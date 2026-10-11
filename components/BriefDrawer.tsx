@@ -159,7 +159,7 @@ export function BriefDrawer(props: ViewProps & { onClose: () => void }) {
       </div>
 
       <footer className="flex flex-wrap items-center gap-3 border-t border-zinc-200 px-6 py-4">
-        <Button onClick={() => props.openDrawer("scenario")}>Test both plans</Button>
+        <Button onClick={() => props.openDrawer("scenario")}>Test which plan meets the launch requirements</Button>
         {isProduct ? (
           <Button
             kind="secondary"

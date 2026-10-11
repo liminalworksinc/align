@@ -15,13 +15,13 @@
   --al-surface: #111115;
   --al-surface-sunk: #0d0d10;
   --al-surface-raised: #18181d;
-  --al-line: #202026;
-  --al-line-strong: #2c2c33;
+  --al-line: #2a2a31;
+  --al-line-strong: #3a3a43;
 
   --al-ink: #f2f0ec;
-  --al-ink-2: #c6c2ba;
-  --al-ink-3: #8e8a83;
-  --al-ink-4: #75726c;
+  --al-ink-2: #d6d2ca;
+  --al-ink-3: #aaa59d;
+  --al-ink-4: #8e8a83;
 
   --al-accent: #c46bff;
   --al-accent-bg: rgb(196 107 255 / 0.1);
@@ -136,7 +136,7 @@ body {
 /* Mono uppercase section label. */
 .al-lbl {
   font-family: var(--al-mono);
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--al-ink-3);

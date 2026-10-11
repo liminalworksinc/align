@@ -125,10 +125,10 @@ function GoalPanel({ p, g }: { p: ViewProps; g: Goal }) {
               p.openDrawer("brief");
             }}
           >
-            See what to do next
+            Review the conflict with Security
           </Button>
         ) : isMine ? (
-          <Button onClick={() => p.openDrawer("brief")}>See what to do next</Button>
+          <Button onClick={() => p.openDrawer("brief")}>Review the conflict with Security</Button>
         ) : (
           <Button onClick={() => p.go("proposals")}>Propose a change to {teamName(g)}&apos;s goal</Button>
         )}
@@ -272,7 +272,7 @@ function RelationPanel({ p, r }: { p: ViewProps; r: GoalRelation }) {
             p.openDrawer("brief");
           }}
         >
-          See what to do next
+          Review the conflict with Security
         </Button>
       )}
     </>

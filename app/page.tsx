@@ -175,6 +175,7 @@ export default function Page() {
   const counts: Partial<Record<View, number>> = { decision: decisionCount, proposals: pendingForMe };
   const myGoal = me.actor === "product" || me.actor === "security" ? currentGoal(state, me.actor) : undefined;
   const kr2 = ceo?.measures.find((m) => m.id === "KR2");
+  const focus = view === "decision" || view === "today";
   const alikeOk = state.brief?.alike_status === "retrieved";
   const ops = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("ops");
 
@@ -196,7 +197,7 @@ export default function Page() {
   }
 
   return (
-    <div className="grid h-screen grid-cols-[236px_minmax(0,1fr)_360px] grid-rows-[64px_minmax(0,1fr)] overflow-hidden">
+    <div className={`grid h-screen grid-rows-[64px_minmax(0,1fr)] overflow-hidden ${focus ? "grid-cols-[236px_minmax(0,1fr)]" : "grid-cols-[236px_minmax(0,1fr)_360px]"}`}>
       {/* Sidebar */}
       <aside className="row-span-2 flex flex-col border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5">
         <div className="flex h-16 items-center gap-2.5 px-2.5">
@@ -253,7 +254,7 @@ export default function Page() {
       </aside>
 
       {/* Top bar */}
-      <header className="col-span-2 flex items-center gap-4 border-b border-zinc-200 px-6">
+      <header className={`${focus ? "" : "col-span-2"} flex items-center gap-4 border-b border-zinc-200 px-6`}>
         <div className="shrink-0 whitespace-nowrap text-[15px] text-zinc-500">
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
         </div>
@@ -343,7 +344,7 @@ export default function Page() {
         {view === "evidence" && <EvidenceView {...props} />}
 
         {drawer && (
-          <div className="fixed inset-y-0 left-[236px] right-[360px] top-16 z-20 flex justify-end bg-[rgba(5,5,7,0.55)]" onClick={closeDrawer}>
+          <div className={`fixed inset-y-0 left-[236px] ${focus ? "right-0" : "right-[360px]"} top-16 z-20 flex justify-end bg-[rgba(5,5,7,0.55)]`} onClick={closeDrawer}>
             <div
               className={`al-in h-full overflow-y-auto border-l border-zinc-200 bg-white ${drawer === "scenario" ? "w-[min(880px,100%)]" : "w-[min(720px,100%)]"}`}
               onClick={(e) => e.stopPropagation()}
@@ -357,10 +358,12 @@ export default function Page() {
         )}
       </main>
 
-      {/* Persistent inspector */}
-      <aside className="overflow-y-auto border-l border-zinc-200 bg-zinc-50 p-[22px]" aria-label="Inspector">
-        <Inspector {...props} />
-      </aside>
+      {/* Persistent inspector (hidden on the decision screen so the decision is the only thing in view) */}
+      {!focus && (
+        <aside className="overflow-y-auto border-l border-zinc-200 bg-zinc-50 p-[22px]" aria-label="Inspector">
+          <Inspector {...props} />
+        </aside>
+      )}
     </div>
   );
 }

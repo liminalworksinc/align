@@ -5,12 +5,7 @@ import type { ViewProps } from "./props";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
 import { depRelation } from "./TeamLens";
-import { Badge, Button, OWNER_LABEL, STATE_LABEL, StateBadge, fmtTime } from "./ui";
-
-const PLAN_NAME: Record<string, string> = {
-  "p-throughput": "Current plan: oldest tickets first",
-  "p-beta": "New plan: beta issues first",
-};
+import { Badge, Button, OWNER_LABEL, StateBadge, fmtTime } from "./ui";
 
 function passed(r?: SimulationRun) {
   return r ? r.checks.filter((c) => c.passed).length : 0;
@@ -22,59 +17,51 @@ function leftCriticalAlone(r?: SimulationRun) {
   return c ? c.passed : undefined;
 }
 
-function Point({ ok, children }: { ok: boolean | undefined; children: ReactNode }) {
-  const mark = ok === undefined ? "–" : ok ? "✓" : "✕";
-  const cls = ok === undefined ? "bg-zinc-100 text-zinc-500" : ok ? "bg-emerald-700 text-black" : "bg-red-700 text-black";
-  return (
-    <li className="flex items-start gap-2.5 text-[14px] leading-snug text-zinc-900">
-      <span aria-hidden className={`mt-px grid size-[18px] shrink-0 place-items-center rounded-full text-[11px] font-bold ${cls}`}>
-        {mark}
-      </span>
-      {children}
-    </li>
-  );
-}
-
 function PlanCard({
   props,
   run,
-  tag,
+  label,
+  name,
   recommended,
-  points,
-  summary,
 }: {
   props: ViewProps;
   run?: SimulationRun;
-  tag: ReactNode;
+  label: string;
+  name: string;
   recommended?: boolean;
-  points: ReactNode;
-  summary: string;
 }) {
-  const name = run ? PLAN_NAME[run.plan_id] ?? "Team plan" : recommended ? PLAN_NAME["p-beta"] : PLAN_NAME["p-throughput"];
+  const ok = run?.verdict === "PASS";
+  const alone = leftCriticalAlone(run);
   return (
     <article
-      className={`flex flex-col gap-3 rounded-[14px] border p-[18px] ${recommended ? "border-violet-700 bg-white shadow-[inset_0_0_0_1px_var(--al-accent)]" : "border-zinc-200 bg-zinc-50"}`}
+      className={`flex flex-col gap-3 rounded-[14px] border p-5 ${recommended ? "border-violet-700 bg-white shadow-[inset_0_0_0_1px_var(--al-accent)]" : "border-zinc-200 bg-zinc-50"}`}
     >
-      <div className="flex items-center gap-2">{tag}</div>
-      <h3 className="text-[19px] font-semibold leading-snug text-zinc-900">{name}</h3>
-      <p className="text-[14px] text-zinc-600">{summary}</p>
-      <div className="flex flex-col gap-2 border-t border-zinc-200 pt-3">
-        <div className="flex items-center justify-between">
-          <span className="text-[14px] font-semibold">Practice test</span>
-          {run ? (
-            <span className="flex items-center gap-2 text-[13px] text-zinc-500">
-              <StateBadge state={run.verdict} /> {passed(run)} of {run.checks.length} checks
-            </span>
-          ) : (
-            <StateBadge state="UNTESTED" />
-          )}
-        </div>
-        <ul className="flex flex-col gap-2">{points}</ul>
+      <div className="flex items-center gap-2">
+        <span className={`al-lbl ${recommended ? "!text-violet-700" : ""}`}>{label}</span>
+        {run && <span className="ml-auto"><StateBadge state={run.verdict} /></span>}
       </div>
+      <h3 className="text-[22px] font-semibold leading-snug text-zinc-900">{name}</h3>
+      {run ? (
+        <>
+          <div className="flex items-baseline gap-3">
+            <span className={`text-[56px] font-semibold leading-none tracking-[-0.02em] ${ok ? "text-emerald-700" : "text-red-700"}`}>
+              {passed(run)} / {run.checks.length}
+            </span>
+            <span className="text-[16px] text-zinc-700">checks passed</span>
+          </div>
+          <p className={`text-[16px] font-medium ${alone === false ? "text-red-700" : "text-zinc-900"}`}>
+            {alone === false ? "✕ Changed the critical security ticket it had to leave alone" : alone ? "✓ Left the critical security ticket alone" : "Critical security ticket: not checked"}
+          </p>
+        </>
+      ) : (
+        <p className="text-[16px] text-zinc-700">
+          <StateBadge state="UNTESTED" /> Not tested yet in the practice sandbox.
+        </p>
+      )}
       <div className="mt-auto pt-1">
-        <Button kind="secondary" onClick={() => props.openDrawer("scenario")}>
-          See the test results
-        </Button>
+        <button onClick={() => props.openDrawer("scenario")} className="text-[14px] font-semibold text-violet-700 hover:underline">
+          See every check →
+        </button>
       </div>
     </article>
   );
@@ -217,8 +204,6 @@ export function DecisionView(props: ViewProps) {
   }
 
   // 3 · Open decision: current plan vs recommended plan
-  const baseAlone = leftCriticalAlone(baseline);
-  const candAlone = leftCriticalAlone(candidate);
   const candPassed = candidate?.verdict === "PASS";
   const propose = () => {
     if (candidate)
@@ -230,71 +215,38 @@ export function DecisionView(props: ViewProps) {
     props.go("proposals");
   };
   return (
-    <div className="flex flex-col gap-4">
-      <Header label="Next decision" right={<Badge tone="amber">Needs your judgment</Badge>} />
+    <div className="flex flex-col gap-5">
+      <Header label="Should Security change what its AI works on next?" right={<Badge tone="amber">Needs your judgment</Badge>} />
       <div>
-        <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
-          {isProduct
-            ? "Security's AI agents are busy with work that doesn't move the CEO's new goal."
-            : "The CEO's new requirement isn't covered by your current plan."}
+        <h1 className="text-[34px] font-semibold leading-[1.15] tracking-[-0.015em] text-zinc-900">
+          Your company&apos;s priorities changed. Your agent&apos;s plan didn&apos;t.
         </h1>
-        <p className="mt-2 max-w-[720px] text-[15px] text-zinc-700">
-          {isProduct
-            ? "Security's plan was set before the CEO's change. Align found a tested alternative based on the goals, Security's constraints and the open beta customer issue. You can't change Security's goal, but you can propose it."
-            : "Compare both plans on the same practice test. Only you can change your goal; Product can propose a change."}
+        <p className="mt-2.5 max-w-[760px] text-[17px] leading-relaxed text-zinc-700">
+          The CEO now requires beta customers&apos; issues to be handled first. Security&apos;s approved plan still prioritizes ticket volume, oldest first.
         </p>
       </div>
-      <div className="grid grid-cols-[1fr_44px_1fr] items-stretch">
-        <PlanCard
-          props={props}
-          run={baseline}
-          tag={<Badge tone="neutral" icon={false}>Running now</Badge>}
-          summary="The AI agent works through the queue oldest first. The beta customer's issue waits at normal priority."
-          points={
-            <>
-              <Point ok={undefined}>Doesn&apos;t mention the beta</Point>
-              <Point ok={baseAlone}>{baseAlone === false ? "Touched the critical security ticket it should leave alone" : "Left the critical security ticket alone"}</Point>
-              <Point ok={undefined}>Rewards closing tickets, not launch readiness</Point>
-            </>
-          }
-        />
-        <div className="grid place-items-center">
-          <span className="grid size-10 place-items-center rounded-full border border-zinc-200 bg-zinc-100 font-mono text-[12px] font-bold">vs</span>
-        </div>
-        <PlanCard
-          props={props}
-          run={candidate}
-          recommended
-          tag={
-            <>
-              <Badge tone="violet">Recommended</Badge>
-              <span className="ml-auto text-[13px] text-zinc-500">Based on the goals and test results</span>
-            </>
-          }
-          summary="Beta customers' issues first: marked urgent, tagged as beta, a private note for engineers and a reply to the customer. Other tickets untouched."
-          points={
-            <>
-              <Point ok={candPassed ? true : undefined}>Meets the CEO&apos;s new requirement{candPassed ? " in the practice test" : " (not shown by a passed test yet)"}</Point>
-              <Point ok={candAlone}>{candAlone === false ? "Touched the critical security ticket" : "Left the critical security ticket alone"}</Point>
-              <Point ok={interruption ? interruption.verdict === "PASS" : undefined}>
-                {interruption ? `Recovered safely when the ticket system failed mid-run` : "Outage test not run yet"}
-              </Point>
-            </>
-          }
-        />
+      <div className="grid grid-cols-2 gap-4">
+        <PlanCard props={props} run={baseline} label="Current plan · running now" name="Oldest tickets first" />
+        <PlanCard props={props} run={candidate} recommended label="Tested alternative" name="Beta customers' issues first" />
       </div>
-      <div className="flex flex-wrap items-center gap-3 border-t border-zinc-200 pt-4">
+      <p className="text-[14px] text-zinc-500">
+        Same practice tickets, same pass/fail checks, in a sandbox. It shows how each plan handles tickets, not whether the launch will succeed.
+      </p>
+      <div className="flex flex-wrap items-center gap-5 rounded-[14px] border border-zinc-300 bg-white px-5 py-4">
+        <div className="min-w-[280px] flex-1">
+          <div className="text-[18px] font-semibold text-zinc-900">Security owns the decision.</div>
+          <div className="text-[15px] text-zinc-700">Product can propose the tested change. Only Security can approve its own commitment.</div>
+        </div>
         {isProduct ? (
-          <>
-            <Button onClick={propose}>Propose the recommended plan to Security →</Button>
+          <div className="flex flex-wrap items-center gap-2">
             <Button kind="ghost" onClick={() => props.openDrawer("brief")}>
-              See all options
+              Review the conflict with Security
             </Button>
-            <span className="text-[13px] text-zinc-500">Creates a proposal. Security decides; nothing changes for them until they approve.</span>
-          </>
+            <Button onClick={propose}>{candPassed ? "Propose the tested change →" : "Propose the change (not tested yet) →"}</Button>
+          </div>
         ) : (
-          <span className="text-[14px] text-zinc-500">
-            {rel ? `Status: ${STATE_LABEL[rel.status] ?? rel.status}. ` : ""}Product hasn&apos;t proposed a change yet. When they do, it shows up here.
+          <span className="text-[15px] text-zinc-600">
+            Product hasn&apos;t proposed it yet. When they do, you decide here.
           </span>
         )}
       </div>

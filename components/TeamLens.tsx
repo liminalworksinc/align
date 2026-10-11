@@ -167,7 +167,7 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
 
       <div className="rounded-xl bg-white p-5 ring-1 ring-zinc-200">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <h4 className="al-lbl">What changed</h4>
+          <h4 className="al-lbl">The CEO changed the requirements. Security&apos;s plan hasn&apos;t caught up.</h4>
           {accepted ? <Badge tone="neutral">Resolved</Badge> : <Badge tone="amber">Needs a decision</Badge>}
         </div>
 
@@ -235,7 +235,7 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
         )}
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <Button onClick={() => openDrawer("brief")}>See what to do next</Button>
+          <Button onClick={() => openDrawer("brief")}>Review the conflict with Security</Button>
           {me.actor === "product" ? (
             <Button kind="secondary" onClick={() => go("proposals")}>
               Propose a change to Security&apos;s goal

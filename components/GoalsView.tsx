@@ -246,7 +246,9 @@ export function GoalsView(props: ViewProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em]">How the goals connect</h1>
+        <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em]">
+          {depRelation(props.s)?.status === "UNKNOWN" ? "Your launch depends on a Security priority that hasn’t changed." : "How the goals connect"}
+        </h1>
         <div role="group" aria-label="Choose a view" className="inline-flex gap-0.5 rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
           {(["company", "team", "me"] as const).map((l) => (
             <button

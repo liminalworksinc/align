@@ -61,7 +61,7 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
       <header className="flex items-center justify-between gap-4 border-b border-zinc-200 bg-white px-6 py-4">
         <div>
           <h2 id="scenario-title" className="text-[26px] font-semibold leading-tight tracking-[-0.01em]">
-            Test both plans
+            Which plan meets the launch requirements?
           </h2>
           <p className="text-[15px] text-zinc-600">
             A practice test (Sparta sandbox): same practice tickets, same pass/fail checks — only the plan differs.
