@@ -10,7 +10,7 @@ Align is a one-day SpeedHacks prototype (Oct 11, 2026). It takes one costly coor
 
 - **The person and the pain.** A Director of Product whose launch depends on a peer team's goal. The CEO changes priorities; Security's AI agents keep optimizing the old measure (tickets closed, oldest first). Today, fixing that takes five manual coordination steps (**estimated** ~200 minutes; [method](#the-problem)).
 - **What Align does instead.** Product sees the conflict and tests both plans in a Sparta sandbox, then proposes a change. Security, which owns the goal, edits and approves it. The server enforces who owns what: Product **cannot** approve for Security (HTTP 403).
-- **The proof (real runs, same tickets, same 9 checks).** Every recorded run of the current plan **failed** (5 of 5, 1–2 of 9 checks) and each time **touched the protected security ticket**, while the agent reported the job as done. Every run of the new plan **passed** (6 of 6, 9 of 9), including one with an injected outage. [Results](#results-real-runs-oct-11-2026).
+- **The proof (real runs, same tickets, same 9 checks).** Every recorded run of the current plan **failed** (8 of 8, 1–2 of 9 checks) and each time **touched the protected security ticket**, while the agent reported the job as done. Every run of the new plan **passed** (8 of 8, 9 of 9), including one with an injected outage. [Results](#results-real-runs-oct-11-2026).
 - **Agents follow the agreement.** After Security approves, a coding agent asks Align which plan it's authorized to run (read-only [MCP server](docs/MCP.md)), then runs it. Running agent sessions are told about the change ([live replan](#agents-follow-the-agreement)).
 - **Honest by design.** Measured in-app time is never blended with the estimated baseline. A passing sandbox test never turns a company goal green. See [Claims and non-claims](#claims-and-non-claims).
 
@@ -235,12 +235,12 @@ It passed only `beta-tag-preserved` and `beta-open`. It also marked tickets 2 an
 
 What these runs show: under this seed and these checks, the throughput plan breaks the protected P0 incident and misses the beta launch criteria, and the beta plan meets them.
 
-**Every run on record** (`sparta/walkthrough-lab/evidence/`, same mission, seed `d5268b2b…` and checks; includes the later live-replan and agent-preflight runs):
+**Every run on record** as of 15:05 PT (`sparta/walkthrough-lab/evidence/`, same mission, seed `d5268b2b…` and checks; includes the later live-replan and agent-preflight runs):
 
 | Plan | Runs | Result | Protected P0 (ticket 1) |
 |---|---|---|---|
-| `p-throughput@1` (current) | 5 | 5 FAIL (2/9 four times, 1/9 once) | Changed in all 5 |
-| `p-beta@1` (new) | 6, one with an injected outage | 6 PASS (9/9) | Untouched in all 6 |
+| `p-throughput@1` (current) | 8 | 8 FAIL (2/9 seven times, 1/9 once) | Changed in all 8 |
+| `p-beta@1` (new) | 8, one with an injected outage | 8 PASS (9/9) | Untouched in all 8 |
 
 That's a small sample on one model and one seed. It shows the difference is consistent across today's runs, not how often each plan would pass in general.
 
