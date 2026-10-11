@@ -104,7 +104,8 @@ tmuxs() {
   tmux split-window -v -l 12 -t "$SESSION" -c "$ROOT"
   tmux send-keys -t "$SESSION:0.1" 'clear; node scripts/align-listen.mjs' Enter
   # Default permission mode: the project allow rules (Align MCP tools, scripts/run-plan.sh accepted) apply exactly.
-  tmux send-keys -t "$SESSION:0.0" 'clear; claude --permission-mode default' Enter
+  # Project and local settings only: the presenter's personal hooks and plugins stay off the stage pane.
+  tmux send-keys -t "$SESSION:0.0" 'clear; claude --permission-mode default --setting-sources project,local' Enter
   ok "top: Claude Code (Align MCP + live replan watcher) · bottom: Align authority stream"
   echo "  Attach with: tmux attach -t $SESSION"
 }
