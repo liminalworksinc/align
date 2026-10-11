@@ -6,6 +6,7 @@ import { api } from "./useAlign";
 import { tally } from "./select";
 import { Badge, ForEngineers, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtDuration, fmtTime } from "./ui";
 import { checkWords } from "./SpartaProof";
+import { AuthorityStrip } from "./AuthorityStrip";
 
 /* ------------------------------------------------------------------ */
 /* Shared evidence helpers (also used by ScenarioDrawer)              */
@@ -198,6 +199,9 @@ export function EvidenceView(props: ViewProps) {
           command in the README.
         </p>
       </header>
+      <div className="mb-6">
+        <AuthorityStrip s={props.s} />
+      </div>
       <DecisionRecord {...props} />
       <SpartaRuns {...props} />
       <AuditLog {...props} />

@@ -2,6 +2,7 @@
 import { useEffect, type ReactNode } from "react";
 import type { SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
+import { AuthorityStrip } from "./AuthorityStrip";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
 import { depRelation } from "./TeamLens";
@@ -107,6 +108,7 @@ export function DecisionView(props: ViewProps) {
             {acc.ratified_at ? ` Approved at ${fmtTime(acc.ratified_at)}.` : ""}
           </p>
         </div>
+        <AuthorityStrip s={s} />
         {goal && (
           <div className="rounded-[14px] border border-zinc-200 bg-zinc-50 p-[18px]">
             <div className="al-lbl mb-1">Security&apos;s new target</div>
@@ -150,6 +152,7 @@ export function DecisionView(props: ViewProps) {
             Both of you see the same proposal, the same changes and the same test results. Every version is kept.
           </p>
         </div>
+        <AuthorityStrip s={s} />
         <div className="grid grid-cols-2 gap-[18px] rounded-[14px] border border-zinc-200 bg-zinc-50 p-[18px]">
           <div className="flex flex-col gap-2">
             <span className="al-lbl">Product&apos;s proposed target for Security</span>
