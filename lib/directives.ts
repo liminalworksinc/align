@@ -40,14 +40,17 @@ function sessionTeams(s: AppState, session: AgentSession): Set<Owner> {
   const m = (s.mappings ?? []).find((x) => x.session_id === session.id);
   const g = m?.choice ? s.goals.find((x) => x.id === m.choice) : undefined;
   if (g) teams.add(g.owner_id);
-  const text = [...session.prompts.map((p) => p.text), ...session.tools, session.last_message ?? ""].join(" ");
+  // The user's prompts and the tools the agent used, not the agent's own replies: a reply that merely discusses
+  // a delivered directive would otherwise enroll the session in Security and pull in every later change.
+  const text = [...session.prompts.map((p) => p.text), ...session.tools].join(" ");
   if (/triage|p-throughput|p-beta|run-plan|security|align_get_accepted_plan/i.test(text)) teams.add("security");
   return teams;
 }
 
 function relevant(s: AppState, session: AgentSession, ev: AuthorityEventRow): boolean {
   if (ev.at < session.started_at) return false; // only changes that happened while this session existed
-  if (ev.kind === "push") return Date.now() - Date.parse(session.last_at) < ACTIVE_WINDOW_MS;
+  // A push directive is written for the Security plan's agents, so only active Security sessions get it.
+  if (ev.kind === "push") return Date.now() - Date.parse(session.last_at) < ACTIVE_WINDOW_MS && sessionTeams(s, session).has("security");
   return !!ev.goal && sessionTeams(s, session).has(ev.goal.owner_id);
 }
 
