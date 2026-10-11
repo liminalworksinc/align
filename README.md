@@ -6,6 +6,22 @@
 
 Align is a one-day SpeedHacks prototype (Oct 11, 2026). It takes one costly coordination problem, a top-down priority change that lands on a goal you don't own, and turns it into a short, owner-controlled decision backed by a reproducible agent test.
 
+## For judges: the 60-second version
+
+- **The person and the pain.** A Director of Product whose launch depends on a peer team's goal. The CEO changes priorities; Security's AI agents keep optimizing the old measure (tickets closed, oldest first). Today, fixing that takes five manual coordination steps (**estimated** ~200 minutes; [method](#the-problem)).
+- **What Align does instead.** Product sees the conflict and tests both plans in a Sparta sandbox, then proposes a change. Security, which owns the goal, edits and approves it. The server enforces who owns what: Product **cannot** approve for Security (HTTP 403).
+- **The proof (real runs, same tickets, same 9 checks).** Every recorded run of the current plan **failed** (5 of 5, 1–2 of 9 checks) and each time **touched the protected security ticket**, while the agent reported the job as done. Every run of the new plan **passed** (6 of 6, 9 of 9), including one with an injected outage. [Results](#results-real-runs-oct-11-2026).
+- **Agents follow the agreement.** After Security approves, a coding agent asks Align which plan it's authorized to run (read-only [MCP server](docs/MCP.md)), then runs it. Running agent sessions are told about the change ([live replan](#agents-follow-the-agreement)).
+- **Honest by design.** Measured in-app time is never blended with the estimated baseline. A passing sandbox test never turns a company goal green. See [Claims and non-claims](#claims-and-non-claims).
+
+| Judging criterion | Where to look |
+|---|---|
+| Problem and time saved (40%) | [The problem](#the-problem), [Time-saved method](#time-saved-method), the proof strip at the end of the demo |
+| Technical execution (25%) | [Guarantees](#truth-states-and-guarantees), [Sparta results](#results-real-runs-oct-11-2026), [Architecture](#architecture), `scripts/test-flow.mjs` (46 checks), `scripts/test-mcp.mjs` |
+| Market and path forward (15%) | [Market and path forward](#market-and-path-forward) |
+| Originality (10%) | Owner-only goal changes pinned to the exact tested plan; agents read the agreement before they act |
+| Product quality and demo (10%) | [Quick start](#quick-start), [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) |
+
 ---
 
 ## The problem
@@ -40,6 +56,15 @@ The flow after Align, with two people in two signed-in sessions (Product and Sec
 7. **Security approves the change to its own goal.** A new Security version is created (`supersedes` the old one). The card shows "Agreed by Security", and handling beta customers' issues becomes the next step under the new version.
 8. **Both people see the agreed version.** The clock stops only when both sessions have seen it.
 9. **Summary strip.** The time to agreement measured in Align, and the number of steps, sit next to the *estimated* time for doing it by hand. The two are labelled differently and never blended.
+
+Before step 1, **Leadership** (a third signed-in role) approves the CEO's new company goal and pushes it to every team. The old version is kept, and the Product → Security dependency is created as "Unknown".
+
+### Agents follow the agreement
+
+- **Agents ask before they act.** `GET /api/policy/security` and the MCP tool `align_get_accepted_plan` return the plan Security's agents are authorized to run: the throughput plan before approval, the approved plan after, with who approved it and its test status. `scripts/run-plan.sh accepted` asks Align first, prints the authority, then runs that plan. If Align is unreachable it refuses to guess.
+- **Running sessions hear about changes.** When Leadership pushes a goal or an owner approves a change, Align queues a directive for each captured Claude Code session (`/api/directives`, streamed over SSE with a polling fallback). A watcher hook wakes an idle session so it replans; delivery and "acted on" receipts show on the work map and decision record. Recorded live: a throughput run FAILED, then after Security approved, the woken session ran `p-beta@1` and it PASSED.
+- **Work map.** Captured agent sessions (Claude Code hooks, Codex notify) are mapped to the current goals by Jev (see [Jev / TypeSafe](#jev--typesafe)), and owners confirm or reject each mapping.
+- **Read-only by design.** No agent can create, change or approve a goal. There is no write tool on the MCP server.
 
 Operator screens show no backend IDs or hashes. The Evidence page keeps them in closed **For engineers** sections so every result can be reproduced.
 
@@ -102,7 +127,7 @@ A decision is recorded in one Claude Code session and retrieved through Alike in
 
 ### Jev / TypeSafe (via Vercel AI Gateway)
 
-Jev classifies captured Claude Code and Codex sessions against the live goal registry (every currently ratified goal, plus "none"). It returns a choice with calibrated probabilities and a conflict probability. Matches are suggestions shown as PROPOSED; below 0.6 confidence a session stays unassigned, and work counts toward a goal only after that goal's owner confirms it. If Jev is unreachable, sessions show "not matched" with the reason; no other model is substituted. Runtime verified on Oct 11 2026 (`lib/mapper.ts`).
+Jev classifies captured Claude Code and Codex sessions against the live goal registry (every currently ratified goal, plus "none"). It returns a choice with calibrated probabilities and a conflict probability. Matches are suggestions shown as PROPOSED; below 0.6 confidence a session stays unassigned, and work counts toward a goal only after that goal's owner confirms it. If Jev is unreachable, sessions show "not matched" with the reason; no other model is substituted. Runtime verified on Oct 11 2026 (`lib/mapper.ts`). Jev never approves or changes a goal.
 
 ## Quick start
 
@@ -110,7 +135,8 @@ Requirements: **Node 24+**, macOS or Linux.
 
 ```bash
 npm install
-npm run dev            # http://localhost:3100 (bound to 127.0.0.1)
+npm run dev -- -p 3100   # http://localhost:3100 (every script and doc assumes 3100)
+node scripts/test-flow.mjs http://localhost:3100   # 46-check acceptance test (it resets demo state)
 ```
 
 Open two browser windows (or one normal and one private window) and sign in once in each:
@@ -120,6 +146,8 @@ Open two browser windows (or one normal and one private window) and sign in once
 | Leadership | `leadership-demo` |
 | Product | `product-demo` |
 | Security | `security-demo` |
+
+For the MCP server and live replan, put `ALIGN_MCP_TOKEN=<random hex>` in `.env.local` and restart the server; see [`docs/MCP.md`](docs/MCP.md).
 
 Localhost only: these are demo passcodes and the agent-facing routes trust this machine. Not production security.
 
@@ -131,6 +159,9 @@ Environment overrides:
 | `ALIGN_SECURITY_PASSCODE` | Security passcode (default `security-demo`) |
 | `ALIGN_SECRET` | HMAC secret for session cookies (otherwise generated into `data/.secret`, gitignored) |
 | `ALIGN_SECURITY_NAME` | Display name for the Security owner (default `Alex / Security Lead`) |
+| `ALIGN_LEADERSHIP_PASSCODE` | Leadership passcode (default `leadership-demo`) |
+| `ALIGN_MCP_TOKEN` | Bearer token for `/api/mcp`; unset means every MCP request is rejected |
+| `ALIGN_URL` | For the scripts: where Align runs (default `http://localhost:3100`) |
 
 **Demo reset.** This restores goals, proposals, timer and audit from `data/fixture.json`, and keeps ingested Sparta evidence and any recorded Alike reference. It needs a signed-in session:
 
@@ -202,7 +233,16 @@ It passed only `beta-tag-preserved` and `beta-open`. It also marked tickets 2 an
 2. **Change.** Added a bounded model retry with backoff (2s, 4s, 8s) on 429/5xx in `agent/goal-triage-agent.mjs`. A model retry never touches the world. Retries show up in the traces as `model_retry` steps.
 3. **Comparable rerun.** The candidate was rerun on the same mission, seed and checks and passed (`p-beta@1-normal-115116`, 9/9; its trace shows 429s that the retry absorbed). The baseline had first been run on the pre-fix agent version (FAIL, same 7 checks failed); that run is archived in [`sparta/walkthrough-lab/evidence-archive/`](sparta/walkthrough-lab/evidence-archive/README.md), and the baseline was **rerun on the identical agent code** (`p-throughput@1-normal-115150`), so baseline vs candidate differs only in the team plan.
 
-What these runs show: under this seed and these checks, the throughput plan breaks the protected P0 incident and misses the beta launch criteria, and the beta plan meets them. They are single runs on one model. They don't measure how often each plan passes.
+What these runs show: under this seed and these checks, the throughput plan breaks the protected P0 incident and misses the beta launch criteria, and the beta plan meets them.
+
+**Every run on record** (`sparta/walkthrough-lab/evidence/`, same mission, seed `d5268b2b…` and checks; includes the later live-replan and agent-preflight runs):
+
+| Plan | Runs | Result | Protected P0 (ticket 1) |
+|---|---|---|---|
+| `p-throughput@1` (current) | 5 | 5 FAIL (2/9 four times, 1/9 once) | Changed in all 5 |
+| `p-beta@1` (new) | 6, one with an injected outage | 6 PASS (9/9) | Untouched in all 6 |
+
+That's a small sample on one model and one seed. It shows the difference is consistent across today's runs, not how often each plan would pass in general.
 
 **Alike evidence:** the team-plan decision was recorded in Claude Code session A and retrieved by a fresh session B through Alike, which changed B's proposal from `p-throughput@1` to `p-beta@1`. See [`docs/alike/session-b-retrieval.md`](docs/alike/session-b-retrieval.md).
 
@@ -228,7 +268,7 @@ What this is not:
 - Not production time savings. In-app time is from a demo; the manual baseline is an estimate.
 - Not ROI.
 - Not a release verification. Company beta readiness is not verified.
-- Not agent-host enforcement. Align doesn't push the ratified plan into a real agent host or block other plans.
+- Not agent-host enforcement. Agents *read* the approved plan (MCP, policy endpoint) and Align *notifies* running Claude Code sessions of changes, but nothing stops an agent from running a different plan.
 
 ## Architecture
 
@@ -251,6 +291,12 @@ What this is not:
 | GET | `/api/evidence/:id` | any | Run, raw evidence report and agent trace |
 | POST | `/api/alike` | signed in | Attach a retrieved Alike decision reference |
 | POST | `/api/reset` | signed in | Demo reset (`{"confirm":"reset"}`) |
+| POST | `/api/org/push` | Leadership | Approve and push the company goal to every team |
+| GET | `/api/policy/security` | any | The plan Security's agents are authorized to run right now |
+| GET | `/api/directives`, `/api/directives/stream`; POST `/api/directives/ack` | agent session | Goal-change directives for a session (poll or SSE) and receipts |
+| GET/POST | `/api/sessions`, `/api/sessions/events` | any / capture hook | Captured agent sessions |
+| GET/POST | `/api/mappings`, `…/:session_id/confirm`, `…/reject` | owner | Jev session-to-goal mappings and owner decisions |
+| POST | `/api/mcp` | Bearer token | Read-only MCP server ([`docs/MCP.md`](docs/MCP.md)) |
 
 ```
 app/                 Next.js UI + route handlers (app/api/**)
@@ -261,12 +307,19 @@ lib/
   auth.ts            passcodes + HMAC session cookies
   store.ts           JSON store, single-writer queue, reset
   evidence.ts        Sparta evidence ingestion (sha256-idempotent)
+  org.ts, registry.ts, policy.ts   company goal push, live goal registry, authorized plan
+  directives.ts      goal-change directives for running agent sessions
+  mapper.ts          Jev session-to-goal mapping
 data/fixture.json    synthetic company, goals, brief, manual baseline
 agent/
   goal-triage-agent.mjs   Sparta agent driven by a versioned plan
   plans/                  p-throughput@1.md, p-beta@1.md
   traces/                 per-run agent traces
-scripts/run-plan.sh  run one plan in a fresh Sparta world, save evidence
+scripts/
+  run-plan.sh        run one plan (or `accepted`) in a fresh Sparta world, save evidence
+  run-of-show.sh     operator helper for the recorded demo
+  align-capture.mjs, align-watch.mjs, align-listen.mjs   session capture and live-replan hooks
+  test-flow.mjs, test-mcp.mjs, test-mapper.mjs, test-capture.mjs   automated checks
 sparta/walkthrough-lab/
   package.json            pins sparta_worlds@0.9.0-beta.3
   projects/team-inbox/    seed.json, missions.json, checks.json, project.json
@@ -300,7 +353,7 @@ A low relevance score is evidence for a question, never a veto on someone's work
 - A read-only Align MCP server (`align_list_goals`, `align_get_accepted_plan`, `align_get_work_map`, `align_get_decision_record`, `align_get_directives`) lets a coding agent read the ratified goals and decision record before it starts. See [`docs/MCP.md`](docs/MCP.md). It has no write tools: goals change only through their owners in the Align UI.
 - When Leadership pushes a company goal or an owner ratifies a goal change, Align pushes it into running Claude Code sessions doing that work, waking them to replan. A recorded, uninterrupted run with its evidence: [`docs/LIVE_REPLAN.md`](docs/LIVE_REPLAN.md).
 
-These are things an agent **pulls**. Align does not push decisions into an agent host, and it doesn't block other plans (see non-claims above).
+Agents read the approved plan and get notified when it changes; nothing forces an agent to follow it (see non-claims above).
 
 **Where Align should meet work, in priority order:**
 1. **Agent preflight** (Claude Code and other agent hosts): before substantial work, read the approved goal, its constraints and peer commitments through MCP; flag a conflict and name the owner.
@@ -324,4 +377,4 @@ The Goals screen stays as the place to understand upstream, peer and downstream 
 
 ## Provenance
 
-Built during SpeedHacks hours on **Oct 11, 2026**. All application code is new. It uses only public SDKs and libraries (Next.js, React, `sparta_worlds` from npm) and the Anthropic Messages API format, served for the recorded runs by Vercel AI Gateway with `openai/gpt-4.1`. The Sparta agent is adapted from the public Anthropic-format starter included in `sparta_worlds`.
+Built during SpeedHacks hours on **Oct 11, 2026**. All application code is new. The visual theme is app-authored, with public Google Fonts. It uses only public SDKs and libraries (Next.js, React, `sparta_worlds` from npm, the MCP SDK) and the Anthropic Messages API format, served for the recorded runs by Vercel AI Gateway with `openai/gpt-4.1`. The Sparta agent is adapted from the public Anthropic-format starter included in `sparta_worlds`.

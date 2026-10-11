@@ -27,9 +27,9 @@
 ### 4:00: Save project + start recording
 - [ ] On HackerSquad, create/save the project:
   - **Name:** Align
-  - **Description:** Cross-team goal changes, decided by the people who own them, with tested evidence. When the CEO changes priorities, Product proposes a change to a peer team's goal, tests the candidate agent plan in Sparta Worlds against the same mission, seed and checks, and the owning team counters and ratifies its own goal. In-app time is measured; the manual baseline is an estimate. One-day prototype with a synthetic company.
-  - **Technologies:** Next.js, TypeScript, Sparta Worlds, Alike, Anthropic Claude
-  - **GitHub URL:** paste the output of `git remote get-url origin` without `.git` (public repo)
+  - **Description:** AI agents finish tickets fast, but when the CEO changes priorities, agreeing on the right work still takes meetings. Align turns that into one owner-controlled decision backed by a real test. Product sees that Security's agents still chase ticket throughput, tests both plans in Sparta Worlds on the same tickets and checks (current plan: 5 of 5 runs failed and touched the protected security ticket; new plan: 6 of 6 passed), and proposes a change. Security edits and approves its own goal; only it can. Coding agents then read the approved plan from Align over MCP before they act. In-app time is measured; the manual baseline is an estimate. One-day prototype with a synthetic company.
+  - **Technologies:** Next.js, TypeScript, Sparta Worlds, Alike, Jev (TypeSafe), Model Context Protocol, Claude Code, Vercel AI Gateway
+  - **GitHub URL:** https://github.com/liminalworksinc/align (public repo)
 - [ ] Demo reset done (see the pre-recording checklist in `docs/DEMO_SCRIPT.md`).
 - [ ] **Start the final recording.** Target ~4:10, never over 5:00.
 
