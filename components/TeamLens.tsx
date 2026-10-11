@@ -1,0 +1,190 @@
+"use client";
+import type { Goal, StateView, WorkItem } from "@/lib/types";
+import type { ViewProps } from "./props";
+import { currentGoal, priorVersion } from "./select";
+import { Badge, Button, OWNER_LABEL } from "./ui";
+import type { Selection } from "./useAlign";
+
+/* Shared helpers (also used by GoalsView). */
+export const RING = "ring-2 ring-violet-500 ring-offset-2";
+export const isSel = (sel: Selection | null, kind: Selection["kind"], id?: string) => !!id && sel?.kind === kind && sel.id === id;
+export const workFor = (s: StateView, g?: Goal): WorkItem[] =>
+  g ? s.work_items.filter((w) => w.goal_id === g.id).sort((a, b) => a.priority_rank - b.priority_rank) : [];
+export const depRelation = (s: StateView) => s.relations.find((r) => r.id === "r-product-security");
+
+export function VersionTag({ s, g }: { s: StateView; g: Goal }) {
+  const prior = priorVersion(s, g);
+  return prior ? (
+    <span className="inline-flex items-center gap-1.5">
+      <Badge tone="neutral" icon={false}>
+        {prior.version} → {g.version}
+      </Badge>
+      <Badge tone="violet">updated</Badge>
+    </span>
+  ) : (
+    <Badge tone="neutral" icon={false}>
+      {g.version}
+    </Badge>
+  );
+}
+
+export function EditTag({ g, me }: { g: Goal; me: ViewProps["me"] }) {
+  return g.owner_id === me.actor ? <Badge tone="blue">Yours · editable</Badge> : <Badge tone="neutral">Shared · read-only</Badge>;
+}
+
+export function MissingGoal({ owner }: { owner: string }) {
+  return (
+    <div className="rounded-xl border-2 border-dashed border-zinc-300 p-5 text-[16px] text-zinc-500">
+      No current goal is shared for {OWNER_LABEL[owner] ?? owner}.
+    </div>
+  );
+}
+
+function Column({ props, owner }: { props: ViewProps; owner: "product" | "security" }) {
+  const { s, me, select, selection } = props;
+  const g = currentGoal(s, owner);
+  if (!g) return <MissingGoal owner={owner} />;
+  const work = workFor(s, g);
+  const priv = s.private_constraints.filter((c) => c.owner === owner);
+  const unresolved = depRelation(s)?.status === "UNKNOWN";
+  return (
+    <div className="flex flex-col gap-4 rounded-xl bg-white p-5 ring-1 ring-zinc-200">
+      <button
+        onClick={() => select({ kind: "goal", id: g.id })}
+        className={`rounded-lg p-1 text-left ${isSel(selection, "goal", g.id) ? RING : ""}`}
+      >
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <span className="text-[17px] font-bold">{g.owner_name}</span>
+          <VersionTag s={s} g={g} />
+          <EditTag g={g} me={me} />
+        </div>
+        <p className="text-[16px] text-zinc-800">{g.objective}</p>
+      </button>
+
+      <div>
+        <h4 className="mb-1.5 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Already committed to</h4>
+        <ul className="space-y-1.5">
+          {g.measures.map((m) => (
+            <li key={m.id} className="text-[15px] text-zinc-800">
+              <span className="mr-1.5 font-mono text-[13px] text-zinc-500">{m.id}</span>
+              {m.text}
+              {m.inherited_from && <span className="ml-1.5 text-[13px] text-zinc-500">(from CEO {m.inherited_from})</span>}
+              {m.id === "S-M1" && unresolved && (
+                <div className="mt-1">
+                  <Badge tone="amber">conflicts with CEO KR2</Badge>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div>
+        <h4 className="mb-1.5 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Priority list</h4>
+        {work.length ? (
+          <ol className="space-y-1">
+            {work.map((w, i) => (
+              <li key={w.id}>
+                <button
+                  onClick={() => select({ kind: "work", id: w.id })}
+                  className={`flex w-full items-baseline gap-2 rounded-md px-2 py-1.5 text-left text-[15px] hover:bg-zinc-50 ${isSel(selection, "work", w.id) ? RING : ""}`}
+                >
+                  <span className="font-mono text-[13px] text-zinc-500">#{i + 1}</span>
+                  <span className="flex-1 text-zinc-900">{w.task}</span>
+                  <span className="text-[13px] text-zinc-500">{w.observed_status}</span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="text-[15px] text-zinc-500">No work items linked to this goal.</p>
+        )}
+      </div>
+
+      {priv.length > 0 && (
+        <div className="rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200">
+          <div className="mb-1 flex items-center gap-2">
+            <Badge tone="neutral">Private to you</Badge>
+          </div>
+          {priv.map((c, i) => (
+            <p key={i} className="text-[15px] text-zinc-700">
+              {c.text}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function TeamLens(props: ViewProps & { embedded?: boolean }) {
+  const { s, me, select, selection, openDrawer, go, embedded } = props;
+  const ceo = currentGoal(s, "ceo");
+  const accepted = s.acceptances.at(-1);
+  return (
+    <div className="flex flex-col gap-4">
+      {!embedded && <h1 className="text-[24px] font-bold tracking-tight">Team lens</h1>}
+
+      {ceo ? (
+        <button
+          onClick={() => {
+            select({ kind: "goal", id: ceo.id });
+            props.mark("ceo_change_viewed");
+          }}
+          className={`rounded-xl bg-zinc-50 p-4 text-left ring-1 ring-zinc-300 ${isSel(selection, "goal", ceo.id) ? RING : ""}`}
+        >
+          <div className="mb-1 flex flex-wrap items-center gap-2 text-[14px]">
+            <span className="font-semibold text-zinc-600">Shared CEO objective</span>
+            <Badge tone="neutral">Inherited · read-only</Badge>
+            <Badge tone="neutral" icon={false}>{ceo.version}</Badge>
+          </div>
+          <p className="text-[17px] font-semibold text-zinc-900">{ceo.objective}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {ceo.measures.map((m) =>
+              m.id === "KR2" && ceo.changed ? (
+                <Badge key={m.id} tone="amber">KR2 changed today</Badge>
+              ) : (
+                <Badge key={m.id} tone="neutral" icon={false}>{m.id}</Badge>
+              ),
+            )}
+          </div>
+        </button>
+      ) : (
+        <MissingGoal owner="ceo" />
+      )}
+
+      <div className="grid grid-cols-2 gap-4">
+        <Column props={props} owner="product" />
+        <Column props={props} owner="security" />
+      </div>
+
+      <div className="rounded-xl bg-white p-4 ring-1 ring-zinc-200">
+        <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-zinc-500">What changed</h4>
+        <p className="text-[16px] text-zinc-800">
+          <Badge tone="amber">New</Badge> CEO KR2 requires beta-launch incidents triaged per launch-readiness criteria. Security&apos;s shared measure S-M1
+          optimizes generic throughput.
+        </p>
+        {accepted && (
+          <p className="mt-2 text-[16px] text-zinc-800">
+            <Badge tone="neutral">Resolved</Badge> Security goal {accepted.accepted_version} accepted by its owner; Product commitment acknowledged.
+          </p>
+        )}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button onClick={() => openDrawer("brief")}>Compare ways forward</Button>
+          {me.actor === "product" ? (
+            <Button kind="secondary" onClick={() => go("proposals")}>
+              Ask peer / propose edit
+            </Button>
+          ) : (
+            <>
+              <Button kind="secondary" disabled>
+                Ask peer / propose edit
+              </Button>
+              <span className="text-[14px] text-zinc-500">Proposals to your goal arrive in Proposals</span>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
