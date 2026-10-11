@@ -133,6 +133,8 @@ export default function Page() {
   useEffect(() => {
     if (me?.actor && !landed.current) {
       landed.current = true;
+      // One-time landing view after sign-in; guarded by the ref, so it can't cascade.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (me.actor === "leadership") setView("company");
     }
   }, [me]);

@@ -47,6 +47,8 @@ export function useAlign() {
   const loadMe = useCallback(async () => setMe(await api<Me>("/api/session")), []);
 
   useEffect(() => {
+    // Subscribes to the server: state is set when the fetches resolve, not synchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadMe();
     refresh();
     timer.current = setInterval(refresh, 1500);
