@@ -69,8 +69,11 @@ export async function mutate<T>(fn: (s: AppState) => T | Promise<T>): Promise<T>
   await prev.catch(() => undefined);
   try {
     const s = await readState();
+    const before = JSON.stringify(s);
     const result = await fn(s);
-    await writeState(s);
+    // Skip no-op writes: every /api/state poll runs through here, and rewriting an unchanged
+    // state.json makes the dev server recompile and reload open pages in a loop.
+    if (JSON.stringify(s) !== before) await writeState(s);
     return result;
   } finally {
     release();

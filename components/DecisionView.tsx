@@ -1,5 +1,5 @@
 "use client";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import type { SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { ProofStrip } from "./ProofStrip";
@@ -98,6 +98,12 @@ export function DecisionView(props: ViewProps) {
   const open = prop && !["RATIFIED", "REJECTED"].includes(prop.state);
   const { baseline, candidate, interruption } = comparablePair(s);
   const kr2 = currentGoal(s, "ceo")?.measures.find((m) => m.id === "KR2");
+  const ceoChangeOpen = Boolean(kr2 && rel?.status === "UNKNOWN" && !s.timer?.started_at);
+  const { mark } = props;
+  // Landing here while the CEO's change is unresolved is seeing that change: start the time-to-agreement clock.
+  useEffect(() => {
+    if (ceoChangeOpen) mark("ceo_change_viewed");
+  }, [ceoChangeOpen, mark]);
 
   // 1 · Agreement reached
   if (acc && rel?.status === "ACCEPTED") {
@@ -116,8 +122,8 @@ export function DecisionView(props: ViewProps) {
         </div>
         {goal && (
           <div className="rounded-[14px] border border-zinc-200 bg-zinc-50 p-[18px]">
-            <div className="al-lbl mb-1">Security&apos;s goal now</div>
-            <p className="text-[15px] text-zinc-900">{goal.objective}</p>
+            <div className="al-lbl mb-1">Security&apos;s new target</div>
+            <p className="text-[15px] text-zinc-900">{goal.measures.find((m) => m.id === "S-M3")?.text ?? goal.objective}</p>
           </div>
         )}
         <ProofStrip s={s} />
@@ -159,8 +165,8 @@ export function DecisionView(props: ViewProps) {
         </div>
         <div className="grid grid-cols-2 gap-[18px] rounded-[14px] border border-zinc-200 bg-zinc-50 p-[18px]">
           <div className="flex flex-col gap-2">
-            <span className="al-lbl">New target for Security</span>
-            <p className="text-[15px] text-zinc-900">{latest?.proposed_measure_text ?? prop.proposed_measure_text}</p>
+            <span className="al-lbl">Product&apos;s proposed target for Security</span>
+            <p className="text-[15px] text-zinc-900">{prop.proposed_measure_text}</p>
             <span className="self-start">
               <StateBadge state={prop.test_status} />
             </span>
@@ -246,7 +252,7 @@ export function DecisionView(props: ViewProps) {
           summary="The AI agent works through the queue oldest first. The beta customer's issue waits at normal priority."
           points={
             <>
-              <Point ok={false}>Doesn&apos;t mention the beta</Point>
+              <Point ok={undefined}>Doesn&apos;t mention the beta</Point>
               <Point ok={baseAlone}>{baseAlone === false ? "Touched the critical security ticket it should leave alone" : "Left the critical security ticket alone"}</Point>
               <Point ok={undefined}>Rewards closing tickets, not launch readiness</Point>
             </>

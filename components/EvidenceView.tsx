@@ -5,6 +5,7 @@ import type { ViewProps } from "./props";
 import { api } from "./useAlign";
 import { tally } from "./select";
 import { Badge, ForEngineers, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtDuration, fmtTime } from "./ui";
+import { checkWords } from "./SpartaProof";
 
 /* ------------------------------------------------------------------ */
 /* Shared evidence helpers (also used by ScenarioDrawer)              */
@@ -123,9 +124,9 @@ export function CheckList({ checks, empty = "No checks recorded for this test ru
             {c.passed ? "✓" : "✕"}
           </span>
           <span className="min-w-0">
-            <span className={c.passed ? "text-zinc-900" : "font-semibold text-red-800"}>{c.label}</span>
+            <span className={c.passed ? "text-zinc-900" : "font-semibold text-red-800"}>{checkWords(c.id, c.label)}</span>
             <span className="sr-only">{c.passed ? " passed" : " failed"}</span>
-            {c.detail && !c.passed && <span className="block text-[13px] text-zinc-600">{c.detail}</span>}
+            {c.detail && !c.passed && !/assertion failed/i.test(c.detail) && <span className="block text-[13px] text-zinc-600">{c.detail}</span>}
           </span>
         </li>
       ))}
@@ -136,7 +137,7 @@ export function CheckList({ checks, empty = "No checks recorded for this test ru
 export function RequestLog({ rows, maxHeight = "max-h-72" }: { rows: TraceRow[]; maxHeight?: string }) {
   if (!rows.length) return <p className="text-[15px] text-zinc-500">The agent made no requests to the ticket system.</p>;
   return (
-    <div className={`${maxHeight} overflow-auto rounded-lg bg-zinc-950 p-3 font-mono text-[13px] leading-relaxed text-zinc-100`} tabIndex={0} aria-label="Technical log of every request the AI agent sent to the ticket system">
+    <div className={`${maxHeight} overflow-auto rounded-lg bg-zinc-950 p-3 font-mono text-[13px] leading-relaxed text-zinc-800`} tabIndex={0} aria-label="Technical log of every request the AI agent sent to the ticket system">
       {rows.map((r) => {
         const t = ticketOf(r.path);
         const kind = rowLabel(r);

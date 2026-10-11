@@ -202,9 +202,9 @@ function RelationPanel({ p, r }: { p: ViewProps; r: GoalRelation }) {
       </div>
 
       {isConflict && (
-        <Section title="Where the goals clash">
+        <Section title={r.status === "ACCEPTED" ? "What the goals clashed on (now agreed)" : "Where the goals clash"}>
           <div className="overflow-hidden rounded-lg ring-1 ring-zinc-200">
-            <ConflictRow label={`Security's current target${orig ? ` (${orig.version})` : ""}`} tone="amber">
+            <ConflictRow label={`${r.status === "ACCEPTED" ? "Security's old target" : "Security's current target"}${orig ? ` (${orig.version})` : ""}`} tone={r.status === "ACCEPTED" ? "neutral" : "amber"}>
               {oldMeasure?.text ?? "Unknown"}
             </ConflictRow>
             <ConflictRow label="The CEO's new requirement" tone="neutral">
@@ -214,10 +214,16 @@ function RelationPanel({ p, r }: { p: ViewProps; r: GoalRelation }) {
               The critical security ticket (#1) and its private notes must not be touched.
               {protectedMeasure && <div className="mt-1 text-[13px] text-zinc-500">Security&apos;s rule: {protectedMeasure.text}</div>}
             </ConflictRow>
-            <ConflictRow label="What happens now" tone="amber">
-              Beta customers&apos; issues wait in line like any other ticket. The CEO&apos;s new requirement can&apos;t be met unless Security
-              changes its target.
-            </ConflictRow>
+            {r.status === "ACCEPTED" ? (
+              <ConflictRow label="What happens now" tone="neutral">
+                Security approved a new target: beta customers&apos; issues come first, and the critical security ticket stays off-limits.
+              </ConflictRow>
+            ) : (
+              <ConflictRow label="What happens now" tone="amber">
+                Beta customers&apos; issues wait in line like any other ticket. The CEO&apos;s new requirement can&apos;t be met unless Security
+                changes its target.
+              </ConflictRow>
+            )}
           </div>
         </Section>
       )}

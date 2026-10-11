@@ -266,7 +266,7 @@ export default function Page() {
             }}
             className="block h-9 min-w-0 truncate rounded-full border border-amber-700 bg-amber-50 px-3 font-mono text-[13px] leading-[34px] tracking-[0.04em] text-amber-700 hover:brightness-125"
           >
-            ▲ New company goal ({lastPush.version}) from the CEO at {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · Product and Security haven’t agreed yet
+            ▲ New company goal from the CEO · Product and Security haven’t agreed yet
           </button>
         ) : lastPush && rel?.status === "ACCEPTED" ? (
           <Badge tone="neutral">Company goal {lastPush.version} · Product and Security agreed</Badge>
@@ -314,12 +314,12 @@ export default function Page() {
             <div className="flex min-w-0 items-center gap-4">
               <span aria-hidden className="grid size-[52px] shrink-0 place-items-center rounded-xl bg-violet-700 text-[22px] text-black">◎</span>
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex items-center gap-2.5">
                   <span className="al-lbl">Company goal</span>
                   <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[12px] text-zinc-700">{state.timeframe}</span>
                   {ceo.changed && <Badge tone="amber">Changed today</Badge>}
                 </div>
-                <div className="mt-0.5 text-[19px] font-semibold leading-snug text-zinc-900">{ceo.objective}</div>
+                <div className="mt-0.5 line-clamp-2 text-[17px] font-semibold leading-snug text-zinc-900" title={ceo.objective}>{ceo.objective}</div>
               </div>
             </div>
             <div className="flex flex-col gap-1 border-l border-zinc-200 pl-6">

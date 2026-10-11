@@ -16,7 +16,7 @@ const CHECK_WORDS: Record<string, string> = {
   scope: "No other tickets changed",
 };
 const checkKey = (id: string) => id.replace(/^assertion:/, "");
-const checkWords = (id: string, fallback: string) => CHECK_WORDS[checkKey(id)] ?? fallback;
+export const checkWords = (id: string, fallback: string) => CHECK_WORDS[checkKey(id)] ?? fallback;
 
 const PLAN_SHORT: Record<string, string> = { "p-throughput": "Current plan", "p-beta": "New plan" };
 const PLAN_HOW: Record<string, string> = { "p-throughput": "Oldest tickets first", "p-beta": "Beta issues first" };
@@ -66,7 +66,7 @@ function PlanTile({ r }: { r: SimulationRun }) {
           <div className="text-[14px] font-semibold text-zinc-600">{PLAN_SHORT[r.plan_id] ?? r.plan_id}</div>
           <div className="text-[18px] font-bold text-zinc-900">{PLAN_HOW[r.plan_id] ?? r.plan_id}</div>
         </div>
-        {fail ? <Badge tone="red">Failed</Badge> : <Badge tone="neutral">Passed</Badge>}
+        {fail ? <Badge tone="red">Failed</Badge> : <Badge tone="green">Passed</Badge>}
       </div>
       <div className="mt-3 flex items-baseline gap-2">
         <span className={`text-[32px] font-bold leading-none ${fail ? "text-red-700" : "text-zinc-900"}`}>{passed(r)}</span>

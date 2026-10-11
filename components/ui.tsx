@@ -109,13 +109,14 @@ export const OWNER_LABEL: Record<string, string> = {
   ceo: "CEO",
   product: "Product Director",
   security: "Alex / Security Lead",
+  leadership: "CEO / Leadership",
 };
 
 export function fmtTime(iso?: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso; // never render "Invalid Date"
-  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 export function fmtDuration(ms: number) {

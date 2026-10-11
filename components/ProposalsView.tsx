@@ -548,7 +548,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
       {isSecurity && canDecide && (
         <Card tone="violet">
           <h2 className="mb-3 text-[18px] font-bold text-zinc-900">Your decision</h2>
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 2xl:grid-cols-2">
             <div>
               <label className="block">
                 <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Why you&apos;re approving</span>
