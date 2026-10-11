@@ -72,7 +72,7 @@ function textFor(s: AppState, session: AgentSession, ev: AuthorityEventRow): Dir
       `Objective: ${ev.goal.objective}`,
       ...diff.map((d) => `• ${d}`),
       `Your team's authorized plan is still ${plan.plan} under Security goal ${plan.goal_version}${risk ? ", which may conflict with the new KR3 (protected tickets unchanged)" : ""}.`,
-      `Action: start your reply with the line "Align → ${title}". Add a task to your own todo list: "Hold: current plan vs company goal ${ev.goal.version} — awaiting Security goal decision". Do not switch plans on your own; summarize the risk in two sentences and wait for the Security goal owner to ratify a change.`,
+      `Action: start your reply with the line "Align → ${title}". Add a task to your built-in task list (Claude Code task tools, not Alike): "Hold: current plan vs company goal ${ev.goal.version} — awaiting Security goal decision". Do not switch plans on your own; summarize the risk in two sentences and wait for the Security goal owner to ratify a change.`,
       footer,
     ].join("\n");
     return { event_id: ev.event_id, kind: "push", at: ev.at, authority: "CEO / Leadership", title, text };
@@ -88,7 +88,7 @@ function textFor(s: AppState, session: AgentSession, ev: AuthorityEventRow): Dir
     `ALIGN · AUTHORITY CHANGE — ${title}.`,
     `Proposal ${ev.proposal_id}: ${prop?.counter_versions.at(-1)?.proposed_measure_text ?? prop?.proposed_measure_text ?? ""}`,
     `Accepted plan: ${plan.plan} (${plan.test_status ?? "untested"}${evidence ? `; Sparta: ${evidence}` : ""}).`,
-    `REPLAN: start your reply with the line "Align → ${title}". Add a task to your own todo list: "Replan under ${team} goal ${acc?.accepted_version ?? ""}". Call align_get_accepted_plan, run the exact command it returns (scripts/run-plan.sh accepted), report the Sparta result in two sentences, then mark the task done.`,
+    `REPLAN: start your reply with the line "Align → ${title}". Add a task to your built-in task list (Claude Code task tools, not Alike): "Replan under ${team} goal ${acc?.accepted_version ?? ""}". Call align_get_accepted_plan, then run exactly "scripts/run-plan.sh accepted" as a single command (you are already in the repo root: no cd prefix), report the Sparta result in two sentences, then mark the task done.`,
     footer,
   ].join("\n");
   return { event_id: ev.event_id, kind: "ratify", at: ev.at, authority: owner, title, text };

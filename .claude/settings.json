@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(scripts/run-plan.sh accepted)",
-      "Bash(scripts/run-plan.sh accepted:*)"
+      "Bash(scripts/run-plan.sh accepted:*)",
+      "mcp__align",
+      "Bash(scripts/run-plan.sh accepted 2>&1 | tail -40)"
     ]
   },
   "hooks": {

@@ -383,6 +383,9 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
   const missing = p.simulation_refs.filter((r) => !s.simulations.some((x) => x.id === r));
   const latestText = p.counter_versions.at(-1)?.proposed_measure_text ?? p.proposed_measure_text;
   const acc = s.acceptances.find((a) => a.proposal_id === p.id) ?? null;
+  const deliveries = (s.sessions ?? [])
+    .flatMap((x) => (x.directives ?? []).filter((d) => d.event_id === `accept:${p.id}`))
+    .sort((a, b) => a.delivered_at.localeCompare(b.delivered_at));
   const canDecide = p.state === "PENDING_SECURITY" || p.state === "ACKNOWLEDGED_BY_PRODUCT";
   const [ratifyWhy, setRatifyWhy] = useState("Beta customers' issues now come first, and the critical security ticket stays off-limits.");
 
@@ -506,6 +509,12 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
               <dt className="text-zinc-500">Plan</dt>
               <dd>
                 <PlanLabel id={acc.plan_ref.plan_id} />
+              </dd>
+              <dt className="text-zinc-500">Agent delivery</dt>
+              <dd className="text-zinc-900">
+                {deliveries.length
+                  ? `${deliveries.length} agent ${deliveries.length === 1 ? "session" : "sessions"} · first delivered ${fmtTime(deliveries[0].delivered_at)} · acted on: ${deliveries.filter((d) => d.acted_at).length}`
+                  : "Not delivered to an agent session yet"}
               </dd>
             </dl>
             <p className="mt-3 text-[15px] text-zinc-600">

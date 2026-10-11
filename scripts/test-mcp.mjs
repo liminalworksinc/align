@@ -7,7 +7,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const URL_ = process.argv[2] || process.env.ALIGN_MCP_URL || "http://localhost:3100/api/mcp";
-const EXPECTED = ["align_get_accepted_plan", "align_get_decision_record", "align_get_work_map", "align_list_goals"];
+const EXPECTED = ["align_get_accepted_plan", "align_get_decision_record", "align_get_directives", "align_get_work_map", "align_list_goals"];
 
 function readToken() {
   if (process.env.ALIGN_MCP_TOKEN) return process.env.ALIGN_MCP_TOKEN;
@@ -69,6 +69,7 @@ const calls = [
   ["align_get_accepted_plan", {}],
   ["align_get_work_map", {}],
   ["align_get_decision_record", {}],
+  ["align_get_directives", {}],
 ];
 for (const [name, args] of calls) {
   const r = await client.callTool({ name, arguments: args });

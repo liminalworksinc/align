@@ -83,7 +83,7 @@ export async function resetState(by: { actor: string; sid: string }) {
     // Keep ingested Sparta evidence across demo resets. The fixture's Alike reference wins; an operator-captured one is kept only if the fixture has none.
     fresh.simulations = s.simulations;
     // Captured agent sessions are real history: keep them. Their mappings are recomputed against the reset registry.
-    fresh.sessions = s.sessions ?? [];
+    fresh.sessions = (s.sessions ?? []).map((x) => ({ ...x, directives: [] })); // deliveries belong to the reset history
     fresh.mappings = [];
     if (!fresh.brief.alike_ref && s.brief.alike_ref) {
       fresh.brief.alike_ref = s.brief.alike_ref;

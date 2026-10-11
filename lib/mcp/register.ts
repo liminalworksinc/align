@@ -1,5 +1,6 @@
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { authorityEvents, describeEvent, pendingFor } from "../directives";
 import { acceptedPlan } from "../policy";
 import { activeRegistry, currentGoals } from "../registry";
 import { readState } from "../store";
@@ -306,6 +307,48 @@ function decisionRecord(s: AppState, proposalId: string | undefined): z.infer<ty
   };
 }
 
+// ---------- align_get_directives ----------
+
+const DirectiveOut = z.object({
+  event_id: z.string(),
+  kind: z.enum(["push", "ratify"]),
+  at: z.string(),
+  authority: z.string(),
+  title: z.string(),
+  text: z.string(),
+});
+
+const DirectivesOut = z.object({
+  session_id: z.string().nullable(),
+  session_found: z.boolean().nullable(),
+  directives: z.array(DirectiveOut),
+  recent: z.array(
+    z.object({ event_id: z.string(), kind: z.enum(["push", "ratify"]), at: z.string(), title: z.string(), delivered: z.number(), acted: z.number() }),
+  ),
+});
+
+function findSession(s: AppState, q: string): AgentSession | undefined {
+  return s.sessions.find((x) => x.id === q || x.session_id === q) ?? s.sessions.find((x) => x.session_id.endsWith(q));
+}
+
+function directives(s: AppState, sessionId: string | undefined): z.infer<typeof DirectivesOut> {
+  const q = sessionId?.trim();
+  const sess = q ? findSession(s, q) : undefined;
+  const recent = authorityEvents(s)
+    .slice(-10)
+    .reverse()
+    .map((ev) => {
+      const got = s.sessions.flatMap((x) => (x.directives ?? []).filter((d) => d.event_id === ev.event_id));
+      return { event_id: ev.event_id, kind: ev.kind, at: ev.at, title: describeEvent(s, ev.event_id), delivered: got.length, acted: got.filter((d) => d.acted_at).length };
+    });
+  return {
+    session_id: sess?.id ?? q ?? null,
+    session_found: q ? Boolean(sess) : null,
+    directives: sess ? pendingFor(s, sess.id) : [],
+    recent,
+  };
+}
+
 // ---------- registration ----------
 
 export function registerAlign(server: McpServer) {
@@ -394,6 +437,29 @@ export function registerAlign(server: McpServer) {
           }; ${r.sparta_runs.length} Sparta run(s): ${r.sparta_runs.map((x) => `${x.plan} ${x.verdict}`).join(", ") || "none"}. ${OUTCOME_NOTE}`
         : `${proposal_id ? `No proposal ${proposal_id}.` : "No proposals recorded yet."} ${OUTCOME_NOTE}`;
       return result(out, summary);
+    },
+  );
+
+  server.registerTool(
+    "align_get_directives",
+    {
+      title: "Get authority directives",
+      description:
+        "Authority changes (a Leadership company-goal push or a goal owner's ratification) that Align routes to agent sessions. Pass session_id (full id or a suffix of the raw session id) to get the directives that session has not received yet. Also lists the 10 most recent authority events with delivery counts.",
+      inputSchema: z.object({ session_id: z.string().max(200).optional() }),
+      outputSchema: DirectivesOut,
+      annotations: READ_ONLY,
+    },
+    async ({ session_id }, ctx) => {
+      requireRead(ctx);
+      const out = directives(await readState(), session_id);
+      const head = out.session_id
+        ? out.session_found
+          ? `${out.directives.length} pending directive(s) for ${out.session_id}${out.directives.length ? `: ${out.directives.map((d) => d.title).join("; ")}` : ""}.`
+          : `No captured session matches "${out.session_id}".`
+        : "No session_id given; pending directives not computed.";
+      const lines = out.recent.map((e) => `- ${e.title} at ${e.at}: delivered ${e.delivered}, acted ${e.acted}`);
+      return result(out, `${head}\n${out.recent.length} recent authority event(s)${lines.length ? `:\n${lines.join("\n")}` : "."}`);
     },
   );
 }

@@ -31,6 +31,10 @@ export function OrgView(props: ViewProps) {
   const prev = priorVersion(s, ceo);
   const draft = s.org_draft;
   const lastPush = s.pushes.at(-1);
+  const pushDeliveries = lastPush
+    ? (s.sessions ?? []).flatMap((x) => (x.directives ?? []).filter((d) => d.event_id === `push:${lastPush.id}`))
+    : [];
+  const pushActed = pushDeliveries.filter((d) => d.acted_at).length;
   const [objective, setObjective] = useState(draft?.objective ?? "");
   const [busy, setBusy] = useState(false);
   const canPush = me.actor === "leadership" && !!draft;
@@ -100,6 +104,10 @@ export function OrgView(props: ViewProps) {
             </div>
             <div className="mt-2 text-[15px] text-zinc-600">
               Sent to the Product Director and Alex (Security Lead). AI coding sessions are being re-checked against the new goals.
+            </div>
+            <div className="mt-1 text-[15px] text-zinc-600">
+              Delivered to {pushDeliveries.length} agent {pushDeliveries.length === 1 ? "session" : "sessions"}
+              {pushDeliveries.length > 0 && ` · acted on: ${pushActed}`}
             </div>
             <div className="mt-3 flex gap-2">
               <Button kind="secondary" onClick={() => props.go("work")}>See where AI agent work is going</Button>

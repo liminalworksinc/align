@@ -90,12 +90,20 @@ windows() {
 tmuxs() {
   hdr "tmux session \"$SESSION\""
   tmux kill-session -t "$SESSION" 2>/dev/null
-  tmux new-session -d -s "$SESSION" -x 240 -y 60 -c "$ROOT"
-  tmux split-window -h -t "$SESSION" -c "$ROOT"
-  tmux send-keys -t "$SESSION:0.0" 'claude' Enter
-  tmux send-keys -t "$SESSION:0.1" 'clear; echo "Run terminal. Act 4: scripts/run-plan.sh accepted"' Enter
-  ok "left: Claude Code (align MCP) · right: run terminal"
+  tmux new-session -d -s "$SESSION" -x 220 -y 60 -c "$ROOT"
+  tmux split-window -v -l 12 -t "$SESSION" -c "$ROOT"
+  tmux send-keys -t "$SESSION:0.1" 'clear; node scripts/align-listen.mjs' Enter
+  # Default permission mode: the project allow rules (Align MCP tools, scripts/run-plan.sh accepted) apply exactly.
+  tmux send-keys -t "$SESSION:0.0" 'clear; claude --permission-mode default' Enter
+  ok "top: Claude Code (Align MCP + live replan watcher) · bottom: Align authority stream"
   echo "  Attach with: tmux attach -t $SESSION"
+}
+
+operator() {
+  hdr "Starting the Security triage operator in Claude Code"
+  tmux send-keys -t "$SESSION:0.0" "You're the Security triage operator. Use the align MCP tools to find the plan you're authorized to run, run it with the exact command Align gives, report the Sparta result in two sentences, then stay on standby for direction from Align."
+  sleep 0.5; tmux send-keys -t "$SESSION:0.0" Enter
+  ok "operator prompt sent (it runs the authorized plan, then waits for Align)"
 }
 
 cue() {
@@ -123,12 +131,14 @@ ACT 3 · Product and Security agree (Product + Security windows)
  10. Product: "Accept Security's changes and confirm what Product will do"
  11. Security: "Approve the change to my goal" → both windows show the agreed goal
 
-ACT 4 · The AI agent follows the agreement (tmux)
- 12. Left pane (Claude Code): "Use the align MCP tools: what goals did my org approve,
-     and which plan is the Security triage agent allowed to run? Then run it."
- 13. Claude calls align_list_goals + align_get_accepted_plan → runs scripts/run-plan.sh accepted
-     → the approved Security goal allows the new plan (beta issues first) → practice test passes 9 of 9
- 14. Work page: this Claude session appears, linked to the Security goal
+BEFORE ACT 1 · Start the AI agent (tmux top pane)
+  scripts/run-of-show.sh operator → Claude runs the authorized plan (p-throughput@1, Sparta FAIL) and waits on standby
+
+LIVE DURING ACTS 1 AND 3 · The AI agent follows the people who own the goals (nobody types to Claude)
+  • After the company goal is pushed: within ~1s Claude wakes on its own ("Align → Company goal v2 pushed…"), flags the KR3 risk, holds
+  • After Security ratifies: Claude wakes again ("Align → Security goal v2 ratified…"), replans, runs scripts/run-plan.sh accepted → Sparta PASS 9/9
+  • Bottom pane: each change leaving Align and reaching the session within milliseconds
+  • Work map card: "Listening for Align" → "Replan delivered · acted on"; decision record: "Agent delivery: 1 session"
 
 CLOSE · Summary strip: time to agreement measured in Align vs the estimate for doing it by hand
 EOF
@@ -142,6 +152,7 @@ case "${1:-all}" in
   windows) windows ;;
   tmux) tmuxs ;;
   cue) cue ;;
+  operator) operator ;;
   all) check; reset; seed; windows; tmuxs; cue ;;
-  *) echo "usage: scripts/run-of-show.sh {check|mcp|reset|seed|windows|tmux|cue|all}"; exit 1 ;;
+  *) echo "usage: scripts/run-of-show.sh {check|mcp|reset|seed|windows|tmux|operator|cue|all}"; exit 1 ;;
 esac
