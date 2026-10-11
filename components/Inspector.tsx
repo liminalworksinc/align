@@ -3,14 +3,15 @@ import type { ReactNode } from "react";
 import type { Goal, GoalRelation, Proposal, SimulationRun, StateView, WorkItem } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { Badge, Button, Mono, OWNER_LABEL, Section, StateBadge, fmtTime } from "./ui";
-import { accepted, currentGoal, priorVersion } from "./select";
+import { TICKET_LABEL } from "./EvidenceView";
+import { accepted, comparablePair, currentGoal, priorVersion } from "./select";
 
 const DEFAULT_RELATION = "r-product-security";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="border-b border-zinc-100 py-2 last:border-b-0">
-      <div className="text-[12px] font-semibold uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="al-lbl">{label}</div>
       <div className="mt-0.5 text-[16px] leading-snug text-zinc-900">{children}</div>
     </div>
   );
@@ -74,6 +75,7 @@ function GoalPanel({ p, g }: { p: ViewProps; g: Goal }) {
           </Row>
         )}
       </Section>
+      {g.owner_id === "security" && <WorkNotGoal s={s} g={g} />}
       <Section title="Measures">
         <ul className="space-y-2">
           {g.measures.map((m) => (
@@ -127,6 +129,47 @@ function GoalPanel({ p, g }: { p: ViewProps; g: Goal }) {
         )}
       </div>
     </>
+  );
+}
+
+/** Design "Work completed ≠ goal achieved": old criterion vs inherited one, the affected ticket, real Sparta status. */
+function WorkNotGoal({ s, g }: { s: StateView; g: Goal }) {
+  const old = originalSecurity(s)?.measures.find((m) => m.id === "S-M1") ?? g.measures.find((m) => m.id === "S-M1");
+  const kr2 = ceoKR2(s);
+  const { baseline, candidate } = comparablePair(s);
+  const runs = [baseline, candidate].filter((r): r is SimulationRun => Boolean(r));
+  return (
+    <Section title="Work completed ≠ goal achieved">
+      <div className="divide-y divide-zinc-200 rounded-[10px] border border-zinc-200 text-[14px]">
+        <div className="px-3 py-2">
+          <div className="al-lbl">Measured before the change</div>
+          <div className="text-zinc-900">{old?.text ?? "Unknown"}</div>
+        </div>
+        <div className="px-3 py-2">
+          <div className="al-lbl !text-amber-700">CEO now requires (KR2)</div>
+          <div className="text-zinc-900">{kr2?.text ?? "Unknown"}</div>
+        </div>
+        <div className="px-3 py-2">
+          <div className="al-lbl">Affected ticket</div>
+          <div className="text-zinc-900">#4 · {TICKET_LABEL["4"]}</div>
+        </div>
+        <div className="px-3 py-2">
+          <div className="al-lbl">Evidence status</div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {runs.length === 0 ? (
+              <StateBadge state="UNTESTED" />
+            ) : (
+              runs.map((r) => (
+                <span key={r.id} className="inline-flex items-center gap-1.5 text-[13px] text-zinc-600">
+                  <StateBadge state={r.verdict} />
+                  {r.plan_id}@{r.plan_version} {r.checks.filter((c) => c.passed).length}/{r.checks.length}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </Section>
   );
 }
 
@@ -224,7 +267,7 @@ function RelationPanel({ p, r }: { p: ViewProps; r: GoalRelation }) {
 function ConflictRow({ label, tone, children }: { label: string; tone: "amber" | "neutral"; children: ReactNode }) {
   return (
     <div className={`border-b border-zinc-200 px-3 py-2.5 last:border-b-0 ${tone === "amber" ? "bg-amber-50/60" : "bg-white"}`}>
-      <div className="text-[12px] font-semibold uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="al-lbl">{label}</div>
       <div className="mt-0.5 text-[15px] leading-snug text-zinc-900">{children}</div>
     </div>
   );
@@ -234,7 +277,7 @@ function WorkPanel({ p, w }: { p: ViewProps; w: WorkItem }) {
   const g = goalById(p.s, w.goal_id);
   return (
     <>
-      <h2 className="mb-1 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Work item</h2>
+      <h2 className="mb-1 al-lbl">Work item</h2>
       <p className="mb-4 text-[18px] font-semibold leading-snug text-zinc-900">{w.task}</p>
       <Section title="Details">
         <Row label="Owner">{OWNER_LABEL[w.owner] ?? w.owner}</Row>
@@ -420,7 +463,7 @@ export function Inspector(props: ViewProps) {
 
   return (
     <div className="text-[16px]">
-      <div className="mb-3 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Inspector</div>
+      <div className="mb-3 al-lbl">Inspector</div>
       {body}
       
     </div>

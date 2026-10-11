@@ -55,14 +55,17 @@ function Login({ onDone }: { onDone: () => void }) {
   }
   return (
     <main className="flex min-h-screen items-center justify-center p-8">
-      <form onSubmit={submit} className="w-[560px] rounded-2xl bg-white p-8 shadow-sm ring-1 ring-zinc-200">
-        <div className="mb-1 text-[28px] font-bold tracking-tight">Align</div>
+      <form onSubmit={submit} className="al-in w-[560px] rounded-[14px] border border-zinc-200 bg-white p-9">
+        <div className="mb-1 flex items-baseline gap-2.5">
+          <span className="font-display text-[34px] leading-none">Align</span>
+          <span className="al-lbl text-violet-700">by Liminal</span>
+        </div>
         <p className="mb-6 text-[16px] text-zinc-600">Northstar Security. Sign in as the owner of your goals.</p>
         <fieldset className="mb-4">
-          <legend className="mb-2 text-[14px] font-semibold text-zinc-700">I am</legend>
+          <legend className="al-lbl mb-2">I am</legend>
           <div className="grid grid-cols-3 gap-2">
             {ROLES.map((r) => (
-              <label key={r.id} className={`cursor-pointer rounded-lg p-3 text-[16px] ring-1 ${role === r.id ? "bg-violet-50 ring-violet-500" : "ring-zinc-300"}`}>
+              <label key={r.id} className={`cursor-pointer rounded-[14px] border p-3.5 text-[16px] transition ${role === r.id ? "border-zinc-300 bg-zinc-100 outline-2 outline-offset-2 outline-violet-700" : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-100"}`}>
                 <input type="radio" name="role" value={r.id} checked={role === r.id} onChange={() => setRole(r.id)} className="sr-only" />
                 <div className="font-semibold leading-snug">{r.name}</div>
                 <div className="text-[13px] text-zinc-500">{r.blurb}</div>
@@ -71,12 +74,12 @@ function Login({ onDone }: { onDone: () => void }) {
           </div>
         </fieldset>
         <label className="mb-4 block">
-          <span className="mb-1 block text-[14px] font-semibold text-zinc-700">Passcode</span>
+          <span className="al-lbl mb-1.5 block">Passcode</span>
           <input
             type="password"
             value={passcode}
             onChange={(e) => setPasscode(e.target.value)}
-            className="w-full rounded-lg px-3 py-2 text-[16px] ring-1 ring-zinc-300"
+            className="w-full rounded-[10px] border border-zinc-300 bg-zinc-50 px-3 py-2.5 text-[16px] text-zinc-900"
             autoFocus
           />
         </label>
@@ -179,28 +182,29 @@ export default function Page() {
   return (
     <div className="grid h-screen grid-cols-[232px_minmax(0,1fr)_360px] grid-rows-[64px_minmax(0,1fr)] overflow-hidden">
       {/* Sidebar */}
-      <aside className="row-span-2 flex flex-col border-r border-zinc-200 bg-white">
-        <div className="flex h-16 items-center gap-2 border-b border-zinc-200 px-5">
-          <span className="text-[22px] font-bold tracking-tight">Align</span>
+      <aside className="row-span-2 flex flex-col border-r border-zinc-200 bg-[var(--rail-bg)]">
+        <div className="flex h-16 items-center gap-2 border-b border-zinc-200 px-6">
+          <span className="font-display text-[24px] leading-none">Align</span>
+          <span className="al-lbl text-violet-700">Liminal</span>
         </div>
-        <nav className="flex flex-col gap-1 p-3" aria-label="Main">
+        <nav className="flex flex-col gap-0.5 p-3" aria-label="Main">
           {nav.map((n) => (
             <button
               key={n.id}
               onClick={() => props.go(n.id)}
               aria-current={view === n.id ? "page" : undefined}
-              className={`flex items-center justify-between rounded-lg px-3 py-2.5 text-left text-[16px] font-medium ${view === n.id ? "bg-violet-50 text-violet-800" : "text-zinc-700 hover:bg-zinc-100"}`}
+              className={`flex min-h-[46px] items-center justify-between rounded-[10px] px-3.5 text-left text-[16px] transition ${view === n.id ? "bg-violet-50 text-zinc-900 shadow-[inset_2px_0_0_var(--liminal)]" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"}`}
             >
               <span className="flex items-center gap-2.5">
-                <span aria-hidden className="w-5 text-center">{n.icon}</span>
+                <span aria-hidden className="w-4 text-center font-mono text-[13px] text-zinc-500">{n.icon}</span>
                 {n.label}
               </span>
               {n.id === "proposals" && pendingForMe > 0 && <Badge tone="amber">{pendingForMe}</Badge>}
             </button>
           ))}
         </nav>
-        <div className="mt-auto border-t border-zinc-200 p-4 text-[14px] text-zinc-600">
-          <div className="font-semibold text-zinc-900">{me.name}</div>
+        <div className="mt-auto border-t border-zinc-200 p-4 text-[14px] text-zinc-500">
+          <div className="text-[15px] font-semibold text-zinc-900">{me.name}</div>
           <div className="mb-3">Session {me.sid}</div>
           <div className="flex flex-wrap gap-2">
             <Button kind="secondary" onClick={signOut}>Sign&nbsp;out</Button>
@@ -210,8 +214,8 @@ export default function Page() {
       </aside>
 
       {/* Top bar */}
-      <header className="col-span-2 flex items-center gap-4 border-b border-zinc-200 bg-white px-6">
-        <div className="text-[15px] text-zinc-600">
+      <header className="col-span-2 flex items-center gap-4 border-b border-zinc-200 bg-zinc-50 px-6">
+        <div className="shrink-0 whitespace-nowrap text-[15px] text-zinc-500">
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
         </div>
         {unresolved && lastPush && me.actor !== "leadership" ? (
@@ -221,7 +225,7 @@ export default function Page() {
               if (ceo) setSelection({ kind: "goal", id: ceo.id });
               props.go("goals");
             }}
-            className="rounded-lg bg-amber-50 px-3 py-1.5 text-[15px] font-semibold text-amber-900 ring-1 ring-amber-300"
+            className="block h-9 min-w-0 truncate rounded-full border border-amber-700 bg-amber-50 px-3 font-mono text-[13px] leading-[34px] tracking-[0.04em] text-amber-700 hover:brightness-125"
           >
             ▲ Company goal {lastPush.version} pushed by CEO / Leadership at {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · 1 dependency unconfirmed
           </button>
@@ -230,7 +234,7 @@ export default function Page() {
         ) : lastPush ? (
           <Badge tone="neutral">Company goal {lastPush.version} pushed {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Badge>
         ) : null}
-        <div className="ml-auto flex items-center gap-3 text-[14px] text-zinc-600">
+        <div className="ml-auto flex shrink-0 items-center gap-2.5 whitespace-nowrap text-[14px] text-zinc-500">
           Signed in as
           <Badge tone="violet" icon={false}>{me.name}</Badge>
         </div>
@@ -249,7 +253,7 @@ export default function Page() {
           </div>
         )}
         {error && (
-          <div role="alert" className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-[15px] font-medium text-red-800 ring-1 ring-red-300">
+          <div role="alert" className="al-in mb-4 rounded-[10px] border border-red-700 bg-red-50 px-4 py-2.5 text-[15px] text-zinc-900">
             {error}
           </div>
         )}
@@ -262,9 +266,9 @@ export default function Page() {
         {view === "evidence" && <EvidenceView {...props} />}
 
         {drawer && (
-          <div className="fixed inset-y-0 left-[232px] right-[360px] top-16 z-20 flex justify-end bg-zinc-900/20" onClick={closeDrawer}>
+          <div className="fixed inset-y-0 left-[232px] right-[360px] top-16 z-20 flex justify-end bg-[rgba(5,5,7,0.55)]" onClick={closeDrawer}>
             <div
-              className={`h-full overflow-y-auto bg-white shadow-xl ring-1 ring-zinc-200 ${drawer === "scenario" ? "w-[min(880px,100%)]" : "w-[min(720px,100%)]"}`}
+              className={`al-in h-full overflow-y-auto border-l border-zinc-200 bg-white ${drawer === "scenario" ? "w-[min(880px,100%)]" : "w-[min(720px,100%)]"}`}
               onClick={(e) => e.stopPropagation()}
               role="dialog"
               aria-modal="true"
@@ -277,7 +281,7 @@ export default function Page() {
       </main>
 
       {/* Persistent inspector */}
-      <aside className="overflow-y-auto border-l border-zinc-200 bg-white p-5" aria-label="Inspector">
+      <aside className="overflow-y-auto border-l border-zinc-200 bg-zinc-50 p-[22px]" aria-label="Inspector">
         <Inspector {...props} />
       </aside>
     </div>

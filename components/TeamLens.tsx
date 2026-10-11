@@ -6,7 +6,7 @@ import { Badge, Button, OWNER_LABEL } from "./ui";
 import type { Selection } from "./useAlign";
 
 /* Shared helpers (also used by GoalsView). */
-export const RING = "ring-2 ring-violet-500 ring-offset-2";
+export const RING = "outline-2 outline-offset-2 outline-violet-500";
 export const isSel = (sel: Selection | null, kind: Selection["kind"], id?: string) => !!id && sel?.kind === kind && sel.id === id;
 export const workFor = (s: StateView, g?: Goal): WorkItem[] =>
   g ? s.work_items.filter((w) => w.goal_id === g.id).sort((a, b) => a.priority_rank - b.priority_rank) : [];
@@ -62,7 +62,7 @@ function Column({ props, owner }: { props: ViewProps; owner: "product" | "securi
       </button>
 
       <div>
-        <h4 className="mb-1.5 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Already committed to</h4>
+        <h4 className="mb-1.5 al-lbl">Already committed to</h4>
         <ul className="space-y-1.5">
           {g.measures.map((m) => (
             <li key={m.id} className="text-[15px] text-zinc-800">
@@ -80,7 +80,7 @@ function Column({ props, owner }: { props: ViewProps; owner: "product" | "securi
       </div>
 
       <div>
-        <h4 className="mb-1.5 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Priority list</h4>
+        <h4 className="mb-1.5 al-lbl">Priority list</h4>
         {work.length ? (
           <ol className="space-y-1">
             {work.map((w, i) => (
@@ -123,7 +123,7 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
   const accepted = s.acceptances.at(-1);
   return (
     <div className="flex flex-col gap-4">
-      {!embedded && <h1 className="text-[24px] font-bold tracking-tight">Team lens</h1>}
+      {!embedded && <h1 className="font-display text-[30px] font-normal leading-[1.1]">Team lens</h1>}
 
       {ceo ? (
         <button
@@ -159,7 +159,7 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
       </div>
 
       <div className="rounded-xl bg-white p-4 ring-1 ring-zinc-200">
-        <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-zinc-500">What changed</h4>
+        <h4 className="mb-2 al-lbl">What changed</h4>
         <p className="text-[16px] text-zinc-800">
           <Badge tone="amber">New</Badge> CEO KR2 requires beta-launch incidents triaged per launch-readiness criteria. Security&apos;s shared measure S-M1
           optimizes generic throughput.

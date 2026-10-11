@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { SimulationRun, StateView } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { comparablePair } from "./select";
@@ -62,7 +62,7 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
     <aside role="dialog" aria-modal="true" aria-labelledby="scenario-title" className="flex h-full w-[880px] max-w-full flex-col bg-zinc-50 text-[16px] text-zinc-900 shadow-2xl">
       <header className="flex items-center justify-between gap-4 border-b border-zinc-200 bg-white px-6 py-4">
         <div>
-          <h2 id="scenario-title" className="text-[22px] font-bold tracking-tight">
+          <h2 id="scenario-title" className="font-display text-[26px] font-normal leading-[1.1]">
             Scenario Studio · Sparta test
           </h2>
           <p className="text-[15px] text-zinc-600">Same mission, seed and checks. Only the team triage plan differs.</p>
@@ -137,9 +137,9 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
 function ComparabilityStrip({ baseline, candidate }: { baseline?: SimulationRun; candidate?: SimulationRun }) {
   const rows = (
     <div className="mt-2 grid grid-cols-[110px_1fr_1fr] gap-x-3 gap-y-1 font-mono text-[13px]">
-      <span className="font-sans text-[13px] font-semibold uppercase tracking-wide text-zinc-500"> </span>
-      <span className="font-sans text-[13px] font-semibold uppercase tracking-wide text-zinc-500">baseline</span>
-      <span className="font-sans text-[13px] font-semibold uppercase tracking-wide text-zinc-500">candidate</span>
+      <span className="al-lbl"> </span>
+      <span className="al-lbl">baseline</span>
+      <span className="al-lbl">candidate</span>
       {COMPARE_FIELDS.map((f) => {
         const differs = baseline && candidate && baseline[f.key] !== candidate[f.key];
         return (
@@ -231,7 +231,7 @@ function RunBody(props: ViewProps & { run: SimulationRun; comparable: boolean })
       </div>
 
       <div className="rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200">
-        <div className="mb-1 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Shared case · ticket 4 (beta incident)</div>
+        <div className="mb-1 al-lbl">Shared case · ticket 4 (beta incident)</div>
         <p className="mb-2 text-[15px]">
           {beta ? (
             <>
@@ -245,7 +245,7 @@ function RunBody(props: ViewProps & { run: SimulationRun; comparable: boolean })
       </div>
 
       <div className="rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200">
-        <div className="mb-1 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Protected P0 · ticket 1 (security incident)</div>
+        <div className="mb-1 al-lbl">Protected P0 · ticket 1 (security incident)</div>
         <p className="text-[15px]">
           {p0Ok === undefined ? (
             <span className="text-amber-800">Not graded in this evidence.</span>
@@ -278,6 +278,38 @@ function RunBody(props: ViewProps & { run: SimulationRun; comparable: boolean })
   );
 }
 
+function AgentReport({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const ref = useRef<HTMLParagraphElement>(null);
+  const id = useId();
+
+  useEffect(() => {
+    const el = ref.current;
+    if (el && !open) setOverflows(el.scrollHeight > el.clientHeight);
+  }, [text, open]);
+
+  return (
+    <div className="mb-2 rounded-lg bg-zinc-50 px-3 py-2 text-[14px] ring-1 ring-zinc-200">
+      <div className="al-lbl">Agent&apos;s own report (a claim, not a grade)</div>
+      <p ref={ref} id={id} className={`mt-1 text-zinc-800 ${open ? "" : "line-clamp-3"}`}>
+        {text}
+      </p>
+      {(overflows || open) && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={id}
+          className="mt-1 rounded text-[13px] font-semibold text-violet-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+        >
+          {open ? "Show less" : "Show more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Timeline({ run }: { run: SimulationRun }) {
   const ev = useEvidence(run.id);
   const planSteps =
@@ -287,13 +319,8 @@ function Timeline({ run }: { run: SimulationRun }) {
 
   return (
     <div>
-      <div className="mb-1 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Execution timeline</div>
-      {ev?.status === "ready" && ev.data.trace?.reply ? (
-        <div className="mb-2 rounded-lg bg-zinc-50 px-3 py-2 text-[14px] ring-1 ring-zinc-200">
-          <div className="text-[12px] font-bold uppercase tracking-wide text-zinc-500">Agent&apos;s own report (a claim, not a grade)</div>
-          <p className="mt-1 line-clamp-3 text-zinc-800" title={String(ev.data.trace.reply)}>{String(ev.data.trace.reply)}</p>
-        </div>
-      ) : null}
+      <div className="mb-1 al-lbl">Execution timeline</div>
+      {ev?.status === "ready" && ev.data.trace?.reply ? <AgentReport text={String(ev.data.trace.reply)} /> : null}
       <ol className="max-h-80 overflow-y-auto rounded-lg ring-1 ring-zinc-200" tabIndex={0} aria-label="Execution timeline">
         {!ev || ev.status === "loading" ? (
           <li className="px-3 py-2 text-[14px] text-zinc-500" role="status">
@@ -304,10 +331,10 @@ function Timeline({ run }: { run: SimulationRun }) {
             Agent trace unavailable: {ev.error}
           </li>
         ) : planSteps.length === 0 ? (
-          <li className="flex gap-2 border-b border-zinc-100 px-3 py-2 text-[14px]">
-            <span className="w-[120px] shrink-0 font-semibold text-violet-800">plan</span>
-            <span className="min-w-0 text-zinc-700">
-              Ran under team plan <code className="font-mono text-[13px]">{run.plan_id}@{run.plan_version}</code> (model emitted tool calls without narration)
+          <li className="flex gap-2 border-b border-zinc-100 bg-zinc-50 px-3 py-2 text-[14px]">
+            <span className="w-[120px] shrink-0 text-zinc-500">no plan text</span>
+            <span className="min-w-0 italic text-zinc-500">
+              Ran under team plan <code className="font-mono text-[13px] not-italic">{run.plan_id}@{run.plan_version}</code>. The model called tools without narrating a plan.
             </span>
           </li>
         ) : (

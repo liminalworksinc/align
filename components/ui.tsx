@@ -3,20 +3,21 @@ import type { ReactNode } from "react";
 
 export type Tone = "violet" | "amber" | "neutral" | "red" | "green" | "blue";
 
+// Outline pills from the Liminal design: mono, rounded, colored border + text, no fill.
 const TONES: Record<Tone, string> = {
-  violet: "bg-violet-50 text-violet-800 ring-violet-300",
-  amber: "bg-amber-50 text-amber-900 ring-amber-300",
-  neutral: "bg-zinc-100 text-zinc-700 ring-zinc-300",
-  red: "bg-red-50 text-red-800 ring-red-300",
-  green: "bg-emerald-50 text-emerald-800 ring-emerald-400",
-  blue: "bg-sky-50 text-sky-800 ring-sky-300",
+  violet: "text-violet-700 border-violet-700",
+  amber: "text-amber-700 border-amber-700",
+  neutral: "text-zinc-700 border-zinc-300",
+  red: "text-red-700 border-red-700",
+  green: "text-emerald-700 border-emerald-700",
+  blue: "text-sky-800 border-sky-800",
 };
 
 const ICONS: Record<Tone, string> = { violet: "◆", amber: "▲", neutral: "●", red: "✕", green: "✓", blue: "ⓘ" };
 
 export function Badge({ tone, children, icon = true }: { tone: Tone; children: ReactNode; icon?: boolean }) {
   return (
-    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[13px] font-semibold ring-1 ring-inset ${TONES[tone]}`}>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 font-mono text-[12px] leading-[1.4] tracking-[0.04em] ${TONES[tone]}`}>
       {icon && <span aria-hidden>{ICONS[tone]}</span>}
       {children}
     </span>
@@ -52,13 +53,13 @@ export function Button({
   type?: "button" | "submit";
 }) {
   const k = {
-    primary: "bg-violet-700 text-white hover:bg-violet-800 disabled:bg-zinc-300",
-    secondary: "bg-white text-zinc-900 ring-1 ring-zinc-300 hover:bg-zinc-50 disabled:text-zinc-400",
-    danger: "bg-white text-red-700 ring-1 ring-red-300 hover:bg-red-50",
-    ghost: "text-zinc-700 hover:bg-zinc-100",
+    primary: "border-transparent bg-violet-700 text-black hover:brightness-110",
+    secondary: "border-zinc-300 text-zinc-900 hover:border-zinc-500 hover:bg-zinc-100",
+    danger: "border-red-700 text-red-700 hover:bg-red-50",
+    ghost: "border-transparent text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900",
   }[kind];
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`rounded-lg px-3.5 py-2 text-[15px] font-semibold transition ${k} disabled:cursor-not-allowed`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-[18px] text-[15px] font-semibold transition ${k} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100`}>
       {children}
     </button>
   );
@@ -68,7 +69,7 @@ export function Section({ title, children, right }: { title: string; children: R
   return (
     <section className="mb-5">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-[13px] font-bold uppercase tracking-wide text-zinc-500">{title}</h3>
+        <h3 className="al-lbl">{title}</h3>
         {right}
       </div>
       {children}
@@ -77,7 +78,7 @@ export function Section({ title, children, right }: { title: string; children: R
 }
 
 export function Mono({ children }: { children: ReactNode }) {
-  return <code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[13px] text-zinc-800">{children}</code>;
+  return <code className="rounded bg-zinc-100 px-1.5 py-px font-mono text-[13px] text-zinc-900">{children}</code>;
 }
 
 export const OWNER_LABEL: Record<string, string> = {

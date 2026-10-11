@@ -148,7 +148,7 @@ export function EvidenceView(props: ViewProps) {
   return (
     <div className="mx-auto max-w-6xl px-6 py-6 text-[16px] text-zinc-900">
       <header className="mb-6">
-        <h1 className="text-[28px] font-bold tracking-tight">Evidence</h1>
+        <h1 className="font-display text-[30px] font-normal leading-[1.1]">Evidence</h1>
         <p className="mt-1 text-[16px] text-zinc-600">
           Decision record, Sparta runs, audit log and coordination timer. Sparta evidence is unsigned: each run is reproducible with the README command, not cryptographically proven.
         </p>
@@ -412,7 +412,7 @@ function SpartaRuns({ s, select, selection }: ViewProps) {
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left text-[15px]">
               <thead>
-                <tr className="border-b border-zinc-200 text-[13px] uppercase tracking-wide text-zinc-500">
+                <tr className="border-b border-zinc-200 al-lbl">
                   <th className="px-4 py-2 font-semibold">Plan</th>
                   <th className="px-3 py-2 font-semibold">Scenario</th>
                   <th className="px-3 py-2 font-semibold">Verdict</th>
@@ -488,9 +488,9 @@ function RunDetail({ run }: { run: SimulationRun }) {
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       <div>
-        <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Independent grader checks</h4>
+        <h4 className="mb-2 al-lbl">Independent grader checks</h4>
         <CheckList checks={run.checks} />
-        <h4 className="mb-2 mt-4 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Changed records</h4>
+        <h4 className="mb-2 mt-4 al-lbl">Changed records</h4>
         {run.changed_records.length === 0 ? (
           <p className="text-[15px] text-zinc-600">No ticket records changed.</p>
         ) : (
@@ -504,7 +504,7 @@ function RunDetail({ run }: { run: SimulationRun }) {
             ))}
           </ul>
         )}
-        <h4 className="mb-2 mt-4 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Protected records</h4>
+        <h4 className="mb-2 mt-4 al-lbl">Protected records</h4>
         <ul className="space-y-1 text-[15px]">
           {run.protected_records.map((p) => (
             <li key={p.ticket_id}>
@@ -526,9 +526,9 @@ function RunDetail({ run }: { run: SimulationRun }) {
         </dl>
       </div>
       <div className="min-w-0">
-        <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Sparta request log ({run.trace.length})</h4>
+        <h4 className="mb-2 al-lbl">Sparta request log ({run.trace.length})</h4>
         <RequestLog rows={run.trace} />
-        <h4 className="mb-2 mt-4 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Agent trace</h4>
+        <h4 className="mb-2 mt-4 al-lbl">Agent trace</h4>
         {!ev || ev.status === "loading" ? (
           <p className="text-[15px] text-zinc-500" role="status">
             Loading evidence…
@@ -582,7 +582,7 @@ function AuditLog({ s }: ViewProps) {
           <div className="max-h-96 overflow-auto">
             <table className="w-full border-collapse text-left text-[15px]">
               <thead className="sticky top-0 bg-white">
-                <tr className="border-b border-zinc-200 text-[13px] uppercase tracking-wide text-zinc-500">
+                <tr className="border-b border-zinc-200 al-lbl">
                   <th className="px-4 py-2 font-semibold">Time</th>
                   <th className="px-3 py-2 font-semibold">Actor</th>
                   <th className="px-3 py-2 font-semibold">Session</th>
@@ -639,7 +639,7 @@ function TimerPanel({ s }: ViewProps) {
             </>
           )}
         </dl>
-        <h4 className="mb-2 mt-4 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Touchpoints ({t.touchpoints.length})</h4>
+        <h4 className="mb-2 mt-4 al-lbl">Touchpoints ({t.touchpoints.length})</h4>
         {t.touchpoints.length === 0 ? (
           <p className="text-[16px] text-zinc-600">No touchpoints recorded yet.</p>
         ) : (

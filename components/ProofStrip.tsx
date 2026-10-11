@@ -8,7 +8,7 @@ const DECISIONS = new Set(["propose", "counter", "acknowledge", "ratify"]);
 function Tile({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-2 rounded-xl bg-white p-4 ring-1 ring-zinc-200">
-      <div className="text-[13px] font-bold uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="al-lbl">{label}</div>
       {children}
     </div>
   );

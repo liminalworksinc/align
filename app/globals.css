@@ -1,23 +1,117 @@
 @import "tailwindcss";
 
+/*
+ * Liminal design system (dark substrate) mapped onto the Tailwind palette the
+ * components already use, so every zinc/violet/amber/red/emerald class resolves
+ * to a Liminal token. Truth colors keep their meaning:
+ *   violet = selected/candidate (--liminal), amber = unresolved (--watch),
+ *   red = real failed check (--alarm), emerald = Sparta-verified only (--ui-state-success).
+ */
 @theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+  --font-display: var(--display);
+
+  --color-white: var(--frame-bg);
+  --color-black: var(--bg);
+
+  --color-zinc-50: var(--frame-bg-2);
+  --color-zinc-100: var(--frame-bg-3);
+  --color-zinc-200: var(--card-border);
+  --color-zinc-300: var(--card-border-2);
+  --color-zinc-400: var(--text-faint);
+  --color-zinc-500: var(--text-dim);
+  --color-zinc-600: color-mix(in oklab, var(--text-dim), var(--text-mid));
+  --color-zinc-700: var(--text-mid);
+  --color-zinc-800: var(--text);
+  --color-zinc-900: var(--text);
+  --color-zinc-950: var(--bg);
+
+  --color-violet-50: var(--liminal-bg);
+  --color-violet-100: var(--liminal-bg);
+  --color-violet-200: color-mix(in oklab, var(--liminal) 35%, transparent);
+  --color-violet-300: color-mix(in oklab, var(--liminal) 55%, transparent);
+  --color-violet-400: color-mix(in oklab, var(--liminal) 75%, transparent);
+  --color-violet-500: var(--liminal);
+  --color-violet-600: var(--liminal);
+  --color-violet-700: var(--liminal);
+  --color-violet-800: var(--liminal);
+  --color-violet-900: var(--liminal);
+  --color-violet-950: var(--text);
+
+  --color-amber-50: var(--watch-bg);
+  --color-amber-100: var(--watch-bg);
+  --color-amber-300: var(--watch);
+  --color-amber-400: var(--watch);
+  --color-amber-500: var(--watch);
+  --color-amber-700: var(--watch);
+  --color-amber-800: var(--watch);
+  --color-amber-900: var(--watch);
+  --color-amber-950: var(--text);
+
+  --color-red-50: var(--alarm-bg);
+  --color-red-300: var(--alarm);
+  --color-red-700: var(--alarm);
+  --color-red-800: var(--alarm);
+
+  --color-emerald-50: var(--ui-state-success-bg);
+  --color-emerald-400: var(--ui-state-success);
+  --color-emerald-700: var(--ui-state-success);
+  --color-emerald-800: var(--ui-state-success);
+
+  --color-sky-50: var(--ui-state-info-bg);
+  --color-sky-300: var(--ui-state-info);
+  --color-sky-800: var(--ui-state-info);
 }
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
+  /* Self-hosted faces from next/font take the first slot in each Liminal stack. */
+  --sans: var(--font-space-grotesk), "Space Grotesk", "Geist", system-ui, sans-serif;
+  --mono: var(--font-space-mono), "Space Mono", "Geist Mono", ui-monospace, monospace;
+  --display: var(--font-nineties), "Nineties Headliner", Georgia, serif;
 }
 
 html,
 body {
-  background: #f6f6f8;
-  color: #16161d;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
   font-size: 16px;
+  line-height: 1.4;
 }
 
 :focus-visible {
-  outline: 3px solid #7c3aed;
+  outline: 2px solid var(--ui-focus-ring);
   outline-offset: 2px;
   border-radius: 6px;
+}
+
+::selection {
+  background: var(--liminal-bg);
+  color: var(--text);
+}
+
+@keyframes al-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.al-in {
+  animation: al-in 0.3s var(--ease);
+}
+
+/* Mono uppercase section label, the design's `.al-lbl`. */
+.al-lbl {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }

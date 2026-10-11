@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Space_Grotesk, Space_Mono } from "next/font/google";
+import localFont from "next/font/local";
+import "./liminal-tokens.css";
 import "./globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+const spaceGrotesk = Space_Grotesk({ variable: "--font-space-grotesk", subsets: ["latin"] });
+const spaceMono = Space_Mono({ variable: "--font-space-mono", subsets: ["latin"], weight: ["400", "700"] });
+const nineties = localFont({ src: "./fonts/nineties-headliner.otf", variable: "--font-nineties", display: "swap" });
 
 export const metadata: Metadata = {
   title: "Align",
@@ -12,8 +15,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full font-sans">{children}</body>
+    <html lang="en" className={`${spaceGrotesk.variable} ${spaceMono.variable} ${nineties.variable} h-full antialiased`}>
+      <body data-product="team" data-relationship="peer" className="min-h-full font-sans">
+        {children}
+      </body>
     </html>
   );
 }

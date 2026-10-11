@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Goal, Measure } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { ProofStrip } from "./ProofStrip";
-import { currentGoal } from "./select";
+import { comparablePair, currentGoal } from "./select";
 import { EditTag, MissingGoal, RING, TeamLens, VersionTag, depRelation, isSel, workFor } from "./TeamLens";
 import { Badge, Button, StateBadge } from "./ui";
 
@@ -35,7 +35,7 @@ function CeoCard({ props, g, only }: { props: ViewProps; g: Goal; only?: string 
   return (
     <button
       onClick={onClick}
-      className={`w-full rounded-xl bg-white px-5 py-4 text-left shadow-sm ring-1 ring-zinc-300 hover:ring-zinc-400 ${isSel(props.selection, "goal", g.id) ? RING : ""}`}
+      className={`w-full rounded-xl bg-white px-5 py-4 text-left ring-1 ring-zinc-300 hover:ring-zinc-400 ${isSel(props.selection, "goal", g.id) ? RING : ""}`}
     >
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <span className="text-[15px] font-bold text-zinc-600">{g.owner_name}</span>
@@ -61,7 +61,7 @@ function TeamCard({ props, owner, allWork }: { props: ViewProps; owner: "product
   const unresolved = depRelation(s)?.status === "UNKNOWN";
   const work = workFor(s, g).slice(0, allWork ? undefined : 3);
   return (
-    <article className={`flex h-full flex-col rounded-xl bg-white shadow-sm ring-1 ring-zinc-300 ${isSel(selection, "goal", g.id) ? RING : ""}`}>
+    <article className={`flex h-full flex-col rounded-xl bg-white ring-1 ring-zinc-300 ${isSel(selection, "goal", g.id) ? RING : ""}`}>
       <button onClick={() => select({ kind: "goal", id: g.id })} className="flex flex-1 flex-col justify-start rounded-t-xl p-4 text-left hover:bg-zinc-50">
         <div className="mb-1 text-[16px] font-bold text-zinc-900">{g.owner_name}</div>
         <div className="mb-2 flex flex-wrap gap-1.5">
@@ -76,7 +76,7 @@ function TeamCard({ props, owner, allWork }: { props: ViewProps; owner: "product
         </ul>
       </button>
       <div className="border-t border-zinc-200 p-3">
-        <div className="mb-1 px-1 text-[12px] font-bold uppercase tracking-wide text-zinc-500">Work in priority order</div>
+        <div className="mb-1 px-1 al-lbl">Work in priority order</div>
         {work.length ? (
           <ol className="space-y-1">
             {work.map((w, i) => (
@@ -110,9 +110,9 @@ function DependencyButton({ props }: { props: ViewProps }) {
       <button
         onClick={() => props.select({ kind: "relation", id: rel.id })}
         aria-label={`Dependency: ${rel.label}. Status ${rel.status}`}
-        className={`relative z-10 mx-2 flex flex-col items-center gap-1.5 rounded-lg px-2.5 py-2 text-center ${open ? "bg-amber-50 ring-1 ring-amber-300" : "bg-white ring-1 ring-zinc-300"} hover:shadow ${isSel(props.selection, "relation", rel.id) ? RING : ""}`}
+        className={`relative z-10 mx-2 flex flex-col items-center gap-1.5 rounded-lg px-2.5 py-2 text-center ${open ? "ring-1 ring-amber-300 [background:linear-gradient(var(--watch-bg),var(--watch-bg)),var(--frame-bg)]" : "bg-white ring-1 ring-zinc-300"} hover:brightness-125 ${isSel(props.selection, "relation", rel.id) ? RING : ""}`}
       >
-        <span className="text-[12px] font-bold uppercase tracking-wide text-zinc-500">Product → Security</span>
+        <span className="al-lbl">Product → Security</span>
         <span className="text-[14px] font-semibold leading-snug text-zinc-900">{rel.label}</span>
         {rel.status === "ACCEPTED" ? <Badge tone="neutral">OWNER-ACCEPTED</Badge> : <StateBadge state={rel.status} />}
       </button>
@@ -151,18 +151,37 @@ function Banner({ props }: { props: ViewProps }) {
   const acc = s.acceptances.at(-1);
   if (acc)
     return (
-      <div className="flex items-center gap-3 rounded-xl bg-zinc-100 px-4 py-3 text-[16px] text-zinc-800 ring-1 ring-zinc-300">
+      <div className="al-in flex items-center gap-3.5 rounded-xl border border-zinc-300 bg-white px-[18px] py-3 text-[17px] text-zinc-900">
         <Badge tone="neutral">Ratified</Badge>
         <span>Agreement ratified: Security goal {acc.accepted_version} accepted by its owner; Product commitment acknowledged.</span>
       </div>
     );
   if (depRelation(s)?.status !== "UNKNOWN") return null;
+  const oldMeasure = currentGoal(s, "security")?.measures.find((m) => m.id === "S-M1");
+  const kr2 = currentGoal(s, "ceo")?.measures.find((m) => m.id === "KR2");
+  const { baseline } = comparablePair(s);
+  const passed = baseline?.checks.filter((c) => c.passed).length ?? 0;
   return (
-    <div className="flex items-center gap-4 rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-300" role="status">
-      <span aria-hidden className="text-[18px] text-amber-700">▲</span>
-      <p className="flex-1 text-[16px] font-medium text-amber-950">
-        Company goal {s.pushes.at(-1)?.version ?? ""} pushed by CEO / Leadership: beta launch incidents must be triaged per launch-readiness criteria. 1 peer dependency unconfirmed.
-      </p>
+    <div className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-3.5 rounded-xl border border-zinc-200 bg-zinc-50 px-[18px] py-3" role="status">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="al-lbl">What agents optimize</span>
+        <span className="text-[17px] text-zinc-900">{oldMeasure?.text ?? "Unknown: Security measure not shared"}</span>
+        {baseline && (
+          <span className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-zinc-500">
+            <StateBadge state={baseline.verdict} />
+            {baseline.plan_id}@{baseline.plan_version} · {passed}/{baseline.checks.length} checks in Sparta
+          </span>
+        )}
+      </div>
+      <span aria-label="does not equal" className="font-mono text-[20px] text-zinc-500">
+        ≠
+      </span>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="al-lbl !text-amber-700">{s.pushes.at(-1) ? `Company goal ${s.pushes.at(-1)!.version}` : "The CEO"} now requires · KR2</span>
+        <span className="line-clamp-2 text-[17px] text-zinc-900" title={kr2?.text}>
+          {kr2?.text ?? "Unknown"}
+        </span>
+      </div>
       <Button
         kind="secondary"
         onClick={() => {
@@ -202,7 +221,7 @@ function MeLens({ props }: { props: ViewProps }) {
     return <div className="mx-auto max-w-[620px]">{ceo ? <CeoCard props={props} g={ceo} /> : <MissingGoal owner="ceo" />}</div>;
   return (
     <div className="mx-auto flex max-w-[620px] flex-col gap-3">
-      <div className="text-[13px] font-bold uppercase tracking-wide text-zinc-500">Inherited CEO criterion your goal depends on</div>
+      <div className="al-lbl">Inherited CEO criterion your goal depends on</div>
       {ceo ? <CeoCard props={props} g={ceo} only={ceo.measures.some((m) => m.id === "KR2") ? "KR2" : undefined} /> : <MissingGoal owner="ceo" />}
       <div className="flex justify-center" aria-hidden>
         <div className={`h-8 border-l-2 ${LINE}`} />
@@ -227,14 +246,14 @@ export function GoalsView(props: ViewProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-[24px] font-bold tracking-tight">Line of sight</h1>
-        <div role="group" aria-label="Lens" className="inline-flex rounded-lg bg-zinc-100 p-1 ring-1 ring-zinc-200">
+        <h1 className="font-display text-[36px] font-normal leading-[1.1]">Line of sight</h1>
+        <div role="group" aria-label="Lens" className="inline-flex gap-0.5 rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
           {(["company", "team", "me"] as const).map((l) => (
             <button
               key={l}
               onClick={() => setLens(l)}
               aria-pressed={lens === l}
-              className={`rounded-md px-4 py-1.5 text-[15px] font-semibold capitalize ${lens === l ? "bg-white text-violet-800 shadow-sm ring-1 ring-violet-300" : "text-zinc-600 hover:text-zinc-900"}`}
+              className={`min-h-9 rounded-md px-3.5 text-[14px] capitalize transition ${lens === l ? "bg-zinc-100 text-zinc-900" : "text-zinc-500 hover:text-zinc-900"}`}
             >
               {l}
             </button>

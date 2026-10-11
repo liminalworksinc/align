@@ -116,7 +116,7 @@ export function ProposalsView(props: ViewProps) {
     <div className="flex min-h-0 gap-5">
       <aside className="w-72 shrink-0" aria-label="Proposal inbox">
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-[13px] font-bold uppercase tracking-wide text-zinc-500">Inbox</h2>
+          <h2 className="al-lbl">Inbox</h2>
           {isProduct && !openOne && !showComposer && (
             <Button kind="secondary" onClick={() => setComposing(true)}>
               New proposal
@@ -226,7 +226,7 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
         if (canSend) void send();
       }}
     >
-      <h1 className="text-[24px] font-bold text-zinc-900">Propose a change to Security&apos;s goal</h1>
+      <h1 className="font-display text-[28px] font-normal leading-[1.1] text-zinc-900">Propose a change to Security&apos;s goal</h1>
 
       <Section title="Current Security goal" right={<Badge tone="neutral">Shared · read-only — you can propose, not edit</Badge>}>
         <Card tone="readonly">
@@ -395,7 +395,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="text-[24px] font-bold text-zinc-900">Proposal to Security goal {p.target_goal_version}</h1>
+        <h1 className="font-display text-[28px] font-normal leading-[1.1] text-zinc-900">Proposal to Security goal {p.target_goal_version}</h1>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <StateBadge state={p.state} />
           <TestStatusBadge status={p.test_status} />

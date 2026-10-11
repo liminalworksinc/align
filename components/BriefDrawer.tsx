@@ -31,7 +31,7 @@ export function BriefDrawer(props: ViewProps & { onClose: () => void }) {
     <div aria-labelledby="brief-title" className="flex h-full w-full flex-col bg-white">
       <header className="flex items-start justify-between gap-4 border-b border-zinc-200 px-6 py-4">
         <div>
-          <div className="text-[13px] font-bold uppercase tracking-wide text-zinc-500">Intelligence Brief</div>
+          <div className="al-lbl">Intelligence Brief</div>
           <div className="mt-0.5 text-[14px] text-zinc-500">
             Re: <Mono>{b.goal_ref}</Mono>
           </div>
@@ -75,18 +75,18 @@ export function BriefDrawer(props: ViewProps & { onClose: () => void }) {
                   Recorded ~{alike.recorded_at.slice(0, 10)} {fmtTime(alike.recorded_at)} (session A&apos;s own account) · retrieved in session <Mono>{alike.retrieved_in_session}</Mono>
                 </p>
                 <div className="rounded-md bg-violet-50/60 p-3 ring-1 ring-violet-200">
-                  <div className="mb-1 text-[13px] font-bold uppercase tracking-wide text-violet-800">Steered a fresh session&apos;s plan choice</div>
+                  <div className="mb-1 al-lbl !text-violet-700">Steered a fresh session&apos;s plan choice</div>
                   <p className="mb-2 text-[13px] text-zinc-600">p-beta@1 was written before this decision was recorded. Alike carried the decision to a new session; it did not author the plan.</p>
                   <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3 text-[15px] leading-snug">
                     <div>
-                      <div className="text-[12px] font-semibold uppercase text-zinc-500">Before</div>
+                      <div className="al-lbl">Before</div>
                       <div className="text-zinc-700">{alike.plan_before}</div>
                     </div>
                     <div className="pt-4 text-zinc-400" aria-hidden>
                       →
                     </div>
                     <div>
-                      <div className="text-[12px] font-semibold uppercase text-zinc-500">After</div>
+                      <div className="al-lbl">After</div>
                       <div className="text-zinc-900">{alike.plan_after}</div>
                     </div>
                   </div>
