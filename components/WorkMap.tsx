@@ -54,25 +54,6 @@ interface Ctx {
   teamOf: (key: string | null) => string;
   goalOf: (key: string | null) => Goal | undefined;
   now: number;
-  listening: Record<string, string>;
-}
-
-/** Live link to the running session plus a receipt for the latest authority change pushed into it. */
-function DirectiveLine({ session, ctx }: { session: AgentSession; ctx: Ctx }) {
-  const d = session.directives?.at(-1);
-  const on = !!ctx.listening[session.id];
-  if (!on && !d) return null;
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      {on && <Badge tone="violet">Listening for Align</Badge>}
-      {d && (
-        <Badge tone="neutral" icon={false}>
-          Replan delivered {fmtTime(d.delivered_at)}
-          {d.acted_at ? ` · acted on ${fmtTime(d.acted_at)}` : " · awaiting action"}
-        </Badge>
-      )}
-    </div>
-  );
 }
 
 function MatchLine({ m, ctx }: { m: SessionMapping; ctx: Ctx }) {
@@ -194,7 +175,6 @@ function SessionCard({ session, m, ctx }: { session: AgentSession; m: SessionMap
         <div className="mt-2">
           <StatusBadges m={m} ctx={ctx} />
         </div>
-        <DirectiveLine session={session} ctx={ctx} />
       </button>
       {canAct && (
         <div className="flex gap-2 border-t border-zinc-200 px-4 py-2.5">
@@ -245,7 +225,6 @@ export function WorkMap(props: ViewProps) {
   const [remote, setRemote] = useState<MappingsResponse | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [flash, setFlash] = useState(false);
-  const [listening, setListening] = useState<Record<string, string>>({});
   const prevVersion = useRef<string | null>(null);
 
   useEffect(() => {
@@ -263,21 +242,6 @@ export function WorkMap(props: ViewProps) {
       clearInterval(t);
     };
   }, [s.registry_version]);
-
-  // Which captured sessions hold an open directive stream right now (read-only GET).
-  useEffect(() => {
-    let live = true;
-    const load = () =>
-      api<{ listening?: Record<string, string> }>("/api/sessions")
-        .then((r) => live && setListening(r.listening ?? {}))
-        .catch(() => live && setListening({}));
-    load();
-    const t = setInterval(load, 3000);
-    return () => {
-      live = false;
-      clearInterval(t);
-    };
-  }, []);
 
   // State polls faster than the mappings route, so prefer its mappings and version; take the registry from the route when present.
   const version = s.registry_version ?? remote?.registry_version ?? "";
@@ -301,7 +265,6 @@ export function WorkMap(props: ViewProps) {
   const ctx: Ctx = {
     props,
     now,
-    listening,
     goalOf: (key) => (key ? goalById.get(key) : undefined),
     teamOf: (key) => key === "none" ? "Not linked to a goal" : registry.find((e) => e.key === key)?.team ?? TEAM[goalById.get(key ?? "")?.owner_id ?? ""] ?? "Not linked to a goal",
   };
