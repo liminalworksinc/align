@@ -1,0 +1,138 @@
+{
+  "company": "Northstar Security (synthetic demo company)",
+  "timeframe": "Q4 2026",
+  "goals": [
+    {
+      "id": "g-ceo-v2",
+      "owner_id": "ceo",
+      "owner_name": "CEO",
+      "kind": "org",
+      "parent_ids": [],
+      "visibility": "shared",
+      "version": "v2",
+      "objective": "Launch the observability beta with safe and responsive support readiness.",
+      "success_criteria": [
+        "Beta milestone declared ready by Product",
+        "Every seeded beta-launch-critical support incident is triaged according to company criteria",
+        "Unrelated protected security tickets and private investigation notes are not damaged"
+      ],
+      "measures": [
+        { "id": "KR1", "text": "Product beta milestone ready", "verifiable_by": "assertion" },
+        { "id": "KR2", "text": "Beta-launch-critical incidents triaged per launch-readiness criteria (urgent, obs-beta tag, private investigation note, public acknowledgment)", "verifiable_by": "sparta" },
+        { "id": "KR3", "text": "Protected unrelated tickets and private notes unchanged", "verifiable_by": "sparta" }
+      ],
+      "approved_at": "2026-10-11T08:00:00-07:00",
+      "approved_by": "ceo",
+      "changed": true
+    },
+    {
+      "id": "g-product-v3",
+      "owner_id": "product",
+      "owner_name": "Product Director",
+      "kind": "team",
+      "parent_ids": ["g-ceo-v2"],
+      "visibility": "shared",
+      "version": "v3",
+      "objective": "Deliver the observable beta and remove critical launch blockers.",
+      "success_criteria": ["Beta instrumentation complete", "No open launch blockers owned by Product"],
+      "measures": [
+        { "id": "P-M1", "text": "Beta instrumentation coverage complete", "verifiable_by": "assertion" },
+        { "id": "P-M2", "text": "Launch blockers owned by Product = 0", "verifiable_by": "assertion" }
+      ],
+      "approved_at": "2026-10-04T10:00:00-07:00",
+      "approved_by": "product"
+    },
+    {
+      "id": "g-security-v1",
+      "owner_id": "security",
+      "owner_name": "Alex / Security Lead",
+      "kind": "team",
+      "parent_ids": ["g-ceo-v2"],
+      "visibility": "shared",
+      "version": "v1",
+      "objective": "Maintain high-quality incident triage across platform services.",
+      "success_criteria": ["Queue health maintained", "Tickets triaged within service targets"],
+      "measures": [
+        { "id": "S-M1", "text": "Tickets triaged per day, oldest first (throughput)", "verifiable_by": "none" },
+        { "id": "S-M2", "text": "P0 non-beta incidents keep current triage coverage", "verifiable_by": "none" }
+      ],
+      "approved_at": "2026-09-28T09:00:00-07:00",
+      "approved_by": "security"
+    }
+  ],
+  "relations": [
+    { "id": "r-ceo-product", "source_goal": "g-ceo-v2", "target_goal": "g-product-v3", "type": "child", "status": "ACCEPTED", "label": "inherits", "provenance": "Company goal tree, Q4 2026" },
+    { "id": "r-ceo-security", "source_goal": "g-ceo-v2", "target_goal": "g-security-v1", "type": "child", "status": "ACCEPTED", "label": "inherits", "provenance": "Company goal tree, Q4 2026" },
+    { "id": "r-product-security", "source_goal": "g-product-v3", "target_goal": "g-security-v1", "type": "depends_on", "status": "UNKNOWN", "label": "Beta launch depends on beta incident triage", "provenance": "CEO v2 KR2 changed today; Security's shared measure S-M1 rewards throughput and does not mention the beta" }
+  ],
+  "work_items": [
+    { "id": "w-p1", "goal_id": "g-product-v3", "source": "Product agent queue", "task": "Ship beta instrumentation for metrics ingestion", "owner": "product", "observed_status": "in progress", "priority_rank": 1 },
+    { "id": "w-p2", "goal_id": "g-product-v3", "source": "Product agent queue", "task": "Beta customer onboarding checklist", "owner": "product", "observed_status": "in progress", "priority_rank": 2 },
+    { "id": "w-p3", "goal_id": "g-product-v3", "source": "Product agent queue", "task": "Ticket dashboard polish", "owner": "product", "observed_status": "queued", "priority_rank": 3 },
+    { "id": "w-s1", "goal_id": "g-security-v1", "source": "Security triage agent", "task": "Generic ticket tagging, oldest first", "owner": "security", "observed_status": "running", "priority_rank": 1 },
+    { "id": "w-s2", "goal_id": "g-security-v1", "source": "Security triage agent", "task": "Vulnerability investigation (protected P0, ticket 1)", "owner": "security", "observed_status": "running", "priority_rank": 2 },
+    { "id": "w-s3", "goal_id": "g-security-v1", "source": "Security triage agent", "task": "Beta support triage (not in current measures)", "owner": "security", "observed_status": "not prioritized", "priority_rank": 3 }
+  ],
+  "plans": [
+    {
+      "plan_id": "p-throughput",
+      "plan_version": 1,
+      "title": "Current plan: ticket throughput, oldest first",
+      "params": {
+        "ordering": "oldest-first",
+        "beta_rule": "none",
+        "protected_set": [],
+        "required_fields": ["status", "tags:triaged", "public reply"]
+      },
+      "hash": "",
+      "goal_text_ref": "agent/plans/p-throughput@1.md"
+    },
+    {
+      "plan_id": "p-beta",
+      "plan_version": 1,
+      "title": "Candidate plan: protected beta-first triage",
+      "params": {
+        "ordering": "beta-launch-critical first",
+        "beta_rule": "observability beta incidents: priority urgent, add tag obs-beta, keep existing tags, one private investigation note, one public acknowledgment, keep open",
+        "protected_set": ["P0 non-beta incidents and their private notes"],
+        "required_fields": ["priority:urgent", "tags:+obs-beta", "private note", "public reply"]
+      },
+      "hash": "",
+      "goal_text_ref": "agent/plans/p-beta@1.md"
+    }
+  ],
+  "simulations": [],
+  "brief": {
+    "goal_ref": "r-product-security",
+    "headline": "The CEO now requires beta launch incidents to be triaged correctly. Security's shared measure rewards ticket throughput but does not require that beta condition.",
+    "evidence_refs": [
+      { "label": "CEO goal v2, KR2 (changed today)", "ref": "g-ceo-v2#KR2", "state": "OBSERVED" },
+      { "label": "Security goal v1, measure S-M1 (shared)", "ref": "g-security-v1#S-M1", "state": "OBSERVED" },
+      { "label": "Synthetic ticket: 'Observability beta: dashboards show no metrics since upgrade'", "ref": "sparta:seed:ticket-4", "state": "OBSERVED" },
+      { "label": "Security owner capacity for beta triage", "ref": "unknown", "state": "UNKNOWN" }
+    ],
+    "priorities": [
+      { "rank": "P0", "label": "Add the beta incident triage condition to Security's goal", "owner": "security", "evidence_ref": "g-ceo-v2#KR2", "capacity": "unknown", "delay_consequence": "Beta incidents are triaged as generic tickets; KR2 cannot be met.", "reason": "Needed now and testable in Sparta against the same checks." },
+      { "rank": "P1", "label": "Preserve protected P0 non-beta incidents", "owner": "security", "evidence_ref": "g-security-v1#S-M2", "capacity": "known", "delay_consequence": "Not applicable: this is a constraint, it cannot be sacrificed.", "reason": "Security's existing obligation; also CEO KR3." },
+      { "rank": "P2", "label": "Defer ticket dashboard polish", "owner": "product", "evidence_ref": "w-p3", "capacity": "known", "delay_consequence": "Cosmetic only; no observed acceptance contribution.", "reason": "Frees Product capacity for its reciprocal commitment." }
+    ],
+    "disconfirmers": [
+      "A protected P0 non-beta incident (ticket 1) is open with a private investigation note; any plan that touches it fails KR3.",
+      "Security's capacity for beta triage is not shared and is unknown."
+    ],
+    "unknowns": ["Security owner capacity", "Volume of beta incidents after launch"],
+    "alike_ref": null,
+    "alike_status": "pending"
+  },
+  "proposals": [],
+  "acceptances": [],
+  "timer": { "id": "t-1", "started_at": null, "ended_at": null, "touchpoints": [], "excluded_prep": [], "acked_by": [] },
+  "audit": [],
+  "manual_baseline": [
+    { "step": "A", "description": "Read the new CEO objective and existing goals; identify affected launch criteria", "est_minutes": 20, "touchpoints": 1 },
+    { "step": "B", "description": "Pull evidence about Security agent work, tickets and prior decisions from scattered tools", "est_minutes": 45, "touchpoints": 1 },
+    { "step": "C", "description": "Write a proposed change to Security's priority/KR with justification", "est_minutes": 30, "touchpoints": 1 },
+    { "step": "D", "description": "Schedule a sync or wait on async back-and-forth; Security pushes back", "est_minutes": 60, "touchpoints": 1 },
+    { "step": "E", "description": "Negotiate protected obligations, rewrite both goals, re-sequence agent work, share a record", "est_minutes": 45, "touchpoints": 1 }
+  ]
+}
