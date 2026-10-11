@@ -208,11 +208,14 @@ async function main() {
   const pReject = await call(product, "POST", `/api/proposals/${pid}/reject`, {});
   check("G6 Product cannot reject -> 403", pReject.status === 403, short(pReject));
 
-  // ---- counter #1 (no plan change) ----
+  // ---- counter #1 (no plan change; carries the tested plan's own parameters) ----
+  const plansNow = (await call(security, "GET", "/api/state")).json?.plans ?? [];
+  const testedParams = plansNow.find((x) => x.plan_id === "p-beta" && x.plan_version === 1)?.params;
   const c1 = await call(security, "POST", `/api/proposals/${pid}/counter`, {
     proposed_measure_text: "Beta incidents triaged within 24h; P0 within 4h",
     rationale: "Tighten P0 window",
     changes_plan: false,
+    plan_params: testedParams,
   });
   check("Security counter (changes_plan=false) -> COUNTERED", c1.status === 200 && c1.json?.state === "COUNTERED", short(c1));
   check("Counter without plan change keeps test_status unchanged", c1.json?.test_status === initialTestStatus, `got ${c1.json?.test_status}, expected ${initialTestStatus}`);
@@ -225,20 +228,23 @@ async function main() {
   const ack1 = await call(product, "POST", `/api/proposals/${pid}/acknowledge`, {});
   check("Product acknowledges -> ACKNOWLEDGED_BY_PRODUCT", ack1.status === 200 && ack1.json?.state === "ACKNOWLEDGED_BY_PRODUCT", short(ack1));
 
-  // ---- counter #2 (plan change -> STALE) ----
+  // ---- counter #2 (declared "wording only", but its executable parameters differ -> STALE by hash) ----
   const c2 = await call(security, "POST", `/api/proposals/${pid}/counter`, {
     proposed_measure_text: "Beta incidents triaged within 24h; P0 within 4h; protected tickets untouched",
     rationale: "Changes the executable plan's protected set",
-    changes_plan: true,
+    changes_plan: false,
+    plan_params: { ...(testedParams ?? {}), protected_set: [...(testedParams?.protected_set ?? []), "All P1 incidents"] },
   });
-  check("G4/G7 Security counter (changes_plan=true) -> COUNTERED", c2.status === 200 && c2.json?.state === "COUNTERED", short(c2));
-  check("G4/G7 plan-changing counter marks test_status STALE", c2.json?.test_status === "STALE", `got ${c2.json?.test_status}`);
+  check("G4/G7 Security counter with changed plan params -> COUNTERED", c2.status === 200 && c2.json?.state === "COUNTERED", short(c2));
+  check("G4/G7 changed plan params mark STALE even when declared wording-only", c2.json?.test_status === "STALE", `got ${c2.json?.test_status}`);
   const ack2 = await call(product, "POST", `/api/proposals/${pid}/acknowledge`, {});
   check("Product acknowledges again -> ACKNOWLEDGED_BY_PRODUCT", ack2.status === 200 && ack2.json?.state === "ACKNOWLEDGED_BY_PRODUCT", short(ack2));
 
-  // ---- ratify ----
-  const rat = await call(security, "POST", `/api/proposals/${pid}/accept`, { rationale: "Agreed with revised terms" });
-  check("Security ratifies -> RATIFIED", rat.status === 200 && rat.json?.state === "RATIFIED", short(rat));
+  // ---- ratify: stale evidence can't silently become an approved tested plan ----
+  const ratStale = await call(security, "POST", `/api/proposals/${pid}/accept`, { rationale: "Agreed with revised terms" });
+  check("G4/G7 ratifying a STALE proposal without accept_untested -> 409", ratStale.status === 409, short(ratStale));
+  const rat = await call(security, "POST", `/api/proposals/${pid}/accept`, { rationale: "Agreed; will rerun", accept_untested: true });
+  check("Security ratifies explicitly as untested -> RATIFIED", rat.status === 200 && rat.json?.state === "RATIFIED", short(rat));
 
   const sState1 = await call(security, "GET", "/api/state");
   const st = sState1.json ?? {};
@@ -252,7 +258,8 @@ async function main() {
   const rel = st.relations?.find((r) => r.id === "r-product-security");
   check("Relation r-product-security status ACCEPTED", rel?.status === "ACCEPTED", JSON.stringify(rel));
   const acc = st.acceptances?.find((a) => a.proposal_id === pid);
-  check("Acceptance test_status === STALE (no false green)", acc?.test_status === "STALE", JSON.stringify(acc && { test_status: acc.test_status, accepted_version: acc.accepted_version }));
+  check("Acceptance test_status === UNTESTED (no false green)", acc?.test_status === "UNTESTED", JSON.stringify(acc && { test_status: acc.test_status, accepted_version: acc.accepted_version }));
+  check("Audit records the untested ratification", (st.audit ?? []).some((a) => a.action === "ratify_untested" && a.target === pid));
 
   // ---- G6 reload consistency ----
   const pState2 = await call(product, "GET", "/api/state");

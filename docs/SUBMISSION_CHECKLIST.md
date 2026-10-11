@@ -47,5 +47,5 @@
 - [ ] The manual baseline is labeled **ESTIMATE** everywhere it appears (video, README, UI).
 - [ ] No claims of traction, ROI, production time savings or release verification.
 - [ ] Alike is mentioned only if a decision was really retrieved in a fresh session.
-- [ ] Jev/TypeSafe is listed as "not used" (unless it actually shipped).
+- [ ] Jev/TypeSafe is described accurately: it classifies captured agent sessions against the goal registry via Vercel AI Gateway; matches are suggestions that need the goal owner's confirmation.
 - [ ] "Company beta readiness is NOT verified by this test" is visible in the README and said in the video.

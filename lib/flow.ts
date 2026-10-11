@@ -1,8 +1,15 @@
-import type { Actor, AppState, Proposal, StateView, TestStatus } from "./types";
-import { HttpError, id, now } from "./store";
+import type { PlanParams, Actor, AppState, Proposal, StateView, TestStatus } from "./types";
+import { HttpError, id, now, sha256 } from "./store";
 import type { Session } from "./auth";
 import path from "node:path";
 import { readTrace } from "./evidence";
+
+/** Executable identity of a plan: its parameters with keys and list order normalized. */
+function paramsHash(p: PlanParams): string {
+  const norm = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(norm).map(String).sort() : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, norm((v as Record<string, unknown>)[k])])) : String(v).trim().toLowerCase();
+  return sha256(JSON.stringify(norm(p)));
+}
 
 const forbid = (why: string) => {
   throw new HttpError(403, why);
@@ -114,7 +121,7 @@ export function counterProposal(
   s: AppState,
   who: Session,
   pid: string,
-  body: { proposed_measure_text?: string; rationale?: string; changes_plan?: boolean },
+  body: { proposed_measure_text?: string; rationale?: string; changes_plan?: boolean; plan_params?: PlanParams },
 ) {
   const p = openProposal(s, pid);
   if (who.actor !== p.recipient_owner) forbid("Only Security can ask for changes to a proposal for Security’s goal");
@@ -122,15 +129,21 @@ export function counterProposal(
   const text = String(body.proposed_measure_text || "").trim();
   if (!text) throw new HttpError(400, "Write the changes you’re asking for");
   const n = p.counter_versions.length + 1;
+  // Plan identity is decided by comparing executable parameters, not by the counter's own claim:
+  // if the counter carries plan parameters that differ from the tested plan's, the evidence no longer applies.
+  const tested = s.plans.find((x) => x.plan_id === p.plan_ref.plan_id && x.plan_version === p.plan_ref.plan_version);
+  const paramsChanged = !!body.plan_params && (!tested || paramsHash(body.plan_params) !== paramsHash(tested.params));
+  const changesPlan = body.changes_plan === true || paramsChanged;
   p.counter_versions.push({
     version: `v2.${n}`,
     by: "security",
     at: now(),
     proposed_measure_text: text,
     rationale: String(body.rationale || "").trim(),
-    changes_plan: body.changes_plan === true,
+    changes_plan: changesPlan,
+    ...(body.plan_params ? { plan_params: body.plan_params } : {}),
   });
-  if (body.changes_plan === true) p.test_status = "STALE"; // tested report no longer matches the executable plan
+  if (changesPlan) p.test_status = "STALE"; // tested report no longer matches the executable plan
   p.state = "COUNTERED";
   p.product_ack_at = undefined;
   audit(s, who, "counter", p.id);
@@ -149,13 +162,18 @@ export function acknowledgeProposal(s: AppState, who: Session, pid: string) {
   return p;
 }
 
-export function ratifyProposal(s: AppState, who: Session, pid: string, body: { rationale?: string }) {
+export function ratifyProposal(s: AppState, who: Session, pid: string, body: { rationale?: string; accept_untested?: boolean }) {
   const p = openProposal(s, pid);
   const target = s.goals.find((g) => g.id === p.target_goal_id);
   if (!target) throw new HttpError(404, "The goal this proposal changes couldn’t be found");
   if (who.actor !== target.owner_id) forbid("Only Security can approve changes to Security’s goal");
   if (!["PENDING_SECURITY", "ACKNOWLEDGED_BY_PRODUCT"].includes(p.state))
     conflict(p.state === "COUNTERED" ? "Product needs to accept your changes before you can approve" : "This proposal can’t be approved right now");
+  // Stale evidence can't silently become an approved, "tested" plan. The owner must rerun or knowingly accept it untested.
+  if (p.test_status === "STALE" && body.accept_untested !== true)
+    conflict("The test no longer matches this plan. Rerun it, or approve it explicitly as untested.");
+  const approvedUntested = p.test_status === "STALE";
+  if (approvedUntested) p.test_status = "UNTESTED";
   const latest = p.counter_versions.at(-1);
   const finalText = latest?.proposed_measure_text ?? p.proposed_measure_text;
   const version = latest?.version ?? "v2";
@@ -208,7 +226,7 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
     acknowledged_at: p.product_ack_at ?? p.created_at, // Product authored the commitment when no counter required re-acknowledgment
     acknowledged_via: p.product_ack_at ? "explicit" : "authored_in_proposal",
   });
-  audit(s, who, "ratify", p.id);
+  audit(s, who, approvedUntested ? "ratify_untested" : "ratify", p.id);
   touch(s, who, "ratify");
   return p;
 }

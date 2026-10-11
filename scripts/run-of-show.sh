@@ -30,7 +30,7 @@ signin() { # role passcode
 check() {
   FAILED=0
   hdr "Preflight"
-  if curl -fsS --max-time 3 "$ALIGN_URL/api/session" >/dev/null; then ok "Align app at $ALIGN_URL"; else bad "Align app not reachable at $ALIGN_URL (start it: npm run dev -- -p 3100)"; fi
+  if curl -fsS --max-time 3 "$ALIGN_URL/api/session" >/dev/null; then ok "Align app at $ALIGN_URL"; else bad "Align app not reachable at $ALIGN_URL (start it: npm run dev)"; fi
   [ -f "$ROOT/sparta/walkthrough-lab/projects/team-inbox/.env" ] && ok "Sparta model config (.env) present" || bad "Missing sparta/walkthrough-lab/projects/team-inbox/.env"
   [ -x "$ROOT/sparta/walkthrough-lab/node_modules/.bin/worlds" ] && ok "Sparta Worlds installed (pinned beta.3)" || bad "Sparta not installed: cd sparta/walkthrough-lab && npm install"
   local policy; policy="$(curl -fsS --max-time 3 "$ALIGN_URL/api/policy/security" 2>/dev/null)"
@@ -45,6 +45,16 @@ check() {
     if echo "$jev" | grep -q '"answers"'; then ok "Jev reachable via Vercel AI Gateway"; else warn "Jev not available yet ($(echo "$jev" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log((j.error?.message||j.message||"unknown").slice(0,70))}catch{console.log("no response")}})')). Work map will show 'Not matched' until credits are active."; fi
   else bad "No AI_GATEWAY_API_KEY in the Sparta .env"; fi
   command -v tmux >/dev/null && ok "tmux $(tmux -V | cut -d' ' -f2)" || bad "tmux not installed (brew install tmux)"
+  # Demo passcodes and localhost guards are not production security: keep Align on this machine.
+  local port="${ALIGN_URL##*:}"; port="${port%%/*}"
+  if lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -qE '\*:'"$port"'|0\.0\.0\.0:'"$port"; then
+    warn "Align is listening on all interfaces (:$port). For the recording, prefer: npm run dev (binds 127.0.0.1)"
+  else ok "Align bound to this machine only"; fi
+  for f in "$ROOT/.env.local" "$ROOT/sparta/walkthrough-lab/projects/team-inbox/.env"; do
+    [ -f "$f" ] || continue
+    perm="$(stat -f %Lp "$f")"
+    case "$perm" in *00) ok "$(basename "$f") readable only by you";; *) warn "$(basename "$f") is readable by others (chmod 600 $f)";; esac
+  done
   local n; n="$(curl -fsS "$ALIGN_URL/api/sessions" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).sessions.length)}catch{console.log("?")}})')"
   ok "Captured agent sessions: $n"
   [ "$FAILED" = 0 ] && printf "\n\033[32mReady.\033[0m\n" || printf "\n\033[31mFix the items marked ✗ before recording.\033[0m\n"
@@ -104,6 +114,16 @@ operator() {
   tmux send-keys -t "$SESSION:0.0" "You're the Security triage operator. Use the align MCP tools to find the plan you're authorized to run, run it with the exact command Align gives (use only the align MCP tools and that command; don't open other files or tools first), report the Sparta result in two sentences, then stay on standby for direction from Align."
   sleep 0.5; tmux send-keys -t "$SESSION:0.0" Enter
   ok "operator prompt sent (it runs the authorized plan, then waits for Align)"
+  local ev="$ROOT/sparta/walkthrough-lab/evidence" before; before="$(ls "$ev" | wc -l)"
+  echo "  waiting for the agent's first run (up to 4 min)…"
+  for _ in $(seq 1 80); do [ "$(ls "$ev" | wc -l)" -gt "$before" ] && break; sleep 3; done
+  local f; f="$(ls -t "$ev"/*.json 2>/dev/null | head -1)"
+  if [ "$(ls "$ev" | wc -l)" -gt "$before" ]; then
+    echo "  $(node "$ROOT/scripts/verify-run.mjs" "$f" | head -1)"
+    case "$f" in *p-throughput*) echo "  This FAIL is the intended starting point: the current plan breaks the new company goal.";; esac
+  else
+    warn "no new Sparta run yet; check the Claude pane for a permission prompt"
+  fi
 }
 
 cue() {

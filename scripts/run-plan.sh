@@ -31,5 +31,10 @@ CODE=$?
 set -e
 echo "evidence: $EVIDENCE"
 echo "trace:    $ROOT/agent/traces/${LABEL}.trace.json"
-echo "exit:     $CODE"
-exit 0
+# The verdict is read back from Sparta's evidence, not inferred from the command finishing.
+if [ -f "$EVIDENCE" ]; then
+  node "$ROOT/scripts/verify-run.mjs" "$EVIDENCE" | head -2 || true
+else
+  echo "Verified by Sparta: no evidence written (run did not complete)"
+fi
+exit "$CODE"

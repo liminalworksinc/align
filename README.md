@@ -100,9 +100,9 @@ Guarantees enforced in code (`lib/flow.ts`, `lib/auth.ts`):
 
 A decision is recorded in one Claude Code session and retrieved through Alike in a **fresh** session. That retrieved reference is attached to the brief with `POST /api/alike`. Align stores only the **decision id, a short summary, timestamps, the retrieving session, and one-line plan before/after labels**, never transcripts. If nothing was retrieved, the brief's Alike status stays `pending` or `unavailable`, the UI says so, and the proposal cites `alike:unavailable`. We don't fake it.
 
-### Jev / TypeSafe
+### Jev / TypeSafe (via Vercel AI Gateway)
 
-Not used.
+Jev classifies captured Claude Code and Codex sessions against the live goal registry (every currently ratified goal, plus "none"). It returns a choice with calibrated probabilities and a conflict probability. Matches are suggestions shown as PROPOSED; below 0.6 confidence a session stays unassigned, and work counts toward a goal only after that goal's owner confirms it. If Jev is unreachable, sessions show "not matched" with the reason; no other model is substituted. Runtime verified on Oct 11 2026 (`lib/mapper.ts`).
 
 ## Quick start
 
@@ -110,15 +110,18 @@ Requirements: **Node 24+**, macOS or Linux.
 
 ```bash
 npm install
-npm run dev            # http://localhost:3000 by default
+npm run dev            # http://localhost:3100 (bound to 127.0.0.1)
 ```
 
 Open two browser windows (or one normal and one private window) and sign in once in each:
 
 | Role | Passcode |
 |---|---|
+| Leadership | `leadership-demo` |
 | Product | `product-demo` |
 | Security | `security-demo` |
+
+Localhost only: these are demo passcodes and the agent-facing routes trust this machine. Not production security.
 
 Environment overrides:
 
@@ -133,9 +136,9 @@ Environment overrides:
 
 ```bash
 curl -s -c /tmp/align.jar -H 'content-type: application/json' \
-  -d '{"role":"product","passcode":"product-demo"}' http://localhost:3000/api/session
+  -d '{"role":"product","passcode":"product-demo"}' http://localhost:3100/api/session
 curl -s -b /tmp/align.jar -H 'content-type: application/json' \
-  -d '{"confirm":"reset"}' http://localhost:3000/api/reset
+  -d '{"confirm":"reset"}' http://localhost:3100/api/reset
 ```
 
 ## Reproduce the Sparta test
@@ -294,7 +297,8 @@ A low relevance score is evidence for a question, never a veto on someone's work
 **What exists in this repo today (read-only):**
 - `GET /api/policy/security` returns the plan Security's agents are authorized to run right now: `p-throughput@1` before any ratification, the ratified plan after, with its hash, who ratified it and its test status.
 - `scripts/run-plan.sh accepted` asks Align which plan is authorized, prints the authority, then runs that plan. If Align is unreachable it refuses to guess.
-- A read-only Align MCP server (`align_list_goals`, `align_get_accepted_plan`, `align_get_work_map`, `align_get_decision_record`) lets a coding agent read the ratified goals and decision record before it starts. See [`docs/MCP.md`](docs/MCP.md). It has no write tools: goals change only through their owners in the Align UI.
+- A read-only Align MCP server (`align_list_goals`, `align_get_accepted_plan`, `align_get_work_map`, `align_get_decision_record`, `align_get_directives`) lets a coding agent read the ratified goals and decision record before it starts. See [`docs/MCP.md`](docs/MCP.md). It has no write tools: goals change only through their owners in the Align UI.
+- When Leadership pushes a company goal or an owner ratifies a goal change, Align pushes it into running Claude Code sessions doing that work, waking them to replan. A recorded, uninterrupted run with its evidence: [`docs/LIVE_REPLAN.md`](docs/LIVE_REPLAN.md).
 
 These are things an agent **pulls**. Align does not push decisions into an agent host, and it doesn't block other plans (see non-claims above).
 

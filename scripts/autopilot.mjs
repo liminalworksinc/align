@@ -239,8 +239,12 @@ if (AGENT) {
   }, 300000);
   await sleep(4000);
   if (ran) {
+    // A new file only proves a run happened. The verdict, plan and protected ticket are read from the evidence itself.
     const f = readdirSync(EVIDENCE_DIR).filter((x) => !before.has(x))[0];
-    log(`Agent run produced ${f}`);
+    const expectPlan = (await api("/api/policy/security")).plan;
+    const v = spawnSync("node", [path.join(ROOT, "scripts/verify-run.mjs"), path.join(EVIDENCE_DIR, f), "--expect", "PASS", "--plan", expectPlan], { encoding: "utf8" });
+    log(`Agent run ${f}: ${v.stdout.trim().replace(/\n/g, " | ")}`);
+    if (v.status !== 0) problems.push(`agent run did not verify: ${v.stdout.trim()}`);
   }
   await focus(L, "The agent's session appears on the Work map, matched to the goal it served");
   await L.reload({ waitUntil: "networkidle0" });
