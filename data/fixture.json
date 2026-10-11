@@ -243,6 +243,11 @@
         "state": "OBSERVED"
       },
       {
+        "label": "Alike decision (recorded in session A, retrieved in a fresh session B)",
+        "ref": "urn:alike:decision:78eddb31",
+        "state": "OBSERVED"
+      },
+      {
         "label": "Security owner capacity for beta triage",
         "ref": "unknown",
         "state": "UNKNOWN"
@@ -285,8 +290,15 @@
       "Security owner capacity",
       "Volume of beta incidents after launch"
     ],
-    "alike_ref": null,
-    "alike_status": "pending"
+    "alike_ref": {
+      "decision_id": "urn:alike:decision:78eddb31af39fe7970cf47014f6ba26d9829f492e3e96f8df68e4167f9c7cfcb",
+      "summary": "Beta triage counts only with urgent priority, obs-beta tag (existing tags kept), one private investigation note and one public acknowledgment; protected P0 non-beta incidents untouched. Rejected alternative: oldest-first throughput triage.",
+      "recorded_at": "2026-10-11 11:34 PDT \u00b7 session A (Claude Code)",
+      "retrieved_in_session": "fresh Claude Code session fbd65d8c (docs/alike/session-b-retrieval.md)",
+      "plan_before": "Oldest-first throughput triage: tag each ticket triaged, set priority by apparent severity, reply publicly, solve routine tickets (essentially p-throughput@1).",
+      "plan_after": "Beta-first: urgent + obs-beta (keep tags), one private note then one public acknowledgment, protected P0 untouched, other tickets unchanged (p-beta@1)."
+    },
+    "alike_status": "retrieved"
   },
   "proposals": [],
   "acceptances": [],
