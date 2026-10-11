@@ -19,7 +19,6 @@ type NavItem = { id: View; label: string; sub: string; icon: string };
 const NAV: NavItem[] = [
   { id: "decision", label: "Next decision", sub: "What needs you", icon: "◆" },
   { id: "goals", label: "Goals", sub: "How they connect", icon: "◎" },
-  { id: "team", label: "Team", sub: "People and dependencies", icon: "⇄" },
   { id: "proposals", label: "Proposals", sub: "Changes in progress", icon: "✉" },
   { id: "evidence", label: "Evidence", sub: "Decisions and proof", icon: "▤" },
 ];
