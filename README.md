@@ -19,8 +19,22 @@ Align is a one-day SpeedHacks prototype (Oct 11, 2026). It takes one costly coor
 | Problem and time saved (40%) | [The problem](#the-problem), [Time-saved method](#time-saved-method), the proof strip at the end of the demo |
 | Technical execution (25%) | [Guarantees](#truth-states-and-guarantees), [Sparta results](#results-real-runs-oct-11-2026), [Architecture](#architecture), `scripts/test-flow.mjs` (two-session acceptance test), `scripts/test-mcp.mjs` |
 | Market and path forward (15%) | [Market and path forward](#market-and-path-forward) |
-| Originality (10%) | Owner-only goal changes pinned to the exact tested plan; agents read the agreement before they act |
+| Originality (10%) | A human-approved goal change reaches a **running** agent: it holds when the CEO's goal changes, and replans only after Security approves. [`docs/LIVE_REPLAN.md`](docs/LIVE_REPLAN.md) |
 | Product quality and demo (10%) | [Quick start](#quick-start), [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) |
+
+**The moment to remember** (recorded uninterrupted, [`docs/LIVE_REPLAN.md`](docs/LIVE_REPLAN.md)): a Claude Code session runs the approved throughput plan → Sparta FAIL 2/9. Leadership pushes the new company goal; the running agent is told within milliseconds, sees the conflict and **holds** instead of changing its own plan. Security approves its revised goal; the agent is told, reads the newly approved `p-beta@1` from Align, and runs it → Sparta PASS 9/9, protected ticket untouched. No human prompted the agent after its first instruction.
+
+**Verify it yourself** (the first two need nothing but Node):
+
+```bash
+node scripts/verify-run.mjs sparta/walkthrough-lab/evidence/p-throughput@1-normal-134756.json --expect FAIL
+node scripts/verify-run.mjs sparta/walkthrough-lab/evidence/p-beta@1-normal-134838.json --expect PASS --plan p-beta@1
+node scripts/timing-report.mjs        # measured in-app time vs estimated manual time, kept separate (needs a running server)
+node scripts/test-mcp.mjs             # read-only MCP server checks (needs a running server and ALIGN_MCP_TOKEN)
+scripts/run-plan.sh p-beta@1          # rerun a plan yourself in a fresh Sparta world (needs a model key)
+```
+
+Sparta evidence files are unsigned, so rerunning beats trusting them.
 
 ---
 
@@ -63,7 +77,7 @@ Before step 1, **Leadership** (a third signed-in role) approves the CEO's new co
 
 - **Agents ask before they act.** `GET /api/policy/security` and the MCP tool `align_get_accepted_plan` return the plan Security's agents are authorized to run: the throughput plan before approval, the approved plan after, with who approved it and its test status. `scripts/run-plan.sh accepted` asks Align first, prints the authority, then runs that plan. If Align is unreachable it refuses to guess.
 - **Running sessions hear about changes.** When Leadership pushes a goal or an owner approves a change, Align queues a directive for each captured Claude Code session (`/api/directives`, streamed over SSE with a polling fallback). A watcher hook wakes an idle session so it replans; delivery and "acted on" receipts show on the work map and decision record. Recorded live: a throughput run FAILED, then after Security approved, the woken session ran `p-beta@1` and it PASSED.
-- **Work map.** Captured agent sessions (Claude Code hooks, Codex notify) are mapped to the current goals by Jev (see [Jev / TypeSafe](#jev--typesafe)), and owners confirm or reject each mapping.
+- **Work map.** Captured agent sessions (Claude Code hooks, Codex notify) are mapped to the current goals by Jev (see [Jev / TypeSafe](#jev--typesafe-via-vercel-ai-gateway)), and owners confirm or reject each mapping.
 - **Read-only by design.** No agent can create, change or approve a goal. There is no write tool on the MCP server.
 
 Operator screens show no backend IDs or hashes. The Evidence page keeps them in closed **For engineers** sections so every result can be reproduced.
@@ -256,6 +270,16 @@ That's a small sample on one model and one seed. It shows the difference is cons
 
 Touchpoint comparison: **five coordination steps (A–E)** become **one proposal, one counter, one acknowledgment and one ratification**, plus logged review views.
 
+We report three numbers and never subtract one from another to claim "hours saved":
+
+| Quantity | Where it comes from | Kind |
+|---|---|---|
+| Manual coordination, steps A–E | `manual_baseline` in `data/fixture.json`: 200 min, 5 touchpoints | **Estimate** from the team's experience |
+| Time to agreement in Align | The app's timer, from first viewing the CEO change to both owners seeing the approved version | **Measured** in the demo |
+| Sandbox preparation | Sparta runs done before or during the demo | **Measured**, listed separately |
+
+`node scripts/timing-report.mjs` prints all three. Which steps go away: digging up evidence (B) and scheduling a sync (D) are replaced by the brief, the attached test and the in-app exchange. Which remain: people still read the change, write the proposal, and decide; Align doesn't decide for them. We haven't measured how often this situation happens in real organizations.
+
 ## Claims and non-claims
 
 What this is:
@@ -268,6 +292,8 @@ What this is not:
 - Not production time savings. In-app time is from a demo; the manual baseline is an estimate.
 - Not ROI.
 - Not a release verification. Company beta readiness is not verified.
+- Not automatic conflict discovery for any organization. The Product → Security dependency is defined for this scenario and created when Leadership pushes the goal; Align keeps that relationship and brings the conflict forward for the owners. Jev's work-to-goal matches are suggestions.
+- Not production security. Demo passcodes; the agent-facing routes (session capture, directives) trust the local machine and have no authentication. Only the MCP server requires a token. Run it on localhost or a trusted network.
 - Not agent-host enforcement. Agents *read* the approved plan (MCP, policy endpoint) and Align *notifies* running Claude Code sessions of changes, but nothing stops an agent from running a different plan.
 
 ## Architecture
