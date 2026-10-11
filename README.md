@@ -274,7 +274,47 @@ sparta/walkthrough-lab/
 
 - **Buyer:** VP Product or CPO at AI-native organizations of 50–500 people, where agent-driven teams depend on each other's goals.
 - **Wedge:** cross-team goal changes after a top-down priority shift, a narrow, recurring and expensive moment.
-- **Next:** discovery interviews with Product, Security, IT and Ops leaders; connectors to Linear/Jira and to agent hosts; clear data boundaries (what's shared, what stays private, what's never stored).
+
+### Shift left: check the goal before the work starts
+
+Today's demo starts after the damage: the CEO changed the goal, Security's agent kept optimizing throughput, and two owners had to renegotiate. The bigger opportunity is earlier. **Before a ticket becomes agent work, and before an agent spends money or changes a system, the agent should know which goal version is approved and who owns it.**
+
+That doesn't mean an approval gate on every task. It means three levels of friction:
+
+| Situation | Align behavior | Friction |
+|---|---|---|
+| The work clearly serves an approved goal | Supply the goal context automatically | Almost none |
+| The link to a goal is ambiguous | Explain the uncertainty and propose alternatives | Advisory |
+| The work conflicts with an owner-approved constraint or changes another team's commitment | Ask the owner to decide | Explicit review |
+
+A low relevance score is evidence for a question, never a veto on someone's work.
+
+**What exists in this repo today (read-only):**
+- `GET /api/policy/security` returns the plan Security's agents are authorized to run right now: `p-throughput@1` before any ratification, the ratified plan after, with its hash, who ratified it and its test status.
+- `scripts/run-plan.sh accepted` asks Align which plan is authorized, prints the authority, then runs that plan. If Align is unreachable it refuses to guess.
+- A read-only Align MCP server (`align_list_goals`, `align_get_accepted_plan`, `align_get_work_map`, `align_get_decision_record`) lets a coding agent read the ratified goals and decision record before it starts. See [`docs/MCP.md`](docs/MCP.md). It has no write tools: goals change only through their owners in the Align UI.
+
+These are things an agent **pulls**. Align does not push decisions into an agent host, and it doesn't block other plans (see non-claims above).
+
+**Where Align should meet work, in priority order:**
+1. **Agent preflight** (Claude Code and other agent hosts): before substantial work, read the approved goal, its constraints and peer commitments through MCP; flag a conflict and name the owner.
+2. **Issue intake** (Linear, Jira): when an issue is created or reprioritized, check it against the current goals before it's assigned to a person or an agent. The issue stays in the tracker; the agreement and its authority stay in Align.
+3. **Peer negotiation in chat** (Slack): bring the exact proposal, diff and owner into the thread; link the thread to the ratified record. Chat is where people negotiate, not the source of authority.
+4. **PR and CI checks**: check delivered work against the goal's acceptance criteria, separately from code correctness.
+
+The Goals screen stays as the place to understand upstream, peer and downstream relationships and to make hard calls. It shouldn't be a step people visit before every task.
+
+**What Align should own:** a *goal contract* (a versioned, owner-approved reading of a goal: outcomes, constraints, owner, validity), an *alignment preflight* against it, *cross-owner negotiation* where only the owner can change their commitment, and *execution evidence* that keeps "work completed" separate from "goal achieved". AI summaries, goal visualization and task classification alone aren't a moat; work-management and chat tools are adding those themselves.
+
+**How we'd measure it** (none of this is measured yet): time from a goal change to downstream acknowledgment; human time to settle one cross-owner change; work revised or stopped before execution; agent compute before vs after a correction; rework traced to obsolete acceptance criteria; verified outcomes against approved criteria. A cancelled task isn't automatically a saving. Claiming avoided rework needs evidence of the alternative path, the effort avoided and Align's own cost, including false alerts.
+
+**Biggest adoption risk:** another system second-guessing people's priorities becomes its own coordination tax. Align has to be strict about authority: owners control their goals, agents can discover, compare, explain and propose, and nobody silently redefines what another person accepted.
+
+**Next proof:** not a bigger demo. Watch an independent operator change or stop a real agent task because Align surfaced an owner-approved goal conflict before the work started.
+
+**Next steps:** discovery interviews with Product, Security, IT and Ops leaders; authenticated MCP preflight that can also draft proposals for owner review; a Linear intake check; Slack as a negotiation surface; clear data boundaries (what's shared, what stays private, what's never stored).
+
+> AI made execution fast. Align makes agreement on what to execute fast enough to keep up.
 
 ## Provenance
 

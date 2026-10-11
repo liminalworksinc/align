@@ -1,6 +1,6 @@
 # Align: Demo Script (HackerSquad video)
 
-**Hard limit:** 5:00. **Target:** ~4:10.
+**Hard limit:** 5:00. **Target:** ~4:10 without the path-forward terminal beat, ~4:40 with it.
 **Setup:** two browser windows side by side. Left is **Product** (normal window, `product-demo`). Right is **Security** (private window, `security-demo`).
 **Rule:** anything marked `[fill from actual run]` is read from the screen or evidence on the day. If a run didn't happen or didn't pass, say what actually happened. Never read a number we didn't produce.
 
@@ -67,13 +67,26 @@
 **Screen (both windows):** Goals. Security now shows the new version, and the old version is still visible as superseded. The dependency is `ACCEPTED`. Beta triage is next work.
 > "Both sessions now show the accepted Security version. The prior version is kept. Every step is in the audit log, and the evidence links straight to the Sparta report and agent trace."
 
-### 3:55–4:15: Proof strip, buyer and path, close
+### 3:55–4:10: Proof strip
 **Screen:** proof strip.
 > "Measured in this session: **[fill from actual run: mm:ss]** and **[fill from actual run: N]** touchpoints, from first viewing the CEO change until both of us saw the accepted version. Next to it, the manual baseline is labeled an estimate. Sandbox prep is listed separately."
+
+### 4:10–4:40: Path forward, the agent asks first
+**Screen:** a terminal next to the Security window. Run `curl -s localhost:3000/api/policy/security`, or `ALIGN_URL=http://localhost:3000 scripts/run-plan.sh accepted` and cut after its first line (a full run makes billed model calls). If you can, show the output from before ratification too (prepared during the dry run), so both are on screen.
+
+**Only if `/api/policy/security` answers on the recording machine (check during the dry run).** If not, say the lines over the proof strip and don't show a terminal.
+
+> "Today we caught the wrong work after the fact. The bigger opportunity is catching it before it starts. Before Security's agent runs, it asks Align which plan it's authorized to run. Before ratification the answer was the throughput plan. Now it's the beta plan, ratified by Security, with the exact plan hash we tested. The agent reads that; it can't change it."
 >
-> "We think the buyer is a VP Product or CPO at an AI-native company of 50 to 500 people. That's a hypothesis we'll test with Product, Security and Ops leaders, with connectors to Linear, Jira and agent hosts next."
+> "Next, the same check where work begins: agent preflight over MCP first, then Linear and Jira intake, then negotiation inside Slack. Most work passes without friction. Only a real conflict with a goal someone owns goes to that person."
 >
-> **Close:** "Align made one costly cross-team decision faster, without automating away the people who own it."
+> "We think the buyer is a VP Product or CPO at an AI-native company of 50 to 500 people. That's a hypothesis. The proof we want next is a real operator stopping a real agent task because Align caught a goal conflict first."
+>
+> **Close:** "AI made execution fast. Align makes agreement on what to execute fast enough to keep up."
+
+**Timing:** this pushes the cut to ~4:40, still under 5:00 but with less margin than the PRD's ~4:10 target. If the dry run runs long, cut the optional rate-limit line in Scenario Studio first, then the Alike paragraph.
+
+**Don't say:** that Align enforces plans in the agent host, blocks other plans, or saved time or money. The agent reads the policy; nothing enforces it. Keep the competitor names out of the spoken lines unless someone checks the claims.
 
 ---
 
@@ -128,4 +141,4 @@ Optional 403 beat (only if time allows): from the Product window, try to ratify.
 | 0:30–0:45 | Goals + brief | Amber dependency; P0 option; disconfirmer: protected P0 ticket. |
 | 0:45–1:15 | Scenario Studio | "Same Sparta mission, seed and checks. Current plan FAILS 7 of 9 checks and posts a public reply on the protected P0; candidate PASSES 9 of 9 and leaves the protected P0 unchanged, even with an injected connector failure. This tests ticket behavior, not company ROI." |
 | 1:15–1:40 | Decision | Propose (pinned to plan hash) → Security counters → Product acknowledges → Security ratifies its own goal. |
-| 1:40–2:00 | Proof + close | "Measured: [fill from actual run] vs an estimated baseline. Align made one costly cross-team decision faster, without automating away the people who own it." |
+| 1:40–2:00 | Proof + close | "Measured: [fill from actual run] vs an estimated baseline. Next, agents ask Align which plan they're authorized to run before they start. AI made execution fast; Align makes agreement on what to execute fast enough to keep up." |
