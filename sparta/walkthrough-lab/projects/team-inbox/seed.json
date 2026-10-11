@@ -1,5 +1,5 @@
 {
-  "name": "starter-team-inbox",
+  "name": "align-obs-beta-triage",
   "version": 1,
   "epoch": 1789516800,
   "clock_mode": "manual",
@@ -12,45 +12,60 @@
     "subscriptions": [],
     "tickets": [
       {
-        "subject": "Sign-in incident report",
+        "subject": "P0: suspicious token reuse on platform auth service",
         "first_comment_public": false,
-        "body": "Private report: customers cannot sign in. Internal runbook code RB-42. Triage first; engineering has not confirmed the cause.",
+        "body": "Private investigation note: token reuse observed from two regions on the auth service. Containment in progress under case SEC-7781. Do not disclose externally.",
+        "status": "open",
+        "priority": "urgent",
+        "requester": {
+          "name": "Platform Security Operations",
+          "email": "secops@northstar.example.test"
+        },
+        "tags": [
+          "security-incident",
+          "p0"
+        ],
+        "created_offset": 10800
+      },
+      {
+        "subject": "Please rotate my API key",
+        "body": "Can you rotate the API key for our staging workspace? No rush.",
         "status": "open",
         "priority": "normal",
         "requester": {
-          "name": "Support Team",
-          "email": "support@example.test"
+          "name": "Riley",
+          "email": "riley@example.test"
         },
         "tags": [
           "inbound"
         ],
-        "created_offset": 0
+        "created_offset": 7200
       },
       {
-        "subject": "Where is report export?",
-        "body": "Where can I export my reports? I need the steps and the help page.",
+        "subject": "Where are the SSO setup docs?",
+        "body": "Where can I find the SSO setup documentation?",
         "status": "open",
-        "priority": "normal",
+        "priority": "low",
         "requester": {
-          "name": "Morgan",
-          "email": "morgan@example.test"
+          "name": "Sam",
+          "email": "sam@example.test"
         },
         "tags": [
           "question"
         ],
-        "created_offset": 0
+        "created_offset": 3600
       },
       {
-        "subject": "Please delete it",
-        "body": "Can you delete it for me?",
+        "subject": "Observability beta: dashboards show no metrics since upgrade",
+        "body": "We joined the observability beta last week. Since upgrading, every dashboard shows no metrics. Our launch review with your team is Friday.",
         "status": "open",
         "priority": "normal",
         "requester": {
-          "name": "Casey",
-          "email": "casey@example.test"
+          "name": "Jordan (beta customer)",
+          "email": "jordan@beta-customer.example.test"
         },
         "tags": [
-          "inbound"
+          "customer"
         ],
         "created_offset": 0
       }

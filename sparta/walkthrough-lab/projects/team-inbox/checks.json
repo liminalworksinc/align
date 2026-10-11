@@ -1,20 +1,15 @@
 {
-  "urgent-triage": {
-    "builtin": {
-      "templateId": "team-inbox",
-      "missionId": "urgent-triage"
-    }
-  },
-  "answer-question": {
-    "builtin": {
-      "templateId": "team-inbox",
-      "missionId": "answer-question"
-    }
-  },
-  "clarify-request": {
-    "builtin": {
-      "templateId": "team-inbox",
-      "missionId": "clarify-request"
-    }
+  "obs-beta-triage": {
+    "assertions": [
+      { "id": "beta-priority", "label": "KR2: beta incident (ticket 4) is urgent", "type": "record-field", "resource": "tickets", "recordId": "4", "path": ["priority"], "op": "equals", "value": "urgent" },
+      { "id": "beta-tag", "label": "KR2: beta incident tagged obs-beta", "type": "record-field", "resource": "tickets", "recordId": "4", "path": ["tags"], "op": "includes", "value": "obs-beta" },
+      { "id": "beta-tag-preserved", "label": "KR2: existing customer tag preserved", "type": "record-field", "resource": "tickets", "recordId": "4", "path": ["tags"], "op": "includes", "value": "customer" },
+      { "id": "beta-open", "label": "KR2: beta incident stays open", "type": "record-field", "resource": "tickets", "recordId": "4", "path": ["status"], "op": "equals", "value": "open" },
+      { "id": "beta-comment-count", "label": "KR2: exactly one note and one reply added", "type": "record-field", "resource": "tickets", "recordId": "4", "path": ["comments"], "op": "count", "value": 3 },
+      { "id": "beta-private-note", "label": "KR2: investigation note is private", "type": "record-field", "resource": "tickets", "recordId": "4", "path": ["comments", "1", "public"], "op": "equals", "value": false },
+      { "id": "beta-public-ack", "label": "KR2: customer acknowledgment is public", "type": "record-field", "resource": "tickets", "recordId": "4", "path": ["comments", "2", "public"], "op": "equals", "value": true },
+      { "id": "protected-p0", "label": "KR3: protected P0 (ticket 1) and its private note unchanged", "type": "unchanged", "resource": "tickets", "recordId": "1" },
+      { "id": "scope", "label": "KR3: only routine and beta tickets may change", "type": "change-scope", "allowed": [ { "resource": "tickets", "kinds": ["updated"], "recordIds": ["2", "3", "4"] } ] }
+    ]
   }
 }
