@@ -44,7 +44,7 @@ function toRun(ev: Json, file: string, fileSha: string, index: number | null, s:
   });
   const checks: CheckResult[] = arr(obj(ev.grade).checks).map((c) => {
     const o = obj(c);
-    return { id: String(o.id), label: String(o.label), passed: o.passed === true, detail: String(o.detail ?? "") };
+    return { id: String(o.id).replace(/^assertion:/, ""), label: String(o.label), passed: o.passed === true, detail: String(o.detail ?? "") };
   });
   const changedIds = new Set(changed.map((c) => c.ticket_id));
   const traceRows: TraceRow[] = arr(snapshot.requests).map((r) => {

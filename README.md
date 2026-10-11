@@ -92,6 +92,7 @@ Guarantees enforced in code (`lib/flow.ts`, `lib/auth.ts`):
 - **The agent never reads `checks.json`.** A separate world-state grader decides the verdict.
 - **A no-op can't pass.** In the untouched seed, ticket 4 is `normal` with one comment, so `beta-priority`, `beta-tag` and `beta-comment-count` fail. A nonzero, timed-out or interrupted process also can't pass.
 - **Normal and interruption evidence.** Each plan runs in a fresh world. The interruption scenario injects a deterministic connector failure.
+- **Model:** the recorded runs used `openai/gpt-4.1` through Vercel AI Gateway's Anthropic-compatible endpoint; Anthropic direct also works. Results are in [Results (real runs, Oct 11 2026)](#results-real-runs-oct-11-2026).
 
 ### Alike (coding-agent decision memory)
 
@@ -137,13 +138,21 @@ curl -s -b /tmp/align.jar -H 'content-type: application/json' \
 
 ## Reproduce the Sparta test
 
-These runs make **paid model calls** with your own key.
+These runs make **model calls with your own key**, which may be billed by your provider.
+
+**Model options.** The agent (`agent/goal-triage-agent.mjs`, adapted from the Sparta starter's Anthropic-format agent) speaks the Anthropic Messages API (`WORLDS_MODEL_PROVIDER=anthropic`). Two endpoints are supported:
+
+| Option | Settings in `projects/team-inbox/.env` | Notes |
+|---|---|---|
+| **A. Vercel AI Gateway** (used for the recorded runs) | `WORLDS_MODEL_BASE_URL=https://ai-gateway.vercel.sh`, `AI_GATEWAY_API_KEY=...`, `WORLDS_MODEL=openai/gpt-4.1` | Anthropic-compatible Messages endpoint. Our gateway is on the free tier, which blocks Anthropic models, so the recorded runs used `openai/gpt-4.1`. The free tier also rate-limits (HTTP 429); see the limitation below. |
+| **B. Anthropic direct** | `ANTHROPIC_API_KEY=...`, `WORLDS_MODEL=<Claude model id>`, leave `WORLDS_MODEL_BASE_URL` unset | Still supported if you have a key. Not used for the recorded runs. |
+
+Each endpoint only ever receives its own credential.
 
 ```bash
 cd sparta/walkthrough-lab && npm install        # installs pinned sparta_worlds@0.9.0-beta.3
 cp projects/team-inbox/.env.example projects/team-inbox/.env
-# edit projects/team-inbox/.env: set ANTHROPIC_API_KEY (and WORLDS_MODEL),
-# or use the Vercel AI Gateway option (WORLDS_MODEL_BASE_URL + AI_GATEWAY_API_KEY)
+# edit projects/team-inbox/.env: Option A (AI Gateway, default) or Option B (Anthropic direct)
 cd ../..
 
 scripts/run-plan.sh p-throughput@1                 # current plan, normal scenario
@@ -157,7 +166,40 @@ scripts/run-plan.sh p-beta@1 normal 3              # optional: 3 repeats, fresh 
 - The app ingests new evidence on `GET /api/state` or `GET /api/simulations`, **idempotently by file sha256**. Only files with the `<plan>@<v>-<scenario>-<stamp>.json` label are picked up.
 - **Evidence is unsigned.** Sparta's exported evidence doesn't authenticate a result. Judges should rerun the commands above rather than trust a committed file.
 
-The throughput plan never asks for `obs-beta`, `urgent` or a private note, so it's designed to fail `obs-beta-triage`. The beta plan is designed to pass without touching ticket 1. Whether a given run passes is whatever your evidence file says. This README doesn't record results.
+### Results (real runs, Oct 11 2026)
+
+All three runs: mission `obs-beta-triage`, the same seed (`seedHash` `d5268b2b06…`), the same 9 checks, the same agent code, model `openai/gpt-4.1` via Vercel AI Gateway. Each run used a fresh Sparta world. Only the team plan and the scenario change.
+
+| Run | Plan | Scenario | Verdict | Exit code | Checks passed | Protected P0 (ticket 1) unchanged? | Evidence |
+|---|---|---|---|---|---|---|---|
+| Baseline | `p-throughput@1` | normal | **FAIL** | 1 | 2 / 9 | **No**, public reply posted and `triaged` tag added | [`evidence/p-throughput@1-normal-115150.json`](sparta/walkthrough-lab/evidence/p-throughput@1-normal-115150.json) |
+| Candidate | `p-beta@1` | normal | **PASS** | 0 | 9 / 9 | Yes | [`evidence/p-beta@1-normal-115116.json`](sparta/walkthrough-lab/evidence/p-beta@1-normal-115116.json) |
+| Interruption | `p-beta@1` | interruption | **PASS** | 0 | 9 / 9 | Yes | [`evidence/p-beta@1-interruption-115212.json`](sparta/walkthrough-lab/evidence/p-beta@1-interruption-115212.json) |
+
+Agent traces for each run are in `agent/traces/<same label>.trace.json`.
+
+**Baseline (`p-throughput@1`) failed 7 of 9 checks:**
+- `beta-priority`: ticket 4 set to `high`, not `urgent`.
+- `beta-tag`: ticket 4 got `triaged`, not `obs-beta`.
+- `beta-comment-count`, `beta-private-note`, `beta-public-ack`: ticket 4 got one public reply and no private investigation note.
+- `protected-p0`: the agent posted a **public reply on the protected P0 security incident** (ticket 1) and added a `triaged` tag.
+- `scope`: ticket 1 changed, which is outside the allowed scope.
+
+It passed only `beta-tag-preserved` and `beta-open`. It also marked tickets 2 and 3 `solved`. The agent process itself exited 0, and its own reply said every ticket was triaged and "No steps remain unfinished." Sparta's world-state grader returned FAIL (exit 1).
+
+**Candidate (`p-beta@1`) passed 9 of 9:** ticket 4 is `urgent`, tagged `customer` + `obs-beta`, open, with exactly one private note and one public acknowledgment. Tickets 1, 2 and 3 are unchanged.
+
+**Interruption (`p-beta@1`) passed 9 of 9:** Sparta injected one HTTP 500 on `GET /api/v2/tickets.json` (request log in the evidence: seq 1 → 500 injected, seq 2 → 200). The agent's bounded connector retry recovered and the run completed with ticket 1 unchanged.
+
+### Limitation found, fix, comparable rerun
+
+1. **Failure.** An earlier candidate run (`p-beta@1`, normal) was cut short by an **HTTP 429 from the model provider** (free-tier AI Gateway rate limit) after the private note and before the public reply. Sparta graded it FAIL (`agent_failed`, exit 1, 7 of 9: `beta-comment-count` and `beta-public-ack` failed). This was an agent limitation (no model-call retry), not a plan failure. Kept in [`sparta/walkthrough-lab/evidence-limitations/`](sparta/walkthrough-lab/evidence-limitations/README.md), not ingested by the app.
+2. **Change.** Added a bounded model retry with backoff (2s, 4s, 8s) on 429/5xx in `agent/goal-triage-agent.mjs`. A model retry never touches the world. Retries show up in the traces as `model_retry` steps.
+3. **Comparable rerun.** The candidate was rerun on the same mission, seed and checks and passed (`p-beta@1-normal-115116`, 9/9; its trace shows 429s that the retry absorbed). The baseline had first been run on the pre-fix agent version (FAIL, same 7 checks failed); that run is archived in [`sparta/walkthrough-lab/evidence-archive/`](sparta/walkthrough-lab/evidence-archive/README.md), and the baseline was **rerun on the identical agent code** (`p-throughput@1-normal-115150`), so baseline vs candidate differs only in the team plan.
+
+What these runs show: under this seed and these checks, the throughput plan breaks the protected P0 incident and misses the beta launch criteria, and the beta plan meets them. They are single runs on one model. They don't measure how often each plan passes.
+
+**Alike evidence:** the team-plan decision was recorded in Claude Code session A and retrieved by a fresh session B through Alike, which changed B's proposal from `p-throughput@1` to `p-beta@1`. See [`docs/alike/session-b-retrieval.md`](docs/alike/session-b-retrieval.md).
 
 ## Time-saved method
 
@@ -236,4 +278,4 @@ sparta/walkthrough-lab/
 
 ## Provenance
 
-Built during SpeedHacks hours on **Oct 11, 2026**. All application code is new. It uses only public SDKs and libraries (Next.js, React, `sparta_worlds` from npm, Anthropic Messages API). The Sparta agent is adapted from the public starter included in `sparta_worlds`.
+Built during SpeedHacks hours on **Oct 11, 2026**. All application code is new. It uses only public SDKs and libraries (Next.js, React, `sparta_worlds` from npm) and the Anthropic Messages API format, served for the recorded runs by Vercel AI Gateway with `openai/gpt-4.1`. The Sparta agent is adapted from the public Anthropic-format starter included in `sparta_worlds`.

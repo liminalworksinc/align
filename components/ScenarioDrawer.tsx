@@ -288,6 +288,12 @@ function Timeline({ run }: { run: SimulationRun }) {
   return (
     <div>
       <div className="mb-1 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Execution timeline</div>
+      {ev?.status === "ready" && ev.data.trace?.reply ? (
+        <div className="mb-2 rounded-lg bg-zinc-50 px-3 py-2 text-[14px] ring-1 ring-zinc-200">
+          <div className="text-[12px] font-bold uppercase tracking-wide text-zinc-500">Agent&apos;s own report (a claim, not a grade)</div>
+          <p className="mt-1 line-clamp-3 text-zinc-800" title={String(ev.data.trace.reply)}>{String(ev.data.trace.reply)}</p>
+        </div>
+      ) : null}
       <ol className="max-h-80 overflow-y-auto rounded-lg ring-1 ring-zinc-200" tabIndex={0} aria-label="Execution timeline">
         {!ev || ev.status === "loading" ? (
           <li className="px-3 py-2 text-[14px] text-zinc-500" role="status">
@@ -298,7 +304,12 @@ function Timeline({ run }: { run: SimulationRun }) {
             Agent trace unavailable: {ev.error}
           </li>
         ) : planSteps.length === 0 ? (
-          <li className="px-3 py-2 text-[14px] text-zinc-500">No agent plan text recorded.</li>
+          <li className="flex gap-2 border-b border-zinc-100 px-3 py-2 text-[14px]">
+            <span className="w-[120px] shrink-0 font-semibold text-violet-800">plan</span>
+            <span className="min-w-0 text-zinc-700">
+              Ran under team plan <code className="font-mono text-[13px]">{run.plan_id}@{run.plan_version}</code> (model emitted tool calls without narration)
+            </span>
+          </li>
         ) : (
           planSteps.map((t, i) => (
             <li key={`plan-${i}`} className="flex gap-2 border-b border-zinc-100 px-3 py-2 text-[14px]">

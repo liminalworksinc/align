@@ -33,7 +33,7 @@
 > "The brief ranks options. P0: add the beta triage condition to Security's goal. P1: keep protected P0 security incidents untouched, which is a constraint, not a trade-off. P2: Product defers dashboard polish to free capacity. It also shows what could prove us wrong: there's an open P0 incident with a private note, and Security's capacity is unknown."
 
 **Only if an Alike decision was really retrieved in a fresh session:**
-> "This decision came from Alike. It was recorded in an earlier Claude Code session and retrieved in a fresh one: [fill from actual run: decision summary]. Align keeps the id and summary, not the transcript."
+> "This decision came from Alike. It was recorded in an earlier Claude Code session and retrieved in a fresh one: beta triage counts only with urgent priority, the obs-beta tag with existing tags kept, one private investigation note, one public acknowledgment, and protected P0 non-beta incidents untouched. Oldest-first throughput triage was recorded as rejected. With that, the fresh session switched its proposal from the throughput plan to the beta plan. Align keeps the id and summary, not the transcript."
 
 **If not retrieved:** skip Alike entirely, or point at the status: "Alike shows unavailable here, and we say so."
 
@@ -42,9 +42,11 @@
 
 > "Before asking Security for anything, we test. Same Sparta Worlds mission, same seed, same checks. The only thing that changes is the team plan the agent runs."
 >
-> "Current throughput plan: **[fill from actual run: FAIL / PASS]**, [fill from actual run: e.g. which checks failed]. Candidate beta-first plan: **[fill from actual run]**, [fill from actual run: N of 9 checks]. The protected P0, ticket 1, is [fill from actual run: unchanged / changed]."
+> "Current throughput plan: **FAIL**, 7 of 9 checks failed. It set the beta ticket to high instead of urgent, with no obs-beta tag and no private note. Worse, it posted a public reply on the protected P0 security incident. And its own summary said the work was complete. Candidate beta-first plan: **PASS**, 9 of 9 checks. The protected P0, ticket 1, is **unchanged**."
 >
-> "Here's the interruption run. Sparta injects a connector failure mid-run: [fill from actual run: verdict]."
+> "Here's the interruption run. Sparta injects an HTTP 500 on the ticket list. The agent's bounded retry recovered: **PASS**, 9 of 9, ticket 1 unchanged."
+>
+> *(Optional, if time allows)* "We also found a limitation: one candidate run was cut short by a rate limit from our model provider. We added a bounded model retry and reran on the same mission, seed and checks. Both runs are in the repo."
 >
 > "To be clear: this tests ticket behavior in a sandbox. It's not company ROI, and it doesn't verify beta readiness."
 
@@ -105,7 +107,7 @@ Optional 403 beat (only if time allows): from the Product window, try to ratify.
 
 - [ ] `npm run dev` running; both windows load `http://localhost:3000`.
 - [ ] Sparta evidence exists for `p-throughput@1` normal, `p-beta@1` normal and `p-beta@1` interruption in `sparta/walkthrough-lab/evidence/`. Scenario Studio shows all three after a refresh.
-- [ ] Note the real verdicts and check counts from those files for the `[fill from actual run]` lines.
+- [ ] Confirm Scenario Studio matches the recorded runs used in the script: `p-throughput@1-normal-115150` FAIL (exit 1, 2/9, ticket 1 changed), `p-beta@1-normal-115116` PASS (exit 0, 9/9), `p-beta@1-interruption-115212` PASS (exit 0, 9/9). If you rerun and get different results, say what actually happened.
 - [ ] Alike: if a decision was actually retrieved in a fresh session, it's attached (`POST /api/alike`). If not, cut the Alike line.
 - [ ] Demo reset: `POST /api/reset {"confirm":"reset"}` (see README). Evidence and the Alike ref survive the reset.
 - [ ] After reset: no proposals, timer not started, Security on v1, dependency amber.
@@ -124,6 +126,6 @@ Optional 403 beat (only if time allows): from the Product window, try to ratify.
 | 0:00–0:15 | Hook | Shruti: "With AI agents, our teams finish tickets faster, but agreeing on whether we're working on the right thing still happens at human meeting speed." |
 | 0:15–0:30 | Problem | "The CEO changed priorities. My launch depends on Security's goal, which I can't edit. Today that's five steps and, by our estimate, about 200 minutes." |
 | 0:30–0:45 | Goals + brief | Amber dependency; P0 option; disconfirmer: protected P0 ticket. |
-| 0:45–1:15 | Scenario Studio | "Same Sparta mission, seed and checks. Current plan [fill from actual run]; candidate [fill from actual run]; protected P0 [fill from actual run]. This tests ticket behavior, not company ROI." |
+| 0:45–1:15 | Scenario Studio | "Same Sparta mission, seed and checks. Current plan FAILS 7 of 9 checks and posts a public reply on the protected P0; candidate PASSES 9 of 9 and leaves the protected P0 unchanged, even with an injected connector failure. This tests ticket behavior, not company ROI." |
 | 1:15–1:40 | Decision | Propose (pinned to plan hash) → Security counters → Product acknowledges → Security ratifies its own goal. |
 | 1:40–2:00 | Proof + close | "Measured: [fill from actual run] vs an estimated baseline. Align made one costly cross-team decision faster, without automating away the people who own it." |
