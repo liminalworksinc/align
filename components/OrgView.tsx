@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
 import type { Measure } from "@/lib/types";
 import type { ViewProps } from "./props";
@@ -90,7 +91,7 @@ export function OrgView(props: ViewProps) {
       ) : lastPush ? (
         <p className="rounded-xl bg-zinc-50 px-4 py-3 text-[15px] text-zinc-600 ring-1 ring-zinc-200">
           Nothing to approve: company goal {lastPush.version} was already sent at {fmtTime(lastPush.pushed_at)}. To run the decisions again, open{" "}
-          <a href="/?ops" className="underline">Align with ?ops</a> and click <b>Start the demo over</b>, or run <code>scripts/run-of-show.sh reset</code>.
+          <Link href="/?ops" className="underline">Align with ?ops</Link> and click <b>Start the demo over</b>, or run <code>scripts/run-of-show.sh reset</code>.
         </p>
       ) : (
         <p className="rounded-xl bg-zinc-50 px-4 py-3 text-[15px] text-zinc-600 ring-1 ring-zinc-200">No new version is being drafted.</p>
