@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "allow": ["Bash(scripts/run-plan.sh accepted)", "Bash(scripts/run-plan.sh accepted:*)"]
+  },
   "hooks": {
     "SessionStart": [
       {
