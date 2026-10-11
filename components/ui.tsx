@@ -24,7 +24,7 @@ export function Badge({ tone, children, icon = true }: { tone: Tone; children: R
   );
 }
 
-/** Truth-state badge. Green is reserved for Sparta-verified narrow outcomes only. */
+/** Status badge. Green is reserved for passing sandbox test results only. */
 export function StateBadge({ state }: { state: string }) {
   const tone: Tone =
     state === "VERIFIED" || state === "PASS"
@@ -36,8 +36,32 @@ export function StateBadge({ state }: { state: string }) {
           : state === "PROPOSED" || state === "INFERRED"
             ? "violet"
             : "neutral";
-  return <Badge tone={tone}>{state.replaceAll("_", " ")}</Badge>;
+  return <Badge tone={tone}>{STATE_LABEL[state] ?? state.replaceAll("_", " ").toLowerCase()}</Badge>;
 }
+
+/** Plain-language names for every status the app shows. The codes stay in data and APIs. */
+export const STATE_LABEL: Record<string, string> = {
+  OBSERVED: "Confirmed",
+  PROPOSED: "Suggested",
+  INFERRED: "Best guess",
+  ACCEPTED: "Agreed",
+  VERIFIED: "Passed the test",
+  UNKNOWN: "Unknown",
+  FAILED: "Failed",
+  REJECTED: "Declined",
+  PASS: "Passed",
+  FAIL: "Failed",
+  TESTED: "Tested",
+  STALE: "Needs retest",
+  UNTESTED: "Not tested",
+  DRAFT: "Draft",
+  PENDING_SECURITY: "Waiting for Security",
+  COUNTERED: "Security asked for changes",
+  ACKNOWLEDGED_BY_PRODUCT: "Product accepted changes",
+  RATIFIED: "Approved",
+  NOT_SHARED: "Not shared",
+  NOT_TESTED: "Not tested",
+};
 
 export function Button({
   children,
@@ -98,4 +122,17 @@ export function fmtDuration(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000));
   const m = Math.floor(s / 60);
   return m ? `${m}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`;
+}
+
+/**
+ * The only place backend metadata (ids, hashes, versions, paths, commands) may appear.
+ * Closed by default; used on the Evidence page so engineers can still reproduce a result.
+ */
+export function ForEngineers({ children, label = "For engineers" }: { children: ReactNode; label?: string }) {
+  return (
+    <details className="group mt-2 text-[13px] text-zinc-500">
+      <summary className="cursor-pointer select-none rounded text-zinc-500 hover:text-zinc-700">{label}</summary>
+      <div className="mt-2 space-y-1 font-mono text-[12px] text-zinc-500 [overflow-wrap:anywhere]">{children}</div>
+    </details>
+  );
 }

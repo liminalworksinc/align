@@ -2,11 +2,21 @@
 import type { ReactNode } from "react";
 import type { Goal, GoalRelation, Proposal, SimulationRun, StateView, WorkItem } from "@/lib/types";
 import type { ViewProps } from "./props";
-import { Badge, Button, Mono, OWNER_LABEL, Section, StateBadge, fmtTime } from "./ui";
-import { TICKET_LABEL } from "./EvidenceView";
+import { Badge, Button, OWNER_LABEL, Section, StateBadge, fmtTime } from "./ui";
+import { teamName } from "./TeamLens";
 import { accepted, comparablePair, currentGoal, priorVersion } from "./select";
 
 const DEFAULT_RELATION = "r-product-security";
+
+/* Plain words for codes that live in the data. */
+const RELATION_WORD: Record<string, string> = { child: "passes down to", supports: "supports", depends_on: "depends on", conflicts_with: "clashes with" };
+const SCENARIO: Record<string, string> = { normal: "Normal run", interruption: "Outage test" };
+const WHAT: Record<string, string> = { Relation: "This connection", "Simulation run": "This test run", "Work item": "This work item", Goal: "This goal", Proposal: "This proposal" };
+function planName(id: string) {
+  if (id.includes("beta")) return "New plan: beta issues first";
+  if (id.includes("throughput")) return "Current plan: oldest tickets first";
+  return "Plan";
+}
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -36,7 +46,7 @@ function GoalPanel({ p, g }: { p: ViewProps; g: Goal }) {
   const prior = priorVersion(s, g);
   const isCeo = g.owner_id === "ceo";
   const isMine = g.owner_id === me.actor;
-  const edit = isCeo ? "Inherited · read-only" : isMine ? "Yours · editable" : "Shared · read-only";
+  const edit = isCeo ? "Set by CEO · view only" : isMine ? "Your goal · you can edit" : `${teamName(g)}'s goal · view only`;
   const kr2 = ceoKR2(s);
   const isCurrent = currentGoal(s, g.owner_id)?.id === g.id;
   return (
@@ -49,7 +59,7 @@ function GoalPanel({ p, g }: { p: ViewProps; g: Goal }) {
           {g.version}
         </Badge>
         {g.changed && <Badge tone="amber">Changed today</Badge>}
-        {!isCurrent && <Badge tone="neutral">Superseded</Badge>}
+        {!isCurrent && <Badge tone="neutral">Replaced by a newer version</Badge>}
       </div>
       <p className="mb-4 text-[18px] font-semibold leading-snug text-zinc-900">{g.objective}</p>
       <Section title="Goal">
@@ -59,55 +69,50 @@ function GoalPanel({ p, g }: { p: ViewProps; g: Goal }) {
           {prior && (
             <span className="text-zinc-500">
               {" "}
-              (prior: {prior.version}, <Mono>{prior.id}</Mono> kept)
+              (the earlier version, {prior.version}, is kept for the record)
             </span>
           )}
         </Row>
-        <Row label="Kind">{g.kind}</Row>
-        <Row label="Edit state">
+        <Row label="Who can edit">
           <Badge tone={isMine ? "violet" : "neutral"} icon={false}>
             {edit}
           </Badge>
         </Row>
         {g.kind === "team" && kr2 && (
-          <Row label="Inherited acceptance criterion (CEO KR2)">
+          <Row label="The CEO's new requirement">
             <span className="text-zinc-800">{kr2.text}</span>
           </Row>
         )}
       </Section>
       {g.owner_id === "security" && <WorkNotGoal s={s} g={g} />}
-      <Section title="Measures">
+      <Section title="How success is measured">
         <ul className="space-y-2">
           {g.measures.map((m) => (
             <li key={m.id} className="rounded-lg bg-zinc-50 p-2.5 text-[15px] leading-snug ring-1 ring-zinc-200">
-              <div className="mb-1 flex items-center gap-2">
-                <Mono>{m.id}</Mono>
-                {m.inherited_from && <span className="text-[13px] text-zinc-500">from {m.inherited_from}</span>}
-                <span className="ml-auto text-[12px] text-zinc-500">verifiable by: {m.verifiable_by}</span>
-              </div>
+              {m.inherited_from && <div className="mb-1 text-[13px] text-zinc-500">From the CEO&apos;s goal</div>}
               {m.text}
             </li>
           ))}
         </ul>
       </Section>
-      <Section title="Sources">
+      <Section title="Where this comes from">
         <div className="space-y-2 text-[15px]">
           <div className="flex items-start gap-2">
             <StateBadge state="OBSERVED" />
             <span>
-              Approved by {OWNER_LABEL[g.approved_by] ?? g.approved_by} at {fmtTime(g.approved_at)} ({g.approved_at.slice(0, 10)})
+              Approved by {OWNER_LABEL[g.approved_by] ?? g.approved_by} at {fmtTime(g.approved_at)}
             </span>
           </div>
           {g.owner_id === "security" && me.actor === "product" && (
             <div className="flex items-start gap-2">
               <StateBadge state="UNKNOWN" />
-              <span>Security capacity: UNKNOWN (not shared)</span>
+              <span>How much time Security has free: unknown (Security hasn&apos;t shared it)</span>
             </div>
           )}
           {g.owner_id === "product" && me.actor === "security" && (
             <div className="flex items-start gap-2">
               <StateBadge state="UNKNOWN" />
-              <span>Product beta scope list: UNKNOWN (not shared)</span>
+              <span>Which features are in Product&apos;s beta: unknown (Product hasn&apos;t shared it)</span>
             </div>
           )}
         </div>
@@ -120,41 +125,42 @@ function GoalPanel({ p, g }: { p: ViewProps; g: Goal }) {
               p.openDrawer("brief");
             }}
           >
-            View source
+            See what to do next
           </Button>
         ) : isMine ? (
-          <Button onClick={() => p.openDrawer("brief")}>Review priorities</Button>
+          <Button onClick={() => p.openDrawer("brief")}>See what to do next</Button>
         ) : (
-          <Button onClick={() => p.go("proposals")}>Propose goal change</Button>
+          <Button onClick={() => p.go("proposals")}>Propose a change to {teamName(g)}&apos;s goal</Button>
         )}
       </div>
     </>
   );
 }
 
-/** Design "Work completed ≠ goal achieved": old criterion vs inherited one, the affected ticket, real Sparta status. */
+/** Design "Busy isn't the same as on-goal": old criterion vs inherited one, the affected ticket, real Sparta status. */
 function WorkNotGoal({ s, g }: { s: StateView; g: Goal }) {
   const old = originalSecurity(s)?.measures.find((m) => m.id === "S-M1") ?? g.measures.find((m) => m.id === "S-M1");
   const kr2 = ceoKR2(s);
   const { baseline, candidate } = comparablePair(s);
   const runs = [baseline, candidate].filter((r): r is SimulationRun => Boolean(r));
+  if (!kr2) return null; // nothing to contrast until the CEO adds the new requirement
   return (
-    <Section title="Work completed ≠ goal achieved">
+    <Section title="Busy isn't the same as on-goal">
       <div className="divide-y divide-zinc-200 rounded-[10px] border border-zinc-200 text-[14px]">
         <div className="px-3 py-2">
-          <div className="al-lbl">Measured before the change</div>
+          <div className="al-lbl">What Security measured before the change</div>
           <div className="text-zinc-900">{old?.text ?? "Unknown"}</div>
         </div>
         <div className="px-3 py-2">
-          <div className="al-lbl !text-amber-700">CEO now requires (KR2)</div>
+          <div className="al-lbl !text-amber-700">What the CEO now requires</div>
           <div className="text-zinc-900">{kr2?.text ?? "Unknown"}</div>
         </div>
         <div className="px-3 py-2">
-          <div className="al-lbl">Affected ticket</div>
-          <div className="text-zinc-900">#4 · {TICKET_LABEL["4"]}</div>
+          <div className="al-lbl">Ticket affected</div>
+          <div className="text-zinc-900">The beta customer&apos;s issue (ticket #4)</div>
         </div>
         <div className="px-3 py-2">
-          <div className="al-lbl">Evidence status</div>
+          <div className="al-lbl">Practice test results</div>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {runs.length === 0 ? (
               <StateBadge state="UNTESTED" />
@@ -162,7 +168,7 @@ function WorkNotGoal({ s, g }: { s: StateView; g: Goal }) {
               runs.map((r) => (
                 <span key={r.id} className="inline-flex items-center gap-1.5 text-[13px] text-zinc-600">
                   <StateBadge state={r.verdict} />
-                  {r.plan_id}@{r.plan_version} {r.checks.filter((c) => c.passed).length}/{r.checks.length}
+                  {planName(r.plan_id)}: {r.checks.filter((c) => c.passed).length} of {r.checks.length} checks passed
                 </span>
               ))
             )}
@@ -186,65 +192,68 @@ function RelationPanel({ p, r }: { p: ViewProps; r: GoalRelation }) {
   return (
     <>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h2 className="text-[20px] font-bold text-zinc-900">{isConflict ? "Cross-team dependency" : "Goal relation"}</h2>
+        <h2 className="text-[20px] font-bold text-zinc-900">{isConflict ? "Product needs Security" : "How these goals connect"}</h2>
         <StateBadge state={r.status} />
       </div>
       <p className="mb-4 text-[16px] leading-snug text-zinc-800">{r.label}</p>
       <div className="mb-4 text-[14px] text-zinc-600">
-        {src ? `${OWNER_LABEL[src.owner_id]} ${src.version}` : r.source_goal} <span className="text-zinc-400">{r.type.replace("_", " ")}</span>{" "}
+        {src ? `${OWNER_LABEL[src.owner_id]} ${src.version}` : r.source_goal} <span className="text-zinc-400">{RELATION_WORD[r.type] ?? r.type.replace("_", " ")}</span>{" "}
         {tgt ? `${OWNER_LABEL[tgt.owner_id]} ${tgt.version}` : r.target_goal}
       </div>
 
       {isConflict && (
-        <Section title="Conflict">
+        <Section title="Where the goals clash">
           <div className="overflow-hidden rounded-lg ring-1 ring-zinc-200">
-            <ConflictRow label={`Old Security measure${orig ? ` (${orig.version}, S-M1)` : ""}`} tone="amber">
-              {oldMeasure?.text ?? "UNKNOWN"}
+            <ConflictRow label={`Security's current target${orig ? ` (${orig.version})` : ""}`} tone="amber">
+              {oldMeasure?.text ?? "Unknown"}
             </ConflictRow>
-            <ConflictRow label="New CEO measure (KR2)" tone="neutral">
-              {kr2?.text ?? "UNKNOWN"}
+            <ConflictRow label="The CEO's new requirement" tone="neutral">
+              {kr2?.text ?? "Unknown"}
             </ConflictRow>
-            <ConflictRow label="Protected constraint (S-M2)" tone="neutral">
-              P0 non-beta incidents and their private notes
-              {protectedMeasure && <div className="mt-1 text-[13px] text-zinc-500">S-M2: {protectedMeasure.text}</div>}
+            <ConflictRow label="Critical security ticket (off-limits)" tone="neutral">
+              The critical security ticket (#1) and its private notes must not be touched.
+              {protectedMeasure && <div className="mt-1 text-[13px] text-zinc-500">Security&apos;s rule: {protectedMeasure.text}</div>}
             </ConflictRow>
-            <ConflictRow label="Consequence" tone="amber">
-              Beta incidents get triaged as generic tickets; KR2 cannot be met without changing Security&apos;s measure.
+            <ConflictRow label="What happens now" tone="amber">
+              Beta customers&apos; issues wait in line like any other ticket. The CEO&apos;s new requirement can&apos;t be met unless Security
+              changes its target.
             </ConflictRow>
           </div>
         </Section>
       )}
 
-      <Section title="Provenance">
+      <Section title="Where this comes from">
         <div className="flex items-start gap-2 text-[15px] leading-snug text-zinc-700">
           <StateBadge state="OBSERVED" />
-          <span>{r.provenance}</span>
+          <span>
+            {acc
+              ? `Agreed through ${OWNER_LABEL.product}'s proposal and approved by Security.`
+              : isConflict
+                ? "Found when the CEO sent the updated company goal to every team. Security's current target doesn't mention the beta."
+                : "From the company's goal plan."}
+          </span>
         </div>
       </Section>
 
       {acc && (
-        <Section title="Accepted record">
+        <Section title="What was decided">
           <div className="rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200">
-            <Row label="Accepted version">
-              Security {acc.accepted_version} <Mono>{acc.new_goal_id}</Mono>
+            <Row label="Approved goal">
+              Security&apos;s goal, {acc.accepted_version}
             </Row>
-            <Row label="Ratified">
+            <Row label="Approved by">
               {OWNER_LABEL[acc.ratified_by]} · {fmtTime(acc.ratified_at)}
             </Row>
-            <Row label="Acknowledged">
-              {OWNER_LABEL[acc.acknowledged_by]} · {acc.acknowledged_via === "authored_in_proposal" ? "commitment written in its proposal, " : ""}{fmtTime(acc.acknowledged_at)}
+            <Row label="Changes accepted by">
+              {OWNER_LABEL[acc.acknowledged_by]} · {acc.acknowledged_via === "authored_in_proposal" ? "with what Product will do in return written into its proposal, " : ""}{fmtTime(acc.acknowledged_at)}
             </Row>
-            <Row label="Next work">{acc.next_work}</Row>
-            <Row label="Plan">
-              <Mono>
-                {acc.plan_ref.plan_id}@{acc.plan_ref.plan_version}
-              </Mono>
-            </Row>
-            <Row label="Test status">
+            <Row label="Next step">{acc.next_work}</Row>
+            <Row label="Plan tested">{planName(acc.plan_ref.plan_id)}</Row>
+            <Row label="Practice test result">
               <StateBadge state={acc.test_status} />
             </Row>
             <p className="mt-2 rounded-md bg-amber-50 px-2.5 py-2 text-[14px] font-semibold text-amber-900 ring-1 ring-amber-300">
-              Company beta readiness: NOT verified by this test.
+              Whether the beta launch succeeds isn&apos;t known yet. This test can&apos;t tell you that.
             </p>
           </div>
         </Section>
@@ -257,7 +266,7 @@ function RelationPanel({ p, r }: { p: ViewProps; r: GoalRelation }) {
             p.openDrawer("brief");
           }}
         >
-          Review priorities
+          See what to do next
         </Button>
       )}
     </>
@@ -282,27 +291,22 @@ function WorkPanel({ p, w }: { p: ViewProps; w: WorkItem }) {
       <Section title="Details">
         <Row label="Owner">{OWNER_LABEL[w.owner] ?? w.owner}</Row>
         <Row label="Source">{w.source}</Row>
-        <Row label="Observed status">
+        <Row label="Status">
           <span className="inline-flex items-center gap-2">
             <StateBadge state="OBSERVED" /> {w.observed_status}
           </span>
         </Row>
-        <Row label="Priority rank">#{w.priority_rank}</Row>
+        <Row label="Priority">#{w.priority_rank}</Row>
         <Row label="Goal">
           {g ? (
             <button className="text-left text-violet-800 underline-offset-2 hover:underline" onClick={() => p.select({ kind: "goal", id: g.id })}>
               {OWNER_LABEL[g.owner_id]} {g.version}: {g.objective}
             </button>
           ) : (
-            <Mono>{w.goal_id}</Mono>
+            "Unknown"
           )}
         </Row>
-        {w.proposed_workstream && <Row label="Proposed workstream">{w.proposed_workstream}</Row>}
-        {w.decision_ref && (
-          <Row label="Decision ref">
-            <Mono>{w.decision_ref}</Mono>
-          </Row>
-        )}
+        {w.proposed_workstream && <Row label="Suggested next work">{w.proposed_workstream}</Row>}
       </Section>
     </>
   );
@@ -312,37 +316,16 @@ function SimPanel({ p, r }: { p: ViewProps; r: SimulationRun }) {
   return (
     <>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h2 className="text-[18px] font-bold text-zinc-900">
-          <Mono>
-            {r.plan_id}@{r.plan_version}
-          </Mono>
-        </h2>
+        <h2 className="text-[18px] font-bold text-zinc-900">{planName(r.plan_id)}</h2>
         <StateBadge state={r.verdict} />
         <Badge tone="neutral" icon={false}>
-          {r.scenario}
+          {SCENARIO[r.scenario] ?? r.scenario}
         </Badge>
       </div>
-      <p className="mb-4 text-[14px] text-zinc-600">Sparta check in a sandbox ticket world. A PASS covers these checks only.</p>
-      <Section title="Run">
-        <Row label="Mission">
-          <Mono>{r.mission_id}</Mono>
-        </Row>
-        <Row label="Seed / checks version">
-          <Mono>{r.seed_version}</Mono> / <Mono>{r.checks_version}</Mono>
-        </Row>
-        <Row label="Exit code">
-          <Mono>{r.exit_code}</Mono>
-        </Row>
-        <Row label="Report">
-          <span className="break-all text-[14px]">
-            <Mono>{r.report_path}</Mono>
-          </span>
-          <div className="mt-1 text-[13px] text-zinc-500">
-            sha256 <Mono>{r.report_sha256.slice(0, 12)}</Mono>
-          </div>
-        </Row>
-      </Section>
-      <Section title="Checks">
+      <p className="mb-4 text-[14px] text-zinc-600">
+        Practice test (Sparta sandbox) on sample tickets. A pass only covers these checks. It doesn&apos;t predict the launch or any business result.
+      </p>
+      <Section title="Independent checks">
         <ul className="space-y-1.5">
           {r.checks.map((c) => (
             <li key={c.id} className="flex items-start gap-2 text-[15px] leading-snug">
@@ -358,19 +341,19 @@ function SimPanel({ p, r }: { p: ViewProps; r: SimulationRun }) {
         </ul>
       </Section>
       {r.protected_records.length > 0 && (
-        <Section title="Protected records">
+        <Section title="Records that must not be touched">
           <ul className="space-y-1 text-[15px]">
             {r.protected_records.map((pr) => (
               <li key={pr.ticket_id} className="flex items-center gap-2">
-                <Mono>{pr.ticket_id}</Mono>
-                {pr.unchanged ? <Badge tone="neutral">unchanged</Badge> : <Badge tone="red">changed</Badge>}
+                <span>{pr.ticket_id === "1" ? "The critical security ticket (#1)" : `Ticket #${pr.ticket_id}`}</span>
+                {pr.unchanged ? <Badge tone="neutral">Untouched</Badge> : <Badge tone="red">Changed</Badge>}
               </li>
             ))}
           </ul>
         </Section>
       )}
       <Button kind="secondary" onClick={() => p.go("evidence")}>
-        Open evidence
+        Open Evidence
       </Button>
     </>
   );
@@ -389,24 +372,20 @@ function ProposalPanel({ p, pr }: { p: ViewProps; pr: Proposal }) {
       <p className="mb-4 text-[14px] text-zinc-600">
         {OWNER_LABEL[pr.proposing_owner]} → {OWNER_LABEL[pr.recipient_owner]}
       </p>
-      <Section title="Target">
+      <Section title="What would change">
         <Row label="Goal">
           {g ? `${OWNER_LABEL[g.owner_id]} ` : ""}
-          {pr.target_goal_version} <Mono>{pr.target_goal_id}</Mono>
+          {pr.target_goal_version}
         </Row>
-        <Row label="Proposed measure">{pr.proposed_measure_text}</Row>
+        <Row label="Proposed new target">{pr.proposed_measure_text}</Row>
         {counter && (
-          <Row label={`Latest counter (${counter.version}, ${OWNER_LABEL[counter.by]})`}>
+          <Row label={`Latest changes from ${OWNER_LABEL[counter.by]} (${counter.version})`}>
             {counter.proposed_measure_text}
-            {counter.changes_plan && <div className="mt-1 text-[13px] text-amber-800">Changes the executable plan; prior test is stale.</div>}
+            {counter.changes_plan && <div className="mt-1 text-[13px] text-amber-800">Needs a new test: these changes alter how the agent works.</div>}
           </Row>
         )}
-        <Row label="Plan">
-          <Mono>
-            {pr.plan_ref.plan_id}@{pr.plan_ref.plan_version}
-          </Mono>
-        </Row>
-        <Row label="Simulation refs">{pr.simulation_refs.length} attached</Row>
+        <Row label="Plan">{planName(pr.plan_ref.plan_id)}</Row>
+        <Row label="Test results">{pr.simulation_refs.length} attached</Row>
       </Section>
       <Button kind="secondary" onClick={() => p.go("proposals")}>
         Open in Proposals
@@ -418,7 +397,7 @@ function ProposalPanel({ p, pr }: { p: ViewProps; pr: Proposal }) {
 function Missing({ what }: { what: string }) {
   return (
     <div className="flex items-start gap-2 text-[15px] text-zinc-700">
-      <StateBadge state="UNKNOWN" /> <span>{what} not found or not visible to you.</span>
+      <StateBadge state="UNKNOWN" /> <span>{WHAT[what] ?? what} wasn&apos;t found, or you can&apos;t see it.</span>
     </div>
   );
 }
@@ -463,7 +442,7 @@ export function Inspector(props: ViewProps) {
 
   return (
     <div className="text-[16px]">
-      <div className="mb-3 al-lbl">Inspector</div>
+      <div className="mb-3 al-lbl">Details</div>
       {body}
       
     </div>

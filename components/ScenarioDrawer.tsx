@@ -1,19 +1,17 @@
 "use client";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { SimulationRun, StateView } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { comparablePair } from "./select";
-import { Badge, Button, Mono, StateBadge } from "./ui";
-import { CheckList, TICKET_LABEL, rowLabel, ticketOf, useEvidence } from "./EvidenceView";
+import { Badge, Button, StateBadge } from "./ui";
+import { CheckList, TICKET_LABEL, fieldWords, rowLabel, ticketOf, useEvidence } from "./EvidenceView";
 
-const BASELINE_CMD = "scripts/run-plan.sh p-throughput@1";
-const CANDIDATE_CMD = "scripts/run-plan.sh p-beta@1";
-const INTERRUPT_CMD = "scripts/run-plan.sh p-beta@1 interruption";
+const NOT_RUN = "An engineer can start this test from the project; see Evidence.";
 
 const COMPARE_FIELDS: { key: "mission_id" | "seed_version" | "checks_version"; label: string }[] = [
-  { key: "mission_id", label: "mission" },
-  { key: "seed_version", label: "seed" },
-  { key: "checks_version", label: "checks" },
+  { key: "mission_id", label: "practice task" },
+  { key: "seed_version", label: "practice tickets" },
+  { key: "checks_version", label: "pass/fail checks" },
 ];
 
 export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
@@ -42,9 +40,9 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
   const isProduct = me.actor === "product";
   const candidatePassed = candidate?.verdict === "PASS";
   const ctaReason = !isProduct
-    ? "Only the Product Director can attach a plan to a proposal."
+    ? "Only the Product Director can add test results to a proposal."
     : !candidate
-      ? "No candidate run yet. Run the candidate plan in a fresh Sparta world first."
+      ? "The new plan hasn't been tested yet. Run its practice test first."
       : null;
 
   const attach = () => {
@@ -63,14 +61,16 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
       <header className="flex items-center justify-between gap-4 border-b border-zinc-200 bg-white px-6 py-4">
         <div>
           <h2 id="scenario-title" className="font-display text-[26px] font-normal leading-[1.1]">
-            Scenario Studio · Sparta test
+            Test both plans
           </h2>
-          <p className="text-[15px] text-zinc-600">Same mission, seed and checks. Only the team triage plan differs.</p>
+          <p className="text-[15px] text-zinc-600">
+            A practice test (Sparta sandbox): same practice tickets, same pass/fail checks — only the plan differs.
+          </p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close Scenario Studio (Escape)"
+          aria-label="Close Test both plans (Escape)"
           className="rounded-lg px-3 py-2 text-[15px] font-semibold text-zinc-700 ring-1 ring-zinc-300 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
         >
           ✕ Close
@@ -83,36 +83,28 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
         <div className="grid grid-cols-2 gap-4">
           <RunColumn
             {...props}
-            title="Current plan · p-throughput@1"
-            subtitle="Security goal v1: throughput"
+            title="Current plan: oldest tickets first"
+            subtitle="Security's current target: close as many tickets as possible, oldest first"
             run={shownBaseline}
             comparable={!!baseline}
-            emptyText={
-              <>
-                No comparable baseline run yet. Run <Mono>{BASELINE_CMD}</Mono> (fresh Sparta world).
-              </>
-            }
+            emptyText={NOT_RUN}
           />
           <RunColumn
             {...props}
-            title="Candidate · p-beta@1"
-            subtitle="proposed beta-first, protects P0"
+            title="New plan: beta issues first"
+            subtitle="Proposed: handle the beta customer's issue first and leave the critical security ticket alone"
             run={candidate}
             comparable
-            emptyText={
-              <>
-                No candidate run yet. Run <Mono>{CANDIDATE_CMD}</Mono> (fresh Sparta world).
-              </>
-            }
+            emptyText={NOT_RUN}
           />
         </div>
 
         <InterruptionRow run={interruption} {...props} />
 
         <div className="rounded-xl bg-amber-50 px-4 py-3 text-[15px] leading-relaxed text-amber-950 ring-1 ring-amber-300">
-          <span className="font-bold">Assumptions. </span>
-          Synthetic ticket operations only. Tests one ticket-triage behavior, not company strategy, staffing, calendar, release launch or ROI. Evidence is unsigned; reproduce
-          with the README command.
+          <span className="font-bold">What this test covers. </span>
+          This is a practice test on sample tickets. It checks how tickets get handled — it doesn&apos;t predict the launch or any business result. These results aren&apos;t
+          signed, but anyone can re-run them with the command in the README.
         </div>
       </div>
 
@@ -120,13 +112,13 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
         <p className="text-[14px] text-zinc-600">
           {ctaReason ??
             (candidatePassed
-              ? `Attaches ${candidate!.plan_id}@${candidate!.plan_version} and ${[baseline, candidate, interruption].filter(Boolean).length} run reference(s).`
-              : "Candidate did not pass in Sparta. Attaching marks the proposal as untested.")}
+              ? `Adds the tested new plan and ${[baseline, candidate, interruption].filter(Boolean).length} test run(s) to your proposal.`
+              : "The new plan didn't pass its practice test. Adding it marks the proposal as not tested.")}
         </p>
         <div className="flex shrink-0 items-center gap-2">
-          {!candidatePassed && candidate && isProduct && <Badge tone="amber">UNTESTED</Badge>}
+          {!candidatePassed && candidate && isProduct && <Badge tone="amber">Not tested</Badge>}
           <Button onClick={attach} disabled={!!ctaReason}>
-            {candidate && !candidatePassed ? "Attach (UNTESTED: candidate did not pass)" : "Attach tested plan to proposal"}
+            {candidate && !candidatePassed ? "Add anyway (not tested: the new plan didn't pass)" : "Add test results to the proposal"}
           </Button>
         </div>
       </footer>
@@ -135,32 +127,13 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
 }
 
 function ComparabilityStrip({ baseline, candidate }: { baseline?: SimulationRun; candidate?: SimulationRun }) {
-  const rows = (
-    <div className="mt-2 grid grid-cols-[110px_1fr_1fr] gap-x-3 gap-y-1 font-mono text-[13px]">
-      <span className="al-lbl"> </span>
-      <span className="al-lbl">baseline</span>
-      <span className="al-lbl">candidate</span>
-      {COMPARE_FIELDS.map((f) => {
-        const differs = baseline && candidate && baseline[f.key] !== candidate[f.key];
-        return (
-          <div key={f.key} className="contents">
-            <span className="font-sans text-[14px] text-zinc-600">{f.label}</span>
-            <span className={differs ? "font-semibold text-amber-900" : ""}>{baseline?.[f.key] ?? "—"}</span>
-            <span className={differs ? "font-semibold text-amber-900" : ""}>{candidate?.[f.key] ?? "—"}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-
   if (!baseline || !candidate) {
-    const missing = [!baseline && "baseline (p-throughput@1)", !candidate && "candidate (p-beta@1)"].filter(Boolean).join(" and ");
+    const missing = [!baseline && "the current plan", !candidate && "the new plan"].filter(Boolean).join(" and ");
     return (
       <div className="rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-300">
         <div className="flex items-center gap-2 text-[16px] font-semibold text-amber-950">
-          <Badge tone="amber">Comparison incomplete</Badge> Missing {missing} run.
+          <Badge tone="amber">Can&apos;t compare yet</Badge> No test run yet for {missing}.
         </div>
-        {rows}
       </div>
     );
   }
@@ -169,35 +142,33 @@ function ComparabilityStrip({ baseline, candidate }: { baseline?: SimulationRun;
     return (
       <div className="rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-300">
         <div className="flex items-center gap-2 text-[16px] font-semibold text-amber-950">
-          <Badge tone="amber">Not comparable</Badge> {diffs.join(", ")} differ{diffs.length === 1 ? "s" : ""} between baseline and candidate.
+          <Badge tone="amber">Not a fair comparison</Badge> The {diffs.join(", ")} differ between the two test runs, so the plan isn&apos;t the only difference.
         </div>
-        {rows}
       </div>
     );
   }
   return (
     <div className="rounded-xl bg-white px-4 py-3 ring-1 ring-zinc-300">
-      <div className="text-[16px] font-semibold text-zinc-900">Same mission · same seed · same checks ✓</div>
-      {rows}
+      <div className="text-[16px] font-semibold text-zinc-900">Same practice tickets, same pass/fail checks — only the plan differs ✓</div>
     </div>
   );
 }
 
 function RunColumn(
-  props: ViewProps & { title: string; subtitle: string; run?: SimulationRun; comparable: boolean; emptyText: ReactNode },
+  props: ViewProps & { title: string; subtitle: string; run?: SimulationRun; comparable: boolean; emptyText: string },
 ) {
   const { run, s } = props;
   return (
     <section className="flex min-w-0 flex-col rounded-xl bg-white ring-1 ring-zinc-200" aria-label={props.title}>
       <div className="border-b border-zinc-200 px-4 py-3">
-        <h3 className="font-mono text-[15px] font-bold">{props.title}</h3>
-        <p className="text-[14px] text-zinc-600">({props.subtitle})</p>
+        <h3 className="text-[16px] font-bold">{props.title}</h3>
+        <p className="text-[14px] text-zinc-600">{props.subtitle}</p>
       </div>
       {!run ? (
         <div className="p-4 text-[15px] leading-relaxed text-zinc-700">
-          <Badge tone="amber">NO RUN</Badge>
+          <Badge tone="amber">Not run yet</Badge>
           <p className="mt-2">{props.emptyText}</p>
-          <p className="mt-2 text-[14px] text-zinc-500">Results appear here automatically once the evidence file is ingested. Nothing is shown until a real run exists.</p>
+          <p className="mt-2 text-[14px] text-zinc-500">Results show up here on their own once the test finishes. Nothing is shown until a real test has run.</p>
         </div>
       ) : (
         <RunBody {...props} run={run} s={s} />
@@ -220,41 +191,35 @@ function RunBody(props: ViewProps & { run: SimulationRun; comparable: boolean })
     <div className="flex flex-1 flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <StateBadge state={run.verdict} />
-        <span className="text-[14px] text-zinc-600">
-          exit <span className="font-mono text-zinc-900">{run.exit_code}</span>
-        </span>
-        <span className="text-[14px] text-zinc-600">
-          plan <span className="font-mono text-zinc-900">{run.plan_hash.slice(0, 12) || "—"}</span>
-        </span>
-        {!props.comparable && <Badge tone="amber">not comparable</Badge>}
-        {planDrift && <Badge tone="amber">plan changed since run: STALE</Badge>}
+        {!props.comparable && <Badge tone="amber">Not a fair comparison</Badge>}
+        {planDrift && <Badge tone="amber">Needs a new test: the plan changed after this run</Badge>}
       </div>
 
       <div className="rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200">
-        <div className="mb-1 al-lbl">Shared case · ticket 4 (beta incident)</div>
+        <div className="mb-1 al-lbl">The beta customer&apos;s issue (ticket #4)</div>
         <p className="mb-2 text-[15px]">
           {beta ? (
             <>
-              Changed: <span className="font-mono text-[14px]">{beta.fields.length ? beta.fields.join(", ") : "no tracked field diff"}</span>
+              What the agent changed: <span>{beta.fields.length ? fieldWords(beta.fields) : "nothing we track"}</span>
             </>
           ) : (
-            <span className="font-semibold text-zinc-700">Not touched by the agent.</span>
+            <span className="font-semibold text-zinc-700">The agent didn&apos;t touch this ticket.</span>
           )}
         </p>
-        <CheckList checks={kr2} empty="No KR2 checks in this evidence." />
+        <CheckList checks={kr2} empty="No checks for the CEO's new requirement in this test run." />
       </div>
 
       <div className="rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200">
-        <div className="mb-1 al-lbl">Protected P0 · ticket 1 (security incident)</div>
+        <div className="mb-1 al-lbl">The critical security ticket (#1) · off-limits</div>
         <p className="text-[15px]">
           {p0Ok === undefined ? (
-            <span className="text-amber-800">Not graded in this evidence.</span>
+            <span className="text-amber-800">Not checked in this test run.</span>
           ) : p0Ok ? (
             <span>
-              <span aria-hidden className="font-bold text-emerald-700">✓ </span>Unchanged, private note intact.
+              <span aria-hidden className="font-bold text-emerald-700">✓ </span>Left alone, as required. Its private note for engineers is intact.
             </span>
           ) : (
-            <span className="font-semibold text-red-800">✕ Modified: protected P0 was touched.</span>
+            <span className="font-semibold text-red-800">✕ Changed: the agent touched the critical security ticket.</span>
           )}
         </p>
         {p0Check && <p className="mt-1 text-[13px] text-zinc-500">{p0Check.label}</p>}
@@ -270,9 +235,8 @@ function RunBody(props: ViewProps & { run: SimulationRun; comparable: boolean })
             props.go("evidence");
           }}
         >
-          Open evidence
+          See full results in Evidence
         </Button>
-        <span className="ml-2 font-mono text-[12px] text-zinc-500">{run.id}</span>
       </div>
     </div>
   );
@@ -291,7 +255,7 @@ function AgentReport({ text }: { text: string }) {
 
   return (
     <div className="mb-2 rounded-lg bg-zinc-50 px-3 py-2 text-[14px] ring-1 ring-zinc-200">
-      <div className="al-lbl">Agent&apos;s own report (a claim, not a grade)</div>
+      <div className="al-lbl">What the AI agent says it did (its own words — not checked)</div>
       <p ref={ref} id={id} className={`mt-1 text-zinc-800 ${open ? "" : "line-clamp-3"}`}>
         {text}
       </p>
@@ -319,53 +283,53 @@ function Timeline({ run }: { run: SimulationRun }) {
 
   return (
     <div>
-      <div className="mb-1 al-lbl">Execution timeline</div>
+      <div className="mb-1 al-lbl">What the AI agent did, step by step</div>
       {ev?.status === "ready" && ev.data.trace?.reply ? <AgentReport text={String(ev.data.trace.reply)} /> : null}
-      <ol className="max-h-80 overflow-y-auto rounded-lg ring-1 ring-zinc-200" tabIndex={0} aria-label="Execution timeline">
+      <ol className="max-h-80 overflow-y-auto rounded-lg ring-1 ring-zinc-200" tabIndex={0} aria-label="What the AI agent did, step by step">
         {!ev || ev.status === "loading" ? (
           <li className="px-3 py-2 text-[14px] text-zinc-500" role="status">
-            Loading agent trace…
+            Loading the agent&apos;s steps…
           </li>
         ) : ev.status === "error" ? (
           <li className="px-3 py-2 text-[14px] text-amber-800" role="alert">
-            Agent trace unavailable: {ev.error}
+            Couldn&apos;t load the agent&apos;s steps: {ev.error}
           </li>
         ) : planSteps.length === 0 ? (
           <li className="flex gap-2 border-b border-zinc-100 bg-zinc-50 px-3 py-2 text-[14px]">
-            <span className="w-[120px] shrink-0 text-zinc-500">no plan text</span>
+            <span className="w-[120px] shrink-0 text-zinc-500">no written plan</span>
             <span className="min-w-0 italic text-zinc-500">
-              Ran under team plan <code className="font-mono text-[13px] not-italic">{run.plan_id}@{run.plan_version}</code>. The model called tools without narrating a plan.
+              The agent followed the team&apos;s plan but didn&apos;t write out its own steps first — it went straight to working on the tickets.
             </span>
           </li>
         ) : (
           planSteps.map((t, i) => (
             <li key={`plan-${i}`} className="flex gap-2 border-b border-zinc-100 px-3 py-2 text-[14px]">
-              <span className="w-[120px] shrink-0 font-semibold text-violet-800">agent plan</span>
+              <span className="w-[120px] shrink-0 font-semibold text-violet-800">agent&apos;s plan</span>
               <span className="min-w-0 text-zinc-700" title={t}>
                 {t.length > 180 ? `${t.slice(0, 180)}…` : t}
               </span>
             </li>
           ))
         )}
-        {run.trace.length === 0 && <li className="px-3 py-2 text-[14px] text-zinc-500">No connector requests recorded.</li>}
+        {run.trace.length === 0 && <li className="px-3 py-2 text-[14px] text-zinc-500">The agent made no requests to the ticket system.</li>}
         {run.trace.map((r) => {
           const k = rowLabel(r);
           const t = ticketOf(r.path);
-          const hitsP0 = t === "1" && k.label === "scoped mutation";
+          const hitsP0 = t === "1" && k.label === "changed ticket";
           const color = k.tone === "amber" ? "text-amber-800" : k.tone === "violet" ? "text-violet-800" : "text-zinc-600";
           return (
             <li key={r.seq} className={`flex gap-2 border-b border-zinc-100 px-3 py-1.5 text-[14px] ${r.injected ? "bg-amber-50" : hitsP0 ? "bg-red-50" : ""}`}>
               <span className={`w-[120px] shrink-0 font-semibold ${hitsP0 ? "text-red-800" : color}`}>{k.label}</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[13px]" title={`${r.method} ${r.path}${t && TICKET_LABEL[t] ? ` · ${TICKET_LABEL[t]}` : ""}`}>
-                {r.method} {r.path}
+              <span className="min-w-0 flex-1 truncate">
+                {t ? `Ticket #${t}${TICKET_LABEL[t] ? ` · ${TICKET_LABEL[t]}` : ""}` : "the ticket list"}
               </span>
-              <span className={`shrink-0 font-mono text-[13px] ${r.status >= 400 ? "text-amber-800" : "text-zinc-500"}`}>{r.status}</span>
+              {r.status >= 400 && <span className="shrink-0 text-[13px] text-amber-800">didn&apos;t go through</span>}
             </li>
           );
         })}
         <li className="bg-zinc-50 px-3 py-2">
           <div className="mb-1 flex items-center gap-2 text-[14px] font-semibold">
-            Independent grader verdict <StateBadge state={run.verdict} />
+            Result from the independent checks <StateBadge state={run.verdict} />
           </div>
           <CheckList checks={run.checks} />
         </li>
@@ -378,22 +342,23 @@ function InterruptionRow({ run, select, go }: ViewProps & { run?: SimulationRun;
   if (!run) {
     return (
       <div className="rounded-xl bg-white px-4 py-3 text-[15px] text-zinc-700 ring-1 ring-zinc-200">
-        <span className="font-semibold">Interruption scenario (injected connector failure):</span> no run yet. Optional: <Mono>{INTERRUPT_CMD}</Mono>
+        <span className="font-semibold">Outage test:</span> not run yet. This optional test makes the ticket system fail mid-run to check that the agent retries
+        safely and doesn&apos;t guess. {NOT_RUN}
       </div>
     );
   }
   const injected = run.trace.filter((r) => r.injected).length;
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl bg-white px-4 py-3 text-[15px] ring-1 ring-zinc-200">
-      <span className="font-semibold">Interruption scenario (injected connector failure):</span>
+      <span className="font-semibold">Outage test:</span>
       <StateBadge state={run.verdict} />
       <span>
-        exit <span className="font-mono">{run.exit_code}</span>
+        Simulated failures <span className="font-mono">{injected}</span>
       </span>
-      <span>
-        injected requests <span className="font-mono">{injected}</span>
+      <span className="text-[14px] text-zinc-600">
+        The ticket system failed mid-run on purpose. The agent may retry a failed request up to 3 times without doing anything twice; if it still fails, it stops
+        and reports the problem instead of guessing.
       </span>
-      <span className="text-[14px] text-zinc-600">Bounded retry: transient connector errors (429/5xx) get at most 3 attempts with the same idempotency key; then the agent stops with a nonzero exit instead of guessing.</span>
       <Button
         kind="ghost"
         onClick={() => {
@@ -401,7 +366,7 @@ function InterruptionRow({ run, select, go }: ViewProps & { run?: SimulationRun;
           go("evidence");
         }}
       >
-        Open evidence
+        See full results in Evidence
       </Button>
     </div>
   );

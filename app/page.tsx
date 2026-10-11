@@ -29,9 +29,9 @@ const NAV_LEADERSHIP: { id: View; label: string; icon: string }[] = [
   { id: "evidence", label: "Evidence", icon: "▤" },
 ];
 const ROLES = [
-  { id: "leadership", name: "CEO / Leadership", blurb: "Owns company goals" },
+  { id: "leadership", name: "CEO / Leadership", blurb: "Sets the company goal" },
   { id: "product", name: "Product Director", blurb: "Owns the beta launch" },
-  { id: "security", name: "Alex / Security Lead", blurb: "Owns incident triage" },
+  { id: "security", name: "Alex / Security Lead", blurb: "Owns how customer issues get handled" },
 ] as const;
 type Role = (typeof ROLES)[number]["id"];
 
@@ -60,7 +60,7 @@ function Login({ onDone }: { onDone: () => void }) {
           <span className="font-display text-[34px] leading-none">Align</span>
           <span className="al-lbl text-violet-700">by Liminal</span>
         </div>
-        <p className="mb-6 text-[16px] text-zinc-600">Northstar Security. Sign in as the owner of your goals.</p>
+        <p className="mb-6 text-[16px] text-zinc-600">Northstar Security, a made-up company for this demo. Choose who you are; each person signs in separately.</p>
         <fieldset className="mb-4">
           <legend className="al-lbl mb-2">I am</legend>
           <div className="grid grid-cols-3 gap-2">
@@ -133,7 +133,7 @@ export default function Page() {
   if (!state)
     return (
       <main className="p-10 text-[16px]">
-        {loadError ? <span className="text-red-700">Could not load state: {loadError}</span> : <span className="text-zinc-500">Loading workspace…</span>}
+        {loadError ? <span className="text-red-700">Couldn’t load the workspace: {loadError}</span> : <span className="text-zinc-500">Loading workspace…</span>}
       </main>
     );
 
@@ -204,11 +204,10 @@ export default function Page() {
           ))}
         </nav>
         <div className="mt-auto border-t border-zinc-200 p-4 text-[14px] text-zinc-500">
-          <div className="text-[15px] font-semibold text-zinc-900">{me.name}</div>
-          <div className="mb-3">Session {me.sid}</div>
+          <div className="mb-3 text-[15px] font-semibold text-zinc-900">{me.name}</div>
           <div className="flex flex-wrap gap-2">
             <Button kind="secondary" onClick={signOut}>Sign&nbsp;out</Button>
-            {ops && <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>{confirmReset ? "Confirm reset" : "Reset workspace"}</Button>}
+            {ops && <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>{confirmReset ? "Click again to reset" : "Start the demo over"}</Button>}
           </div>
         </div>
       </aside>
@@ -227,12 +226,12 @@ export default function Page() {
             }}
             className="block h-9 min-w-0 truncate rounded-full border border-amber-700 bg-amber-50 px-3 font-mono text-[13px] leading-[34px] tracking-[0.04em] text-amber-700 hover:brightness-125"
           >
-            ▲ Company goal {lastPush.version} pushed by CEO / Leadership at {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · 1 dependency unconfirmed
+            ▲ New company goal ({lastPush.version}) from the CEO at {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · Product and Security haven’t agreed yet
           </button>
         ) : lastPush && rel?.status === "ACCEPTED" ? (
-          <Badge tone="neutral">Company goal {lastPush.version} · dependency agreed by owners</Badge>
+          <Badge tone="neutral">Company goal {lastPush.version} · Product and Security agreed</Badge>
         ) : lastPush ? (
-          <Badge tone="neutral">Company goal {lastPush.version} pushed {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Badge>
+          <Badge tone="neutral">Company goal {lastPush.version} sent {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Badge>
         ) : null}
         <div className="ml-auto flex shrink-0 items-center gap-2.5 whitespace-nowrap text-[14px] text-zinc-500">
           Signed in as
@@ -244,12 +243,12 @@ export default function Page() {
       <main className="relative overflow-y-auto p-6">
         {loadError && (
           <div role="status" className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-[15px] font-medium text-amber-900 ring-1 ring-amber-300">
-            ▲ Connection to the Align server lost ({loadError}). Showing the last data received; retrying every 1.5 s.
+            ▲ Lost connection to the server ({loadError}). Showing the last update; reconnecting automatically.
           </div>
         )}
         {state.ingest_errors && state.ingest_errors.length > 0 && (
           <div role="status" className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-[15px] text-amber-900 ring-1 ring-amber-300">
-            ▲ Some Sparta evidence could not be read and was not ingested: {state.ingest_errors.join("; ")}
+            ▲ Some practice-test results couldn’t be read and aren’t shown: {state.ingest_errors.join("; ")}
           </div>
         )}
         {error && (

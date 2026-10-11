@@ -11,6 +11,9 @@ export const isSel = (sel: Selection | null, kind: Selection["kind"], id?: strin
 export const workFor = (s: StateView, g?: Goal): WorkItem[] =>
   g ? s.work_items.filter((w) => w.goal_id === g.id).sort((a, b) => a.priority_rank - b.priority_rank) : [];
 export const depRelation = (s: StateView) => s.relations.find((r) => r.id === "r-product-security");
+/** Short team name for prose ("Security's goal"), falling back to the owner label. */
+export const teamName = (g: Goal) =>
+  g.owner_id === "security" ? "Security" : g.owner_id === "product" ? "Product" : (OWNER_LABEL[g.owner_id] ?? g.owner_name);
 
 export function VersionTag({ s, g }: { s: StateView; g: Goal }) {
   const prior = priorVersion(s, g);
@@ -19,7 +22,7 @@ export function VersionTag({ s, g }: { s: StateView; g: Goal }) {
       <Badge tone="neutral" icon={false}>
         {prior.version} → {g.version}
       </Badge>
-      <Badge tone="violet">updated</Badge>
+      <Badge tone="violet">Updated</Badge>
     </span>
   ) : (
     <Badge tone="neutral" icon={false}>
@@ -29,13 +32,13 @@ export function VersionTag({ s, g }: { s: StateView; g: Goal }) {
 }
 
 export function EditTag({ g, me }: { g: Goal; me: ViewProps["me"] }) {
-  return g.owner_id === me.actor ? <Badge tone="blue">Yours · editable</Badge> : <Badge tone="neutral">Shared · read-only</Badge>;
+  return g.owner_id === me.actor ? <Badge tone="blue">Your goal · you can edit</Badge> : <Badge tone="neutral">{teamName(g)}&apos;s goal · view only</Badge>;
 }
 
 export function MissingGoal({ owner }: { owner: string }) {
   return (
     <div className="rounded-xl border-2 border-dashed border-zinc-300 p-5 text-[16px] text-zinc-500">
-      No current goal is shared for {OWNER_LABEL[owner] ?? owner}.
+      No current goal has been shared for {OWNER_LABEL[owner] ?? owner}.
     </div>
   );
 }
@@ -66,12 +69,11 @@ function Column({ props, owner }: { props: ViewProps; owner: "product" | "securi
         <ul className="space-y-1.5">
           {g.measures.map((m) => (
             <li key={m.id} className="text-[15px] text-zinc-800">
-              <span className="mr-1.5 font-mono text-[13px] text-zinc-500">{m.id}</span>
               {m.text}
-              {m.inherited_from && <span className="ml-1.5 text-[13px] text-zinc-500">(from CEO {m.inherited_from})</span>}
+              {m.inherited_from && <span className="ml-1.5 text-[13px] text-zinc-500">(from the CEO&apos;s goal)</span>}
               {m.id === "S-M1" && unresolved && (
                 <div className="mt-1">
-                  <Badge tone="amber">conflicts with CEO KR2</Badge>
+                  <Badge tone="amber">Clashes with the CEO&apos;s new requirement</Badge>
                 </div>
               )}
             </li>
@@ -97,7 +99,7 @@ function Column({ props, owner }: { props: ViewProps; owner: "product" | "securi
             ))}
           </ol>
         ) : (
-          <p className="text-[15px] text-zinc-500">No work items linked to this goal.</p>
+          <p className="text-[15px] text-zinc-500">No work linked to this goal yet.</p>
         )}
       </div>
 
@@ -123,7 +125,7 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
   const accepted = s.acceptances.at(-1);
   return (
     <div className="flex flex-col gap-4">
-      {!embedded && <h1 className="font-display text-[30px] font-normal leading-[1.1]">Team lens</h1>}
+      {!embedded && <h1 className="font-display text-[30px] font-normal leading-[1.1]">Team view</h1>}
 
       {ceo ? (
         <button
@@ -134,17 +136,17 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
           className={`rounded-xl bg-zinc-50 p-4 text-left ring-1 ring-zinc-300 ${isSel(selection, "goal", ceo.id) ? RING : ""}`}
         >
           <div className="mb-1 flex flex-wrap items-center gap-2 text-[14px]">
-            <span className="font-semibold text-zinc-600">Shared CEO objective</span>
-            <Badge tone="neutral">Inherited · read-only</Badge>
+            <span className="font-semibold text-zinc-600">The CEO&apos;s company goal</span>
+            <Badge tone="neutral">Set by CEO · view only</Badge>
             <Badge tone="neutral" icon={false}>{ceo.version}</Badge>
           </div>
           <p className="text-[17px] font-semibold text-zinc-900">{ceo.objective}</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {ceo.measures.map((m) =>
+            {ceo.measures.map((m, i) =>
               m.id === "KR2" && ceo.changed ? (
-                <Badge key={m.id} tone="amber">KR2 changed today</Badge>
+                <Badge key={m.id} tone="amber">New requirement, added today</Badge>
               ) : (
-                <Badge key={m.id} tone="neutral" icon={false}>{m.id}</Badge>
+                <Badge key={m.id} tone="neutral" icon={false}>CEO requirement {i + 1}</Badge>
               ),
             )}
           </div>
@@ -161,26 +163,26 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
       <div className="rounded-xl bg-white p-4 ring-1 ring-zinc-200">
         <h4 className="mb-2 al-lbl">What changed</h4>
         <p className="text-[16px] text-zinc-800">
-          <Badge tone="amber">New</Badge> CEO KR2 requires beta-launch incidents triaged per launch-readiness criteria. Security&apos;s shared measure S-M1
-          optimizes generic throughput.
+          <Badge tone="amber">New</Badge> The CEO now requires issues from beta customers to be handled in time for the beta launch. Security&apos;s
+          current target is speed: close as many tickets as possible, oldest first, so beta issues wait in line.
         </p>
         {accepted && (
           <p className="mt-2 text-[16px] text-zinc-800">
-            <Badge tone="neutral">Resolved</Badge> Security goal {accepted.accepted_version} accepted by its owner; Product commitment acknowledged.
+            <Badge tone="neutral">Resolved</Badge> Security approved its updated goal ({accepted.accepted_version}), and Product accepted Security&apos;s changes.
           </p>
         )}
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button onClick={() => openDrawer("brief")}>Compare ways forward</Button>
+          <Button onClick={() => openDrawer("brief")}>See what to do next</Button>
           {me.actor === "product" ? (
             <Button kind="secondary" onClick={() => go("proposals")}>
-              Ask peer / propose edit
+              Propose a change to Security&apos;s goal
             </Button>
           ) : (
             <>
               <Button kind="secondary" disabled>
-                Ask peer / propose edit
+                Propose a change to Security&apos;s goal
               </Button>
-              <span className="text-[14px] text-zinc-500">Proposals to your goal arrive in Proposals</span>
+              <span className="text-[14px] text-zinc-500">Changes Product proposes to your goal show up under Proposals.</span>
             </>
           )}
         </div>

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentSession, Goal, RegistryEntry, SessionMapping, StateView } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { api } from "./useAlign";
-import { Badge, Button, Mono, fmtTime } from "./ui";
+import { Badge, Button, fmtTime } from "./ui";
 
 const TEAM: Record<string, string> = { ceo: "Company", product: "Product", security: "Security" };
 const OWNER_ACTOR: Record<string, string> = { ceo: "leadership", product: "product", security: "security" };
@@ -25,7 +25,7 @@ function fallbackRegistry(s: StateView): RegistryEntry[] {
     .filter((g) => !superseded.has(g.id))
     .sort((a, b) => order[a.owner_id] - order[b.owner_id])
     .map((g) => ({ key: g.id, goal_id: g.id, version: g.version, label: g.objective, owner: g.owner_id, team: TEAM[g.owner_id], org: s.company }));
-  entries.push({ key: "none", goal_id: null, version: null, label: "Does not clearly serve any accepted goal", owner: null, team: "Unassigned", org: s.company });
+  entries.push({ key: "none", goal_id: null, version: null, label: "Does not clearly serve any accepted goal", owner: null, team: "Not linked to a goal", org: s.company });
   return entries;
 }
 
@@ -40,11 +40,11 @@ function ago(iso: string, now: number) {
 }
 
 function originLabel(o: AgentSession["origin"]) {
-  if (o.kind === "linear") return `Linear ${o.ref ?? ""}`.trim();
-  if (o.kind === "github") return o.ref ? `GitHub ${o.ref}` : "GitHub";
+  if (o.kind === "linear") return "Linear";
+  if (o.kind === "github") return "GitHub";
   if (o.kind === "slack") return "Slack";
-  if (o.kind === "align-push") return "Org push";
-  return "Ad hoc";
+  if (o.kind === "align-push") return "Company goal update";
+  return "Started directly";
 }
 
 const pct = (p: number) => `${Math.round(p * 100)}%`;
@@ -65,9 +65,9 @@ function MatchLine({ m, ctx }: { m: SessionMapping; ctx: Ctx }) {
     <div className="mt-2">
       <div className="flex items-baseline justify-between text-[14px]">
         <span className="font-semibold text-violet-800">
-          Jev · {ctx.teamOf(m.choice)} {pct(m.confidence)}
+          Best guess: {ctx.teamOf(m.choice)} · {pct(m.confidence)} sure
         </span>
-        {next && <span className="text-zinc-500">next: {ctx.teamOf(next[0])} {pct(next[1])}</span>}
+        {next && <span className="text-zinc-500">runner-up: {ctx.teamOf(next[0])} {pct(next[1])}</span>}
       </div>
       <div className="mt-1 h-1.5 rounded-full bg-zinc-100">
         <div className="h-1.5 rounded-full bg-violet-600" style={{ width: pct(Math.min(1, Math.max(0, m.confidence))) }} />
@@ -80,18 +80,20 @@ function StatusBadges({ m, ctx }: { m: SessionMapping | undefined; ctx: Ctx }) {
   if (!m || m.state === "MAPPER_UNAVAILABLE")
     return (
       <div>
-        <Badge tone="amber">Not matched</Badge>
-        {m?.error && <p className="mt-1 text-[13px] text-zinc-500">{m.error}</p>}
+        <Badge tone="amber">Not linked yet</Badge>
+        {m?.state === "MAPPER_UNAVAILABLE" && (
+          <p className="mt-1 text-[13px] text-zinc-500">The goal-linking service couldn&apos;t be reached, so this session hasn&apos;t been linked to a goal yet.</p>
+        )}
       </div>
     );
-  const owner = ctx.goalOf(m.choice)?.owner_name ?? (m.confirmed_by ? ACTOR_NAME[m.confirmed_by] : "owner");
+  const owner = ctx.goalOf(m.choice)?.owner_name ?? (m.confirmed_by ? ACTOR_NAME[m.confirmed_by] : "the goal owner");
   return (
     <div className="flex flex-wrap gap-1.5">
-      {m.state === "PROPOSED" && <Badge tone="violet">Suggested</Badge>}
+      {m.state === "PROPOSED" && <Badge tone="violet">Suggested link · not confirmed</Badge>}
       {m.state === "CONFIRMED" && <Badge tone="neutral">Confirmed by {owner}</Badge>}
-      {m.state === "REJECTED" && <Badge tone="neutral">Rejected by owner</Badge>}
-      {m.state === "PENDING" && <Badge tone="amber">Re-matching…</Badge>}
-      {m.conflict?.flagged && <Badge tone="red">Conflicts with a protected goal · {pct(m.conflict.probability)}</Badge>}
+      {m.state === "REJECTED" && <Badge tone="neutral">Declined by goal owner</Badge>}
+      {m.state === "PENDING" && <Badge tone="amber">Re-checking…</Badge>}
+      {m.conflict?.flagged && <Badge tone="red">May work against an off-limits goal · {pct(m.conflict.probability)} likely</Badge>}
     </div>
   );
 }
@@ -101,7 +103,7 @@ function Detail({ session, m, ctx }: { session: AgentSession; m: SessionMapping 
   return (
     <div className="space-y-3 border-t border-zinc-200 px-4 py-3">
       <div>
-        <div className="mb-1 al-lbl">Prompts</div>
+        <div className="mb-1 al-lbl">What the person asked the AI</div>
         <ol className="space-y-1">
           {session.prompts.map((p, i) => (
             <li key={i} className="text-[14px] text-zinc-800">
@@ -112,15 +114,11 @@ function Detail({ session, m, ctx }: { session: AgentSession; m: SessionMapping 
         </ol>
       </div>
       <div className={row}>
-        <span className="text-zinc-500">Files</span>
-        <span className="break-all font-mono text-[13px] text-zinc-700">{session.files.join(", ") || "—"}</span>
+        <span className="text-zinc-500">Files changed</span>
+        <span className="text-zinc-700">{session.files.length}</span>
       </div>
       <div className={row}>
-        <span className="text-zinc-500">Tools</span>
-        <span className="text-zinc-700">{[...new Set(session.tools)].join(", ") || "—"}</span>
-      </div>
-      <div className={row}>
-        <span className="text-zinc-500">Origin</span>
+        <span className="text-zinc-500">Started from</span>
         <span className="text-zinc-700">{originLabel(session.origin)}</span>
       </div>
       {m && (
@@ -131,7 +129,6 @@ function Detail({ session, m, ctx }: { session: AgentSession; m: SessionMapping 
                 .sort((a, b) => b[1] - a[1])
                 .map(([k, p]) => (
                   <tr key={k} className={k === m.choice ? "font-semibold text-violet-800" : "text-zinc-700"}>
-                    <td className="py-0.5 pr-2 font-mono text-[12px] text-zinc-500">{k}</td>
                     <td className="py-0.5 pr-2">{ctx.teamOf(k)}</td>
                     <td className="py-0.5 text-right tabular-nums">{pct(p)}</td>
                   </tr>
@@ -139,11 +136,7 @@ function Detail({ session, m, ctx }: { session: AgentSession; m: SessionMapping 
             </tbody>
           </table>
           <div className={row}>
-            <span className="text-zinc-500">Model</span>
-            <span className="font-mono text-[13px] text-zinc-700">{m.model ?? "—"}</span>
-          </div>
-          <div className={row}>
-            <span className="text-zinc-500">Matched at</span>
+            <span className="text-zinc-500">Linked at</span>
             <span className="text-zinc-700">{fmtTime(m.mapped_at)}</span>
           </div>
         </>
@@ -170,18 +163,13 @@ function SessionCard({ session, m, ctx }: { session: AgentSession; m: SessionMap
             {originLabel(session.origin)}
           </Badge>
         </div>
-        <div className="mb-1.5 truncate">
-          <Mono>
-            {session.repo || session.cwd_name}@{session.branch || "—"}
-          </Mono>
-        </div>
         <p className="truncate text-[16px] text-zinc-900" title={last}>
-          {last || <span className="text-zinc-400">No prompt captured</span>}
+          {last || <span className="text-zinc-400">No request recorded</span>}
         </p>
         <div className="mt-1 flex gap-3 text-[13px] text-zinc-500">
-          <span>{session.files.length} files</span>
-          <span>{session.tools.length} tools</span>
-          <span className={when === "active" ? "font-semibold text-violet-700" : ""}>{when}</span>
+          <span>{session.files.length} files changed</span>
+          <span>{session.tools.length} tool uses</span>
+          <span className={when === "active" ? "font-semibold text-violet-700" : ""}>{when === "active" ? "Active now" : when}</span>
         </div>
         {m && m.state !== "MAPPER_UNAVAILABLE" && <MatchLine m={m} ctx={ctx} />}
         <div className="mt-2">
@@ -190,7 +178,7 @@ function SessionCard({ session, m, ctx }: { session: AgentSession; m: SessionMap
       </button>
       {canAct && (
         <div className="flex gap-2 border-t border-zinc-200 px-4 py-2.5">
-          <Button onClick={() => props.act(`${base}/confirm`)}>Confirm</Button>
+          <Button onClick={() => props.act(`${base}/confirm`)}>Confirm link</Button>
           <Button kind="secondary" onClick={() => props.act(`${base}/reject`)}>
             Not this goal
           </Button>
@@ -209,22 +197,22 @@ function Lane({ entry, items, ctx }: { entry: RegistryEntry; items: { session: A
     <div className="flex min-w-0 flex-1 basis-0 flex-col rounded-2xl bg-zinc-50 p-3 ring-1 ring-zinc-200">
       <header className="mb-3 px-1">
         <div className="flex items-baseline justify-between gap-2">
-          <h3 className="text-[18px] font-bold text-zinc-900">{entry.team}</h3>
+          <h3 className="text-[18px] font-bold text-zinc-900">{entry.key === "none" ? "Not linked to a goal" : entry.team}</h3>
           <span className="text-[13px] text-zinc-500">
-            {entry.version ?? ""} · {items.length}
+            {entry.version ? `${entry.version} · ` : ""}{items.length} {items.length === 1 ? "session" : "sessions"}
           </span>
         </div>
-        <p className="line-clamp-2 min-h-[2.75em] text-[15px] leading-snug text-zinc-700">{goal?.objective ?? "Work that does not clearly serve any ratified goal"}</p>
-        {goal && <div className="mt-0.5 text-[13px] text-zinc-500">Owner: {goal.owner_name}</div>}
+        <p className="line-clamp-2 min-h-[2.75em] text-[15px] leading-snug text-zinc-700">{goal?.objective ?? "Work that doesn't clearly serve any approved goal"}</p>
+        {goal && <div className="mt-0.5 text-[13px] text-zinc-500">Goal owner: {goal.owner_name}</div>}
       </header>
       <div className="space-y-3">
         {shown.map(({ session, m }) => (
           <SessionCard key={session.id} session={session} m={m} ctx={ctx} />
         ))}
-        {!items.length && <p className="px-1 text-[14px] text-zinc-400">No sessions</p>}
+        {!items.length && <p className="px-1 text-[14px] text-zinc-400">No AI coding sessions here</p>}
         {items.length > LANE_MAX && (
           <button onClick={() => setAll((a) => !a)} className="w-full rounded-lg py-1.5 text-[14px] font-semibold text-violet-700 hover:bg-violet-50">
-            {all ? "Show fewer" : `+${items.length - LANE_MAX} more`}
+            {all ? "Show fewer" : `Show ${items.length - LANE_MAX} more`}
           </button>
         )}
       </div>
@@ -278,7 +266,7 @@ export function WorkMap(props: ViewProps) {
     props,
     now,
     goalOf: (key) => (key ? goalById.get(key) : undefined),
-    teamOf: (key) => registry.find((e) => e.key === key)?.team ?? TEAM[goalById.get(key ?? "")?.owner_id ?? ""] ?? "Unassigned",
+    teamOf: (key) => key === "none" ? "Not linked to a goal" : registry.find((e) => e.key === key)?.team ?? TEAM[goalById.get(key ?? "")?.owner_id ?? ""] ?? "Not linked to a goal",
   };
 
   const lanes = useMemo(() => {
@@ -305,35 +293,29 @@ export function WorkMap(props: ViewProps) {
 
   return (
     <div className="mx-auto max-w-[1600px]">
-      <h1 className="font-display text-[30px] font-normal leading-[1.1] text-zinc-900">Where agent work is going</h1>
+      <h1 className="font-display text-[30px] font-normal leading-[1.1] text-zinc-900">Where AI agent work is going</h1>
       <p className="mb-5 max-w-4xl text-[17px] text-zinc-600">
-        Claude Code and Codex sessions, captured automatically and matched to the goals your org has ratified. Matches are suggestions until the goal&apos;s owner confirms them.
+        AI coding sessions (Claude Code and Codex) are recorded automatically and linked to the approved goal each one seems to serve. Each link is only a guess until that goal&apos;s owner confirms it.
       </p>
 
       <div className={`mb-5 flex flex-wrap items-center gap-2 rounded-xl bg-white px-4 py-3 ring-1 transition ${flash ? "ring-2 ring-violet-500" : "ring-zinc-200"}`}>
         {registry.map((e) => (
           <span key={e.key} className="rounded-md bg-zinc-100 px-2.5 py-1 text-[15px] font-semibold text-zinc-800">
-            {e.team}
+            {e.key === "none" ? "Not linked to a goal" : e.team}
             {e.version ? ` ${e.version}` : ""}
           </span>
         ))}
-        <span className="ml-1 text-[14px] text-zinc-500">
-          registry <Mono>{version.slice(0, 7) || "—"}</Mono>
-        </span>
         {push && (
           <span className="text-[14px] text-zinc-600">
-            Company goal {push.version} pushed by CEO / Leadership at {fmtTime(push.pushed_at)}
+            Company goal {push.version} sent to every team by CEO / Leadership at {fmtTime(push.pushed_at)}
           </span>
         )}
-        {rematching && <span className="ml-auto text-[15px] font-semibold text-violet-700">Goals changed — re-matching sessions…</span>}
+        {rematching && <span className="ml-auto text-[15px] font-semibold text-violet-700">Goals changed — re-checking which goal each session serves…</span>}
       </div>
 
       {sessions.length === 0 ? (
         <div className="rounded-2xl bg-white p-10 text-center ring-1 ring-zinc-200">
-          <p className="mb-2 text-[18px] text-zinc-800">No agent sessions captured yet. Sessions in repos with Align capture enabled appear here automatically.</p>
-          <p className="text-[15px] text-zinc-500">
-            <Mono>node scripts/align-capture.mjs</Mono> is wired via <Mono>.claude/settings.json</Mono>.
-          </p>
+          <p className="text-[18px] text-zinc-800">No AI coding sessions yet. They show up here once session recording is turned on.</p>
         </div>
       ) : (
         <div className="flex gap-3 pb-4">

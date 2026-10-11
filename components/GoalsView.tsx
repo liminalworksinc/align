@@ -5,23 +5,23 @@ import type { ViewProps } from "./props";
 import { ProofStrip } from "./ProofStrip";
 import { comparablePair, currentGoal } from "./select";
 import { EditTag, MissingGoal, RING, TeamLens, VersionTag, depRelation, isSel, workFor } from "./TeamLens";
-import { Badge, Button, StateBadge } from "./ui";
+import { Badge, Button, STATE_LABEL, StateBadge } from "./ui";
 
 type Lens = "company" | "team" | "me";
+const LENS_LABEL: Record<Lens, string> = { company: "Company", team: "Teams", me: "My goal" };
 const LINE = "border-zinc-300";
 
 function MeasureRow({ m, changed, conflict }: { m: Measure; changed?: boolean; conflict?: boolean }) {
   return (
     <li className={`rounded-md px-2.5 py-1 text-[15px] ${changed ? "bg-amber-50 ring-1 ring-amber-300" : ""}`}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="font-mono text-[13px] font-semibold text-zinc-500">{m.id}</span>
         <span className="flex-1 text-zinc-900">{m.text}</span>
       </div>
       <div className="mt-1 flex flex-wrap gap-1.5 empty:hidden">
-        {changed && <Badge tone="amber">changed today</Badge>}
-        {conflict && <Badge tone="amber">conflicts with CEO KR2</Badge>}
-        {m.inherited_from && <Badge tone="neutral" icon={false}>from CEO {m.inherited_from}</Badge>}
-        {m.verifiable_by === "sparta" && <span className="text-[13px] text-zinc-500">Checkable in Sparta</span>}
+        {changed && <Badge tone="amber">Changed today</Badge>}
+        {conflict && <Badge tone="amber">Clashes with the CEO&apos;s new requirement</Badge>}
+        {m.inherited_from && <Badge tone="neutral" icon={false}>From the CEO&apos;s goal</Badge>}
+        {m.verifiable_by === "sparta" && <span className="text-[13px] text-zinc-500">Can be checked in a practice test</span>}
       </div>
     </li>
   );
@@ -39,7 +39,7 @@ function CeoCard({ props, g, only }: { props: ViewProps; g: Goal; only?: string 
     >
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <span className="text-[15px] font-bold text-zinc-600">{g.owner_name}</span>
-        <Badge tone="neutral">Inherited · read-only</Badge>
+        <Badge tone="neutral">Set by CEO · view only</Badge>
         <Badge tone="neutral" icon={false}>{g.version}</Badge>
       </div>
       <p className="mb-2 text-[19px] font-semibold leading-snug text-zinc-900">{g.objective}</p>
@@ -93,7 +93,7 @@ function TeamCard({ props, owner, allWork }: { props: ViewProps; owner: "product
             ))}
           </ol>
         ) : (
-          <p className="px-1 text-[15px] text-zinc-500">No linked work.</p>
+          <p className="px-1 text-[15px] text-zinc-500">No work linked to this goal yet.</p>
         )}
       </div>
     </article>
@@ -109,12 +109,12 @@ function DependencyButton({ props }: { props: ViewProps }) {
       <div className={`absolute inset-x-0 top-[3.25rem] border-t-2 ${open ? "border-dashed border-amber-400" : LINE}`} aria-hidden />
       <button
         onClick={() => props.select({ kind: "relation", id: rel.id })}
-        aria-label={`Dependency: ${rel.label}. Status ${rel.status}`}
+        aria-label={`Product needs Security: ${rel.label}. Status: ${STATE_LABEL[rel.status] ?? rel.status}`}
         className={`relative z-10 mx-2 flex flex-col items-center gap-1.5 rounded-lg px-2.5 py-2 text-center ${open ? "ring-1 ring-amber-300 [background:linear-gradient(var(--al-warn-bg),var(--al-warn-bg)),var(--al-surface)]" : "bg-white ring-1 ring-zinc-300"} hover:brightness-125 ${isSel(props.selection, "relation", rel.id) ? RING : ""}`}
       >
-        <span className="al-lbl">Product → Security</span>
+        <span className="al-lbl">Product needs Security</span>
         <span className="text-[14px] font-semibold leading-snug text-zinc-900">{rel.label}</span>
-        {rel.status === "ACCEPTED" ? <Badge tone="neutral">OWNER-ACCEPTED</Badge> : <StateBadge state={rel.status} />}
+        {rel.status === "ACCEPTED" ? <Badge tone="neutral">Agreed by Security</Badge> : <StateBadge state={rel.status} />}
       </button>
     </>
   );
@@ -133,7 +133,7 @@ function Leg({ side, label }: { side: "left" | "right"; label: string }) {
 
 /** Elbow connectors from the CEO card to both team cards, aligned to the team-row grid. */
 function InheritConnectors({ props }: { props: ViewProps }) {
-  const label = (id: string) => props.s.relations.find((r) => r.id === id)?.label ?? "inherits";
+  const label = (id: string) => props.s.relations.find((r) => r.id === id)?.label ?? "follows";
   return (
     <div className="relative grid h-12 grid-cols-[1fr_184px_1fr]" aria-hidden>
       <div className={`absolute left-1/2 top-0 h-5 border-l-2 ${LINE}`} />
@@ -152,8 +152,8 @@ function Banner({ props }: { props: ViewProps }) {
   if (acc)
     return (
       <div className="al-in flex items-center gap-3.5 rounded-xl border border-zinc-300 bg-white px-[18px] py-3 text-[17px] text-zinc-900">
-        <Badge tone="neutral">Ratified</Badge>
-        <span>Agreement ratified: Security goal {acc.accepted_version} accepted by its owner; Product commitment acknowledged.</span>
+        <Badge tone="neutral">Approved</Badge>
+        <span>Agreement reached: Security approved its updated goal ({acc.accepted_version}), and Product accepted Security&apos;s changes.</span>
       </div>
     );
   if (depRelation(s)?.status !== "UNKNOWN") return null;
@@ -164,20 +164,20 @@ function Banner({ props }: { props: ViewProps }) {
   return (
     <div className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-3.5 rounded-xl border border-zinc-200 bg-zinc-50 px-[18px] py-3" role="status">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="al-lbl">What agents optimize</span>
-        <span className="text-[17px] text-zinc-900">{oldMeasure?.text ?? "Unknown: Security measure not shared"}</span>
+        <span className="al-lbl">What Security&apos;s AI agents aim for now</span>
+        <span className="text-[17px] text-zinc-900">{oldMeasure?.text ?? "Unknown: Security hasn't shared its target"}</span>
         {baseline && (
           <span className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-zinc-500">
             <StateBadge state={baseline.verdict} />
-            {baseline.plan_id}@{baseline.plan_version} · {passed}/{baseline.checks.length} checks in Sparta
+            Current plan: oldest tickets first · {passed} of {baseline.checks.length} independent checks passed in the practice test (Sparta sandbox)
           </span>
         )}
       </div>
-      <span aria-label="does not equal" className="font-mono text-[20px] text-zinc-500">
+      <span aria-label="does not match" className="font-mono text-[20px] text-zinc-500">
         ≠
       </span>
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="al-lbl !text-amber-700">{s.pushes.at(-1) ? `Company goal ${s.pushes.at(-1)!.version}` : "The CEO"} now requires · KR2</span>
+        <span className="al-lbl !text-amber-700">{s.pushes.at(-1) ? `Company goal ${s.pushes.at(-1)!.version}` : "The CEO"} now requires</span>
         <span className="line-clamp-2 text-[17px] text-zinc-900" title={kr2?.text}>
           {kr2?.text ?? "Unknown"}
         </span>
@@ -221,7 +221,7 @@ function MeLens({ props }: { props: ViewProps }) {
     return <div className="mx-auto max-w-[620px]">{ceo ? <CeoCard props={props} g={ceo} /> : <MissingGoal owner="ceo" />}</div>;
   return (
     <div className="mx-auto flex max-w-[620px] flex-col gap-3">
-      <div className="al-lbl">Inherited CEO criterion your goal depends on</div>
+      <div className="al-lbl">The CEO&apos;s new requirement your goal depends on</div>
       {ceo ? <CeoCard props={props} g={ceo} only={ceo.measures.some((m) => m.id === "KR2") ? "KR2" : undefined} /> : <MissingGoal owner="ceo" />}
       <div className="flex justify-center" aria-hidden>
         <div className={`h-8 border-l-2 ${LINE}`} />
@@ -246,8 +246,8 @@ export function GoalsView(props: ViewProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-[36px] font-normal leading-[1.1]">Line of sight</h1>
-        <div role="group" aria-label="Lens" className="inline-flex gap-0.5 rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
+        <h1 className="font-display text-[36px] font-normal leading-[1.1]">How the goals connect</h1>
+        <div role="group" aria-label="Choose a view" className="inline-flex gap-0.5 rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
           {(["company", "team", "me"] as const).map((l) => (
             <button
               key={l}
@@ -255,7 +255,7 @@ export function GoalsView(props: ViewProps) {
               aria-pressed={lens === l}
               className={`min-h-9 rounded-md px-3.5 text-[14px] capitalize transition ${lens === l ? "bg-zinc-100 text-zinc-900" : "text-zinc-500 hover:text-zinc-900"}`}
             >
-              {l}
+              {LENS_LABEL[l]}
             </button>
           ))}
         </div>
