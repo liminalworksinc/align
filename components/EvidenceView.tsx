@@ -136,7 +136,7 @@ function planLabel(r: SimulationRun) {
 /* ------------------------------------------------------------------ */
 
 export function EvidenceView(props: ViewProps) {
-  const { s, mark } = props;
+  const { mark } = props;
   const marked = useRef(false);
   useEffect(() => {
     if (marked.current) return;
