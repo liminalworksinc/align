@@ -17,7 +17,7 @@ Align is a one-day SpeedHacks prototype (Oct 11, 2026). It takes one costly coor
 | Judging criterion | Where to look |
 |---|---|
 | Problem and time saved (40%) | [The problem](#the-problem), [Time-saved method](#time-saved-method), the proof strip at the end of the demo |
-| Technical execution (25%) | [Guarantees](#truth-states-and-guarantees), [Sparta results](#results-real-runs-oct-11-2026), [Architecture](#architecture), `scripts/test-flow.mjs` (46 checks), `scripts/test-mcp.mjs` |
+| Technical execution (25%) | [Guarantees](#truth-states-and-guarantees), [Sparta results](#results-real-runs-oct-11-2026), [Architecture](#architecture), `scripts/test-flow.mjs` (two-session acceptance test), `scripts/test-mcp.mjs` |
 | Market and path forward (15%) | [Market and path forward](#market-and-path-forward) |
 | Originality (10%) | Owner-only goal changes pinned to the exact tested plan; agents read the agreement before they act |
 | Product quality and demo (10%) | [Quick start](#quick-start), [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) |
@@ -136,7 +136,7 @@ Requirements: **Node 24+**, macOS or Linux.
 ```bash
 npm install
 npm run dev -- -p 3100   # http://localhost:3100 (every script and doc assumes 3100)
-node scripts/test-flow.mjs http://localhost:3100   # 46-check acceptance test (it resets demo state)
+node scripts/test-flow.mjs http://localhost:3100   # two-session acceptance test (it resets demo state: never run it against the demo server)
 ```
 
 Open two browser windows (or one normal and one private window) and sign in once in each:
