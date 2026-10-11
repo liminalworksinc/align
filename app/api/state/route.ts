@@ -2,6 +2,7 @@ import { sessionFrom } from "@/lib/auth";
 import { ingestEvidence } from "@/lib/evidence";
 import { recordExcludedPrep, viewFor } from "@/lib/flow";
 import { handle } from "@/lib/http";
+import { ensureRegistryFresh } from "@/lib/mapper";
 import { mutate } from "@/lib/store";
 
 
@@ -19,6 +20,8 @@ export async function GET(req: Request) {
       recordExcludedPrep(st);
       return st;
     });
+    // A registry change (org push, ratify) re-maps every captured agent session. Fire and forget.
+    void ensureRegistryFresh();
     return viewFor(s, who?.actor ?? null);
   });
 }
