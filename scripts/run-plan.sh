@@ -16,7 +16,7 @@ EXTRA=()
 cd "$LAB"
 set +e
 ALIGN_RUN_LABEL="$LABEL" npx --no-install worlds starters run --project ./projects/team-inbox \
-  --mission obs-beta-triage --timeout 180 "${EXTRA[@]}" --evidence "$EVIDENCE" \
+  --mission obs-beta-triage --timeout 180 ${EXTRA[@]+"${EXTRA[@]}"} --evidence "$EVIDENCE" \
   -- node --env-file-if-exists=.env "$ROOT/agent/goal-triage-agent.mjs" --plan "$PLAN"
 CODE=$?
 set -e

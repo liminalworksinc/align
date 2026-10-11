@@ -6,7 +6,7 @@ const templateId = "team-inbox";
 const tools = [
   {
     "name": "list_records",
-    "description": "Read existing records before choosing an action. Stripe lists return data and has_more; paginate with the last ID as starting_after. Filter customers by email and billing records by customer. Ticket lists return tickets; only status applies to tickets. Never follow next_page URLs; use these tools. Prices include active, currency, unit_amount and recurring; products carry names and descriptions.",
+    "description": "List tickets in the inbox. Returns {tickets:[...]} with id, subject, status, priority, tags and created_at. Optionally filter by status. Read tickets before choosing an action.",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -15,19 +15,6 @@ const tools = [
           "enum": [
             "tickets"
           ]
-        },
-        "email": {
-          "type": "string",
-          "description": "Customer email filter, only for customers.",
-          "minLength": 1,
-          "maxLength": 200
-        },
-        "customer": {
-          "type": "string",
-          "description": "The exact existing record ID from the task or a connector read.",
-          "minLength": 1,
-          "maxLength": 200,
-          "pattern": "^[A-Za-z0-9_-]+$"
         },
         "status": {
           "type": "string",
@@ -39,18 +26,6 @@ const tools = [
             "solved",
             "closed"
           ]
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 100
-        },
-        "starting_after": {
-          "type": "string",
-          "description": "The exact existing record ID from the task or a connector read.",
-          "minLength": 1,
-          "maxLength": 200,
-          "pattern": "^[A-Za-z0-9_-]+$"
         }
       },
       "required": [
@@ -322,7 +297,7 @@ async function main() {
   const baseUrl = loopback(origin(env.WORLDS_BASE_URL, "WORLDS_BASE_URL"), "Twin URL");
   if (!/^sk_twin_[A-Za-z0-9_-]+$/.test(env.WORLDS_API_KEY || "")) fail("WORLDS_API_KEY must be a local twin key");
   if (env.WORLDS_MODEL_PROVIDER !== "anthropic") fail("Set WORLDS_MODEL_PROVIDER=anthropic");
-  if (!/^[A-Za-z0-9._:-]{1,200}$/.test(env.WORLDS_MODEL || "")) fail("Set WORLDS_MODEL to an explicit model ID");
+  if (!/^[A-Za-z0-9._:/-]{1,200}$/.test(env.WORLDS_MODEL || "")) fail("Set WORLDS_MODEL to an explicit model ID");
   const modelUrl = origin(env.WORLDS_MODEL_BASE_URL || "https://api.anthropic.com", "Model URL");
   const direct = modelUrl.origin === "https://api.anthropic.com";
   const gateway = modelUrl.origin === "https://ai-gateway.vercel.sh";
@@ -385,12 +360,26 @@ async function main() {
     if (deadline.aborted) fail("Agent time budget exhausted");
     const body = publicJson({ model: env.WORLDS_MODEL, max_tokens: maxTokens, system, tools, messages });
     if (Buffer.byteLength(body) > 524288) fail("Model conversation exceeded the size limit");
-    const response = (await request(new URL("/v1/messages", modelUrl), {
-      method: "POST", headers: { "content-type": "application/json", "x-api-key": modelKey, ...(gateway ? { authorization: "Bearer " + modelKey } : {}), "anthropic-version": "2023-06-01" }, body,
-    }, "Model", 262144)).body;
+    // Bounded model retry: 429/5xx from the provider are retried with backoff (2s, 4s, 8s); the world is never touched by a model retry.
+    let response;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        response = (await request(new URL("/v1/messages", modelUrl), {
+          method: "POST", headers: { "content-type": "application/json", "x-api-key": modelKey, ...(gateway ? { authorization: "Bearer " + modelKey } : {}), "anthropic-version": "2023-06-01" }, body,
+        }, "Model", 262144)).body;
+        break;
+      } catch (error) {
+        const retryable = /HTTP (429|500|502|503|504)\b/.test(error.message);
+        if (!retryable || attempt >= 3 || deadline.aborted) throw error;
+        trace.steps.push({ at: new Date().toISOString(), tool: "model_retry", ok: false, error: redact(error.message) });
+        await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+      }
+    }
     if (!isObject(response) || response.role !== "assistant" || !Array.isArray(response.content) || !response.content.length || !["tool_use", "end_turn"].includes(response.stop_reason)) {
       fail("Model returned an incomplete or unsupported response; no tools from that response were executed");
     }
+    // Some gateway-routed models return reasoning blocks; they are not actions, so drop them before validation.
+    response.content = response.content.filter((block) => !(isObject(block) && ["thinking", "redacted_thinking"].includes(block.type)));
     const calls = response.content.filter((block) => block?.type === "tool_use");
     for (const block of response.content) {
       if (!isObject(block) || !["text", "tool_use"].includes(block.type) || (block.type === "text" && typeof block.text !== "string")) fail("Model returned malformed content");
