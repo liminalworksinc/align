@@ -1,92 +1,82 @@
 # Align: Demo Script (HackerSquad video)
 
-**Hard limit:** 5:00. **Target:** ~4:10 without the path-forward terminal beat, ~4:40 with it.
-**Setup:** two browser windows side by side. Left is **Product** (normal window, `product-demo`). Right is **Security** (private window, `security-demo`).
+**Hard limit:** 5:00. **Target:** ~4:15.
+**Setup:** `scripts/run-of-show.sh` opens three browser windows (Leadership `leadership-demo`, Product `product-demo`, Security `security-demo`) and a tmux pane for the Claude Code operator session and the Align event stream. Server: `http://localhost:3100`.
 **Rule:** anything marked `[fill from actual run]` is read from the screen or evidence on the day. If a run didn't happen or didn't pass, say what actually happened. Never read a number we didn't produce.
 
 ---
 
-## Storyboard (~4:10)
+## Storyboard (~4:15, recorded in HackerSquad's recorder)
 
-### 0:00–0:20: Founder hook
-**Screen:** Align title, or Goals view in the Product window.
+HackerSquad asks for three beats: **the problem**, **the tech stack and what it made possible**, then a **live demo plus the code**. This order follows them, shows the result in the first 30 seconds (per the pre-submission review), and ends on the agent replanning by itself.
 
-> **Shruti:** "I spent years as a product manager writing OKRs and figuring out how to translate executive strategy into work. With AI agents, our teams finish tickets faster, but agreeing on whether we are working on the right thing still happens at human meeting speed."
+**Screen layout:** browser windows for Leadership, Product and Security (`scripts/run-of-show.sh` opens them), plus the tmux pane with the Claude Code operator session (top) and the Align event stream (bottom). Camera on.
+**Before recording:** `scripts/run-of-show.sh operator` has already run once: Claude ran the authorized plan (`p-throughput@1`, Sparta FAIL) and is on standby. Don't type to Claude during the take.
+
+### Beat 1 · The problem (0:00–0:55)
+
+**0:00–0:25 · Value first.** Screen: Next decision (or Test both plans), with the two results side by side.
+> **Shruti:** "The company's goal changed. The agent's plan didn't. Our CEO now needs beta customers' issues handled first. Security's AI agent is still closing tickets oldest first. In a sandbox it fails 7 of 9 checks, and it posts a public reply on a protected security incident, then reports the job as done. The plan Security should be running passes 9 of 9."
 >
-> **Second presenter:** "[presenter's own words: one sentence of real security background]"
-
-### 0:20–0:50: The pain, the five manual steps
-**Screen:** the "Doing it by hand · estimate" tile in the summary strip (or the README table). Keep the word **estimate** visible.
-
-> "Here's the setup. Northstar Security is a made-up company. I'm the Director of Product. My launch depends on our Security Lead. This morning the CEO changed priorities: the beta of our new monitoring product has to launch with beta customers' issues handled first. Security's goal still rewards closing as many tickets as possible, oldest first. I can't edit their goal, and I shouldn't be able to."
+> "I spent years as a product manager turning executive strategy into OKRs. With AI agents, teams finish tickets faster, but agreeing on the right work still happens at meeting speed."
 >
-> "Today that's five steps: read the new goal, dig facts out of scattered tools, write a proposal, chase a meeting, then negotiate and rewrite both goals. **Our estimate**, not a measurement, is about 200 minutes across five steps."
+> **Sean:** "[one sentence of his real security background]"
 
-### 0:50–1:20: How the goals connect, the CEO change, the amber card
-**Screen (Product):** Goals → "How the goals connect". The CEO's goal (v2) is marked "Changed today". Product v3 and Security v1 sit beneath. The "Product needs Security" card between them is amber, "Unknown". The strip at the top reads "What Security's AI agents aim for now ≠ The CEO now requires".
+**0:25–0:55 · Why it matters.** Screen: the summary strip or README table, with **ESTIMATE** visible.
+> "I'm Product. I can't edit Security's goal, and I shouldn't be able to. Today fixing this takes five steps: read the new goal, dig up evidence, write a proposal, chase a meeting, renegotiate both goals. **Our estimate**, not a measurement, is about 200 minutes. Align makes it one decision the owners make, and the agents follow."
 
-> "Align shows how the goals connect. The CEO's goal changed today: beta customers' issues now have to be handled first. My goal is fine. But my launch needs Security, and that card turns amber, because Security's target is still 'close as many tickets as possible' and doesn't mention the beta. Align marks that unknown, not 'fine'."
+### Beat 2 · Tech stack and what it enabled (0:55–1:25)
 
-### 1:20–1:55: "What to do next" (+ Alike, only if real)
-**Screen (Product):** click the "Product needs Security" card → **Review the conflict with Security**.
-
-> "Align suggests options, in order, and I choose. First: add 'handle beta issues first' to Security's goal. Second: keep the critical security ticket off-limits, which is a rule, not a trade-off. Third: Product postpones dashboard polish to free up time. It also shows what could prove us wrong: there's an open critical security ticket with a private note, and we don't know how much time Security has."
-
-**Only if an Alike decision was really retrieved in a fresh session:**
-> "This earlier team decision came from Alike, our AI-agent memory tool. It was saved in an earlier Claude Code session and found again by a fresh one: a beta issue only counts as handled when it's marked urgent, tagged as beta, gets a private note for engineers and a reply to the customer, and the critical security ticket stays untouched. Handling tickets oldest first was recorded as rejected. With that, the fresh session switched from the oldest-first plan to the beta-first plan. Align keeps a short summary, not the conversation."
-
-**If not retrieved:** skip Alike entirely, or point at the status: "Alike shows 'not available' here, and we say so."
-
-### 1:55–2:45: Which plan follows the new priority? (Sparta practice test)
-**Screen (Product):** **Test which plan follows the new priority**. "Oldest tickets first" (current plan) on the left, "Beta customers' issues first" (tested alternative) on the right. The Next decision screen shows the same two cards at a glance (2 / 9 vs 9 / 9); the outage test is only in this drawer, under "See every check →".
-
-> "Before asking Security for anything, we test. This is a practice test in Sparta, a sandbox with sample tickets. Same practice tickets, same pass/fail checks. The only thing that changes is the plan the AI agent follows."
+Screen: README "For judges" section, or a simple list. About 6 seconds each.
+> "**Sparta Worlds** let us prove behavior, not describe it: the same practice tickets and the same nine checks for both plans. Eight runs each: the old plan failed every time, the new one passed every time."
 >
-> "Current plan, oldest tickets first: **Failed**, only 2 of 9 checks passed. It marked the beta customer's issue 'high' instead of 'urgent', didn't tag it as beta, and left no note for engineers. Worse, it posted a public reply on the critical security ticket it was supposed to leave alone. And the agent's own summary said everything was done. New plan, beta issues first: **Passed**, 9 of 9 checks. The critical security ticket was **left alone**."
+> "**Claude Code and MCP**: agents ask Align which plan they're authorized to run, and running sessions get told when an owner approves a change."
 >
-> "Here's the outage test. Sparta makes the ticket system fail mid-run on purpose. The agent retried safely and recovered: **Passed**, 9 of 9, the critical security ticket untouched."
+> "**Alike** carried a team decision from one coding session into a fresh one. **Jev** matches agent sessions to goals, and the goal's owner confirms."
 >
-> *(Optional, if time allows)* "We also hit a limit: one run of the new plan was cut short because our AI provider throttled us. We added a careful retry and ran it again on the same practice tickets and checks. Both runs are in the repo."
+> "Next.js and TypeScript for the app. Without Sparta we'd only have a claim; without MCP the agreement would stay in a web page."
+
+### Beat 3 · Live demo (1:25–3:25)
+
+**1:25–1:45 · Leadership pushes the new goal.** Leadership window → Company goal → **Approve and send to teams**. Point at the tmux top pane.
+> "Leadership approves the new company goal. Watch the agent: Align tells it within a second. It sees the conflict and **holds**. It doesn't rewrite its own plan, because Security owns it."
+
+**1:45–2:00 · Where agent work is going.** Leadership → Work.
+> "Align checks the running agent sessions against the new goals. This oldest-first session may now work against the goal."
+
+**2:00–2:30 · Product tests both plans.** Product window → Goals → "Product needs Security" → See what to do next → Test both plans.
+> "Same practice tickets, same nine checks, only the plan changes. Old plan: 2 of 9, critical security ticket touched. New plan: 9 of 9, critical ticket untouched."
+
+**2:30–3:05 · Two owners agree.** Product: Add test results → Send proposal. Security: Proposals → Ask for changes. Product: Accept Security's changes. Security: Approve the change to my goal.
+> "I propose, with the test attached. Security owns this goal, so Alex asks for one change, and I accept it. Only Security can approve. If I tried, the server returns 403."
+
+**3:05–3:25 · The climax: the agent follows the people.** Point at the tmux panes. Nobody types.
+> "Security just approved. Align tells the agent within milliseconds. It wakes, reads the newly approved plan from Align, runs it… **9 of 9**, critical ticket untouched. Nobody prompted the agent. The people who own the goal changed it, and the agent followed."
+
+**If the live agent doesn't fire in the take:** don't fake it. Open `docs/LIVE_REPLAN.md` and say: "Here's the same sequence recorded uninterrupted earlier today: 2 of 9, hold, approval, 9 of 9."
+
+### Beat 3, continued · The code (3:25–3:50)
+
+Show the code for about 8 seconds each, zoomed to 18px or more.
+1. `lib/flow.ts` lines 165–174: `if (who.actor !== target.owner_id) forbid("Only Security can approve changes to Security's goal")`, and stale test evidence can't silently become "tested".
+   > "Ownership is enforced on the server, not in the UI."
+2. `lib/policy.ts` line 16, `acceptedPlan`:
+   > "This is what agents read: the latest plan the owner approved, with who approved it and its test status."
+3. Terminal: `node scripts/verify-run.mjs sparta/walkthrough-lab/evidence/p-beta@1-normal-134838.json --expect PASS --plan p-beta@1`
+   > "And anyone can re-check a verdict from Sparta's evidence."
+
+### Close (3:50–4:15)
+
+Screen: the summary strip, or `node scripts/timing-report.mjs`.
+> "Measured in Align today: **[fill from actual run: mm:ss]** and **[fill from actual run: N]** human decisions. Sandbox prep is listed separately. The 200 minutes by hand is our estimate. We don't subtract one from the other."
 >
-> "To be clear: this checks how tickets get handled on sample tickets. It doesn't predict the launch or any business result."
-
-### 2:45–3:30: Propose → Security asks for changes → Product accepts → Security approves
-**Screen (Product):** **Add test results to the proposal** → **Send proposal to Alex / Security Lead**.
-> "I propose a new target for Security, tied to the exact plan we just tested, plus what Product will do in return: tag beta issues as they come in, publish what's in the beta, and postpone the dashboard polish."
-
-**Screen (Security window):** the proposal arrives under **Proposals** ("Waiting for your decision"). Click **Ask for changes**.
-> **Security:** "I own this goal, so I ask for a change. Same plan, but this week we can only do the AI agent plus one human review a day. The wording changes, how the agent works doesn't, so the test still counts."
-
-**Screen (Product):** **Accept Security's changes and confirm what Product will do**.
-> "I accept Security's changes."
-
-**Screen (Security):** **Approve the change to my goal**.
-> **Security:** "And I approve the change to my own goal. Only I can. If Product tried, Align would refuse."
-
-### 3:30–3:55: Back to Goals + evidence
-**Screen (both windows):** Goals. Security now shows the new version (v2), and the old version is kept. The "Product needs Security" card shows "Agreed by Security". Handling beta customers' issues is next up.
-> "Both of us now see the agreed Security goal. The old version is kept. Every step is recorded under Evidence, 'Who did what, when', with the full practice-test results one click away."
-
-### 3:55–4:10: Summary strip
-**Screen:** the summary strip under the goals.
-> "Measured in this session: **[fill from actual run: mm:ss]** and **[fill from actual run: N]** steps, from first seeing the CEO's change until both of us saw the agreed goal. Next to it, doing it by hand is labeled an estimate. The practice tests we ran beforehand are listed separately and not counted."
-
-### 4:10–4:40: Path forward, the agent asks first
-**Screen:** a terminal next to the Security window. Run `curl -s localhost:3100/api/policy/security`, or `scripts/run-plan.sh accepted` and cut after its first line (a full run makes billed model calls). If you can, show the output from before Security approved too (prepared during the dry run), so both are on screen.
-
-**Only if `/api/policy/security` answers on the recording machine (check during the dry run).** If not, say the lines over the summary strip and don't show a terminal.
-
-> "Today we caught the wrong work after the fact. The bigger opportunity is catching it before it starts. Before Security's agent runs, it asks Align which plan it's allowed to run. Before Security approved, the answer was the oldest-first plan. Now it's the beta-first plan, approved by Security, exactly the version we tested. The agent reads that; it can't change it."
+> "This is a synthetic company, and the test covers ticket handling in a sandbox, not whether the beta launch is ready."
 >
-> "Next, the same check where work begins: agent preflight over MCP first, then Linear and Jira intake, then negotiation inside Slack. Most work passes without friction. Only a real conflict with a goal someone owns goes to that person."
->
-> "We think the buyer is a VP Product or CPO at an AI-native company of 50 to 500 people. That's a hypothesis. The proof we want next is a real operator stopping a real agent task because Align caught a goal conflict first."
->
-> **Close:** "AI made execution fast. Align makes agreement on what to execute fast enough to keep up."
+> "Next: the same check wherever work starts, in agent preflight, Linear and Jira intake, and Slack. AI made execution fast. Align makes agreement on what to execute fast enough to keep up."
 
-**Timing:** this pushes the cut to ~4:40, still under 5:00 but with less margin than the PRD's ~4:10 target. If the dry run runs long, cut the optional throttling line in "Which plan follows the new priority?" first, then the Alike paragraph.
+**Timing:** ~4:15. If the dry run runs long, cut the Jev/Alike line in Beat 2, then the Work view (1:45–2:00). Never cut the result in the opening, the owner-only approval, or the climax.
 
-**Don't say:** that Align enforces plans in the agent host, blocks other plans, or saved time or money. The agent reads the policy; nothing enforces it. Keep the competitor names out of the spoken lines unless someone checks the claims.
+**Don't say:** "saved X hours", "enforces", "detects any conflict", or that the company's beta is ready. Don't name competitors.
 
 ---
 
