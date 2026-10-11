@@ -27,10 +27,13 @@ function eventTitle(s: StateView, id: string) {
 }
 
 function agentSession(s: StateView): AgentSession | undefined {
+  // Only Security's triage agent: the session started with the operator instruction, or one Align linked
+  // to the Security goal. Other captured sessions (e.g. developers' own Claude Code) never show here.
   const all = [...(s.sessions ?? [])].filter((x) => x.harness === "claude-code");
-  const withDirectives = all.filter((x) => x.directives?.length);
-  const pick = (xs: AgentSession[]) => xs.sort((a, b) => (a.last_at < b.last_at ? 1 : -1))[0];
-  return pick(withDirectives) ?? pick(all);
+  const isOperator = (x: AgentSession) => x.prompts.some((p) => /security triage operator/i.test(p.text));
+  const linked = (x: AgentSession) => (s.mappings ?? []).some((m) => m.session_id === x.id && (m.choice ?? "").startsWith("g-security"));
+  const newest = (xs: AgentSession[]) => xs.sort((a, b) => (a.last_at < b.last_at ? 1 : -1))[0];
+  return newest(all.filter(isOperator)) ?? newest(all.filter(linked));
 }
 
 function runLine(r: SimulationRun) {
