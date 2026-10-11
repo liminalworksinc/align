@@ -103,31 +103,34 @@ cue() {
 
 ALIGN · RUN OF SHOW (~4 min)
 
-ACT 1 · Org push (Leadership window)
-  1. Company goal → read the v2 draft (KR2 beta triage, KR3 protected incidents)
-  2. Click "Ratify & push to teams"
-  3. Product + Security windows: banner "Company goal v2 pushed by CEO / Leadership"
+ACT 1 · The CEO changes the company goal (Leadership window)
+  1. Company goal → read the next version (draft): beta customers' issues handled first,
+     unrelated security tickets left untouched
+  2. Click "Approve and send to teams"
+  3. Product + Security windows: banner "New company goal (v2) from the CEO at … · Product and Security haven't agreed yet"
 
-ACT 2 · Where agent work is going (Leadership window → Work)
-  4. Registry chips update: Company v2 · Product v3 · Security v1 · Unassigned
-  5. Agent sessions re-match to the new goals; point at the throughput session flagged as a conflict
+ACT 2 · Where AI agent work is going (Leadership window → Work)
+  4. Goal chips update: Company v2 · Product v3 · Security v1 · Not linked to a goal
+  5. AI coding sessions get re-checked against the new goals; point at the oldest-first session
+     marked "May work against an off-limits goal"
 
-ACT 3 · Negotiation (Product + Security windows)
-  6. Product: Goals → amber dependency → Review priorities → Compare ways forward in Sparta
-  7. Scenario: p-throughput@1 FAIL (protected P0 touched) vs p-beta@1 PASS, same mission/seed/checks
-  8. Attach tested plan → Send proposal
-  9. Security: Proposals → Counter (protect P0 non-beta incidents)
- 10. Product: Acknowledge revised terms
- 11. Security: Ratify my goal revision → both windows show the agreed version
+ACT 3 · Product and Security agree (Product + Security windows)
+  6. Product: Goals ("How the goals connect") → "Product needs Security" card → "See what to do next" → "Test both plans"
+  7. Test both plans: "Current plan: oldest tickets first" Failed (touched the critical security ticket)
+     vs "New plan: beta issues first" Passed, same practice tickets and same pass/fail checks
+  8. "Add test results to the proposal" → "Send proposal to Alex / Security Lead"
+  9. Security: Proposals → "Ask for changes" (keep the critical security ticket's private notes untouched too)
+ 10. Product: "Accept Security's changes and confirm what Product will do"
+ 11. Security: "Approve the change to my goal" → both windows show the agreed goal
 
-ACT 4 · The agent follows the agreement (tmux)
- 12. Left pane (Claude Code): "Use the align MCP tools: what goals did my org ratify,
-     and which plan is the Security triage agent authorized to run? Then run it."
+ACT 4 · The AI agent follows the agreement (tmux)
+ 12. Left pane (Claude Code): "Use the align MCP tools: what goals did my org approve,
+     and which plan is the Security triage agent allowed to run? Then run it."
  13. Claude calls align_list_goals + align_get_accepted_plan → runs scripts/run-plan.sh accepted
-     → "Security goal v2.1 … authorizes p-beta@1" → Sparta PASS 9/9
- 14. Work map: this Claude session appears, matched to the Security goal
+     → the approved Security goal allows the new plan (beta issues first) → practice test passes 9 of 9
+ 14. Work page: this Claude session appears, linked to the Security goal
 
-CLOSE · Proof strip: measured in-app time vs the manual estimate
+CLOSE · Summary strip: time to agreement measured in Align vs the estimate for doing it by hand
 EOF
 }
 

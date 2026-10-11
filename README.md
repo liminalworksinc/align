@@ -31,29 +31,31 @@ The agents finish tickets fast. Agreeing on whether they're working on the right
 
 The flow after Align, with two people in two signed-in sessions (Product and Security):
 
-1. **Goals ladder (line of sight).** CEO v2 → Product v3 and Security v1. The CEO goal shows as changed today. The Product → Security dependency turns amber (`UNKNOWN`) because Security's shared measure doesn't cover the new KR2.
-2. **Intelligence brief.** A headline, evidence refs with truth states, ranked options (P0 add the beta triage condition to Security's goal; P1 preserve the protected P0 non-beta incidents; P2 defer Product's dashboard polish), **disconfirmers** (a protected P0 ticket with a private note; Security capacity is unknown), and explicit unknowns. If a prior decision came back from Alike, it's cited here.
-3. **Scenario Studio.** The current plan (`p-throughput@1`) and the candidate plan (`p-beta@1`) run in Sparta Worlds against the **same mission, seed and checks**. Shown side by side: verdict, each check, changed vs protected records, the request trace, and an interruption run.
-4. **Versioned proposal.** Product proposes a revised Security measure plus a reciprocal commitment. The proposal is pinned to the **exact tested plan hash** and the simulation run ids.
-5. **Security counters** (revised wording). If the counter changes plan parameters, the test status flips to `STALE`.
-6. **Product acknowledges** the countered terms.
-7. **Security ratifies its own goal.** A new Security version is created (`supersedes` the old one). The dependency turns `ACCEPTED`, and the beta triage work item becomes next work under the new version.
-8. **Both sessions see the accepted version.** The timer stops only when both sessions have seen it.
-9. **Proof strip.** Measured in-app time and touchpoints sit next to the *estimated* manual baseline. The two are labeled differently and never blended.
+1. **How the goals connect.** The CEO's goal (v2) sits above Product (v3) and Security (v1), marked "Changed today". The **Product needs Security** card turns amber ("Unknown") because Security's current target, closing as many tickets as possible, oldest first, doesn't cover the CEO's new requirement: handle beta customers' issues first.
+2. **What to do next.** A one-line recommendation, the facts behind it (each marked Confirmed or Unknown), options in suggested order (add "beta issues first" to Security's goal; keep the critical security ticket off-limits; Product postpones dashboard polish), **what could prove it wrong** (an open critical security ticket with a private note; Security's available time is unknown), and what we don't know yet. If an earlier team decision came back from Alike, it's shown here.
+3. **Test both plans.** The current plan (oldest tickets first, `p-throughput@1`) and the new plan (beta issues first, `p-beta@1`) run as practice tests in Sparta Worlds on the **same practice tickets and the same pass/fail checks**. Shown side by side: the result, each check, which tickets changed and which stayed off-limits, what the AI agent did step by step, and an outage test.
+4. **Proposal.** Product proposes a new target for Security plus what Product will do in return. The proposal is tied to the **exact plan that was tested** (its hash) and the test runs.
+5. **Security asks for changes** (revised wording). If the changes alter how the agent works, the proposal shows "Needs retest" (`STALE`).
+6. **Product accepts Security's changes.**
+7. **Security approves the change to its own goal.** A new Security version is created (`supersedes` the old one). The card shows "Agreed by Security", and handling beta customers' issues becomes the next step under the new version.
+8. **Both people see the agreed version.** The clock stops only when both sessions have seen it.
+9. **Summary strip.** The time to agreement measured in Align, and the number of steps, sit next to the *estimated* time for doing it by hand. The two are labelled differently and never blended.
+
+Operator screens show no backend IDs or hashes. The Evidence page keeps them in closed **For engineers** sections so every result can be reproduced.
 
 ## Truth states and guarantees
 
-| State | Meaning |
-|---|---|
-| `OBSERVED` | Read from a source (goal, ticket, record) |
-| `PROPOSED` | Suggested by a non-owner; not in force |
-| `ACCEPTED` | Agreed by the owner(s) |
-| `VERIFIED` | A Sparta check passed on the narrow outcome it tests |
-| `UNKNOWN` | Not known, and shown as unknown |
-| `FAILED` | A Sparta check or run failed |
-| `REJECTED` | The owner declined |
+| State | Shown in the app as | Meaning |
+|---|---|---|
+| `OBSERVED` | Confirmed | Read from a source (goal, ticket, record) |
+| `PROPOSED` | Suggested | Suggested by a non-owner; not in force |
+| `ACCEPTED` | Agreed | Agreed by the owner(s) |
+| `VERIFIED` | Passed the test | A Sparta check passed on the narrow outcome it tests |
+| `UNKNOWN` | Unknown | Not known, and shown as unknown |
+| `FAILED` | Failed | A Sparta check or run failed |
+| `REJECTED` | Declined | The owner declined |
 
-(The type also has `NOT_SHARED`, `NOT_TESTED` and `INFERRED` for private or untested items.) Proposal test status is `TESTED`, `STALE` or `UNTESTED`.
+(The type also has `NOT_SHARED`, `NOT_TESTED` and `INFERRED` for private or untested items.) Proposal test status is `TESTED`, `STALE` or `UNTESTED` (shown as "Tested", "Needs retest", "Not tested"). Proposal states show as "Waiting for Security", "Security asked for changes", "Product accepted changes", "Approved" and "Declined". The mapping lives in `STATE_LABEL` in `components/ui.tsx`.
 
 Guarantees enforced in code (`lib/flow.ts`, `lib/auth.ts`):
 

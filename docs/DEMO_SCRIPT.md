@@ -16,67 +16,67 @@
 > **Second presenter:** "[presenter's own words: one sentence of real security background]"
 
 ### 0:20–0:50: The pain, the five manual steps
-**Screen:** the manual baseline table (proof strip or README table). Keep the **ESTIMATE** label visible.
+**Screen:** the "Doing it by hand · estimate" tile in the summary strip (or the README table). Keep the word **estimate** visible.
 
-> "Here's the setup. Northstar Security is a synthetic company. I'm the Director of Product. My launch depends on our Director of Product Security. This morning the CEO changed priorities: the observability beta has to launch with beta incidents triaged properly. Security's goal still rewards ticket throughput, oldest first. I can't edit their goal, and I shouldn't be able to."
+> "Here's the setup. Northstar Security is a made-up company. I'm the Director of Product. My launch depends on our Security Lead. This morning the CEO changed priorities: the beta of our new monitoring product has to launch with beta customers' issues handled first. Security's goal still rewards closing as many tickets as possible, oldest first. I can't edit their goal, and I shouldn't be able to."
 >
-> "Today that's five steps: read the new objective, dig evidence out of scattered tools, write a proposal, chase a sync, then negotiate and rewrite both goals. **Our estimate**, not a measurement, is about 200 minutes across five touchpoints."
+> "Today that's five steps: read the new goal, dig facts out of scattered tools, write a proposal, chase a meeting, then negotiate and rewrite both goals. **Our estimate**, not a measurement, is about 200 minutes across five steps."
 
-### 0:50–1:20: Goals ladder, CEO change, amber dependency
-**Screen (Product):** Goals ladder. CEO v2 is marked changed. Product v3 and Security v1 sit beneath. The Product → Security dependency is amber, `UNKNOWN`.
+### 0:50–1:20: How the goals connect, the CEO change, the amber card
+**Screen (Product):** Goals → "How the goals connect". The CEO's goal (v2) is marked "Changed today". Product v3 and Security v1 sit beneath. The "Product needs Security" card between them is amber, "Unknown". The strip at the top reads "What Security's AI agents aim for now ≠ The CEO now requires".
 
-> "Align shows line of sight. The CEO goal changed today. KR2 now requires beta incidents to be triaged to launch criteria. My goal is fine. The dependency on Security turns amber, because Security's shared measure is throughput and doesn't mention the beta. Align marks that unknown, not 'fine'."
+> "Align shows how the goals connect. The CEO's goal changed today: beta customers' issues now have to be handled first. My goal is fine. But my launch needs Security, and that card turns amber, because Security's target is still 'close as many tickets as possible' and doesn't mention the beta. Align marks that unknown, not 'fine'."
 
-### 1:20–1:55: Intelligence brief (+ Alike, only if real)
-**Screen (Product):** open the Brief.
+### 1:20–1:55: "What to do next" (+ Alike, only if real)
+**Screen (Product):** click the "Product needs Security" card → **See what to do next**.
 
-> "The brief ranks options. P0: add the beta triage condition to Security's goal. P1: keep protected P0 security incidents untouched, which is a constraint, not a trade-off. P2: Product defers dashboard polish to free capacity. It also shows what could prove us wrong: there's an open P0 incident with a private note, and Security's capacity is unknown."
+> "Align suggests options, in order, and I choose. First: add 'handle beta issues first' to Security's goal. Second: keep the critical security ticket off-limits, which is a rule, not a trade-off. Third: Product postpones dashboard polish to free up time. It also shows what could prove us wrong: there's an open critical security ticket with a private note, and we don't know how much time Security has."
 
 **Only if an Alike decision was really retrieved in a fresh session:**
-> "This decision came from Alike. It was recorded in an earlier Claude Code session and retrieved in a fresh one: beta triage counts only with urgent priority, the obs-beta tag with existing tags kept, one private investigation note, one public acknowledgment, and protected P0 non-beta incidents untouched. Oldest-first throughput triage was recorded as rejected. With that, the fresh session switched its proposal from the throughput plan to the beta plan. Align keeps the id and summary, not the transcript."
+> "This earlier team decision came from Alike, our AI-agent memory tool. It was saved in an earlier Claude Code session and found again by a fresh one: a beta issue only counts as handled when it's marked urgent, tagged as beta, gets a private note for engineers and a reply to the customer, and the critical security ticket stays untouched. Handling tickets oldest first was recorded as rejected. With that, the fresh session switched from the oldest-first plan to the beta-first plan. Align keeps a short summary, not the conversation."
 
-**If not retrieved:** skip Alike entirely, or point at the status: "Alike shows unavailable here, and we say so."
+**If not retrieved:** skip Alike entirely, or point at the status: "Alike shows 'not available' here, and we say so."
 
-### 1:55–2:45: Scenario Studio (Sparta)
-**Screen (Product):** Scenario Studio. Current plan `p-throughput@1` on the left, candidate `p-beta@1` on the right.
+### 1:55–2:45: Test both plans (Sparta practice test)
+**Screen (Product):** **Test both plans**. "Current plan: oldest tickets first" on the left, "New plan: beta issues first" on the right.
 
-> "Before asking Security for anything, we test. Same Sparta Worlds mission, same seed, same checks. The only thing that changes is the team plan the agent runs."
+> "Before asking Security for anything, we test. This is a practice test in Sparta, a sandbox with sample tickets. Same practice tickets, same pass/fail checks. The only thing that changes is the plan the AI agent follows."
 >
-> "Current throughput plan: **FAIL**, 7 of 9 checks failed. It set the beta ticket to high instead of urgent, with no obs-beta tag and no private note. Worse, it posted a public reply on the protected P0 security incident. And its own summary said the work was complete. Candidate beta-first plan: **PASS**, 9 of 9 checks. The protected P0, ticket 1, is **unchanged**."
+> "Current plan, oldest tickets first: **Failed**, only 2 of 9 checks passed. It marked the beta customer's issue 'high' instead of 'urgent', didn't tag it as beta, and left no note for engineers. Worse, it posted a public reply on the critical security ticket it was supposed to leave alone. And the agent's own summary said everything was done. New plan, beta issues first: **Passed**, 9 of 9 checks. The critical security ticket was **left alone**."
 >
-> "Here's the interruption run. Sparta injects an HTTP 500 on the ticket list. The agent's bounded retry recovered: **PASS**, 9 of 9, ticket 1 unchanged."
+> "Here's the outage test. Sparta makes the ticket system fail mid-run on purpose. The agent retried safely and recovered: **Passed**, 9 of 9, the critical security ticket untouched."
 >
-> *(Optional, if time allows)* "We also found a limitation: one candidate run was cut short by a rate limit from our model provider. We added a bounded model retry and reran on the same mission, seed and checks. Both runs are in the repo."
+> *(Optional, if time allows)* "We also hit a limit: one run of the new plan was cut short because our AI provider throttled us. We added a careful retry and ran it again on the same practice tickets and checks. Both runs are in the repo."
 >
-> "To be clear: this tests ticket behavior in a sandbox. It's not company ROI, and it doesn't verify beta readiness."
+> "To be clear: this checks how tickets get handled on sample tickets. It doesn't predict the launch or any business result."
 
-### 2:45–3:30: Propose → counter → acknowledge → ratify
-**Screen (Product):** Attach plan → Propose.
-> "I propose a revised Security measure, pinned to the exact plan hash we just tested, with my commitment: Product tags beta issues at intake, publishes beta scope, and defers polish."
+### 2:45–3:30: Propose → Security asks for changes → Product accepts → Security approves
+**Screen (Product):** **Add test results to the proposal** → **Send proposal to Alex / Security Lead**.
+> "I propose a new target for Security, tied to the exact plan we just tested, plus what Product will do in return: tag beta issues as they come in, publish what's in the beta, and postpone the dashboard polish."
 
-**Screen (Security window):** proposal arrives. Counter with revised wording.
-> **Security:** "I own this goal, so I counter. Same plan, but capacity is agent triage plus one human review this week. The wording changes, the plan parameters don't, so the test still holds."
+**Screen (Security window):** the proposal arrives under **Proposals** ("Waiting for your decision"). Click **Ask for changes**.
+> **Security:** "I own this goal, so I ask for a change. Same plan, but this week we can only do the AI agent plus one human review a day. The wording changes, how the agent works doesn't, so the test still counts."
 
-**Screen (Product):** Acknowledge.
-> "I acknowledge the countered terms."
+**Screen (Product):** **Accept Security's changes and confirm what Product will do**.
+> "I accept Security's changes."
 
-**Screen (Security):** Ratify.
-> **Security:** "And I ratify my own goal. Only I can. If Product tried, the server returns 403."
+**Screen (Security):** **Approve the change to my goal**.
+> **Security:** "And I approve the change to my own goal. Only I can. If Product tried, Align would refuse."
 
 ### 3:30–3:55: Back to Goals + evidence
-**Screen (both windows):** Goals. Security now shows the new version, and the old version is still visible as superseded. The dependency is `ACCEPTED`. Beta triage is next work.
-> "Both sessions now show the accepted Security version. The prior version is kept. Every step is in the audit log, and the evidence links straight to the Sparta report and agent trace."
+**Screen (both windows):** Goals. Security now shows the new version (v2), and the old version is kept. The "Product needs Security" card shows "Agreed by Security". Handling beta customers' issues is next up.
+> "Both of us now see the agreed Security goal. The old version is kept. Every step is recorded under Evidence, 'Who did what, when', with the full practice-test results one click away."
 
-### 3:55–4:10: Proof strip
-**Screen:** proof strip.
-> "Measured in this session: **[fill from actual run: mm:ss]** and **[fill from actual run: N]** touchpoints, from first viewing the CEO change until both of us saw the accepted version. Next to it, the manual baseline is labeled an estimate. Sandbox prep is listed separately."
+### 3:55–4:10: Summary strip
+**Screen:** the summary strip under the goals.
+> "Measured in this session: **[fill from actual run: mm:ss]** and **[fill from actual run: N]** steps, from first seeing the CEO's change until both of us saw the agreed goal. Next to it, doing it by hand is labeled an estimate. The practice tests we ran beforehand are listed separately and not counted."
 
 ### 4:10–4:40: Path forward, the agent asks first
-**Screen:** a terminal next to the Security window. Run `curl -s localhost:3000/api/policy/security`, or `ALIGN_URL=http://localhost:3000 scripts/run-plan.sh accepted` and cut after its first line (a full run makes billed model calls). If you can, show the output from before ratification too (prepared during the dry run), so both are on screen.
+**Screen:** a terminal next to the Security window. Run `curl -s localhost:3000/api/policy/security`, or `ALIGN_URL=http://localhost:3000 scripts/run-plan.sh accepted` and cut after its first line (a full run makes billed model calls). If you can, show the output from before Security approved too (prepared during the dry run), so both are on screen.
 
-**Only if `/api/policy/security` answers on the recording machine (check during the dry run).** If not, say the lines over the proof strip and don't show a terminal.
+**Only if `/api/policy/security` answers on the recording machine (check during the dry run).** If not, say the lines over the summary strip and don't show a terminal.
 
-> "Today we caught the wrong work after the fact. The bigger opportunity is catching it before it starts. Before Security's agent runs, it asks Align which plan it's authorized to run. Before ratification the answer was the throughput plan. Now it's the beta plan, ratified by Security, with the exact plan hash we tested. The agent reads that; it can't change it."
+> "Today we caught the wrong work after the fact. The bigger opportunity is catching it before it starts. Before Security's agent runs, it asks Align which plan it's allowed to run. Before Security approved, the answer was the oldest-first plan. Now it's the beta-first plan, approved by Security, exactly the version we tested. The agent reads that; it can't change it."
 >
 > "Next, the same check where work begins: agent preflight over MCP first, then Linear and Jira intake, then negotiation inside Slack. Most work passes without friction. Only a real conflict with a goal someone owns goes to that person."
 >
@@ -84,7 +84,7 @@
 >
 > **Close:** "AI made execution fast. Align makes agreement on what to execute fast enough to keep up."
 
-**Timing:** this pushes the cut to ~4:40, still under 5:00 but with less margin than the PRD's ~4:10 target. If the dry run runs long, cut the optional rate-limit line in Scenario Studio first, then the Alike paragraph.
+**Timing:** this pushes the cut to ~4:40, still under 5:00 but with less margin than the PRD's ~4:10 target. If the dry run runs long, cut the optional throttling line in "Test both plans" first, then the Alike paragraph.
 
 **Don't say:** that Align enforces plans in the agent host, blocks other plans, or saved time or money. The agent reads the policy; nothing enforces it. Keep the competitor names out of the spoken lines unless someone checks the claims.
 
@@ -92,43 +92,43 @@
 
 ## Operator click-by-click checklist
 
-UI labels below follow the build plan. Match them to the final UI during the dry run.
+UI labels below match the app as of commit 2d8b38f. Re-check them during the dry run.
 
 | # | Window | Action | Expect |
 |---|---|---|---|
-| 1 | Product | Already signed in. Open **Goals** | CEO v2 marked changed; timer starts on first CEO-change view |
-| 2 | Product | Point at Product → Security dependency | Amber, `UNKNOWN` |
-| 3 | Product | Open **Brief** | P0/P1/P2, disconfirmers, unknowns, Alike status |
-| 4 | Product | Open **Scenario Studio** | Baseline and candidate on same mission/seed/checks; interruption run listed |
-| 5 | Product | Open one check and the trace (optional) | Evidence detail loads |
-| 6 | Product | **Attach plan `p-beta@1`** with its runs → **Proposals** → fill measure + reciprocal commitment → **Propose** | State `PENDING_SECURITY`, test status `TESTED` (if both runs exist) |
-| 7 | Security | Refresh if needed → open proposal → **Counter** with revised wording. **Leave "changes plan" off** | State `COUNTERED`, test status unchanged |
-| 8 | Product | **Acknowledge** | State `ACKNOWLEDGED_BY_PRODUCT` |
-| 9 | Security | **Ratify / Accept** | State `RATIFIED`; new Security goal version |
-| 10 | Security | Open **Goals** | Accepted version shown (records `saw_accepted_version`) |
-| 11 | Product | Open **Goals** | Accepted version shown; timer stops |
-| 12 | Either | Show **proof strip** | Measured time + touchpoints vs labeled ESTIMATE |
+| 1 | Product | Already signed in. Open **Goals** | CEO goal v2 marked "Changed today"; the clock starts the first time the CEO's change is viewed |
+| 2 | Product | Point at the **Product needs Security** card | Amber, "Unknown" |
+| 3 | Product | Click the card → **See what to do next** | Three options in order, "What could prove this wrong", "What we don't know yet", earlier team decision (Alike) |
+| 4 | Product | **Test both plans** | Current plan Failed, new plan Passed, "Same practice tickets, same pass/fail checks"; outage test listed |
+| 5 | Product | **See full results in Evidence** (optional) | Test run detail opens |
+| 6 | Product | **Add test results to the proposal** → Proposals form (text is pre-filled) → **Send proposal to Alex / Security Lead** | "Waiting for Security", "Tested" (if both runs exist) |
+| 7 | Security | Refresh if needed → **Review and decide** → **Ask for changes**. **Leave "These changes alter how the agent works" unticked** | "Security asked for changes"; still "Tested" |
+| 8 | Product | **Review Security's changes** → **Accept Security's changes and confirm what Product will do** | "Product accepted changes" |
+| 9 | Security | **Approve the change to my goal** | "Approved"; new Security goal version (v2) |
+| 10 | Security | Open **Goals** | Agreed version shown |
+| 11 | Product | Open **Goals** | Agreed version shown; the clock stops |
+| 12 | Either | Show the **summary strip** | Measured time and steps next to the labelled estimate |
 
-Suggested text to paste:
-- **Measure (Product):** "Observability-beta incidents triaged per launch-readiness policy (urgent, obs-beta tag, private investigation note, public acknowledgment); P0 non-beta incidents and their private notes protected."
-- **Reciprocal commitment (Product):** "Product tags beta issues obs-beta at intake, publishes the beta scope list, and defers ticket dashboard polish."
-- **Counter (Security):** "Observability-beta incidents triaged per launch-readiness policy by the triage agent, with one human review per day this week; P0 non-beta incidents and their private notes protected."
+The proposal form is pre-filled with this text (paste only if it was cleared):
+- **New target for Security (Product):** "Beta customers' issues are handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer. The critical security ticket is not touched"
+- **What Product will do in return:** "Product will tag every beta issue as beta when it comes in and publish exactly what is in the beta by Wednesday. Product will postpone the ticket dashboard polish."
+- **Ask for changes (Security):** the form adds ", and its private notes stay untouched too" to the target. To show the capacity trade-off instead, write: "Beta customers' issues handled first by the AI agent, with one human review a day this week; the critical security ticket and its private notes stay untouched."
 
-Optional 403 beat (only if time allows): from the Product window, try to ratify. Expect "Only the owner of the Security goal can ratify its revision".
+Optional "only the owner can approve" beat (only if time allows): from the Product window, try to approve. Expect "Only Security can approve changes to Security's goal".
 
 ## Pre-recording reset checklist
 
 - [ ] `npm run dev` running; both windows load `http://localhost:3000`.
-- [ ] Sparta evidence exists for `p-throughput@1` normal, `p-beta@1` normal and `p-beta@1` interruption in `sparta/walkthrough-lab/evidence/`. Scenario Studio shows all three after a refresh.
-- [ ] Confirm Scenario Studio matches the recorded runs used in the script: `p-throughput@1-normal-115150` FAIL (exit 1, 2/9, ticket 1 changed), `p-beta@1-normal-115116` PASS (exit 0, 9/9), `p-beta@1-interruption-115212` PASS (exit 0, 9/9). If you rerun and get different results, say what actually happened.
+- [ ] Sparta evidence exists for `p-throughput@1` normal, `p-beta@1` normal and `p-beta@1` interruption in `sparta/walkthrough-lab/evidence/`. "Test both plans" shows all three after a refresh.
+- [ ] Confirm "Test both plans" matches the recorded runs used in the script: `p-throughput@1-normal-115150` FAIL (exit 1, 2/9, ticket 1 changed), `p-beta@1-normal-115116` PASS (exit 0, 9/9), `p-beta@1-interruption-115212` PASS (exit 0, 9/9). If you rerun and get different results, say what actually happened.
 - [ ] Alike: if a decision was actually retrieved in a fresh session, it's attached (`POST /api/alike`). If not, cut the Alike line.
-- [ ] Demo reset: `POST /api/reset {"confirm":"reset"}` (see README). Evidence and the Alike ref survive the reset.
-- [ ] After reset: no proposals, timer not started, Security on v1, dependency amber.
+- [ ] Demo reset: **Start the demo over** in the sidebar, or `POST /api/reset {"confirm":"reset"}` (see README). Test results and the Alike decision survive the reset.
+- [ ] After reset: no proposals, clock not started, Security on v1, "Product needs Security" card amber.
 - [ ] Product signed in on the left window, Security on the right (private window, so cookies are separate).
-- [ ] **Don't open Goals in either window until recording starts**, so the timer starts on camera.
+- [ ] **Don't open Goals in either window until recording starts**, so the clock starts on camera.
 - [ ] Browser zoom ~110–125%, notifications off, no API keys, `.env` or terminal secrets on screen.
 - [ ] Mic check; screen recorder captures both windows.
-- [ ] Measure, commitment and counter text ready to paste.
+- [ ] Proposal text is pre-filled; backup copies of the target, commitment and change request ready to paste.
 
 ---
 
@@ -138,7 +138,7 @@ Optional 403 beat (only if time allows): from the Product window, try to ratify.
 |---|---|---|
 | 0:00–0:15 | Hook | Shruti: "With AI agents, our teams finish tickets faster, but agreeing on whether we're working on the right thing still happens at human meeting speed." |
 | 0:15–0:30 | Problem | "The CEO changed priorities. My launch depends on Security's goal, which I can't edit. Today that's five steps and, by our estimate, about 200 minutes." |
-| 0:30–0:45 | Goals + brief | Amber dependency; P0 option; disconfirmer: protected P0 ticket. |
-| 0:45–1:15 | Scenario Studio | "Same Sparta mission, seed and checks. Current plan FAILS 7 of 9 checks and posts a public reply on the protected P0; candidate PASSES 9 of 9 and leaves the protected P0 unchanged, even with an injected connector failure. This tests ticket behavior, not company ROI." |
-| 1:15–1:40 | Decision | Propose (pinned to plan hash) → Security counters → Product acknowledges → Security ratifies its own goal. |
-| 1:40–2:00 | Proof + close | "Measured: [fill from actual run] vs an estimated baseline. Next, agents ask Align which plan they're authorized to run before they start. AI made execution fast; Align makes agreement on what to execute fast enough to keep up." |
+| 0:30–0:45 | Goals + what to do next | Amber "Product needs Security" card; first option: add "beta issues first" to Security's goal; what could prove it wrong: the critical security ticket. |
+| 0:45–1:15 | Test both plans | "Same practice tickets, same checks. The current plan fails, only 2 of 9 checks pass, and it posts a public reply on the critical security ticket; the new plan passes 9 of 9 and leaves that ticket alone, even when the ticket system fails mid-run. This checks ticket handling, not business results." |
+| 1:15–1:40 | Decision | Propose (tied to the tested plan) → Security asks for changes → Product accepts → Security approves its own goal. |
+| 1:40–2:00 | Proof + close | "Measured: [fill from actual run] vs an estimated baseline. Next, AI agents ask Align which plan they're allowed to run before they start. AI made execution fast; Align makes agreement on what to execute fast enough to keep up." |
