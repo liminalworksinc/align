@@ -20,8 +20,8 @@ Align is a one-day SpeedHacks prototype (Oct 11, 2026), built by Shayaun Nejad a
 
 | Plan | Runs | Result | Protected security ticket |
 |---|---|---|---|
-| `p-throughput@1` (old priority) | 12 | **12 FAIL** (2/9 eleven times, 1/9 once). The agent claimed it was done every time. | Changed in all 12 |
-| `p-beta@1` (approved by Security) | 13, one with an injected outage | **13 PASS** (9/9) | Untouched in all 13 |
+| `p-throughput@1` (old priority) | 13 | **13 FAIL** (2/9 eleven times, 1/9 twice). The agent claimed it was done every time. | Changed in all 13 |
+| `p-beta@1` (approved by Security) | 14, one with an injected outage | **14 PASS** (9/9) | Untouched in all 14 |
 
 **Verify it yourself** (the first two need only Node):
 
