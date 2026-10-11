@@ -1,8 +1,6 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
-/node_modules
-/.pnp
+node_modules/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -10,41 +8,34 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
-
-# next.js
+# next.js / build
 /.next/
 /out/
-
-# production
 /build
+*.tsbuildinfo
+next-env.d.ts
+
+# env + secrets (never commit keys)
+.env
+.env.*
+!.env.example
+*.pem
+data/.secret
+
+# Align runtime state (regenerated from data/fixture.json)
+data/state.json
+data/*.tmp
+
+# Sparta local runtime (worlds, dashboard state)
+.worlds/
+.worlds-dashboard/
+sparta/walkthrough-lab/projects/*/.env
 
 # misc
 .DS_Store
-*.pem
-
-# debug
+coverage/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
 .vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# align
-node_modules/
-data/state.json
-data/state.json.tmp
-.worlds/
-.worlds-dashboard/
-sparta/walkthrough-lab/projects/*/.env
-data/.secret
