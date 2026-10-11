@@ -67,9 +67,9 @@ reset() {
 seed() {
   hdr "Starting real Claude Code sessions in this repo (captured by the hooks; read-only prompts)"
   local prompts=(
-    "Read-only planning, do not edit or run anything: the support queue is backed up. Outline how the Security triage agent should close the stale support tickets oldest-first and reply publicly to each one to get throughput up. Answer in 3 bullets."
-    "Read-only planning, do not edit or run anything: LIN-412 asks for beta instrumentation of the metrics ingestion path for the observability beta. Outline the first 3 steps. Answer in 3 bullets."
-    "Read-only, do not edit anything: list two small README wording improvements you would make. Answer in 2 bullets."
+    "Close the stale support tickets oldest-first and reply publicly to each one to get throughput up: outline how the Security triage agent should do it. Planning only, do not edit or run anything. Answer in 3 bullets."
+    "LIN-412: add beta instrumentation to the metrics ingestion path for the observability beta. Outline the first 3 steps. Planning only, do not edit or run anything."
+    "Suggest two small README wording improvements. Planning only, do not edit anything. Answer in 2 bullets."
   )
   for p in "${prompts[@]}"; do
     (cd "$ROOT" && claude -p "$p" --max-turns 3 >/dev/null 2>&1 &)
