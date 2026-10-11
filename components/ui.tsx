@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 export type Tone = "violet" | "amber" | "neutral" | "red" | "green" | "blue";
 
-// Outline pills from the Liminal design: mono, rounded, colored border + text, no fill.
+// Outline pills: mono, rounded, colored border + text, no fill.
 const TONES: Record<Tone, string> = {
   violet: "text-violet-700 border-violet-700",
   amber: "text-amber-700 border-amber-700",
@@ -17,7 +17,7 @@ const ICONS: Record<Tone, string> = { violet: "◆", amber: "▲", neutral: "●
 
 export function Badge({ tone, children, icon = true }: { tone: Tone; children: ReactNode; icon?: boolean }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 font-mono text-[12px] leading-[1.4] tracking-[0.04em] ${TONES[tone]}`}>
+    <span className={`inline-flex max-w-full shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[12px] leading-[1.4] tracking-[0.04em] ${TONES[tone]}`}>
       {icon && <span aria-hidden>{ICONS[tone]}</span>}
       {children}
     </span>
@@ -78,7 +78,7 @@ export function Section({ title, children, right }: { title: string; children: R
 }
 
 export function Mono({ children }: { children: ReactNode }) {
-  return <code className="rounded bg-zinc-100 px-1.5 py-px font-mono text-[13px] text-zinc-900">{children}</code>;
+  return <code className="rounded bg-zinc-100 px-1.5 py-px font-mono text-[13px] text-zinc-900 [overflow-wrap:anywhere]">{children}</code>;
 }
 
 export const OWNER_LABEL: Record<string, string> = {

@@ -1,95 +1,121 @@
 @import "tailwindcss";
 
 /*
- * Liminal design system (dark substrate) mapped onto the Tailwind palette the
- * components already use, so every zinc/violet/amber/red/emerald class resolves
- * to a Liminal token. Truth colors keep their meaning:
- *   violet = selected/candidate (--liminal), amber = unresolved (--watch),
- *   red = real failed check (--alarm), emerald = Sparta-verified only (--ui-state-success).
+ * Align dark theme. Tokens below were authored for this app; the Tailwind palette the
+ * components already use is mapped onto them so every zinc/violet/amber/red/emerald class
+ * resolves here. Truth colors keep their meaning:
+ *   violet = selected/candidate (--al-accent), amber = unresolved (--al-warn),
+ *   red = real failed check (--al-fail), emerald = Sparta-verified only (--al-pass).
  */
-@theme inline {
-  --font-sans: var(--sans);
-  --font-mono: var(--mono);
-  --font-display: var(--display);
-
-  --color-white: var(--frame-bg);
-  --color-black: var(--bg);
-
-  --color-zinc-50: var(--frame-bg-2);
-  --color-zinc-100: var(--frame-bg-3);
-  --color-zinc-200: var(--card-border);
-  --color-zinc-300: var(--card-border-2);
-  --color-zinc-400: var(--text-faint);
-  --color-zinc-500: var(--text-dim);
-  --color-zinc-600: color-mix(in oklab, var(--text-dim), var(--text-mid));
-  --color-zinc-700: var(--text-mid);
-  --color-zinc-800: var(--text);
-  --color-zinc-900: var(--text);
-  --color-zinc-950: var(--bg);
-
-  --color-violet-50: var(--liminal-bg);
-  --color-violet-100: var(--liminal-bg);
-  --color-violet-200: color-mix(in oklab, var(--liminal) 35%, transparent);
-  --color-violet-300: color-mix(in oklab, var(--liminal) 55%, transparent);
-  --color-violet-400: color-mix(in oklab, var(--liminal) 75%, transparent);
-  --color-violet-500: var(--liminal);
-  --color-violet-600: var(--liminal);
-  --color-violet-700: var(--liminal);
-  --color-violet-800: var(--liminal);
-  --color-violet-900: var(--liminal);
-  --color-violet-950: var(--text);
-
-  --color-amber-50: var(--watch-bg);
-  --color-amber-100: var(--watch-bg);
-  --color-amber-300: var(--watch);
-  --color-amber-400: var(--watch);
-  --color-amber-500: var(--watch);
-  --color-amber-700: var(--watch);
-  --color-amber-800: var(--watch);
-  --color-amber-900: var(--watch);
-  --color-amber-950: var(--text);
-
-  --color-red-50: var(--alarm-bg);
-  --color-red-300: var(--alarm);
-  --color-red-700: var(--alarm);
-  --color-red-800: var(--alarm);
-
-  --color-emerald-50: var(--ui-state-success-bg);
-  --color-emerald-400: var(--ui-state-success);
-  --color-emerald-700: var(--ui-state-success);
-  --color-emerald-800: var(--ui-state-success);
-
-  --color-sky-50: var(--ui-state-info-bg);
-  --color-sky-300: var(--ui-state-info);
-  --color-sky-800: var(--ui-state-info);
-}
-
 :root {
   color-scheme: dark;
-  /* Self-hosted faces from next/font take the first slot in each Liminal stack. */
-  --sans: var(--font-space-grotesk), "Space Grotesk", "Geist", system-ui, sans-serif;
-  --mono: var(--font-space-mono), "Space Mono", "Geist Mono", ui-monospace, monospace;
-  --display: var(--font-nineties), "Nineties Headliner", Georgia, serif;
+
+  --al-bg: #0b0b0e;
+  --al-rail: #09090b;
+  --al-surface: #111115;
+  --al-surface-sunk: #0d0d10;
+  --al-surface-raised: #18181d;
+  --al-line: #202026;
+  --al-line-strong: #2c2c33;
+
+  --al-ink: #f2f0ec;
+  --al-ink-2: #c6c2ba;
+  --al-ink-3: #8e8a83;
+  --al-ink-4: #75726c;
+
+  --al-accent: #c46bff;
+  --al-accent-bg: rgb(196 107 255 / 0.1);
+  --al-warn: #f5b342;
+  --al-warn-bg: rgb(245 179 66 / 0.09);
+  --al-fail: #ff5c6c;
+  --al-fail-bg: rgb(255 92 108 / 0.09);
+  --al-pass: #3ddc84;
+  --al-pass-bg: rgb(61 220 132 / 0.08);
+  --al-info: #6fa8ff;
+  --al-info-bg: rgb(111 168 255 / 0.08);
+  --al-focus: #9b7bff;
+  --al-ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --al-sans: var(--font-space-grotesk), system-ui, sans-serif;
+  --al-mono: var(--font-space-mono), ui-monospace, monospace;
+  --al-display: var(--font-anton), Impact, sans-serif;
+}
+
+@theme inline {
+  --font-sans: var(--al-sans);
+  --font-mono: var(--al-mono);
+  --font-display: var(--al-display);
+
+  --color-white: var(--al-surface);
+  --color-black: var(--al-bg);
+
+  --color-zinc-50: var(--al-surface-sunk);
+  --color-zinc-100: var(--al-surface-raised);
+  --color-zinc-200: var(--al-line);
+  --color-zinc-300: var(--al-line-strong);
+  --color-zinc-400: var(--al-ink-4);
+  --color-zinc-500: var(--al-ink-3);
+  --color-zinc-600: color-mix(in oklab, var(--al-ink-3), var(--al-ink-2));
+  --color-zinc-700: var(--al-ink-2);
+  --color-zinc-800: var(--al-ink);
+  --color-zinc-900: var(--al-ink);
+  --color-zinc-950: var(--al-bg);
+
+  --color-violet-50: var(--al-accent-bg);
+  --color-violet-100: var(--al-accent-bg);
+  --color-violet-200: color-mix(in oklab, var(--al-accent) 35%, transparent);
+  --color-violet-300: color-mix(in oklab, var(--al-accent) 55%, transparent);
+  --color-violet-400: color-mix(in oklab, var(--al-accent) 75%, transparent);
+  --color-violet-500: var(--al-accent);
+  --color-violet-600: var(--al-accent);
+  --color-violet-700: var(--al-accent);
+  --color-violet-800: var(--al-accent);
+  --color-violet-900: var(--al-accent);
+  --color-violet-950: var(--al-ink);
+
+  --color-amber-50: var(--al-warn-bg);
+  --color-amber-100: var(--al-warn-bg);
+  --color-amber-300: var(--al-warn);
+  --color-amber-400: var(--al-warn);
+  --color-amber-500: var(--al-warn);
+  --color-amber-700: var(--al-warn);
+  --color-amber-800: var(--al-warn);
+  --color-amber-900: var(--al-warn);
+  --color-amber-950: var(--al-ink);
+
+  --color-red-50: var(--al-fail-bg);
+  --color-red-300: var(--al-fail);
+  --color-red-700: var(--al-fail);
+  --color-red-800: var(--al-fail);
+
+  --color-emerald-50: var(--al-pass-bg);
+  --color-emerald-400: var(--al-pass);
+  --color-emerald-700: var(--al-pass);
+  --color-emerald-800: var(--al-pass);
+
+  --color-sky-50: var(--al-info-bg);
+  --color-sky-300: var(--al-info);
+  --color-sky-800: var(--al-info);
 }
 
 html,
 body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--sans);
+  background: var(--al-bg);
+  color: var(--al-ink);
+  font-family: var(--al-sans);
   font-size: 16px;
   line-height: 1.4;
 }
 
 :focus-visible {
-  outline: 2px solid var(--ui-focus-ring);
+  outline: 2px solid var(--al-focus);
   outline-offset: 2px;
   border-radius: 6px;
 }
 
 ::selection {
-  background: var(--liminal-bg);
-  color: var(--text);
+  background: var(--al-accent-bg);
+  color: var(--al-ink);
 }
 
 @keyframes al-in {
@@ -104,14 +130,14 @@ body {
 }
 
 .al-in {
-  animation: al-in 0.3s var(--ease);
+  animation: al-in 0.3s var(--al-ease);
 }
 
-/* Mono uppercase section label, the design's `.al-lbl`. */
+/* Mono uppercase section label. */
 .al-lbl {
-  font-family: var(--mono);
+  font-family: var(--al-mono);
   font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--al-ink-3);
 }

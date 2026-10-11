@@ -46,7 +46,7 @@ export function OrgView(props: ViewProps) {
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-5">
       <div>
-        <h1 className="text-[24px] font-bold tracking-tight">Company goal</h1>
+        <h1 className="font-display text-[30px] font-normal leading-[1.1]">Company goal</h1>
         <p className="text-[16px] text-zinc-600">
           Ratified by Leadership and pushed to every team. Teams inherit it; agents are matched against it.
         </p>
@@ -65,7 +65,7 @@ export function OrgView(props: ViewProps) {
         <Section title={`Next version · ${ceo ? `v${Number(ceo.version.replace(/^v/, "")) + 1}` : "v1"}`} right={<Badge tone="violet">Draft</Badge>}>
           <div className="rounded-xl bg-white p-5 ring-1 ring-violet-300">
             <label className="mb-3 block">
-              <span className="mb-1 block text-[13px] font-bold uppercase tracking-wide text-zinc-500">Objective</span>
+              <span className="mb-1 block al-lbl">Objective</span>
               <textarea
                 value={objective}
                 onChange={(e) => setObjective(e.target.value)}
@@ -74,7 +74,7 @@ export function OrgView(props: ViewProps) {
                 className="w-full rounded-lg px-3 py-2 text-[18px] font-semibold ring-1 ring-zinc-300"
               />
             </label>
-            <div className="mb-1 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Key results</div>
+            <div className="mb-1 al-lbl">Key results</div>
             <MeasureList measures={draft.measures} compare={ceo?.measures} />
             <div className="mt-4 flex items-center gap-3">
               {canPush ? (

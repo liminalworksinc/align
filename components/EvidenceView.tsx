@@ -415,10 +415,8 @@ function SpartaRuns({ s, select, selection }: ViewProps) {
                 <tr className="border-b border-zinc-200 al-lbl">
                   <th className="px-4 py-2 font-semibold">Plan</th>
                   <th className="px-3 py-2 font-semibold">Scenario</th>
-                  <th className="px-3 py-2 font-semibold">Verdict</th>
-                  <th className="px-3 py-2 font-semibold">Exit</th>
+                  <th className="px-3 py-2 font-semibold">Verdict · exit</th>
                   <th className="px-3 py-2 font-semibold">Mission · seed · checks</th>
-                  <th className="px-3 py-2 font-semibold">Report</th>
                   <th className="px-3 py-2 font-semibold">sha256</th>
                 </tr>
               </thead>
@@ -445,28 +443,30 @@ function SpartaRuns({ s, select, selection }: ViewProps) {
                           isSel ? "bg-violet-50 ring-1 ring-inset ring-violet-300" : "hover:bg-zinc-50"
                         }`}
                       >
-                        <td className="px-4 py-3">
+                        <td className="whitespace-nowrap px-4 py-3">
                           <span aria-hidden className="mr-1 inline-block w-3 text-zinc-400">
                             {isOpen ? "▾" : "▸"}
                           </span>
                           <span className="font-mono text-[14px] font-semibold">{planLabel(r)}</span>
                         </td>
                         <td className="px-3 py-3">{r.scenario === "interruption" ? <Badge tone="amber">interruption</Badge> : "normal"}</td>
-                        <td className="px-3 py-3">
-                          <StateBadge state={r.verdict} />
+                        <td className="whitespace-nowrap px-3 py-3">
+                          <StateBadge state={r.verdict} /> <span className="ml-1 font-mono text-[13px] text-zinc-500">{r.exit_code}</span>
                         </td>
-                        <td className="px-3 py-3 font-mono">{r.exit_code}</td>
-                        <td className="px-3 py-3 font-mono text-[13px] text-zinc-700">
+                        <td className="whitespace-nowrap px-3 py-3 font-mono text-[13px] leading-snug text-zinc-700">
                           {r.mission_id}
                           <br />
-                          seed {r.seed_version} · checks {r.checks_version}
+                          seed {r.seed_version}
+                          <br />
+                          checks {r.checks_version}
                         </td>
-                        <td className="max-w-[260px] break-all px-3 py-3 font-mono text-[13px] text-zinc-700">{r.report_path}</td>
-                        <td className="px-3 py-3 font-mono text-[13px] text-zinc-700">{r.report_sha256.slice(0, 12)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 font-mono text-[13px] text-zinc-700" title={r.report_path}>
+                          {r.report_sha256.slice(0, 8)}
+                        </td>
                       </tr>
                       {isOpen && (
                         <tr className="border-b border-zinc-200 bg-zinc-50">
-                          <td colSpan={7} className="px-4 py-4">
+                          <td colSpan={5} className="px-4 py-4">
                             <RunDetail run={r} />
                           </td>
                         </tr>

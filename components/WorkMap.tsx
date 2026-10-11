@@ -101,7 +101,7 @@ function Detail({ session, m, ctx }: { session: AgentSession; m: SessionMapping 
   return (
     <div className="space-y-3 border-t border-zinc-200 px-4 py-3">
       <div>
-        <div className="mb-1 text-[12px] font-bold uppercase tracking-wide text-zinc-500">Prompts</div>
+        <div className="mb-1 al-lbl">Prompts</div>
         <ol className="space-y-1">
           {session.prompts.map((p, i) => (
             <li key={i} className="text-[14px] text-zinc-800">
@@ -305,7 +305,7 @@ export function WorkMap(props: ViewProps) {
 
   return (
     <div className="mx-auto max-w-[1600px]">
-      <h1 className="text-[28px] font-bold tracking-tight text-zinc-900">Where agent work is going</h1>
+      <h1 className="font-display text-[30px] font-normal leading-[1.1] text-zinc-900">Where agent work is going</h1>
       <p className="mb-5 max-w-4xl text-[17px] text-zinc-600">
         Claude Code and Codex sessions, captured automatically and matched to the goals your org has ratified. Matches are suggestions until the goal&apos;s owner confirms them.
       </p>

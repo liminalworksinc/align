@@ -182,7 +182,7 @@ export default function Page() {
   return (
     <div className="grid h-screen grid-cols-[232px_minmax(0,1fr)_360px] grid-rows-[64px_minmax(0,1fr)] overflow-hidden">
       {/* Sidebar */}
-      <aside className="row-span-2 flex flex-col border-r border-zinc-200 bg-[var(--rail-bg)]">
+      <aside className="row-span-2 flex flex-col border-r border-zinc-200 bg-[var(--al-rail)]">
         <div className="flex h-16 items-center gap-2 border-b border-zinc-200 px-6">
           <span className="font-display text-[24px] leading-none">Align</span>
           <span className="al-lbl text-violet-700">Liminal</span>
@@ -193,7 +193,7 @@ export default function Page() {
               key={n.id}
               onClick={() => props.go(n.id)}
               aria-current={view === n.id ? "page" : undefined}
-              className={`flex min-h-[46px] items-center justify-between rounded-[10px] px-3.5 text-left text-[16px] transition ${view === n.id ? "bg-violet-50 text-zinc-900 shadow-[inset_2px_0_0_var(--liminal)]" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"}`}
+              className={`flex min-h-[46px] items-center justify-between rounded-[10px] px-3.5 text-left text-[16px] transition ${view === n.id ? "bg-violet-50 text-zinc-900 shadow-[inset_2px_0_0_var(--al-accent)]" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"}`}
             >
               <span className="flex items-center gap-2.5">
                 <span aria-hidden className="w-4 text-center font-mono text-[13px] text-zinc-500">{n.icon}</span>

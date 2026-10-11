@@ -110,7 +110,7 @@ function DependencyButton({ props }: { props: ViewProps }) {
       <button
         onClick={() => props.select({ kind: "relation", id: rel.id })}
         aria-label={`Dependency: ${rel.label}. Status ${rel.status}`}
-        className={`relative z-10 mx-2 flex flex-col items-center gap-1.5 rounded-lg px-2.5 py-2 text-center ${open ? "ring-1 ring-amber-300 [background:linear-gradient(var(--watch-bg),var(--watch-bg)),var(--frame-bg)]" : "bg-white ring-1 ring-zinc-300"} hover:brightness-125 ${isSel(props.selection, "relation", rel.id) ? RING : ""}`}
+        className={`relative z-10 mx-2 flex flex-col items-center gap-1.5 rounded-lg px-2.5 py-2 text-center ${open ? "ring-1 ring-amber-300 [background:linear-gradient(var(--al-warn-bg),var(--al-warn-bg)),var(--al-surface)]" : "bg-white ring-1 ring-zinc-300"} hover:brightness-125 ${isSel(props.selection, "relation", rel.id) ? RING : ""}`}
       >
         <span className="al-lbl">Product → Security</span>
         <span className="text-[14px] font-semibold leading-snug text-zinc-900">{rel.label}</span>
