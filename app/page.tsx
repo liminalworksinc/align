@@ -8,26 +8,35 @@ import type { Drawer, View, ViewProps } from "@/components/props";
 import { ProposalsView } from "@/components/ProposalsView";
 import { ScenarioDrawer } from "@/components/ScenarioDrawer";
 import { TeamLens } from "@/components/TeamLens";
-import { TodayView } from "@/components/TodayView";
+import { DecisionView } from "@/components/DecisionView";
 import { OrgView } from "@/components/OrgView";
 import { WorkMap } from "@/components/WorkMap";
-import { currentGoal } from "@/components/select";
+import { activeProposal, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, useAlign, type Selection } from "@/components/useAlign";
 
-const NAV: { id: View; label: string; icon: string }[] = [
-  { id: "today", label: "Today", icon: "☀" },
-  { id: "goals", label: "Goals", icon: "◎" },
-  { id: "team", label: "Team", icon: "⇄" },
-  { id: "proposals", label: "Proposals", icon: "✉" },
-  { id: "evidence", label: "Evidence", icon: "▤" },
+type NavItem = { id: View; label: string; sub: string; icon: string };
+const NAV: NavItem[] = [
+  { id: "decision", label: "Next decision", sub: "What needs you", icon: "◆" },
+  { id: "goals", label: "Goals", sub: "How they connect", icon: "◎" },
+  { id: "team", label: "Team", sub: "People and dependencies", icon: "⇄" },
+  { id: "proposals", label: "Proposals", sub: "Changes in progress", icon: "✉" },
+  { id: "evidence", label: "Evidence", sub: "Decisions and proof", icon: "▤" },
 ];
-const NAV_LEADERSHIP: { id: View; label: string; icon: string }[] = [
-  { id: "company", label: "Company goal", icon: "◆" },
-  { id: "goals", label: "Goals", icon: "◎" },
-  { id: "work", label: "Work", icon: "⌁" },
-  { id: "evidence", label: "Evidence", icon: "▤" },
+const NAV_LEADERSHIP: NavItem[] = [
+  { id: "company", label: "Company goal", sub: "Set and send", icon: "◆" },
+  { id: "goals", label: "Goals", sub: "How they connect", icon: "◎" },
+  { id: "work", label: "Work", sub: "Where AI agent work goes", icon: "⌁" },
+  { id: "evidence", label: "Evidence", sub: "Decisions and proof", icon: "▤" },
 ];
+const TEAM_OF: Record<string, string> = { product: "Product", security: "Security", leadership: "Leadership" };
+const initials = (name: string) =>
+  name
+    .split(/[\s/]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
 const ROLES = [
   { id: "leadership", name: "CEO / Leadership", blurb: "Sets the company goal" },
   { id: "product", name: "Product Director", blurb: "Owns the beta launch" },
@@ -94,7 +103,7 @@ function Login({ onDone }: { onDone: () => void }) {
 
 export default function Page() {
   const { state, me, error, setError, loadError, loadMe, act, mark, refresh } = useAlign();
-  const [view, setView] = useState<View>("goals");
+  const [view, setView] = useState<View>("decision");
   const landed = useRef(false);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -160,6 +169,13 @@ export default function Page() {
   const lastPush = state.pushes?.at(-1);
   const ceo = currentGoal(state, "ceo");
   const nav = me.actor === "leadership" ? NAV_LEADERSHIP : NAV;
+  const openProposal = activeProposal(state);
+  const proposalOpen = openProposal && !["RATIFIED", "REJECTED"].includes(openProposal.state);
+  const decisionCount = pendingForMe + (me.actor === "product" && unresolved && !proposalOpen ? 1 : 0);
+  const counts: Partial<Record<View, number>> = { decision: decisionCount, proposals: pendingForMe };
+  const myGoal = me.actor === "product" || me.actor === "security" ? currentGoal(state, me.actor) : undefined;
+  const kr2 = ceo?.measures.find((m) => m.id === "KR2");
+  const alikeOk = state.brief?.alike_status === "retrieved";
   const ops = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("ops");
 
   async function signOut() {
@@ -176,44 +192,68 @@ export default function Page() {
     await act("/api/reset", { confirm: "reset" });
     setSelection(null);
     setAttached(null);
-    setView("goals");
+    setView(me?.actor === "leadership" ? "company" : "decision");
   }
 
   return (
-    <div className="grid h-screen grid-cols-[232px_minmax(0,1fr)_360px] grid-rows-[64px_minmax(0,1fr)] overflow-hidden">
+    <div className="grid h-screen grid-cols-[236px_minmax(0,1fr)_360px] grid-rows-[64px_minmax(0,1fr)] overflow-hidden">
       {/* Sidebar */}
-      <aside className="row-span-2 flex flex-col border-r border-zinc-200 bg-[var(--al-rail)]">
-        <div className="flex h-16 items-center gap-2 border-b border-zinc-200 px-6">
-          <span className="font-display text-[24px] leading-none">Align</span>
-          <span className="al-lbl text-violet-700">Liminal</span>
+      <aside className="row-span-2 flex flex-col border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5">
+        <div className="flex h-16 items-center gap-2.5 px-2.5">
+          <span aria-hidden className="grid size-7 place-items-center rounded-lg bg-violet-700 font-display text-[18px] text-black">A</span>
+          <span className="font-display text-[22px] leading-none">Align</span>
+          <span className="border-l border-zinc-200 pl-2.5 text-[13px] text-zinc-500">by Liminal</span>
         </div>
-        <nav className="flex flex-col gap-0.5 p-3" aria-label="Main">
-          {nav.map((n) => (
-            <button
-              key={n.id}
-              onClick={() => props.go(n.id)}
-              aria-current={view === n.id ? "page" : undefined}
-              className={`flex min-h-[46px] items-center justify-between rounded-[10px] px-3.5 text-left text-[16px] transition ${view === n.id ? "bg-violet-50 text-zinc-900 shadow-[inset_2px_0_0_var(--al-accent)]" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"}`}
-            >
-              <span className="flex items-center gap-2.5">
-                <span aria-hidden className="w-4 text-center font-mono text-[13px] text-zinc-500">{n.icon}</span>
-                {n.label}
-              </span>
-              {n.id === "proposals" && pendingForMe > 0 && <Badge tone="amber">{pendingForMe}</Badge>}
-            </button>
-          ))}
+        <nav className="mt-1.5 flex flex-col gap-1" aria-label="Main">
+          {nav.map((n) => {
+            const on = view === n.id;
+            const count = counts[n.id] ?? 0;
+            return (
+              <button
+                key={n.id}
+                onClick={() => props.go(n.id)}
+                aria-current={on ? "page" : undefined}
+                className={`flex min-h-[60px] w-full items-center gap-3.5 rounded-xl border px-3.5 text-left transition ${on ? "border-violet-700 bg-violet-50" : "border-transparent hover:bg-zinc-100"}`}
+              >
+                <span aria-hidden className={`grid size-7 shrink-0 place-items-center rounded-lg border-[1.5px] font-mono text-[13px] ${on ? "border-violet-700 text-violet-700" : "border-zinc-500 text-zinc-700"}`}>
+                  {n.icon}
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-[15px] font-semibold leading-tight text-zinc-900">{n.label}</span>
+                  <span className="truncate text-[13px] text-zinc-500">{n.sub}</span>
+                </span>
+                {count > 0 && (
+                  <span className={`ml-auto grid h-6 min-w-6 place-items-center rounded-full px-1.5 text-[12px] font-bold ${n.id === "decision" ? "bg-violet-700 text-black" : "bg-zinc-100 text-zinc-900"}`}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </nav>
-        <div className="mt-auto border-t border-zinc-200 p-4 text-[14px] text-zinc-500">
-          <div className="mb-3 text-[15px] font-semibold text-zinc-900">{me.name}</div>
-          <div className="flex flex-wrap gap-2">
-            <Button kind="secondary" onClick={signOut}>Sign&nbsp;out</Button>
-            {ops && <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>{confirmReset ? "Click again to reset" : "Start the demo over"}</Button>}
+        <div className="mt-auto flex flex-col gap-2.5 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
+          <span className="al-lbl !text-violet-700">Connected</span>
+          <div className="flex items-start gap-2.5">
+            <span aria-hidden className={`mt-[5px] size-2.5 shrink-0 rounded-full ${state.simulations.length ? "bg-violet-700" : "bg-zinc-400"}`} />
+            <div>
+              <b>Sparta</b>
+              <div className="text-[13px] text-zinc-500">
+                Practice tests · {state.simulations.length} run{state.simulations.length === 1 ? "" : "s"}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-start gap-2.5">
+            <span aria-hidden className={`mt-[5px] size-2.5 shrink-0 rounded-full ${alikeOk ? "bg-violet-700" : "bg-zinc-400"}`} />
+            <div>
+              <b>Alike</b>
+              <div className="text-[13px] text-zinc-500">Team decision memory · {alikeOk ? "1 earlier decision" : "not available"}</div>
+            </div>
           </div>
         </div>
       </aside>
 
       {/* Top bar */}
-      <header className="col-span-2 flex items-center gap-4 border-b border-zinc-200 bg-zinc-50 px-6">
+      <header className="col-span-2 flex items-center gap-4 border-b border-zinc-200 px-6">
         <div className="shrink-0 whitespace-nowrap text-[15px] text-zinc-500">
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
         </div>
@@ -233,9 +273,22 @@ export default function Page() {
         ) : lastPush ? (
           <Badge tone="neutral">Company goal {lastPush.version} sent {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Badge>
         ) : null}
-        <div className="ml-auto flex shrink-0 items-center gap-2.5 whitespace-nowrap text-[14px] text-zinc-500">
-          Signed in as
-          <Badge tone="violet" icon={false}>{me.name}</Badge>
+        <div className="ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap">
+          {ops && (
+            <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
+              {confirmReset ? "Click again to reset" : "Start the demo over"}
+            </Button>
+          )}
+          <span aria-hidden className="grid size-9 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[13px] font-bold text-violet-700">
+            {initials(me.name ?? "")}
+          </span>
+          <div className="leading-tight">
+            <div className="text-[14px] font-semibold text-zinc-900">{me.name}</div>
+            <div className="text-[12.5px] text-zinc-500">{TEAM_OF[me.actor] ?? ""} · Owner</div>
+          </div>
+          <Button kind="ghost" onClick={signOut}>
+            Sign&nbsp;out
+          </Button>
         </div>
       </header>
 
@@ -256,7 +309,32 @@ export default function Page() {
             {error}
           </div>
         )}
-        {view === "today" && <TodayView {...props} />}
+        {me.actor !== "leadership" && ceo && (
+          <div className="mb-4 grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-6 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5">
+            <div className="flex min-w-0 items-center gap-4">
+              <span aria-hidden className="grid size-[52px] shrink-0 place-items-center rounded-xl bg-violet-700 text-[22px] text-black">◎</span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="al-lbl">Company goal</span>
+                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[12px] text-zinc-700">{state.timeframe}</span>
+                  {ceo.changed && <Badge tone="amber">Changed today</Badge>}
+                </div>
+                <div className="mt-0.5 text-[19px] font-semibold leading-snug text-zinc-900">{ceo.objective}</div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1 border-l border-zinc-200 pl-6">
+              <span className="al-lbl !text-amber-700">The CEO&apos;s new requirement</span>
+              <span className="line-clamp-2 text-[14px] leading-snug text-zinc-900">{kr2 ? kr2.text : "No new requirement yet"}</span>
+              {kr2 && rel && <span className="text-[12.5px] text-zinc-500">Product and Security: {rel.status === "ACCEPTED" ? "agreed" : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}</span>}
+            </div>
+            <div className="flex flex-col gap-1 border-l border-zinc-200 pl-6">
+              <span className="al-lbl !text-violet-700">Your goal{myGoal ? ` · ${myGoal.version}` : ""}</span>
+              <span className="line-clamp-2 text-[14px] leading-snug text-zinc-900">{myGoal?.objective ?? "Unknown"}</span>
+            </div>
+          </div>
+        )}
+        {view === "decision" && <DecisionView {...props} />}
+        {view === "today" && <DecisionView {...props} />}
         {view === "company" && <OrgView {...props} />}
         {view === "work" && <WorkMap {...props} />}
         {view === "goals" && <GoalsView {...props} />}
@@ -265,7 +343,7 @@ export default function Page() {
         {view === "evidence" && <EvidenceView {...props} />}
 
         {drawer && (
-          <div className="fixed inset-y-0 left-[232px] right-[360px] top-16 z-20 flex justify-end bg-[rgba(5,5,7,0.55)]" onClick={closeDrawer}>
+          <div className="fixed inset-y-0 left-[236px] right-[360px] top-16 z-20 flex justify-end bg-[rgba(5,5,7,0.55)]" onClick={closeDrawer}>
             <div
               className={`al-in h-full overflow-y-auto border-l border-zinc-200 bg-white ${drawer === "scenario" ? "w-[min(880px,100%)]" : "w-[min(720px,100%)]"}`}
               onClick={(e) => e.stopPropagation()}

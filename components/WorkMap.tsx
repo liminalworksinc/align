@@ -293,7 +293,7 @@ export function WorkMap(props: ViewProps) {
 
   return (
     <div className="mx-auto max-w-[1600px]">
-      <h1 className="font-display text-[30px] font-normal leading-[1.1] text-zinc-900">Where AI agent work is going</h1>
+      <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Where AI agent work is going</h1>
       <p className="mb-5 max-w-4xl text-[17px] text-zinc-600">
         AI coding sessions (Claude Code and Codex) are recorded automatically and linked to the approved goal each one seems to serve. Each link is only a guess until that goal&apos;s owner confirms it.
       </p>

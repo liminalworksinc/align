@@ -123,9 +123,14 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
   const { s, me, select, selection, openDrawer, go, embedded } = props;
   const ceo = currentGoal(s, "ceo");
   const accepted = s.acceptances.at(-1);
+  const sec = currentGoal(s, "security");
+  const secBefore = accepted && sec ? (priorVersion(s, sec) ?? sec) : sec;
+  const oldTarget = secBefore?.measures.find((m) => m.id === "S-M1")?.text ?? "Close as many tickets as possible each day, oldest first";
+  const newRequirement =
+    ceo?.measures.find((m) => m.id === "KR2")?.text ?? "Beta customers' issues handled first, in time for the beta launch";
   return (
     <div className="flex flex-col gap-4">
-      {!embedded && <h1 className="font-display text-[30px] font-normal leading-[1.1]">Team view</h1>}
+      {!embedded && <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em]">Team view</h1>}
 
       {ceo ? (
         <button
@@ -160,18 +165,76 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
         <Column props={props} owner="security" />
       </div>
 
-      <div className="rounded-xl bg-white p-4 ring-1 ring-zinc-200">
-        <h4 className="mb-2 al-lbl">What changed</h4>
-        <p className="text-[16px] text-zinc-800">
-          <Badge tone="amber">New</Badge> The CEO now requires issues from beta customers to be handled in time for the beta launch. Security&apos;s
-          current target is speed: close as many tickets as possible, oldest first, so beta issues wait in line.
-        </p>
-        {accepted && (
-          <p className="mt-2 text-[16px] text-zinc-800">
-            <Badge tone="neutral">Resolved</Badge> Security approved its updated goal ({accepted.accepted_version}), and Product accepted Security&apos;s changes.
-          </p>
+      <div className="rounded-xl bg-white p-5 ring-1 ring-zinc-200">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <h4 className="al-lbl">What changed</h4>
+          {accepted ? <Badge tone="neutral">Resolved</Badge> : <Badge tone="amber">Needs a decision</Badge>}
+        </div>
+
+        <div className="grid items-stretch gap-3 md:grid-cols-[1fr_auto_1fr]">
+          <div className="rounded-lg bg-zinc-50 p-4 ring-1 ring-zinc-200">
+            <div className="text-[13px] font-semibold uppercase tracking-wide text-zinc-500">Security&apos;s agents are measured on</div>
+            <p className={`mt-1 text-[17px] ${accepted ? "text-zinc-500 line-through decoration-zinc-400" : "text-zinc-900"}`}>{oldTarget}</p>
+          </div>
+          <div aria-hidden className="hidden items-center text-[24px] text-amber-700 md:flex">
+            ≠
+          </div>
+          <div className="rounded-lg bg-amber-50 p-4 ring-1 ring-amber-300">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[13px] font-semibold uppercase tracking-wide text-amber-800">The CEO now requires</span>
+              {ceo?.changed && <Badge tone="amber">New today</Badge>}
+            </div>
+            <p className="mt-1 text-[17px] text-zinc-900">{newRequirement}</p>
+          </div>
+        </div>
+
+        {accepted ? (
+          <ul className="mt-4 space-y-1.5 text-[16px] text-zinc-900">
+            <li className="flex gap-2">
+              <span aria-hidden className="text-zinc-500">●</span>
+              <span>
+                Security approved its updated goal ({accepted.accepted_version}). Its agents now put beta issues first.
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span aria-hidden className="text-zinc-500">●</span>
+              <span>Product took on its part: tag beta issues on arrival and publish what&apos;s in the beta.</span>
+            </li>
+          </ul>
+        ) : (
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div>
+              <h5 className="mb-1.5 text-[14px] font-semibold text-zinc-700">Why it matters</h5>
+              <ul className="space-y-1.5 text-[16px] text-zinc-900">
+                <li className="flex gap-2">
+                  <span aria-hidden className="text-amber-700">▲</span> Beta customers&apos; issues wait behind older tickets
+                </li>
+                <li className="flex gap-2">
+                  <span aria-hidden className="text-amber-700">▲</span> The agents can finish every ticket and still miss the CEO&apos;s goal
+                </li>
+                <li className="flex gap-2">
+                  <span aria-hidden className="text-zinc-500">●</span> Product can&apos;t change Security&apos;s goal. Only Security can.
+                </li>
+              </ul>
+            </div>
+            <div>
+              <h5 className="mb-1.5 text-[14px] font-semibold text-zinc-700">How Align resolves it</h5>
+              <ol className="space-y-1.5 text-[16px] text-zinc-900">
+                <li className="flex gap-2">
+                  <span className="font-mono text-[14px] text-violet-700">1</span> Test both plans in Sparta on the same practice tickets
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-mono text-[14px] text-violet-700">2</span> Product proposes the change, with the test attached
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-mono text-[14px] text-violet-700">3</span> Security edits or approves its own goal
+                </li>
+              </ol>
+            </div>
+          </div>
         )}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+
+        <div className="mt-5 flex flex-wrap items-center gap-3">
           <Button onClick={() => openDrawer("brief")}>See what to do next</Button>
           {me.actor === "product" ? (
             <Button kind="secondary" onClick={() => go("proposals")}>

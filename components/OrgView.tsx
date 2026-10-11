@@ -45,7 +45,7 @@ export function OrgView(props: ViewProps) {
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-5">
       <div>
-        <h1 className="font-display text-[30px] font-normal leading-[1.1]">Company goal</h1>
+        <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em]">Company goal</h1>
         <p className="text-[16px] text-zinc-600">
           Approved by leadership and sent to every team. Each team&apos;s goals build on it, and AI coding sessions are linked to it.
         </p>

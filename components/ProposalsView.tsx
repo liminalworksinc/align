@@ -5,6 +5,101 @@ import type { ViewProps } from "./props";
 import { activeProposal, currentGoal } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
 import { ProofStrip } from "./ProofStrip";
+import { SpartaProof } from "./SpartaProof";
+
+/** Split free text into short bullet lines: one per sentence, and "Lead: a, b, and c" becomes a lead line with sub-items. */
+function toBullets(text: string): { lead: string; items: string[] }[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim().replace(/\.$/, ""))
+    .filter(Boolean)
+    .map((s) => {
+      const i = s.indexOf(": ");
+      if (i < 0) return { lead: s, items: [] };
+      const items = s
+        .slice(i + 2)
+        .split(/,\s*(?:and\s+)?|\s+and\s+(?=[a-z])/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      return items.length > 1 ? { lead: s.slice(0, i), items } : { lead: s, items: [] };
+    });
+}
+
+function Bullets({ text, marker = "●" }: { text: string; marker?: string }) {
+  const lines = toBullets(text);
+  if (!lines.length) return <p className="text-[16px] text-zinc-500">—</p>;
+  return (
+    <ul className="space-y-2">
+      {lines.map((l, i) => (
+        <li key={i} className="flex gap-2 text-[16px] leading-snug text-zinc-900">
+          <span aria-hidden className="mt-0.5 text-[12px] text-zinc-500">
+            {marker}
+          </span>
+          <div>
+            {l.lead}
+            {l.items.length > 0 && (
+              <ul className="mt-1.5 grid gap-1 sm:grid-cols-2">
+                {l.items.map((it) => (
+                  <li key={it} className="flex items-center gap-2 rounded-md bg-zinc-50 px-2 py-1 text-[15px] ring-1 ring-zinc-200">
+                    <span aria-hidden className="text-violet-700">
+                      ◆
+                    </span>
+                    {it.charAt(0).toUpperCase() + it.slice(1)}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Where the proposal is in its four steps. Security may approve straight away, which skips step 3. */
+function Stepper({ p }: { p: Proposal }) {
+  const countered = p.counter_versions.length > 0;
+  const steps = [
+    { label: "Product proposes", done: true },
+    { label: "Security reviews", done: p.state !== "PENDING_SECURITY" && p.state !== "DRAFT" },
+    {
+      label: countered ? "Product accepts Security's changes" : "Product confirms its part",
+      done: p.state === "ACKNOWLEDGED_BY_PRODUCT" || p.state === "RATIFIED",
+      skipped: p.state === "RATIFIED" && !countered,
+    },
+    { label: p.state === "REJECTED" ? "Security declined" : "Security approves its goal", done: p.state === "RATIFIED" || p.state === "REJECTED" },
+  ];
+  const current = steps.findIndex((s) => !s.done);
+  return (
+    <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Progress of this proposal">
+      {steps.map((st, i) => {
+        const now = i === current;
+        const cls = now
+          ? "bg-violet-50 ring-violet-400 text-violet-900"
+          : st.done
+            ? "bg-white ring-zinc-300 text-zinc-900"
+            : "bg-zinc-50 ring-zinc-200 text-zinc-500";
+        return (
+          <li key={i} aria-current={now ? "step" : undefined} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[14px] ring-1 ${cls}`}>
+            <span aria-hidden className="font-mono text-[13px]">
+              {st.done ? "●" : now ? "◆" : "○"}
+            </span>
+            <span className="font-semibold">
+              {i + 1}. {st.label}
+              {"skipped" in st && st.skipped && <span className="font-normal text-zinc-500"> (not needed)</span>}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** Text the counter added to the previous version, when it only appended (e.g. "and its private notes stay untouched too"). */
+function addedText(prev: string, next: string): string | null {
+  const base = prev.replace(/[.\s]+$/, "");
+  return next.startsWith(base) && next.length > base.length ? next.slice(base.length).replace(/^[,\s]+/, "") : null;
+}
 
 const DEFAULT_MEASURE =
   "Beta customers' issues are handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer. The critical security ticket is not touched";
@@ -237,7 +332,7 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
         if (canSend) void send();
       }}
     >
-      <h1 className="font-display text-[28px] font-normal leading-[1.1] text-zinc-900">Propose a change to Security&apos;s goal</h1>
+      <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Propose a change to Security&apos;s goal</h1>
 
       <Section title="Security's goal today" right={<Badge tone="neutral">Security&apos;s goal · view only — you can propose a change, not edit it</Badge>}>
         <Card tone="readonly">
@@ -273,8 +368,8 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
 
       <Section title="What you're proposing">
         <Card>
-          <p className="text-[16px] text-red-700/80 line-through decoration-red-400" aria-label={`Remove Security's current target: ${oldMeasure}`}>
-            <span aria-hidden className="font-mono font-bold no-underline">− </span>
+          <div className="text-[13px] font-semibold uppercase tracking-wide text-zinc-500">Today Security is measured on</div>
+          <p className="mt-0.5 text-[16px] text-zinc-500 line-through decoration-zinc-400" aria-label={`Replace Security's current target: ${oldMeasure}`}>
             {oldMeasure}
           </p>
           <label className="mt-3 block">
@@ -294,15 +389,15 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
         </Card>
       </Section>
 
-      <Section title="Test results">
+      <Section title="Test results from Sparta">
         {attached ? (
           <Card>
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-[16px]">
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-[16px]">
               <PlanLabel id={attached.plan_id} />
               <span className="text-zinc-600">Result once sent:</span>
               <TestStatusBadge status={expectation} />
             </div>
-            <RunList runs={runs} missing={missing} />
+            {runs.length ? <SpartaProof runs={runs} onOpenTest={() => props.openDrawer("scenario")} /> : <RunList runs={runs} missing={missing} />}
           </Card>
         ) : (
           <Card tone="amber">
@@ -399,7 +494,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="font-display text-[28px] font-normal leading-[1.1] text-zinc-900">Proposed change to Security&apos;s goal ({p.target_goal_version})</h1>
+        <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Proposed change to Security&apos;s goal ({p.target_goal_version})</h1>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <StateBadge state={p.state} />
           <TestStatusBadge status={p.test_status} />
@@ -407,6 +502,9 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
         <p className="mt-1 text-[15px] text-zinc-600">
           From {OWNER_LABEL[p.proposing_owner]} to {OWNER_LABEL[p.recipient_owner]} · sent {fmtTime(p.created_at)}
         </p>
+        <div className="mt-3">
+          <Stepper p={p} />
+        </div>
       </header>
 
       {/* Role-specific action / status area */}
@@ -416,7 +514,8 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
             <div>
               <Badge tone="amber">Security asked for changes</Badge>
               <p className="mt-1 text-[16px] text-amber-950">
-                {OWNER_LABEL.security} changed the proposed target ({p.counter_versions.at(-1)?.version}). See what changed below.
+                {OWNER_LABEL.security} edited the new target
+                {p.counter_versions.at(-1)?.rationale ? `: "${p.counter_versions.at(-1)?.rationale}"` : "."} The change is highlighted below.
               </p>
             </div>
             <Button disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/acknowledge`, {})}>
@@ -483,31 +582,36 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
               <Badge tone="neutral">Approved: Security&apos;s goal ({acc.accepted_version})</Badge>
               <TestStatusBadge status={acc.test_status} />
             </div>
-            <dl className="mt-3 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-[16px]">
-              <dt className="text-zinc-500">Approved by</dt>
-              <dd className="text-zinc-900">
-                {OWNER_LABEL[acc.ratified_by]} at {fmtTime(acc.ratified_at)}
-              </dd>
-              <dt className="text-zinc-500">Accepted by</dt>
-              <dd className="text-zinc-900">
-                {OWNER_LABEL[acc.acknowledged_by]} {acc.acknowledged_via === "authored_in_proposal" ? "(wrote what it will do into its proposal)" : ""} at {fmtTime(acc.acknowledged_at)}
-              </dd>
-              <dt className="text-zinc-500">What happens next</dt>
-              <dd className="text-zinc-900">
-                Security&apos;s AI agent follows the {planName(acc.plan_ref.plan_id).toLowerCase()}. Product tags beta issues as they come in and
-                publishes what&apos;s in the beta.
-              </dd>
-              {acc.rationale && (
-                <>
-                  <dt className="text-zinc-500">Why</dt>
-                  <dd className="text-zinc-900">{acc.rationale}</dd>
-                </>
-              )}
-              <dt className="text-zinc-500">Plan</dt>
-              <dd>
-                <PlanLabel id={acc.plan_ref.plan_id} />
-              </dd>
-            </dl>
+            <ul className="mt-3 space-y-2 text-[16px] text-zinc-900">
+              <li className="flex gap-2">
+                <span aria-hidden className="text-zinc-500">●</span>
+                <span>
+                  <strong>{OWNER_LABEL[acc.ratified_by]}</strong> approved the new goal at {fmtTime(acc.ratified_at)}
+                  {acc.rationale ? `: "${acc.rationale}"` : ""}
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span aria-hidden className="text-zinc-500">●</span>
+                <span>
+                  <strong>{OWNER_LABEL[acc.acknowledged_by]}</strong>{" "}
+                  {acc.acknowledged_via === "authored_in_proposal" ? "committed to its part in the proposal" : "accepted Security's changes"} at{" "}
+                  {fmtTime(acc.acknowledged_at)}
+                </span>
+              </li>
+            </ul>
+            <h4 className="mt-4 mb-1.5 al-lbl">What happens next</h4>
+            <ol className="space-y-1.5 text-[16px] text-zinc-900">
+              <li className="flex gap-2">
+                <span className="font-mono text-[14px] text-violet-700">1</span> Security&apos;s AI agent switches to the{" "}
+                {planName(acc.plan_ref.plan_id).toLowerCase()}
+              </li>
+              <li className="flex gap-2">
+                <span className="font-mono text-[14px] text-violet-700">2</span> Product tags beta issues as they come in
+              </li>
+              <li className="flex gap-2">
+                <span className="font-mono text-[14px] text-violet-700">3</span> Product publishes what&apos;s in the beta
+              </li>
+            </ol>
             <p className="mt-3 text-[15px] text-zinc-600">
               Both teams agreeing doesn&apos;t prove the beta launch will work. A passed test only covers the practice tickets.
             </p>
@@ -519,54 +623,72 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
       )}
       {p.state === "RATIFIED" && <ProofStrip s={s} />}
 
-      <Section title="What changed">
-        <Card>
-          <ol className="space-y-3">
-            <li className="text-[16px] text-red-700/80 line-through decoration-red-400">
-              <span aria-hidden className="font-mono font-bold">− </span>
-              {oldMeasure}
-              <span className="sr-only"> (removed)</span>
-            </li>
-            <li className={p.counter_versions.length ? "text-zinc-500" : "text-zinc-900"}>
-              <div className="text-[14px] font-semibold text-zinc-600">
-                + v2 · proposed by {OWNER_LABEL[p.proposing_owner]} at {fmtTime(p.created_at)}
-                {p.counter_versions.length > 0 && " (replaced by Security's changes)"}
-              </div>
-              <p className="text-[16px]">{p.proposed_measure_text}</p>
+      <Section title="What changes in Security's goal">
+        <div className="grid items-stretch gap-3 lg:grid-cols-[1fr_auto_1.4fr]">
+          <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200">
+            <div className="text-[13px] font-semibold uppercase tracking-wide text-zinc-500">Before</div>
+            <p className="mt-1 text-[17px] text-zinc-500 line-through decoration-zinc-400">{oldMeasure}</p>
+            <p className="mt-2 text-[14px] text-zinc-500">Counts tickets closed. Beta issues wait in line behind older ones.</p>
+          </div>
+          <div aria-hidden className="hidden items-center text-[28px] text-violet-700 lg:flex">
+            →
+          </div>
+          <div className="rounded-xl bg-violet-50 p-4 ring-1 ring-violet-300">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[13px] font-semibold uppercase tracking-wide text-violet-800">
+                {p.state === "RATIFIED" ? "Now agreed" : "Proposed"}
+              </span>
+              {p.counter_versions.length > 0 && <Badge tone="violet">Includes Security&apos;s edit</Badge>}
+              {p.counter_versions.at(-1)?.changes_plan && <Badge tone="amber">Changes how the agent works: needs a new test</Badge>}
+            </div>
+            <div className="mt-2">
+              <Bullets text={latestText} />
+            </div>
+          </div>
+        </div>
+
+        {p.counter_versions.length > 0 && (
+          <ol className="mt-3 space-y-2 border-l-2 border-zinc-200 pl-4 text-[15px]">
+            <li className="text-zinc-700">
+              <span className="font-semibold">{OWNER_LABEL[p.proposing_owner]}</span> proposed the first version at {fmtTime(p.created_at)}
             </li>
             {p.counter_versions.map((c, i) => {
-              const latest = i === p.counter_versions.length - 1;
+              const prev = i === 0 ? p.proposed_measure_text : p.counter_versions[i - 1].proposed_measure_text;
+              const added = addedText(prev, c.proposed_measure_text);
               return (
-                <li key={c.version} className={latest ? "rounded-lg bg-violet-50 p-2 ring-1 ring-violet-300" : "text-zinc-500"}>
-                  <div className="flex flex-wrap items-center gap-2 text-[14px] font-semibold text-zinc-600">
-                    + {c.version} · changes asked for by {OWNER_LABEL[c.by]} at {fmtTime(c.at)}
-                    {latest && <Badge tone="violet">latest version</Badge>}
-                    {c.changes_plan && <Badge tone="amber">needs a new test: changes how the agent works</Badge>}
-                  </div>
-                  <p className="text-[16px] text-zinc-900">{c.proposed_measure_text}</p>
-                  {c.rationale && <p className="text-[15px] text-zinc-600">Why: {c.rationale}</p>}
+                <li key={c.version} className="text-zinc-700">
+                  <span className="font-semibold">{OWNER_LABEL[c.by]}</span> edited it at {fmtTime(c.at)}
+                  {added ? (
+                    <>
+                      , adding: <mark className="rounded bg-violet-100 px-1 text-violet-900">{added}</mark>
+                    </>
+                  ) : (
+                    <>: new wording above</>
+                  )}
+                  {c.rationale && <div className="text-zinc-500">Why: {c.rationale}</div>}
                 </li>
               );
             })}
           </ol>
-        </Card>
+        )}
       </Section>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <Section title="Why">
-          <p className="text-[16px] text-zinc-900">{p.rationale || "—"}</p>
+        <Section title="Why Product is asking">
+          <Bullets text={p.rationale || ""} />
         </Section>
         <Section title="What Product will do in return">
-          <p className="text-[16px] text-zinc-900">{p.reciprocal_commitment}</p>
+          <Bullets text={p.reciprocal_commitment} marker="◆" />
         </Section>
       </div>
 
-      <Section title="Plan and test results">
-        <p className="mb-2 text-[16px] text-zinc-800">
-          <PlanLabel id={p.plan_ref.plan_id} />
-        </p>
-        <p className="mb-2 text-[15px] text-zinc-600">A passed test covers the practice tickets only. It doesn&apos;t predict the beta launch.</p>
-        <RunList runs={runs} missing={missing} />
+      <Section title="Proof from Sparta: both plans on the same practice tickets">
+        {runs.length ? (
+          <SpartaProof runs={runs} onOpenTest={() => props.openDrawer("scenario")} />
+        ) : (
+          <RunList runs={runs} missing={missing} />
+        )}
+        {missing.length > 0 && runs.length > 0 && <RunList runs={[]} missing={missing} />}
       </Section>
 
       <Section title="Who did what, when">

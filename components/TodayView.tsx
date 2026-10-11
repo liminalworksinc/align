@@ -86,7 +86,7 @@ export function TodayView(props: ViewProps) {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <header>
-        <h1 className="font-display text-[30px] font-normal leading-[1.1] text-zinc-900">Good to see you, {OWNER_LABEL[actor]}</h1>
+        <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Good to see you, {OWNER_LABEL[actor]}</h1>
         <p className="text-[16px] text-zinc-600">
           {s.company} · {s.timeframe}
         </p>

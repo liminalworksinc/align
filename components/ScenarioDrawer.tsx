@@ -60,7 +60,7 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
     <aside role="dialog" aria-modal="true" aria-labelledby="scenario-title" className="flex h-full w-[880px] max-w-full flex-col bg-zinc-50 text-[16px] text-zinc-900 shadow-2xl">
       <header className="flex items-center justify-between gap-4 border-b border-zinc-200 bg-white px-6 py-4">
         <div>
-          <h2 id="scenario-title" className="font-display text-[26px] font-normal leading-[1.1]">
+          <h2 id="scenario-title" className="text-[26px] font-semibold leading-tight tracking-[-0.01em]">
             Test both plans
           </h2>
           <p className="text-[15px] text-zinc-600">

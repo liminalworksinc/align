@@ -191,7 +191,7 @@ export function EvidenceView(props: ViewProps) {
   return (
     <div className="mx-auto max-w-6xl px-6 py-6 text-[16px] text-zinc-900">
       <header className="mb-6">
-        <h1 className="font-display text-[30px] font-normal leading-[1.1]">Evidence</h1>
+        <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em]">Evidence</h1>
         <p className="mt-1 text-[16px] text-zinc-600">
           What was decided, the practice test runs, who did what, and how long it took to agree. These results aren&apos;t signed, but anyone can re-run them with the
           command in the README.
