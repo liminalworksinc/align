@@ -138,7 +138,6 @@ LIVE DURING ACTS 1 AND 3 · The AI agent follows the people who own the goals (n
   • After the company goal is pushed: within ~1s Claude wakes on its own ("Align → Company goal v2 pushed…"), flags the KR3 risk, holds
   • After Security ratifies: Claude wakes again ("Align → Security goal v2 ratified…"), replans, runs scripts/run-plan.sh accepted → Sparta PASS 9/9
   • Bottom pane: each change leaving Align and reaching the session within milliseconds
-  • Work map card: "Listening for Align" → "Replan delivered · acted on"; decision record: "Agent delivery: 1 session"
 
 CLOSE · Summary strip: time to agreement measured in Align vs the estimate for doing it by hand
 EOF
