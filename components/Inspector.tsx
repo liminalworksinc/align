@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import type { Goal, GoalRelation, Proposal, SimulationRun, StateView, WorkItem } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { Badge, Button, OWNER_LABEL, Section, StateBadge, fmtTime } from "./ui";
-import { teamName } from "./TeamLens";
+import { reviewConflictLabel, teamName } from "./TeamLens";
 import { accepted, comparablePair, currentGoal, priorVersion } from "./select";
 
 const DEFAULT_RELATION = "r-product-security";
@@ -125,10 +125,10 @@ function GoalPanel({ p, g }: { p: ViewProps; g: Goal }) {
               p.openDrawer("brief");
             }}
           >
-            Review the conflict with Security
+            {reviewConflictLabel(me)}
           </Button>
         ) : isMine ? (
-          <Button onClick={() => p.openDrawer("brief")}>Review the conflict with Security</Button>
+          <Button onClick={() => p.openDrawer("brief")}>{reviewConflictLabel(me)}</Button>
         ) : (
           <Button onClick={() => p.go("proposals")}>Propose a change to {teamName(g)}&apos;s goal</Button>
         )}
@@ -272,7 +272,7 @@ function RelationPanel({ p, r }: { p: ViewProps; r: GoalRelation }) {
             p.openDrawer("brief");
           }}
         >
-          Review the conflict with Security
+          {reviewConflictLabel(p.me)}
         </Button>
       )}
     </>

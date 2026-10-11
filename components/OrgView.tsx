@@ -87,6 +87,11 @@ export function OrgView(props: ViewProps) {
             </div>
           </div>
         </Section>
+      ) : lastPush ? (
+        <p className="rounded-xl bg-zinc-50 px-4 py-3 text-[15px] text-zinc-600 ring-1 ring-zinc-200">
+          Nothing to approve: company goal {lastPush.version} was already sent at {fmtTime(lastPush.pushed_at)}. To run the decisions again, open{" "}
+          <a href="/?ops" className="underline">Align with ?ops</a> and click <b>Start the demo over</b>, or run <code>scripts/run-of-show.sh reset</code>.
+        </p>
       ) : (
         <p className="rounded-xl bg-zinc-50 px-4 py-3 text-[15px] text-zinc-600 ring-1 ring-zinc-200">No new version is being drafted.</p>
       )}

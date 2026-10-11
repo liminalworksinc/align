@@ -28,7 +28,7 @@
 > "Align shows how the goals connect. The CEO's goal changed today: beta customers' issues now have to be handled first. My goal is fine. But my launch needs Security, and that card turns amber, because Security's target is still 'close as many tickets as possible' and doesn't mention the beta. Align marks that unknown, not 'fine'."
 
 ### 1:20–1:55: "What to do next" (+ Alike, only if real)
-**Screen (Product):** click the "Product needs Security" card → **See what to do next**.
+**Screen (Product):** click the "Product needs Security" card → **Review the conflict with Security**.
 
 > "Align suggests options, in order, and I choose. First: add 'handle beta issues first' to Security's goal. Second: keep the critical security ticket off-limits, which is a rule, not a trade-off. Third: Product postpones dashboard polish to free up time. It also shows what could prove us wrong: there's an open critical security ticket with a private note, and we don't know how much time Security has."
 
@@ -37,8 +37,8 @@
 
 **If not retrieved:** skip Alike entirely, or point at the status: "Alike shows 'not available' here, and we say so."
 
-### 1:55–2:45: Test both plans (Sparta practice test)
-**Screen (Product):** **Test both plans**. "Current plan: oldest tickets first" on the left, "New plan: beta issues first" on the right.
+### 1:55–2:45: Which plan follows the new priority? (Sparta practice test)
+**Screen (Product):** **Test which plan follows the new priority**. "Oldest tickets first" (current plan) on the left, "Beta customers' issues first" (tested alternative) on the right. The Next decision screen shows the same two cards at a glance (2 / 9 vs 9 / 9); the outage test is only in this drawer, under "See every check →".
 
 > "Before asking Security for anything, we test. This is a practice test in Sparta, a sandbox with sample tickets. Same practice tickets, same pass/fail checks. The only thing that changes is the plan the AI agent follows."
 >
@@ -72,7 +72,7 @@
 > "Measured in this session: **[fill from actual run: mm:ss]** and **[fill from actual run: N]** steps, from first seeing the CEO's change until both of us saw the agreed goal. Next to it, doing it by hand is labeled an estimate. The practice tests we ran beforehand are listed separately and not counted."
 
 ### 4:10–4:40: Path forward, the agent asks first
-**Screen:** a terminal next to the Security window. Run `curl -s localhost:3000/api/policy/security`, or `ALIGN_URL=http://localhost:3000 scripts/run-plan.sh accepted` and cut after its first line (a full run makes billed model calls). If you can, show the output from before Security approved too (prepared during the dry run), so both are on screen.
+**Screen:** a terminal next to the Security window. Run `curl -s localhost:3100/api/policy/security`, or `scripts/run-plan.sh accepted` and cut after its first line (a full run makes billed model calls). If you can, show the output from before Security approved too (prepared during the dry run), so both are on screen.
 
 **Only if `/api/policy/security` answers on the recording machine (check during the dry run).** If not, say the lines over the summary strip and don't show a terminal.
 
@@ -84,7 +84,7 @@
 >
 > **Close:** "AI made execution fast. Align makes agreement on what to execute fast enough to keep up."
 
-**Timing:** this pushes the cut to ~4:40, still under 5:00 but with less margin than the PRD's ~4:10 target. If the dry run runs long, cut the optional throttling line in "Test both plans" first, then the Alike paragraph.
+**Timing:** this pushes the cut to ~4:40, still under 5:00 but with less margin than the PRD's ~4:10 target. If the dry run runs long, cut the optional throttling line in "Which plan follows the new priority?" first, then the Alike paragraph.
 
 **Don't say:** that Align enforces plans in the agent host, blocks other plans, or saved time or money. The agent reads the policy; nothing enforces it. Keep the competitor names out of the spoken lines unless someone checks the claims.
 
@@ -98,8 +98,8 @@ UI labels below match the app as of commit 2d8b38f. Re-check them during the dry
 |---|---|---|---|
 | 1 | Product | Already signed in. Open **Goals** | CEO goal v2 marked "Changed today"; the clock starts the first time the CEO's change is viewed |
 | 2 | Product | Point at the **Product needs Security** card | Amber, "Unknown" |
-| 3 | Product | Click the card → **See what to do next** | Three options in order, "What could prove this wrong", "What we don't know yet", earlier team decision (Alike) |
-| 4 | Product | **Test both plans** | Current plan Failed, new plan Passed, "Same practice tickets, same pass/fail checks"; outage test listed |
+| 3 | Product | Click the card → **Review the conflict with Security** | Three options in order, "What could prove this wrong", "What we don't know yet", earlier team decision (Alike) |
+| 4 | Product | **Test which plan follows the new priority** | Current plan Failed, new plan Passed, "Same practice tickets, same pass/fail checks"; outage test listed |
 | 5 | Product | **See full results in Evidence** (optional) | Test run detail opens |
 | 6 | Product | **Add test results to the proposal** → Proposals form (text is pre-filled) → **Send proposal to Alex / Security Lead** | "Waiting for Security", "Tested" (if both runs exist) |
 | 7 | Security | Refresh if needed → **Review and decide** → **Ask for changes**. **Leave "These changes alter how the agent works" unticked** | "Security asked for changes"; still "Tested" |
@@ -118,9 +118,9 @@ Optional "only the owner can approve" beat (only if time allows): from the Produ
 
 ## Pre-recording reset checklist
 
-- [ ] `npm run dev` running; both windows load `http://localhost:3000`.
-- [ ] Sparta evidence exists for `p-throughput@1` normal, `p-beta@1` normal and `p-beta@1` interruption in `sparta/walkthrough-lab/evidence/`. "Test both plans" shows all three after a refresh.
-- [ ] Confirm "Test both plans" matches the recorded runs used in the script: `p-throughput@1-normal-115150` FAIL (exit 1, 2/9, ticket 1 changed), `p-beta@1-normal-115116` PASS (exit 0, 9/9), `p-beta@1-interruption-115212` PASS (exit 0, 9/9). If you rerun and get different results, say what actually happened.
+- [ ] `npm run dev` running; both windows load `http://localhost:3100`.
+- [ ] Sparta evidence exists for `p-throughput@1` normal, `p-beta@1` normal and `p-beta@1` interruption in `sparta/walkthrough-lab/evidence/`. "Which plan follows the new priority?" shows all three after a refresh.
+- [ ] Confirm "Which plan follows the new priority?" matches the recorded runs used in the script: `p-throughput@1-normal-115150` FAIL (exit 1, 2/9, ticket 1 changed), `p-beta@1-normal-115116` PASS (exit 0, 9/9), `p-beta@1-interruption-115212` PASS (exit 0, 9/9). If you rerun and get different results, say what actually happened.
 - [ ] Alike: if a decision was actually retrieved in a fresh session, it's attached (`POST /api/alike`). If not, cut the Alike line.
 - [ ] Demo reset: **Start the demo over** in the sidebar, or `POST /api/reset {"confirm":"reset"}` (see README). Test results and the Alike decision survive the reset.
 - [ ] After reset: no proposals, clock not started, Security on v1, "Product needs Security" card amber.
@@ -139,6 +139,6 @@ Optional "only the owner can approve" beat (only if time allows): from the Produ
 | 0:00–0:15 | Hook | Shruti: "With AI agents, our teams finish tickets faster, but agreeing on whether we're working on the right thing still happens at human meeting speed." |
 | 0:15–0:30 | Problem | "The CEO changed priorities. My launch depends on Security's goal, which I can't edit. Today that's five steps and, by our estimate, about 200 minutes." |
 | 0:30–0:45 | Goals + what to do next | Amber "Product needs Security" card; first option: add "beta issues first" to Security's goal; what could prove it wrong: the critical security ticket. |
-| 0:45–1:15 | Test both plans | "Same practice tickets, same checks. The current plan fails, only 2 of 9 checks pass, and it posts a public reply on the critical security ticket; the new plan passes 9 of 9 and leaves that ticket alone, even when the ticket system fails mid-run. This checks ticket handling, not business results." |
+| 0:45–1:15 | Which plan follows the new priority? (open the drawer for the outage line) | "Same practice tickets, same checks. The current plan fails, only 2 of 9 checks pass, and it posts a public reply on the critical security ticket; the new plan passes 9 of 9 and leaves that ticket alone, even when the ticket system fails mid-run. This checks ticket handling, not business results." |
 | 1:15–1:40 | Decision | Propose (tied to the tested plan) → Security asks for changes → Product accepts → Security approves its own goal. |
 | 1:40–2:00 | Proof + close | "Measured: [fill from actual run] vs an estimated baseline. Next, AI agents ask Align which plan they're allowed to run before they start. AI made execution fast; Align makes agreement on what to execute fast enough to keep up." |

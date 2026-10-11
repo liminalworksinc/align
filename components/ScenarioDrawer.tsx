@@ -61,7 +61,7 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
       <header className="flex items-center justify-between gap-4 border-b border-zinc-200 bg-white px-6 py-4">
         <div>
           <h2 id="scenario-title" className="text-[26px] font-semibold leading-tight tracking-[-0.01em]">
-            Which plan meets the launch requirements?
+            Which plan follows the new priority?
           </h2>
           <p className="text-[15px] text-zinc-600">
             A practice test (Sparta sandbox): same practice tickets, same pass/fail checks — only the plan differs.
@@ -70,7 +70,7 @@ export function ScenarioDrawer(props: ViewProps & { onClose: () => void }) {
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close Test both plans (Escape)"
+          aria-label="Close plan test (Escape)"
           className="rounded-lg px-3 py-2 text-[15px] font-semibold text-zinc-700 ring-1 ring-zinc-300 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
         >
           ✕ Close

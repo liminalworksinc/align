@@ -15,6 +15,10 @@ export const depRelation = (s: StateView) => s.relations.find((r) => r.id === "r
 export const teamName = (g: Goal) =>
   g.owner_id === "security" ? "Security" : g.owner_id === "product" ? "Product" : (OWNER_LABEL[g.owner_id] ?? g.owner_name);
 
+/** Label for the button that opens the brief; Security is the other side of the conflict for everyone but Security. */
+export const reviewConflictLabel = (me: ViewProps["me"]) =>
+  me.actor === "security" ? "Review the CEO's new requirement" : "Review the conflict with Security";
+
 export function VersionTag({ s, g }: { s: StateView; g: Goal }) {
   const prior = priorVersion(s, g);
   return prior ? (
@@ -166,10 +170,11 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
       </div>
 
       <div className="rounded-xl bg-white p-5 ring-1 ring-zinc-200">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <h4 className="al-lbl">The CEO changed the requirements. Security&apos;s plan hasn&apos;t caught up.</h4>
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <h4 className="al-lbl">What changed</h4>
           {accepted ? <Badge tone="neutral">Resolved</Badge> : <Badge tone="amber">Needs a decision</Badge>}
         </div>
+        <p className="mb-3 text-[15px] text-zinc-900">The CEO changed the requirements. Security&apos;s plan hasn&apos;t caught up.</p>
 
         <div className="grid items-stretch gap-3 md:grid-cols-[1fr_auto_1fr]">
           <div className="rounded-lg bg-zinc-50 p-4 ring-1 ring-zinc-200">
@@ -221,7 +226,7 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
               <h5 className="mb-1.5 text-[14px] font-semibold text-zinc-700">How Align resolves it</h5>
               <ol className="space-y-1.5 text-[16px] text-zinc-900">
                 <li className="flex gap-2">
-                  <span className="font-mono text-[14px] text-violet-700">1</span> Test both plans in Sparta on the same practice tickets
+                  <span className="font-mono text-[14px] text-violet-700">1</span> Test which plan follows the new priority, in Sparta on the same practice tickets
                 </li>
                 <li className="flex gap-2">
                   <span className="font-mono text-[14px] text-violet-700">2</span> Product proposes the change, with the test attached
@@ -235,7 +240,7 @@ export function TeamLens(props: ViewProps & { embedded?: boolean }) {
         )}
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <Button onClick={() => openDrawer("brief")}>Review the conflict with Security</Button>
+          <Button onClick={() => openDrawer("brief")}>{reviewConflictLabel(me)}</Button>
           {me.actor === "product" ? (
             <Button kind="secondary" onClick={() => go("proposals")}>
               Propose a change to Security&apos;s goal

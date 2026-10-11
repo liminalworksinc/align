@@ -100,7 +100,7 @@ export function fieldWords(fields: string[]) {
 const ACTION_WORDS: Record<string, string> = {
   ceo_change_viewed: "saw the CEO's change",
   brief_reviewed: "read What to do next",
-  scenario_reviewed: "opened Test both plans",
+  scenario_reviewed: "opened the plan test",
   evidence_opened: "opened Evidence",
   propose: "proposed a change",
   counter: "asked for changes",
@@ -243,7 +243,7 @@ function DecisionRecord({ s, select }: ViewProps) {
           <div className="text-[16px] text-zinc-600">
             <p className="font-semibold text-zinc-800">No proposal yet.</p>
             <p className="mt-1">
-              The steps of the decision show up here once Product adds test results in &ldquo;Test both plans&rdquo; and sends a proposal to Security.
+              The steps of the decision show up here once Product adds test results in &ldquo;Which plan follows the new priority?&rdquo; and sends a proposal to Security.
             </p>
             {secV1 && (
               <p className="mt-3">

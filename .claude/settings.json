@@ -3,8 +3,24 @@
     "allow": [
       "Bash(scripts/run-plan.sh accepted)",
       "Bash(scripts/run-plan.sh accepted:*)",
+      "Bash(node scripts/verify-run.mjs:*)",
       "mcp__align",
-      "Bash(scripts/run-plan.sh accepted 2>&1 | tail -40)"
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(grep:*)",
+      "Bash(sed -n:*)",
+      "Bash(wc:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "mcp__alike__get_entity",
+      "mcp__alike__search_entities",
+      "mcp__alike__search_environment",
+      "mcp__alike__query_entities",
+      "mcp__alike__list_agent_sessions",
+      "Bash(~/.alike/bin/alike get:*)"
     ]
   },
   "hooks": {

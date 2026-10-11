@@ -409,7 +409,7 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
                 </p>
               </div>
               <Button kind="secondary" onClick={() => props.openDrawer("scenario")}>
-                Test both plans
+                Test which plan follows the new priority
               </Button>
             </div>
           </Card>
