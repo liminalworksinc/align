@@ -206,7 +206,7 @@ function Lane({ entry, items, ctx }: { entry: RegistryEntry; items: { session: A
   const goal = ctx.goalOf(entry.key);
   const shown = all ? items : items.slice(0, LANE_MAX);
   return (
-    <div className="flex w-[320px] min-w-[300px] flex-1 flex-col rounded-2xl bg-zinc-50 p-3 ring-1 ring-zinc-200">
+    <div className="flex min-w-0 flex-1 basis-0 flex-col rounded-2xl bg-zinc-50 p-3 ring-1 ring-zinc-200">
       <header className="mb-3 px-1">
         <div className="flex items-baseline justify-between gap-2">
           <h3 className="text-[18px] font-bold text-zinc-900">{entry.team}</h3>
@@ -336,7 +336,7 @@ export function WorkMap(props: ViewProps) {
           </p>
         </div>
       ) : (
-        <div className="flex gap-4 overflow-x-auto pb-4">
+        <div className="flex gap-3 pb-4">
           {registry.map((e) => (
             <Lane key={e.key} entry={e} items={lanes.get(e.key) ?? []} ctx={ctx} />
           ))}

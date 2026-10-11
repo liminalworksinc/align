@@ -372,31 +372,6 @@ function ProposalPanel({ p, pr }: { p: ViewProps; pr: Proposal }) {
   );
 }
 
-function TruthLegend() {
-  return (
-    <div className="mt-6 border-t border-zinc-200 pt-3">
-      <div className="mb-2 text-[12px] font-bold uppercase tracking-wide text-zinc-500">Truth legend</div>
-      <ul className="space-y-1.5 text-[13px] text-zinc-700">
-        <li className="flex items-center gap-2">
-          <Badge tone="violet">PROPOSED</Badge> candidate
-        </li>
-        <li className="flex items-center gap-2">
-          <Badge tone="amber">UNKNOWN</Badge> unresolved
-        </li>
-        <li className="flex items-center gap-2">
-          <Badge tone="neutral">ACCEPTED</Badge> approved by a human, not success
-        </li>
-        <li className="flex items-center gap-2">
-          <Badge tone="red">FAIL</Badge> failed check
-        </li>
-        <li className="flex items-center gap-2">
-          <Badge tone="green">PASS</Badge> Sparta-verified narrow ticket outcome only
-        </li>
-      </ul>
-    </div>
-  );
-}
-
 function Missing({ what }: { what: string }) {
   return (
     <div className="flex items-start gap-2 text-[15px] text-zinc-700">
@@ -407,7 +382,12 @@ function Missing({ what }: { what: string }) {
 
 export function Inspector(props: ViewProps) {
   const { s } = props;
-  const sel = props.selection ?? { kind: "relation" as const, id: DEFAULT_RELATION };
+  const fallbackGoal = [...s.goals].reverse().find((g) => g.owner_id === "ceo" && !s.goals.some((x) => x.supersedes === g.id));
+  const sel =
+    props.selection ??
+    (s.relations.some((r) => r.id === DEFAULT_RELATION)
+      ? { kind: "relation" as const, id: DEFAULT_RELATION }
+      : { kind: "goal" as const, id: fallbackGoal?.id ?? "" });
 
   let body: ReactNode;
   switch (sel.kind) {
@@ -442,7 +422,7 @@ export function Inspector(props: ViewProps) {
     <div className="text-[16px]">
       <div className="mb-3 text-[13px] font-bold uppercase tracking-wide text-zinc-500">Inspector</div>
       {body}
-      <TruthLegend />
+      
     </div>
   );
 }

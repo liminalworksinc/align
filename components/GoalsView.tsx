@@ -161,7 +161,7 @@ function Banner({ props }: { props: ViewProps }) {
     <div className="flex items-center gap-4 rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-300" role="status">
       <span aria-hidden className="text-[18px] text-amber-700">▲</span>
       <p className="flex-1 text-[16px] font-medium text-amber-950">
-        CEO priority updated today: beta launch incidents must be triaged per launch-readiness criteria. 1 peer dependency unconfirmed.
+        Company goal {s.pushes.at(-1)?.version ?? ""} pushed by CEO / Leadership: beta launch incidents must be triaged per launch-readiness criteria. 1 peer dependency unconfirmed.
       </p>
       <Button
         kind="secondary"
