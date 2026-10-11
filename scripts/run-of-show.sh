@@ -101,7 +101,7 @@ tmuxs() {
 
 operator() {
   hdr "Starting the Security triage operator in Claude Code"
-  tmux send-keys -t "$SESSION:0.0" "You're the Security triage operator. Use the align MCP tools to find the plan you're authorized to run, run it with the exact command Align gives, report the Sparta result in two sentences, then stay on standby for direction from Align."
+  tmux send-keys -t "$SESSION:0.0" "You're the Security triage operator. Use the align MCP tools to find the plan you're authorized to run, run it with the exact command Align gives (use only the align MCP tools and that command; don't open other files or tools first), report the Sparta result in two sentences, then stay on standby for direction from Align."
   sleep 0.5; tmux send-keys -t "$SESSION:0.0" Enter
   ok "operator prompt sent (it runs the authorized plan, then waits for Align)"
 }
