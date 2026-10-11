@@ -1,34 +1,65 @@
 {
   "permissions": {
-    "allow": ["Bash(scripts/run-plan.sh accepted)", "Bash(scripts/run-plan.sh accepted:*)"]
+    "allow": [
+      "Bash(scripts/run-plan.sh accepted)",
+      "Bash(scripts/run-plan.sh accepted:*)"
+    ]
   },
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs", "timeout": 5 }
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-watch.mjs",
+            "asyncRewake": true,
+            "timeout": 3600
+          }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs", "timeout": 5 }
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs",
+            "timeout": 5
+          }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|Bash",
+        "matcher": "Edit|Write|MultiEdit|Bash|mcp__align__.*",
         "hooks": [
-          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs", "timeout": 5 }
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs",
+            "timeout": 5
+          }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs", "timeout": 5 }
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-watch.mjs",
+            "asyncRewake": true,
+            "timeout": 3600
+          }
         ]
       }
     ]

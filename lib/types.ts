@@ -305,6 +305,13 @@ export interface AgentSession {
   started_at: string;
   last_at: string;
   ended_at?: string;
+  directives?: DirectiveDelivery[]; // authority changes pushed into this session
+}
+
+export interface DirectiveDelivery {
+  event_id: string; // "push:<id>" | "accept:<proposal_id>"
+  delivered_at: string;
+  acted_at?: string;
 }
 
 export type MappingState = "PROPOSED" | "UNASSIGNED" | "CONFIRMED" | "REJECTED" | "MAPPER_UNAVAILABLE" | "PENDING";

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { handle } from "@/lib/http";
 import { scheduleMapping } from "@/lib/mapper";
+import { markActed } from "@/lib/directives";
 import { HttpError, mutate, now } from "@/lib/store";
 import type { AgentSession, SessionOriginKind } from "@/lib/types";
 
@@ -186,6 +187,8 @@ export async function POST(req: Request) {
       }
       if (toolName && !sess.tools.includes(toolName)) sess.tools.push(toolName);
       if (lastMessage) sess.last_message = lastMessage;
+      // A replan was acted on when the agent reads the accepted plan or runs it after a delivered directive.
+      if (/align_get_accepted_plan/.test(String(toolName ?? "")) || /run-plan\.sh accepted/.test(String(command ?? ""))) markActed(sess);
 
       if (hookEvent === "Stop" || hookEvent === "SessionEnd") sess.ended_at = at;
       else if (hookEvent === "UserPromptSubmit" || hookEvent === "SessionStart") delete sess.ended_at; // resumed

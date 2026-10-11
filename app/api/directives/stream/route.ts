@@ -1,0 +1,94 @@
+import { describeEvent, pendingFor, recipientsFor } from "@/lib/directives";
+import { bus, listening, type AuthorityEvent } from "@/lib/events";
+import { assertLocal } from "@/lib/local-guard";
+import { HttpError, now, readState } from "@/lib/store";
+
+// Server-Sent Events: Align pushes authority changes to agent watchers the moment they commit.
+//   ?session=<harness:id>  directives for one agent session (pending ones replay on connect)
+//   ?session=*             every authority event and delivery (read-only wire view)
+export async function GET(req: Request) {
+  try {
+    assertLocal(req);
+  } catch (e) {
+    return Response.json({ error: (e as HttpError).message }, { status: 403 });
+  }
+  const sid = new URL(req.url).searchParams.get("session") || "*";
+  const enc = new TextEncoder();
+  let cleanup = () => {};
+
+  const stream = new ReadableStream({
+    async start(ctrl) {
+      let closed = false;
+      const send = (event: string, data: unknown) => {
+        if (closed) return;
+        try {
+          ctrl.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
+      send("hello", { session: sid, at: now() });
+      const sent = new Set<string>();
+      const flush = async () => {
+        if (sid === "*") return;
+        for (const d of pendingFor(await readState(), sid)) {
+          if (sent.has(d.event_id)) continue;
+          sent.add(d.event_id);
+          send("directive", d);
+        }
+      };
+      if (sid !== "*") listening.set(sid, now());
+      await flush();
+
+      const onAuthority = async (e: AuthorityEvent) => {
+        if (sid === "*") {
+          const st = await readState();
+          const all = recipientsFor(st, e.event_id);
+          const live = all.filter((id) => listening.has(id));
+          send("authority", { ...e, title: describeEvent(st, e.event_id), recipients: live, later: all.length - live.length });
+        }
+        else await flush();
+      };
+      const onDelivered = (d: { session: string; event_id: string; at: string }) => {
+        if (sid === "*") send("delivered", d);
+      };
+      bus.on("authority", onAuthority);
+      bus.on("delivered", onDelivered);
+      const ping = setInterval(() => {
+        if (closed) return;
+        try {
+          ctrl.enqueue(enc.encode(`: ping ${Date.now()}\n\n`));
+        } catch {
+          closed = true;
+        }
+      }, 15000);
+      cleanup = () => {
+        closed = true;
+        bus.off("authority", onAuthority);
+        bus.off("delivered", onDelivered);
+        clearInterval(ping);
+        if (sid !== "*") listening.delete(sid);
+      };
+      req.signal.addEventListener("abort", () => {
+        cleanup();
+        try {
+          ctrl.close();
+        } catch {
+          /* already closed */
+        }
+      });
+    },
+    cancel() {
+      cleanup();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    },
+  });
+}
