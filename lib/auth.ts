@@ -19,11 +19,13 @@ function secret(): string {
 const PASSCODES: Record<Actor, string> = {
   product: process.env.ALIGN_PRODUCT_PASSCODE || "product-demo",
   security: process.env.ALIGN_SECURITY_PASSCODE || "security-demo",
+  leadership: process.env.ALIGN_LEADERSHIP_PASSCODE || "leadership-demo",
 };
 
 export const DISPLAY: Record<Actor, string> = {
   product: "Product Director",
   security: process.env.ALIGN_SECURITY_NAME || "Alex / Security Lead",
+  leadership: process.env.ALIGN_LEADERSHIP_NAME || "CEO / Leadership",
 };
 
 export interface Session {
@@ -36,7 +38,7 @@ function sign(payload: string) {
 }
 
 export function login(role: string, passcode: string): { token: string; session: Session } {
-  if (role !== "product" && role !== "security") throw new HttpError(400, "Unknown role");
+  if (role !== "product" && role !== "security" && role !== "leadership") throw new HttpError(400, "Unknown role");
   const expected = Buffer.from(PASSCODES[role]);
   const given = Buffer.from(String(passcode ?? ""));
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
@@ -55,7 +57,7 @@ export function readSession(token: string | undefined): Session | null {
   if (good.length !== mac.length || !timingSafeEqual(Buffer.from(good), Buffer.from(mac))) return null;
   try {
     const s = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Session;
-    return s.actor === "product" || s.actor === "security" ? s : null;
+    return s.actor === "product" || s.actor === "security" || s.actor === "leadership" ? s : null;
   } catch {
     return null;
   }

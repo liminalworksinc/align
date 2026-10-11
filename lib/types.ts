@@ -1,7 +1,7 @@
 // Align shared contract. All lanes build against these shapes.
 
 export type Owner = "ceo" | "product" | "security";
-export type Actor = "product" | "security";
+export type Actor = "product" | "security" | "leadership";
 
 export type TruthState =
   | "OBSERVED"
@@ -247,9 +247,79 @@ export interface AppState {
   manual_baseline: ManualBaselineStep[];
   private_constraints: { owner: Actor; text: string }[];
   ingest_errors?: string[]; // evidence files that could not be parsed; never blocks polling
+  org_draft: OrgDraft | null; // Leadership's unpublished next company goal version
+  pushes: GoalPush[];
+  sessions: AgentSession[];
+  mappings: SessionMapping[];
+  registry_version: string;
 }
 
 // Session view returned to the browser. Visibility-filtered for the actor.
 export interface StateView extends AppState {
   me: Actor | null;
+}
+
+// ---- Org push, goal registry, agent sessions, Jev mappings ----
+
+export interface OrgDraft {
+  objective: string;
+  success_criteria: string[];
+  measures: Measure[];
+}
+
+export interface GoalPush {
+  id: string;
+  goal_id: string;
+  version: string;
+  pushed_by: Actor; // always "leadership"
+  pushed_at: string;
+  pushed_to: Actor[];
+  registry_version: string;
+}
+
+/** One option in the live goal registry. The registry is the enum Jev classifies agent work against. */
+export interface RegistryEntry {
+  key: string; // stable goal_id, or "none"
+  goal_id: string | null;
+  version: string | null;
+  label: string; // what the classifier reads: objective + measures, truncated
+  owner: Owner | null;
+  team: string; // "Company" | "Product" | "Security" | "Unassigned"
+  org: string;
+}
+
+export type SessionOriginKind = "linear" | "github" | "slack" | "align-push" | "ad-hoc";
+
+export interface AgentSession {
+  id: string; // `${harness}:${session_id}`
+  harness: "claude-code" | "codex";
+  session_id: string;
+  repo: string;
+  branch: string;
+  cwd_name: string;
+  prompts: { at: string; text: string }[];
+  files: string[];
+  tools: string[];
+  last_message?: string;
+  origin: { kind: SessionOriginKind; ref?: string };
+  started_at: string;
+  last_at: string;
+  ended_at?: string;
+}
+
+export type MappingState = "PROPOSED" | "UNASSIGNED" | "CONFIRMED" | "REJECTED" | "MAPPER_UNAVAILABLE" | "PENDING";
+
+export interface SessionMapping {
+  session_id: string; // AgentSession.id
+  registry_version: string;
+  choice: string | null; // registry key
+  confidence: number | null;
+  probabilities: Record<string, number>;
+  conflict?: { probability: number; flagged: boolean };
+  state: MappingState;
+  model: string | null;
+  error?: string;
+  mapped_at: string;
+  confirmed_by?: Actor;
+  confirmed_at?: string;
 }

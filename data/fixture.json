@@ -1,41 +1,28 @@
 {
-  "company": "Northstar Security (synthetic demo company)",
+  "company": "Northstar Security",
   "timeframe": "Q4 2026",
   "goals": [
     {
-      "id": "g-ceo-v2",
+      "id": "g-ceo-v1",
       "owner_id": "ceo",
       "owner_name": "CEO",
       "kind": "org",
       "parent_ids": [],
       "visibility": "shared",
-      "version": "v2",
-      "objective": "Launch the observability beta with safe and responsive support readiness.",
+      "version": "v1",
+      "objective": "Launch the observability beta.",
       "success_criteria": [
-        "Beta milestone declared ready by Product",
-        "Every seeded beta-launch-critical support incident is triaged according to company criteria",
-        "Unrelated protected security tickets and private investigation notes are not damaged"
+        "Beta milestone declared ready by Product"
       ],
       "measures": [
         {
           "id": "KR1",
           "text": "Product beta milestone ready",
           "verifiable_by": "assertion"
-        },
-        {
-          "id": "KR2",
-          "text": "Beta-launch-critical incidents triaged per launch-readiness criteria (urgent, obs-beta tag, private investigation note, public acknowledgment)",
-          "verifiable_by": "sparta"
-        },
-        {
-          "id": "KR3",
-          "text": "Protected unrelated tickets and private notes unchanged",
-          "verifiable_by": "sparta"
         }
       ],
-      "approved_at": "2026-10-11T08:00:00-07:00",
-      "approved_by": "ceo",
-      "changed": true
+      "approved_at": "2026-09-15T09:00:00-07:00",
+      "approved_by": "ceo"
     },
     {
       "id": "g-product-v3",
@@ -43,7 +30,7 @@
       "owner_name": "Product Director",
       "kind": "team",
       "parent_ids": [
-        "g-ceo-v2"
+        "g-ceo-v1"
       ],
       "visibility": "shared",
       "version": "v3",
@@ -73,7 +60,7 @@
       "owner_name": "Alex / Security Lead",
       "kind": "team",
       "parent_ids": [
-        "g-ceo-v2"
+        "g-ceo-v1"
       ],
       "visibility": "shared",
       "version": "v1",
@@ -101,7 +88,7 @@
   "relations": [
     {
       "id": "r-ceo-product",
-      "source_goal": "g-ceo-v2",
+      "source_goal": "g-ceo-v1",
       "target_goal": "g-product-v3",
       "type": "child",
       "status": "ACCEPTED",
@@ -110,21 +97,12 @@
     },
     {
       "id": "r-ceo-security",
-      "source_goal": "g-ceo-v2",
+      "source_goal": "g-ceo-v1",
       "target_goal": "g-security-v1",
       "type": "child",
       "status": "ACCEPTED",
       "label": "inherits",
       "provenance": "Company goal tree, Q4 2026"
-    },
-    {
-      "id": "r-product-security",
-      "source_goal": "g-product-v3",
-      "target_goal": "g-security-v1",
-      "type": "depends_on",
-      "status": "UNKNOWN",
-      "label": "Beta launch depends on beta incident triage",
-      "provenance": "CEO v2 KR2 changed today; Security's shared measure S-M1 rewards throughput and does not mention the beta"
     }
   ],
   "work_items": [
@@ -352,5 +330,34 @@
       "owner": "product",
       "text": "Private: beta scope list is still in draft; publishing it is Product's reciprocal commitment."
     }
-  ]
+  ],
+  "org_draft": {
+    "objective": "Launch the observability beta with safe and responsive support readiness.",
+    "success_criteria": [
+      "Beta milestone declared ready by Product",
+      "Every seeded beta-launch-critical support incident is triaged according to company criteria",
+      "Unrelated protected security tickets and private investigation notes are not damaged"
+    ],
+    "measures": [
+      {
+        "id": "KR1",
+        "text": "Product beta milestone ready",
+        "verifiable_by": "assertion"
+      },
+      {
+        "id": "KR2",
+        "text": "Beta-launch-critical incidents triaged per launch-readiness criteria (urgent, obs-beta tag, private investigation note, public acknowledgment)",
+        "verifiable_by": "sparta"
+      },
+      {
+        "id": "KR3",
+        "text": "Protected unrelated tickets and private notes unchanged",
+        "verifiable_by": "sparta"
+      }
+    ]
+  },
+  "pushes": [],
+  "sessions": [],
+  "mappings": [],
+  "registry_version": ""
 }

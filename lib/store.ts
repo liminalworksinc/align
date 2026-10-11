@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { AppState, Plan } from "./types";
+import { registryVersion } from "./registry";
 
 export const ROOT = process.cwd();
 const DATA = path.join(ROOT, "data");
@@ -24,15 +25,25 @@ export function planFileHash(plan: Pick<Plan, "plan_id" | "plan_version">) {
   return existsSync(file) ? sha256(readFileSync(file)) : "";
 }
 
+/** Fill fields added after a state file was written, so older state keeps loading. */
+function withDefaults(s: AppState): AppState {
+  s.org_draft ??= null;
+  s.pushes ??= [];
+  s.sessions ??= [];
+  s.mappings ??= [];
+  if (!s.registry_version) s.registry_version = registryVersion(s);
+  return s;
+}
+
 function initialState(): AppState {
   const fixture = JSON.parse(readFileSync(FIXTURE_FILE, "utf8")) as AppState;
   fixture.plans = fixture.plans.map((p) => ({ ...p, hash: planFileHash(p) }));
-  return fixture;
+  return withDefaults(fixture);
 }
 
 export async function readState(): Promise<AppState> {
   try {
-    return JSON.parse(await fs.readFile(STATE_FILE, "utf8")) as AppState;
+    return withDefaults(JSON.parse(await fs.readFile(STATE_FILE, "utf8")) as AppState);
   } catch {
     const s = initialState();
     await writeState(s);
@@ -71,6 +82,9 @@ export async function resetState(by: { actor: string; sid: string }) {
     const fresh = initialState();
     // Keep ingested Sparta evidence across demo resets. The fixture's Alike reference wins; an operator-captured one is kept only if the fixture has none.
     fresh.simulations = s.simulations;
+    // Captured agent sessions are real history: keep them. Their mappings are recomputed against the reset registry.
+    fresh.sessions = s.sessions ?? [];
+    fresh.mappings = [];
     if (!fresh.brief.alike_ref && s.brief.alike_ref) {
       fresh.brief.alike_ref = s.brief.alike_ref;
       fresh.brief.alike_status = s.brief.alike_status;
