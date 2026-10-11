@@ -115,6 +115,19 @@ async function main() {
   const reset = await call(product, "POST", "/api/reset", { confirm: "reset" });
   check("setup: POST /api/reset starts clean", reset.status === 200 && reset.json?.ok === true, short(reset));
 
+  // ---- org push: only Leadership can ratify and push the company goal ----
+  const pushDenied = await call(product, "POST", "/api/org/push", {});
+  check("Org push by Product -> 403", pushDenied.status === 403, short(pushDenied));
+  const leadership = new Jar("leadership");
+  const sl = await call(leadership, "POST", "/api/session", { role: "leadership", passcode: process.env.ALIGN_LEADERSHIP_PASSCODE || "leadership-demo" });
+  check("setup: leadership signs in", sl.status === 200, short(sl));
+  const push = await call(leadership, "POST", "/api/org/push", {});
+  check("Org push by Leadership creates company goal v2", push.status === 200 && push.json?.version === "v2", short(push));
+  const afterPush = await call(product, "GET", "/api/state");
+  const goalsAfter = afterPush.json?.goals ?? [];
+  check("Push keeps v1 and v2 supersedes it", goalsAfter.some((g) => g.id === "g-ceo-v1") && goalsAfter.some((g) => g.id === "g-ceo-v2" && g.supersedes === "g-ceo-v1"));
+  check("Push creates the Product→Security dependency as UNKNOWN", (afterPush.json?.relations ?? []).some((r) => r.id === "r-product-security" && r.status === "UNKNOWN"));
+
   // ---- G6 auth ----
   const bad = await call(new Jar("anon"), "POST", "/api/session", { role: "product", passcode: "definitely-wrong" });
   check("G6 wrong passcode -> 401", bad.status === 401, short(bad));
