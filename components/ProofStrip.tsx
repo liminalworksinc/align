@@ -47,7 +47,7 @@ export function ProofStrip({ s }: { s: StateView }) {
   const verified = !!acc && acc.test_status === "TESTED" && candidate?.verdict === "PASS";
 
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" aria-label="Proof strip">
+    <div className="@container"><div className="grid grid-cols-1 gap-3 @md:grid-cols-2 @4xl:grid-cols-4" aria-label="Proof strip">
       <Tile label="Manual baseline · estimate">
         <div className="text-[28px] font-bold leading-tight text-zinc-900">≈ {manualMin} min</div>
         <div className="text-[16px] text-zinc-800">{manualSteps} coordination steps</div>
@@ -152,6 +152,6 @@ export function ProofStrip({ s }: { s: StateView }) {
         )}
         <div className="text-[14px] text-zinc-500">Company beta readiness not verified.</div>
       </Tile>
-    </div>
+    </div></div>
   );
 }
