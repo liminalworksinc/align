@@ -80,6 +80,21 @@ tmux attach -t align
 
 Then push the company goal as Leadership and ratify as Security, in the app or through the API. Watch the top pane.
 
+## Running it live
+
+`scripts/live.mjs` does the setup above in one step and keeps a backup for every beat:
+
+```
+node scripts/live.mjs ready      # preflight, warm routes, reset, start the operator, wait for its baseline FAIL, confirm it's armed
+node scripts/live.mjs status     # who wakes on the next decision; flags extra operators and other Security sessions
+node scripts/live.mjs push       # Act 1 backup: Leadership push through the API
+node scripts/live.mjs agree      # Act 3 backup: finishes the negotiation from wherever the browser left off
+node scripts/live.mjs rescue     # the agent didn't wake: hands it the directive in its pane (say so on stage)
+node scripts/live.mjs fallback   # the live run failed: shows the verified run above
+```
+
+Run `ready` within about 50 minutes of going on: the watcher waits 55 minutes after the agent's last turn. Close other Claude Code sessions in this repo first; `status` lists any that would also wake.
+
 ## What this proves, and what it doesn't
 
 **Proves:** a decision made by the accountable people in Align changed which plan a running agent executed, with no human prompting of the agent after its first instruction; the change reached the agent within milliseconds; and the executed plan's outcome was independently graded by Sparta (2/9 before, 9/9 after, same mission, seed and checks).
