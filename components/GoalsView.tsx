@@ -198,10 +198,12 @@ function MeLens({ props }: { props: ViewProps }) {
   const actor = props.me.actor;
   const ceo = currentGoal(props.s, "ceo");
   if (!actor) return <MissingGoal owner="you" />;
+  if (actor === "leadership")
+    return <div className="mx-auto max-w-[620px]">{ceo ? <CeoCard props={props} g={ceo} /> : <MissingGoal owner="ceo" />}</div>;
   return (
     <div className="mx-auto flex max-w-[620px] flex-col gap-3">
       <div className="text-[13px] font-bold uppercase tracking-wide text-zinc-500">Inherited CEO criterion your goal depends on</div>
-      {ceo ? <CeoCard props={props} g={ceo} only="KR2" /> : <MissingGoal owner="ceo" />}
+      {ceo ? <CeoCard props={props} g={ceo} only={ceo.measures.some((m) => m.id === "KR2") ? "KR2" : undefined} /> : <MissingGoal owner="ceo" />}
       <div className="flex justify-center" aria-hidden>
         <div className={`h-8 border-l-2 ${LINE}`} />
       </div>

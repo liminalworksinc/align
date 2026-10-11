@@ -216,7 +216,7 @@
         "state": "OBSERVED"
       },
       {
-        "label": "Synthetic ticket: 'Observability beta: dashboards show no metrics since upgrade'",
+        "label": "Sandbox ticket: 'Observability beta: dashboards show no metrics since upgrade'",
         "ref": "sparta:seed:ticket-4",
         "state": "OBSERVED"
       },

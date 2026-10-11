@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BriefDrawer } from "@/components/BriefDrawer";
 import { EvidenceView } from "@/components/EvidenceView";
 import { GoalsView } from "@/components/GoalsView";
@@ -9,6 +9,9 @@ import { ProposalsView } from "@/components/ProposalsView";
 import { ScenarioDrawer } from "@/components/ScenarioDrawer";
 import { TeamLens } from "@/components/TeamLens";
 import { TodayView } from "@/components/TodayView";
+import { OrgView } from "@/components/OrgView";
+import { WorkMap } from "@/components/WorkMap";
+import { currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, useAlign, type Selection } from "@/components/useAlign";
 
@@ -19,9 +22,21 @@ const NAV: { id: View; label: string; icon: string }[] = [
   { id: "proposals", label: "Proposals", icon: "✉" },
   { id: "evidence", label: "Evidence", icon: "▤" },
 ];
+const NAV_LEADERSHIP: { id: View; label: string; icon: string }[] = [
+  { id: "company", label: "Company goal", icon: "◆" },
+  { id: "goals", label: "Goals", icon: "◎" },
+  { id: "work", label: "Work", icon: "⌁" },
+  { id: "evidence", label: "Evidence", icon: "▤" },
+];
+const ROLES = [
+  { id: "leadership", name: "CEO / Leadership", blurb: "Owns company goals" },
+  { id: "product", name: "Product Director", blurb: "Owns the beta launch" },
+  { id: "security", name: "Alex / Security Lead", blurb: "Owns incident triage" },
+] as const;
+type Role = (typeof ROLES)[number]["id"];
 
 function Login({ onDone }: { onDone: () => void }) {
-  const [role, setRole] = useState<"product" | "security">("product");
+  const [role, setRole] = useState<Role>("product");
   const [passcode, setPasscode] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,17 +55,17 @@ function Login({ onDone }: { onDone: () => void }) {
   }
   return (
     <main className="flex min-h-screen items-center justify-center p-8">
-      <form onSubmit={submit} className="w-[440px] rounded-2xl bg-white p-8 shadow-sm ring-1 ring-zinc-200">
+      <form onSubmit={submit} className="w-[560px] rounded-2xl bg-white p-8 shadow-sm ring-1 ring-zinc-200">
         <div className="mb-1 text-[28px] font-bold tracking-tight">Align</div>
-        <p className="mb-6 text-[16px] text-zinc-600">Northstar Security (synthetic demo company). Each owner signs in to their own session.</p>
+        <p className="mb-6 text-[16px] text-zinc-600">Northstar Security. Sign in as the owner of your goals.</p>
         <fieldset className="mb-4">
           <legend className="mb-2 text-[14px] font-semibold text-zinc-700">I am</legend>
-          <div className="grid grid-cols-2 gap-2">
-            {(["product", "security"] as const).map((r) => (
-              <label key={r} className={`cursor-pointer rounded-lg p-3 text-[16px] ring-1 ${role === r ? "bg-violet-50 ring-violet-500" : "ring-zinc-300"}`}>
-                <input type="radio" name="role" value={r} checked={role === r} onChange={() => setRole(r)} className="sr-only" />
-                <div className="font-semibold">{r === "product" ? "Product Director" : "Alex / Security Lead"}</div>
-                <div className="text-[13px] text-zinc-500">{r === "product" ? "Owns the beta launch" : "Owns incident triage"}</div>
+          <div className="grid grid-cols-3 gap-2">
+            {ROLES.map((r) => (
+              <label key={r.id} className={`cursor-pointer rounded-lg p-3 text-[16px] ring-1 ${role === r.id ? "bg-violet-50 ring-violet-500" : "ring-zinc-300"}`}>
+                <input type="radio" name="role" value={r.id} checked={role === r.id} onChange={() => setRole(r.id)} className="sr-only" />
+                <div className="font-semibold leading-snug">{r.name}</div>
+                <div className="text-[13px] text-zinc-500">{r.blurb}</div>
               </label>
             ))}
           </div>
@@ -77,6 +92,7 @@ function Login({ onDone }: { onDone: () => void }) {
 export default function Page() {
   const { state, me, error, setError, loadError, loadMe, act, mark, refresh } = useAlign();
   const [view, setView] = useState<View>("goals");
+  const landed = useRef(false);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   // The attached tested plan survives a reload, so a refreshed tab never sends an UNTESTED proposal by accident.
@@ -101,6 +117,13 @@ export default function Page() {
     const t = setTimeout(() => setError(null), 6000);
     return () => clearTimeout(t);
   }, [error, setError]);
+
+  useEffect(() => {
+    if (me?.actor && !landed.current) {
+      landed.current = true;
+      if (me.actor === "leadership") setView("company");
+    }
+  }, [me]);
 
   if (!me) return <main className="p-10 text-[16px] text-zinc-500">Loading Align…</main>;
   if (!me.actor) return <Login onDone={() => { loadMe(); refresh(); }} />;
@@ -129,7 +152,12 @@ export default function Page() {
   const pendingForMe = state.proposals.filter((p) =>
     me.actor === "security" ? ["PENDING_SECURITY", "ACKNOWLEDGED_BY_PRODUCT"].includes(p.state) : p.state === "COUNTERED",
   ).length;
-  const unresolved = state.relations.find((r) => r.id === "r-product-security")?.status === "UNKNOWN";
+  const rel = state.relations.find((r) => r.id === "r-product-security");
+  const unresolved = rel?.status === "UNKNOWN";
+  const lastPush = state.pushes?.at(-1);
+  const ceo = currentGoal(state, "ceo");
+  const nav = me.actor === "leadership" ? NAV_LEADERSHIP : NAV;
+  const ops = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("ops");
 
   async function signOut() {
     await api("/api/session", { method: "DELETE" });
@@ -156,7 +184,7 @@ export default function Page() {
           <span className="text-[22px] font-bold tracking-tight">Align</span>
         </div>
         <nav className="flex flex-col gap-1 p-3" aria-label="Main">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <button
               key={n.id}
               onClick={() => props.go(n.id)}
@@ -176,7 +204,7 @@ export default function Page() {
           <div className="mb-3">Session {me.sid}</div>
           <div className="flex flex-wrap gap-2">
             <Button kind="secondary" onClick={signOut}>Sign&nbsp;out</Button>
-            <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>{confirmReset ? "Confirm reset" : "Reset demo"}</Button>
+            {ops && <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>{confirmReset ? "Confirm reset" : "Reset workspace"}</Button>}
           </div>
         </div>
       </aside>
@@ -186,20 +214,22 @@ export default function Page() {
         <div className="text-[15px] text-zinc-600">
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
         </div>
-        {unresolved ? (
+        {unresolved && lastPush && me.actor !== "leadership" ? (
           <button
             onClick={() => {
               mark("ceo_change_viewed");
-              setSelection({ kind: "goal", id: "g-ceo-v2" });
+              if (ceo) setSelection({ kind: "goal", id: ceo.id });
               props.go("goals");
             }}
             className="rounded-lg bg-amber-50 px-3 py-1.5 text-[15px] font-semibold text-amber-900 ring-1 ring-amber-300"
           >
-            ▲ CEO priority updated today · 1 peer dependency unconfirmed
+            ▲ Company goal {lastPush.version} pushed by CEO / Leadership at {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · 1 dependency unconfirmed
           </button>
-        ) : (
-          <Badge tone="neutral">Dependency resolved by owners</Badge>
-        )}
+        ) : lastPush && rel?.status === "ACCEPTED" ? (
+          <Badge tone="neutral">Company goal {lastPush.version} · dependency agreed by owners</Badge>
+        ) : lastPush ? (
+          <Badge tone="neutral">Company goal {lastPush.version} pushed {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Badge>
+        ) : null}
         <div className="ml-auto flex items-center gap-3 text-[14px] text-zinc-600">
           Signed in as
           <Badge tone="violet" icon={false}>{me.name}</Badge>
@@ -224,6 +254,8 @@ export default function Page() {
           </div>
         )}
         {view === "today" && <TodayView {...props} />}
+        {view === "company" && <OrgView {...props} />}
+        {view === "work" && <WorkMap {...props} />}
         {view === "goals" && <GoalsView {...props} />}
         {view === "team" && <TeamLens {...props} />}
         {view === "proposals" && <ProposalsView {...props} />}

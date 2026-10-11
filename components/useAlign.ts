@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { StateView } from "@/lib/types";
+import type { Actor, StateView } from "@/lib/types";
 
 export type Selection =
   | { kind: "goal"; id: string }
@@ -10,7 +10,7 @@ export type Selection =
   | { kind: "proposal"; id: string };
 
 export interface Me {
-  actor: "product" | "security" | null;
+  actor: Actor | null;
   name: string | null;
   sid: string | null;
 }

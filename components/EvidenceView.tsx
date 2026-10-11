@@ -395,7 +395,7 @@ function SpartaRuns({ s, select, selection }: ViewProps) {
         {runs.length === 0 ? (
           <div className="p-5 text-[16px] text-zinc-600">
             <p className="font-semibold text-zinc-800">No Sparta runs ingested yet.</p>
-            <p className="mt-1">Each run is a real LLM agent in a fresh synthetic Team Inbox world. Run, from the repo root:</p>
+            <p className="mt-1">Each run is a real LLM agent in a fresh Sparta Team Inbox sandbox. Run, from the repo root:</p>
             <ul className="mt-2 space-y-1">
               <li>
                 <Mono>scripts/run-plan.sh p-throughput@1</Mono> <span className="text-[14px] text-zinc-500">baseline (current plan)</span>

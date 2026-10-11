@@ -7,7 +7,8 @@ import type { AppState, OrgDraft } from "./types";
 /** Leadership ratifies the drafted company goal and pushes it to every team. Prior versions are kept. */
 export function pushCompanyGoal(s: AppState, who: Session, edits?: Partial<OrgDraft>) {
   if (who.actor !== "leadership") throw new HttpError(403, "Only Leadership can ratify and push a company goal");
-  const draft = { ...(s.org_draft ?? {}), ...(edits ?? {}) } as OrgDraft;
+  if (!s.org_draft) throw new HttpError(409, "No drafted company goal to push");
+  const draft = { ...s.org_draft, ...Object.fromEntries(Object.entries(edits ?? {}).filter(([, v]) => v !== undefined && v !== "")) } as OrgDraft;
   if (!draft.objective?.trim() || !draft.measures?.length) throw new HttpError(400, "The company goal needs an objective and measures");
   const prev = currentGoals(s).find((g) => g.owner_id === "ceo");
   if (!prev) throw new HttpError(409, "No current company goal");

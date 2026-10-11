@@ -1,7 +1,7 @@
 import type { StateView } from "@/lib/types";
 import type { Me, Selection } from "./useAlign";
 
-export type View = "today" | "goals" | "team" | "proposals" | "evidence";
+export type View = "today" | "company" | "goals" | "team" | "work" | "proposals" | "evidence";
 export type Drawer = "brief" | "scenario" | null;
 
 /** Props every view/panel component receives from app/page.tsx. */

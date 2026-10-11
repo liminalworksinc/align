@@ -279,7 +279,7 @@ function SimPanel({ p, r }: { p: ViewProps; r: SimulationRun }) {
           {r.scenario}
         </Badge>
       </div>
-      <p className="mb-4 text-[14px] text-zinc-600">Sparta check on a synthetic ticket world. A PASS covers these checks only.</p>
+      <p className="mb-4 text-[14px] text-zinc-600">Sparta check in a sandbox ticket world. A PASS covers these checks only.</p>
       <Section title="Run">
         <Row label="Mission">
           <Mono>{r.mission_id}</Mono>

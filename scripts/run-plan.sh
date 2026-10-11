@@ -2,7 +2,16 @@
 # Run the Align goal-triage agent under one team plan in a fresh Sparta world and save evidence.
 # Usage: scripts/run-plan.sh <plan_id@version> [normal|interruption] [runs]
 set -euo pipefail
-PLAN="${1:?plan, e.g. p-beta@1}"
+PLAN="${1:?plan, e.g. p-beta@1, or 'accepted' to run whatever Align has authorized}"
+if [ "$PLAN" = "accepted" ]; then
+  ALIGN_URL="${ALIGN_URL:-http://localhost:3100}"
+  POLICY="$(curl -fsS --max-time 3 "$ALIGN_URL/api/policy/security" 2>/dev/null)" || {
+    echo "Align is not reachable at $ALIGN_URL; refusing to guess which plan is authorized." >&2
+    exit 2
+  }
+  PLAN="$(node -e 'const p=JSON.parse(process.argv[1]);process.stdout.write(p.plan)' "$POLICY")"
+  node -e 'const p=JSON.parse(process.argv[1]);const t=p.ratified_at?new Date(p.ratified_at).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}):"";console.log(`Align: Security goal ${p.goal_version} (${p.authority}${t?" at "+t:""}) authorizes ${p.plan}`)' "$POLICY"
+fi
 SCENARIO="${2:-normal}"
 RUNS="${3:-1}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
