@@ -47,3 +47,4 @@ data/state.json.tmp
 .worlds/
 .worlds-dashboard/
 sparta/walkthrough-lab/projects/*/.env
+data/.secret

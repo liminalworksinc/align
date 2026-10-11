@@ -154,6 +154,7 @@ export interface CounterVersion {
   proposed_measure_text: string;
   plan_params?: PlanParams; // only when the counter changes the executable plan
   rationale: string;
+  changes_plan: boolean; // true when the counter changes test-relevant plan parameters
 }
 
 export type ProposalState =
@@ -243,6 +244,7 @@ export interface AppState {
   timer: FlowTimer;
   audit: AuditEvent[];
   manual_baseline: ManualBaselineStep[];
+  private_constraints: { owner: Actor; text: string }[];
 }
 
 // Session view returned to the browser. Visibility-filtered for the actor.
