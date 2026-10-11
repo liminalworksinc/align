@@ -6,16 +6,16 @@ import type { AppState, OrgDraft } from "./types";
 
 /** Leadership ratifies the drafted company goal and pushes it to every team. Prior versions are kept. */
 export function pushCompanyGoal(s: AppState, who: Session, edits?: Partial<OrgDraft>) {
-  if (who.actor !== "leadership") throw new HttpError(403, "Only Leadership can ratify and push a company goal");
-  if (!s.org_draft) throw new HttpError(409, "No drafted company goal to push");
+  if (who.actor !== "leadership") throw new HttpError(403, "Only leadership can approve and send the company goal");
+  if (!s.org_draft) throw new HttpError(409, "There’s no new company goal drafted to send");
   const draft = { ...s.org_draft, ...Object.fromEntries(Object.entries(edits ?? {}).filter(([, v]) => v !== undefined && v !== "")) } as OrgDraft;
-  if (!draft.objective?.trim() || !draft.measures?.length) throw new HttpError(400, "The company goal needs an objective and measures");
+  if (!draft.objective?.trim() || !draft.measures?.length) throw new HttpError(400, "The company goal needs a goal statement and at least one requirement");
   const prev = currentGoals(s).find((g) => g.owner_id === "ceo");
-  if (!prev) throw new HttpError(409, "No current company goal");
+  if (!prev) throw new HttpError(409, "There’s no current company goal yet");
   const nextNum = Number(prev.version.replace(/^v/, "")) + 1;
   const version = `v${nextNum}`;
   const gid = `g-ceo-v${nextNum}`;
-  if (s.goals.some((g) => g.id === gid)) throw new HttpError(409, `Company goal ${version} was already pushed`);
+  if (s.goals.some((g) => g.id === gid)) throw new HttpError(409, `Company goal ${version} was already sent to teams`);
   const at = now();
   s.goals.push({
     ...prev,
@@ -41,8 +41,8 @@ export function pushCompanyGoal(s: AppState, who: Session, edits?: Partial<OrgDr
       target_goal: security.id,
       type: "depends_on",
       status: "UNKNOWN",
-      label: "Beta launch depends on beta incident triage",
-      provenance: `Company goal ${version} KR2 pushed by Leadership; Security's shared measure S-M1 rewards throughput and does not mention the beta`,
+      label: "The beta launch needs Security to handle beta issues first",
+      provenance: `Found when leadership sent company goal ${version}: Security's current target rewards closing lots of tickets and doesn't mention the beta`,
     });
   }
   refreshRegistry(s);

@@ -73,11 +73,11 @@ export function createProposal(
   who: Session,
   body: { proposed_measure_text?: string; rationale?: string; reciprocal_commitment?: string; plan_id?: string; plan_version?: number; simulation_refs?: string[] },
 ) {
-  if (who.actor !== "product") forbid("Only the Product owner can propose a change to a peer goal");
-  if (s.proposals.some((p) => !["RATIFIED", "REJECTED"].includes(p.state))) conflict("A proposal is already open");
+  if (who.actor !== "product") forbid("Only the Product Director can propose a change to another team’s goal");
+  if (s.proposals.some((p) => !["RATIFIED", "REJECTED"].includes(p.state))) conflict("There’s already an open proposal. Finish or decline it first.");
   const target = currentGoal(s, "security");
   const plan = s.plans.find((p) => p.plan_id === body.plan_id && p.plan_version === Number(body.plan_version));
-  if (!plan) throw new HttpError(400, "Attach a known tested plan (plan_id + plan_version)");
+  if (!plan) throw new HttpError(400, "Add a plan that has been tested before sending");
   const simRefs = (body.simulation_refs ?? []).filter((r) => s.simulations.some((x) => x.id === r));
   const plan_ref = { plan_id: plan.plan_id, plan_version: plan.plan_version, plan_hash: plan.hash };
   const p: Proposal = {
@@ -97,7 +97,7 @@ export function createProposal(
     test_status: testStatusFor(s, plan_ref, simRefs),
     created_at: now(),
   };
-  if (!p.proposed_measure_text || !p.reciprocal_commitment) throw new HttpError(400, "A proposal needs the measure text and Product's reciprocal commitment");
+  if (!p.proposed_measure_text || !p.reciprocal_commitment) throw new HttpError(400, "A proposal needs the new target and what Product will do in return");
   s.proposals.push(p);
   audit(s, who, "propose", p.id);
   touch(s, who, "propose");
@@ -106,7 +106,7 @@ export function createProposal(
 
 function openProposal(s: AppState, pid: string) {
   const p = s.proposals.find((x) => x.id === pid);
-  if (!p) throw new HttpError(404, "Proposal not found");
+  if (!p) throw new HttpError(404, "That proposal couldn’t be found");
   return p;
 }
 
@@ -117,10 +117,10 @@ export function counterProposal(
   body: { proposed_measure_text?: string; rationale?: string; changes_plan?: boolean },
 ) {
   const p = openProposal(s, pid);
-  if (who.actor !== p.recipient_owner) forbid("Only the Security owner can counter a proposal to the Security goal");
-  if (!["PENDING_SECURITY", "ACKNOWLEDGED_BY_PRODUCT"].includes(p.state)) conflict(`Cannot counter a proposal in state ${p.state}`);
+  if (who.actor !== p.recipient_owner) forbid("Only Security can ask for changes to a proposal for Security’s goal");
+  if (!["PENDING_SECURITY", "ACKNOWLEDGED_BY_PRODUCT"].includes(p.state)) conflict("This proposal can’t be changed right now");
   const text = String(body.proposed_measure_text || "").trim();
-  if (!text) throw new HttpError(400, "Counter needs revised measure text");
+  if (!text) throw new HttpError(400, "Write the changes you’re asking for");
   const n = p.counter_versions.length + 1;
   p.counter_versions.push({
     version: `v2.${n}`,
@@ -140,8 +140,8 @@ export function counterProposal(
 
 export function acknowledgeProposal(s: AppState, who: Session, pid: string) {
   const p = openProposal(s, pid);
-  if (who.actor !== p.proposing_owner) forbid("Only the Product owner can acknowledge Product's reciprocal commitment");
-  if (p.state !== "COUNTERED") conflict(`Nothing to acknowledge in state ${p.state}`);
+  if (who.actor !== p.proposing_owner) forbid("Only the Product Director can accept Security’s changes");
+  if (p.state !== "COUNTERED") conflict("There are no changes from Security to accept");
   p.state = "ACKNOWLEDGED_BY_PRODUCT";
   p.product_ack_at = now();
   audit(s, who, "acknowledge", p.id);
@@ -152,10 +152,10 @@ export function acknowledgeProposal(s: AppState, who: Session, pid: string) {
 export function ratifyProposal(s: AppState, who: Session, pid: string, body: { rationale?: string }) {
   const p = openProposal(s, pid);
   const target = s.goals.find((g) => g.id === p.target_goal_id);
-  if (!target) throw new HttpError(404, "Target goal not found");
-  if (who.actor !== target.owner_id) forbid("Only the owner of the Security goal can ratify its revision");
+  if (!target) throw new HttpError(404, "The goal this proposal changes couldn’t be found");
+  if (who.actor !== target.owner_id) forbid("Only Security can approve changes to Security’s goal");
   if (!["PENDING_SECURITY", "ACKNOWLEDGED_BY_PRODUCT"].includes(p.state))
-    conflict(p.state === "COUNTERED" ? "Product must acknowledge the countered terms before ratification" : `Cannot ratify in state ${p.state}`);
+    conflict(p.state === "COUNTERED" ? "Product needs to accept your changes before you can approve" : "This proposal can’t be approved right now");
   const latest = p.counter_versions.at(-1);
   const finalText = latest?.proposed_measure_text ?? p.proposed_measure_text;
   const version = latest?.version ?? "v2";
@@ -166,7 +166,7 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
     measures: [
       ...target.measures.filter((m) => m.id !== "S-M1"),
       { id: "S-M3", text: finalText, verifiable_by: "sparta" as const, inherited_from: "KR2" },
-      { id: "S-M1", text: "Tickets triaged per day (throughput), secondary to S-M3", verifiable_by: "none" as const },
+      { id: "S-M1", text: "Close as many tickets as possible each day, after beta issues", verifiable_by: "none" as const },
     ],
     approved_at: now(),
     approved_by: "security" as const,
@@ -179,8 +179,8 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
   if (rel) {
     rel.status = "ACCEPTED";
     rel.target_goal = newGoal.id;
-    rel.label = "Owner-accepted agreement: beta incidents triaged per launch-readiness policy";
-    rel.provenance = `Proposal ${p.id}, ratified by Security ${version}`;
+    rel.label = "Agreed: Security handles beta customers’ issues first";
+    rel.provenance = `Agreed through Product’s proposal; Security approved goal ${version}`;
   }
   const rel2 = s.relations.find((r) => r.id === "r-ceo-security");
   if (rel2) rel2.target_goal = newGoal.id;
@@ -188,8 +188,8 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
   const beta = s.work_items.find((w) => w.id === "w-s3");
   if (beta) {
     beta.priority_rank = 0;
-    beta.observed_status = `next work, authorized under ${version}`;
-    beta.task = `Beta support triage with plan ${p.plan_ref.plan_id}@${p.plan_ref.plan_version}`;
+    beta.observed_status = `next up, approved in goal ${version}`;
+    beta.task = "Handle beta customers’ issues first, using the tested new plan";
   }
   const polish = s.work_items.find((w) => w.id === "w-p3");
   if (polish) polish.observed_status = "deferred (Product commitment)";
@@ -200,7 +200,7 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
     ratified_by: "security",
     acknowledged_by: "product",
     rationale: String(body.rationale || "").trim(),
-    next_work: `Security triage agent runs ${p.plan_ref.plan_id}@${p.plan_ref.plan_version}; Product tags beta issues obs-beta at intake and publishes beta scope`,
+    next_work: "Security’s AI agent follows the new plan (beta issues first); Product tags beta issues as they come in and publishes what’s in the beta",
     plan_ref: p.plan_ref,
     test_status: p.test_status,
     evidence_version: p.simulation_refs,
@@ -215,8 +215,8 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
 
 export function rejectProposal(s: AppState, who: Session, pid: string) {
   const p = openProposal(s, pid);
-  if (who.actor !== p.recipient_owner) forbid("Only the Security owner can reject a proposal to the Security goal");
-  if (["RATIFIED", "REJECTED"].includes(p.state)) conflict(`Proposal already ${p.state}`);
+  if (who.actor !== p.recipient_owner) forbid("Only Security can decline a proposal for Security’s goal");
+  if (["RATIFIED", "REJECTED"].includes(p.state)) conflict("This proposal has already been decided");
   p.state = "REJECTED";
   audit(s, who, "reject", p.id);
   touch(s, who, "reject");
