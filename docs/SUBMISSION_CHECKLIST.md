@@ -29,7 +29,7 @@
   - **Name:** Align
   - **Description:** Cross-team goal changes, decided by the people who own them, with tested evidence. When the CEO changes priorities, Product proposes a change to a peer team's goal, tests the candidate agent plan in Sparta Worlds against the same mission, seed and checks, and the owning team counters and ratifies its own goal. In-app time is measured; the manual baseline is an estimate. One-day prototype with a synthetic company.
   - **Technologies:** Next.js, TypeScript, Sparta Worlds, Alike, Anthropic Claude
-  - **GitHub URL:** https://github.com/liminalworksinc/align (public repo)
+  - **GitHub URL:** paste the output of `git remote get-url origin` without `.git` (public repo)
 - [ ] Demo reset done (see the pre-recording checklist in `docs/DEMO_SCRIPT.md`).
 - [ ] **Start the final recording.** Target ~4:10, never over 5:00.
 

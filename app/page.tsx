@@ -79,7 +79,20 @@ export default function Page() {
   const [view, setView] = useState<View>("goals");
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [attached, setAttached] = useState<ViewProps["attached"]>(null);
+  // The attached tested plan survives a reload, so a refreshed tab never sends an UNTESTED proposal by accident.
+  const [attached, setAttachedState] = useState<ViewProps["attached"]>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return JSON.parse(window.sessionStorage.getItem("align.attached") ?? "null");
+    } catch {
+      return null;
+    }
+  });
+  const setAttached = useCallback((a: ViewProps["attached"]) => {
+    setAttachedState(a);
+    if (a) window.sessionStorage.setItem("align.attached", JSON.stringify(a));
+    else window.sessionStorage.removeItem("align.attached");
+  }, []);
   const [confirmReset, setConfirmReset] = useState(false);
 
   const closeDrawer = useCallback(() => setDrawer(null), []);
@@ -195,6 +208,16 @@ export default function Page() {
 
       {/* Canvas */}
       <main className="relative overflow-y-auto p-6">
+        {loadError && (
+          <div role="status" className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-[15px] font-medium text-amber-900 ring-1 ring-amber-300">
+            ▲ Connection to the Align server lost ({loadError}). Showing the last data received; retrying every 1.5 s.
+          </div>
+        )}
+        {state.ingest_errors && state.ingest_errors.length > 0 && (
+          <div role="status" className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-[15px] text-amber-900 ring-1 ring-amber-300">
+            ▲ Some Sparta evidence could not be read and was not ingested: {state.ingest_errors.join("; ")}
+          </div>
+        )}
         {error && (
           <div role="alert" className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-[15px] font-medium text-red-800 ring-1 ring-red-300">
             {error}

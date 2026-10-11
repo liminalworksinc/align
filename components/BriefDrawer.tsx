@@ -72,10 +72,11 @@ export function BriefDrawer(props: ViewProps & { onClose: () => void }) {
                 </div>
                 <p className="mb-1 text-[15px] leading-snug text-zinc-800">{alike.summary}</p>
                 <p className="mb-3 text-[13px] text-zinc-500">
-                  Recorded {alike.recorded_at.slice(0, 10)} {fmtTime(alike.recorded_at)} · retrieved in session <Mono>{alike.retrieved_in_session}</Mono>
+                  Recorded ~{alike.recorded_at.slice(0, 10)} {fmtTime(alike.recorded_at)} (session A&apos;s own account) · retrieved in session <Mono>{alike.retrieved_in_session}</Mono>
                 </p>
                 <div className="rounded-md bg-violet-50/60 p-3 ring-1 ring-violet-200">
-                  <div className="mb-2 text-[13px] font-bold uppercase tracking-wide text-violet-800">Changed the recommended plan</div>
+                  <div className="mb-1 text-[13px] font-bold uppercase tracking-wide text-violet-800">Steered a fresh session&apos;s plan choice</div>
+                  <p className="mb-2 text-[13px] text-zinc-600">p-beta@1 was written before this decision was recorded. Alike carried the decision to a new session; it did not author the plan.</p>
                   <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3 text-[15px] leading-snug">
                     <div>
                       <div className="text-[12px] font-semibold uppercase text-zinc-500">Before</div>

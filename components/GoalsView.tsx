@@ -114,7 +114,7 @@ function DependencyButton({ props }: { props: ViewProps }) {
       >
         <span className="text-[12px] font-bold uppercase tracking-wide text-zinc-500">Product → Security</span>
         <span className="text-[14px] font-semibold leading-snug text-zinc-900">{rel.label}</span>
-        <StateBadge state={rel.status} />
+        {rel.status === "ACCEPTED" ? <Badge tone="neutral">OWNER-ACCEPTED</Badge> : <StateBadge state={rel.status} />}
       </button>
     </>
   );

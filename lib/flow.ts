@@ -1,6 +1,8 @@
 import type { Actor, AppState, Proposal, StateView, TestStatus } from "./types";
 import { HttpError, id, now } from "./store";
 import type { Session } from "./auth";
+import path from "node:path";
+import { readTrace } from "./evidence";
 
 const forbid = (why: string) => {
   throw new HttpError(403, why);
@@ -21,6 +23,25 @@ export function touch(s: AppState, who: Session, action: string) {
   }
   if (t.ended_at) return;
   t.touchpoints.push({ actor: who.actor, action, at: now() });
+}
+
+/** Sandbox runs are prep, not decision time: list each run's own measured duration separately (from its agent trace). */
+export function recordExcludedPrep(s: AppState) {
+  for (const run of s.simulations) {
+    const label = path.basename(run.report_path, ".json");
+    const name = `Sparta sandbox run ${label} (prep, excluded)`;
+    if (s.timer.excluded_prep.some((p) => p.label === name)) continue;
+    let trace: Record<string, unknown> | null = null;
+    try {
+      trace = readTrace(label);
+    } catch {
+      continue; // unreadable trace: list nothing rather than guess a duration
+    }
+    const start = Date.parse(String(trace?.started_at ?? ""));
+    const end = Date.parse(String(trace?.finished_at ?? ""));
+    if (Number.isFinite(start) && Number.isFinite(end) && end >= start)
+      s.timer.excluded_prep.push({ label: name, seconds: Math.round((end - start) / 1000) });
+  }
 }
 
 export function currentGoal(s: AppState, owner: "ceo" | "product" | "security") {
@@ -185,6 +206,7 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
     evidence_version: p.simulation_refs,
     ratified_at: now(),
     acknowledged_at: p.product_ack_at ?? p.created_at, // Product authored the commitment when no counter required re-acknowledgment
+    acknowledged_via: p.product_ack_at ? "explicit" : "authored_in_proposal",
   });
   audit(s, who, "ratify", p.id);
   touch(s, who, "ratify");
@@ -207,6 +229,7 @@ export function seeFinal(s: AppState, who: Session) {
   if (!t.acked_by.includes(who.actor)) {
     t.acked_by.push(who.actor);
     t.touchpoints.push({ actor: who.actor, action: "saw_accepted_version", at: now() });
+    audit(s, who, "saw_accepted_version", s.acceptances.at(-1)!.accepted_version);
   }
   if (t.acked_by.includes("product") && t.acked_by.includes("security")) t.ended_at = now();
 }

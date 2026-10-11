@@ -1,6 +1,6 @@
 # Alike retrieval evidence (session A → fresh session B)
 
-**Session A** (Claude Code, this build session, 2026-10-11 ~11:34 PDT) recorded two decisions with the `alike` CLI `record_decision`, anchored to `agent/plans` and `agent/goal-triage-agent.mjs` in `liminalworksinc/align`:
+**Session A** (Claude Code, this build session, 2026-10-11 ~11:34 PDT) recorded two decisions with the `alike` CLI `record_decision`, anchored to `agent/plans` and `agent/goal-triage-agent.mjs` in the `align` GitHub repo:
 
 - `urn:alike:decision:78eddb31af39fe7970cf47014f6ba26d9829f492e3e96f8df68e4167f9c7cfcb` (made): beta triage counts only with urgent priority, `obs-beta` tag (existing tags kept), one private investigation note, one public acknowledgment, and protected P0 non-beta incidents untouched.
 - `urn:alike:decision:4b1a72b3aa27dfa67eefcaaeb34ada9ee4e109c7d9b6371165c84ae833097dba` (rejected): oldest-first throughput triage. (`…3e4972…` is an accidental duplicate of this rejected alternative.)
@@ -30,3 +30,5 @@ Alike: three confirmed decisions in the injected pointers (78eddb31… made; 4b1
 ---
 
 Notes: session B received the decisions through Alike's injected coordination pointers; its follow-up `get_entity` reads were blocked by a non-interactive permission prompt, so it reported recording time and author as unknown. Align stores only the decision id, a summary, timestamps and the plan before/after, never raw transcripts.
+
+**Scope of the claim.** `agent/plans/p-beta@1.md` was committed (84f22d1) before session A recorded the decision. Alike did not write the plan. It carried the team's decision to a fresh session with no prior context, and that session chose `p-beta@1` over the `p-throughput@1` plan it would otherwise have proposed. The session also had repository access, so the plan files were visible to it. Who recorded the decision is unknown in session B, because its full-record reads were blocked.

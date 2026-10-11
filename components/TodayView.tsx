@@ -31,7 +31,15 @@ export function TodayView(props: ViewProps) {
   if (actor === "product") {
     if (!t.started_at) {
       items.push(
-        <Item key="ceo" action={<Button onClick={() => props.go("goals")}>Review CEO change</Button>}>
+        <Item key="ceo" action={<Button
+              onClick={() => {
+                props.mark("ceo_change_viewed");
+                props.select({ kind: "goal", id: "g-ceo-v2" });
+                props.go("goals");
+              }}
+            >
+              Review CEO change
+            </Button>}>
           <Badge tone="amber">Unreviewed</Badge> The CEO changed the company goal ({ceo?.version ?? "v2"}). Review how it affects your goals.
         </Item>,
       );

@@ -189,7 +189,7 @@ function RelationPanel({ p, r }: { p: ViewProps; r: GoalRelation }) {
               {OWNER_LABEL[acc.ratified_by]} · {fmtTime(acc.ratified_at)}
             </Row>
             <Row label="Acknowledged">
-              {OWNER_LABEL[acc.acknowledged_by]} · {fmtTime(acc.acknowledged_at)}
+              {OWNER_LABEL[acc.acknowledged_by]} · {acc.acknowledged_via === "authored_in_proposal" ? "commitment written in its proposal, " : ""}{fmtTime(acc.acknowledged_at)}
             </Row>
             <Row label="Next work">{acc.next_work}</Row>
             <Row label="Plan">

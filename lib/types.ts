@@ -75,7 +75,7 @@ export interface Plan {
   plan_version: number;
   title: string;
   params: PlanParams;
-  hash: string; // sha256 of canonical params
+  hash: string; // sha256 of the plan file agent/plans/<plan_id>@<version>.md (matches the agent trace plan_sha256)
   goal_text_ref: string; // agent/plans/<plan_id>@<version>.md
 }
 
@@ -197,6 +197,7 @@ export interface Acceptance {
   evidence_version: string[];
   ratified_at: string;
   acknowledged_at: string;
+  acknowledged_via?: "explicit" | "authored_in_proposal"; // explicit = Product's POST /acknowledge; otherwise the commitment was written by Product in its own proposal
 }
 
 export interface Touchpoint {
@@ -245,6 +246,7 @@ export interface AppState {
   audit: AuditEvent[];
   manual_baseline: ManualBaselineStep[];
   private_constraints: { owner: Actor; text: string }[];
+  ingest_errors?: string[]; // evidence files that could not be parsed; never blocks polling
 }
 
 // Session view returned to the browser. Visibility-filtered for the actor.

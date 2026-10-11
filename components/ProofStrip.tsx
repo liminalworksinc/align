@@ -108,7 +108,7 @@ export function ProofStrip({ s }: { s: StateView }) {
           <ul className="space-y-2 text-[16px]">
             <li>
               <div className="font-semibold text-zinc-900">{OWNER_LABEL.product}</div>
-              <div className="text-zinc-600">acknowledged at {fmtTime(acc.acknowledged_at)}</div>
+              <div className="text-zinc-600">{acc.acknowledged_via === "authored_in_proposal" ? "commitment written in its proposal at" : "acknowledged at"} {fmtTime(acc.acknowledged_at)}</div>
             </li>
             <li>
               <div className="font-semibold text-zinc-900">{OWNER_LABEL.security}</div>

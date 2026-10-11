@@ -88,7 +88,9 @@ export const OWNER_LABEL: Record<string, string> = {
 
 export function fmtTime(iso?: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso; // never render "Invalid Date"
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
 }
 
 export function fmtDuration(ms: number) {

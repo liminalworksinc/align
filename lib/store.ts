@@ -66,15 +66,20 @@ export async function mutate<T>(fn: (s: AppState) => T | Promise<T>): Promise<T>
   }
 }
 
-export async function resetState() {
+export async function resetState(by: { actor: string; sid: string }) {
   return mutate((s) => {
     const fresh = initialState();
-    // Keep ingested Sparta evidence and the operator-captured Alike reference across demo resets.
+    // Keep ingested Sparta evidence across demo resets. The fixture's Alike reference wins; an operator-captured one is kept only if the fixture has none.
     fresh.simulations = s.simulations;
-    if (s.brief.alike_ref) {
+    if (!fresh.brief.alike_ref && s.brief.alike_ref) {
       fresh.brief.alike_ref = s.brief.alike_ref;
       fresh.brief.alike_status = s.brief.alike_status;
     }
+    // The audit log is never erased: a reset is itself an audited event.
+    fresh.audit = [
+      ...s.audit,
+      { id: id("a"), actor: by.actor, session_id: by.sid, action: "reset", target: "state", at: now() },
+    ] as AppState["audit"];
     Object.assign(s, fresh);
     return s;
   });

@@ -14,12 +14,10 @@ export function activeProposal(s: StateView) {
   return [...s.proposals].reverse().find((p) => p.state !== "REJECTED") ?? null;
 }
 
-/** Latest baseline FAIL and candidate PASS (normal scenario) that share mission, seed and checks. */
+/** Latest baseline and candidate runs (normal scenario) that share mission, seed and checks. Latest regardless of verdict: no cherry-picking a PASS. */
 export function comparablePair(s: StateView): { baseline?: SimulationRun; candidate?: SimulationRun; interruption?: SimulationRun } {
   const latest = (pred: (r: SimulationRun) => boolean) => [...s.simulations].reverse().find(pred);
-  const candidate =
-    latest((r) => r.plan_id === "p-beta" && r.scenario === "normal" && r.verdict === "PASS") ??
-    latest((r) => r.plan_id === "p-beta" && r.scenario === "normal");
+  const candidate = latest((r) => r.plan_id === "p-beta" && r.scenario === "normal");
   const baseline = latest(
     (r) =>
       r.plan_id === "p-throughput" &&
@@ -28,6 +26,12 @@ export function comparablePair(s: StateView): { baseline?: SimulationRun; candid
   );
   const interruption = latest((r) => r.plan_id === "p-beta" && r.scenario === "interruption");
   return { baseline, candidate, interruption };
+}
+
+/** Every ingested run for a plan, e.g. "p-beta@1: 3/3 PASS". */
+export function tally(s: StateView, planId: string, scenario?: SimulationRun["scenario"]) {
+  const runs = s.simulations.filter((r) => r.plan_id === planId && (!scenario || r.scenario === scenario));
+  return { pass: runs.filter((r) => r.verdict === "PASS").length, total: runs.length };
 }
 
 export function accepted(s: StateView) {

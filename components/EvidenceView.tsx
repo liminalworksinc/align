@@ -3,6 +3,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { CheckResult, SimulationRun, TraceRow } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { api } from "./useAlign";
+import { tally } from "./select";
 import { Badge, Mono, OWNER_LABEL, Section, StateBadge, fmtDuration, fmtTime } from "./ui";
 
 /* ------------------------------------------------------------------ */
@@ -253,7 +254,15 @@ function DecisionRecord({ s, select }: ViewProps) {
             ))}
 
             <ChainStep title="Product acknowledgment" who={OWNER_LABEL.product} at={proposal.product_ack_at ?? acceptance?.acknowledged_at ?? null}>
-              {proposal.product_ack_at || acceptance?.acknowledged_at ? "Acknowledged." : <span className="text-amber-800">Not yet acknowledged.</span>}
+              {proposal.product_ack_at ? (
+                "Acknowledged."
+              ) : acceptance?.acknowledged_via === "authored_in_proposal" ? (
+                "No separate acknowledgment: Security ratified Product's terms unchanged, so the commitment stands as Product wrote it in the proposal."
+              ) : acceptance?.acknowledged_at ? (
+                "Acknowledged."
+              ) : (
+                <span className="text-amber-800">Not yet acknowledged.</span>
+              )}
             </ChainStep>
 
             <ChainStep title="Security ratification" who={OWNER_LABEL.security} at={acceptance?.ratified_at ?? null} tone={acceptance ? "violet" : "amber"}>
@@ -314,7 +323,11 @@ function DecisionRecord({ s, select }: ViewProps) {
                             <span className="text-[15px] text-zinc-700">
                               {planLabel(r)} · {r.scenario}
                             </span>
-                            <StateBadge state={r.verdict} />
+                            {r.verdict === "PASS" && (acceptance?.test_status ?? proposal.test_status) === "STALE" ? (
+                              <Badge tone="neutral">PASS for {planLabel(r)}, not for the countered plan</Badge>
+                            ) : (
+                              <StateBadge state={r.verdict} />
+                            )}
                           </>
                         ) : (
                           <Badge tone="amber">run not found in state</Badge>
@@ -364,7 +377,20 @@ function SpartaRuns({ s, select, selection }: ViewProps) {
   };
 
   return (
-    <Section title="Sparta runs" right={<span className="text-[14px] text-zinc-500">{s.simulations.length} ingested · newest first</span>}>
+    <Section
+      title="Sparta runs"
+      right={
+        <span className="text-[14px] text-zinc-500">
+          {(["p-throughput", "p-beta"] as const)
+            .map((id) => {
+              const n = tally(s, id);
+              return `${id}: ${n.pass}/${n.total} PASS`;
+            })
+            .join(" · ")}{" "}
+          · {s.simulations.length} ingested · newest first
+        </span>
+      }
+    >
       <Card className="p-0">
         {runs.length === 0 ? (
           <div className="p-5 text-[16px] text-zinc-600">

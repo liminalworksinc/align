@@ -487,7 +487,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
               </dd>
               <dt className="text-zinc-500">Acknowledged by</dt>
               <dd className="text-zinc-900">
-                {OWNER_LABEL[acc.acknowledged_by]} at {fmtTime(acc.acknowledged_at)}
+                {OWNER_LABEL[acc.acknowledged_by]} {acc.acknowledged_via === "authored_in_proposal" ? "(commitment written in its proposal)" : ""} at {fmtTime(acc.acknowledged_at)}
               </dd>
               <dt className="text-zinc-500">Next work</dt>
               <dd className="text-zinc-900">{acc.next_work}</dd>
