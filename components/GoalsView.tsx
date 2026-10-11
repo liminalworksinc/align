@@ -12,7 +12,7 @@ const LINE = "border-zinc-300";
 
 function MeasureRow({ m, changed, conflict }: { m: Measure; changed?: boolean; conflict?: boolean }) {
   return (
-    <li className={`rounded-md px-2.5 py-1.5 text-[15px] ${changed ? "bg-amber-50 ring-1 ring-amber-300" : ""}`}>
+    <li className={`rounded-md px-2.5 py-1 text-[15px] ${changed ? "bg-amber-50 ring-1 ring-amber-300" : ""}`}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="font-mono text-[13px] font-semibold text-zinc-500">{m.id}</span>
         <span className="flex-1 text-zinc-900">{m.text}</span>
@@ -35,15 +35,15 @@ function CeoCard({ props, g, only }: { props: ViewProps; g: Goal; only?: string 
   return (
     <button
       onClick={onClick}
-      className={`w-full rounded-xl bg-white p-5 text-left shadow-sm ring-1 ring-zinc-300 hover:ring-zinc-400 ${isSel(props.selection, "goal", g.id) ? RING : ""}`}
+      className={`w-full rounded-xl bg-white px-5 py-4 text-left shadow-sm ring-1 ring-zinc-300 hover:ring-zinc-400 ${isSel(props.selection, "goal", g.id) ? RING : ""}`}
     >
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <span className="text-[15px] font-bold text-zinc-600">{g.owner_name}</span>
         <Badge tone="neutral">Inherited · read-only</Badge>
         <Badge tone="neutral" icon={false}>{g.version}</Badge>
       </div>
-      <p className="mb-3 text-[19px] font-semibold leading-snug text-zinc-900">{g.objective}</p>
-      <ul className="space-y-1">
+      <p className="mb-2 text-[19px] font-semibold leading-snug text-zinc-900">{g.objective}</p>
+      <ul className="space-y-0.5">
         {g.measures
           .filter((m) => !only || m.id === only)
           .map((m) => (
@@ -62,7 +62,7 @@ function TeamCard({ props, owner, allWork }: { props: ViewProps; owner: "product
   const work = workFor(s, g).slice(0, allWork ? undefined : 3);
   return (
     <article className={`flex h-full flex-col rounded-xl bg-white shadow-sm ring-1 ring-zinc-300 ${isSel(selection, "goal", g.id) ? RING : ""}`}>
-      <button onClick={() => select({ kind: "goal", id: g.id })} className="flex-1 rounded-t-xl p-4 text-left hover:bg-zinc-50">
+      <button onClick={() => select({ kind: "goal", id: g.id })} className="flex flex-1 flex-col justify-start rounded-t-xl p-4 text-left hover:bg-zinc-50">
         <div className="mb-1 text-[16px] font-bold text-zinc-900">{g.owner_name}</div>
         <div className="mb-2 flex flex-wrap gap-1.5">
           <VersionTag s={s} g={g} />
@@ -106,7 +106,7 @@ function DependencyButton({ props }: { props: ViewProps }) {
   const open = rel.status === "UNKNOWN";
   return (
     <>
-      <div className={`absolute inset-x-0 top-1/2 border-t-2 ${open ? "border-dashed border-amber-400" : LINE}`} aria-hidden />
+      <div className={`absolute inset-x-0 top-[3.25rem] border-t-2 ${open ? "border-dashed border-amber-400" : LINE}`} aria-hidden />
       <button
         onClick={() => props.select({ kind: "relation", id: rel.id })}
         aria-label={`Dependency: ${rel.label}. Status ${rel.status}`}
@@ -123,10 +123,10 @@ function DependencyButton({ props }: { props: ViewProps }) {
 function Leg({ side, label }: { side: "left" | "right"; label: string }) {
   return (
     <div className="relative">
-      <div className={`absolute top-6 border-t-2 ${LINE} ${side === "left" ? "left-1/2 right-0" : "left-0 right-1/2"}`} />
-      <div className={`absolute bottom-0 left-1/2 top-6 border-l-2 ${LINE}`} />
+      <div className={`absolute top-5 border-t-2 ${LINE} ${side === "left" ? "left-1/2 right-0" : "left-0 right-1/2"}`} />
+      <div className={`absolute bottom-0 left-1/2 top-5 border-l-2 ${LINE}`} />
       <span className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 text-[11px] leading-none text-zinc-400">▼</span>
-      <span className="absolute left-1/2 top-9 ml-2 text-[13px] font-medium text-zinc-500">{label}</span>
+      <span className="absolute left-1/2 top-6 ml-2 text-[13px] font-medium text-zinc-500">{label}</span>
     </div>
   );
 }
@@ -135,11 +135,11 @@ function Leg({ side, label }: { side: "left" | "right"; label: string }) {
 function InheritConnectors({ props }: { props: ViewProps }) {
   const label = (id: string) => props.s.relations.find((r) => r.id === id)?.label ?? "inherits";
   return (
-    <div className="relative grid h-16 grid-cols-[1fr_184px_1fr]" aria-hidden>
-      <div className={`absolute left-1/2 top-0 h-6 border-l-2 ${LINE}`} />
+    <div className="relative grid h-12 grid-cols-[1fr_184px_1fr]" aria-hidden>
+      <div className={`absolute left-1/2 top-0 h-5 border-l-2 ${LINE}`} />
       <Leg side="left" label={label("r-ceo-product")} />
       <div className="relative">
-        <div className={`absolute inset-x-0 top-6 border-t-2 ${LINE}`} />
+        <div className={`absolute inset-x-0 top-5 border-t-2 ${LINE}`} />
       </div>
       <Leg side="right" label={label("r-ceo-security")} />
     </div>
@@ -185,7 +185,7 @@ function Ladder({ props }: { props: ViewProps }) {
       <InheritConnectors props={props} />
       <div className="grid grid-cols-[1fr_184px_1fr] items-stretch">
         <TeamCard props={props} owner="product" />
-        <div className="relative flex items-center justify-center">
+        <div className="relative flex items-start justify-center pt-5">
           <DependencyButton props={props} />
         </div>
         <TeamCard props={props} owner="security" />
@@ -223,7 +223,7 @@ export function GoalsView(props: ViewProps) {
   }, [accepted, mark]);
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-[24px] font-bold tracking-tight">Line of sight</h1>
         <div role="group" aria-label="Lens" className="inline-flex rounded-lg bg-zinc-100 p-1 ring-1 ring-zinc-200">

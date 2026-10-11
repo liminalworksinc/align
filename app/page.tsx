@@ -161,8 +161,8 @@ export default function Page() {
         <div className="mt-auto border-t border-zinc-200 p-4 text-[14px] text-zinc-600">
           <div className="font-semibold text-zinc-900">{me.name}</div>
           <div className="mb-3">Session {me.sid}</div>
-          <div className="flex gap-2">
-            <Button kind="secondary" onClick={signOut}>Sign out</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button kind="secondary" onClick={signOut}>Sign&nbsp;out</Button>
             <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>{confirmReset ? "Confirm reset" : "Reset demo"}</Button>
           </div>
         </div>

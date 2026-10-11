@@ -9,7 +9,7 @@ import { ProofStrip } from "./ProofStrip";
 const DEFAULT_MEASURE =
   "Observability-beta incidents triaged per launch-readiness policy (urgent, obs-beta tag, private investigation note, public acknowledgment), protecting P0 non-beta incidents";
 const DEFAULT_RATIONALE =
-  "CEO KR2 changed today; the current throughput measure does not require beta triage. Sparta shows the current plan fails and the candidate passes the same checks.";
+  "CEO KR2 changed today; the current throughput measure does not require beta triage. The attached Sparta test runs the current and candidate plans against the same mission, seed and checks.";
 const DEFAULT_COMMITMENT =
   "Product tags every beta issue obs-beta at intake and publishes the exact beta scope by Wednesday; Product defers ticket dashboard polish.";
 const COUNTER_SUFFIX = " while existing P0 non-beta incidents and their private notes remain untouched";
