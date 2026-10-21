@@ -51,6 +51,14 @@ const CUSTOM_BLURB: Record<Role, string> = {
   product: "asks for the change",
   security: "owns the goal being changed",
 };
+// Two-letter avatar from the team name: first letters of two words, else first letter plus next consonant
+// ("Data Platform" → DP, "Product" → PR, "Leadership" → LD), so roles never share initials by job title.
+const teamInitials = (team: string) => {
+  const w = team.split(/[\s/]+/).filter(Boolean);
+  if (w.length >= 2) return (w[0][0] + w[1][0]).toUpperCase();
+  const c = w[0]?.slice(1).match(/[b-df-hj-np-tv-z]/i)?.[0] ?? w[0]?.[1] ?? "";
+  return ((w[0]?.[0] ?? "") + c).toUpperCase();
+};
 // "<Team> lead", except when the team name already says it (a leadership team, or a name ending in "Lead").
 const youAre = (team: string, actor: string) => (actor === "leadership" || /\b(lead|leadership)$/i.test(team) ? team : `${team} lead`);
 // api() falls back to "HTTP <status>" when a response carries no sentence; custom screens never show that.
@@ -201,7 +209,9 @@ export default function Page() {
   const unresolved = rel?.status === "UNKNOWN";
   const lastPush = state.pushes?.at(-1);
   const ceo = currentGoal(state, "ceo");
-  const nav = (me.actor === "leadership" ? NAV_LEADERSHIP : NAV).filter((n) => !custom || !CUSTOM_HIDDEN.includes(n.id));
+  const nav = (me.actor === "leadership" ? NAV_LEADERSHIP : NAV)
+    .filter((n) => !custom || !CUSTOM_HIDDEN.includes(n.id))
+    .map((n) => (custom && n.id === "company" ? { ...n, sub: "Shared with both teams" } : n));
   const openProposal = activeProposal(state);
   const proposalOpen = openProposal && !["RATIFIED", "REJECTED"].includes(openProposal.state);
   const decisionCount = pendingForMe + (me.actor === "product" && unresolved && !proposalOpen ? 1 : 0);
@@ -340,15 +350,21 @@ export default function Page() {
           )}
           {ops && custom && me.actor === "leadership" && (
             <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
-              {confirmReset ? "Click again to restart" : "Restart this scenario"}
+              {confirmReset ? "Click again to go back to the Northstar demo" : "Back to the Northstar demo"}
             </Button>
           )}
           <span aria-hidden className="grid size-9 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[13px] font-bold text-violet-700">
-            {initials((custom ? L.person[me.actor] : me.name) ?? "")}
+            {custom ? teamInitials(L.role[me.actor]) : initials(me.name ?? "")}
           </span>
           <div className="leading-tight">
             <div className="text-[14px] font-semibold text-zinc-900">{custom ? L.person[me.actor] : me.name}</div>
-            <div className="text-[12.5px] text-zinc-500">{custom ? L.role[me.actor] : (TEAM_OF[me.actor] ?? "")} · Owner</div>
+            {custom ? (
+              <div className="text-[12.5px] text-zinc-500">
+                {L.role[me.actor]} · {CUSTOM_BLURB[me.actor]}
+              </div>
+            ) : (
+              <div className="text-[12.5px] text-zinc-500">{TEAM_OF[me.actor] ?? ""} · Owner</div>
+            )}
           </div>
           <Button kind="ghost" onClick={signOut}>
             Sign&nbsp;out

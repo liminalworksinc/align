@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// Custom-scenario acceptance test (Build A minimum slice): setup authority S1–S9, state after setup T1,
-// the propose → change → owner-approval flow F2–F14 plus the affected work items check, and R4 back to Northstar.
+// Custom-scenario acceptance test (Build A minimum slice): setup authority S1–S9, the minimal setup S10/S11,
+// state after setup T1, the propose → change → owner-approval flow F2–F15, and R4 back to Northstar.
 // Case ids follow Sean's Build A plan §7/§8. Contracts: plan §3 (setup API, approval, custom state seed).
 //
 // Usage: node scripts/test-scenario.mjs http://127.0.0.1:3205 [fixture.json]
 // The fixture defaults to data/scenarios/example-custom.json (owned by L2, the Fernway example).
 import { readFileSync } from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { baseUrl, signIn } from "./lib/harness.mjs";
@@ -15,6 +16,28 @@ const BASE = baseUrl();
 const FIXTURE = path.resolve(process.argv[3] || path.join(ROOT, "data/scenarios/example-custom.json"));
 const fixture = JSON.parse(readFileSync(FIXTURE, "utf8"));
 const NORTHSTAR_TEXT = /Northstar|Sparta|Alike|p-beta|p-throughput|KR2 makes beta/;
+
+// The fewest fields a setup may carry (founder ruling "optional fields"). Every other field is optional.
+const MINIMAL = {
+  confirm: "replace",
+  company: "Minimal Co",
+  company_goal: { objective: "Close the audit finding this quarter", measures: ["The audit finding is closed"] },
+  asking: { team: "Support", lead: "Head of Support", objective: "Cut the ticket backlog in half" },
+  owning: { team: "Infra", lead: "Infra Lead", objective: "Finish the database upgrade", measures: ["Database upgrade done by the 30th"] },
+  dependency: "The audit fix needs an Infra config change that is not on their plan.",
+  work_items: [
+    { team: "asking", task: "Backlog triage rota" },
+    { team: "owning", task: "Database upgrade rollout" },
+  ],
+  plan: { text: "Infra ships the config change first; Support pauses new tooling asks until the upgrade lands." },
+};
+const MINIMAL_REQUIRED = [
+  "confirm", "company",
+  "company_goal", "company_goal.objective", "company_goal.measures",
+  "asking", "asking.team", "asking.lead", "asking.objective",
+  "owning", "owning.team", "owning.lead", "owning.objective", "owning.measures",
+  "dependency", "work_items", "plan", "plan.text",
+];
 
 let passed = 0;
 let failed = 0;
@@ -46,6 +69,21 @@ const current = (st, owner) => {
   return all.find((g) => !superseded.has(g.id));
 };
 const setup = (role, body, opts) => call(role, "POST", "/api/scenario", body, opts);
+// fetch drops a caller-set Host header, so the DNS-rebinding case goes through node:http.
+function postWithHost(p, host, body, cookie) {
+  const u = new URL(BASE + p);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { hostname: u.hostname, port: u.port, path: u.pathname, method: "POST", headers: { host, cookie, "content-type": "application/json", origin: `http://${host}` } },
+      (res) => {
+        let text = "";
+        res.on("data", (d) => (text += d)).on("end", () => resolve({ status: res.statusCode, text }));
+      },
+    );
+    req.on("error", reject);
+    req.end(JSON.stringify(body));
+  });
+}
 
 async function main() {
   console.log(`Align custom-scenario test against ${BASE} (fixture ${path.relative(ROOT, FIXTURE)})\n`);
@@ -68,10 +106,10 @@ async function main() {
   check('S4 foreign or "null" Origin -> 403 (CSRF)', s4.status === 403 && s4n.status === 403, `${short(s4)} | ${short(s4n)}`);
   const without = (key) => Object.fromEntries(Object.entries(fixture).filter(([k]) => k !== key));
   const s5 = await setup("leadership", without("confirm"));
-  const s5b = await setup("leadership", without("company_measure"));
+  const s5b = await setup("leadership", without("company_goal"));
   const s5c = await setup("leadership", { ...fixture, work_items: fixture.work_items.filter((w) => w.team !== "owning") });
   check(
-    'S5 missing confirm:"replace", company_measure or an owning-team work item -> 400 with {error, issues[{path, message}]}',
+    'S5 missing confirm:"replace", company_goal or an owning-team work item -> 400 with {error, issues[{path, message}]}',
     [s5, s5b, s5c].every((r) => r.status === 400) && typeof s5.json?.error === "string" && Array.isArray(s5.json?.issues) && s5.json.issues.every((i) => "path" in i && "message" in i),
     `${short(s5)} | ${short(s5b)} | ${short(s5c)}`,
   );
@@ -82,11 +120,56 @@ async function main() {
   const big = JSON.stringify({ ...fixture, pad: "x".repeat(70 * 1024) });
   const s8 = await setup("leadership", undefined, { raw: big, headers: { "content-type": "application/json" } });
   check("S8 body over 64 KB -> 413", s8.status === 413, short(s8));
+  const s12 = await postWithHost("/api/scenario", "rebind.example:3000", fixture, cookies.leadership);
+  check("S12 non-loopback Host (DNS rebinding) -> 403", s12.status === 403, short(s12));
   const proto = JSON.stringify(fixture).replace(/^\{/, '{"__proto__":{"admin":true},');
   const s9 = await setup("leadership", undefined, { raw: proto, headers: { "content-type": "application/json" } });
   check("S9 own __proto__ key -> 400", s9.status === 400, short(s9));
+
+  // Founder ruling "optional fields": only the minimal conflict is required.
+  const dropAt = (obj, p) => {
+    const copy = structuredClone(obj);
+    const keys = p.split(".");
+    const last = keys.pop();
+    delete keys.reduce((o, k) => o[k], copy)[last];
+    return copy;
+  };
+  // [case, response, the issue path the 400 must name]
+  const s11 = [];
+  for (const p of MINIMAL_REQUIRED) s11.push([`no ${p}`, await setup("leadership", dropAt(MINIMAL, p)), p]);
+  for (const side of ["asking", "owning"]) {
+    s11.push([`no ${side} work item`, await setup("leadership", { ...MINIMAL, work_items: MINIMAL.work_items.filter((w) => w.team !== side) }), "work_items"]);
+    const four = Array.from({ length: 4 }, (_, i) => ({ team: side, task: `${side} task ${i + 1}` }));
+    s11.push([`4 ${side} work items`, await setup("leadership", { ...MINIMAL, work_items: [...MINIMAL.work_items.filter((w) => w.team !== side), ...four] }), "work_items"]);
+  }
+  const s11bad = s11.filter(([, r, p]) => r.status !== 400 || !(r.json?.issues ?? []).some((i) => i.path === p));
+  check(
+    `S11 minimal setup missing any required field, or with 4 work items for one team -> 400 naming that field (${s11.length} cases)`,
+    s11bad.length === 0,
+    s11bad.map(([what, r]) => `${what}: ${short(r)}`).join(" | "),
+  );
   const before = await state();
-  check("S1–S9 left Northstar untouched", before.scenario === undefined && (before.simulations ?? []).length >= 27, `scenario=${before.scenario} sims=${before.simulations?.length}`);
+  check("S1–S9 and S11 left Northstar untouched", before.scenario === undefined && (before.simulations ?? []).length >= 27, `scenario=${before.scenario} sims=${before.simulations?.length}`);
+
+  // S10: the minimal body builds a valid custom state; then the per-team cap of 3 is inclusive.
+  const s10 = await setup("leadership", MINIMAL);
+  const m = await state();
+  const goal = (gid) => (m.goals ?? []).find((g) => g.id === gid);
+  const dep = (m.relations ?? []).find((r) => r.id === m.scenario_config?.dependency_id);
+  const owners = (m.work_items ?? []).map((w) => w.owner).sort();
+  check(
+    "S10 minimal setup -> 200: 1 company measure, 1 owning measure, 1+1 work items, the dependency, plan p-custom@1",
+    s10.status === 200 && m.scenario === "custom" && m.company === MINIMAL.company &&
+      goal("g-ceo-v1")?.measures?.length === 1 && goal("g-security-v1")?.measures?.length === 1 &&
+      m.scenario_config?.company_measure_id === "KR1" && m.scenario_config?.owner_measure_id === "S-M1" &&
+      JSON.stringify(owners) === JSON.stringify(["product", "security"]) &&
+      dep?.type === "depends_on" && dep.source_goal === "g-product-v1" && dep.target_goal === "g-security-v1" && dep.label === MINIMAL.dependency &&
+      m.plans?.[0]?.plan_id === "p-custom" && m.plans[0].plan_version === 1 && m.plans[0].text === MINIMAL.plan.text,
+    `${short(s10)} ${JSON.stringify({ scenario: m.scenario, cfg: m.scenario_config, owners, dep, kr: goal("g-ceo-v1")?.measures, sm: goal("g-security-v1")?.measures })}`,
+  );
+  const three = ["asking", "owning"].flatMap((team) => [1, 2, 3].map((i) => ({ team, task: `${team} task ${i}` })));
+  const s10b = await setup("leadership", { ...MINIMAL, work_items: three });
+  check("S10 3 work items per team (the cap) -> 200", s10b.status === 200, short(s10b));
 
   const ok = await setup("leadership", fixture);
   const o = ok.json ?? {};
@@ -182,6 +265,16 @@ async function main() {
     "F14 acceptance.affected_work_item_ids lists real custom work items",
     Array.isArray(affected) && affected.length > 0 && affected.every((x) => workIds.has(x) && /^w-[ps]\d+$/.test(x)),
     JSON.stringify({ affected, work_items: [...workIds] }),
+  );
+
+  // Founder ruling #5: the approval also names the asking team's own work items, separately.
+  const asking = acc?.asking_work_item_ids;
+  const askingOwned = (st.work_items ?? []).filter((w) => w.owner === "product").map((w) => w.id);
+  check(
+    "F15 acceptance.asking_work_item_ids is exactly the asking team's work items, disjoint from affected_work_item_ids",
+    Array.isArray(asking) && asking.length > 0 && JSON.stringify([...asking].sort()) === JSON.stringify([...askingOwned].sort()) &&
+      !asking.some((x) => (affected ?? []).includes(x)),
+    JSON.stringify({ asking, askingOwned, affected }),
   );
 
   // ---- R4: custom back to Northstar ----

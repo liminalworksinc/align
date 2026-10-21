@@ -5,6 +5,7 @@ import type { Session } from "./auth";
 import path from "node:path";
 import { readTrace } from "./evidence";
 import { profileFor } from "./scenario-profile";
+import { slotOf } from "./labels";
 
 /** Executable identity of a plan: its parameters with keys and list order normalized. */
 function paramsHash(p: PlanParams): string {
@@ -213,6 +214,8 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
   }
   // Work items whose team's goal changed (read before retargeting).
   const affected = s.work_items.filter((w) => w.goal_id === target.id).map((w) => w.id);
+  const askingGoal = currentGoal(s, slotOf(p.proposing_owner));
+  const asking = s.work_items.filter((w) => w.goal_id === askingGoal.id).map((w) => w.id);
   for (const w of s.work_items) if (w.goal_id === target.id) w.goal_id = newGoal.id;
   prof.updateWorkItems(s, version);
   s.acceptances.push({
@@ -233,6 +236,7 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
     ...(swap.replaced_measure_id ? { replaced_measure_id: swap.replaced_measure_id } : {}),
     ...(swap.new_measure_id ? { new_measure_id: swap.new_measure_id } : {}),
     ...(prof.custom ? { affected_work_item_ids: affected } : {}),
+    ...(prof.custom ? { asking_work_item_ids: asking } : {}),
   });
   audit(s, who, approvedUntested ? "ratify_untested" : "ratify", p.id);
   touch(s, who, "ratify");

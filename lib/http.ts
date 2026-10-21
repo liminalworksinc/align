@@ -15,9 +15,17 @@ export async function handle(fn: () => Promise<unknown>) {
  * CSRF guard for state-replacing routes. SameSite=Strict does not separate localhost ports and body() parses any
  * content type, so require JSON (a cross-site form can't send it without a preflight) and a same-origin Origin.
  */
+/** Host header names a loopback address (any port). A DNS-rebound page reaches us under its own name, so anything else is refused. */
+function loopbackHost(host: string | null): boolean {
+  if (!host) return false;
+  const name = host.startsWith("[") ? host.slice(0, host.indexOf("]") + 1) : host.split(":")[0];
+  return ["localhost", "127.0.0.1", "[::1]"].includes(name.toLowerCase());
+}
+
 export function requireJson(req: Request) {
   const type = (req.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
   if (type !== "application/json") throw new HttpError(415, "Send this as application/json");
+  if (!loopbackHost(req.headers.get("host"))) throw new HttpError(403, "This request must come from this machine");
   // Compare with the Host the browser actually used; Next's req.url may normalize it (e.g. to localhost).
   const origin = req.headers.get("origin");
   if (origin) {
