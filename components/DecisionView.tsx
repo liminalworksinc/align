@@ -291,11 +291,19 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
             The previous version is kept.{acc.ratified_at ? ` Approved by ${owner} at ${fmtTime(acc.ratified_at)}.` : ""}
           </p>
         </div>
-        <div className="rounded-[14px] border border-zinc-200 bg-zinc-50 p-[18px]">
-          <div className="al-lbl mb-1">{poss(owning)} new target</div>
-          <p className="text-[18px] text-zinc-900">{newTarget}</p>
-        </div>
-        <OldPlanWork s={s} L={L} ids={acc.affected_work_item_ids ?? []} revision={newTarget} />
+        {/* The approved target shows once, at the top of the old-plan panel (and in the header card). */}
+        <ul aria-label="What this record shows" className="flex flex-col gap-1.5 rounded-[14px] border border-zinc-200 bg-white p-[18px] text-[17px] text-zinc-900">
+          <li>
+            <span className="font-semibold">Decision:</span> recorded
+          </li>
+          <li>
+            <span className="font-semibold">Work done:</span> not verified yet
+          </li>
+          <li>
+            <span className="font-semibold">Outcome:</span> not measured yet
+          </li>
+        </ul>
+        <OldPlanWork s={s} L={L} owningIds={acc.affected_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} revision={newTarget} />
         <ProofStrip s={s} />
       </div>
     );
@@ -380,12 +388,8 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
         </h1>
         <p className="mt-2.5 max-w-[760px] text-[18px] leading-relaxed text-zinc-700">{rel.label}</p>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <article className="flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-zinc-50 p-5">
-          <span className="al-lbl">The new company requirement</span>
-          <p className="text-[20px] font-semibold leading-snug text-zinc-900">{requirement.text}</p>
-          <span className="text-[16px] text-zinc-700">Set by {L.person.ceo}</span>
-        </article>
+      {/* The new requirement is already in the company strip above; this card shows only what it collides with. */}
+      <div>
         <article className="flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-zinc-50 p-5">
           <span className="al-lbl">
             {poss(owning)} goal today{ownerGoal ? ` · ${ownerGoal.version}` : ""}
@@ -427,31 +431,53 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
   );
 }
 
-/** Work items tied to the goal that just changed. Always expanded: this is what the decision changes next. */
-function OldPlanWork({ s, L, ids, revision }: { s: ViewProps["s"]; L: Labels; ids: string[]; revision: string }) {
-  const items = ids.map((id) => s.work_items.find((w) => w.id === id)).filter((w): w is NonNullable<typeof w> => Boolean(w));
+/**
+ * Work still on the old plan, always expanded: the owning team's items tied to the goal that changed, then the
+ * asking team's own items to check against what it committed to. The approved revision shows once, above both.
+ */
+function OldPlanWork({ s, L, owningIds, askingIds, revision }: { s: ViewProps["s"]; L: Labels; owningIds: string[]; askingIds: string[]; revision: string }) {
+  const find = (ids: string[]) => ids.map((id) => s.work_items.find((w) => w.id === id)).filter((w): w is NonNullable<typeof w> => Boolean(w));
+  const owning = find(owningIds);
+  const asking = find(askingIds);
+  const row = "flex flex-wrap items-center justify-between gap-3 rounded-[10px] bg-zinc-50 p-3.5 ring-1 ring-zinc-200";
   return (
     <section aria-label="Work still on the old plan" className="rounded-[14px] border border-amber-700 bg-white p-[18px]">
       <div className="al-lbl mb-3 !text-amber-700">Work still on the old plan</div>
-      {items.length === 0 ? (
+      <div className="mb-3 flex flex-col gap-1 rounded-[10px] bg-amber-50 px-3.5 py-3 ring-1 ring-amber-300">
+        <span className="al-lbl">Approved revision</span>
+        <span className="text-[17px] leading-snug text-zinc-900">{revision}</span>
+      </div>
+      {owning.length === 0 && asking.length === 0 ? (
         <p className="text-[16px] text-zinc-700">No work items were tied to this goal</p>
       ) : (
-        <ul className="flex flex-col gap-2.5">
-          {items.map((w) => (
-            <li key={w.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-start gap-4 rounded-[10px] bg-zinc-50 p-3.5 ring-1 ring-zinc-200">
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[17px] font-semibold leading-snug text-zinc-900">{w.task}</span>
-                <span className="self-start">
-                  <Badge tone="amber">needs update → {L.person[w.owner]}</Badge>
-                </span>
-              </div>
-              <div className="flex flex-col gap-1 border-l border-zinc-200 pl-4">
-                <span className="al-lbl">Approved revision</span>
-                <span className="text-[16px] leading-snug text-zinc-900">{revision}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <div className="flex flex-col gap-4">
+          {owning.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="al-lbl">{L.team.security}</span>
+              <ul className="flex flex-col gap-2.5">
+                {owning.map((w) => (
+                  <li key={w.id} className={row}>
+                    <span className="text-[17px] font-semibold leading-snug text-zinc-900">{w.task}</span>
+                    <Badge tone="amber">needs update → {L.person[w.owner]}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {asking.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="al-lbl">{L.team.product}</span>
+              <ul className="flex flex-col gap-2.5">
+                {asking.map((w) => (
+                  <li key={w.id} className={row}>
+                    <span className="text-[17px] font-semibold leading-snug text-zinc-900">{w.task}</span>
+                    <Badge tone="neutral">check against your new commitment</Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       )}
     </section>
   );
