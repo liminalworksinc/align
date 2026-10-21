@@ -2,7 +2,8 @@
 # Build A gate runner. Usage: scripts/test-all.sh <port>   (run from a lane or integration worktree)
 # Checks frozen files, lint and types, starts a fresh dev server on <port>, then runs in fixed order:
 # snapshot, test-flow, test-scenario, test-mcp, test-capture, test-mapper. Capture and mapper add sessions
-# that survive reset, so they run last. One summary line per step; exits non-zero if any step fails.
+# that survive reset, so they run last. Then test-tenancy, which starts its own servers on <port>.
+# One summary line per step; exits non-zero if any step fails.
 set -u
 
 PORT="${1:-}"
@@ -63,6 +64,10 @@ step test-scenario node scripts/test-scenario.mjs "$BASE"
 step test-mcp env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-mcp.mjs "$BASE/api/mcp"
 step test-capture node scripts/test-capture.mjs "$BASE"
 step test-mapper env ALIGN_URL="$BASE" node scripts/test-mapper.mjs
+# Multi-workspace tests need their own server configs (creation closed, signup code, open create).
+stop_server
+SERVER=""
+step test-tenancy node scripts/test-tenancy.mjs "$PORT"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "test-all: all steps passed (logs in $LOGDIR)"; else echo "test-all: $FAILS step(s) failed (logs in $LOGDIR)"; fi
