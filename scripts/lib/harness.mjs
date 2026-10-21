@@ -90,7 +90,7 @@ async function installHook(outDir) {
     try {
       const views = await stateViews(base, cookies, norm, realFetch);
       if (withMcp && token) views.mcp = await mcpListings(base, token, norm);
-      writeFileSync(path.join(outDir, stepName(step, label)), JSON.stringify(views, null, 2) + "\n");
+      writeFileSync(path.join(outDir, stepName(step, label)), JSON.stringify(views) + "\n"); // compact; snapshot-northstar.mjs hashes out simulations
     } finally {
       capturing = false;
     }
