@@ -2,7 +2,7 @@
 // Northstar reads only the frozen literals below, so its output stays byte-identical.
 // Custom scenarios read state.teams and state.scenario_config.
 
-import type { Acceptance, Actor, AppState, Owner, ScenarioKind } from "./types";
+import type { Acceptance, Actor, AppState, Owner, ScenarioKind, ScenarioTeam } from "./types";
 
 type LabelState = Pick<AppState, "company" | "simulations" | "scenario" | "teams" | "scenario_config">;
 
@@ -41,20 +41,29 @@ export function scenarioOf(s: Pick<AppState, "scenario">): ScenarioKind {
   return s.scenario ?? "northstar";
 }
 
-function custom(s: Pick<AppState, "scenario" | "teams">): s is Pick<AppState, "scenario"> & { teams: NonNullable<AppState["teams"]> } {
-  return scenarioOf(s) === "custom" && !!s.teams;
+// A custom state without teams (never written by setup) shows the slot names, never Northstar's.
+const SLOT_TEAMS: Record<Owner, ScenarioTeam> = {
+  ceo: { team: "ceo", lead: "ceo" },
+  product: { team: "product", lead: "product" },
+  security: { team: "security", lead: "security" },
+};
+
+/** Custom is decided by scenarioOf alone, the same test profileFor uses. */
+function customTeams(s: Pick<AppState, "scenario" | "teams">): Record<Owner, ScenarioTeam> | null {
+  return scenarioOf(s) === "custom" ? (s.teams ?? SLOT_TEAMS) : null;
 }
 
 export function teamOf(s: Pick<AppState, "scenario" | "teams">, slot: Owner): string {
-  return custom(s) ? s.teams[slot].team : NORTHSTAR.team[slot];
+  return customTeams(s)?.[slot].team ?? NORTHSTAR.team[slot];
 }
 
 export function leadOf(s: Pick<AppState, "scenario" | "teams">, slot: Owner): string {
-  return custom(s) ? s.teams[slot].lead : NORTHSTAR.person[slot];
+  return customTeams(s)?.[slot].lead ?? NORTHSTAR.person[slot];
 }
 
 export function labelsFor(s: LabelState): Labels {
-  if (!custom(s)) {
+  const t = customTeams(s);
+  if (!t) {
     return {
       northstar: true,
       sandbox: true,
@@ -64,7 +73,6 @@ export function labelsFor(s: LabelState): Labels {
       person: { ...NORTHSTAR.person },
     };
   }
-  const t = s.teams;
   return {
     northstar: false,
     sandbox: s.simulations.length > 0,

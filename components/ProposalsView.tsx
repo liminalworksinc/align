@@ -258,8 +258,8 @@ export function ProposalsView(props: ViewProps) {
   const who = whoFor(L);
 
   return (
-    <div className="flex min-h-0 gap-5">
-      <aside className="w-72 shrink-0" aria-label="Proposal inbox">
+    <div className={L.northstar ? "flex min-h-0 gap-5" : "flex min-h-0 flex-col gap-5 @[56rem]:flex-row"}>
+      <aside className={L.northstar ? "w-72 shrink-0" : "w-full shrink-0 @[56rem]:w-72"} aria-label="Proposal inbox">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="al-lbl">Inbox</h2>
           {isProduct && !openOne && !showComposer && (
@@ -317,7 +317,8 @@ export function ProposalsView(props: ViewProps) {
         {showComposer ? (
           <Composer {...props} busy={busy} run={run} onSent={() => setComposing(false)} />
         ) : active ? (
-          <Detail {...props} p={active} busy={busy} run={run} />
+          // Keyed on state and revision count so Detail's local state (the untested tick) never carries over to a new revision.
+          <Detail key={`${active.id}:${active.state}:${active.counter_versions.length}`} {...props} p={active} busy={busy} run={run} />
         ) : (
           <Card tone="readonly">
             <p className="text-[18px] font-semibold text-zinc-900">No proposals to your goal yet.</p>
@@ -406,7 +407,9 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
           L.northstar ? (
             <Badge tone="neutral">Security&apos;s goal · view only — you can propose a change, not edit it</Badge>
           ) : (
-            <Badge tone="neutral">{poss(L.team.security)} goal · view only — you can propose a change, not edit it</Badge>
+            <span className="ml-3 min-w-0">
+              <Badge tone="neutral">{poss(L.team.security)} goal · view only — you can propose a change, not edit it</Badge>
+            </span>
           )
         }
       >

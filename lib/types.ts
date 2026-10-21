@@ -205,7 +205,7 @@ export interface Acceptance {
   // Custom scenarios only; absent for Northstar so its state stays byte-identical.
   replaced_measure_id?: string;
   new_measure_id?: string;
-  affected_work_item_ids?: string[]; // operator work items whose team's goal changed ("Work still on the old plan")
+  owning_work_item_ids?: string[]; // operator work items whose team's goal changed ("Work still on the old plan")
   asking_work_item_ids?: string[]; // the asking team's own work items, to check against its new commitment
 }
 

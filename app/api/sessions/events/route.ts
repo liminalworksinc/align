@@ -1,6 +1,6 @@
 import path from "node:path";
 import { handle } from "@/lib/http";
-import { mappingEnabled, scheduleMapping } from "@/lib/mapper";
+import { scheduleMapping } from "@/lib/mapper";
 import { markActed } from "@/lib/directives";
 import { hasCaptureConsent, HttpError, mutate, now, readState } from "@/lib/store";
 import type { AgentSession, SessionOriginKind } from "@/lib/types";
@@ -158,7 +158,7 @@ export async function POST(req: Request) {
       throw new HttpError(403, "No capture consent for this harness and repo");
     }
 
-    await mutate((s) => {
+    const scenario = await mutate((s) => {
       // Re-checked under the write lock so a revoke that lands in between still wins. Throwing here writes nothing.
       if (!hasCaptureConsent(s, harness, consentRepo)) throw new HttpError(403, "No capture consent for this harness and repo");
       const at = now();
@@ -206,10 +206,11 @@ export async function POST(req: Request) {
         if (command) texts.push(command);
         sess.origin = originFor(texts, sess.branch);
       }
+      return { scenario: s.scenario };
     });
 
-    // B1-4: the external model is off unless ALIGN_MAPPER_EXTERNAL=1.
-    if (mappingEnabled()) scheduleMapping(id);
+    // B1-4: the external model is off unless ALIGN_MAPPER_EXTERNAL=1 (scheduleMapping also checks); custom scenarios schedule nothing.
+    scheduleMapping(id, scenario);
     return { ok: true, id };
   });
 }
