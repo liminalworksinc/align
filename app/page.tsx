@@ -152,7 +152,7 @@ function Login({ onDone, L }: { onDone: () => void; L?: Labels }) {
 export default function Page() {
   const { state, me, error, setError, loadError, loadMe, act, mark, refresh } = useAlign();
   const [view, setView] = useState<View>("decision");
-  const landed = useRef(false);
+  const landed = useRef<string | null>(null); // the role the landing view was set for; null when signed out
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   // The attached tested plan survives a reload, so a refreshed tab never sends an UNTESTED proposal by accident.
@@ -179,12 +179,13 @@ export default function Page() {
   }, [error, setError]);
 
   useEffect(() => {
-    if (me?.actor && !landed.current) {
-      landed.current = true;
-      // One-time landing view after sign-in; guarded by the ref, so it can't cascade.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (me.actor === "leadership") setView("company");
-    }
+    // Landing view once per sign-in, so a tester who signs out and back in as another role in the same window
+    // lands on that role's view. Guarded by the ref, so it can't cascade.
+    const actor = me?.actor ?? null;
+    if (actor === landed.current) return;
+    landed.current = actor;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (actor) setView(actor === "leadership" ? "company" : "decision");
   }, [me]);
 
   if (!me) return <main className="p-10 text-[16px] text-zinc-500">Loading Align…</main>;
