@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { AppState, Goal, GoalRelation, Measure, Plan, PlanParams, WorkItem } from "./types";
 import type { Session } from "./auth";
-import { captureConsents, HttpError, id, mutate, normalizePlanText, now, setCaptureConsents, sha256 } from "./store";
+import { captureConsents, hasCaptureConsent, HttpError, id, mutate, normalizePlanText, now, setCaptureConsents, sha256 } from "./store";
 import { registryVersion } from "./registry";
 
 // Bring-your-own two-team conflict. Leadership enters it on /setup; the server builds the whole state from the
@@ -245,14 +245,19 @@ export function buildCustomState(input: ScenarioInput, at: string, input_sha256:
   return s;
 }
 
-/** Replace the whole workspace with the custom scenario. Sessions (directives cleared), capture consents and the audit log are kept. */
+/**
+ * Replace the whole workspace with the custom scenario. Capture consents and the audit log are kept. Sessions are
+ * kept (directives cleared) only when their harness and repo has a capture consent, the same filter resetState uses.
+ */
 export async function setupScenario(who: Session, input: ScenarioInput, input_sha256: string) {
   return mutate((s) => {
     if (s.proposals.some((p) => !["RATIFIED", "REJECTED"].includes(p.state)))
       throw new HttpError(409, "There’s an open proposal. Finish or decline it before setting up a new scenario.");
     const at = now();
     const next = buildCustomState(input, at, input_sha256);
-    next.sessions = (s.sessions ?? []).map((x) => ({ ...x, directives: [] }));
+    next.sessions = (s.sessions ?? [])
+      .filter((x) => hasCaptureConsent(s, x.harness, x.repo)) // R1 default: sessions without consent do not persist
+      .map((x) => ({ ...x, directives: [] }));
     // The audit log is never erased. The setup event records only the input hash, never the text.
     next.audit = [
       ...s.audit,

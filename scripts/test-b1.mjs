@@ -3,7 +3,7 @@
 // Usage: node scripts/test-b1.mjs <baseUrl> [--expect-mapper=off|no-key]   (refuses port 3100)
 // Run it against a server started from this worktree: the marker grep reads this worktree's data/state.json.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { baseUrl, signIn } from "./lib/harness.mjs";
@@ -367,9 +367,30 @@ console.log(`\n# B1-5 key presence (server expected: ${EXPECT_MAPPER})`);
 console.log("\n# B1-7 setting up a custom scenario keeps capture consent");
 {
   await grant(lead);
+  // PR #2 review item 3: setup applies reset's consent filter to sessions.
+  const idKeep = `claude-code:${sid("setup-keep")}`;
+  const k = await postEvent(event(idKeep.slice(12)));
+  if (k.status === 200) created.add(idKeep);
+  check("consented session created before the setup", k.status === 200, `status=${k.status}`);
+  // An unconsented session cannot be created over HTTP any more (events need consent; revoke purges), so plant one
+  // the way older state could hold it: a copy of the consented session in a repo with no consent record.
+  const LEGACY_REPO = "b1-synthetic-legacy";
+  const idDrop = `claude-code:${sid("setup-drop")}`;
+  {
+    const raw = JSON.parse(readFileSync(STATE_FILE, "utf8"));
+    const src = raw.sessions.find((x) => x.id === idKeep);
+    raw.sessions.push({ ...src, id: idDrop, session_id: idDrop.slice(12), repo: LEGACY_REPO, cwd_name: LEGACY_REPO });
+    const tmp = `${STATE_FILE}.b1test.tmp`;
+    writeFileSync(tmp, JSON.stringify(raw, null, 2));
+    renameSync(tmp, STATE_FILE);
+  }
+  check("planted an unconsented session in state", (await stateSessions(lead)).some((s) => s.id === idDrop));
   const fixture = JSON.parse(readFileSync(path.join(ROOT, "data", "scenarios", "example-custom.json"), "utf8"));
   const setup = await call("POST", "/api/scenario", { cookie: lead, json: fixture });
   check("leadership sets up the Fernway scenario", setup.status === 200 && setup.body?.scenario === "custom", `status=${setup.status} ${JSON.stringify(setup.body)}`);
+  const kept = await stateSessions(lead);
+  check("setupScenario keeps the session whose harness+repo has consent", kept.some((s) => s.id === idKeep));
+  check("setupScenario drops the session whose harness+repo has no consent", !kept.some((s) => s.id === idDrop || s.repo === LEGACY_REPO));
   const list = await call("GET", "/api/sessions/consent", { cookie: lead });
   check("the consent record survives the custom setup", list.status === 200 && list.body.consents.some((c) => c.harness === "claude-code" && c.repo === REPO), JSON.stringify(list.body));
   const id = `claude-code:${sid("after-setup")}`;
