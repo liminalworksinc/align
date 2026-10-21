@@ -574,6 +574,23 @@ const ACTION_LABEL: Record<string, string> = {
   reject: "declined the proposal",
 };
 
+/** Custom countered banner: quotes what the owner changed (the added words, else the new target), then why. */
+function CounterEdit({ p, by }: { p: Proposal; by: string }) {
+  const last = p.counter_versions.at(-1);
+  if (!last) return null;
+  const prev = p.counter_versions.length > 1 ? p.counter_versions[p.counter_versions.length - 2].proposed_measure_text : p.proposed_measure_text;
+  const added = addedText(prev, last.proposed_measure_text);
+  return (
+    <div className="mt-1 space-y-1 text-[16px] text-amber-950">
+      <p>
+        {by} {added ? "added" : "changed the new target to"}: &ldquo;{added ?? last.proposed_measure_text}&rdquo;
+      </p>
+      {last.rationale && <p>Why: {last.rationale}</p>}
+      <p>The change is highlighted below.</p>
+    </div>
+  );
+}
+
 function customActionLabel(action: string, L: Labels): string | undefined {
   if (action === "acknowledge") return `accepted ${poss(L.team.security)} changes and confirmed what ${L.team.product} will do`;
   if (action === "ratify_untested") return "approved the change to its goal without a sandbox test";
@@ -638,10 +655,14 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <Badge tone="amber">{L.northstar ? "Security asked for changes" : `${own} asked for changes`}</Badge>
-              <p className="mt-1 text-[16px] text-amber-950">
-                {who("security")} edited the new target
-                {p.counter_versions.at(-1)?.rationale ? `: "${p.counter_versions.at(-1)?.rationale}"` : "."} The change is highlighted below.
-              </p>
+              {L.northstar ? (
+                <p className="mt-1 text-[16px] text-amber-950">
+                  {who("security")} edited the new target
+                  {p.counter_versions.at(-1)?.rationale ? `: "${p.counter_versions.at(-1)?.rationale}"` : "."} The change is highlighted below.
+                </p>
+              ) : (
+                <CounterEdit p={p} by={who("security")} />
+              )}
             </div>
             <Button disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/acknowledge`, {})}>
               {busy ? "Working…" : L.northstar ? "Accept Security's changes and confirm what Product will do" : `Accept ${poss(own)} changes and confirm what ${ask} will do`}
