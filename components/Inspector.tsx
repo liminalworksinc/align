@@ -1,10 +1,11 @@
 "use client";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Goal, GoalRelation, Proposal, SimulationRun, StateView, WorkItem } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { Badge, Button, OWNER_LABEL, Section, StateBadge, fmtTime } from "./ui";
 import { reviewConflictLabel, teamName } from "./TeamLens";
 import { accepted, comparablePair, currentGoal, priorVersion } from "./select";
+import { companyMeasureId, conflictMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
 
 const DEFAULT_RELATION = "r-product-security";
 
@@ -410,6 +411,8 @@ function Missing({ what }: { what: string }) {
 
 export function Inspector(props: ViewProps) {
   const { s } = props;
+  const L = labelsFor(s);
+  if (!L.northstar) return <CustomInspector p={props} L={L} />;
   const fallbackGoal = [...s.goals].reverse().find((g) => g.owner_id === "ceo" && !s.goals.some((x) => x.supersedes === g.id));
   const sel =
     props.selection ??
@@ -452,5 +455,204 @@ export function Inspector(props: ViewProps) {
       {body}
       
     </div>
+  );
+}
+
+// ---- Custom scenario: the same panels, named from the operator's setup. No sandbox or agent claims. ----
+
+function CustomInspector({ p, L }: { p: ViewProps; L: Labels }) {
+  const { s } = p;
+  const dep = dependencyId(s);
+  const sel = p.selection ?? (s.relations.some((r) => r.id === dep) ? { kind: "relation" as const, id: dep } : null);
+  let body: ReactNode = <p className="text-[16px] text-zinc-600">Select a goal or a proposal to see its details.</p>;
+  if (sel?.kind === "relation") {
+    const r = s.relations.find((x) => x.id === sel.id);
+    body = r ? <CustomRelation p={p} L={L} r={r} /> : <Missing what="Relation" />;
+  } else if (sel?.kind === "goal") {
+    const g = goalById(s, sel.id);
+    body = g ? <CustomGoal p={p} L={L} g={g} /> : <Missing what="Goal" />;
+  } else if (sel?.kind === "work") {
+    const w = s.work_items.find((x) => x.id === sel.id);
+    body = w ? (
+      <>
+        <h2 className="mb-1 al-lbl">Work item</h2>
+        <p className="mb-4 text-[18px] font-semibold leading-snug text-zinc-900">{w.task}</p>
+        <Section title="Details">
+          <Row label="Owner">{L.person[w.owner]}</Row>
+          <Row label="Team">{L.team[w.owner]}</Row>
+          <Row label="Status">{w.observed_status}</Row>
+        </Section>
+      </>
+    ) : (
+      <Missing what="Work item" />
+    );
+  } else if (sel?.kind === "proposal") {
+    const pr = s.proposals.find((x) => x.id === sel.id);
+    body = pr ? <CustomProposal p={p} L={L} pr={pr} /> : <Missing what="Proposal" />;
+  } else if (sel) {
+    body = <Missing what="Simulation run" />;
+  }
+  return (
+    <div className="text-[16px]">
+      <div className="mb-3 al-lbl">Details</div>
+      {body}
+    </div>
+  );
+}
+
+function teamVersion(L: Labels, g: Goal | undefined, fallback: string) {
+  return g ? `${L.team[g.owner_id]} ${g.version}` : fallback;
+}
+
+function CustomRelation({ p, L, r }: { p: ViewProps; L: Labels; r: GoalRelation }) {
+  const { s } = p;
+  const src = goalById(s, r.source_goal);
+  const tgt = goalById(s, r.target_goal);
+  const isConflict = r.id === dependencyId(s);
+  const owning = L.team.security;
+  const orig = originalSecurity(s);
+  const oldMeasure = orig?.measures.find((m) => m.id === conflictMeasureId(s));
+  const requirement = currentGoal(s, "ceo")?.measures.find((m) => m.id === companyMeasureId(s));
+  const acc = r.status === "ACCEPTED" && isConflict ? accepted(s) : null;
+  const plan = acc ? s.plans.find((x) => x.plan_id === acc.plan_ref.plan_id && x.plan_version === acc.plan_ref.plan_version) : undefined;
+  // Folded by default so the first screen leads with one requirement; the relation title stays visible.
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h2 className="text-[20px] font-bold text-zinc-900">{isConflict ? `${L.team.product} needs ${owning}` : "How these goals connect"}</h2>
+        {r.status === "UNKNOWN" ? <Badge tone="amber">Not agreed yet</Badge> : <StateBadge state={r.status} labels={L} />}
+      </div>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="mb-4 text-[16px] font-semibold text-violet-800 underline underline-offset-2 hover:text-violet-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+      >
+        {open ? "Hide details" : "Show details"}
+      </button>
+      {open && (
+      <>
+      <p className="mb-4 text-[16px] leading-snug text-zinc-800">{r.label}</p>
+      <div className="mb-4 text-[16px] text-zinc-600">
+        {teamVersion(L, src, r.source_goal)} <span className="text-zinc-400">{RELATION_WORD[r.type] ?? r.type.replace("_", " ")}</span>{" "}
+        {teamVersion(L, tgt, r.target_goal)}
+      </div>
+      {isConflict && (
+        <Section title={r.status === "ACCEPTED" ? "What the goals clashed on (now agreed)" : "Where the goals clash"}>
+          <div className="overflow-hidden rounded-lg ring-1 ring-zinc-200">
+            <ConflictRow label={`${poss(owning)} ${r.status === "ACCEPTED" ? "old" : "current"} target${orig ? ` (${orig.version})` : ""}`} tone={r.status === "ACCEPTED" ? "neutral" : "amber"}>
+              {oldMeasure?.text ?? "Unknown"}
+            </ConflictRow>
+            <ConflictRow label="The new company requirement" tone="neutral">
+              {requirement?.text ?? "Unknown"}
+            </ConflictRow>
+            <ConflictRow label="What happens now" tone={r.status === "ACCEPTED" ? "neutral" : "amber"}>
+              {r.status === "ACCEPTED"
+                ? `${owning} approved a new target for its goal.`
+                : `The new company requirement can’t be met unless ${owning} changes its goal.`}
+            </ConflictRow>
+          </div>
+        </Section>
+      )}
+      <Section title="Where this comes from">
+        <div className="flex items-start gap-2 text-[16px] leading-snug text-zinc-700">
+          <StateBadge state="OBSERVED" />
+          <span>{r.provenance}</span>
+        </div>
+      </Section>
+      </>
+      )}
+      {acc && (
+        <Section title="What was decided">
+          <div className="rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200">
+            <Row label="Approved goal">
+              {poss(owning)} goal, {acc.accepted_version}
+            </Row>
+            <Row label="Approved by">
+              {L.person.security} · {fmtTime(acc.ratified_at)}
+            </Row>
+            <Row label="Changes accepted by">
+              {L.person.product} · {fmtTime(acc.acknowledged_at)}
+            </Row>
+            <Row label="Next step">{acc.next_work}</Row>
+            {plan && <Row label="Plan">{plan.title}</Row>}
+            <Row label="Sandbox test">
+              <Badge tone="amber">Not sandbox-tested</Badge>
+            </Row>
+          </div>
+        </Section>
+      )}
+    </>
+  );
+}
+
+function CustomGoal({ p, L, g }: { p: ViewProps; L: Labels; g: Goal }) {
+  const { s, me } = p;
+  const prior = priorVersion(s, g);
+  const isMine = me.actor && (me.actor === "leadership" ? g.owner_id === "ceo" : g.owner_id === me.actor);
+  const isCurrent = currentGoal(s, g.owner_id)?.id === g.id;
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Badge tone="neutral" icon={false}>
+          {L.team[g.owner_id]}
+        </Badge>
+        <Badge tone="neutral" icon={false}>
+          {g.version}
+        </Badge>
+        {g.changed && <Badge tone="amber">Changed today</Badge>}
+        {!isCurrent && <Badge tone="neutral">Replaced by a newer version</Badge>}
+      </div>
+      <p className="mb-4 text-[18px] font-semibold leading-snug text-zinc-900">{g.objective}</p>
+      <Section title="Goal">
+        <Row label="Owner">{L.person[g.owner_id]}</Row>
+        <Row label="Version">
+          {g.version}
+          {prior && <span className="text-zinc-500"> (the earlier version, {prior.version}, is kept for the record)</span>}
+        </Row>
+        <Row label="Who can edit">
+          <Badge tone={isMine ? "violet" : "neutral"} icon={false}>
+            {isMine ? "Your goal · you can edit" : `${poss(L.team[g.owner_id])} goal · view only`}
+          </Badge>
+        </Row>
+      </Section>
+      <Section title="How success is measured">
+        <ul className="space-y-2">
+          {g.measures.map((m) => (
+            <li key={m.id} className="rounded-lg bg-zinc-50 p-2.5 text-[16px] leading-snug ring-1 ring-zinc-200">
+              {m.text}
+            </li>
+          ))}
+        </ul>
+      </Section>
+    </>
+  );
+}
+
+function CustomProposal({ p, L, pr }: { p: ViewProps; L: Labels; pr: Proposal }) {
+  const counter = pr.counter_versions.at(-1);
+  const plan = p.s.plans.find((x) => x.plan_id === pr.plan_ref.plan_id && x.plan_version === pr.plan_ref.plan_version);
+  return (
+    <>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h2 className="text-[18px] font-bold text-zinc-900">Proposal</h2>
+        <StateBadge state={pr.state} labels={L} />
+        <Badge tone="amber">Not sandbox-tested</Badge>
+      </div>
+      <p className="mb-4 text-[16px] text-zinc-600">
+        {L.team[pr.proposing_owner === "leadership" ? "ceo" : pr.proposing_owner]} → {L.team[pr.recipient_owner === "leadership" ? "ceo" : pr.recipient_owner]}
+      </p>
+      <Section title="What would change">
+        <Row label="Goal">
+          {L.team.security} {pr.target_goal_version}
+        </Row>
+        <Row label="Proposed new target">{pr.proposed_measure_text}</Row>
+        {counter && (
+          <Row label={`Latest changes from ${L.team[counter.by === "leadership" ? "ceo" : counter.by]} (${counter.version})`}>{counter.proposed_measure_text}</Row>
+        )}
+        {plan && <Row label="Plan">{plan.title}</Row>}
+      </Section>
+    </>
   );
 }

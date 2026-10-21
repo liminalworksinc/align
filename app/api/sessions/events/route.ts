@@ -152,7 +152,7 @@ export async function POST(req: Request) {
     const filePath = clean(ev.file_path);
     const id = `${harness}:${sessionId}`;
 
-    await mutate((s) => {
+    const scenario = await mutate((s) => {
       const at = now();
       let sess = s.sessions.find((x) => x.id === id);
       if (!sess) {
@@ -198,9 +198,10 @@ export async function POST(req: Request) {
         if (command) texts.push(command);
         sess.origin = originFor(texts, sess.branch);
       }
+      return { scenario: s.scenario };
     });
 
-    scheduleMapping(id);
+    scheduleMapping(id, scenario);
     return { ok: true, id };
   });
 }

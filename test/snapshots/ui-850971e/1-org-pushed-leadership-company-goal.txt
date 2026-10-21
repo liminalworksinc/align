@@ -1,0 +1,77 @@
+A
+Align
+by Liminal
+◆
+Company goal
+Set and send
+◎
+Goals
+How they connect
+⌁
+Work
+Where AI agent work goes
+▤
+Evidence
+Decisions and proof
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+Northstar Security · Q4 2026
+●
+Company goal v2 sent <TIME>
+CL
+CEO / Leadership
+Leadership · Owner
+Sign out
+Company goal
+
+Approved by leadership and sent to every team. Each team's goals build on it, and AI coding sessions are linked to it.
+
+CURRENT GOAL · V2
+●
+Approved <TIME>
+
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+
+Product says the beta is ready to launch
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+◆
+New
+Unrelated tickets and private notes left untouched
+◆
+New
+
+Nothing to approve: company goal v2 was already sent at <TIME>. To run the decisions again, open Align with ?ops and click Start the demo over, or run scripts/run-of-show.sh reset.
+
+LAST SENT TO TEAMS
+●
+Sent
+Company goal v2 · sent by CEO / Leadership · <TIME>
+Sent to the Product Director and Alex (Security Lead). AI coding sessions are being re-checked against the new goals.
+See where AI agent work is going
+See how the goals connect
+DETAILS
+Product needs Security
+▲
+Unknown
+
+The beta launch needs Security to handle beta issues first
+
+Product Director v3 depends on Alex / Security Lead v1
+WHERE THE GOALS CLASH
+SECURITY'S CURRENT TARGET (V1)
+Close as many tickets as possible each day, oldest first
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+CRITICAL SECURITY TICKET (OFF-LIMITS)
+The critical security ticket (#1) and its private notes must not be touched.
+Security's rule: Critical security tickets keep getting the same careful handling
+WHAT HAPPENS NOW
+Beta customers' issues wait in line like any other ticket. The CEO's new requirement can't be met unless Security changes its target.
+WHERE THIS COMES FROM
+●
+Confirmed
+Found when the CEO sent the updated company goal to every team. Security's current target doesn't mention the beta.
+Review the conflict with Security

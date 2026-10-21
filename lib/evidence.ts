@@ -89,6 +89,7 @@ function toRun(ev: Json, file: string, fileSha: string, index: number | null, s:
 
 /** Ingest new Align evidence files. Idempotent: keyed by file sha256 (plus run index for batches). */
 export async function ingestEvidence(s: AppState): Promise<number> {
+  if (s.scenario === "custom") return 0; // Northstar sandbox runs never belong to a custom scenario; every poll would re-add them
   if (!existsSync(EVIDENCE_DIR)) return 0;
   const files = (await fs.readdir(EVIDENCE_DIR)).filter((f) => f.endsWith(".json")).sort();
   let added = 0;

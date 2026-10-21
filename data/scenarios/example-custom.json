@@ -1,0 +1,35 @@
+{
+  "confirm": "replace",
+  "company": "Fernway",
+  "timeframe": "This quarter",
+  "leadership": { "team": "Leadership", "lead": "Head of Operations" },
+  "company_goal": {
+    "objective": "Pass the SOC 2 readiness review by quarter end, to unblock an enterprise deal.",
+    "measures": ["The readiness review shows 90 days of access-log retention"]
+  },
+  "company_measure": 0,
+  "asking": {
+    "team": "Product",
+    "lead": "Head of Product",
+    "objective": "Ship the self-serve onboarding redesign.",
+    "measures": ["Self-serve onboarding redesign live for all new accounts"]
+  },
+  "owning": {
+    "team": "Data Platform",
+    "lead": "Data Platform Lead",
+    "objective": "Finish the warehouse migration by the 15th.",
+    "measures": ["Warehouse migration cut over by the 15th"]
+  },
+  "owner_measure": 0,
+  "dependency": "The readiness review needs 90 days of access-log retention, which only Data Platform can build, and it is not on their plan.",
+  "work_items": [
+    { "team": "asking", "task": "Onboarding redesign: new account setup flow", "status": "in progress" },
+    { "team": "asking", "task": "Onboarding schema changes for the new flow", "status": "planned" },
+    { "team": "owning", "task": "Warehouse migration: move reporting tables", "status": "in progress" },
+    { "team": "owning", "task": "Warehouse migration cutover on the 15th", "status": "planned" }
+  ],
+  "plan": {
+    "title": "Access-log retention first",
+    "text": "Data Platform builds 90-day access-log retention first, for two weeks. In return, Product freezes onboarding schema changes until the migration lands. The migration cutover date stays fixed."
+  }
+}

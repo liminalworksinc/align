@@ -3,6 +3,8 @@ import { HttpError, id, now, sha256 } from "./store";
 import type { Session } from "./auth";
 import path from "node:path";
 import { readTrace } from "./evidence";
+import { profileFor } from "./scenario-profile";
+import { slotOf } from "./labels";
 
 /** Executable identity of a plan: its parameters with keys and list order normalized. */
 function paramsHash(p: PlanParams): string {
@@ -80,11 +82,14 @@ export function createProposal(
   who: Session,
   body: { proposed_measure_text?: string; rationale?: string; reciprocal_commitment?: string; plan_id?: string; plan_version?: number; simulation_refs?: string[] },
 ) {
-  if (who.actor !== "product") forbid("Only the Product Director can propose a change to another team’s goal");
-  if (s.proposals.some((p) => !["RATIFIED", "REJECTED"].includes(p.state))) conflict("There’s already an open proposal. Finish or decline it first.");
+  const prof = profileFor(s);
+  if (who.actor !== "product") forbid(prof.messages.proposeWrongActor);
+  if (s.proposals.some((p) => !["RATIFIED", "REJECTED"].includes(p.state))) conflict(prof.messages.openProposalExists);
   const target = currentGoal(s, "security");
-  const plan = s.plans.find((p) => p.plan_id === body.plan_id && p.plan_version === Number(body.plan_version));
-  if (!plan) throw new HttpError(400, "Add a plan that has been tested before sending");
+  const planId = body.plan_id ?? prof.defaultPlan?.plan_id;
+  const planVersion = body.plan_version ?? prof.defaultPlan?.plan_version;
+  const plan = s.plans.find((p) => p.plan_id === planId && p.plan_version === Number(planVersion));
+  if (!plan) throw new HttpError(400, prof.messages.planMissing);
   const simRefs = (body.simulation_refs ?? []).filter((r) => s.simulations.some((x) => x.id === r));
   const plan_ref = { plan_id: plan.plan_id, plan_version: plan.plan_version, plan_hash: plan.hash };
   const p: Proposal = {
@@ -98,13 +103,13 @@ export function createProposal(
     reciprocal_commitment: String(body.reciprocal_commitment || "").trim(),
     plan_ref,
     simulation_refs: simRefs,
-    source_refs: ["g-ceo-v2#KR2", `${target.id}#S-M1`, s.brief.alike_ref ? `alike:${s.brief.alike_ref.decision_id}` : "alike:unavailable"],
+    source_refs: prof.sourceRefs(s, target),
     counter_versions: [],
     state: "PENDING_SECURITY",
     test_status: testStatusFor(s, plan_ref, simRefs),
     created_at: now(),
   };
-  if (!p.proposed_measure_text || !p.reciprocal_commitment) throw new HttpError(400, "A proposal needs the new target and what Product will do in return");
+  if (!p.proposed_measure_text || !p.reciprocal_commitment) throw new HttpError(400, prof.messages.proposalIncomplete);
   s.proposals.push(p);
   audit(s, who, "propose", p.id);
   touch(s, who, "propose");
@@ -124,7 +129,8 @@ export function counterProposal(
   body: { proposed_measure_text?: string; rationale?: string; changes_plan?: boolean; plan_params?: PlanParams },
 ) {
   const p = openProposal(s, pid);
-  if (who.actor !== p.recipient_owner) forbid("Only Security can ask for changes to a proposal for Security’s goal");
+  const prof = profileFor(s);
+  if (who.actor !== p.recipient_owner) forbid(prof.messages.counterWrongActor);
   if (!["PENDING_SECURITY", "ACKNOWLEDGED_BY_PRODUCT"].includes(p.state)) conflict("This proposal can’t be changed right now");
   const text = String(body.proposed_measure_text || "").trim();
   if (!text) throw new HttpError(400, "Write the changes you’re asking for");
@@ -135,7 +141,7 @@ export function counterProposal(
   const paramsChanged = !!body.plan_params && (!tested || paramsHash(body.plan_params) !== paramsHash(tested.params));
   const changesPlan = body.changes_plan === true || paramsChanged;
   p.counter_versions.push({
-    version: `v2.${n}`,
+    version: `${prof.nextVersion(s.goals.find((g) => g.id === p.target_goal_id) ?? currentGoal(s, "security"))}.${n}`,
     by: "security",
     at: now(),
     proposed_measure_text: text,
@@ -143,7 +149,8 @@ export function counterProposal(
     changes_plan: changesPlan,
     ...(body.plan_params ? { plan_params: body.plan_params } : {}),
   });
-  if (changesPlan) p.test_status = "STALE"; // tested report no longer matches the executable plan
+  // Tested report no longer matches the executable plan. A custom plan that was never tested stays UNTESTED.
+  if (changesPlan && !(prof.planChangeKeepsUntested && p.test_status === "UNTESTED")) p.test_status = "STALE";
   p.state = "COUNTERED";
   p.product_ack_at = undefined;
   audit(s, who, "counter", p.id);
@@ -153,8 +160,9 @@ export function counterProposal(
 
 export function acknowledgeProposal(s: AppState, who: Session, pid: string) {
   const p = openProposal(s, pid);
-  if (who.actor !== p.proposing_owner) forbid("Only the Product Director can accept Security’s changes");
-  if (p.state !== "COUNTERED") conflict("There are no changes from Security to accept");
+  const prof = profileFor(s);
+  if (who.actor !== p.proposing_owner) forbid(prof.messages.ackWrongActor);
+  if (p.state !== "COUNTERED") conflict(prof.messages.ackNothingToAccept);
   p.state = "ACKNOWLEDGED_BY_PRODUCT";
   p.product_ack_at = now();
   audit(s, who, "acknowledge", p.id);
@@ -166,26 +174,26 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
   const p = openProposal(s, pid);
   const target = s.goals.find((g) => g.id === p.target_goal_id);
   if (!target) throw new HttpError(404, "The goal this proposal changes couldn’t be found");
-  if (who.actor !== target.owner_id) forbid("Only Security can approve changes to Security’s goal");
+  const prof = profileFor(s);
+  if (who.actor !== target.owner_id) forbid(prof.messages.ratifyWrongActor);
   if (!["PENDING_SECURITY", "ACKNOWLEDGED_BY_PRODUCT"].includes(p.state))
-    conflict(p.state === "COUNTERED" ? "Product needs to accept your changes before you can approve" : "This proposal can’t be approved right now");
+    conflict(p.state === "COUNTERED" ? prof.messages.ratifyNeedsAck : "This proposal can’t be approved right now");
+  // Custom: no plan has a sandbox test, so every approval must say so explicitly.
+  if (prof.strictUntestedMessage !== null && p.test_status !== "TESTED" && body.accept_untested !== true) conflict(prof.strictUntestedMessage);
   // Stale evidence can't silently become an approved, "tested" plan. The owner must rerun or knowingly accept it untested.
   if (p.test_status === "STALE" && body.accept_untested !== true)
     conflict("The test no longer matches this plan. Rerun it, or approve it explicitly as untested.");
-  const approvedUntested = p.test_status === "STALE";
-  if (approvedUntested) p.test_status = "UNTESTED";
+  const approvedUntested = prof.strictUntestedMessage !== null ? p.test_status !== "TESTED" : p.test_status === "STALE";
+  if (p.test_status === "STALE" && approvedUntested) p.test_status = "UNTESTED";
   const latest = p.counter_versions.at(-1);
   const finalText = latest?.proposed_measure_text ?? p.proposed_measure_text;
-  const version = latest?.version ?? "v2";
+  const version = latest?.version ?? prof.nextVersion(target);
+  const swap = prof.measureSwap(s, target, finalText);
   const newGoal = {
     ...target,
-    id: `g-security-${version.replace(".", "_")}`,
+    id: prof.goalId(version),
     version,
-    measures: [
-      ...target.measures.filter((m) => m.id !== "S-M1"),
-      { id: "S-M3", text: finalText, verifiable_by: "sparta" as const, inherited_from: "KR2" },
-      { id: "S-M1", text: "Close as many tickets as possible each day, after beta issues", verifiable_by: "none" as const },
-    ],
+    measures: swap.measures,
     approved_at: now(),
     approved_by: "security" as const,
     supersedes: target.id,
@@ -193,24 +201,22 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
   };
   s.goals.push(newGoal);
   p.state = "RATIFIED";
-  const rel = s.relations.find((r) => r.id === "r-product-security");
-  if (rel) {
-    rel.status = "ACCEPTED";
-    rel.target_goal = newGoal.id;
-    rel.label = "Agreed: Security handles beta customers’ issues first";
-    rel.provenance = `Agreed through Product’s proposal; Security approved goal ${version}`;
+  // Every relation into the old goal version follows the approved one; the dependency itself becomes agreed.
+  for (const rel of s.relations) {
+    if (rel.id === prof.dependencyId) {
+      const agreed = prof.dependencyAgreed(version);
+      rel.status = "ACCEPTED";
+      rel.target_goal = newGoal.id;
+      rel.label = agreed.label;
+      rel.provenance = agreed.provenance;
+    } else if (rel.target_goal === target.id) rel.target_goal = newGoal.id;
   }
-  const rel2 = s.relations.find((r) => r.id === "r-ceo-security");
-  if (rel2) rel2.target_goal = newGoal.id;
+  // Work items whose team's goal changed (read before retargeting).
+  const affected = s.work_items.filter((w) => w.goal_id === target.id).map((w) => w.id);
+  const askingGoal = currentGoal(s, slotOf(p.proposing_owner));
+  const asking = s.work_items.filter((w) => w.goal_id === askingGoal.id).map((w) => w.id);
   for (const w of s.work_items) if (w.goal_id === target.id) w.goal_id = newGoal.id;
-  const beta = s.work_items.find((w) => w.id === "w-s3");
-  if (beta) {
-    beta.priority_rank = 0;
-    beta.observed_status = `next up, approved in goal ${version}`;
-    beta.task = "Handle beta customers’ issues first, using the tested new plan";
-  }
-  const polish = s.work_items.find((w) => w.id === "w-p3");
-  if (polish) polish.observed_status = "deferred (Product commitment)";
+  prof.updateWorkItems(s, version);
   s.acceptances.push({
     proposal_id: p.id,
     accepted_version: version,
@@ -218,13 +224,18 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
     ratified_by: "security",
     acknowledged_by: "product",
     rationale: String(body.rationale || "").trim(),
-    next_work: "Security’s AI agent follows the new plan (beta issues first); Product tags beta issues as they come in and publishes what’s in the beta",
+    next_work: prof.nextWork(version),
     plan_ref: p.plan_ref,
     test_status: p.test_status,
     evidence_version: p.simulation_refs,
     ratified_at: now(),
     acknowledged_at: p.product_ack_at ?? p.created_at, // Product authored the commitment when no counter required re-acknowledgment
     acknowledged_via: p.product_ack_at ? "explicit" : "authored_in_proposal",
+    // Custom only, appended last so Northstar acceptances keep their keys and order.
+    ...(swap.replaced_measure_id ? { replaced_measure_id: swap.replaced_measure_id } : {}),
+    ...(swap.new_measure_id ? { new_measure_id: swap.new_measure_id } : {}),
+    ...(prof.custom ? { owning_work_item_ids: affected } : {}),
+    ...(prof.custom ? { asking_work_item_ids: asking } : {}),
   });
   audit(s, who, approvedUntested ? "ratify_untested" : "ratify", p.id);
   touch(s, who, "ratify");
@@ -233,7 +244,7 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
 
 export function rejectProposal(s: AppState, who: Session, pid: string) {
   const p = openProposal(s, pid);
-  if (who.actor !== p.recipient_owner) forbid("Only Security can decline a proposal for Security’s goal");
+  if (who.actor !== p.recipient_owner) forbid(profileFor(s).messages.rejectWrongActor);
   if (["RATIFIED", "REJECTED"].includes(p.state)) conflict("This proposal has already been decided");
   p.state = "REJECTED";
   audit(s, who, "reject", p.id);

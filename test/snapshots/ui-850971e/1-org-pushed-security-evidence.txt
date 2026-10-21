@@ -1,0 +1,207 @@
+A
+Align
+by Liminal
+◆
+Next decision
+What needs you
+◎
+Goals
+How they connect
+✉
+Proposals
+Changes in progress
+▤
+Evidence
+Decisions and proof
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+Northstar Security · Q4 2026
+▲ New company goal from the CEO · Product and Security haven’t agreed yet
+AS
+Alex / Security Lead
+Security · Owner
+Sign out
+◎
+COMPANY GOAL
+Q4 2026
+▲
+Changed today
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+Product and Security: not agreed yet
+YOUR GOAL · V1
+Handle customer and security issues quickly and correctly.
+Evidence
+
+What was decided, the practice test runs, who did what, and how long it took to agree. These results aren't signed, but anyone can re-run them with the command in the README.
+
+AUTHORITY → AGENT BEHAVIOR → RESULT
+01
+BEFORE
+Security v1 · oldest tickets first
+1/9
+checks passed in the practice test
+02
+CEO CHANGES THE GOAL
+Beta customers' issues first
+Sent to every team at <TIME>
+No connected AI agent sessions
+03
+HUMAN DECISION
+Security decides
+▲
+Unknown
+Only Security can approve a change to its goal.
+04
+AFTER
+Tested alternative: beta issues first
+9/9
+tested result · waits for Security's approval
+WHAT WAS DECIDED
+
+No proposal yet.
+
+The steps of the decision show up here once Product adds test results in “Which plan follows the new priority?” and sends a proposal to Security.
+
+Security's current goal (v1): Handle customer and security issues quickly and correctly.
+
+PRACTICE TEST RUNS (SPARTA SANDBOX)
+Current plan: 0 of 13 passed · New plan: 14 of 14 passed · 27 runs in total · newest first
+PLAN	TEST TYPE	RESULT	CHECKS PASSED	TIME
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	1 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	1 of 9	<TIME>
+▸Current plan: oldest tickets first	Normal test	
+✕
+Failed	2 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	Normal test	
+✓
+Passed	9 of 9	<TIME>
+▸New plan: beta issues first	
+▲
+Outage test	
+✓
+Passed	9 of 9	<TIME>
+WHO DID WHAT, WHEN
+Names come from who was signed in, so a request can't claim to be someone else.
+TIME	WHO	WHAT THEY DID
+<TIME>	Alex / Security Lead	opened Evidence
+<TIME>	Product Director	opened Evidence
+<TIME>	Product Director	saw the CEO's change
+<TIME>	CEO / Leadership	approved the company goal and sent it to every team
+<TIME>	CEO / Leadership	reset the demo
+For engineers
+TIME TO AGREEMENT
+Started
+<TIME>
+Ended
+Still running
+Not counted
+27 practice test runs done beforehand (<DUR> <DUR> in total)
+For engineers
+STEPS (3)
+<TIME>
+Product Director
+saw the CEO's change
+<TIME>
+Product Director
+opened Evidence
+<TIME>
+Alex / Security Lead
+opened Evidence
+DETAILS
+Product needs Security
+▲
+Unknown
+
+The beta launch needs Security to handle beta issues first
+
+Product Director v3 depends on Alex / Security Lead v1
+WHERE THE GOALS CLASH
+SECURITY'S CURRENT TARGET (V1)
+Close as many tickets as possible each day, oldest first
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+CRITICAL SECURITY TICKET (OFF-LIMITS)
+The critical security ticket (#1) and its private notes must not be touched.
+Security's rule: Critical security tickets keep getting the same careful handling
+WHAT HAPPENS NOW
+Beta customers' issues wait in line like any other ticket. The CEO's new requirement can't be met unless Security changes its target.
+WHERE THIS COMES FROM
+●
+Confirmed
+Found when the CEO sent the updated company goal to every team. Security's current target doesn't mention the beta.
+Review the CEO's new requirement

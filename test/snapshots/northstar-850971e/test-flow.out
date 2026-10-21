@@ -1,0 +1,52 @@
+
+PASS  setup: product signs in (200, cookie set)
+PASS  setup: security signs in (200, cookie set)
+PASS  setup: POST /api/reset starts clean
+PASS  Org push by Product -> 403
+PASS  setup: leadership signs in
+PASS  Org push by Leadership creates company goal v2
+PASS  Push keeps v1 and v2 supersedes it
+PASS  Push creates the Product→Security dependency as UNKNOWN
+PASS  G6 wrong passcode -> 401
+PASS  G6 unauthenticated mutation (POST /api/proposals, no cookie) -> 401
+PASS  G2 product's private_constraints are all owner=product
+PASS  G2 security's private_constraints are all owner=security
+PASS  G8 timer starts on ceo_change_viewed (started_at set)
+PASS  G8 unknown timer action -> 400
+PASS  G6 Security cannot create a proposal -> 403
+PASS  Product creates proposal -> 200, state PENDING_SECURITY
+PASS  Proposal test_status matches evidence (26 sim refs, expected TESTED)
+PASS  Second open proposal -> 409
+PASS  G6 Product cannot accept -> 403
+PASS  G6 Product cannot counter -> 403
+PASS  G6 Product cannot reject -> 403
+PASS  Security counter (changes_plan=false) -> COUNTERED
+PASS  Counter without plan change keeps test_status unchanged
+PASS  G6 Security cannot acknowledge -> 403
+PASS  Security cannot ratify while COUNTERED -> 409
+PASS  Product acknowledges -> ACKNOWLEDGED_BY_PRODUCT
+PASS  G4/G7 Security counter with changed plan params -> COUNTERED
+PASS  G4/G7 changed plan params mark STALE even when declared wording-only
+PASS  Product acknowledges again -> ACKNOWLEDGED_BY_PRODUCT
+PASS  G4/G7 ratifying a STALE proposal without accept_untested -> 409
+PASS  Security ratifies explicitly as untested -> RATIFIED
+PASS  G2/G4 new security goal version v2.2 supersedes g-security-v1
+PASS  Prior version g-security-v1 still present (not overwritten)
+PASS  Relation r-product-security status ACCEPTED
+PASS  Acceptance test_status === UNTESTED (no false green)
+PASS  Audit records the untested ratification
+PASS  G6 reload: both sessions see identical acceptances
+PASS  G6 reload: both sessions see the same current security goal version
+PASS  G8 timer not ended after only Product saw accepted version
+PASS  G8 timer ends after both sessions saw accepted version
+PASS  G8 touchpoints include propose by product
+PASS  G8 touchpoints include counter by security
+PASS  G8 touchpoints include acknowledge by product
+PASS  G8 touchpoints include ratify by security
+FAIL  Audit log: propose/acknowledge by product, counter/ratify by security
+      wrong=[] seen=propose,counter,acknowledge
+PASS  G7 evidence ingestion idempotent (second call added 0, same count)
+PASS  Evidence for unknown id -> 404
+PASS  teardown: POST /api/reset leaves demo state clean
+
+47 passed, 1 failed

@@ -2,14 +2,16 @@
 //   scheduleMapping(sessionId)  -- debounced, fire-and-forget; maps one session against the current registry
 //   remapAll()                  -- re-map every session (called when registry_version changes)
 //   ensureRegistryFresh()       -- recompute registry_version; remap everything when it changed
+// Custom scenarios are never mapped: the goal registry is Northstar's, so all three return early for them.
 // None of these throw into callers. Results are persisted as SessionMapping rows via mutate().
 // Only Jev (typesafe-ai/jev via AI Gateway) is ever called. On failure the mapping is MAPPER_UNAVAILABLE; no other model is substituted.
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { scenarioOf } from "./labels";
 import { activeRegistry, registryVersion, refreshRegistry } from "./registry";
 import { mutate, now, readState } from "./store";
-import type { AgentSession, RegistryEntry, SessionMapping } from "./types";
+import type { AgentSession, AppState, RegistryEntry, SessionMapping } from "./types";
 
 const ENDPOINT = "https://ai-gateway.vercel.sh/typesafe/v1/systemone";
 const MODEL = "typesafe-ai/jev";
@@ -169,6 +171,7 @@ async function callJev(state: string, registry: RegistryEntry[]): Promise<JevRes
 
 export async function mapSession(sessionId: string): Promise<void> {
   const st = await readState();
+  if (scenarioOf(st) === "custom") return;
   const session = st.sessions.find((x) => x.id === sessionId);
   if (!session) return;
   const registry = activeRegistry(st);
@@ -249,7 +252,9 @@ function enqueue(sessionId: string) {
     });
 }
 
-export function scheduleMapping(sessionId: string): void {
+/** `s` is the state the caller just read or wrote; a custom scenario schedules nothing. */
+export function scheduleMapping(sessionId: string, s: Pick<AppState, "scenario">): void {
+  if (scenarioOf(s) === "custom") return;
   try {
     const t = timers.get(sessionId);
     if (t) clearTimeout(t);
@@ -268,7 +273,7 @@ export function scheduleMapping(sessionId: string): void {
 export function remapAll(): void {
   readState()
     .then((s) => {
-      for (const x of s.sessions) scheduleMapping(x.id);
+      for (const x of s.sessions) scheduleMapping(x.id, s);
     })
     .catch((e) => console.error("[mapper] remapAll failed", e));
 }
@@ -277,6 +282,7 @@ export function remapAll(): void {
 export async function ensureRegistryFresh(): Promise<void> {
   try {
     const snap = await readState();
+    if (scenarioOf(snap) === "custom") return;
     let changed = false;
     if (registryVersion(snap) !== snap.registry_version) {
       changed = await mutate((s) => refreshRegistry(s));
@@ -288,7 +294,7 @@ export async function ensureRegistryFresh(): Promise<void> {
     const current = snap.registry_version;
     for (const x of snap.sessions) {
       const m = snap.mappings.find((mm) => mm.session_id === x.id);
-      if ((!m || m.registry_version !== current) && !timers.has(x.id) && !queued.has(x.id) && !running.has(x.id)) scheduleMapping(x.id);
+      if ((!m || m.registry_version !== current) && !timers.has(x.id) && !queued.has(x.id) && !running.has(x.id)) scheduleMapping(x.id, snap);
     }
   } catch (e) {
     console.error("[mapper] registry refresh failed", e);

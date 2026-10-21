@@ -75,8 +75,10 @@ export interface Plan {
   plan_version: number;
   title: string;
   params: PlanParams;
-  hash: string; // sha256 of the plan file agent/plans/<plan_id>@<version>.md (matches the agent trace plan_sha256)
-  goal_text_ref: string; // agent/plans/<plan_id>@<version>.md
+  hash: string; // sha256 of the plan file agent/plans/<plan_id>@<version>.md (matches the agent trace plan_sha256), or of the inline text
+  goal_text_ref: string; // agent/plans/<plan_id>@<version>.md, or inline:<plan_id>@<version>
+  text?: string; // inline plan text (custom scenarios); hash is sha256 of the normalized text
+  source?: "file" | "inline";
 }
 
 export interface CheckResult {
@@ -155,6 +157,8 @@ export interface CounterVersion {
   plan_params?: PlanParams; // only when the counter changes the executable plan
   rationale: string;
   changes_plan: boolean; // true when the counter changes test-relevant plan parameters
+  plan_text?: string; // custom scenarios: the counter's revised inline plan text
+  plan_hash?: string;
 }
 
 export type ProposalState =
@@ -198,6 +202,11 @@ export interface Acceptance {
   ratified_at: string;
   acknowledged_at: string;
   acknowledged_via?: "explicit" | "authored_in_proposal"; // explicit = Product's POST /acknowledge; otherwise the commitment was written by Product in its own proposal
+  // Custom scenarios only; absent for Northstar so its state stays byte-identical.
+  replaced_measure_id?: string;
+  new_measure_id?: string;
+  owning_work_item_ids?: string[]; // operator work items whose team's goal changed ("Work still on the old plan")
+  asking_work_item_ids?: string[]; // the asking team's own work items, to check against its new commitment
 }
 
 export interface Touchpoint {
@@ -252,6 +261,31 @@ export interface AppState {
   sessions: AgentSession[];
   mappings: SessionMapping[];
   registry_version: string;
+  // Custom scenarios only. Never written for Northstar and never defaulted, so /api/state stays byte-identical.
+  scenario?: ScenarioKind;
+  teams?: Record<Owner, ScenarioTeam>;
+  scenario_config?: ScenarioConfig;
+}
+
+export type ScenarioKind = "northstar" | "custom";
+
+export interface ScenarioTeam {
+  team: string; // e.g. "Sales"
+  lead: string; // person name shown for the slot
+}
+
+// No private text here: viewFor sends the whole state to every caller.
+export interface ScenarioConfig {
+  created_at: string;
+  created_by: Actor;
+  input_sha256: string;
+  dependency_id: string;
+  owner_measure_id: string;
+  company_measure_id: string;
+  unblocks_work_item_id?: string;
+  deferred_work_item_id?: string;
+  plan_id: string;
+  plan_version: number;
 }
 
 // Session view returned to the browser. Visibility-filtered for the actor.
