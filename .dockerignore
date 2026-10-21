@@ -1,0 +1,16 @@
+.git
+.next
+node_modules
+.env
+.env.*
+.claude
+.worlds
+.worlds-dashboard
+data/state.json
+data/.secret
+data/.pid
+data/*.tmp
+data/workspaces
+data/custom-scenario.json
+*.pem
+coverage
