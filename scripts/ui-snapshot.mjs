@@ -1,0 +1,190 @@
+#!/usr/bin/env node
+// Rendered-UI snapshot: drives a flow over HTTP and, at each stage, signs in each role in its own
+// browser context, visits every nav view and writes <stage>-<role>-<view>.txt (document.body.innerText,
+// clock times / durations / random ids masked) plus a PNG.
+//
+// Usage: node scripts/ui-snapshot.mjs <baseUrl> <outDir> [--flow northstar|custom] [--fixture file.json]
+//                                     [--forbid <regex>]
+// Start the server from an empty data/ (rm -f data/state.json): the Evidence view lists the audit log,
+// which survives /api/reset, so a reused state.json never matches the baseline.
+// Diff two runs with: diff -r -x '*.png' <outA> <outB>
+// Chrome: CHROME_PATH, else /Applications/Google Chrome.app.
+
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import puppeteer from "puppeteer-core";
+
+const args = process.argv.slice(2);
+const opt = (name, dflt) => {
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 ? args.splice(i, 2)[1] : dflt;
+};
+const flow = opt("flow", "northstar");
+const fixture = opt("fixture", null);
+const forbidSrc = opt("forbid", null);
+const [baseArg, out] = args;
+if (!baseArg || !out) {
+  console.error("Usage: node scripts/ui-snapshot.mjs <baseUrl> <outDir> [--flow northstar|custom] [--fixture f] [--forbid re]");
+  process.exit(2);
+}
+const BASE = baseArg.replace(/\/$/, "");
+if (/:3100$/.test(BASE) && process.env.ALIGN_TEST_ALLOW_DEMO !== "1") {
+  console.error("Refusing to run against port 3100 (the demo server).");
+  process.exit(2);
+}
+if (flow === "custom" && !fixture) {
+  console.error("--flow custom needs --fixture <scenario body json>");
+  process.exit(2);
+}
+const forbid = forbidSrc ? new RegExp(forbidSrc, "i") : null;
+const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
+const PASSCODES = {
+  product: process.env.ALIGN_PRODUCT_PASSCODE || "product-demo",
+  security: process.env.ALIGN_SECURITY_PASSCODE || "security-demo",
+  leadership: process.env.ALIGN_LEADERSHIP_PASSCODE || "leadership-demo",
+};
+
+const mask = (t) =>
+  t
+    .replace(/\b\d{1,2}:\d{2}(:\d{2})?\s?(AM|PM|am|pm)?\b/g, "<TIME>")
+    .replace(/\b\d+(\.\d+)?\s?(ms|s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?)\b(\s+ago)?/g, "<DUR>")
+    .replace(/\b\d+m\s?\d+s\b/g, "<DUR>")
+    .replace(/\b(just now|a few seconds ago)\b/gi, "<DUR>")
+    .replace(/\b(prop|push|a|run|sess|s)-[0-9a-f]{6,}\b/g, "$1-<ID>");
+
+const jars = { product: "", security: "", leadership: "" };
+
+async function call(role, method, path, body, { allow = [] } = {}) {
+  const headers = {};
+  if (body !== undefined) headers["content-type"] = "application/json";
+  if (role && jars[role]) headers.cookie = jars[role];
+  const res = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const sc = res.headers.get("set-cookie");
+  if (role && sc) jars[role] = sc.split(";")[0];
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = null;
+  }
+  if (res.status >= 300 && !allow.includes(res.status)) throw new Error(`${method} ${path} -> ${res.status} ${text.slice(0, 300)}`);
+  return { status: res.status, json };
+}
+
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+const violations = [];
+let files = 0;
+
+async function shoot(stage, roles) {
+  mkdirSync(out, { recursive: true });
+  const { hostname } = new URL(BASE);
+  for (const role of roles) {
+    const ctx = await browser.createBrowserContext();
+    const page = await ctx.newPage();
+    await page.setViewport({ width: 1600, height: 1000 });
+    await page.emulateTimezone("America/Los_Angeles");
+    const [name, ...v] = jars[role].split("=");
+    await ctx.setCookie({ name, value: v.join("="), domain: hostname, path: "/" });
+    await page.goto(BASE, { waitUntil: "load" });
+    await page.waitForSelector("nav[aria-label=Main] button");
+    const n = (await page.$$("nav[aria-label=Main] button")).length;
+    for (let i = 0; i < n; i++) {
+      const btn = (await page.$$("nav[aria-label=Main] button"))[i];
+      const label = (await btn.$eval("span.font-semibold", (e) => e.innerText)).replace(/\W+/g, "-").toLowerCase();
+      await btn.click();
+      await new Promise((r) => setTimeout(r, 800));
+      const text = mask(await page.evaluate(() => document.body.innerText));
+      const f = `${out}/${stage}-${role}-${label}`;
+      writeFileSync(`${f}.txt`, text + "\n");
+      await page.screenshot({ path: `${f}.png` });
+      files++;
+      const m = forbid && text.match(forbid);
+      if (m) violations.push(`${stage}-${role}-${label}: "${m[0]}"`);
+    }
+    await ctx.close();
+  }
+}
+
+const ALL = ["product", "security", "leadership"];
+const PS = ["product", "security"];
+
+try {
+  for (const r of ALL) await call(r, "POST", "/api/session", { role: r, passcode: PASSCODES[r] });
+
+  if (flow === "northstar") {
+    await call("leadership", "POST", "/api/reset", { confirm: "reset" });
+    await shoot("0-fresh", ALL);
+    await call("leadership", "POST", "/api/org/push", {});
+    await shoot("1-org-pushed", ALL);
+    const state = (await call("product", "GET", "/api/state")).json;
+    const sims = (await call("product", "GET", "/api/simulations")).json?.simulations ?? [];
+    const simRefs = sims.filter((r) => (r.plan_id === "p-throughput" || r.plan_id === "p-beta") && r.scenario === "normal").map((r) => r.id);
+    const prop = (
+      await call("product", "POST", "/api/proposals", {
+        plan_id: "p-beta",
+        plan_version: 1,
+        simulation_refs: simRefs,
+        proposed_measure_text: "Beta incidents triaged per launch-readiness policy within 24h",
+        rationale: "CEO KR2 makes beta readiness the priority",
+        reciprocal_commitment: "Product tags beta issues obs-beta at intake and publishes beta scope",
+      })
+    ).json;
+    await shoot("2-pending-security", ALL);
+    const params = state.plans.find((x) => x.plan_id === "p-beta" && x.plan_version === 1)?.params;
+    await call("security", "POST", `/api/proposals/${prop.id}/counter`, {
+      proposed_measure_text: "Beta incidents triaged within 24h; P0 within 4h",
+      rationale: "Tighten P0 window",
+      changes_plan: false,
+      plan_params: params,
+    });
+    await shoot("3-countered", PS);
+    await call("product", "POST", `/api/proposals/${prop.id}/acknowledge`, {});
+    await shoot("4-acknowledged", PS);
+    await call("security", "POST", `/api/proposals/${prop.id}/counter`, {
+      proposed_measure_text: "Beta incidents triaged within 24h; P0 within 4h; protected tickets untouched",
+      rationale: "Changes the executable plan's protected set",
+      changes_plan: false,
+      plan_params: { ...params, protected_set: [...(params?.protected_set ?? []), "All P1 incidents"] },
+    });
+    await call("product", "POST", `/api/proposals/${prop.id}/acknowledge`, {});
+    await shoot("5-stale-acknowledged", PS);
+    await call("security", "POST", `/api/proposals/${prop.id}/accept`, { rationale: "Agreed; will rerun", accept_untested: true });
+    await shoot("6-ratified", ALL);
+    await call("leadership", "POST", "/api/reset", { confirm: "reset" });
+  } else if (flow === "custom") {
+    const body = JSON.parse(readFileSync(fixture, "utf8"));
+    await call("leadership", "POST", "/api/scenario", { ...body, confirm: "replace" });
+    await shoot("0-setup", ALL);
+    const prop = (
+      await call("product", "POST", "/api/proposals", {
+        proposed_measure_text: "Requested change to the owning team's measure",
+        rationale: "The company goal changed",
+        reciprocal_commitment: "The asking team commits to its side of the change",
+      })
+    ).json;
+    await shoot("2-pending", ALL);
+    await call("security", "POST", `/api/proposals/${prop.id}/counter`, {
+      proposed_measure_text: "Requested change, with the owning team's revision",
+      rationale: "Owner asks for changes",
+      changes_plan: false,
+    });
+    await shoot("3-countered", PS);
+    await call("product", "POST", `/api/proposals/${prop.id}/acknowledge`, {});
+    await shoot("4-acknowledged", PS);
+    const refused = await call("security", "POST", `/api/proposals/${prop.id}/accept`, { rationale: "Approve" }, { allow: [409] });
+    if (refused.status !== 409) throw new Error(`custom accept without accept_untested returned ${refused.status}, expected 409`);
+    await call("security", "POST", `/api/proposals/${prop.id}/accept`, { rationale: "Approve", accept_untested: true });
+    await shoot("6-ratified", ALL);
+  } else {
+    throw new Error(`Unknown --flow ${flow}`);
+  }
+} finally {
+  await browser.close();
+}
+
+console.log(`${files} views captured to ${out}`);
+if (violations.length) {
+  console.log(`FORBID ${violations.length} violation(s):\n  ${violations.join("\n  ")}`);
+  process.exit(1);
+}
