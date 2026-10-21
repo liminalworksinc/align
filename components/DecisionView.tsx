@@ -303,7 +303,7 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
             <span className="font-semibold">Outcome:</span> not measured yet
           </li>
         </ul>
-        <OldPlanWork s={s} L={L} owningIds={acc.affected_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} revision={newTarget} />
+        <OldPlanWork s={s} L={L} owningIds={acc.affected_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} revision={newTarget} viewer={me.actor} />
         <ProofStrip s={s} />
       </div>
     );
@@ -435,7 +435,23 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
  * Work still on the old plan, always expanded: the owning team's items tied to the goal that changed, then the
  * asking team's own items to check against what it committed to. The approved revision shows once, above both.
  */
-function OldPlanWork({ s, L, owningIds, askingIds, revision }: { s: ViewProps["s"]; L: Labels; owningIds: string[]; askingIds: string[]; revision: string }) {
+function OldPlanWork({
+  s,
+  L,
+  owningIds,
+  askingIds,
+  revision,
+  viewer,
+}: {
+  s: ViewProps["s"];
+  L: Labels;
+  owningIds: string[];
+  askingIds: string[];
+  revision: string;
+  viewer: ViewProps["me"]["actor"];
+}) {
+  // "your" only when the asking team itself is looking; everyone else reads whose commitment it is.
+  const commitment = viewer === "product" ? "check against your new commitment" : `check against ${poss(L.team.product)} new commitment`;
   const find = (ids: string[]) => ids.map((id) => s.work_items.find((w) => w.id === id)).filter((w): w is NonNullable<typeof w> => Boolean(w));
   const owning = find(owningIds);
   const asking = find(askingIds);
@@ -471,7 +487,7 @@ function OldPlanWork({ s, L, owningIds, askingIds, revision }: { s: ViewProps["s
                 {asking.map((w) => (
                   <li key={w.id} className={row}>
                     <span className="text-[17px] font-semibold leading-snug text-zinc-900">{w.task}</span>
-                    <Badge tone="neutral">check against your new commitment</Badge>
+                    <Badge tone="neutral">{commitment}</Badge>
                   </li>
                 ))}
               </ul>
