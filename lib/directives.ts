@@ -1,7 +1,11 @@
 import { acceptedPlan } from "./policy";
+import { labelsFor, scenarioOf, teamOf } from "./labels";
 
 import { now } from "./store";
 import type { AgentSession, AppState, Goal, Owner } from "./types";
+
+/** Who sends a company goal, in words (Northstar: "CEO / Leadership"). */
+const leadership = (s: AppState) => labelsFor(s).person.leadership;
 
 /** An authority change pushed into an agent session as a replan instruction. */
 export interface Directive {
@@ -13,7 +17,6 @@ export interface Directive {
   text: string; // the full instruction Claude receives
 }
 
-const TEAM: Record<Owner, string> = { ceo: "Company", product: "Product", security: "Security" };
 const ACTIVE_WINDOW_MS = 2 * 60 * 60 * 1000;
 const t = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", timeZone: "America/Los_Angeles" });
@@ -48,6 +51,8 @@ function sessionTeams(s: AppState, session: AgentSession): Set<Owner> {
 }
 
 function relevant(s: AppState, session: AgentSession, ev: AuthorityEventRow): boolean {
+  // Custom scenarios wake no agent: their approvals name no runnable plan file, so no directive may go out.
+  if (scenarioOf(s) === "custom") return false;
   if (ev.at < session.started_at) return false; // only changes that happened while this session existed
   // A push directive is written for the Security plan's agents, so only active Security sessions get it.
   if (ev.kind === "push") return Date.now() - Date.parse(session.last_at) < ACTIVE_WINDOW_MS && sessionTeams(s, session).has("security");
@@ -69,20 +74,20 @@ function textFor(s: AppState, session: AgentSession, ev: AuthorityEventRow): Dir
     const diff = measureDiff(prev, ev.goal);
     const m = (s.mappings ?? []).find((x) => x.session_id === session.id);
     const risk = (m?.conflict?.probability ?? 0) >= 0.4 || /throughput|oldest-first|p-throughput/i.test(plan.plan);
-    const title = `Company goal ${ev.goal.version} pushed by CEO / Leadership at ${t(ev.at)}`;
+    const title = `${teamOf(s, "ceo")} goal ${ev.goal.version} pushed by ${leadership(s)} at ${t(ev.at)}`;
     const text = [
       `ALIGN · AUTHORITY CHANGE — ${title}.`,
       `Objective: ${ev.goal.objective}`,
       ...diff.map((d) => `• ${d}`),
-      `Your team's authorized plan is still ${plan.plan} under Security goal ${plan.goal_version}${risk ? ", which may conflict with the new KR3 (protected tickets unchanged)" : ""}.`,
-      `Action: start your reply with the line "Align → ${title}". Add a task to your built-in task list (Claude Code task tools, not Alike): "Hold: current plan vs company goal ${ev.goal.version} — awaiting Security goal decision". Do not switch plans on your own; summarize the risk in two sentences and wait for the Security goal owner to ratify a change.`,
+      `Your team's authorized plan is still ${plan.plan} under ${teamOf(s, "security")} goal ${plan.goal_version}${risk ? ", which may conflict with the new KR3 (protected tickets unchanged)" : ""}.`,
+      `Action: start your reply with the line "Align → ${title}". Add a task to your built-in task list (Claude Code task tools, not Alike): "Hold: current plan vs company goal ${ev.goal.version} — awaiting ${teamOf(s, "security")} goal decision". Do not switch plans on your own; summarize the risk in two sentences and wait for the ${teamOf(s, "security")} goal owner to ratify a change.`,
       footer,
     ].join("\n");
-    return { event_id: ev.event_id, kind: "push", at: ev.at, authority: "CEO / Leadership", title, text };
+    return { event_id: ev.event_id, kind: "push", at: ev.at, authority: leadership(s), title, text };
   }
   const acc = s.acceptances.find((a) => a.proposal_id === ev.proposal_id);
   const prop = s.proposals.find((p) => p.id === ev.proposal_id);
-  const team = ev.goal ? TEAM[ev.goal.owner_id] : "Team";
+  const team = ev.goal ? teamOf(s, ev.goal.owner_id) : "Team";
   const owner = ev.goal?.owner_name ?? "the goal owner";
   const runs = (prop?.simulation_refs ?? []).map((id) => s.simulations.find((r) => r.id === id)).filter(Boolean);
   const evidence = runs.filter((r) => r!.scenario === "normal").map((r) => `${r!.plan_id}@${r!.plan_version} ${r!.verdict}`).join(" vs ");
@@ -134,7 +139,7 @@ export function markActed(session: AgentSession) {
 export function describeEvent(s: AppState, eventId: string): string {
   const ev = authorityEvents(s).find((e) => e.event_id === eventId);
   if (!ev?.goal) return eventId;
-  if (ev.kind === "push") return `Company goal ${ev.goal.version} pushed by CEO / Leadership`;
+  if (ev.kind === "push") return `${teamOf(s, "ceo")} goal ${ev.goal.version} pushed by ${leadership(s)}`;
   const acc = s.acceptances.find((a) => a.proposal_id === ev.proposal_id);
-  return `${TEAM[ev.goal.owner_id]} goal ${acc?.accepted_version ?? ev.goal.version} ratified by ${ev.goal.owner_name}`;
+  return `${teamOf(s, ev.goal.owner_id)} goal ${acc?.accepted_version ?? ev.goal.version} ratified by ${ev.goal.owner_name}`;
 }
