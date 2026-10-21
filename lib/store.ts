@@ -134,9 +134,10 @@ export async function mutateWs<T>(ws: CustomWsId, fn: (s: AppState) => T | Promi
   });
 }
 
-/** Replace a custom workspace's whole state (Restart). Built by lib/scenario.ts; the store never imports it. */
-export async function replaceWorkspaceState(ws: CustomWsId, next: AppState) {
+/** Replace a custom workspace's whole state (Restart) under its lock. The caller builds it; the store never imports scenario.ts. */
+export async function replaceWorkspaceState(ws: CustomWsId, build: (current: AppState) => AppState) {
   return mutateWs(ws, (s) => {
+    const next = build(s);
     for (const k of Object.keys(s)) delete (s as unknown as Record<string, unknown>)[k];
     Object.assign(s, next);
   });

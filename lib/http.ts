@@ -44,3 +44,65 @@ export async function body<T = Record<string, unknown>>(req: Request): Promise<T
     return {} as T;
   }
 }
+
+const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function rejectReserved(v: unknown, at: string): void {
+  if (Array.isArray(v)) return v.forEach((x, i) => rejectReserved(x, `${at}[${i}]`));
+  if (v && typeof v === "object")
+    for (const k of Object.keys(v)) {
+      if (RESERVED_KEYS.has(k)) throw new HttpError(400, `“${k}” is not allowed as a field name (at ${at})`);
+      rejectReserved((v as Record<string, unknown>)[k], `${at}.${k}`);
+    }
+}
+
+/**
+ * Read at most `max` bytes (413 beyond that) and parse JSON (400 if invalid, or if any key is __proto__,
+ * constructor or prototype). An empty body is {}. Used by the workspace routes; body() is unchanged.
+ */
+export async function cappedJson<T = Record<string, unknown>>(req: Request, max = 64 * 1024, tooLarge = "This request is too large"): Promise<T> {
+  if (Number(req.headers.get("content-length") || 0) > max) throw new HttpError(413, tooLarge);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  if (req.body) {
+    const reader = req.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) {
+        await reader.cancel();
+        throw new HttpError(413, tooLarge);
+      }
+      chunks.push(value);
+    }
+  }
+  const text = Buffer.concat(chunks).toString("utf8").trim();
+  if (!text) return {} as T;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new HttpError(400, "Send valid JSON");
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, "Send a JSON object");
+  rejectReserved(raw, "body");
+  return raw as T;
+}
+
+/** Per-field caps for custom workspace bodies: every string 300 characters, plan text 4000. */
+export function capFields(v: unknown, at = "body"): void {
+  if (typeof v === "string") {
+    const max = /(^|\.)(text|plan_text)$/.test(at) ? 4000 : 300;
+    if (v.length > max) throw new HttpError(400, `${at.replace(/^body\./, "")} is too long (max ${max} characters)`);
+  } else if (Array.isArray(v)) v.forEach((x, i) => capFields(x, `${at}[${i}]`));
+  else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) capFields(x, `${at}.${k}`);
+}
+
+/** Northstar bodies parse exactly as before (body()); custom workspace bodies are capped at 64 KB and per field. */
+export async function bodyFor<T = Record<string, unknown>>(req: Request, ws: string): Promise<T> {
+  if (ws === "northstar") return body<T>(req);
+  const b = await cappedJson<T>(req);
+  capFields(b);
+  return b;
+}

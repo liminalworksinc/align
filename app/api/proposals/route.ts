@@ -1,13 +1,12 @@
-import { requireSession } from "@/lib/auth";
+import { requireWsSession } from "@/lib/auth";
 import { createProposal } from "@/lib/flow";
-import { body, handle } from "@/lib/http";
-import { mutate } from "@/lib/store";
+import { bodyFor, handle } from "@/lib/http";
 
 
 export async function POST(req: Request) {
   return handle(async () => {
-    const who = requireSession(req);
-    const b = await body(req);
-    return mutate((s) => createProposal(s, who, b));
+    const who = requireWsSession(req);
+    const b = await bodyFor(req, who.ws);
+    return who.mutate((s) => createProposal(s, who, b));
   });
 }

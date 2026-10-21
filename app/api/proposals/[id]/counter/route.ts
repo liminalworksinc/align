@@ -1,15 +1,14 @@
-import { requireSession } from "@/lib/auth";
+import { requireWsSession } from "@/lib/auth";
 import { counterProposal } from "@/lib/flow";
-import { body, handle } from "@/lib/http";
-import { mutate } from "@/lib/store";
+import { bodyFor, handle } from "@/lib/http";
 
 
 export async function POST(req: Request, ctx: RouteContext<"/api/proposals/[id]/counter">) {
   return handle(async () => {
-    const who = requireSession(req);
+    const who = requireWsSession(req);
     const { id } = await ctx.params;
-    const b = await body(req);
+    const b = await bodyFor(req, who.ws);
     void b;
-    return mutate((s) => counterProposal(s, who, id, b));
+    return who.mutate((s) => counterProposal(s, who, id, b));
   });
 }

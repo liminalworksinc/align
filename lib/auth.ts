@@ -157,6 +157,13 @@ export function requireWsSession(req: Request): WsContext {
   return bindWs(s);
 }
 
+/** For GET /api/state: the caller's workspace, or Northstar when anonymous (as before). */
+export function stateContext(req: Request): { who: WsSession | null } & Pick<WsContext, "mutate" | "read"> {
+  const who = wsSessionFrom(req);
+  if (who) return { ...bindWs(who), who };
+  return { who: null, mutate: (fn) => mutate(fn), read: () => readState() };
+}
+
 export function bindWs(s: WsSession): WsContext {
   if (s.ws === "northstar") {
     // Flow functions read only actor and sid, so the extra fields never reach Northstar state.

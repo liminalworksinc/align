@@ -108,7 +108,7 @@ async function appendEvent(event: "created" | "deleted", id: CustomWsId) {
 }
 
 /** Live workspaces: directories named like an id. Skips _events.jsonl, .tmp-* and .deleting-*. */
-async function countWorkspaces(): Promise<number> {
+export async function countWorkspaces(): Promise<number> {
   try {
     const names = await fs.readdir(config().workspacesRoot);
     return names.filter((n) => ID_RE.test(n)).length;

@@ -1,15 +1,20 @@
-import { sessionFrom } from "@/lib/auth";
+import { stateContext } from "@/lib/auth";
 import { ingestEvidence } from "@/lib/evidence";
 import { recordExcludedPrep, viewFor } from "@/lib/flow";
 import { handle } from "@/lib/http";
 import { ensureRegistryFresh } from "@/lib/mapper";
-import { mutate } from "@/lib/store";
 
 
 export async function GET(req: Request) {
   return handle(async () => {
-    const who = sessionFrom(req);
-    const s = await mutate(async (st) => {
+    // Anonymous is Northstar, as before. A custom session ended by expiry or revocation gets 401, never Northstar.
+    const ctx = stateContext(req);
+    const who = ctx.who;
+    if (who && who.ws !== "northstar") {
+      // Custom workspaces have no Sparta evidence, prep exclusions or agent registry.
+      return viewFor(await ctx.read(), who.actor);
+    }
+    const s = await ctx.mutate(async (st) => {
       try {
         await ingestEvidence(st);
         st.ingest_errors = [];
