@@ -13,7 +13,12 @@ export interface Me {
   actor: Actor | null;
   name: string | null;
   sid: string | null;
+  workspace?: string; // custom workspace sessions only
 }
+
+export const SESSION_ENDED = "Your session ended. Sign in again.";
+const SIGNED_OUT: Me = { actor: null, name: null, sid: null };
+const isEnded = (e: unknown) => (e as { status?: number }).status === 401 && (e as Error).message === SESSION_ENDED;
 
 export async function api<T = unknown>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const res = await fetch(path, {
@@ -27,24 +32,63 @@ export async function api<T = unknown>(path: string, init?: { method?: string; b
   return data as T;
 }
 
-export function useAlign() {
+/**
+ * `workspace` is the /w/<id> slug; omit it for the Northstar app at /. A session for a different workspace (or a
+ * custom session on /) counts as signed out here, and a /w page never polls /api/state before sign-in.
+ */
+export function useAlign(workspace?: string) {
   const [state, setState] = useState<StateView | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [ended, setEnded] = useState(false); // a custom session expired or was revoked
+  const [elsewhere, setElsewhere] = useState<string | null>(null); // the workspace this browser is signed in to instead
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const live = useRef(!workspace); // may this page poll /api/state now?
+
+  const endSession = useCallback(() => {
+    live.current = !workspace;
+    setState(null);
+    setMe(SIGNED_OUT);
+    setEnded(true);
+  }, [workspace]);
 
   const refresh = useCallback(async () => {
+    if (!live.current) return;
     try {
       const s = await api<StateView>("/api/state");
+      if (!live.current) return;
       setState(s);
       setLoadError(null);
     } catch (e) {
+      if (isEnded(e)) return endSession();
       setLoadError((e as Error).message);
     }
-  }, []);
+  }, [endSession]);
 
-  const loadMe = useCallback(async () => setMe(await api<Me>("/api/session")), []);
+  const loadMe = useCallback(async () => {
+    let m: Me;
+    try {
+      m = await api<Me>("/api/session");
+    } catch (e) {
+      if (isEnded(e)) return endSession();
+      throw e;
+    }
+    if (m.actor && m.workspace !== workspace) {
+      live.current = false;
+      setState(null);
+      setElsewhere(m.workspace ?? "northstar");
+      setMe(SIGNED_OUT);
+      return;
+    }
+    setElsewhere(null);
+    if (m.actor) setEnded(false);
+    const wasLive = live.current;
+    live.current = !workspace || !!m.actor;
+    if (!live.current) setState(null);
+    setMe(m);
+    if (live.current && !wasLive) refresh();
+  }, [workspace, endSession, refresh]);
 
   useEffect(() => {
     // Subscribes to the server: state is set when the fetches resolve, not synchronously.
@@ -65,16 +109,17 @@ export function useAlign() {
         await refresh();
         return out;
       } catch (e) {
-        setError((e as Error).message);
+        if (isEnded(e)) endSession();
+        else setError((e as Error).message);
         return null;
       }
     },
-    [refresh],
+    [refresh, endSession],
   );
 
   const mark = useCallback((action: string) => {
     api("/api/timer", { body: { action } }).catch(() => undefined);
   }, []);
 
-  return { state, me, error, setError, loadError, refresh, loadMe, act, mark };
+  return { state, me, error, setError, loadError, refresh, loadMe, act, mark, ended, elsewhere };
 }
