@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { labelsFor, poss, type Labels } from "@/lib/labels";
 import type { StateView } from "@/lib/types";
 import { Badge, OWNER_LABEL, STATE_LABEL, fmtDuration, fmtTime } from "./ui";
 
@@ -26,6 +27,52 @@ function useNow(running: boolean) {
 }
 
 export function ProofStrip({ s }: { s: StateView }) {
+  const L = labelsFor(s);
+  return L.northstar ? <NorthstarProof s={s} /> : <CustomProof s={s} L={L} />;
+}
+
+/** Custom scenarios: who approved, and the sandbox status. No manual estimate and no practice-test claims. */
+function CustomProof({ s, L }: { s: StateView; L: Labels }) {
+  const acc = s.acceptances.at(-1) ?? null;
+  return (
+    <div className="grid grid-cols-2 gap-3" aria-label="Summary: approvals and sandbox test">
+      <Tile label="Who approved">
+        {acc ? (
+          <ul className="space-y-2 text-[16px]">
+            <li>
+              <div className="font-semibold text-zinc-900">{L.person.product}</div>
+              <div className="text-zinc-600">accepted {poss(L.team.security)} changes at {fmtTime(acc.acknowledged_at)}</div>
+            </li>
+            <li>
+              <div className="font-semibold text-zinc-900">{L.person.security}</div>
+              <div className="text-zinc-600">
+                approved its goal ({acc.accepted_version}) at {fmtTime(acc.ratified_at)}
+              </div>
+            </li>
+          </ul>
+        ) : (
+          <>
+            <div className="text-[28px] font-bold leading-tight text-zinc-400">Not yet</div>
+            <div className="text-[16px] text-zinc-500">
+              Two people must agree: {L.person.product} and {L.person.security}
+            </div>
+          </>
+        )}
+      </Tile>
+      <Tile label="Sandbox test">
+        <span className="self-start">
+          <Badge tone="amber">Not sandbox-tested</Badge>
+        </span>
+        <div className="text-[16px] text-zinc-700">
+          {acc ? `${L.person.security} approved this plan explicitly without a sandbox test.` : "This plan has no sandbox test. Approving it needs an explicit acknowledgement."}
+        </div>
+        <div className="text-[16px] text-zinc-500">Agreeing on the goal isn&apos;t proof the plan will work.</div>
+      </Tile>
+    </div>
+  );
+}
+
+function NorthstarProof({ s }: { s: StateView }) {
   const t = s.timer;
   const running = !!t.started_at && !t.ended_at;
   const now = useNow(running);
