@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Custom-scenario acceptance test (Build A minimum slice): setup authority S1–S9, the minimal setup S10/S11,
+// Custom-scenario acceptance test (Build A minimum slice): setup authority S1–S9, the minimal setup S10/S11, Host checks S12/S13,
 // state after setup T1, the propose → change → owner-approval flow F2–F15, and R4 back to Northstar.
 // Case ids follow Sean's Build A plan §7/§8. Contracts: plan §3 (setup API, approval, custom state seed).
 //
@@ -70,20 +70,19 @@ const current = (st, owner) => {
 };
 const setup = (role, body, opts) => call(role, "POST", "/api/scenario", body, opts);
 // fetch drops a caller-set Host header, so the DNS-rebinding case goes through node:http.
-function postWithHost(p, host, body, cookie) {
+function requestWithHost(method, p, host, headers = {}, body) {
   const u = new URL(BASE + p);
   return new Promise((resolve, reject) => {
-    const req = http.request(
-      { hostname: u.hostname, port: u.port, path: u.pathname, method: "POST", headers: { host, cookie, "content-type": "application/json", origin: `http://${host}` } },
-      (res) => {
-        let text = "";
-        res.on("data", (d) => (text += d)).on("end", () => resolve({ status: res.statusCode, text }));
-      },
-    );
+    const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method, headers: { ...headers, host } }, (res) => {
+      let text = "";
+      res.on("data", (d) => (text += d)).on("end", () => resolve({ status: res.statusCode, text }));
+    });
     req.on("error", reject);
-    req.end(JSON.stringify(body));
+    req.end(body === undefined ? undefined : JSON.stringify(body));
   });
 }
+const postWithHost = (p, host, body, cookie) =>
+  requestWithHost("POST", p, host, { cookie, "content-type": "application/json", origin: `http://${host}` }, body);
 
 async function main() {
   console.log(`Align custom-scenario test against ${BASE} (fixture ${path.relative(ROOT, FIXTURE)})\n`);
@@ -121,7 +120,11 @@ async function main() {
   const s8 = await setup("leadership", undefined, { raw: big, headers: { "content-type": "application/json" } });
   check("S8 body over 64 KB -> 413", s8.status === 413, short(s8));
   const s12 = await postWithHost("/api/scenario", "rebind.example:3000", fixture, cookies.leadership);
-  check("S12 non-loopback Host (DNS rebinding) -> 403", s12.status === 403, short(s12));
+  // proxy.ts answers 421 before the route runs; requireJson's own check (403) stays as a second line.
+  check("S12 non-loopback Host (DNS rebinding) -> 421 or 403", s12.status === 421 || s12.status === 403, short(s12));
+  const s13 = await requestWithHost("GET", "/api/state", "rebind.example", { cookie: cookies.leadership });
+  const s13p = await requestWithHost("GET", "/", "rebind.example:3000", { cookie: cookies.leadership });
+  check("S13 GET /api/state and / with a non-loopback Host are refused by proxy.ts -> 421", s13.status === 421 && s13p.status === 421, `${short(s13)} | ${short(s13p)}`);
   const proto = JSON.stringify(fixture).replace(/^\{/, '{"__proto__":{"admin":true},');
   const s9 = await setup("leadership", undefined, { raw: proto, headers: { "content-type": "application/json" } });
   check("S9 own __proto__ key -> 400", s9.status === 400, short(s9));
