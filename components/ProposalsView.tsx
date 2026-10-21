@@ -317,7 +317,8 @@ export function ProposalsView(props: ViewProps) {
         {showComposer ? (
           <Composer {...props} busy={busy} run={run} onSent={() => setComposing(false)} />
         ) : active ? (
-          <Detail {...props} p={active} busy={busy} run={run} />
+          // Keyed on state and revision count so Detail's local state (the untested tick) never carries over to a new revision.
+          <Detail key={`${active.id}:${active.state}:${active.counter_versions.length}`} {...props} p={active} busy={busy} run={run} />
         ) : (
           <Card tone="readonly">
             <p className="text-[18px] font-semibold text-zinc-900">No proposals to your goal yet.</p>
