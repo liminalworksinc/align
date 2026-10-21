@@ -184,6 +184,16 @@ async function main() {
     JSON.stringify({ affected, work_items: [...workIds] }),
   );
 
+  // Founder ruling #5: the approval also names the asking team's own work items, separately.
+  const asking = acc?.asking_work_item_ids;
+  const askingOwned = (st.work_items ?? []).filter((w) => w.owner === "product").map((w) => w.id);
+  check(
+    "F15 acceptance.asking_work_item_ids is exactly the asking team's work items, disjoint from affected_work_item_ids",
+    Array.isArray(asking) && asking.length > 0 && JSON.stringify([...asking].sort()) === JSON.stringify([...askingOwned].sort()) &&
+      !asking.some((x) => (affected ?? []).includes(x)),
+    JSON.stringify({ asking, askingOwned, affected }),
+  );
+
   // ---- R4: custom back to Northstar ----
   const r4p = await call("product", "POST", "/api/reset", { confirm: "reset" });
   const stillCustom = (await state()).scenario === "custom";
