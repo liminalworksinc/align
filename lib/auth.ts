@@ -1,8 +1,9 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { Actor } from "./types";
-import { HttpError } from "./store";
+import type { Actor, AppState } from "./types";
+import { HttpError, mutate, mutateWs, readState } from "./store";
+import { parseCustomWs, readAuth, verifyPasscode, type CustomWsId, type WsId } from "./workspace";
 
 export const COOKIE = "align_session";
 
@@ -33,6 +34,33 @@ export interface Session {
   sid: string;
 }
 
+/** A custom workspace session. Northstar sessions keep the plain {actor, sid} shape and token. */
+export interface WsSession extends Session {
+  ws: WsId;
+}
+
+/** Scoped access for workspace-aware routes: state reads and writes are bound to the session's workspace. */
+export interface WsContext extends WsSession {
+  mutate<T>(fn: (s: AppState) => T | Promise<T>): Promise<T>;
+  read(): Promise<AppState>;
+}
+
+const SESSION_MS = 12 * 60 * 60 * 1000;
+const ACTORS = new Set(["product", "security", "leadership"]);
+
+// Custom token payload: {actor, sid, ws, ep, exp}. ep is the workspace epoch (bumped to revoke), exp is ms since epoch.
+interface CustomPayload extends Session {
+  ws: string;
+  ep: number;
+  exp: number;
+}
+
+type TokenRead =
+  | { kind: "none" } // no token, or one that fails the HMAC: anonymous, exactly as before
+  | { kind: "northstar"; session: Session }
+  | { kind: "custom"; session: WsSession }
+  | { kind: "ended" }; // signed by us, but expired, revoked or for a workspace that is gone
+
 function sign(payload: string) {
   return createHmac("sha256", secret()).update(payload).digest("base64url");
 }
@@ -49,28 +77,91 @@ export function login(role: string, passcode: string): { token: string; session:
   return { token: `${payload}.${sign(payload)}`, session };
 }
 
-export function readSession(token: string | undefined): Session | null {
-  if (!token) return null;
-  const [payload, mac] = token.split(".");
-  if (!payload || !mac) return null;
-  const good = sign(payload);
-  if (good.length !== mac.length || !timingSafeEqual(Buffer.from(good), Buffer.from(mac))) return null;
-  try {
-    const s = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Session;
-    return s.actor === "product" || s.actor === "security" || s.actor === "leadership" ? s : null;
-  } catch {
-    return null;
-  }
+const WRONG = "Wrong passcode for this role";
+
+/**
+ * Sign in to a custom workspace. Invalid id, unknown workspace, unknown role and wrong passcode all get the same 401.
+ * Compares with async scrypt and timingSafeEqual.
+ */
+export async function loginWorkspace(workspace: unknown, role: unknown, passcode: unknown): Promise<{ token: string; session: WsSession }> {
+  const ws = parseCustomWs(workspace);
+  if (!ws || typeof role !== "string" || !ACTORS.has(role) || typeof passcode !== "string") throw new HttpError(401, WRONG);
+  const auth = readAuth(ws);
+  if (!auth || !(await verifyPasscode(auth.roles[role as Actor], passcode))) throw new HttpError(401, WRONG);
+  const body: CustomPayload = { actor: role as Actor, sid: randomUUID().slice(0, 8), ws, ep: auth.epoch, exp: Date.now() + SESSION_MS };
+  const payload = Buffer.from(JSON.stringify(body)).toString("base64url");
+  return { token: `${payload}.${sign(payload)}`, session: { actor: body.actor, sid: body.sid, ws } };
 }
 
-export function sessionFrom(req: Request): Session | null {
+function readToken(token: string | undefined): TokenRead {
+  if (!token) return { kind: "none" };
+  const [payload, mac] = token.split(".");
+  if (!payload || !mac) return { kind: "none" };
+  const good = sign(payload);
+  if (good.length !== mac.length || !timingSafeEqual(Buffer.from(good), Buffer.from(mac))) return { kind: "none" };
+  let p: Partial<CustomPayload>;
+  try {
+    p = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<CustomPayload>;
+  } catch {
+    return { kind: "none" };
+  }
+  if (!p || typeof p.actor !== "string" || !ACTORS.has(p.actor)) return { kind: "none" };
+  if (p.ws === undefined) return { kind: "northstar", session: p as Session };
+  const ws = parseCustomWs(p.ws);
+  if (!ws || typeof p.exp !== "number" || p.exp <= Date.now()) return { kind: "ended" };
+  const auth = readAuth(ws);
+  if (!auth || auth.epoch !== p.ep) return { kind: "ended" };
+  return { kind: "custom", session: { actor: p.actor as Actor, sid: String(p.sid), ws } };
+}
+
+export function readSession(token: string | undefined): Session | null {
+  const t = readToken(token);
+  return t.kind === "northstar" ? t.session : null;
+}
+
+function tokenFrom(req: Request): TokenRead {
   const cookie = req.headers.get("cookie") || "";
   const match = cookie.split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`));
-  return readSession(match ? decodeURIComponent(match.slice(COOKIE.length + 1)) : undefined);
+  return readToken(match ? decodeURIComponent(match.slice(COOKIE.length + 1)) : undefined);
 }
 
+/** Northstar session or null. A custom token is not a Northstar session. */
+export function sessionFrom(req: Request): Session | null {
+  const t = tokenFrom(req);
+  return t.kind === "northstar" ? t.session : null;
+}
+
+export const SESSION_ENDED = "Your session ended. Sign in again.";
+
+/** Any session, with its workspace. Throws 401 Session ended for a signed custom token that no longer verifies. */
+export function wsSessionFrom(req: Request): WsSession | null {
+  const t = tokenFrom(req);
+  if (t.kind === "ended") throw new HttpError(401, SESSION_ENDED);
+  if (t.kind === "northstar") return { ...t.session, ws: "northstar" };
+  return t.kind === "custom" ? t.session : null;
+}
+
+/** For Northstar-only routes. A custom workspace session gets 403; it can never reach Northstar state here. */
 export function requireSession(req: Request): Session {
-  const s = sessionFrom(req);
+  const t = tokenFrom(req);
+  if (t.kind === "ended") throw new HttpError(401, SESSION_ENDED);
+  if (t.kind === "custom") throw new HttpError(403, "This isn’t available in a custom workspace");
+  if (t.kind !== "northstar") throw new HttpError(401, "Sign in as Product or Security first");
+  return t.session;
+}
+
+/** For workspace-aware routes: the only way a route reaches custom state. ctx.mutate and ctx.read are bound to ctx.ws. */
+export function requireWsSession(req: Request): WsContext {
+  const s = wsSessionFrom(req);
   if (!s) throw new HttpError(401, "Sign in as Product or Security first");
-  return s;
+  return bindWs(s);
+}
+
+export function bindWs(s: WsSession): WsContext {
+  if (s.ws === "northstar") {
+    // Flow functions read only actor and sid, so the extra fields never reach Northstar state.
+    return { ...s, mutate: (fn) => mutate(fn), read: () => readState() };
+  }
+  const ws: CustomWsId = s.ws;
+  return { ...s, mutate: (fn) => mutateWs(ws, fn), read: () => readState(ws) };
 }

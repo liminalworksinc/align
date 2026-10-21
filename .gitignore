@@ -26,6 +26,10 @@ data/.secret
 data/state.json
 data/*.tmp
 
+# Custom workspaces and the single-server guard
+data/workspaces/
+data/.pid
+
 # Sparta local runtime (worlds, dashboard state)
 .worlds/
 .worlds-dashboard/

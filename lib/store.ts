@@ -3,18 +3,17 @@ import { promises as fs, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { AppState, Plan } from "./types";
 import { registryVersion } from "./registry";
+import { HttpError } from "./errors";
+import { withLock } from "./locks";
+import { wsDir, workspaceExists, type CustomWsId, type WsId } from "./workspace";
+
+export { HttpError };
 
 export const ROOT = process.cwd();
 const DATA = path.join(ROOT, "data");
 const STATE_FILE = path.join(DATA, "state.json");
 const FIXTURE_FILE = path.join(DATA, "fixture.json");
 export const PLANS_DIR = path.join(ROOT, "agent", "plans");
-
-export class HttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}
 
 export function sha256(text: string | Buffer) {
   return createHash("sha256").update(text).digest("hex");
@@ -46,7 +45,8 @@ export function initialState(): AppState {
   return withDefaults(fixture);
 }
 
-export async function readState(): Promise<AppState> {
+export async function readState(ws: WsId = "northstar"): Promise<AppState> {
+  if (ws !== "northstar") return readCustom(ws);
   try {
     return withDefaults(JSON.parse(await fs.readFile(STATE_FILE, "utf8")) as AppState);
   } catch {
@@ -83,6 +83,63 @@ export async function mutate<T>(fn: (s: AppState) => T | Promise<T>): Promise<T>
   } finally {
     release();
   }
+}
+
+// ---- custom workspaces ----
+// No fallback: a missing or unreadable custom state is an error, never a reseed (only Northstar reseeds).
+
+const MAX_WS_BYTES = 1024 * 1024;
+const AUDIT_KEEP = 1000;
+
+async function readCustom(ws: CustomWsId): Promise<AppState> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(wsDir(ws), "state.json"), "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") throw new HttpError(404, "This workspace no longer exists");
+    throw new HttpError(500, "This workspace could not be read");
+  }
+  try {
+    return withDefaults(JSON.parse(raw) as AppState);
+  } catch {
+    throw new HttpError(500, "This workspace could not be read");
+  }
+}
+
+/** Never creates directories. Trims audit to the last 1000 rows (older rows go to audit-archive.jsonl), then caps size. */
+async function writeCustom(ws: CustomWsId, s: AppState) {
+  const dir = wsDir(ws);
+  if (!workspaceExists(ws)) throw new HttpError(404, "This workspace no longer exists");
+  if (s.audit.length > AUDIT_KEEP) {
+    const old = s.audit.slice(0, s.audit.length - AUDIT_KEEP);
+    await fs.appendFile(path.join(dir, "audit-archive.jsonl"), old.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    s.audit = s.audit.slice(-AUDIT_KEEP);
+  }
+  const text = JSON.stringify(s, null, 2);
+  if (Buffer.byteLength(JSON.stringify({ ...s, audit: [] }, null, 2)) > MAX_WS_BYTES) throw new HttpError(413, "This workspace is full");
+  const file = path.join(dir, "state.json");
+  const tmp = `${file}.${randomUUID()}.tmp`;
+  await fs.writeFile(tmp, text);
+  await fs.rename(tmp, file);
+}
+
+/** mutate() for one custom workspace, under that workspace's own lock. */
+export async function mutateWs<T>(ws: CustomWsId, fn: (s: AppState) => T | Promise<T>): Promise<T> {
+  return withLock(ws, async () => {
+    const s = await readCustom(ws);
+    const before = JSON.stringify(s);
+    const result = await fn(s);
+    if (JSON.stringify(s) !== before) await writeCustom(ws, s);
+    return result;
+  });
+}
+
+/** Replace a custom workspace's whole state (Restart). Built by lib/scenario.ts; the store never imports it. */
+export async function replaceWorkspaceState(ws: CustomWsId, next: AppState) {
+  return mutateWs(ws, (s) => {
+    for (const k of Object.keys(s)) delete (s as unknown as Record<string, unknown>)[k];
+    Object.assign(s, next);
+  });
 }
 
 /**
