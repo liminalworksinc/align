@@ -155,9 +155,9 @@ if (AGENT) { startClaude(); log("Claude Code starting in tmux session '" + TMUX 
 
 const L = await windowFor("leadership");
 await signIn(L, "leadership");
+// Leadership's cookie, for API reads that need a signed-in session (B1-3).
+const jar = (await L.cookies()).map((c) => `${c.name}=${c.value}`).join("; ");
 if (RESET) {
-  const cookies = await L.cookies();
-  const jar = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
   await api("/api/reset", { method: "POST", headers: { "content-type": "application/json", cookie: jar }, body: JSON.stringify({ confirm: "reset" }) });
   log("Workspace reset: company goal v1, no proposals");
   await L.reload({ waitUntil: "networkidle0" });
@@ -183,7 +183,7 @@ log("ACT 2 · Jev re-matches agent sessions to the new goals");
 await focus(L, "Act 2 · Where agent work is going: sessions re-match to the new goals");
 await press(L, "Work", { nav: true });
 await waitFor("re-matching against the new goal registry", async () => {
-  const m = await api("/api/mappings");
+  const m = await api("/api/mappings", { headers: { cookie: jar } });
   return m.mappings?.length && m.mappings.every((x) => x.registry_version === m.registry_version && x.state !== "PENDING");
 }, 90000);
 await sleep(HOLD * 2);

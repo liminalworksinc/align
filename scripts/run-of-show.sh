@@ -38,12 +38,10 @@ check() {
   if grep -q '^ALIGN_MCP_TOKEN=' "$ROOT/.env.local" 2>/dev/null; then ok "MCP token configured (.env.local)"; else bad "No ALIGN_MCP_TOKEN in .env.local"; fi
   if (cd "$ROOT" && claude mcp list 2>/dev/null | grep -q '^align:.*Connected'); then ok "Claude Code has the align MCP server connected (this repo)"; else warn "align MCP not connected in Claude Code. Run: scripts/run-of-show.sh mcp"; fi
   grep -q align-capture "$ROOT/.claude/settings.json" 2>/dev/null && ok "Session capture hooks enabled (.claude/settings.json)" || bad "Capture hooks missing in .claude/settings.json"
-  local key; key="$(grep '^AI_GATEWAY_API_KEY=' "$ROOT/sparta/walkthrough-lab/projects/team-inbox/.env" 2>/dev/null | cut -d= -f2-)"
-  if [ -n "$key" ]; then
-    local jev; jev="$(curl -sS --max-time 15 https://ai-gateway.vercel.sh/typesafe/v1/systemone -H "Authorization: Bearer $key" -H 'content-type: application/json' \
-      -d '{"model":"typesafe-ai/jev","state":"preflight","questions":{"q":{"type":"choice","instructions":"Pick one","criteria":{"a":"a","b":"b"}}}}' 2>/dev/null)"
-    if echo "$jev" | grep -q '"answers"'; then ok "Jev reachable via Vercel AI Gateway"; else warn "Jev not available yet ($(echo "$jev" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log((j.error?.message||j.message||"unknown").slice(0,70))}catch{console.log("no response")}})')). Work map will show 'Not matched' until credits are active."; fi
-  else bad "No AI_GATEWAY_API_KEY in the Sparta .env"; fi
+  # The mapper reads only the environment (B1-4): it is off unless ALIGN_MAPPER_EXTERNAL=1, and then needs AI_GATEWAY_API_KEY. Never print the key.
+  if [ "${ALIGN_MAPPER_EXTERNAL:-}" = "1" ]; then
+    [ -n "${AI_GATEWAY_API_KEY:-}" ] && ok "External mapping model on (ALIGN_MAPPER_EXTERNAL=1, key present in env)" || bad "ALIGN_MAPPER_EXTERNAL=1 but AI_GATEWAY_API_KEY is not set in the environment"
+  else warn "External mapping model off (set ALIGN_MAPPER_EXTERNAL=1 and AI_GATEWAY_API_KEY for the Work map to match sessions)"; fi
   command -v tmux >/dev/null && ok "tmux $(tmux -V | cut -d' ' -f2)" || bad "tmux not installed (brew install tmux)"
   # Demo passcodes and localhost guards are not production security: keep Align on this machine.
   local port="${ALIGN_URL##*:}"; port="${port%%/*}"
@@ -55,8 +53,12 @@ check() {
     perm="$(stat -f %Lp "$f")"
     case "$perm" in *00) ok "$(basename "$f") readable only by you";; *) warn "$(basename "$f") is readable by others (chmod 600 $f)";; esac
   done
-  local n; n="$(curl -fsS "$ALIGN_URL/api/sessions" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).sessions.length)}catch{console.log("?")}})')"
-  ok "Captured agent sessions: $n"
+  # GET /api/sessions needs a signed-in session (B1-3): sign in as leadership first.
+  local n=""
+  if signin leadership "${ALIGN_LEADERSHIP_PASSCODE:-leadership-demo}"; then
+    n="$(curl -fsS -b "$(jar leadership)" "$ALIGN_URL/api/sessions" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).sessions.length)}catch{}})')"
+  fi
+  [ -n "$n" ] && ok "Captured agent sessions: $n" || bad "Could not read captured agent sessions (sign-in or /api/sessions failed)"
   [ "$FAILED" = 0 ] && printf "\n\033[32mReady.\033[0m\n" || printf "\n\033[31mFix the items marked ✗ before recording.\033[0m\n"
 }
 
