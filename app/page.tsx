@@ -15,7 +15,7 @@ import { WorkMap } from "@/components/WorkMap";
 import { activeProposal, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, useAlign, type Selection } from "@/components/useAlign";
-import { companyMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
+import { companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
 
 type NavItem = { id: View; label: string; sub: string; icon: string };
 const NAV: NavItem[] = [
@@ -206,6 +206,13 @@ export default function Page() {
   const counts: Partial<Record<View, number>> = { decision: decisionCount, proposals: pendingForMe };
   const myGoal = me.actor === "product" || me.actor === "security" ? currentGoal(state, me.actor) : undefined;
   const kr2 = ceo?.measures.find((m) => m.id === companyMeasureId(state));
+  // Custom: the goal's current target. An approval swaps the owner's measure, not its objective.
+  const lastAcc = state.acceptances.at(-1);
+  const myTarget = custom && myGoal
+    ? (lastAcc?.new_goal_id === myGoal.id ? myGoal.measures.find((m) => m.id === decisionMeasureId(state, lastAcc)) : undefined) ??
+      myGoal.measures.find((m) => m.id === conflictMeasureId(state)) ??
+      myGoal.measures[0]
+    : undefined;
   // Custom scenarios have no live agent, so the rail always shows the Inspector.
   const focus = !custom && (view === "decision" || view === "today");
   const alikeOk = state.brief?.alike_status === "retrieved";
@@ -393,6 +400,7 @@ export default function Page() {
             <div className="flex flex-col gap-1 border-l border-zinc-200 pl-6">
               <span className="al-lbl !text-violet-700">Your goal{myGoal ? ` · ${myGoal.version}` : ""}</span>
               <span className="line-clamp-2 text-[14px] leading-snug text-zinc-900">{myGoal?.objective ?? "Unknown"}</span>
+              {custom && myTarget && <span className="line-clamp-2 text-[14px] leading-snug text-zinc-700">Target: {myTarget.text}</span>}
             </div>
           </div>
         )}
