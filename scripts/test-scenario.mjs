@@ -6,6 +6,7 @@
 // Usage: node scripts/test-scenario.mjs http://127.0.0.1:3205 [fixture.json]
 // The fixture defaults to data/scenarios/example-custom.json (owned by L2, the Fernway example).
 import { readFileSync } from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { baseUrl, signIn } from "./lib/harness.mjs";
@@ -46,6 +47,21 @@ const current = (st, owner) => {
   return all.find((g) => !superseded.has(g.id));
 };
 const setup = (role, body, opts) => call(role, "POST", "/api/scenario", body, opts);
+// fetch drops a caller-set Host header, so the DNS-rebinding case goes through node:http.
+function postWithHost(p, host, body, cookie) {
+  const u = new URL(BASE + p);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { hostname: u.hostname, port: u.port, path: u.pathname, method: "POST", headers: { host, cookie, "content-type": "application/json", origin: `http://${host}` } },
+      (res) => {
+        let text = "";
+        res.on("data", (d) => (text += d)).on("end", () => resolve({ status: res.statusCode, text }));
+      },
+    );
+    req.on("error", reject);
+    req.end(JSON.stringify(body));
+  });
+}
 
 async function main() {
   console.log(`Align custom-scenario test against ${BASE} (fixture ${path.relative(ROOT, FIXTURE)})\n`);
@@ -82,6 +98,8 @@ async function main() {
   const big = JSON.stringify({ ...fixture, pad: "x".repeat(70 * 1024) });
   const s8 = await setup("leadership", undefined, { raw: big, headers: { "content-type": "application/json" } });
   check("S8 body over 64 KB -> 413", s8.status === 413, short(s8));
+  const s12 = await postWithHost("/api/scenario", "rebind.example:3000", fixture, cookies.leadership);
+  check("S12 non-loopback Host (DNS rebinding) -> 403", s12.status === 403, short(s12));
   const proto = JSON.stringify(fixture).replace(/^\{/, '{"__proto__":{"admin":true},');
   const s9 = await setup("leadership", undefined, { raw: proto, headers: { "content-type": "application/json" } });
   check("S9 own __proto__ key -> 400", s9.status === 400, short(s9));
