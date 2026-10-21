@@ -1,6 +1,6 @@
 import path from "node:path";
 import { handle } from "@/lib/http";
-import { scheduleMapping } from "@/lib/mapper";
+import { mappingEnabled, scheduleMapping } from "@/lib/mapper";
 import { markActed } from "@/lib/directives";
 import { hasCaptureConsent, HttpError, mutate, now, readState } from "@/lib/store";
 import type { AgentSession, SessionOriginKind } from "@/lib/types";
@@ -208,7 +208,8 @@ export async function POST(req: Request) {
       }
     });
 
-    scheduleMapping(id);
+    // B1-4: the external model is off unless ALIGN_MAPPER_EXTERNAL=1.
+    if (mappingEnabled()) scheduleMapping(id);
     return { ok: true, id };
   });
 }

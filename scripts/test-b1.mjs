@@ -205,6 +205,32 @@ console.log("\n# B1-3 auth");
   console.log(`INFO /api/state signed out still lists ${(leak.body?.sessions || []).length} session(s): open until B1-6 (viewFor allowlist)`);
 }
 
+// ---------------- B1-4 external model off by default ----------------
+console.log(`\n# B1-4 external model off by default (server expected: ${EXPECT_MAPPER})`);
+{
+  const src = readFileSync(path.join(ROOT, "lib", "mapper.ts"), "utf8");
+  check("lib/mapper.ts no longer reads the Sparta team-inbox .env", !/team-inbox|readFileSync|\.env["'`]/.test(src));
+  check("lib/mapper.ts has the explicit ALIGN_MAPPER_EXTERNAL=1 control", /process\.env\.ALIGN_MAPPER_EXTERNAL === "1"/.test(src));
+
+  await grant(lead);
+  const id = `claude-code:${sid("mapper")}`;
+  const e = await postEvent(event(id.slice(12)));
+  if (e.status === 200) created.add(id);
+  check("consented event accepted", e.status === 200, `status=${e.status}`);
+  for (let i = 0; i < 3; i++) await call("GET", "/api/state", { cookie: lead }); // ensureRegistryFresh runs on every poll
+  const anonR = await call("POST", "/api/mappings", { json: { action: "remap" } });
+  check("POST /api/mappings remap signed out is refused with 401", anonR.status === 401, `status=${anonR.status}`);
+  for (const [role, cookie] of [["product", product], ["security", await signIn(BASE, "security")]]) {
+    const r = await call("POST", "/api/mappings", { cookie, json: { action: "remap" } });
+    check(`POST /api/mappings remap as ${role} is refused with 403 (leadership only)`, r.status === 403, `status=${r.status}`);
+  }
+  const lr = await call("POST", "/api/mappings", { cookie: lead, json: { action: "remap" } });
+  check("POST /api/mappings remap as leadership is accepted but not attempted", lr.status === 200 && lr.body?.attempted === false, `status=${lr.status} ${JSON.stringify(lr.body)}`);
+  await sleep(3500); // past the 1.5 s debounce: a scheduled mapping would have written a row by now
+  const m = await call("GET", "/api/mappings", { cookie: lead });
+  check("no mapping row was written for the new session (event, poll and remap paths)", m.status === 200 && !m.body.mappings.some((x) => x.session_id === id), JSON.stringify(m.body?.mappings?.find((x) => x.session_id === id) ?? null));
+}
+
 // ---------------- cleanup ----------------
 console.log("\n# cleanup");
 for (const id of created) {

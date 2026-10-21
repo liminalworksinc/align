@@ -3,10 +3,9 @@
 //   remapAll()                  -- re-map every session (called when registry_version changes)
 //   ensureRegistryFresh()       -- recompute registry_version; remap everything when it changed
 // None of these throw into callers. Results are persisted as SessionMapping rows via mutate().
+// All of them do nothing unless mappingEnabled(): the external model is off by default (ALIGN_MAPPER_EXTERNAL=1 turns it on).
 // Only Jev (typesafe-ai/jev via AI Gateway) is ever called. On failure the mapping is MAPPER_UNAVAILABLE; no other model is substituted.
 
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { activeRegistry, registryVersion, refreshRegistry } from "./registry";
 import { mutate, now, readState } from "./store";
 import type { AgentSession, RegistryEntry, SessionMapping } from "./types";
@@ -18,29 +17,23 @@ const TIMEOUT_MS = 15000;
 const PROPOSE_AT = 0.6;
 const CONFLICT_AT = 0.6;
 
-// ---- API key (server-side only; never logged or returned) ----
+// ---- External model control (B1-4) ----
+// Session text leaves the machine only when ALIGN_MAPPER_EXTERNAL=1. Default off: nothing is scheduled or sent.
 
-let cachedKey: string | null | undefined;
+export function externalModelEnabled(): boolean {
+  return process.env.ALIGN_MAPPER_EXTERNAL === "1";
+}
+
+/** True only when mapping may run. Every entry point below checks it. */
+export function mappingEnabled(): boolean {
+  return externalModelEnabled();
+}
+
+// ---- API key (server-side only; never logged or returned) ----
+// Read from the process environment only. No .env file anywhere is read for it.
 
 function apiKey(): string | null {
-  if (process.env.AI_GATEWAY_API_KEY) return process.env.AI_GATEWAY_API_KEY;
-  if (cachedKey !== undefined) return cachedKey;
-  cachedKey = null;
-  try {
-    const file = path.join(process.cwd(), "sparta", "walkthrough-lab", "projects", "team-inbox", ".env");
-    if (existsSync(file)) {
-      for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
-        const m = line.match(/^\s*(?:export\s+)?AI_GATEWAY_API_KEY\s*=\s*(.*)\s*$/);
-        if (m) {
-          const v = m[1].trim().replace(/^(['"])(.*)\1$/, "$2");
-          if (v) cachedKey = v;
-        }
-      }
-    }
-  } catch {
-    cachedKey = null;
-  }
-  return cachedKey;
+  return process.env.AI_GATEWAY_API_KEY || null;
 }
 
 // ---- Jev request ----
@@ -168,6 +161,7 @@ async function callJev(state: string, registry: RegistryEntry[]): Promise<JevRes
 // ---- Mapping one session ----
 
 export async function mapSession(sessionId: string): Promise<void> {
+  if (!mappingEnabled()) return;
   const st = await readState();
   const session = st.sessions.find((x) => x.id === sessionId);
   if (!session) return;
@@ -250,6 +244,7 @@ function enqueue(sessionId: string) {
 }
 
 export function scheduleMapping(sessionId: string): void {
+  if (!mappingEnabled()) return;
   try {
     const t = timers.get(sessionId);
     if (t) clearTimeout(t);
@@ -266,6 +261,7 @@ export function scheduleMapping(sessionId: string): void {
 }
 
 export function remapAll(): void {
+  if (!mappingEnabled()) return;
   readState()
     .then((s) => {
       for (const x of s.sessions) scheduleMapping(x.id);
@@ -281,6 +277,8 @@ export async function ensureRegistryFresh(): Promise<void> {
     if (registryVersion(snap) !== snap.registry_version) {
       changed = await mutate((s) => refreshRegistry(s));
     }
+    // The registry version above is bookkeeping and always kept current. Mapping itself is gated.
+    if (!mappingEnabled()) return;
     if (changed) {
       remapAll();
       return;

@@ -1,7 +1,7 @@
 import { connection } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { body, handle } from "@/lib/http";
-import { remapAll } from "@/lib/mapper";
+import { mappingEnabled, remapAll } from "@/lib/mapper";
 import { activeRegistry } from "@/lib/registry";
 import { HttpError, readState } from "@/lib/store";
 
@@ -17,10 +17,13 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   return handle(async () => {
-    requireSession(req);
+    // B1-4: remapping sends every captured session to the external model, so it is leadership only.
+    const who = requireSession(req);
+    if (who.actor !== "leadership") throw new HttpError(403, "Only leadership can remap sessions");
     const b = await body<{ action?: string }>(req);
     if (b.action !== "remap") throw new HttpError(400, "Unknown action");
+    if (!mappingEnabled()) return { ok: true, attempted: false, reason: "external model off" };
     remapAll();
-    return { ok: true };
+    return { ok: true, attempted: true };
   });
 }

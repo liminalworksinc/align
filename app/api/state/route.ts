@@ -20,7 +20,8 @@ export async function GET(req: Request) {
       recordExcludedPrep(st);
       return st;
     });
-    // A registry change (org push, ratify) re-maps every captured agent session. Fire and forget.
+    // Keeps registry_version current. A registry change (org push, ratify) re-maps every captured agent session,
+    // but only when the external model is on (B1-4: ensureRegistryFresh checks mappingEnabled()). Fire and forget.
     void ensureRegistryFresh();
     return viewFor(s, who?.actor ?? null);
   });
