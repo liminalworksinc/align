@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build A gate runner. Usage: scripts/test-all.sh <port>   (run from a lane or integration worktree)
 # Checks frozen files, lint and types, starts a fresh dev server on <port>, then runs in fixed order:
-# snapshot, test-flow, test-scenario, test-mcp, test-capture, test-mapper. Capture and mapper add sessions
+# snapshot, test-flow, test-scenario (default fixture, then each scripts/fixtures/*.json), test-mcp,
+# test-capture, test-mapper. Capture and mapper add sessions
 # that survive reset, so they run last. Then test-tenancy, which starts its own servers on <port>.
 # One summary line per step; exits non-zero if any step fails.
 set -u
@@ -60,7 +61,9 @@ curl -s -o /dev/null "$BASE/login" || { summary FAIL server "did not start, see 
 step snapshot env ALIGN_MCP_TOKEN="$TOKEN" node scripts/snapshot-northstar.mjs "$BASE"
 # test-flow keeps its known baseline failure; the gate is its stdout matching the baseline's.
 step test-flow bash -c "node scripts/test-flow.mjs '$BASE' | tail -n +2 | diff -u test/snapshots/northstar-850971e/test-flow.out - && echo 'stdout identical to the baseline'"
+# test-scenario runs once per custom fixture: the default example, then every scripts/fixtures/*.json.
 step test-scenario node scripts/test-scenario.mjs "$BASE"
+for f in scripts/fixtures/*.json; do step "scenario:$(basename "$f" .json)" node scripts/test-scenario.mjs "$BASE" "$f"; done
 step test-mcp env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-mcp.mjs "$BASE/api/mcp"
 step test-capture node scripts/test-capture.mjs "$BASE"
 step test-mapper env ALIGN_URL="$BASE" node scripts/test-mapper.mjs
