@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Actor, StateView } from "@/lib/types";
+import type { Actor, AnonStateView, StateView } from "@/lib/types";
 
 export type Selection =
   | { kind: "goal"; id: string }
@@ -28,7 +28,8 @@ export async function api<T = unknown>(path: string, init?: { method?: string; b
 }
 
 export function useAlign() {
-  const [state, setState] = useState<StateView | null>(null);
+  // Signed out, /api/state carries only the sign-in labels (B1-6), so the page checks state.me before rendering.
+  const [state, setState] = useState<StateView | AnonStateView | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -36,7 +37,7 @@ export function useAlign() {
 
   const refresh = useCallback(async () => {
     try {
-      const s = await api<StateView>("/api/state");
+      const s = await api<StateView | AnonStateView>("/api/state");
       setState(s);
       setLoadError(null);
     } catch (e) {

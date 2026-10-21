@@ -75,7 +75,7 @@ function markerCount() {
   return readFileSync(STATE_FILE, "utf8").split(MARKER).length - 1;
 }
 
-/** Sessions as /api/state shows them (that route still exposes them to every caller until B1-6). */
+/** Sessions as /api/state shows them to a signed-in caller (B1-6: signed out, it has no sessions key). */
 async function stateSessions(cookie) {
   const r = await call("GET", "/api/state", { cookie });
   return Array.isArray(r.body?.sessions) ? r.body.sessions : [];
@@ -200,9 +200,45 @@ console.log("\n# B1-3 auth");
   check("GET /api/mappings signed out is refused with 401", anonM.status === 401 && !("mappings" in (anonM.body || {})), `status=${anonM.status}`);
   const m = await call("GET", "/api/mappings", { cookie: product });
   check("GET /api/mappings signed in returns registry and mappings", m.status === 200 && Array.isArray(m.body.mappings) && Array.isArray(m.body.registry), `status=${m.status}`);
-  // Known open by design until B1-6: /api/state spreads the whole state (flow.ts viewFor) to every caller.
-  const leak = await call("GET", "/api/state");
-  console.log(`INFO /api/state signed out still lists ${(leak.body?.sessions || []).length} session(s): open until B1-6 (viewFor allowlist)`);
+}
+
+// ---------------- B1-6 per-role allowlist on /api/state ----------------
+console.log("\n# B1-6 /api/state per-role allowlist");
+{
+  // A consented synthetic session with MARKER exists from B1-3, plus a consent record.
+  const security = await signIn(BASE, "security");
+  const anon = await call("GET", "/api/state");
+  const keys = Object.keys(anon.body || {});
+  check("anonymous GET /api/state answers 200 with me: null", anon.status === 200 && anon.body?.me === null, `status=${anon.status}`);
+  for (const k of ["sessions", "mappings", "audit", "org_draft", "capture_consents"]) {
+    check(`anonymous /api/state has no ${k} key`, !keys.includes(k), `keys=${keys.join(",")}`);
+  }
+  const allowed = new Set(["company", "scenario", "teams", "me"]);
+  check("anonymous /api/state carries only the sign-in labels (company, scenario, teams, me)", keys.every((k) => allowed.has(k)), `keys=${keys.join(",")}`);
+  check("anonymous /api/state does not contain the captured marker", !JSON.stringify(anon.body).includes(MARKER));
+  const forged = await call("GET", "/api/state", { cookie: "align_session=forged.value" });
+  check("a forged cookie gets the anonymous view", forged.status === 200 && forged.body?.me === null && !("sessions" in (forged.body || {})), `keys=${Object.keys(forged.body || {}).join(",")}`);
+
+  const views = {};
+  for (const [role, cookie] of [["product", product], ["security", security], ["leadership", lead]]) {
+    views[role] = (await call("GET", "/api/state", { cookie })).body || {};
+  }
+  const p = views.product;
+  const screenKeys = ["company", "timeframe", "goals", "relations", "work_items", "plans", "simulations", "brief", "proposals", "acceptances", "timer", "audit", "manual_baseline", "private_constraints", "pushes", "sessions", "mappings", "registry_version"];
+  const missing = screenKeys.filter((k) => !(k in p));
+  check("product still sees every key its screens read", p.me === "product" && missing.length === 0, `missing=${missing.join(",")}`);
+  check("product sees goals, relations and work items", p.goals?.length > 0 && p.relations?.length > 0 && p.work_items?.length > 0);
+  check("product sees the captured session and the consent record (signed-in only)", (p.sessions || []).some((x) => JSON.stringify(x.prompts || []).includes(MARKER)) && (p.capture_consents || []).some((c) => c.repo === REPO));
+  check("product sees only its own private constraints", (p.private_constraints || []).every((c) => c.owner === "product"));
+  check("security sees only its own private constraints", (views.security.private_constraints || []).every((c) => c.owner === "security"));
+  check("product view has no org_draft key", !("org_draft" in p));
+  check("security view has no org_draft key", !("org_draft" in views.security));
+  check("leadership view keeps the org_draft key", "org_draft" in views.leadership);
+  const shared = (v) => (v.goals || []).every((g) => g.visibility === "shared");
+  check("every goal reaching product and security is shared (Northstar has no private goals)", shared(p) && shared(views.security));
+  const m = await call("GET", "/api/mappings", { cookie: product });
+  const goalIds = new Set((views.leadership.goals || []).filter((g) => g.visibility === "shared").map((g) => g.id));
+  check("GET /api/mappings registry lists only shared goals (A-7)", m.status === 200 && m.body.registry.every((e) => e.goal_id === null || goalIds.has(e.goal_id)));
 }
 
 // ---------------- B1-4 external model off by default ----------------

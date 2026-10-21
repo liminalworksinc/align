@@ -273,7 +273,7 @@ export interface ScenarioTeam {
   lead: string; // person name shown for the slot
 }
 
-// No private text here: viewFor sends the whole state to every caller.
+// No private text here: every signed-in role receives it through viewFor.
 export interface ScenarioConfig {
   created_at: string;
   created_by: Actor;
@@ -287,9 +287,21 @@ export interface ScenarioConfig {
   plan_version: number;
 }
 
-// Session view returned to the browser. Visibility-filtered for the actor.
-export interface StateView extends AppState {
-  me: Actor | null;
+// B1-6: /api/state is a per-role allowlist projection (lib/flow.ts viewFor), never a spread of AppState.
+// A field a role may not see is absent. Signed-in view: goals and private constraints filtered to the viewer,
+// org_draft for leadership only, ingest_errors with absolute paths stripped.
+export interface StateView extends Omit<AppState, "org_draft"> {
+  org_draft?: OrgDraft | null;
+  me: Actor;
+}
+
+// B1-6: what an anonymous caller gets. Only the labels the sign-in screen renders (labelsFor); nothing captured,
+// no goals, no audit, no draft.
+export interface AnonStateView {
+  company: string;
+  scenario?: ScenarioKind;
+  teams?: Record<Owner, ScenarioTeam>;
+  me: null;
 }
 
 // ---- Org push, goal registry, agent sessions, Jev mappings ----
