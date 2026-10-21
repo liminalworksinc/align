@@ -27,6 +27,8 @@ REPO=my-repo                  # basename of the repo's git top-level folder
 PASS=leadership-demo          # leadership passcode (ALIGN_LEADERSHIP_PASSCODE if the server sets one)
 ```
 
+`leadership-demo` is the built-in default and only fits a local test server. Anywhere else, set `PASS` to the real leadership passcode the server was started with, and never paste it into a shared file or channel.
+
 Sign in as leadership:
 
 ```sh
