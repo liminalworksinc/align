@@ -55,8 +55,12 @@ check() {
     perm="$(stat -f %Lp "$f")"
     case "$perm" in *00) ok "$(basename "$f") readable only by you";; *) warn "$(basename "$f") is readable by others (chmod 600 $f)";; esac
   done
-  local n; n="$(curl -fsS "$ALIGN_URL/api/sessions" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).sessions.length)}catch{console.log("?")}})')"
-  ok "Captured agent sessions: $n"
+  # GET /api/sessions needs a signed-in session (B1-3): sign in as leadership first.
+  local n=""
+  if signin leadership "${ALIGN_LEADERSHIP_PASSCODE:-leadership-demo}"; then
+    n="$(curl -fsS -b "$(jar leadership)" "$ALIGN_URL/api/sessions" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).sessions.length)}catch{}})')"
+  fi
+  [ -n "$n" ] && ok "Captured agent sessions: $n" || bad "Could not read captured agent sessions (sign-in or /api/sessions failed)"
   [ "$FAILED" = 0 ] && printf "\n\033[32mReady.\033[0m\n" || printf "\n\033[31mFix the items marked ✗ before recording.\033[0m\n"
 }
 
