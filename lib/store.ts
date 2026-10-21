@@ -115,7 +115,7 @@ export function setCaptureConsents(s: AppState, list: CaptureConsent[]) {
 
 /**
  * Reset to the Northstar fixture. `fresh` drops carried-over Sparta evidence and the operator-captured Alike
- * reference (used when leaving a custom scenario). Sessions and the audit log are kept either way.
+ * reference (used when leaving a custom scenario). Consented sessions and the audit log are kept either way.
  */
 export async function resetState(by: { actor: string; sid: string }, opts?: { fresh?: boolean }) {
   return mutate((s) => {
@@ -132,8 +132,11 @@ export async function resetState(by: { actor: string; sid: string }, opts?: { fr
         fresh.brief.alike_status = s.brief.alike_status;
       }
     }
-    // Captured agent sessions are real history: keep them. Their mappings are recomputed against the reset registry.
-    fresh.sessions = (s.sessions ?? []).map((x) => ({ ...x, directives: [] })); // deliveries belong to the reset history
+    // Captured agent sessions are real history: keep the ones whose harness and repo still have a capture consent
+    // record (B1-2, ruling R1 default). Sessions without one are purged. Mappings are recomputed against the reset registry.
+    fresh.sessions = (s.sessions ?? [])
+      .filter((x) => hasCaptureConsent(s, x.harness, x.repo))
+      .map((x) => ({ ...x, directives: [] })); // deliveries belong to the reset history
     fresh.mappings = [];
     // The audit log is never erased: a reset is itself an audited event.
     fresh.audit = [

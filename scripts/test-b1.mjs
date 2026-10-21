@@ -127,6 +127,58 @@ console.log("\n# B1-1 consent");
   check("after revoke, events are refused again", after.status === 403, `status=${after.status}`);
 }
 
+// ---------------- B1-2 delete + reset purge ----------------
+console.log("\n# B1-2 delete");
+{
+  for (const id of created) {
+    const r = await call("DELETE", `/api/sessions/${encodeURIComponent(id)}`, { cookie: lead });
+    check(`B1-1 session deleted (${id})`, r.status === 200, `status=${r.status}`);
+  }
+  created.clear();
+  await grant(lead);
+  const idA = `claude-code:${sid("delete")}`;
+  const a = await postEvent(event(idA.slice("claude-code:".length)));
+  check("consented session created for the delete test", a.status === 200, `status=${a.status}`);
+  await sleep(2500); // let any scheduled mapping settle first
+  check("marker is in data/state.json before the delete", markerCount() > 0, `count=${markerCount()}`);
+
+  const delUrl = `/api/sessions/${encodeURIComponent(idA)}`;
+  const anon = await call("DELETE", delUrl);
+  check("DELETE signed out is refused with 401", anon.status === 401, `status=${anon.status}`);
+  const foreign = await call("DELETE", delUrl, { cookie: lead, headers: { origin: "http://evil.example" } });
+  check("DELETE from a foreign Origin is refused (403)", foreign.status === 403, `status=${foreign.status}`);
+  const del = await call("DELETE", delUrl, { cookie: product });
+  check("DELETE /api/sessions/[id] removes the session", del.status === 200 && del.body?.id === idA, `status=${del.status} ${JSON.stringify(del.body)}`);
+  const again = await call("DELETE", delUrl, { cookie: product });
+  check("second DELETE returns 404", again.status === 404, `status=${again.status}`);
+  const st = await call("GET", "/api/state", { cookie: lead });
+  check("session gone from state", !(st.body?.sessions || []).some((s) => s.id === idA));
+  check("its mappings are gone from state", !(st.body?.mappings || []).some((m) => m.session_id === idA));
+  await sleep(2000); // a mapping scheduled before the delete must not bring a row back
+  const st2 = await call("GET", "/api/state", { cookie: lead });
+  check("no mapping row reappears after the delete", !(st2.body?.mappings || []).some((m) => m.session_id === idA));
+  const bad = await call("DELETE", "/api/sessions/not-a-session-id", { cookie: lead });
+  check("DELETE with a malformed id returns 400", bad.status === 400, `status=${bad.status}`);
+
+  console.log("\n# B1-2 reset purges only sessions with no consent record (R1 default)");
+  const idKeep = `claude-code:${sid("reset-keep")}`;
+  const idPurge = `claude-code:${sid("reset-purge")}`;
+  await grant(lead, OTHER_REPO);
+  const k = await postEvent(event(idKeep.slice(12)));
+  const p = await postEvent(event(idPurge.slice(12), OTHER_REPO));
+  check("consented sessions created in two repos", k.status === 200 && p.status === 200, `keep=${k.status} purge=${p.status}`);
+  await revoke(lead, OTHER_REPO);
+  const reset = await call("POST", "/api/reset", { cookie: lead, json: { confirm: "reset" } });
+  check("reset succeeds", reset.status === 200, `status=${reset.status}`);
+  const after = await stateSessions(lead);
+  check("reset keeps the session whose repo still has consent", after.some((s) => s.id === idKeep));
+  check("reset purges the session whose consent was revoked", !after.some((s) => s.id === idPurge));
+  const dk = await call("DELETE", `/api/sessions/${encodeURIComponent(idKeep)}`, { cookie: lead });
+  check("kept session deleted", dk.status === 200, `status=${dk.status}`);
+  await sleep(500);
+  check("grep for the marker in data/state.json returns 0 after the deletes", existsSync(STATE_FILE) && markerCount() === 0, `count=${markerCount()}`);
+}
+
 // ---------------- cleanup ----------------
 await revoke(lead, REPO);
 await revoke(lead, OTHER_REPO);
