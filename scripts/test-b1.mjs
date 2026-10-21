@@ -179,10 +179,42 @@ console.log("\n# B1-2 delete");
   check("grep for the marker in data/state.json returns 0 after the deletes", existsSync(STATE_FILE) && markerCount() === 0, `count=${markerCount()}`);
 }
 
+// ---------------- B1-3 auth ----------------
+console.log("\n# B1-3 auth");
+{
+  await grant(lead);
+  const id = `claude-code:${sid("auth")}`;
+  const e = await postEvent(event(id.slice(12)));
+  if (e.status === 200) created.add(id);
+  const anonS = await call("GET", "/api/sessions");
+  check("GET /api/sessions signed out is refused with 401", anonS.status === 401 && !JSON.stringify(anonS.body).includes(MARKER), `status=${anonS.status}`);
+  const foreignS = await call("GET", "/api/sessions", { cookie: lead, headers: { origin: "http://evil.example" } });
+  check("GET /api/sessions from a foreign Origin is still refused (403)", foreignS.status === 403, `status=${foreignS.status}`);
+  const badCookie = await call("GET", "/api/sessions", { cookie: "align_session=forged.value" });
+  check("GET /api/sessions with a forged cookie is refused with 401", badCookie.status === 401, `status=${badCookie.status}`);
+  for (const [role, cookie] of [["leadership", lead], ["product", product]]) {
+    const r = await call("GET", "/api/sessions", { cookie });
+    check(`GET /api/sessions signed in as ${role} returns the session`, r.status === 200 && r.body.sessions.some((s) => s.id === id), `status=${r.status}`);
+  }
+  const anonM = await call("GET", "/api/mappings");
+  check("GET /api/mappings signed out is refused with 401", anonM.status === 401 && !("mappings" in (anonM.body || {})), `status=${anonM.status}`);
+  const m = await call("GET", "/api/mappings", { cookie: product });
+  check("GET /api/mappings signed in returns registry and mappings", m.status === 200 && Array.isArray(m.body.mappings) && Array.isArray(m.body.registry), `status=${m.status}`);
+  // Known open by design until B1-6: /api/state spreads the whole state (flow.ts viewFor) to every caller.
+  const leak = await call("GET", "/api/state");
+  console.log(`INFO /api/state signed out still lists ${(leak.body?.sessions || []).length} session(s): open until B1-6 (viewFor allowlist)`);
+}
+
 // ---------------- cleanup ----------------
+console.log("\n# cleanup");
+for (const id of created) {
+  const r = await call("DELETE", `/api/sessions/${encodeURIComponent(id)}`, { cookie: lead });
+  check(`synthetic session deleted (${id})`, r.status === 200, `status=${r.status}`);
+}
 await revoke(lead, REPO);
 await revoke(lead, OTHER_REPO);
-void product;
+await sleep(500);
+check("final: grep for the marker in data/state.json returns 0", markerCount() === 0, `count=${markerCount()}`);
 
 console.log(`\n${passes} passed, ${failures} failed`);
 console.log(failures ? `${failures} FAILED` : "ALL PASS");
