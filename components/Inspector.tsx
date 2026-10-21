@@ -1,5 +1,5 @@
 "use client";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Goal, GoalRelation, Proposal, SimulationRun, StateView, WorkItem } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { Badge, Button, OWNER_LABEL, Section, StateBadge, fmtTime } from "./ui";
@@ -515,12 +515,24 @@ function CustomRelation({ p, L, r }: { p: ViewProps; L: Labels; r: GoalRelation 
   const requirement = currentGoal(s, "ceo")?.measures.find((m) => m.id === companyMeasureId(s));
   const acc = r.status === "ACCEPTED" && isConflict ? accepted(s) : null;
   const plan = acc ? s.plans.find((x) => x.plan_id === acc.plan_ref.plan_id && x.plan_version === acc.plan_ref.plan_version) : undefined;
+  // Folded by default so the first screen leads with one requirement; the relation title stays visible.
+  const [open, setOpen] = useState(false);
   return (
     <>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <h2 className="text-[20px] font-bold text-zinc-900">{isConflict ? `${L.team.product} needs ${owning}` : "How these goals connect"}</h2>
-        <StateBadge state={r.status} labels={L} />
+        {r.status === "UNKNOWN" ? <Badge tone="amber">Not agreed yet</Badge> : <StateBadge state={r.status} labels={L} />}
       </div>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="mb-4 text-[16px] font-semibold text-violet-800 underline underline-offset-2 hover:text-violet-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+      >
+        {open ? "Hide details" : "Show details"}
+      </button>
+      {open && (
+      <>
       <p className="mb-4 text-[16px] leading-snug text-zinc-800">{r.label}</p>
       <div className="mb-4 text-[16px] text-zinc-600">
         {teamVersion(L, src, r.source_goal)} <span className="text-zinc-400">{RELATION_WORD[r.type] ?? r.type.replace("_", " ")}</span>{" "}
@@ -549,6 +561,8 @@ function CustomRelation({ p, L, r }: { p: ViewProps; L: Labels; r: GoalRelation 
           <span>{r.provenance}</span>
         </div>
       </Section>
+      </>
+      )}
       {acc && (
         <Section title="What was decided">
           <div className="rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200">
