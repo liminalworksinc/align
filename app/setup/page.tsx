@@ -41,7 +41,7 @@ const emptyTeam = (): TeamForm => ({ team: "", lead: "", objective: "", measures
 const EMPTY: Form = {
   company: "",
   timeframe: "",
-  leadership: { team: "Leadership", lead: "" },
+  leadership: { team: "", lead: "" },
   company_goal: { objective: "", measures: [""] },
   company_measure: 0,
   asking: emptyTeam(),
@@ -268,7 +268,7 @@ export default function SetupPage() {
           <input className={field} value={form.timeframe} onChange={(e) => set((f) => ((f.timeframe = e.target.value), f))} />
         </Field>
         <Field label="Leadership team name" error={err("leadership.team")}>
-          <input className={field} value={form.leadership.team} onChange={(e) => set((f) => ((f.leadership.team = e.target.value), f))} />
+          <input className={field} placeholder="e.g. Leadership" value={form.leadership.team} onChange={(e) => set((f) => ((f.leadership.team = e.target.value), f))} />
         </Field>
         <Field label="Leadership lead" error={err("leadership.lead")}>
           <input className={field} value={form.leadership.lead} onChange={(e) => set((f) => ((f.leadership.lead = e.target.value), f))} />
