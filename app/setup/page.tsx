@@ -35,17 +35,17 @@ interface Form {
 }
 type Issues = Record<string, string[]>;
 
-const MAX_WORK_PER_TEAM = 3; // UI cap for the demo; the API allows more
+const MAX_WORK_PER_TEAM = 3; // same cap as the API
 
-const emptyTeam = (): TeamForm => ({ team: "", lead: "", objective: "", measures: [""] });
+const emptyTeam = (measures: string[]): TeamForm => ({ team: "", lead: "", objective: "", measures });
 const EMPTY: Form = {
   company: "",
   timeframe: "",
   leadership: { team: "", lead: "" },
   company_goal: { objective: "", measures: [""] },
   company_measure: 0,
-  asking: emptyTeam(),
-  owning: emptyTeam(),
+  asking: emptyTeam([]), // optional
+  owning: emptyTeam([""]),
   owner_measure: 0,
   dependency: "",
   work_items: [
@@ -55,22 +55,23 @@ const EMPTY: Form = {
   plan: { title: "", text: "" },
 };
 
-/** The request body: trimmed text, optional fields dropped when empty. */
+/** The request body: trimmed text, optional fields dropped when empty (the server fills in its defaults). */
 function toBody(f: Form) {
   const t = (s: string) => s.trim();
+  const leadership = { ...(t(f.leadership.team) ? { team: t(f.leadership.team) } : {}), ...(t(f.leadership.lead) ? { lead: t(f.leadership.lead) } : {}) };
   return {
     confirm: "replace",
     company: t(f.company),
     ...(t(f.timeframe) ? { timeframe: t(f.timeframe) } : {}),
-    leadership: { team: t(f.leadership.team), lead: t(f.leadership.lead) },
+    ...(Object.keys(leadership).length ? { leadership } : {}),
     company_goal: { objective: t(f.company_goal.objective), measures: f.company_goal.measures.map(t) },
     company_measure: f.company_measure,
-    asking: { ...f.asking, team: t(f.asking.team), lead: t(f.asking.lead), objective: t(f.asking.objective), measures: f.asking.measures.map(t) },
+    asking: { ...f.asking, team: t(f.asking.team), lead: t(f.asking.lead), objective: t(f.asking.objective), measures: f.asking.measures.map(t).filter(Boolean) },
     owning: { ...f.owning, team: t(f.owning.team), lead: t(f.owning.lead), objective: t(f.owning.objective), measures: f.owning.measures.map(t) },
     owner_measure: f.owner_measure,
     dependency: t(f.dependency),
     work_items: f.work_items.map((w) => ({ team: w.team, task: t(w.task), ...(t(w.status) ? { status: t(w.status) } : {}) })),
-    plan: { title: t(f.plan.title), text: t(f.plan.text) },
+    plan: { ...(t(f.plan.title) ? { title: t(f.plan.title) } : {}), text: t(f.plan.text) },
   };
 }
 
@@ -121,6 +122,7 @@ export default function SetupPage() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ company: string; team: string } | null>(null);
   const [team, setTeam] = useState("Leadership"); // leadership's team name in the current workspace, for the role line
+  const [more, setMore] = useState(false); // optional fields shown; an optional field that has a value always stays visible
 
   useEffect(() => {
     fetch("/api/session", { cache: "no-store" })
@@ -149,7 +151,7 @@ export default function SetupPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        setDone({ company: data.company, team: form.leadership.team.trim() });
+        setDone({ company: data.company, team: form.leadership.team.trim() || "Leadership" });
         return;
       }
       if (res.status === 400 && Array.isArray(data.issues)) {
@@ -205,15 +207,15 @@ export default function SetupPage() {
           <input className={field} value={t.objective} onChange={(e) => set((f) => ((f[side].objective = e.target.value), f))} />
         </Field>
         {t.measures.map((m, i) => (
-          <Field key={i} label={side === "owning" && i === form.owner_measure ? `Measure ${i + 1} (measured on today)` : `Measure ${i + 1}`} error={err(`${side}.measures.${i}`)}>
+          <Field key={i} label={side === "asking" ? `Measure ${i + 1} (optional)` : t.measures.length > 1 && i === form.owner_measure ? `Measure ${i + 1} (measured on today)` : `Measure ${i + 1}`} error={err(`${side}.measures.${i}`)}>
             <div className="flex gap-2">
               <input className={field} value={m} onChange={(e) => set((f) => ((f[side].measures[i] = e.target.value), f))} />
-              {side === "owning" && (
+              {side === "owning" && t.measures.length > 1 && (
                 <Button kind="ghost" onClick={() => set((f) => ((f.owner_measure = i), f))} disabled={form.owner_measure === i}>
                   {form.owner_measure === i ? "Measured on this today" : "Pick"}
                 </Button>
               )}
-              {t.measures.length > 1 && (
+              {(side === "asking" || t.measures.length > 1) && (
                 <Button
                   kind="ghost"
                   onClick={() =>
@@ -235,10 +237,10 @@ export default function SetupPage() {
             {m}
           </p>
         ))}
-        {t.measures.length < 5 && (
+        {more && t.measures.length < 5 && (
           <div className="mb-4">
             <Button kind="ghost" onClick={() => set((f) => (f[side].measures.push(""), f))}>
-              Add a measure
+              {side === "asking" ? "Add a measure (optional)" : "Add another measure"}
             </Button>
           </div>
         )}
@@ -251,6 +253,9 @@ export default function SetupPage() {
   const full = (side: Side) => workCount(side) >= MAX_WORK_PER_TEAM;
   const named = (side: Side) => form[side].team.trim() || (side === "asking" ? "the asking team" : "the owning team");
   const unplaced = Object.entries(issues).filter(([p]) => p === "form" || p === "");
+  const show = (value: string) => more || value !== ""; // an optional field: visible when expanded, or once it has a value
+  // The two starting rows (one per team) need no team picker; any other mix shows it.
+  const simpleWork = form.work_items.length === 2 && form.work_items[0].team === "asking" && form.work_items[1].team === "owning";
 
   return page(
     <>
@@ -259,20 +264,36 @@ export default function SetupPage() {
       <p className="mb-6 text-[16px] text-zinc-700">
         Describe one real disagreement between two teams. Saving replaces everything currently in Align with this scenario.
       </p>
+      <div className="mb-6 rounded-[14px] border border-zinc-200 bg-white p-4">
+        <Button kind="ghost" onClick={() => setMore((m) => !m)}>
+          {more ? "Hide optional detail" : "Add more detail (optional)"}
+        </Button>
+        <p className="mt-2 text-[16px] text-zinc-600">
+          {more
+            ? "Optional fields are marked below. Anything left empty is filled in for you."
+            : "Only the fields needed for the conflict are shown. More detail adds a timeframe, leadership names, more requirements and measures, more work items, statuses and a plan title."}
+        </p>
+      </div>
 
-      <Step n={1} title="Company and leadership">
+      <Step n={1} title={more ? "Company and leadership" : "Company"}>
         <Field label="Company name" error={err("company")}>
           <input className={field} value={form.company} onChange={(e) => set((f) => ((f.company = e.target.value), f))} />
         </Field>
-        <Field label="Timeframe (optional)" hint="For example: This quarter" error={err("timeframe")}>
-          <input className={field} value={form.timeframe} onChange={(e) => set((f) => ((f.timeframe = e.target.value), f))} />
-        </Field>
-        <Field label="Leadership team name" error={err("leadership.team")}>
-          <input className={field} placeholder="e.g. Leadership" value={form.leadership.team} onChange={(e) => set((f) => ((f.leadership.team = e.target.value), f))} />
-        </Field>
-        <Field label="Leadership lead" error={err("leadership.lead")}>
-          <input className={field} value={form.leadership.lead} onChange={(e) => set((f) => ((f.leadership.lead = e.target.value), f))} />
-        </Field>
+        {show(form.timeframe) && (
+          <Field label="Timeframe (optional)" hint="For example: This quarter" error={err("timeframe")}>
+            <input className={field} value={form.timeframe} onChange={(e) => set((f) => ((f.timeframe = e.target.value), f))} />
+          </Field>
+        )}
+        {show(form.leadership.team) && (
+          <Field label="Leadership team name (optional)" hint="Leave empty to use: Leadership" error={err("leadership.team")}>
+            <input className={field} placeholder="e.g. Leadership" value={form.leadership.team} onChange={(e) => set((f) => ((f.leadership.team = e.target.value), f))} />
+          </Field>
+        )}
+        {show(form.leadership.lead) && (
+          <Field label="Leadership lead (optional)" hint="Leave empty to use: Leadership" error={err("leadership.lead")}>
+            <input className={field} value={form.leadership.lead} onChange={(e) => set((f) => ((f.leadership.lead = e.target.value), f))} />
+          </Field>
+        )}
       </Step>
 
       <Step n={2} title="The company goal that changed">
@@ -280,12 +301,18 @@ export default function SetupPage() {
           <input className={field} value={form.company_goal.objective} onChange={(e) => set((f) => ((f.company_goal.objective = e.target.value), f))} />
         </Field>
         {form.company_goal.measures.map((m, i) => (
-          <Field key={i} label={i === form.company_measure ? `Requirement ${i + 1} (the one in conflict)` : `Requirement ${i + 1}`} error={err(`company_goal.measures.${i}`)}>
+          <Field
+            key={i}
+            label={form.company_goal.measures.length === 1 ? "The requirement in conflict" : i === form.company_measure ? `Requirement ${i + 1} (the one in conflict)` : `Requirement ${i + 1}`}
+            error={err(`company_goal.measures.${i}`)}
+          >
             <div className="flex gap-2">
               <input className={field} value={m} onChange={(e) => set((f) => ((f.company_goal.measures[i] = e.target.value), f))} />
-              <Button kind="ghost" onClick={() => set((f) => ((f.company_measure = i), f))} disabled={form.company_measure === i}>
-                {form.company_measure === i ? "This is the one in conflict" : "Pick"}
-              </Button>
+              {form.company_goal.measures.length > 1 && (
+                <Button kind="ghost" onClick={() => set((f) => ((f.company_measure = i), f))} disabled={form.company_measure === i}>
+                  {form.company_measure === i ? "This is the one in conflict" : "Pick"}
+                </Button>
+              )}
               {form.company_goal.measures.length > 1 && (
                 <Button
                   kind="ghost"
@@ -308,9 +335,9 @@ export default function SetupPage() {
             {m}
           </p>
         ))}
-        {form.company_goal.measures.length < 5 && (
+        {more && form.company_goal.measures.length < 5 && (
           <Button kind="ghost" onClick={() => set((f) => (f.company_goal.measures.push(""), f))}>
-            Add a requirement
+            Add another requirement
           </Button>
         )}
       </Step>
@@ -333,25 +360,29 @@ export default function SetupPage() {
       )}
 
       <Step n={5} title="Work in progress">
-        <p className="mb-4 text-[16px] text-zinc-700">At least one item for each team. These show who has work on the old plan after a decision.</p>
+        <p className="mb-4 text-[16px] text-zinc-700">One item for each team, up to {MAX_WORK_PER_TEAM}. These show who has work on the old plan after a decision.</p>
         {form.work_items.map((w, i) => (
           <div key={i} className="mb-4 rounded-[10px] border border-zinc-200 p-3">
-            <Field label="Team" error={err(`work_items.${i}.team`)}>
-              <select className={field} value={w.team} onChange={(e) => set((f) => ((f.work_items[i].team = e.target.value as Side), f))}>
-                <option value="asking" disabled={w.team !== "asking" && full("asking")}>
-                  {named("asking")}
-                </option>
-                <option value="owning" disabled={w.team !== "owning" && full("owning")}>
-                  {named("owning")}
-                </option>
-              </select>
-            </Field>
-            <Field label="Work item" error={err(`work_items.${i}.task`)}>
+            {(more || !simpleWork) && (
+              <Field label="Team" error={err(`work_items.${i}.team`)}>
+                <select className={field} value={w.team} onChange={(e) => set((f) => ((f.work_items[i].team = e.target.value as Side), f))}>
+                  <option value="asking" disabled={w.team !== "asking" && full("asking")}>
+                    {named("asking")}
+                  </option>
+                  <option value="owning" disabled={w.team !== "owning" && full("owning")}>
+                    {named("owning")}
+                  </option>
+                </select>
+              </Field>
+            )}
+            <Field label={more || !simpleWork ? "Work item" : `Work item for ${named(w.team)}`} error={err(`work_items.${i}.task`)}>
               <input className={field} value={w.task} onChange={(e) => set((f) => ((f.work_items[i].task = e.target.value), f))} />
             </Field>
-            <Field label="Status (optional)" hint="For example: in progress" error={err(`work_items.${i}.status`)}>
-              <input className={field} value={w.status} onChange={(e) => set((f) => ((f.work_items[i].status = e.target.value), f))} />
-            </Field>
+            {show(w.status) && (
+              <Field label="Status (optional)" hint="For example: in progress" error={err(`work_items.${i}.status`)}>
+                <input className={field} value={w.status} onChange={(e) => set((f) => ((f.work_items[i].status = e.target.value), f))} />
+              </Field>
+            )}
             {form.work_items.length > 2 && (
               <Button kind="ghost" onClick={() => set((f) => (f.work_items.splice(i, 1), f))}>
                 Remove this item
@@ -369,7 +400,7 @@ export default function SetupPage() {
             {named(side)} has {MAX_WORK_PER_TEAM} work items, the most this form takes.
           </p>
         ))}
-        {!(full("asking") && full("owning")) && (
+        {more && !(full("asking") && full("owning")) && (
           <Button kind="ghost" onClick={() => set((f) => (f.work_items.push({ team: full("asking") ? "owning" : "asking", task: "", status: "" }), f))}>
             Add a work item
           </Button>
@@ -377,9 +408,11 @@ export default function SetupPage() {
       </Step>
 
       <Step n={6} title="The proposed plan">
-        <Field label="Plan title" error={err("plan.title")}>
-          <input className={field} value={form.plan.title} onChange={(e) => set((f) => ((f.plan.title = e.target.value), f))} />
-        </Field>
+        {show(form.plan.title) && (
+          <Field label="Plan title (optional)" hint="Leave empty to use: The proposed plan" error={err("plan.title")}>
+            <input className={field} value={form.plan.title} onChange={(e) => set((f) => ((f.plan.title = e.target.value), f))} />
+          </Field>
+        )}
         <Field label="The plan" hint="What would change, and what the asking team gives in return. 20 to 4,000 characters." error={err("plan.text")}>
           <textarea className={field} rows={6} value={form.plan.text} onChange={(e) => set((f) => ((f.plan.text = e.target.value), f))} />
         </Field>
