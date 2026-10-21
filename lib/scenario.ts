@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { AppState, Goal, GoalRelation, Measure, Plan, PlanParams, WorkItem } from "./types";
 import type { Session } from "./auth";
-import { HttpError, id, mutate, normalizePlanText, now, sha256 } from "./store";
+import { captureConsents, HttpError, id, mutate, normalizePlanText, now, setCaptureConsents, sha256 } from "./store";
 import { registryVersion } from "./registry";
 
 // Bring-your-own two-team conflict. Leadership enters it on /setup; the server builds the whole state from the
@@ -245,7 +245,7 @@ export function buildCustomState(input: ScenarioInput, at: string, input_sha256:
   return s;
 }
 
-/** Replace the whole workspace with the custom scenario. Sessions (directives cleared) and the audit log are kept. */
+/** Replace the whole workspace with the custom scenario. Sessions (directives cleared), capture consents and the audit log are kept. */
 export async function setupScenario(who: Session, input: ScenarioInput, input_sha256: string) {
   return mutate((s) => {
     if (s.proposals.some((p) => !["RATIFIED", "REJECTED"].includes(p.state)))
@@ -258,8 +258,10 @@ export async function setupScenario(who: Session, input: ScenarioInput, input_sh
       ...s.audit,
       { id: id("a"), actor: who.actor, session_id: who.sid, action: "scenario_setup", target: `sha256:${input_sha256}`, at },
     ];
+    const consents = captureConsents(s); // consent is per harness and repo, not per scenario
     for (const k of Object.keys(s)) delete (s as unknown as Record<string, unknown>)[k];
     Object.assign(s, next);
+    setCaptureConsents(s, consents);
     return {
       ok: true as const,
       scenario: "custom" as const,

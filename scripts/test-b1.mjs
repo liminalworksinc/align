@@ -289,6 +289,24 @@ console.log(`\n# B1-5 key presence (server expected: ${EXPECT_MAPPER})`);
   check("no mapping row at all for the new session", !(after.body?.mappings || []).some((x) => x.session_id === id));
 }
 
+// ---------------- B1-7 custom setup keeps capture consent ----------------
+console.log("\n# B1-7 setting up a custom scenario keeps capture consent");
+{
+  await grant(lead);
+  const fixture = JSON.parse(readFileSync(path.join(ROOT, "data", "scenarios", "example-custom.json"), "utf8"));
+  const setup = await call("POST", "/api/scenario", { cookie: lead, json: fixture });
+  check("leadership sets up the Fernway scenario", setup.status === 200 && setup.body?.scenario === "custom", `status=${setup.status} ${JSON.stringify(setup.body)}`);
+  const list = await call("GET", "/api/sessions/consent", { cookie: lead });
+  check("the consent record survives the custom setup", list.status === 200 && list.body.consents.some((c) => c.harness === "claude-code" && c.repo === REPO), JSON.stringify(list.body));
+  const id = `claude-code:${sid("after-setup")}`;
+  const e = await postEvent(event(id.slice(12)));
+  if (e.status === 200) created.add(id);
+  check("a consented event is still accepted after the custom setup", e.status === 200, `status=${e.status}`);
+  const reset = await call("POST", "/api/reset", { cookie: lead, json: { confirm: "reset" } });
+  const back = (await call("GET", "/api/state", { cookie: lead })).body || {};
+  check("leadership resets back to Northstar", reset.status === 200 && back.company === "Northstar Security" && !("scenario" in back), `status=${reset.status} company=${back.company}`);
+}
+
 // ---------------- cleanup ----------------
 console.log("\n# cleanup");
 for (const id of created) {
