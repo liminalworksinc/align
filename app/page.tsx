@@ -61,6 +61,19 @@ const teamInitials = (team: string) => {
 };
 // "<Team> lead", except when the team name already says it (a leadership team, or a name ending in "Lead").
 const youAre = (team: string, actor: string) => (actor === "leadership" || /\b(lead|leadership)$/i.test(team) ? team : `${team} lead`);
+// Custom shell: below 1100px the page scrolls as a whole and the Inspector rail stacks under the main column, so
+// independent testers on 900–1024px laptops never scroll sideways. The header wraps at every width.
+const CUSTOM_SHELL =
+  "grid min-h-screen grid-cols-[236px_minmax(0,1fr)] grid-rows-[auto_auto_auto] min-[1100px]:h-screen min-[1100px]:grid-cols-[236px_minmax(0,1fr)_360px] min-[1100px]:grid-rows-[auto_minmax(0,1fr)] min-[1100px]:overflow-hidden";
+const CUSTOM_SIDEBAR =
+  "sticky top-0 row-span-3 flex h-screen flex-col self-start border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5 min-[1100px]:static min-[1100px]:row-span-2 min-[1100px]:h-auto min-[1100px]:self-stretch";
+const CUSTOM_HEADER = "flex min-h-16 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-200 px-6 py-2.5 min-[1100px]:col-span-2";
+const CUSTOM_MAIN = "@container relative min-w-0 p-6 text-[16px] min-[1100px]:overflow-y-auto";
+const CUSTOM_RAIL = "min-w-0 border-t border-zinc-200 bg-zinc-50 p-[22px] min-[1100px]:overflow-y-auto min-[1100px]:border-t-0 min-[1100px]:border-l";
+// The company-goal strip stacks its three parts when the main column is narrow.
+const CUSTOM_STRIP =
+  "mb-4 grid grid-cols-1 items-center gap-4 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5 @[60rem]:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] @[60rem]:gap-6";
+const CUSTOM_STRIP_CELL = "flex min-w-0 flex-col gap-1 border-t border-zinc-200 pt-3 @[60rem]:border-t-0 @[60rem]:border-l @[60rem]:pl-6 @[60rem]:pt-0";
 // api() falls back to "HTTP <status>" when a response carries no sentence; custom screens never show that.
 const plainError = (e: string) => (/^HTTP \d+$/.test(e) ? "Something went wrong. Please try again." : e);
 
@@ -246,9 +259,9 @@ export default function Page() {
   }
 
   return (
-    <div className="grid h-screen grid-cols-[236px_minmax(0,1fr)_360px] grid-rows-[64px_minmax(0,1fr)] overflow-hidden">
+    <div className={custom ? CUSTOM_SHELL : "grid h-screen grid-cols-[236px_minmax(0,1fr)_360px] grid-rows-[64px_minmax(0,1fr)] overflow-hidden"}>
       {/* Sidebar */}
-      <aside className="row-span-2 flex flex-col border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5">
+      <aside className={custom ? CUSTOM_SIDEBAR : "row-span-2 flex flex-col border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5"}>
         <div className="flex h-16 items-center gap-2.5 px-2.5">
           <span aria-hidden className="grid size-7 place-items-center rounded-lg bg-violet-700 font-display text-[18px] text-black">A</span>
           <span className="font-display text-[22px] leading-none">Align</span>
@@ -305,12 +318,12 @@ export default function Page() {
       </aside>
 
       {/* Top bar */}
-      <header className="col-span-2 flex items-center gap-4 border-b border-zinc-200 px-6">
+      <header className={custom ? CUSTOM_HEADER : "col-span-2 flex items-center gap-4 border-b border-zinc-200 px-6"}>
         <div className="shrink-0 whitespace-nowrap text-[15px] text-zinc-500">
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
         </div>
         {custom && (
-          <span className="shrink-0 whitespace-nowrap rounded-full border border-violet-700 bg-violet-50 px-3 py-1 text-[16px] font-semibold text-violet-700">
+          <span className="rounded-full border border-violet-700 bg-violet-50 px-3 py-1 text-[16px] font-semibold text-violet-700">
             You are: {youAre(L.role[me.actor], me.actor)}
           </span>
         )}
@@ -320,7 +333,7 @@ export default function Page() {
               {L.team.product} and {L.team.security} agreed
             </Badge>
           ) : unresolved && me.actor !== "leadership" ? (
-            <span className="block h-9 min-w-0 truncate rounded-full border border-amber-700 bg-amber-50 px-3 font-mono text-[14px] leading-[34px] tracking-[0.04em] text-amber-700">
+            <span className="rounded-2xl border border-amber-700 bg-amber-50 px-3 py-1.5 font-mono text-[14px] leading-snug tracking-[0.04em] text-amber-700">
               ▲ New company goal · {L.team.product} and {L.team.security} haven’t agreed yet
             </span>
           ) : null
@@ -340,7 +353,7 @@ export default function Page() {
         ) : lastPush ? (
           <Badge tone="neutral">Company goal {lastPush.version} sent {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Badge>
         ) : null}
-        <div className="ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap">
+        <div className={custom ? "ml-auto flex min-w-0 items-center gap-3" : "ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap"}>
           {ops && !custom && (
             <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
               {confirmReset ? "Click again to reset" : "Start the demo over"}
@@ -371,7 +384,7 @@ export default function Page() {
       </header>
 
       {/* Canvas */}
-      <main className={custom ? "relative overflow-y-auto p-6 text-[16px]" : "relative overflow-y-auto p-6"}>
+      <main className={custom ? CUSTOM_MAIN : "relative overflow-y-auto p-6"}>
         {loadError && (
           <div role="status" className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-[15px] font-medium text-amber-900 ring-1 ring-amber-300">
             ▲ Lost connection to the server ({loadError}). Showing the last update; reconnecting automatically.
@@ -388,11 +401,11 @@ export default function Page() {
           </div>
         )}
         {me.actor !== "leadership" && ceo && (
-          <div className="mb-4 grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-6 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5">
+          <div className={custom ? CUSTOM_STRIP : "mb-4 grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-6 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5"}>
             <div className="flex min-w-0 items-center gap-4">
               <span aria-hidden className="grid size-[52px] shrink-0 place-items-center rounded-xl bg-violet-700 text-[22px] text-black">◎</span>
               <div className="min-w-0">
-                <div className="flex items-center gap-2.5">
+                <div className={custom ? "flex flex-wrap items-center gap-2.5" : "flex items-center gap-2.5"}>
                   <span className="al-lbl">Company goal</span>
                   <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[12px] text-zinc-700">{state.timeframe}</span>
                   {ceo.changed && <Badge tone="amber">Changed today</Badge>}
@@ -400,7 +413,7 @@ export default function Page() {
                 <div className="mt-0.5 line-clamp-2 text-[17px] font-semibold leading-snug text-zinc-900" title={ceo.objective}>{ceo.objective}</div>
               </div>
             </div>
-            <div className="flex flex-col gap-1 border-l border-zinc-200 pl-6">
+            <div className={custom ? CUSTOM_STRIP_CELL : "flex flex-col gap-1 border-l border-zinc-200 pl-6"}>
               {custom ? (
                 <span className="al-lbl !text-amber-700">The new company requirement</span>
               ) : (
@@ -413,7 +426,7 @@ export default function Page() {
                 </span>
               ) : <span className="text-[12.5px] text-zinc-500">Product and Security: {rel.status === "ACCEPTED" ? "agreed" : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}</span>)}
             </div>
-            <div className="flex flex-col gap-1 border-l border-zinc-200 pl-6">
+            <div className={custom ? CUSTOM_STRIP_CELL : "flex flex-col gap-1 border-l border-zinc-200 pl-6"}>
               <span className="al-lbl !text-violet-700">Your goal{myGoal ? ` · ${myGoal.version}` : ""}</span>
               <span className="line-clamp-2 text-[14px] leading-snug text-zinc-900">{myGoal?.objective ?? "Unknown"}</span>
               {custom && myTarget && <span className="line-clamp-2 text-[14px] leading-snug text-zinc-700">Target: {myTarget.text}</span>}
@@ -445,7 +458,7 @@ export default function Page() {
       </main>
 
       {/* Right rail: the live AI-agent pane on the decision screen, the inspector everywhere else */}
-      <aside className="overflow-y-auto border-l border-zinc-200 bg-zinc-50 p-[22px]" aria-label={focus ? "Security's AI agent" : "Inspector"}>
+      <aside className={custom ? CUSTOM_RAIL : "overflow-y-auto border-l border-zinc-200 bg-zinc-50 p-[22px]"} aria-label={focus ? "Security's AI agent" : "Inspector"}>
         {focus ? <AgentPane s={state} /> : <Inspector {...props} />}
       </aside>
     </div>
