@@ -280,6 +280,9 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
   if (acc && rel?.status === "ACCEPTED") {
     const goal = s.goals.find((g) => g.id === acc.new_goal_id);
     const newTarget = goal?.measures.find((m) => m.id === decisionMeasureId(s, acc))?.text ?? goal?.objective ?? "";
+    // What the owning team's approval depends on: its conditions field, else the reason it gave when asking for changes.
+    const lastCounter = s.proposals.find((p) => p.id === acc.proposal_id)?.counter_versions.at(-1);
+    const conditions = lastCounter?.conditions || lastCounter?.rationale || "";
     return (
       <div className="flex flex-col gap-4">
         <Header label="Decision record" right={<Badge tone="neutral">Agreement reached</Badge>} />
@@ -290,7 +293,15 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
           <p className="mt-2 max-w-[680px] text-[16px] text-zinc-700">
             The previous version is kept.{acc.ratified_at ? ` Approved by ${owner} at ${fmtTime(acc.ratified_at)}.` : ""}
           </p>
+          <p className="mt-1 max-w-[680px] text-[16px] font-semibold text-zinc-900">This records what the two teams agreed. It is not approval to launch.</p>
         </div>
+        {conditions && (
+          <section aria-label="Conditions" className="rounded-[14px] border border-amber-300 bg-amber-50 p-[18px]">
+            <h2 className="al-lbl !text-amber-700">Conditions</h2>
+            <p className="mt-1 whitespace-pre-wrap text-[16px] text-zinc-900">{conditions}</p>
+            <p className="mt-1 text-[14px] text-zinc-600">{owning} asked for these when it asked for changes.</p>
+          </section>
+        )}
         {/* The approved target shows once, at the top of the old-plan panel (and in the header card). */}
         <ul aria-label="What this record shows" className="flex flex-col gap-1.5 rounded-[14px] border border-zinc-200 bg-white p-[18px] text-[17px] text-zinc-900">
           <li>

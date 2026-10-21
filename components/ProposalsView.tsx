@@ -582,13 +582,15 @@ function CounterEdit({ p, by }: { p: Proposal; by: string }) {
   const last = p.counter_versions.at(-1);
   if (!last) return null;
   const prev = p.counter_versions.length > 1 ? p.counter_versions[p.counter_versions.length - 2].proposed_measure_text : p.proposed_measure_text;
-  const added = addedText(prev, last.proposed_measure_text);
+  // Drop the joining punctuation the diff keeps (", " or ". ") so the quote starts at the added words.
+  const added = addedText(prev, last.proposed_measure_text)?.replace(/^[,.\s]+/, "") || null;
   return (
     <div className="mt-1 space-y-1 text-[16px] text-amber-950">
       <p>
         {by} {added ? "added" : "changed the new target to"}: &ldquo;{added ?? last.proposed_measure_text}&rdquo;
       </p>
       {last.rationale && <p>Why: {last.rationale}</p>}
+      {last.conditions && <p>Conditions: {last.conditions}</p>}
       <p>The change is highlighted below.</p>
     </div>
   );
@@ -938,6 +940,7 @@ function CounterForm({ p, latestText, busy, run, L }: { p: Proposal; latestText:
   );
   const [why, setWhy] = useState(L.northstar ? "Keep the critical security ticket off-limits." : "");
   const [changesPlan, setChangesPlan] = useState(false);
+  const [conditions, setConditions] = useState("");
   return (
     <form
       onSubmit={(e) => {
@@ -945,7 +948,7 @@ function CounterForm({ p, latestText, busy, run, L }: { p: Proposal; latestText:
         if (busy || !text.trim()) return;
         // Custom plans have no agent run, so the counter carries only the wording and the reason.
         if (L.northstar) void run(`/api/proposals/${p.id}/counter`, { proposed_measure_text: text, rationale: why, changes_plan: changesPlan });
-        else void run(`/api/proposals/${p.id}/counter`, { proposed_measure_text: text, rationale: why });
+        else void run(`/api/proposals/${p.id}/counter`, { proposed_measure_text: text, rationale: why, ...(conditions.trim() ? { conditions } : {}) });
       }}
       className="space-y-2"
     >
@@ -957,6 +960,13 @@ function CounterForm({ p, latestText, busy, run, L }: { p: Proposal; latestText:
         <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Why you want these changes</span>
         <input className={inputCls} value={why} onChange={(e) => setWhy(e.target.value)} />
       </label>
+      {!L.northstar && (
+        <label className="block">
+          <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Conditions (optional)</span>
+          <span className="mb-1 block text-[14px] text-zinc-500">What your approval depends on, e.g. &ldquo;Approve if X and Y&rdquo;.</span>
+          <textarea className={inputCls} rows={2} maxLength={1000} value={conditions} onChange={(e) => setConditions(e.target.value)} />
+        </label>
+      )}
       {L.northstar && (
         <label className="flex items-start gap-2 text-[15px] text-zinc-800">
           <input

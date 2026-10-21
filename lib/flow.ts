@@ -122,11 +122,13 @@ function openProposal(s: AppState, pid: string) {
   return p;
 }
 
+export const MAX_CONDITIONS = 1000;
+
 export function counterProposal(
   s: AppState,
   who: Session,
   pid: string,
-  body: { proposed_measure_text?: string; rationale?: string; changes_plan?: boolean; plan_params?: PlanParams },
+  body: { proposed_measure_text?: string; rationale?: string; changes_plan?: boolean; plan_params?: PlanParams; conditions?: unknown },
 ) {
   const p = openProposal(s, pid);
   const prof = profileFor(s);
@@ -134,6 +136,14 @@ export function counterProposal(
   if (!["PENDING_SECURITY", "ACKNOWLEDGED_BY_PRODUCT"].includes(p.state)) conflict("This proposal can’t be changed right now");
   const text = String(body.proposed_measure_text || "").trim();
   if (!text) throw new HttpError(400, "Write the changes you’re asking for");
+  // Conditions are custom-only: Northstar ignores the field, so its counter shape never changes.
+  let conditions: string | undefined;
+  if (s.scenario === "custom" && body.conditions !== undefined && body.conditions !== null) {
+    if (typeof body.conditions !== "string") throw new HttpError(400, "Conditions must be text");
+    conditions = body.conditions.trim() || undefined;
+    if (conditions && conditions.length > MAX_CONDITIONS)
+      throw new HttpError(400, `Keep the conditions to ${MAX_CONDITIONS} characters or fewer`);
+  }
   const n = p.counter_versions.length + 1;
   // Plan identity is decided by comparing executable parameters, not by the counter's own claim:
   // if the counter carries plan parameters that differ from the tested plan's, the evidence no longer applies.
@@ -148,6 +158,7 @@ export function counterProposal(
     rationale: String(body.rationale || "").trim(),
     changes_plan: changesPlan,
     ...(body.plan_params ? { plan_params: body.plan_params } : {}),
+    ...(conditions ? { conditions } : {}), // appended last
   });
   // Tested report no longer matches the executable plan. A custom plan that was never tested stays UNTESTED.
   if (changesPlan && !(prof.planChangeKeepsUntested && p.test_status === "UNTESTED")) p.test_status = "STALE";

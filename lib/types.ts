@@ -159,6 +159,7 @@ export interface CounterVersion {
   changes_plan: boolean; // true when the counter changes test-relevant plan parameters
   plan_text?: string; // custom scenarios: the counter's revised inline plan text
   plan_hash?: string;
+  conditions?: string; // custom scenarios: what the owning team's approval depends on (≤ 1000 chars); never written in Northstar
 }
 
 export type ProposalState =

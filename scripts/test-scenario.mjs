@@ -232,11 +232,20 @@ async function main() {
   const f5 = await call("product", "POST", `/api/proposals/${pid}/accept`, { rationale: "x", accept_untested: true });
   const f5c = await call("product", "POST", `/api/proposals/${pid}/counter`, { proposed_measure_text: "x" });
   check("F5 asking team cannot approve or ask for changes -> 403", f5.status === 403 && f5c.status === 403, `${short(f5)} | ${short(f5c)}`);
-  const f6 = await call("security", "POST", `/api/proposals/${pid}/counter`, {
-    proposed_measure_text: `${body.proposed_measure_text}, reviewed weekly`,
-    rationale: "Needs a review cadence",
-  });
+  // Conditions: custom-only, trimmed, at most 1000 characters; a bad value changes nothing.
+  const counterBody = { proposed_measure_text: `${body.proposed_measure_text}, reviewed weekly`, rationale: "Needs a review cadence" };
+  const f6c = await call("security", "POST", `/api/proposals/${pid}/counter`, { ...counterBody, conditions: "x".repeat(1001) });
+  const f6t = await call("security", "POST", `/api/proposals/${pid}/counter`, { ...counterBody, conditions: 42 });
+  const afterBad = (await state()).proposals?.find((x) => x.id === pid);
+  check(
+    "F6c conditions over 1000 characters, or not text -> 400, proposal unchanged",
+    f6c.status === 400 && f6t.status === 400 && afterBad?.state === "PENDING_SECURITY" && afterBad.counter_versions.length === 0,
+    `${short(f6c)} | ${short(f6t)}`,
+  );
+  const CONDITIONS = "Approve only if the first condition is met and the second is confirmed in writing";
+  const f6 = await call("security", "POST", `/api/proposals/${pid}/counter`, { ...counterBody, conditions: `  ${CONDITIONS}\n ` });
   check("F6 owning team asks for changes -> COUNTERED, still UNTESTED", f6.status === 200 && f6.json?.state === "COUNTERED" && f6.json?.test_status === "UNTESTED", short(f6));
+  check("F6 the counter stores its conditions, trimmed, as the last field", f6.json?.counter_versions?.at(-1)?.conditions === CONDITIONS && Object.keys(f6.json.counter_versions.at(-1)).at(-1) === "conditions", JSON.stringify(f6.json?.counter_versions?.at(-1)));
   const f7 = await call("security", "POST", `/api/proposals/${pid}/acknowledge`, {});
   check("F7 owning team cannot accept its own change -> 403", f7.status === 403, short(f7));
   const f8 = await call("security", "POST", `/api/proposals/${pid}/accept`, { rationale: "early", accept_untested: true });
@@ -264,6 +273,9 @@ async function main() {
   const rel = (st.relations ?? []).find((r) => r.id === "r-product-security");
   check("F13 r-product-security ACCEPTED", rel?.status === "ACCEPTED", JSON.stringify(rel));
   check("F13 acceptance keeps test_status UNTESTED (receipt records the acknowledgement)", acc?.test_status === "UNTESTED", JSON.stringify(acc && { test_status: acc.test_status }));
+  const askView = await state("product");
+  const recCounter = (askView.proposals ?? []).find((x) => x.id === acc?.proposal_id)?.counter_versions?.at(-1);
+  check("F13 the record state carries the approved proposal's conditions, for the asking team too", recCounter?.conditions === CONDITIONS, JSON.stringify(recCounter));
   check("F13 audit records ratify_untested by security", (st.audit ?? []).some((a) => a.action === "ratify_untested" && a.actor === "security"));
   check("F14 custom state after approval still has no Northstar text or simulations", (st.simulations ?? []).length === 0 && !NORTHSTAR_TEXT.test(JSON.stringify({ ...st, audit: [] })));
 
