@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
-import type { Actor } from "@/lib/types";
+import { labelsFor } from "@/lib/labels";
+import type { Actor, StateView } from "@/lib/types";
 
 // Leadership sets up its own two-team conflict. Reached by URL only (/setup); nothing links here.
 // Every field maps 1:1 to the POST /api/scenario schema (lib/scenario.ts). Operator text is rendered as plain text only.
@@ -116,13 +117,18 @@ export default function SetupPage() {
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ company: string } | null>(null);
+  const [done, setDone] = useState<{ company: string; team: string } | null>(null);
+  const [team, setTeam] = useState("Leadership"); // leadership's team name in the current workspace, for the role line
 
   useEffect(() => {
     fetch("/api/session", { cache: "no-store" })
       .then((r) => r.json())
       .then((m: { actor: Actor | null }) => setActor(m.actor))
       .catch(() => setActor(null));
+    fetch("/api/state", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((st: StateView) => setTeam(labelsFor(st).role.leadership))
+      .catch(() => undefined);
   }, []);
 
   const set = (fn: (f: Form) => Form) => setForm((f) => fn(structuredClone(f)));
@@ -141,7 +147,7 @@ export default function SetupPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        setDone({ company: data.company });
+        setDone({ company: data.company, team: form.leadership.team.trim() });
         return;
       }
       if (res.status === 400 && Array.isArray(data.issues)) {
@@ -174,7 +180,7 @@ export default function SetupPage() {
   if (done)
     return page(
       <section className="rounded-[14px] border border-zinc-200 bg-white p-6">
-        <p className="mb-1 text-[16px] text-zinc-600">You are: Leadership lead</p>
+        <p className="mb-1 text-[16px] text-zinc-600">You are: {done.team}</p>
         <h1 className="mb-3 text-[24px] font-semibold">Scenario ready: {done.company}</h1>
         <p className="mb-5 text-[16px]">Each team lead can now sign in and see the conflict. Nothing has been sandbox-tested.</p>
         <Link href="/" className="inline-flex min-h-11 items-center rounded-[10px] bg-violet-700 px-[18px] text-[16px] font-semibold text-black hover:brightness-110">
@@ -244,7 +250,7 @@ export default function SetupPage() {
 
   return page(
     <>
-      <p className="mb-1 text-[16px] text-zinc-600">You are: Leadership lead</p>
+      <p className="mb-1 text-[16px] text-zinc-600">You are: {team}</p>
       <h1 className="mb-2 text-[28px] font-semibold">Set up your own conflict</h1>
       <p className="mb-6 text-[16px] text-zinc-700">
         Describe one real disagreement between two teams. Saving replaces everything currently in Align with this scenario.
