@@ -35,7 +35,12 @@ function withDefaults(s: AppState): AppState {
   return s;
 }
 
-function initialState(): AppState {
+/** Canonical form of inline plan text before hashing, so the same plan always gets the same hash. */
+export function normalizePlanText(text: string): string {
+  return text.replace(/\r\n?/g, "\n").trim();
+}
+
+export function initialState(): AppState {
   const fixture = JSON.parse(readFileSync(FIXTURE_FILE, "utf8")) as AppState;
   fixture.plans = fixture.plans.map((p) => ({ ...p, hash: planFileHash(p) }));
   return withDefaults(fixture);
@@ -80,18 +85,28 @@ export async function mutate<T>(fn: (s: AppState) => T | Promise<T>): Promise<T>
   }
 }
 
-export async function resetState(by: { actor: string; sid: string }) {
+/**
+ * Reset to the Northstar fixture. `fresh` drops carried-over Sparta evidence and the operator-captured Alike
+ * reference (used when leaving a custom scenario). Sessions and the audit log are kept either way.
+ */
+export async function resetState(by: { actor: string; sid: string }, opts?: { fresh?: boolean }) {
   return mutate((s) => {
     const fresh = initialState();
-    // Keep ingested Sparta evidence across demo resets. The fixture's Alike reference wins; an operator-captured one is kept only if the fixture has none.
-    fresh.simulations = s.simulations;
+    // Object.assign below never removes keys, so clear the custom-only fields first. Northstar never has them.
+    delete s.scenario;
+    delete s.teams;
+    delete s.scenario_config;
+    if (!opts?.fresh) {
+      // Keep ingested Sparta evidence across demo resets. The fixture's Alike reference wins; an operator-captured one is kept only if the fixture has none.
+      fresh.simulations = s.simulations;
+      if (!fresh.brief.alike_ref && s.brief.alike_ref) {
+        fresh.brief.alike_ref = s.brief.alike_ref;
+        fresh.brief.alike_status = s.brief.alike_status;
+      }
+    }
     // Captured agent sessions are real history: keep them. Their mappings are recomputed against the reset registry.
     fresh.sessions = (s.sessions ?? []).map((x) => ({ ...x, directives: [] })); // deliveries belong to the reset history
     fresh.mappings = [];
-    if (!fresh.brief.alike_ref && s.brief.alike_ref) {
-      fresh.brief.alike_ref = s.brief.alike_ref;
-      fresh.brief.alike_status = s.brief.alike_status;
-    }
     // The audit log is never erased: a reset is itself an audited event.
     fresh.audit = [
       ...s.audit,
