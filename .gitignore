@@ -40,3 +40,6 @@ yarn-error.log*
 .pnpm-debug.log*
 .vercel
 .claude/settings.local.json
+
+# Saved custom-scenario setup input (operator text; never committed)
+data/custom-scenario.json
