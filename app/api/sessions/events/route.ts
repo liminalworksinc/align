@@ -2,7 +2,7 @@ import path from "node:path";
 import { handle } from "@/lib/http";
 import { scheduleMapping } from "@/lib/mapper";
 import { markActed } from "@/lib/directives";
-import { HttpError, mutate, now } from "@/lib/store";
+import { hasCaptureConsent, HttpError, mutate, now, readState } from "@/lib/store";
 import type { AgentSession, SessionOriginKind } from "@/lib/types";
 
 // Ingest for local agent hooks (scripts/align-capture.mjs). No session cookie: hooks run on this machine.
@@ -152,7 +152,15 @@ export async function POST(req: Request) {
     const filePath = clean(ev.file_path);
     const id = `${harness}:${sessionId}`;
 
+    // B1-1: no consent record for this harness and repo means 403, and nothing is written or mapped.
+    const consentRepo = repo || cwdName;
+    if (!hasCaptureConsent(await readState(), harness, consentRepo)) {
+      throw new HttpError(403, "No capture consent for this harness and repo");
+    }
+
     await mutate((s) => {
+      // Re-checked under the write lock so a revoke that lands in between still wins. Throwing here writes nothing.
+      if (!hasCaptureConsent(s, harness, consentRepo)) throw new HttpError(403, "No capture consent for this harness and repo");
       const at = now();
       let sess = s.sessions.find((x) => x.id === id);
       if (!sess) {

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import type { AppState, Plan } from "./types";
+import type { Actor, AppState, Plan } from "./types";
 import { registryVersion } from "./registry";
 
 export const ROOT = process.cwd();
@@ -83,6 +83,34 @@ export async function mutate<T>(fn: (s: AppState) => T | Promise<T>): Promise<T>
   } finally {
     release();
   }
+}
+
+// ---- Capture consent (B1-1) ----
+// One record per harness and repo. Without one, /api/sessions/events refuses the event and writes nothing.
+// Kept off AppState's declared fields and never defaulted, so a fresh state (and Northstar /api/state) has no such key.
+
+export type CaptureHarness = "claude-code" | "codex";
+
+export interface CaptureConsent {
+  harness: CaptureHarness;
+  repo: string;
+  granted_by: Actor;
+  granted_at: string;
+}
+
+type WithConsents = AppState & { capture_consents?: CaptureConsent[] };
+
+export function captureConsents(s: AppState): CaptureConsent[] {
+  return (s as WithConsents).capture_consents ?? [];
+}
+
+export function hasCaptureConsent(s: AppState, harness: string, repo: string): boolean {
+  return !!repo && captureConsents(s).some((c) => c.harness === harness && c.repo === repo);
+}
+
+export function setCaptureConsents(s: AppState, list: CaptureConsent[]) {
+  if (list.length) (s as WithConsents).capture_consents = list;
+  else delete (s as WithConsents).capture_consents;
 }
 
 /**
