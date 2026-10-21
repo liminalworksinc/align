@@ -1,0 +1,41 @@
+{
+  "confirm": "replace",
+  "company": "Halverson Bio",
+  "timeframe": "This quarter",
+  "leadership": { "team": "Executive Team", "lead": "Chief Executive" },
+  "company_goal": {
+    "objective": "Raise first-patient-in enrolment for the Phase 2 study this quarter.",
+    "measures": [
+      "Extend the patient screening window from 4 to 5 weeks",
+      "First patient in at 10 active sites by quarter end"
+    ]
+  },
+  "company_measure": 0,
+  "asking": {
+    "team": "Clinical Development",
+    "lead": "Maren Holt",
+    "objective": "Reach the Phase 2 enrolment target this quarter.",
+    "measures": ["40 patients randomised by quarter end"]
+  },
+  "owning": {
+    "team": "Clinical Operations",
+    "lead": "Daniel Osei",
+    "objective": "Keep site activation on schedule.",
+    "measures": [
+      "Screening completed within 4 weeks at every active site",
+      "New sites activated within 60 days of contract"
+    ]
+  },
+  "owner_measure": 0,
+  "dependency": "Clinical Development can only reach the enrolment target if eligible patients get a fifth week to finish screening, and only Clinical Operations can change the screening procedure at the sites.",
+  "work_items": [
+    { "team": "asking", "task": "Draft the protocol amendment for a 5-week screening window", "status": "in progress" },
+    { "team": "asking", "task": "Update the pre-screening eligibility worksheet", "status": "planned" },
+    { "team": "owning", "task": "Activate the next wave of sites on the 4-week screening checklist", "status": "in progress" },
+    { "team": "owning", "task": "Retrain site coordinators on the current screening procedure", "status": "planned" }
+  ],
+  "plan": {
+    "title": "Five-week screening window",
+    "text": "Once the protocol amendment is approved by the ethics committees, Clinical Operations moves every active site to a 5-week screening window: it updates the site screening checklist and retrains coordinators within two weeks, and sites still in activation start on the new checklist. In return, Clinical Development submits the amendment and the revised eligibility worksheet, and takes over pre-screening chart review so coordinators' workload does not grow. Site activation dates stay as planned."
+  }
+}
