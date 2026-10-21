@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Custom-scenario acceptance test (Build A minimum slice): setup authority S1–S8, state after setup T1,
+// Custom-scenario acceptance test (Build A minimum slice): setup authority S1–S9, state after setup T1,
 // the propose → change → owner-approval flow F2–F14 plus the affected work items check, and R4 back to Northstar.
 // Case ids follow Sean's Build A plan §7/§8. Contracts: plan §3 (setup API, approval, custom state seed).
 //
 // Usage: node scripts/test-scenario.mjs http://127.0.0.1:3205 [fixture.json]
-// The fixture defaults to data/scenarios/example-custom.json (owned by L2).
+// The fixture defaults to data/scenarios/example-custom.json (owned by L2, the Fernway example).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,25 +64,29 @@ async function main() {
   const s3 = await setup("leadership", undefined, { raw: JSON.stringify(fixture), headers: { "content-type": "text/plain" } });
   check("S3 non-JSON content type -> 415 (CSRF)", s3.status === 415, short(s3));
   const s4 = await setup("leadership", fixture, { headers: { origin: "http://evil.example" } });
-  check("S4 foreign Origin -> 403 (CSRF)", s4.status === 403, short(s4));
+  const s4n = await setup("leadership", fixture, { headers: { origin: "null" } });
+  check('S4 foreign or "null" Origin -> 403 (CSRF)', s4.status === 403 && s4n.status === 403, `${short(s4)} | ${short(s4n)}`);
   const without = (key) => Object.fromEntries(Object.entries(fixture).filter(([k]) => k !== key));
   const s5 = await setup("leadership", without("confirm"));
   const s5b = await setup("leadership", without("company_measure"));
+  const s5c = await setup("leadership", { ...fixture, work_items: fixture.work_items.filter((w) => w.team !== "owning") });
   check(
-    'S5 missing confirm:"replace" or company_measure -> 400 with a plain sentence and issues',
-    s5.status === 400 && s5b.status === 400 && typeof s5.json?.error === "string" && Array.isArray(s5.json?.issues),
-    `${short(s5)} | ${short(s5b)}`,
+    'S5 missing confirm:"replace", company_measure or an owning-team work item -> 400 with {error, issues[{path, message}]}',
+    [s5, s5b, s5c].every((r) => r.status === 400) && typeof s5.json?.error === "string" && Array.isArray(s5.json?.issues) && s5.json.issues.every((i) => "path" in i && "message" in i),
+    `${short(s5)} | ${short(s5b)} | ${short(s5c)}`,
   );
   const s6 = await setup("leadership", { ...fixture, extra_field: 1 });
-  const s6p = await setup("leadership", undefined, { raw: JSON.stringify(fixture).replace(/^\{/, '{"__proto__":{"admin":true},') });
-  check("S6 unknown key and own __proto__ key -> 400 (strict schema)", s6.status === 400 && s6p.status === 400, `${short(s6)} | ${short(s6p)}`);
-  const s7 = await setup("leadership", { ...fixture, plan_id: "p-beta" });
+  check("S6 unknown key -> 400 (strict schema)", s6.status === 400, short(s6));
+  const s7 = await setup("leadership", { ...fixture, plan: { ...fixture.plan, plan_id: "p-beta" } });
   check("S7 client-supplied ids are refused -> 400 (server makes ids)", s7.status === 400, short(s7));
   const big = JSON.stringify({ ...fixture, pad: "x".repeat(70 * 1024) });
   const s8 = await setup("leadership", undefined, { raw: big, headers: { "content-type": "application/json" } });
   check("S8 body over 64 KB -> 413", s8.status === 413, short(s8));
+  const proto = JSON.stringify(fixture).replace(/^\{/, '{"__proto__":{"admin":true},');
+  const s9 = await setup("leadership", undefined, { raw: proto, headers: { "content-type": "application/json" } });
+  check("S9 own __proto__ key -> 400", s9.status === 400, short(s9));
   const before = await state();
-  check("S1–S8 left Northstar untouched", before.scenario === undefined && (before.simulations ?? []).length >= 27, `scenario=${before.scenario} sims=${before.simulations?.length}`);
+  check("S1–S9 left Northstar untouched", before.scenario === undefined && (before.simulations ?? []).length >= 27, `scenario=${before.scenario} sims=${before.simulations?.length}`);
 
   const ok = await setup("leadership", fixture);
   const o = ok.json ?? {};
@@ -105,16 +109,15 @@ async function main() {
     JSON.stringify({ scenario: t1.scenario, ids, sims: t1.simulations?.length, sims2: t1b.simulations?.length }),
   );
   check("T1 custom state carries no Northstar, Sparta or Alike text", !NORTHSTAR_TEXT.test(JSON.stringify({ ...t1b, audit: [] })), (JSON.stringify(t1b).match(NORTHSTAR_TEXT) ?? [""])[0]);
-  check("T1 setup audit event holds a hash, not the input", (t1.audit ?? []).some((a) => a.action === "scenario_setup") && !JSON.stringify(t1.audit ?? []).includes(fixture.plan_text ?? "\u0000"));
+  check("T1 setup audit event holds a hash, not the input", (t1.audit ?? []).some((a) => a.action === "scenario_setup") && !JSON.stringify(t1.audit ?? []).includes(fixture.plan.text));
 
   // ---- F: propose → change → owner approval (plan §3 approval, §7 acceptance) ----
-  const plan = (t1.plans ?? []).find((x) => x.plan_id === "p-custom" && x.plan_version === 1);
   const ownerMeasure = t1.scenario_config?.owner_measure_id;
   const body = {
     plan_id: "p-custom",
     plan_version: 1,
     simulation_refs: [],
-    proposed_measure_text: fixture.proposed_measure_text ?? "Customer requirement met within the agreed window",
+    proposed_measure_text: "Customer requirement met within the agreed window",
     rationale: "The company goal changed; the dependency needs a new measure",
     reciprocal_commitment: "The asking team scopes the request up front",
   };
@@ -140,8 +143,6 @@ async function main() {
   const f6 = await call("security", "POST", `/api/proposals/${pid}/counter`, {
     proposed_measure_text: `${body.proposed_measure_text}, reviewed weekly`,
     rationale: "Needs a review cadence",
-    changes_plan: false,
-    plan_params: plan?.params ?? {},
   });
   check("F6 owning team asks for changes -> COUNTERED, still UNTESTED", f6.status === 200 && f6.json?.state === "COUNTERED" && f6.json?.test_status === "UNTESTED", short(f6));
   const f7 = await call("security", "POST", `/api/proposals/${pid}/acknowledge`, {});
