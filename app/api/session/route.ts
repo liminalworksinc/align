@@ -1,4 +1,4 @@
-import { bindWs, COOKIE, DISPLAY, login, loginWorkspace, sessionFrom, wsSessionFrom, type WsSession } from "@/lib/auth";
+import { bindWs, DISPLAY, login, loginWorkspace, sessionCookie, sessionFrom, wsSessionFrom, type WsSession } from "@/lib/auth";
 import { body, handle, requireJson } from "@/lib/http";
 import { slotOf } from "@/lib/labels";
 import { checkLoginBackoff, clearLoginFailures, recordLoginFailure } from "@/lib/ratelimit";
@@ -36,18 +36,18 @@ export async function POST(req: Request) {
       }
       clearLoginFailures(key);
       const res = Response.json({ actor: out.session.actor, name: await customName(out.session), sid: out.session.sid, workspace: out.session.ws });
-      res.headers.append("set-cookie", `${COOKIE}=${encodeURIComponent(out.token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200`);
+      res.headers.append("set-cookie", sessionCookie(out.token));
       return res;
     }
     const { token, session } = login(String(b.role), String(b.passcode ?? ""));
     const res = Response.json({ actor: session.actor, name: DISPLAY[session.actor], sid: session.sid });
-    res.headers.append("set-cookie", `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200`);
+    res.headers.append("set-cookie", sessionCookie(token));
     return res;
   });
 }
 
 export async function DELETE() {
   const res = Response.json({ ok: true });
-  res.headers.append("set-cookie", `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);
+  res.headers.append("set-cookie", sessionCookie(null));
   return res;
 }

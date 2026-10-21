@@ -5,6 +5,7 @@
 //   phase "closed": no create config            -> creation closed
 //   phase "code":   signup code, cap 3          -> wrong code, cap race
 //   phase "open":   open create (serve.sh mode) -> everything else, plus the Northstar snapshot with workspaces on disk
+//   phase "hosted": HOSTED=1 refusals at startup, then a valid hosted config (Host align.test, X-Forwarded-Proto https)
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
@@ -65,6 +66,32 @@ function withHost(method, p, host, body) {
     req.end();
   });
 }
+
+/** A request as the platform proxy forwards it in hosted mode: allowlisted Host and X-Forwarded-Proto https. */
+function hosted(method, p, { body, cookie, headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const data = body === undefined ? undefined : JSON.stringify(body);
+    const h = { host: HOSTED_HOST, "x-forwarded-proto": "https", ...headers };
+    if (data) Object.assign(h, { "content-type": h["content-type"] ?? "application/json", "content-length": Buffer.byteLength(data) });
+    if (cookie) h.cookie = cookie;
+    const req = http.request({ host: "127.0.0.1", port: PORT, method, path: p, headers: h }, (res) => {
+      let t = "";
+      res.on("data", (c) => (t += c));
+      res.on("end", () => {
+        let json = null;
+        try {
+          json = JSON.parse(t);
+        } catch {}
+        const sc = res.headers["set-cookie"] ?? [];
+        resolve({ status: res.statusCode, text: t, json, setCookie: sc.join("\n"), cookie: (sc[0] || "").split(";")[0] });
+      });
+    });
+    req.on("error", reject);
+    if (data) req.write(data);
+    req.end();
+  });
+}
+const HOSTED_HOST = "align.test";
 
 const create = (body, extra = {}) => call("POST", "/api/workspaces", { body, ...extra });
 async function signIn(ws, passcodes) {
@@ -141,16 +168,21 @@ async function startServer(env) {
   rmSync(NS_STATE, { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
   const clean = { ...process.env };
-  for (const k of ["AI_GATEWAY_API_KEY", "ALIGN_CAPTURE", "ALIGN_SECRET", "ALIGN_URL", "ALIGN_MCP_URL", "ALIGN_ALLOW_OPEN_CREATE", "ALIGN_SIGNUP_CODE", "ALIGN_MAX_WORKSPACES", "ALIGN_CREATE_PER_HOUR", "ALIGN_DATA_DIR", "ALIGN_PUBLIC"]) delete clean[k];
-  server = spawn("npx", ["next", "dev", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: "ignore", detached: true });
-  for (let i = 0; i < 90; i++) {
+  for (const k of ["AI_GATEWAY_API_KEY", "ALIGN_CAPTURE", "ALIGN_SECRET", "ALIGN_URL", "ALIGN_MCP_URL", "ALIGN_ALLOW_OPEN_CREATE", "ALIGN_SIGNUP_CODE", "ALIGN_MAX_WORKSPACES", "ALIGN_CREATE_PER_HOUR", "ALIGN_DATA_DIR", "ALIGN_PUBLIC", "HOSTED", "ALIGN_HOSTS", "ALIGN_NORTHSTAR_PUBLIC", "ALIGN_PRODUCT_PASSCODE", "ALIGN_SECURITY_PASSCODE", "ALIGN_LEADERSHIP_PASSCODE"]) delete clean[k];
+  server = spawn("npx", ["next", "dev", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "ignore", "pipe"], detached: true });
+  let exited = false;
+  let stderr = "";
+  server.stderr.on("data", (c) => (stderr += c));
+  server.on("exit", () => (exited = true));
+  for (let i = 0; i < 90 && !exited; i++) {
     try {
-      const r = await fetch(`${BASE}/api/workspaces/config`);
-      if (r.status === 200) return;
+      // Hosted servers answer only for their allowlisted Host over (forwarded) https.
+      const r = env.HOSTED === "1" ? await hosted("GET", "/api/workspaces/config") : await fetch(`${BASE}/api/workspaces/config`);
+      if (r.status === 200) return { started: true, stderr };
     } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
-  throw new Error("server did not start");
+  return { started: false, stderr };
 }
 async function stopServer() {
   if (!server) return;
@@ -162,6 +194,10 @@ async function stopServer() {
   await new Promise((r) => setTimeout(r, 2500));
   rmSync(NS_STATE, { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
+}
+async function mustStart(env) {
+  const r = await startServer(env);
+  if (!r.started) throw new Error(`server did not start: ${r.stderr.slice(-400)}`);
 }
 process.on("exit", () => {
   if (server)
@@ -184,7 +220,7 @@ function forge(payload, secret) {
 const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "align-tenancy-"));
 try {
   // ======== phase closed ========
-  await startServer({ ALIGN_DATA_DIR: path.join(tmpRoot, "closed") });
+  await mustStart({ ALIGN_DATA_DIR: path.join(tmpRoot, "closed") });
   const closed = await create(FIXTURE);
   check("B13 creation closed without signup code or ALIGN_ALLOW_OPEN_CREATE -> 403", closed.status === 403, `${closed.status} ${closed.text}`);
   const cfgClosed = await call("GET", "/api/workspaces/config");
@@ -192,7 +228,7 @@ try {
   await stopServer();
 
   // ======== phase code ========
-  await startServer({ ALIGN_DATA_DIR: path.join(tmpRoot, "code"), ALIGN_SIGNUP_CODE: "tenancy-code-1", ALIGN_MAX_WORKSPACES: "3", ALIGN_CREATE_PER_HOUR: "100" });
+  await mustStart({ ALIGN_DATA_DIR: path.join(tmpRoot, "code"), ALIGN_SIGNUP_CODE: "tenancy-code-1", ALIGN_MAX_WORKSPACES: "3", ALIGN_CREATE_PER_HOUR: "100" });
   const wrong = await create({ ...FIXTURE, signup_code: "nope" });
   check("B13 wrong signup code -> 403", wrong.status === 403, `${wrong.status} ${wrong.text}`);
   const c1 = await create({ ...FIXTURE, signup_code: "tenancy-code-1" });
@@ -209,7 +245,7 @@ try {
   const dataDir = path.join(tmpRoot, "open");
   const wsRoot = path.join(dataDir, "workspaces");
   const mcpToken = "tenancy-" + Date.now();
-  await startServer({ ALIGN_DATA_DIR: dataDir, ALIGN_ALLOW_OPEN_CREATE: "1", ALIGN_CREATE_PER_HOUR: "1000", ALIGN_MCP_TOKEN: mcpToken });
+  await mustStart({ ALIGN_DATA_DIR: dataDir, ALIGN_ALLOW_OPEN_CREATE: "1", ALIGN_CREATE_PER_HOUR: "1000", ALIGN_MCP_TOKEN: mcpToken });
 
   // C19 Northstar API + MCP snapshot with another workspace on disk (before any Northstar capture: sessions survive reset)
   const W0 = await create(marked("ZMARK"));
@@ -433,6 +469,61 @@ try {
   const awareFiles = ["session", "state", "reset", "timer", "proposals"].map((d) => `app/api/${d}/route.ts`).concat(["acknowledge", "counter", "reject", "accept"].map((a) => `app/api/proposals/[id]/${a}/route.ts`));
   const offenders = awareFiles.filter((f) => /import\s*\{[^}]*\b(mutate|readState)\b[^}]*\}\s*from\s*["']@\/lib\/store["']/.test(readFileSync(path.join(ROOT, f), "utf8")));
   check("A12 workspace-aware routes do not import mutate or readState from lib/store", offenders.length === 0, offenders.join(" "));
+
+  // ======== phase hosted ========
+  await stopServer();
+  const hostedDir = path.join(tmpRoot, "hosted");
+  const good = {
+    HOSTED: "1",
+    ALIGN_HOSTS: HOSTED_HOST,
+    ALIGN_SECRET: "t".repeat(48),
+    ALIGN_DATA_DIR: hostedDir,
+    ALIGN_SIGNUP_CODE: "hosted-signup-code-1",
+    ALIGN_PRODUCT_PASSCODE: "product-strong-pass-1",
+    ALIGN_SECURITY_PASSCODE: "security-strong-pass-1",
+    ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-1",
+  };
+  const refusals = [
+    ["default passcodes", { ALIGN_PRODUCT_PASSCODE: undefined, ALIGN_SECURITY_PASSCODE: undefined, ALIGN_LEADERSHIP_PASSCODE: undefined }, "non-default passcode"],
+    ["no ALIGN_HOSTS", { ALIGN_HOSTS: undefined }, "ALIGN_HOSTS"],
+    ["an AI key", { AI_GATEWAY_API_KEY: "sk-test" }, "AI_GATEWAY_API_KEY"],
+  ];
+  for (const [what, delta, needle] of refusals) {
+    const env = { ...good, ...delta };
+    for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
+    const r = await startServer(env);
+    check(`H1 HOSTED=1 refuses to start with ${what}`, !r.started && r.stderr.includes(needle), r.started ? "it started" : r.stderr.slice(-300));
+    await stopServer();
+  }
+  await mustStart(good);
+  const hLoop = await call("GET", "/api/workspaces/config");
+  const hOther = await withHost("GET", "/api/workspaces/config", "evil.example");
+  check("H2 a non-allowlisted Host is refused (loopback and a foreign name -> 421)", hLoop.status === 421 && hOther.status === 421, `${hLoop.status} ${hOther.status}`);
+  const hHttp = await hosted("GET", "/api/workspaces/config", { headers: { "x-forwarded-proto": "http" } });
+  check("H2 plain http behind the proxy -> 403", hHttp.status === 403, `${hHttp.status}`);
+  const hOpen = await hosted("POST", "/api/workspaces", { body: FIXTURE });
+  check("H3 hosted create needs the signup code (open create is off)", hOpen.status === 403, `${hOpen.status} ${hOpen.text}`);
+  const hA = await hosted("POST", "/api/workspaces", { body: { ...marked("HAMARK"), signup_code: good.ALIGN_SIGNUP_CODE }, headers: { origin: `https://${HOSTED_HOST}` } });
+  const hB = await hosted("POST", "/api/workspaces", { body: { ...marked("HBMARK"), signup_code: good.ALIGN_SIGNUP_CODE } });
+  check("H3 hosted create with the signup code and same-site Origin -> 201", hA.status === 201 && hB.status === 201, `${hA.status} ${hB.status} ${hA.text.slice(0, 200)}`);
+  const hForeign = await hosted("POST", "/api/workspaces", { body: { ...FIXTURE, signup_code: good.ALIGN_SIGNUP_CODE }, headers: { origin: "https://evil.example" } });
+  check("H3 foreign Origin -> 403", hForeign.status === 403, `${hForeign.status}`);
+  const hl = await hosted("POST", "/api/session", { body: { workspace: hA.json.workspace.id, role: "product", passcode: hA.json.passcodes.product } });
+  check("H4 workspace session cookie: __Host- name, Secure, HttpOnly, SameSite=Strict", hl.status === 200 && /^__Host-align_session=/.test(hl.setCookie) && /; Secure/.test(hl.setCookie) && /HttpOnly/.test(hl.setCookie) && /SameSite=Strict/.test(hl.setCookie), hl.setCookie);
+  const nsDefault = await hosted("POST", "/api/session", { body: { role: "product", passcode: "product-demo" } });
+  check("H4 the default Northstar passcode does not sign in", nsDefault.status === 401, `${nsDefault.status}`);
+  const plainCookie = hl.cookie.replace(/^__Host-/, "");
+  const hPlain = await hosted("GET", "/api/session", { cookie: plainCookie });
+  check("H4 a cookie without the __Host- prefix is not a session when hosted", hPlain.json?.actor === null, hPlain.text);
+  const hCap = await hosted("POST", "/api/sessions/events", { body: { harness: "claude-code", session_id: "h-1", hook_event: "UserPromptSubmit", prompt: "x" } });
+  check("H5 capture refused (/api/sessions/events -> 404)", hCap.status === 404, `${hCap.status}`);
+  const hNs = await Promise.all(["/api/state", "/api/sessions", "/api/simulations", "/api/mappings", "/api/policy/security", "/api/directives?session=*"].map((p) => hosted("GET", p)));
+  check("H6 Northstar is not served anonymously (state, sessions, simulations, mappings, policy, directives -> 404)", hNs.every((r) => r.status === 404), hNs.map((r) => r.status).join(","));
+  const hlB = await hosted("POST", "/api/session", { body: { workspace: hB.json.workspace.id, role: "product", passcode: hB.json.passcodes.product } });
+  const hsA = await hosted("GET", "/api/state", { cookie: hl.cookie });
+  const hsB = await hosted("GET", "/api/state", { cookie: hlB.cookie });
+  check("H7 two hosted workspaces can't see each other", hsA.status === 200 && hsB.status === 200 && hsA.text.includes("HAMARK") && !hsA.text.includes("HBMARK") && hsB.text.includes("HBMARK") && !hsB.text.includes("HAMARK"), `${hsA.status} ${hsB.status}`);
+  check("H7 no Northstar content in a hosted workspace", !/Northstar|Sparta/.test(hsA.text), hsA.text.match(/Northstar|Sparta/)?.[0]);
 } catch (e) {
   check("tenancy run", false, e?.stack ?? e);
 } finally {

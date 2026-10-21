@@ -1,3 +1,4 @@
+import { config, hostAllowed } from "./config";
 import { HttpError } from "./store";
 
 export async function handle(fn: () => Promise<unknown>) {
@@ -25,7 +26,10 @@ function loopbackHost(host: string | null): boolean {
 export function requireJson(req: Request) {
   const type = (req.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
   if (type !== "application/json") throw new HttpError(415, "Send this as application/json");
-  if (!loopbackHost(req.headers.get("host"))) throw new HttpError(403, "This request must come from this machine");
+  if (config().hosted) {
+    // Hosted: the configured public hostnames replace the loopback rule (proxy.ts enforces the same list).
+    if (!hostAllowed(req.headers.get("host"))) throw new HttpError(403, "This request came from another site");
+  } else if (!loopbackHost(req.headers.get("host"))) throw new HttpError(403, "This request must come from this machine");
   // Compare with the Host the browser actually used; Next's req.url may normalize it (e.g. to localhost).
   const origin = req.headers.get("origin");
   if (origin) {

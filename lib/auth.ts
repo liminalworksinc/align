@@ -2,10 +2,22 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Actor, AppState } from "./types";
+import { config } from "./config";
 import { HttpError, mutate, mutateWs, readState } from "./store";
 import { parseCustomWs, readAuth, verifyPasscode, type CustomWsId, type WsId } from "./workspace";
 
 export const COOKIE = "align_session";
+
+/** HOSTED=1 uses the __Host- name (Secure, Path=/, no Domain), so a sibling subdomain can't plant a session cookie. */
+const cookieName = () => (config().hosted ? `__Host-${COOKIE}` : COOKIE);
+
+/** The Set-Cookie value. Mode L: exactly as before. Hosted: __Host- name and Secure. */
+export function sessionCookie(token: string | null): string {
+  const secure = config().hosted ? "; Secure" : "";
+  return token === null
+    ? `${cookieName()}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`
+    : `${cookieName()}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${secure}`;
+}
 
 function secret(): string {
   if (process.env.ALIGN_SECRET) return process.env.ALIGN_SECRET;
@@ -121,8 +133,9 @@ export function readSession(token: string | undefined): Session | null {
 
 function tokenFrom(req: Request): TokenRead {
   const cookie = req.headers.get("cookie") || "";
-  const match = cookie.split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`));
-  return readToken(match ? decodeURIComponent(match.slice(COOKIE.length + 1)) : undefined);
+  const name = cookieName();
+  const match = cookie.split(/;\s*/).find((c) => c.startsWith(`${name}=`));
+  return readToken(match ? decodeURIComponent(match.slice(name.length + 1)) : undefined);
 }
 
 /** Northstar session or null. A custom token is not a Northstar session. */
