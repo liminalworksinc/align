@@ -1,5 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
+import { customStateLabel, type Labels } from "@/lib/labels";
 
 export type Tone = "violet" | "amber" | "neutral" | "red" | "green" | "blue";
 
@@ -24,8 +25,8 @@ export function Badge({ tone, children, icon = true }: { tone: Tone; children: R
   );
 }
 
-/** Status badge. Green is reserved for passing sandbox test results only. */
-export function StateBadge({ state }: { state: string }) {
+/** Status badge. Green is reserved for passing sandbox test results only. Custom scenarios pass labels for team names. */
+export function StateBadge({ state, labels }: { state: string; labels?: Labels }) {
   const tone: Tone =
     state === "VERIFIED" || state === "PASS"
       ? "green"
@@ -36,7 +37,8 @@ export function StateBadge({ state }: { state: string }) {
           : state === "PROPOSED" || state === "INFERRED"
             ? "violet"
             : "neutral";
-  return <Badge tone={tone}>{STATE_LABEL[state] ?? state.replaceAll("_", " ").toLowerCase()}</Badge>;
+  const custom = labels && customStateLabel(state, labels);
+  return <Badge tone={tone}>{custom ?? STATE_LABEL[state] ?? state.replaceAll("_", " ").toLowerCase()}</Badge>;
 }
 
 /** Plain-language names for every status the app shows. The codes stay in data and APIs. */
