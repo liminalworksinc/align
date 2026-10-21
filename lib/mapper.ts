@@ -24,9 +24,21 @@ export function externalModelEnabled(): boolean {
   return process.env.ALIGN_MAPPER_EXTERNAL === "1";
 }
 
-/** True only when mapping may run. Every entry point below checks it. */
+export interface MapperStatus {
+  status: "off" | "no-key" | "on";
+  message: string;
+}
+
+/** B1-5: what the API reports. With the control off or the key missing, mapping is not attempted and no row is written. */
+export function mapperStatus(): MapperStatus {
+  if (!externalModelEnabled()) return { status: "off", message: "external model off" };
+  if (!apiKey()) return { status: "no-key", message: "no key" };
+  return { status: "on", message: "external model on" };
+}
+
+/** True only when mapping may run (control on AND key present). Every entry point below checks it. */
 export function mappingEnabled(): boolean {
-  return externalModelEnabled();
+  return mapperStatus().status === "on";
 }
 
 // ---- API key (server-side only; never logged or returned) ----

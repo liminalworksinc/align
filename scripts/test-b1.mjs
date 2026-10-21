@@ -231,6 +231,28 @@ console.log(`\n# B1-4 external model off by default (server expected: ${EXPECT_M
   check("no mapping row was written for the new session (event, poll and remap paths)", m.status === 200 && !m.body.mappings.some((x) => x.session_id === id), JSON.stringify(m.body?.mappings?.find((x) => x.session_id === id) ?? null));
 }
 
+// ---------------- B1-5 key presence ----------------
+console.log(`\n# B1-5 key presence (server expected: ${EXPECT_MAPPER})`);
+{
+  const message = EXPECT_MAPPER === "off" ? "external model off" : "no key";
+  const m = await call("GET", "/api/mappings", { cookie: lead });
+  check(`GET /api/mappings reports mapper "${message}"`, m.body?.mapper?.status === EXPECT_MAPPER && m.body?.mapper?.message === message, JSON.stringify(m.body?.mapper));
+  const s = await call("GET", "/api/sessions", { cookie: lead });
+  check(`GET /api/sessions reports mapper "${message}"`, s.body?.mapper?.status === EXPECT_MAPPER && s.body?.mapper?.message === message, JSON.stringify(s.body?.mapper));
+  const r = await call("POST", "/api/mappings", { cookie: lead, json: { action: "remap" } });
+  check(`remap reports "${message}" and is not attempted`, r.status === 200 && r.body?.attempted === false && r.body?.reason === message, JSON.stringify(r.body));
+
+  const id = `claude-code:${sid("keycheck")}`;
+  const e = await postEvent(event(id.slice(12)));
+  if (e.status === 200) created.add(id);
+  await call("GET", "/api/state", { cookie: lead });
+  await sleep(3500);
+  const after = await call("GET", "/api/mappings", { cookie: lead });
+  const unavailable = (after.body?.mappings || []).filter((x) => x.state === "MAPPER_UNAVAILABLE");
+  check("no MAPPER_UNAVAILABLE rows are written", after.status === 200 && unavailable.length === 0, `${unavailable.length} row(s)`);
+  check("no mapping row at all for the new session", !(after.body?.mappings || []).some((x) => x.session_id === id));
+}
+
 // ---------------- cleanup ----------------
 console.log("\n# cleanup");
 for (const id of created) {

@@ -1,7 +1,7 @@
 import { connection } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { body, handle } from "@/lib/http";
-import { mappingEnabled, remapAll } from "@/lib/mapper";
+import { mapperStatus, remapAll } from "@/lib/mapper";
 import { activeRegistry } from "@/lib/registry";
 import { HttpError, readState } from "@/lib/store";
 
@@ -11,7 +11,7 @@ export async function GET(req: Request) {
     // B1-3: mappings describe captured sessions, so they need a signed-in session too.
     requireSession(req);
     const s = await readState();
-    return { registry: activeRegistry(s), registry_version: s.registry_version, mappings: s.mappings };
+    return { registry: activeRegistry(s), registry_version: s.registry_version, mappings: s.mappings, mapper: mapperStatus() };
   });
 }
 
@@ -22,8 +22,10 @@ export async function POST(req: Request) {
     if (who.actor !== "leadership") throw new HttpError(403, "Only leadership can remap sessions");
     const b = await body<{ action?: string }>(req);
     if (b.action !== "remap") throw new HttpError(400, "Unknown action");
-    if (!mappingEnabled()) return { ok: true, attempted: false, reason: "external model off" };
+    // B1-5: with the control off or no key, nothing is attempted and the reason is reported.
+    const mapper = mapperStatus();
+    if (mapper.status !== "on") return { ok: true, attempted: false, reason: mapper.message, mapper };
     remapAll();
-    return { ok: true, attempted: true };
+    return { ok: true, attempted: true, mapper };
   });
 }
