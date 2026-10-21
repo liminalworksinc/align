@@ -4,6 +4,8 @@ import { captureConsents, HttpError, mutate, now, readState, setCaptureConsents,
 
 // Capture consent (B1-1): a server-side record per harness and repo. /api/sessions/events refuses events
 // (403, nothing written) for any harness and repo without one. Granting or revoking needs a signed-in session.
+// Revoking also purges that harness and repo's captured sessions and their mappings (ruling R1 default:
+// sessions without consent do not persist), so nothing of that repo is mapped or sent to the model again.
 
 const REPO = /^[\w.-]{1,120}$/;
 
@@ -45,7 +47,12 @@ export async function DELETE(req: Request) {
       const before = captureConsents(s);
       const after = before.filter((c) => !(c.harness === harness && c.repo === repo));
       setCaptureConsents(s, after);
-      return { ok: true, revoked: before.length !== after.length };
+      const purged = new Set(s.sessions.filter((x) => x.harness === harness && x.repo === repo).map((x) => x.id));
+      if (purged.size) {
+        s.sessions = s.sessions.filter((x) => !purged.has(x.id));
+        s.mappings = s.mappings.filter((m) => !purged.has(m.session_id));
+      }
+      return { ok: true, revoked: before.length !== after.length, purged_sessions: purged.size };
     });
   });
 }

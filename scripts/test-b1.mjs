@@ -125,6 +125,35 @@ console.log("\n# B1-1 consent");
   check("revoke removes the consent record", rv.status === 200 && rv.body?.revoked === true);
   const after = await postEvent(event(sid("revoked")));
   check("after revoke, events are refused again", after.status === 403, `status=${after.status}`);
+  check("revoke purged the repo's captured session", rv.body?.purged_sessions >= 1 && !(await stateSessions(lead)).some((s) => s.id === `claude-code:${okId}`), `purged=${rv.body?.purged_sessions}`);
+  created.delete(`claude-code:${okId}`);
+}
+
+// ---------------- Revoke stops mapping and purges (PR #2 review item 1) ----------------
+console.log("\n# revoke stops mapping and purges the repo's sessions");
+{
+  const src = readFileSync(path.join(ROOT, "lib", "mapper.ts"), "utf8");
+  const body = (name) => src.slice(src.indexOf(name), src.indexOf("\n}\n", src.indexOf(name)));
+  check("mapSession checks consent before the model call", /hasCaptureConsent[\s\S]*callJev\(/.test(body("export async function mapSession")));
+  check("mapSession re-checks consent in its final mutate", /await mutate\([\s\S]*hasCaptureConsent/.test(body("export async function mapSession")));
+  check("remapAll skips sessions without consent", /hasCaptureConsent/.test(body("export function remapAll")));
+  check("ensureRegistryFresh skips sessions without consent", /hasCaptureConsent/.test(body("export async function ensureRegistryFresh")));
+
+  await grant(lead, OTHER_REPO);
+  const ids = [`claude-code:${sid("revoke-a")}`, `claude-code:${sid("revoke-b")}`];
+  const posted = await Promise.all(ids.map((id) => postEvent(event(id.slice(12), OTHER_REPO))));
+  check("two consented sessions created in the repo to revoke", posted.every((r) => r.status === 200), posted.map((r) => r.status).join(","));
+  const rv = await revoke(lead, OTHER_REPO);
+  check("revoke reports both sessions purged", rv.status === 200 && rv.body?.purged_sessions === 2, JSON.stringify(rv.body));
+  const remap = await call("POST", "/api/mappings", { cookie: lead, json: { action: "remap" } });
+  check("leadership remap after the revoke answers 200", remap.status === 200, `status=${remap.status}`);
+  for (let i = 0; i < 3; i++) await call("GET", "/api/state", { cookie: lead }); // ensureRegistryFresh runs on every poll
+  await sleep(3500); // past the 1.5 s debounce
+  const st = (await call("GET", "/api/state", { cookie: lead })).body || {};
+  check("the revoked repo's sessions are gone", !(st.sessions || []).some((s) => s.repo === OTHER_REPO), JSON.stringify((st.sessions || []).filter((s) => s.repo === OTHER_REPO).map((s) => s.id)));
+  check("no mapping row exists or was written for the revoked repo's sessions", !(st.mappings || []).some((m) => ids.includes(m.session_id)));
+  const late = await postEvent(event(ids[0].slice(12), OTHER_REPO));
+  check("a late event for a purged session is refused and does not recreate it", late.status === 403 && !(await stateSessions(lead)).some((s) => ids.includes(s.id)), `status=${late.status}`);
 }
 
 // ---------------- B1-2 delete + reset purge ----------------
@@ -160,19 +189,20 @@ console.log("\n# B1-2 delete");
   const bad = await call("DELETE", "/api/sessions/not-a-session-id", { cookie: lead });
   check("DELETE with a malformed id returns 400", bad.status === 400, `status=${bad.status}`);
 
-  console.log("\n# B1-2 reset purges only sessions with no consent record (R1 default)");
+  console.log("\n# B1-2 revoke purges at once; reset keeps sessions whose repo still has consent (R1 default)");
   const idKeep = `claude-code:${sid("reset-keep")}`;
   const idPurge = `claude-code:${sid("reset-purge")}`;
   await grant(lead, OTHER_REPO);
   const k = await postEvent(event(idKeep.slice(12)));
   const p = await postEvent(event(idPurge.slice(12), OTHER_REPO));
   check("consented sessions created in two repos", k.status === 200 && p.status === 200, `keep=${k.status} purge=${p.status}`);
-  await revoke(lead, OTHER_REPO);
+  const rvp = await revoke(lead, OTHER_REPO);
+  check("revoke purges the other repo's session immediately", rvp.body?.purged_sessions === 1 && !(await stateSessions(lead)).some((s) => s.id === idPurge), JSON.stringify(rvp.body));
   const reset = await call("POST", "/api/reset", { cookie: lead, json: { confirm: "reset" } });
   check("reset succeeds", reset.status === 200, `status=${reset.status}`);
   const after = await stateSessions(lead);
   check("reset keeps the session whose repo still has consent", after.some((s) => s.id === idKeep));
-  check("reset purges the session whose consent was revoked", !after.some((s) => s.id === idPurge));
+  check("the session whose consent was revoked is still gone after reset", !after.some((s) => s.id === idPurge));
   const dk = await call("DELETE", `/api/sessions/${encodeURIComponent(idKeep)}`, { cookie: lead });
   check("kept session deleted", dk.status === 200, `status=${dk.status}`);
   await sleep(500);

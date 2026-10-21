@@ -5,9 +5,10 @@
 // None of these throw into callers. Results are persisted as SessionMapping rows via mutate().
 // All of them do nothing unless mappingEnabled(): the external model is off by default (ALIGN_MAPPER_EXTERNAL=1 turns it on).
 // Only Jev (typesafe-ai/jev via AI Gateway) is ever called. On failure the mapping is MAPPER_UNAVAILABLE; no other model is substituted.
+// A session whose harness and repo has no capture consent is never sent to the model and never gets a mapping row.
 
 import { activeRegistry, registryVersion, refreshRegistry } from "./registry";
-import { mutate, now, readState } from "./store";
+import { hasCaptureConsent, mutate, now, readState } from "./store";
 import type { AgentSession, RegistryEntry, SessionMapping } from "./types";
 
 const ENDPOINT = "https://ai-gateway.vercel.sh/typesafe/v1/systemone";
@@ -177,6 +178,8 @@ export async function mapSession(sessionId: string): Promise<void> {
   const st = await readState();
   const session = st.sessions.find((x) => x.id === sessionId);
   if (!session) return;
+  // Consent is checked before any text leaves the machine. A revoked repo's session is skipped.
+  if (!hasCaptureConsent(st, session.harness, session.repo)) return;
   const registry = activeRegistry(st);
   const version = registryVersion(st);
 
@@ -211,7 +214,10 @@ export async function mapSession(sessionId: string): Promise<void> {
   }
 
   await mutate((s) => {
-    if (!s.sessions.some((x) => x.id === sessionId)) return;
+    const current = s.sessions.find((x) => x.id === sessionId);
+    if (!current) return;
+    // Re-checked under the write lock: a revoke that landed during the model call wins, and no row is written.
+    if (!hasCaptureConsent(s, current.harness, current.repo)) return;
     const i = s.mappings.findIndex((m) => m.session_id === sessionId);
     const prev = i >= 0 ? s.mappings[i] : null;
     // An owner's decision stands while the registry is unchanged and Jev still picks the same goal.
@@ -276,7 +282,7 @@ export function remapAll(): void {
   if (!mappingEnabled()) return;
   readState()
     .then((s) => {
-      for (const x of s.sessions) scheduleMapping(x.id);
+      for (const x of s.sessions) if (hasCaptureConsent(s, x.harness, x.repo)) scheduleMapping(x.id);
     })
     .catch((e) => console.error("[mapper] remapAll failed", e));
 }
@@ -297,6 +303,7 @@ export async function ensureRegistryFresh(): Promise<void> {
     }
     const current = snap.registry_version;
     for (const x of snap.sessions) {
+      if (!hasCaptureConsent(snap, x.harness, x.repo)) continue;
       const m = snap.mappings.find((mm) => mm.session_id === x.id);
       if ((!m || m.registry_version !== current) && !timers.has(x.id) && !queued.has(x.id) && !running.has(x.id)) scheduleMapping(x.id);
     }
