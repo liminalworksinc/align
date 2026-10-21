@@ -5,7 +5,6 @@ import type { Session } from "./auth";
 import path from "node:path";
 import { readTrace } from "./evidence";
 import { profileFor } from "./scenario-profile";
-import { slotOf } from "./labels";
 
 /** Executable identity of a plan: its parameters with keys and list order normalized. */
 function paramsHash(p: PlanParams): string {
