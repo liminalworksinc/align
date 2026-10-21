@@ -51,6 +51,8 @@ const CUSTOM_BLURB: Record<Role, string> = {
   product: "asks for the change",
   security: "owns the goal being changed",
 };
+// "<Team> lead", except when the team name already says it (a leadership team, or a name ending in "Lead").
+const youAre = (team: string, actor: string) => (actor === "leadership" || /\b(lead|leadership)$/i.test(team) ? team : `${team} lead`);
 // api() falls back to "HTTP <status>" when a response carries no sentence; custom screens never show that.
 const plainError = (e: string) => (/^HTTP \d+$/.test(e) ? "Something went wrong. Please try again." : e);
 
@@ -292,7 +294,7 @@ export default function Page() {
         </div>
         {custom && (
           <span className="shrink-0 whitespace-nowrap rounded-full border border-violet-700 bg-violet-50 px-3 py-1 text-[16px] font-semibold text-violet-700">
-            You are: {L.role[me.actor]} lead
+            You are: {youAre(L.role[me.actor], me.actor)}
           </span>
         )}
         {custom ? (
@@ -346,7 +348,7 @@ export default function Page() {
       </header>
 
       {/* Canvas */}
-      <main className={`relative overflow-y-auto p-6${custom ? " text-[16px]" : ""}`}>
+      <main className={custom ? "relative overflow-y-auto p-6 text-[16px]" : "relative overflow-y-auto p-6"}>
         {loadError && (
           <div role="status" className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-[15px] font-medium text-amber-900 ring-1 ring-amber-300">
             ▲ Lost connection to the server ({loadError}). Showing the last update; reconnecting automatically.
