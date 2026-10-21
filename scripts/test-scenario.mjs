@@ -263,9 +263,9 @@ async function main() {
 
   // Affected work items: the approval names the operator work items whose team goal changed.
   const workIds = new Set((st.work_items ?? []).map((w) => w.id));
-  const affected = acc?.affected_work_item_ids;
+  const affected = acc?.owning_work_item_ids;
   check(
-    "F14 acceptance.affected_work_item_ids lists real custom work items",
+    "F14 acceptance.owning_work_item_ids lists real custom work items",
     Array.isArray(affected) && affected.length > 0 && affected.every((x) => workIds.has(x) && /^w-[ps]\d+$/.test(x)),
     JSON.stringify({ affected, work_items: [...workIds] }),
   );
@@ -274,7 +274,7 @@ async function main() {
   const asking = acc?.asking_work_item_ids;
   const askingOwned = (st.work_items ?? []).filter((w) => w.owner === "product").map((w) => w.id);
   check(
-    "F15 acceptance.asking_work_item_ids is exactly the asking team's work items, disjoint from affected_work_item_ids",
+    "F15 acceptance.asking_work_item_ids is exactly the asking team's work items, disjoint from owning_work_item_ids",
     Array.isArray(asking) && asking.length > 0 && JSON.stringify([...asking].sort()) === JSON.stringify([...askingOwned].sort()) &&
       !asking.some((x) => (affected ?? []).includes(x)),
     JSON.stringify({ asking, askingOwned, affected }),

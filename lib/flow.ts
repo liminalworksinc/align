@@ -234,7 +234,7 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
     // Custom only, appended last so Northstar acceptances keep their keys and order.
     ...(swap.replaced_measure_id ? { replaced_measure_id: swap.replaced_measure_id } : {}),
     ...(swap.new_measure_id ? { new_measure_id: swap.new_measure_id } : {}),
-    ...(prof.custom ? { affected_work_item_ids: affected } : {}),
+    ...(prof.custom ? { owning_work_item_ids: affected } : {}),
     ...(prof.custom ? { asking_work_item_ids: asking } : {}),
   });
   audit(s, who, approvedUntested ? "ratify_untested" : "ratify", p.id);

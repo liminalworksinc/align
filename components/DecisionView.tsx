@@ -303,7 +303,7 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
             <span className="font-semibold">Outcome:</span> not measured yet
           </li>
         </ul>
-        <OldPlanWork s={s} L={L} owningIds={acc.affected_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} revision={newTarget} viewer={me.actor} />
+        <OldPlanWork s={s} L={L} owningIds={acc.owning_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} revision={newTarget} viewer={me.actor} />
         <ProofStrip s={s} />
       </div>
     );
