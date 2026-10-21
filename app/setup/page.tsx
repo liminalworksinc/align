@@ -35,6 +35,8 @@ interface Form {
 }
 type Issues = Record<string, string[]>;
 
+const MAX_WORK_PER_TEAM = 3; // UI cap for the demo; the API allows more
+
 const emptyTeam = (): TeamForm => ({ team: "", lead: "", objective: "", measures: [""] });
 const EMPTY: Form = {
   company: "",
@@ -208,7 +210,7 @@ export default function SetupPage() {
               <input className={field} value={m} onChange={(e) => set((f) => ((f[side].measures[i] = e.target.value), f))} />
               {side === "owning" && (
                 <Button kind="ghost" onClick={() => set((f) => ((f.owner_measure = i), f))} disabled={form.owner_measure === i}>
-                  {form.owner_measure === i ? "Picked" : "Pick"}
+                  {form.owner_measure === i ? "Measured on this today" : "Pick"}
                 </Button>
               )}
               {t.measures.length > 1 && (
@@ -245,6 +247,8 @@ export default function SetupPage() {
     );
   };
 
+  const workCount = (side: Side) => form.work_items.filter((w) => w.team === side).length;
+  const full = (side: Side) => workCount(side) >= MAX_WORK_PER_TEAM;
   const named = (side: Side) => form[side].team.trim() || (side === "asking" ? "the asking team" : "the owning team");
   const unplaced = Object.entries(issues).filter(([p]) => p === "form" || p === "");
 
@@ -280,7 +284,7 @@ export default function SetupPage() {
             <div className="flex gap-2">
               <input className={field} value={m} onChange={(e) => set((f) => ((f.company_goal.measures[i] = e.target.value), f))} />
               <Button kind="ghost" onClick={() => set((f) => ((f.company_measure = i), f))} disabled={form.company_measure === i}>
-                {form.company_measure === i ? "Picked" : "Pick"}
+                {form.company_measure === i ? "This is the one in conflict" : "Pick"}
               </Button>
               {form.company_goal.measures.length > 1 && (
                 <Button
@@ -334,8 +338,12 @@ export default function SetupPage() {
           <div key={i} className="mb-4 rounded-[10px] border border-zinc-200 p-3">
             <Field label="Team" error={err(`work_items.${i}.team`)}>
               <select className={field} value={w.team} onChange={(e) => set((f) => ((f.work_items[i].team = e.target.value as Side), f))}>
-                <option value="asking">{named("asking")}</option>
-                <option value="owning">{named("owning")}</option>
+                <option value="asking" disabled={w.team !== "asking" && full("asking")}>
+                  {named("asking")}
+                </option>
+                <option value="owning" disabled={w.team !== "owning" && full("owning")}>
+                  {named("owning")}
+                </option>
               </select>
             </Field>
             <Field label="Work item" error={err(`work_items.${i}.task`)}>
@@ -356,8 +364,13 @@ export default function SetupPage() {
             {m}
           </p>
         ))}
-        {form.work_items.length < 20 && (
-          <Button kind="ghost" onClick={() => set((f) => (f.work_items.push({ team: "asking", task: "", status: "" }), f))}>
+        {(["asking", "owning"] as const).filter(full).map((side) => (
+          <p key={side} className="mb-3 text-[16px] text-zinc-700">
+            {named(side)} has {MAX_WORK_PER_TEAM} work items, the most this form takes.
+          </p>
+        ))}
+        {!(full("asking") && full("owning")) && (
+          <Button kind="ghost" onClick={() => set((f) => (f.work_items.push({ team: full("asking") ? "owning" : "asking", task: "", status: "" }), f))}>
             Add a work item
           </Button>
         )}
