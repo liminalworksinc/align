@@ -15,6 +15,7 @@ import { WorkMap } from "@/components/WorkMap";
 import { activeProposal, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, useAlign, type Selection } from "@/components/useAlign";
+import { companyMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
 
 type NavItem = { id: View; label: string; sub: string; icon: string };
 const NAV: NavItem[] = [
@@ -43,8 +44,17 @@ const ROLES = [
   { id: "security", name: "Alex / Security Lead", blurb: "Owns how customer issues get handled" },
 ] as const;
 type Role = (typeof ROLES)[number]["id"];
+// Custom scenarios show only the decision path in Build A; these views stay Northstar-only.
+const CUSTOM_HIDDEN: View[] = ["goals", "evidence", "work"];
+const CUSTOM_BLURB: Record<Role, string> = {
+  leadership: "sets the company goal",
+  product: "asks for the change",
+  security: "owns the goal being changed",
+};
+// api() falls back to "HTTP <status>" when a response carries no sentence; custom screens never show that.
+const plainError = (e: string) => (/^HTTP \d+$/.test(e) ? "Something went wrong. Please try again." : e);
 
-function Login({ onDone }: { onDone: () => void }) {
+function Login({ onDone, L }: { onDone: () => void; L?: Labels }) {
   const [role, setRole] = useState<Role>("product");
   const [passcode, setPasscode] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -57,7 +67,7 @@ function Login({ onDone }: { onDone: () => void }) {
       await api("/api/session", { body: { role, passcode } });
       onDone();
     } catch (x) {
-      setErr((x as Error).message);
+      setErr(L && !L.northstar ? plainError((x as Error).message) : (x as Error).message);
     } finally {
       setBusy(false);
     }
@@ -69,15 +79,30 @@ function Login({ onDone }: { onDone: () => void }) {
           <span className="font-display text-[34px] leading-none">Align</span>
           <span className="al-lbl text-violet-700">by Liminal</span>
         </div>
-        <p className="mb-6 text-[16px] text-zinc-600">Northstar Security, a made-up company for this demo. Choose who you are; each person signs in separately.</p>
+        {L && !L.northstar ? (
+          <p className="mb-6 text-[16px] text-zinc-600">{L.company}. Choose who you are; each person signs in separately.</p>
+        ) : (
+          <p className="mb-6 text-[16px] text-zinc-600">Northstar Security, a made-up company for this demo. Choose who you are; each person signs in separately.</p>
+        )}
         <fieldset className="mb-4">
           <legend className="al-lbl mb-2">I am</legend>
           <div className="grid grid-cols-3 gap-2">
             {ROLES.map((r) => (
               <label key={r.id} className={`cursor-pointer rounded-[14px] border p-3.5 text-[16px] transition ${role === r.id ? "border-zinc-300 bg-zinc-100 outline-2 outline-offset-2 outline-violet-700" : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-100"}`}>
                 <input type="radio" name="role" value={r.id} checked={role === r.id} onChange={() => setRole(r.id)} className="sr-only" />
-                <div className="font-semibold leading-snug">{r.name}</div>
-                <div className="text-[13px] text-zinc-500">{r.blurb}</div>
+                {L && !L.northstar ? (
+                  <>
+                    <div className="font-semibold leading-snug">{L.person[r.id]}</div>
+                    <div className="text-[16px] text-zinc-500">
+                      {L.role[r.id]} · {CUSTOM_BLURB[r.id]}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="font-semibold leading-snug">{r.name}</div>
+                    <div className="text-[13px] text-zinc-500">{r.blurb}</div>
+                  </>
+                )}
               </label>
             ))}
           </div>
@@ -140,7 +165,7 @@ export default function Page() {
   }, [me]);
 
   if (!me) return <main className="p-10 text-[16px] text-zinc-500">Loading Align…</main>;
-  if (!me.actor) return <Login onDone={() => { loadMe(); refresh(); }} />;
+  if (!me.actor) return <Login L={state ? labelsFor(state) : undefined} onDone={() => { loadMe(); refresh(); }} />;
   if (!state)
     return (
       <main className="p-10 text-[16px]">
@@ -148,6 +173,8 @@ export default function Page() {
       </main>
     );
 
+  const L = labelsFor(state);
+  const custom = !L.northstar;
   const props: ViewProps = {
     s: state,
     me,
@@ -166,18 +193,19 @@ export default function Page() {
   const pendingForMe = state.proposals.filter((p) =>
     me.actor === "security" ? ["PENDING_SECURITY", "ACKNOWLEDGED_BY_PRODUCT"].includes(p.state) : p.state === "COUNTERED",
   ).length;
-  const rel = state.relations.find((r) => r.id === "r-product-security");
+  const rel = state.relations.find((r) => r.id === dependencyId(state));
   const unresolved = rel?.status === "UNKNOWN";
   const lastPush = state.pushes?.at(-1);
   const ceo = currentGoal(state, "ceo");
-  const nav = me.actor === "leadership" ? NAV_LEADERSHIP : NAV;
+  const nav = (me.actor === "leadership" ? NAV_LEADERSHIP : NAV).filter((n) => !custom || !CUSTOM_HIDDEN.includes(n.id));
   const openProposal = activeProposal(state);
   const proposalOpen = openProposal && !["RATIFIED", "REJECTED"].includes(openProposal.state);
   const decisionCount = pendingForMe + (me.actor === "product" && unresolved && !proposalOpen ? 1 : 0);
   const counts: Partial<Record<View, number>> = { decision: decisionCount, proposals: pendingForMe };
   const myGoal = me.actor === "product" || me.actor === "security" ? currentGoal(state, me.actor) : undefined;
-  const kr2 = ceo?.measures.find((m) => m.id === "KR2");
-  const focus = view === "decision" || view === "today";
+  const kr2 = ceo?.measures.find((m) => m.id === companyMeasureId(state));
+  // Custom scenarios have no live agent, so the rail always shows the Inspector.
+  const focus = !custom && (view === "decision" || view === "today");
   const alikeOk = state.brief?.alike_status === "retrieved";
   const ops = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("ops");
 
@@ -234,6 +262,7 @@ export default function Page() {
             );
           })}
         </nav>
+        {!custom && (
         <div className="mt-auto flex flex-col gap-2.5 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
           <span className="al-lbl !text-violet-700">Connected</span>
           <div className="flex items-start gap-2.5">
@@ -253,6 +282,7 @@ export default function Page() {
             </div>
           </div>
         </div>
+        )}
       </aside>
 
       {/* Top bar */}
@@ -260,7 +290,22 @@ export default function Page() {
         <div className="shrink-0 whitespace-nowrap text-[15px] text-zinc-500">
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
         </div>
-        {unresolved && lastPush && me.actor !== "leadership" ? (
+        {custom && (
+          <span className="shrink-0 whitespace-nowrap rounded-full border border-violet-700 bg-violet-50 px-3 py-1 text-[16px] font-semibold text-violet-700">
+            You are: {L.role[me.actor]} lead
+          </span>
+        )}
+        {custom ? (
+          rel?.status === "ACCEPTED" ? (
+            <Badge tone="neutral">
+              {L.team.product} and {L.team.security} agreed
+            </Badge>
+          ) : unresolved && me.actor !== "leadership" ? (
+            <span className="block h-9 min-w-0 truncate rounded-full border border-amber-700 bg-amber-50 px-3 font-mono text-[14px] leading-[34px] tracking-[0.04em] text-amber-700">
+              ▲ New company goal · {L.team.product} and {L.team.security} haven’t agreed yet
+            </span>
+          ) : null
+        ) : unresolved && lastPush && me.actor !== "leadership" ? (
           <button
             onClick={() => {
               mark("ceo_change_viewed");
@@ -277,17 +322,22 @@ export default function Page() {
           <Badge tone="neutral">Company goal {lastPush.version} sent {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Badge>
         ) : null}
         <div className="ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap">
-          {ops && (
+          {ops && !custom && (
             <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
               {confirmReset ? "Click again to reset" : "Start the demo over"}
             </Button>
           )}
+          {ops && custom && me.actor === "leadership" && (
+            <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
+              {confirmReset ? "Click again to restart" : "Restart this scenario"}
+            </Button>
+          )}
           <span aria-hidden className="grid size-9 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[13px] font-bold text-violet-700">
-            {initials(me.name ?? "")}
+            {initials((custom ? L.person[me.actor] : me.name) ?? "")}
           </span>
           <div className="leading-tight">
-            <div className="text-[14px] font-semibold text-zinc-900">{me.name}</div>
-            <div className="text-[12.5px] text-zinc-500">{TEAM_OF[me.actor] ?? ""} · Owner</div>
+            <div className="text-[14px] font-semibold text-zinc-900">{custom ? L.person[me.actor] : me.name}</div>
+            <div className="text-[12.5px] text-zinc-500">{custom ? L.role[me.actor] : (TEAM_OF[me.actor] ?? "")} · Owner</div>
           </div>
           <Button kind="ghost" onClick={signOut}>
             Sign&nbsp;out
@@ -296,20 +346,20 @@ export default function Page() {
       </header>
 
       {/* Canvas */}
-      <main className="relative overflow-y-auto p-6">
+      <main className={`relative overflow-y-auto p-6${custom ? " text-[16px]" : ""}`}>
         {loadError && (
           <div role="status" className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-[15px] font-medium text-amber-900 ring-1 ring-amber-300">
             ▲ Lost connection to the server ({loadError}). Showing the last update; reconnecting automatically.
           </div>
         )}
-        {state.ingest_errors && state.ingest_errors.length > 0 && (
+        {L.sandbox && state.ingest_errors && state.ingest_errors.length > 0 && (
           <div role="status" className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-[15px] text-amber-900 ring-1 ring-amber-300">
             ▲ Some practice-test results couldn’t be read and aren’t shown: {state.ingest_errors.join("; ")}
           </div>
         )}
         {error && (
           <div role="alert" className="al-in mb-4 rounded-[10px] border border-red-700 bg-red-50 px-4 py-2.5 text-[15px] text-zinc-900">
-            {error}
+            {custom ? plainError(error) : error}
           </div>
         )}
         {me.actor !== "leadership" && ceo && (
@@ -326,9 +376,17 @@ export default function Page() {
               </div>
             </div>
             <div className="flex flex-col gap-1 border-l border-zinc-200 pl-6">
-              <span className="al-lbl !text-amber-700">The CEO&apos;s new requirement</span>
+              {custom ? (
+                <span className="al-lbl !text-amber-700">The new company requirement</span>
+              ) : (
+                <span className="al-lbl !text-amber-700">The CEO&apos;s new requirement</span>
+              )}
               <span className="line-clamp-2 text-[14px] leading-snug text-zinc-900">{kr2 ? kr2.text : "No new requirement yet"}</span>
-              {kr2 && rel && <span className="text-[12.5px] text-zinc-500">Product and Security: {rel.status === "ACCEPTED" ? "agreed" : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}</span>}
+              {kr2 && rel && (custom ? (
+                <span className="text-[14px] text-zinc-500">
+                  {L.team.product} and {L.team.security}: {rel.status === "ACCEPTED" ? "agreed" : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}
+                </span>
+              ) : <span className="text-[12.5px] text-zinc-500">Product and Security: {rel.status === "ACCEPTED" ? "agreed" : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}</span>)}
             </div>
             <div className="flex flex-col gap-1 border-l border-zinc-200 pl-6">
               <span className="al-lbl !text-violet-700">Your goal{myGoal ? ` · ${myGoal.version}` : ""}</span>
@@ -339,13 +397,13 @@ export default function Page() {
         {view === "decision" && <DecisionView {...props} />}
         {view === "today" && <DecisionView {...props} />}
         {view === "company" && <OrgView {...props} />}
-        {view === "work" && <WorkMap {...props} />}
-        {view === "goals" && <GoalsView {...props} />}
+        {view === "work" && !custom && <WorkMap {...props} />}
+        {view === "goals" && !custom && <GoalsView {...props} />}
         {view === "team" && <TeamLens {...props} />}
         {view === "proposals" && <ProposalsView {...props} />}
-        {view === "evidence" && <EvidenceView {...props} />}
+        {view === "evidence" && !custom && <EvidenceView {...props} />}
 
-        {drawer && (
+        {drawer && !custom && (
           <div className="fixed inset-y-0 left-[236px] right-[360px] top-16 z-20 flex justify-end bg-[rgba(5,5,7,0.55)]" onClick={closeDrawer}>
             <div
               className={`al-in h-full overflow-y-auto border-l border-zinc-200 bg-white ${drawer === "scenario" ? "w-[min(880px,100%)]" : "w-[min(720px,100%)]"}`}
