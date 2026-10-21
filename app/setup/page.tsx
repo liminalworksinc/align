@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { labelsFor } from "@/lib/labels";
-import type { Actor, StateView } from "@/lib/types";
+import type { Actor, AnonStateView, StateView } from "@/lib/types";
 import { EMPTY, issuesFrom, ScenarioFields, toBody, type Form, type Issues } from "@/components/ScenarioForm";
 
 // Leadership sets up its own two-team conflict. Reached by URL only (/setup); nothing links here.
@@ -27,7 +27,7 @@ export default function SetupPage() {
       .catch(() => setActor(null));
     fetch("/api/state", { cache: "no-store" })
       .then((r) => r.json())
-      .then((st: StateView) => setTeam(labelsFor(st).role.leadership))
+      .then((st: StateView | AnonStateView) => setTeam(labelsFor({ simulations: [], ...st }).role.leadership))
       .catch(() => undefined);
   }, []);
 

@@ -76,6 +76,8 @@ async function signIn(role) {
   if (r.status !== 200) throw new Error(`${role} sign-in failed (${r.status})`);
   return jar;
 }
+let leadershipJar; // GET /api/sessions and /api/mappings need a signed-in session (B1-3)
+const leadJar = async () => (leadershipJar ??= await signIn("leadership"));
 const sh = (cmd, args, opts = {}) => spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", ...opts });
 const tmux = (...a) => sh("tmux", a);
 const pane = () => tmux("capture-pane", "-t", PANE, "-p").stdout || "";
@@ -89,7 +91,7 @@ function wakesOnSecurity(sess, mappings) {
   return /triage|p-throughput|p-beta|run-plan|security|align_get_accepted_plan/i.test(text);
 }
 async function sessions() {
-  const r = await call("GET", "/api/sessions");
+  const r = await call("GET", "/api/sessions", undefined, await leadJar());
   const { sessions = [], mappings = [], listening = {} } = r.json ?? {};
   const live = sessions.filter((s) => listening[s.id]);
   const operators = live.filter((s) => OPERATOR.test(s.prompts[0]?.text ?? "")).sort((a, b) => b.started_at.localeCompare(a.started_at));
@@ -125,7 +127,8 @@ async function ready() {
   const gets = ["/", "/api/state", "/api/policy/security", "/api/sessions", "/api/simulations", "/api/mappings", "/api/directives?session=warmup", "/api/mcp"];
   const posts = ["/api/org/push", "/api/proposals", "/api/proposals/warmup/counter", "/api/proposals/warmup/acknowledge", "/api/proposals/warmup/accept", "/api/directives/ack", "/api/timer"];
   // Unauthenticated POSTs are refused (401/400) but still compile the route, without changing state.
-  await Promise.all([...gets.map((p) => call("GET", p, undefined, undefined, 90000)), ...posts.map((p) => call("POST", p, {}, undefined, 90000))].map((x) => x.catch(() => null)));
+  const warmJar = await leadJar();
+  await Promise.all([...gets.map((p) => call("GET", p, undefined, warmJar, 90000)), ...posts.map((p) => call("POST", p, {}, undefined, 90000))].map((x) => x.catch(() => null)));
   ok(`${gets.length + posts.length} routes warm (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
 
   hdr("3 · Reset");

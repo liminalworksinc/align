@@ -2,7 +2,18 @@
 // What Align measured vs what was estimated, kept separate. Quote this block in the video.
 //   node scripts/timing-report.mjs [--json]
 const ALIGN = process.env.ALIGN_URL || "http://localhost:3100";
-const s = await (await fetch(`${ALIGN}/api/state`)).json();
+// B1-6: signed out, /api/state carries only the sign-in labels, so read it as leadership.
+const login = await fetch(`${ALIGN}/api/session`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ role: "leadership", passcode: process.env.ALIGN_LEADERSHIP_PASSCODE || "leadership-demo" }),
+});
+const cookie = (login.headers.getSetCookie?.() ?? []).map((l) => l.split(";")[0]).join("; ");
+if (login.status !== 200 || !cookie) {
+  console.error(`sign-in as leadership failed: HTTP ${login.status}`);
+  process.exit(1);
+}
+const s = await (await fetch(`${ALIGN}/api/state`, { headers: { cookie } })).json();
 const t = s.timer ?? {};
 const fmt = (sec) => (sec >= 60 ? `${Math.floor(sec / 60)} min ${String(Math.round(sec % 60)).padStart(2, "0")} s` : `${Math.round(sec)} s`);
 const time = (iso) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });

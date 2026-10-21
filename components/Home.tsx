@@ -289,9 +289,11 @@ export default function Home({ workspace }: { workspace?: string }) {
   }, [me]);
 
   if (!me) return <main className="p-10 text-[16px] text-zinc-500">Loading Align…</main>;
+  // The signed-out view has no simulations (B1-6); the sign-in screen reads only the labels.
   if (!me.actor)
-    return <Login L={state ? labelsFor(state) : undefined} workspace={workspace} ended={ended} elsewhere={elsewhere} onDone={() => { loadMe(); refresh(); }} />;
-  if (!state)
+    return <Login L={state ? labelsFor({ simulations: [], ...state }) : undefined} workspace={workspace} ended={ended} elsewhere={elsewhere} onDone={() => { loadMe(); refresh(); }} />;
+  // Until the state poll catches up with the sign-in, the last state is the signed-out view (or another role's).
+  if (!state || state.me === null || state.me !== me.actor)
     return (
       <main className="p-10 text-[16px]">
         {loadError ? <span className="text-red-700">Couldn’t load the workspace: {loadError}</span> : <span className="text-zinc-500">Loading workspace…</span>}

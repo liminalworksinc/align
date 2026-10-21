@@ -254,18 +254,25 @@ try {
   check("C19 Northstar snapshot identical to 850971e with workspaces on disk", snap.status === 0, (snap.stdout + snap.stderr).split("\n").slice(-4).join(" "));
 
   // A11 create-time marker: a captured Northstar session must not reach a new workspace.
-  await call("POST", "/api/sessions/events", { body: { harness: "claude-code", session_id: "tenancy-capture-1", hook_event: "UserPromptSubmit", prompt: "NSMARKER captured prompt", cwd: "/tmp/x" } });
-  const nsAfterCapture = await call("GET", "/api/state");
+  // B1-1: capture needs a consent record for the harness and repo, granted by Northstar leadership.
+  const nsLead = (await call("POST", "/api/session", { body: { role: "leadership", passcode: "leadership-demo" } })).cookie;
+  const consent = await call("POST", "/api/sessions/consent", { cookie: nsLead, body: { harness: "claude-code", repo: "tenancy-repo" } });
+  const cap = await call("POST", "/api/sessions/events", { body: { harness: "claude-code", session_id: "tenancy-capture-1", hook_event: "UserPromptSubmit", prompt: "NSMARKER captured prompt", cwd: "/tmp/tenancy-repo", repo: "tenancy-repo" } });
+  check("A11 setup: consent granted and the synthetic capture accepted", consent.status === 200 && cap.status === 200, `${consent.status} ${cap.status} ${cap.text}`);
+  // B1-6: anonymous state no longer carries sessions, so read it as Northstar leadership.
+  const nsAfterCapture = await call("GET", "/api/state", { cookie: nsLead });
   check("A11 setup: the Northstar capture landed", nsAfterCapture.text.includes("NSMARKER"), "capture marker not in Northstar state");
-  // The mapper maps the captured session in the background; wait for it so later Northstar hash checks are stable.
-  let mapped = false;
-  for (let i = 0; i < 30 && !mapped; i++) {
-    const st = await call("GET", "/api/state");
-    mapped = (st.json?.mappings ?? []).some((m) => m.session_id === "claude-code:tenancy-capture-1");
-    if (!mapped) await new Promise((r) => setTimeout(r, 500));
+  // Background work after a capture (registry refresh, mapping when the external model is on) can still write
+  // Northstar; wait until its state file is stable so later Northstar hash checks compare like with like.
+  let stable = false;
+  for (let i = 0, last = ""; i < 30 && !stable; i++) {
+    await call("GET", "/api/state", { cookie: nsLead });
+    await new Promise((r) => setTimeout(r, 700));
+    const h = fileHash(NS_STATE);
+    stable = h === last;
+    last = h;
   }
-  await new Promise((r) => setTimeout(r, 1000));
-  check("A11 setup: the background mapper settled", mapped, "no mapping for the captured session");
+  check("A11 setup: Northstar state settled after the capture", stable, "state kept changing");
 
   // B13 request-shape refusals
   const plain = await create(undefined, { raw: JSON.stringify(FIXTURE), headers: { "content-type": "text/plain" } });
@@ -343,8 +350,14 @@ try {
     call("POST", "/api/mappings/claude-code:tenancy-capture-1/reject", { cookie: sa.leadership, body: {} }),
     call("POST", "/api/org/push", { cookie: sa.leadership, body: {} }),
     call("POST", "/api/scenario", { cookie: sa.leadership, body: { ...FIXTURE, confirm: "replace" } }),
+    // B1: capture consent and captured sessions are Northstar (this machine's agents) only.
+    call("GET", "/api/sessions/consent", { cookie: sa.leadership }),
+    call("POST", "/api/sessions/consent", { cookie: sa.leadership, body: { harness: "claude-code", repo: "tenancy-repo" } }),
+    call("DELETE", "/api/sessions/consent", { cookie: sa.leadership, body: { harness: "claude-code", repo: "tenancy-repo" } }),
+    call("DELETE", "/api/sessions/claude-code:tenancy-capture-1", { cookie: sa.leadership }),
+    call("GET", "/api/sessions", { cookie: sa.leadership }),
   ]);
-  check("A5 alike, mappings POST/confirm/reject, org/push, scenario with a custom token -> 403", r5.every((r) => r.status === 403), r5.map((r) => r.status).join(","));
+  check("A5 alike, mappings POST/confirm/reject, org/push, scenario, capture consent, session list/delete with a custom token -> 403", r5.every((r) => r.status === 403), r5.map((r) => r.status).join(","));
   check("A5 Northstar state unchanged", fileHash(NS_STATE) === nsBefore5, "changed");
 
   // A6 custom flow leaves Northstar byte-identical

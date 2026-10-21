@@ -15,10 +15,14 @@ function label(g: Goal): string {
   return `${TEAM[g.owner_id]} goal ${g.version}: ${g.objective} Measures: ${measures}`.slice(0, 600);
 }
 
-/** The live goal registry: every current accepted goal, plus "none". This is the enum Jev classifies against. */
+/**
+ * The live goal registry: every current accepted shared goal, plus "none". This is the enum Jev classifies against.
+ * B1-6 (A-7): private goals never enter it, so their labels reach neither GET /api/mappings nor the Jev payload.
+ */
 export function activeRegistry(s: AppState): RegistryEntry[] {
   const order = { ceo: 0, product: 1, security: 2 } as const;
   const entries: RegistryEntry[] = currentGoals(s)
+    .filter((g) => g.visibility === "shared")
     .sort((a, b) => order[a.owner_id] - order[b.owner_id])
     .map((g) => ({ key: g.id, goal_id: g.id, version: g.version, label: label(g), owner: g.owner_id, team: TEAM[g.owner_id], org: ORG }));
   entries.push({ key: "none", goal_id: null, version: null, label: "Does not clearly serve any accepted goal", owner: null, team: "Unassigned", org: ORG });

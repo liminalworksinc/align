@@ -4,13 +4,13 @@
 //   ensureRegistryFresh()       -- recompute registry_version; remap everything when it changed
 // Custom scenarios are never mapped: the goal registry is Northstar's, so all three return early for them.
 // None of these throw into callers. Results are persisted as SessionMapping rows via mutate().
+// All of them do nothing unless mappingEnabled(): the external model is off by default (ALIGN_MAPPER_EXTERNAL=1 turns it on).
 // Only Jev (typesafe-ai/jev via AI Gateway) is ever called. On failure the mapping is MAPPER_UNAVAILABLE; no other model is substituted.
+// A session whose harness and repo has no capture consent is never sent to the model and never gets a mapping row.
 
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { scenarioOf } from "./labels";
 import { activeRegistry, registryVersion, refreshRegistry } from "./registry";
-import { mutate, now, readState } from "./store";
+import { hasCaptureConsent, mutate, now, readState } from "./store";
 import type { AgentSession, AppState, RegistryEntry, SessionMapping } from "./types";
 
 const ENDPOINT = "https://ai-gateway.vercel.sh/typesafe/v1/systemone";
@@ -20,29 +20,35 @@ const TIMEOUT_MS = 15000;
 const PROPOSE_AT = 0.6;
 const CONFLICT_AT = 0.6;
 
-// ---- API key (server-side only; never logged or returned) ----
+// ---- External model control (B1-4) ----
+// Session text leaves the machine only when ALIGN_MAPPER_EXTERNAL=1. Default off: nothing is scheduled or sent.
 
-let cachedKey: string | null | undefined;
+export function externalModelEnabled(): boolean {
+  return process.env.ALIGN_MAPPER_EXTERNAL === "1";
+}
+
+export interface MapperStatus {
+  status: "off" | "no-key" | "on";
+  message: string;
+}
+
+/** B1-5: what the API reports. With the control off or the key missing, mapping is not attempted and no row is written. */
+export function mapperStatus(): MapperStatus {
+  if (!externalModelEnabled()) return { status: "off", message: "external model off" };
+  if (!apiKey()) return { status: "no-key", message: "no key" };
+  return { status: "on", message: "external model on" };
+}
+
+/** True only when mapping may run (control on AND key present). Every entry point below checks it. */
+export function mappingEnabled(): boolean {
+  return mapperStatus().status === "on";
+}
+
+// ---- API key (server-side only; never logged or returned) ----
+// Read from the process environment only. No .env file anywhere is read for it.
 
 function apiKey(): string | null {
-  if (process.env.AI_GATEWAY_API_KEY) return process.env.AI_GATEWAY_API_KEY;
-  if (cachedKey !== undefined) return cachedKey;
-  cachedKey = null;
-  try {
-    const file = path.join(process.cwd(), "sparta", "walkthrough-lab", "projects", "team-inbox", ".env");
-    if (existsSync(file)) {
-      for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
-        const m = line.match(/^\s*(?:export\s+)?AI_GATEWAY_API_KEY\s*=\s*(.*)\s*$/);
-        if (m) {
-          const v = m[1].trim().replace(/^(['"])(.*)\1$/, "$2");
-          if (v) cachedKey = v;
-        }
-      }
-    }
-  } catch {
-    cachedKey = null;
-  }
-  return cachedKey;
+  return process.env.AI_GATEWAY_API_KEY || null;
 }
 
 // ---- Jev request ----
@@ -170,10 +176,13 @@ async function callJev(state: string, registry: RegistryEntry[]): Promise<JevRes
 // ---- Mapping one session ----
 
 export async function mapSession(sessionId: string): Promise<void> {
+  if (!mappingEnabled()) return;
   const st = await readState();
   if (scenarioOf(st) === "custom") return;
   const session = st.sessions.find((x) => x.id === sessionId);
   if (!session) return;
+  // Consent is checked before any text leaves the machine. A revoked repo's session is skipped.
+  if (!hasCaptureConsent(st, session.harness, session.repo)) return;
   const registry = activeRegistry(st);
   const version = registryVersion(st);
 
@@ -208,7 +217,10 @@ export async function mapSession(sessionId: string): Promise<void> {
   }
 
   await mutate((s) => {
-    if (!s.sessions.some((x) => x.id === sessionId)) return;
+    const current = s.sessions.find((x) => x.id === sessionId);
+    if (!current) return;
+    // Re-checked under the write lock: a revoke that landed during the model call wins, and no row is written.
+    if (!hasCaptureConsent(s, current.harness, current.repo)) return;
     const i = s.mappings.findIndex((m) => m.session_id === sessionId);
     const prev = i >= 0 ? s.mappings[i] : null;
     // An owner's decision stands while the registry is unchanged and Jev still picks the same goal.
@@ -254,6 +266,7 @@ function enqueue(sessionId: string) {
 
 /** `s` is the state the caller just read or wrote; a custom scenario schedules nothing. */
 export function scheduleMapping(sessionId: string, s: Pick<AppState, "scenario">): void {
+  if (!mappingEnabled()) return;
   if (scenarioOf(s) === "custom") return;
   try {
     const t = timers.get(sessionId);
@@ -271,9 +284,10 @@ export function scheduleMapping(sessionId: string, s: Pick<AppState, "scenario">
 }
 
 export function remapAll(): void {
+  if (!mappingEnabled()) return;
   readState()
     .then((s) => {
-      for (const x of s.sessions) scheduleMapping(x.id, s);
+      for (const x of s.sessions) if (hasCaptureConsent(s, x.harness, x.repo)) scheduleMapping(x.id, s);
     })
     .catch((e) => console.error("[mapper] remapAll failed", e));
 }
@@ -287,12 +301,15 @@ export async function ensureRegistryFresh(): Promise<void> {
     if (registryVersion(snap) !== snap.registry_version) {
       changed = await mutate((s) => refreshRegistry(s));
     }
+    // The registry version above is bookkeeping and always kept current. Mapping itself is gated.
+    if (!mappingEnabled()) return;
     if (changed) {
       remapAll();
       return;
     }
     const current = snap.registry_version;
     for (const x of snap.sessions) {
+      if (!hasCaptureConsent(snap, x.harness, x.repo)) continue;
       const m = snap.mappings.find((mm) => mm.session_id === x.id);
       if ((!m || m.registry_version !== current) && !timers.has(x.id) && !queued.has(x.id) && !running.has(x.id)) scheduleMapping(x.id, snap);
     }

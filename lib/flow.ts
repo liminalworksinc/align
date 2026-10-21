@@ -1,10 +1,10 @@
-import type { PlanParams, Actor, AppState, Proposal, StateView, TestStatus } from "./types";
+import type { PlanParams, Actor, AnonStateView, AppState, Proposal, StateView, TestStatus } from "./types";
+import { slotOf } from "./labels";
 import { HttpError, id, now, sha256 } from "./store";
 import type { Session } from "./auth";
 import path from "node:path";
 import { readTrace } from "./evidence";
 import { profileFor } from "./scenario-profile";
-import { slotOf } from "./labels";
 
 /** Executable identity of a plan: its parameters with keys and list order normalized. */
 function paramsHash(p: PlanParams): string {
@@ -263,12 +263,70 @@ export function seeFinal(s: AppState, who: Session) {
   if (t.acked_by.includes("product") && t.acked_by.includes("security")) t.ended_at = now();
 }
 
-/** Visibility filter: private constraints only for their owner; private goals only for their owner. */
-export function viewFor(s: AppState, me: Actor | null): StateView {
-  return {
-    ...s,
-    goals: s.goals.filter((g) => g.visibility === "shared" || g.owner_id === me),
-    private_constraints: s.private_constraints.filter((c) => c.owner === me),
-    me,
-  };
+// ---- B1-6: per-role allowlist projection of /api/state ----
+// Every key is opted in here; a key that is not listed (including any field added to AppState later) never
+// leaves the server. Keys keep the stored object's order, so a signed-in Northstar view stays byte-identical
+// apart from the removals below. A field a role may not see is absent, not null.
+
+const OMIT = Symbol("omit");
+type Ctx = { me: Actor; hidden: Set<string> };
+type Project = (v: unknown, s: AppState, c: Ctx) => unknown;
+const keep: Project = (v) => v;
+
+/** Absolute paths in fs error messages become their last segment. */
+const stripPaths = (m: string) => m.replace(/(?:[A-Za-z]:)?(?:[\\/][^\s\\/'"`]+)+[\\/]([^\s\\/'"`]+)/g, "$1");
+
+const SIGNED_IN: Partial<Record<keyof AppState | "capture_consents", Project>> = {
+  company: keep,
+  timeframe: keep,
+  goals: (_v, s, c) => s.goals.filter((g) => !c.hidden.has(g.id)),
+  relations: (_v, s, c) => s.relations.filter((r) => !c.hidden.has(r.source_goal) && !c.hidden.has(r.target_goal)),
+  work_items: (_v, s, c) => s.work_items.filter((w) => !c.hidden.has(w.goal_id)),
+  plans: keep,
+  simulations: keep,
+  brief: keep,
+  proposals: keep,
+  acceptances: keep,
+  timer: keep,
+  audit: keep,
+  manual_baseline: keep,
+  private_constraints: (_v, s, c) => s.private_constraints.filter((x) => x.owner === c.me),
+  org_draft: (v, _s, c) => (c.me === "leadership" ? v : OMIT), // Leadership's unpublished next company goal
+  pushes: keep,
+  sessions: keep, // captured sessions and their mappings: signed-in roles only (AgentPane, WorkMap, AuthorityStrip)
+  mappings: keep,
+  capture_consents: keep,
+  registry_version: keep,
+  ingest_errors: (v) => (Array.isArray(v) ? v.map((m) => stripPaths(String(m))) : OMIT),
+  scenario: keep,
+  teams: keep,
+  scenario_config: keep,
+};
+
+/** Goals the viewer may not see: private goals of another owner (Owner mapped to Actor, so ceo is leadership). */
+function hiddenGoals(s: AppState, me: Actor): Set<string> {
+  return new Set(s.goals.filter((g) => g.visibility !== "shared" && g.owner_id !== slotOf(me)).map((g) => g.id));
+}
+
+/** /api/state for one caller. Anonymous callers get only the sign-in screen's labels. */
+export function viewFor(s: AppState, me: Actor | null): StateView | AnonStateView {
+  if (!me) {
+    return {
+      company: s.company,
+      ...(s.scenario !== undefined ? { scenario: s.scenario } : {}),
+      ...(s.teams !== undefined ? { teams: s.teams } : {}),
+      me: null,
+    };
+  }
+  const c: Ctx = { me, hidden: hiddenGoals(s, me) };
+  const out: Record<string, unknown> = {};
+  const src = s as unknown as Record<string, unknown>;
+  for (const k of Object.keys(src)) {
+    const project = SIGNED_IN[k as keyof typeof SIGNED_IN];
+    if (!project) continue;
+    const v = project(src[k], s, c);
+    if (v !== OMIT) out[k] = v;
+  }
+  out.me = me;
+  return out as unknown as StateView;
 }
