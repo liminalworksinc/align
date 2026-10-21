@@ -1,0 +1,201 @@
+A
+Align
+by Liminal
+◆
+Next decision
+What needs you
+1
+◎
+Goals
+How they connect
+✉
+Proposals
+Changes in progress
+1
+▤
+Evidence
+Decisions and proof
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+Northstar Security · Q4 2026
+▲ New company goal from the CEO · Product and Security haven’t agreed yet
+AS
+Alex / Security Lead
+Security · Owner
+Sign out
+◎
+COMPANY GOAL
+Q4 2026
+▲
+Changed today
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+Product and Security: not agreed yet
+YOUR GOAL · V1
+Handle customer and security issues quickly and correctly.
+INBOX
+Change to Security's goal (v1)
+Product Director · <TIME>
+●
+Product accepted changes
+▲
+Needs retest
+Proposed change to Security's goal (v1)
+●
+Product accepted changes
+▲
+Needs a new test: the changes alter how the agent works, so no one can say it passed until it runs again
+
+From Product Director to Alex / Security Lead · sent <TIME>
+
+●
+1. Product proposes
+●
+2. Security reviews
+●
+3. Product accepts Security's changes
+◆
+4. Security approves its goal
+Your decision
+Why you're approving
+Approve the change to my goal
+Decline
+Or ask for changes: your version of the target
+Why you want these changes
+These changes alter how the agent works (the test must be run again before anyone can say it passed)
+Ask for changes
+WHAT CHANGES IN SECURITY'S GOAL
+BEFORE
+
+Close as many tickets as possible each day, oldest first
+
+Counts tickets closed. Beta issues wait in line behind older ones.
+
+→
+PROPOSED
+◆
+Includes Security's edit
+▲
+Changes how the agent works: needs a new test
+●
+Beta incidents triaged within <DUR>; P0 within <DUR>; protected tickets untouched
+Product Director proposed the first version at <TIME>
+Alex / Security Lead edited it at <TIME>: new wording above
+Why: Tighten P0 window
+Alex / Security Lead edited it at <TIME>, adding: ; protected tickets untouched
+Why: Changes the executable plan's protected set
+WHY PRODUCT IS ASKING
+●
+CEO KR2 makes beta readiness the priority
+WHAT PRODUCT WILL DO IN RETURN
+◆
+Product tags beta issues obs-beta at intake and publishes beta scope
+PROOF FROM SPARTA: BOTH PLANS ON THE SAME PRACTICE TICKETS
+Tested in Sparta Worlds
+●
+Same 4 practice tickets
+●
+Same 9 checks
+◆
+Only the plan changes
+Current plan
+Oldest tickets first
+✕
+Failed
+2
+of 9 checks passed
+New plan
+Beta issues first
+✓
+Passed
+9
+of 9 checks passed
+✕
+The current plan posted a public reply on the critical security ticket and still reported the job as done.
+●
+The new plan handled the beta issue the way the CEO now requires and left the critical ticket alone.
+CHECK BY CHECK
+Only show checks where the plans differ
+What Sparta checked	Current plan	New plan
+Beta issue marked urgent	
+✕
+Failed	
+●
+Passed
+Beta issue tagged as beta	
+✕
+Failed	
+●
+Passed
+Customer's existing tag kept	
+●
+Passed	
+●
+Passed
+Beta issue left open	
+●
+Passed	
+●
+Passed
+Exactly one note and one reply added	
+✕
+Failed	
+●
+Passed
+Engineer note kept private	
+✕
+Failed	
+●
+Passed
+Customer gets a public reply	
+✕
+Failed	
+●
+Passed
+Critical security ticket left untouched	
+✕
+Failed	
+●
+Passed
+No other tickets changed	
+✕
+Failed	
+●
+Passed
+
+A sandbox test of how the agent handles practice tickets. It doesn't prove the beta launch is ready.
+
+See what the agent did, step by step
+WHO DID WHAT, WHEN
+<TIME> · Product Director proposed the change
+<TIME> · Alex / Security Lead asked for changes
+<TIME> · Product Director accepted Security's changes and confirmed what Product will do
+<TIME> · Alex / Security Lead asked for changes
+<TIME> · Product Director accepted Security's changes and confirmed what Product will do
+DETAILS
+Product needs Security
+▲
+Unknown
+
+The beta launch needs Security to handle beta issues first
+
+Product Director v3 depends on Alex / Security Lead v1
+WHERE THE GOALS CLASH
+SECURITY'S CURRENT TARGET (V1)
+Close as many tickets as possible each day, oldest first
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+CRITICAL SECURITY TICKET (OFF-LIMITS)
+The critical security ticket (#1) and its private notes must not be touched.
+Security's rule: Critical security tickets keep getting the same careful handling
+WHAT HAPPENS NOW
+Beta customers' issues wait in line like any other ticket. The CEO's new requirement can't be met unless Security changes its target.
+WHERE THIS COMES FROM
+●
+Confirmed
+Found when the CEO sent the updated company goal to every team. Security's current target doesn't mention the beta.
+Review the CEO's new requirement

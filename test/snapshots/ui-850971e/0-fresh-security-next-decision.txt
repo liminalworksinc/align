@@ -1,0 +1,48 @@
+A
+Align
+by Liminal
+◆
+Next decision
+What needs you
+◎
+Goals
+How they connect
+✉
+Proposals
+Changes in progress
+▤
+Evidence
+Decisions and proof
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+Northstar Security · Q4 2026
+AS
+Alex / Security Lead
+Security · Owner
+Sign out
+◎
+COMPANY GOAL
+Q4 2026
+Launch the beta of our new monitoring product.
+THE CEO'S NEW REQUIREMENT
+No new requirement yet
+YOUR GOAL · V1
+Handle customer and security issues quickly and correctly.
+NEXT DECISION
+Nothing needs your decision right now.
+
+When the CEO changes the company goal, anything that affects your team shows up here first.
+
+See how the goals connect
+LIVE · SECURITY'S AI AGENT
+Claude Code triage agent
+Connected to Align's live feed
+NOW
+No agent connected
+Agent started
+Start the agent to see it here
+
+Read-only. The agent reads approved goals; only owners can change them.
