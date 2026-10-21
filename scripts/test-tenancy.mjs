@@ -58,7 +58,7 @@ function withHost(method, p, host, body) {
       (res) => {
         let t = "";
         res.on("data", (c) => (t += c));
-        res.on("end", () => resolve({ status: res.statusCode, text: t }));
+        res.on("end", () => resolve({ status: res.statusCode, text: t, setCookie: (res.headers["set-cookie"] ?? []).join("\n") }));
       },
     );
     req.on("error", reject);
@@ -499,6 +499,13 @@ try {
   const hLoop = await call("GET", "/api/workspaces/config");
   const hOther = await withHost("GET", "/api/workspaces/config", "evil.example");
   check("H2 a non-allowlisted Host is refused (loopback and a foreign name -> 421)", hLoop.status === 421 && hOther.status === 421, `${hLoop.status} ${hOther.status}`);
+  // The hosted app must answer on its own (allowlisted) name, pages included, and refuse every other name.
+  const hPage = await hosted("GET", "/");
+  const hSignIn = await hosted("POST", "/api/session", { body: { role: "product", passcode: good.ALIGN_PRODUCT_PASSCODE } });
+  const hPageOther = await withHost("GET", "/", "evil.example");
+  const hSignInOther = await withHost("POST", "/api/session", "evil.example", { role: "product", passcode: good.ALIGN_PRODUCT_PASSCODE });
+  check("H2 allowlisted Host: GET / and POST /api/session -> 200", hPage.status === 200 && hSignIn.status === 200, `${hPage.status} ${hSignIn.status}`);
+  check("H2 non-allowlisted Host: GET / and POST /api/session -> 421, no cookie", hPageOther.status === 421 && hSignInOther.status === 421 && !hSignInOther.setCookie, `${hPageOther.status} ${hSignInOther.status}`);
   const hHttp = await hosted("GET", "/api/workspaces/config", { headers: { "x-forwarded-proto": "http" } });
   check("H2 plain http behind the proxy -> 403", hHttp.status === 403, `${hHttp.status}`);
   const hOpen = await hosted("POST", "/api/workspaces", { body: FIXTURE });
