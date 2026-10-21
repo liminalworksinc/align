@@ -176,9 +176,9 @@ console.log("\n# B1-2 delete");
   check("DELETE signed out is refused with 401", anon.status === 401, `status=${anon.status}`);
   const foreign = await call("DELETE", delUrl, { cookie: lead, headers: { origin: "http://evil.example" } });
   check("DELETE from a foreign Origin is refused (403)", foreign.status === 403, `status=${foreign.status}`);
-  const del = await call("DELETE", delUrl, { cookie: product });
+  const del = await call("DELETE", delUrl, { cookie: lead });
   check("DELETE /api/sessions/[id] removes the session", del.status === 200 && del.body?.id === idA, `status=${del.status} ${JSON.stringify(del.body)}`);
-  const again = await call("DELETE", delUrl, { cookie: product });
+  const again = await call("DELETE", delUrl, { cookie: lead });
   check("second DELETE returns 404", again.status === 404, `status=${again.status}`);
   const st = await call("GET", "/api/state", { cookie: lead });
   check("session gone from state", !(st.body?.sessions || []).some((s) => s.id === idA));
@@ -207,6 +207,50 @@ console.log("\n# B1-2 delete");
   check("kept session deleted", dk.status === 200, `status=${dk.status}`);
   await sleep(500);
   check("grep for the marker in data/state.json returns 0 after the deletes", existsSync(STATE_FILE) && markerCount() === 0, `count=${markerCount()}`);
+}
+
+// ---------------- Leadership only, with audit (PR #2 review item 2) ----------------
+console.log("\n# consent and session delete are leadership only, and audited");
+{
+  const security = await signIn(BASE, "security");
+  const AUDIT_REPO = "b1-synthetic-audit";
+  await revoke(lead, AUDIT_REPO);
+  for (const [role, cookie] of [["product", product], ["security", security]]) {
+    const g = await grant(cookie, AUDIT_REPO);
+    check(`consent POST as ${role} is refused with 403 and a plain sentence`, g.status === 403 && /^Only leadership .+\.$/.test(g.body?.error || ""), `status=${g.status} ${JSON.stringify(g.body)}`);
+    const r = await revoke(cookie, AUDIT_REPO);
+    check(`consent DELETE as ${role} is refused with 403`, r.status === 403, `status=${r.status}`);
+    const l = await call("GET", "/api/sessions/consent", { cookie });
+    check(`consent GET as ${role} still answers 200`, l.status === 200 && Array.isArray(l.body?.consents), `status=${l.status}`);
+  }
+  const listed = await call("GET", "/api/sessions/consent", { cookie: lead });
+  check("refused grants recorded nothing", !listed.body.consents.some((c) => c.repo === AUDIT_REPO));
+
+  const auditBefore = ((await call("GET", "/api/state", { cookie: lead })).body?.audit || []).length;
+  const g = await grant(lead, AUDIT_REPO);
+  check("consent POST as leadership answers 200", g.status === 200, `status=${g.status}`);
+  const idD = `claude-code:${sid("audit-delete")}`;
+  const e = await postEvent(event(idD.slice(12), AUDIT_REPO));
+  check("consented session created for the audited delete", e.status === 200, `status=${e.status}`);
+  const delUrl = `/api/sessions/${encodeURIComponent(idD)}`;
+  for (const [role, cookie] of [["product", product], ["security", security]]) {
+    const d = await call("DELETE", delUrl, { cookie });
+    check(`session DELETE as ${role} is refused with 403 and a plain sentence`, d.status === 403 && /^Only leadership .+\.$/.test(d.body?.error || ""), `status=${d.status} ${JSON.stringify(d.body)}`);
+  }
+  check("refused deletes left the session in place", (await stateSessions(lead)).some((s) => s.id === idD));
+  const d = await call("DELETE", delUrl, { cookie: lead });
+  check("session DELETE as leadership answers 200", d.status === 200, `status=${d.status}`);
+  const r = await revoke(lead, AUDIT_REPO);
+  check("consent DELETE as leadership answers 200", r.status === 200 && r.body?.revoked === true, `status=${r.status}`);
+
+  const audit = ((await call("GET", "/api/state", { cookie: lead })).body?.audit || []).slice(auditBefore);
+  const row = (action, target) => audit.find((a) => a.action === action && a.target === target && a.actor === "leadership");
+  check("audit row for the grant carries harness/repo only", !!row("grant_capture_consent", `claude-code/${AUDIT_REPO}`), JSON.stringify(audit));
+  check("audit row for the session delete carries the session id only", !!row("delete_session", idD), JSON.stringify(audit));
+  check("audit row for the revoke carries harness/repo only", !!row("revoke_capture_consent", `claude-code/${AUDIT_REPO}`), JSON.stringify(audit));
+  check("refused attempts wrote no audit rows", audit.length === 3, `${audit.length} new row(s): ${audit.map((a) => a.action).join(",")}`);
+  const blob = JSON.stringify(audit);
+  check("audit rows carry no prompt text", !blob.includes(MARKER) && !blob.includes("synthetic prompt") && audit.every((a) => Object.keys(a).sort().join(",") === "action,actor,at,id,session_id,target"));
 }
 
 // ---------------- B1-3 auth ----------------

@@ -1,9 +1,10 @@
-import { requireSession } from "@/lib/auth";
+import { requireSession, type Session } from "@/lib/auth";
 import { body, handle, requireJson } from "@/lib/http";
-import { captureConsents, HttpError, mutate, now, readState, setCaptureConsents, type CaptureHarness } from "@/lib/store";
+import { captureConsents, HttpError, id, mutate, now, readState, setCaptureConsents, type CaptureHarness } from "@/lib/store";
 
 // Capture consent (B1-1): a server-side record per harness and repo. /api/sessions/events refuses events
-// (403, nothing written) for any harness and repo without one. Granting or revoking needs a signed-in session.
+// (403, nothing written) for any harness and repo without one. Listing needs a signed-in session; granting and
+// revoking are leadership only, and each is an audit row carrying only the harness and repo.
 // Revoking also purges that harness and repo's captured sessions and their mappings (ruling R1 default:
 // sessions without consent do not persist), so nothing of that repo is mapped or sent to the model again.
 
@@ -17,6 +18,12 @@ function parse(b: { harness?: unknown; repo?: unknown }): { harness: CaptureHarn
   return { harness, repo };
 }
 
+function requireLeadership(req: Request): Session {
+  const who = requireSession(req);
+  if (who.actor !== "leadership") throw new HttpError(403, "Only leadership can grant or revoke capture consent.");
+  return who;
+}
+
 export async function GET(req: Request) {
   return handle(async () => {
     requireSession(req);
@@ -26,13 +33,14 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   return handle(async () => {
-    const who = requireSession(req);
+    const who = requireLeadership(req);
     requireJson(req);
     const { harness, repo } = parse(await body(req));
     return mutate((s) => {
       const list = captureConsents(s).filter((c) => !(c.harness === harness && c.repo === repo));
       const record = { harness, repo, granted_by: who.actor, granted_at: now() };
       setCaptureConsents(s, [...list, record]);
+      s.audit.push({ id: id("a"), actor: who.actor, session_id: who.sid, action: "grant_capture_consent", target: `${harness}/${repo}`, at: record.granted_at });
       return { ok: true, consent: record };
     });
   });
@@ -40,7 +48,7 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   return handle(async () => {
-    requireSession(req);
+    const who = requireLeadership(req);
     requireJson(req);
     const { harness, repo } = parse(await body(req));
     return mutate((s) => {
@@ -52,7 +60,10 @@ export async function DELETE(req: Request) {
         s.sessions = s.sessions.filter((x) => !purged.has(x.id));
         s.mappings = s.mappings.filter((m) => !purged.has(m.session_id));
       }
-      return { ok: true, revoked: before.length !== after.length, purged_sessions: purged.size };
+      const revoked = before.length !== after.length;
+      // A revoke that changed nothing (no record, no sessions) is not an event.
+      if (revoked || purged.size) s.audit.push({ id: id("a"), actor: who.actor, session_id: who.sid, action: "revoke_capture_consent", target: `${harness}/${repo}`, at: now() });
+      return { ok: true, revoked, purged_sessions: purged.size };
     });
   });
 }
