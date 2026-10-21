@@ -75,7 +75,7 @@ function requestWithHost(method, p, host, headers = {}, body) {
   return new Promise((resolve, reject) => {
     const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method, headers: { ...headers, host } }, (res) => {
       let text = "";
-      res.on("data", (d) => (text += d)).on("end", () => resolve({ status: res.statusCode, text }));
+      res.on("data", (d) => (text += d)).on("end", () => resolve({ status: res.statusCode, headers: res.headers, text }));
     });
     req.on("error", reject);
     req.end(body === undefined ? undefined : JSON.stringify(body));
@@ -124,7 +124,13 @@ async function main() {
   check("S12 non-loopback Host (DNS rebinding) -> 421 or 403", s12.status === 421 || s12.status === 403, short(s12));
   const s13 = await requestWithHost("GET", "/api/state", "rebind.example", { cookie: cookies.leadership });
   const s13p = await requestWithHost("GET", "/", "rebind.example:3000", { cookie: cookies.leadership });
-  check("S13 GET /api/state and / with a non-loopback Host are refused by proxy.ts -> 421", s13.status === 421 && s13p.status === 421, `${short(s13)} | ${short(s13p)}`);
+  // Sign-in has no session to check, so a rebound page must not reach it with the default passcodes.
+  const s13s = await requestWithHost("POST", "/api/session", "rebind.example", { "content-type": "application/json", origin: "http://rebind.example" }, { role: "leadership", passcode: "leadership-demo" });
+  check(
+    "S13 GET /api/state, GET / and POST /api/session (sign-in) with a non-loopback Host are refused by proxy.ts -> 421",
+    s13.status === 421 && s13p.status === 421 && s13s.status === 421 && !s13s.headers["set-cookie"],
+    `${short(s13)} | ${short(s13p)} | ${short(s13s)}`,
+  );
   const proto = JSON.stringify(fixture).replace(/^\{/, '{"__proto__":{"admin":true},');
   const s9 = await setup("leadership", undefined, { raw: proto, headers: { "content-type": "application/json" } });
   check("S9 own __proto__ key -> 400", s9.status === 400, short(s9));
