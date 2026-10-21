@@ -52,7 +52,7 @@ async function main() {
   for (const role of ["product", "security", "leadership"]) cookies[role] = await signIn(BASE, role);
 
   // Start from Northstar so the run is repeatable.
-  const r0 = await call("leadership", "POST", "/api/reset", { confirm: "reset", scenario: "northstar" });
+  const r0 = await call("leadership", "POST", "/api/reset", { confirm: "reset" });
   check("setup: leadership resets to Northstar", r0.status === 200, short(r0));
 
   // ---- S: setup authority and input hardening (plan §3 setup API, §9) ----
@@ -185,9 +185,10 @@ async function main() {
   );
 
   // ---- R4: custom back to Northstar ----
-  const r4p = await call("product", "POST", "/api/reset", { confirm: "reset", scenario: "northstar" });
-  check("R4 switching scenario needs leadership -> 403 for product", r4p.status === 403, short(r4p));
-  const r4 = await call("leadership", "POST", "/api/reset", { confirm: "reset", scenario: "northstar" });
+  const r4p = await call("product", "POST", "/api/reset", { confirm: "reset" });
+  const stillCustom = (await state()).scenario === "custom";
+  check("R4 product cannot reset a custom scenario -> 403, state stays custom", r4p.status === 403 && stillCustom, `${short(r4p)} custom=${stillCustom}`);
+  const r4 = await call("leadership", "POST", "/api/reset", { confirm: "reset" });
   const ns = await state();
   check(
     "R4 leadership returns to Northstar: no scenario fields, Northstar goals, ≥27 simulations",
