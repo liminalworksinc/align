@@ -14,4 +14,5 @@ Rules
 - Ports 3200 (frozen baseline), 3201+ (lanes). Never 3100. Use npx next dev -H 127.0.0.1; never npm start for the demo (it binds all interfaces).
 - Never git stash. Draft PRs only. Shruti approves every merge; Sean reviews the plan's §10 files.
 - Build B only after the 6:00 PM gate passes, B1 privacy gates first; otherwise it is Shruti's Thu 1:00–2:30 call.
+- Capture consent is granted by leadership through the API, per harness and repo: follow docs/CAPTURE_CONSENT.md before the first real capture.
 - Honesty: "Not sandbox-tested" for custom scenarios; untested approvals need accept_untested; one number per surface. Not shipped by Fri noon = the 30-day roadmap, never "shipped".
