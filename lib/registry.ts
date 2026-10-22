@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import type { AppState, Goal, RegistryEntry } from "./types";
+import type { AppState, Goal, Owner, RegistryEntry } from "./types";
+import { scenarioOf, teamOf } from "./labels";
 
 const ORG = "Northstar Security";
 const TEAM: Record<string, string> = { ceo: "Company", product: "Product", security: "Security" };
@@ -10,9 +11,14 @@ export function currentGoals(s: AppState): Goal[] {
   return s.goals.filter((g) => !superseded.has(g.id));
 }
 
-function label(g: Goal): string {
+// A custom scenario's registry names its own company and teams (MCP work map and goal list); Northstar's is unchanged.
+// registryVersion hashes keys and versions only, so labels never move it.
+const teamName = (s: AppState, owner: Owner) => (scenarioOf(s) === "custom" ? teamOf(s, owner) : TEAM[owner]);
+const orgName = (s: AppState) => (scenarioOf(s) === "custom" ? s.company : ORG);
+
+function label(s: AppState, g: Goal): string {
   const measures = g.measures.map((m) => `${m.id}: ${m.text}`).join("; ");
-  return `${TEAM[g.owner_id]} goal ${g.version}: ${g.objective} Measures: ${measures}`.slice(0, 600);
+  return `${teamName(s, g.owner_id)} goal ${g.version}: ${g.objective} Measures: ${measures}`.slice(0, 600);
 }
 
 /**
@@ -24,8 +30,8 @@ export function activeRegistry(s: AppState): RegistryEntry[] {
   const entries: RegistryEntry[] = currentGoals(s)
     .filter((g) => g.visibility === "shared")
     .sort((a, b) => order[a.owner_id] - order[b.owner_id])
-    .map((g) => ({ key: g.id, goal_id: g.id, version: g.version, label: label(g), owner: g.owner_id, team: TEAM[g.owner_id], org: ORG }));
-  entries.push({ key: "none", goal_id: null, version: null, label: "Does not clearly serve any accepted goal", owner: null, team: "Unassigned", org: ORG });
+    .map((g) => ({ key: g.id, goal_id: g.id, version: g.version, label: label(s, g), owner: g.owner_id, team: teamName(s, g.owner_id), org: orgName(s) }));
+  entries.push({ key: "none", goal_id: null, version: null, label: "Does not clearly serve any accepted goal", owner: null, team: "Unassigned", org: orgName(s) });
   return entries;
 }
 

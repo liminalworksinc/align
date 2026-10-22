@@ -62,8 +62,8 @@ step snapshot env ALIGN_MCP_TOKEN="$TOKEN" node scripts/snapshot-northstar.mjs "
 # test-flow keeps its known baseline failure; the gate is its stdout matching the baseline's.
 step test-flow bash -c "node scripts/test-flow.mjs '$BASE' | tail -n +2 | diff -u test/snapshots/northstar-850971e/test-flow.out - && echo 'stdout identical to the baseline'"
 # test-scenario runs once per custom fixture: the default example, then every scripts/fixtures/*.json.
-step test-scenario node scripts/test-scenario.mjs "$BASE"
-for f in scripts/fixtures/*.json; do step "scenario:$(basename "$f" .json)" node scripts/test-scenario.mjs "$BASE" "$f"; done
+step test-scenario env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-scenario.mjs "$BASE"
+for f in scripts/fixtures/*.json; do step "scenario:$(basename "$f" .json)" env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-scenario.mjs "$BASE" "$f"; done
 step test-mcp env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-mcp.mjs "$BASE/api/mcp"
 step test-capture node scripts/test-capture.mjs "$BASE"
 step test-mapper env ALIGN_URL="$BASE" node scripts/test-mapper.mjs
