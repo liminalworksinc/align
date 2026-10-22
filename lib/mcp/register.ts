@@ -133,7 +133,6 @@ const AcceptedPlanOut = z.object({
       asking_team: z.string(),
       owning_team: z.string(),
       status: z.enum(["agreed", "not_agreed"]),
-      launch: z.enum(["pending", "not_applicable"]), // agreed is never launch approval
       plan_title: z.string(),
       plan_text: z.string(),
       owning_measures: z.array(z.string()),
