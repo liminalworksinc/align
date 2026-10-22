@@ -899,7 +899,7 @@ try {
       else if (/^(route|page)\.tsx?$/.test(e.name)) routes.push(url || "/");
     }
   })(path.join(ROOT, "app"), "");
-  const TESTER = [/^\/new$/, /^\/w\/x$/, /^\/api\/workspaces$/, /^\/api\/workspaces\/config$/, /^\/api\/workspaces\/x\/login-info$/, /^\/api\/session$/, /^\/api\/state$/, /^\/api\/timer$/, /^\/api\/reset$/, /^\/api\/proposals$/, /^\/api\/proposals\/x\/(?:accept|acknowledge|counter|reject)$/];
+  const TESTER = [/^\/new$/, /^\/w\/x$/, /^\/api\/workspaces$/, /^\/api\/workspaces\/config$/, /^\/api\/workspaces\/x\/login-info$/, /^\/api\/session$/, /^\/api\/state$/, /^\/api\/timer$/, /^\/api\/reset$/, /^\/api\/proposals$/, /^\/api\/proposals\/x\/(?:accept|acknowledge|counter|launch|reject)$/];
   const shut = routes.filter((r) => !TESTER.some((t) => t.test(r)) && !["/", "/setup"].includes(r));
   const probes = await Promise.all(shut.flatMap((r) => [hosted("GET", r), hosted("POST", r, { body: {} })]).map((x) => x.then((y) => y.status)));
   const open = shut.filter((_, i) => probes[2 * i] !== 404 || probes[2 * i + 1] !== 404);

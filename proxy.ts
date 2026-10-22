@@ -20,7 +20,7 @@ const HOSTED_ROUTES = [
   /^\/api\/timer$/,
   /^\/api\/reset$/,
   /^\/api\/proposals$/,
-  /^\/api\/proposals\/[^/]+\/(?:accept|acknowledge|counter|reject)$/,
+  /^\/api\/proposals\/[^/]+\/(?:accept|acknowledge|counter|launch|reject)$/,
 ];
 const TO_NEW = new Set(["/", "/setup"]); // Northstar's pages: a tester lands on workspace creation instead
 
