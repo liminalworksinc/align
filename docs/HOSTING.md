@@ -20,7 +20,7 @@ Without `HOSTED`, nothing changes. The loopback rules, cookie and Northstar beha
 
 | Area | HOSTED=1 behaviour |
 |---|---|
-| Routes | Only the tester routes exist: `/new`, `/w/<id>`, `/api/workspaces` (create, config, login-info), `/api/session`, `/api/state`, `/api/timer`, `/api/reset`, `/api/proposals/*`. `/` and `/setup` redirect to `/new`. **Every other path is 404**, so a route added later stays closed until it's added to `proxy.ts`. test-tenancy H6 checks every route in `app/`. |
+| Routes | Only the tester routes exist: `/new`, `/w/<id>`, `/api/workspaces` (create, config, login-info), `/api/session`, `/api/state`, `/api/timer`, `/api/reset`, `/api/proposals` and `/api/proposals/<id>/(accept|acknowledge|counter|reject)`. `/` and `/setup` redirect to `/new`. **Every other path is 404**, so a route added later stays closed until it's added to `proxy.ts`. test-tenancy H6 checks every route in `app/`. |
 | Northstar | **Off entirely** (go-C condition 1). Northstar sign-in is 404 and Northstar tokens are ignored. The Northstar store refuses every read and write (`lib/store.ts`). The image holds no fixture and no Sparta evidence. There's no override. |
 | Hosts | Only the hostnames in `ALIGN_HOSTS` are served. Every other Host gets 421, loopback included. |
 | Proxy | Without `X-Forwarded-Proto: https`, a request gets 403. Without `Fly-Client-IP`, it also gets 403, since it didn't come through Fly's edge. |
@@ -41,11 +41,11 @@ The server won't serve until all of these hold. On `next start` it exits with th
 - `ALIGN_SECRET`: 32+ characters. Session tokens are signed with it, so rotating it signs everyone out.
 - `ALIGN_DATA_DIR`: an absolute path outside the app directory (the volume, `/data`).
 - `ALIGN_SIGNUP_CODES`: one or more invite codes, each 12+ characters. `ALIGN_SIGNUP_CODE` (a single shared code) is refused.
-- `ALIGN_DELETE_BY`: the deletion date, `YYYY-MM-DD`.
+- `ALIGN_DELETE_BY`: the deletion date, `YYYY-MM-DD`, not yet passed. From that day a running server answers 410 to every request, and a restart is refused.
 - `ALIGN_PRODUCT_PASSCODE`, `ALIGN_SECURITY_PASSCODE`, `ALIGN_LEADERSHIP_PASSCODE`: set, not the `*-demo` defaults, and 12+ characters. They serve nothing while Northstar is off; they're required so a mistake there could never expose the demo passcodes.
-- These must be unset or off: `AI_GATEWAY_API_KEY`, `ALIGN_CAPTURE`, `ALIGN_ALLOW_OPEN_CREATE`, `ALIGN_CREATE_PER_HOUR`, `ALIGN_NORTHSTAR_PUBLIC` and `ALIGN_PUBLIC`.
+- These must be unset (any value is refused, `"0"` included): `AI_GATEWAY_API_KEY`, `ALIGN_CREATE_PER_HOUR`, `ALIGN_NORTHSTAR_PUBLIC`. These must be unset or off: `ALIGN_CAPTURE` (or `0`), `ALIGN_ALLOW_OPEN_CREATE` and `ALIGN_PUBLIC` (anything but `1`).
 
-test-tenancy H1 checks every one of these on a production server, and the same refusal was checked on the built image.
+test-tenancy H1 checks every one of these on a production server: each must exit, or stay up answering only 503, and name its problem. `scripts/test-image.sh` checks a refusal on the built image.
 
 ## Environment
 
@@ -76,7 +76,7 @@ test-tenancy H1 checks every one of these on a production server, and the same r
 No plaintext passcode or invite code is stored anywhere. Passcodes are shown once, at creation.
 
 **Volume snapshots.** Fly takes daily snapshots of volumes and keeps them for several days by default, so deleting a workspace doesn't remove it from older snapshots.
-- To keep the Nov 6 promise, either turn scheduled snapshots off for this volume, or make sure every snapshot older than the deletion has expired by the stated date.
+- `fly.toml` sets `scheduled_snapshots = false` on the mount, which applies when the volume is created by a deploy. For a volume that already exists, also turn them off on the volume, and make sure any snapshot taken before that has expired by the stated date.
 - Before deploying, check the current flags with `fly volumes update --help` and `fly volumes snapshots list <volume id>`. This page doesn't claim the exact defaults.
 
 ## Creating tester workspaces
@@ -153,4 +153,4 @@ Delete the synthetic workspaces afterwards with `ws-admin.mjs`.
 
 ## Local test
 
-`node scripts/test-tenancy.mjs <port>` builds once and runs every phase on `next start`, the way Fly runs it. Its hosted phase sends `Host: align.test`, `X-Forwarded-Proto: https` and `Fly-Client-IP`, the way Fly's edge forwards requests. `scripts/test-all.sh` runs it as its last step.
+`node scripts/test-tenancy.mjs <port>` builds once and runs every phase on `next start`, the way Fly runs it. Its hosted phase sends `Host: align.test`, `X-Forwarded-Proto: https` and `Fly-Client-IP`, the way Fly's edge forwards requests. `scripts/test-all.sh` runs it after the dev-server gates, before `ui-northstar`.

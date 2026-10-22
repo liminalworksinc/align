@@ -159,7 +159,7 @@ async function main() {
   );
   const proto = JSON.stringify(fixture).replace(/^\{/, '{"__proto__":{"admin":true},');
   const s9 = await setup("leadership", undefined, { raw: proto, headers: { "content-type": "application/json" } });
-  check("S9 own __proto__ key -> 400", s9.status === 400, short(s9));
+  check("S9 own __proto__ key -> 400, refused for that key (not some other 400)", s9.status === 400 && /__proto__/.test(JSON.stringify(s9.json ?? s9.text ?? "")), short(s9));
 
   // Founder ruling "optional fields": only the minimal conflict is required.
   const dropAt = (obj, p) => {

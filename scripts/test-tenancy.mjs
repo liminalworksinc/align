@@ -201,15 +201,18 @@ async function startServer(env) {
   let stderr = "";
   server.stderr.on("data", (c) => (stderr += c));
   server.on("exit", () => (exited = true));
+  let last = 0; // the last HTTP status seen: a refused hosted server that stays up must answer 503, never serve
   for (let i = 0; i < 90 && !exited; i++) {
     try {
       // Hosted servers answer only for their allowlisted Host over (forwarded) https.
       const r = env.HOSTED === "1" ? await hosted("GET", "/api/workspaces/config") : await fetch(`${BASE}/api/workspaces/config`);
-      if (r.status === 200) return { started: true, stderr };
+      last = r.status;
+      if (r.status === 200) return { started: true, stderr, exited, last };
+      if (r.status === 503) break; // up, but serving nothing (proxy.ts startupProblems)
     } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
-  return { started: false, stderr };
+  return { started: false, stderr, exited, last };
 }
 async function stopServer() {
   if (!server) return;
@@ -341,8 +344,11 @@ try {
   // A2 a session ignores any workspace in body, query or header
   const nB0 = treeHash(path.join(wsRoot, b));
   const nA0 = treeHash(path.join(wsRoot, a));
-  const a2 = await call("POST", `/api/timer?workspace=${b}`, { cookie: sa.product, body: { action: "ceo_change_viewed", workspace: b }, headers: { "x-align-workspace": b } });
-  check("A2 workspace in body/query/header ignored: the write succeeds in A, B untouched", a2.status === 200 && treeHash(path.join(wsRoot, a)) !== nA0 && treeHash(path.join(wsRoot, b)) === nB0, `${a2.status} A changed=${treeHash(path.join(wsRoot, a)) !== nA0}`);
+  const a2h = await call("POST", "/api/timer", { cookie: sa.product, body: { action: "ceo_change_viewed" }, headers: { "x-align-workspace": b } });
+  const a2hUnchanged = treeHash(path.join(wsRoot, a)) === nA0 && treeHash(path.join(wsRoot, b)) === nB0;
+  check("M7 a write whose page names another workspace (x-align-workspace) -> 409, A and B untouched", a2h.status === 409 && a2hUnchanged, `${a2h.status} unchanged=${a2hUnchanged}`);
+  const a2 = await call("POST", `/api/timer?workspace=${b}`, { cookie: sa.product, body: { action: "ceo_change_viewed", workspace: b }, headers: { "x-align-workspace": a } });
+  check("A2 workspace in body/query ignored: the write succeeds in A, B untouched", a2.status === 200 && treeHash(path.join(wsRoot, a)) !== nA0 && treeHash(path.join(wsRoot, b)) === nB0, `${a2.status} A changed=${treeHash(path.join(wsRoot, a)) !== nA0}`);
   const meA = await call("GET", `/api/session?workspace=${b}`, { cookie: sa.product });
   check("A2 GET /api/session reports A", meA.json?.workspace === a, meA.text);
   const info = await call("GET", `/api/workspaces/${b}/login-info`);
@@ -499,6 +505,14 @@ try {
   check("R19 primitive JSON sign-in bodies -> 400, never 500", prim.every((r) => r.status === 400), prim.map((r) => r.status).join(","));
   // R15 the state names its workspace, so a tab can tell the cookie moved under it; Northstar's has no such key
   const nsR = await northstarSignIn();
+  // M4 the default store too: a page on another local port can't reset Northstar, and directives refuse it
+  const nsBeforeM4 = fileHash(NS_STATE);
+  const m4o = await call("POST", "/api/reset", { cookie: nsR.leadership, raw: JSON.stringify({ confirm: "reset" }), headers: { "content-type": "text/plain", origin: "http://localhost:5173" } });
+  const m4t = await call("POST", "/api/reset", { cookie: nsR.leadership, raw: JSON.stringify({ confirm: "reset" }), headers: { "content-type": "text/plain" } });
+  const m4j = await call("POST", "/api/reset", { cookie: nsR.leadership, body: { confirm: "reset" }, headers: { origin: "http://localhost:5173" } });
+  const m4d = await call("GET", "/api/directives?session=x", { headers: { origin: "http://localhost:5173" } });
+  const m4unchanged = fileHash(NS_STATE) === nsBeforeM4;
+  check("M4 Northstar reset from another local port -> 403 (text/plain or JSON), text/plain -> 415, Northstar unchanged; directives from another port -> 403", m4o.status === 403 && m4t.status === 415 && m4j.status === 403 && m4unchanged && m4d.status === 403, `${m4o.status} ${m4t.status} ${m4j.status} unchanged=${m4unchanged} ${m4d.status}`);
   const nsState = await call("GET", "/api/state", { cookie: nsR.product });
   const wsState = await call("GET", "/api/state", { cookie: sb.product });
   check("R15 custom /api/state names its workspace; Northstar's does not", wsState.json?.workspace === b && !!nsState.json && !("workspace" in nsState.json), `${wsState.json?.workspace} ${Object.keys(nsState.json ?? {}).includes("workspace")}`);
@@ -587,11 +601,14 @@ try {
       const st = await page.evaluate((ws, pc) => fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace: ws, role: "product", passcode: pc }) }).then((r) => r.status), b, B.json.passcodes.product).catch(() => 0);
       await page.reload({ waitUntil: "domcontentloaded" });
       const inB = await waitFor(async () => (await page.evaluate(() => document.body.innerText).catch(() => "")).includes("BMARK"), 45000);
+      // The leftover check below looks for this exact text, so it must be on the page while signed in.
+      const bodyIn = await page.evaluate(() => document.body.innerText).catch(() => "");
+      check("U2 setup: the signed-in page shows the signed-in role line (the leftover marker below)", bodyIn.includes("You are: Product BMARK lead"), bodyIn.slice(0, 200));
       const authU = path.join(wsRoot, b, "auth.json");
       const auU = JSON.parse(readFileSync(authU, "utf8"));
       writeFileSync(authU, JSON.stringify({ ...auU, epoch: auU.epoch + 1 }), { mode: 0o600 });
       const ended = await waitFor(async () => (await page.evaluate(() => document.body.innerText).catch(() => "")).includes(ENDED), 20000);
-      const leftover = (await page.evaluate(() => document.body.innerText).catch(() => "")).includes("BMARK workspace goal");
+      const leftover = (await page.evaluate(() => document.body.innerText).catch(() => "")).includes("You are: Product BMARK lead");
       writeFileSync(authU, JSON.stringify(auU), { mode: 0o600 });
       await new Promise((r) => setTimeout(r, 50));
       check("U2 a session ended server-side: the page says \"Your session ended. Sign in again.\"", st === 200 && inB && ended && !leftover, JSON.stringify({ st, inB, ended, leftover }));
@@ -600,7 +617,7 @@ try {
     } finally {
       await browser.close();
     }
-  }
+  } else check("U browser checks need Chrome (CHROME_PATH)", false, CHROME);
 
   // ---- W: an agent connected to a workspace (Mode L): token, capture, MCP and wake-ups stay in that workspace ----
   const W_REPO = "w-agent-repo";
@@ -658,15 +675,46 @@ try {
   const wAck = await call("POST", "/api/directives/ack", { body: { session: "claude-code:w-agent-1", event_id: wAfter[0]?.event_id }, headers: bearer });
   const delivered = (await call("GET", "/api/state", { cookie: sb.leadership })).json.sessions.find((x) => x.session_id === "w-agent-1")?.directives ?? [];
   check("W5 the watcher's ack marks delivery in B's state; the next poll is empty", wAck.status === 200 && delivered.length === 1 && (await dirW()).length === 0, `${wAck.status} ${JSON.stringify(delivered)}`);
-  // Revocation: bumping B's epoch (what a passcode reset does) ends the token everywhere
-  const authBW = path.join(wsRoot, b, "auth.json");
-  const auW = JSON.parse(readFileSync(authBW, "utf8"));
-  writeFileSync(authBW, JSON.stringify({ ...auW, epoch: auW.epoch + 1 }), { mode: 0o600 });
-  await new Promise((r) => setTimeout(r, 50));
-  const [rvCap, rvMcp] = [await ev("w-agent-1", "Bash"), await mcpCall(wTok, "align_list_goals")];
-  writeFileSync(authBW, JSON.stringify(auW), { mode: 0o600 });
-  await new Promise((r) => setTimeout(r, 50));
-  check("W6 after an epoch bump the token is refused: capture 401, MCP 401", rvCap.status === 401 && rvMcp.status === 401, `${rvCap.status} ${rvMcp.status}`);
+  check("W5 the ack recorded B's authority event id", delivered.some((d) => d.event_id === wAfter[0]?.event_id), JSON.stringify(delivered));
+  // M2: an ack is small and names a real authority event; anything else records nothing
+  const junkAck = await call("POST", "/api/directives/ack", { body: { session: "claude-code:w-agent-1", event_id: "not-an-authority-event" }, headers: bearer });
+  const bigAck = await call("POST", "/api/directives/ack", { raw: JSON.stringify({ session: "claude-code:w-agent-1", event_id: wAfter[0]?.event_id, pad: "x".repeat(5000) }), headers: bearer });
+  const deliveredAfterJunk = (await call("GET", "/api/state", { cookie: sb.leadership })).json.sessions.find((x) => x.session_id === "w-agent-1")?.directives ?? [];
+  check("M2 an ack naming no authority event records nothing (fresh false); a 5 KB ack -> 413", junkAck.status === 200 && junkAck.json?.fresh === false && bigAck.status === 413 && deliveredAfterJunk.length === delivered.length, `${junkAck.status} ${junkAck.text} ${bigAck.status} ${deliveredAfterJunk.length}`);
+  // M3: a token for another harness and repo of the same workspace can't read or ack this session
+  const oMint = await call("POST", "/api/workspaces/agent-token", { cookie: sb.leadership, body: { harness: "codex", repo: "w-other-repo" } });
+  const other = { authorization: `Bearer ${oMint.json?.token}` };
+  const oPoll = await call("GET", "/api/directives?session=claude-code:w-agent-1", { headers: other });
+  const oAck = await call("POST", "/api/directives/ack", { body: { session: "claude-code:w-agent-1", event_id: wAfter[0]?.event_id }, headers: other });
+  const [ownMap, oMap] = [await mcpCall(wTok, "align_get_work_map"), await mcpCall(oMint.json?.token, "align_get_work_map")];
+  const badPoll = await call("GET", "/api/directives?session=claude-code:w-agent-1", { headers: { authorization: `Bearer ${wTok.slice(0, -2)}xx` } });
+  check(
+    "M3 another harness/repo's token: poll 403, ack 403, its work map omits the session (its own token's shows it); a bad agent token on directives -> 401",
+    oMint.status === 200 && oPoll.status === 403 && oAck.status === 403 && JSON.stringify(ownMap.result ?? {}).includes("w-agent-1") && !JSON.stringify(oMap.result ?? {}).includes("w-agent-1") && badPoll.status === 401,
+    `${oMint.status} ${oPoll.status} ${oAck.status} own=${JSON.stringify(ownMap.result ?? {}).includes("w-agent-1")} other=${JSON.stringify(oMap.result ?? {}).includes("w-agent-1")} ${badPoll.status}`,
+  );
+  // W6 / H1: leadership disconnects the agent in the product; every agent token stops and the repo's consent and
+  // captured sessions go. Product can't disconnect.
+  const dProduct = await call("DELETE", "/api/workspaces/agent-token", { cookie: sb.product, body: { harness: "claude-code", repo: W_REPO } });
+  const dLead = await call("DELETE", "/api/workspaces/agent-token", { cookie: sb.leadership, body: { harness: "claude-code", repo: W_REPO } });
+  const [rvCap, rvMcp, rvPoll, rvOther] = [await ev("w-agent-9", "Bash"), await mcpCall(wTok, "align_list_goals"), await call("GET", "/api/directives?session=claude-code:w-agent-1", { headers: bearer }), await call("GET", "/api/directives?session=codex:x", { headers: other })];
+  const bAfterD = (await call("GET", "/api/state", { cookie: sb.leadership })).json;
+  check(
+    "W6 leadership disconnects (product 403): capture, MCP and directives -> 401 for every agent token; the repo's consent and sessions are removed",
+    dProduct.status === 403 && dLead.status === 200 && dLead.json?.removed_consents === 1 && dLead.json?.purged_sessions >= 1 && rvCap.status === 401 && rvMcp.status === 401 && rvPoll.status === 401 && rvOther.status === 401 && !bAfterD.sessions.some((x) => x.repo === W_REPO),
+    `${dProduct.status} ${dLead.status} ${dLead.text} ${rvCap.status} ${rvMcp.status} ${rvPoll.status} ${rvOther.status}`,
+  );
+  // H1: Restart revokes agents. A token that captured before Restart is refused after it, and must be minted again.
+  const rMint = await call("POST", "/api/workspaces/agent-token", { cookie: sb.leadership, body: { harness: "claude-code", repo: W_REPO } });
+  const rAuth = { authorization: `Bearer ${rMint.json?.token}` };
+  const capBefore = await ev("w-agent-10", "Bash", rAuth);
+  const restartB = await call("POST", "/api/reset", { cookie: sb.leadership, body: { confirm: "reset" } });
+  const capAfter = await ev("w-agent-11", "Bash", rAuth);
+  check("H1 Restart revokes agents: a token that captured before Restart -> 401 after", rMint.status === 200 && capBefore.status === 200 && restartB.status === 200 && capAfter.status === 401, `${rMint.status} ${capBefore.status} ${restartB.status} ${capAfter.status}`);
+  // M5: Restart is limited per workspace (10 a minute), so a loop can't churn the audit archive
+  const loop = [];
+  for (let i = 0; i < 11; i++) loop.push((await call("POST", "/api/reset", { cookie: sb.leadership, body: { confirm: "reset" } })).status);
+  check("M5 a Restart loop is limited: 429 within 11 more in a minute, never more than 10 accepted", loop.includes(429) && loop.filter((x) => x === 200).length <= 9 && loop.every((x) => x === 200 || x === 429), loop.join(","));
 
   // ---- spec section 11 tests 9, 18, 20 ----
   // 9: a Northstar leadership token can't export, rotate or delete a workspace, and data/ doesn't change. Those
@@ -703,6 +751,15 @@ try {
   const afterTrim = JSON.parse(readFileSync(fileC, "utf8"));
   const archived = existsSync(archiveC) ? readFileSync(archiveC, "utf8").trim().split("\n").length : 0;
   check("S18 below the cap a write with 1500 audit rows succeeds: 1000 kept (newest), 501 archived", tw.status === 200 && afterTrim.audit.length === 1000 && afterTrim.audit.at(-1).action === "propose" && archived === 501, `${tw.status} kept=${afterTrim.audit.length} archived=${archived}`);
+  // M5: the archive is bounded: past 1 MB it rotates to audit-archive.1.jsonl (one previous file kept)
+  writeFileSync(archiveC, `${JSON.stringify({ id: "pad", pad: "p".repeat(1024 * 1024) })}\n`, { mode: 0o600 });
+  const trim2 = JSON.parse(readFileSync(fileC, "utf8"));
+  trim2.audit = rows;
+  trim2.proposals = []; // no open proposal, so the write below is accepted (and trims)
+  writeFileSync(fileC, JSON.stringify(trim2), { mode: 0o600 });
+  const tw2 = await call("POST", "/api/proposals", { cookie: sc.product, body: { proposed_measure_text: "CMARK rotated", rationale: "r", reciprocal_commitment: "c" } });
+  const rotated = path.join(wsRoot, c, "audit-archive.1.jsonl");
+  check("M5 an archive past 1 MB rotates: audit-archive.1.jsonl holds the old file, the new archive is small", tw2.status === 200 && existsSync(rotated) && statSync(rotated).size > 1024 * 1024 && existsSync(archiveC) && statSync(archiveC).size < 512 * 1024, `${tw2.status} ${tw2.text.slice(0, 120)} rotated=${existsSync(rotated)} new=${existsSync(archiveC) ? statSync(archiveC).size : "none"}`);
 
   // 20: a Northstar state.json from before L0 (850971e's fixture, as its first run wrote it) loads unchanged
   const nsNow = readFileSync(NS_STATE, "utf8");
@@ -754,7 +811,7 @@ try {
   // ======== phase hosted ========
   await stopServer();
   const hostedDir = path.join(tmpRoot, "hosted");
-  const INVITES = ["hosted-invite-0001", "hosted-invite-0002", "hosted-invite-0003"];
+  const INVITES = ["hosted-invite-0001", "hosted-invite-0002", "hosted-invite-0003", "hosted-invite-0004"];
   const good = {
     HOSTED: "1",
     ALIGN_HOSTS: HOSTED_HOST,
@@ -784,6 +841,7 @@ try {
     ["Northstar public", { ALIGN_NORTHSTAR_PUBLIC: "1" }, "Northstar is off when hosted"],
     ["no deletion date", { ALIGN_DELETE_BY: undefined }, "ALIGN_DELETE_BY must be a date"],
     ["a bad deletion date", { ALIGN_DELETE_BY: "Nov 6" }, "ALIGN_DELETE_BY must be a date"],
+    ["a deletion date that has passed", { ALIGN_DELETE_BY: "2020-01-01" }, "has passed"],
     ["an AI key", { AI_GATEWAY_API_KEY: "sk-test" }, "AI_GATEWAY_API_KEY"],
     ["capture on", { ALIGN_CAPTURE: "1" }, "ALIGN_CAPTURE must be off"],
     ["public mode", { ALIGN_PUBLIC: "1" }, "Public mode is not supported"],
@@ -792,7 +850,8 @@ try {
     const env = { ...good, ...delta };
     for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
     const r = await startServer(env);
-    check(`H1 HOSTED=1 refuses to serve with ${what}`, !r.started && r.stderr.includes(needle), r.started ? "it started" : r.stderr.slice(-300));
+    // Refused means the process exited, or stayed up answering only 503: never "no answer within 90 s".
+    check(`H1 HOSTED=1 refuses to serve with ${what}`, !r.started && (r.exited || r.last === 503) && r.stderr.includes(needle), r.started ? "it started" : `exited=${r.exited} last=${r.last} ${r.stderr.slice(-300)}`);
     await stopServer();
   }
   await mustStart(good);
@@ -883,10 +942,14 @@ try {
   const t0 = Date.now();
   const burst = Promise.all(Array.from({ length: 24 }, (_, i) => hosted("POST", "/api/session", { body: { workspace: hB.json.workspace.id, role: "leadership", passcode: `burst-${i}-wrong` }, headers: { "fly-client-ip": `192.0.2.${i + 1}` } }).then((r) => r.status)));
   await new Promise((r) => setTimeout(r, 30));
+  // M1: creating a workspace with an invite isn't starved by the burst, and the invite isn't burned
+  const createDuring = hosted("POST", "/api/workspaces", { body: { ...marked("HDMARK"), signup_code: INVITES[3] }, headers: { "fly-client-ip": "198.51.100.90" } });
   const during = await hosted("GET", "/api/state", { cookie: hl.cookie });
   const readMs = Date.now() - t0;
   const bs = await burst;
   check("H10 24 parallel sign-ins: at most 10 hash (the rest 429), and another workspace still reads in under 1.5 s", bs.filter((x) => x === 429).length >= 14 && bs.every((x) => x === 401 || x === 429) && during.status === 200 && readMs < 1500, `${bs.join(",")} read=${during.status} in ${readMs} ms`);
+  const cd = await createDuring;
+  check("M1 a create with an invite during the sign-in burst -> 201", cd.status === 201, `${cd.status} ${cd.text.slice(0, 200)}`);
 
   // H11 the operator delete tool (go-C condition 4), while the server runs
   const admin = (...a) => spawnSync("node", ["scripts/ws-admin.mjs", ...a], { cwd: ROOT, encoding: "utf8", env: { ...process.env, ALIGN_DATA_DIR: hostedDir } });

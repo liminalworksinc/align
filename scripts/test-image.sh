@@ -20,7 +20,9 @@ docker build -q -t "$TAG" . >/dev/null || { echo "FAIL  docker build"; exit 1; }
 echo "PASS  docker build"
 
 inside="$(docker run --rm --entrypoint sh "$TAG" -c 'ls -A /app; ls /app/scripts; find / \( -name ".env" -o -name ".env.*" \) -not -path "/proc/*" -not -path "/sys/*" -not -path "*/node_modules/*" 2>/dev/null')"
-echo "$inside" | grep -qxE 'data|sparta|agent|test|docs|\.env.*'; [ $? -ne 0 ]; ok $? "the image has no data/, sparta/, agent/, test/, docs/ or .env" "$(echo "$inside" | tr '\n' ' ')"
+echo "$inside" | grep -qxE 'data|sparta|agent|test|docs|\.env.*'; nobad=$?
+# The listing must be real (it names package.json), or "none of these names" would pass on an empty listing.
+echo "$inside" | grep -qx 'package.json' && [ "$nobad" -ne 0 ]; ok $? "the image has no data/, sparta/, agent/, test/, docs/ or .env" "$(echo "$inside" | tr '\n' ' ')"
 [ "$(docker run --rm --entrypoint sh "$TAG" -c 'ls /app/scripts')" = "ws-admin.mjs" ]; ok $? "the only script in the image is ws-admin.mjs"
 
 docker run --name "$NAME-bad" "$TAG" >/dev/null 2>&1

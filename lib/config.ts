@@ -79,6 +79,7 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
   if (env.ALIGN_SIGNUP_CODE) p.push("ALIGN_SIGNUP_CODE (one shared code) is not allowed when hosted; use ALIGN_SIGNUP_CODES");
   if (env.ALIGN_ALLOW_OPEN_CREATE === "1") p.push("ALIGN_ALLOW_OPEN_CREATE is not allowed when hosted");
   if (env.ALIGN_CREATE_PER_HOUR) p.push("ALIGN_CREATE_PER_HOUR is not allowed when hosted (fixed at 5)");
+  if (env.ALIGN_PUBLIC === "1") p.push("Public mode is not supported in this build"); // also behind proxy.ts's 503
   if (env.ALIGN_NORTHSTAR_PUBLIC) p.push("ALIGN_NORTHSTAR_PUBLIC is not allowed: Northstar is off when hosted");
   // The tester notice states the deletion date (go-C condition 3).
   const del = env.ALIGN_DELETE_BY ?? "";
