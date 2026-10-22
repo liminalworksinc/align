@@ -4,13 +4,19 @@ import { authorityEvents, describeEvent, pendingFor } from "../directives";
 import { acceptedPlan } from "../policy";
 import { activeRegistry, currentGoals } from "../registry";
 import { readState } from "../store";
-import type { AgentSession, AppState, SessionMapping } from "../types";
+import { leadOf, scenarioOf, teamOf } from "../labels";
+import type { AgentSession, AppState, Owner, SessionMapping } from "../types";
 
 // Read-only MCP surface for Align. Every tool reads via readState() and never mutates.
 
 const ORG = "Northstar Security";
 const TEAM: Record<string, string> = { ceo: "Company", product: "Product", security: "Security" };
 const PUSHED_BY = "CEO / Leadership";
+// A custom scenario names its own company and teams; Northstar keeps the constants above.
+const orgOf = (s: AppState) => (scenarioOf(s) === "custom" ? s.company : ORG);
+const teamName = (s: AppState, owner: string) =>
+  scenarioOf(s) === "custom" && owner in TEAM ? teamOf(s, owner as Owner) : (TEAM[owner] ?? owner);
+const pushedBy = (s: AppState) => (scenarioOf(s) === "custom" ? leadOf(s, "ceo") : PUSHED_BY);
 const OUTCOME_NOTE = "Company outcome is not verified by this record.";
 const READ_ONLY = { readOnlyHint: true, idempotentHint: true, openWorldHint: false } as const;
 const PROMPT_MAX = 200;
@@ -71,11 +77,11 @@ function listGoals(s: AppState): z.infer<typeof ListGoalsOut> {
   const push = s.pushes.at(-1);
   return {
     registry_version: s.registry_version,
-    org: ORG,
-    latest_push: push ? { version: push.version, pushed_at: push.pushed_at, pushed_by: PUSHED_BY } : null,
+    org: orgOf(s),
+    latest_push: push ? { version: push.version, pushed_at: push.pushed_at, pushed_by: pushedBy(s) } : null,
     goals: goals.map((g) => ({
       goal_id: g.id,
-      team: TEAM[g.owner_id] ?? g.owner_id,
+      team: teamName(s, g.owner_id),
       owner: g.owner_name,
       version: g.version,
       objective: g.objective,
@@ -90,7 +96,7 @@ function listGoals(s: AppState): z.infer<typeof ListGoalsOut> {
 // ---------- align_get_accepted_plan ----------
 
 const AcceptedPlanOut = z.object({
-  team: z.literal("security"),
+  team: z.string(), // Northstar: "security"; a custom scenario: the owning team's name
   goal_id: z.string(),
   goal_version: z.string(),
   plan: z.string(),
@@ -99,7 +105,25 @@ const AcceptedPlanOut = z.object({
   ratified_at: z.string().nullable(),
   test_status: z.string().nullable(),
   run_command: z.string(),
+  // Custom scenarios only: the agreement itself, since an agent reads structuredContent, not the text summary.
+  agreement: z
+    .object({
+      company: z.string(),
+      asking_team: z.string(),
+      owning_team: z.string(),
+      status: z.enum(["agreed", "not_agreed"]),
+      plan_title: z.string(),
+      plan_text: z.string(),
+      owning_measures: z.array(z.string()),
+      agreed_measure: z.string().nullable(),
+      conditions: z.string().nullable(),
+      asking_commitment: z.string().nullable(),
+    })
+    .optional(),
 });
+
+/** Custom: the agreement is the instruction; there is no plan file to run. */
+const NO_RUN = "none: this plan is an agreement between teams, not a script. Work only within it.";
 
 // ---------- align_get_work_map ----------
 
@@ -366,8 +390,8 @@ export function registerAlign(server: McpServer) {
       requireRead(ctx);
       const out = listGoals(await readState());
       const lines = out.goals.map((g) => `- ${g.team} ${g.version} (${g.goal_id}): ${g.objective}`);
-      const push = out.latest_push ? `latest push ${out.latest_push.version} at ${out.latest_push.pushed_at} by ${PUSHED_BY}` : "no Leadership push yet";
-      return result(out, `${ORG}: ${out.goals.length} current goals (registry ${out.registry_version}, ${push}).\n${lines.join("\n")}`);
+      const push = out.latest_push ? `latest push ${out.latest_push.version} at ${out.latest_push.pushed_at} by ${out.latest_push.pushed_by}` : "no Leadership push yet";
+      return result(out, `${out.org}: ${out.goals.length} current goals (registry ${out.registry_version}, ${push}).\n${lines.join("\n")}`);
     },
   );
 
@@ -383,7 +407,29 @@ export function registerAlign(server: McpServer) {
     },
     async (_args, ctx) => {
       requireRead(ctx);
-      const out = { ...acceptedPlan(await readState()), run_command: "scripts/run-plan.sh accepted" };
+      const s = await readState();
+      if (scenarioOf(s) === "custom") {
+        const { agreement, ...rest } = acceptedPlan(s);
+        const a = agreement!;
+        const out = { ...rest, run_command: NO_RUN, agreement: a }; // agreement last, after run_command
+        const lines =
+          a.status === "agreed"
+            ? [
+                `${a.company}: ${a.owning_team} goal ${out.goal_version} was changed by agreement (${out.authority}, ${out.ratified_at}); test status ${out.test_status ?? "none recorded"}.`,
+                `Agreed measure: ${a.agreed_measure}`,
+                `Plan "${a.plan_title}": ${a.plan_text}`,
+                a.conditions ? `Conditions from ${a.owning_team}: ${a.conditions}` : `No conditions recorded.`,
+                a.asking_commitment ? `${a.asking_team} committed to: ${a.asking_commitment}` : "",
+                `Run command: ${NO_RUN}`,
+              ]
+            : [
+                `${a.company}: no change is agreed. ${out.authority}.`,
+                `${a.owning_team}'s current measures: ${a.owning_measures.join("; ")}`,
+                `Plan "${a.plan_title}" is proposed only, not agreed. Do not act on it.`,
+              ];
+        return result(out, lines.filter(Boolean).join("\n"));
+      }
+      const out = { ...acceptedPlan(s), run_command: "scripts/run-plan.sh accepted" };
       return result(
         out,
         `Security goal ${out.goal_version} (${out.authority}) authorizes ${out.plan}; test status ${out.test_status ?? "none recorded"}. Run with: ${out.run_command}`,

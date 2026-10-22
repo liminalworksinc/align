@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Custom-scenario acceptance test (Build A minimum slice): setup authority S1–S9, the minimal setup S10/S11, Host checks S12/S13,
-// state after setup T1, the propose → change → owner-approval flow F2–F15, and R4 back to Northstar.
+// state after setup T1, the propose → change → owner-approval flow F2–F15, what an agent reads (accepted plan P1/P2,
+// the approval directive D1–D4, on synthetic sessions under a synthetic repo), and R4 back to Northstar.
 // Case ids follow Sean's Build A plan §7/§8. Contracts: plan §3 (setup API, approval, custom state seed).
 //
 // Usage: node scripts/test-scenario.mjs http://127.0.0.1:3205 [fixture.json]
@@ -16,6 +17,10 @@ const BASE = baseUrl();
 const FIXTURE = path.resolve(process.argv[3] || path.join(ROOT, "data/scenarios/example-custom.json"));
 const fixture = JSON.parse(readFileSync(FIXTURE, "utf8"));
 const NORTHSTAR_TEXT = /Northstar|Sparta|Alike|p-beta|p-throughput|KR2 makes beta/;
+const RUN = Date.now().toString(36);
+const AGENT_REPO = "test-scenario-agent";
+const AGENT_READS = `test-scenario-reads-${RUN}`;
+const AGENT_OTHER = `test-scenario-other-${RUN}`;
 
 // The fewest fields a setup may carry (founder ruling "optional fields"). Every other field is optional.
 const MINIMAL = {
@@ -203,6 +208,15 @@ async function main() {
   check("T1 custom state carries no Northstar, Sparta or Alike text", !NORTHSTAR_TEXT.test(JSON.stringify({ ...t1b, audit: [] })), (JSON.stringify(t1b).match(NORTHSTAR_TEXT) ?? [""])[0]);
   check("T1 setup audit event holds a hash, not the input", (t1.audit ?? []).some((a) => a.action === "scenario_setup") && !JSON.stringify(t1.audit ?? []).includes(fixture.plan.text));
 
+  // ---- P: what an agent reads before any agreement (accepted plan, custom) ----
+  const owningTeam = t1.teams?.security?.team;
+  const p1 = (await call(null, "GET", "/api/policy/security")).json;
+  check(
+    "P1 before approval the accepted plan is none, not agreed, named for the owning team, with the proposed plan text",
+    p1?.plan === "none" && p1?.team === owningTeam && p1?.agreement?.status === "not_agreed" && p1?.agreement?.plan_text === t1.plans?.[0]?.text && p1?.agreement?.conditions === null,
+    JSON.stringify(p1),
+  );
+
   // ---- F: propose → change → owner approval (plan §3 approval, §7 acceptance) ----
   const ownerMeasure = t1.scenario_config?.owner_measure_id;
   const body = {
@@ -221,6 +235,17 @@ async function main() {
     short(f2),
   );
   if (!pid) throw new Error("No proposal id; aborting flow");
+  // Two synthetic agent sessions under a synthetic repo (consent revoked at the end, which purges them):
+  // one has read Align over MCP, one has not. Only the first may receive the approval's directive.
+  const g1 = await call("leadership", "POST", "/api/sessions/consent", { harness: "claude-code", repo: AGENT_REPO });
+  const capture = (sid, tool) =>
+    fetch(`${BASE}/api/sessions/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ harness: "claude-code", session_id: sid, hook_event: "PostToolUse", repo: AGENT_REPO, cwd: AGENT_REPO, tool_name: tool }),
+    }).then((r) => r.status);
+  const c1 = [await capture(AGENT_READS, "mcp__align__align_get_accepted_plan"), await capture(AGENT_OTHER, "Bash")];
+  check("D1 consent for a synthetic repo, two agent sessions captured", g1.status === 200 && c1.every((s) => s === 200), `${short(g1)} ${c1}`);
   const ref = f2.json?.goal_text_ref;
   check("F2 inline plan reference is inline:p-custom@1 when present (decision 8)", ref === undefined || ref === "inline:p-custom@1", `goal_text_ref=${ref}`);
   const f3 = await call("product", "POST", "/api/proposals", body);
@@ -260,6 +285,29 @@ async function main() {
   );
   const f11 = await call("security", "POST", `/api/proposals/${pid}/accept`, { rationale: "Agreed without a sandbox test", accept_untested: true });
   check("F11 approval with accept_untested -> RATIFIED", f11.status === 200 && f11.json?.state === "RATIFIED", short(f11));
+
+  // What an agent reads after the approval: the agreement, its conditions, and a directive with no run command.
+  const p2 = (await call(null, "GET", "/api/policy/security")).json;
+  check(
+    "P2 after approval the accepted plan is p-custom@1, agreed, with the counter's measure, the conditions and the commitment",
+    p2?.plan === "p-custom@1" && p2?.team === owningTeam && p2?.test_status === "UNTESTED" && p2?.agreement?.status === "agreed" &&
+      p2?.agreement?.agreed_measure === counterBody.proposed_measure_text && p2?.agreement?.conditions === CONDITIONS &&
+      p2?.agreement?.asking_commitment === body.reciprocal_commitment,
+    JSON.stringify(p2),
+  );
+  const dirFor = async (sid) => (await call(null, "GET", `/api/directives?session=claude-code:${sid}`)).json?.pending ?? [];
+  const [dReads, dOther] = [await dirFor(AGENT_READS), await dirFor(AGENT_OTHER)];
+  const dText = dReads[0]?.text ?? "";
+  check(
+    "D2 the approval reaches the session that read Align: one ratify directive with the conditions and no run command",
+    dReads.length === 1 && dReads[0].kind === "ratify" && dText.includes(CONDITIONS) && dText.includes(owningTeam) &&
+      /no run command/.test(dText) && !/run-plan\.sh|Sparta|Northstar/.test(dText),
+    JSON.stringify(dReads),
+  );
+  check("D3 a session that never read Align gets no directive", dOther.length === 0, JSON.stringify(dOther));
+  const r1 = await call("leadership", "DELETE", "/api/sessions/consent", { harness: "claude-code", repo: AGENT_REPO });
+  const gone = !((await state()).sessions ?? []).some((x) => x.repo === AGENT_REPO);
+  check("D4 consent revoked, both synthetic sessions purged", r1.status === 200 && gone, short(r1));
 
   const st = await state();
   const sec = current(st, "security");
