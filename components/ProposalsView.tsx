@@ -473,7 +473,8 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
             <span className="mb-1 flex items-center gap-2 text-[15px] font-semibold text-violet-800">
               <span aria-hidden className="font-mono">+</span> {L.northstar ? "New target for Security" : `New target for ${L.team.security}`}
             </span>
-            <textarea className={inputCls} rows={3} value={measure} onChange={(e) => setMeasure(e.target.value)} />
+            <textarea className={inputCls} rows={3} maxLength={300} value={measure} onChange={(e) => setMeasure(e.target.value)} />
+            {measure.length >= 300 && <span className="mt-1 block text-[14px] text-amber-700">Keep the new target under 300 characters.</span>}
           </label>
           <label className="mt-3 block">
             <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Why</span>
@@ -971,7 +972,8 @@ function CounterForm({ p, latestText, busy, run, L }: { p: Proposal; latestText:
     >
       <label className="block">
         <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Or ask for changes: your version of the target</span>
-        <textarea className={inputCls} rows={4} value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea className={inputCls} rows={4} maxLength={300} value={text} onChange={(e) => setText(e.target.value)} />
+        {text.length >= 300 && <span className="mt-1 block text-[14px] text-amber-700">Keep the new target under 300 characters.</span>}
       </label>
       <label className="block">
         <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Why you want these changes</span>

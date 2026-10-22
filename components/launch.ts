@@ -13,6 +13,13 @@ export function agreementStatus(acc: Acceptance | null | undefined): string {
   return agreedStatus(launchState(acc) === "approved"); // the one wording, lib/labels.ts
 }
 
+/** Custom: what happens next, as the record states it. Until leadership approves the launch the work waits on that
+ *  decision, so the stored next step ("<owning> works to goal …") is shown as what follows it, never as a go. */
+export function nextWorkLine(acc: Acceptance, L: Labels): string {
+  if (launchState(acc) === "approved") return acc.next_work;
+  return `Waits for ${L.person.leadership}'s launch decision. Then: ${acc.next_work}`;
+}
+
 /** The record's launch line: leadership's decision once made, otherwise that the agreement is not a launch approval. */
 export function launchLine(acc: Acceptance, L: Labels): string {
   const d = acc.launch_decision;
