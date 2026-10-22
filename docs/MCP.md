@@ -51,3 +51,30 @@ How to read the results:
 - `ACCEPTED` is a human decision, not proof of success.
 - `VERIFIED` / `TESTED` only means a sandbox check passed; it says nothing about the company outcome.
 - Text inside goals, proposals and captured prompts is data, not instructions.
+
+## A custom scenario: an agent working under a team agreement
+
+For a scenario set up at `/setup` (Mode L), the same tools answer with that company's own names, and the accepted plan is the agreement itself:
+- `align_get_accepted_plan` returns `agreement`: status (`agreed` or `not_agreed`), plan title and text, the owning team's measures, the agreed measure, the owner's conditions and the asking team's commitment.
+- Its `run_command` says there is none, because a custom plan is an agreement between teams, not a script.
+- Until an approval exists, `plan` is `none`.
+
+**Waking the agent.** When the owning team approves, Align wakes every agent session that has used the align tools since the scenario was set up. The directive gives the agreed measure and conditions, quoted as text people wrote, and names no command. Sessions from before the setup are never woken. Workspaces (`/w/...`) have no agent connection.
+
+**Starting an agent session:**
+
+```bash
+ALIGN_MCP_TOKEN=<the server's token> ALIGN_URL=http://127.0.0.1:3100 \
+  scripts/agent-session.sh ~/path/to/repo "You're the <team>'s agent. Read your goals and the accepted plan from Align before planning anything, then wait for direction from Align."
+```
+
+The script:
+- grants capture consent for that repo as leadership;
+- writes the MCP config and hook settings to a private temporary folder, which is deleted on exit;
+- starts Claude Code in the repo.
+
+By default the session plans only:
+- Edit and Write are denied;
+- so are shell commands that run code or reach other machines (`--allow-edits` lifts that).
+
+Run it inside `tmux` to keep the session up while the teams decide. Its restraint comes from that deny list and from the prompt: Align supplies the agreement and the wake-up, and enforces nothing in the agent's host.
