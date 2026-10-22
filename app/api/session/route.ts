@@ -1,6 +1,6 @@
 import { bindWs, DISPLAY, login, loginWorkspace, sessionCookie, sessionFrom, wsSessionFrom, type WsSession } from "@/lib/auth";
 import { config } from "@/lib/config";
-import { body, handle, requireJson } from "@/lib/http";
+import { body, handle, requireJson, requireSameOrigin } from "@/lib/http";
 import { slotOf } from "@/lib/labels";
 import { checkLoginBackoff, clearLoginFailures, clientOf, recordLoginFailure, withSigninSlot } from "@/lib/ratelimit";
 import { isRole, parseCustomWs, workspaceExists } from "@/lib/workspace";
@@ -22,6 +22,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   return handle(async () => {
+    requireSameOrigin(req); // cross-port CSRF (review M4)
     const b = await body<{ role?: string; passcode?: string; workspace?: unknown }>(req);
     // A primitive JSON body (42, "x", null) has no keys: it falls through to Northstar's 400, as before L0.
     if (b && typeof b === "object" && "workspace" in b) {

@@ -3,6 +3,7 @@ import { handle } from "@/lib/http";
 import { scheduleMapping } from "@/lib/mapper";
 import { markActed } from "@/lib/directives";
 import { agentFrom } from "@/lib/agent-token";
+import { originIsThisServer } from "@/lib/local-guard";
 import { hasCaptureConsent, HttpError, mutate, mutateWs, now, readState } from "@/lib/store";
 import type { AgentSession, AppState, SessionOriginKind } from "@/lib/types";
 
@@ -13,7 +14,6 @@ const MAX_BODY = 16 * 1024;
 const MAX_TEXT = 1000;
 const MAX_FILES = 50;
 const MAX_PROMPTS = 200;
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 interface CaptureEvent {
   harness?: unknown;
@@ -32,13 +32,8 @@ interface CaptureEvent {
 function assertLocalOrigin(req: Request) {
   const origin = req.headers.get("origin");
   if (!origin) return;
-  let host = "";
-  try {
-    host = new URL(origin).hostname;
-  } catch {
-    // "null" or malformed origins are not local.
-  }
-  if (!LOCAL_HOSTS.has(host)) throw new HttpError(403, "Capture events are accepted from this machine only");
+  // Another localhost port is another site: only this server's own origin (or no Origin, i.e. a script) may post.
+  if (!originIsThisServer(req, origin)) throw new HttpError(403, "Capture events are accepted from this machine only");
 }
 
 async function readCapped(req: Request): Promise<string> {

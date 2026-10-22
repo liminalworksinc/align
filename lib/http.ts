@@ -26,6 +26,28 @@ function loopbackHost(host: string | null): boolean {
   return ["localhost", "127.0.0.1", "[::1]"].includes(name.toLowerCase());
 }
 
+/**
+ * CSRF for cookie-authenticated writes that keep the default store's parsing (Northstar and /setup scenarios).
+ * A browser sends Origin on every cross-origin POST, so when one is present it must be this server's own Host, port
+ * included: SameSite=Strict doesn't separate localhost ports. A request that has a body must also be JSON. Scripts
+ * send no Origin and JSON bodies, so Northstar's behaviour (and its snapshot) is unchanged (review M4).
+ */
+export function requireSameOrigin(req: Request) {
+  const origin = req.headers.get("origin");
+  if (origin !== null) {
+    let host: string | null = null;
+    try {
+      host = new URL(origin).host;
+    } catch {
+      /* "null" or malformed: never same-origin */
+    }
+    if (!host || host !== req.headers.get("host")) throw new HttpError(403, "This request came from another site");
+  }
+  const type = (req.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  const hasBody = type !== "" || Number(req.headers.get("content-length") || 0) > 0;
+  if (hasBody && type !== "application/json") throw new HttpError(415, "Send this as application/json");
+}
+
 export function requireJson(req: Request) {
   const type = (req.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
   if (type !== "application/json") throw new HttpError(415, "Send this as application/json");
@@ -109,7 +131,10 @@ export function capFields(v: unknown, at = "body"): void {
 
 /** Northstar bodies parse exactly as before (body()); custom workspace bodies are capped at 64 KB and per field. */
 export async function bodyFor<T = Record<string, unknown>>(req: Request, ws: string): Promise<T> {
-  if (ws === "northstar") return body<T>(req);
+  if (ws === "northstar") {
+    requireSameOrigin(req); // the default store too: a cross-port page must not write Northstar or a /setup scenario
+    return body<T>(req);
+  }
   // CSRF: SameSite=Strict doesn't separate localhost ports, so a text/plain form from another local port could
   // otherwise write to a signed-in workspace. JSON only, same Host and Origin, as /api/workspaces requires.
   requireJson(req);
