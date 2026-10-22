@@ -508,6 +508,47 @@ try {
   const r14 = await call("POST", "/api/timer", { cookie: sb.product, raw: JSON.stringify({ action: "brief_reviewed" }), headers: { "content-type": "text/plain" } });
   const r14o = await call("POST", "/api/timer", { cookie: sb.product, body: { action: "brief_reviewed" }, headers: { origin: "http://127.0.0.1:9" } });
   check("R14 custom write as text/plain -> 415; JSON from another origin -> 403", r14.status === 415 && r14o.status === 403, `${r14.status} ${r14o.status}`);
+  // R14 every cookie-authenticated write route, generated from app/api so a new route can't be missed: a request with
+  // a valid session cookie but another site's Origin is refused 403 "came from another site" (Sean's #6 review, fix 2).
+  // Routes that never read the session cookie are listed with how they authenticate, and must not start reading it.
+  const NOT_COOKIE = {
+    "/api/sessions/events": "capture hook: consent record and agent token",
+    "/api/directives/ack": "local watcher: assertLocal, or an agent token",
+    "/api/mcp": "MCP: bearer token only",
+  };
+  const r14Routes = [];
+  (function walk(dir, url) {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const seg = e.name.replace(/^\[.*\]$/, "x");
+      if (e.isDirectory()) walk(path.join(dir, e.name), `${url}/${seg}`);
+      else if (e.name === "route.ts") {
+        const src = readFileSync(path.join(dir, e.name), "utf8");
+        const methods = [...src.matchAll(/export (?:async )?function (POST|PUT|PATCH|DELETE)\b/g)].map((m) => m[1]);
+        const reexport = src.match(/export \{([^}]*)\}/)?.[1] ?? "";
+        for (const m of ["POST", "PUT", "PATCH", "DELETE"]) if (new RegExp(`as ${m}\\b`).test(reexport)) methods.push(m);
+        for (const m of methods) r14Routes.push({ url, method: m, src });
+      }
+    }
+  })(path.join(ROOT, "app/api"), "/api");
+  const nsW = await northstarSignIn();
+  const readsCookie = (src) => /require(?:Ws)?Session\(|stateContext\(/.test(src);
+  const r14Probes = [];
+  for (const r of r14Routes) {
+    if (NOT_COOKIE[r.url]) {
+      check(`R14 ${r.method} ${r.url} is not cookie-authenticated (${NOT_COOKIE[r.url]})`, !readsCookie(r.src), "it now reads the session cookie: add it to the Origin probe");
+      continue;
+    }
+    // Workspace routes get a workspace session; Northstar-only routes the default store's leadership session.
+    const cookie = /requireWsSession\(|bodyFor\(/.test(r.src) ? sb.leadership : nsW.leadership;
+    r14Probes.push(call(r.method, r.url, { cookie, body: {}, headers: { origin: "http://127.0.0.1:9" } }).then((x) => ({ ...r, x })));
+  }
+  const r14Probed = await Promise.all(r14Probes);
+  const r14Open = r14Probed.filter((p) => !(p.x.status === 403 && /another site|from this machine/i.test(p.x.json?.error ?? p.x.text)));
+  check(
+    `R14 all ${r14Probed.length} cookie-authenticated write routes refuse another site's Origin (403)`,
+    r14Probed.length >= 20 && r14Open.length === 0,
+    r14Open.map((p) => `${p.method} ${p.url} -> ${p.x.status} ${(p.x.json?.error ?? p.x.text).slice(0, 60)}`).join(" | "),
+  );
   // R19 a primitive JSON body at sign-in is Northstar's 400, as before L0 (it was a 500)
   const prim = await Promise.all(["42", '"x"', "true"].map((raw) => call("POST", "/api/session", { raw })));
   check("R19 primitive JSON sign-in bodies -> 400, never 500", prim.every((r) => r.status === 400), prim.map((r) => r.status).join(","));
