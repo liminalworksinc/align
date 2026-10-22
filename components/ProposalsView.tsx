@@ -5,6 +5,7 @@ import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types
 import type { ViewProps } from "./props";
 import { activeProposal, currentGoal } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
+import { nextStepHint } from "./nextStep";
 import { ProofStrip } from "./ProofStrip";
 import { SpartaProof } from "./SpartaProof";
 
@@ -621,6 +622,10 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
   // Custom: an untested plan is approved only with this explicit acknowledgement (sent as accept_untested).
   const needsAck = !L.northstar && p.test_status !== "TESTED";
   const [ackUntested, setAckUntested] = useState(false);
+  // Custom: what the owning team made its approval depend on (same source as the decision record's Conditions).
+  const lastCounter = p.counter_versions.at(-1);
+  const conditions = L.northstar ? "" : lastCounter?.conditions || lastCounter?.rationale || "";
+  const hint = nextStepHint(p, me.actor, L);
 
   // Seeing the ratified record counts as "accepted version seen" for this session (server dedupes per actor).
   const marked = useRef<string | null>(null);
@@ -680,11 +685,13 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           <p className="text-[16px] text-zinc-800">
             <Badge tone="amber">Waiting for {who("security")}</Badge>
           </p>
+          {hint && <p className="mt-2 text-[16px] text-zinc-700">{hint}</p>}
         </Card>
       )}
       {isProduct && p.state === "ACKNOWLEDGED_BY_PRODUCT" && (
         <Card tone="readonly">
           <Badge tone="amber">You accepted the changes · waiting for {who("security")} to approve</Badge>
+          {hint && <p className="mt-2 text-[16px] text-zinc-700">{hint}</p>}
         </Card>
       )}
       {isProduct &&
@@ -700,6 +707,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
       {isSecurity && p.state === "COUNTERED" && (
         <Card tone="readonly">
           <Badge tone="amber">{L.northstar ? "Waiting for Product to accept your changes" : `Waiting for ${ask} to accept your changes`}</Badge>
+          {hint && <p className="mt-2 text-[16px] text-zinc-700">{hint}</p>}
         </Card>
       )}
       {isSecurity && canDecide && (
@@ -711,6 +719,11 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
                 <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Why you&apos;re approving</span>
                 <input className={inputCls} value={ratifyWhy} onChange={(e) => setRatifyWhy(e.target.value)} />
               </label>
+              {conditions && (
+                <p aria-label="Your conditions" className="mt-3 whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-[16px] text-zinc-800 ring-1 ring-zinc-200">
+                  <span className="font-semibold">You asked for:</span> {conditions}
+                </p>
+              )}
               {needsAck && (
                 <label className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-[16px] text-amber-950 ring-1 ring-amber-300">
                   <input
@@ -789,6 +802,14 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
                 <li className="flex gap-2">
                   <span aria-hidden className="text-zinc-500">●</span>
                   <span>Approved without a sandbox test: the plan was not run before approval.</span>
+                </li>
+              )}
+              {conditions && (
+                <li className="flex gap-2">
+                  <span aria-hidden className="text-zinc-500">●</span>
+                  <span className="whitespace-pre-wrap">
+                    Conditions from {own}: {conditions}
+                  </span>
                 </li>
               )}
             </ul>

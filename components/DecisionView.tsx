@@ -7,6 +7,7 @@ import { AuthorityStrip } from "./AuthorityStrip";
 import { launchLine } from "./launch";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
+import { nextStepHint } from "./nextStep";
 import { depRelation } from "./TeamLens";
 import { Badge, Button, OWNER_LABEL, StateBadge, fmtTime } from "./ui";
 
@@ -337,6 +338,11 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
           <li>
             <span className="font-semibold">Outcome:</span> not measured yet
           </li>
+          {conditions && (
+            <li>
+              <span className="font-semibold">Conditions:</span> not confirmed yet
+            </li>
+          )}
         </ul>
         <OldPlanWork s={s} L={L} owningIds={acc.owning_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} revision={newTarget} viewer={me.actor} />
         <ProofStrip s={s} />
@@ -397,6 +403,7 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
             <span className="text-[16px] text-zinc-600">Nothing for you to do until {isProduct ? owning : asking} responds.</span>
           )}
         </div>
+        {nextStepHint(prop, me.actor, L) && <p className="text-[16px] text-zinc-700">{nextStepHint(prop, me.actor, L)}</p>}
       </div>
     );
   }
