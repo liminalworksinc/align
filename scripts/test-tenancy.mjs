@@ -365,7 +365,11 @@ try {
   const ns6Text = readFileSync(NS_STATE, "utf8");
   const p6 = await call("POST", "/api/proposals", { cookie: sa.product, body: { proposed_measure_text: "AMARK new target", rationale: "AMARK why", reciprocal_commitment: "AMARK commit" } });
   const pid = p6.json?.id;
-  const c6 = await call("POST", `/api/proposals/${pid}/counter`, { cookie: sa.security, body: { proposed_measure_text: "AMARK revised", rationale: "AMARK r", changes_plan: false } });
+  // Conditions take the same 1000-character limit in a workspace as in /setup, not the 300-character field cap.
+  const c6long = await call("POST", `/api/proposals/${pid}/counter`, { cookie: sa.security, body: { proposed_measure_text: "AMARK revised", rationale: "AMARK r", conditions: "x".repeat(1001) } });
+  check("A6 workspace conditions over 1000 characters -> 400", c6long.status === 400, `${c6long.status} ${c6long.text}`);
+  const c6 = await call("POST", `/api/proposals/${pid}/counter`, { cookie: sa.security, body: { proposed_measure_text: "AMARK revised", rationale: "AMARK r", changes_plan: false, conditions: `AMARK ${"c".repeat(600)}` } });
+  check("A6 workspace conditions of 606 characters are kept", c6.json?.counter_versions?.at(-1)?.conditions?.length === 606, `${c6.status} ${c6.text.slice(0, 200)}`);
   const k6 = await call("POST", `/api/proposals/${pid}/acknowledge`, { cookie: sa.product, body: {} });
   const t6 = await call("POST", "/api/timer", { cookie: sa.product, body: { action: "brief_reviewed" } });
   check("A6 custom propose, counter, acknowledge, timer -> 200", [p6, c6, k6, t6].every((r) => r.status === 200), [p6, c6, k6, t6].map((r) => `${r.status}`).join(","));
