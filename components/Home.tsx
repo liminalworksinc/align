@@ -15,7 +15,7 @@ import { WorkMap } from "@/components/WorkMap";
 import { activeProposal, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, SESSION_ENDED, useAlign, type Selection } from "@/components/useAlign";
-import { AGREED_STATUS, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
+import { AGREED_STATUS, ROLE_SWITCH, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
 
 type NavItem = { id: View; label: string; sub: string; icon: string };
 const NAV: NavItem[] = [
@@ -163,7 +163,8 @@ function WorkspaceLogin({ workspace, onDone, ended, elsewhere }: { workspace: st
           <span className="font-display text-[34px] leading-none">Align</span>
           <span className="al-lbl text-violet-700">by Liminal</span>
         </div>
-        <p className="mb-6 text-[16px] text-zinc-600">{info.name}. Choose your team; each person signs in separately with their own passcode.</p>
+        <p className="mb-2 text-[16px] text-zinc-600">{info.name}. Choose your team; each person signs in separately with their own passcode.</p>
+        <p className="mb-6 text-[14px] text-zinc-500">{ROLE_SWITCH}</p>
         <Elsewhere id={elsewhere} />
         <fieldset className="mb-4">
           <legend className="al-lbl mb-2">I am on</legend>
@@ -222,7 +223,10 @@ function NorthstarLogin({ onDone, L, elsewhere }: { onDone: () => void; L?: Labe
           <span className="al-lbl text-violet-700">by Liminal</span>
         </div>
         {L && !L.northstar ? (
-          <p className="mb-6 text-[16px] text-zinc-600">{L.company}. Choose who you are; each person signs in separately.</p>
+          <>
+            <p className="mb-2 text-[16px] text-zinc-600">{L.company}. Choose who you are; each person signs in separately.</p>
+            <p className="mb-6 text-[14px] text-zinc-500">{ROLE_SWITCH}</p>
+          </>
         ) : (
           <p className="mb-6 text-[16px] text-zinc-600">Northstar Security, a made-up company for this demo. Choose who you are; each person signs in separately.</p>
         )}
@@ -472,7 +476,7 @@ export default function Home({ workspace }: { workspace?: string }) {
         {custom ? (
           rel?.status === "ACCEPTED" ? (
             <Badge tone="neutral">
-              {L.team.product} and {L.team.security} agreed
+              {L.team.product} and {L.team.security}: {AGREED_STATUS.toLowerCase()}
             </Badge>
           ) : unresolved && me.actor !== "leadership" ? (
             <span className="rounded-2xl border border-amber-700 bg-amber-50 px-3 py-1.5 font-mono text-[14px] leading-snug tracking-[0.04em] text-amber-700">

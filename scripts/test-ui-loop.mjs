@@ -145,6 +145,7 @@ async function main() {
     const signInText = await text(A);
     check("U1 sign-in screen names the company and both teams", signInText.includes(fixture.company) && signInText.includes(ASKING) && signInText.includes(OWNING), signInText.slice(0, 300));
     check("U1 sign-in screen has no Northstar copy", !LEAK.test(signInText), leakIn(signInText));
+    check("P1-2 sign-in screen tells a solo tester how to switch teams", /Testing on your own\?/.test(signInText) && /Sign out/.test(signInText), signInText.slice(0, 400));
     check("U2 both teams sign in, each in its own browser profile", (await signInUi(A, ASKING, PASSCODES.product)) && (await signInUi(O, OWNING, PASSCODES.security)));
     const home = await text(A);
     check("U2 the asking team's home has no Northstar copy", !LEAK.test(home), leakIn(home));

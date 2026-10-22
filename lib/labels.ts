@@ -103,7 +103,9 @@ export function poss(name: string): string {
  * agents' directive and MCP, and every screen say the same thing, so nobody reads the agreement as a go.
  */
 export const AGREED_STATUS = "Agreed, launch pending";
-export const AGREED_NOT_LAUNCH = "Both teams agreed. This is not approval to launch: the launch decision is still pending.";
+/** The one role-switch instruction for a tester playing every team (P1 item 2). DRAFT wording: Shruti owns it. */
+export const ROLE_SWITCH = "Testing on your own? Sign in as one team, then use Sign out (top right) and sign in as the next team with its passcode. Your work is saved.";
+export const AGREED_NOT_LAUNCH ="Both teams agreed. This is not approval to launch: the launch decision is still pending.";
 
 /**
  * Team-specific proposal states in a custom scenario. Returns undefined for Northstar and for every
