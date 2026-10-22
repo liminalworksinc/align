@@ -7,6 +7,7 @@ import { readState } from "../store";
 import { leadOf, poss, scenarioOf, teamOf } from "../labels";
 import type { AgentSession, AppState, Owner, SessionMapping } from "../types";
 import type { WsId } from "../workspace";
+import { scopeToGrant, type AgentHarness } from "../agent-token";
 
 // Read-only MCP surface for Align. Every tool reads via readState() and never mutates.
 
@@ -26,6 +27,19 @@ const PROMPT_MAX = 200;
 function storeOf(ctx: ServerContext): WsId {
   const ws = ctx.http?.authInfo?.extra?.ws;
   return typeof ws === "string" ? (ws as WsId) : "northstar";
+}
+
+/** An agent token's harness and repo (null for ALIGN_MCP_TOKEN): its session-level tools see only those sessions. */
+function grantOf(ctx: ServerContext): { harness: AgentHarness; repo: string } | null {
+  const e = ctx.http?.authInfo?.extra;
+  return e && (e.harness === "claude-code" || e.harness === "codex") && typeof e.repo === "string" ? { harness: e.harness, repo: e.repo } : null;
+}
+
+/** State for the session-level tools (work map, directives): an agent token's own harness and repo only. */
+async function sessionState(ctx: ServerContext): Promise<AppState> {
+  const s = await readState(storeOf(ctx));
+  const g = grantOf(ctx);
+  return g ? scopeToGrant(s, g) : s;
 }
 
 /** Defense in depth: withMcpAuth already rejected unauthenticated requests. */
@@ -457,7 +471,7 @@ export function registerAlign(server: McpServer) {
     },
     async ({ session_id }, ctx) => {
       requireRead(ctx);
-      const out = workMap(await readState(storeOf(ctx)), session_id);
+      const out = workMap(await sessionState(ctx), session_id);
       const summary = out.query
         ? out.total_sessions
           ? (() => {
@@ -512,7 +526,7 @@ export function registerAlign(server: McpServer) {
     },
     async ({ session_id }, ctx) => {
       requireRead(ctx);
-      const out = directives(await readState(storeOf(ctx)), session_id);
+      const out = directives(await sessionState(ctx), session_id);
       const head = out.session_id
         ? out.session_found
           ? `${out.directives.length} pending directive(s) for ${out.session_id}${out.directives.length ? `: ${out.directives.map((d) => d.title).join("; ")}` : ""}.`

@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { signPayload } from "./auth";
 import { config } from "./config";
+import { HttpError } from "./errors";
+import type { AgentSession, AppState } from "./types";
 import { agentEpochOf, parseCustomWs, readAuth, type CustomWsId } from "./workspace";
 
 // Agent tokens connect a coding agent to one custom workspace in Mode L: read-only MCP, capture for one harness and
@@ -62,4 +64,28 @@ export function agentFrom(req: Request): AgentGrant | null {
  *  default (Northstar) store, so routes answer 401 when `agentFrom` is null. */
 export function hasAgentHeader(req: Request): boolean {
   return /^Bearer\s+agt\./i.test(req.headers.get("authorization") ?? "");
+}
+
+/** The grant from `agentFrom`, or a 401 when the request carries an agent token that no longer verifies, or null
+ *  when it carries none (the default store's watcher and scripts). */
+export function agentOrRefuse(req: Request): AgentGrant | null {
+  const agent = agentFrom(req);
+  if (!agent && hasAgentHeader(req)) throw new HttpError(401, "This agent token is no longer valid");
+  return agent;
+}
+
+type GrantScope = Pick<AgentGrant, "harness" | "repo">;
+const inGrant = (x: Pick<AgentSession, "harness" | "repo">, g: GrantScope) => x.harness === g.harness && x.repo === g.repo;
+
+/** A token reads and acknowledges only its own harness and repo's sessions: 403 for a session another one started. */
+export function assertSessionInGrant(s: AppState, g: GrantScope, sessionId: string) {
+  const sess = (s.sessions ?? []).find((x) => x.id === sessionId || x.session_id === sessionId);
+  if (sess && !inGrant(sess, g)) throw new HttpError(403, "This session belongs to another harness or repo");
+}
+
+/** A copy of the state whose sessions (and their mappings) are only the grant's own harness and repo. */
+export function scopeToGrant(s: AppState, g: GrantScope): AppState {
+  const sessions = (s.sessions ?? []).filter((x) => inGrant(x, g));
+  const ids = new Set(sessions.map((x) => x.id));
+  return { ...s, sessions, mappings: (s.mappings ?? []).filter((m) => ids.has(m.session_id)) };
 }

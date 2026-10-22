@@ -17,7 +17,7 @@ const handler = createMcpHandler(registerAlign, {
 function verifyToken(_req: Request, bearerToken?: string): AuthInfo | undefined {
   if (!bearerToken) return undefined;
   const agent = readAgentToken(bearerToken);
-  if (agent) return { token: bearerToken, clientId: `agent:${agent.ws}`, scopes: ["goals:read"], extra: { ws: agent.ws } };
+  if (agent) return { token: bearerToken, clientId: `agent:${agent.ws}`, scopes: ["goals:read"], extra: { ws: agent.ws, harness: agent.harness, repo: agent.repo } };
   const expected = process.env.ALIGN_MCP_TOKEN;
   if (!expected) return undefined;
   const a = Buffer.from(bearerToken);

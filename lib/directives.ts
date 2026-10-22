@@ -147,6 +147,8 @@ export function recipientsFor(s: AppState, eventId: string): string[] {
 export function markDelivered(s: AppState, sessionId: string, eventId: string): boolean {
   const session = (s.sessions ?? []).find((x) => x.id === sessionId || x.session_id === sessionId);
   if (!session) return false;
+  // Only a real authority event is recorded: an ack naming anything else changes nothing (state can't be padded).
+  if (!authorityEvents(s).some((ev) => ev.event_id === eventId)) return false;
   session.directives ??= [];
   if (session.directives.some((d) => d.event_id === eventId)) return false;
   session.directives.push({ event_id: eventId, delivered_at: now() });
