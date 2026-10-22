@@ -16,6 +16,7 @@ export type WsId = "northstar" | CustomWsId;
 const ID_RE = /^w_[a-z2-7]{12}$/;
 const B32 = "abcdefghijklmnopqrstuvwxyz234567";
 const ROLES: Actor[] = ["leadership", "product", "security"];
+export const isRole = (x: unknown): x is Actor => typeof x === "string" && (ROLES as string[]).includes(x);
 
 /** The only way client input becomes a workspace id. Rejects "northstar" and anything not exactly w_ + 12 base32. */
 export function parseCustomWs(x: unknown): CustomWsId | null {
@@ -59,9 +60,11 @@ const SCRYPT_WAITING = 8;
 const sg = globalThis as unknown as { __alignScrypt?: { running: number; queue: (() => void)[] } };
 const pool = (sg.__alignScrypt ??= { running: 0, queue: [] });
 
-async function scryptAsync(passcode: string, salt: Buffer): Promise<Buffer> {
+/** `wait`: creation always queues for a slot instead of getting 429, so a sign-in burst can never make a create fail
+ *  part-way (creates are serialized by the creation lock and rate-limited, so the queue stays short). */
+async function scryptAsync(passcode: string, salt: Buffer, wait = false): Promise<Buffer> {
   if (pool.running >= SCRYPT_RUNNING) {
-    if (pool.queue.length >= SCRYPT_WAITING) throw new HttpError(429, "Too many sign-ins right now, try again in a moment");
+    if (!wait && pool.queue.length >= SCRYPT_WAITING) throw new HttpError(429, "Too many sign-ins right now, try again in a moment");
     await new Promise<void>((r) => pool.queue.push(r)); // the releasing call hands its slot over
   } else pool.running++;
   try {
@@ -92,7 +95,7 @@ export const agentEpochOf = (a: WorkspaceAuth): number => a.agent_epoch ?? a.epo
 
 async function hashPasscode(passcode: string): Promise<RoleHash> {
   const salt = randomBytes(16);
-  return { salt: salt.toString("base64"), hash: (await scryptAsync(passcode, salt)).toString("base64") };
+  return { salt: salt.toString("base64"), hash: (await scryptAsync(passcode, salt, true)).toString("base64") };
 }
 
 export async function verifyPasscode(h: RoleHash, passcode: string): Promise<boolean> {
@@ -199,24 +202,35 @@ async function usedInvites(): Promise<string[]> {
 export async function inviteUnused(code: string): Promise<boolean> {
   return !(await usedInvites()).includes(codeHash(code));
 }
+/** One message for a wrong code and a spent one, so the answer never confirms that a guessed code is real. */
+export const BAD_INVITE = "That invite code isn’t valid or was already used";
+
+async function writeUsed(list: string[]) {
+  await fs.mkdir(config().workspacesRoot, { recursive: true, mode: 0o700 });
+  const tmp = `${usedFile()}.${randomBytes(6).toString("hex")}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(list), { mode: 0o600 });
+  await fs.rename(tmp, usedFile());
+}
 async function claimInvite(code: string) {
   const used = await usedInvites();
   const h = codeHash(code);
-  if (used.includes(h)) throw new HttpError(403, "That invite code was already used");
-  await fs.mkdir(config().workspacesRoot, { recursive: true, mode: 0o700 });
-  const tmp = `${usedFile()}.${randomBytes(6).toString("hex")}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify([...used, h]), { mode: 0o600 });
-  await fs.rename(tmp, usedFile());
+  if (used.includes(h)) throw new HttpError(403, BAD_INVITE);
+  await writeUsed([...used, h]);
+}
+/** Gives a claimed invite back when the create fails after claiming it, so a failure never burns a tester's code. */
+async function unclaimInvite(code: string) {
+  const h = codeHash(code);
+  await writeUsed((await usedInvites()).filter((x) => x !== h));
 }
 
-/** `invite` is a single-use code to spend, `takeToken` the creation rate bucket: both run inside the creation lock,
- *  after the cap check, so a refused create spends neither (review item 6). */
+/** `invite` is a single-use code to spend, `takeToken` the creation rate bucket. Inside the creation lock: the cap
+ *  check, then all hashing and file writes (hashing waits for a slot, never 429), then the invite claim, the rate
+ *  token and the rename. Anything that fails after the claim gives the invite back, so a failed create never burns a
+ *  tester's code, and a spent or wrong code is refused before any rate token is taken (review items 6, M1). */
 export async function createWorkspace(args: { name: string; state: AppState; scenario: unknown; invite?: string; takeToken?: () => void }): Promise<CreatedWorkspace> {
   return withLock("_create", async () => {
     const cfg = config();
     if ((await countWorkspaces()) >= cfg.maxWorkspaces) throw new HttpError(409, "The workspace limit for this server has been reached");
-    args.takeToken?.();
-    if (args.invite !== undefined) await claimInvite(args.invite);
     const id = newWorkspaceId();
     const root = cfg.workspacesRoot;
     const final = wsDir(id);
@@ -226,15 +240,22 @@ export async function createWorkspace(args: { name: string; state: AppState; sce
     const auth: WorkspaceAuth = { epoch: 1, roles };
     const meta = { id, name: args.name, created_at: new Date().toISOString(), schema_version: 1 };
     await fs.mkdir(root, { recursive: true, mode: 0o700 });
+    let claimed = false;
     try {
       await fs.mkdir(tmp, { mode: 0o700 }); // owner-only: state holds private constraints, auth holds passcode hashes
       await fs.writeFile(path.join(tmp, "state.json"), JSON.stringify(args.state, null, 2), { mode: 0o600 });
       await fs.writeFile(path.join(tmp, "scenario.json"), JSON.stringify(args.scenario, null, 2), { mode: 0o600 });
       await fs.writeFile(path.join(tmp, "auth.json"), JSON.stringify(auth, null, 2), { mode: 0o600 });
       await fs.writeFile(path.join(tmp, "workspace.json"), JSON.stringify(meta, null, 2), { mode: 0o600 });
+      if (args.invite !== undefined) {
+        await claimInvite(args.invite);
+        claimed = true;
+      }
+      args.takeToken?.();
       await fs.rename(tmp, final);
     } catch (e) {
       await fs.rm(tmp, { recursive: true, force: true });
+      if (claimed) await unclaimInvite(args.invite as string).catch((u) => console.error("invite refund failed", (u as Error).name));
       throw e;
     }
     // The workspace exists once the rename lands. A failed event append must not turn that into a 500 that loses

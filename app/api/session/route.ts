@@ -1,8 +1,9 @@
 import { bindWs, DISPLAY, login, loginWorkspace, sessionCookie, sessionFrom, wsSessionFrom, type WsSession } from "@/lib/auth";
+import { config } from "@/lib/config";
 import { body, handle, requireJson } from "@/lib/http";
 import { slotOf } from "@/lib/labels";
-import { checkLoginBackoff, clearLoginFailures, clientOf, recordLoginFailure } from "@/lib/ratelimit";
-import { parseCustomWs, workspaceExists } from "@/lib/workspace";
+import { checkLoginBackoff, clearLoginFailures, clientOf, recordLoginFailure, withSigninSlot } from "@/lib/ratelimit";
+import { isRole, parseCustomWs, workspaceExists } from "@/lib/workspace";
 
 /** A custom workspace shows the person named for the role's team at setup. */
 async function customName(w: WsSession) {
@@ -30,12 +31,17 @@ export async function POST(req: Request) {
       // await, so parallel tries can't all pass the check; success clears it.
       requireJson(req);
       const ws = parseCustomWs(b.workspace);
-      const key = ws && workspaceExists(ws) ? `ws:${ws}:${String(b.role).slice(0, 20)}:${clientOf(req)}` : null;
+      const client = clientOf(req);
+      // Keys exist only for a real workspace and a real role, so junk ids and junk role strings can't evict entries.
+      const key = ws && workspaceExists(ws) && isRole(b.role) ? `ws:${ws}:${b.role}:${client}` : null;
       if (key) {
         checkLoginBackoff(key);
         recordLoginFailure(key);
       }
-      const out = await loginWorkspace(b.workspace, b.role, b.passcode);
+      // Hosted: one client may hold only a couple of scrypt slots at once, correct passcodes included (review M1).
+      // Mode L has one client key ("local") for everyone on the machine, so it isn't capped there.
+      const signIn = () => loginWorkspace(b.workspace, b.role, b.passcode);
+      const out = config().hosted ? await withSigninSlot(client, signIn) : await signIn();
       if (key) clearLoginFailures(key);
       const res = Response.json({ actor: out.session.actor, name: await customName(out.session), sid: out.session.sid, workspace: out.session.ws });
       res.headers.append("set-cookie", sessionCookie(out.token));

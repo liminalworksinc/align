@@ -81,7 +81,36 @@ export function recordCodeFailure(client: string, now = Date.now()) {
   codeFails.set(client, [...recent(client, now), now]);
 }
 
-/** The client key for limits: Fly-Client-IP when hosted (trusted only there), else one local key. */
+/** IPv6 addresses collapse to their /64 (one host can hold a whole /64, so per-address keys are free to rotate). */
+export function clientNet(ip: string): string {
+  const v = ip.trim().toLowerCase().replace(/^\[|\]$/g, "").split("%")[0];
+  if (!v.includes(":")) return v;
+  const [head, tail = ""] = v.split("::");
+  const a = head ? head.split(":") : [];
+  const b = v.includes("::") && tail ? tail.split(":") : [];
+  const groups = [...a, ...Array(Math.max(0, 8 - a.length - b.length)).fill("0"), ...b];
+  return `${groups.slice(0, 4).map((x) => x.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
+/** The client key for limits: Fly-Client-IP when hosted (trusted only there; IPv6 keyed by /64), else one local key. */
 export function clientOf(req: Request): string {
-  return config().hosted ? `ip:${req.headers.get("fly-client-ip") ?? "unknown"}` : "local";
+  return config().hosted ? `ip:${clientNet(req.headers.get("fly-client-ip") ?? "unknown")}` : "local";
+}
+
+// Sign-ins in flight per client: the scrypt pool is shared by every workspace, so one client may hold at most
+// SIGNINS_PER_CLIENT slots at a time; further parallel tries get 429 before they reach scrypt (review M1).
+const SIGNINS_PER_CLIENT = 2;
+const g2 = globalThis as unknown as { __alignSignins?: Map<string, number> };
+const signins = (g2.__alignSignins ??= new Map());
+export async function withSigninSlot<T>(client: string, fn: () => Promise<T>): Promise<T> {
+  const n = signins.get(client) ?? 0;
+  if (n >= SIGNINS_PER_CLIENT) throw new HttpError(429, "Too many sign-ins at once, try again in a moment");
+  signins.set(client, n + 1);
+  try {
+    return await fn();
+  } finally {
+    const left = (signins.get(client) ?? 1) - 1;
+    if (left > 0) signins.set(client, left);
+    else signins.delete(client);
+  }
 }

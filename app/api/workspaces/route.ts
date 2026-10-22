@@ -4,7 +4,7 @@ import { handle, requireJson } from "@/lib/http";
 import { checkCodeFailures, clientOf, recordCodeFailure, takeCreateToken } from "@/lib/ratelimit";
 import { ScenarioInvalid } from "@/lib/scenario";
 import { HttpError } from "@/lib/store";
-import { createWorkspace, inviteUnused } from "@/lib/workspace";
+import { BAD_INVITE, createWorkspace, inviteUnused } from "@/lib/workspace";
 import { initialWorkspaceState, readWorkspaceInput } from "@/lib/workspace-setup";
 
 function codeMatches(given: string | null, expected: string | null) {
@@ -37,8 +37,9 @@ export async function POST(req: Request) {
       const ok = invite !== undefined ? await inviteUnused(invite) : codeMatches(given, cfg.signupCode);
       if (!ok) {
         recordCodeFailure(client);
-        if (invite !== undefined) throw new HttpError(403, "That invite code was already used");
-        throw new HttpError(403, cfg.signupCode || cfg.signupCodes.length ? "That signup code isn’t right" : "Workspace creation is closed");
+        // Invites: one message for wrong and spent, so the answer never confirms that a guessed code is real.
+        if (cfg.signupCodes.length) throw new HttpError(403, BAD_INVITE);
+        throw new HttpError(403, cfg.signupCode ? "That signup code isn’t right" : "Workspace creation is closed");
       }
     }
     const state = initialWorkspaceState(parsed.input, parsed.input_sha256);
