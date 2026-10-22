@@ -572,7 +572,7 @@ function CustomRelation({ p, L, r }: { p: ViewProps; L: Labels; r: GoalRelation 
             <Row label="Approved by">
               {L.person.security} · {fmtTime(acc.ratified_at)}
             </Row>
-            <Row label="Changes accepted by">
+            <Row label={acc.acknowledged_via === "authored_in_proposal" ? "Committed to its part" : "Changes accepted by"}>
               {L.person.product} · {fmtTime(acc.acknowledged_at)}
             </Row>
             <Row label="Next step">{acc.next_work}</Row>
