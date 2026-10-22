@@ -99,6 +99,13 @@ export function poss(name: string): string {
 }
 
 /**
+ * The one way a custom scenario states an approved decision (founder ruling 10-22, P1 item 3): the record, the
+ * agents' directive and MCP, and every screen say the same thing, so nobody reads the agreement as a go.
+ */
+export const AGREED_STATUS = "Agreed, launch pending";
+export const AGREED_NOT_LAUNCH = "Both teams agreed. This is not approval to launch: the launch decision is still pending.";
+
+/**
  * Team-specific proposal states in a custom scenario. Returns undefined for Northstar and for every
  * other state, so callers fall back to their own STATE_LABEL and Northstar text never changes.
  */
@@ -107,6 +114,7 @@ export function customStateLabel(state: string, L: Labels): string | undefined {
   if (state === "PENDING_SECURITY") return `Waiting for ${L.team.security}`;
   if (state === "COUNTERED") return `${L.team.security} asked for changes`;
   if (state === "ACKNOWLEDGED_BY_PRODUCT") return `${L.team.product} accepted changes`;
+  if (state === "RATIFIED") return AGREED_STATUS;
   return undefined;
 }
 

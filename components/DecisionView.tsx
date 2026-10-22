@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, type ReactNode } from "react";
-import { companyMeasureId, decisionMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { AGREED_STATUS, companyMeasureId, decisionMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { AuthorityStrip } from "./AuthorityStrip";
@@ -101,7 +101,7 @@ export function DecisionView(props: ViewProps) {
     const goal = s.goals.find((g) => g.id === acc.new_goal_id);
     return (
       <div className="flex flex-col gap-4">
-        <Header label="Decision record" right={<Badge tone="neutral">Agreement reached</Badge>} />
+        <Header label="Decision record" right={<Badge tone="neutral">{L.northstar ? "Agreement reached" : AGREED_STATUS}</Badge>} />
         <div className="al-in">
           <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
             Security&apos;s updated goal ({acc.accepted_version}) is now the shared plan for both teams.
@@ -285,7 +285,7 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
     const conditions = lastCounter?.conditions || lastCounter?.rationale || "";
     return (
       <div className="flex flex-col gap-4">
-        <Header label="Decision record" right={<Badge tone="neutral">Agreement reached</Badge>} />
+        <Header label="Decision record" right={<Badge tone="neutral">{L.northstar ? "Agreement reached" : AGREED_STATUS}</Badge>} />
         <div className="al-in">
           <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
             {poss(owning)} updated goal ({acc.accepted_version}) is now the shared plan for both teams.

@@ -4,7 +4,7 @@ import { authorityEvents, describeEvent, pendingFor, quoted } from "../directive
 import { acceptedPlan } from "../policy";
 import { activeRegistry, currentGoals } from "../registry";
 import { readState } from "../store";
-import { leadOf, poss, scenarioOf, teamOf } from "../labels";
+import { AGREED_NOT_LAUNCH, AGREED_STATUS, leadOf, poss, scenarioOf, teamOf } from "../labels";
 import type { AgentSession, AppState, Owner, SessionMapping } from "../types";
 import type { WsId } from "../workspace";
 import { scopeToGrant, type AgentHarness } from "../agent-token";
@@ -133,6 +133,7 @@ const AcceptedPlanOut = z.object({
       asking_team: z.string(),
       owning_team: z.string(),
       status: z.enum(["agreed", "not_agreed"]),
+      launch: z.enum(["pending", "not_applicable"]), // agreed is never launch approval
       plan_title: z.string(),
       plan_text: z.string(),
       owning_measures: z.array(z.string()),
@@ -437,6 +438,7 @@ export function registerAlign(server: McpServer) {
           a.status === "agreed"
             ? [
                 `${a.company}: ${a.owning_team} goal ${out.goal_version} was changed by agreement (${out.authority}, ${out.ratified_at}); test status ${out.test_status ?? "none recorded"}.`,
+                `Status: ${AGREED_STATUS.toLowerCase()}. ${AGREED_NOT_LAUNCH}`,
                 `Agreed measure: ${quoted(a.agreed_measure ?? "")}`,
                 `Plan ${quoted(a.plan_title)}: ${quoted(a.plan_text)}`,
                 a.conditions ? `Conditions from ${a.owning_team}: ${quoted(a.conditions)}` : `No conditions recorded.`,
@@ -508,7 +510,7 @@ export function registerAlign(server: McpServer) {
       const summary = r
         ? `Proposal ${r.proposal_id} (${r.state}) on ${r.target_goal_id} ${r.target_goal_version}; ${r.counters.length} counter(s); ${
             r.ratification ? `ratified as ${r.ratification.accepted_version} at ${r.ratification.ratified_at} (${r.ratification.test_status})` : "not ratified"
-          }; ${runs(r)}. ${OUTCOME_NOTE}`
+          }; ${runs(r)}. ${scenarioOf(s) === "custom" && r.ratification ? `Status: ${AGREED_STATUS.toLowerCase()}. ${AGREED_NOT_LAUNCH} ` : ""}${OUTCOME_NOTE}`
         : `${proposal_id ? `No proposal ${proposal_id}.` : "No proposals recorded yet."} ${OUTCOME_NOTE}`;
       return result(out, summary);
     },

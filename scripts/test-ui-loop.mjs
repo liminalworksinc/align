@@ -181,7 +181,7 @@ async function main() {
     await waitText(O, "Your decision");
     await click(O, "without a sandbox test", "label");
     await click(O, "Approve the change to my goal");
-    check("U7 the owning team approves", await waitText(O, "Approved"), (await text(O)).slice(0, 300));
+    check("U7 the owning team approves: the page says \"Agreed, launch pending\"", await waitText(O, "Agreed, launch pending"), (await text(O)).slice(0, 300));
     await click(O, "See the decision");
     await sleep(800);
     const dec = await text(O);

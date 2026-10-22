@@ -15,7 +15,7 @@ import { WorkMap } from "@/components/WorkMap";
 import { activeProposal, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, SESSION_ENDED, useAlign, type Selection } from "@/components/useAlign";
-import { companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
+import { AGREED_STATUS, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
 
 type NavItem = { id: View; label: string; sub: string; icon: string };
 const NAV: NavItem[] = [
@@ -569,7 +569,7 @@ export default function Home({ workspace }: { workspace?: string }) {
               <span className="line-clamp-2 text-[14px] leading-snug text-zinc-900">{kr2 ? kr2.text : "No new requirement yet"}</span>
               {kr2 && rel && (custom ? (
                 <span className="text-[14px] text-zinc-500">
-                  {L.team.product} and {L.team.security}: {rel.status === "ACCEPTED" ? "agreed" : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}
+                  {L.team.product} and {L.team.security}: {rel.status === "ACCEPTED" ? AGREED_STATUS.toLowerCase() : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}
                 </span>
               ) : <span className="text-[12.5px] text-zinc-500">Product and Security: {rel.status === "ACCEPTED" ? "agreed" : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}</span>)}
             </div>

@@ -20,6 +20,7 @@ export interface CustomAgreement {
   asking_team: string;
   owning_team: string;
   status: "agreed" | "not_agreed";
+  launch: "pending" | "not_applicable"; // an agreement is never approval to launch (P1 item 3)
   plan_title: string;
   plan_text: string;
   owning_measures: string[]; // the owning team's current measures (the agreed version once approved)
@@ -51,6 +52,7 @@ function customPlan(s: AppState): AcceptedPlan {
       asking_team: teamOf(s, "product"),
       owning_team: teamOf(s, "security"),
       status: agreed ? "agreed" : "not_agreed",
+      launch: agreed ? "pending" : "not_applicable",
       plan_title: plan?.title ?? "The proposed plan",
       plan_text: last?.plan_text ?? plan?.text ?? "", // a counter's revised plan text wins once agreed
       owning_measures: (goal?.measures ?? []).map((m) => m.text),
