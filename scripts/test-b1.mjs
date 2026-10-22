@@ -386,7 +386,7 @@ console.log("\n# B1-7 setting up a custom scenario keeps capture consent");
   }
   check("planted an unconsented session in state", (await stateSessions(lead)).some((s) => s.id === idDrop));
   const fixture = JSON.parse(readFileSync(path.join(ROOT, "data", "scenarios", "example-custom.json"), "utf8"));
-  const setup = await call("POST", "/api/scenario", { cookie: lead, json: fixture });
+  const setup = await call("POST", "/api/scenario", { cookie: lead, json: { ...fixture, confirm: "replace" } });
   check("leadership sets up the Fernway scenario", setup.status === 200 && setup.body?.scenario === "custom", `status=${setup.status} ${JSON.stringify(setup.body)}`);
   const kept = await stateSessions(lead);
   check("setupScenario keeps the session whose harness+repo has consent", kept.some((s) => s.id === idKeep));

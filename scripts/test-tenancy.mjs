@@ -45,7 +45,6 @@ if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
   process.exit(2);
 }
 const FIXTURE = JSON.parse(readFileSync(path.join(ROOT, "data/scenarios/example-custom.json"), "utf8"));
-delete FIXTURE.confirm;
 const NS_STATE = path.join(ROOT, "data/state.json");
 const ENDED = "Your session ended. Sign in again.";
 const WRONG = "Wrong passcode for this role";

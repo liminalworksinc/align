@@ -16,7 +16,8 @@ import { baseUrl, signIn } from "./lib/harness.mjs";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BASE = baseUrl();
 const FIXTURE = path.resolve(process.argv[3] || path.join(ROOT, "data/scenarios/example-custom.json"));
-const fixture = JSON.parse(readFileSync(FIXTURE, "utf8"));
+// Fixtures carry no confirm, so /api/workspaces accepts them as they are; /api/scenario needs it, so add it here.
+const fixture = { confirm: "replace", ...JSON.parse(readFileSync(FIXTURE, "utf8")) };
 const NORTHSTAR_TEXT = /Northstar|Sparta|Alike|p-beta|p-throughput|KR2 makes beta/;
 const RUN = Date.now().toString(36);
 const AGENT_REPO = "test-scenario-agent";
