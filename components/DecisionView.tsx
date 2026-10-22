@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, type ReactNode } from "react";
-import { AGREED_STATUS, companyMeasureId, decisionMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { AGREED_STATUS, CONDITIONS_UNCONFIRMED, CONDITIONS_UNCONFIRMED_NOTE, companyMeasureId, decisionMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { AuthorityStrip } from "./AuthorityStrip";
@@ -263,6 +263,11 @@ export function DecisionView(props: ViewProps) {
 // ---- Custom scenario: the same decision path, built only from the operator's own setup. ----
 // No sandbox runs and no agents exist here, so nothing below mentions tests passing or agents acting.
 
+/** A waiting screen's next step for someone testing alone: the team whose move it is (P1 items 2 and 4). */
+function SoloNext({ team }: { team: string }) {
+  return <span className="text-zinc-500">Testing on your own? Sign in as {team} next.</span>;
+}
+
 function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
   const { s, me } = props;
   const isProduct = me.actor === "product";
@@ -297,9 +302,14 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
         </div>
         {conditions && (
           <section aria-label="Conditions" className="rounded-[14px] border border-amber-300 bg-amber-50 p-[18px]">
-            <h2 className="al-lbl !text-amber-700">Conditions</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="al-lbl !text-amber-700">Conditions</h2>
+              <Badge tone="amber">{CONDITIONS_UNCONFIRMED}</Badge>
+            </div>
             <p className="mt-1 whitespace-pre-wrap text-[16px] text-zinc-900">{conditions}</p>
-            <p className="mt-1 text-[14px] text-zinc-600">{owning} asked for these when it asked for changes.</p>
+            <p className="mt-1 text-[14px] text-zinc-600">
+              {owning} asked for these when it asked for changes. {CONDITIONS_UNCONFIRMED_NOTE}
+            </p>
           </section>
         )}
         {/* The approved target shows once, at the top of the old-plan panel (and in the header card). */}
@@ -370,7 +380,9 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
           {needsMe ? (
             <Button onClick={() => props.go("proposals")}>Review and decide →</Button>
           ) : (
-            <span className="text-[16px] text-zinc-600">Nothing for you to do until {isProduct ? owning : asking} responds.</span>
+            <span className="text-[16px] text-zinc-600">
+              Nothing for you to do until {isProduct ? owning : asking} responds. <SoloNext team={isProduct ? owning : asking} />
+            </span>
           )}
         </div>
       </div>
@@ -392,7 +404,8 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
   const ownerGoal = currentGoal(s, "security");
   return (
     <div className="flex flex-col gap-5">
-      <Header label={`Should ${owning} change its goal?`} right={<Badge tone="amber">Needs your judgment</Badge>} />
+      {/* Only the asking team can act before a proposal exists, so only it is told this needs its judgment. */}
+      <Header label={`Should ${owning} change its goal?`} right={isProduct ? <Badge tone="amber">Needs your judgment</Badge> : <Badge tone="neutral">Waiting for {asking}</Badge>} />
       <div>
         <h1 className="text-[34px] font-semibold leading-[1.15] tracking-[-0.015em] text-zinc-900">
           The company goal changed. {poss(owning)} goal didn&apos;t.
@@ -435,7 +448,9 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
         {isProduct ? (
           <Button onClick={() => props.go("proposals")}>Propose the change →</Button>
         ) : (
-          <span className="text-[16px] text-zinc-600">{asking} hasn&apos;t proposed it yet. When they do, you decide here.</span>
+          <span className="text-[16px] text-zinc-600">
+            {asking} hasn&apos;t proposed it yet. When they do, you decide here. <SoloNext team={asking} />
+          </span>
         )}
       </div>
     </div>

@@ -103,6 +103,10 @@ export function poss(name: string): string {
  * agents' directive and MCP, and every screen say the same thing, so nobody reads the agreement as a go.
  */
 export const AGREED_STATUS = "Agreed, launch pending";
+/** Conditions are recorded, never checked (P1 item 4): every place that shows them says so. */
+export const CONDITIONS_UNCONFIRMED = "Not confirmed yet";
+export const CONDITIONS_UNCONFIRMED_NOTE = "Nobody has confirmed these are met. Align records them; it doesn't check them.";
+
 /** The one role-switch instruction for a tester playing every team (P1 item 2). DRAFT wording: Shruti owns it. */
 export const ROLE_SWITCH = "Testing on your own? Sign in as one team, then use Sign out (top right) and sign in as the next team with its passcode. Your work is saved.";
 export const AGREED_NOT_LAUNCH ="Both teams agreed. This is not approval to launch: the launch decision is still pending.";

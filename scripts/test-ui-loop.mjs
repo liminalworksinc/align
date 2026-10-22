@@ -169,7 +169,7 @@ async function main() {
 
     // The asking team sees the conditions and accepts
     await openProposals(A);
-    check("U5 the asking team sees the conditions before accepting", await waitText(A, CONDITIONS.slice(0, 40)), (await text(A)).slice(0, 500));
+    check("U5 the asking team sees the conditions before accepting, marked not confirmed yet", (await waitText(A, CONDITIONS.slice(0, 40))) && /not confirmed yet/i.test(await text(A)), (await text(A)).slice(0, 500));
     await click(A, `Accept ${OWNING}`);
     check("U5 the asking team accepts the changes", await waitText(A, "accepted"), (await text(A)).slice(0, 300));
 
@@ -186,7 +186,7 @@ async function main() {
     await click(O, "See the decision");
     await sleep(800);
     const dec = await text(O);
-    check("U8 the decision record shows the conditions and that agreement is not launch approval", dec.includes(CONDITIONS.slice(0, 40)) && /not approval to launch/i.test(dec), dec.slice(0, 500));
+    check("U8 the decision record shows the conditions (not confirmed yet), that agreement is not launch approval, and one next step", dec.includes(CONDITIONS.slice(0, 40)) && /not approval to launch/i.test(dec) && /Not confirmed yet/.test(dec) && (dec.match(/Next step/gi) ?? []).length === 1, dec.slice(0, 500));
     check("U8 the decision record has no Northstar copy", !LEAK.test(dec), leakIn(dec));
 
     const acc = (await api(lead, "GET", "/api/state")).json?.acceptances?.at(-1);
