@@ -19,11 +19,15 @@ export default function SetupPage() {
   const [done, setDone] = useState<{ company: string; team: string } | null>(null);
   const [team, setTeam] = useState("Leadership"); // leadership's team name in the current workspace, for the role line
   const [more, setMore] = useState(false); // optional fields shown; an optional field that has a value always stays visible
+  const [inWorkspace, setInWorkspace] = useState<string | null>(null); // signed in to a custom workspace, not the demo
 
   useEffect(() => {
     fetch("/api/session", { cache: "no-store" })
       .then((r) => r.json())
-      .then((m: { actor: Actor | null }) => setActor(m.actor))
+      .then((m: { actor: Actor | null; workspace?: string }) => {
+        setActor(m.actor);
+        setInWorkspace(m.workspace ?? null);
+      })
       .catch(() => setActor(null));
     fetch("/api/state", { cache: "no-store" })
       .then((r) => r.json())
@@ -67,6 +71,17 @@ export default function SetupPage() {
   const page = (children: ReactNode) => <main className="mx-auto min-h-screen max-w-3xl bg-zinc-50 px-5 py-8 text-[16px] text-zinc-900">{children}</main>;
 
   if (actor === undefined) return page(<p>Loading…</p>);
+  // A workspace session (even its leadership) can't replace the demo: say so before the form, not after it is filled.
+  if (inWorkspace)
+    return page(
+      <p className="text-[18px]">
+        This page sets up the demo workspace, and this browser is signed in to another workspace.{" "}
+        <a href={`/w/${inWorkspace}`} className="font-semibold text-violet-700 underline">
+          Open that workspace
+        </a>{" "}
+        instead, or sign in as the demo&apos;s leadership on the main page, then come back to this address.
+      </p>,
+    );
   if (actor !== "leadership")
     return page(
       <p className="text-[18px]">

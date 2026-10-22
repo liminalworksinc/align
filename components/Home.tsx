@@ -89,8 +89,15 @@ function Login({ onDone, L, workspace, ended, elsewhere }: { onDone: () => void;
   return <NorthstarLogin onDone={onDone} L={L} elsewhere={elsewhere} />;
 }
 
-/** Shown on a sign-in screen when this browser holds a session for a different custom workspace. */
+/** Shown on a sign-in screen when this browser holds a session for a different custom workspace, or (on a /w page
+ *  only, since "/" is the demo itself) for the Northstar demo. */
 function Elsewhere({ id }: { id: string | null | undefined }) {
+  if (id === "northstar")
+    return (
+      <p className="mb-4 rounded-[10px] bg-zinc-100 px-3 py-2.5 text-[15px] text-zinc-700">
+        This browser is signed in to the Align demo. Signing in here signs it out of the demo. A browser holds one session at a time.
+      </p>
+    );
   if (!id || !WS_ID.test(id)) return null;
   return (
     <p className="mb-4 rounded-[10px] bg-zinc-100 px-3 py-2.5 text-[15px] text-zinc-700">
@@ -105,16 +112,21 @@ function Elsewhere({ id }: { id: string | null | undefined }) {
 
 function WorkspaceLogin({ workspace, onDone, ended, elsewhere }: { workspace: string; onDone: () => void; ended?: boolean; elsewhere?: string | null }) {
   const [info, setInfo] = useState<LoginInfo | null>(null);
-  const [missing, setMissing] = useState(false);
+  const [missing, setMissing] = useState<"gone" | "unreachable" | null>(null);
+  const [attempt, setAttempt] = useState(0); // Try again re-runs the login-info fetch
   const [role, setRole] = useState<Role>("product");
   const [passcode, setPasscode] = useState("");
   const [err, setErr] = useState<string | null>(ended ? SESSION_ENDED : null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     api<LoginInfo>(`/api/workspaces/${encodeURIComponent(workspace)}/login-info`)
-      .then(setInfo)
-      .catch(() => setMissing(true));
-  }, [workspace]);
+      .then((i) => {
+        setMissing(null);
+        setInfo(i);
+      })
+      // Only a 404 means the workspace is gone; anything else (server down, a read error) can be retried.
+      .catch((e) => setMissing((e as { status?: number }).status === 404 ? "gone" : "unreachable"));
+  }, [workspace, attempt]);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -130,14 +142,23 @@ function WorkspaceLogin({ workspace, onDone, ended, elsewhere }: { workspace: st
   }
   if (missing)
     return (
-      <main className="flex min-h-screen items-center justify-center p-8">
-        <p className="al-in w-[560px] rounded-[14px] border border-zinc-200 bg-white p-9 text-[16px] text-zinc-700">This workspace no longer exists.</p>
+      <main className="flex min-h-screen items-center justify-center p-4 sm:p-8">
+        <div className="al-in w-full max-w-[560px] rounded-[14px] border border-zinc-200 bg-white p-6 text-[16px] text-zinc-700 sm:p-9">
+          {missing === "gone" ? (
+            <p>This workspace no longer exists.</p>
+          ) : (
+            <>
+              <p className="mb-4">Couldn’t reach this workspace. Check that Align is running, then try again.</p>
+              <Button onClick={() => setAttempt((n) => n + 1)}>Try again</Button>
+            </>
+          )}
+        </div>
       </main>
     );
   if (!info) return <main className="p-10 text-[16px] text-zinc-500">Loading Align…</main>;
   return (
-    <main className="flex min-h-screen items-center justify-center p-8">
-      <form onSubmit={submit} className="al-in w-[560px] rounded-[14px] border border-zinc-200 bg-white p-9">
+    <main className="flex min-h-screen items-center justify-center p-4 sm:p-8">
+      <form onSubmit={submit} className="al-in w-full max-w-[560px] rounded-[14px] border border-zinc-200 bg-white p-6 sm:p-9">
         <div className="mb-1 flex items-baseline gap-2.5">
           <span className="font-display text-[34px] leading-none">Align</span>
           <span className="al-lbl text-violet-700">by Liminal</span>
@@ -146,7 +167,7 @@ function WorkspaceLogin({ workspace, onDone, ended, elsewhere }: { workspace: st
         <Elsewhere id={elsewhere} />
         <fieldset className="mb-4">
           <legend className="al-lbl mb-2">I am on</legend>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {info.roles.map((r) => (
               <label key={r.id} className={`cursor-pointer rounded-[14px] border p-3.5 text-[16px] transition ${role === r.id ? "border-zinc-300 bg-zinc-100 outline-2 outline-offset-2 outline-violet-700" : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-100"}`}>
                 <input type="radio" name="role" value={r.id} checked={role === r.id} onChange={() => setRole(r.id)} className="sr-only" />
@@ -250,7 +271,7 @@ function NorthstarLogin({ onDone, L, elsewhere }: { onDone: () => void; L?: Labe
 
 /** The app. `workspace` is the /w/<id> slug for a custom workspace; omitted for Northstar at /. */
 export default function Home({ workspace }: { workspace?: string }) {
-  const { state, me, error, setError, loadError, loadMe, act, mark, refresh, ended, elsewhere } = useAlign(workspace);
+  const { state, me, error, setError, loadError, meError, loadMe, act, mark, refresh, ended, elsewhere } = useAlign(workspace);
   const [view, setView] = useState<View>("decision");
   const landed = useRef<string | null>(null); // the role the landing view was set for; null when signed out
   const [drawer, setDrawer] = useState<Drawer>(null);
@@ -288,7 +309,17 @@ export default function Home({ workspace }: { workspace?: string }) {
     if (actor) setView(actor === "leadership" ? "company" : "decision");
   }, [me]);
 
-  if (!me) return <main className="p-10 text-[16px] text-zinc-500">Loading Align…</main>;
+  if (!me)
+    return meError ? (
+      <main className="p-10 text-[16px]">
+        <p role="alert" className="mb-4 text-red-700">
+          Couldn’t reach Align: {meError}
+        </p>
+        <Button onClick={() => void loadMe()}>Try again</Button>
+      </main>
+    ) : (
+      <main className="p-10 text-[16px] text-zinc-500">Loading Align…</main>
+    );
   // The signed-out view has no simulations (B1-6); the sign-in screen reads only the labels.
   if (!me.actor)
     return <Login L={state ? labelsFor({ simulations: [], ...state }) : undefined} workspace={workspace} ended={ended} elsewhere={elsewhere} onDone={() => { loadMe(); refresh(); }} />;

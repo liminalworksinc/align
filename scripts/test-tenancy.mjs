@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Multi-workspace tenancy tests (spec rev 2 section 11, groups A to C, Mode L). Starts its own dev servers on <port>,
+// Multi-workspace tenancy tests (spec rev 2 section 11, groups A to C, Mode L). Builds once, then starts its own
+// production servers (next start) on <port>,
 // one per config phase, with custom workspaces in a temp ALIGN_DATA_DIR. Northstar stays in ./data, as in test-all.
-// Usage: node scripts/test-tenancy.mjs <port>   (from a worktree root; refuses 3100 and a busy port)
+// Usage: node scripts/test-tenancy.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port)
 //   phase "closed": no create config            -> creation closed
 //   phase "code":   signup code, cap 3          -> wrong code, cap race
 //   phase "open":   open create (serve.sh mode) -> everything else, plus the Northstar snapshot with workspaces on disk
@@ -13,6 +14,18 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync,
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import puppeteer from "puppeteer-core";
+
+const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+/** Poll `fn` until it returns true, up to `ms`. */
+async function waitFor(fn, ms = 20000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (await fn()) return true;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return false;
+}
 
 const PORT = Number(process.argv[2]);
 if (!Number.isInteger(PORT) || PORT === 3100) {
@@ -21,6 +34,16 @@ if (!Number.isInteger(PORT) || PORT === 3100) {
 }
 const BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = process.cwd();
+// startServer deletes ./data/state.json and data/.secret, so refuse the main checkout (the live demo's data) and a
+// busy port before anything is touched, as test-all.sh does.
+if (path.resolve(ROOT) === path.join(os.homedir(), "liminal/align")) {
+  console.error(`test-tenancy: refusing the main checkout ${ROOT}; run from a worktree`);
+  process.exit(2);
+}
+if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
+  console.error(`test-tenancy: port ${PORT} is already in use`);
+  process.exit(2);
+}
 const FIXTURE = JSON.parse(readFileSync(path.join(ROOT, "data/scenarios/example-custom.json"), "utf8"));
 delete FIXTURE.confirm;
 const NS_STATE = path.join(ROOT, "data/state.json");
@@ -169,7 +192,9 @@ async function startServer(env) {
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
   const clean = { ...process.env };
   for (const k of ["AI_GATEWAY_API_KEY", "ALIGN_CAPTURE", "ALIGN_SECRET", "ALIGN_URL", "ALIGN_MCP_URL", "ALIGN_ALLOW_OPEN_CREATE", "ALIGN_SIGNUP_CODE", "ALIGN_MAX_WORKSPACES", "ALIGN_CREATE_PER_HOUR", "ALIGN_DATA_DIR", "ALIGN_PUBLIC", "HOSTED", "ALIGN_HOSTS", "ALIGN_NORTHSTAR_PUBLIC", "ALIGN_PRODUCT_PASSCODE", "ALIGN_SECURITY_PASSCODE", "ALIGN_LEADERSHIP_PASSCODE"]) delete clean[k];
-  server = spawn("npx", ["next", "dev", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "ignore", "pipe"], detached: true });
+  // A production server (next start on the build made once below), as Fly runs it: no dev-only behaviour (hot
+  // reload, on-demand compiles) in any gate, and hosted refusals are checked as they really happen.
+  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "ignore", "pipe"], detached: true });
   let exited = false;
   let stderr = "";
   server.stderr.on("data", (c) => (stderr += c));
@@ -189,7 +214,7 @@ async function stopServer() {
   try {
     process.kill(-server.pid, "SIGTERM");
   } catch {}
-  spawnSync("pkill", ["-f", `next dev -H 127.0.0.1 -p ${PORT}`]);
+  spawnSync("pkill", ["-f", `next start -H 127.0.0.1 -p ${PORT}`]);
   server = null;
   await new Promise((r) => setTimeout(r, 2500));
   rmSync(NS_STATE, { force: true });
@@ -218,6 +243,12 @@ function forge(payload, secret) {
 }
 
 const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "align-tenancy-"));
+// One production build for every phase. Config is read at request time (lib/config.ts), so one build serves them all.
+const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "" } });
+if (build.status !== 0) {
+  console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
+  process.exit(1);
+}
 try {
   // ======== phase closed ========
   await mustStart({ ALIGN_DATA_DIR: path.join(tmpRoot, "closed") });
@@ -450,6 +481,88 @@ try {
   check("A11 auth.json and scenario.json are 0600", mode("auth.json") === "600" && mode("scenario.json") === "600", `${mode("auth.json")} ${mode("scenario.json")}`);
   const served = stA.text + afterReset.text + info.text;
   check("A11 auth.json and scenario.json never appear in an API response", !served.includes('"salt"') && !served.includes('"epoch"') && !served.includes('"confirm":"replace"'), "leaked");
+
+  // ---- R: fixes from Sean's PR #3 review ----
+  // R14 CSRF: a custom write needs JSON from this origin (a text/plain form from another local port used to land)
+  const r14 = await call("POST", "/api/timer", { cookie: sb.product, raw: JSON.stringify({ action: "brief_reviewed" }), headers: { "content-type": "text/plain" } });
+  const r14o = await call("POST", "/api/timer", { cookie: sb.product, body: { action: "brief_reviewed" }, headers: { origin: "http://127.0.0.1:9" } });
+  check("R14 custom write as text/plain -> 415; JSON from another origin -> 403", r14.status === 415 && r14o.status === 403, `${r14.status} ${r14o.status}`);
+  // R19 a primitive JSON body at sign-in is Northstar's 400, as before L0 (it was a 500)
+  const prim = await Promise.all(["42", '"x"', "true"].map((raw) => call("POST", "/api/session", { raw })));
+  check("R19 primitive JSON sign-in bodies -> 400, never 500", prim.every((r) => r.status === 400), prim.map((r) => r.status).join(","));
+  // R15 the state names its workspace, so a tab can tell the cookie moved under it; Northstar's has no such key
+  const nsR = await northstarSignIn();
+  const nsState = await call("GET", "/api/state", { cookie: nsR.product });
+  const wsState = await call("GET", "/api/state", { cookie: sb.product });
+  check("R15 custom /api/state names its workspace; Northstar's does not", wsState.json?.workspace === b && !!nsState.json && !("workspace" in nsState.json), `${wsState.json?.workspace} ${Object.keys(nsState.json ?? {}).includes("workspace")}`);
+  // R12 files and folders are owner-only (state holds private constraints)
+  const dmode = (statSync(path.join(wsRoot, a)).mode & 0o777).toString(8);
+  check("R12 workspace folder 0700; state.json and workspace.json 0600", dmode === "700" && mode("state.json") === "600" && mode("workspace.json") === "600", `${dmode} ${mode("state.json")} ${mode("workspace.json")}`);
+  // R19 an unreadable auth file is a server error, never a false "Session ended" that signs everyone out
+  const authB19 = path.join(wsRoot, b, "auth.json");
+  const auth19 = readFileSync(authB19, "utf8");
+  writeFileSync(authB19, JSON.stringify({ epoch: 1 }), { mode: 0o600 });
+  await new Promise((r) => setTimeout(r, 50));
+  const r19 = await call("GET", "/api/state", { cookie: sb.product });
+  writeFileSync(authB19, auth19, { mode: 0o600 });
+  await new Promise((r) => setTimeout(r, 50));
+  const r19ok = await call("GET", "/api/state", { cookie: sb.product });
+  check("R19 malformed auth.json -> 500 (not 401 Session ended); restored -> 200", r19.status === 500 && r19.json?.error !== ENDED && r19ok.status === 200, `${r19.status} ${r19.text.slice(0, 120)} ${r19ok.status}`);
+  // R15 in a browser: tab 1 shows A; tab 2 (same profile) signs in to B. Tab 1 must drop A's view without ever
+  // rendering B's data, and say the browser is signed in to another workspace.
+  if (existsSync(CHROME)) {
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    // next dev can reload pages in a loop while it settles after source edits, which destroys the page context:
+    // reads retry, and an attempt where tab 1 never loaded A is retried in a fresh profile (up to 3). A sighting
+    // of B's data in tab 1 is never retried away: it fails the check.
+    const textOf = (page) => page.evaluate(() => document.body.innerText).catch(() => "");
+    const signInIn = async (page, ws, passcode) => {
+      let status = 0;
+      await waitFor(async () => {
+        status = await page
+          .evaluate(
+            (ws, passcode) => fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace: ws, role: "product", passcode }) }).then((r) => r.status),
+            ws,
+            passcode,
+          )
+          .catch(() => 0);
+        return status !== 0;
+      }, 60000);
+      return status;
+    };
+    const attempt = async () => {
+      const ctx = await browser.createBrowserContext(); // one profile: both tabs share its cookie, as in a real browser
+      try {
+        const t1 = await ctx.newPage();
+        await t1.goto(`${BASE}/w/${a}`, { waitUntil: "domcontentloaded", timeout: 90000 }); // next dev compiles /w on first visit
+        const s1 = await signInIn(t1, a, A.json.passcodes.product);
+        await t1.reload({ waitUntil: "domcontentloaded" });
+        const sawA = await waitFor(async () => (await textOf(t1)).includes("AMARK"), 45000);
+        if (!sawA) return { s1, sawA, tab1: (await textOf(t1)).slice(0, 200) };
+        const t2 = await ctx.newPage();
+        await t2.goto(`${BASE}/w/${b}`, { waitUntil: "domcontentloaded", timeout: 90000 });
+        const s2 = await signInIn(t2, b, B.json.passcodes.product);
+        let sawB = false;
+        const told = await waitFor(async () => {
+          const t = await textOf(t1);
+          if (t.includes("BMARK")) sawB = true;
+          return /signed in to another workspace/.test(t);
+        });
+        return { s1, s2, sawA, told, sawB, tab1: (await textOf(t1)).slice(0, 200) };
+      } finally {
+        await ctx.close();
+      }
+    };
+    try {
+      let r = { sawA: false };
+      for (let i = 0; i < 3 && !r.sawA; i++) r = await attempt();
+      check("R15 a tab in A, after another tab signs in to B: never shows B's data, says another workspace", r.s1 === 200 && r.s2 === 200 && r.sawA && r.told && !r.sawB, JSON.stringify(r));
+    } catch (e) {
+      check("R15 browser check ran", false, e.message);
+    } finally {
+      await browser.close();
+    }
+  } else check("R15 browser check needs Chrome (CHROME_PATH)", false, CHROME);
 
   // A10 corrupt state
   const fileA = path.join(wsRoot, a, "state.json");

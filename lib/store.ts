@@ -106,20 +106,21 @@ async function readCustom(ws: CustomWsId): Promise<AppState> {
   }
 }
 
-/** Never creates directories. Trims audit to the last 1000 rows (older rows go to audit-archive.jsonl), then caps size. */
+/** Never creates directories. Caps size first (a refused write changes nothing on disk), then trims audit to the
+ *  last 1000 rows (older rows go to audit-archive.jsonl). Files are owner-only: state holds private constraints. */
 async function writeCustom(ws: CustomWsId, s: AppState) {
   const dir = wsDir(ws);
   if (!workspaceExists(ws)) throw new HttpError(404, "This workspace no longer exists");
+  if (Buffer.byteLength(JSON.stringify({ ...s, audit: [] }, null, 2)) > MAX_WS_BYTES) throw new HttpError(413, "This workspace is full");
   if (s.audit.length > AUDIT_KEEP) {
     const old = s.audit.slice(0, s.audit.length - AUDIT_KEEP);
-    await fs.appendFile(path.join(dir, "audit-archive.jsonl"), old.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    await fs.appendFile(path.join(dir, "audit-archive.jsonl"), old.map((r) => JSON.stringify(r)).join("\n") + "\n", { mode: 0o600 });
     s.audit = s.audit.slice(-AUDIT_KEEP);
   }
   const text = JSON.stringify(s, null, 2);
-  if (Buffer.byteLength(JSON.stringify({ ...s, audit: [] }, null, 2)) > MAX_WS_BYTES) throw new HttpError(413, "This workspace is full");
   const file = path.join(dir, "state.json");
   const tmp = `${file}.${randomUUID()}.tmp`;
-  await fs.writeFile(tmp, text);
+  await fs.writeFile(tmp, text, { mode: 0o600 });
   await fs.rename(tmp, file);
 }
 

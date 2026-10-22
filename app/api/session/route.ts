@@ -22,7 +22,8 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   return handle(async () => {
     const b = await body<{ role?: string; passcode?: string; workspace?: unknown }>(req);
-    if ("workspace" in b) {
+    // A primitive JSON body (42, "x", null) has no keys: it falls through to Northstar's 400, as before L0.
+    if (b && typeof b === "object" && "workspace" in b) {
       // Custom workspace login: JSON only (login CSRF), soft backoff per workspace, one uniform 401.
       requireJson(req);
       const key = `ws:${String(b.workspace).slice(0, 40)}`;

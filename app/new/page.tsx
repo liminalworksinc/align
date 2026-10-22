@@ -41,6 +41,7 @@ export default function NewWorkspacePage() {
   const [busy, setBusy] = useState(false);
   const [more, setMore] = useState(false);
   const [created, setCreated] = useState<Created | null>(null);
+  const [saved, setSaved] = useState(false); // the tester confirmed the passcodes are saved before leaving the card
 
   useEffect(() => {
     fetch("/api/workspaces/config", { cache: "no-store" })
@@ -134,9 +135,25 @@ export default function NewWorkspacePage() {
           A browser profile holds one workspace session at a time. Signing in here signs that browser out of any other workspace, including the demo. To try
           several roles on one computer, use a separate browser profile or private window for each.
         </p>
-        <Link href={created.workspace.path} className="inline-flex min-h-11 items-center rounded-[10px] bg-violet-700 px-[18px] text-[16px] font-semibold text-black hover:brightness-110">
-          Open the workspace
-        </Link>
+        <label className="mb-4 flex items-start gap-2 rounded-[10px] bg-amber-50 p-3 text-[16px] ring-1 ring-amber-300">
+          <input type="checkbox" className="mt-1 size-4 accent-violet-700" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
+          <span>I’ve saved all three passcodes somewhere I can find them.</span>
+        </label>
+        {/* A new tab, so this card (the only place the passcodes are shown) stays open behind it. */}
+        {saved ? (
+          <Link
+            href={created.workspace.path}
+            target="_blank"
+            rel="noopener"
+            className="inline-flex min-h-11 items-center rounded-[10px] bg-violet-700 px-[18px] text-[16px] font-semibold text-black hover:brightness-110"
+          >
+            Open the workspace in a new tab
+          </Link>
+        ) : (
+          <span aria-disabled="true" className="inline-flex min-h-11 items-center rounded-[10px] bg-zinc-200 px-[18px] text-[16px] font-semibold text-zinc-500">
+            Open the workspace in a new tab
+          </span>
+        )}
       </section>,
     );
   }
@@ -155,7 +172,13 @@ export default function NewWorkspacePage() {
       <p className="mb-6 text-[16px] text-zinc-700">
         Describe one real disagreement between two teams. This makes a new, separate workspace with its own passcodes. Nothing in any other workspace changes.
       </p>
-      {cfg?.signup_code_required && (
+      {cfg === null && (
+        <p role="alert" className="mb-4 rounded-[10px] border border-amber-300 bg-amber-50 p-4 text-[16px]">
+          Couldn’t check this server’s settings. If you were given a signup code, enter it below.
+        </p>
+      )}
+      {/* Unknown config (the fetch failed) keeps the code field: hiding it would make creation fail with no way to fix it. */}
+      {(cfg === null || cfg?.signup_code_required) && (
         <section className="mb-6 rounded-[14px] border border-zinc-200 bg-white p-5">
           <Field label="Signup code" hint="The code you were given to create a workspace." error={issues.signup_code}>
             <input className={field} autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} />

@@ -37,7 +37,8 @@ const WAIT_MS = 30000; // next dev compiles a page on first visit
 let passed = 0;
 let failed = 0;
 function check(label, ok, detail = "") {
-  ok ? passed++ : failed++;
+  if (ok) passed++;
+  else failed++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${!ok && detail ? `\n      ${String(detail).slice(0, 500)}` : ""}`);
   return ok;
 }

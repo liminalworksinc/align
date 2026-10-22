@@ -15,8 +15,9 @@ export async function GET(req: Request) {
     // Hosted: Northstar is not public. Anonymous callers get 404 unless ALIGN_NORTHSTAR_PUBLIC=1.
     if (!who && config().hosted && !config().northstarPublic) throw new HttpError(404, "Not found");
     if (who && who.ws !== "northstar") {
-      // Custom workspaces have no Sparta evidence, prep exclusions or agent registry.
-      return viewFor(await ctx.read(), who.actor);
+      // Custom workspaces have no Sparta evidence, prep exclusions or agent registry. The view names its workspace
+      // (appended last), so a tab showing another workspace or Northstar can tell the cookie changed under it.
+      return { ...viewFor(await ctx.read(), who.actor), workspace: who.ws };
     }
     const s = await ctx.mutate(async (st) => {
       try {

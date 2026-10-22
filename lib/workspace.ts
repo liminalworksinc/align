@@ -84,19 +84,37 @@ const g = globalThis as unknown as { __alignAuthCache?: Map<string, { mtimeMs: n
 const authCache = (g.__alignAuthCache ??= new Map());
 
 /** auth.json for a workspace, or null if the workspace does not exist (or is being deleted). */
+const validAuth = (a: unknown): a is WorkspaceAuth => {
+  const x = a as WorkspaceAuth | null;
+  return !!x && typeof x.epoch === "number" && !!x.roles &&
+    ROLES.every((r) => typeof x.roles[r]?.salt === "string" && typeof x.roles[r]?.hash === "string");
+};
+
+/** null only when the workspace has no auth file (deleted): its sessions have ended. Anything else that stops the
+ *  read (EMFILE, a malformed file) is a server error, never a false "Session ended". */
 export function readAuth(ws: CustomWsId): WorkspaceAuth | null {
   const file = path.join(wsDir(ws), "auth.json");
+  let mtimeMs: number;
   try {
-    const { mtimeMs } = statSync(file);
-    const hit = authCache.get(ws);
-    if (hit && hit.mtimeMs === mtimeMs) return hit.auth;
-    const auth = JSON.parse(readFileSync(file, "utf8")) as WorkspaceAuth;
-    authCache.set(ws, { mtimeMs, auth });
-    return auth;
-  } catch {
+    mtimeMs = statSync(file).mtimeMs;
+  } catch (e) {
     authCache.delete(ws);
-    return null;
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new HttpError(500, "This workspace could not be read");
   }
+  const hit = authCache.get(ws);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.auth;
+  let auth: unknown;
+  try {
+    auth = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    authCache.delete(ws);
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; // deleted between stat and read
+    throw new HttpError(500, "This workspace could not be read");
+  }
+  if (!validAuth(auth)) throw new HttpError(500, "This workspace could not be read");
+  authCache.set(ws, { mtimeMs, auth });
+  return auth;
 }
 
 // ---- lifecycle ----
@@ -139,19 +157,21 @@ export async function createWorkspace(args: { name: string; state: AppState; sce
     const roles = Object.fromEntries(await Promise.all(ROLES.map(async (r) => [r, await hashPasscode(passcodes[r])]))) as Record<Actor, RoleHash>;
     const auth: WorkspaceAuth = { epoch: 1, roles };
     const meta = { id, name: args.name, created_at: new Date().toISOString(), schema_version: 1 };
-    await fs.mkdir(root, { recursive: true });
+    await fs.mkdir(root, { recursive: true, mode: 0o700 });
     try {
-      await fs.mkdir(tmp);
-      await fs.writeFile(path.join(tmp, "state.json"), JSON.stringify(args.state, null, 2));
+      await fs.mkdir(tmp, { mode: 0o700 }); // owner-only: state holds private constraints, auth holds passcode hashes
+      await fs.writeFile(path.join(tmp, "state.json"), JSON.stringify(args.state, null, 2), { mode: 0o600 });
       await fs.writeFile(path.join(tmp, "scenario.json"), JSON.stringify(args.scenario, null, 2), { mode: 0o600 });
       await fs.writeFile(path.join(tmp, "auth.json"), JSON.stringify(auth, null, 2), { mode: 0o600 });
-      await fs.writeFile(path.join(tmp, "workspace.json"), JSON.stringify(meta, null, 2));
+      await fs.writeFile(path.join(tmp, "workspace.json"), JSON.stringify(meta, null, 2), { mode: 0o600 });
       await fs.rename(tmp, final);
     } catch (e) {
       await fs.rm(tmp, { recursive: true, force: true });
       throw e;
     }
-    await appendEvent("created", id);
+    // The workspace exists once the rename lands. A failed event append must not turn that into a 500 that loses
+    // the only copy of its passcodes; the event log is a record, not the source of truth (countWorkspaces reads dirs).
+    await appendEvent("created", id).catch((e) => console.error("workspace event append failed", (e as Error).name));
     return { id, name: args.name, passcodes };
   });
 }

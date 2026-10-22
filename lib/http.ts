@@ -108,6 +108,9 @@ export function capFields(v: unknown, at = "body"): void {
 /** Northstar bodies parse exactly as before (body()); custom workspace bodies are capped at 64 KB and per field. */
 export async function bodyFor<T = Record<string, unknown>>(req: Request, ws: string): Promise<T> {
   if (ws === "northstar") return body<T>(req);
+  // CSRF: SameSite=Strict doesn't separate localhost ports, so a text/plain form from another local port could
+  // otherwise write to a signed-in workspace. JSON only, same Host and Origin, as /api/workspaces requires.
+  requireJson(req);
   const b = await cappedJson<T>(req);
   capFields(b);
   return b;

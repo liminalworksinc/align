@@ -44,12 +44,16 @@ export function useAlign(workspace?: string) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false); // a custom session expired or was revoked
   const [elsewhere, setElsewhere] = useState<string | null>(null); // the workspace this browser is signed in to instead
+  const [meError, setMeError] = useState<string | null>(null); // /api/session failed before we knew who is signed in
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const live = useRef(!workspace); // may this page poll /api/state now?
+  const meRef = useRef<Me | null>(null);
+  const loadMeRef = useRef<() => Promise<void>>(async () => undefined);
 
   const endSession = useCallback(() => {
     live.current = !workspace;
     setState(null);
+    meRef.current = SIGNED_OUT;
     setMe(SIGNED_OUT);
     setEnded(true);
   }, [workspace]);
@@ -59,13 +63,22 @@ export function useAlign(workspace?: string) {
     try {
       const s = await api<StateView | AnonStateView>("/api/state");
       if (!live.current) return;
+      // The cookie is per origin: signing in elsewhere in another tab (another workspace, Northstar, or another
+      // role) changes what this tab's poll returns. Never render that here; ask who is signed in instead.
+      const ws = (s as { workspace?: string }).workspace;
+      const actor = meRef.current?.actor;
+      if (ws !== workspace || (actor && s.me !== actor)) {
+        live.current = false;
+        setState(null);
+        return void loadMeRef.current();
+      }
       setState(s);
       setLoadError(null);
     } catch (e) {
       if (isEnded(e)) return endSession();
       setLoadError((e as Error).message);
     }
-  }, [endSession]);
+  }, [endSession, workspace]);
 
   const loadMe = useCallback(async () => {
     let m: Me;
@@ -73,12 +86,16 @@ export function useAlign(workspace?: string) {
       m = await api<Me>("/api/session");
     } catch (e) {
       if (isEnded(e)) return endSession();
-      throw e;
+      // Server down or a corrupt workspace: say so, with a retry, instead of "Loading Align…" forever.
+      setMeError((e as Error).message);
+      return;
     }
+    setMeError(null);
     if (m.actor && m.workspace !== workspace) {
       live.current = false;
       setState(null);
       setElsewhere(m.workspace ?? "northstar");
+      meRef.current = SIGNED_OUT;
       setMe(SIGNED_OUT);
       return;
     }
@@ -87,9 +104,13 @@ export function useAlign(workspace?: string) {
     const wasLive = live.current;
     live.current = !workspace || !!m.actor;
     if (!live.current) setState(null);
+    meRef.current = m;
     setMe(m);
     if (live.current && !wasLive) refresh();
   }, [workspace, endSession, refresh]);
+  useEffect(() => {
+    loadMeRef.current = loadMe; // refresh (defined first) calls the current loadMe through this ref
+  }, [loadMe]);
 
   useEffect(() => {
     // Subscribes to the server: state is set when the fetches resolve, not synchronously.
@@ -122,5 +143,5 @@ export function useAlign(workspace?: string) {
     api("/api/timer", { body: { action } }).catch(() => undefined);
   }, []);
 
-  return { state, me, error, setError, loadError, refresh, loadMe, act, mark, ended, elsewhere };
+  return { state, me, error, setError, loadError, meError, refresh, loadMe, act, mark, ended, elsewhere };
 }
