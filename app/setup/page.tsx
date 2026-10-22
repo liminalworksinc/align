@@ -23,14 +23,17 @@ export default function SetupPage() {
 
   useEffect(() => {
     fetch("/api/session", { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`); // an error body is not a signed-out session
+        return r.json();
+      })
       .then((m: { actor: Actor | null; workspace?: string }) => {
         setActor(m.actor);
         setInWorkspace(m.workspace ?? null);
       })
       .catch(() => setActor(null));
     fetch("/api/state", { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((st: StateView | AnonStateView) => setTeam(labelsFor({ simulations: [], ...st }).role.leadership))
       .catch(() => undefined);
   }, []);

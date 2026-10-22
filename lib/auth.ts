@@ -174,6 +174,10 @@ export function requireSession(req: Request): Session {
 export function requireWsSession(req: Request): WsContext {
   const s = wsSessionFrom(req);
   if (!s) throw new HttpError(401, "Sign in as Product or Security first");
+  // The cookie is per origin: a tab left open on one workspace would otherwise write into whichever workspace this
+  // browser signed in to since. The page names the workspace it shows; a mismatch is refused (review M7).
+  const shown = req.headers.get("x-align-workspace");
+  if (shown && shown !== s.ws) throw new HttpError(409, "This tab is for another workspace than you are signed in to. Reload it.");
   return bindWs(s);
 }
 

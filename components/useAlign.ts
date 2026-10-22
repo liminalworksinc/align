@@ -20,10 +20,13 @@ export const SESSION_ENDED = "Your session ended. Sign in again.";
 const SIGNED_OUT: Me = { actor: null, name: null, sid: null };
 const isEnded = (e: unknown) => (e as { status?: number }).status === 401 && (e as Error).message === SESSION_ENDED;
 
-export async function api<T = unknown>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+export async function api<T = unknown>(path: string, init?: { method?: string; body?: unknown; workspace?: string }): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (init?.body) headers["content-type"] = "application/json";
+  if (init?.workspace) headers["x-align-workspace"] = init.workspace; // the server refuses a write for another workspace (409)
   const res = await fetch(path, {
     method: init?.method ?? (init?.body ? "POST" : "GET"),
-    headers: init?.body ? { "content-type": "application/json" } : undefined,
+    headers,
     body: init?.body ? JSON.stringify(init.body) : undefined,
     cache: "no-store",
   });
@@ -127,21 +130,26 @@ export function useAlign(workspace?: string) {
     async <T,>(path: string, body: unknown = {}): Promise<T | null> => {
       setError(null);
       try {
-        const out = await api<T>(path, { body });
+        const out = await api<T>(path, { body, workspace: workspace ?? "northstar" });
         await refresh();
         return out;
       } catch (e) {
         if (isEnded(e)) endSession();
-        else setError((e as Error).message);
+        else if ((e as { status?: number }).status === 409) {
+          // Signed in to another workspace in another tab: stop showing this one and say so (the Elsewhere notice).
+          live.current = false;
+          setState(null);
+          void loadMe();
+        } else setError((e as Error).message);
         return null;
       }
     },
-    [refresh, endSession],
+    [refresh, endSession, loadMe, workspace],
   );
 
   const mark = useCallback((action: string) => {
-    api("/api/timer", { body: { action } }).catch(() => undefined);
-  }, []);
+    api("/api/timer", { body: { action }, workspace: workspace ?? "northstar" }).catch(() => undefined);
+  }, [workspace]);
 
   return { state, me, error, setError, loadError, meError, refresh, loadMe, act, mark, ended, elsewhere };
 }

@@ -327,7 +327,14 @@ export default function Home({ workspace }: { workspace?: string }) {
   if (!state || state.me === null || state.me !== me.actor)
     return (
       <main className="p-10 text-[16px]">
-        {loadError ? <span className="text-red-700">Couldn’t load the workspace: {loadError}</span> : <span className="text-zinc-500">Loading workspace…</span>}
+        {meError || loadError ? (
+          <>
+            <p role="alert" className="mb-4 text-red-700">Couldn’t load the workspace: {meError ?? loadError}</p>
+            <Button onClick={() => { loadMe(); refresh(); }}>Try again</Button>
+          </>
+        ) : (
+          <span className="text-zinc-500">Loading workspace…</span>
+        )}
       </main>
     );
 
