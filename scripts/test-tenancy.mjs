@@ -854,6 +854,12 @@ try {
     check(`H1 HOSTED=1 refuses to serve with ${what}`, !r.started && (r.exited || r.last === 503) && r.stderr.includes(needle), r.started ? "it started" : `exited=${r.exited} last=${r.last} ${r.stderr.slice(-300)}`);
     await stopServer();
   }
+  // P1 item 5: the deletion day itself is still served (it closes at the end of that day, Pacific), so a test running
+  // on the last day isn't cut off. Today's UTC date has always not yet ended by that rule.
+  const today = new Date().toISOString().slice(0, 10);
+  const onTheDay = await startServer({ ...good, ALIGN_DELETE_BY: today });
+  check(`P1-5 a hosted server with ALIGN_DELETE_BY = today (${today}) still serves until that day ends`, onTheDay.started, `exited=${onTheDay.exited} last=${onTheDay.last} ${onTheDay.stderr.slice(-200)}`);
+  await stopServer();
   await mustStart(good);
 
   // H2 the host, scheme and proxy rules

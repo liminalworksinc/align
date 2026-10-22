@@ -41,7 +41,7 @@ The server won't serve until all of these hold. On `next start` it exits with th
 - `ALIGN_SECRET`: 32+ characters. Session tokens are signed with it, so rotating it signs everyone out.
 - `ALIGN_DATA_DIR`: an absolute path outside the app directory (the volume, `/data`).
 - `ALIGN_SIGNUP_CODES`: one or more invite codes, each 12+ characters. `ALIGN_SIGNUP_CODE` (a single shared code) is refused.
-- `ALIGN_DELETE_BY`: the deletion date, `YYYY-MM-DD`, not yet passed. From that day a running server answers 410 to every request, and a restart is refused.
+- `ALIGN_DELETE_BY`: the deletion date, `YYYY-MM-DD`, not yet passed. Once that day ends (midnight Pacific), a running server answers 410 to every request and a restart is refused. Testers keep the whole day; the operator purges with `ws-admin` that evening.
 - `ALIGN_PRODUCT_PASSCODE`, `ALIGN_SECURITY_PASSCODE`, `ALIGN_LEADERSHIP_PASSCODE`: set, not the `*-demo` defaults, and 12+ characters. They serve nothing while Northstar is off; they're required so a mistake there could never expose the demo passcodes.
 - These must be unset (any value is refused, `"0"` included): `AI_GATEWAY_API_KEY`, `ALIGN_CREATE_PER_HOUR`, `ALIGN_NORTHSTAR_PUBLIC`. These must be unset or off: `ALIGN_CAPTURE` (or `0`), `ALIGN_ALLOW_OPEN_CREATE` and `ALIGN_PUBLIC` (anything but `1`).
 
