@@ -54,7 +54,7 @@ test-tenancy H1 checks every one of these on a production server: each must exit
 | `HOSTED` | Dockerfile | `1` |
 | `ALIGN_DATA_DIR` | Dockerfile / `fly.toml` | `/data` (the volume) |
 | `ALIGN_HOSTS` | `fly.toml` | the app hostname, e.g. `align-pg-draft.fly.dev` |
-| `ALIGN_MAX_WORKSPACES` | `fly.toml` | `25`. The cap exists for polling cost (spec section 10). |
+| `ALIGN_MAX_WORKSPACES` | `fly.toml` | `25`. The cap exists for polling cost (spec section 10). `0`, a negative or a non-number falls back to 25; it can't close creation. |
 | `ALIGN_DELETE_BY` | `fly.toml` | `2026-11-06` (Sean's suggested date; change it in one place) |
 | `ALIGN_SECRET` | `fly secrets` | `openssl rand -hex 32` |
 | `ALIGN_SIGNUP_CODES` | `fly secrets` | one code per planned tester, e.g. five of `openssl rand -hex 8`, comma-separated. To add testers later, set the list again with the new codes added. |
