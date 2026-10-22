@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build A gate runner. Usage: scripts/test-all.sh <port>   (run from a lane or integration worktree)
 # Checks frozen files, lint and types, starts a fresh dev server on <port>, then runs in fixed order:
-# snapshot, test-flow, test-scenario (default fixture, then each scripts/fixtures/*.json), test-mcp,
+# snapshot, test-flow, test-scenario (default fixture, then each scripts/fixtures/*.json), test-ui-loop, test-mcp,
 # test-capture, test-mapper. Capture and mapper add sessions
 # that survive reset, so they run last. Then test-tenancy, which starts its own servers on <port>.
 # One summary line per step; exits non-zero if any step fails.
@@ -64,6 +64,8 @@ step test-flow bash -c "node scripts/test-flow.mjs '$BASE' | tail -n +2 | diff -
 # test-scenario runs once per custom fixture: the default example, then every scripts/fixtures/*.json.
 step test-scenario env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-scenario.mjs "$BASE"
 for f in scripts/fixtures/*.json; do step "scenario:$(basename "$f" .json)" env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-scenario.mjs "$BASE" "$f"; done
+# The same custom loop in a browser: two team profiles by visible labels, plus a synthetic agent's wake-up. Needs Chrome.
+step test-ui-loop node scripts/test-ui-loop.mjs "$BASE"
 step test-mcp env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-mcp.mjs "$BASE/api/mcp"
 step test-capture node scripts/test-capture.mjs "$BASE"
 step test-mapper env ALIGN_URL="$BASE" node scripts/test-mapper.mjs
