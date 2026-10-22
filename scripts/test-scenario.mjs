@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Custom-scenario acceptance test (Build A minimum slice): setup authority S1–S9, the minimal setup S10/S11, Host checks S12/S13,
-// state after setup T1, the propose → change → owner-approval flow F2–F15, what an agent reads (accepted plan P1/P2,
-// the approval directive D0–D5, on synthetic sessions under a synthetic repo, and the MCP tools M0–M2), and R4 back
-// to Northstar. The MCP checks need the server's token: ALIGN_MCP_TOKEN=<t> (test-all passes it).
+// state after setup T1, the propose → change → owner-approval flow F2–F15, leadership's launch decision L1–L6, what an
+// agent reads (accepted plan P1/P2, the approval directive D0–D5, on synthetic sessions under a synthetic repo, and the
+// MCP tools M0–M2), and R4 back to Northstar. The MCP checks need the server's token: ALIGN_MCP_TOKEN=<t> (test-all passes it).
 // Case ids follow Sean's Build A plan §7/§8. Contracts: plan §3 (setup API, approval, custom state seed).
 //
 // Usage: node scripts/test-scenario.mjs http://127.0.0.1:3205 [fixture.json]
@@ -306,6 +306,8 @@ async function main() {
     f10.status === 409 && /no sandbox test/i.test(f10.json?.error ?? f10.text),
     short(f10),
   );
+  const l1 = await call("leadership", "POST", `/api/proposals/${pid}/launch`, { decision: "approved" });
+  check("L1 launch decision before the teams agree -> 409", l1.status === 409, short(l1));
   const f11 = await call("security", "POST", `/api/proposals/${pid}/accept`, { rationale: "Agreed without a sandbox test", accept_untested: true });
   check("F11 approval with accept_untested -> RATIFIED", f11.status === 200 && f11.json?.state === "RATIFIED", short(f11));
 
@@ -390,6 +392,40 @@ async function main() {
     JSON.stringify({ asking, askingOwned, affected }),
   );
 
+  // Leadership's launch decision on the agreed record (custom only).
+  const launch = (role, b, opts) => call(role, "POST", `/api/proposals/${pid}/launch`, b, opts);
+  const l2p = await launch("product", { decision: "approved" });
+  const l2s = await launch("security", { decision: "approved" });
+  check("L2 product and security cannot decide the launch -> 403", l2p.status === 403 && l2s.status === 403, `${short(l2p)} | ${short(l2s)}`);
+  const l3 = await launch("leadership", { decision: "approved", note: "x".repeat(501) });
+  const l3d = await launch("leadership", { decision: "yes" });
+  const l3t = await launch("leadership", { decision: "approved", note: 7 });
+  const l3j = await launch("leadership", undefined, { raw: JSON.stringify({ decision: "approved" }), headers: { "content-type": "text/plain" } });
+  const noDecision = (await state()).acceptances?.find((a) => a.proposal_id === pid)?.launch_decision;
+  check(
+    "L3 note over 500 characters, a bad decision or a non-text note -> 400; non-JSON -> 415; nothing recorded",
+    l3.status === 400 && l3d.status === 400 && l3t.status === 400 && l3j.status === 415 && noDecision === undefined,
+    `${short(l3)} | ${short(l3d)} | ${short(l3t)} | ${short(l3j)} | ${JSON.stringify(noDecision)}`,
+  );
+  const NOTE = "Launch after the partner briefing";
+  const l4 = await launch("leadership", { decision: "not_yet", note: `  ${NOTE} ` });
+  check("L4 leadership says not yet -> 200 with the trimmed note", l4.status === 200 && l4.json?.decision === "not_yet" && l4.json?.note === NOTE && l4.json?.by === "leadership", short(l4));
+  const l5 = await launch("leadership", { decision: "approved" });
+  const afterLaunch = await state("product");
+  const lacc = afterLaunch.acceptances?.find((a) => a.proposal_id === pid);
+  check(
+    "L5 leadership approves the launch -> 200, overwrites the earlier decision, launch_decision is the acceptance's last field",
+    l5.status === 200 && lacc?.launch_decision?.decision === "approved" && lacc.launch_decision.note === undefined && Object.keys(lacc).at(-1) === "launch_decision",
+    `${short(l5)} | ${JSON.stringify(lacc?.launch_decision)}`,
+  );
+  const launchRows = (afterLaunch.audit ?? []).filter((a) => a.action.startsWith("launch_") && a.target === pid); // the audit outlives earlier runs
+  check(
+    "L5 one audit row per decision, by leadership, naming the proposal and never the note",
+    launchRows.map((a) => a.action).join(",") === "launch_not_yet,launch_approved" && launchRows.every((a) => a.actor === "leadership") &&
+      !JSON.stringify(afterLaunch.audit).includes(NOTE),
+    JSON.stringify(launchRows),
+  );
+
   // ---- R4: custom back to Northstar ----
   const r4p = await call("product", "POST", "/api/reset", { confirm: "reset" });
   const stillCustom = (await state()).scenario === "custom";
@@ -402,6 +438,10 @@ async function main() {
       (ns.goals ?? []).some((g) => g.id === "g-security-v1") && !(ns.plans ?? []).some((x) => x.plan_id === "p-custom") && (ns.simulations ?? []).length >= 27,
     JSON.stringify({ status: r4.status, scenario: ns.scenario, sims: ns.simulations?.length }),
   );
+  const nsProposal = (ns.proposals ?? [])[0]?.id ?? pid;
+  const l6 = await call("leadership", "POST", `/api/proposals/${nsProposal}/launch`, { decision: "approved" });
+  const l6b = await call("leadership", "POST", `/api/proposals/${pid}/launch`, { decision: "approved" });
+  check("L6 Northstar refuses the launch route -> 404", l6.status === 404 && l6b.status === 404, `${short(l6)} | ${short(l6b)}`);
 }
 
 try {

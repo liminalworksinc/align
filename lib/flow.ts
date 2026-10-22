@@ -253,6 +253,27 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
   return p;
 }
 
+export const MAX_LAUNCH_NOTE = 500;
+
+/** Custom only: leadership approves the launch of the agreed plan, or says not yet. A later call replaces the earlier one. */
+export function decideLaunch(s: AppState, who: Session, pid: string, body: { decision?: unknown; note?: unknown }) {
+  if (s.scenario !== "custom") throw new HttpError(404, "Launch decisions exist only in custom scenarios");
+  if (who.actor !== "leadership") forbid("Only leadership can decide on the launch");
+  const p = openProposal(s, pid);
+  const acc = s.acceptances.find((a) => a.proposal_id === p.id);
+  if (p.state !== "RATIFIED" || !acc) conflict("The two teams haven’t agreed yet, so there is nothing to launch");
+  if (body.decision !== "approved" && body.decision !== "not_yet") throw new HttpError(400, "Choose approved or not_yet");
+  let note: string | undefined;
+  if (body.note !== undefined && body.note !== null) {
+    if (typeof body.note !== "string") throw new HttpError(400, "The note must be text");
+    note = body.note.trim() || undefined;
+    if (note && note.length > MAX_LAUNCH_NOTE) throw new HttpError(400, `Keep the note to ${MAX_LAUNCH_NOTE} characters or fewer`);
+  }
+  acc!.launch_decision = { decision: body.decision, ...(note ? { note } : {}), by: "leadership", at: now() };
+  audit(s, who, body.decision === "approved" ? "launch_approved" : "launch_not_yet", p.id); // never the note text
+  return acc!.launch_decision;
+}
+
 export function rejectProposal(s: AppState, who: Session, pid: string) {
   const p = openProposal(s, pid);
   if (who.actor !== p.recipient_owner) forbid(profileFor(s).messages.rejectWrongActor);

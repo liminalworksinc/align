@@ -434,6 +434,14 @@ try {
   await sse;
   check("A6 custom accept -> 200 RATIFIED", acc.status === 200, `${acc.status} ${acc.text.slice(0, 200)}`);
   check("B17 custom accept emits no authority event on ?session=*", wire.includes("event: hello") && !wire.includes("event: authority"), wire.slice(0, 300));
+  // The launch route is workspace-scoped: B's leadership names A's proposal and reaches only B.
+  const aTree6 = treeHash(path.join(wsRoot, a));
+  const bTree6l = treeHash(path.join(wsRoot, b));
+  const lB = await call("POST", `/api/proposals/${pid}/launch`, { cookie: sb.leadership, body: { decision: "approved" } });
+  check("A6 B's leadership cannot launch A's proposal -> 404, A and B unchanged", lB.status === 404 && treeHash(path.join(wsRoot, a)) === aTree6 && treeHash(path.join(wsRoot, b)) === bTree6l, `${lB.status} ${lB.text}`);
+  const lA = await call("POST", `/api/proposals/${pid}/launch`, { cookie: sa.leadership, body: { decision: "approved" } });
+  const launchedA = JSON.parse(readFileSync(path.join(wsRoot, a, "state.json"), "utf8")).acceptances.find((x) => x.proposal_id === pid)?.launch_decision;
+  check("A6 A's leadership launches A's proposal -> 200, recorded in A only", lA.status === 200 && launchedA?.decision === "approved" && treeHash(path.join(wsRoot, b)) === bTree6l, `${lA.status} ${lA.text}`);
   const p6b = await call("POST", "/api/proposals", { cookie: sa.product, body: { proposed_measure_text: "AMARK second", rationale: "r", reciprocal_commitment: "c" } });
   const rj = await call("POST", `/api/proposals/${p6b.json?.id}/reject`, { cookie: sa.security, body: {} });
   check("A6 custom reject -> 200", rj.status === 200, `${rj.status} ${rj.text.slice(0, 200)}`);

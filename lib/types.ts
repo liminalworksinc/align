@@ -208,6 +208,15 @@ export interface Acceptance {
   new_measure_id?: string;
   owning_work_item_ids?: string[]; // operator work items whose team's goal changed ("Work still on the old plan")
   asking_work_item_ids?: string[]; // the asking team's own work items, to check against its new commitment
+  launch_decision?: LaunchDecision; // leadership's launch call after the teams agree; appended last
+}
+
+/** Custom only. Leadership's decision on launching what the two teams agreed. Changing it overwrites it. */
+export interface LaunchDecision {
+  decision: "approved" | "not_yet";
+  note?: string; // at most 500 characters; never written to the audit log
+  by: "leadership";
+  at: string;
 }
 
 export interface Touchpoint {

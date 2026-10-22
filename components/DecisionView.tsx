@@ -4,6 +4,7 @@ import { companyMeasureId, decisionMeasureId, labelsFor, poss, type Labels } fro
 import type { SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { AuthorityStrip } from "./AuthorityStrip";
+import { launchLine } from "./launch";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
 import { depRelation } from "./TeamLens";
@@ -299,7 +300,7 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
           <p className="mt-2 max-w-[680px] text-[16px] text-zinc-700">
             The previous version is kept.{acc.ratified_at ? ` Approved by ${owner} at ${fmtTime(acc.ratified_at)}.` : ""}
           </p>
-          <p className="mt-1 max-w-[680px] text-[16px] font-semibold text-zinc-900">This records what the two teams agreed. It is not approval to launch.</p>
+          <p className="mt-1 max-w-[680px] text-[16px] font-semibold text-zinc-900">{launchLine(acc, L)}</p>
         </div>
         {conditions && (
           <section aria-label="Conditions" className="rounded-[14px] border border-amber-300 bg-amber-50 p-[18px]">
