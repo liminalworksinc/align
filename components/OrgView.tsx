@@ -47,7 +47,15 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
 
   return (
     <>
-      <Section title="Decision record" right={<Badge tone="neutral">{agreementStatus(acc)}</Badge>}>
+      <Section
+        title="Decision record"
+        right={
+          <span className="flex flex-wrap justify-end gap-2">
+            {conditions && <Badge tone="amber">Agreed · conditions not checked</Badge>}
+            <Badge tone="neutral">{agreementStatus(acc)}</Badge>
+          </span>
+        }
+      >
         <div className="flex flex-col gap-3 rounded-xl bg-white p-5 ring-1 ring-zinc-300">
           <p style={{ fontSize: 17 }} className="text-zinc-700">
             {L.team.product} and {L.team.security} agreed on {poss(L.team.security)} updated goal ({acc.accepted_version}).{" "}
@@ -73,11 +81,6 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
             <li>
               <span className="font-semibold">Outcome:</span> not measured yet
             </li>
-            {conditions && (
-              <li>
-                <span className="font-semibold">Conditions:</span> not confirmed yet
-              </li>
-            )}
           </ul>
           <p className="text-[16px] font-semibold text-zinc-900">{launchLine(acc, L)}</p>
           {d?.note && <p className="whitespace-pre-wrap text-[15px] text-zinc-600">Note: {d.note}</p>}
