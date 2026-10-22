@@ -280,12 +280,12 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
   if (acc && rel?.status === "ACCEPTED") {
     const goal = s.goals.find((g) => g.id === acc.new_goal_id);
     const newTarget = goal?.measures.find((m) => m.id === decisionMeasureId(s, acc))?.text ?? goal?.objective ?? "";
-    // What the owning team's approval depends on: its conditions field, else the reason it gave when asking for changes.
+    // What the owning team's approval depends on: its conditions field only. Its reason for asking for changes is shown
+    // separately, never as a condition. One condition per line; Align stores them as one text and never checks them.
     const lastCounter = s.proposals.find((p) => p.id === acc.proposal_id)?.counter_versions.at(-1);
-    const conditions = lastCounter?.conditions || lastCounter?.rationale || "";
-    // One condition per line; Align stores them as one text and never checks whether they hold.
+    const conditions = lastCounter?.conditions?.trim() ?? "";
+    const reason = lastCounter?.rationale?.trim() ?? "";
     const conditionLines = conditions.split("\n").map((c) => c.trim()).filter(Boolean);
-    const asker = L.person.product;
     return (
       <div className="flex flex-col gap-4">
         <Header
@@ -301,22 +301,6 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
           </p>
           <p className="mt-1 max-w-[680px] text-[16px] font-semibold text-zinc-900">This records what the two teams agreed. It is not approval to launch.</p>
         </div>
-        <section aria-label="Who decided" className="rounded-[14px] border border-zinc-200 bg-white p-[18px]">
-          <h2 className="al-lbl">Who decided</h2>
-          <ul className="mt-1 flex flex-col gap-1.5 text-[16px] text-zinc-900">
-            <li>
-              <span className="font-semibold">{owner}</span> ({owning}) approved the updated goal
-              {acc.ratified_at ? ` at ${fmtTime(acc.ratified_at)}` : ""}.
-            </li>
-            <li>
-              <span className="font-semibold">{asker}</span> ({asking}){" "}
-              {acc.acknowledged_via === "authored_in_proposal"
-                ? `proposed the change and committed to ${poss(asking)} part`
-                : `accepted ${poss(owning)} changes${acc.acknowledged_at ? ` at ${fmtTime(acc.acknowledged_at)}` : ""}`}
-              .
-            </li>
-          </ul>
-        </section>
         {conditions && (
           <section aria-label="Conditions" className="rounded-[14px] border border-amber-300 bg-amber-50 p-[18px]">
             <h2 className="al-lbl !text-amber-700">Conditions</h2>
@@ -330,9 +314,16 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
               <p className="mt-1 whitespace-pre-wrap text-[16px] text-zinc-900">{conditions}</p>
             )}
             <p className="mt-1 text-[14px] text-zinc-600">
-              {owning} asked for these when it asked for changes. Align records them but does not check whether they are met.
+              {conditionLines.length > 1
+                ? `${owning} asked for these when it asked for changes. Align records them but does not check whether they are met.`
+                : `${owning} asked for this when it asked for changes. Align records it but does not check whether it is met.`}
             </p>
           </section>
+        )}
+        {reason && (
+          <p className="max-w-[680px] text-[16px] text-zinc-700">
+            <span className="font-semibold text-zinc-900">Why {owning} asked for changes:</span> {reason}
+          </p>
         )}
         {/* The approved target shows once, at the top of the old-plan panel (and in the header card). */}
         <ul aria-label="What this record shows" className="flex flex-col gap-1.5 rounded-[14px] border border-zinc-200 bg-white p-[18px] text-[17px] text-zinc-900">

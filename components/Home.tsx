@@ -425,7 +425,7 @@ export default function Home({ workspace }: { workspace?: string }) {
                 </span>
                 <span className="flex min-w-0 flex-col">
                   <span className="text-[15px] font-semibold leading-tight text-zinc-900">{n.label}</span>
-                  <span className="truncate text-[13px] text-zinc-500">{n.sub}</span>
+                  <span className="text-[13px] leading-snug text-zinc-500">{n.sub}</span>
                 </span>
                 {count > 0 && (
                   <span className={`ml-auto grid h-6 min-w-6 place-items-center rounded-full px-1.5 text-[12px] font-bold ${n.id === "decision" ? "bg-violet-700 text-black" : "bg-zinc-100 text-zinc-900"}`}>
