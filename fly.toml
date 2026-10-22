@@ -11,6 +11,7 @@ primary_region = "sjc"
   ALIGN_DATA_DIR = "/data"
   ALIGN_HOSTS = "align-pg-draft.fly.dev"
   ALIGN_MAX_WORKSPACES = "25"
+  ALIGN_DELETE_BY = "2026-11-06"
 
 [http_service]
   internal_port = 8080
@@ -18,6 +19,19 @@ primary_region = "sjc"
   auto_stop_machines = "off"
   auto_start_machines = false
   min_machines_running = 1
+
+  # The health check comes from inside Fly's network, so it sends what Fly's edge would: the allowlisted Host,
+  # forwarded https and a Fly-Client-IP. Without them proxy.ts answers 421 or 403 and the check would fail.
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/api/workspaces/config"
+    [http_service.checks.headers]
+      Host = "align-pg-draft.fly.dev"
+      X-Forwarded-Proto = "https"
+      Fly-Client-IP = "fly-health-check"
 
 [[mounts]]
   source = "align_data"

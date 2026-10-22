@@ -78,6 +78,8 @@ function sign(payload: string) {
 }
 
 export function login(role: string, passcode: string): { token: string; session: Session } {
+  // Hosted has no Northstar: its shared passcodes sign nobody in there (go-C condition 1).
+  if (config().hosted) throw new HttpError(404, "Not found");
   if (role !== "product" && role !== "security" && role !== "leadership") throw new HttpError(400, "Unknown role");
   const expected = Buffer.from(PASSCODES[role]);
   const given = Buffer.from(String(passcode ?? ""));
@@ -118,7 +120,9 @@ function readToken(token: string | undefined): TokenRead {
     return { kind: "none" };
   }
   if (!p || typeof p.actor !== "string" || !ACTORS.has(p.actor)) return { kind: "none" };
-  if (p.ws === undefined) return { kind: "northstar", session: p as Session };
+  // A Northstar token (no expiry, no mode binding) is never honoured when hosted, even one minted elsewhere with
+  // the same secret: hosted serves custom workspaces only.
+  if (p.ws === undefined) return config().hosted ? { kind: "none" } : { kind: "northstar", session: p as Session };
   const ws = parseCustomWs(p.ws);
   if (!ws || typeof p.exp !== "number" || p.exp <= Date.now()) return { kind: "ended" };
   const auth = readAuth(ws);

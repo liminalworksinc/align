@@ -2,19 +2,20 @@ import path from "node:path";
 
 // Every multi-workspace setting, read from the environment only (never from request headers).
 // Mode L (loopback) is the default. HOSTED=1 is the hosted tester mode (founder ruling 10-21 "go C"): one server
-// behind the platform's HTTPS proxy, an explicit hostname allowlist, strong secrets, no capture, Northstar closed.
-// ALIGN_PUBLIC=1 (the spec's full Mode P) is still refused.
+// behind Fly's HTTPS proxy, an explicit hostname allowlist, strong secrets, no capture, no AI key, and no Northstar
+// at all (the demo, its fixture and Sparta evidence are never served or read). ALIGN_PUBLIC=1 (full Mode P) is refused.
 
 export interface Config {
   hosted: boolean; // HOSTED=1
-  northstarPublic: boolean; // HOSTED=1 only: serve Northstar's no-session routes anyway (ALIGN_NORTHSTAR_PUBLIC=1)
   dataDir: string; // custom workspaces live under <dataDir>/workspaces; Northstar always stays in <cwd>/data
   workspacesRoot: string;
   maxWorkspaces: number;
-  signupCode: string | null;
+  signupCode: string | null; // Mode L only: one shared code (ALIGN_SIGNUP_CODE)
+  signupCodes: string[]; // single-use invite codes (ALIGN_SIGNUP_CODES, comma-separated); hosted requires these
   allowOpenCreate: boolean;
   allowedHosts: Set<string>; // hostnames without port: ALIGN_HOSTS when hosted, else the loopback names
-  trustProxy: boolean;
+  deleteBy: string | null; // ALIGN_DELETE_BY (YYYY-MM-DD): the date everything on a hosted server is deleted
+  createPerHour: number; // ALIGN_CREATE_PER_HOUR in Mode L (tests); fixed at 5 when hosted
 }
 
 const LOOPBACK = ["localhost", "127.0.0.1", "[::1]"];
@@ -31,14 +32,15 @@ export function config(): Config {
   const max = Number(process.env.ALIGN_MAX_WORKSPACES || 25);
   return {
     hosted,
-    northstarPublic: hosted && process.env.ALIGN_NORTHSTAR_PUBLIC === "1",
     dataDir,
     workspacesRoot: path.join(dataDir, "workspaces"),
     maxWorkspaces: Number.isInteger(max) && max > 0 ? max : 25,
-    signupCode: process.env.ALIGN_SIGNUP_CODE || null,
+    signupCode: hosted ? null : process.env.ALIGN_SIGNUP_CODE || null,
+    signupCodes: (process.env.ALIGN_SIGNUP_CODES ?? "").split(",").map((c) => c.trim()).filter(Boolean), // case-sensitive
     allowOpenCreate: !hosted && process.env.ALIGN_ALLOW_OPEN_CREATE === "1",
     allowedHosts: new Set(hosted ? list(process.env.ALIGN_HOSTS) : LOOPBACK),
-    trustProxy: process.env.ALIGN_TRUST_PROXY === "1",
+    deleteBy: process.env.ALIGN_DELETE_BY || null,
+    createPerHour: hosted ? 5 : Number(process.env.ALIGN_CREATE_PER_HOUR || 5),
   };
 }
 
@@ -70,8 +72,17 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
   const dir = env.ALIGN_DATA_DIR;
   if (!dir || !path.isAbsolute(dir)) p.push("ALIGN_DATA_DIR must be an absolute path on the persistent volume");
   else if (!path.relative(path.resolve(cwd), path.resolve(dir)).startsWith("..")) p.push("ALIGN_DATA_DIR must be outside the app directory");
-  if (!env.ALIGN_SIGNUP_CODE || env.ALIGN_SIGNUP_CODE.length < 12) p.push("ALIGN_SIGNUP_CODE must be set (12+ characters)");
+  // One single-use invite code per tester: a shared code let one holder fill the server (review item 6).
+  const codes = (env.ALIGN_SIGNUP_CODES ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+  if (!codes.length) p.push("ALIGN_SIGNUP_CODES must list single-use invite codes (comma-separated)");
+  if (codes.some((c) => c.length < 12)) p.push("ALIGN_SIGNUP_CODES: every code must be 12+ characters");
+  if (env.ALIGN_SIGNUP_CODE) p.push("ALIGN_SIGNUP_CODE (one shared code) is not allowed when hosted; use ALIGN_SIGNUP_CODES");
   if (env.ALIGN_ALLOW_OPEN_CREATE === "1") p.push("ALIGN_ALLOW_OPEN_CREATE is not allowed when hosted");
+  if (env.ALIGN_CREATE_PER_HOUR) p.push("ALIGN_CREATE_PER_HOUR is not allowed when hosted (fixed at 5)");
+  if (env.ALIGN_NORTHSTAR_PUBLIC) p.push("ALIGN_NORTHSTAR_PUBLIC is not allowed: Northstar is off when hosted");
+  // The tester notice states the deletion date (go-C condition 3).
+  const del = env.ALIGN_DELETE_BY ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(del) || Number.isNaN(Date.parse(`${del}T00:00:00Z`))) p.push("ALIGN_DELETE_BY must be a date (YYYY-MM-DD)");
   for (const [k, dflt] of Object.entries(DEFAULT_PASSCODES)) {
     const v = env[k];
     if (!v || v === dflt) p.push(`${k} must be set to a non-default passcode`);
@@ -80,6 +91,12 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
   if (env.AI_GATEWAY_API_KEY) p.push("AI_GATEWAY_API_KEY must not be set when hosted (no AI key)");
   if (env.ALIGN_CAPTURE && env.ALIGN_CAPTURE !== "0") p.push("ALIGN_CAPTURE must be off when hosted");
   return p;
+}
+
+/** hostedProblems() for this process, computed once: the environment doesn't change while the server runs. */
+let problems: string[] | null = null;
+export function startupProblems(): string[] {
+  return (problems ??= process.env.HOSTED === "1" ? hostedProblems() : []);
 }
 
 /** Startup check (instrumentation.ts). Throws, so the server does not start. */

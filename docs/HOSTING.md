@@ -1,97 +1,156 @@
 # Hosting Align for unmoderated tests (HOSTED=1)
 
-**Status: draft.** Nothing has been deployed: there's no app, volume, DNS record or account yet. Sean approves the hosted setup on LIM-2424 before any of it is created. This page goes with `Dockerfile`, `.dockerignore` and `fly.toml`.
+**Status: draft.** Nothing has been deployed: there's no app, volume, DNS record or account yet. The account creation and the deploy each need Sean's separate go on LIM-2424. This page goes with `Dockerfile`, `.dockerignore` and `fly.toml`.
 
-Purpose (founder ruling 10-21 "go C"): every Proving Ground interviewee gets their own workspace and a link, and runs the test without a moderator. One server serves all the workspaces.
+**Purpose (founder ruling 10-21 "go C").** Every Proving Ground interviewee gets their own workspace and a link, and runs the test without a moderator. One server serves all the workspaces.
 
 ## Why Fly
 
-- **One machine with a persistent volume.** The multi-workspace spec (rev 2, section 10) needs exactly one Node process on a host with a persistent disk, because state locks live in process memory and `data/.pid` refuses a second server. A Fly volume attaches to a single machine, and `min_machines_running = 1` with auto-stop off keeps that one process alive.
-- **HTTPS at the edge.** The Fly proxy terminates TLS (`force_https`) and sets `X-Forwarded-Proto`, which the app trusts only when `HOSTED=1`.
-- **Secrets stay off disk in the repo.** They're set with `fly secrets`.
-- **Not serverless.** Serverless platforms (Vercel functions and the like) are ruled out as written: they run many processes and have no shared disk. Render or Railway with a single instance and a disk would also work; Fly was picked for the simplest volume plus single-machine setup.
+- **One machine with a persistent volume.** The multi-workspace spec (rev 2, section 10) needs exactly one Node process on a host with a persistent disk, because state locks live in process memory.
+  - A pid file on the volume (`/data/.pid`) refuses a second server.
+  - A Fly volume attaches to a single machine.
+  - `min_machines_running = 1`, with auto-stop off, keeps that one process alive.
+- **HTTPS at the edge.** The Fly proxy terminates TLS (`force_https`), and sets `X-Forwarded-Proto` and `Fly-Client-IP`. The app trusts them only when `HOSTED=1`.
+- **Secrets stay out of the repo and the image.** They're set with `fly secrets`.
+- **Not serverless.** Serverless platforms are ruled out: they run many processes and have no shared disk.
 
 ## What HOSTED=1 changes
 
-Without `HOSTED`, nothing changes: the loopback rules, cookie and Northstar behaviour stay byte-identical (gated by test-all).
+Without `HOSTED`, nothing changes. The loopback rules, cookie and Northstar behaviour stay as they are, gated by `scripts/test-all.sh`.
 
 | Area | HOSTED=1 behaviour |
 |---|---|
-| Hosts | Only the hostnames in `ALIGN_HOSTS` are served. Every other Host gets 421, loopback included. `requireJson` checks the same list in place of its loopback rule. |
-| HTTPS | Requests whose `X-Forwarded-Proto` isn't `https` get 403. |
+| Routes | Only the tester routes exist: `/new`, `/w/<id>`, `/api/workspaces` (create, config, login-info), `/api/session`, `/api/state`, `/api/timer`, `/api/reset`, `/api/proposals/*`. `/` and `/setup` redirect to `/new`. **Every other path is 404**, so a route added later stays closed until it's added to `proxy.ts`. test-tenancy H6 checks every route in `app/`. |
+| Northstar | **Off entirely** (go-C condition 1). Northstar sign-in is 404 and Northstar tokens are ignored. The Northstar store refuses every read and write (`lib/store.ts`). The image holds no fixture and no Sparta evidence. There's no override. |
+| Hosts | Only the hostnames in `ALIGN_HOSTS` are served. Every other Host gets 421, loopback included. |
+| Proxy | Without `X-Forwarded-Proto: https`, a request gets 403. Without `Fly-Client-IP`, it also gets 403, since it didn't come through Fly's edge. |
 | Cookies | `__Host-align_session`, with `Secure; HttpOnly; SameSite=Strict; Path=/`. A cookie without the prefix isn't accepted. |
-| Creation | Needs `ALIGN_SIGNUP_CODE`. `ALIGN_ALLOW_OPEN_CREATE` is refused. A global bucket allows 5 creates per hour, and `ALIGN_MAX_WORKSPACES` caps the total (default 25). |
-| Capture | `/api/sessions/events` returns 404, and `ALIGN_CAPTURE` must be off. No AI key is allowed (`AI_GATEWAY_API_KEY` must be unset). |
-| Northstar | Not served anonymously. `/api/state` without a session returns 404, and so do the routes that take no session (`/api/sessions`, `/api/directives*`, `/api/mappings`, `/api/policy`, `/api/simulations`, `/api/evidence`, `/api/mcp`). Northstar sign-in needs non-default passcodes. Northstar data lives in the image's `data/` and resets on each deploy; tester data lives only on the volume. |
-| Isolation | Each tester workspace is its own directory under `$ALIGN_DATA_DIR/workspaces/<id>/`. A workspace session can't read or write another workspace or Northstar (test-tenancy A1–A12, H7). |
+| Creation | **One single-use invite code per tester** (`ALIGN_SIGNUP_CODES`). A used code is refused, and used codes are kept only as SHA-256 hashes. Wrong codes: 10 per 10 minutes per client, then 429. 5 creates per rolling hour (fixed). `ALIGN_MAX_WORKSPACES` caps the total (default 25). |
+| Sign-in | Passcode hashing runs at most 2 at a time, with 8 waiting; the rest get 429. Backoff is per workspace, role and client: after 5 wrong tries, that client waits. Another person's tries never lock you out. |
+| Notice | `/new` says it's a test server, says not to enter confidential details, and gives the deletion date (`ALIGN_DELETE_BY`). The passcode card repeats the date (go-C condition 3). Shruti owns the wording. |
+| Capture and AI | `/api/sessions/events` is 404. No AI key is used, even if one is set (startup refuses it too). |
+| Files | Workspace folders are 0700 and files 0600, owned by the `node` user. |
+| Logs | Server errors log only the error's name, never a message, body or path (go-C condition 5). |
+| Isolation | Each tester workspace is its own directory under `$ALIGN_DATA_DIR/workspaces/<id>/`. A workspace session can't read or write another workspace (test-tenancy A1 to A12, H7). |
 
 ## Startup refusals
 
-The server won't start, and exits with the list of problems, unless all of these hold:
+The server won't serve until all of these hold. On `next start` it exits with the list of problems. If a platform ever kept a refused process up, `proxy.ts` would still answer 503 to everything.
 
 - `ALIGN_HOSTS`: the public hostname(s), comma-separated, with no loopback names.
 - `ALIGN_SECRET`: 32+ characters. Session tokens are signed with it, so rotating it signs everyone out.
 - `ALIGN_DATA_DIR`: an absolute path outside the app directory (the volume, `/data`).
-- `ALIGN_SIGNUP_CODE`: 12+ characters.
-- `ALIGN_PRODUCT_PASSCODE`, `ALIGN_SECURITY_PASSCODE`, `ALIGN_LEADERSHIP_PASSCODE`: set, not the `*-demo` defaults, and 12+ characters.
-- `AI_GATEWAY_API_KEY` unset, `ALIGN_CAPTURE` off, `ALIGN_ALLOW_OPEN_CREATE` unset.
-- `ALIGN_PUBLIC` unset. The spec's full Mode P isn't in this build.
+- `ALIGN_SIGNUP_CODES`: one or more invite codes, each 12+ characters. `ALIGN_SIGNUP_CODE` (a single shared code) is refused.
+- `ALIGN_DELETE_BY`: the deletion date, `YYYY-MM-DD`.
+- `ALIGN_PRODUCT_PASSCODE`, `ALIGN_SECURITY_PASSCODE`, `ALIGN_LEADERSHIP_PASSCODE`: set, not the `*-demo` defaults, and 12+ characters. They serve nothing while Northstar is off; they're required so a mistake there could never expose the demo passcodes.
+- These must be unset or off: `AI_GATEWAY_API_KEY`, `ALIGN_CAPTURE`, `ALIGN_ALLOW_OPEN_CREATE`, `ALIGN_CREATE_PER_HOUR`, `ALIGN_NORTHSTAR_PUBLIC` and `ALIGN_PUBLIC`.
+
+test-tenancy H1 checks every one of these on a production server, and the same refusal was checked on the built image.
 
 ## Environment
 
 | Variable | Where it's set | Value |
 |---|---|---|
-| `HOSTED` | `fly.toml` / Dockerfile | `1` |
-| `ALIGN_DATA_DIR` | `fly.toml` | `/data` (the volume) |
+| `HOSTED` | Dockerfile | `1` |
+| `ALIGN_DATA_DIR` | Dockerfile / `fly.toml` | `/data` (the volume) |
 | `ALIGN_HOSTS` | `fly.toml` | the app hostname, e.g. `align-pg-draft.fly.dev` |
 | `ALIGN_MAX_WORKSPACES` | `fly.toml` | `25`. The cap exists for polling cost (spec section 10). |
+| `ALIGN_DELETE_BY` | `fly.toml` | `2026-11-06` (Sean's suggested date; change it in one place) |
 | `ALIGN_SECRET` | `fly secrets` | `openssl rand -hex 32` |
-| `ALIGN_SIGNUP_CODE` | `fly secrets` | a random code, given only to whoever creates tester workspaces |
-| `ALIGN_*_PASSCODE` (3) | `fly secrets` | random, for the Northstar demo roles |
-| `ALIGN_CREATE_PER_HOUR` | not set | Defaults to 5. **Don't raise it in hosted mode without Sean's approval.** It exists so the local tests can create more than five workspaces. |
-| `ALIGN_NORTHSTAR_PUBLIC` | not set | Leave unset. Setting it to `1` reopens the Northstar no-session routes. |
+| `ALIGN_SIGNUP_CODES` | `fly secrets` | one code per planned tester, e.g. five of `openssl rand -hex 8`, comma-separated. To add testers later, set the list again with the new codes added. |
+| `ALIGN_*_PASSCODE` (3) | `fly secrets` | random; unused while Northstar is off |
 
 ## The volume
 
-- Layout: `/data/workspaces/<id>/` holds `state.json`, `auth.json` (0600: passcode hashes and epoch), `scenario.json` (0600: the setup input, used by Restart and never served), `workspace.json` and `audit-archive.jsonl`. `/data/workspaces/_events.jsonl` logs creates and deletes, with no names or hashes.
-- No plaintext passcode is stored anywhere. Passcodes are shown once at creation.
-- Backup means copying `/data/workspaces`. What we promise testers about retention, deletion and backups is still open (spec Q4, Shruti). Answer it before the first real tester.
+**Layout of `/data`:**
+- `/data/workspaces/<id>/` holds:
+  - `state.json`;
+  - `auth.json` (passcode hashes and epoch);
+  - `scenario.json` (the setup input, used by Restart and never served);
+  - `workspace.json`;
+  - `audit-archive.jsonl`.
+- `/data/workspaces/_events.jsonl` logs creates and deletes, with ids only.
+- `/data/workspaces/_used_invites.json` holds the hashes of spent invite codes.
+- `/data/.pid` is the running server's pid.
+
+No plaintext passcode or invite code is stored anywhere. Passcodes are shown once, at creation.
+
+**Volume snapshots.** Fly takes daily snapshots of volumes and keeps them for several days by default, so deleting a workspace doesn't remove it from older snapshots.
+- To keep the Nov 6 promise, either turn scheduled snapshots off for this volume, or make sure every snapshot older than the deletion has expired by the stated date.
+- Before deploying, check the current flags with `fly volumes update --help` and `fly volumes snapshots list <volume id>`. This page doesn't claim the exact defaults.
 
 ## Creating tester workspaces
 
 One workspace per tester:
 
-1. Open `https://<host>/new` (being built by S1 on `build-a/L0-new`), enter the signup code and the tester's two-team conflict, and create it. The success card shows the link `/w/<id>` and the three passcodes, **once**.
-2. Send the tester the link and the passcodes they need. The creator receives all three; in an unmoderated test, one tester plays all three roles in turn, and a browser profile holds one workspace session at a time.
+1. Open `https://<host>/new`, enter one unused invite code and the tester's two-team conflict, and create it. The card shows the link `/w/<id>` and the three passcodes, **once**. The open link waits for "I've saved all three passcodes" and opens a new tab.
+2. Send the tester the link and the passcodes they need. In an unmoderated test, one tester plays all three roles in turn, and a browser profile holds one workspace session at a time.
 3. Without the page, a JSON POST works too:
 
    ```sh
    curl -sS https://<host>/api/workspaces -H 'content-type: application/json' \
-     -d @tester.json   # the /setup body without "confirm", plus "signup_code"
+     -d @tester.json   # the /setup body without "confirm", plus "signup_code": "<one invite code>"
    ```
 
    The response is 201 `{workspace:{id,name,path}, passcodes:{leadership,product,security}, shown_once:true}`.
 
-Leadership can restart a tester's scenario from the header ("Restart this scenario"). Passcode rotation, export and delete aren't in this build. Until they are, a host admin removes a workspace with `fly ssh console`: rename `/data/workspaces/<id>` to `.deleting-<id>`, then remove it. That's the same procedure the app uses, and its tokens fail from then on.
+Leadership can restart a tester's scenario from the header ("Restart this scenario"). Passcode rotation and export aren't in this build.
 
-## Deploy steps (for after Sean approves; not run)
+## Deleting workspaces (go-C condition 4)
+
+On the machine (`fly ssh console`), as the `node` user. As root, the tool could leave a root-owned file that the app can't write:
+
+```sh
+cd /app
+alias wsa='setpriv --reuid=node --regid=node --init-groups node scripts/ws-admin.mjs'
+wsa list
+wsa delete <workspace id>
+wsa delete --all --yes   # the end-of-test purge
+```
+
+It deletes the way the app does:
+1. It renames the folder aside, and from that moment every request for the workspace gets 404.
+2. It removes the folder.
+3. It appends a `deleted` row to `_events.jsonl`.
+
+It's safe while the server runs (test-tenancy H11). Wiping the volume is the last resort.
+
+## Deploy steps (for after Sean's go; not run)
 
 ```sh
 fly apps create align-pg-draft
 fly volumes create align_data --size 1 --region sjc
-fly secrets set ALIGN_SECRET=... ALIGN_SIGNUP_CODE=... \
+fly secrets set ALIGN_SECRET=... ALIGN_SIGNUP_CODES=code1,code2,... \
   ALIGN_PRODUCT_PASSCODE=... ALIGN_SECURITY_PASSCODE=... ALIGN_LEADERSHIP_PASSCODE=...
-fly deploy
+fly deploy --ha=false     # one machine: locks are in process memory, and the volume attaches to one machine
 fly scale count 1
 ```
 
-Check after the deploy, with a synthetic workspace only:
+**The image** (`Dockerfile`):
+- The build context is an allowlist (`.dockerignore`), so only the app's own source goes in.
+- The runtime has production dependencies, the build output and `scripts/ws-admin.mjs`. It has no `data/`, `sparta/`, `agent/` or test scripts, and no `.env` file.
+- The container hands `/data` to the `node` user, then `setpriv` execs the server as `node`, so the server itself is PID 1.
 
-- `curl -sI https://<host>/api/state` returns 404 (Northstar closed).
-- Creating without the code returns 403.
-- Creating with the code returns 201.
-- The `/w/<id>` sign-in works, and the cookie is `__Host-align_session` with `Secure`.
+**The health check** (`fly.toml`) calls `/api/workspaces/config` with the Host, `X-Forwarded-Proto` and `Fly-Client-IP` headers Fly's edge would send. Without them the app answers 421 or 403.
+
+## Smoke test on the live URL (go-C condition 6)
+
+Run this before the first tester gets a link, and post the results on LIM-2424:
+1. A wrong Host gets 421.
+2. Plain http gets 403.
+3. The server refuses to start with default passcodes (redeploy with one unset, then put it back).
+4. Capture (`/api/sessions/events`) is 404.
+5. `/api/state` without a session is 404.
+6. Northstar sign-in, `/`, `/api/mcp` and `/api/policy/security`: 404, and `/` redirects to `/new`.
+7. Two synthetic workspaces can't read each other.
+
+Delete the synthetic workspaces afterwards with `ws-admin.mjs`.
+
+## Limits worth knowing
+
+- **Fly-Client-IP is only a presence check against other machines on Fly's private network.** Fly's edge sets it, but a machine inside the same Fly organization could forge it. Keep this app the only app in its organization.
+- **The rate limits and invite checks live in process memory, apart from used invites, which are on disk.** A restart clears the hourly create bucket and the wrong-code counts.
 
 ## Local test
 
-`node scripts/test-tenancy.mjs <port>` runs the hosted phase on a local dev server. It sends `Host: align.test` and `X-Forwarded-Proto: https`, the way the platform proxy forwards requests. `scripts/test-all.sh` runs it as its last step.
+`node scripts/test-tenancy.mjs <port>` builds once and runs every phase on `next start`, the way Fly runs it. Its hosted phase sends `Host: align.test`, `X-Forwarded-Proto: https` and `Fly-Client-IP`, the way Fly's edge forwards requests. `scripts/test-all.sh` runs it as its last step.

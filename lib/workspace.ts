@@ -1,4 +1,4 @@
-import { randomBytes, randomInt, scrypt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from "node:crypto";
 import { existsSync, promises as fs, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { config } from "./config";
@@ -52,10 +52,27 @@ export function newPasscode(): string {
 
 const normalizePasscode = (p: string) => p.trim().toLowerCase().replace(/[\s-]/g, "");
 
-function scryptAsync(passcode: string, salt: Buffer): Promise<Buffer> {
-  return new Promise((resolve, reject) =>
-    scrypt(normalizePasscode(passcode), salt, 32, { N: 16384, r: 8, p: 1 }, (err, key) => (err ? reject(err) : resolve(key))),
-  );
+// Each scrypt is ~50 ms of 16 MB work on libuv's 4-thread pool, which fs.promises shares: a burst of parallel
+// sign-ins would stall every workspace's state reads. At most 2 run at once, 8 more may wait, the rest get 429.
+const SCRYPT_RUNNING = 2;
+const SCRYPT_WAITING = 8;
+const sg = globalThis as unknown as { __alignScrypt?: { running: number; queue: (() => void)[] } };
+const pool = (sg.__alignScrypt ??= { running: 0, queue: [] });
+
+async function scryptAsync(passcode: string, salt: Buffer): Promise<Buffer> {
+  if (pool.running >= SCRYPT_RUNNING) {
+    if (pool.queue.length >= SCRYPT_WAITING) throw new HttpError(429, "Too many sign-ins right now, try again in a moment");
+    await new Promise<void>((r) => pool.queue.push(r)); // the releasing call hands its slot over
+  } else pool.running++;
+  try {
+    return await new Promise((resolve, reject) =>
+      scrypt(normalizePasscode(passcode), salt, 32, { N: 16384, r: 8, p: 1 }, (err, key) => (err ? reject(err) : resolve(key))),
+    );
+  } finally {
+    const next = pool.queue.shift();
+    if (next) next(); // slot passes straight to the next waiter: running stays the same
+    else pool.running--;
+  }
 }
 
 interface RoleHash {
@@ -121,8 +138,8 @@ export function readAuth(ws: CustomWsId): WorkspaceAuth | null {
 
 async function appendEvent(event: "created" | "deleted", id: CustomWsId) {
   const root = config().workspacesRoot;
-  await fs.mkdir(root, { recursive: true });
-  await fs.appendFile(path.join(root, "_events.jsonl"), JSON.stringify({ ts: new Date().toISOString(), event, id }) + "\n");
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  await fs.appendFile(path.join(root, "_events.jsonl"), JSON.stringify({ ts: new Date().toISOString(), event, id }) + "\n", { mode: 0o600 });
 }
 
 /** Live workspaces: directories named like an id. Skips _events.jsonl, .tmp-* and .deleting-*. */
@@ -145,10 +162,40 @@ export interface CreatedWorkspace {
  * Create a workspace atomically: everything is written to <root>/.tmp-<id>/ and renamed into place, so a
  * workspace can be signed into only once it is complete. The cap check and the create share one lock.
  */
-export async function createWorkspace(args: { name: string; state: AppState; scenario: unknown }): Promise<CreatedWorkspace> {
+/** Invite codes already used, as sha256 hex (never the code itself), in <workspacesRoot>/_used_invites.json. */
+const usedFile = () => path.join(config().workspacesRoot, "_used_invites.json");
+const codeHash = (code: string) => createHash("sha256").update(code).digest("hex");
+async function usedInvites(): Promise<string[]> {
+  try {
+    const v = JSON.parse(await fs.readFile(usedFile(), "utf8"));
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new HttpError(500, "The invite list could not be read");
+  }
+}
+/** Refuses an invite code that was already used. Read-only; claimInvite (under the creation lock) records it. */
+export async function inviteUnused(code: string): Promise<boolean> {
+  return !(await usedInvites()).includes(codeHash(code));
+}
+async function claimInvite(code: string) {
+  const used = await usedInvites();
+  const h = codeHash(code);
+  if (used.includes(h)) throw new HttpError(403, "That invite code was already used");
+  await fs.mkdir(config().workspacesRoot, { recursive: true, mode: 0o700 });
+  const tmp = `${usedFile()}.${randomBytes(6).toString("hex")}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify([...used, h]), { mode: 0o600 });
+  await fs.rename(tmp, usedFile());
+}
+
+/** `invite` is a single-use code to spend, `takeToken` the creation rate bucket: both run inside the creation lock,
+ *  after the cap check, so a refused create spends neither (review item 6). */
+export async function createWorkspace(args: { name: string; state: AppState; scenario: unknown; invite?: string; takeToken?: () => void }): Promise<CreatedWorkspace> {
   return withLock("_create", async () => {
     const cfg = config();
     if ((await countWorkspaces()) >= cfg.maxWorkspaces) throw new HttpError(409, "The workspace limit for this server has been reached");
+    args.takeToken?.();
+    if (args.invite !== undefined) await claimInvite(args.invite);
     const id = newWorkspaceId();
     const root = cfg.workspacesRoot;
     const final = wsDir(id);

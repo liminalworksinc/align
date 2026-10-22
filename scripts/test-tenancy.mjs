@@ -94,7 +94,9 @@ function withHost(method, p, host, body) {
 function hosted(method, p, { body, cookie, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const data = body === undefined ? undefined : JSON.stringify(body);
-    const h = { host: HOSTED_HOST, "x-forwarded-proto": "https", ...headers };
+    // As Fly's edge forwards it: allowlisted Host, X-Forwarded-Proto https and Fly-Client-IP. undefined drops a header.
+    const h = { host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": "198.51.100.7", ...headers };
+    for (const k of Object.keys(h)) if (h[k] === undefined) delete h[k];
     if (data) Object.assign(h, { "content-type": h["content-type"] ?? "application/json", "content-length": Buffer.byteLength(data) });
     if (cookie) h.cookie = cookie;
     const req = http.request({ host: "127.0.0.1", port: PORT, method, path: p, headers: h }, (res) => {
@@ -106,7 +108,7 @@ function hosted(method, p, { body, cookie, headers = {} } = {}) {
           json = JSON.parse(t);
         } catch {}
         const sc = res.headers["set-cookie"] ?? [];
-        resolve({ status: res.statusCode, text: t, json, setCookie: sc.join("\n"), cookie: (sc[0] || "").split(";")[0] });
+        resolve({ status: res.statusCode, headers: res.headers, text: t, json, setCookie: sc.join("\n"), cookie: (sc[0] || "").split(";")[0] });
       });
     });
     req.on("error", reject);
@@ -603,64 +605,154 @@ try {
   // ======== phase hosted ========
   await stopServer();
   const hostedDir = path.join(tmpRoot, "hosted");
+  const INVITES = ["hosted-invite-0001", "hosted-invite-0002", "hosted-invite-0003"];
   const good = {
     HOSTED: "1",
     ALIGN_HOSTS: HOSTED_HOST,
     ALIGN_SECRET: "t".repeat(48),
     ALIGN_DATA_DIR: hostedDir,
-    ALIGN_SIGNUP_CODE: "hosted-signup-code-1",
+    ALIGN_SIGNUP_CODES: INVITES.join(","),
+    ALIGN_DELETE_BY: "2026-11-06",
     ALIGN_PRODUCT_PASSCODE: "product-strong-pass-1",
     ALIGN_SECURITY_PASSCODE: "security-strong-pass-1",
     ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-1",
   };
+  // H1 every startup refusal (lib/config.ts hostedProblems), each on its own production server.
   const refusals = [
     ["default passcodes", { ALIGN_PRODUCT_PASSCODE: undefined, ALIGN_SECURITY_PASSCODE: undefined, ALIGN_LEADERSHIP_PASSCODE: undefined }, "non-default passcode"],
-    ["no ALIGN_HOSTS", { ALIGN_HOSTS: undefined }, "ALIGN_HOSTS"],
+    ["one default passcode", { ALIGN_SECURITY_PASSCODE: "security-demo" }, "ALIGN_SECURITY_PASSCODE must be set to a non-default"],
+    ["a short passcode", { ALIGN_LEADERSHIP_PASSCODE: "short-pass" }, "ALIGN_LEADERSHIP_PASSCODE must be 12+"],
+    ["no ALIGN_HOSTS", { ALIGN_HOSTS: undefined }, "ALIGN_HOSTS must list"],
+    ["a loopback host", { ALIGN_HOSTS: `${HOSTED_HOST},localhost` }, "must not include loopback"],
+    ["a short secret", { ALIGN_SECRET: "s".repeat(20) }, "ALIGN_SECRET must be set"],
+    ["a relative data dir", { ALIGN_DATA_DIR: "data/hosted" }, "absolute path"],
+    ["a data dir inside the app", { ALIGN_DATA_DIR: path.join(ROOT, "data", "hosted-inside") }, "outside the app directory"],
+    ["no invite codes", { ALIGN_SIGNUP_CODES: undefined }, "ALIGN_SIGNUP_CODES must list"],
+    ["a short invite code", { ALIGN_SIGNUP_CODES: "short-code,hosted-invite-0009" }, "every code must be 12+"],
+    ["a shared signup code", { ALIGN_SIGNUP_CODE: "shared-signup-code-1" }, "one shared code"],
+    ["open create", { ALIGN_ALLOW_OPEN_CREATE: "1" }, "ALIGN_ALLOW_OPEN_CREATE is not allowed"],
+    ["a create rate", { ALIGN_CREATE_PER_HOUR: "50" }, "ALIGN_CREATE_PER_HOUR is not allowed"],
+    ["Northstar public", { ALIGN_NORTHSTAR_PUBLIC: "1" }, "Northstar is off when hosted"],
+    ["no deletion date", { ALIGN_DELETE_BY: undefined }, "ALIGN_DELETE_BY must be a date"],
+    ["a bad deletion date", { ALIGN_DELETE_BY: "Nov 6" }, "ALIGN_DELETE_BY must be a date"],
     ["an AI key", { AI_GATEWAY_API_KEY: "sk-test" }, "AI_GATEWAY_API_KEY"],
+    ["capture on", { ALIGN_CAPTURE: "1" }, "ALIGN_CAPTURE must be off"],
+    ["public mode", { ALIGN_PUBLIC: "1" }, "Public mode is not supported"],
   ];
   for (const [what, delta, needle] of refusals) {
     const env = { ...good, ...delta };
     for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
     const r = await startServer(env);
-    check(`H1 HOSTED=1 refuses to start with ${what}`, !r.started && r.stderr.includes(needle), r.started ? "it started" : r.stderr.slice(-300));
+    check(`H1 HOSTED=1 refuses to serve with ${what}`, !r.started && r.stderr.includes(needle), r.started ? "it started" : r.stderr.slice(-300));
     await stopServer();
   }
   await mustStart(good);
+
+  // H2 the host, scheme and proxy rules
   const hLoop = await call("GET", "/api/workspaces/config");
   const hOther = await withHost("GET", "/api/workspaces/config", "evil.example");
   check("H2 a non-allowlisted Host is refused (loopback and a foreign name -> 421)", hLoop.status === 421 && hOther.status === 421, `${hLoop.status} ${hOther.status}`);
-  // The hosted app must answer on its own (allowlisted) name, pages included, and refuse every other name.
-  const hPage = await hosted("GET", "/");
-  const hSignIn = await hosted("POST", "/api/session", { body: { role: "product", passcode: good.ALIGN_PRODUCT_PASSCODE } });
-  const hPageOther = await withHost("GET", "/", "evil.example");
-  const hSignInOther = await withHost("POST", "/api/session", "evil.example", { role: "product", passcode: good.ALIGN_PRODUCT_PASSCODE });
-  check("H2 allowlisted Host: GET / and POST /api/session -> 200", hPage.status === 200 && hSignIn.status === 200, `${hPage.status} ${hSignIn.status}`);
-  check("H2 non-allowlisted Host: GET / and POST /api/session -> 421, no cookie", hPageOther.status === 421 && hSignInOther.status === 421 && !hSignInOther.setCookie, `${hPageOther.status} ${hSignInOther.status}`);
   const hHttp = await hosted("GET", "/api/workspaces/config", { headers: { "x-forwarded-proto": "http" } });
   check("H2 plain http behind the proxy -> 403", hHttp.status === 403, `${hHttp.status}`);
+  const hNoEdge = await hosted("GET", "/api/workspaces/config", { headers: { "fly-client-ip": undefined } });
+  check("H2 a request that did not come through Fly's edge (no Fly-Client-IP) -> 403", hNoEdge.status === 403, `${hNoEdge.status}`);
+  const hNew = await hosted("GET", "/new");
+  const hCfg = await hosted("GET", "/api/workspaces/config");
+  check("H2 /new answers; config states the test server and its deletion date", hNew.status === 200 && hCfg.json?.test_server?.delete_by === "2026-11-06", `${hNew.status} ${hCfg.text}`);
+
+  // H8 Northstar is off: its pages go to /new, its sign-in and data are 404, and no Northstar token counts
+  const toNew = await Promise.all(["/", "/setup"].map((p) => hosted("GET", p)));
+  check("H8 / and /setup redirect to /new", toNew.every((r) => r.status === 307 && r.headers?.location === `https://${HOSTED_HOST}/new`), toNew.map((r) => `${r.status} ${r.headers?.location}`).join(" | "));
+  const nsIn = await hosted("POST", "/api/session", { body: { role: "product", passcode: good.ALIGN_PRODUCT_PASSCODE } });
+  const nsDefault = await hosted("POST", "/api/session", { body: { role: "product", passcode: "product-demo" } });
+  check("H8 Northstar sign-in -> 404, with its own or the default passcode, and no cookie", nsIn.status === 404 && nsDefault.status === 404 && !nsIn.setCookie, `${nsIn.status} ${nsDefault.status}`);
+  const nsToken = `__Host-${forge({ actor: "leadership", sid: "forged01" }, good.ALIGN_SECRET)}`;
+  const [ftState, ftProp, ftSession] = await Promise.all([
+    hosted("GET", "/api/state", { cookie: nsToken }),
+    hosted("POST", "/api/proposals", { cookie: nsToken, body: { proposed_measure_text: "x", reciprocal_commitment: "y" } }),
+    hosted("GET", "/api/session", { cookie: nsToken }),
+  ]);
+  check("H8 a Northstar token signed with the hosted secret is no session (state 404, write 401, session null)", ftState.status === 404 && ftProp.status === 401 && ftSession.json?.actor === null, `${ftState.status} ${ftProp.status} ${ftSession.text}`);
+
+  // H6 the allowlist, against every route in the app: anything not a tester route is 404 for GET and POST
+  const routes = [];
+  (function walk(dir, url) {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const seg = e.name.replace(/^\[.*\]$/, "x");
+      if (e.isDirectory()) walk(path.join(dir, e.name), `${url}/${seg}`);
+      else if (/^(route|page)\.tsx?$/.test(e.name)) routes.push(url || "/");
+    }
+  })(path.join(ROOT, "app"), "");
+  const TESTER = [/^\/new$/, /^\/w\/x$/, /^\/api\/workspaces$/, /^\/api\/workspaces\/config$/, /^\/api\/workspaces\/x\/login-info$/, /^\/api\/session$/, /^\/api\/state$/, /^\/api\/timer$/, /^\/api\/reset$/, /^\/api\/proposals$/, /^\/api\/proposals\/x\/(?:accept|acknowledge|counter|reject)$/];
+  const shut = routes.filter((r) => !TESTER.some((t) => t.test(r)) && !["/", "/setup"].includes(r));
+  const probes = await Promise.all(shut.flatMap((r) => [hosted("GET", r), hosted("POST", r, { body: {} })]).map((x) => x.then((y) => y.status)));
+  const open = shut.filter((_, i) => probes[2 * i] !== 404 || probes[2 * i + 1] !== 404);
+  check(`H6 all ${shut.length} non-tester routes (Northstar, capture, MCP, evidence, agent routes) -> 404 for GET and POST`, shut.length >= 15 && open.length === 0, `open: ${open.join(" ")} (of ${routes.length} routes)`);
+
+  // H3 creation: single-use invites, the wrong-code limit
   const hOpen = await hosted("POST", "/api/workspaces", { body: FIXTURE });
-  check("H3 hosted create needs the signup code (open create is off)", hOpen.status === 403, `${hOpen.status} ${hOpen.text}`);
-  const hA = await hosted("POST", "/api/workspaces", { body: { ...marked("HAMARK"), signup_code: good.ALIGN_SIGNUP_CODE }, headers: { origin: `https://${HOSTED_HOST}` } });
-  const hB = await hosted("POST", "/api/workspaces", { body: { ...marked("HBMARK"), signup_code: good.ALIGN_SIGNUP_CODE } });
-  check("H3 hosted create with the signup code and same-site Origin -> 201", hA.status === 201 && hB.status === 201, `${hA.status} ${hB.status} ${hA.text.slice(0, 200)}`);
-  const hForeign = await hosted("POST", "/api/workspaces", { body: { ...FIXTURE, signup_code: good.ALIGN_SIGNUP_CODE }, headers: { origin: "https://evil.example" } });
-  check("H3 foreign Origin -> 403", hForeign.status === 403, `${hForeign.status}`);
+  check("H3 hosted create needs an invite code (open create is off)", hOpen.status === 403, `${hOpen.status} ${hOpen.text}`);
+  const hA = await hosted("POST", "/api/workspaces", { body: { ...marked("HAMARK"), signup_code: INVITES[0] }, headers: { origin: `https://${HOSTED_HOST}` } });
+  const hB = await hosted("POST", "/api/workspaces", { body: { ...marked("HBMARK"), signup_code: INVITES[1] } });
+  check("H3 hosted create with an invite code and same-site Origin -> 201", hA.status === 201 && hB.status === 201, `${hA.status} ${hB.status} ${hA.text.slice(0, 200)}`);
+  const reuse = await hosted("POST", "/api/workspaces", { body: { ...FIXTURE, signup_code: INVITES[0] } });
+  check("H3 an invite code works once (reuse -> 403 already used)", reuse.status === 403 && /already used/.test(reuse.text), `${reuse.status} ${reuse.text}`);
+  const usedFileText = readFileSync(path.join(hostedDir, "workspaces", "_used_invites.json"), "utf8");
+  check("H3 used invites are stored as hashes, never the codes", !INVITES.some((c) => usedFileText.includes(c)) && JSON.parse(usedFileText).length === 2, usedFileText.slice(0, 200));
+  const hForeign = await hosted("POST", "/api/workspaces", { body: { ...FIXTURE, signup_code: INVITES[2] }, headers: { origin: "https://evil.example" } });
+  check("H3 foreign Origin -> 403 (and the invite is not spent)", hForeign.status === 403 && JSON.parse(readFileSync(path.join(hostedDir, "workspaces", "_used_invites.json"), "utf8")).length === 2, `${hForeign.status}`);
+  const guess = [];
+  for (let i = 0; i < 11; i++) guess.push((await hosted("POST", "/api/workspaces", { body: { ...FIXTURE, signup_code: `wrong-code-${i}-xxxx` }, headers: { "fly-client-ip": "203.0.113.50" } })).status);
+  const otherClient = await hosted("POST", "/api/workspaces", { body: { ...marked("HCMARK"), signup_code: INVITES[2] }, headers: { "fly-client-ip": "198.51.100.60" } });
+  check("H3 wrong codes: 10 refused (403), then 429 for that client; another client still creates", guess.slice(0, 10).every((x) => x === 403) && guess[10] === 429 && otherClient.status === 201, `${guess.join(",")} other=${otherClient.status}`);
+
+  // H4 the cookie
   const hl = await hosted("POST", "/api/session", { body: { workspace: hA.json.workspace.id, role: "product", passcode: hA.json.passcodes.product } });
   check("H4 workspace session cookie: __Host- name, Secure, HttpOnly, SameSite=Strict", hl.status === 200 && /^__Host-align_session=/.test(hl.setCookie) && /; Secure/.test(hl.setCookie) && /HttpOnly/.test(hl.setCookie) && /SameSite=Strict/.test(hl.setCookie), hl.setCookie);
-  const nsDefault = await hosted("POST", "/api/session", { body: { role: "product", passcode: "product-demo" } });
-  check("H4 the default Northstar passcode does not sign in", nsDefault.status === 401, `${nsDefault.status}`);
   const plainCookie = hl.cookie.replace(/^__Host-/, "");
   const hPlain = await hosted("GET", "/api/session", { cookie: plainCookie });
   check("H4 a cookie without the __Host- prefix is not a session when hosted", hPlain.json?.actor === null, hPlain.text);
+
+  // H5 capture
   const hCap = await hosted("POST", "/api/sessions/events", { body: { harness: "claude-code", session_id: "h-1", hook_event: "UserPromptSubmit", prompt: "x" } });
   check("H5 capture refused (/api/sessions/events -> 404)", hCap.status === 404, `${hCap.status}`);
-  const hNs = await Promise.all(["/api/state", "/api/sessions", "/api/simulations", "/api/mappings", "/api/policy/security", "/api/directives?session=*"].map((p) => hosted("GET", p)));
-  check("H6 Northstar is not served anonymously (state, sessions, simulations, mappings, policy, directives -> 404)", hNs.every((r) => r.status === 404), hNs.map((r) => r.status).join(","));
+
+  // H7 isolation
   const hlB = await hosted("POST", "/api/session", { body: { workspace: hB.json.workspace.id, role: "product", passcode: hB.json.passcodes.product } });
   const hsA = await hosted("GET", "/api/state", { cookie: hl.cookie });
   const hsB = await hosted("GET", "/api/state", { cookie: hlB.cookie });
   check("H7 two hosted workspaces can't see each other", hsA.status === 200 && hsB.status === 200 && hsA.text.includes("HAMARK") && !hsA.text.includes("HBMARK") && hsB.text.includes("HBMARK") && !hsB.text.includes("HAMARK"), `${hsA.status} ${hsB.status}`);
   check("H7 no Northstar content in a hosted workspace", !/Northstar|Sparta/.test(hsA.text), hsA.text.match(/Northstar|Sparta/)?.[0]);
+
+  // H9 backoff is per client: an attacker's wrong tries lock out only the attacker
+  const att = [];
+  for (let i = 0; i < 6; i++) att.push((await hosted("POST", "/api/session", { body: { workspace: hA.json.workspace.id, role: "security", passcode: "wrong-pass" }, headers: { "fly-client-ip": "203.0.113.9" } })).status);
+  const legit = await hosted("POST", "/api/session", { body: { workspace: hA.json.workspace.id, role: "security", passcode: hA.json.passcodes.security }, headers: { "fly-client-ip": "198.51.100.7" } });
+  check("H9 6 wrong tries from one client -> 429 there; the right passcode from another client -> 200", att.slice(0, 5).every((x) => x === 401) && att[5] === 429 && legit.status === 200, `${att.join(",")} legit=${legit.status}`);
+
+  // H10 a sign-in burst is bounded and doesn't stall other workspaces
+  const t0 = Date.now();
+  const burst = Promise.all(Array.from({ length: 24 }, (_, i) => hosted("POST", "/api/session", { body: { workspace: hB.json.workspace.id, role: "leadership", passcode: `burst-${i}-wrong` }, headers: { "fly-client-ip": `192.0.2.${i + 1}` } }).then((r) => r.status)));
+  await new Promise((r) => setTimeout(r, 30));
+  const during = await hosted("GET", "/api/state", { cookie: hl.cookie });
+  const readMs = Date.now() - t0;
+  const bs = await burst;
+  check("H10 24 parallel sign-ins: at most 10 hash (the rest 429), and another workspace still reads in under 1.5 s", bs.filter((x) => x === 429).length >= 14 && bs.every((x) => x === 401 || x === 429) && during.status === 200 && readMs < 1500, `${bs.join(",")} read=${during.status} in ${readMs} ms`);
+
+  // H11 the operator delete tool (go-C condition 4), while the server runs
+  const admin = (...a) => spawnSync("node", ["scripts/ws-admin.mjs", ...a], { cwd: ROOT, encoding: "utf8", env: { ...process.env, ALIGN_DATA_DIR: hostedDir } });
+  const listed = admin("list");
+  const del = admin("delete", hB.json.workspace.id);
+  const afterDel = await Promise.all([hosted("GET", `/api/workspaces/${hB.json.workspace.id}/login-info`), hosted("GET", "/api/state", { cookie: hlB.cookie })]);
+  const events = readFileSync(path.join(hostedDir, "workspaces", "_events.jsonl"), "utf8");
+  check(
+    "H11 ws-admin lists, then deletes B while serving: B 404 / Session ended, an event row, A untouched",
+    listed.status === 0 && listed.stdout.includes(hB.json.workspace.id) && del.status === 0 && afterDel[0].status === 404 && afterDel[1].status === 401 &&
+      events.includes(`"deleted","id":"${hB.json.workspace.id}"`) && (await hosted("GET", "/api/state", { cookie: hl.cookie })).status === 200,
+    `${listed.status} ${del.status} ${del.stderr} ${afterDel.map((r) => r.status)}`,
+  );
+  const all = admin("delete", "--all");
+  check("H11 delete --all needs --yes", all.status === 2 && existsSync(path.join(hostedDir, "workspaces", hA.json.workspace.id)), `${all.status} ${all.stderr}`);
 } catch (e) {
   check("tenancy run", false, e?.stack ?? e);
 } finally {

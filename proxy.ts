@@ -1,38 +1,47 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { config as alignConfig, hostAllowed, hostName } from "@/lib/config";
+import { config as alignConfig, hostAllowed, hostName, startupProblems } from "@/lib/config";
 import { LOCAL_HOSTS } from "@/lib/local-guard";
 
 // Runs before every page and API route.
 // Mode L (default): every route is for this machine only. A DNS-rebound page reaches the server under its own
 // name, so refuse any Host header whose hostname is not loopback (any port). requireJson keeps its own check.
 // HOSTED=1 (tester mode): the ALIGN_HOSTS allowlist replaces loopback; then HTTPS is required (X-Forwarded-Proto
-// from the platform proxy is trusted only in this mode), agent capture is off, and Northstar's no-session routes
-// are closed unless ALIGN_NORTHSTAR_PUBLIC=1.
-const CAPTURE = ["/api/sessions/events"];
-const NORTHSTAR_OPEN = ["/api/sessions", "/api/directives", "/api/mappings", "/api/policy", "/api/simulations", "/api/evidence", "/api/mcp"];
-const under = (p: string, prefixes: string[]) => prefixes.some((x) => p === x || p.startsWith(`${x}/`));
+// from Fly's proxy is trusted only in this mode) and the request must come through that proxy (Fly-Client-IP).
+// Only the tester routes below exist: everything else, Northstar and capture included, is 404, so a route added
+// later is closed when hosted until it is listed here.
+const HOSTED_ROUTES = [
+  /^\/new$/,
+  /^\/w\/[^/]+$/,
+  /^\/api\/workspaces$/,
+  /^\/api\/workspaces\/config$/,
+  /^\/api\/workspaces\/[^/]+\/login-info$/,
+  /^\/api\/session$/,
+  /^\/api\/state$/,
+  /^\/api\/timer$/,
+  /^\/api\/reset$/,
+  /^\/api\/proposals$/,
+  /^\/api\/proposals\/[^/]+\/(?:accept|acknowledge|counter|reject)$/,
+];
+const TO_NEW = new Set(["/", "/setup"]); // Northstar's pages: a tester lands on workspace creation instead
+
+const text = (status: number, body: string) => new NextResponse(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
 export function proxy(request: NextRequest) {
   const cfg = alignConfig();
   const name = hostName(request.headers.get("host"));
   if (!cfg.hosted) {
     if (name && LOCAL_HOSTS.has(name)) return NextResponse.next();
-    return new NextResponse("Misdirected request: this server answers to localhost only\n", {
-      status: 421,
-      headers: { "content-type": "text/plain; charset=utf-8" },
-    });
+    return text(421, "Misdirected request: this server answers to localhost only\n");
   }
-  if (!hostAllowed(request.headers.get("host"))) {
-    return new NextResponse("Misdirected request: this server answers to its own host name only\n", {
-      status: 421,
-      headers: { "content-type": "text/plain; charset=utf-8" },
-    });
-  }
+  // A misconfigured hosted server serves nothing, even if the platform kept the process up after startup refused.
+  if (startupProblems().length) return text(503, "This server is not configured to serve testers yet\n");
+  if (!hostAllowed(request.headers.get("host"))) return text(421, "Misdirected request: this server answers to its own host name only\n");
   if (request.headers.get("x-forwarded-proto") !== "https") return NextResponse.json({ error: "Use https" }, { status: 403 });
+  // Fly's edge sets Fly-Client-IP; a request without it did not come through the public proxy.
+  if (!request.headers.get("fly-client-ip")) return NextResponse.json({ error: "Use the public address" }, { status: 403 });
   const p = request.nextUrl.pathname;
-  if (under(p, CAPTURE) || (!cfg.northstarPublic && under(p, NORTHSTAR_OPEN))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+  if (TO_NEW.has(p)) return NextResponse.redirect(new URL("/new", `https://${name}`), 307);
+  if (!HOSTED_ROUTES.some((r) => r.test(p))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.next();
 }
 

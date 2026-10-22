@@ -8,7 +8,9 @@ export async function handle(fn: () => Promise<unknown>) {
     return out instanceof Response ? out : Response.json(out);
   } catch (e) {
     if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
-    console.error(e);
+    // Hosted logs carry no request data: an error's message can quote a body or a path, so only its name is kept.
+    if (config().hosted) console.error("Server error:", (e as Error)?.name ?? "unknown");
+    else console.error(e);
     return Response.json({ error: "Server error" }, { status: 500 });
   }
 }

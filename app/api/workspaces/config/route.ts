@@ -7,6 +7,8 @@ export async function GET() {
   await connection();
   return handle(async () => {
     const cfg = config();
-    return { signup_code_required: !cfg.allowOpenCreate, max_reached: (await countWorkspaces()) >= cfg.maxWorkspaces };
+    const out = { signup_code_required: !cfg.allowOpenCreate, max_reached: (await countWorkspaces()) >= cfg.maxWorkspaces };
+    // Hosted: /new states that this is a test server and when everything is deleted (go-C condition 3).
+    return cfg.hosted ? { ...out, test_server: { delete_by: cfg.deleteBy } } : out;
   });
 }

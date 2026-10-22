@@ -1,3 +1,4 @@
+import { config } from "./config";
 import { HttpError } from "./errors";
 
 // In-memory limits for custom workspaces only. Northstar login is never limited (its tests send wrong passcodes).
@@ -14,9 +15,10 @@ interface Failures {
   last: number;
 }
 
-const g = globalThis as unknown as { __alignLoginFails?: Map<string, Failures>; __alignCreates?: number[] };
+const g = globalThis as unknown as { __alignLoginFails?: Map<string, Failures>; __alignCreates?: number[]; __alignCodeFails?: Map<string, number[]> };
 const fails = (g.__alignLoginFails ??= new Map());
 const creates = (g.__alignCreates ??= []);
+const codeFails: Map<string, number[]> = (g.__alignCodeFails ??= new Map());
 
 function evict(now: number) {
   for (const [k, f] of fails) if (now - f.last > WINDOW_MS) fails.delete(k);
@@ -52,10 +54,34 @@ export function loginLimiterSize() {
   return fails.size;
 }
 
-/** Global creation bucket: ALIGN_CREATE_PER_HOUR (default 5) workspaces per rolling hour. */
+/** Global creation bucket: 5 workspaces per rolling hour (ALIGN_CREATE_PER_HOUR in Mode L only). Called inside the
+ *  creation lock after the cap check, so a create refused for the cap spends no token. */
 export function takeCreateToken(now = Date.now()) {
-  const perHour = Number(process.env.ALIGN_CREATE_PER_HOUR || 5);
+  const perHour = config().createPerHour;
   while (creates.length && now - creates[0] > 60 * 60 * 1000) creates.shift();
   if (creates.length >= perHour) throw new HttpError(429, "Too many workspaces created recently, try again later");
   creates.push(now);
+}
+
+// Wrong signup or invite codes: 10 per 10 minutes per client, then refused until the window passes. `client` is
+// Fly-Client-IP when hosted (set by Fly's edge; proxy.ts refuses requests without it), "local" in Mode L.
+const CODE_WINDOW_MS = 10 * 60 * 1000;
+const FREE_CODE_FAILURES = 10;
+function recent(client: string, now: number): number[] {
+  const list = (codeFails.get(client) ?? []).filter((t) => now - t <= CODE_WINDOW_MS);
+  if (list.length) codeFails.set(client, list);
+  else codeFails.delete(client);
+  return list;
+}
+export function checkCodeFailures(client: string, now = Date.now()) {
+  if (recent(client, now).length >= FREE_CODE_FAILURES) throw new HttpError(429, "Too many wrong codes, try again in a few minutes");
+}
+export function recordCodeFailure(client: string, now = Date.now()) {
+  while (codeFails.size >= MAX_KEYS) codeFails.delete(codeFails.keys().next().value!);
+  codeFails.set(client, [...recent(client, now), now]);
+}
+
+/** The client key for limits: Fly-Client-IP when hosted (trusted only there), else one local key. */
+export function clientOf(req: Request): string {
+  return config().hosted ? `ip:${req.headers.get("fly-client-ip") ?? "unknown"}` : "local";
 }

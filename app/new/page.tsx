@@ -14,6 +14,22 @@ interface Created {
   people: { role: Role; team: string; lead: string }[];
 }
 
+/** "2026-11-06" as "Friday, November 6, 2026" (the date is a calendar day, so read it in UTC). */
+function longDate(day: string | null | undefined): string | null {
+  const t = day ? Date.parse(`${day}T00:00:00Z`) : NaN;
+  return Number.isNaN(t) ? null : new Date(t).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+// Wording from the go-C ruling (Shruti owns the final copy): a test server, nothing confidential, a deletion date.
+function TestServerNotice({ deleteBy }: { deleteBy: string | null }) {
+  return (
+    <div role="note" className="mb-6 rounded-[14px] border border-amber-300 bg-amber-50 p-5 text-[16px] text-zinc-900">
+      <p className="font-semibold">This is a test server.</p>
+      <p className="mt-1">Don’t enter confidential details. Everything here is deleted by {deleteBy ?? "the end of the test"}.</p>
+    </div>
+  );
+}
+
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
@@ -33,7 +49,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 }
 
 export default function NewWorkspacePage() {
-  const [cfg, setCfg] = useState<{ signup_code_required: boolean; max_reached: boolean } | null | undefined>(undefined);
+  const [cfg, setCfg] = useState<{ signup_code_required: boolean; max_reached: boolean; test_server?: { delete_by: string | null } } | null | undefined>(undefined);
   const [form, setForm] = useState<Form>(EMPTY);
   const [code, setCode] = useState("");
   const [issues, setIssues] = useState<Issues>({});
@@ -108,6 +124,9 @@ export default function NewWorkspacePage() {
           <p className="font-semibold">Save these passcodes now. They won’t be shown again.</p>
           <p className="mt-1">Align keeps only a scrambled copy, so nobody can look them up later.</p>
         </div>
+        {cfg?.test_server && (
+          <p className="mb-5 text-[16px] text-zinc-700">This workspace is on a test server and is deleted by {longDate(cfg.test_server.delete_by) ?? "the end of the test"}.</p>
+        )}
 
         <h2 className="mb-2 text-[18px] font-semibold">Workspace link</h2>
         <div className="mb-5 flex flex-wrap items-center gap-2">
@@ -168,6 +187,7 @@ export default function NewWorkspacePage() {
 
   return page(
     <>
+      {cfg?.test_server && <TestServerNotice deleteBy={longDate(cfg.test_server.delete_by)} />}
       <h1 className="mb-2 text-[28px] font-semibold">Create a workspace</h1>
       <p className="mb-6 text-[16px] text-zinc-700">
         Describe one real disagreement between two teams. This makes a new, separate workspace with its own passcodes. Nothing in any other workspace changes.

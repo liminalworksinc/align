@@ -1,10 +1,10 @@
 import { timingSafeEqual } from "node:crypto";
 import { config } from "@/lib/config";
 import { handle, requireJson } from "@/lib/http";
-import { takeCreateToken } from "@/lib/ratelimit";
+import { checkCodeFailures, clientOf, recordCodeFailure, takeCreateToken } from "@/lib/ratelimit";
 import { ScenarioInvalid } from "@/lib/scenario";
 import { HttpError } from "@/lib/store";
-import { createWorkspace } from "@/lib/workspace";
+import { createWorkspace, inviteUnused } from "@/lib/workspace";
 import { initialWorkspaceState, readWorkspaceInput } from "@/lib/workspace-setup";
 
 function codeMatches(given: string | null, expected: string | null) {
@@ -26,13 +26,23 @@ export async function POST(req: Request) {
       if (e instanceof ScenarioInvalid) return Response.json({ error: e.message, issues: e.issues }, { status: 400 });
       throw e;
     }
-    // Access comes from config only: open create (serve.sh, loopback) or a matching signup code.
-    if (!cfg.allowOpenCreate && !codeMatches(parsed.signup_code, cfg.signupCode)) {
-      throw new HttpError(403, cfg.signupCode ? "That signup code isn’t right" : "Workspace creation is closed");
+    // Access comes from config only: open create (serve.sh, loopback), a single-use invite code (ALIGN_SIGNUP_CODES,
+    // required when hosted), or Mode L's shared signup code. Wrong codes are limited per client.
+    let invite: string | undefined;
+    if (!cfg.allowOpenCreate) {
+      const client = clientOf(req);
+      checkCodeFailures(client);
+      const given = parsed.signup_code;
+      invite = cfg.signupCodes.find((c) => codeMatches(given, c));
+      const ok = invite !== undefined ? await inviteUnused(invite) : codeMatches(given, cfg.signupCode);
+      if (!ok) {
+        recordCodeFailure(client);
+        if (invite !== undefined) throw new HttpError(403, "That invite code was already used");
+        throw new HttpError(403, cfg.signupCode || cfg.signupCodes.length ? "That signup code isn’t right" : "Workspace creation is closed");
+      }
     }
-    takeCreateToken();
     const state = initialWorkspaceState(parsed.input, parsed.input_sha256);
-    const ws = await createWorkspace({ name: parsed.input.company, state, scenario: parsed.input });
+    const ws = await createWorkspace({ name: parsed.input.company, state, scenario: parsed.input, invite, takeToken: takeCreateToken });
     return Response.json(
       { workspace: { id: ws.id, name: ws.name, path: `/w/${ws.id}` }, passcodes: ws.passcodes, shown_once: true },
       { status: 201, headers: { "cache-control": "no-store" } },

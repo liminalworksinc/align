@@ -3,6 +3,7 @@ import { promises as fs, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { Actor, AppState, Plan } from "./types";
 import { registryVersion } from "./registry";
+import { config } from "./config";
 import { HttpError } from "./errors";
 import { withLock } from "./locks";
 import { wsDir, workspaceExists, type CustomWsId, type WsId } from "./workspace";
@@ -47,6 +48,9 @@ export function initialState(): AppState {
 
 export async function readState(ws: WsId = "northstar"): Promise<AppState> {
   if (ws !== "northstar") return readCustom(ws);
+  // Hosted serves custom workspaces only. Every Northstar read and write (mutate and resetState read through here)
+  // stops at this line, so no route, present or future, can reach the demo, its fixture or its evidence.
+  if (config().hosted) throw new HttpError(404, "Not found");
   try {
     return withDefaults(JSON.parse(await fs.readFile(STATE_FILE, "utf8")) as AppState);
   } catch {
