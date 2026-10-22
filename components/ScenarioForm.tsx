@@ -333,7 +333,7 @@ export function ScenarioFields({
         </p>
       ))}
       {more && !(full("asking") && full("owning")) && (
-        <Button kind="ghost" onClick={() => set((f) => (f.work_items.push({ team: full("asking") ? "owning" : "asking", task: "", status: "" }), f))}>
+        <Button kind="ghost" onClick={() => set((f) => (f.work_items.push({ team: workCount("owning") < workCount("asking") ? "owning" : "asking", task: "", status: "" }), f))}>
           Add a work item
         </Button>
       )}
