@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { labelsFor, poss } from "@/lib/labels";
 import type { Acceptance, Measure } from "@/lib/types";
-import { launchLine, recordFacts } from "./launch";
+import { agreementStatus, launchLine, launchState, recordFacts } from "./launch";
 import type { ViewProps } from "./props";
 import { accepted, currentGoal, priorVersion } from "./select";
 import { Badge, Button, Section, fmtTime } from "./ui";
@@ -47,10 +47,11 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
 
   return (
     <>
-      <Section title="Decision record" right={<Badge tone="neutral">Agreement reached</Badge>}>
+      <Section title="Decision record" right={<Badge tone="neutral">{agreementStatus(acc)}</Badge>}>
         <div className="flex flex-col gap-3 rounded-xl bg-white p-5 ring-1 ring-zinc-300">
           <p style={{ fontSize: 17 }} className="text-zinc-700">
-            {L.team.product} and {L.team.security} agreed. {poss(L.team.security)} updated goal ({acc.accepted_version}) is now the shared plan.
+            {L.team.product} and {L.team.security} agreed on {poss(L.team.security)} updated goal ({acc.accepted_version}).{" "}
+            {launchState(acc) === "approved" ? "It is now the shared plan." : "Launch is pending until leadership decides."}
           </p>
           <div>
             <div className="mb-1 al-lbl">Approved target</div>

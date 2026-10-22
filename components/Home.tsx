@@ -12,7 +12,8 @@ import { AgentPane } from "@/components/AgentPane";
 import { DecisionView } from "@/components/DecisionView";
 import { OrgView } from "@/components/OrgView";
 import { WorkMap } from "@/components/WorkMap";
-import { activeProposal, currentGoal } from "@/components/select";
+import { agreementStatus, launchState } from "@/components/launch";
+import { accepted, activeProposal, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, SESSION_ENDED, useAlign, type Selection } from "@/components/useAlign";
 import { companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
@@ -471,9 +472,7 @@ export default function Home({ workspace }: { workspace?: string }) {
         )}
         {custom ? (
           rel?.status === "ACCEPTED" ? (
-            <Badge tone="neutral">
-              {L.team.product} and {L.team.security} agreed
-            </Badge>
+            <Badge tone="neutral">{agreementStatus(accepted(state))}</Badge>
           ) : unresolved && me.actor !== "leadership" ? (
             <span className="rounded-2xl border border-amber-700 bg-amber-50 px-3 py-1.5 font-mono text-[14px] leading-snug tracking-[0.04em] text-amber-700">
               ▲ New company goal · {L.team.product} and {L.team.security} haven’t agreed yet
@@ -569,7 +568,8 @@ export default function Home({ workspace }: { workspace?: string }) {
               <span className="line-clamp-2 text-[14px] leading-snug text-zinc-900">{kr2 ? kr2.text : "No new requirement yet"}</span>
               {kr2 && rel && (custom ? (
                 <span className="text-[14px] text-zinc-500">
-                  {L.team.product} and {L.team.security}: {rel.status === "ACCEPTED" ? "agreed" : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}
+                  {L.team.product} and {L.team.security}:{" "}
+                  {rel.status === "ACCEPTED" ? `agreed · launch ${launchState(accepted(state))}` : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}
                 </span>
               ) : <span className="text-[12.5px] text-zinc-500">Product and Security: {rel.status === "ACCEPTED" ? "agreed" : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}</span>)}
             </div>

@@ -1,7 +1,7 @@
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { authorityEvents, describeEvent, pendingFor, quoted } from "../directives";
-import { acceptedPlan } from "../policy";
+import { acceptedPlan, launchApproved } from "../policy";
 import { activeRegistry, currentGoals } from "../registry";
 import { readState } from "../store";
 import { leadOf, poss, scenarioOf, teamOf } from "../labels";
@@ -145,6 +145,8 @@ const AcceptedPlanOut = z.object({
 
 /** Custom: the agreement is the instruction; there is no plan file to run. */
 const NO_RUN = "none: this plan is an agreement between teams, not a script. Work only within it.";
+/** Custom: appended to run_command while leadership hasn't approved the launch, so the structured output says it too. */
+const LAUNCH_PENDING = "Launch approval is still pending: plan within the agreement only, and don't act as if the launch is approved.";
 
 // ---------- align_get_work_map ----------
 
@@ -432,11 +434,16 @@ export function registerAlign(server: McpServer) {
       if (scenarioOf(s) === "custom") {
         const { agreement, ...rest } = acceptedPlan(s);
         const a = agreement!;
-        const out = { ...rest, run_command: NO_RUN, agreement: a }; // agreement last, after run_command
+        const approved = a.status === "agreed" && launchApproved(s);
+        const pending = a.status === "agreed" && !approved;
+        const out = { ...rest, run_command: pending ? `${NO_RUN} ${LAUNCH_PENDING}` : NO_RUN, agreement: a }; // agreement last, after run_command
         const lines =
           a.status === "agreed"
             ? [
                 `${a.company}: ${a.owning_team} goal ${out.goal_version} was changed by agreement (${out.authority}, ${out.ratified_at}); test status ${out.test_status ?? "none recorded"}.`,
+                approved
+                  ? `Agreed by both teams · launch approved by ${leadOf(s, "ceo")}.`
+                  : `Agreed by both teams · launch pending: ${leadOf(s, "ceo")} has not approved the launch. ${LAUNCH_PENDING}`,
                 `Agreed measure: ${quoted(a.agreed_measure ?? "")}`,
                 `Plan ${quoted(a.plan_title)}: ${quoted(a.plan_text)}`,
                 a.conditions ? `Conditions from ${a.owning_team}: ${quoted(a.conditions)}` : `No conditions recorded.`,

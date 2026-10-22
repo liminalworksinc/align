@@ -622,9 +622,9 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
   // Custom: an untested plan is approved only with this explicit acknowledgement (sent as accept_untested).
   const needsAck = !L.northstar && p.test_status !== "TESTED";
   const [ackUntested, setAckUntested] = useState(false);
-  // Custom: what the owning team made its approval depend on (same source as the decision record's Conditions).
+  // Custom: what the owning team made its approval depend on: its conditions field only, as on the decision record.
   const lastCounter = p.counter_versions.at(-1);
-  const conditions = L.northstar ? "" : lastCounter?.conditions || lastCounter?.rationale || "";
+  const conditions = L.northstar ? "" : (lastCounter?.conditions?.trim() ?? "");
   const hint = nextStepHint(p, me.actor, L);
 
   // Seeing the ratified record counts as "accepted version seen" for this session (server dedupes per actor).
@@ -802,14 +802,6 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
                 <li className="flex gap-2">
                   <span aria-hidden className="text-zinc-500">●</span>
                   <span>Approved without a sandbox test: the plan was not run before approval.</span>
-                </li>
-              )}
-              {conditions && (
-                <li className="flex gap-2">
-                  <span aria-hidden className="text-zinc-500">●</span>
-                  <span className="whitespace-pre-wrap">
-                    Conditions from {own}: {conditions}
-                  </span>
                 </li>
               )}
             </ul>

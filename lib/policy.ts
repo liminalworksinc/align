@@ -61,6 +61,11 @@ function customPlan(s: AppState): AcceptedPlan {
   };
 }
 
+/** Custom: leadership approved the launch of the latest agreement. Without that (no decision, or "not yet") launch is pending. */
+export function launchApproved(s: AppState): boolean {
+  return s.acceptances.at(-1)?.launch_decision?.decision === "approved";
+}
+
 /** Which plan the Security team's agents are authorized to run right now. Latest ratified acceptance wins; otherwise the v1 goal's plan. */
 export function acceptedPlan(s: AppState): AcceptedPlan {
   if (scenarioOf(s) === "custom") return customPlan(s);

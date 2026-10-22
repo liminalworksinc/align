@@ -4,7 +4,7 @@ import { companyMeasureId, decisionMeasureId, labelsFor, poss, type Labels } fro
 import type { SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { AuthorityStrip } from "./AuthorityStrip";
-import { launchLine } from "./launch";
+import { agreementStatus, launchLine, launchState } from "./launch";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
 import { nextStepHint } from "./nextStep";
@@ -292,11 +292,18 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
       <div className="flex flex-col gap-4">
         <Header
           label="Decision record"
-          right={conditions ? <Badge tone="amber">Agreed · conditions not checked</Badge> : <Badge tone="neutral">Agreement reached</Badge>}
+          right={
+            <span className="flex flex-wrap justify-end gap-2">
+              {conditions && <Badge tone="amber">Agreed · conditions not checked</Badge>}
+              <Badge tone="neutral">{agreementStatus(acc)}</Badge>
+            </span>
+          }
         />
         <div className="al-in">
           <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
-            {poss(owning)} updated goal ({acc.accepted_version}) is now the shared plan for both teams.
+            {launchState(acc) === "approved"
+              ? `${poss(owning)} updated goal (${acc.accepted_version}) is now the shared plan for both teams.`
+              : `Both teams agreed on ${poss(owning)} updated goal (${acc.accepted_version}). Launch is pending until leadership decides.`}
           </h1>
           <p className="mt-2 max-w-[680px] text-[16px] text-zinc-700">
             The previous version is kept.{acc.ratified_at ? ` Approved by ${owner} at ${fmtTime(acc.ratified_at)}.` : ""}
@@ -338,11 +345,6 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
           <li>
             <span className="font-semibold">Outcome:</span> not measured yet
           </li>
-          {conditions && (
-            <li>
-              <span className="font-semibold">Conditions:</span> not confirmed yet
-            </li>
-          )}
         </ul>
         <OldPlanWork s={s} L={L} owningIds={acc.owning_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} revision={newTarget} viewer={me.actor} />
         <ProofStrip s={s} />
@@ -363,7 +365,7 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
       : prop.state === "COUNTERED"
         ? `Your requested changes are with ${asking}.`
         : prop.state === "ACKNOWLEDGED_BY_PRODUCT"
-          ? `${asking} accepted your changes. Approve to make it the shared plan.`
+          ? `${asking} accepted your changes. Approve to record the agreement; the launch is still leadership's call.`
           : `${asking} proposes a change to your goal.`;
     return (
       <div className="flex flex-col gap-4">
