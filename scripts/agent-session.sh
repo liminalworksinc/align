@@ -44,7 +44,8 @@ curl -sf -o /dev/null "$ALIGN_URL/api/workspaces/config" || die "Align is not an
 umask 077
 if [ -n "$WS" ]; then
   # A workspace: its leadership mints an agent token for this repo. The token goes to the MCP config and the hooks.
-  node -e 'console.log(JSON.stringify({ workspace: process.argv[1], role: "leadership", passcode: process.argv[2] }))' "$WS" "$ALIGN_WORKSPACE_PASSCODE" > "$JAR/login.json"
+  # Secrets go through the environment of one process, never argv (argv is visible to every user in ps).
+  A_WS="$WS" A_PASS="$ALIGN_WORKSPACE_PASSCODE" node -e 'console.log(JSON.stringify({ workspace: process.env.A_WS, role: "leadership", passcode: process.env.A_PASS }))' > "$JAR/login.json"
   curl -sf -o /dev/null -c "$JAR/cookies" -H 'content-type: application/json' --data @"$JAR/login.json" "$ALIGN_URL/api/session" \
     || die "workspace leadership sign-in failed (check ALIGN_WORKSPACE and ALIGN_WORKSPACE_PASSCODE)"
   rm -f "$JAR/login.json"
@@ -54,9 +55,10 @@ if [ -n "$WS" ]; then
   [ -n "$TOKEN" ] || die "could not mint an agent token for $REPO_NAME in $WS"
   echo "agent-session: agent token minted for claude-code + $REPO_NAME in $WS (also its capture consent)" >&2
 else
-  curl -sf -o /dev/null -c "$JAR/cookies" -H 'content-type: application/json' \
-    -d "{\"role\":\"leadership\",\"passcode\":\"${ALIGN_LEADERSHIP_PASSCODE:-leadership-demo}\"}" "$ALIGN_URL/api/session" \
+  A_PASS="${ALIGN_LEADERSHIP_PASSCODE:-leadership-demo}" node -e 'console.log(JSON.stringify({ role: "leadership", passcode: process.env.A_PASS }))' > "$JAR/login.json"
+  curl -sf -o /dev/null -c "$JAR/cookies" -H 'content-type: application/json' --data @"$JAR/login.json" "$ALIGN_URL/api/session" \
     || die "leadership sign-in failed (set ALIGN_LEADERSHIP_PASSCODE)"
+  rm -f "$JAR/login.json"
   curl -sf -o /dev/null -b "$JAR/cookies" -H 'content-type: application/json' \
     -d "{\"harness\":\"claude-code\",\"repo\":\"$REPO_NAME\"}" "$ALIGN_URL/api/sessions/consent" \
     || die "could not grant capture consent for $REPO_NAME"
@@ -65,10 +67,10 @@ else
 fi
 rm -f "$JAR/cookies"
 
-node -e '
-  const [url, token] = process.argv.slice(1);
+A_TOKEN="$TOKEN" node -e '
+  const url = process.argv[1], token = process.env.A_TOKEN;
   console.log(JSON.stringify({ mcpServers: { align: { type: "http", url: `${url}/api/mcp`, headers: { Authorization: `Bearer ${token}` } } } }));
-' "$ALIGN_URL" "$TOKEN" > "$JAR/mcp.json"
+' "$ALIGN_URL" > "$JAR/mcp.json"
 node -e '
   const [root, edits] = process.argv.slice(1);
   const cap = `node "${root}/scripts/align-capture.mjs"`;

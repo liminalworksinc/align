@@ -63,7 +63,7 @@ export async function readState(ws: WsId = "northstar"): Promise<AppState> {
 async function writeState(s: AppState) {
   await fs.mkdir(DATA, { recursive: true });
   const tmp = `${STATE_FILE}.${randomUUID()}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(s, null, 2));
+  await fs.writeFile(tmp, JSON.stringify(s, null, 2), { mode: 0o600 }); // owner-only, like workspace state
   await fs.rename(tmp, STATE_FILE);
 }
 
