@@ -3,7 +3,8 @@
 # Checks frozen files, lint and types, starts a fresh dev server on <port>, then runs in fixed order:
 # snapshot, test-flow, test-scenario (default fixture, then each scripts/fixtures/*.json), test-ui-loop, test-mcp,
 # test-capture, test-mapper. Capture and mapper add sessions
-# that survive reset, so they run last. Then test-tenancy, which starts its own servers on <port>.
+# that survive reset, so they run last. Then test-tenancy and ui-northstar, which start their own production
+# servers on <port>.
 # One summary line per step; exits non-zero if any step fails.
 set -u
 
@@ -73,6 +74,8 @@ step test-mapper env ALIGN_URL="$BASE" node scripts/test-mapper.mjs
 stop_server
 SERVER=""
 step test-tenancy node scripts/test-tenancy.mjs "$PORT"
+# Northstar's rendered UI text against 850971e's, on its own production server (needs Chrome).
+step ui-northstar scripts/test-ui-northstar.sh "$PORT"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "test-all: all steps passed (logs in $LOGDIR)"; else echo "test-all: $FAILS step(s) failed (logs in $LOGDIR)"; fi

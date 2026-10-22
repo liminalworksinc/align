@@ -1,0 +1,70 @@
+A
+Align
+by Liminal
+◆
+Company goal
+Set and send
+◎
+Goals
+How they connect
+⌁
+Work
+Where AI agent work goes
+▤
+Evidence
+Decisions and proof
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+Northstar Security · Q4 2026
+CL
+CEO / Leadership
+Leadership · Owner
+Sign out
+Company goal
+
+Approved by leadership and sent to every team. Each team's goals build on it, and AI coding sessions are linked to it.
+
+CURRENT GOAL · V1
+●
+Approved <TIME>
+
+Launch the beta of our new monitoring product.
+
+Product says the beta is ready to launch
+NEXT VERSION (DRAFT) · V2
+◆
+Draft
+GOAL
+CEO REQUIREMENTS
+Product says the beta is ready to launch
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+◆
+New
+Unrelated tickets and private notes left untouched
+◆
+New
+Approve and send to teams
+Goes to the Product Director and Alex (Security Lead). The previous version is kept.
+DETAILS
+CEO
+v1
+
+Launch the beta of our new monitoring product.
+
+GOAL
+OWNER
+CEO
+VERSION
+v1
+WHO CAN EDIT
+Set by CEO · view only
+HOW SUCCESS IS MEASURED
+Product says the beta is ready to launch
+WHERE THIS COMES FROM
+●
+Confirmed
+Approved by CEO at <TIME>
+Review the conflict with Security

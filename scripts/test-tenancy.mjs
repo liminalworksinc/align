@@ -340,8 +340,9 @@ try {
 
   // A2 a session ignores any workspace in body, query or header
   const nB0 = treeHash(path.join(wsRoot, b));
-  await call("POST", `/api/timer?workspace=${b}`, { cookie: sa.product, body: { action: "brief_reviewed", workspace: b }, headers: { "x-align-workspace": b } });
-  check("A2 workspace in body/query/header ignored: B untouched", treeHash(path.join(wsRoot, b)) === nB0, "B changed");
+  const nA0 = treeHash(path.join(wsRoot, a));
+  const a2 = await call("POST", `/api/timer?workspace=${b}`, { cookie: sa.product, body: { action: "ceo_change_viewed", workspace: b }, headers: { "x-align-workspace": b } });
+  check("A2 workspace in body/query/header ignored: the write succeeds in A, B untouched", a2.status === 200 && treeHash(path.join(wsRoot, a)) !== nA0 && treeHash(path.join(wsRoot, b)) === nB0, `${a2.status} A changed=${treeHash(path.join(wsRoot, a)) !== nA0}`);
   const meA = await call("GET", `/api/session?workspace=${b}`, { cookie: sa.product });
   check("A2 GET /api/session reports A", meA.json?.workspace === a, meA.text);
   const info = await call("GET", `/api/workspaces/${b}/login-info`);
@@ -433,16 +434,20 @@ try {
   check("A6 Northstar files byte-identical after the custom flow", fileHash(NS_STATE) === ns6, `changed keys: ${changedKeys(ns6Text, readFileSync(NS_STATE, "utf8"))}`);
   const ns = await northstarSignIn();
   const bTree6 = treeHash(path.join(wsRoot, a));
-  await call("POST", "/api/timer", { cookie: ns.product, body: { action: "brief_reviewed" } });
-  await call("POST", "/api/proposals", { cookie: ns.product, body: { plan_id: "p-beta", plan_version: 1, simulation_refs: [], proposed_measure_text: "NS", rationale: "NS", reciprocal_commitment: "NS" } });
-  check("A6 Northstar actions leave A's files byte-identical", treeHash(path.join(wsRoot, a)) === bTree6, "A changed");
+  const nsBefore6r = fileHash(NS_STATE);
+  const ns6t = await call("POST", "/api/timer", { cookie: ns.product, body: { action: "brief_reviewed" } });
+  const ns6p = await call("POST", "/api/proposals", { cookie: ns.product, body: { plan_id: "p-beta", plan_version: 1, simulation_refs: [], proposed_measure_text: "NS", rationale: "NS", reciprocal_commitment: "NS" } });
+  check("A6 Northstar actions succeed and change Northstar, and leave A's files byte-identical", ns6t.status === 200 && ns6p.status === 200 && fileHash(NS_STATE) !== nsBefore6r && treeHash(path.join(wsRoot, a)) === bTree6, `${ns6t.status} ${ns6p.status}`);
 
   // A7 parallel writes
   const actions = ["ceo_change_viewed", "brief_reviewed", "scenario_reviewed", "evidence_opened"];
-  await Promise.all([
-    ...Array.from({ length: 20 }, (_, i) => call("POST", "/api/timer", { cookie: [sa.product, sa.security][i % 2], body: { action: actions[i % 4] } })),
-    ...Array.from({ length: 20 }, (_, i) => call("POST", "/api/timer", { cookie: [sb.product, sb.security][i % 2], body: { action: actions[i % 4] } })),
+  const a7 = await Promise.all([
+    ...Array.from({ length: 20 }, (_, i) => call("POST", "/api/timer", { cookie: [sa.product, sa.security][i % 2], body: { action: actions[(i >> 1) % 4] } })),
+    ...Array.from({ length: 20 }, (_, i) => call("POST", "/api/timer", { cookie: [sb.product, sb.security][i % 2], body: { action: actions[(i >> 1) % 4] } })),
   ]);
+  const touched = (w) => new Set(JSON.parse(readFileSync(path.join(wsRoot, w, "state.json"), "utf8")).timer.touchpoints.map((t) => `${t.actor}:${t.action}`));
+  const want = ["product", "security"].flatMap((r) => actions.map((x) => `${r}:${x}`));
+  check("A7 all 40 parallel timer calls -> 200, and each workspace records all 8 actor/action touches", a7.every((r) => r.status === 200) && want.every((k) => touched(a).has(k) && touched(b).has(k)), `${a7.map((r) => r.status).filter((x) => x !== 200).join(",")} missing A: ${want.filter((k) => !touched(a).has(k))} B: ${want.filter((k) => !touched(b).has(k))}`);
   const sidsA = new Set([sa.leadership_sid, sa.product_sid, sa.security_sid, "create"]);
   const sidsB = new Set([sb.leadership_sid, sb.product_sid, sb.security_sid, "create"]);
   const auA = JSON.parse(readFileSync(path.join(wsRoot, a, "state.json"), "utf8")).audit;
@@ -566,6 +571,37 @@ try {
     }
   } else check("R15 browser check needs Chrome (CHROME_PATH)", false, CHROME);
 
+  // U: the /w page before sign-in never polls state (spec section 11 D), and an ended session says so in the page
+  if (existsSync(CHROME)) {
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    try {
+      const ctx = await browser.createBrowserContext();
+      const page = await ctx.newPage();
+      const seen = [];
+      page.on("request", (r) => seen.push(new URL(r.url()).pathname));
+      await page.goto(`${BASE}/w/${b}`, { waitUntil: "domcontentloaded", timeout: 90000 });
+      const shown = await waitFor(async () => /Choose your team/.test(await page.evaluate(() => document.body.innerText).catch(() => "")), 45000);
+      await new Promise((r) => setTimeout(r, 4000)); // > two poll intervals (1.5 s)
+      check("U1 /w/<id> before sign-in shows the sign-in and never requests /api/state", shown && !seen.includes("/api/state"), `shown=${shown} state requests=${seen.filter((p) => p === "/api/state").length}`);
+      // Sign in, then end the session server-side (epoch bump, as a passcode reset does): the page must say so.
+      const st = await page.evaluate((ws, pc) => fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace: ws, role: "product", passcode: pc }) }).then((r) => r.status), b, B.json.passcodes.product).catch(() => 0);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const inB = await waitFor(async () => (await page.evaluate(() => document.body.innerText).catch(() => "")).includes("BMARK"), 45000);
+      const authU = path.join(wsRoot, b, "auth.json");
+      const auU = JSON.parse(readFileSync(authU, "utf8"));
+      writeFileSync(authU, JSON.stringify({ ...auU, epoch: auU.epoch + 1 }), { mode: 0o600 });
+      const ended = await waitFor(async () => (await page.evaluate(() => document.body.innerText).catch(() => "")).includes(ENDED), 20000);
+      const leftover = (await page.evaluate(() => document.body.innerText).catch(() => "")).includes("BMARK workspace goal");
+      writeFileSync(authU, JSON.stringify(auU), { mode: 0o600 });
+      await new Promise((r) => setTimeout(r, 50));
+      check("U2 a session ended server-side: the page says \"Your session ended. Sign in again.\"", st === 200 && inB && ended && !leftover, JSON.stringify({ st, inB, ended, leftover }));
+    } catch (e) {
+      check("U browser checks ran", false, e.message);
+    } finally {
+      await browser.close();
+    }
+  }
+
   // ---- W: an agent connected to a workspace (Mode L): token, capture, MCP and wake-ups stay in that workspace ----
   const W_REPO = "w-agent-repo";
   const wForm = await call("POST", "/api/workspaces/agent-token", { cookie: sb.leadership, raw: JSON.stringify({ harness: "claude-code", repo: W_REPO }), headers: { "content-type": "text/plain" } });
@@ -631,6 +667,53 @@ try {
   writeFileSync(authBW, JSON.stringify(auW), { mode: 0o600 });
   await new Promise((r) => setTimeout(r, 50));
   check("W6 after an epoch bump the token is refused: capture 401, MCP 401", rvCap.status === 401 && rvMcp.status === 401, `${rvCap.status} ${rvMcp.status}`);
+
+  // ---- spec section 11 tests 9, 18, 20 ----
+  // 9: a Northstar leadership token can't export, rotate or delete a workspace, and data/ doesn't change. Those
+  // operations aren't routes in this build (ws-admin.mjs deletes on the host), so every call must fail closed.
+  const dataBefore9 = treeHash(dataDir) + treeHash(path.join(ROOT, "data"));
+  const t9 = await Promise.all([
+    call("GET", `/api/workspaces/${b}/export`, { cookie: nsR.leadership }),
+    call("POST", `/api/workspaces/${b}/rotate`, { cookie: nsR.leadership, body: {} }),
+    call("DELETE", `/api/workspaces/${b}`, { cookie: nsR.leadership }),
+    call("POST", `/api/workspaces/${b}/delete`, { cookie: nsR.leadership, body: {} }),
+  ]);
+  check("S9 Northstar leadership: export, rotate and delete of a workspace all fail (no such routes), data/ unchanged", t9.every((r) => [403, 404, 405].includes(r.status)) && treeHash(dataDir) + treeHash(path.join(ROOT, "data")) === dataBefore9, t9.map((r) => r.status).join(","));
+
+  // 18: at the size cap a growing write is 413 and changes nothing (no archive rows either); below it, a write
+  // with a long audit log trims it to 1000 rows and archives the rest.
+  const C = await create(marked("CMARK"));
+  const c = C.json.workspace.id;
+  const sc = await signIn(c, C.json.passcodes);
+  const fileC = path.join(wsRoot, c, "state.json");
+  const archiveC = path.join(wsRoot, c, "audit-archive.jsonl");
+  const baseC = JSON.parse(readFileSync(fileC, "utf8"));
+  const rows = Array.from({ length: 1500 }, (_, i) => ({ id: `a-old-${i}`, actor: "leadership", session_id: "old", action: "old_row", target: "x", at: new Date(Date.now() - 1e6 + i).toISOString() }));
+  const big = structuredClone(baseC);
+  big.goals[0].objective = "x".repeat(1_100_000);
+  big.audit = rows;
+  writeFileSync(fileC, JSON.stringify(big), { mode: 0o600 });
+  const bigHash = fileHash(fileC);
+  const grow = await call("POST", "/api/proposals", { cookie: sc.product, body: { proposed_measure_text: "CMARK grow", rationale: "r", reciprocal_commitment: "c" } });
+  check("S18 at the size cap a growing write -> 413, state unchanged, no audit rows archived", grow.status === 413 && fileHash(fileC) === bigHash && !existsSync(archiveC), `${grow.status} ${grow.text.slice(0, 120)} archive=${existsSync(archiveC)}`);
+  const trim = structuredClone(baseC);
+  trim.audit = rows;
+  writeFileSync(fileC, JSON.stringify(trim), { mode: 0o600 });
+  const tw = await call("POST", "/api/proposals", { cookie: sc.product, body: { proposed_measure_text: "CMARK trimmed", rationale: "r", reciprocal_commitment: "c" } });
+  const afterTrim = JSON.parse(readFileSync(fileC, "utf8"));
+  const archived = existsSync(archiveC) ? readFileSync(archiveC, "utf8").trim().split("\n").length : 0;
+  check("S18 below the cap a write with 1500 audit rows succeeds: 1000 kept (newest), 501 archived", tw.status === 200 && afterTrim.audit.length === 1000 && afterTrim.audit.at(-1).action === "propose" && archived === 501, `${tw.status} kept=${afterTrim.audit.length} archived=${archived}`);
+
+  // 20: a Northstar state.json from before L0 (850971e's fixture, as its first run wrote it) loads unchanged
+  const nsNow = readFileSync(NS_STATE, "utf8");
+  const old = spawnSync("git", ["show", "850971e:data/fixture.json"], { cwd: ROOT, encoding: "utf8" });
+  writeFileSync(NS_STATE, old.stdout);
+  const oldHash = fileHash(NS_STATE);
+  const pol = await call("GET", "/api/policy/security"); // a pure read
+  const unchanged = fileHash(NS_STATE) === oldHash;
+  const oldGoals = await call("GET", "/api/state", { cookie: nsR.leadership }); // may ingest evidence, so after the hash
+  check("S20 an 850971e Northstar state.json loads: a pure read leaves it byte-identical; the plan and goals read from it", old.status === 0 && pol.status === 200 && pol.json?.plan === "p-throughput@1" && unchanged && oldGoals.status === 200 && (oldGoals.json?.goals ?? []).some((g) => g.id === "g-security-v1"), `${old.status} ${pol.status} ${pol.json?.plan} unchanged=${unchanged} ${oldGoals.status}`);
+  writeFileSync(NS_STATE, nsNow);
 
   // A10 corrupt state
   const fileA = path.join(wsRoot, a, "state.json");
