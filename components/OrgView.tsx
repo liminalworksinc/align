@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { labelsFor, poss } from "@/lib/labels";
+import { CONDITIONS_UNCONFIRMED, conditionsUnconfirmedNote, labelsFor, poss } from "@/lib/labels";
 import type { Acceptance, Measure } from "@/lib/types";
 import { agreementStatus, launchLine, launchState, recordFacts } from "./launch";
 import type { ViewProps } from "./props";
@@ -49,12 +49,7 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
     <>
       <Section
         title="Decision record"
-        right={
-          <span className="flex flex-wrap justify-end gap-2">
-            {conditions && <Badge tone="amber">Agreed · conditions not checked</Badge>}
-            <Badge tone="neutral">{agreementStatus(acc)}</Badge>
-          </span>
-        }
+        right={<Badge tone="neutral">{agreementStatus(acc)}</Badge>} // one status; open conditions are marked in their box
       >
         <div className="flex flex-col gap-3 rounded-xl bg-white p-5 ring-1 ring-zinc-300">
           <p style={{ fontSize: 17 }} className="text-zinc-700">
@@ -67,8 +62,12 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
           </div>
           {conditions && (
             <section aria-label="Conditions" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
-              <h2 className="al-lbl !text-amber-700">Conditions</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="al-lbl !text-amber-700">Conditions</h2>
+                <Badge tone="amber">{CONDITIONS_UNCONFIRMED}</Badge>
+              </div>
               <p className="mt-1 whitespace-pre-wrap text-[16px] text-zinc-900">{conditions}</p>
+              <p className="mt-1 text-[14px] text-zinc-600">{conditionsUnconfirmedNote(conditions.split("\n").filter((c) => c.trim()).length)}</p>
             </section>
           )}
           <ul aria-label="What this record shows" className="flex flex-col gap-1.5 text-[17px] text-zinc-900">

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { companyMeasureId, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { AGREED_STATUS, CONDITIONS_UNCONFIRMED, companyMeasureId, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { activeProposal, currentGoal } from "./select";
@@ -591,7 +591,11 @@ function CounterEdit({ p, by }: { p: Proposal; by: string }) {
         {by} {added ? "added" : "changed the new target to"}: &ldquo;{added ?? last.proposed_measure_text}&rdquo;
       </p>
       {last.rationale && <p>Why: {last.rationale}</p>}
-      {last.conditions && <p>Conditions: {last.conditions}</p>}
+      {last.conditions && (
+        <p>
+          Conditions ({CONDITIONS_UNCONFIRMED.toLowerCase()}): {last.conditions}
+        </p>
+      )}
       <p>The change is highlighted below.</p>
     </div>
   );
@@ -778,7 +782,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           <Card>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone="neutral">
-                Approved: {poss(own)} goal ({acc.accepted_version})
+                {AGREED_STATUS}: {poss(own)} goal ({acc.accepted_version})
               </Badge>
               <TestStatusBadge status={acc.test_status} L={L} />
             </div>

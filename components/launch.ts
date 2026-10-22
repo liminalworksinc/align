@@ -1,4 +1,4 @@
-import { decisionMeasureId, type Labels } from "@/lib/labels";
+import { agreedStatus, decisionMeasureId, type Labels } from "@/lib/labels";
 import type { Acceptance, StateView } from "@/lib/types";
 
 // Shared by leadership's Company goal screen and the teams' decision record (custom scenarios only).
@@ -10,7 +10,7 @@ export function launchState(acc: Acceptance | null | undefined): "approved" | "p
 
 /** Custom: the agreement status wherever it's shown, so no screen reads as final before leadership decides the launch. */
 export function agreementStatus(acc: Acceptance | null | undefined): string {
-  return `Agreed by both teams · launch ${launchState(acc)}`;
+  return agreedStatus(launchState(acc) === "approved"); // the one wording, lib/labels.ts
 }
 
 /** The record's launch line: leadership's decision once made, otherwise that the agreement is not a launch approval. */

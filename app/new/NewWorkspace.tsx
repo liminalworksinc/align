@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { EMPTY, Field, field, issuesFrom, ScenarioFields, toBody, type Form, type Issues } from "@/components/ScenarioForm";
+import { ROLE_SWITCH } from "@/lib/labels";
 
 // Create a new custom workspace from the same form as /setup. No sign-in is needed and creating does not sign anyone in.
 // POSTs to /api/workspaces; the three passcodes come back once and are shown once on the success card.
@@ -152,8 +153,8 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
           You now hold all three passcodes, so you could act for every team. Give each one to a different person: {created.people.map((p) => (p.lead === p.team ? `someone in ${p.team}` : p.lead)).join(", ")}.
         </p>
         <p className="mb-5 text-[16px] text-zinc-700">
-          A browser profile holds one workspace session at a time. Signing in here signs that browser out of any other workspace, including the demo. To try
-          several roles on one computer, use a separate browser profile or private window for each.
+          A browser holds one workspace session at a time. Signing in here signs that browser out of any other workspace, including the demo.
+          {" "}{ROLE_SWITCH}
         </p>
         <label className="mb-4 flex items-start gap-2 rounded-[10px] bg-amber-50 p-3 text-[16px] ring-1 ring-amber-300">
           <input type="checkbox" className="mt-1 size-4 accent-violet-700" checked={saved} onChange={(e) => setSaved(e.target.checked)} />

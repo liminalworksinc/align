@@ -242,7 +242,7 @@ async function main() {
   const p1 = (await call("product", "GET", "/api/policy/security")).json;
   check(
     "P1 before approval the accepted plan is none, not agreed, named for the owning team, with the proposed plan text",
-    p1?.plan === "none" && p1?.team === owningTeam && p1?.agreement?.status === "not_agreed" && p1?.agreement?.plan_text === t1.plans?.[0]?.text && p1?.agreement?.conditions === null,
+    p1?.plan === "none" && p1?.team === owningTeam && p1?.agreement?.status === "not_agreed" && p1?.agreement?.plan_text === t1.plans?.[0]?.text && p1?.agreement?.conditions === null && p1?.agreement?.launch === "not_applicable",
     JSON.stringify(p1),
   );
 
@@ -343,7 +343,15 @@ async function main() {
       ag?.agreed_measure === counterBody.proposed_measure_text && /^none: /.test(m1?.structuredContent?.run_command ?? ""),
     JSON.stringify(m1?.structuredContent),
   );
-  const mText = [m1, await mcp("align_list_goals"), await mcp("align_get_work_map"), await mcp("align_get_decision_record")]
+  // P1 item 3: every surface states the approved decision the same way, so no one reads the agreement as a go.
+  const mRecord = await mcp("align_get_decision_record");
+  const sayPending = (t) => /agreed, launch pending/i.test(t) && /not approval to launch/.test(t);
+  check(
+    "P1-3 approved decision reads \"agreed, launch pending\" in the directive, the accepted-plan and decision-record text, and structuredContent (launch: pending)",
+    sayPending(dText) && sayPending(m1?.content?.[0]?.text ?? "") && sayPending(mRecord?.content?.[0]?.text ?? "") && ag?.launch === "pending",
+    JSON.stringify({ directive: sayPending(dText), plan: sayPending(m1?.content?.[0]?.text ?? ""), record: sayPending(mRecord?.content?.[0]?.text ?? ""), launch: ag?.launch }),
+  );
+  const mText = [m1, await mcp("align_list_goals"), await mcp("align_get_work_map"), mRecord]
     .map((r) => `${r?.content?.[0]?.text ?? ""}\n${JSON.stringify(r?.structuredContent ?? {})}`)
     .join("\n");
   // Northstar's team names count as a leak only when this company has no team of that name (Fernway has "Product").

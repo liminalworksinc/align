@@ -611,12 +611,12 @@ try {
       const inB = await waitFor(async () => (await page.evaluate(() => document.body.innerText).catch(() => "")).includes("BMARK"), 45000);
       // The leftover check below looks for this exact text, so it must be on the page while signed in.
       const bodyIn = await page.evaluate(() => document.body.innerText).catch(() => "");
-      check("U2 setup: the signed-in page shows the signed-in role line (the leftover marker below)", bodyIn.includes("You are: Product BMARK lead"), bodyIn.slice(0, 200));
+      check("U2 setup: the signed-in page shows the signed-in role line (the leftover marker below)", bodyIn.includes("Acting as Product BMARK"), bodyIn.slice(0, 200));
       const authU = path.join(wsRoot, b, "auth.json");
       const auU = JSON.parse(readFileSync(authU, "utf8"));
       writeFileSync(authU, JSON.stringify({ ...auU, epoch: auU.epoch + 1 }), { mode: 0o600 });
       const ended = await waitFor(async () => (await page.evaluate(() => document.body.innerText).catch(() => "")).includes(ENDED), 20000);
-      const leftover = (await page.evaluate(() => document.body.innerText).catch(() => "")).includes("You are: Product BMARK lead");
+      const leftover = (await page.evaluate(() => document.body.innerText).catch(() => "")).includes("Acting as Product BMARK");
       writeFileSync(authU, JSON.stringify(auU), { mode: 0o600 });
       await new Promise((r) => setTimeout(r, 50));
       check("U2 a session ended server-side: the page says \"Your session ended. Sign in again.\"", st === 200 && inB && ended && !leftover, JSON.stringify({ st, inB, ended, leftover }));
@@ -862,6 +862,12 @@ try {
     check(`H1 HOSTED=1 refuses to serve with ${what}`, !r.started && (r.exited || r.last === 503) && r.stderr.includes(needle), r.started ? "it started" : `exited=${r.exited} last=${r.last} ${r.stderr.slice(-300)}`);
     await stopServer();
   }
+  // P1 item 5: the deletion day itself is still served (it closes at the end of that day, Pacific), so a test running
+  // on the last day isn't cut off. Today's UTC date has always not yet ended by that rule.
+  const today = new Date().toISOString().slice(0, 10);
+  const onTheDay = await startServer({ ...good, ALIGN_DELETE_BY: today });
+  check(`P1-5 a hosted server with ALIGN_DELETE_BY = today (${today}) still serves until that day ends`, onTheDay.started, `exited=${onTheDay.exited} last=${onTheDay.last} ${onTheDay.stderr.slice(-200)}`);
+  await stopServer();
   await mustStart(good);
 
   // H2 the host, scheme and proxy rules

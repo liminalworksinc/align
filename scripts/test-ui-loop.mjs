@@ -145,6 +145,7 @@ async function main() {
     const signInText = await text(A);
     check("U1 sign-in screen names the company and both teams", signInText.includes(fixture.company) && signInText.includes(ASKING) && signInText.includes(OWNING), signInText.slice(0, 300));
     check("U1 sign-in screen has no Northstar copy", !LEAK.test(signInText), leakIn(signInText));
+    check("P1-2 sign-in screen tells a solo tester how to switch teams", /Testing on your own\?/.test(signInText) && /Switch team/.test(signInText), signInText.slice(0, 400));
     check("U2 both teams sign in, each in its own browser profile", (await signInUi(A, ASKING, PASSCODES.product)) && (await signInUi(O, OWNING, PASSCODES.security)));
     const home = await text(A);
     check("U2 the asking team's home has no Northstar copy", !LEAK.test(home), leakIn(home));
@@ -168,7 +169,7 @@ async function main() {
 
     // The asking team sees the conditions and accepts
     await openProposals(A);
-    check("U5 the asking team sees the conditions before accepting", await waitText(A, CONDITIONS.slice(0, 40)), (await text(A)).slice(0, 500));
+    check("U5 the asking team sees the conditions before accepting, marked not confirmed yet", (await waitText(A, CONDITIONS.slice(0, 40))) && /not confirmed yet/i.test(await text(A)), (await text(A)).slice(0, 500));
     await click(A, `Accept ${OWNING}`);
     check("U5 the asking team accepts the changes", await waitText(A, "accepted"), (await text(A)).slice(0, 300));
 
@@ -176,18 +177,52 @@ async function main() {
     const before = await api(null, "GET", `/api/directives?session=claude-code:${AGENT}`);
     check("U6 before approval the agent has no wake-up", (before.json?.pending ?? []).length === 0, before.text.slice(0, 300));
 
+    // P1-2b Switch team (LIM-2437 bd53f6f6): the owner's window switches to the asking team. Its sign-in opens with that
+    // team chosen and still needs its passcode; as the asking team it can't approve the owner's goal (no permission
+    // carries over); switching back needs the owner's passcode (a wrong one is refused).
+    const passcode = (page, v) => page.evaluate((v) => { const el = document.querySelector("input[type=password]"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, v); el.dispatchEvent(new Event("input", { bubbles: true })); }, v);
+    const checkedTeam = (page) => page.evaluate(() => document.querySelector("input[type=radio]:checked")?.closest("label")?.innerText.replace(/\s+/g, " ") ?? "");
+    await click(O, "Switch team");
+    await click(O, ASKING, "[role=menuitem]");
+    const toAsking = (await O.waitForSelector("input[type=password]", { timeout: 30000 }).then(() => true, () => false)) && (await checkedTeam(O)).includes(ASKING);
+    await passcode(O, PASSCODES.product);
+    await click(O, "Sign in");
+    const actingAsking = await waitText(O, `Acting as ${ASKING}`);
+    const wrongActor = await O.evaluate(async () => {
+      const st = await (await fetch("/api/state", { cache: "no-store" })).json();
+      const open = (st.proposals ?? []).find((x) => !["RATIFIED", "REJECTED"].includes(x.state));
+      const r = await fetch(`/api/proposals/${open?.id}/accept`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accept_untested: true }) });
+      const after = await (await fetch("/api/state", { cache: "no-store" })).json();
+      return { status: r.status, before: open?.state, after: (after.proposals ?? []).find((x) => x.id === open?.id)?.state };
+    });
+    check(
+      "P1-2b Switch team: the owner's window switches to the asking team (preselected, passcode required) and that team's approval of the owner's goal is refused, state unchanged",
+      toAsking && actingAsking && wrongActor.status === 403 && wrongActor.after === wrongActor.before,
+      JSON.stringify({ toAsking, actingAsking, wrongActor }),
+    );
+    await click(O, "Switch team");
+    await click(O, OWNING, "[role=menuitem]");
+    await O.waitForSelector("input[type=password]", { timeout: 30000 });
+    await passcode(O, "not-the-owner-passcode");
+    await click(O, "Sign in");
+    await sleep(800);
+    const wrongPass = !(await text(O)).includes(`Acting as ${OWNING}`);
+    await passcode(O, PASSCODES.security);
+    await click(O, "Sign in");
+    check("P1-2b switching back to the owning team needs its passcode (a wrong one is refused)", wrongPass && (await waitText(O, `Acting as ${OWNING}`)), (await text(O)).slice(0, 300));
+
     // The owning team approves, ticking "without a sandbox test"
     await openProposals(O);
     await waitText(O, "Your decision");
     await click(O, "without a sandbox test", "label");
     await click(O, "Approve the change to my goal");
-    check("U7 the owning team approves", await waitText(O, "Approved"), (await text(O)).slice(0, 300));
+    check("U7 the owning team approves: the page says \"Agreed, launch pending\"", await waitText(O, "Agreed, launch pending"), (await text(O)).slice(0, 300));
     await click(O, "See the decision");
     await sleep(800);
     const dec = await text(O);
-    check("U8 the decision record shows the conditions and that agreement is not launch approval", dec.includes(CONDITIONS.slice(0, 40)) && /not approval to launch/i.test(dec), dec.slice(0, 500));
+    check("U8 the decision record shows the conditions (not confirmed yet), that agreement is not launch approval, and one next step", dec.includes(CONDITIONS.slice(0, 40)) && /not approval to launch/i.test(dec) && /Not confirmed yet/.test(dec) && (dec.match(/Next step/gi) ?? []).length === 1, dec.slice(0, 500));
     check("U8 the decision record has no Northstar copy", !LEAK.test(dec), leakIn(dec));
-    check("U8 open conditions are flagged as not checked", /conditions not checked/i.test(dec), dec.slice(0, 500));
+    check("U8 open conditions are flagged not confirmed yet, once", (dec.match(/not confirmed yet/gi) ?? []).length === 1, dec.slice(0, 500));
 
     const acc = (await api(lead, "GET", "/api/state")).json?.acceptances?.at(-1);
     for (const [pg, team] of [[A, ASKING], [O, OWNING]]) {

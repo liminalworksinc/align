@@ -12,11 +12,11 @@ import { AgentPane } from "@/components/AgentPane";
 import { DecisionView } from "@/components/DecisionView";
 import { OrgView } from "@/components/OrgView";
 import { WorkMap } from "@/components/WorkMap";
-import { agreementStatus, launchState } from "@/components/launch";
+import { agreementStatus } from "@/components/launch";
 import { accepted, activeProposal, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, SESSION_ENDED, useAlign, type Selection } from "@/components/useAlign";
-import { companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
+import { ROLE_SWITCH, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
 
 type NavItem = { id: View; label: string; sub: string; icon: string };
 const NAV: NavItem[] = [
@@ -61,7 +61,6 @@ const teamInitials = (team: string) => {
   return ((w[0]?.[0] ?? "") + c).toUpperCase();
 };
 // "<Team> lead", except when the team name already says it (a leadership team, or a name ending in "Lead").
-const youAre = (team: string, actor: string) => (actor === "leadership" || /\b(lead|leadership)$/i.test(team) ? team : `${team} lead`);
 // Custom shell: below 1100px the page scrolls as a whole and the Inspector rail stacks under the main column, so
 // independent testers on 900–1024px laptops never scroll sideways. The header wraps at every width.
 const CUSTOM_SHELL =
@@ -85,9 +84,39 @@ interface LoginInfo {
 }
 const WS_ID = /^w_[a-z2-7]{12}$/;
 
-function Login({ onDone, L, workspace, ended, elsewhere }: { onDone: () => void; L?: Labels; workspace?: string; ended?: boolean; elsewhere?: string | null }) {
-  if (workspace) return <WorkspaceLogin workspace={workspace} onDone={onDone} ended={ended} elsewhere={elsewhere} />;
-  return <NorthstarLogin onDone={onDone} L={L} elsewhere={elsewhere} />;
+/** The header's Switch team menu (custom scenarios): the other teams, one click each. */
+function SwitchTeam({ L, current, onPick }: { L: Labels; current: string; onPick: (r: Role) => void }) {
+  const [open, setOpen] = useState(false);
+  const others = ROLES.map((r) => r.id).filter((r) => r !== current);
+  return (
+    <div className="relative">
+      <Button kind="secondary" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
+        Switch team ▾
+      </Button>
+      {open && (
+        <div role="menu" aria-label="Switch team" className="absolute right-0 top-full z-20 mt-1 flex min-w-[220px] flex-col rounded-[10px] border border-zinc-300 bg-white p-1 shadow-lg">
+          {others.map((r) => (
+            <button
+              key={r}
+              role="menuitem"
+              className="rounded-[8px] px-3 py-2 text-left text-[15px] text-zinc-900 hover:bg-zinc-100"
+              onClick={() => {
+                setOpen(false);
+                onPick(r);
+              }}
+            >
+              {L.role[r]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Login({ onDone, L, workspace, ended, elsewhere, initialRole }: { onDone: () => void; L?: Labels; workspace?: string; ended?: boolean; elsewhere?: string | null; initialRole?: Role }) {
+  if (workspace) return <WorkspaceLogin workspace={workspace} onDone={onDone} ended={ended} elsewhere={elsewhere} initialRole={initialRole} />;
+  return <NorthstarLogin onDone={onDone} L={L} elsewhere={elsewhere} initialRole={initialRole} />;
 }
 
 /** Shown on a sign-in screen when this browser holds a session for a different custom workspace, or (on a /w page
@@ -111,11 +140,11 @@ function Elsewhere({ id }: { id: string | null | undefined }) {
   );
 }
 
-function WorkspaceLogin({ workspace, onDone, ended, elsewhere }: { workspace: string; onDone: () => void; ended?: boolean; elsewhere?: string | null }) {
+function WorkspaceLogin({ workspace, onDone, ended, elsewhere, initialRole }: { workspace: string; onDone: () => void; ended?: boolean; elsewhere?: string | null; initialRole?: Role }) {
   const [info, setInfo] = useState<LoginInfo | null>(null);
   const [missing, setMissing] = useState<"gone" | "unreachable" | null>(null);
   const [attempt, setAttempt] = useState(0); // Try again re-runs the login-info fetch
-  const [role, setRole] = useState<Role>("product");
+  const [role, setRole] = useState<Role>(initialRole ?? "product"); // Switch team preselects the team chosen
   const [passcode, setPasscode] = useState("");
   const [err, setErr] = useState<string | null>(ended ? SESSION_ENDED : null);
   const [busy, setBusy] = useState(false);
@@ -164,7 +193,8 @@ function WorkspaceLogin({ workspace, onDone, ended, elsewhere }: { workspace: st
           <span className="font-display text-[34px] leading-none">Align</span>
           <span className="al-lbl text-violet-700">by Liminal</span>
         </div>
-        <p className="mb-6 text-[16px] text-zinc-600">{info.name}. Choose your team; each person signs in separately with their own passcode.</p>
+        <p className="mb-2 text-[16px] text-zinc-600">{info.name}. Choose your team; each person signs in separately with their own passcode.</p>
+        <p className="mb-6 text-[14px] text-zinc-500">{ROLE_SWITCH}</p>
         <Elsewhere id={elsewhere} />
         <fieldset className="mb-4">
           <legend className="al-lbl mb-2">I am on</legend>
@@ -197,8 +227,8 @@ function WorkspaceLogin({ workspace, onDone, ended, elsewhere }: { workspace: st
   );
 }
 
-function NorthstarLogin({ onDone, L, elsewhere }: { onDone: () => void; L?: Labels; elsewhere?: string | null }) {
-  const [role, setRole] = useState<Role>("product");
+function NorthstarLogin({ onDone, L, elsewhere, initialRole }: { onDone: () => void; L?: Labels; elsewhere?: string | null; initialRole?: Role }) {
+  const [role, setRole] = useState<Role>(initialRole ?? "product");
   const [passcode, setPasscode] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -223,7 +253,10 @@ function NorthstarLogin({ onDone, L, elsewhere }: { onDone: () => void; L?: Labe
           <span className="al-lbl text-violet-700">by Liminal</span>
         </div>
         {L && !L.northstar ? (
-          <p className="mb-6 text-[16px] text-zinc-600">{L.company}. Choose who you are; each person signs in separately.</p>
+          <>
+            <p className="mb-2 text-[16px] text-zinc-600">{L.company}. Choose who you are; each person signs in separately.</p>
+            <p className="mb-6 text-[14px] text-zinc-500">{ROLE_SWITCH}</p>
+          </>
         ) : (
           <p className="mb-6 text-[16px] text-zinc-600">Northstar Security, a made-up company for this demo. Choose who you are; each person signs in separately.</p>
         )}
@@ -273,6 +306,7 @@ function NorthstarLogin({ onDone, L, elsewhere }: { onDone: () => void; L?: Labe
 /** The app. `workspace` is the /w/<id> slug for a custom workspace; omitted for Northstar at /. */
 export default function Home({ workspace }: { workspace?: string }) {
   const { state, me, error, setError, loadError, meError, loadMe, act, mark, refresh, ended, elsewhere } = useAlign(workspace);
+  const [nextRole, setNextRole] = useState<Role | null>(null); // the team chosen in Switch team, until it signs in
   const [view, setView] = useState<View>("decision");
   const landed = useRef<string | null>(null); // the role the landing view was set for; null when signed out
   const [drawer, setDrawer] = useState<Drawer>(null);
@@ -323,7 +357,20 @@ export default function Home({ workspace }: { workspace?: string }) {
     );
   // The signed-out view has no simulations (B1-6); the sign-in screen reads only the labels.
   if (!me.actor)
-    return <Login L={state ? labelsFor({ simulations: [], ...state }) : undefined} workspace={workspace} ended={ended} elsewhere={elsewhere} onDone={() => { loadMe(); refresh(); }} />;
+    return (
+      <Login
+        L={state ? labelsFor({ simulations: [], ...state }) : undefined}
+        workspace={workspace}
+        ended={ended}
+        elsewhere={elsewhere}
+        initialRole={nextRole ?? undefined}
+        onDone={() => {
+          setNextRole(null);
+          loadMe();
+          refresh();
+        }}
+      />
+    );
   // Until the state poll catches up with the sign-in, the last state is the signed-out view (or another role's).
   if (!state || state.me === null || state.me !== me.actor)
     return (
@@ -387,6 +434,12 @@ export default function Home({ workspace }: { workspace?: string }) {
   async function signOut() {
     await api("/api/session", { method: "DELETE" });
     loadMe();
+  }
+  // Switch team (founder ruling, LIM-2437 bd53f6f6): sign this team out and open the chosen team's sign-in. Its
+  // passcode is still required, so one person can't act as the owner without it, and nothing carries over.
+  async function switchTo(role: Role) {
+    setNextRole(role);
+    await signOut();
   }
   async function reset() {
     if (!confirmReset) {
@@ -467,12 +520,14 @@ export default function Home({ workspace }: { workspace?: string }) {
         </div>
         {custom && (
           <span className="rounded-full border border-violet-700 bg-violet-50 px-3 py-1 text-[16px] font-semibold text-violet-700">
-            You are: {youAre(L.role[me.actor], me.actor)}
+            Acting as {L.role[me.actor]}
           </span>
         )}
         {custom ? (
           rel?.status === "ACCEPTED" ? (
-            <Badge tone="neutral">{agreementStatus(accepted(state))}</Badge>
+            <Badge tone="neutral">
+              {L.team.product} and {L.team.security}: {agreementStatus(accepted(state)).toLowerCase()}
+            </Badge>
           ) : unresolved && me.actor !== "leadership" ? (
             <span className="rounded-2xl border border-amber-700 bg-amber-50 px-3 py-1.5 font-mono text-[14px] leading-snug tracking-[0.04em] text-amber-700">
               ▲ New company goal · {L.team.product} and {L.team.security} haven’t agreed yet
@@ -523,6 +578,7 @@ export default function Home({ workspace }: { workspace?: string }) {
               <div className="text-[12.5px] text-zinc-500">{TEAM_OF[me.actor] ?? ""} · Owner</div>
             )}
           </div>
+          {custom && <SwitchTeam L={L} current={me.actor} onPick={(r) => void switchTo(r)} />}
           <Button kind="ghost" onClick={signOut}>
             Sign&nbsp;out
           </Button>
@@ -569,7 +625,7 @@ export default function Home({ workspace }: { workspace?: string }) {
               {kr2 && rel && (custom ? (
                 <span className="text-[14px] text-zinc-500">
                   {L.team.product} and {L.team.security}:{" "}
-                  {rel.status === "ACCEPTED" ? `agreed · launch ${launchState(accepted(state))}` : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}
+                  {rel.status === "ACCEPTED" ? agreementStatus(accepted(state)).toLowerCase() : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}
                 </span>
               ) : <span className="text-[12.5px] text-zinc-500">Product and Security: {rel.status === "ACCEPTED" ? "agreed" : rel.status === "UNKNOWN" ? "not agreed yet" : "proposal in progress"}</span>)}
             </div>
