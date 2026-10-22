@@ -83,6 +83,7 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
   // The tester notice states the deletion date (go-C condition 3).
   const del = env.ALIGN_DELETE_BY ?? "";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(del) || Number.isNaN(Date.parse(`${del}T00:00:00Z`))) p.push("ALIGN_DELETE_BY must be a date (YYYY-MM-DD)");
+  else if (testServerClosed(del)) p.push(`ALIGN_DELETE_BY (${del}) has passed: purge with ws-admin delete --all --yes and stop the server`);
   for (const [k, dflt] of Object.entries(DEFAULT_PASSCODES)) {
     const v = env[k];
     if (!v || v === dflt) p.push(`${k} must be set to a non-default passcode`);
@@ -91,6 +92,14 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
   if (env.AI_GATEWAY_API_KEY) p.push("AI_GATEWAY_API_KEY must not be set when hosted (no AI key)");
   if (env.ALIGN_CAPTURE && env.ALIGN_CAPTURE !== "0") p.push("ALIGN_CAPTURE must be off when hosted");
   return p;
+}
+
+/** True from the start (UTC) of ALIGN_DELETE_BY: the promised deletion date. A hosted server refuses to start after
+ *  it, and a running one stops serving tester routes (proxy.ts, 410), so no tester data is reachable past the date. */
+export function testServerClosed(deleteBy: string | null | undefined, now = Date.now()): boolean {
+  if (!deleteBy) return false;
+  const t = Date.parse(`${deleteBy}T00:00:00Z`);
+  return !Number.isNaN(t) && t <= now;
 }
 
 /** hostedProblems() for this process, computed once: the environment doesn't change while the server runs. */

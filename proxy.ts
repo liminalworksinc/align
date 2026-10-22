@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { config as alignConfig, hostAllowed, hostName, startupProblems } from "@/lib/config";
+import { config as alignConfig, hostAllowed, hostName, startupProblems, testServerClosed } from "@/lib/config";
 import { LOCAL_HOSTS } from "@/lib/local-guard";
 
 // Runs before every page and API route.
@@ -39,6 +39,8 @@ export function proxy(request: NextRequest) {
   if (request.headers.get("x-forwarded-proto") !== "https") return NextResponse.json({ error: "Use https" }, { status: 403 });
   // Fly's edge sets Fly-Client-IP; a request without it did not come through the public proxy.
   if (!request.headers.get("fly-client-ip")) return NextResponse.json({ error: "Use the public address" }, { status: 403 });
+  // The promised deletion date: from that day nothing is served (startup also refuses once it has passed).
+  if (testServerClosed(cfg.deleteBy)) return text(410, `This test server closed on ${cfg.deleteBy}.\n`);
   const p = request.nextUrl.pathname;
   if (TO_NEW.has(p)) return NextResponse.redirect(new URL("/new", `https://${name}`), 307);
   if (!HOSTED_ROUTES.some((r) => r.test(p))) return NextResponse.json({ error: "Not found" }, { status: 404 });

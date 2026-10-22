@@ -97,6 +97,19 @@ export function clientOf(req: Request): string {
   return config().hosted ? `ip:${clientNet(req.headers.get("fly-client-ip") ?? "unknown")}` : "local";
 }
 
+// State-replacing actions per workspace (Restart, connecting an agent): at most ACTIONS_PER_MINUTE each per minute,
+// so a loop can't churn a workspace's audit log onto the shared volume (review M5).
+const ACTIONS_PER_MINUTE = 10;
+const g3 = globalThis as unknown as { __alignActions?: Map<string, number[]> };
+const actions: Map<string, number[]> = (g3.__alignActions ??= new Map());
+export function takeWorkspaceAction(ws: string, action: string, now = Date.now()) {
+  const key = `${ws}:${action}`;
+  const list = (actions.get(key) ?? []).filter((t) => now - t < 60_000);
+  if (list.length >= ACTIONS_PER_MINUTE) throw new HttpError(429, "Too many of these in a row, try again in a minute");
+  while (actions.size >= MAX_KEYS) actions.delete(actions.keys().next().value!);
+  actions.set(key, [...list, now]);
+}
+
 // Sign-ins in flight per client: the scrypt pool is shared by every workspace, so one client may hold at most
 // SIGNINS_PER_CLIENT slots at a time; further parallel tries get 429 before they reach scrypt (review M1).
 const SIGNINS_PER_CLIENT = 2;

@@ -3,6 +3,7 @@ import { requireWsSession, type WsContext } from "@/lib/auth";
 import { config } from "@/lib/config";
 import { audit } from "@/lib/flow";
 import { bodyFor, handle } from "@/lib/http";
+import { takeWorkspaceAction } from "@/lib/ratelimit";
 import { captureConsents, HttpError, now, setCaptureConsents } from "@/lib/store";
 import { agentEpochOf, bumpAgentEpoch, readAuth, type CustomWsId } from "@/lib/workspace";
 
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
     const repo = b.repo;
     const auth = readAuth(who.ws);
     if (!auth) throw new HttpError(404, "This workspace no longer exists");
+    takeWorkspaceAction(who.ws, "connect_agent"); // a mint loop can't churn the audit archive (review M5)
     await who.mutate((s) => {
       const list = captureConsents(s).filter((c) => !(c.harness === harness && c.repo === repo));
       setCaptureConsents(s, [...list, { harness, repo, granted_by: "leadership", granted_at: now() }]);

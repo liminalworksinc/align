@@ -94,6 +94,7 @@ export async function mutate<T>(fn: (s: AppState) => T | Promise<T>): Promise<T>
 
 const MAX_WS_BYTES = 1024 * 1024;
 const AUDIT_KEEP = 1000;
+const ARCHIVE_MAX_BYTES = 1024 * 1024; // per archive file; at most two per workspace (review M5)
 
 async function readCustom(ws: CustomWsId): Promise<AppState> {
   let raw: string;
@@ -118,7 +119,13 @@ async function writeCustom(ws: CustomWsId, s: AppState) {
   if (Buffer.byteLength(JSON.stringify({ ...s, audit: [] }, null, 2)) > MAX_WS_BYTES) throw new HttpError(413, "This workspace is full");
   if (s.audit.length > AUDIT_KEEP) {
     const old = s.audit.slice(0, s.audit.length - AUDIT_KEEP);
-    await fs.appendFile(path.join(dir, "audit-archive.jsonl"), old.map((r) => JSON.stringify(r)).join("\n") + "\n", { mode: 0o600 });
+    const chunk = old.map((r) => JSON.stringify(r)).join("\n") + "\n";
+    // Bounded on the shared volume: once the archive would pass ARCHIVE_MAX_BYTES it becomes audit-archive.1.jsonl
+    // (replacing the previous one) and a new file starts, so one workspace holds at most two archive files.
+    const archive = path.join(dir, "audit-archive.jsonl");
+    const size = await fs.stat(archive).then((st) => st.size, () => 0);
+    if (size + Buffer.byteLength(chunk) > ARCHIVE_MAX_BYTES) await fs.rename(archive, path.join(dir, "audit-archive.1.jsonl")).catch(() => undefined);
+    await fs.appendFile(archive, chunk, { mode: 0o600 });
     s.audit = s.audit.slice(-AUDIT_KEEP);
   }
   const text = JSON.stringify(s, null, 2);

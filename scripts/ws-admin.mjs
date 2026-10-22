@@ -53,6 +53,13 @@ if (cmd === "list") {
     process.exit(2);
   }
   for (const id of ids()) remove(id);
+  // Crash leftovers hold tester data too (.tmp-<id>: state and passcode hashes; .deleting-<id>: a whole workspace).
+  for (const n of existsSync(root) ? readdirSync(root) : []) {
+    if (/^\.(tmp|deleting)-w_[a-z2-7]{12}$/.test(n)) {
+      rmSync(path.join(root, n), { recursive: true, force: true });
+      console.log(`removed leftover ${n}`);
+    }
+  }
 } else if (cmd === "delete" && arg) {
   if (!WS_ID.test(arg)) {
     console.error(`ws-admin: not a workspace id: ${arg}`);

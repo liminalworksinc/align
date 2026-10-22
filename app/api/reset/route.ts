@@ -1,6 +1,7 @@
 import { requireWsSession } from "@/lib/auth";
 import { bodyFor, handle } from "@/lib/http";
 import { teamOf } from "@/lib/labels";
+import { takeWorkspaceAction } from "@/lib/ratelimit";
 import { HttpError, resetState } from "@/lib/store";
 import { resetWorkspace } from "@/lib/workspace-setup";
 
@@ -15,6 +16,7 @@ export async function POST(req: Request) {
       // A custom workspace restarts its own conflict from the saved setup input. Leadership only.
       const s = await who.read();
       if (who.actor !== "leadership") throw new HttpError(403, `Only ${teamOf(s, "ceo")} can restart this scenario`);
+      takeWorkspaceAction(who.ws, "restart"); // a Restart loop can't churn the audit archive (review M5)
       await resetWorkspace(who.ws, who);
       return { ok: true };
     }

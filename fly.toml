@@ -36,6 +36,8 @@ primary_region = "sjc"
 [[mounts]]
   source = "align_data"
   destination = "/data"
+  # No automatic volume snapshots: they would keep tester data past ALIGN_DELETE_BY (go-C condition 4).
+  scheduled_snapshots = false
 
 [[vm]]
   memory = "1gb"
