@@ -187,6 +187,7 @@ async function main() {
     const dec = await text(O);
     check("U8 the decision record shows the conditions and that agreement is not launch approval", dec.includes(CONDITIONS.slice(0, 40)) && /not approval to launch/i.test(dec), dec.slice(0, 500));
     check("U8 the decision record has no Northstar copy", !LEAK.test(dec), leakIn(dec));
+    check("U8 open conditions are flagged as not checked, and the record says who decided", /conditions not checked/i.test(dec) && /Who decided/i.test(dec) && /approved the updated goal/i.test(dec), dec.slice(0, 500));
 
     const acc = (await api(lead, "GET", "/api/state")).json?.acceptances?.at(-1);
     for (const [pg, team] of [[A, ASKING], [O, OWNING]]) {

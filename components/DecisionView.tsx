@@ -283,9 +283,15 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
     // What the owning team's approval depends on: its conditions field, else the reason it gave when asking for changes.
     const lastCounter = s.proposals.find((p) => p.id === acc.proposal_id)?.counter_versions.at(-1);
     const conditions = lastCounter?.conditions || lastCounter?.rationale || "";
+    // One condition per line; Align stores them as one text and never checks whether they hold.
+    const conditionLines = conditions.split("\n").map((c) => c.trim()).filter(Boolean);
+    const asker = L.person.product;
     return (
       <div className="flex flex-col gap-4">
-        <Header label="Decision record" right={<Badge tone="neutral">Agreement reached</Badge>} />
+        <Header
+          label="Decision record"
+          right={conditions ? <Badge tone="amber">Agreed · conditions not checked</Badge> : <Badge tone="neutral">Agreement reached</Badge>}
+        />
         <div className="al-in">
           <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
             {poss(owning)} updated goal ({acc.accepted_version}) is now the shared plan for both teams.
@@ -295,11 +301,37 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
           </p>
           <p className="mt-1 max-w-[680px] text-[16px] font-semibold text-zinc-900">This records what the two teams agreed. It is not approval to launch.</p>
         </div>
+        <section aria-label="Who decided" className="rounded-[14px] border border-zinc-200 bg-white p-[18px]">
+          <h2 className="al-lbl">Who decided</h2>
+          <ul className="mt-1 flex flex-col gap-1.5 text-[16px] text-zinc-900">
+            <li>
+              <span className="font-semibold">{owner}</span> ({owning}) approved the updated goal
+              {acc.ratified_at ? ` at ${fmtTime(acc.ratified_at)}` : ""}.
+            </li>
+            <li>
+              <span className="font-semibold">{asker}</span> ({asking}){" "}
+              {acc.acknowledged_via === "authored_in_proposal"
+                ? `proposed the change and committed to ${poss(asking)} part`
+                : `accepted ${poss(owning)} changes${acc.acknowledged_at ? ` at ${fmtTime(acc.acknowledged_at)}` : ""}`}
+              .
+            </li>
+          </ul>
+        </section>
         {conditions && (
           <section aria-label="Conditions" className="rounded-[14px] border border-amber-300 bg-amber-50 p-[18px]">
             <h2 className="al-lbl !text-amber-700">Conditions</h2>
-            <p className="mt-1 whitespace-pre-wrap text-[16px] text-zinc-900">{conditions}</p>
-            <p className="mt-1 text-[14px] text-zinc-600">{owning} asked for these when it asked for changes.</p>
+            {conditionLines.length > 1 ? (
+              <ol className="mt-1 list-decimal pl-5 text-[16px] text-zinc-900">
+                {conditionLines.map((c, i) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ol>
+            ) : (
+              <p className="mt-1 whitespace-pre-wrap text-[16px] text-zinc-900">{conditions}</p>
+            )}
+            <p className="mt-1 text-[14px] text-zinc-600">
+              {owning} asked for these when it asked for changes. Align records them but does not check whether they are met.
+            </p>
           </section>
         )}
         {/* The approved target shows once, at the top of the old-plan panel (and in the header card). */}
