@@ -3,7 +3,7 @@ import type { Session } from "./auth";
 import { cappedJson } from "./http";
 import { buildCustomState, MAX_BODY_BYTES, ScenarioInput, ScenarioInvalid } from "./scenario";
 import { id, now, replaceWorkspaceState, sha256 } from "./store";
-import { readScenarioFile, type CustomWsId } from "./workspace";
+import { bumpAgentEpoch, readScenarioFile, type CustomWsId } from "./workspace";
 
 // Custom workspaces reuse the /setup schema and state builder from lib/scenario.ts unchanged. The body is the
 // setup input without `confirm`, plus an optional signup_code. Nothing here touches Northstar state.
@@ -36,7 +36,8 @@ export function initialWorkspaceState(input: ScenarioInput, input_sha256: string
   return s;
 }
 
-/** Restart: rebuild from the saved setup input. Keeps the audit log; proposals, acceptances and timer start over. */
+/** Restart: rebuild from the saved setup input. Keeps the audit log; proposals, acceptances, timer, captured sessions
+ *  and capture consents start over, and every agent token is revoked (agent epoch bump; human sign-ins stay). */
 export async function resetWorkspace(ws: CustomWsId, who: Session) {
   const { confirm: _confirm, ...saved } = (await readScenarioFile(ws)) as Record<string, unknown>;
   void _confirm;
@@ -46,4 +47,5 @@ export async function resetWorkspace(ws: CustomWsId, who: Session) {
     next.audit = [...current.audit, { id: id("a"), actor: who.actor, session_id: who.sid, action: "reset", target: "workspace", at: now() }];
     return next;
   });
+  await bumpAgentEpoch(ws);
 }

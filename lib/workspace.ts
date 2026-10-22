@@ -82,8 +82,13 @@ interface RoleHash {
 
 export interface WorkspaceAuth {
   epoch: number;
+  /** Agent tokens are checked against this, not `epoch` (which also signs human sessions), so revoking agents never
+   *  signs people out. Absent in workspaces created before it existed: agentEpochOf falls back to `epoch`. */
+  agent_epoch?: number;
   roles: Record<Actor, RoleHash>;
 }
+
+export const agentEpochOf = (a: WorkspaceAuth): number => a.agent_epoch ?? a.epoch;
 
 async function hashPasscode(passcode: string): Promise<RoleHash> {
   const salt = randomBytes(16);
@@ -132,6 +137,22 @@ export function readAuth(ws: CustomWsId): WorkspaceAuth | null {
   if (!validAuth(auth)) throw new HttpError(500, "This workspace could not be read");
   authCache.set(ws, { mtimeMs, auth });
   return auth;
+}
+
+/** Revoke every agent token for a workspace by bumping agent_epoch in auth.json (atomic, owner-only). Restart and
+ *  the leadership revoke route call this; human sessions are untouched. */
+export async function bumpAgentEpoch(ws: CustomWsId): Promise<number> {
+  return withLock(`auth:${ws}`, async () => {
+    const auth = readAuth(ws);
+    if (!auth) throw new HttpError(404, "This workspace no longer exists");
+    const next: WorkspaceAuth = { ...auth, agent_epoch: agentEpochOf(auth) + 1 };
+    const file = path.join(wsDir(ws), "auth.json");
+    const tmp = `${file}.${randomBytes(6).toString("hex")}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
+    await fs.rename(tmp, file);
+    authCache.delete(ws);
+    return next.agent_epoch as number;
+  });
 }
 
 // ---- lifecycle ----

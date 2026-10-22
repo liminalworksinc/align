@@ -211,7 +211,15 @@ export async function POST(req: Request) {
       return { scenario: s.scenario };
     };
     if (agent) {
-      await mutateWs(agent.ws, upsert); // custom workspaces are never mapped
+      // B1-1 inside a workspace: the token is not the consent. The workspace's consent record for this harness and
+      // repo must still exist (Restart and DELETE /api/workspaces/agent-token remove it), checked under the write lock.
+      await mutateWs(agent.ws, (s) => {
+        if (!hasCaptureConsent(s, agent.harness, agent.repo)) throw new HttpError(403, "No capture consent for this harness and repo");
+        // A token writes only its own repo's sessions: never adopt (and re-label) a session another repo started.
+        const existing = s.sessions.find((x) => x.id === id);
+        if (existing && existing.repo !== agent.repo) throw new HttpError(403, `This session belongs to ${existing.repo}, not ${agent.repo}`);
+        return upsert(s);
+      }); // custom workspaces are never mapped
       return { ok: true, id };
     }
 
