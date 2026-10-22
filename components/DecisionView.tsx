@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, type ReactNode } from "react";
-import { AGREED_STATUS, CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, decisionMeasureId, labelsFor, poss, switchHint, type Labels } from "@/lib/labels";
+import { AGREED_STATUS, companyMeasureId, decisionMeasureId, labelsFor, poss, switchHint, type Labels } from "@/lib/labels";
 import type { SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { AuthorityStrip } from "./AuthorityStrip";
-import { agreementStatus, launchLine, launchState } from "./launch";
+import { DecisionRecord } from "./DecisionRecord";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
 import { nextStepHint } from "./nextStep";
@@ -283,70 +283,16 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
   const requirement = currentGoal(s, "ceo")?.measures.find((m) => m.id === companyMeasureId(s));
   const plan = s.plans.find((p) => p.plan_id === s.scenario_config?.plan_id && p.plan_version === s.scenario_config?.plan_version);
 
-  // 1 · Agreement reached
+  // 1 · Agreement reached: the shared decision record (also leadership's), then the work still on the old plan.
   if (acc && rel?.status === "ACCEPTED") {
     const goal = s.goals.find((g) => g.id === acc.new_goal_id);
     const newTarget = goal?.measures.find((m) => m.id === decisionMeasureId(s, acc))?.text ?? goal?.objective ?? "";
-    // What the owning team's approval depends on: its conditions field only. Its reason for asking for changes is shown
-    // separately, never as a condition. One condition per line; Align stores them as one text and never checks them.
-    const lastCounter = s.proposals.find((p) => p.id === acc.proposal_id)?.counter_versions.at(-1);
-    const conditions = lastCounter?.conditions?.trim() ?? "";
-    const reason = lastCounter?.rationale?.trim() ?? "";
-    const conditionLines = conditions.split("\n").map((c) => c.trim()).filter(Boolean);
     return (
-      <div className="flex flex-col gap-4">
-        {/* One status wording (lib/labels.ts via agreementStatus); open conditions are marked once, in their box. */}
-        <Header label="Decision record" right={<Badge tone="neutral">{agreementStatus(acc)}</Badge>} />
-        <div className="al-in">
-          <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
-            {launchState(acc) === "approved"
-              ? `${poss(owning)} updated goal (${acc.accepted_version}) is now the shared plan for both teams.`
-              : `Both teams agreed on ${poss(owning)} updated goal (${acc.accepted_version}). Launch is pending until leadership decides.`}
-          </h1>
-          <p className="mt-2 max-w-[680px] text-[16px] text-zinc-700">
-            The previous version is kept.{acc.ratified_at ? ` Approved by ${owner} at ${fmtTime(acc.ratified_at)}.` : ""}
-          </p>
-          <p className="mt-1 max-w-[680px] text-[16px] font-semibold text-zinc-900">{launchLine(acc, L)}</p>
-        </div>
-        {conditions && (
-          <section aria-label="Conditions" className="rounded-[14px] border border-amber-300 bg-amber-50 p-[18px]">
-            <div className="flex items-center gap-2">
-              <h2 className="al-lbl !text-amber-700">Conditions</h2>
-              <Badge tone="amber">{CONDITIONS_UNCONFIRMED}</Badge>
-            </div>
-            {conditionLines.length > 1 ? (
-              <ol className="mt-1 list-decimal pl-5 text-[16px] text-zinc-900">
-                {conditionLines.map((c, i) => (
-                  <li key={i}>{c}</li>
-                ))}
-              </ol>
-            ) : (
-              <p className="mt-1 whitespace-pre-wrap text-[16px] text-zinc-900">{conditions}</p>
-            )}
-            <p className="mt-1 text-[14px] text-zinc-600">
-              {owning} asked for {conditionLines.length > 1 ? "these" : "this"} when it asked for changes. {conditionsUnconfirmedNote(conditionLines.length)}
-            </p>
-          </section>
-        )}
-        {reason && (
-          <p className="max-w-[680px] text-[16px] text-zinc-700">
-            <span className="font-semibold text-zinc-900">Why {owning} asked for changes:</span> {reason}
-          </p>
-        )}
-        {/* The approved target shows once, at the top of the old-plan panel (and in the header card). */}
-        <ul aria-label="What this record shows" className="flex flex-col gap-1.5 rounded-[14px] border border-zinc-200 bg-white p-[18px] text-[17px] text-zinc-900">
-          <li>
-            <span className="font-semibold">Decision:</span> recorded
-          </li>
-          <li>
-            <span className="font-semibold">Work done:</span> not verified yet
-          </li>
-          <li>
-            <span className="font-semibold">Outcome:</span> not measured yet
-          </li>
-        </ul>
+      <div className="flex flex-col gap-6">
+        {/* Custom has no Work view on this base yet, so "Move running work" scrolls to the old-plan panel below. When
+            the v6 Work view lands (agent/LIM-2424-v6-work) this becomes () => props.go("work"). */}
+        <DecisionRecord s={s} acc={acc} L={L} onMoveWork={() => document.getElementById("old-plan-work")?.scrollIntoView({ behavior: "smooth" })} />
         <OldPlanWork s={s} L={L} owningIds={acc.owning_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} revision={newTarget} viewer={me.actor} />
-        <ProofStrip s={s} />
       </div>
     );
   }
@@ -505,7 +451,7 @@ function OldPlanWork({
   const asking = find(askingIds);
   const row = "flex flex-wrap items-center justify-between gap-3 rounded-[10px] bg-zinc-50 p-3.5 ring-1 ring-zinc-200";
   return (
-    <section aria-label="Work still on the old plan" className="rounded-[14px] border border-amber-700 bg-white p-[18px]">
+    <section id="old-plan-work" aria-label="Work still on the old plan" className="rounded-[14px] border border-amber-700 bg-white p-[18px]">
       <div className="al-lbl mb-3 !text-amber-700">Work still on the old plan</div>
       <div className="mb-3 flex flex-col gap-1 rounded-[10px] bg-amber-50 px-3.5 py-3 ring-1 ring-amber-300">
         <span className="al-lbl">Approved revision</span>
