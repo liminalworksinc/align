@@ -77,6 +77,9 @@ function sign(payload: string) {
   return createHmac("sha256", secret()).update(payload).digest("base64url");
 }
 
+/** The session HMAC, for lib/agent-token.ts (a distinct `agt.` token shape that never reads as a session). */
+export const signPayload = sign;
+
 export function login(role: string, passcode: string): { token: string; session: Session } {
   // Hosted has no Northstar: its shared passcodes sign nobody in there (go-C condition 1).
   if (config().hosted) throw new HttpError(404, "Not found");

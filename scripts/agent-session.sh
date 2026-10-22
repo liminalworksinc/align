@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Start a Claude Code agent session in <repo-dir>, wired to a local Align (Mode L) running a /setup scenario:
-# the read-only align MCP tools, the capture hook, and the watcher that wakes the session when a team approves a
-# change. Grants capture consent for that repo as leadership first (consent is per harness and repo).
+# Start a Claude Code agent session in <repo-dir>, wired to a local Align (Mode L): the read-only align MCP tools,
+# the capture hook, and the watcher that wakes the session when a team approves a change.
 #
-# Usage: ALIGN_MCP_TOKEN=<the server's token> scripts/agent-session.sh <repo-dir> "<prompt>" [--allow-edits]
+# Two targets:
+#   a /setup scenario (the default store):
+#     ALIGN_MCP_TOKEN=<the server's token> scripts/agent-session.sh <repo-dir> "<prompt>" [--allow-edits]
+#     Grants capture consent for the repo as the demo's leadership (ALIGN_LEADERSHIP_PASSCODE, default leadership-demo).
+#   a workspace (/w/<id>):
+#     ALIGN_WORKSPACE=<w_id> ALIGN_WORKSPACE_PASSCODE=<its leadership passcode> scripts/agent-session.sh <repo-dir> "<prompt>"
+#     Signs in as that workspace's leadership and mints an agent token for this repo (also its capture consent);
+#     MCP, capture and wake-ups then read and write that workspace only. No ALIGN_MCP_TOKEN needed.
 #   ALIGN_URL                  default http://127.0.0.1:3100 (loopback only: capture and directives are local routes)
-#   ALIGN_LEADERSHIP_PASSCODE  default leadership-demo (used only to grant capture consent)
 #   ALIGN_AGENT_MODEL          default sonnet
 #   ALIGN_WATCH_WINDOW_MS      default 900000 (15 minutes of waiting for an approval after each turn)
 # By default the session plans only: Edit/Write and shell commands that run code or reach other machines are denied.
@@ -20,7 +25,10 @@ ALIGN_URL="${ALIGN_URL:-http://127.0.0.1:3100}"
 die() { echo "agent-session: $*" >&2; exit 2; }
 
 [ -d "$REPO" ] || die "no such directory: $REPO"
-[ -n "${ALIGN_MCP_TOKEN:-}" ] || die "set ALIGN_MCP_TOKEN to the token the Align server was started with"
+WS="${ALIGN_WORKSPACE:-}"
+[ -n "$WS" ] || [ -n "${ALIGN_MCP_TOKEN:-}" ] || die "set ALIGN_MCP_TOKEN (a /setup scenario) or ALIGN_WORKSPACE and ALIGN_WORKSPACE_PASSCODE (a workspace)"
+[ -z "$WS" ] || [[ "$WS" =~ ^w_[a-z2-7]{12}$ ]] || die "ALIGN_WORKSPACE must be a workspace id (w_ and 12 characters)"
+[ -z "$WS" ] || [ -n "${ALIGN_WORKSPACE_PASSCODE:-}" ] || die "set ALIGN_WORKSPACE_PASSCODE to that workspace's leadership passcode"
 [[ "$ALIGN_URL" =~ ^http://(127\.0\.0\.1|localhost)(:[0-9]+)?$ ]] || die "ALIGN_URL must be a loopback address, got $ALIGN_URL"
 command -v claude >/dev/null || die "claude is not on PATH"
 
@@ -33,20 +41,34 @@ chmod 700 "$JAR"
 trap 'rm -rf "$JAR"' EXIT
 
 curl -sf -o /dev/null "$ALIGN_URL/api/workspaces/config" || die "Align is not answering at $ALIGN_URL"
-curl -sf -o /dev/null -c "$JAR/cookies" -H 'content-type: application/json' \
-  -d "{\"role\":\"leadership\",\"passcode\":\"${ALIGN_LEADERSHIP_PASSCODE:-leadership-demo}\"}" "$ALIGN_URL/api/session" \
-  || die "leadership sign-in failed (set ALIGN_LEADERSHIP_PASSCODE)"
-curl -sf -o /dev/null -b "$JAR/cookies" -H 'content-type: application/json' \
-  -d "{\"harness\":\"claude-code\",\"repo\":\"$REPO_NAME\"}" "$ALIGN_URL/api/sessions/consent" \
-  || die "could not grant capture consent for $REPO_NAME"
-rm -f "$JAR/cookies"
-echo "agent-session: capture consent granted for claude-code + $REPO_NAME" >&2
-
 umask 077
+if [ -n "$WS" ]; then
+  # A workspace: its leadership mints an agent token for this repo. The token goes to the MCP config and the hooks.
+  node -e 'console.log(JSON.stringify({ workspace: process.argv[1], role: "leadership", passcode: process.argv[2] }))' "$WS" "$ALIGN_WORKSPACE_PASSCODE" > "$JAR/login.json"
+  curl -sf -o /dev/null -c "$JAR/cookies" -H 'content-type: application/json' --data @"$JAR/login.json" "$ALIGN_URL/api/session" \
+    || die "workspace leadership sign-in failed (check ALIGN_WORKSPACE and ALIGN_WORKSPACE_PASSCODE)"
+  rm -f "$JAR/login.json"
+  TOKEN="$(curl -sf -b "$JAR/cookies" -H 'content-type: application/json' \
+    -d "{\"harness\":\"claude-code\",\"repo\":\"$REPO_NAME\"}" "$ALIGN_URL/api/workspaces/agent-token" \
+    | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write(JSON.parse(d).token||"")}catch{}})')"
+  [ -n "$TOKEN" ] || die "could not mint an agent token for $REPO_NAME in $WS"
+  echo "agent-session: agent token minted for claude-code + $REPO_NAME in $WS (also its capture consent)" >&2
+else
+  curl -sf -o /dev/null -c "$JAR/cookies" -H 'content-type: application/json' \
+    -d "{\"role\":\"leadership\",\"passcode\":\"${ALIGN_LEADERSHIP_PASSCODE:-leadership-demo}\"}" "$ALIGN_URL/api/session" \
+    || die "leadership sign-in failed (set ALIGN_LEADERSHIP_PASSCODE)"
+  curl -sf -o /dev/null -b "$JAR/cookies" -H 'content-type: application/json' \
+    -d "{\"harness\":\"claude-code\",\"repo\":\"$REPO_NAME\"}" "$ALIGN_URL/api/sessions/consent" \
+    || die "could not grant capture consent for $REPO_NAME"
+  TOKEN="$ALIGN_MCP_TOKEN"
+  echo "agent-session: capture consent granted for claude-code + $REPO_NAME" >&2
+fi
+rm -f "$JAR/cookies"
+
 node -e '
   const [url, token] = process.argv.slice(1);
   console.log(JSON.stringify({ mcpServers: { align: { type: "http", url: `${url}/api/mcp`, headers: { Authorization: `Bearer ${token}` } } } }));
-' "$ALIGN_URL" "$ALIGN_MCP_TOKEN" > "$JAR/mcp.json"
+' "$ALIGN_URL" "$TOKEN" > "$JAR/mcp.json"
 node -e '
   const [root, edits] = process.argv.slice(1);
   const cap = `node "${root}/scripts/align-capture.mjs"`;
@@ -66,6 +88,8 @@ node -e '
 
 cd "$TOP"
 # User-level plugins and hooks are skipped (project and local settings still load) to keep the session small.
-ALIGN_URL="$ALIGN_URL" ALIGN_CAPTURE=1 ALIGN_WATCH_WINDOW_MS="${ALIGN_WATCH_WINDOW_MS:-900000}" \
+# In workspace mode the hooks send the agent token, so capture and wake-ups go to that workspace.
+AGENT_TOKEN=""; [ -n "$WS" ] && AGENT_TOKEN="$TOKEN"
+ALIGN_URL="$ALIGN_URL" ALIGN_CAPTURE=1 ALIGN_WATCH_WINDOW_MS="${ALIGN_WATCH_WINDOW_MS:-900000}" ALIGN_AGENT_TOKEN="$AGENT_TOKEN" \
   claude --model "${ALIGN_AGENT_MODEL:-sonnet}" --setting-sources project,local \
   --settings "$JAR/settings.json" --mcp-config "$JAR/mcp.json" --strict-mcp-config --permission-mode default "$PROMPT"

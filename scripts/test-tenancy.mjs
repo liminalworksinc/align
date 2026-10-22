@@ -566,6 +566,72 @@ try {
     }
   } else check("R15 browser check needs Chrome (CHROME_PATH)", false, CHROME);
 
+  // ---- W: an agent connected to a workspace (Mode L): token, capture, MCP and wake-ups stay in that workspace ----
+  const W_REPO = "w-agent-repo";
+  const wForm = await call("POST", "/api/workspaces/agent-token", { cookie: sb.leadership, raw: JSON.stringify({ harness: "claude-code", repo: W_REPO }), headers: { "content-type": "text/plain" } });
+  const wProduct = await call("POST", "/api/workspaces/agent-token", { cookie: sb.product, body: { harness: "claude-code", repo: W_REPO } });
+  const wNs = await call("POST", "/api/workspaces/agent-token", { cookie: nsR.leadership, body: { harness: "claude-code", repo: W_REPO } });
+  const wMint = await call("POST", "/api/workspaces/agent-token", { cookie: sb.leadership, body: { harness: "claude-code", repo: W_REPO } });
+  const wTok = wMint.json?.token;
+  check("W1 only workspace leadership mints an agent token (text/plain 415, product 403, Northstar 404), shown once", wForm.status === 415 && wProduct.status === 403 && wNs.status === 404 && wMint.status === 200 && /^agt\./.test(wTok ?? "") && wMint.json?.shown_once === true, `${wForm.status} ${wProduct.status} ${wNs.status} ${wMint.status}`);
+  const wAudit = (await call("GET", "/api/state", { cookie: sb.leadership })).json?.audit ?? [];
+  check("W1 minting records the consent and an audit row with the harness and repo only", wAudit.some((r) => r.action === "agent_connected" && r.target === `claude-code/${W_REPO}`) && !JSON.stringify(wAudit).includes(wTok), "no audit row, or the token leaked");
+  const bearer = { authorization: `Bearer ${wTok}` };
+  const ev = (sid, tool, headers = bearer, repo = W_REPO) => call("POST", "/api/sessions/events", { body: { harness: "claude-code", session_id: sid, hook_event: "PostToolUse", repo, cwd: repo, tool_name: tool }, headers });
+  const nsBeforeW = fileHash(NS_STATE);
+  const w2 = await ev("w-agent-1", "mcp__align__align_get_accepted_plan");
+  const w2repo = await ev("w-agent-2", "Bash", bearer, "another-repo");
+  const w2none = await ev("w-agent-3", "Bash", {}); // no token: the default store, which has no consent for this repo
+  const bState = (await call("GET", "/api/state", { cookie: sb.leadership })).json;
+  const aStateW = (await call("GET", "/api/state", { cookie: sa.leadership })).json;
+  check(
+    "W2 capture with the token lands in B only (not A, not Northstar); another repo -> 403; no token -> 403",
+    w2.status === 200 && w2repo.status === 403 && w2none.status === 403 && bState.sessions.some((x) => x.session_id === "w-agent-1") &&
+      !aStateW.sessions.some((x) => x.session_id === "w-agent-1") && fileHash(NS_STATE) === nsBeforeW,
+    `${w2.status} ${w2repo.status} ${w2none.status}`,
+  );
+  // MCP: the agent token reads B; the server token still reads the default store
+  const mcpCall = async (token, name) => {
+    const r = await fetch(`${BASE}/api/mcp`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } }) });
+    const t = await r.text();
+    const line = t.split("\n").find((l) => l.startsWith("data: "));
+    try {
+      return { status: r.status, result: JSON.parse(line ? line.slice(6) : t).result };
+    } catch {
+      return { status: r.status, result: null };
+    }
+  };
+  const wM = await mcpCall(wTok, "align_list_goals");
+  const wMbad = await mcpCall(`${wTok.slice(0, -2)}xx`, "align_list_goals");
+  check("W3 MCP with B's agent token reads B (its company, no A, no Northstar); a tampered token -> 401", wM.status === 200 && /BMARK/.test(wM.result?.structuredContent?.org ?? "") && !JSON.stringify(wM.result).includes("AMARK") && !/Northstar/.test(JSON.stringify(wM.result)) && wMbad.status === 401, `${wM.status} ${wM.result?.structuredContent?.org} ${wMbad.status}`);
+  // Wake-up: B's approval reaches B's agent session, through the token, and nothing reaches the default store
+  const dirW = (headers = bearer) => call("GET", "/api/directives?session=claude-code:w-agent-1", { headers }).then((r) => r.json?.pending ?? []);
+  const wBefore = await dirW();
+  const wp = await call("POST", "/api/proposals", { cookie: sb.product, body: { proposed_measure_text: "WMARK agreed measure", rationale: "r", reciprocal_commitment: "WMARK commitment" } });
+  await call("POST", `/api/proposals/${wp.json?.id}/counter`, { cookie: sb.security, body: { proposed_measure_text: "WMARK agreed measure, weekly", rationale: "r", conditions: "WMARK conditions" } });
+  await call("POST", `/api/proposals/${wp.json?.id}/acknowledge`, { cookie: sb.product, body: {} });
+  const wAcc = await call("POST", `/api/proposals/${wp.json?.id}/accept`, { cookie: sb.security, body: { accept_untested: true } });
+  const [wAfter, wNoTok] = [await dirW(), await dirW({})];
+  check(
+    "W4 B's approval: one wake-up for B's agent via its token, conditions quoted, no command; without the token, nothing",
+    wBefore.length === 0 && wAcc.status === 200 && wAfter.length === 1 && wAfter[0].text.includes("«WMARK conditions»") && /no run command/.test(wAfter[0].text) && wNoTok.length === 0,
+    `${wBefore.length} ${wAcc.status} ${JSON.stringify(wAfter).slice(0, 200)} ${wNoTok.length}`,
+  );
+  const wPlan = await mcpCall(wTok, "align_get_accepted_plan");
+  check("W4 the agent reads B's agreement through MCP: agreed, with the conditions", wPlan.result?.structuredContent?.agreement?.status === "agreed" && wPlan.result?.structuredContent?.agreement?.conditions === "WMARK conditions", JSON.stringify(wPlan.result?.structuredContent ?? {}).slice(0, 200));
+  const wAck = await call("POST", "/api/directives/ack", { body: { session: "claude-code:w-agent-1", event_id: wAfter[0]?.event_id }, headers: bearer });
+  const delivered = (await call("GET", "/api/state", { cookie: sb.leadership })).json.sessions.find((x) => x.session_id === "w-agent-1")?.directives ?? [];
+  check("W5 the watcher's ack marks delivery in B's state; the next poll is empty", wAck.status === 200 && delivered.length === 1 && (await dirW()).length === 0, `${wAck.status} ${JSON.stringify(delivered)}`);
+  // Revocation: bumping B's epoch (what a passcode reset does) ends the token everywhere
+  const authBW = path.join(wsRoot, b, "auth.json");
+  const auW = JSON.parse(readFileSync(authBW, "utf8"));
+  writeFileSync(authBW, JSON.stringify({ ...auW, epoch: auW.epoch + 1 }), { mode: 0o600 });
+  await new Promise((r) => setTimeout(r, 50));
+  const [rvCap, rvMcp] = [await ev("w-agent-1", "Bash"), await mcpCall(wTok, "align_list_goals")];
+  writeFileSync(authBW, JSON.stringify(auW), { mode: 0o600 });
+  await new Promise((r) => setTimeout(r, 50));
+  check("W6 after an epoch bump the token is refused: capture 401, MCP 401", rvCap.status === 401 && rvMcp.status === 401, `${rvCap.status} ${rvMcp.status}`);
+
   // A10 corrupt state
   const fileA = path.join(wsRoot, a, "state.json");
   writeFileSync(fileA, readFileSync(fileA, "utf8").slice(0, 200));

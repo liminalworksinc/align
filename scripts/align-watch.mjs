@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const ALIGN = process.env.ALIGN_URL || "http://localhost:3100";
+// ALIGN_AGENT_TOKEN (a workspace's agent token, Mode L): wake-ups come from that workspace instead of the default store.
+const AUTH = process.env.ALIGN_AGENT_TOKEN ? { authorization: `Bearer ${process.env.ALIGN_AGENT_TOKEN}` } : {};
 const WINDOW_MS = Number(process.env.ALIGN_WATCH_WINDOW_MS || 55 * 60 * 1000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -66,7 +68,7 @@ async function deliver(session, d) {
   try {
     await fetch(`${ALIGN}/api/directives/ack`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...AUTH },
       body: JSON.stringify({ session, event_id: d.event_id }),
       signal: AbortSignal.timeout(3000),
     });
@@ -81,7 +83,7 @@ async function viaStream(session, deadline) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), Math.max(0, deadline - Date.now()));
   try {
-    const res = await fetch(`${ALIGN}/api/directives/stream?session=${encodeURIComponent(session)}`, { signal: ctl.signal });
+    const res = await fetch(`${ALIGN}/api/directives/stream?session=${encodeURIComponent(session)}`, { headers: AUTH, signal: ctl.signal });
     if (!res.ok || !res.body) return;
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -109,7 +111,7 @@ async function viaStream(session, deadline) {
 async function viaPoll(session, until) {
   while (Date.now() < until) {
     try {
-      const r = await fetch(`${ALIGN}/api/directives?session=${encodeURIComponent(session)}`, { signal: AbortSignal.timeout(3000) });
+      const r = await fetch(`${ALIGN}/api/directives?session=${encodeURIComponent(session)}`, { headers: AUTH, signal: AbortSignal.timeout(3000) });
       const j = await r.json();
       if (j.pending?.length) await deliver(session, j.pending[0]);
     } catch {

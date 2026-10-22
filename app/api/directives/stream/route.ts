@@ -1,3 +1,4 @@
+import { agentFrom } from "@/lib/agent-token";
 import { describeEvent, pendingFor, recipientsFor } from "@/lib/directives";
 import { bus, listening, type AuthorityEvent } from "@/lib/events";
 import { assertLocal } from "@/lib/local-guard";
@@ -13,6 +14,10 @@ export async function GET(req: Request) {
     return Response.json({ error: (e as HttpError).message }, { status: 403 });
   }
   const sid = new URL(req.url).searchParams.get("session") || "*";
+  // With an agent token, this stream serves that workspace's session only: the wire view (*) is the default store's.
+  const agent = agentFrom(req);
+  if (agent && sid === "*") return Response.json({ error: "An agent token streams one session, not the wire view" }, { status: 400 });
+  const ws = agent?.ws;
   const enc = new TextEncoder();
   let cleanup = () => {};
 
@@ -31,7 +36,7 @@ export async function GET(req: Request) {
       const sent = new Set<string>();
       const flush = async () => {
         if (sid === "*") return;
-        for (const d of pendingFor(await readState(), sid)) {
+        for (const d of pendingFor(await readState(ws), sid)) {
           if (sent.has(d.event_id)) continue;
           sent.add(d.event_id);
           send("directive", d);
@@ -41,6 +46,7 @@ export async function GET(req: Request) {
       await flush();
 
       const onAuthority = async (e: AuthorityEvent) => {
+        if (e.ws !== ws) return; // another store's event: a workspace's never reaches the default store, and back
         if (sid === "*") {
           const st = await readState();
           const all = recipientsFor(st, e.event_id);

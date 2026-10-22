@@ -11,9 +11,11 @@ export async function POST(req: Request, ctx: RouteContext<"/api/proposals/[id]/
     const b = await bodyFor(req, who.ws);
     void b;
     const out = await who.mutate((s) => ratifyProposal(s, who, id, b));
-    // The authority stream serves the default store, the one agents read over MCP: Northstar, or a /setup scenario,
-    // whose directive names no command (lib/directives.ts). A workspace approval emits nothing: no agent can reach it.
-    if (who.ws === "northstar") emitAuthority({ event_id: `accept:${id}`, kind: "ratify", at: new Date().toISOString() });
+    // Every approval wakes the agents that read the same store: the default one (Northstar, or a /setup scenario)
+    // or, tagged with its id, a workspace whose agents connect with an agent token (Mode L). The default store's
+    // event keeps its shape; the wire view (?session=*) never shows a workspace's events.
+    const at = new Date().toISOString();
+    emitAuthority({ event_id: `accept:${id}`, kind: "ratify", at, ...(who.ws !== "northstar" ? { ws: who.ws } : {}) });
     return out;
   });
 }

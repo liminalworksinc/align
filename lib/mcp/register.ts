@@ -6,6 +6,7 @@ import { activeRegistry, currentGoals } from "../registry";
 import { readState } from "../store";
 import { leadOf, poss, scenarioOf, teamOf } from "../labels";
 import type { AgentSession, AppState, Owner, SessionMapping } from "../types";
+import type { WsId } from "../workspace";
 
 // Read-only MCP surface for Align. Every tool reads via readState() and never mutates.
 
@@ -20,6 +21,12 @@ const pushedBy = (s: AppState) => (scenarioOf(s) === "custom" ? leadOf(s, "ceo")
 const OUTCOME_NOTE = "Company outcome is not verified by this record.";
 const READ_ONLY = { readOnlyHint: true, idempotentHint: true, openWorldHint: false } as const;
 const PROMPT_MAX = 200;
+
+/** The store this caller may read: its agent token's workspace, else the default store (ALIGN_MCP_TOKEN). */
+function storeOf(ctx: ServerContext): WsId {
+  const ws = ctx.http?.authInfo?.extra?.ws;
+  return typeof ws === "string" ? (ws as WsId) : "northstar";
+}
 
 /** Defense in depth: withMcpAuth already rejected unauthenticated requests. */
 function requireRead(ctx: ServerContext) {
@@ -388,7 +395,7 @@ export function registerAlign(server: McpServer) {
     },
     async (_args, ctx) => {
       requireRead(ctx);
-      const out = listGoals(await readState());
+      const out = listGoals(await readState(storeOf(ctx)));
       const lines = out.goals.map((g) => `- ${g.team} ${g.version} (${g.goal_id}): ${g.objective}`);
       const push = out.latest_push ? `latest push ${out.latest_push.version} at ${out.latest_push.pushed_at} by ${out.latest_push.pushed_by}` : "no Leadership push yet";
       return result(out, `${out.org}: ${out.goals.length} current goals (registry ${out.registry_version}, ${push}).\n${lines.join("\n")}`);
@@ -407,7 +414,7 @@ export function registerAlign(server: McpServer) {
     },
     async (_args, ctx) => {
       requireRead(ctx);
-      const s = await readState();
+      const s = await readState(storeOf(ctx));
       if (scenarioOf(s) === "custom") {
         const { agreement, ...rest } = acceptedPlan(s);
         const a = agreement!;
@@ -450,7 +457,7 @@ export function registerAlign(server: McpServer) {
     },
     async ({ session_id }, ctx) => {
       requireRead(ctx);
-      const out = workMap(await readState(), session_id);
+      const out = workMap(await readState(storeOf(ctx)), session_id);
       const summary = out.query
         ? out.total_sessions
           ? (() => {
@@ -476,7 +483,7 @@ export function registerAlign(server: McpServer) {
     },
     async ({ proposal_id }, ctx) => {
       requireRead(ctx);
-      const s = await readState();
+      const s = await readState(storeOf(ctx));
       const out = decisionRecord(s, proposal_id);
       const r = out.record;
       // A custom plan is inline text with no sandbox, so its record names no Sparta runs.
@@ -505,7 +512,7 @@ export function registerAlign(server: McpServer) {
     },
     async ({ session_id }, ctx) => {
       requireRead(ctx);
-      const out = directives(await readState(), session_id);
+      const out = directives(await readState(storeOf(ctx)), session_id);
       const head = out.session_id
         ? out.session_found
           ? `${out.directives.length} pending directive(s) for ${out.session_id}${out.directives.length ? `: ${out.directives.map((d) => d.title).join("; ")}` : ""}.`

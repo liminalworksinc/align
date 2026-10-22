@@ -2,8 +2,9 @@ import path from "node:path";
 import { handle } from "@/lib/http";
 import { scheduleMapping } from "@/lib/mapper";
 import { markActed } from "@/lib/directives";
-import { hasCaptureConsent, HttpError, mutate, now, readState } from "@/lib/store";
-import type { AgentSession, SessionOriginKind } from "@/lib/types";
+import { agentFrom } from "@/lib/agent-token";
+import { hasCaptureConsent, HttpError, mutate, mutateWs, now, readState } from "@/lib/store";
+import type { AgentSession, AppState, SessionOriginKind } from "@/lib/types";
 
 // Ingest for local agent hooks (scripts/align-capture.mjs). No session cookie: hooks run on this machine.
 // Browsers always send Origin on cross-site POSTs, so any non-localhost Origin is refused.
@@ -152,15 +153,16 @@ export async function POST(req: Request) {
     const filePath = clean(ev.file_path);
     const id = `${harness}:${sessionId}`;
 
-    // B1-1: no consent record for this harness and repo means 403, and nothing is written or mapped.
+    // An agent token routes the event to its own workspace (Mode L); the token is that repo's capture consent.
+    // A token that no longer verifies (revoked by an epoch bump, or its workspace deleted) is refused outright,
+    // never treated as a Northstar event.
+    const agent = agentFrom(req);
+    if (!agent && /^Bearer\s+agt\./i.test(req.headers.get("authorization") ?? "")) throw new HttpError(401, "This agent token is no longer valid");
     const consentRepo = repo || cwdName;
-    if (!hasCaptureConsent(await readState(), harness, consentRepo)) {
-      throw new HttpError(403, "No capture consent for this harness and repo");
-    }
+    if (agent && (harness !== agent.harness || consentRepo !== agent.repo))
+      throw new HttpError(403, `This agent token is for ${agent.harness} in ${agent.repo}`);
 
-    const scenario = await mutate((s) => {
-      // Re-checked under the write lock so a revoke that lands in between still wins. Throwing here writes nothing.
-      if (!hasCaptureConsent(s, harness, consentRepo)) throw new HttpError(403, "No capture consent for this harness and repo");
+    const upsert = (s: AppState) => {
       const at = now();
       let sess = s.sessions.find((x) => x.id === id);
       if (!sess) {
@@ -207,6 +209,20 @@ export async function POST(req: Request) {
         sess.origin = originFor(texts, sess.branch);
       }
       return { scenario: s.scenario };
+    };
+    if (agent) {
+      await mutateWs(agent.ws, upsert); // custom workspaces are never mapped
+      return { ok: true, id };
+    }
+
+    // B1-1: no consent record for this harness and repo means 403, and nothing is written or mapped.
+    if (!hasCaptureConsent(await readState(), harness, consentRepo)) {
+      throw new HttpError(403, "No capture consent for this harness and repo");
+    }
+    const scenario = await mutate((s) => {
+      // Re-checked under the write lock so a revoke that lands in between still wins. Throwing here writes nothing.
+      if (!hasCaptureConsent(s, harness, consentRepo)) throw new HttpError(403, "No capture consent for this harness and repo");
+      return upsert(s);
     });
 
     // B1-4: the external model is off unless ALIGN_MAPPER_EXTERNAL=1 (scheduleMapping also checks); custom scenarios schedule nothing.
