@@ -59,7 +59,24 @@ For a scenario set up at `/setup` (Mode L), the same tools answer with that comp
 - Its `run_command` says there is none, because a custom plan is an agreement between teams, not a script.
 - Until an approval exists, `plan` is `none`.
 
-**Waking the agent.** When the owning team approves, Align wakes every agent session that has used the align tools since the scenario was set up. The directive gives the agreed measure and conditions, quoted as text people wrote, and names no command. Sessions from before the setup are never woken. Workspaces (`/w/...`) have no agent connection.
+**Waking the agent.** When the owning team approves, Align wakes every agent session that has used the align tools since the scenario was set up. The directive gives the agreed measure and conditions, quoted as text people wrote, and names no command. Sessions from before the setup are never woken.
+
+## A workspace (`/w/<id>`, Mode L): agent tokens
+
+A workspace connects its agents with its own token, not the server's `ALIGN_MCP_TOKEN`:
+- **Minting.** The workspace's leadership calls `POST /api/workspaces/agent-token` with `{"harness":"claude-code","repo":"<repo folder name>"}` and gets `agt....` back, once. Minting records that repo's capture consent and an audit row, with the harness and repo only.
+- **Capture.** With the token as `Authorization: Bearer`, capture events for that repo go into the workspace. Another repo gets 403.
+- **MCP.** The token reads only that workspace, for every tool.
+- **Wake-ups.** Poll, ack and stream all use the workspace. Its approvals never reach the default store, and the default store's never reach it.
+- **Revocation.** The token carries the workspace's passcode epoch, so bumping the epoch revokes it. A deleted workspace's token fails too.
+- **Hosted mode.** None of this exists when hosted: the routes are 404 and tokens are never accepted.
+
+`scripts/agent-session.sh` does all of it:
+
+```bash
+ALIGN_URL=http://127.0.0.1:3100 ALIGN_WORKSPACE=<w_id> ALIGN_WORKSPACE_PASSCODE=<its leadership passcode> \
+  scripts/agent-session.sh ~/path/to/repo "<prompt>"
+```
 
 **Starting an agent session:**
 
