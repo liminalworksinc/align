@@ -914,6 +914,18 @@ try {
     dProduct.status === 403 && dLead.status === 200 && dLead.json?.removed_consents === 1 && dLead.json?.purged_sessions >= 1 && rvCap.status === 401 && rvMcp.status === 401 && rvPoll.status === 401 && rvOther.status === 401 && !bAfterD.sessions.some((x) => x.repo === W_REPO),
     `${dProduct.status} ${dLead.status} ${dLead.text} ${rvCap.status} ${rvMcp.status} ${rvPoll.status} ${rvOther.status}`,
   );
+  // Sean's #6 review fix 5: the watcher (the agent's wake-up hook) with a refused token says so on one stderr line and
+  // exits 1, instead of polling the 401 silently until its window ends.
+  const watch = spawnSync("node", ["scripts/align-watch.mjs"], {
+    cwd: ROOT, encoding: "utf8", timeout: 15000, input: JSON.stringify({ session_id: "w-agent-1", cwd: ROOT }),
+    env: { ...process.env, ALIGN_URL: BASE, ALIGN_CAPTURE: "1", ALIGN_AGENT_TOKEN: wTok, ALIGN_WATCH_WINDOW_MS: "60000" },
+  });
+  const watchLines = (watch.stderr ?? "").trim().split("\n").filter(Boolean);
+  check(
+    "W6 the watcher with a revoked token exits 1 at once with one stderr line naming the 401",
+    watch.status === 1 && watchLines.length === 1 && /refused this session's token \(401\)/.test(watchLines[0]),
+    `status=${watch.status} signal=${watch.signal} stderr=${JSON.stringify(watch.stderr)}`,
+  );
   // H1: Restart revokes agents. A token that captured before Restart is refused after it, and must be minted again.
   const rMint = await call("POST", "/api/workspaces/agent-token", { cookie: sb.leadership, body: { harness: "claude-code", repo: W_REPO } });
   const rAuth = { authorization: `Bearer ${rMint.json?.token}` };
