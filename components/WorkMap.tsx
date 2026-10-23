@@ -222,7 +222,8 @@ function Lane({ entry, items, ctx }: { entry: RegistryEntry; items: { session: A
   );
 }
 
-export function WorkMap(props: ViewProps) {
+/** Northstar only: captured agent sessions in one lane per goal. Polls /api/mappings while mounted. */
+function AgentLanes(props: ViewProps) {
   const { s } = props;
   const L = labelsFor(s);
   const [remote, setRemote] = useState<MappingsResponse | null>(null);
@@ -299,9 +300,6 @@ export function WorkMap(props: ViewProps) {
   const sessions = s.sessions ?? [];
 
   return (
-    <div className="mx-auto flex max-w-[1600px] flex-col gap-8">
-      <OldPlanWork s={s} />
-      <GoalCascade s={s} L={L} />
       <section aria-label="Where AI agent work is going">
       <h2 className="text-[22px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Where AI agent work is going</h2>
       <p className="mb-5 max-w-4xl text-[15px] text-zinc-500">
@@ -335,6 +333,19 @@ export function WorkMap(props: ViewProps) {
         </div>
       )}
       </section>
+  );
+}
+
+/** v6 Work: the old-plan sweep and the goal cascade; Northstar adds the agent lanes. Custom scenarios have no session
+ *  capture or goal linking (and /api/mappings refuses workspace sessions), so they never mount the lanes or poll. */
+export function WorkMap(props: ViewProps) {
+  const { s } = props;
+  const L = labelsFor(s);
+  return (
+    <div className="mx-auto flex max-w-[1600px] flex-col gap-8">
+      <OldPlanWork s={s} />
+      <GoalCascade s={s} L={L} />
+      {L.northstar && <AgentLanes {...props} />}
     </div>
   );
 }
