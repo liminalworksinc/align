@@ -19,7 +19,7 @@ import { agreementStatus } from "@/components/launch";
 import { accepted, changedToday, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, SESSION_ENDED, useAlign, type Selection } from "@/components/useAlign";
-import { ROLE_SWITCH, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { NO_ANSWER_HOSTED, NO_ANSWER_WORKSPACE_LOCAL, ROLE_SWITCH, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
 
 // v6 rail (LIM-2424). One nav for teams and leadership; leadership also keeps its Company goal entry (OrgView).
 // `also` lists the views a nav item stays highlighted for (the record under Decisions, a review under Your turn).
@@ -114,8 +114,8 @@ function SwitchTeam({ L, current, onPick }: { L: Labels; current: string; onPick
   );
 }
 
-function Login({ onDone, L, workspace, ended, elsewhere, initialRole }: { onDone: () => void; L?: Labels; workspace?: string; ended?: boolean; elsewhere?: string | null; initialRole?: Role }) {
-  if (workspace) return <WorkspaceLogin workspace={workspace} onDone={onDone} ended={ended} elsewhere={elsewhere} initialRole={initialRole} />;
+function Login({ onDone, L, workspace, hosted, ended, elsewhere, initialRole }: { onDone: () => void; L?: Labels; workspace?: string; hosted?: boolean; ended?: boolean; elsewhere?: string | null; initialRole?: Role }) {
+  if (workspace) return <WorkspaceLogin workspace={workspace} hosted={hosted} onDone={onDone} ended={ended} elsewhere={elsewhere} initialRole={initialRole} />;
   return <NorthstarLogin onDone={onDone} L={L} elsewhere={elsewhere} initialRole={initialRole} />;
 }
 
@@ -140,7 +140,7 @@ function Elsewhere({ id }: { id: string | null | undefined }) {
   );
 }
 
-function WorkspaceLogin({ workspace, onDone, ended, elsewhere, initialRole }: { workspace: string; onDone: () => void; ended?: boolean; elsewhere?: string | null; initialRole?: Role }) {
+function WorkspaceLogin({ workspace, hosted, onDone, ended, elsewhere, initialRole }: { workspace: string; hosted?: boolean; onDone: () => void; ended?: boolean; elsewhere?: string | null; initialRole?: Role }) {
   const [info, setInfo] = useState<LoginInfo | null>(null);
   const [missing, setMissing] = useState<"gone" | "unreachable" | null>(null);
   const [attempt, setAttempt] = useState(0); // Try again re-runs the login-info fetch
@@ -178,7 +178,7 @@ function WorkspaceLogin({ workspace, onDone, ended, elsewhere, initialRole }: { 
             <p>This workspace no longer exists.</p>
           ) : (
             <>
-              <p className="mb-4">Couldn’t reach this workspace. Check that Align is running, then try again.</p>
+              <p className="mb-4">{hosted ? NO_ANSWER_HOSTED : NO_ANSWER_WORKSPACE_LOCAL}</p>
               <Button onClick={() => setAttempt((n) => n + 1)}>Try again</Button>
             </>
           )}
@@ -305,8 +305,9 @@ function NorthstarLogin({ onDone, L, elsewhere, initialRole }: { onDone: () => v
   );
 }
 
-/** The app. `workspace` is the /w/<id> slug for a custom workspace; omitted for Northstar at /. */
-export default function Home({ workspace }: { workspace?: string }) {
+/** The app. `workspace` is the /w/<id> slug for a custom workspace; omitted for Northstar at /. `hosted` comes from
+ *  the server render (HOSTED=1), so the sign-in screen can word a failed fetch for testers. */
+export default function Home({ workspace, hosted }: { workspace?: string; hosted?: boolean }) {
   const { state, me, error, setError, loadError, meError, loadMe, act, mark, refresh, ended, elsewhere } = useAlign(workspace);
   const [nextRole, setNextRole] = useState<Role | null>(null); // the team chosen in Switch team, until it signs in
   const [view, setView] = useState<View>("turn");
@@ -364,6 +365,7 @@ export default function Home({ workspace }: { workspace?: string }) {
       <Login
         L={state ? labelsFor({ simulations: [], ...state }) : undefined}
         workspace={workspace}
+        hosted={hosted}
         ended={ended}
         elsewhere={elsewhere}
         initialRole={nextRole ?? undefined}
