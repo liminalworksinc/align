@@ -517,6 +517,9 @@ export default function Home({ workspace }: { workspace?: string }) {
       <header className={custom ? CUSTOM_HEADER : "col-span-2 flex items-center gap-4 border-b border-zinc-200 px-6"}>
         <div className="shrink-0 whitespace-nowrap text-[15px] text-zinc-500">
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
+          {custom && state.scenario_config?.company_note && (
+            <div className="whitespace-normal text-[13px] text-zinc-500">{state.scenario_config.company_note}</div>
+          )}
         </div>
         {custom && (
           <span className="rounded-full border border-violet-700 bg-violet-50 px-3 py-1 text-[16px] font-semibold text-violet-700">

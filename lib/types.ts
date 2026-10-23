@@ -296,6 +296,7 @@ export interface ScenarioConfig {
   deferred_work_item_id?: string;
   plan_id: string;
   plan_version: number;
+  company_note?: string; // shown under the company name in the custom header (setup input company_note)
 }
 
 // B1-6: /api/state is a per-role allowlist projection (lib/flow.ts viewFor), never a spread of AppState.

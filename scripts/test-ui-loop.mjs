@@ -149,6 +149,10 @@ async function main() {
     check("U2 both teams sign in, each in its own browser profile", (await signInUi(A, ASKING, PASSCODES.product)) && (await signInUi(O, OWNING, PASSCODES.security)));
     const home = await text(A);
     check("U2 the asking team's home has no Northstar copy", !LEAK.test(home), leakIn(home));
+    if (fixture.company_note) {
+      const head = await A.evaluate(() => document.querySelector("header")?.innerText ?? "");
+      check("CN4 the header shows the company note under the company name", head.includes(fixture.company) && head.indexOf(fixture.company_note) > head.indexOf(fixture.company), head.slice(0, 300));
+    }
 
     // Propose (with no proposal yet, Proposals opens the composer directly)
     await click(A, "Proposals");
