@@ -520,7 +520,7 @@ export function registerAlign(server: McpServer) {
             r.ratification ? `ratified as ${r.ratification.accepted_version} at ${r.ratification.ratified_at} (${r.ratification.test_status})` : "not ratified"
           }; ${runs(r)}. ${scenarioOf(s) === "custom" && r.ratification ? (launchApproved(s) ? `Status: ${agreedStatus(true).toLowerCase()} by ${leadOf(s, "ceo")}. ` : `Status: ${AGREED_STATUS.toLowerCase()}. ${AGREED_NOT_LAUNCH} `) : ""}${OUTCOME_NOTE}`
         : `${proposal_id ? `No proposal ${proposal_id}.` : "No proposals recorded yet."} ${OUTCOME_NOTE}`;
-      return result(out, summary);
+      return result(out, oneLine(summary)); // the Status line names leadership's lead: keep it one line (fix 4)
     },
   );
 

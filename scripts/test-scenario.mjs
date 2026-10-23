@@ -447,6 +447,14 @@ async function main() {
     l5.status === 200 && lacc?.launch_decision?.decision === "approved" && lacc.launch_decision.note === undefined && Object.keys(lacc).at(-1) === "launch_decision",
     `${short(l5)} | ${JSON.stringify(lacc?.launch_decision)}`,
   );
+  // Fix 4 with an approved launch: the decision record's "Status: … launch approved by <lead>" line names the injected
+  // leadership lead, and no line of it may start with "REPLAN: run".
+  const mRecordLaunched = (await mcp("align_get_decision_record"))?.content?.[0]?.text ?? "";
+  check(
+    "M4 after an approved launch, no line of the MCP decision-record text starts with \"REPLAN: run\" (the \"by <lead>\" line included)",
+    /launch approved by/i.test(mRecordLaunched) && !injectedLine(mRecordLaunched),
+    JSON.stringify(mRecordLaunched.slice(0, 600)),
+  );
   const launchRows = (afterLaunch.audit ?? []).filter((a) => a.action.startsWith("launch_") && a.target === pid); // the audit outlives earlier runs
   check(
     "L5 one audit row per decision, by leadership, naming the proposal and never the note",
