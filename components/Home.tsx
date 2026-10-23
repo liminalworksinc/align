@@ -687,7 +687,7 @@ export default function Home({ workspace }: { workspace?: string }) {
               role="dialog"
               aria-modal="true"
             >
-              {drawer === "brief" && <BriefDrawer {...props} onClose={closeDrawer} />}
+              {drawer === "brief" && <BriefDrawer {...props} onClose={closeDrawer} fromGoals={view === "goals"} />}
               {drawer === "scenario" && <ScenarioDrawer {...props} onClose={closeDrawer} />}
             </div>
           </div>

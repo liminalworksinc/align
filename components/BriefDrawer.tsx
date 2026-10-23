@@ -18,8 +18,9 @@ const HINT: Record<BriefOption["rank"], string> = {
 
 const truthTone = (state: string): PillTone => (state === "UNKNOWN" ? "amber" : state === "PROPOSED" || state === "INFERRED" ? "violet" : "grey");
 
-export function BriefDrawer(props: ViewProps & { onClose: () => void }) {
-  const { s, me, onClose, mark } = props;
+/** `fromGoals`: opened over the Goals view, so closing returns there and the back link says so. */
+export function BriefDrawer(props: ViewProps & { onClose: () => void; fromGoals?: boolean }) {
+  const { s, me, onClose, mark, fromGoals } = props;
   const L = labelsFor(s);
   const b = s.brief;
   const [choice, setChoice] = useState<BriefOption["rank"]>("P0");
@@ -60,7 +61,13 @@ export function BriefDrawer(props: ViewProps & { onClose: () => void }) {
     <div aria-labelledby="brief-title" className="flex h-full w-full flex-col bg-[var(--al-bg)]">
       <header className="flex items-center gap-2.5 border-b border-zinc-200 px-6 py-4">
         <Button kind="ghost" onClick={onClose}>
-          <span aria-hidden>←</span> Goals
+          {fromGoals ? (
+            <>
+              <span aria-hidden>←</span> Goals
+            </>
+          ) : (
+            "Close"
+          )}
         </Button>
         <span className="ml-auto">
           <Pill tone="violet">Suggestion · you choose</Pill>
@@ -210,7 +217,7 @@ export function BriefDrawer(props: ViewProps & { onClose: () => void }) {
           {L.northstar ? HINT[choice] : `Not sandbox-tested. ${L.team.product} can still propose the change; ${L.team.security} approves it knowing that.`}
         </span>
         {L.northstar && (
-          <Button kind="secondary" onClick={() => props.openDrawer("scenario")}>
+          <Button kind="secondary" onClick={() => props.go("studio")}>
             Test in Scenario Studio
           </Button>
         )}

@@ -206,7 +206,7 @@ await press(P, "See ways forward");
 await focus(P, "Sparta: current plan FAILS, candidate PASSES the same checks");
 await press(P, "Test in Scenario Studio");
 await sleep(HOLD * 1.5);
-await press(P, "Add test results to the proposal");
+await press(P, "Attach to proposal");
 await focus(P, "Product sends the proposal, pinned to the tested plan");
 await press(P, "Send proposal to");
 await focus(S, "Security reviews the proposal to its own goal");
