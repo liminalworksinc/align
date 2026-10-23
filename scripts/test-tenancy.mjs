@@ -347,6 +347,7 @@ try {
   const a2h = await call("POST", "/api/timer", { cookie: sa.product, body: { action: "ceo_change_viewed" }, headers: { "x-align-workspace": b } });
   const a2hUnchanged = treeHash(path.join(wsRoot, a)) === nA0 && treeHash(path.join(wsRoot, b)) === nB0;
   check("M7 a write whose page names another workspace (x-align-workspace) -> 409, A and B untouched", a2h.status === 409 && a2hUnchanged, `${a2h.status} unchanged=${a2hUnchanged}`);
+  check("L409 the stale-tab 409 carries code workspace_mismatch (and its message)", a2h.json?.code === "workspace_mismatch" && /another workspace/.test(a2h.json?.error ?? ""), a2h.text);
   const a2 = await call("POST", `/api/timer?workspace=${b}`, { cookie: sa.product, body: { action: "ceo_change_viewed", workspace: b }, headers: { "x-align-workspace": a } });
   check("A2 workspace in body/query ignored: the write succeeds in A, B untouched", a2.status === 200 && treeHash(path.join(wsRoot, a)) !== nA0 && treeHash(path.join(wsRoot, b)) === nB0, `${a2.status} A changed=${treeHash(path.join(wsRoot, a)) !== nA0}`);
   const meA = await call("GET", `/api/session?workspace=${b}`, { cookie: sa.product });
@@ -626,6 +627,158 @@ try {
       await browser.close();
     }
   } else check("U browser checks need Chrome (CHROME_PATH)", false, CHROME);
+
+  // ---- L409: only the stale-tab 409 reloads the view; every other 409 shows its reason (Sean, PR #6 review) ----
+  // Before: useAlign treated ANY 409 as "signed in elsewhere", cleared the view and swallowed ordinary conflicts.
+  // The page's 1.5 s poll is paused (a wrapper on setInterval, flipped by window.__freeze) so a click lands on the
+  // view as it was, as a click inside one poll interval does; act()'s own refresh still runs.
+  if (existsSync(CHROME)) {
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    const freezable = () => {
+      const orig = window.setInterval.bind(window);
+      window.setInterval = (fn, ms, ...rest) => orig(() => { if (!window.__freeze) fn(); }, ms, ...rest);
+    };
+    const textOf = (page) => page.evaluate(() => document.body.innerText).catch(() => "");
+    const clickBtn = async (page, label, sel = "button") =>
+      waitFor(
+        () =>
+          page
+            .evaluate(
+              (label, sel) => {
+                const el = [...document.querySelectorAll(sel)].find((x) => x.offsetParent !== null && !x.disabled && x.innerText.replace(/\s+/g, " ").includes(label));
+                if (!el) return false;
+                el.scrollIntoView({ block: "center" });
+                el.click();
+                return true;
+              },
+              label,
+              sel,
+            )
+            .catch(() => false),
+        45000,
+      );
+    const fillIn = (page, label, value) =>
+      waitFor(
+        () =>
+          page
+            .evaluate(
+              (label, value) => {
+                const l = [...document.querySelectorAll("label")].find((x) => x.offsetParent !== null && x.innerText.replace(/\s+/g, " ").includes(label));
+                const el = l?.querySelector("textarea, input:not([type=checkbox]):not([type=radio])");
+                if (!el) return false;
+                const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                Object.getOwnPropertyDescriptor(proto, "value").set.call(el, value);
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                return true;
+              },
+              label,
+              value,
+            )
+            .catch(() => false),
+        45000,
+      );
+    const pageSignIn = (page, body) =>
+      page.evaluate((b) => fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.status), body).catch(() => 0);
+    try {
+      // (a) Northstar: Security has the proposal open with Approve showing; Security in a second window asks for changes;
+      // the first window's Approve now gets the ordinary 409. Its reason must show, with the view kept and no reload.
+      const nsReset = await call("POST", "/api/reset", { cookie: nsR.leadership, body: { confirm: "reset" } });
+      const nsPush = await call("POST", "/api/org/push", { cookie: nsR.leadership, body: {} });
+      const nsProp = await call("POST", "/api/proposals", {
+        cookie: nsR.product,
+        body: { plan_id: "p-beta", plan_version: 1, simulation_refs: [], proposed_measure_text: "L409MARK beta incidents triaged within 24h", rationale: "L409 rationale", reciprocal_commitment: "L409 Product tags beta issues" },
+      });
+      const nsPid = nsProp.json?.id;
+      const w1ctx = await browser.createBrowserContext();
+      const w2ctx = await browser.createBrowserContext();
+      const w1 = await w1ctx.newPage();
+      const w2 = await w2ctx.newPage();
+      await w1.setViewport({ width: 1440, height: 900 });
+      await w1.evaluateOnNewDocument(freezable);
+      await w1.goto(`${BASE}/`, { waitUntil: "domcontentloaded", timeout: 90000 });
+      const s1 = await pageSignIn(w1, { role: "security", passcode: "security-demo" });
+      await w1.reload({ waitUntil: "domcontentloaded" });
+      await w2.goto(`${BASE}/`, { waitUntil: "domcontentloaded", timeout: 90000 });
+      const s2 = await pageSignIn(w2, { role: "security", passcode: "security-demo" });
+      await clickBtn(w1, "Proposals");
+      const approveShown = await waitFor(async () => (await textOf(w1)).includes("Approve the change to my goal"), 45000);
+      await w1.evaluate(() => {
+        const box = [...document.querySelectorAll("label")].find((l) => /without a sandbox test/.test(l.innerText))?.querySelector("input[type=checkbox]");
+        if (box && !box.checked) box.click();
+      });
+      await w1.evaluate(() => {
+        window.__freeze = true;
+        window.__l409 = "kept";
+      });
+      const counter = await w2.evaluate(
+        (pid) =>
+          fetch(`/api/proposals/${pid}/counter`, { method: "POST", headers: { "content-type": "application/json", "x-align-workspace": "northstar" }, body: JSON.stringify({ proposed_measure_text: "L409MARK triaged within 24h; P0 within 4h", rationale: "L409 tighten", changes_plan: false }) }).then((r) => r.status),
+        nsPid,
+      );
+      const navs = [];
+      w1.on("framenavigated", (f) => f === w1.mainFrame() && navs.push(f.url()));
+      await clickBtn(w1, "Approve the change to my goal");
+      const NEEDS_ACK = "Product needs to accept your changes before you can approve";
+      const shown = await waitFor(async () => (await textOf(w1)).includes(NEEDS_ACK), 15000);
+      await new Promise((r) => setTimeout(r, 1500));
+      const after = await textOf(w1);
+      const marker = await w1.evaluate(() => window.__l409).catch(() => null);
+      const nsState = (await call("GET", "/api/state", { cookie: nsR.security })).json;
+      check(
+        "L409 (a) Northstar: Security approves in one window after asking for changes in another -> the 409 reason shows on screen, the view stays, no reload",
+        nsReset.status === 200 && nsPush.status === 200 && !!nsPid && s1 === 200 && s2 === 200 && approveShown && counter === 200 && shown && after.includes(NEEDS_ACK) && after.includes("L409MARK") && marker === "kept" && navs.length === 0 && nsState?.proposals?.find((x) => x.id === nsPid)?.state === "COUNTERED",
+        JSON.stringify({ reset: nsReset.status, push: nsPush.status, nsPid, s1, s2, approveShown, counter, shown, marker, navs, state: nsState?.proposals?.find((x) => x.id === nsPid)?.state, page: after.slice(0, 300) }),
+      );
+      // API: that ordinary 409 keeps Northstar's body exactly ({error} only, no code)
+      const plain409 = await call("POST", `/api/proposals/${nsPid}/accept`, { cookie: nsR.security, body: { rationale: "x" }, headers: { "x-align-workspace": "northstar" } });
+      check("L409 an ordinary 409 body is exactly {error}, no code", plain409.status === 409 && JSON.stringify(Object.keys(plain409.json ?? {})) === '["error"]' && plain409.json.error === NEEDS_ACK, plain409.text);
+      await w1ctx.close();
+      await w2ctx.close();
+      await call("POST", "/api/reset", { cookie: nsR.leadership, body: { confirm: "reset" } });
+
+      // (b) the stale tab: a /w page for workspace C whose browser has since signed in to Northstar. Its next write gets
+      // 409 workspace_mismatch, and the page drops C's view and shows the Elsewhere notice, as before.
+      const C = await create(marked("CMARK"));
+      const c = C.json?.workspace?.id;
+      const tctx = await browser.createBrowserContext();
+      const t = await tctx.newPage();
+      await t.setViewport({ width: 1440, height: 900 });
+      await t.evaluateOnNewDocument(freezable);
+      await t.goto(`${BASE}/w/${c}`, { waitUntil: "domcontentloaded", timeout: 90000 });
+      const tIn = await pageSignIn(t, { workspace: c, role: "product", passcode: C.json?.passcodes?.product });
+      await t.reload({ waitUntil: "domcontentloaded" });
+      const sawC = await waitFor(async () => (await textOf(t)).includes("CMARK"), 45000);
+      await clickBtn(t, "Proposals");
+      if (!(await waitFor(async () => (await textOf(t)).includes("Send proposal to"), 10000))) await clickBtn(t, "Propose a change");
+      const owning = marked("CMARK").owning.team;
+      const asking = marked("CMARK").asking.team;
+      const f1 = await fillIn(t, `New target for ${owning}`, "L409 stale-tab target");
+      const f2 = await fillIn(t, "Why", "L409 why");
+      const f3 = await fillIn(t, `What ${asking} will do in return`, "L409 in return");
+      await t.evaluate(() => {
+        window.__freeze = true;
+      });
+      const moved = await pageSignIn(t, { role: "product", passcode: "product-demo" }); // the cookie now names Northstar
+      const mismatch = [];
+      t.on("response", async (r) => {
+        if (r.request().method() === "POST" && new URL(r.url()).pathname === "/api/proposals") mismatch.push({ status: r.status(), body: await r.json().catch(() => null) });
+      });
+      await clickBtn(t, "Send proposal to");
+      const told = await waitFor(async () => /This browser is signed in to the Align demo/.test(await textOf(t)), 15000);
+      const tText = await textOf(t);
+      const cState = JSON.parse(readFileSync(path.join(wsRoot, c, "state.json"), "utf8"));
+      check(
+        "L409 (b) stale tab: its write gets 409 workspace_mismatch, the page drops the workspace view and shows the Elsewhere notice",
+        C.status === 201 && tIn === 200 && sawC && f1 && f2 && f3 && moved === 200 && mismatch[0]?.status === 409 && mismatch[0]?.body?.code === "workspace_mismatch" && told && !tText.includes("L409 stale-tab target") && cState.proposals.length === 0,
+        JSON.stringify({ created: C.status, tIn, sawC, f: [f1, f2, f3], moved, mismatch, told, page: tText.slice(0, 300) }),
+      );
+      await tctx.close();
+    } catch (e) {
+      check("L409 browser checks ran", false, e.message);
+    } finally {
+      await browser.close();
+    }
+  } else check("L409 browser checks need Chrome (CHROME_PATH)", false, CHROME);
 
   // ---- W: an agent connected to a workspace (Mode L): token, capture, MCP and wake-ups stay in that workspace ----
   const W_REPO = "w-agent-repo";
