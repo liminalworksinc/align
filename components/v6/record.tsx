@@ -4,7 +4,7 @@
 import { useState, type ReactNode } from "react";
 import { poss, type Labels } from "@/lib/labels";
 import type { StateView } from "@/lib/types";
-import { fmtDuration, fmtTime } from "../ui";
+import { Button, fmtDuration, fmtTime } from "../ui";
 
 export type PillTone = "amber" | "violet" | "red" | "mint" | "grey" | "white";
 
@@ -67,11 +67,30 @@ export function RecordTabs({ tab, setTab }: { tab: RecordTab; setTab: (t: Record
   );
 }
 
-/** Header: the one status pill and the approval time, then the title. */
-export function RecordHeader({ pill, tone, at, title, children }: { pill: string; tone: PillTone; at?: string | null; title: string; children?: ReactNode }) {
+/** Header: the one status pill and the approval time, then the title. `onBack` shows "← Decisions". */
+export function RecordHeader({
+  pill,
+  tone,
+  at,
+  title,
+  onBack,
+  children,
+}: {
+  pill: string;
+  tone: PillTone;
+  at?: string | null;
+  title: string;
+  onBack?: () => void;
+  children?: ReactNode;
+}) {
   return (
     <div className="al-in flex flex-col gap-2">
       <div className="flex items-center gap-2.5">
+        {onBack && (
+          <Button kind="ghost" onClick={onBack}>
+            ← Decisions
+          </Button>
+        )}
         <span className="al-lbl !text-violet-700">Decision record</span>
         <span className="ml-auto">
           <Pill tone={tone}>{pill}</Pill>

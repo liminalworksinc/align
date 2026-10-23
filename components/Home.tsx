@@ -14,6 +14,7 @@ import { DecisionsView } from "@/components/DecisionsView";
 import { YourTurnView, waitingOnMe } from "@/components/YourTurnView";
 import { OrgView } from "@/components/OrgView";
 import { WorkMap } from "@/components/WorkMap";
+import { ScenarioStudio } from "@/components/v6/ScenarioStudio";
 import { agreementStatus } from "@/components/launch";
 import { accepted, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
@@ -665,7 +666,8 @@ export default function Home({ workspace }: { workspace?: string }) {
         {/* v6 routes: nav id → view. "decision" is the record route; "proposals" is the review a Your turn card opens. */}
         {view === "turn" && <YourTurnView {...props} />}
         {view === "goals" && <GoalsView {...props} />}
-        {(view === "studio" || view === "evidence") && L.sandbox && <EvidenceView {...props} />}
+        {view === "studio" && L.sandbox && <ScenarioStudio {...props} />}
+        {view === "evidence" && L.sandbox && <EvidenceView {...props} />}
         {view === "decisions" && <DecisionsView {...props} />}
         {view === "work" && <WorkMap {...props} />}
         {view === "decision" && <DecisionView {...props} />}

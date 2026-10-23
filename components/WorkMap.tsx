@@ -9,7 +9,6 @@ import { GoalCascade, OldPlanWork } from "./v6/OldPlanWork";
 
 const TEAM: Record<string, string> = { ceo: "Company", product: "Product", security: "Security" };
 const OWNER_ACTOR: Record<string, string> = { ceo: "leadership", product: "product", security: "security" };
-const ACTOR_NAME: Record<string, string> = { leadership: "CEO / Leadership", product: "Product Director", security: "Alex / Security Lead" };
 const HARNESS: Record<AgentSession["harness"], string> = { "claude-code": "Claude Code", codex: "Codex" };
 const LANE_MAX = 6;
 
@@ -89,7 +88,7 @@ function StatusBadges({ m, ctx }: { m: SessionMapping | undefined; ctx: Ctx }) {
         )}
       </div>
     );
-  const owner = ctx.goalOf(m.choice)?.owner_name ?? (m.confirmed_by ? ACTOR_NAME[m.confirmed_by] : "the goal owner");
+  const owner = ctx.goalOf(m.choice)?.owner_name ?? (m.confirmed_by ? (labelsFor(ctx.props.s).person as Record<string, string>)[m.confirmed_by] ?? m.confirmed_by : "the goal owner");
   return (
     <div className="flex flex-wrap gap-1.5">
       {m.state === "PROPOSED" && <Badge tone="violet">Suggested link · not confirmed</Badge>}

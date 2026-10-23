@@ -34,7 +34,7 @@ function depPill(s: StateView, L: Labels): { tone: PillTone; text: string } {
 function TeamNode({ props, L, owner, sel, dim, onPick }: { props: ViewProps; L: Labels; owner: "product" | "security"; sel: boolean; dim: boolean; onPick: () => void }) {
   const { s, me } = props;
   const g = currentGoal(s, owner);
-  if (!g) return <MissingGoal owner={owner} />;
+  if (!g) return <MissingGoal owner={L.northstar ? owner : L.team[owner]} />;
   const prior = priorVersion(s, g);
   const conflictId = conflictMeasureId(s);
   const open = depStage(s) === "open";
@@ -226,7 +226,7 @@ export function GoalsView(props: ViewProps) {
             </div>
           </button>
         ) : (
-          <MissingGoal owner="ceo" />
+          <MissingGoal owner={L.northstar ? "ceo" : L.team.ceo} />
         )}
       </div>
 

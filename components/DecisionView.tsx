@@ -273,7 +273,7 @@ function NorthstarRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: 
   ].join("\n");
   return (
     <div className="flex max-w-[960px] flex-col gap-[18px]">
-      <RecordHeader pill={status} tone="white" at={acc.ratified_at} title={title}>
+      <RecordHeader pill={status} tone="white" at={acc.ratified_at} title={title} onBack={() => props.go("decisions")}>
         <p className="max-w-[680px] text-[15px] text-zinc-700">Handling beta customers&apos; issues moves to the top of Security&apos;s list. The previous version is kept.</p>
       </RecordHeader>
       <RecordTabs tab={tab} setTab={setTab} />
@@ -517,7 +517,7 @@ function CustomRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: Acc
   ].join("\n");
   return (
     <div className="flex max-w-[960px] flex-col gap-[18px]">
-      <RecordHeader pill={status} tone={conditions ? "amber" : "white"} at={acc.ratified_at} title={title}>
+      <RecordHeader pill={status} tone={conditions ? "amber" : "white"} at={acc.ratified_at} title={title} onBack={() => props.go("decisions")}>
         <p className="max-w-[680px] text-[16px] text-zinc-700">
           The previous version is kept.
         </p>
