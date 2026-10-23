@@ -4,8 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { applyEvents, ensureSession, epochFor, recordRootTurn } from "../src/ledger.ts";
-import { repoKey, requestKey, sessionKey } from "../src/keys.ts";
-import { localId } from "../src/shared/layout.ts";
+import { deviceSecret, repoKey, requestKey, sessionKey } from "../src/keys.ts";
+import { layout, localId } from "../src/shared/layout.ts";
 import { picoToMicros, PRICE_TABLE_VERSION, priceRequest } from "../src/spend/prices.ts";
 import { tailFile } from "../src/tailer.ts";
 import { promoteSettled } from "../src/sync.ts";
@@ -276,6 +276,19 @@ describe("codex rollout", () => {
 });
 
 describe("keys, prices, epochs", () => {
+  test("device secret: created once, stable, never silently replaced", () => {
+    const t = makeEnv();
+    envs.push(t);
+    fs.mkdirSync(t.home, { recursive: true, mode: 0o700 });
+    const a = deviceSecret(t.home);
+    assert.equal(a.length, 32);
+    assert.equal(fs.statSync(layout.deviceSecret(t.home)).mode & 0o777, 0o600);
+    assert.deepEqual(deviceSecret(t.home), a, "same secret on every read");
+    fs.writeFileSync(layout.deviceSecret(t.home), a.subarray(0, 20));
+    assert.throws(() => deviceSecret(t.home), /20 bytes, expected 32; refusing to replace it/);
+    assert.equal(fs.readFileSync(layout.deviceSecret(t.home)).length, 20, "the damaged file is left for recovery");
+  });
+
   test("keys are 43-char base64url HMACs and differ by workspace", () => {
     const secret = Buffer.alloc(32, 7);
     const a = sessionKey(secret, "ws_a", "claude-code", SID);
