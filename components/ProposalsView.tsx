@@ -1,118 +1,22 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { AGREED_STATUS, CONDITIONS_UNCONFIRMED, companyMeasureId, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { AGREED_STATUS, CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types";
 import type { ViewProps } from "./props";
-import { activeProposal, currentGoal } from "./select";
+import { activeProposal, currentGoal, priorVersion } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
 import { nextStepHint } from "./nextStep";
 import { ProofStrip } from "./ProofStrip";
 import { SpartaProof } from "./SpartaProof";
+import { launchLine } from "./launch";
+import { Chip, Collapsible, InkPill, Lbl, Msg, NumberedLines, Old, Option, conditionLines } from "./v6/thread";
 
-/** Split free text into short bullet lines: one per sentence, and "Lead: a, b, and c" becomes a lead line with sub-items. */
-function toBullets(text: string): { lead: string; items: string[] }[] {
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim().replace(/\.$/, ""))
-    .filter(Boolean)
-    .map((s) => {
-      const i = s.indexOf(": ");
-      if (i < 0) return { lead: s, items: [] };
-      const items = s
-        .slice(i + 2)
-        .split(/,\s*(?:and\s+)?|\s+and\s+(?=[a-z])/)
-        .map((x) => x.trim())
-        .filter(Boolean);
-      return items.length > 1 ? { lead: s.slice(0, i), items } : { lead: s, items: [] };
-    });
-}
-
-function Bullets({ text, marker = "●" }: { text: string; marker?: string }) {
-  const lines = toBullets(text);
-  if (!lines.length) return <p className="text-[16px] text-zinc-500">—</p>;
-  return (
-    <ul className="space-y-2">
-      {lines.map((l, i) => (
-        <li key={i} className="flex gap-2 text-[16px] leading-snug text-zinc-900">
-          <span aria-hidden className="mt-0.5 text-[12px] text-zinc-500">
-            {marker}
-          </span>
-          <div>
-            {l.lead}
-            {l.items.length > 0 && (
-              <ul className="mt-1.5 grid gap-1 sm:grid-cols-2">
-                {l.items.map((it) => (
-                  <li key={it} className="flex items-center gap-2 rounded-md bg-zinc-50 px-2 py-1 text-[15px] ring-1 ring-zinc-200">
-                    <span aria-hidden className="text-violet-700">
-                      ◆
-                    </span>
-                    {it.charAt(0).toUpperCase() + it.slice(1)}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
+/** Mirrors lib/flow.ts MAX_CONDITIONS (the server refuses longer conditions). */
+const MAX_CONDITIONS = 1000;
 
 /** Who speaks for a slot or role. Northstar keeps OWNER_LABEL; custom scenarios use the operator's names. */
 function whoFor(L: Labels) {
   return (k: string) => (L.northstar ? (OWNER_LABEL[k] ?? k) : ((L.person as Record<string, string>)[k] ?? k));
-}
-
-/** Where the proposal is in its four steps. Security may approve straight away, which skips step 3. */
-function Stepper({ p, L }: { p: Proposal; L: Labels }) {
-  const countered = p.counter_versions.length > 0;
-  const ask = L.team.product;
-  const own = L.team.security;
-  const steps = L.northstar
-    ? [
-        { label: "Product proposes", done: true },
-        { label: "Security reviews", done: p.state !== "PENDING_SECURITY" && p.state !== "DRAFT" },
-        {
-          label: countered ? "Product accepts Security's changes" : "Product confirms its part",
-          done: p.state === "ACKNOWLEDGED_BY_PRODUCT" || p.state === "RATIFIED",
-          skipped: p.state === "RATIFIED" && !countered,
-        },
-        { label: p.state === "REJECTED" ? "Security declined" : "Security approves its goal", done: p.state === "RATIFIED" || p.state === "REJECTED" },
-      ]
-    : [
-        { label: `${ask} proposes`, done: true },
-        { label: `${own} reviews`, done: p.state !== "PENDING_SECURITY" && p.state !== "DRAFT" },
-        {
-          label: countered ? `${ask} accepts ${poss(own)} changes` : `${ask} confirms its part`,
-          done: p.state === "ACKNOWLEDGED_BY_PRODUCT" || p.state === "RATIFIED",
-          skipped: p.state === "RATIFIED" && !countered,
-        },
-        { label: p.state === "REJECTED" ? `${own} declined` : `${own} approves its goal`, done: p.state === "RATIFIED" || p.state === "REJECTED" },
-      ];
-  const current = steps.findIndex((s) => !s.done);
-  return (
-    <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Progress of this proposal">
-      {steps.map((st, i) => {
-        const now = i === current;
-        const cls = now
-          ? "bg-violet-50 ring-violet-400 text-violet-900"
-          : st.done
-            ? "bg-white ring-zinc-300 text-zinc-900"
-            : "bg-zinc-50 ring-zinc-200 text-zinc-500";
-        return (
-          <li key={i} aria-current={now ? "step" : undefined} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[14px] ring-1 ${cls}`}>
-            <span aria-hidden className="font-mono text-[13px]">
-              {st.done ? "●" : now ? "◆" : "○"}
-            </span>
-            <span className="font-semibold">
-              {i + 1}. {st.label}
-              {"skipped" in st && st.skipped && <span className="font-normal text-zinc-500"> (not needed)</span>}
-            </span>
-          </li>
-        );
-      })}
-    </ol>
-  );
 }
 
 /** Text the counter added to the previous version, when it only appended (e.g. "and its private notes stay untouched too"). */
@@ -551,62 +455,20 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
   );
 }
 
+
 // ---------------------------------------------------------------------------------------------
+// Review: the proposal as a message thread (v6). Each version of the target is shown once, in the bubble that
+// introduced it; the owner answers below. Every action here is the same call and payload as before v6.
 
-interface TimelineRow {
-  key: string;
-  actor: string;
-  action: string;
-  at: string;
+/** Plain run name for a test pill: which plan, which run, and the verdict with its checks. */
+function runPill(r: SimulationRun, proposedPlan: string): { text: string; tone: "green" | "red" } {
+  const side = r.plan_id === proposedPlan ? "New plan" : "Current plan";
+  const kind = r.scenario === "normal" ? "" : " (outage test)";
+  const n = r.checks.length ? ` ${r.checks.filter((c) => c.passed).length}/${r.checks.length}` : "";
+  return { text: `${side}${kind}: ${r.verdict === "PASS" ? "passed" : "failed"}${n}`, tone: r.verdict === "PASS" ? "green" : "red" };
 }
 
-function timelineFor(s: StateView, p: Proposal): TimelineRow[] {
-  const fromAudit = s.audit.filter((a) => a.target === p.id);
-  if (fromAudit.length) return fromAudit.map((a) => ({ key: a.id, actor: a.actor, action: a.action, at: a.at }));
-  const rows: TimelineRow[] = [{ key: "c", actor: p.proposing_owner, action: "propose", at: p.created_at }];
-  p.counter_versions.forEach((c) => rows.push({ key: c.version, actor: c.by, action: "counter", at: c.at }));
-  if (p.product_ack_at) rows.push({ key: "ack", actor: "product", action: "acknowledge", at: p.product_ack_at });
-  const acc = s.acceptances.find((a) => a.proposal_id === p.id);
-  if (acc) rows.push({ key: "rat", actor: "security", action: "ratify", at: acc.ratified_at });
-  return rows;
-}
-
-const ACTION_LABEL: Record<string, string> = {
-  propose: "proposed the change",
-  counter: "asked for changes",
-  acknowledge: "accepted Security's changes and confirmed what Product will do",
-  ratify: "approved the change to its goal",
-  reject: "declined the proposal",
-};
-
-/** Custom countered banner: quotes what the owner changed (the added words, else the new target), then why. */
-function CounterEdit({ p, by }: { p: Proposal; by: string }) {
-  const last = p.counter_versions.at(-1);
-  if (!last) return null;
-  const prev = p.counter_versions.length > 1 ? p.counter_versions[p.counter_versions.length - 2].proposed_measure_text : p.proposed_measure_text;
-  // Drop the joining punctuation the diff keeps (", " or ". ") so the quote starts at the added words.
-  const added = addedText(prev, last.proposed_measure_text)?.replace(/^[,.\s]+/, "") || null;
-  return (
-    <div className="mt-1 space-y-1 text-[16px] text-amber-950">
-      <p>
-        {by} {added ? "added" : "changed the new target to"}: &ldquo;{added ?? last.proposed_measure_text}&rdquo;
-      </p>
-      {last.rationale && <p>Why: {last.rationale}</p>}
-      {last.conditions && (
-        <p>
-          Conditions ({CONDITIONS_UNCONFIRMED.toLowerCase()}): {last.conditions}
-        </p>
-      )}
-      <p>The change is highlighted below.</p>
-    </div>
-  );
-}
-
-function customActionLabel(action: string, L: Labels): string | undefined {
-  if (action === "acknowledge") return `accepted ${poss(L.team.security)} changes and confirmed what ${L.team.product} will do`;
-  if (action === "ratify_untested") return "approved the change to its goal without a sandbox test";
-  return ACTION_LABEL[action];
-}
+type Answer = "accept" | "acceptIf" | "counter" | "decline";
 
 function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
   const { s, me, p, busy } = props;
@@ -624,13 +486,20 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
   const acc = s.acceptances.find((a) => a.proposal_id === p.id) ?? null;
   const canDecide = p.state === "PENDING_SECURITY" || p.state === "ACKNOWLEDGED_BY_PRODUCT";
   const [ratifyWhy, setRatifyWhy] = useState(L.northstar ? "Beta customers' issues now come first, and the critical security ticket stays off-limits." : "");
-  // Custom: an untested plan is approved only with this explicit acknowledgement (sent as accept_untested).
-  const needsAck = !L.northstar && p.test_status !== "TESTED";
+  // An untested custom plan, or stale evidence in any scenario, is approved only with this explicit acknowledgement
+  // (sent as accept_untested). The server refuses either approval without it.
+  const needsAck = (!L.northstar && p.test_status !== "TESTED") || p.test_status === "STALE";
   const [ackUntested, setAckUntested] = useState(false);
   // Custom: what the owning team made its approval depend on: its conditions field only, as on the decision record.
   const lastCounter = p.counter_versions.at(-1);
   const conditions = L.northstar ? "" : (lastCounter?.conditions?.trim() ?? "");
   const hint = nextStepHint(p, me.actor, L);
+  const [answer, setAnswer] = useState<Answer>("accept");
+
+  const ceo = currentGoal(s, "ceo");
+  const ceoPrev = priorVersion(s, ceo);
+  const companyNow = ceo?.measures.find((m) => m.id === companyMeasureId(s))?.text;
+  const companyBefore = ceoPrev?.measures.find((m) => m.id === companyMeasureId(s))?.text;
 
   // Seeing the ratified record counts as "accepted version seen" for this session (server dedupes per actor).
   const marked = useRef<string | null>(null);
@@ -642,95 +511,244 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
     }
   }, [p.state, p.id, mark]);
 
+  const footer = "flex flex-wrap items-center gap-3 border-t border-zinc-200 pt-4";
+
   return (
-    <div className="space-y-5">
-      <header>
-        {L.northstar ? (
-          <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Proposed change to Security&apos;s goal ({p.target_goal_version})</h1>
-        ) : (
-          <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
-            Proposed change to {poss(own)} goal ({p.target_goal_version})
-          </h1>
-        )}
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+    <div className="max-w-[880px] space-y-5">
+      <header className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
           <StateBadge state={p.state} labels={L} />
           <TestStatusBadge status={p.test_status} L={L} />
         </div>
-        <p className={L.northstar ? "mt-1 text-[15px] text-zinc-600" : "mt-1 text-[16px] text-zinc-600"}>
+        {L.northstar ? (
+          <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Proposed change to Security&apos;s goal ({p.target_goal_version})</h1>
+        ) : (
+          <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
+            Proposed change to {poss(own)} goal ({p.target_goal_version})
+          </h1>
+        )}
+        <p className="text-[15px] text-zinc-600">
           From {who(p.proposing_owner)} to {who(p.recipient_owner)} · sent {fmtTime(p.created_at)}
         </p>
-        <div className="mt-3">
-          <Stepper p={p} L={L} />
-        </div>
       </header>
 
-      {/* Role-specific action / status area */}
-      {isProduct && p.state === "COUNTERED" && (
-        <Card tone="amber">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <Badge tone="amber">{L.northstar ? "Security asked for changes" : `${own} asked for changes`}</Badge>
-              {L.northstar ? (
-                <p className="mt-1 text-[16px] text-amber-950">
-                  {who("security")} edited the new target
-                  {p.counter_versions.at(-1)?.rationale ? `: "${p.counter_versions.at(-1)?.rationale}"` : "."} The change is highlighted below.
+      <ol className="space-y-3.5" aria-label="Conversation about this proposal">
+        <Msg name={who(p.proposing_owner)} tag={<Chip>proposal · {p.target_goal_version}</Chip>} at={fmtTime(p.created_at)} me={me.actor === p.proposing_owner}>
+          <p className="text-[15px]">
+            <Lbl>Current</Lbl>
+            <Old>{oldMeasure}</Old>
+          </p>
+          <p className="text-[15px] text-zinc-900">
+            <Lbl accent>Proposed</Lbl>
+            {p.proposed_measure_text}
+          </p>
+          {p.rationale && (
+            <p className="text-[14px] text-zinc-600">
+              <b className="text-zinc-700">Why:</b> {p.rationale}
+            </p>
+          )}
+          <p className="text-[14px] text-zinc-600">
+            <b className="text-zinc-700">In return:</b> {p.reciprocal_commitment || "—"}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {L.sandbox && runs.length > 0
+              ? runs.map((r) => {
+                  const pill = runPill(r, p.plan_ref.plan_id);
+                  return (
+                    <Badge key={r.id} tone={pill.tone}>
+                      {pill.text}
+                    </Badge>
+                  );
+                })
+              : <TestStatusBadge status={p.test_status} L={L} />}
+          </div>
+        </Msg>
+
+        {p.counter_versions.map((c, i) => {
+          const prev = i === 0 ? p.proposed_measure_text : p.counter_versions[i - 1].proposed_measure_text;
+          const added = addedText(prev, c.proposed_measure_text);
+          const same = c.proposed_measure_text.trim() === prev.trim();
+          const lines = L.northstar ? [] : conditionLines(c.conditions);
+          return (
+            <Msg
+              key={c.version}
+              name={who(c.by)}
+              tag={<Badge tone="amber">{lines.length && same ? "accept if" : "counter"} · {c.version}</Badge>}
+              at={fmtTime(c.at)}
+              tone="counter"
+              me={me.actor === c.by}
+            >
+              {same ? (
+                <p className="text-[15px] text-zinc-700">Kept the target as proposed.</p>
+              ) : added ? (
+                <p className="text-[15px] text-zinc-900">
+                  …<mark className="rounded bg-violet-100 px-1 text-violet-900">{added}</mark>
                 </p>
               ) : (
-                <CounterEdit p={p} by={who("security")} />
+                <p className="text-[15px] text-zinc-900">
+                  <Lbl accent>Revised</Lbl>
+                  {c.proposed_measure_text}
+                </p>
+              )}
+              {c.rationale && <p className="text-[14px] text-zinc-600">Why: {c.rationale}</p>}
+              {L.northstar && c.changes_plan && <Badge tone="amber">Changes how the agent works: needs a new test</Badge>}
+              {lines.length > 0 && (
+                <div className="mt-1 space-y-1.5 rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="al-lbl !text-[11px]">Conditions</span>
+                    <Badge tone="amber">{CONDITIONS_UNCONFIRMED}</Badge>
+                  </div>
+                  <NumberedLines lines={lines} />
+                  <p className="text-[13px] text-zinc-500">{conditionsUnconfirmedNote(lines.length)}</p>
+                </div>
+              )}
+            </Msg>
+          );
+        })}
+
+        {p.product_ack_at && lastCounter && (
+          <Msg name={who(p.proposing_owner)} tag={<Chip>acknowledged {lastCounter.version}</Chip>} at={fmtTime(p.product_ack_at)} me={me.actor === p.proposing_owner}>
+            <p className="text-[15px] text-zinc-900">
+              {L.northstar
+                ? "Accepted Security's changes and confirmed what Product will do."
+                : `Accepted ${poss(own)} changes and confirmed what ${ask} will do.`}
+            </p>
+          </Msg>
+        )}
+
+        {p.state === "RATIFIED" && acc && (
+          <Msg name={who(acc.ratified_by)} tag={<InkPill>ratified · goal {acc.accepted_version}</InkPill>} at={fmtTime(acc.ratified_at)} tone="ratified" me={me.actor === acc.ratified_by}>
+            <div className="flex flex-wrap items-center gap-2">
+              {L.northstar ? (
+                <Badge tone="neutral">Approved: Security&apos;s goal ({acc.accepted_version})</Badge>
+              ) : (
+                <Badge tone="neutral">
+                  {AGREED_STATUS}: {poss(own)} goal ({acc.accepted_version})
+                </Badge>
+              )}
+              <TestStatusBadge status={acc.test_status} L={L.northstar ? undefined : L} />
+            </div>
+            {acc.rationale && <p className="text-[15px] text-zinc-900">&ldquo;{acc.rationale}&rdquo;</p>}
+            <p className="text-[14px] text-zinc-600">
+              {target?.version ? `${target.version} kept as superseded. ` : ""}
+              {acc.acknowledged_via === "authored_in_proposal"
+                ? `${who(acc.acknowledged_by)} committed to its part in the proposal.`
+                : `${who(acc.acknowledged_by)} accepted the changes at ${fmtTime(acc.acknowledged_at)}.`}
+            </p>
+            {!L.northstar && acc.test_status !== "TESTED" && (
+              <p className="text-[14px] text-zinc-600">Approved without a sandbox test: the plan was not run before approval.</p>
+            )}
+            {L.northstar && (
+              <ol className="mt-1 space-y-1 text-[15px] text-zinc-900" aria-label="What happens next">
+                <li className="flex gap-2">
+                  <span className="font-mono text-[14px] text-violet-700">1</span> Security&apos;s AI agent switches to the{" "}
+                  {planName(acc.plan_ref.plan_id).toLowerCase()}
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-mono text-[14px] text-violet-700">2</span> Product tags beta issues as they come in
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-mono text-[14px] text-violet-700">3</span> Product publishes what&apos;s in the beta
+                </li>
+              </ol>
+            )}
+            <p className="text-[14px] text-zinc-600">
+              {L.northstar
+                ? "Both teams agreeing doesn't prove the beta launch will work. A passed test only covers the practice tickets."
+                : launchLine(acc, L)}
+            </p>
+            <div>
+              {L.northstar ? (
+                <Button kind="secondary" onClick={() => props.go("goals")}>
+                  Back to goals
+                </Button>
+              ) : (
+                <Button kind="secondary" onClick={() => props.go("decision")}>
+                  See the decision
+                </Button>
               )}
             </div>
-            <Button disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/acknowledge`, {})}>
-              {busy ? "Working…" : L.northstar ? "Accept Security's changes and confirm what Product will do" : `Accept ${poss(own)} changes and confirm what ${ask} will do`}
-            </Button>
-          </div>
-        </Card>
-      )}
-      {isProduct && p.state === "PENDING_SECURITY" && (
-        <Card tone="readonly">
-          <p className="text-[16px] text-zinc-800">
-            <Badge tone="amber">Waiting for {who("security")}</Badge>
-          </p>
-          {hint && <p className="mt-2 text-[16px] text-zinc-700">{hint}</p>}
-        </Card>
-      )}
-      {isProduct && p.state === "ACKNOWLEDGED_BY_PRODUCT" && (
-        <Card tone="readonly">
-          <Badge tone="amber">You accepted the changes · waiting for {who("security")} to approve</Badge>
-          {hint && <p className="mt-2 text-[16px] text-zinc-700">{hint}</p>}
-        </Card>
-      )}
-      {isProduct &&
-        (p.state === "PENDING_SECURITY" || p.state === "ACKNOWLEDGED_BY_PRODUCT" || p.state === "COUNTERED") &&
-        (L.northstar ? (
-          <p className="text-[15px] text-zinc-500">Only Security can approve a change to Security&apos;s goal.</p>
-        ) : (
-          <p className="text-[16px] text-zinc-600">
-            Only {own} can approve a change to {poss(own)} goal.
-          </p>
-        ))}
+          </Msg>
+        )}
 
-      {isSecurity && p.state === "COUNTERED" && (
-        <Card tone="readonly">
-          <Badge tone="amber">{L.northstar ? "Waiting for Product to accept your changes" : `Waiting for ${ask} to accept your changes`}</Badge>
-          {hint && <p className="mt-2 text-[16px] text-zinc-700">{hint}</p>}
-        </Card>
-      )}
+        {p.state === "REJECTED" && (
+          <Msg name={who(p.recipient_owner)} tag={<Badge tone="red">declined</Badge>} tone="declined" me={me.actor === p.recipient_owner}>
+            {L.northstar ? (
+              <p className="text-[15px] text-zinc-700">{OWNER_LABEL.security} declined this proposal. Security&apos;s goal stays as it was.</p>
+            ) : (
+              <p className="text-[15px] text-zinc-700">
+                {L.person.security} declined this proposal. {poss(own)} goal stays as it was.
+              </p>
+            )}
+          </Msg>
+        )}
+      </ol>
+
+      {p.state === "RATIFIED" && L.sandbox && <ProofStrip s={s} />}
+
+      <div>
+        <Collapsible title="Evidence">
+          {L.northstar ? (
+            <div className="space-y-2">
+              {runs.length ? <SpartaProof runs={runs} onOpenTest={() => props.openDrawer("scenario")} /> : <RunList runs={runs} missing={missing} />}
+              {missing.length > 0 && runs.length > 0 && <RunList runs={[]} missing={missing} />}
+            </div>
+          ) : (
+            <PlanSection s={s} planId={p.plan_ref.plan_id} planVersion={p.plan_ref.plan_version} />
+          )}
+        </Collapsible>
+        <Collapsible title="What changed upstream">
+          <div className="space-y-2 text-[15px]">
+            <p className="text-[14px] text-zinc-600">
+              {L.northstar ? "Set by CEO" : `Set by ${L.person.ceo}`} · company goal ({ceo?.version ?? "—"})
+            </p>
+            {companyBefore && companyBefore !== companyNow && (
+              <p>
+                <Old>{companyBefore}</Old>
+              </p>
+            )}
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-zinc-900 ring-1 ring-amber-300">
+              {companyNow ?? (L.northstar ? "The CEO's new requirement isn't available right now." : "The new requirement isn't available right now.")}
+            </p>
+          </div>
+        </Collapsible>
+      </div>
+
+      {/* Role-gated answer and footers: each control is one the server accepts from this role in this state. */}
       {isSecurity && canDecide && (
-        <Card tone="violet">
-          <h2 className="mb-3 text-[18px] font-bold text-zinc-900">Your decision</h2>
-          <div className="grid gap-4 2xl:grid-cols-2">
-            <div>
+        <section className="space-y-3 border-t border-zinc-200 pt-4" aria-labelledby={`decide-${p.id}`}>
+          <h2 id={`decide-${p.id}`} className="al-lbl">
+            Your decision
+          </h2>
+          {p.state === "ACKNOWLEDGED_BY_PRODUCT" && (
+            <p className="text-[15px] text-zinc-700">
+              {who(p.proposing_owner)} accepted your changes. Approve to make them {L.northstar ? "Security's" : poss(own)} goal.
+            </p>
+          )}
+          <div role="radiogroup" aria-label="Your answer" className="flex flex-wrap gap-2.5">
+            <Option on={answer === "accept"} title="Accept" sub="as written" onPick={() => setAnswer("accept")} />
+            {!L.northstar && <Option on={answer === "acceptIf"} title="Accept if…" sub="with conditions" onPick={() => setAnswer("acceptIf")} />}
+            <Option on={answer === "counter"} title="Counter" sub="edit the measure" onPick={() => setAnswer("counter")} />
+            <Option on={answer === "decline"} title="Decline" sub="keep your goal as it is" onPick={() => setAnswer("decline")} />
+          </div>
+
+          {answer === "accept" && (
+            <div className="al-in space-y-3">
               <label className="block">
                 <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Why you&apos;re approving</span>
                 <input className={inputCls} value={ratifyWhy} onChange={(e) => setRatifyWhy(e.target.value)} />
               </label>
               {conditions && (
-                <p aria-label="Your conditions" className="mt-3 whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-[16px] text-zinc-800 ring-1 ring-zinc-200">
-                  <span className="font-semibold">You asked for:</span> {conditions}
-                </p>
+                <div aria-label="Your conditions" className="space-y-1.5 rounded-lg bg-zinc-50 p-3 ring-1 ring-zinc-200">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[15px] font-semibold text-zinc-800">You asked for:</span>
+                    <Badge tone="amber">{CONDITIONS_UNCONFIRMED}</Badge>
+                  </div>
+                  <NumberedLines lines={conditionLines(conditions)} />
+                </div>
               )}
               {needsAck && (
-                <label className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-[16px] text-amber-950 ring-1 ring-amber-300">
+                <label className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-[16px] text-amber-950 ring-1 ring-amber-300">
                   <input
                     type="checkbox"
                     className="mt-1 size-4 accent-violet-700 focus-visible:outline-2 focus-visible:outline-violet-600"
@@ -739,216 +757,154 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
                   />
                   <span>
                     <span className="font-semibold">I&apos;m approving this plan without a sandbox test</span>
-                    <span className="block text-[16px] text-amber-900">The decision record will say it was approved as not sandbox-tested.</span>
+                    <span className="block text-[16px] text-amber-900">
+                      {L.northstar
+                        ? "The attached test no longer matches this plan. The decision record will say it was approved as untested."
+                        : "The decision record will say it was approved as not sandbox-tested."}
+                    </span>
                   </span>
                 </label>
               )}
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button
-                  disabled={busy || !canDecide || (needsAck && !ackUntested)}
-                  onClick={() =>
-                    void props.run(
-                      `/api/proposals/${p.id}/accept`,
-                      needsAck ? { rationale: ratifyWhy, accept_untested: true } : { rationale: ratifyWhy },
-                    )
-                  }
-                >
-                  {busy ? "Working…" : "Approve the change to my goal"}
-                </Button>
-                <Button kind="danger" disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/reject`, {})}>
-                  Decline
-                </Button>
-              </div>
+              <Button
+                disabled={busy || !canDecide || (needsAck && !ackUntested)}
+                onClick={() =>
+                  void props.run(
+                    `/api/proposals/${p.id}/accept`,
+                    needsAck ? { rationale: ratifyWhy, accept_untested: true } : { rationale: ratifyWhy },
+                  )
+                }
+              >
+                {busy ? "Working…" : "Approve the change to my goal"}
+              </Button>
             </div>
-            <CounterForm key={`${p.id}:${p.counter_versions.length}`} p={p} latestText={latestText} busy={busy} run={props.run} L={L} />
-          </div>
-        </Card>
-      )}
-
-      {p.state === "REJECTED" && (
-        <Card tone="readonly">
-          <StateBadge state="REJECTED" />
-          {L.northstar ? (
-            <p className="mt-1 text-[16px] text-zinc-700">{OWNER_LABEL.security} declined this proposal. Security&apos;s goal stays as it was.</p>
-          ) : (
-            <p className="mt-1 text-[16px] text-zinc-700">
-              {L.person.security} declined this proposal. {poss(own)} goal stays as it was.
-            </p>
           )}
-        </Card>
+          {answer === "acceptIf" && !L.northstar && (
+            <AcceptIfForm key={`${p.id}:${p.counter_versions.length}`} p={p} latestText={latestText} busy={busy} run={props.run} ask={ask} />
+          )}
+          {answer === "counter" && <CounterForm key={`${p.id}:${p.counter_versions.length}`} p={p} latestText={latestText} busy={busy} run={props.run} L={L} />}
+          {answer === "decline" && (
+            <div className="al-in space-y-3">
+              <p className="text-[15px] text-zinc-700">
+                {L.northstar ? "Security's goal stays as it was." : `${poss(own)} goal stays as it was.`} {who(p.proposing_owner)} sees that you declined.
+              </p>
+              <Button kind="danger" disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/reject`, {})}>
+                {busy ? "Working…" : "Decline this proposal"}
+              </Button>
+            </div>
+          )}
+
+          <p className="rounded-lg bg-zinc-50 px-3.5 py-2.5 text-[14px] text-zinc-600 ring-1 ring-zinc-200">
+            Agreement between two teams is not approval to launch.{" "}
+            {L.northstar ? "Launch approval stays with the CEO." : `${L.person.leadership} decides the launch.`}
+          </p>
+        </section>
       )}
 
-      {p.state === "RATIFIED" && acc && !L.northstar && (
-        <Section title="What was decided">
-          <Card>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone="neutral">
-                {AGREED_STATUS}: {poss(own)} goal ({acc.accepted_version})
-              </Badge>
-              <TestStatusBadge status={acc.test_status} L={L} />
-            </div>
-            <ul className="mt-3 space-y-2 text-[16px] text-zinc-900">
-              <li className="flex gap-2">
-                <span aria-hidden className="text-zinc-500">●</span>
-                <span>
-                  <strong>{who(acc.ratified_by)}</strong> approved the new goal at {fmtTime(acc.ratified_at)}
-                  {acc.rationale ? `: "${acc.rationale}"` : ""}
-                </span>
-              </li>
-              <li className="flex gap-2">
-                <span aria-hidden className="text-zinc-500">●</span>
-                <span>
-                  <strong>{who(acc.acknowledged_by)}</strong>{" "}
-                  {acc.acknowledged_via === "authored_in_proposal" ? "committed to its part in the proposal" : `accepted ${poss(own)} changes`} at{" "}
-                  {fmtTime(acc.acknowledged_at)}
-                </span>
-              </li>
-              {acc.test_status !== "TESTED" && (
-                <li className="flex gap-2">
-                  <span aria-hidden className="text-zinc-500">●</span>
-                  <span>Approved without a sandbox test: the plan was not run before approval.</span>
-                </li>
-              )}
-            </ul>
-            <p className="mt-3 text-[16px] text-zinc-600">Both teams agreeing doesn&apos;t prove the company requirement will be met.</p>
-            <div className="mt-3">
-              <Button onClick={() => props.go("decision")}>See the decision</Button>
-            </div>
-          </Card>
-        </Section>
-      )}
-      {p.state === "RATIFIED" && acc && L.northstar && (
-        <Section title="What was decided">
-          <Card>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone="neutral">Approved: Security&apos;s goal ({acc.accepted_version})</Badge>
-              <TestStatusBadge status={acc.test_status} />
-            </div>
-            <ul className="mt-3 space-y-2 text-[16px] text-zinc-900">
-              <li className="flex gap-2">
-                <span aria-hidden className="text-zinc-500">●</span>
-                <span>
-                  <strong>{OWNER_LABEL[acc.ratified_by]}</strong> approved the new goal at {fmtTime(acc.ratified_at)}
-                  {acc.rationale ? `: "${acc.rationale}"` : ""}
-                </span>
-              </li>
-              <li className="flex gap-2">
-                <span aria-hidden className="text-zinc-500">●</span>
-                <span>
-                  <strong>{OWNER_LABEL[acc.acknowledged_by]}</strong>{" "}
-                  {acc.acknowledged_via === "authored_in_proposal" ? "committed to its part in the proposal" : "accepted Security's changes"} at{" "}
-                  {fmtTime(acc.acknowledged_at)}
-                </span>
-              </li>
-            </ul>
-            <h4 className="mt-4 mb-1.5 al-lbl">What happens next</h4>
-            <ol className="space-y-1.5 text-[16px] text-zinc-900">
-              <li className="flex gap-2">
-                <span className="font-mono text-[14px] text-violet-700">1</span> Security&apos;s AI agent switches to the{" "}
-                {planName(acc.plan_ref.plan_id).toLowerCase()}
-              </li>
-              <li className="flex gap-2">
-                <span className="font-mono text-[14px] text-violet-700">2</span> Product tags beta issues as they come in
-              </li>
-              <li className="flex gap-2">
-                <span className="font-mono text-[14px] text-violet-700">3</span> Product publishes what&apos;s in the beta
-              </li>
-            </ol>
-            <p className="mt-3 text-[15px] text-zinc-600">
-              Both teams agreeing doesn&apos;t prove the beta launch will work. A passed test only covers the practice tickets.
-            </p>
-            <div className="mt-3">
-              <Button onClick={() => props.go("goals")}>Back to goals</Button>
-            </div>
-          </Card>
-        </Section>
-      )}
-      {p.state === "RATIFIED" && L.sandbox && <ProofStrip s={s} />}
-
-      <Section title={L.northstar ? "What changes in Security's goal" : `What changes in ${poss(own)} goal`}>
-        <div className="grid items-stretch gap-3 lg:grid-cols-[1fr_auto_1.4fr]">
-          <div className="rounded-xl bg-zinc-50 p-4 ring-1 ring-zinc-200">
-            <div className="text-[13px] font-semibold uppercase tracking-wide text-zinc-500">Before</div>
-            <p className="mt-1 text-[17px] text-zinc-500 line-through decoration-zinc-400">{oldMeasure}</p>
-            {L.northstar && <p className="mt-2 text-[14px] text-zinc-500">Counts tickets closed. Beta issues wait in line behind older ones.</p>}
-          </div>
-          <div aria-hidden className="hidden items-center text-[28px] text-violet-700 lg:flex">
-            →
-          </div>
-          <div className="rounded-xl bg-violet-50 p-4 ring-1 ring-violet-300">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[13px] font-semibold uppercase tracking-wide text-violet-800">
-                {p.state === "RATIFIED" ? "Now agreed" : "Proposed"}
-              </span>
-              {p.counter_versions.length > 0 &&
-                (L.northstar ? <Badge tone="violet">Includes Security&apos;s edit</Badge> : <Badge tone="violet">Includes {poss(own)} edit</Badge>)}
-              {L.northstar && p.counter_versions.at(-1)?.changes_plan && <Badge tone="amber">Changes how the agent works: needs a new test</Badge>}
-            </div>
-            <div className="mt-2">
-              <Bullets text={latestText} />
-            </div>
-          </div>
+      {isSecurity && p.state === "COUNTERED" && (
+        <div className={footer}>
+          <Badge tone="amber">{L.northstar ? "Waiting for Product to accept your changes" : `Waiting for ${ask} to accept your changes`}</Badge>
+          {hint && <p className="w-full text-[15px] text-zinc-600">{hint}</p>}
         </div>
+      )}
 
-        {p.counter_versions.length > 0 && (
-          <ol className="mt-3 space-y-2 border-l-2 border-zinc-200 pl-4 text-[15px]">
-            <li className="text-zinc-700">
-              <span className="font-semibold">{who(p.proposing_owner)}</span> proposed the first version at {fmtTime(p.created_at)}
-            </li>
-            {p.counter_versions.map((c, i) => {
-              const prev = i === 0 ? p.proposed_measure_text : p.counter_versions[i - 1].proposed_measure_text;
-              const added = addedText(prev, c.proposed_measure_text);
-              return (
-                <li key={c.version} className="text-zinc-700">
-                  <span className="font-semibold">{who(c.by)}</span> edited it at {fmtTime(c.at)}
-                  {added ? (
-                    <>
-                      , adding: <mark className="rounded bg-violet-100 px-1 text-violet-900">{added}</mark>
-                    </>
-                  ) : (
-                    <>: new wording above</>
-                  )}
-                  {c.rationale && <div className="text-zinc-500">Why: {c.rationale}</div>}
-                </li>
-              );
-            })}
+      {isProduct && p.state === "COUNTERED" && (
+        <div className={footer}>
+          <span className="min-w-0 flex-1 text-[15px] text-zinc-700">
+            {who(p.recipient_owner)} asked for changes. Accept them to send the proposal back for final approval.
+          </span>
+          <Button disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/acknowledge`, {})}>
+            {busy ? "Working…" : L.northstar ? "Accept Security's changes and confirm what Product will do" : `Accept ${poss(own)} changes and confirm what ${ask} will do`}
+          </Button>
+        </div>
+      )}
+
+      {isProduct && (p.state === "PENDING_SECURITY" || p.state === "ACKNOWLEDGED_BY_PRODUCT") && (
+        <div className={footer}>
+          {p.state === "PENDING_SECURITY" ? (
+            <Badge tone="amber">Waiting for {who("security")}</Badge>
+          ) : (
+            <Badge tone="amber">You accepted the changes · waiting for {who("security")} to approve</Badge>
+          )}
+          <span className="min-w-0 flex-1 text-[15px] text-zinc-500">
+            {L.northstar ? "Only Security can approve a change to Security's goal." : `Only ${own} can approve a change to ${poss(own)} goal.`}
+          </span>
+          {hint && <p className="w-full text-[15px] text-zinc-600">{hint}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Accept if…: the existing counter, with the target unchanged and the conditions field written one per line. */
+function AcceptIfForm({ p, latestText, busy, run, ask }: { p: Proposal; latestText: string; busy: boolean; run: Run; ask: string }) {
+  const [items, setItems] = useState<string[]>([]);
+  const [draft, setDraft] = useState("");
+  const [why, setWhy] = useState("");
+  const joined = [...items, draft.trim()].filter(Boolean).join("\n");
+  const tooLong = joined.length > MAX_CONDITIONS;
+  const add = () => {
+    const t = draft.trim();
+    if (!t) return;
+    setItems((xs) => [...xs, t]);
+    setDraft("");
+  };
+  return (
+    <form
+      className="al-in space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (busy || !joined || tooLong) return;
+        void run(`/api/proposals/${p.id}/counter`, { proposed_measure_text: latestText, rationale: why, conditions: joined });
+      }}
+    >
+      <div className="space-y-2 rounded-xl bg-white p-4 ring-1 ring-zinc-200">
+        <span className="al-lbl">I&apos;ll accept if</span>
+        {items.length > 0 && (
+          <ol className="space-y-1.5">
+            {items.map((c, i) => (
+              <li key={i} className="flex items-start gap-2.5 text-[15px] text-zinc-900">
+                <span className="grid h-[22px] min-w-[22px] flex-none place-items-center rounded-full bg-zinc-100 px-1.5 text-[12px] font-bold">{i + 1}</span>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap">{c}</span>
+                <Button kind="ghost" onClick={() => setItems((xs) => xs.filter((_, j) => j !== i))}>
+                  Remove
+                </Button>
+              </li>
+            ))}
           </ol>
         )}
-      </Section>
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Section title={L.northstar ? "Why Product is asking" : `Why ${ask} is asking`}>
-          <Bullets text={p.rationale || ""} />
-        </Section>
-        <Section title={L.northstar ? "What Product will do in return" : `What ${ask} will do in return`}>
-          <Bullets text={p.reciprocal_commitment} marker="◆" />
-        </Section>
+        <div className="flex gap-2">
+          <label className="block min-w-0 flex-1">
+            <span className="sr-only">Add a condition</span>
+            <input
+              className={inputCls}
+              placeholder="Add a condition…"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  add();
+                }
+              }}
+            />
+          </label>
+          <Button kind="secondary" disabled={!draft.trim()} onClick={add}>
+            Add
+          </Button>
+        </div>
+        {tooLong && <span className="block text-[14px] text-amber-700">Keep the conditions to {MAX_CONDITIONS} characters or fewer.</span>}
       </div>
-
-      {L.northstar ? (
-        <Section title="Proof from Sparta: both plans on the same practice tickets">
-          {runs.length ? (
-            <SpartaProof runs={runs} onOpenTest={() => props.openDrawer("scenario")} />
-          ) : (
-            <RunList runs={runs} missing={missing} />
-          )}
-          {missing.length > 0 && runs.length > 0 && <RunList runs={[]} missing={missing} />}
-        </Section>
-      ) : (
-        <PlanSection s={s} planId={p.plan_ref.plan_id} planVersion={p.plan_ref.plan_version} />
-      )}
-
-      <Section title="Who did what, when">
-        <ol className="space-y-1.5 border-l-2 border-zinc-200 pl-4">
-          {timelineFor(s, p).map((t) => (
-            <li key={t.key} className="text-[16px] text-zinc-800">
-              <span className="text-zinc-500">{fmtTime(t.at)}</span> · <span className="font-semibold">{who(t.actor)}</span>{" "}
-              {(L.northstar ? ACTION_LABEL[t.action] : customActionLabel(t.action, L)) ?? t.action}
-            </li>
-          ))}
-        </ol>
-      </Section>
-    </div>
+      <label className="block">
+        <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Why (optional)</span>
+        <input className={inputCls} value={why} onChange={(e) => setWhy(e.target.value)} />
+      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" disabled={busy || !joined || tooLong}>
+          {busy ? "Working…" : `Send my conditions to ${ask}`}
+        </Button>
+        <span className="text-[14px] text-zinc-500">The target stays as proposed. {ask} accepts the conditions, then you give the final approval.</span>
+      </div>
+    </form>
   );
 }
 
@@ -959,6 +915,7 @@ function CounterForm({ p, latestText, busy, run, L }: { p: Proposal; latestText:
   const [why, setWhy] = useState(L.northstar ? "Keep the critical security ticket off-limits." : "");
   const [changesPlan, setChangesPlan] = useState(false);
   const [conditions, setConditions] = useState("");
+  const lines = conditionLines(conditions);
   return (
     <form
       onSubmit={(e) => {
@@ -968,11 +925,11 @@ function CounterForm({ p, latestText, busy, run, L }: { p: Proposal; latestText:
         if (L.northstar) void run(`/api/proposals/${p.id}/counter`, { proposed_measure_text: text, rationale: why, changes_plan: changesPlan });
         else void run(`/api/proposals/${p.id}/counter`, { proposed_measure_text: text, rationale: why, ...(conditions.trim() ? { conditions } : {}) });
       }}
-      className="space-y-2"
+      className="al-in space-y-3"
     >
       <label className="block">
-        <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Or ask for changes: your version of the target</span>
-        <textarea className={inputCls} rows={4} maxLength={300} value={text} onChange={(e) => setText(e.target.value)} />
+        <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Ask for changes: your version of the target</span>
+        <textarea className={inputCls} rows={3} maxLength={300} value={text} onChange={(e) => setText(e.target.value)} />
         {text.length >= 300 && <span className="mt-1 block text-[14px] text-amber-700">Keep the new target under 300 characters.</span>}
       </label>
       <label className="block">
@@ -982,10 +939,11 @@ function CounterForm({ p, latestText, busy, run, L }: { p: Proposal; latestText:
       {!L.northstar && (
         <label className="block">
           <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Conditions (optional)</span>
-          <span className="mb-1 block text-[14px] text-zinc-500">What your approval depends on, e.g. &ldquo;Approve if X and Y&rdquo;.</span>
-          <textarea className={inputCls} rows={2} maxLength={1000} value={conditions} onChange={(e) => setConditions(e.target.value)} />
+          <span className="mb-1 block text-[14px] text-zinc-500">What your approval depends on, one per line.</span>
+          <textarea className={inputCls} rows={2} maxLength={MAX_CONDITIONS} value={conditions} onChange={(e) => setConditions(e.target.value)} />
         </label>
       )}
+      {lines.length > 1 && <NumberedLines lines={lines} />}
       {L.northstar && (
         <label className="flex items-start gap-2 text-[15px] text-zinc-800">
           <input

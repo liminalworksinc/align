@@ -161,7 +161,8 @@ async function main() {
 
     // The owning team asks for changes, with conditions
     await openProposals(O);
-    await fill(O, "Or ask for changes", COUNTER);
+    await click(O, "Counter"); // v6: pick the Counter answer, which shows the ask-for-changes form
+    await fill(O, "Ask for changes: your version of the target", COUNTER);
     await fill(O, "Why you want these changes", "UILOOP two fixed nights are easier to plan around.");
     await fill(O, "Conditions (optional)", CONDITIONS);
     await click(O, "Ask for changes");
