@@ -1,9 +1,11 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentSession, Goal, RegistryEntry, SessionMapping, StateView } from "@/lib/types";
+import { labelsFor } from "@/lib/labels";
 import type { ViewProps } from "./props";
 import { api } from "./useAlign";
 import { Badge, Button, fmtTime } from "./ui";
+import { GoalCascade, OldPlanWork } from "./v6/OldPlanWork";
 
 const TEAM: Record<string, string> = { ceo: "Company", product: "Product", security: "Security" };
 const OWNER_ACTOR: Record<string, string> = { ceo: "leadership", product: "product", security: "security" };
@@ -19,12 +21,13 @@ interface MappingsResponse {
 
 /** Client-side mirror of lib/registry activeRegistry: current goals ordered company, product, security, plus "none". */
 function fallbackRegistry(s: StateView): RegistryEntry[] {
+  const L = labelsFor(s);
   const superseded = new Set(s.goals.map((g) => g.supersedes).filter(Boolean));
   const order = { ceo: 0, product: 1, security: 2 } as const;
   const entries: RegistryEntry[] = s.goals
     .filter((g) => !superseded.has(g.id))
     .sort((a, b) => order[a.owner_id] - order[b.owner_id])
-    .map((g) => ({ key: g.id, goal_id: g.id, version: g.version, label: g.objective, owner: g.owner_id, team: TEAM[g.owner_id], org: s.company }));
+    .map((g) => ({ key: g.id, goal_id: g.id, version: g.version, label: g.objective, owner: g.owner_id, team: L.northstar ? TEAM[g.owner_id] : L.team[g.owner_id], org: s.company }));
   entries.push({ key: "none", goal_id: null, version: null, label: "Does not clearly serve any accepted goal", owner: null, team: "Not linked to a goal", org: s.company });
   return entries;
 }
@@ -155,7 +158,7 @@ function SessionCard({ session, m, ctx }: { session: AgentSession; m: SessionMap
   const when = ago(session.last_at, ctx.now);
   const base = `/api/mappings/${encodeURIComponent(session.id)}`;
   return (
-    <article className={`rounded-xl bg-white shadow-sm ring-1 ${m?.conflict?.flagged ? "ring-red-300" : "ring-zinc-300"}`}>
+    <article className={`rounded-[14px] border bg-white ${m?.conflict?.flagged ? "border-red-700" : "border-zinc-200"}`}>
       <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="block w-full rounded-t-xl px-4 py-3 text-left hover:bg-zinc-50">
         <div className="mb-1 flex items-center justify-between gap-2">
           <span className="text-[15px] font-bold text-zinc-900">{HARNESS[session.harness] ?? session.harness}</span>
@@ -194,7 +197,7 @@ function Lane({ entry, items, ctx }: { entry: RegistryEntry; items: { session: A
   const goal = ctx.goalOf(entry.key);
   const shown = all ? items : items.slice(0, LANE_MAX);
   return (
-    <div className="flex min-w-0 flex-1 basis-0 flex-col rounded-2xl bg-zinc-50 p-3 ring-1 ring-zinc-200">
+    <div className="flex min-w-0 flex-1 basis-0 flex-col rounded-[14px] border border-zinc-200 bg-zinc-50 p-3">
       <header className="mb-3 px-1">
         <div className="flex items-baseline justify-between gap-2">
           <h3 className="text-[18px] font-bold text-zinc-900">{entry.key === "none" ? "Not linked to a goal" : entry.team}</h3>
@@ -222,6 +225,7 @@ function Lane({ entry, items, ctx }: { entry: RegistryEntry; items: { session: A
 
 export function WorkMap(props: ViewProps) {
   const { s } = props;
+  const L = labelsFor(s);
   const [remote, setRemote] = useState<MappingsResponse | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [flash, setFlash] = useState(false);
@@ -266,7 +270,11 @@ export function WorkMap(props: ViewProps) {
     props,
     now,
     goalOf: (key) => (key ? goalById.get(key) : undefined),
-    teamOf: (key) => key === "none" ? "Not linked to a goal" : registry.find((e) => e.key === key)?.team ?? TEAM[goalById.get(key ?? "")?.owner_id ?? ""] ?? "Not linked to a goal",
+    teamOf: (key) => {
+      if (key === "none") return "Not linked to a goal";
+      const owner = goalById.get(key ?? "")?.owner_id;
+      return registry.find((e) => e.key === key)?.team ?? (owner ? (L.northstar ? TEAM[owner] : L.team[owner]) : undefined) ?? "Not linked to a goal";
+    },
   };
 
   const lanes = useMemo(() => {
@@ -292,13 +300,16 @@ export function WorkMap(props: ViewProps) {
   const sessions = s.sessions ?? [];
 
   return (
-    <div className="mx-auto max-w-[1600px]">
-      <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Where AI agent work is going</h1>
-      <p className="mb-5 max-w-4xl text-[17px] text-zinc-600">
+    <div className="mx-auto flex max-w-[1600px] flex-col gap-8">
+      <OldPlanWork s={s} />
+      <GoalCascade s={s} L={L} />
+      <section aria-label="Where AI agent work is going">
+      <h2 className="text-[22px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Where AI agent work is going</h2>
+      <p className="mb-5 max-w-4xl text-[15px] text-zinc-500">
         AI coding sessions (Claude Code and Codex) are recorded automatically and linked to the approved goal each one seems to serve. Each link is only a guess until that goal&apos;s owner confirms it.
       </p>
 
-      <div className={`mb-5 flex flex-wrap items-center gap-2 rounded-xl bg-white px-4 py-3 ring-1 transition ${flash ? "ring-2 ring-violet-500" : "ring-zinc-200"}`}>
+      <div className={`mb-5 flex flex-wrap items-center gap-2 rounded-[14px] border bg-white px-4 py-3 transition ${flash ? "border-violet-500" : "border-zinc-200"}`}>
         {registry.map((e) => (
           <span key={e.key} className="rounded-md bg-zinc-100 px-2.5 py-1 text-[15px] font-semibold text-zinc-800">
             {e.key === "none" ? "Not linked to a goal" : e.team}
@@ -314,7 +325,7 @@ export function WorkMap(props: ViewProps) {
       </div>
 
       {sessions.length === 0 ? (
-        <div className="rounded-2xl bg-white p-10 text-center ring-1 ring-zinc-200">
+        <div className="rounded-[14px] border border-dashed border-zinc-300 p-10 text-center">
           <p className="text-[18px] text-zinc-800">No AI coding sessions yet. They show up here once session recording is turned on.</p>
         </div>
       ) : (
@@ -324,6 +335,7 @@ export function WorkMap(props: ViewProps) {
           ))}
         </div>
       )}
+      </section>
     </div>
   );
 }

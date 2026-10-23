@@ -2,6 +2,7 @@
 import { useState } from "react";
 import type { SimulationRun } from "@/lib/types";
 import { Badge, Button } from "./ui";
+import { Pill } from "./v6/kit";
 
 /** Plain words for each Sparta check, keyed by check id (with or without the "assertion:" prefix). */
 const CHECK_WORDS: Record<string, string> = {
@@ -60,13 +61,15 @@ function ScoreBar({ r }: { r: SimulationRun }) {
 function PlanTile({ r }: { r: SimulationRun }) {
   const fail = r.verdict === "FAIL";
   return (
-    <div className={`rounded-xl p-4 ring-1 ${fail ? "bg-red-50 ring-red-200" : "bg-white ring-zinc-300"}`}>
+    <div className={`rounded-[14px] border bg-white p-[18px] ${fail ? "border-red-700" : "border-emerald-700"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="text-[14px] font-semibold text-zinc-600">{PLAN_SHORT[r.plan_id] ?? r.plan_id}</div>
-          <div className="text-[18px] font-bold text-zinc-900">{PLAN_HOW[r.plan_id] ?? r.plan_id}</div>
+          <div className="font-mono text-[11px] uppercase tracking-[0.1em] text-zinc-500">{PLAN_SHORT[r.plan_id] ?? r.plan_id}</div>
+          <div className="text-[17px] font-semibold text-zinc-900">{PLAN_HOW[r.plan_id] ?? r.plan_id}</div>
         </div>
-        {fail ? <Badge tone="red">Failed</Badge> : <Badge tone="green">Passed</Badge>}
+        <Pill tone={fail ? "red" : "mint"}>
+          {r.verdict} · {passed(r)} / {r.checks.length}
+        </Pill>
       </div>
       <div className="mt-3 flex items-baseline gap-2">
         <span className={`text-[32px] font-bold leading-none ${fail ? "text-red-700" : "text-zinc-900"}`}>{passed(r)}</span>
@@ -124,7 +127,7 @@ export function SpartaProof({ runs, onOpenTest }: { runs: SimulationRun[]; onOpe
       </div>
 
       {(p0Hit || p0Safe) && (
-        <ul className="space-y-1.5 rounded-xl bg-zinc-50 p-4 text-[16px] ring-1 ring-zinc-200">
+        <ul className="space-y-1.5 rounded-[14px] border border-zinc-200 bg-zinc-50 p-4 text-[15px]">
           {p0Hit && (
             <li className="flex gap-2">
               <span aria-hidden className="text-red-700">✕</span>
@@ -158,7 +161,7 @@ export function SpartaProof({ runs, onOpenTest }: { runs: SimulationRun[]; onOpe
             Only show checks where the plans differ
           </label>
         </div>
-        <div className="overflow-x-auto rounded-xl ring-1 ring-zinc-200">
+        <div className="overflow-x-auto rounded-[14px] border border-zinc-200">
           <table className="w-full text-left text-[15px]">
             <thead className="bg-zinc-50 text-[13px] text-zinc-600">
               <tr>
