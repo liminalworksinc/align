@@ -74,6 +74,11 @@ function oldPlanItems(s: StateView): { acc: NonNullable<StateView["acceptances"]
   return { acc, items };
 }
 
+/** The work items the Work screen says are still on the old plan (its headline count). The record's link uses it too. */
+export function stillOnOldPlan(s: StateView): WorkItem[] {
+  return oldPlanItems(s)?.items.filter((i) => !i.replanned).map((i) => i.w) ?? [];
+}
+
 export function OldPlanWork({ s }: { s: StateView }) {
   const L = labelsFor(s);
   const [copied, setCopied] = useState<"idle" | "ok" | "failed">("idle");

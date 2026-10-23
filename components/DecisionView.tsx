@@ -11,6 +11,7 @@ import { nextStepHint } from "./nextStep";
 import { depRelation } from "./TeamLens";
 import { SpartaProof } from "./SpartaProof";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, StateBadge, fmtTime } from "./ui";
+import { stillOnOldPlan } from "./v6/OldPlanWork";
 import { AuditTable, Card, CopyText, Legend, MeasuredTile, RecordHeader, RecordTabs, Tile, TimerCard, TruthColumns, useRecordTab } from "./v6/record";
 
 function passed(r?: SimulationRun) {
@@ -232,19 +233,11 @@ export function DecisionView(props: ViewProps) {
   );
 }
 
-/** Work items still tied to the goal version the acceptance replaced. */
-function oldPlanCount(s: ViewProps["s"], acc: Acceptance) {
-  if (acc.owning_work_item_ids || acc.asking_work_item_ids) return (acc.owning_work_item_ids?.length ?? 0) + (acc.asking_work_item_ids?.length ?? 0);
-  const old = s.goals.find((g) => g.id === acc.new_goal_id)?.supersedes;
-  return old ? s.work_items.filter((w) => w.goal_id === old).length : 0;
-}
-
-function MoveWork({ props, n }: { props: ViewProps; n: number }) {
+function MoveWork({ props }: { props: ViewProps }) {
+  const n = stillOnOldPlan(props.s).length; // the same count the Work screen's headline gives
   return (
     <span className="ml-auto">
-      <Button onClick={() => props.go("work")}>
-        Move running work → {n} item{n === 1 ? "" : "s"}
-      </Button>
+      <Button onClick={() => props.go("work")}>See work still on the old plan ({n})</Button>
     </span>
   );
 }
@@ -315,7 +308,7 @@ function NorthstarRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: 
             <Button kind="ghost" onClick={() => props.go("goals")}>
               See how the goals connect
             </Button>
-            <MoveWork props={props} n={oldPlanCount(s, acc)} />
+            <MoveWork props={props} />
           </div>
         </>
       )}
@@ -579,7 +572,7 @@ function CustomRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: Acc
           </div>
           <div className="flex flex-wrap items-center gap-2.5 border-t border-zinc-200 pt-4">
             <CopyText text={copy} />
-            <MoveWork props={props} n={oldPlanCount(s, acc)} />
+            <MoveWork props={props} />
           </div>
           <OldPlanWork s={s} L={L} owningIds={acc.owning_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} viewer={me.actor} />
         </>
