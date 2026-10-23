@@ -1,7 +1,7 @@
 "use client";
 import type { ReactNode } from "react";
 import type { ViewProps } from "./props";
-import { currentGoal, priorVersion } from "./select";
+import { changedToday, currentGoal, priorVersion } from "./select";
 import { Badge, Button, OWNER_LABEL, Section, fmtDuration, fmtTime } from "./ui";
 
 function Item({ children, action }: { children: ReactNode; action: ReactNode }) {
@@ -105,7 +105,7 @@ export function TodayView(props: ViewProps) {
           <div className="rounded-xl bg-white p-4 ring-1 ring-zinc-200">
             <div className="flex flex-wrap items-center gap-2 text-[15px] text-zinc-600">
               The CEO&apos;s company goal {prevCeo ? `${prevCeo.version} → ` : ""}
-              {ceo?.version ?? "v2"} {ceo?.changed && <Badge tone="amber">Changed today</Badge>}
+              {ceo?.version ?? "v2"} {ceo?.changed && <Badge tone="amber">{changedToday(ceo) ? "Changed today" : "Changed"}</Badge>}
             </div>
             <p className="mt-1 text-[16px] font-semibold text-zinc-900">{ceo?.objective}</p>
             {kr2 && (

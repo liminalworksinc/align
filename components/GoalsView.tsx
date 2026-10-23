@@ -5,7 +5,7 @@ import type { StateView } from "@/lib/types";
 import { agreementStatus } from "./launch";
 import type { ViewProps } from "./props";
 import { ProofStrip } from "./ProofStrip";
-import { activeProposal, currentGoal, priorVersion } from "./select";
+import { activeProposal, changedToday, currentGoal, priorVersion } from "./select";
 import { MissingGoal, depRelation, workFor } from "./TeamLens";
 import { Button, STATE_LABEL } from "./ui";
 import { Chip, H1, Lbl, NODE, Pill, Row, Seg, nodeState, type PillTone } from "./v6/kit";
@@ -41,7 +41,15 @@ function TeamNode({ props, L, owner, sel, dim, onPick }: { props: ViewProps; L: 
   const work = workFor(s, g).slice(0, 3);
   const updated = owner === "security" && s.acceptances.length > 0;
   return (
-    <button type="button" onClick={onPick} aria-pressed={sel} className={`${NODE} ${updated ? "border-[var(--al-ink)]" : "border-zinc-200"} ${nodeState(sel, dim)}`}>
+    <div className={`relative ${NODE} ${updated ? "border-[var(--al-ink)]" : "border-zinc-200"} ${nodeState(sel, dim)}`}>
+      {/* The whole card selects the node: one empty button over it (no list or block content inside a button). */}
+      <button
+        type="button"
+        onClick={onPick}
+        aria-pressed={sel}
+        aria-label={`${L.team[owner]} goal ${g.version}`}
+        className="absolute inset-0 z-10 rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Lbl>
           {L.team[owner]} · {me.actor === owner ? "you" : "peer"}
@@ -68,7 +76,7 @@ function TeamNode({ props, L, owner, sel, dim, onPick }: { props: ViewProps; L: 
           <p className="py-2 text-[14px] text-zinc-500">No work linked to this goal yet.</p>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -91,7 +99,7 @@ function selInfo(props: ViewProps, L: Labels, sel: Sel) {
   if (sel === "ceo")
     return {
       tone: (ceo?.changed ? "amber" : "grey") as PillTone,
-      text: ceo?.changed ? "changed today" : (ceo?.version ?? "—"),
+      text: ceo?.changed ? (changedToday(ceo) ? "changed today" : "changed") : (ceo?.version ?? "—"),
       title: kr?.text ?? ceo?.objective ?? `No current goal has been shared for ${L.team.ceo}.`,
       sub: `Set by ${L.person.ceo}. Read-only for both teams; ${L.team.security} inherits it and ${L.team.product} depends on it.`,
       ...next,
@@ -206,7 +214,7 @@ export function GoalsView(props: ViewProps) {
               {ceo.changed && (
                 <span className="ml-auto">
                   <Pill tone="amber" small>
-                    {ceo.measures.some((m) => m.id === krId) ? `${L.northstar ? krId : "Requirement"} changed today` : "Changed today"}
+                    {`${ceo.measures.some((m) => m.id === krId) ? `${L.northstar ? krId : "Requirement"} changed` : "Changed"}${changedToday(ceo) ? " today" : ""}`}
                   </Pill>
                 </span>
               )}

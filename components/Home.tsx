@@ -16,7 +16,7 @@ import { OrgView } from "@/components/OrgView";
 import { WorkMap } from "@/components/WorkMap";
 import { ScenarioStudio } from "@/components/v6/ScenarioStudio";
 import { agreementStatus } from "@/components/launch";
-import { accepted, currentGoal } from "@/components/select";
+import { accepted, changedToday, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, SESSION_ENDED, useAlign, type Selection } from "@/components/useAlign";
 import { ROLE_SWITCH, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
@@ -640,7 +640,7 @@ export default function Home({ workspace }: { workspace?: string }) {
                 <div className={custom ? "flex flex-wrap items-center gap-2.5" : "flex items-center gap-2.5"}>
                   <span className="al-lbl">Company goal</span>
                   <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[12px] text-zinc-700">{state.timeframe}</span>
-                  {ceo.changed && <Badge tone="amber">Changed today</Badge>}
+                  {ceo.changed && <Badge tone="amber">{changedToday(ceo) ? "Changed today" : "Changed"}</Badge>}
                 </div>
                 <div className="mt-0.5 line-clamp-2 text-[17px] font-semibold leading-snug text-zinc-900" title={ceo.objective}>{ceo.objective}</div>
               </div>

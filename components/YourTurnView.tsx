@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import { agreementStatus, launchState, recordFacts } from "@/components/launch";
 import type { View, ViewProps } from "@/components/props";
-import { accepted, currentGoal } from "@/components/select";
+import { accepted, changedToday, currentGoal, isToday } from "@/components/select";
 import { Badge, STATE_LABEL, type Tone } from "@/components/ui";
 import { companyMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { Actor, Proposal, StateView } from "@/lib/types";
@@ -234,8 +234,8 @@ export function YourTurnView(props: ViewProps) {
       )}
 
       {(kr || (acc && decided)) && (
-        <section aria-label="Changed today" className="flex flex-col gap-2.5">
-          <h2 className="al-lbl">Changed today</h2>
+        <section aria-label="What changed" className="flex flex-col gap-2.5">
+          <h2 className="al-lbl">{changedToday(ceo) || isToday(acc?.ratified_at) ? "Changed today" : "What changed"}</h2>
           {kr && (
             <div className="flex items-start gap-3.5 rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4">
               <Badge tone="amber" icon={false}>

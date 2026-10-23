@@ -4,7 +4,7 @@ import type { Goal, GoalRelation, Proposal, SimulationRun, StateView, WorkItem }
 import type { ViewProps } from "./props";
 import { Badge, Button, OWNER_LABEL, Section, StateBadge, fmtTime } from "./ui";
 import { reviewConflictLabel, teamName } from "./TeamLens";
-import { accepted, comparablePair, currentGoal, priorVersion } from "./select";
+import { accepted, changedToday, comparablePair, currentGoal, priorVersion } from "./select";
 import { companyMeasureId, conflictMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
 import { agreementStatus, nextWorkLine } from "./launch";
 
@@ -60,7 +60,7 @@ function GoalPanel({ p, g }: { p: ViewProps; g: Goal }) {
         <Badge tone="neutral" icon={false}>
           {g.version}
         </Badge>
-        {g.changed && <Badge tone="amber">Changed today</Badge>}
+        {g.changed && <Badge tone="amber">{changedToday(g) ? "Changed today" : "Changed"}</Badge>}
         {!isCurrent && <Badge tone="neutral">Replaced by a newer version</Badge>}
       </div>
       <p className="mb-4 text-[18px] font-semibold leading-snug text-zinc-900">{g.objective}</p>
@@ -608,7 +608,7 @@ function CustomGoal({ p, L, g }: { p: ViewProps; L: Labels; g: Goal }) {
         <Badge tone="neutral" icon={false}>
           {g.version}
         </Badge>
-        {g.changed && <Badge tone="amber">Changed today</Badge>}
+        {g.changed && <Badge tone="amber">{changedToday(g) ? "Changed today" : "Changed"}</Badge>}
         {!isCurrent && <Badge tone="neutral">Replaced by a newer version</Badge>}
       </div>
       <p className="mb-4 text-[18px] font-semibold leading-snug text-zinc-900">{g.objective}</p>

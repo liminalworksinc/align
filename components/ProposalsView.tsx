@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types";
 import type { ViewProps } from "./props";
-import { activeProposal, currentGoal, priorVersion } from "./select";
+import { activeProposal, changedToday, currentGoal, priorVersion } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
 import { api, type Me } from "./useAlign";
 import { nextStepHint } from "./nextStep";
@@ -347,7 +347,7 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
         <Section title="The CEO's new requirement">
           <Card tone="readonly">
             <div className="text-[15px] text-zinc-600">
-              Set by CEO · view only · CEO goal ({ceo?.version ?? "—"}) {ceo?.changed && <Badge tone="amber">changed today</Badge>}
+              Set by CEO · view only · CEO goal ({ceo?.version ?? "—"}) {ceo?.changed && <Badge tone="amber">{changedToday(ceo) ? "changed today" : "changed"}</Badge>}
             </div>
             <p className="mt-1 text-[16px] text-zinc-900">{kr2?.text ?? "The CEO's new requirement isn't available right now."}</p>
           </Card>
@@ -727,7 +727,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
               {who(p.proposing_owner)} accepted your changes. Approve to make them {L.northstar ? "Security's" : poss(own)} goal.
             </p>
           )}
-          <div role="radiogroup" aria-label="Your answer" className="flex flex-wrap gap-2.5">
+          <div role="group" aria-label="Your answer" className="flex flex-wrap gap-2.5">
             <Option on={answer === "accept"} title="Accept" sub="as written" onPick={() => setAnswer("accept")} />
             {!L.northstar && <Option on={answer === "acceptIf"} title="Accept if…" sub="with conditions" onPick={() => setAnswer("acceptIf")} />}
             <Option on={answer === "counter"} title="Counter" sub="edit the measure" onPick={() => setAnswer("counter")} />

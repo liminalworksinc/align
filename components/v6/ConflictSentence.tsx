@@ -14,7 +14,7 @@ function Blank({ value, placeholder, quote }: { value: string; placeholder: stri
 
 export function ConflictSentence({ asking, owning, measure, because }: { asking: string; owning: string; measure: string; because: string }) {
   return (
-    <p className="text-[21px] leading-[2] text-zinc-900" aria-live="polite">
+    <p className="text-[21px] leading-[2] text-zinc-900">
       <Blank value={asking} placeholder="The asking team" /> needs <Blank value={owning} placeholder="the owning team" /> to change{" "}
       <Blank value={measure} placeholder="the measure it works to" quote /> because <Blank value={because} placeholder="the company requirement that changed" />.
     </p>

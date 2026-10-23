@@ -215,7 +215,7 @@ await press(S, "Your turn", { nav: true });
 await press(S, "Review the proposal");
 await sleep(HOLD);
 await focus(S, "Security counters: protect P0 non-beta incidents");
-await press(S, "Counter", { within: 'button[role="radio"]' });
+await press(S, "Counter", { within: "button[aria-pressed]" });
 await press(S, "Ask for changes", { exact: true });
 await focus(P, "Product accepts the revised terms");
 await P.reload({ waitUntil: "networkidle0" });

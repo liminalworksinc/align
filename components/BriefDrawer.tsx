@@ -109,15 +109,14 @@ export function BriefDrawer(props: ViewProps & { onClose: () => void; fromGoals?
         </div>
 
         {L.northstar ? (
-          <div role="radiogroup" aria-label="Options, in suggested order" className="flex flex-col gap-2.5">
+          <div role="group" aria-label="Options, in suggested order" className="flex flex-col gap-2.5">
             {b.priorities.map((o) => {
               const on = choice === o.rank;
               return (
                 <button
                   key={o.rank}
                   type="button"
-                  role="radio"
-                  aria-checked={on}
+                  aria-pressed={on}
                   onClick={() => setChoice(o.rank)}
                   className={`flex w-full items-start gap-3.5 rounded-[14px] border bg-white px-[18px] py-4 text-left text-zinc-900 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--al-focus)] ${on ? "border-violet-500" : "border-zinc-200"}`}
                 >

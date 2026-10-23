@@ -111,8 +111,7 @@ export function Option({ on, title, sub, onPick }: { on: boolean; title: string;
   return (
     <button
       type="button"
-      role="radio"
-      aria-checked={on}
+      aria-pressed={on}
       onClick={onPick}
       className={`flex min-w-[9rem] flex-1 flex-col gap-0.5 rounded-xl border px-3.5 py-3 text-left transition ${
         on ? "border-violet-700 bg-violet-50" : "border-zinc-300 hover:bg-zinc-100"
