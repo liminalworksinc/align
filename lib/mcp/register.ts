@@ -127,15 +127,15 @@ const AcceptedPlanOut = z.object({
   test_status: z.string().nullable(),
   run_command: z.string(),
   // Custom scenarios only: the agreement itself, since an agent reads structuredContent, not the text summary.
-  // The agreement also carries launch: "pending" | "approved" | "not_applicable" (lib/policy.ts). It is deliberately
-  // NOT declared here: the tool listing is part of the Northstar snapshot (850971e), which must stay byte-identical.
-  // The schema isn't strict, so the field still reaches structured readers; test-scenario P1-3/P1-3b check it.
+  // Every field lib/policy.ts sends must be declared: the published schema has additionalProperties: false, so a
+  // validating client rejects the whole result over one undeclared field (test-mcp:custom).
   agreement: z
     .object({
       company: z.string(),
       asking_team: z.string(),
       owning_team: z.string(),
       status: z.enum(["agreed", "not_agreed"]),
+      launch: z.enum(["approved", "pending", "not_applicable"]), // agreed is not launch-approved (leadership decides)
       plan_title: z.string(),
       plan_text: z.string(),
       owning_measures: z.array(z.string()),
