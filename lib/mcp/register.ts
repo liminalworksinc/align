@@ -127,6 +127,9 @@ const AcceptedPlanOut = z.object({
   test_status: z.string().nullable(),
   run_command: z.string(),
   // Custom scenarios only: the agreement itself, since an agent reads structuredContent, not the text summary.
+  // The agreement also carries launch: "pending" | "approved" | "not_applicable" (lib/policy.ts). It is deliberately
+  // NOT declared here: the tool listing is part of the Northstar snapshot (850971e), which must stay byte-identical.
+  // The schema isn't strict, so the field still reaches structured readers; test-scenario P1-3/P1-3b check it.
   agreement: z
     .object({
       company: z.string(),

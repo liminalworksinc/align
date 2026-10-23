@@ -96,7 +96,9 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
 }
 
 /** When the test server closes: the end of ALIGN_DELETE_BY in Pacific time (08:00 UTC the next day, midnight PST),
- *  so testers keep the whole promised day. Starting at 00:00 UTC closed it at 4 PM PT the day before (P1 item 5). */
+ *  so testers keep the whole promised day. Starting at 00:00 UTC closed it at 4 PM PT the day before (P1 item 5).
+ *  The fixed +32 h is midnight in standard time (PST); during daylight time (PDT) it is 1 AM, an hour later. The
+ *  test dates (Nov 6 / Nov 13 2026) fall after DST ends on Nov 1. */
 export function testServerClosesAt(deleteBy: string): number {
   return Date.parse(`${deleteBy}T00:00:00Z`) + 32 * 60 * 60 * 1000;
 }
