@@ -348,6 +348,7 @@ export function viewFor(s: AppState, me: Actor | null): StateView | AnonStateVie
       company: s.company,
       ...(s.scenario !== undefined ? { scenario: s.scenario } : {}),
       ...(s.teams !== undefined ? { teams: s.teams } : {}),
+      ...(s.scenario === "custom" && s.scenario_config?.company_note ? { company_note: s.scenario_config.company_note } : {}),
       me: null,
     };
   }

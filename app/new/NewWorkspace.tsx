@@ -16,18 +16,20 @@ interface Created {
   people: { role: Role; team: string; lead: string }[];
 }
 
-/** "2026-11-06" as "Friday, November 6, 2026" (the date is a calendar day, so read it in UTC). */
+/** "2026-11-13" as "November 13, 2026" (the date is a calendar day, so read it in UTC). */
 function longDate(day: string | null | undefined): string | null {
   const t = day ? Date.parse(`${day}T00:00:00Z`) : NaN;
-  return Number.isNaN(t) ? null : new Date(t).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  return Number.isNaN(t) ? null : new Date(t).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
-// Wording from the go-C ruling (Shruti owns the final copy): a test server, nothing confidential, a deletion date.
+// Founder's exact wording (go-C notice, ruled 10-22): early testing on a test server, no confidential, personal or
+// customer data, and the deletion date from ALIGN_DELETE_BY.
 function TestServerNotice({ deleteBy }: { deleteBy: string | null }) {
   return (
     <div role="note" className="mb-6 rounded-[14px] border border-amber-300 bg-amber-50 p-5 text-[16px] text-zinc-900">
-      <p className="font-semibold">This is a test server.</p>
-      <p className="mt-1">Don’t enter confidential details. Everything here is deleted by {deleteBy ?? "the end of the test"}.</p>
+      <p className="font-semibold">Liminal Align is an early-testing product running on a test server.</p>
+      <p className="mt-1">Do not enter confidential, personal, or customer data. Use a fictional or anonymized version of your situation.</p>
+      <p className="mt-1">Everything in your workspace will be deleted by {deleteBy ?? "the end of the test"}. You can request earlier deletion.</p>
     </div>
   );
 }
@@ -136,7 +138,9 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
           <p className="mt-1">Align keeps only a scrambled copy, so nobody can look them up later.</p>
         </div>
         {testServer && (
-          <p className="mb-5 text-[16px] text-zinc-700">This workspace is on a test server and is deleted by {longDate(testServer.delete_by) ?? "the end of the test"}.</p>
+          <p className="mb-5 text-[16px] text-zinc-700">
+            Test workspace. No confidential, personal, or customer data. Deleted by {longDate(testServer.delete_by) ?? "the end of the test"}; sooner on request.
+          </p>
         )}
 
         <h2 className="mb-2 text-[18px] font-semibold">Workspace link</h2>

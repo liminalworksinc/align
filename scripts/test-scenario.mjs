@@ -141,6 +141,10 @@ async function main() {
   );
   const s6 = await setup("leadership", { ...fixture, extra_field: 1 });
   check("S6 unknown key -> 400 (strict schema)", s6.status === 400, short(s6));
+  const s6n = await setup("leadership", { ...fixture, company_note: "n".repeat(201) });
+  const s6b = await setup("leadership", { ...fixture, company_note: "   " });
+  const s6t = await setup("leadership", { ...fixture, company_note: 7 });
+  check("CN1 company_note over 200 characters, blank or not text -> 400 naming company_note", [s6n, s6b, s6t].every((r) => r.status === 400 && (r.json?.issues ?? []).some((i) => i.path === "company_note")), `${short(s6n)} | ${short(s6b)} | ${short(s6t)}`);
   const s7 = await setup("leadership", { ...fixture, plan: { ...fixture.plan, plan_id: "p-beta" } });
   check("S7 client-supplied ids are refused -> 400 (server makes ids)", s7.status === 400, short(s7));
   const big = JSON.stringify({ ...fixture, pad: "x".repeat(70 * 1024) });
@@ -203,6 +207,7 @@ async function main() {
       m.plans?.[0]?.plan_id === "p-custom" && m.plans[0].plan_version === 1 && m.plans[0].text === MINIMAL.plan.text,
     `${short(s10)} ${JSON.stringify({ scenario: m.scenario, cfg: m.scenario_config, owners, dep, kr: goal("g-ceo-v1")?.measures, sm: goal("g-security-v1")?.measures })}`,
   );
+  check("CN2 a setup without company_note stores none (no key in scenario_config)", s10.status === 200 && !("company_note" in (m.scenario_config ?? {})), JSON.stringify(m.scenario_config));
   const three = ["asking", "owning"].flatMap((team) => [1, 2, 3].map((i) => ({ team, task: `${team} task ${i}` })));
   const s10b = await setup("leadership", { ...MINIMAL, work_items: three });
   check("S10 3 work items per team (the cap) -> 200", s10b.status === 200, short(s10b));
@@ -243,6 +248,15 @@ async function main() {
     JSON.stringify({ scenario: t1.scenario, ids, sims: t1.simulations?.length, sims2: t1b.simulations?.length }),
   );
   check("T1 custom state carries no Northstar, Sparta or Alike text", !NORTHSTAR_TEXT.test(JSON.stringify({ ...t1b, audit: [] })), (JSON.stringify(t1b).match(NORTHSTAR_TEXT) ?? [""])[0]);
+  if (fixture.company_note !== undefined) {
+    const note = fixture.company_note.trim();
+    const askView = await state("product");
+    check(
+      "CN3 company_note round-trips, trimmed, as the last scenario_config key, and every role reads it",
+      t1.scenario_config?.company_note === note && Object.keys(t1.scenario_config).at(-1) === "company_note" && askView.scenario_config?.company_note === note,
+      JSON.stringify({ lead: t1.scenario_config, product: askView.scenario_config?.company_note }),
+    );
+  }
   check("T1 setup audit event holds a hash, not the input", (t1.audit ?? []).some((a) => a.action === "scenario_setup") && !JSON.stringify(t1.audit ?? []).includes(fixture.plan.text));
 
   // ---- P: what an agent reads before any agreement (accepted plan, custom) ----

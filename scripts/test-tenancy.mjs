@@ -358,6 +358,7 @@ try {
   const info = await call("GET", `/api/workspaces/${b}/login-info`);
   const leads = [FIXTURE.leadership.lead, FIXTURE.asking.lead, FIXTURE.owning.lead];
   check("A2 login-info for B: names only, no person names, no plan text", info.status === 200 && info.text.includes("BMARK") && !leads.some((l) => info.text.includes(l)) && !info.text.includes(FIXTURE.plan.text.slice(0, 30)), info.text);
+  check("CN5 login-info carries the company note the workspace was set up with (the sign-in screen shows it)", !FIXTURE.company_note || info.json?.company_note === FIXTURE.company_note, info.text);
 
   // A3 tampered tokens
   const secret = readFileSync(path.join(ROOT, "data/.secret"), "utf8").trim();
@@ -1156,9 +1157,11 @@ try {
   check("H2 /new answers; config states the test server and its deletion date", hNew.status === 200 && hCfg.json?.test_server?.delete_by === "2026-11-06", `${hNew.status} ${hCfg.text}`);
 
   // ---- Sean #6 low (d): the test-server notice is in the server-rendered HTML and on the max-reached screen ----
-  const LONG_DELETE = new Date(Date.parse("2026-11-06T00:00:00Z")).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  // The founder's notice (10-22): the date reads "November 6, 2026" (no weekday), in the notice's last paragraph.
+  const LONG_DELETE = new Date(Date.parse("2026-11-06T00:00:00Z")).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const NOTICE_FIRST = "Liminal Align is an early-testing product running on a test server.";
   const visibleHtml = hNew.text.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "");
-  check("LD1 /new's server HTML (no JS, before the config fetch) carries the notice and the deletion date", visibleHtml.includes("This is a test server.") && visibleHtml.includes(`deleted by ${LONG_DELETE}`), visibleHtml.slice(0, 300));
+  check("LD1 /new's server HTML (no JS, before the config fetch) carries the notice once, with the deletion date", visibleHtml.split(NOTICE_FIRST).length === 2 && visibleHtml.includes(`deleted by ${LONG_DELETE}. You can request earlier deletion.`), visibleHtml.slice(0, 300));
   {
     const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check", `--host-resolver-rules=MAP ${HOSTED_HOST} 127.0.0.1`] });
     try {
@@ -1173,7 +1176,7 @@ try {
       );
       await page.goto(`http://${HOSTED_HOST}:${PORT}/new`, { waitUntil: "networkidle0" });
       const text = await page.evaluate(() => document.body.innerText);
-      check("LD2 the max-reached screen also shows the test-server notice", /as many workspaces as it allows/.test(text) && text.includes("This is a test server.") && text.includes(`deleted by ${LONG_DELETE}`), text.slice(0, 300));
+      check("LD2 the max-reached screen also shows the test-server notice, once", /as many workspaces as it allows/.test(text) && text.split(NOTICE_FIRST).length === 2 && text.includes(`deleted by ${LONG_DELETE}. You can request earlier deletion.`), text.slice(0, 300));
     } finally {
       await browser.close();
     }

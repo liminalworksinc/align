@@ -11,7 +11,8 @@ const ROLES: { id: Actor; slot: Owner; blurb: string }[] = [
   { id: "security", slot: "security", blurb: "owns the goal being changed" },
 ];
 
-// Public by design (the sign-in screen needs it): company and team names only, never person names or constraints.
+// Public by design (the sign-in screen needs it): company and team names (and the company note, when set up with
+// one) only, never person names or constraints.
 export async function GET(_req: Request, ctx: RouteContext<"/api/workspaces/[id]/login-info">) {
   await connection();
   return handle(async () => {
@@ -19,6 +20,7 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/workspaces/[id]
     if (!ws || !workspaceExists(ws)) throw new HttpError(404, "This workspace no longer exists");
     // A read, with no session: bound to this workspace only, never Northstar.
     const s = await bindWs({ actor: "leadership", sid: "", ws }).read();
-    return { name: s.company, roles: ROLES.map((r) => ({ id: r.id, team: s.teams?.[r.slot]?.team ?? "", blurb: r.blurb })) };
+    const note = s.scenario_config?.company_note;
+    return { name: s.company, ...(note ? { company_note: note } : {}), roles: ROLES.map((r) => ({ id: r.id, team: s.teams?.[r.slot]?.team ?? "", blurb: r.blurb })) };
   });
 }

@@ -80,6 +80,7 @@ const plainError = (e: string) => (/^HTTP \d+$/.test(e) ? "Something went wrong.
 /** What /api/workspaces/<id>/login-info returns: company and team names only, never person names. */
 interface LoginInfo {
   name: string;
+  company_note?: string;
   roles: { id: Role; team: string; blurb: string }[];
 }
 const WS_ID = /^w_[a-z2-7]{12}$/;
@@ -194,6 +195,7 @@ function WorkspaceLogin({ workspace, onDone, ended, elsewhere, initialRole }: { 
           <span className="al-lbl text-violet-700">by Liminal</span>
         </div>
         <p className="mb-2 text-[16px] text-zinc-600">{info.name}. Choose your team; each person signs in separately with their own passcode.</p>
+        {info.company_note && <p className="mb-2 text-[14px] text-zinc-500">{info.company_note}</p>}
         <p className="mb-6 text-[14px] text-zinc-500">{ROLE_SWITCH}</p>
         <Elsewhere id={elsewhere} />
         <fieldset className="mb-4">
@@ -255,6 +257,7 @@ function NorthstarLogin({ onDone, L, elsewhere, initialRole }: { onDone: () => v
         {L && !L.northstar ? (
           <>
             <p className="mb-2 text-[16px] text-zinc-600">{L.company}. Choose who you are; each person signs in separately.</p>
+            {L.companyNote && <p className="mb-2 text-[14px] text-zinc-500">{L.companyNote}</p>}
             <p className="mb-6 text-[14px] text-zinc-500">{ROLE_SWITCH}</p>
           </>
         ) : (
@@ -517,6 +520,9 @@ export default function Home({ workspace }: { workspace?: string }) {
       <header className={custom ? CUSTOM_HEADER : "col-span-2 flex items-center gap-4 border-b border-zinc-200 px-6"}>
         <div className="shrink-0 whitespace-nowrap text-[15px] text-zinc-500">
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
+          {custom && state.scenario_config?.company_note && (
+            <div className="whitespace-normal text-[13px] text-zinc-500">{state.scenario_config.company_note}</div>
+          )}
         </div>
         {custom && (
           <span className="rounded-full border border-violet-700 bg-violet-50 px-3 py-1 text-[16px] font-semibold text-violet-700">
