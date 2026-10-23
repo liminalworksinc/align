@@ -145,10 +145,15 @@ async function main() {
     const signInText = await text(A);
     check("U1 sign-in screen names the company and both teams", signInText.includes(fixture.company) && signInText.includes(ASKING) && signInText.includes(OWNING), signInText.slice(0, 300));
     check("U1 sign-in screen has no Northstar copy", !LEAK.test(signInText), leakIn(signInText));
+    if (fixture.company_note) check("CN4 the sign-in screen shows the company note under the company line", signInText.includes(fixture.company_note) && signInText.indexOf(fixture.company_note) > signInText.indexOf(fixture.company), signInText.slice(0, 400));
     check("P1-2 sign-in screen tells a solo tester how to switch teams", /Testing on your own\?/.test(signInText) && /Switch team/.test(signInText), signInText.slice(0, 400));
     check("U2 both teams sign in, each in its own browser profile", (await signInUi(A, ASKING, PASSCODES.product)) && (await signInUi(O, OWNING, PASSCODES.security)));
     const home = await text(A);
     check("U2 the asking team's home has no Northstar copy", !LEAK.test(home), leakIn(home));
+    if (fixture.company_note) {
+      const head = await A.evaluate(() => document.querySelector("header")?.innerText ?? "");
+      check("CN4 the header shows the company note under the company name, once signed in", head.includes(fixture.company) && head.indexOf(fixture.company_note) > head.indexOf(fixture.company), head.slice(0, 300));
+    }
 
     // Propose (with no proposal yet, Proposals opens the composer directly)
     await click(A, "Proposals");

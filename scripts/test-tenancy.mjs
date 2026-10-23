@@ -353,6 +353,7 @@ try {
   const info = await call("GET", `/api/workspaces/${b}/login-info`);
   const leads = [FIXTURE.leadership.lead, FIXTURE.asking.lead, FIXTURE.owning.lead];
   check("A2 login-info for B: names only, no person names, no plan text", info.status === 200 && info.text.includes("BMARK") && !leads.some((l) => info.text.includes(l)) && !info.text.includes(FIXTURE.plan.text.slice(0, 30)), info.text);
+  check("CN5 login-info carries the company note the workspace was set up with (the sign-in screen shows it)", !FIXTURE.company_note || info.json?.company_note === FIXTURE.company_note, info.text);
 
   // A3 tampered tokens
   const secret = readFileSync(path.join(ROOT, "data/.secret"), "utf8").trim();

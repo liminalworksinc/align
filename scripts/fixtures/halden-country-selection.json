@@ -1,5 +1,6 @@
 {
-  "company": "Halden Therapeutics (fictional)",
+  "company": "Halden Therapeutics",
+  "company_note": "Example company (fictional), based on an anonymized real workflow.",
   "timeframe": "This quarter",
   "leadership": {
     "team": "Clinical Leadership",
@@ -54,6 +55,6 @@
   ],
   "plan": {
     "title": "Add a second wave of countries",
-    "text": "Fictional company and scenario. Regulatory Affairs adds three second-wave countries to the submission plan and files them now, in parallel with the five planned countries, which stay unchanged. In return, Clinical Operations finishes CRO feasibility for the three countries within two weeks, drops any country that forecasts below 0.5 patients per site per month, and holds one contingency country in reserve. Sites take roughly seven months to open, so the extra countries only help if they are filed now. Illustrative math from published medians: at about 0.9 patients per site per month, 60 open sites enroll 540 patients in about 10 months, versus about 15 months on the original 40 sites."
+    "text": "Regulatory Affairs adds three second-wave countries to the submission plan and files them now, in parallel with the five planned countries, which stay unchanged. In return, Clinical Operations finishes CRO feasibility for the three countries within two weeks, drops any country that forecasts below 0.5 patients per site per month, and holds one contingency country in reserve. Sites take roughly seven months to open, so the extra countries only help if they are filed now. Illustrative math from published medians: at about 0.9 patients per site per month, 60 open sites enroll 540 patients in about 10 months, versus about 15 months on the original 40 sites."
   }
 }
