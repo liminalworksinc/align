@@ -4,7 +4,7 @@ import { CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, de
 import type { Acceptance, SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { AuthorityStrip } from "./AuthorityStrip";
-import { agreementStatus, launchLine, launchState } from "./launch";
+import { STALE_APPROVAL_NOTE, agreementStatus, approvedStale, launchLine, launchState } from "./launch";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
 import { nextStepHint } from "./nextStep";
@@ -260,6 +260,7 @@ function NorthstarRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: 
     runs.find((r) => r.plan_id === acc.plan_ref.plan_id && r.plan_version === acc.plan_ref.plan_version && r.plan_hash === acc.plan_ref.plan_hash) ??
     runs.find((r) => r.plan_id === acc.plan_ref.plan_id);
   const verified = acc.test_status === "TESTED" && candidate?.verdict === "PASS";
+  const stale = approvedStale(s, acc);
   const status = "Agreement reached";
   const title = `Security’s updated goal (${acc.accepted_version}) is now the shared plan for both teams.`;
   const productDid = acc.acknowledged_via === "authored_in_proposal" ? "proposed; wrote what it will do into its proposal" : "proposed; accepted Security's changes";
@@ -269,12 +270,14 @@ function NorthstarRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: 
     `Approved: ${target}`,
     "Only proposed: none",
     "Never tested: company beta readiness",
+    ...(stale ? [STALE_APPROVAL_NOTE] : []),
     `Evidence: ${runs.map((r) => `${r.plan_id}@${r.plan_version} ${r.scenario} ${r.verdict} ${passed(r)}/${r.checks.length}`).join(" · ") || "none attached"}`,
   ].join("\n");
   return (
     <div className="flex max-w-[960px] flex-col gap-[18px]">
       <RecordHeader pill={status} tone="white" at={acc.ratified_at} title={title} onBack={() => props.go("decisions")}>
         <p className="max-w-[680px] text-[15px] text-zinc-700">Handling beta customers&apos; issues moves to the top of Security&apos;s list. The previous version is kept.</p>
+        {stale && <p className="max-w-[680px] text-[15px] font-semibold text-amber-800">{STALE_APPROVAL_NOTE}</p>}
       </RecordHeader>
       <RecordTabs tab={tab} setTab={setTab} />
       {tab === "summary" && (

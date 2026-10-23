@@ -5,10 +5,11 @@ import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types
 import type { ViewProps } from "./props";
 import { activeProposal, currentGoal, priorVersion } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
+import { api } from "./useAlign";
 import { nextStepHint } from "./nextStep";
 import { ProofStrip } from "./ProofStrip";
 import { SpartaProof } from "./SpartaProof";
-import { agreementStatus, launchLine } from "./launch";
+import { STALE_APPROVAL_NOTE, agreementStatus, approvedStale, launchLine } from "./launch";
 import { Chip, Collapsible, InkPill, Lbl, Msg, NumberedLines, Old, Option, conditionLines } from "./v6/thread";
 
 /** Mirrors lib/flow.ts MAX_CONDITIONS (the server refuses longer conditions). */
@@ -638,6 +639,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
             {!L.northstar && acc.test_status !== "TESTED" && (
               <p className="text-[14px] text-zinc-600">Approved without a sandbox test: the plan was not run before approval.</p>
             )}
+            {L.northstar && approvedStale(s, acc) && <p className="text-[14px] text-amber-800">{STALE_APPROVAL_NOTE}</p>}
             {L.northstar && (
               <ol className="mt-1 space-y-1 text-[15px] text-zinc-900" aria-label="What happens next">
                 <li className="flex gap-2">
@@ -756,10 +758,14 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
                     onChange={(e) => setAckUntested(e.target.checked)}
                   />
                   <span>
-                    <span className="font-semibold">I&apos;m approving this plan without a sandbox test</span>
+                    <span className="font-semibold">
+                      {L.northstar
+                        ? "The sandbox test no longer matches this plan. I'm approving it without a passing test."
+                        : "I'm approving this plan without a sandbox test"}
+                    </span>
                     <span className="block text-[16px] text-amber-900">
                       {L.northstar
-                        ? "The attached test no longer matches this plan. The decision record will say it was approved as untested."
+                        ? "The decision record will say it was approved without a passing test."
                         : "The decision record will say it was approved as not sandbox-tested."}
                     </span>
                   </span>
@@ -828,10 +834,42 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           <span className="min-w-0 flex-1 text-[15px] text-zinc-500">
             {L.northstar ? "Only Security can approve a change to Security's goal." : `Only ${own} can approve a change to ${poss(own)} goal.`}
           </span>
+          <TryApprove key={`${p.id}:${p.state}`} p={p} owner={own} />
           {hint && <p className="w-full text-[15px] text-zinc-600">{hint}</p>}
         </div>
       )}
     </div>
+  );
+}
+
+/** The refusal demo: a non-owner tries the real accept endpoint. The server answers 403 and nothing changes; the
+ *  button then says so. It never goes through props.run, so no global error banner and no state refresh. */
+function TryApprove({ p, owner }: { p: Proposal; owner: string }) {
+  const [out, setOut] = useState<{ kind: "refused" | "other"; text: string } | null>(null);
+  const [trying, setTrying] = useState(false);
+  const attempt = async () => {
+    setTrying(true);
+    try {
+      await api(`/api/proposals/${p.id}/accept`, { body: { rationale: "" } });
+      setOut({ kind: "other", text: "The server accepted this. It should have refused it." });
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      setOut(status === 403 ? { kind: "refused", text: `Handed back: only ${owner} can approve this` } : { kind: "other", text: (e as Error).message });
+    } finally {
+      setTrying(false);
+    }
+  };
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <Button kind="secondary" disabled={trying} onClick={() => void attempt()}>
+        {`Try to approve (only ${owner} can)`}
+      </Button>
+      {out && (
+        <span role="status" className={`text-[15px] ${out.kind === "refused" ? "font-semibold text-zinc-800" : "text-amber-800"}`}>
+          {out.text}
+        </span>
+      )}
+    </span>
   );
 }
 
