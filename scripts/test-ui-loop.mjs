@@ -201,7 +201,7 @@ async function main() {
   await crossTab("custom", {
     X: ASKING, Y: OWNING, xPass: PASSCODES.product, yPass: PASSCODES.security, yRole: "security",
     prepare: async (A) => {
-      await click(A, "Proposals");
+      await click(A, "New conflict"); // v6 rail: with no proposal yet, + New conflict opens the composer directly
       if (!(await waitText(A, "Send proposal to"))) await click(A, "Propose a change");
       await fill(A, `New target for ${OWNING}`, `${MEASURE} (cross-tab)`);
       await fill(A, "Why", "UILOOP cross-tab check.");
