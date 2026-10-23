@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Anton, Space_Grotesk, Space_Mono } from "next/font/google";
+import { NOSCRIPT } from "@/lib/labels";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({ variable: "--font-space-grotesk", subsets: ["latin"] });
@@ -15,6 +16,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${spaceGrotesk.variable} ${spaceMono.variable} ${anton.variable} h-full antialiased`}>
       <body className="min-h-full font-sans">
+        <noscript>
+          <p className="p-10 text-[16px] text-zinc-900">{NOSCRIPT}</p>
+        </noscript>
         {children}
       </body>
     </html>

@@ -17,6 +17,8 @@ import path from "node:path";
 import puppeteer from "puppeteer-core";
 // Sean #6 low (c): the /new form's matcher for code refusals (lib/codes.ts has no imports, so Node loads it directly).
 const { isCodeRefusal, CREATION_CLOSED } = await import("../lib/codes.ts");
+// Sean #6 carry-over: the error page's and the noscript notice's words (lib/labels.ts has only type imports).
+const { ERROR_PAGE, ERROR_RETRY, NOSCRIPT } = await import("../lib/labels.ts");
 
 const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 /** Poll `fn` until it returns true, up to `ms`. */
@@ -118,6 +120,12 @@ function hosted(method, p, { body, cookie, headers = {} } = {}) {
   });
 }
 const HOSTED_HOST = "align.test";
+/** The page's server HTML carries the noscript notice once, inside <noscript> (the RSC payload's <script>s, which
+ *  repeat the text, are left out, as in LD1). */
+function noscriptIn(html) {
+  const visible = html.replace(/<script[\s\S]*?<\/script>/g, "");
+  return visible.split(NOSCRIPT).length === 2 && /<noscript>(?:(?!<\/noscript>)[\s\S])*Align needs JavaScript/.test(visible);
+}
 
 const create = (body, extra = {}) => call("POST", "/api/workspaces", { body, ...extra });
 async function signIn(ws, passcodes) {
@@ -645,6 +653,51 @@ try {
       await browser.close();
     }
   } else check("R15 browser check needs Chrome (CHROME_PATH)", false, CHROME);
+
+  // ---- Sean #6 carry-over: an error page and a noscript notice ----
+  const E = await create(marked("EMARK"));
+  const e = E.json?.workspace?.id;
+  const nsPages = await Promise.all(["/", "/new", `/w/${e}`].map((p) => call("GET", p)));
+  check("NS1 server HTML for /, /new and /w/<id> carries the noscript notice", nsPages.every((r) => r.status === 200 && noscriptIn(r.text)), nsPages.map((r) => `${r.status} ${noscriptIn(r.text)}`).join(" "));
+  if (existsSync(CHROME)) {
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    const textOf = (page) => page.evaluate(() => document.body.innerText).catch(() => "");
+    try {
+      const page = await browser.newPage();
+      const jsOn = [];
+      for (const p of ["/", "/new", `/w/${e}`]) {
+        await page.goto(BASE + p, { waitUntil: "networkidle0", timeout: 90000 });
+        jsOn.push((await textOf(page)).includes(NOSCRIPT));
+      }
+      await page.setJavaScriptEnabled(false);
+      await page.goto(`${BASE}/w/${e}`, { waitUntil: "load" });
+      const jsOff = await textOf(page);
+      check("NS2 with JavaScript on, no page shows the noscript notice; with it off, /w/<id> does", jsOn.every((x) => !x) && jsOff.includes(NOSCRIPT), `on=${jsOn.join(",")} off=${jsOff.slice(0, 120)}`);
+      await page.setJavaScriptEnabled(true);
+      // A render error: a workspace state the server serves but the page can't draw (a goal with no measures).
+      const sE = await signIn(e, E.json.passcodes);
+      const stateE = path.join(wsRoot, e, "state.json");
+      const stE = readFileSync(stateE, "utf8");
+      const broken = JSON.parse(stE);
+      for (const g of broken.goals) g.measures = null;
+      writeFileSync(stateE, JSON.stringify(broken), { mode: 0o600 });
+      const [cn, ...cv] = sE.product.split("=");
+      await page.setCookie({ name: cn, value: cv.join("="), domain: "127.0.0.1", path: "/" });
+      await page.goto(`${BASE}/w/${e}`, { waitUntil: "networkidle0", timeout: 90000 });
+      const shown = await waitFor(async () => (await textOf(page)).includes(ERROR_PAGE), 30000);
+      const errText = await textOf(page);
+      const retry = await page.evaluate((l) => [...document.querySelectorAll("button")].some((b) => b.innerText.trim() === l), ERROR_RETRY);
+      check("E1 a render error shows the error page with Try again, and no error message or stack", shown && retry && !/TypeError|Cannot read|measures|at \w+ \(|\.js:\d/.test(errText), errText.slice(0, 200));
+      writeFileSync(stateE, stE, { mode: 0o600 });
+      await page.evaluate((l) => [...document.querySelectorAll("button")].find((b) => b.innerText.trim() === l)?.click(), ERROR_RETRY);
+      const back = await waitFor(async () => (await textOf(page)).includes("EMARK"), 30000);
+      check("E1 Try again after the state is repaired shows the workspace again", back, (await textOf(page)).slice(0, 200));
+    } catch (err) {
+      check("NS2/E1 browser check ran", false, err.message);
+    } finally {
+      await browser.close();
+    }
+  } else check("NS2/E1 browser check needs Chrome (CHROME_PATH)", false, CHROME);
 
   // U: the /w page before sign-in never polls state (spec section 11 D), and an ended session says so in the page
   if (existsSync(CHROME)) {
@@ -1219,6 +1272,8 @@ try {
   const hA = await hosted("POST", "/api/workspaces", { body: { ...marked("HAMARK"), signup_code: INVITES[0] }, headers: { origin: `https://${HOSTED_HOST}` } });
   const hB = await hosted("POST", "/api/workspaces", { body: { ...marked("HBMARK"), signup_code: INVITES[1] } });
   check("H3 hosted create with an invite code and same-site Origin -> 201", hA.status === 201 && hB.status === 201, `${hA.status} ${hB.status} ${hA.text.slice(0, 200)}`);
+  const hPages = [hNew, await hosted("GET", `/w/${hA.json?.workspace?.id}`)];
+  check("NS1 hosted: server HTML for /new and /w/<id> carries the noscript notice", hPages.every((r) => r.status === 200 && noscriptIn(r.text)), hPages.map((r) => `${r.status} ${noscriptIn(r.text)}`).join(" "));
   const reuse = await hosted("POST", "/api/workspaces", { body: { ...FIXTURE, signup_code: INVITES[0] } });
   check("H3 an invite code works once (reuse -> 403 already used)", reuse.status === 403 && /already used/.test(reuse.text), `${reuse.status} ${reuse.text}`);
   const usedFileText = readFileSync(path.join(hostedDir, "workspaces", "_used_invites.json"), "utf8");

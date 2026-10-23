@@ -122,6 +122,12 @@ export const ROLE_SWITCH = "Testing on your own? Use Switch team (top right) to 
 /** The waiting screen's version, naming the team whose move it is. */
 export const switchHint = (team: string) => `Testing on your own? Use Switch team to act as ${team} next.`;
 export const AGREED_NOT_LAUNCH = "Both teams agreed. This is not approval to launch: the launch decision is still pending.";
+/** app/error.tsx and app/global-error.tsx (Sean's #6 carry-over): plain words, never the error's own message or stack. */
+export const ERROR_PAGE = "Something went wrong on this page.";
+export const ERROR_RETRY = "Try again";
+export const errorRef = (digest: string) => `Reference: ${digest}`;
+/** app/layout.tsx: shown only when the browser runs no JavaScript. */
+export const NOSCRIPT = "Align needs JavaScript. Turn it on and reload this page.";
 
 /**
  * Team-specific proposal states in a custom scenario. Returns undefined for Northstar and for every
