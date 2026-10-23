@@ -141,6 +141,8 @@ export interface SiblingSummary {
   commits: string[];
   /** Another person: "Yoonseo (6 sessions)". Absent for this machine's own sessions. */
   who?: string;
+  /** Set for work from another machine. Decides what reaches the model, whatever `who` holds. */
+  remote?: boolean;
   /** Files this session also touched recently, listed first. */
   overlap?: string[];
   /** The other side's own label for its work (`::align task`, or its branch). */
@@ -179,11 +181,11 @@ const ago = (m: number) => (m < 1 ? "just now" : `${m} min ago`);
 
 /**
  * One sender's line. `detail` 2 keeps everything, 1 drops commit subjects, 0 also drops task and goal labels. Another
- * person's (`who`) task label and commit subjects are never shown: they are free text from someone else's machine.
+ * person's (`remote`) task label and commit subjects are never shown: they are free text from someone else's machine.
  */
 function siblingLine(s: SiblingSummary, maxFiles: number, detail = 2): string {
-  const remote = !!s.who;
-  const name = s.who
+  const remote = !!s.remote;
+  const name = remote
     ? `${personName(s.who)} (${s.sessions ?? 1} session${(s.sessions ?? 1) > 1 ? "s" : ""}, ${ago(s.minutes_ago)})`
     : `${harnessLabel(s.harness)} session ${clean(String(s.id).slice(0, 8), 20)} (active ${ago(s.minutes_ago)})`;
   const overlap = (s.overlap || []).slice(0, Math.max(1, maxFiles)).map((f) => clean(f, 60));
@@ -204,7 +206,7 @@ function siblingLine(s: SiblingSummary, maxFiles: number, detail = 2): string {
 /** What other sessions toward this goal (or related ones) did since this session last heard. Drops detail until it fits. */
 export function renderCard(sibs: SiblingSummary[]): string | null {
   if (!sibs.length) return null;
-  const remote = sibs.some((s) => s.who);
+  const remote = sibs.some((s) => s.remote);
   const head = remote ? "[Align] In flight toward this goal and related ones:" : "[Align] Also working toward this goal on this machine:";
   const tail = remote ? "Run `align pod` for details." : "Read their changes before editing the same files.";
   // Keep as many senders as fit, shedding detail before dropping anyone; the first (overlap first) keeps the most.
