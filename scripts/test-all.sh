@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build A gate runner. Usage: scripts/test-all.sh <port>   (run from a lane or integration worktree)
 # Checks frozen files, lint and types, starts a fresh dev server on <port>, then runs in fixed order:
-# snapshot, test-flow, test-scenario (default fixture, then each scripts/fixtures/*.json), test-ui-loop, test-mcp,
+# snapshot, test-flow, test-scenario (default fixture, then each scripts/fixtures/*.json), test-ui-loop, test-mcp (Northstar, then custom),
 # test-capture, test-mapper. Capture and mapper add sessions
 # that survive reset, so they run last. Then test-tenancy and ui-northstar, which start their own production
 # servers on <port>.
@@ -68,6 +68,8 @@ for f in scripts/fixtures/*.json; do step "scenario:$(basename "$f" .json)" env 
 # The same custom loop in a browser: two team profiles by visible labels, plus a synthetic agent's wake-up. Needs Chrome.
 step test-ui-loop node scripts/test-ui-loop.mjs "$BASE"
 step test-mcp env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-mcp.mjs "$BASE/api/mcp"
+# The same validating client on a custom scenario (its `agreement` output), then back to Northstar.
+step test-mcp:custom env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-mcp-custom.mjs "$BASE"
 step test-capture node scripts/test-capture.mjs "$BASE"
 step test-mapper env ALIGN_URL="$BASE" node scripts/test-mapper.mjs
 # Multi-workspace tests need their own server configs (creation closed, signup code, open create).
