@@ -392,6 +392,7 @@ export default function Home({ workspace }: { workspace?: string }) {
   const props: ViewProps = {
     s: state,
     me,
+    workspace: workspace ?? "northstar",
     selection,
     select: setSelection,
     go: (v) => {

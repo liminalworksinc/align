@@ -5,7 +5,7 @@ import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types
 import type { ViewProps } from "./props";
 import { activeProposal, currentGoal, priorVersion } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
-import { api } from "./useAlign";
+import { api, type Me } from "./useAlign";
 import { nextStepHint } from "./nextStep";
 import { ProofStrip } from "./ProofStrip";
 import { SpartaProof } from "./SpartaProof";
@@ -834,7 +834,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           <span className="min-w-0 flex-1 text-[15px] text-zinc-500">
             {L.northstar ? "Only Security can approve a change to Security's goal." : `Only ${own} can approve a change to ${poss(own)} goal.`}
           </span>
-          <TryApprove key={`${p.id}:${p.state}`} p={p} owner={own} />
+          <TryApprove key={`${p.id}:${p.state}`} p={p} owner={own} workspace={props.workspace} />
           {hint && <p className="w-full text-[15px] text-zinc-600">{hint}</p>}
         </div>
       )}
@@ -843,14 +843,24 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
 }
 
 /** The refusal demo: a non-owner tries the real accept endpoint. The server answers 403 and nothing changes; the
- *  button then says so. It never goes through props.run, so no global error banner and no state refresh. */
-function TryApprove({ p, owner }: { p: Proposal; owner: string }) {
+ *  button then says so. It never goes through props.run, so no global error banner and no state refresh.
+ *  Guards, so a stale tab can never really approve: it first re-reads who this browser is signed in as (the same
+ *  /api/session the header uses) and refuses here, with no request, unless that is still the waiting non-owner in this
+ *  workspace; the request then carries the page's workspace exactly as act() does, so the server's stale-tab check
+ *  (409 for another workspace) applies too. */
+function TryApprove({ p, owner, workspace }: { p: Proposal; owner: string; workspace: string }) {
   const [out, setOut] = useState<{ kind: "refused" | "other"; text: string } | null>(null);
   const [trying, setTrying] = useState(false);
   const attempt = async () => {
     setTrying(true);
     try {
-      await api(`/api/proposals/${p.id}/accept`, { body: { rationale: "" } });
+      const now = await api<Me>("/api/session");
+      const waiting = p.state === "PENDING_SECURITY" || p.state === "ACKNOWLEDGED_BY_PRODUCT";
+      if (!waiting || now.actor !== p.proposing_owner || (now.workspace ?? "northstar") !== workspace) {
+        setOut({ kind: "other", text: "This tab is out of date: you are signed in as someone else now. Reload it." });
+        return;
+      }
+      await api(`/api/proposals/${p.id}/accept`, { body: { rationale: "" }, workspace });
       setOut({ kind: "other", text: "The server accepted this. It should have refused it." });
     } catch (e) {
       const status = (e as { status?: number }).status;

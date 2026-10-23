@@ -9,6 +9,8 @@ export type Drawer = "brief" | "scenario" | null;
 export interface ViewProps {
   s: StateView;
   me: Me; // me.actor is "product" | "security" (views only render when signed in)
+  /** The workspace this page shows: the /w/<id> slug, or "northstar". Sent with writes, as act() does. */
+  workspace: string;
   selection: Selection | null;
   select: (sel: Selection) => void;
   go: (view: View) => void;

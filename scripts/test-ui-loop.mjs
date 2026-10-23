@@ -174,6 +174,69 @@ async function main() {
     await click(A, `Accept ${OWNING}`);
     check("U5 the asking team accepts the changes", await waitText(A, "accepted"), (await text(A)).slice(0, 300));
 
+    // U5b The refusal demo, while the proposal waits on the owner. The owner never sees the button; the asking team's
+    // click reaches the real accept endpoint and is handed back (403) with the state unchanged.
+    const openState = async () => {
+      const st = (await api(lead, "GET", "/api/state")).json;
+      const pr = (st?.proposals ?? []).find((x) => !["RATIFIED", "REJECTED"].includes(x.state));
+      return { state: pr?.state, acceptances: st?.acceptances?.length ?? 0 };
+    };
+    const TRY = `Try to approve (only ${OWNING} can)`;
+    await openProposals(O);
+    await waitText(O, "Your decision");
+    check("U5b the owner sees no \"Try to approve\" button", !(await text(O)).includes("Try to approve"), (await text(O)).slice(0, 300));
+    const s5 = await openState();
+    await openProposals(A);
+    check("U5b the asking team sees the refusal demo button while it waits", await waitText(A, TRY), (await text(A)).slice(-600));
+    await click(A, TRY);
+    const handed = await waitText(A, `Handed back: only ${OWNING} can approve this`);
+    const s5b = await openState();
+    check(
+      "U5b the asking team's click is handed back by the server (403) and nothing changes",
+      handed && s5b.state === s5.state && s5b.acceptances === s5.acceptances,
+      JSON.stringify({ handed, s5, s5b, tail: (await text(A)).slice(-300) }),
+    );
+
+    // U5c A stale tab must not approve. A second tab of the asking team's browser keeps its asking-team screen (its
+    // state polls are blocked, as for a backgrounded tab) while the first tab switches this browser to the owner. The
+    // stale tab's button re-reads who is signed in, refuses with no request, and nothing changes.
+    const A2 = await A.browserContext().newPage();
+    await A2.setViewport({ width: 1440, height: 900 });
+    await A2.goto(BASE + "/", { waitUntil: "networkidle2", timeout: 60000 });
+    await openProposals(A2);
+    await waitText(A2, TRY);
+    let acceptCalls = 0;
+    await A2.setRequestInterception(true);
+    A2.on("request", (req) => {
+      const u = req.url();
+      if (/\/api\/proposals\/[^/]+\/accept/.test(u)) acceptCalls++;
+      if (/\/api\/state/.test(u)) return void req.abort();
+      void req.continue();
+    });
+    const pass = (page, v) => page.evaluate((v) => { const el = document.querySelector("input[type=password]"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, v); el.dispatchEvent(new Event("input", { bubbles: true })); }, v);
+    await click(A, "Switch team");
+    await click(A, OWNING, "[role=menuitem]");
+    await A.waitForSelector("input[type=password]", { timeout: 30000 });
+    await pass(A, PASSCODES.security);
+    await click(A, "Sign in");
+    const nowOwner = await waitText(A, `Acting as ${OWNING}`);
+    const s5c = await openState();
+    await click(A2, TRY);
+    const stale = await waitText(A2, "This tab is out of date");
+    const s5d = await openState();
+    check(
+      "U5c a stale asking-team tab, after this browser switched to the owner, refuses on its own: no accept request, nothing changes",
+      nowOwner && stale && acceptCalls === 0 && s5d.state === s5c.state && s5d.acceptances === s5c.acceptances,
+      JSON.stringify({ nowOwner, stale, acceptCalls, s5c, s5d }),
+    );
+    await A2.close();
+    await click(A, "Switch team");
+    await click(A, ASKING, "[role=menuitem]");
+    await A.waitForSelector("input[type=password]", { timeout: 30000 });
+    await pass(A, PASSCODES.product);
+    await click(A, "Sign in");
+    check("U5c the asking team's browser switches back", await waitText(A, `Acting as ${ASKING}`), (await text(A)).slice(0, 300));
+
     // Before approval: the agent has nothing to wake on
     const before = await api(null, "GET", `/api/directives?session=claude-code:${AGENT}`);
     check("U6 before approval the agent has no wake-up", (before.json?.pending ?? []).length === 0, before.text.slice(0, 300));
