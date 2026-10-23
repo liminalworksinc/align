@@ -1,23 +1,20 @@
 A
 Align
 by Liminal
-◆
+Your turn
 Company goal
-Set and send
-◎
 Goals
-How they connect
-⌁
+Scenario Studio
+Decisions
 Work
-Where AI agent work goes
-▤
-Evidence
-Decisions and proof
 CONNECTED
 Sparta
 Practice tests · 27 runs
 Alike
 Team decision memory · 1 earlier decision
+CL
+CEO / Leadership
+owns the company goal
 Northstar Security · Q4 2026
 ●
 Company goal v2 · Product and Security agreed
@@ -25,6 +22,53 @@ CL
 CEO / Leadership
 Leadership · Owner
 Sign out
+Work still on the old plan
+
+2 running items still serve the replaced measure “Close as many tickets as possible each day, oldest first”.
+
+S
+Handle beta customers’ issues first, using the tested new plan
+Security · next up, approved in goal v2.2
+re-planned in this decision
+S
+Tag and answer every ticket, oldest first
+Security · running
+still on the old measure
+S
+Investigate the critical security issue (ticket #1, off-limits)
+Security · running
+still on the old measure
+Keep, re-scope or stop, per item
+Needs a decision field on work items. Not built yet.
+Nobody is notified automatically.
+Copy a nudge for the owner
+COMPANY GOAL → TEAM GOALS → WORK
+COMPANY · V2
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+PRODUCT
+v3
+Ship the beta and clear anything blocking the launch.
+#1
+Set up usage tracking for the beta
+in progress
+#2
+Beta customer onboarding checklist
+in progress
+#3
+Ticket dashboard polish
+deferred (Product commitment)
+SECURITY
+v2.2
+Handle customer and security issues quickly and correctly.
+#1
+Handle beta customers’ issues first, using the tested new plan
+next up, approved in goal v2.2
+#2
+Tag and answer every ticket, oldest first
+running
+#3
+Investigate the critical security issue (ticket #1, off-limits)
+running
 Where AI agent work is going
 
 AI coding sessions (Claude Code and Codex) are recorded automatically and linked to the approved goal each one seems to serve. Each link is only a guess until that goal's owner confirms it.

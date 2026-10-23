@@ -1,0 +1,65 @@
+A
+Align
+by Liminal
+Your turn
+Company goal
+Goals
+Scenario Studio
+Decisions
+Work
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+CL
+CEO / Leadership
+owns the company goal
+Northstar Security · Q4 2026
+●
+Company goal v2 · Product and Security agreed
+CL
+CEO / Leadership
+Leadership · Owner
+Sign out
+← Decisions
+DECISION RECORD
+Agreement reached
+<TIME>
+Security’s updated goal (v2.2) is now the shared plan for both teams.
+
+Handling beta customers' issues moves to the top of Security's list. The previous version is kept.
+
+Approved without a passing test: the sandbox test no longer matched this plan, and the owner acknowledged that before approving.
+
+Summary
+Receipts
+How to read this
+APPROVED
+Beta incidents triaged within <DUR>; P0 within <DUR>; protected tickets untouched
+ONLY PROPOSED
+No open conditions
+NEVER TESTED
+Company beta readiness. Sparta checked ticket behaviour only.
+Alex / Security Lead, owner: approved its goal (v2.2)
+<TIME>
+Product Director: proposed; accepted Security's changes
+<TIME>
+IN ALIGN · MEASURED
+Not started
+0 touchpoints · prep excluded
+SPARTA · NOT VERIFIED
+9 / 9
+Test status: Not tested
+Copy text
+See how the goals connect
+See work still on the old plan (2)
+LIVE · SECURITY'S AI AGENT
+Claude Code triage agent
+Connected to Align's live feed
+NOW
+No agent connected
+Agent started
+Start the agent to see it here
+
+Read-only. The agent reads approved goals; only owners can change them.
