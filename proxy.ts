@@ -23,7 +23,7 @@ const HOSTED_ROUTES = [
   /^\/api\/proposals$/,
   /^\/api\/proposals\/[^/]+\/(?:accept|acknowledge|counter|launch|reject)$/,
 ];
-// Align v2 (ALIGN_V2=1 only): the web app and its API. With the flag unset these are 404 in both modes; when
+// Goal sessions (ALIGN_GOAL_SESSIONS=1 only): the web app and its API. With the flag unset these are 404 in both modes; when
 // hosted they pass the same host, https and edge checks as the tester routes and are allowed alongside them.
 const V2_ROUTES = /^\/(?:app|api\/v2)(?:\/|$)/;
 const TO_NEW = new Set(["/", "/setup"]); // Northstar's pages: a tester lands on workspace creation instead

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
-// Shared client pieces for the Align v2 web app: the API helper, a data hook, layout and form controls.
+// Shared client pieces for the goal sessions web app: the API helper, a data hook, layout and form controls.
 
 /** Full-page navigation within the app (a fresh load after sign-in, sign-out or a workspace switch). */
 export function go(path: string) {

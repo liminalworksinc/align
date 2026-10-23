@@ -1,7 +1,7 @@
-# Align v2 wire contract (local agent ⇄ hosted server)
+# Goal sessions wire contract (local agent ⇄ hosted server)
 
 Status: v2.2, 2026-10-22 (goal tree fields; in-flight activity). v2.1: directive SSE stream removed; cursor polling only. Source of truth for both halves. Plan: `~/.claude/plans/no-we-need-a-logical-lark.md` (rev 2).
-Everything here is behind `ALIGN_V2=1`; with it unset every `/app*` and `/api/v2/*` path is 404.
+Everything here is behind `ALIGN_GOAL_SESSIONS=1`; with it unset every `/app*` and `/api/v2/*` path is 404.
 
 ## Conventions
 - JSON only (`content-type: application/json`), UTF-8. Errors: `{ "error": "<code>", "message": "<human text>" }`.

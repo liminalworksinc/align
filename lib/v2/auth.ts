@@ -10,7 +10,7 @@ import { rand32 } from "./ids";
 
 // Authentication only (who you are): Better Auth 1.7.7, mounted at /api/v2/auth. Authorization (what you may do)
 // is ours, in lib/v2/policy.ts. Google and GitHub sign-in from the environment; no automatic account linking by
-// email. ALIGN_V2_TEST_IDP=1 (never when hosted) adds email + password so the flow can be tested without OAuth apps.
+// email. ALIGN_GOAL_SESSIONS_TEST_IDP=1 (never when hosted) adds email + password so the flow can be tested without OAuth apps.
 
 export const AUTH_BASE_PATH = "/api/v2/auth";
 /** Cookie prefix: Better Auth's session cookie is align_v2.session_token (__Secure- when hosted), never align_session. */

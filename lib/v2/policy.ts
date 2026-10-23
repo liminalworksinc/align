@@ -1,4 +1,4 @@
-// Align v2 authorization: the one place that decides what a signed-in person may do. Better Auth only says who
+// Goal sessions authorization: the one place that decides what a signed-in person may do. Better Auth only says who
 // they are. Every v2 route calls authorize(principal, action, object) and maps the decision to HTTP:
 //   not visible to the caller -> 404 (never 403, so existence doesn't leak)
 //   visible but not allowed   -> 403 with a code

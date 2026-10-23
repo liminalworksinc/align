@@ -3,7 +3,7 @@ import path from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { config } from "../config";
 
-// Align v2 storage: one SQLite file (WAL) at <ALIGN_DATA_DIR or ./data>/v2/align.sqlite, directory 0700, file 0600.
+// Goal sessions storage: one SQLite file (WAL) at <ALIGN_DATA_DIR or ./data>/v2/align.sqlite, directory 0700, file 0600.
 // Two connections to the same file:
 //   auth   - Better Auth's (its Kysely adapter runs async transactions on it)
 //   domain - ours. Every domain write runs inside tx(): BEGIN IMMEDIATE ... COMMIT within one synchronous call,
