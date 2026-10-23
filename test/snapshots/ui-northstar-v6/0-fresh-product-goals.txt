@@ -58,7 +58,7 @@ SECURITY · PEER
 v1
 Handle customer and security issues quickly and correctly.
 Close as many tickets as possible each day, oldest first
-Clashes with KR2
+Clashes with the CEO's new requirement
 Critical security tickets keep getting the same careful handling
 #1
 Tag and answer every ticket, oldest first

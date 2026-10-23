@@ -39,7 +39,7 @@ Investigate the critical security issue (ticket #1, off-limits)
 Security · running
 still on the old measure
 Keep, re-scope or stop, per item
-Needs a decision field on work items. Not built yet.
+Coming next: decide for each item whether to keep it, re-scope it or stop it.
 Nobody is notified automatically.
 Copy a nudge for the owner
 COMPANY GOAL → TEAM GOALS → WORK

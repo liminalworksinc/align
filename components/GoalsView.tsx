@@ -61,7 +61,7 @@ function TeamNode({ props, L, owner, sel, dim, onPick }: { props: ViewProps; L: 
         {g.measures.map((m) => (
           <li key={m.id} className="flex flex-wrap items-baseline gap-2 text-[13.5px] text-zinc-600">
             <span className="min-w-0 flex-1">{m.text}</span>
-            {owner === "security" && m.id === conflictId && open && <Pill tone="amber" small>{L.northstar ? `Clashes with ${companyMeasureId(s)}` : "In conflict"}</Pill>}
+            {owner === "security" && m.id === conflictId && open && <Pill tone="amber" small>{L.northstar ? "Clashes with the CEO's new requirement" : "In conflict"}</Pill>}
           </li>
         ))}
       </ul>
@@ -93,7 +93,7 @@ function selInfo(props: ViewProps, L: Labels, sel: Sel) {
   const forward = L.northstar
     ? { cta: "See ways forward", run: () => openDrawer("brief") }
     : { cta: me.actor === "product" ? "Open proposals" : "See proposals", run: () => go("proposals") };
-  const record = L.northstar ? { cta: "Open record", run: () => go("evidence") } : { cta: "Open proposals", run: () => go("proposals") };
+  const record = L.northstar ? { cta: "Open record", run: () => go("decision") } : { cta: "Open proposals", run: () => go("proposals") };
   const next = st === "accepted" ? record : st === "pending" ? { cta: "Open proposal", run: () => go("proposals") } : forward;
 
   if (sel === "ceo")
@@ -214,7 +214,7 @@ export function GoalsView(props: ViewProps) {
               {ceo.changed && (
                 <span className="ml-auto">
                   <Pill tone="amber" small>
-                    {`${ceo.measures.some((m) => m.id === krId) ? `${L.northstar ? krId : "Requirement"} changed` : "Changed"}${changedToday(ceo) ? " today" : ""}`}
+                    {`${ceo.measures.some((m) => m.id === krId) ? "Requirement changed" : "Changed"}${changedToday(ceo) ? " today" : ""}`}
                   </Pill>
                 </span>
               )}

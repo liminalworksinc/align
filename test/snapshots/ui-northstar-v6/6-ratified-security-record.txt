@@ -43,7 +43,7 @@ Handling beta customers' issues moves to the top of Security's list. The previou
 Approved without a passing test: the sandbox test no longer matched this plan, and the owner acknowledged that before approving.
 
 Summary
-Receipts
+Activity
 How to read this
 APPROVED
 Beta incidents triaged within <DUR>; P0 within <DUR>; protected tickets untouched
