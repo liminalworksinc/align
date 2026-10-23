@@ -471,7 +471,9 @@ export default function Home({ workspace }: { workspace?: string }) {
           <span className="font-display text-[22px] leading-none">Align</span>
           <span className="border-l border-zinc-200 pl-2.5 text-[13px] text-zinc-500">by Liminal</span>
         </div>
-        {newConflict.href ? (
+        {/* Northstar is the shared demo store: "+ New conflict" (leadership's /setup) would replace it, so it is hidden
+            there entirely (founder default, LIM-2424 S1). Custom scenarios keep it. */}
+        {!custom ? null : newConflict.href ? (
           <a href={newConflict.href} className="mb-3.5 mt-1 inline-flex min-h-11 items-center justify-center rounded-[10px] bg-violet-700 px-[18px] text-[15px] font-semibold text-black hover:brightness-110">
             + New conflict
           </a>
