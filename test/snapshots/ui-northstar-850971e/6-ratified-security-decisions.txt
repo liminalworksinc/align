@@ -1,0 +1,84 @@
+A
+Align
+by Liminal
++ New conflict
+Only Product proposes a change. You review it here when it arrives.
+Your turn
+Goals
+Scenario Studio
+Decisions
+Work
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+AS
+Alex / Security Lead
+owns Security’s goal v2.2
+Northstar Security · Q4 2026
+●
+Company goal v2 · Product and Security agreed
+AS
+Alex / Security Lead
+Security · Owner
+Sign out
+◎
+COMPANY GOAL
+Q4 2026
+▲
+Changed today
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+Product and Security: agreed
+YOUR GOAL · V2.2
+Handle customer and security issues quickly and correctly.
+Decisions
+All
+Open
+Accepted
+Agreement reached
+Security’s goal v2.2
+Approved by Alex / Security Lead · Beta incidents triaged within <DUR>; P0 within <DUR>; protected tickets untouched
+<TIME>
+DETAILS
+Product needs Security
+●
+Agreed
+
+Agreed: Security handles beta customers’ issues first
+
+Product Director v3 depends on Alex / Security Lead v2.2
+WHAT THE GOALS CLASHED ON (NOW AGREED)
+SECURITY'S OLD TARGET (V1)
+Close as many tickets as possible each day, oldest first
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+CRITICAL SECURITY TICKET (OFF-LIMITS)
+The critical security ticket (#1) and its private notes must not be touched.
+Security's rule: Critical security tickets keep getting the same careful handling
+WHAT HAPPENS NOW
+Security approved a new target: beta customers' issues come first, and the critical security ticket stays off-limits.
+WHERE THIS COMES FROM
+●
+Confirmed
+Agreed through Product Director's proposal and approved by Security.
+WHAT WAS DECIDED
+APPROVED GOAL
+Security's goal, v2.2
+APPROVED BY
+Alex / Security Lead · <TIME>
+CHANGES ACCEPTED BY
+Product Director · <TIME>
+NEXT STEP
+Security’s AI agent follows the new plan (beta issues first); Product tags beta issues as they come in and publishes what’s in the beta
+PLAN TESTED
+New plan: beta issues first
+PRACTICE TEST RESULT
+▲
+Not tested
+
+Whether the beta launch succeeds isn't known yet. This test can't tell you that.
+
+Review the CEO's new requirement

@@ -1,0 +1,58 @@
+A
+Align
+by Liminal
++ New conflict
+Only Product proposes a change. You review it here when it arrives.
+Your turn
+Goals
+Scenario Studio
+Decisions
+Work
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+AS
+Alex / Security Lead
+owns Security’s goal v1
+Northstar Security · Q4 2026
+AS
+Alex / Security Lead
+Security · Owner
+Sign out
+◎
+COMPANY GOAL
+Q4 2026
+Launch the beta of our new monitoring product.
+THE CEO'S NEW REQUIREMENT
+No new requirement yet
+YOUR GOAL · V1
+Handle customer and security issues quickly and correctly.
+Your turn
+
+Nothing waiting on you.
+
+WAITING ON YOU
+0
+Nothing is waiting on you.
+DETAILS
+CEO
+v1
+
+Launch the beta of our new monitoring product.
+
+GOAL
+OWNER
+CEO
+VERSION
+v1
+WHO CAN EDIT
+Set by CEO · view only
+HOW SUCCESS IS MEASURED
+Product says the beta is ready to launch
+WHERE THIS COMES FROM
+●
+Confirmed
+Approved by CEO at <TIME>
+Review the CEO's new requirement

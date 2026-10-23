@@ -1,0 +1,134 @@
+A
+Align
+by Liminal
++ New conflict
+Your turn
+Goals
+Scenario Studio
+Decisions
+Work
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+PD
+Product Director
+owns Product’s goal v3
+Northstar Security · Q4 2026
+●
+Company goal v2 · Product and Security agreed
+PD
+Product Director
+Product · Owner
+Sign out
+◎
+COMPANY GOAL
+Q4 2026
+▲
+Changed today
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+Product and Security: agreed
+YOUR GOAL · V3
+Ship the beta and clear anything blocking the launch.
+Work still on the old plan
+
+2 running items still serve the replaced measure “Close as many tickets as possible each day, oldest first”.
+
+S
+Handle beta customers’ issues first, using the tested new plan
+Security · next up, approved in goal v2.2
+re-planned in this decision
+S
+Tag and answer every ticket, oldest first
+Security · running
+still on the old measure
+S
+Investigate the critical security issue (ticket #1, off-limits)
+Security · running
+still on the old measure
+Keep, re-scope or stop, per item
+Needs a decision field on work items. Not built yet.
+Nobody is notified automatically.
+Copy a nudge for the owner
+COMPANY GOAL → TEAM GOALS → WORK
+COMPANY · V2
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+PRODUCT
+v3
+Ship the beta and clear anything blocking the launch.
+#1
+Set up usage tracking for the beta
+in progress
+#2
+Beta customer onboarding checklist
+in progress
+#3
+Ticket dashboard polish
+deferred (Product commitment)
+SECURITY
+v2.2
+Handle customer and security issues quickly and correctly.
+#1
+Handle beta customers’ issues first, using the tested new plan
+next up, approved in goal v2.2
+#2
+Tag and answer every ticket, oldest first
+running
+#3
+Investigate the critical security issue (ticket #1, off-limits)
+running
+Where AI agent work is going
+
+AI coding sessions (Claude Code and Codex) are recorded automatically and linked to the approved goal each one seems to serve. Each link is only a guess until that goal's owner confirms it.
+
+Company v2
+Product v3
+Security v2.2
+Not linked to a goal
+Company goal v2 sent to every team by CEO / Leadership at <TIME>
+
+No AI coding sessions yet. They show up here once session recording is turned on.
+
+DETAILS
+Product needs Security
+●
+Agreed
+
+Agreed: Security handles beta customers’ issues first
+
+Product Director v3 depends on Alex / Security Lead v2.2
+WHAT THE GOALS CLASHED ON (NOW AGREED)
+SECURITY'S OLD TARGET (V1)
+Close as many tickets as possible each day, oldest first
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+CRITICAL SECURITY TICKET (OFF-LIMITS)
+The critical security ticket (#1) and its private notes must not be touched.
+Security's rule: Critical security tickets keep getting the same careful handling
+WHAT HAPPENS NOW
+Security approved a new target: beta customers' issues come first, and the critical security ticket stays off-limits.
+WHERE THIS COMES FROM
+●
+Confirmed
+Agreed through Product Director's proposal and approved by Security.
+WHAT WAS DECIDED
+APPROVED GOAL
+Security's goal, v2.2
+APPROVED BY
+Alex / Security Lead · <TIME>
+CHANGES ACCEPTED BY
+Product Director · <TIME>
+NEXT STEP
+Security’s AI agent follows the new plan (beta issues first); Product tags beta issues as they come in and publishes what’s in the beta
+PLAN TESTED
+New plan: beta issues first
+PRACTICE TEST RESULT
+▲
+Not tested
+
+Whether the beta launch succeeds isn't known yet. This test can't tell you that.
+
+Review the conflict with Security

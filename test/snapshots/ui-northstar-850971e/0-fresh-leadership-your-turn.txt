@@ -1,0 +1,50 @@
+A
+Align
+by Liminal
++ New conflict
+Your turn
+Company goal
+Goals
+Scenario Studio
+Decisions
+Work
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+CL
+CEO / Leadership
+owns the company goal
+Northstar Security · Q4 2026
+CL
+CEO / Leadership
+Leadership · Owner
+Sign out
+Your turn
+
+Nothing waiting on you.
+
+WAITING ON YOU
+0
+Nothing is waiting on you.
+DETAILS
+CEO
+v1
+
+Launch the beta of our new monitoring product.
+
+GOAL
+OWNER
+CEO
+VERSION
+v1
+WHO CAN EDIT
+Set by CEO · view only
+HOW SUCCESS IS MEASURED
+Product says the beta is ready to launch
+WHERE THIS COMES FROM
+●
+Confirmed
+Approved by CEO at <TIME>
+Review the conflict with Security

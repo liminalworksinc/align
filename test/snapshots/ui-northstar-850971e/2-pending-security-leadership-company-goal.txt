@@ -1,23 +1,22 @@
 A
 Align
 by Liminal
-◆
++ New conflict
+Your turn
 Company goal
-Set and send
-◎
 Goals
-How they connect
-⌁
+1
+Scenario Studio
+Decisions
 Work
-Where AI agent work goes
-▤
-Evidence
-Decisions and proof
 CONNECTED
 Sparta
 Practice tests · 27 runs
 Alike
 Team decision memory · 1 earlier decision
+CL
+CEO / Leadership
+owns the company goal
 Northstar Security · Q4 2026
 ●
 Company goal v2 sent <TIME>

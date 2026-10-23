@@ -1,23 +1,22 @@
 A
 Align
 by Liminal
-◆
-Next decision
-What needs you
-◎
++ New conflict
+A proposal is already open. Finish it first.
+Your turn
 Goals
-How they connect
-✉
-Proposals
-Changes in progress
-▤
-Evidence
-Decisions and proof
+1
+Scenario Studio
+Decisions
+Work
 CONNECTED
 Sparta
 Practice tests · 27 runs
 Alike
 Team decision memory · 1 earlier decision
+PD
+Product Director
+owns Product’s goal v3
 Northstar Security · Q4 2026
 ▲ New company goal from the CEO · Product and Security haven’t agreed yet
 PD
@@ -35,47 +34,26 @@ Beta customers' issues handled first: marked urgent, tagged as beta, a private n
 Product and Security: not agreed yet
 YOUR GOAL · V3
 Ship the beta and clear anything blocking the launch.
-Your launch depends on a Security priority that hasn’t changed.
-Company
-Teams
-My Goal
-WHAT SECURITY'S AI AGENTS AIM FOR NOW
-Close as many tickets as possible each day, oldest first
-✕
-Failed
-Current plan: oldest tickets first · 1 of 9 independent checks passed in the practice test (Sparta sandbox)
-≠
-COMPANY GOAL V2 NOW REQUIRES
-Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
-Show impact
-CEO
-●
-Set by CEO · view only
+Goals
+
+Select a team to see only what connects to it.
+
+Everything
+Product
+Security
+COMPANY · CEO
+read-only
 v2
-
+KR2 changed today
 Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
-
-Product says the beta is ready to launch
-Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
-▲
-Changed today
-Can be checked in a practice test
-Unrelated tickets and private notes left untouched
-Can be checked in a practice test
-▼
-follows the CEO's goal
-▼
-follows the CEO's goal
-Product Director
+KR1 · Product says the beta is ready to launch
+KR2 · Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer → Security
+KR3 · Unrelated tickets and private notes left untouched
+PRODUCT · YOU
 v3
-ⓘ
-Your goal · you can edit
-
 Ship the beta and clear anything blocking the launch.
-
 Beta usage tracking fully set up
 No launch blockers left on Product's side
-WORK IN PRIORITY ORDER
 #1
 Set up usage tracking for the beta
 in progress
@@ -85,22 +63,15 @@ in progress
 #3
 Ticket dashboard polish
 queued
-PRODUCT NEEDS SECURITY
+PRODUCT → SECURITY
 The beta launch needs Security to handle beta issues first
-▲
-Unknown
-Alex / Security Lead
+Suggested
+proposal in progress
+SECURITY · PEER
 v1
-●
-Security's goal · view only
-
 Handle customer and security issues quickly and correctly.
-
 Close as many tickets as possible each day, oldest first
-▲
-Clashes with the CEO's new requirement
 Critical security tickets keep getting the same careful handling
-WORK IN PRIORITY ORDER
 #1
 Tag and answer every ticket, oldest first
 running
@@ -110,6 +81,10 @@ running
 #3
 Handle beta customers' issues (not part of Security's current target)
 not prioritized
+Suggested
+The beta launch needs Security to handle beta issues first
+A proposal is in progress between Product and Alex / Security Lead.
+Open proposal
 DETAILS
 Product needs Security
 ▲
