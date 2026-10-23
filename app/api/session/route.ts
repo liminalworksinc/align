@@ -55,8 +55,11 @@ export async function POST(req: Request) {
   });
 }
 
-export async function DELETE() {
-  const res = Response.json({ ok: true });
-  res.headers.append("set-cookie", sessionCookie(null));
-  return res;
+export async function DELETE(req: Request) {
+  return handle(async () => {
+    requireSameOrigin(req); // a page on another site or local port can't sign this browser out (logout CSRF)
+    const res = Response.json({ ok: true });
+    res.headers.append("set-cookie", sessionCookie(null));
+    return res;
+  });
 }

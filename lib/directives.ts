@@ -57,8 +57,10 @@ const readsAlign = (session: AgentSession) => session.tools.some((t) => /^mcp__a
  *  worked under a different scenario (possibly another company) and must not be woken by this one's approvals. */
 const setupAt = (s: AppState) => [...s.audit].reverse().find((a) => a.action === "scenario_setup")?.at ?? "";
 
-/** Text people wrote, quoted for an agent: terms to respect, never commands. */
-export const quoted = (text: string) => `«${text.replace(/[«»]/g, '"')}»`;
+/** Text people wrote, quoted for an agent: terms to respect, never commands. Line breaks (\r, \n, U+2028, U+2029)
+ *  become one space, so quoted text can never start a line of its own and pose as an instruction (Sean's #6 review,
+ *  fix 4). */
+export const quoted = (text: string) => `«${text.replace(/[«»]/g, '"').replace(/[\r\n\u2028\u2029]+/g, " ")}»`;
 
 function relevant(s: AppState, session: AgentSession, ev: AuthorityEventRow): boolean {
   if (ev.at < session.started_at) return false; // only changes that happened while this session existed
