@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { agreementStatus, launchState, recordFacts } from "@/components/launch";
 import type { View, ViewProps } from "@/components/props";
 import { accepted, currentGoal } from "@/components/select";
-import { Badge, type Tone } from "@/components/ui";
+import { Badge, STATE_LABEL, type Tone } from "@/components/ui";
 import { companyMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { Actor, Proposal, StateView } from "@/lib/types";
 
@@ -120,6 +120,20 @@ export function waitingOnMe(s: StateView, actor: Actor, open: (v: View, p?: Prop
       open: () => open("proposals"),
     });
   }
+  // Northstar: the next company goal waits on leadership to approve and send it. Same rule as OrgView's button
+  // (canPush: leadership, and a draft exists); the card opens that screen.
+  if (actor === "leadership" && L.northstar && s.org_draft) {
+    items.push({
+      key: "push",
+      team: L.role.leadership,
+      me: true,
+      title: "The next company goal is ready. Approve it and send it to every team",
+      quote: s.org_draft.objective,
+      sub: `Then ${L.team.product} and ${L.team.security} see what changed for their goals`,
+      cta: "Review and send",
+      open: () => open("company"),
+    });
+  }
   // Custom: leadership decides the launch once the teams agree (lib/flow.ts launch decision, custom only).
   const acc = accepted(s);
   if (actor === "leadership" && !L.northstar && acc && !acc.launch_decision) {
@@ -182,7 +196,7 @@ export function YourTurnView(props: ViewProps) {
   const depStatus: { text: string; tone: Tone } | null = !rel
     ? null
     : rel.status === "ACCEPTED"
-      ? { text: L.northstar ? "Agreed" : agreementStatus(acc), tone: "neutral" }
+      ? { text: L.northstar ? STATE_LABEL.ACCEPTED : agreementStatus(acc), tone: "neutral" }
       : rel.status === "UNKNOWN"
         ? { text: "Not agreed yet", tone: "amber" }
         : { text: "Proposal in progress", tone: "violet" };
@@ -256,7 +270,7 @@ export function YourTurnView(props: ViewProps) {
                 quote: decided.target || undefined,
                 sub: (
                   <Badge tone={L.northstar || launchState(acc) === "approved" ? "neutral" : "amber"}>
-                    {L.northstar ? "Agreed" : agreementStatus(acc)}
+                    {L.northstar ? STATE_LABEL.ACCEPTED : agreementStatus(acc)}
                   </Badge>
                 ),
                 cta: "See the decision",

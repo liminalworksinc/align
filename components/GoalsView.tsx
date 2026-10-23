@@ -121,7 +121,7 @@ function selInfo(props: ViewProps, L: Labels, sel: Sel) {
     title: depRelation(s)?.label ?? `${L.team.product} depends on ${L.team.security}`,
     sub:
       st === "accepted"
-        ? `Agreed by both owners.`
+        ? `${depPill(s, L).text}: both owners signed off.`
         : st === "pending"
           ? `A proposal is in progress between ${L.team.product} and ${L.person.security}.`
           : `Work can complete while the goal is still not met: ${poss(L.team.security)} measure hasn't changed.`,
