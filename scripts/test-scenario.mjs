@@ -434,6 +434,16 @@ async function main() {
     JSON.stringify(launchRows),
   );
 
+  // P1-3b: once leadership approves the launch, the agent surfaces say so, naming who approved it, and nothing still
+  // says pending (Mini S2's QA found the decision record without "by <lead>").
+  const [mPlanL, mRecordL] = [await mcp("align_get_accepted_plan"), await mcp("align_get_decision_record")];
+  const approvedBy = (t) => /agreed, launch approved by \S/i.test(t) && !/launch pending/i.test(t);
+  check(
+    "P1-3b after the launch is approved, the accepted-plan and decision-record text say \"agreed, launch approved by <lead>\", none says pending, and launch == \"approved\"",
+    approvedBy(mPlanL?.content?.[0]?.text ?? "") && approvedBy(mRecordL?.content?.[0]?.text ?? "") && mPlanL?.structuredContent?.agreement?.launch === "approved",
+    JSON.stringify({ plan: (mPlanL?.content?.[0]?.text ?? "").slice(0, 240), record: (mRecordL?.content?.[0]?.text ?? "").slice(0, 240), launch: mPlanL?.structuredContent?.agreement?.launch }),
+  );
+
   // ---- R4: custom back to Northstar ----
   const r4p = await call("product", "POST", "/api/reset", { confirm: "reset" });
   const stillCustom = (await state()).scenario === "custom";

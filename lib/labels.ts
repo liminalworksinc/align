@@ -4,10 +4,11 @@
 
 import type { Acceptance, Actor, AppState, Owner, ScenarioKind, ScenarioTeam } from "./types";
 
-type LabelState = Pick<AppState, "company" | "simulations" | "scenario" | "teams" | "scenario_config">;
+type LabelState = Pick<AppState, "company" | "simulations" | "scenario" | "teams" | "scenario_config"> & Partial<Pick<AppState, "acceptances">>;
 
 export interface Labels {
   northstar: boolean;
+  launchApproved: boolean; // custom: leadership approved the launch of the latest agreement (statuses read "launch approved")
   sandbox: boolean; // northstar, or a custom scenario that has sandbox runs; everything tied to runs hides when false
   company: string;
   team: Record<Owner, string>; // team name per goal slot
@@ -66,6 +67,7 @@ export function labelsFor(s: LabelState): Labels {
   if (!t) {
     return {
       northstar: true,
+      launchApproved: false,
       sandbox: true,
       company: NORTHSTAR.company,
       team: { ...NORTHSTAR.team },
@@ -75,6 +77,7 @@ export function labelsFor(s: LabelState): Labels {
   }
   return {
     northstar: false,
+    launchApproved: s.acceptances?.at(-1)?.launch_decision?.decision === "approved",
     sandbox: s.simulations.length > 0,
     company: s.company,
     team: { ceo: t.ceo.team, product: t.product.team, security: t.security.team },
@@ -126,7 +129,7 @@ export function customStateLabel(state: string, L: Labels): string | undefined {
   if (state === "PENDING_SECURITY") return `Waiting for ${L.team.security}`;
   if (state === "COUNTERED") return `${L.team.security} asked for changes`;
   if (state === "ACKNOWLEDGED_BY_PRODUCT") return `${L.team.product} accepted changes`;
-  if (state === "RATIFIED") return AGREED_STATUS;
+  if (state === "RATIFIED") return agreedStatus(L.launchApproved); // follows leadership's launch decision
   return undefined;
 }
 

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { AGREED_STATUS, CONDITIONS_UNCONFIRMED, companyMeasureId, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { CONDITIONS_UNCONFIRMED, companyMeasureId, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { agreementStatus } from "./launch";
 import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { activeProposal, currentGoal } from "./select";
@@ -783,7 +784,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           <Card>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone="neutral">
-                {AGREED_STATUS}: {poss(own)} goal ({acc.accepted_version})
+                {agreementStatus(acc)}: {poss(own)} goal ({acc.accepted_version})
               </Badge>
               <TestStatusBadge status={acc.test_status} L={L} />
             </div>
