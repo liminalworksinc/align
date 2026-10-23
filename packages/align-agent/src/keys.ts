@@ -5,17 +5,32 @@ import { layout } from "./shared/layout.ts";
 import { b64url, writeFileAtomic } from "./shared/fsx.ts";
 import type { Harness } from "./shared/types.ts";
 
+export class DeviceSecretError extends Error {}
+
+/**
+ * The 32-byte device secret behind every keyed id. Created once, exclusively, when the file does not exist. Any other
+ * problem fails closed: regenerating would silently change every session, repo and request key and orphan sessions
+ * this device already shared.
+ */
 export function deviceSecret(alignHome: string): Buffer {
   const file = layout.deviceSecret(alignHome);
-  try {
-    const buf = fs.readFileSync(file);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let buf: Buffer;
+    try {
+      buf = fs.readFileSync(file);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw new DeviceSecretError(`cannot read ${file}: ${(e as Error).message}`);
+      try {
+        fs.writeFileSync(file, crypto.randomBytes(32), { flag: "wx", mode: 0o600 });
+      } catch (w) {
+        if ((w as NodeJS.ErrnoException).code !== "EEXIST") throw w; // another process created it first: read theirs
+      }
+      continue;
+    }
     if (buf.length === 32) return buf;
-  } catch {
-    /* create below */
+    throw new DeviceSecretError(`${file} is ${buf.length} bytes, expected 32; refusing to replace it (restore it from backup or run align uninstall --purge)`);
   }
-  const fresh = crypto.randomBytes(32);
-  writeFileAtomic(file, fresh, 0o600);
-  return fresh;
+  throw new DeviceSecretError(`could not create ${file}`);
 }
 
 function hmac(secret: Buffer, msg: string): string {
