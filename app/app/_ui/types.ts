@@ -11,6 +11,8 @@ export interface Goal {
   pod: { id: string; name: string } | null;
   anchors: { repos: string[]; branch_patterns: string[]; issues: string[] };
   bindable: boolean;
+  depends_on: string[];
+  contributes_to: { id: string; title: string; version: number; reviewed_version: number | null; stale: boolean }[];
 }
 
 export interface WsDetail {

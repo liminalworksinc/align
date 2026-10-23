@@ -1,7 +1,7 @@
 import { all, audit, get, run, tx } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { newId, nowIso } from "./ids";
-import { goalCore, goalObj, goalRow, visibleGoal, type GoalRow } from "./goals";
+import { goalCore, goalObj, goalRow, reviewParents, visibleGoal, type GoalRow } from "./goals";
 import { canBind, canReadGoal, type PolicyPrincipal } from "./policy";
 import { writeDirective } from "./directives";
 import { openEpoch, sessionRow, type SessionRow } from "./sessions";
@@ -130,6 +130,7 @@ function maybeApprove(a: AlignmentRow, at: string): boolean {
     }
   }
   run("UPDATE v2_alignments SET state = 'approved', decided_at = ?, updated_at = ? WHERE id = ?", at, at, a.id);
+  if (a.source_goal_id) reviewParents(a.ws_id, a.source_goal_id, at, a.target_goal_id); // the child starts reviewed against the parent as approved
   audit(a.ws_id, null, "alignment.approved", a.id, at);
   return true;
 }

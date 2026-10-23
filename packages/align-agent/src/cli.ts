@@ -22,6 +22,8 @@ import type { Goal } from "./shared/types.ts";
 import { flushOutbox, ingestSpool, outboxDepth, syncOnce, uploadUsage } from "./sync.ts";
 import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
+import { kvSet } from "./db.ts";
+import { podReport } from "./hooks/siblings.ts";
 
 const out = (s = ""): void => {
   process.stdout.write(s + "\n");
@@ -38,10 +40,11 @@ const HELP = `align ${VERSION}: Align local agent
   align status
   align sessions [--all] [--json]
   align goals [--workspace <name|id>] [--refresh] [--json]
-  align share --dir [<folder>] --workspace <name|id> --goal <ref|none> [--yes]   share every new session started in a folder
+  align share --dir [<folder>] --workspace <name|id> --goal <ref|none> [--signals] [--yes]   share every new session started in a folder
   align share <session|--latest> [--cwd [dir]] --workspace <name|id> --goal <ref|none> [--alias <name>] [--from start|now] [--yes]
   align unshare --dir [<folder>]
   align rules
+  align pod [--cwd <dir>]       work in flight toward this folder's goal and related ones (agents may run it too)
   align stop-sharing <session>
   align delete-history <session> [--yes]
   align bind <session> --goal <ref|none>
@@ -365,11 +368,21 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
-    options: { latest: { type: "boolean" }, cwd: { type: "string" }, dir: { type: "boolean" }, workspace: { type: "string" }, goal: { type: "string" }, alias: { type: "string" }, from: { type: "string" }, yes: { type: "boolean", short: "y" } },
+    options: {
+      latest: { type: "boolean" },
+      cwd: { type: "string" },
+      dir: { type: "boolean" },
+      workspace: { type: "string" },
+      goal: { type: "string" },
+      alias: { type: "string" },
+      from: { type: "string" },
+      signals: { type: "boolean" },
+      yes: { type: "boolean", short: "y" },
+    },
   });
   await needLogin(ctx);
   if (!values.goal) throw new UsageError("--goal <ref|none> is required");
-  if (values.dir) return await shareDir(ctx, positionals[0] || process.cwd(), values.workspace, values.goal, !!values.yes);
+  if (values.dir) return await shareDir(ctx, positionals[0] || process.cwd(), values.workspace, values.goal, !!values.yes, !!values.signals);
   prepare(ctx);
   const from = (values.from || "start") as "start" | "now";
   if (from !== "start" && from !== "now") throw new UsageError("--from must be start or now");
@@ -387,18 +400,27 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   const effectiveFrom = priorEpochs && from === "start" ? "now" : from;
   const plan = planShare(ctx, session.local_id, ws, goal, values.alias ?? null, effectiveFrom);
   out(renderPreview(plan));
+  out(signalsPreview(!!values.signals));
   if (effectiveFrom !== from) out("This session was shared before, so this share counts from now.");
   if (!(await confirm("Share this session?", !!values.yes))) {
     out("Not shared. Run again with --yes to confirm.");
     return;
   }
   applyShare(ctx, plan);
+  kvSet(ctx.db, `signals:${session.local_id}`, values.signals ? "1" : "0");
   await tryFlush(ctx);
   const after = getShare(ctx, session.local_id);
   out(`Session ${session.local_id.slice(0, 8)} is ${after?.state === "pending" ? "queued to share (offline; the next sync retries)" : after?.state}.`);
 }
 
-async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goalRef: string, yes: boolean): Promise<void> {
+/** What pod awareness sends, with and without the user's consent to share names. */
+function signalsPreview(on: boolean): string {
+  return on
+    ? "Work signals ON: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who\ncan read the goal, kept 24 hours, so their agents can avoid overlapping work. File contents are never sent."
+    : "Work signals OFF: only keyed hashes of edited files are sent, so overlapping edits can be flagged without names.\nAdd --signals to share file paths, commit subjects and task labels with people who can read the goal.";
+}
+
+async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goalRef: string, yes: boolean, signals = false): Promise<void> {
   let ws = resolveWorkspace(ctx.home, wsRef);
   if (!ws) {
     await refreshMe(ctx).catch(() => undefined);
@@ -414,12 +436,13 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
   out("Every new Claude Code or Codex session started in this folder is shared from its start. Forks stay private;");
   out("`::align unshare` keeps a single session private. Sessions that are already running are not changed.");
   out("Sent per session: harness, a keyed repo hash, start time, binding epochs, per-request token counts with model, basis and");
-  out("estimated list cost. Never sent: prompts, responses, tool input or output, paths, branch names.");
+  out(`estimated list cost. Never sent: prompts, responses, tool input or output${signals ? "" : ", paths, branch names"}.`);
+  out(signalsPreview(signals));
   const prev = matchRule(readRules(ctx.home), dir);
   if (prev && prev.dir === dir) out(`This replaces the current rule (${prev.workspace_name}${prev.goal_title ? `, "${prev.goal_title}"` : ""}).`);
   if (!(await confirm("Share this folder?", yes))) return out("Not changed. Run again with --yes to confirm.");
-  setRule(ctx.home, { dir, workspace_id: ws.id, workspace_name: ws.name, goal_id: goal ? goal.id : null, goal_title: goal ? goal.title : null });
-  out(`New sessions in ${dir} will be shared with ${ws.name}${goal ? ` for "${goal.title}"` : ""}.`);
+  setRule(ctx.home, { dir, workspace_id: ws.id, workspace_name: ws.name, goal_id: goal ? goal.id : null, goal_title: goal ? goal.title : null, signals });
+  out(`New sessions in ${dir} will be shared with ${ws.name}${goal ? ` for "${goal.title}"` : ""}${signals ? ", with work signals" : ""}.`);
 }
 
 async function cmdRules(ctx: Ctx): Promise<void> {
@@ -427,8 +450,25 @@ async function cmdRules(ctx: Ctx): Promise<void> {
   if (!rules.length) return out("No folder rules. Every session is private until you share it.");
   for (const r of rules) {
     const title = (r.goal_id && loadFeed(ctx.home, r.workspace_id)?.goals.find((g) => g.id === r.goal_id)?.title) || r.goal_title;
-    out(`${r.dir}  ->  ${r.workspace_name}${title ? ` / ${title}` : " / no goal"}  (since ${r.created_at.slice(0, 10)})`);
+    out(`${r.dir}  ->  ${r.workspace_name}${title ? ` / ${title}` : " / no goal"}  (since ${r.created_at.slice(0, 10)}${r.signals ? ", work signals on" : ""})`);
   }
+}
+
+/** Work in flight toward the goal of the newest shared session in this folder, and related goals. Offline. */
+async function cmdPod(ctx: Ctx, argv: string[]): Promise<void> {
+  const { values } = parseArgs({ args: argv, options: { cwd: { type: "string" } } });
+  const dir = realDir(values.cwd || process.cwd());
+  const rows = ctx.db
+    .prepare("SELECT s.local_id AS lid, s.cwd AS cwd FROM sessions s JOIN shares h ON h.local_id = s.local_id WHERE h.state = 'shared' ORDER BY COALESCE(s.last_active, s.created_at) DESC")
+    .all() as { lid: string; cwd: string | null }[];
+  const inside = (c: string | null) => !!c && (realDir(c) === dir || realDir(c).startsWith(dir + path.sep) || dir.startsWith(realDir(c) + path.sep));
+  for (const r of rows.filter((x) => inside(x.cwd))) {
+    const hot = readJson<{ share: { workspace_id: string } | null; goal: { id: string } | null }>(layout.hot(ctx.home, r.lid));
+    if (hot?.share && hot.goal) return out(podReport(ctx.home, r.lid, hot.share.workspace_id, hot.goal.id, r.cwd, 1500));
+  }
+  const rule = matchRule(readRules(ctx.home), dir);
+  if (rule?.goal_id) return out(podReport(ctx.home, null, rule.workspace_id, rule.goal_id, dir, 1500));
+  out("No shared session or folder rule covers this folder, so there is no goal to show work for.");
 }
 
 async function cmdStopSharing(ctx: Ctx, argv: string[]): Promise<void> {
@@ -593,6 +633,8 @@ export async function main(argv: string[]): Promise<void> {
         return await cmdBind(ctx, rest);
       case "rules":
         return await cmdRules(ctx);
+      case "pod":
+        return await cmdPod(ctx, rest);
       case "latch":
         return await cmdLatch(ctx, rest);
       case "install":

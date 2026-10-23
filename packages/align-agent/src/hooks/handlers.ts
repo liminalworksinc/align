@@ -3,11 +3,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { gitInfo, matchAnchors } from "../shared/anchors.ts";
-import { renderDelta, renderEnvelope, type DeltaKind } from "../shared/envelope.ts";
+import { collisionReason, crossNote, measureKey, renderCard, renderContextDelta, renderDelta, renderEnvelope, type DeltaKind } from "../shared/envelope.ts";
+import { contextGoals } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
 import type { FeedFile, GoalSnapshot, Harness, HotState, InjectedState, Latch, MeFile } from "../shared/types.ts";
+import { CLAIM_MS, collision, commitSubject, crossOverlap, display, editedPaths, podReport, readPath, record, shellWrites, siblingNews, type Act } from "./siblings.ts";
 
 export interface HookInput {
   session_id?: string;
@@ -19,6 +21,7 @@ export interface HookInput {
   source?: string;
   prompt?: string;
   tool_name?: string;
+  tool_input?: Record<string, unknown>;
   model?: string;
   /** Set when a tool event fires inside a Claude Code subagent. */
   agent_id?: string;
@@ -167,18 +170,25 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
     const full = source === "startup" || source === "clear" || source === "compact";
     const need = full || ((source === "resume" || source === "fork") && !sameAsInjected(inj, hot.goal, "shared"));
     if (need) {
-      context = renderEnvelope(hot.goal);
+      context = renderEnvelope(hot.goal, hot.context_goals || []);
       markInjected(inj, hot.goal, "shared");
+      markContext(inj, hot.context_goals);
       inj.context_epoch++;
       reportApplied(home, lid, inj, hot.pending_directives);
     }
+    const card = cardFor(home, lid, hot.goal.id, inj, cwd, hot.share.workspace_id);
+    if (card) context = context ? `${context}\n${card}` : card;
   } else if (!hot?.share && (source === "startup" || source === "clear") && autoShare(home, harness, sid, cwd, inj, messages)) {
     const rule = matchRule(readRules(home), cwd);
     const goal = rule?.goal_id ? feedGoal(home, rule.workspace_id, rule.goal_id) : null;
     if (goal) {
-      context = renderEnvelope(goal);
+      const related = contextGoals(home, rule!.workspace_id, goal.id);
+      context = renderEnvelope(goal, related);
       markInjected(inj, goal, "shared");
+      markContext(inj, related);
       inj.context_epoch++;
+      const card = cardFor(home, lid, goal.id, inj, cwd, rule!.workspace_id);
+      if (card) context = `${context}\n${card}`;
     }
   } else if (!hot?.share || hot.share.state === "stopped") {
     if (source === "fork" || source === "clear") {
@@ -210,6 +220,53 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
   if (context) out.hookSpecificOutput = { hookEventName: "SessionStart", additionalContext: context };
   if (messages.length) out.systemMessage = messages.join("\n");
   return out;
+}
+
+/** Cards are rate-limited per session; work that overlaps this session's own files comes through at once. */
+const CARD_EVERY_MS = 10 * 60_000;
+
+/** The sibling card for this session, marking what it reports as seen. Null when nothing is new (or too soon). */
+function cardFor(home: string, lid: string, goalId: string, inj: InjectedState, cwd: string | null, ws?: string): string | null {
+  const news = siblingNews(home, lid, goalId, inj.siblings_seen || {}, cwd, Date.now(), ws);
+  if (!news.summaries.length) return null;
+  const overlap = news.summaries.some((s) => s.overlap?.length);
+  if (!overlap && inj.card_at && Date.now() - Date.parse(inj.card_at) < CARD_EVERY_MS) return null;
+  inj.siblings_seen = news.seen;
+  inj.card_at = new Date().toISOString();
+  return renderCard(news.summaries);
+}
+
+/** Notes for parents and dependencies whose version changed since this session last had them in context. */
+const measuresOf = (c: NonNullable<HotState["context_goals"]>[number]) => (Array.isArray(c.goal.measures) ? c.goal.measures : []).map(measureKey).slice(0, 10);
+
+function contextNotes(inj: InjectedState, ctx: HotState["context_goals"]): string[] {
+  const seen = inj.context_seen || {};
+  const before = inj.context_measures || {};
+  const out: string[] = [];
+  for (const c of ctx || []) {
+    if (seen[c.goal.id] === undefined) {
+      seen[c.goal.id] = c.goal.version; // first sight comes with the envelope or the bound note
+      before[c.goal.id] = measuresOf(c);
+      continue;
+    }
+    if (seen[c.goal.id] !== c.goal.version) {
+      out.push(renderContextDelta(c, before[c.goal.id]));
+      seen[c.goal.id] = c.goal.version;
+      before[c.goal.id] = measuresOf(c);
+    }
+  }
+  inj.context_seen = seen;
+  inj.context_measures = before;
+  return out;
+}
+
+function markContext(inj: InjectedState, ctx: HotState["context_goals"]): void {
+  inj.context_seen = { ...(inj.context_seen || {}) };
+  inj.context_measures = { ...(inj.context_measures || {}) };
+  for (const c of ctx || []) {
+    inj.context_seen[c.goal.id] = c.goal.version;
+    inj.context_measures[c.goal.id] = measuresOf(c);
+  }
 }
 
 // ---------- UserPromptSubmit ----------
@@ -267,6 +324,13 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
     context = renderDelta(kind, goal);
     markInjected(inj, kind === "unbound" ? null : goal, hot.share.state);
   }
+  if (hot.share.state === "shared" && goal) {
+    // A newly bound goal's parents arrive with the bound note; later parent or dependency versions as short notes.
+    const notes = kind === "bound" ? (markContext(inj, hot.context_goals), []) : goal.id === hot.goal?.id ? contextNotes(inj, hot.context_goals) : [];
+    const card = cardFor(home, lid, goal.id, inj, input.cwd || hot.cwd, hot.share.workspace_id);
+    const parts = [context, ...notes, card].filter((x): x is string => !!x);
+    context = parts.length ? parts.join("\n") : null;
+  }
   if (kind || sameAsInjected(inj, goal, hot.share.state)) {
     reportApplied(home, lid, inj, [...hot.pending_directives, ...applied]);
   }
@@ -303,8 +367,43 @@ export function preToolUse(home: string, harness: Harness, input: HookInput): Ho
     (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
     (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
   if (!allowed) return denyOutput();
+  const sib = siblingEdits(home, harness, lid, input);
+  if (sib.held) return sib.held;
   // Context from a subagent's tool call reaches only that subagent, so the delta waits for the main agent.
-  return input.agent_id ? null : midTurnDelta(home, lid);
+  const delta = input.agent_id ? null : midTurnDelta(home, lid);
+  if (!sib.note) return delta;
+  const prev = (delta?.hookSpecificOutput as { additionalContext?: string } | undefined)?.additionalContext;
+  return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: prev ? `${prev}\n${sib.note}` : sib.note } };
+}
+
+/**
+ * Record this shared session's edits and commits for its siblings, and hold an edit to a file another session toward
+ * the same goal changed in the last 20 minutes, once, so the agent re-reads it instead of overwriting that work.
+ */
+function siblingEdits(home: string, harness: Harness, lid: string, input: HookInput): { held?: HookOutput; note?: string } {
+  const hot = readHot(home, lid);
+  if (hot?.share?.state !== "shared" || !hot.goal) return {};
+  const cwd = input.cwd || hot.cwd;
+  const files = editedPaths(harness, input.tool_name, input.tool_input, cwd);
+  const subject = commitSubject(input.tool_name, input.tool_input);
+  const at = new Date().toISOString();
+  const hit = collision(home, lid, hot.goal.id, files);
+  if (hit) {
+    record(home, lid, [{ t: "warned", at, p: hit.file, ref: `${hit.sib.lid}@${hit.at}` }]);
+    const reason = collisionReason(hit.sib.hot.harness, hit.sib.hot.native_session_id, display(hit.file, cwd), Math.floor((Date.now() - Date.parse(hit.at)) / 60_000));
+    return { held: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } } };
+  }
+  // Files written through the shell count as edits for the pod (never held: one command can't be partly denied).
+  const shell = shellWrites(input.tool_name, input.tool_input, cwd).filter((p) => !files.includes(p));
+  const acts: Act[] = [...files, ...shell].map((p) => ({ t: "edit", at, p }));
+  const read = readPath(harness, input.tool_name, input.tool_input, cwd);
+  if (read) acts.push({ t: "read", at, p: read });
+  if (subject) acts.push({ t: "commit", at, s: subject });
+  // Another person (or a claim) on this file: one note, never a hold, since nothing local gets overwritten.
+  const cross = crossOverlap(home, lid, hot.share.workspace_id, hot.goal.id, [...files, ...shell], cwd);
+  if (cross) acts.push({ t: "noted", at, ref: cross.ref });
+  record(home, lid, acts);
+  return cross ? { note: crossNote(cross.who, cross.file, cross.minutes, { goal: cross.goal, claimUntil: cross.claimUntil, task: cross.task }) } : {};
 }
 
 /**
@@ -347,21 +446,33 @@ function claimDelta(home: string, lid: string): (() => void) | null {
   return null;
 }
 
+function contextChanged(hot: HotState, inj: InjectedState): boolean {
+  const seen = inj.context_seen || {};
+  return (hot.context_goals || []).some((c) => seen[c.goal.id] !== undefined && seen[c.goal.id] !== c.goal.version);
+}
+
 function midTurnDelta(home: string, lid: string): HookOutput {
   const hot = readHot(home, lid);
-  if (!hot?.share || !deltaKind(hot, readInjected(home, lid))) return null;
+  if (!hot?.share) return null;
+  const pre = readInjected(home, lid);
+  const own = deltaKind(hot, pre);
+  if (!own && !(hot.share.state === "shared" && contextChanged(hot, pre))) return null;
   const release = claimDelta(home, lid);
   if (!release) return null;
   try {
     const inj = readInjected(home, lid); // re-read under the lock: another hook may have just delivered it
     const kind = deltaKind(hot, inj);
-    if (!kind) return null;
-    const goal = kind === "unbound" ? null : hot.goal;
-    const context = renderDelta(kind, goal);
-    markInjected(inj, goal, hot.share.state);
-    reportApplied(home, lid, inj, hot.pending_directives);
+    const parts: string[] = [];
+    if (kind) {
+      const goal = kind === "unbound" ? null : hot.goal;
+      parts.push(renderDelta(kind, goal));
+      markInjected(inj, goal, hot.share.state);
+      reportApplied(home, lid, inj, hot.pending_directives);
+    }
+    if (hot.share.state === "shared") parts.push(...contextNotes(inj, hot.context_goals));
+    if (!parts.length) return null;
     writeInjected(home, lid, inj);
-    return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: context } };
+    return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: parts.join("\n") } };
   } finally {
     release();
   }
@@ -385,6 +496,12 @@ function feedFor(home: string, hot: HotState | null): FeedFile | null {
   const me = readJson<MeFile>(layout.me(home));
   const ws = hot?.share?.workspace_id || me?.default_workspace || (me?.workspaces?.length === 1 ? me.workspaces[0].id : null);
   return ws ? readJson<FeedFile>(layout.feed(home, ws)) : null;
+}
+
+/** Shared, or about to be: a share is pending, or a folder rule covers this folder (the first sync shares it). */
+function willShare(home: string, hot: HotState | null, cwd: string | null): boolean {
+  if (hot?.share) return hot.share.state === "shared" || hot.share.state === "pending";
+  return !!matchRule(readRules(home), cwd);
 }
 
 export function command(home: string, harness: Harness, sid: string, cwd: string | null, line: string): string {
@@ -433,6 +550,8 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
     case "share": {
       const dirMode = /(^|\s)--dir(\s|$)/.test(arg);
       arg = arg.replace(/(^|\s)--dir(?=\s|$)/, " ").trim();
+      const signals = /(^|\s)--signals(\s|$)/.test(arg);
+      arg = arg.replace(/(^|\s)--signals(?=\s|$)/, " ").trim();
       const already = hot?.share && (hot.share.state === "shared" || hot.share.state === "pending");
       if (already && !dirMode) return `Align: this session is already shared with ${hot!.share!.workspace_name}.`;
       const confirm = /\s*(confirm|--yes|-y)$/i.test(arg);
@@ -454,11 +573,13 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
             `  Every new session started in it is shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : " with no goal"}, from its start.`,
             `  ${already ? "This session is already shared." : "This session is shared too."} Forks stay private. \`::align unshare\` keeps one session private.`,
             `  Sent per session: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
-            `  Never sent: prompts, responses, tool input or output, paths, branch names.`,
-            `Type \`::align share --dir ${arg ? `${arg} ` : ""}confirm\` to turn it on.`,
+            signals
+              ? `  Work signals on: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who can read the goal, kept 24 hours. Never sent: prompts, responses, tool output, file contents.`
+              : `  Never sent: prompts, responses, tool input or output, paths, branch names. (Add --signals to share file paths and task labels with the pod.)`,
+            `Type \`::align share --dir ${signals ? "--signals " : ""}${arg ? `${arg} ` : ""}confirm\` to turn it on.`,
           ].join("\n");
         }
-        setRule(home, { dir, workspace_id: feed.workspace_id, workspace_name: feed.workspace_name, goal_id: goal ? goal.id : null, goal_title: goal ? goal.title : null });
+        setRule(home, { dir, workspace_id: feed.workspace_id, workspace_name: feed.workspace_name, goal_id: goal ? goal.id : null, goal_title: goal ? goal.title : null, signals });
         if (!already) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
         return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${already ? "" : " This session too; your next prompt carries the goal."} \`::align unshare --dir\` turns it off.`;
       }
@@ -494,7 +615,26 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       spool("bind", goal.id);
       return `Align: from your next prompt this session counts toward "${goal.title}".`;
     }
+    case "task": {
+      if (!willShare(home, hot, cwd)) return "Align: this session is not shared, so there is no one to tell.";
+      if (!arg) return "Align: usage is `::align task <what this session is working on>`.";
+      record(home, lid, [{ t: "task", at: ts, s: arg.slice(0, 120) }]);
+      return `Align: sessions toward related goals will see this session is on "${arg.slice(0, 120)}".`;
+    }
+    case "claim": {
+      if (!willShare(home, hot, cwd)) return "Align: this session is not shared, so there is no one to tell.";
+      if (!arg) return "Align: usage is `::align claim <file> [what for]`.";
+      const [file, ...why] = arg.split(/\s+/);
+      const abs = path.resolve(cwd || "/", file);
+      record(home, lid, [{ t: "claim", at: ts, p: abs, s: why.join(" ").slice(0, 120) || undefined }]);
+      const until = new Date(Date.now() + CLAIM_MS).toTimeString().slice(0, 5);
+      return `Align: ${display(abs, cwd)} is claimed by this session until ${until}. Sessions toward related goals get a note before editing it.`;
+    }
+    case "pod": {
+      if (hot?.share?.state !== "shared" || !hot.goal) return "Align: this session is not bound to a goal, so there is no pod work to show.";
+      return podReport(home, lid, hot.share.workspace_id, hot.goal.id, cwd, 1500);
+    }
     default:
-      return "Align commands: `::align status`, `::align goals`, `::align share [--dir] [goal]`, `::align bind <goal>`, `::align unshare [--dir]`. They stay local and never reach the model.";
+      return "Align commands: `::align status`, `::align goals`, `::align share [--dir] [goal]`, `::align bind <goal>`, `::align unshare [--dir]`, `::align task <label>`, `::align claim <file>`, `::align pod`. They stay local and never reach the model.";
   }
 }

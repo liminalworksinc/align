@@ -19,6 +19,18 @@ export interface Goal {
   pod: { id: string; name: string } | null;
   anchors: { repos: string[]; branch_patterns: string[]; issues: string[] };
   bindable: boolean;
+  /** Goals whose output this goal consumes (wire v2.2; absent from older servers). */
+  depends_on?: string[];
+  /** Goals this goal contributes to, and whether its owner reviewed it against their current versions. */
+  contributes_to?: { id: string; title: string; version: number; reviewed_version: number | null; stale: boolean }[];
+}
+
+/** A goal related to the bound one that its agent should also know: a parent it contributes to, or a dependency. */
+export interface ContextGoal {
+  rel: "parent" | "depends";
+  /** parent only: the bound goal was not reviewed against this parent version yet. */
+  stale: boolean;
+  goal: GoalSnapshot;
 }
 
 /** Only the ratified goal fields that may reach the model. */
@@ -53,6 +65,8 @@ export interface HotState {
   pending_directives: string[];
   /** User-only messages (systemMessage); never model context. */
   notices: { id: string; text: string }[];
+  /** Parents and dependencies of the bound goal, from the cached feed. */
+  context_goals?: ContextGoal[];
   updated_at: string;
 }
 
@@ -66,6 +80,14 @@ export interface InjectedState {
   consumed_binding: string | null;
   applied: string[];
   notices_shown: string[];
+  /** Sibling session local id (or remote session key) -> newest activity of theirs already shown to this session. */
+  siblings_seen?: Record<string, string>;
+  /** When the last sibling card was injected (cards are rate-limited unless work overlaps). */
+  card_at?: string;
+  /** Related goal id -> version already in context. */
+  context_seen?: Record<string, number>;
+  /** Related goal id -> its measures (as compared) at that version, so a change note can say what changed. */
+  context_measures?: Record<string, string[]>;
   at: string;
 }
 
