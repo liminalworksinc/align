@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { EMPTY, Field, field, issuesFrom, ScenarioFields, toBody, type Form, type Issues } from "@/components/ScenarioForm";
 import { isCodeRefusal } from "@/lib/codes";
-import { ROLE_SWITCH } from "@/lib/labels";
+import { NO_ANSWER_HOSTED, NO_ANSWER_LOCAL, ROLE_SWITCH } from "@/lib/labels";
 
 // Create a new custom workspace from the same form as /setup. No sign-in is needed and creating does not sign anyone in.
 // POSTs to /api/workspaces; the three passcodes come back once and are shown once on the success card.
@@ -112,7 +112,7 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
       else if (res.status === 421) setProblem("Open this page on the machine running Align, at its localhost address.");
       else setProblem(error ?? "The workspace could not be created. Try again.");
     } catch {
-      setProblem("The server did not answer. Check that Align is running and try again.");
+      setProblem(testServer ? NO_ANSWER_HOSTED : NO_ANSWER_LOCAL);
     } finally {
       setBusy(false);
     }

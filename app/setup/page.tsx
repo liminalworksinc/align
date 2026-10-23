@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
-import { labelsFor } from "@/lib/labels";
+import { labelsFor, NO_ANSWER_LOCAL } from "@/lib/labels";
 import type { Actor, AnonStateView, StateView } from "@/lib/types";
 import { EMPTY, issuesFrom, ScenarioFields, toBody, type Form, type Issues } from "@/components/ScenarioForm";
 
@@ -64,7 +64,7 @@ export default function SetupPage() {
       else setProblem(typeof data.error === "string" ? data.error : "The setup could not be saved. Try again.");
       setConfirming(false);
     } catch {
-      setProblem("The server did not answer. Check that Align is running and try again.");
+      setProblem(NO_ANSWER_LOCAL); // local only: a hosted server redirects /setup to /new
       setConfirming(false);
     } finally {
       setBusy(false);

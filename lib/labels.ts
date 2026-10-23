@@ -121,6 +121,11 @@ export const conditionsUnconfirmedNote = (n: number) =>
 export const ROLE_SWITCH = "Testing on your own? Use Switch team (top right) to act as the next team. Your work is saved.";
 /** The waiting screen's version, naming the team whose move it is. */
 export const switchHint = (team: string) => `Testing on your own? Use Switch team to act as ${team} next.`;
+// When a request gets no answer at all. Local: the person runs Align themselves. Hosted: a tester can't, so the
+// founder's words (Sean's #6 carry-over) point them to whoever sent the link.
+export const NO_ANSWER_LOCAL = "The server did not answer. Check that Align is running and try again.";
+export const NO_ANSWER_WORKSPACE_LOCAL = "Couldn’t reach this workspace. Check that Align is running, then try again.";
+export const NO_ANSWER_HOSTED = "The test server didn't answer. Try again in a minute. If it keeps happening, tell the person who sent you the link.";
 export const AGREED_NOT_LAUNCH = "Both teams agreed. This is not approval to launch: the launch decision is still pending.";
 /** app/error.tsx and app/global-error.tsx (Sean's #6 carry-over): plain words, never the error's own message or stack. */
 export const ERROR_PAGE = "Something went wrong on this page.";
