@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { assertStartupConfig, config } from "./config";
+import { assertStartupConfig, config, testServerClosed } from "./config";
 
 // State locks live in this process's memory, so two servers on one data directory would corrupt it.
 // A pid file records the live server; a second one refuses to start. Mode L keeps it next to Northstar's state
@@ -39,6 +39,10 @@ export function startup() {
   writeFileSync(PID_FILE, String(process.pid), { mode: 0o600 });
   chmodSync(PID_FILE, 0o600); // the mode above applies only when the file is new
   sweepLeftovers();
+  if (config().hosted && testServerClosed(config().deleteBy)) {
+    // Closed mode: up only so the operator can purge (proxy.ts answers 410 to everything).
+    console.error(`ALIGN_DELETE_BY (${config().deleteBy}) has passed: closed, every request gets 410. Purge with ws-admin delete --all --yes, then stop the machine.`);
+  }
   process.once("exit", () => {
     try {
       if (readFileSync(PID_FILE, "utf8").trim() === String(process.pid)) unlinkSync(PID_FILE);

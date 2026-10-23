@@ -209,6 +209,7 @@ async function startServer(env) {
       last = r.status;
       if (r.status === 200) return { started: true, stderr, exited, last };
       if (r.status === 503) break; // up, but serving nothing (proxy.ts startupProblems)
+      if (r.status === 410) return { started: false, closed: true, stderr, exited, last, log: () => stderr, gone: () => exited }; // up, closed (H12)
     } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
@@ -1050,7 +1051,6 @@ try {
     ["Northstar public", { ALIGN_NORTHSTAR_PUBLIC: "1" }, "Northstar is off when hosted"],
     ["no deletion date", { ALIGN_DELETE_BY: undefined }, "ALIGN_DELETE_BY must be a date"],
     ["a bad deletion date", { ALIGN_DELETE_BY: "Nov 6" }, "ALIGN_DELETE_BY must be a date"],
-    ["a deletion date that has passed", { ALIGN_DELETE_BY: "2020-01-01" }, "has passed"],
     ["an AI key", { AI_GATEWAY_API_KEY: "sk-test" }, "AI_GATEWAY_API_KEY"],
     ["capture on", { ALIGN_CAPTURE: "1" }, "ALIGN_CAPTURE must be off"],
     ["public mode", { ALIGN_PUBLIC: "1" }, "Public mode is not supported"],
@@ -1180,6 +1180,42 @@ try {
   );
   const all = admin("delete", "--all");
   check("H11 delete --all needs --yes", all.status === 2 && existsSync(path.join(hostedDir, "workspaces", hA.json.workspace.id)), `${all.status} ${all.stderr}`);
+
+  {
+    // H12 closed mode: once ALIGN_DELETE_BY has ended the server still starts (a refused start crash-loops on Fly, and
+    // then nobody can ssh in to purge), answers 410 to every request whatever its headers, and stays up through the
+    // purge. Same volume as above, so A's workspace is still there to purge.
+    await stopServer();
+    const shut = await startServer({ ...good, ALIGN_DELETE_BY: "2020-01-01" });
+    await new Promise((r) => setTimeout(r, 3000)); // a refused start would have exited by now
+    const probes = await Promise.all([
+      hosted("GET", "/api/workspaces/config"),
+      hosted("GET", "/new"),
+      hosted("GET", "/"),
+      hosted("GET", "/api/state", { cookie: hl.cookie }),
+      hosted("POST", "/api/session", { body: { workspace: hA.json.workspace.id, role: "leadership", passcode: hA.json.passcodes.leadership } }),
+      hosted("POST", "/api/workspaces", { body: { ...marked("H12MARK"), signup_code: INVITES[2] } }),
+      hosted("GET", `/api/workspaces/${hA.json.workspace.id}/login-info`),
+      hosted("GET", "/api/workspaces/config", { headers: { "fly-client-ip": undefined } }),
+      withHost("GET", "/api/workspaces/config", "evil.example"),
+    ]);
+    const codes = probes.map((r) => r.status);
+    check(
+      "H12 past ALIGN_DELETE_BY: the server starts closed and stays up; every request, with any headers, gets 410 and no tester data",
+      shut.closed && !shut.gone() && codes.every((c) => c === 410) && probes.every((r) => !r.text.includes(hA.json.workspace.name ?? "HDMARK") && !r.text.includes("passcode")) &&
+        shut.log().includes("closed, every request gets 410"),
+      `closed=${shut.closed} exited=${shut.gone()} ${codes.join(",")} log=${shut.log().slice(-200)}`,
+    );
+    const purge = admin("delete", "--all", "--yes");
+    const left = readdirSync(path.join(hostedDir, "workspaces")).filter((n) => /^(\.(tmp|deleting)-)?w_[a-z2-7]{12}$/.test(n));
+    const after = await hosted("GET", "/api/workspaces/config");
+    check(
+      "H12 the purge (ws-admin delete --all --yes) succeeds on the closed server: no workspace left, a deleted row each, still up and 410",
+      purge.status === 0 && purge.stdout.includes(`deleted ${hA.json.workspace.id}`) && left.length === 0 && !shut.gone() && after.status === 410 &&
+        readFileSync(path.join(hostedDir, "workspaces", "_events.jsonl"), "utf8").includes(`"deleted","id":"${hA.json.workspace.id}"`),
+      `${purge.status} ${purge.stdout} ${purge.stderr} left=${left} exited=${shut.gone()} ${after.status}`,
+    );
+  }
 } catch (e) {
   check("tenancy run", false, e?.stack ?? e);
 } finally {
