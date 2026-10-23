@@ -1,6 +1,6 @@
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { authorityEvents, describeEvent, pendingFor, quoted } from "../directives";
+import { authorityEvents, describeEvent, oneLine, pendingFor, quoted } from "../directives";
 import { acceptedPlan, launchApproved } from "../policy";
 import { activeRegistry, currentGoals } from "../registry";
 import { readState } from "../store";
@@ -415,9 +415,9 @@ export function registerAlign(server: McpServer) {
     async (_args, ctx) => {
       requireRead(ctx);
       const out = listGoals(await readState(storeOf(ctx)));
-      const lines = out.goals.map((g) => `- ${g.team} ${g.version} (${g.goal_id}): ${g.objective}`);
+      const lines = out.goals.map((g) => oneLine(`- ${g.team} ${g.version} (${g.goal_id}): ${g.objective}`));
       const push = out.latest_push ? `latest push ${out.latest_push.version} at ${out.latest_push.pushed_at} by ${out.latest_push.pushed_by}` : "no Leadership push yet";
-      return result(out, `${out.org}: ${out.goals.length} current goals (registry ${out.registry_version}, ${push}).\n${lines.join("\n")}`);
+      return result(out, `${oneLine(`${out.org}: ${out.goals.length} current goals (registry ${out.registry_version}, ${push}).`)}\n${lines.join("\n")}`);
     },
   );
 
@@ -459,7 +459,7 @@ export function registerAlign(server: McpServer) {
                 `${poss(a.owning_team)} current measures: ${a.owning_measures.map(quoted).join("; ")}`,
                 `Plan ${quoted(a.plan_title)} is proposed only, not agreed. Do not act on it.`,
               ];
-        return result(out, lines.filter(Boolean).join("\n"));
+        return result(out, lines.filter(Boolean).map(oneLine).join("\n"));
       }
       const out = { ...acceptedPlan(s), run_command: "scripts/run-plan.sh accepted" };
       return result(
@@ -487,10 +487,10 @@ export function registerAlign(server: McpServer) {
           ? (() => {
               const v = out.groups[0].sessions[0];
               const m = v.mapping;
-              return `Session ${v.id} (${v.repo}@${v.branch}): ${m ? `${m.state} -> ${m.choice ?? "none"}${m.confidence !== null ? ` (${Math.round(m.confidence * 100)}%)` : ""}${m.conflict_flagged ? ", conflict flagged" : ""}` : "not mapped yet"}.`;
+              return oneLine(`Session ${v.id} (${v.repo}@${v.branch}): ${m ? `${m.state} -> ${m.choice ?? "none"}${m.confidence !== null ? ` (${Math.round(m.confidence * 100)}%)` : ""}${m.conflict_flagged ? ", conflict flagged" : ""}` : "not mapped yet"}.`);
             })()
           : `No captured session matches "${out.query}".`
-        : `${out.total_sessions} captured sessions (registry ${out.registry_version}).\n${out.groups.map((g) => `- ${g.team} [${g.key}]: ${g.sessions.length}`).join("\n")}`;
+        : `${out.total_sessions} captured sessions (registry ${out.registry_version}).\n${out.groups.map((g) => oneLine(`- ${g.team} [${g.key}]: ${g.sessions.length}`)).join("\n")}`;
       return result(out, summary);
     },
   );
@@ -542,8 +542,8 @@ export function registerAlign(server: McpServer) {
           ? `${out.directives.length} pending directive(s) for ${out.session_id}${out.directives.length ? `: ${out.directives.map((d) => d.title).join("; ")}` : ""}.`
           : `No captured session matches "${out.session_id}".`
         : "No session_id given; pending directives not computed.";
-      const lines = out.recent.map((e) => `- ${e.title} at ${e.at}: delivered ${e.delivered}, acted ${e.acted}`);
-      return result(out, `${head}\n${out.recent.length} recent authority event(s)${lines.length ? `:\n${lines.join("\n")}` : "."}`);
+      const lines = out.recent.map((e) => oneLine(`- ${e.title} at ${e.at}: delivered ${e.delivered}, acted ${e.acted}`));
+      return result(out, `${oneLine(head)}\n${out.recent.length} recent authority event(s)${lines.length ? `:\n${lines.join("\n")}` : "."}`);
     },
   );
 }
