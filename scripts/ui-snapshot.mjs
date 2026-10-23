@@ -98,8 +98,7 @@ const DEEP = [
 /** Click a nav item, then the first enabled button in `within` whose text matches; false when there is none. */
 async function openDeep(page, nav, within, match) {
   const clicked = await page.evaluate(
-    (nav, within, src) => {
-      const re = new RegExp(src);
+    (nav) => {
       const norm = (t) => t.replace(/\s+/g, " ").trim();
       const item = [...document.querySelectorAll("nav[aria-label=Main] button")].find((b) => !b.disabled && norm(b.innerText).startsWith(nav));
       if (!item) return false;
@@ -107,8 +106,6 @@ async function openDeep(page, nav, within, match) {
       return true;
     },
     nav,
-    within,
-    match.source,
   );
   if (!clicked) return false;
   await new Promise((r) => setTimeout(r, 800));

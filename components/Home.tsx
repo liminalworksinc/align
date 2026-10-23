@@ -46,8 +46,6 @@ const ROLES = [
   { id: "security", name: "Alex / Security Lead", blurb: "Owns how customer issues get handled" },
 ] as const;
 type Role = (typeof ROLES)[number]["id"];
-/** Scenario Studio lists sandbox runs; a custom scenario without any shows the item disabled with this reason. */
-const NO_SANDBOX = "No sandbox in custom scenarios";
 const CUSTOM_BLURB: Record<Role, string> = {
   leadership: "sets the company goal",
   product: "asks for the change",
@@ -413,7 +411,8 @@ export default function Home({ workspace }: { workspace?: string }) {
   const unresolved = rel?.status === "UNKNOWN";
   const lastPush = state.pushes?.at(-1);
   const ceo = currentGoal(state, "ceo");
-  const nav = NAV.filter((n) => !n.leadershipOnly || me.actor === "leadership");
+  // Scenario Studio compares sandbox runs; custom scenarios have no sandbox, so the rail leaves it out there (S3).
+  const nav = NAV.filter((n) => (!n.leadershipOnly || me.actor === "leadership") && (n.id !== "studio" || !custom));
   const proposalOpen = state.proposals.some((p) => !["RATIFIED", "REJECTED"].includes(p.state));
   const counts: Partial<Record<View, number>> = { turn: turnCount, goals: unresolved ? 1 : 0 };
   // + New conflict: leadership sets one up (/setup on this server; a workspace's leadership starts a new workspace
@@ -492,18 +491,15 @@ export default function Home({ workspace }: { workspace?: string }) {
           {nav.map((n) => {
             const on = view === n.id || !!n.also?.includes(view);
             const count = counts[n.id] ?? 0;
-            const off = n.id === "studio" && !L.sandbox;
             return (
               <button
                 key={n.id}
                 onClick={() => props.go(n.id)}
-                disabled={off}
                 aria-current={on ? "page" : undefined}
                 className={`flex min-h-12 w-full items-center gap-3 rounded-[10px] px-3.5 text-left text-[15px] font-semibold transition ${on ? "bg-violet-50 text-zinc-900 shadow-[inset_2px_0_0_var(--color-violet-700)]" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"} disabled:cursor-not-allowed disabled:hover:bg-transparent`}
               >
                 <span className="flex min-w-0 flex-col">
-                  <span className={off ? "text-zinc-500" : undefined}>{n.label}</span>
-                  {off && <span className="text-[12.5px] font-normal leading-snug text-zinc-500">{NO_SANDBOX}</span>}
+                  <span>{n.label}</span>
                 </span>
                 {count > 0 && (
                   <span className={`ml-auto grid h-[22px] min-w-[22px] place-items-center rounded-full px-1.5 text-[12px] font-bold ${n.id === "turn" ? "bg-violet-700 text-black" : "bg-zinc-100 text-zinc-900"}`}>
