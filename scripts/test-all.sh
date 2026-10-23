@@ -3,8 +3,9 @@
 # Checks frozen files, lint and types, starts a fresh dev server on <port>, then runs in fixed order:
 # snapshot, test-flow, test-scenario (default fixture, then each scripts/fixtures/*.json), test-ui-loop, test-mcp (Northstar, then custom),
 # test-capture, test-mapper. Capture and mapper add sessions
-# that survive reset, so they run last. Then test-tenancy and ui-northstar, which start their own production
-# servers on <port>.
+# that survive reset, so they run last. Then test-tenancy and test-v2 (Align v2, ALIGN_V2=1), which start their own
+# production servers on <port>; snapshot-v2on, the Northstar snapshot again on a dev server with ALIGN_V2=1 (turning
+# v2 on changes no Northstar bytes); and ui-northstar, on its own production server.
 # One summary line per step; exits non-zero if any step fails.
 set -u
 
@@ -76,6 +77,23 @@ step test-mapper env ALIGN_URL="$BASE" node scripts/test-mapper.mjs
 stop_server
 SERVER=""
 step test-tenancy node scripts/test-tenancy.mjs "$PORT"
+# Align v2's hosted server (docs/v2/WIRE.md): flag off, Mode L with the test identity provider, hosted refusals.
+step test-v2 node scripts/test-v2.mjs "$PORT"
+# The same Northstar snapshot against the same baseline with ALIGN_V2=1 (its database in a temp ALIGN_DATA_DIR, so
+# ./data holds only Northstar's state). /api/v2/me answering 401 proves v2 is on.
+V2ON_DIR="$(mktemp -d "${TMPDIR:-/tmp}/align-v2on.XXXXXX")"
+rm -f data/state.json data/.secret
+ALIGN_V2=1 ALIGN_DATA_DIR="$V2ON_DIR" ALIGN_MCP_TOKEN="$TOKEN" npx next dev -H 127.0.0.1 -p "$PORT" >"$LOGDIR/server-v2on.log" 2>&1 &
+SERVER=$!
+for _ in $(seq 1 90); do curl -s -o /dev/null "$BASE/login" && break; sleep 1; done
+if curl -s -o /dev/null "$BASE/login" && [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v2/me")" = 401 ]; then
+  step snapshot-v2on env ALIGN_MCP_TOKEN="$TOKEN" node scripts/snapshot-northstar.mjs "$BASE"
+else
+  summary FAIL snapshot-v2on "the ALIGN_V2=1 dev server did not start, see $LOGDIR/server-v2on.log"
+fi
+stop_server
+SERVER=""
+rm -rf "$V2ON_DIR"
 # Northstar's rendered UI text against 850971e's, on its own production server (needs Chrome).
 step ui-northstar scripts/test-ui-northstar.sh "$PORT"
 

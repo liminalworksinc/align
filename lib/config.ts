@@ -1,4 +1,5 @@
 import path from "node:path";
+import { v2Problems } from "./v2/config";
 
 // Every multi-workspace setting, read from the environment only (never from request headers).
 // Mode L (loopback) is the default. HOSTED=1 is the hosted tester mode (founder ruling 10-21 "go C"): one server
@@ -91,6 +92,7 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
   }
   if (env.AI_GATEWAY_API_KEY) p.push("AI_GATEWAY_API_KEY must not be set when hosted (no AI key)");
   if (env.ALIGN_CAPTURE && env.ALIGN_CAPTURE !== "0") p.push("ALIGN_CAPTURE must be off when hosted");
+  p.push(...v2Problems(env)); // empty unless ALIGN_V2=1
   return p;
 }
 

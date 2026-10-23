@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The local agent package has its own tsconfig and tests.
+    "packages/**",
   ]),
 ]);
 
