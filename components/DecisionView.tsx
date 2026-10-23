@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, type ReactNode } from "react";
-import { AGREED_STATUS, CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, decisionMeasureId, labelsFor, poss, switchHint, type Labels } from "@/lib/labels";
-import type { SimulationRun } from "@/lib/types";
+import { CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, decisionMeasureId, labelsFor, poss, switchHint, type Labels } from "@/lib/labels";
+import type { Acceptance, SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { AuthorityStrip } from "./AuthorityStrip";
 import { agreementStatus, launchLine, launchState } from "./launch";
@@ -9,7 +9,9 @@ import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
 import { nextStepHint } from "./nextStep";
 import { depRelation } from "./TeamLens";
-import { Badge, Button, OWNER_LABEL, StateBadge, fmtTime } from "./ui";
+import { SpartaProof } from "./SpartaProof";
+import { Badge, Button, OWNER_LABEL, STATE_LABEL, StateBadge, fmtTime } from "./ui";
+import { AuditTable, Card, CopyText, Legend, MeasuredTile, RecordHeader, RecordTabs, Tile, TimerCard, TruthColumns, useRecordTab } from "./v6/record";
 
 function passed(r?: SimulationRun) {
   return r ? r.checks.filter((c) => c.passed).length : 0;
@@ -99,39 +101,7 @@ export function DecisionView(props: ViewProps) {
   if (!L.northstar) return <CustomDecision props={props} L={L} />;
 
   // 1 · Agreement reached
-  if (acc && rel?.status === "ACCEPTED") {
-    const goal = s.goals.find((g) => g.id === acc.new_goal_id);
-    return (
-      <div className="flex flex-col gap-4">
-        <Header label="Decision record" right={<Badge tone="neutral">{L.northstar ? "Agreement reached" : AGREED_STATUS}</Badge>} />
-        <div className="al-in">
-          <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
-            Security&apos;s updated goal ({acc.accepted_version}) is now the shared plan for both teams.
-          </h1>
-          <p className="mt-2 max-w-[680px] text-[15px] text-zinc-700">
-            Handling beta customers&apos; issues moves to the top of Security&apos;s list. The previous version is kept.
-            {acc.ratified_at ? ` Approved at ${fmtTime(acc.ratified_at)}.` : ""}
-          </p>
-        </div>
-        <AuthorityStrip s={s} />
-        {goal && (
-          <div className="rounded-[14px] border border-zinc-200 bg-zinc-50 p-[18px]">
-            <div className="al-lbl mb-1">Security&apos;s new target</div>
-            <p className="text-[15px] text-zinc-900">{goal.measures.find((m) => m.id === "S-M3")?.text ?? goal.objective}</p>
-          </div>
-        )}
-        <ProofStrip s={s} />
-        <div className="flex flex-wrap gap-2.5">
-          <Button kind="secondary" onClick={() => props.go("goals")}>
-            See how the goals connect
-          </Button>
-          <Button kind="ghost" onClick={() => props.go("evidence")}>
-            See the full record
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  if (acc && rel?.status === "ACCEPTED") return <NorthstarRecord props={props} L={L} acc={acc} />;
 
   // 2 · A proposal is in progress
   if (open && prop) {
@@ -262,6 +232,105 @@ export function DecisionView(props: ViewProps) {
   );
 }
 
+/** Work items still tied to the goal version the acceptance replaced. */
+function oldPlanCount(s: ViewProps["s"], acc: Acceptance) {
+  if (acc.owning_work_item_ids || acc.asking_work_item_ids) return (acc.owning_work_item_ids?.length ?? 0) + (acc.asking_work_item_ids?.length ?? 0);
+  const old = s.goals.find((g) => g.id === acc.new_goal_id)?.supersedes;
+  return old ? s.work_items.filter((w) => w.goal_id === old).length : 0;
+}
+
+function MoveWork({ props, n }: { props: ViewProps; n: number }) {
+  return (
+    <span className="ml-auto">
+      <Button onClick={() => props.go("work")}>
+        Move running work → {n} item{n === 1 ? "" : "s"}
+      </Button>
+    </span>
+  );
+}
+
+/** v6 record, Northstar: one status pill, three truth columns, who decided (owner first), measured + verified tiles. */
+function NorthstarRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: Acceptance }) {
+  const { s } = props;
+  const [tab, setTab] = useRecordTab();
+  const goal = s.goals.find((g) => g.id === acc.new_goal_id);
+  const target = goal?.measures.find((m) => m.id === decisionMeasureId(s, acc))?.text ?? goal?.objective ?? "";
+  const runs = s.simulations.filter((r) => acc.evidence_version.includes(r.id));
+  const candidate =
+    runs.find((r) => r.plan_id === acc.plan_ref.plan_id && r.plan_version === acc.plan_ref.plan_version && r.plan_hash === acc.plan_ref.plan_hash) ??
+    runs.find((r) => r.plan_id === acc.plan_ref.plan_id);
+  const verified = acc.test_status === "TESTED" && candidate?.verdict === "PASS";
+  const status = "Agreement reached";
+  const title = `Security’s updated goal (${acc.accepted_version}) is now the shared plan for both teams.`;
+  const productDid = acc.acknowledged_via === "authored_in_proposal" ? "proposed; wrote what it will do into its proposal" : "proposed; accepted Security's changes";
+  const copy = [
+    `${title} · ${status}`,
+    `Decided by: ${OWNER_LABEL.security} (approved ${acc.accepted_version} at ${fmtTime(acc.ratified_at)}) and ${OWNER_LABEL.product} (${productDid} at ${fmtTime(acc.acknowledged_at)})`,
+    `Approved: ${target}`,
+    "Only proposed: none",
+    "Never tested: company beta readiness",
+    `Evidence: ${runs.map((r) => `${r.plan_id}@${r.plan_version} ${r.scenario} ${r.verdict} ${passed(r)}/${r.checks.length}`).join(" · ") || "none attached"}`,
+  ].join("\n");
+  return (
+    <div className="flex max-w-[960px] flex-col gap-[18px]">
+      <RecordHeader pill={status} tone="white" at={acc.ratified_at} title={title}>
+        <p className="max-w-[680px] text-[15px] text-zinc-700">Handling beta customers&apos; issues moves to the top of Security&apos;s list. The previous version is kept.</p>
+      </RecordHeader>
+      <RecordTabs tab={tab} setTab={setTab} />
+      {tab === "summary" && (
+        <>
+          <TruthColumns
+            approved={<span>{target}</span>}
+            proposed={<span className="text-zinc-500">No open conditions</span>}
+            untested={<span>Company beta readiness. Sparta checked ticket behaviour only.</span>}
+          />
+          <Card label="Who decided" className="flex flex-col px-[18px] py-2">
+            <div className="flex items-center gap-3 border-b border-zinc-100 py-2.5 text-[14.5px]">
+              <span className="flex-1">
+                <b>{OWNER_LABEL.security}</b>, owner: approved its goal ({acc.accepted_version})
+              </span>
+              <span className="font-mono text-[12.5px] text-zinc-600">{fmtTime(acc.ratified_at)}</span>
+            </div>
+            <div className="flex items-center gap-3 py-2.5 text-[14.5px]">
+              <span className="flex-1">
+                <b>{OWNER_LABEL.product}</b>: {productDid}
+              </span>
+              <span className="font-mono text-[12.5px] text-zinc-600">{fmtTime(acc.acknowledged_at)}</span>
+            </div>
+          </Card>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <MeasuredTile s={s} />
+            <Tile label={verified ? "Sparta · verified" : "Sparta · not verified"} accent={verified}>
+              <span className="text-[24px] font-semibold text-zinc-900">{candidate ? `${passed(candidate)} / ${candidate.checks.length}` : "No run"}</span>
+              <span className="text-[13px] text-zinc-500">
+                {verified ? "ticket behaviour only" : `Test status: ${STATE_LABEL[acc.test_status] ?? acc.test_status}`}
+              </span>
+            </Tile>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5 border-t border-zinc-200 pt-4">
+            <CopyText text={copy} />
+            <Button kind="ghost" onClick={() => props.go("goals")}>
+              See how the goals connect
+            </Button>
+            <MoveWork props={props} n={oldPlanCount(s, acc)} />
+          </div>
+        </>
+      )}
+      {tab === "receipts" && (
+        <>
+          <AuthorityStrip s={s} />
+          <AuditTable s={s} L={L} />
+          <Card label="Sparta runs" className="p-[18px]">
+            <SpartaProof runs={runs} onOpenTest={() => props.openDrawer("scenario")} />
+          </Card>
+          <TimerCard s={s} L={L} />
+        </>
+      )}
+      {tab === "legend" && <Legend L={L} agreed={status} />}
+    </div>
+  );
+}
+
 // ---- Custom scenario: the same decision path, built only from the operator's own setup. ----
 // No sandbox runs and no agents exist here, so nothing below mentions tests passing or agents acting.
 
@@ -284,72 +353,7 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
   const plan = s.plans.find((p) => p.plan_id === s.scenario_config?.plan_id && p.plan_version === s.scenario_config?.plan_version);
 
   // 1 · Agreement reached
-  if (acc && rel?.status === "ACCEPTED") {
-    const goal = s.goals.find((g) => g.id === acc.new_goal_id);
-    const newTarget = goal?.measures.find((m) => m.id === decisionMeasureId(s, acc))?.text ?? goal?.objective ?? "";
-    // What the owning team's approval depends on: its conditions field only. Its reason for asking for changes is shown
-    // separately, never as a condition. One condition per line; Align stores them as one text and never checks them.
-    const lastCounter = s.proposals.find((p) => p.id === acc.proposal_id)?.counter_versions.at(-1);
-    const conditions = lastCounter?.conditions?.trim() ?? "";
-    const reason = lastCounter?.rationale?.trim() ?? "";
-    const conditionLines = conditions.split("\n").map((c) => c.trim()).filter(Boolean);
-    return (
-      <div className="flex flex-col gap-4">
-        {/* One status wording (lib/labels.ts via agreementStatus); open conditions are marked once, in their box. */}
-        <Header label="Decision record" right={<Badge tone="neutral">{agreementStatus(acc)}</Badge>} />
-        <div className="al-in">
-          <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
-            {launchState(acc) === "approved"
-              ? `${poss(owning)} updated goal (${acc.accepted_version}) is now the shared plan for both teams.`
-              : `Both teams agreed on ${poss(owning)} updated goal (${acc.accepted_version}). Launch is pending until leadership decides.`}
-          </h1>
-          <p className="mt-2 max-w-[680px] text-[16px] text-zinc-700">
-            The previous version is kept.{acc.ratified_at ? ` Approved by ${owner} at ${fmtTime(acc.ratified_at)}.` : ""}
-          </p>
-          <p className="mt-1 max-w-[680px] text-[16px] font-semibold text-zinc-900">{launchLine(acc, L)}</p>
-        </div>
-        {conditions && (
-          <section aria-label="Conditions" className="rounded-[14px] border border-amber-300 bg-amber-50 p-[18px]">
-            <div className="flex items-center gap-2">
-              <h2 className="al-lbl !text-amber-700">Conditions</h2>
-              <Badge tone="amber">{CONDITIONS_UNCONFIRMED}</Badge>
-            </div>
-            {conditionLines.length > 1 ? (
-              <ol className="mt-1 list-decimal pl-5 text-[16px] text-zinc-900">
-                {conditionLines.map((c, i) => (
-                  <li key={i}>{c}</li>
-                ))}
-              </ol>
-            ) : (
-              <p className="mt-1 whitespace-pre-wrap text-[16px] text-zinc-900">{conditions}</p>
-            )}
-            <p className="mt-1 text-[14px] text-zinc-600">
-              {owning} asked for {conditionLines.length > 1 ? "these" : "this"} when it asked for changes. {conditionsUnconfirmedNote(conditionLines.length)}
-            </p>
-          </section>
-        )}
-        {reason && (
-          <p className="max-w-[680px] text-[16px] text-zinc-700">
-            <span className="font-semibold text-zinc-900">Why {owning} asked for changes:</span> {reason}
-          </p>
-        )}
-        {/* The approved target shows once, at the top of the old-plan panel (and in the header card). */}
-        <ul aria-label="What this record shows" className="flex flex-col gap-1.5 rounded-[14px] border border-zinc-200 bg-white p-[18px] text-[17px] text-zinc-900">
-          <li>
-            <span className="font-semibold">Decision:</span> recorded
-          </li>
-          <li>
-            <span className="font-semibold">Work done:</span> not verified yet
-          </li>
-          <li>
-            <span className="font-semibold">Outcome:</span> not measured yet
-          </li>
-        </ul>
-        <OldPlanWork s={s} L={L} owningIds={acc.owning_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} revision={newTarget} viewer={me.actor} />
-        <ProofStrip s={s} />
-      </div>
-    );
-  }
+  if (acc && rel?.status === "ACCEPTED") return <CustomRecord props={props} L={L} acc={acc} />;
 
   // 2 · A proposal is in progress
   if (open && prop) {
@@ -480,22 +484,136 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
 }
 
 /**
+ * v6 record, custom scenario. One status pill (agreementStatus: lib/labels.ts wording, reflecting leadership's launch
+ * decision), amber while conditions are open. Conditions are marked once, in the Only proposed column. Who decided
+ * appears once: the ProofStrip "Who approved" tile. No sandbox claims: this scenario has no runs.
+ */
+function CustomRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: Acceptance }) {
+  const { s, me } = props;
+  const [tab, setTab] = useRecordTab();
+  const owning = L.team.security;
+  const owner = L.person.security;
+  const goal = s.goals.find((g) => g.id === acc.new_goal_id);
+  const newTarget = goal?.measures.find((m) => m.id === decisionMeasureId(s, acc))?.text ?? goal?.objective ?? "";
+  // What the owning team's approval depends on: its conditions field only. Its reason for asking for changes is shown
+  // separately, never as a condition. One condition per line; Align stores them as one text and never checks them.
+  const lastCounter = s.proposals.find((p) => p.id === acc.proposal_id)?.counter_versions.at(-1);
+  const conditions = lastCounter?.conditions?.trim() ?? "";
+  const reason = lastCounter?.rationale?.trim() ?? "";
+  const conditionLines = conditions.split("\n").map((c) => c.trim()).filter(Boolean);
+  const status = agreementStatus(acc);
+  const title =
+    launchState(acc) === "approved"
+      ? `${poss(owning)} updated goal (${acc.accepted_version}) is now the shared plan for both teams.`
+      : `Both teams agreed on ${poss(owning)} updated goal (${acc.accepted_version}).`;
+  const copy = [
+    `${title} · ${status}`,
+    launchLine(acc, L),
+    `Decided by: ${owner} (approved ${acc.accepted_version} at ${fmtTime(acc.ratified_at)}) and ${L.person.product} (at ${fmtTime(acc.acknowledged_at)})`,
+    `Approved: ${newTarget}`,
+    `Only proposed: ${conditions ? `${conditionLines.join("; ")} (${CONDITIONS_UNCONFIRMED})` : "none"}`,
+    ...(reason ? [`Why ${owning} asked for changes: ${reason}`] : []),
+    "Never tested: no sandbox test in this scenario",
+  ].join("\n");
+  return (
+    <div className="flex max-w-[960px] flex-col gap-[18px]">
+      <RecordHeader pill={status} tone={conditions ? "amber" : "white"} at={acc.ratified_at} title={title}>
+        <p className="max-w-[680px] text-[16px] text-zinc-700">
+          The previous version is kept.
+        </p>
+        <p className="max-w-[680px] text-[16px] font-semibold text-zinc-900">{launchLine(acc, L)}</p>
+      </RecordHeader>
+      <RecordTabs tab={tab} setTab={setTab} />
+      {tab === "summary" && (
+        <>
+          <TruthColumns
+            approved={<span>{newTarget}</span>}
+            proposed={
+              conditions ? (
+                <div aria-label="Conditions" className="flex flex-col gap-1.5">
+                  <span className="self-start">
+                    <Badge tone="amber">{CONDITIONS_UNCONFIRMED}</Badge>
+                  </span>
+                  {conditionLines.length > 1 ? (
+                    <ol className="list-decimal pl-5">
+                      {conditionLines.map((c, i) => (
+                        <li key={i}>{c}</li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="whitespace-pre-wrap">{conditions}</p>
+                  )}
+                  <p className="text-[13.5px] text-zinc-600">
+                    {owning} asked for {conditionLines.length > 1 ? "these" : "this"} when it asked for changes. {conditionsUnconfirmedNote(conditionLines.length)}
+                  </p>
+                </div>
+              ) : (
+                <span className="text-zinc-500">No open conditions</span>
+              )
+            }
+            untested={
+              <ul aria-label="What this record shows" className="flex flex-col gap-1">
+                <li>
+                  <span className="font-semibold">Decision:</span> recorded
+                </li>
+                <li>
+                  <span className="font-semibold">Work done:</span> not verified yet
+                </li>
+                <li>
+                  <span className="font-semibold">Outcome:</span> not measured yet
+                </li>
+              </ul>
+            }
+          />
+          {reason && (
+            <p className="max-w-[760px] text-[16px] text-zinc-700">
+              <span className="font-semibold text-zinc-900">Why {owning} asked for changes:</span> {reason}
+            </p>
+          )}
+          <ProofStrip s={s} />
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <MeasuredTile s={s} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5 border-t border-zinc-200 pt-4">
+            <CopyText text={copy} />
+            <MoveWork props={props} n={oldPlanCount(s, acc)} />
+          </div>
+          <OldPlanWork s={s} L={L} owningIds={acc.owning_work_item_ids ?? []} askingIds={acc.asking_work_item_ids ?? []} viewer={me.actor} />
+        </>
+      )}
+      {tab === "receipts" && (
+        <>
+          <AuditTable s={s} L={L} />
+          <Card label="Sandbox runs" className="p-[18px]">
+            {L.sandbox ? (
+              <SpartaProof runs={s.simulations.filter((r) => acc.evidence_version.includes(r.id))} onOpenTest={() => props.openDrawer("scenario")} />
+            ) : (
+              <p className="text-[15px] text-zinc-600">No sandbox runs in this scenario</p>
+            )}
+          </Card>
+          <TimerCard s={s} L={L} />
+        </>
+      )}
+      {tab === "legend" && <Legend L={L} agreed={status} />}
+    </div>
+  );
+}
+
+/**
  * Work still on the old plan, always expanded: the owning team's items tied to the goal that changed, then the
- * asking team's own items to check against what it committed to. The approved revision shows once, above both.
+ * asking team's own items to check against what it committed to. The approved target shows once, in the Approved column.
  */
 function OldPlanWork({
   s,
   L,
   owningIds,
   askingIds,
-  revision,
   viewer,
 }: {
   s: ViewProps["s"];
   L: Labels;
   owningIds: string[];
   askingIds: string[];
-  revision: string;
   viewer: ViewProps["me"]["actor"];
 }) {
   // "your" only when the asking team itself is looking; everyone else reads whose commitment it is.
@@ -507,10 +625,6 @@ function OldPlanWork({
   return (
     <section aria-label="Work still on the old plan" className="rounded-[14px] border border-amber-700 bg-white p-[18px]">
       <div className="al-lbl mb-3 !text-amber-700">Work still on the old plan</div>
-      <div className="mb-3 flex flex-col gap-1 rounded-[10px] bg-amber-50 px-3.5 py-3 ring-1 ring-amber-300">
-        <span className="al-lbl">Approved revision</span>
-        <span className="text-[17px] leading-snug text-zinc-900">{revision}</span>
-      </div>
       {owning.length === 0 && asking.length === 0 ? (
         <p className="text-[16px] text-zinc-700">No work items were tied to this goal</p>
       ) : (
