@@ -91,7 +91,10 @@ export function ScenarioStudio(props: ViewProps) {
 
   const same =
     baseline && chosen && baseline.mission_id === chosen.mission_id && baseline.seed_version === chosen.seed_version && baseline.checks_version === chosen.checks_version;
-  const isProduct = me.actor === "product";
+  // The composer takes an attachment only while nothing is open (createProposal: one open proposal at a time), so the
+  // button exists only then; it never says "Attached" when the attachment would go nowhere.
+  const composerOpen = !s.proposals.some((p) => !["RATIFIED", "REJECTED"].includes(p.state));
+  const isProduct = me.actor === "product" && composerOpen;
   const attachedNow = !!candidate && !!props.attached?.simulation_refs.includes(candidate.id);
   const attach = () => {
     if (!candidate) return;
