@@ -1,0 +1,174 @@
+A
+Align
+by Liminal
+Your turn
+Goals
+1
+Scenario Studio
+Decisions
+Work
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+PD
+Product Director
+owns Product’s goal v3
+Northstar Security · Q4 2026
+▲ New company goal from the CEO · Product and Security haven’t agreed yet
+PD
+Product Director
+Product · Owner
+Sign out
+◎
+COMPANY GOAL
+Q4 2026
+▲
+Changed today
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+Product and Security: not agreed yet
+YOUR GOAL · V3
+Ship the beta and clear anything blocking the launch.
+INBOX
+Change to Security's goal (v1)
+Product Director · <TIME>
+●
+Product accepted changes
+▲
+Needs retest
+●
+Product accepted changes
+▲
+Needs a new test: the changes alter how the agent works, so no one can say it passed until it runs again
+Proposed change to Security's goal (v1)
+
+From Product Director to Alex / Security Lead · sent <TIME>
+
+PD
+Product Director
+proposal · v1
+<TIME>
+
+CURRENTClose as many tickets as possible each day, oldest first
+
+PROPOSEDBeta incidents triaged per launch-readiness policy within <DUR>
+
+Why: CEO KR2 makes beta readiness the priority
+
+In return: Product tags beta issues obs-beta at intake and publishes beta scope
+
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✓
+New plan: passed 9/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 1/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 2/9
+✕
+Current plan: failed 1/9
+AS
+Alex / Security Lead
+▲
+counter · v2.1
+<TIME>
+
+REVISEDBeta incidents triaged within <DUR>; P0 within <DUR>
+
+Why: Tighten P0 window
+
+AS
+Alex / Security Lead
+▲
+counter · v2.2
+<TIME>
+
+…; protected tickets untouched
+
+Why: Changes the executable plan's protected set
+
+▲
+Changes how the agent works: needs a new test
+PD
+Product Director
+acknowledged v2.2
+<TIME>
+
+Accepted Security's changes and confirmed what Product will do.
+
+Evidence
+▸
+What changed upstream
+▸
+▲
+You accepted the changes · waiting for Alex / Security Lead to approve
+Only Security can approve a change to Security's goal.
+Try to approve (only Security can)
+DETAILS
+Product needs Security
+▲
+Unknown
+
+The beta launch needs Security to handle beta issues first
+
+Product Director v3 depends on Alex / Security Lead v1
+WHERE THE GOALS CLASH
+SECURITY'S CURRENT TARGET (V1)
+Close as many tickets as possible each day, oldest first
+THE CEO'S NEW REQUIREMENT
+Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
+CRITICAL SECURITY TICKET (OFF-LIMITS)
+The critical security ticket (#1) and its private notes must not be touched.
+Security's rule: Critical security tickets keep getting the same careful handling
+WHAT HAPPENS NOW
+Beta customers' issues wait in line like any other ticket. The CEO's new requirement can't be met unless Security changes its target.
+WHERE THIS COMES FROM
+●
+Confirmed
+Found when the CEO sent the updated company goal to every team. Security's current target doesn't mention the beta.
+Review the conflict with Security

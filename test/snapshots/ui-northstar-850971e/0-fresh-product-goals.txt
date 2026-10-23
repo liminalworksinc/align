@@ -1,23 +1,19 @@
 A
 Align
 by Liminal
-◆
-Next decision
-What needs you
-◎
+Your turn
 Goals
-How they connect
-✉
-Proposals
-Changes in progress
-▤
-Evidence
-Decisions and proof
+Scenario Studio
+Decisions
+Work
 CONNECTED
 Sparta
 Practice tests · 27 runs
 Alike
 Team decision memory · 1 earlier decision
+PD
+Product Director
+owns Product’s goal v3
 Northstar Security · Q4 2026
 PD
 Product Director
@@ -31,32 +27,23 @@ THE CEO'S NEW REQUIREMENT
 No new requirement yet
 YOUR GOAL · V3
 Ship the beta and clear anything blocking the launch.
-How the goals connect
-Company
-Teams
-My Goal
-CEO
-●
-Set by CEO · view only
+Goals
+
+Select a team to see only what connects to it.
+
+Everything
+Product
+Security
+COMPANY · CEO
+read-only
 v1
-
 Launch the beta of our new monitoring product.
-
-Product says the beta is ready to launch
-▼
-follows the CEO's goal
-▼
-follows the CEO's goal
-Product Director
+KR1 · Product says the beta is ready to launch
+PRODUCT · YOU
 v3
-ⓘ
-Your goal · you can edit
-
 Ship the beta and clear anything blocking the launch.
-
 Beta usage tracking fully set up
 No launch blockers left on Product's side
-WORK IN PRIORITY ORDER
 #1
 Set up usage tracking for the beta
 in progress
@@ -66,16 +53,13 @@ in progress
 #3
 Ticket dashboard polish
 queued
-Alex / Security Lead
+No dependency recorded
+SECURITY · PEER
 v1
-●
-Security's goal · view only
-
 Handle customer and security issues quickly and correctly.
-
 Close as many tickets as possible each day, oldest first
+Clashes with KR2
 Critical security tickets keep getting the same careful handling
-WORK IN PRIORITY ORDER
 #1
 Tag and answer every ticket, oldest first
 running
@@ -85,6 +69,10 @@ running
 #3
 Handle beta customers' issues (not part of Security's current target)
 not prioritized
+Unknown
+Product depends on Security
+Work can complete while the goal is still not met: Security’s measure hasn't changed.
+See ways forward
 DETAILS
 CEO
 v1
