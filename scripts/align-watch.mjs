@@ -3,6 +3,8 @@
 // relevant to this session and wakes the agent with a replan directive.
 //   - Holds an SSE connection to Align (/api/directives/stream); falls back to polling /api/directives.
 //   - On the first directive: acknowledges it, prints it to stderr, exits 2 (Claude Code wakes the session).
+//   - Exits 1 with one stderr line if Align refuses the agent token (401/403: expired, revoked, or minted on another
+//     build), instead of polling a refusal silently until the window ends.
 //   - Exits 0 silently otherwise (no change within the window, Align unreachable, not opted in, or another watcher is live).
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -79,11 +81,18 @@ async function deliver(session, d) {
   process.exit(2);
 }
 
+/** Align refused the token: say so once and stop, so the agent's user knows wake-ups are off. */
+function refused(status) {
+  process.stderr.write(`align-watch: Align refused this session's token (${status}); wake-ups are off. Mint a new one with scripts/agent-session.sh.\n`);
+  process.exit(1);
+}
+
 async function viaStream(session, deadline) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), Math.max(0, deadline - Date.now()));
   try {
     const res = await fetch(`${ALIGN}/api/directives/stream?session=${encodeURIComponent(session)}`, { headers: AUTH, signal: ctl.signal });
+    if (res.status === 401 || res.status === 403) refused(res.status);
     if (!res.ok || !res.body) return;
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -112,6 +121,7 @@ async function viaPoll(session, until) {
   while (Date.now() < until) {
     try {
       const r = await fetch(`${ALIGN}/api/directives?session=${encodeURIComponent(session)}`, { headers: AUTH, signal: AbortSignal.timeout(3000) });
+      if (r.status === 401 || r.status === 403) refused(r.status);
       const j = await r.json();
       if (j.pending?.length) await deliver(session, j.pending[0]);
     } catch {
