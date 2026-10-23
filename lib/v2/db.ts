@@ -397,6 +397,38 @@ const MIGRATIONS: string[] = [
     FOREIGN KEY (ws_id, directive_id, session_key) REFERENCES v2_directive_targets(ws_id, directive_id, session_key) ON DELETE CASCADE
   );
   `,
+  // 2: the goal tree (dependencies between goals, a child's review of its parents' versions) and in-flight activity.
+  `
+  ALTER TABLE v2_goals ADD COLUMN depends_on_json TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE v2_goal_versions ADD COLUMN depends_on_json TEXT NOT NULL DEFAULT '[]';
+  CREATE TABLE v2_goal_acks (
+    ws_id TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    parent_id TEXT NOT NULL,
+    parent_version INTEGER NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (goal_id, parent_id),
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, parent_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE TABLE v2_activity (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    session_key TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    goal_id TEXT,
+    repo_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('edit','commit','task','claim')),
+    path_hash TEXT,
+    path TEXT,
+    text TEXT,
+    at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_activity_ws ON v2_activity(ws_id, seq);
+  CREATE INDEX v2_activity_expiry ON v2_activity(ws_id, expires_at);
+  `,
 ];
 
 export function migrate() {

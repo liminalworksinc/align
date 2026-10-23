@@ -8,6 +8,9 @@ import { optStr, str, type Body } from "./validate";
 
 // Goals and their immutable versions. A goal's current fields live on v2_goals; every version (including the
 // first) is also kept in v2_goal_versions with a content hash. Visibility and pod are fixed at creation.
+// The goal tree: a goal contributes to the targets of its approved alignments (its parents) and may depend on other
+// goals whose output it consumes. A child records which version of each parent its owner last reviewed it against;
+// a newer parent version marks the child stale until its owner confirms it or saves a new version.
 
 export type GoalStatus = "active" | "achieved" | "dropped";
 export const GOAL_STATUSES: readonly GoalStatus[] = ["active", "achieved", "dropped"];
@@ -33,6 +36,7 @@ export interface GoalRow {
   title: string;
   measures_json: string;
   anchors_json: string;
+  depends_on_json: string;
   status: GoalStatus;
   created_at: string;
   updated_at: string;
@@ -49,8 +53,18 @@ export interface GoalCore {
   owner: { id: string; name: string };
   pod: { id: string; name: string } | null;
   anchors: Anchors;
+  /** Goals whose output this goal consumes. */
+  depends_on: string[];
 }
-export type Goal = GoalCore & { bindable: boolean };
+/** A goal this one contributes to, and whether this goal was reviewed against its current version. */
+export interface ParentRef {
+  id: string;
+  title: string;
+  version: number;
+  reviewed_version: number | null;
+  stale: boolean;
+}
+export type Goal = GoalCore & { bindable: boolean; contributes_to: ParentRef[] };
 
 export const goalObj = (g: GoalRow): GoalObject => ({ kind: "goal", ownerId: g.owner_id, visibility: g.visibility, podId: g.pod_id });
 
@@ -79,7 +93,60 @@ export function goalCore(g: GoalRow): GoalCore {
     owner: { id: g.owner_id, name: owner?.name ?? "" },
     pod: pod ? { id: pod.id, name: pod.name } : null,
     anchors: JSON.parse(g.anchors_json),
+    depends_on: JSON.parse(g.depends_on_json || "[]"),
   };
+}
+
+/** Ids of the goals this goal contributes to: targets of its approved alignments. */
+export function parentIds(wsId: string, goalId: string): string[] {
+  return all<{ target_goal_id: string }>(
+    "SELECT DISTINCT target_goal_id FROM v2_alignments WHERE ws_id = ? AND source_goal_id = ? AND state = 'approved' ORDER BY target_goal_id",
+    wsId,
+    goalId,
+  ).map((r) => r.target_goal_id);
+}
+
+/** Record that this goal's owner reviewed it against its parents' current versions (or one parent's). */
+export function reviewParents(wsId: string, goalId: string, at: string, only?: string) {
+  for (const pid of only ? [only] : parentIds(wsId, goalId)) {
+    const parent = goalRow(wsId, pid);
+    if (!parent) continue;
+    run(
+      `INSERT INTO v2_goal_acks (ws_id, goal_id, parent_id, parent_version, at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (goal_id, parent_id) DO UPDATE SET parent_version = excluded.parent_version, at = excluded.at`,
+      wsId,
+      goalId,
+      pid,
+      parent.version,
+      at,
+    );
+  }
+}
+
+function parentsFor(pp: PolicyPrincipal, g: GoalRow): ParentRef[] {
+  const out: ParentRef[] = [];
+  for (const pid of parentIds(pp.wsId, g.id)) {
+    const parent = goalRow(pp.wsId, pid);
+    if (!parent || !canReadGoal(pp, goalObj(parent))) continue;
+    const ack = get<{ parent_version: number }>("SELECT parent_version FROM v2_goal_acks WHERE goal_id = ? AND parent_id = ?", g.id, pid);
+    const reviewed = ack?.parent_version ?? null;
+    out.push({ id: parent.id, title: parent.title, version: parent.version, reviewed_version: reviewed, stale: reviewed === null || reviewed < parent.version });
+  }
+  return out;
+}
+
+/** The goal's owner confirms it still fits a parent's current version. */
+export async function confirmParent(pp: PolicyPrincipal, goalId: string, parentId: string) {
+  const g = goalRow(pp.wsId, goalId);
+  if (!g) throw notFound();
+  need(pp, "goal.edit", goalObj(g));
+  if (!parentIds(pp.wsId, goalId).includes(parentId)) throw notFound();
+  const at = nowIso();
+  await tx(() => {
+    reviewParents(pp.wsId, goalId, at, parentId);
+    audit(pp.wsId, pp.userId, "goal.parent_reviewed", goalId, at);
+  });
+  return serializeGoal(pp, goalRow(pp.wsId, goalId)!);
 }
 
 /** Goals this user holds an approved allocation transfer to: an approved work_toward alignment whose current
@@ -119,7 +186,12 @@ export function bindableFor(pp: PolicyPrincipal, g: GoalRow, transfers = transfe
 }
 
 export function serializeGoal(pp: PolicyPrincipal, g: GoalRow, transfers?: Set<string>): Goal {
-  return { ...goalCore(g), bindable: bindableFor(pp, g, transfers) };
+  const core = goalCore(g);
+  const visibleDeps = core.depends_on.filter((id) => {
+    const d = goalRow(pp.wsId, id);
+    return !!d && canReadGoal(pp, goalObj(d));
+  });
+  return { ...core, depends_on: visibleDeps, bindable: bindableFor(pp, g, transfers), contributes_to: parentsFor(pp, g) };
 }
 
 /** Every goal this caller may see (own private + pod + workspace), oldest first. */
@@ -174,8 +246,24 @@ function anchorsIn(v: unknown, prev: Anchors = { repos: [], branch_patterns: [],
   return { repos: list("repos"), branch_patterns: list("branch_patterns"), issues: list("issues") };
 }
 
-const contentHash = (c: { title: string; measures: Measure[]; anchors: Anchors; status: GoalStatus }) =>
-  sha256hex(JSON.stringify({ title: c.title, measures: c.measures, anchors: c.anchors, status: c.status }));
+function dependsIn(pp: PolicyPrincipal, v: unknown, self: string | null, prev: string[] = []): string[] {
+  if (v === undefined) return prev;
+  if (!Array.isArray(v)) throw badRequest("depends_on must be a list of goal ids");
+  if (v.length > 5) throw badRequest("depends_on: at most 5");
+  const out: string[] = [];
+  for (const id of v) {
+    if (typeof id !== "string" || id === self) throw badRequest("depends_on must list other goals");
+    const d = goalRow(pp.wsId, id);
+    if (!d || !canReadGoal(pp, goalObj(d))) throw notFound();
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+const contentHash = (c: { title: string; measures: Measure[]; anchors: Anchors; status: GoalStatus; depends_on?: string[] }) =>
+  sha256hex(
+    JSON.stringify({ title: c.title, measures: c.measures, anchors: c.anchors, status: c.status, ...(c.depends_on?.length ? { depends_on: [...c.depends_on].sort() } : {}) }),
+  );
 
 export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   const visibility = (b.visibility ?? "workspace") as Visibility;
@@ -187,14 +275,15 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   const title = str(b, "title", 300);
   const measures = measuresIn(b.measures ?? []);
   const anchors = anchorsIn(b.anchors ?? {});
+  const dependsOn = dependsIn(pp, b.depends_on ?? [], null);
   const at = nowIso();
   const id = newId("g");
   const count = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_goals WHERE ws_id = ?", pp.wsId)?.n ?? 0;
   if (count >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals");
   await tx(() => {
     run(
-      `INSERT INTO v2_goals (id, ws_id, owner_id, pod_id, visibility, version, title, measures_json, anchors_json, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'active', ?, ?)`,
+      `INSERT INTO v2_goals (id, ws_id, owner_id, pod_id, visibility, version, title, measures_json, anchors_json, depends_on_json, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'active', ?, ?)`,
       id,
       pp.wsId,
       pp.userId,
@@ -203,17 +292,19 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
       title,
       JSON.stringify(measures),
       JSON.stringify(anchors),
+      JSON.stringify(dependsOn),
       at,
       at,
     );
     run(
-      "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, status, content_hash, created_by, created_at) VALUES (?, ?, 1, ?, ?, ?, 'active', ?, ?, ?)",
+      "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, status, content_hash, created_by, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, 'active', ?, ?, ?)",
       pp.wsId,
       id,
       title,
       JSON.stringify(measures),
       JSON.stringify(anchors),
-      contentHash({ title, measures, anchors, status: "active" }),
+      JSON.stringify(dependsOn),
+      contentHash({ title, measures, anchors, status: "active", depends_on: dependsOn }),
       pp.userId,
       at,
     );
@@ -234,19 +325,22 @@ export async function newGoalVersion(pp: PolicyPrincipal, goalId: string, b: Bod
   const anchors = anchorsIn(b.anchors, JSON.parse(g.anchors_json));
   const status = (b.status ?? g.status) as GoalStatus;
   if (!GOAL_STATUSES.includes(status)) throw badRequest("status must be active, achieved or dropped");
-  const hash = contentHash({ title, measures, anchors, status });
-  if (hash === contentHash({ title: g.title, measures: JSON.parse(g.measures_json), anchors: JSON.parse(g.anchors_json), status: g.status })) {
+  const prevDeps: string[] = JSON.parse(g.depends_on_json || "[]");
+  const dependsOn = dependsIn(pp, b.depends_on, g.id, prevDeps);
+  const hash = contentHash({ title, measures, anchors, status, depends_on: dependsOn });
+  if (hash === contentHash({ title: g.title, measures: JSON.parse(g.measures_json), anchors: JSON.parse(g.anchors_json), status: g.status, depends_on: prevDeps })) {
     throw conflict("no_change", "Nothing changed");
   }
   const at = nowIso();
   const v = g.version + 1;
   await tx(() => {
     const n = run(
-      "UPDATE v2_goals SET version = ?, title = ?, measures_json = ?, anchors_json = ?, status = ?, updated_at = ? WHERE ws_id = ? AND id = ? AND version = ?",
+      "UPDATE v2_goals SET version = ?, title = ?, measures_json = ?, anchors_json = ?, depends_on_json = ?, status = ?, updated_at = ? WHERE ws_id = ? AND id = ? AND version = ?",
       v,
       title,
       JSON.stringify(measures),
       JSON.stringify(anchors),
+      JSON.stringify(dependsOn),
       status,
       at,
       pp.wsId,
@@ -255,19 +349,21 @@ export async function newGoalVersion(pp: PolicyPrincipal, goalId: string, b: Bod
     );
     if (!n) throw conflict("stale_version", "This goal changed meanwhile; reload and try again");
     run(
-      "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, status, content_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, status, content_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       pp.wsId,
       goalId,
       v,
       title,
       JSON.stringify(measures),
       JSON.stringify(anchors),
+      JSON.stringify(dependsOn),
       status,
       hash,
       pp.userId,
       at,
     );
     audit(pp.wsId, pp.userId, "goal.versioned", goalId, at);
+    reviewParents(pp.wsId, goalId, at); // saving a version is a review against the parents as they are now
     goalVersionDirective(pp.wsId, goalRow(pp.wsId, goalId)!);
   });
   return serializeGoal(pp, goalRow(pp.wsId, goalId)!);

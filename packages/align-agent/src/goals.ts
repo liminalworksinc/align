@@ -73,6 +73,9 @@ export function syncSnapshots(ctx: Ctx, feed: FeedFile): void {
       touched.add(p.local_id);
     }
   }
+  // Every shared session in this workspace re-reads its parents and dependencies from the new feed.
+  const all = ctx.db.prepare("SELECT local_id FROM shares WHERE workspace_id=?").all(feed.workspace_id) as { local_id: string }[];
+  for (const s of all) touched.add(s.local_id);
   for (const lid of touched) renderHot(ctx, lid);
 }
 

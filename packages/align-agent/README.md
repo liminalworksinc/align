@@ -17,9 +17,10 @@ align logout                                          revokes this device, wipes
 align status                                          identity, last sync, hooks + hash, outbox, unpriced
 align sessions [--all] [--json]                       local sessions, tokens, basis, list-price estimate (offline)
 align goals [--workspace <name|id>] [--refresh]       cached goal feed
-align share --dir [folder] --workspace W --goal G     share every new session started in a folder (rule stays local)
+align share --dir [folder] --workspace W --goal G [--signals]   share every new session started in a folder (rule stays local)
 align share <session|--latest> [--cwd [dir]] --workspace W --goal <ref|none> [--alias <name>] [--from start|now] [--yes]
 align unshare --dir [folder] · align rules            remove a folder rule · list them
+align pod [--cwd <dir>]                               work in flight toward this folder's goal and related goals (offline)
 align stop-sharing <session>                          future usage stays local
 align delete-history <session> [--yes]                server hard delete; totals change
 align bind <session> --goal <ref|none>                takes effect at the next prompt (root turn)
@@ -30,8 +31,9 @@ align sync                                            one pass: spool, transcrip
 align doctor                                          checks plus hook latency
 ```
 
-In a session: `::align status`, `::align goals`, `::align share [--dir] [goal]` (then `... confirm`),
-`::align bind <goal>`, `::align unshare [--dir]`. These are answered locally and never reach the model.
+In a session: `::align status`, `::align goals`, `::align share [--dir] [--signals] [goal]` (then `... confirm`),
+`::align bind <goal>`, `::align unshare [--dir]`, `::align task <label>`, `::align claim <file> [what for]`,
+`::align pod`. These are answered locally and never reach the model.
 
 ## How updates reach a session
 
@@ -43,6 +45,25 @@ In a session: `::align status`, `::align goals`, `::align share [--dir] [goal]` 
    the next tool call fail closed.
 
 So a goal change or stop issued from the web lands within one sync interval, at the next prompt or tool call.
+
+## Goal tree and pod awareness
+
+- A session's starting context also names the goal its goal contributes to (with its measures) and the goals it depends
+  on. A new version of either reaches every session under the child goal as one short note at its next prompt or tool
+  call, flagged when the child's owner has not reviewed the child against it yet.
+- Each shared session's PreToolUse hook records the files it edits and reads, its commit subjects, and its
+  `::align task` and `::align claim` lines in `ALIGN_HOME/activity/<lid>.jsonl`. The sync pass uploads them (paths and
+  text only with `--signals`, otherwise keyed hashes) and caches other machines' activity in `feeds/activity-<ws>.json`.
+- At a prompt, a session gets one card (<= 300 chars) about work in flight toward its goal and related goals (parents,
+  dependencies, children, and goals under the same parent): this machine's sessions and other people's, grouped per
+  person, overlap with its own files first. At most one card per 10 minutes unless work overlaps; 0 bytes when nothing
+  is new. `align pod` gives the agent more when it asks.
+- Edits are seen three ways: edit tools (Claude Edit/Write/MultiEdit, Codex apply_patch), plain shell writes (`>`,
+  `>>`, `tee`, `sed -i`, `cp`/`mv` targets, `git add` paths), and, in the sync pass, the repo's working tree and new
+  commits since the previous pass (for files a script wrote), credited to the session most recently active there.
+- On this machine, an edit to a file another same-goal session changed in the last 20 minutes (and this session has not
+  read since) is held once with the reason. Only hook-seen edits can hold an edit. Across people nothing is held; the next edit of an overlapping or claimed
+  file gets one short note.
 
 ## What `align install` changes
 
@@ -80,9 +101,11 @@ without `--dir`.
 
 - Hooks read only local state, never the network, credentials or transcripts, and exit within 300 ms. The only
   thing they start is the detached sync. A stop latch denies tools fail-closed, even if the sync never ran.
-- Uploads: session key and repo key are per-workspace HMACs; branch, paths and folder rules are never sent; titles
-  are sent as null. Only ratified goal fields reach the model, inside a fixed envelope (<= 1,200 chars) or delta
-  (<= 300 chars), and nothing at all when unchanged.
+- Uploads: session key and repo key are per-workspace HMACs; folder rules are never sent; titles are sent as null.
+  Branch names and repo-relative paths go up only as work signals with `--signals`; without it, keyed hashes only.
+  What reaches the model: ratified goal fields inside a fixed envelope (<= 1,200 chars) or delta (<= 300 chars), and the
+  pod card and notes (<= 300 chars, file paths, commit subjects and task labels from the user's own pod), all passed
+  through the same sanitizer, and nothing at all when unchanged.
 
 ## Development
 

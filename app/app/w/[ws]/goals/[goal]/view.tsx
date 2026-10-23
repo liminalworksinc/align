@@ -18,6 +18,9 @@ function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () =
   const [status, setStatus] = useState(goal.status);
   const [measures, setMeasures] = useState(measuresDraft(goal));
   const [anchors, setAnchors] = useState(anchorsDraft(goal));
+  const [deps, setDeps] = useState<string[]>(goal.depends_on ?? []);
+  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
+  const others = feed.data?.goals.filter((g) => g.id !== goal.id && g.status === "active") ?? [];
   const act = useAction();
   return (
     <Card title="New version">
@@ -25,7 +28,10 @@ function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () =
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void act.run(() => api(`/api/v2/workspaces/${ws}/goals/${goal.id}/versions`, { body: { version: goal.version, title, status, measures: measuresOut(measures), anchors: anchorsOut(anchors) } }), onDone);
+          void act.run(
+            () => api(`/api/v2/workspaces/${ws}/goals/${goal.id}/versions`, { body: { version: goal.version, title, status, measures: measuresOut(measures), anchors: anchorsOut(anchors), depends_on: deps } }),
+            onDone,
+          );
         }}
       >
         <Field label="Goal">
@@ -40,6 +46,17 @@ function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () =
           </Select>
         </Field>
         <AnchorsEditor value={anchors} onChange={setAnchors} />
+        {others.length > 0 && (
+          <div className="mb-3">
+            <p className="mb-1 text-[14px] text-zinc-600">Depends on (agents on this goal hear when these change)</p>
+            {others.map((g) => (
+              <label key={g.id} className="mb-1 flex items-center gap-2 text-[15px]">
+                <input type="checkbox" checked={deps.includes(g.id)} onChange={(e) => setDeps((d) => (e.target.checked ? [...d, g.id] : d.filter((x) => x !== g.id)))} />
+                {g.title}
+              </label>
+            ))}
+          </div>
+        )}
         <Btn type="submit" disabled={act.busy}>
           Save version {goal.version + 1}
         </Btn>
@@ -122,6 +139,50 @@ function RequestAlignment({ ws, goal, me }: { ws: string; goal: Goal; me: Me }) 
   );
 }
 
+function Tree({ ws, goal, canEdit, onDone }: { ws: string; goal: Goal; canEdit: boolean; onDone: () => void }) {
+  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
+  const act = useAction();
+  const deps = (goal.depends_on ?? []).map((id) => feed.data?.goals.find((g) => g.id === id)).filter((g): g is Goal => !!g);
+  if (!goal.contributes_to?.length && !deps.length) return null;
+  return (
+    <Card title="Goal tree">
+      {goal.contributes_to.map((p) => (
+        <div key={p.id} className="mb-2 flex flex-wrap items-center gap-2 text-[15px]">
+          <span>
+            Contributes to{" "}
+            <Link href={`/app/w/${ws}/goals/${p.id}`} className="underline">
+              {p.title}
+            </Link>{" "}
+            (version {p.version})
+          </span>
+          {p.stale ? <Pill tone="amber">{p.reviewed_version ? `reviewed against version ${p.reviewed_version}` : "not reviewed yet"}</Pill> : <Pill tone="green">reviewed</Pill>}
+          {p.stale && canEdit && (
+            <Btn kind="secondary" disabled={act.busy} onClick={() => void act.run(() => api(`/api/v2/workspaces/${ws}/goals/${goal.id}/review`, { body: { parent_id: p.id } }), onDone)}>
+              Still fits version {p.version}
+            </Btn>
+          )}
+        </div>
+      ))}
+      {deps.length > 0 && (
+        <p className="text-[15px]">
+          Depends on:{" "}
+          {deps.map((g, i) => (
+            <span key={g.id}>
+              {i > 0 && ", "}
+              <Link href={`/app/w/${ws}/goals/${g.id}`} className="underline">
+                {g.title}
+              </Link>{" "}
+              (version {g.version})
+            </span>
+          ))}
+        </p>
+      )}
+      {goal.contributes_to.some((p) => p.stale) && <Note>A goal this one contributes to has changed. Agents on this goal already have the new version; check that this goal still fits it.</Note>}
+      <Err>{act.error}</Err>
+    </Card>
+  );
+}
+
 export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: string }) {
   const d = useApi<Detail>(`/api/v2/workspaces/${ws}/goals/${goal}`);
   const ws0 = useApi<{ role: string }>(`/api/v2/workspaces/${ws}`);
@@ -157,6 +218,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             )}
             {d.data!.contributions.length > 0 && <p className="mt-3 text-[14px] text-zinc-500">Contributing goals: {d.data!.contributions.map((c) => c.goal!.title).join(", ")}</p>}
           </Card>
+          <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={d.reload} />
           {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} onDone={d.reload} />}
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}
           <Card title="Versions">

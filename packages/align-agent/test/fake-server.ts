@@ -46,6 +46,14 @@ const b64u = (b: Buffer) => b.toString("base64url");
 const rid = (p: string) => p + b64u(crypto.randomBytes(16));
 
 export class FakeServer {
+  /** Activity from another person's machine, as the real server would return it. */
+  addRemoteActivity(ws: string, it: Record<string, unknown>) {
+    const at = (it.at as string) || new Date().toISOString();
+    const row = { harness: "codex", mine: false, goal_id: "g_ship", path_hash: null, path: null, text: null, ...it, at, ws, seq: ++this.activitySeq, expires_at: (it.expires_at as string) || new Date(Date.parse(at) + 86_400_000).toISOString() };
+    this.activity.push(row);
+    return row;
+  }
+
   url = "";
   server: http.Server;
   opts: Required<FakeOptions>;
@@ -58,6 +66,9 @@ export class FakeServer {
   devices = new Map<string, Device>();
   access = new Map<string, { device: string; exp: number }>();
   sessions = new Map<string, { ws: string; device: string; body: any; state: string }>();
+  /** POST /activity items as received, plus items other people's machines "sent" (addRemoteActivity). */
+  activity: any[] = [];
+  activitySeq = 0;
   epochs = new Map<string, any>();
   usage = new Map<string, any>();
   directives: FakeDirective[] = [];
@@ -312,6 +323,23 @@ export class FakeServer {
           this.streams.delete(s);
         });
         return;
+      }
+      m = /^\/api\/v2\/workspaces\/([^/]+)\/activity$/.exec(p);
+      if (m && req.method === "POST") {
+        const items = Array.isArray(body?.items) ? body.items : [];
+        let accepted = 0;
+        for (const it of items) {
+          const sess = this.sessions.get(it.session_key);
+          if (!sess || sess.device !== dev.id) continue;
+          this.activity.push({ ...it, seq: ++this.activitySeq, ws: m[1], harness: sess.body.harness, user: { id: this.user.id, name: this.user.name }, mine: true, goal_id: sess.body.goal_id ?? "g_ship", expires_at: new Date(Date.parse(it.at) + 86_400_000).toISOString() });
+          accepted++;
+        }
+        return send(200, { accepted });
+      }
+      if (m && req.method === "GET") {
+        const after = Number(url.searchParams.get("after") || 0);
+        const items = this.activity.filter((i) => i.ws === m![1] && i.seq > after);
+        return send(200, { cursor: items.length ? items[items.length - 1].seq : after, items });
       }
       m = /^\/api\/v2\/directives\/([^/]+)\/receipts$/.exec(p);
       if (m && req.method === "POST") {
