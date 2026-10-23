@@ -864,6 +864,18 @@ try {
         window.__freeze = true;
       });
       const moved = await pageSignIn(t, { role: "product", passcode: "product-demo" }); // the cookie now names Northstar
+      // The page checks the session before any write (LIM-2424) and would stop here without sending. Answer that one
+      // check with C's session, as a cookie that changes between the check and the write would, so this still proves
+      // the server's 409 guard behind it. Later session reads go through.
+      let staleAnswered = false;
+      await t.setRequestInterception(true);
+      t.on("request", (r) => {
+        if (!staleAnswered && r.method() === "GET" && new URL(r.url()).pathname === "/api/session") {
+          staleAnswered = true;
+          return void r.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ actor: "product", name: "stale", sid: "stale", workspace: c }) });
+        }
+        void r.continue();
+      });
       const mismatch = [];
       t.on("response", async (r) => {
         if (r.request().method() === "POST" && new URL(r.url()).pathname === "/api/proposals") mismatch.push({ status: r.status(), body: await r.json().catch(() => null) });

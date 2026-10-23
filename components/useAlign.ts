@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { labelsFor } from "@/lib/labels";
 import type { Actor, AnonStateView, StateView } from "@/lib/types";
 
 export type Selection =
@@ -14,6 +15,12 @@ export interface Me {
   name: string | null;
   sid: string | null;
   workspace?: string; // custom workspace sessions only
+}
+
+/** This tab's team changed underneath it: another tab signed this browser in as another team of the same workspace. */
+export interface Switched {
+  from: string; // the team this tab was showing
+  to: string; // the team the browser is signed in as now
 }
 
 export const SESSION_ENDED = "Your session ended. Sign in again.";
@@ -51,9 +58,12 @@ export function useAlign(workspace?: string) {
   const [ended, setEnded] = useState(false); // a custom session expired or was revoked
   const [elsewhere, setElsewhere] = useState<string | null>(null); // the workspace this browser is signed in to instead
   const [meError, setMeError] = useState<string | null>(null); // /api/session failed before we knew who is signed in
+  const [switched, setSwitched] = useState<Switched | null>(null); // signed in as another team in another tab (Sean #6)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const live = useRef(!workspace); // may this page poll /api/state now?
-  const meRef = useRef<Me | null>(null);
+  const meRef = useRef<Me | null>(null); // who this tab loaded with: its view and its writes belong to this team
+  const switchedRef = useRef(false);
+  const lastState = useRef<StateView | AnonStateView | null>(null); // for team names after the view is cleared
   const loadMeRef = useRef<() => Promise<void>>(async () => undefined);
 
   const endSession = useCallback(() => {
@@ -78,6 +88,7 @@ export function useAlign(workspace?: string) {
         setState(null);
         return void loadMeRef.current();
       }
+      lastState.current = s;
       setState(s);
       setLoadError(null);
     } catch (e) {
@@ -106,6 +117,16 @@ export function useAlign(workspace?: string) {
       return;
     }
     setElsewhere(null);
+    // Same workspace, another team: the cookie changed in another tab. This tab still shows its own team, so never
+    // adopt the new one silently; stop and say so until the person chooses to continue as the new team.
+    const was = meRef.current?.actor;
+    if (m.actor && was && m.actor !== was) {
+      live.current = false;
+      switchedRef.current = true;
+      const role = lastState.current ? labelsFor({ simulations: [], ...lastState.current }).role : null;
+      setSwitched({ from: role?.[was] ?? was, to: role?.[m.actor] ?? m.actor });
+      return;
+    }
     if (m.actor) setEnded(false);
     const wasLive = live.current;
     live.current = !workspace || !!m.actor;
@@ -124,14 +145,49 @@ export function useAlign(workspace?: string) {
     loadMe();
     refresh();
     timer.current = setInterval(refresh, 1500);
+    // Coming back to this tab: check now rather than at the next poll (another tab may have signed in meanwhile).
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       if (timer.current) clearInterval(timer.current);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh, loadMe]);
+
+  /** "Continue as <new team>": adopt the session the browser now holds and load that team's view. */
+  const continueAs = useCallback(() => {
+    switchedRef.current = false;
+    setSwitched(null);
+    meRef.current = SIGNED_OUT; // this tab now loads with whoever is signed in
+    void loadMe();
+  }, [loadMe]);
+
+  /** Before any write: is the browser still signed in as the team (and workspace) this tab loaded with? */
+  const sameSession = useCallback(async (): Promise<boolean> => {
+    if (switchedRef.current) return false;
+    let m: Me;
+    try {
+      m = await api<Me>("/api/session");
+    } catch (e) {
+      if (isEnded(e)) endSession();
+      else setError((e as Error).message);
+      return false;
+    }
+    const was = meRef.current;
+    if (was?.actor && m.actor === was.actor && m.workspace === was.workspace) return true;
+    // Signed out, another workspace or another team: stop showing this view; loadMe says which (sign-in,
+    // the Elsewhere notice, or the switched notice).
+    live.current = false;
+    await loadMe();
+    return false;
+  }, [endSession, loadMe]);
 
   const act = useCallback(
     async <T,>(path: string, body: unknown = {}): Promise<T | null> => {
       setError(null);
+      if (!(await sameSession())) return null; // never send a write as a team this tab isn't showing
       try {
         const out = await api<T>(path, { body, workspace: workspace ?? "northstar" });
         await refresh();
@@ -148,12 +204,13 @@ export function useAlign(workspace?: string) {
         return null;
       }
     },
-    [refresh, endSession, loadMe, workspace],
+    [refresh, endSession, loadMe, sameSession, workspace],
   );
 
   const mark = useCallback((action: string) => {
+    if (switchedRef.current) return;
     api("/api/timer", { body: { action }, workspace: workspace ?? "northstar" }).catch(() => undefined);
   }, [workspace]);
 
-  return { state, me, error, setError, loadError, meError, refresh, loadMe, act, mark, ended, elsewhere };
+  return { state, me, error, setError, loadError, meError, refresh, loadMe, act, mark, ended, elsewhere, switched, continueAs };
 }
