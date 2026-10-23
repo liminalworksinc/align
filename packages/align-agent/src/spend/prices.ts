@@ -2,7 +2,7 @@
 // desktop prices.rs integer math. Rates are picodollars per token (USD per MTok * 1e6) so every sum stays integral.
 // These are estimates of list price, never a claim of money spent: a subscription session's row says so via `basis`.
 
-export const PRICE_TABLE_VERSION = "align-prices-2026-10-22.1";
+export const PRICE_TABLE_VERSION = "align-prices-2026-10-22.2";
 
 interface Row {
   input: number;
@@ -17,16 +17,19 @@ interface Row {
   /** Where the row came from and when it was last read against a source. */
   source: string;
   read: string;
+  /** A second rate card for prompts above `input_tokens` (input + cache read + cache write), e.g. Claude Haiku 5.5. */
+  over?: { input_tokens: number; rates: Row };
 }
 
 const AI_SPEND = "liminal ai-spend pricing.js (operator-maintained table)";
+const CLAUDE_API_REF = "Claude API reference (claude-api skill, cached 2026-10-06): models table and Haiku 5.5 migration notes";
 const OPENAI_PAGE = "developers.openai.com/api/docs/pricing (per pricing.js)";
 const UNVERIFIED = "not re-verified for this table";
 
 const usd = (perMTok: number): number => Math.round(perMTok * 1_000_000);
 
-function anthropic(input: number, output: number, cw5m: number, cw1h: number, cacheRead: number, read = UNVERIFIED): Row {
-  return { provider: "anthropic", input: usd(input), output: usd(output), cache_write_5m: usd(cw5m), cache_write_1h: usd(cw1h), cache_read: usd(cacheRead), source: AI_SPEND, read };
+function anthropic(input: number, output: number, cw5m: number, cw1h: number, cacheRead: number, read = UNVERIFIED, source = AI_SPEND): Row {
+  return { provider: "anthropic", input: usd(input), output: usd(output), cache_write_5m: usd(cw5m), cache_write_1h: usd(cw1h), cache_read: usd(cacheRead), source, read };
 }
 function openai(input: number, output: number, cw: number, cacheRead: number, source = AI_SPEND, read = UNVERIFIED): Row {
   return { provider: "openai", input: usd(input), output: usd(output), cache_write: usd(cw), cache_read: usd(cacheRead), source, read };
@@ -35,6 +38,12 @@ function openai(input: number, output: number, cw: number, cacheRead: number, so
 export const PRICES: Record<string, Row> = {
   "claude-fable-5-1": anthropic(10, 50, 12.5, 20, 0.25),
   "claude-opus-5-5": anthropic(4, 20, 5, 8, 0.2),
+  "claude-sonnet-5-5": anthropic(2, 10, 2.5, 4, 0.2, "2026-10-22", CLAUDE_API_REF),
+  // Two rate cards by prompt length; cache reads 0.1x input, writes 1.25x (5m) and 2x (1h).
+  "claude-haiku-5-5": {
+    ...anthropic(0.1, 0.5, 0.125, 0.2, 0.01, "2026-10-22", CLAUDE_API_REF),
+    over: { input_tokens: 100_000, rates: anthropic(0.5, 2.5, 0.625, 1, 0.05, "2026-10-22", CLAUDE_API_REF) },
+  },
   "claude-opus-5": anthropic(5, 25, 6.25, 10, 0.5),
   "claude-sonnet-5": anthropic(3, 15, 3.75, 6, 0.3),
   "claude-mythos-5": anthropic(10, 50, 12.5, 20, 1.0),
@@ -101,8 +110,10 @@ export function validCounts(c: Counts): boolean {
 export function priceRequest(model: string, c: Counts, totalInputForLongContext?: number): PriceResult {
   if (!validCounts(c)) return { est_list_usd_micros: null, unpriced: "invalid_counters" };
   if (NEVER_PRICED.has(model)) return { est_list_usd_micros: null, unpriced: "auto_review_unpriced" };
-  const r = PRICES[model];
-  if (!r) return { est_list_usd_micros: null, unpriced: "unknown_model" };
+  const base = PRICES[model];
+  if (!base) return { est_list_usd_micros: null, unpriced: "unknown_model" };
+  const prompt = c.input + c.cache_read + c.cache_write_5m + c.cache_write_1h + c.cache_write_unsplit;
+  const r = base.over && prompt > base.over.input_tokens ? base.over.rates : base;
   let pico = 0n;
   const add = (n: number, rate: number) => {
     pico += BigInt(n) * BigInt(rate);
