@@ -752,7 +752,9 @@ try {
       await w1.reload({ waitUntil: "domcontentloaded" });
       await w2.goto(`${BASE}/`, { waitUntil: "domcontentloaded", timeout: 90000 });
       const s2 = await pageSignIn(w2, { role: "security", passcode: "security-demo" });
-      await clickBtn(w1, "Proposals");
+      // v6: the proposal opens from its Your turn card (there is no Proposals nav item any more)
+      await clickBtn(w1, "Your turn");
+      await clickBtn(w1, "Review the proposal");
       const approveShown = await waitFor(async () => (await textOf(w1)).includes("Approve the change to my goal"), 45000);
       await w1.evaluate(() => {
         const box = [...document.querySelectorAll("label")].find((l) => /without a sandbox test/.test(l.innerText))?.querySelector("input[type=checkbox]");
@@ -800,7 +802,7 @@ try {
       const tIn = await pageSignIn(t, { workspace: c, role: "product", passcode: C.json?.passcodes?.product });
       await t.reload({ waitUntil: "domcontentloaded" });
       const sawC = await waitFor(async () => (await textOf(t)).includes("CMARK"), 45000);
-      await clickBtn(t, "Proposals");
+      await clickBtn(t, "New conflict"); // v6: + New conflict opens the composer (custom scenarios keep it)
       if (!(await waitFor(async () => (await textOf(t)).includes("Send proposal to"), 10000))) await clickBtn(t, "Propose a change");
       const owning = marked("CMARK").owning.team;
       const asking = marked("CMARK").asking.team;
