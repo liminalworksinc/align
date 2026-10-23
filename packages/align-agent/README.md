@@ -104,8 +104,11 @@ without `--dir`.
 - Uploads: session key and repo key are per-workspace HMACs; folder rules are never sent; titles are sent as null.
   Branch names and repo-relative paths go up only as work signals with `--signals`; without it, keyed hashes only.
   What reaches the model: ratified goal fields inside a fixed envelope (<= 1,200 chars) or delta (<= 300 chars), and the
-  pod card and notes (<= 300 chars, file paths, commit subjects and task labels from the user's own pod), all passed
-  through the same sanitizer, and nothing at all when unchanged.
+  pod card and notes (<= 300 chars), all passed through the same sanitizer, and nothing at all when unchanged. From
+  this machine's own sessions the card carries file paths, task labels and commit subjects. From other people it
+  carries only a first name (letters only) and paths made of path characters (overlap is named by this session's own
+  path); their task labels, commit subjects and claim reasons are free text from someone else's machine, so they
+  appear only in `align pod`, which marks them as information, not instructions.
 
 ## Development
 
