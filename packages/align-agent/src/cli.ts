@@ -11,7 +11,7 @@ import { api, loadCredentials, markSignedOut, rawRequest, saveCredentials, signe
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { getShare } from "./hot.ts";
-import { HOOK_EVENTS, install, sha256File, uninstall, type InstallRecord } from "./install.ts";
+import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { generateDeviceKey } from "./keys.ts";
 import { applyShare, bind, deleteHistory, planShare, renderPreview, stopSharing } from "./share.ts";
 import { gitInfo } from "./shared/anchors.ts";
@@ -257,21 +257,22 @@ async function cmdLogout(ctx: Ctx): Promise<void> {
 function installState(ctx: Ctx): { claude: string; codex: string; hash: string } {
   const rec = readJson<InstallRecord>(layout.install(ctx.home));
   const marker = path.join(ctx.home, "bin", "current", "hook.js");
-  const count = (file: string, key: (j: any) => any) => {
+  const count = (file: string, harness: "claude" | "codex", key: (j: any) => any) => {
     try {
       const j = JSON.parse(fs.readFileSync(file, "utf8"));
       const hooks = key(j) || {};
-      return HOOK_EVENTS.filter((e) => JSON.stringify(hooks[e] || []).includes(marker)).length;
+      return hookEvents(harness).filter((e) => JSON.stringify(hooks[e] || []).includes(marker)).length;
     } catch {
       return 0;
     }
   };
-  const c = count(path.join(ctx.paths.claudeDir, "settings.json"), (j) => j.hooks);
-  const x = count(path.join(ctx.paths.codexHome, "hooks.json"), (j) => j.hooks);
+  const c = count(pluginHooksFile(ctx.paths), "claude", (j) => j.hooks);
+  const x = count(path.join(ctx.paths.codexHome, "hooks.json"), "codex", (j) => j.hooks);
   const installed = sha256File(marker);
   const hash = !rec ? "not installed" : !installed ? "missing" : installed === rec.hook_sha256 ? "ok" : "modified since install";
-  const n = HOOK_EVENTS.length;
-  return { claude: c === n ? "installed" : c ? `partial (${c}/${n})` : "not installed", codex: x === n ? "installed (trust them in Codex /hooks)" : x ? `partial (${x}/${n})` : "not installed", hash };
+  const n = hookEvents("claude").length;
+  const m = hookEvents("codex").length;
+  return { claude: c === n ? "installed" : c ? `partial (${c}/${n})` : "not installed", codex: x === m ? "installed (trust them in Codex /hooks)" : x ? `partial (${x}/${m})` : "not installed", hash };
 }
 
 async function cmdStatus(ctx: Ctx): Promise<void> {

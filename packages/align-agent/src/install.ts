@@ -1,6 +1,7 @@
-// `align install` / `align uninstall`. Install adds three hook handlers (Claude Code settings.json, Codex hooks.json)
-// and nothing else: no telemetry settings, no login item. Every edit is a minimal merge with a timestamped backup,
-// recorded in ALIGN_HOME/install.json so uninstall reverts exactly what install added. Hooks run from
+// `align install` / `align uninstall`. Install adds hook handlers and nothing else: no telemetry settings, no login
+// item. Claude Code gets a skills-directory plugin (CLAUDE_CONFIG_DIR/skills/align), which it loads in every session
+// with no install step and no settings.json edit. Codex gets a minimal merge into hooks.json with a timestamped backup.
+// ALIGN_HOME/install.json records what was added so uninstall reverts exactly that. Hooks run from
 // ALIGN_HOME/bin/current, never from a git worktree.
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -10,6 +11,11 @@ import { layout } from "./shared/layout.ts";
 import { readJson, writeFileAtomic, writeJsonAtomic } from "./shared/fsx.ts";
 
 export const HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"] as const;
+
+/** Claude Code runs StopFailure instead of Stop when a turn ends on an API error; Codex has no such event. */
+export function hookEvents(harness: "claude" | "codex"): readonly string[] {
+  return harness === "claude" ? [...HOOK_EVENTS, "StopFailure"] : HOOK_EVENTS;
+}
 export interface InstallOptions {
   claude: boolean;
   codex: boolean;
@@ -24,8 +30,25 @@ export interface InstallRecord {
   installed_at: string;
   node: string;
   hook_sha256: string;
-  claude?: { settings: string; backup: string | null };
+  claude?: { plugin: string };
   codex?: { hooks: string; hooks_backup: string | null; hooks_created: boolean };
+}
+
+/** The Claude Code plugin folder. `claude plugin disable align@skills-dir` turns it off without uninstalling. */
+export function pluginDir(paths: Paths): string {
+  return path.join(paths.claudeDir, "skills", "align");
+}
+
+export function pluginHooksFile(paths: Paths): string {
+  return path.join(pluginDir(paths), "hooks", "hooks.json");
+}
+
+function isOurPlugin(paths: Paths): boolean {
+  try {
+    return fs.readFileSync(pluginHooksFile(paths), "utf8").includes(path.join(paths.alignHome, "bin", "current", "hook.js"));
+  } catch {
+    return false;
+  }
 }
 
 export function hookCommand(nodePath: string, alignHome: string, harness: "claude" | "codex", event: string): string {
@@ -64,7 +87,7 @@ export function stripHooks(hooks: Record<string, unknown> | undefined, alignHome
 
 export function mergeHooks(hooks: Record<string, unknown>, alignHome: string, nodePath: string, harness: "claude" | "codex"): void {
   stripHooks(hooks, alignHome);
-  for (const event of HOOK_EVENTS) {
+  for (const event of hookEvents(harness)) {
     const groups = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
     const handler = { type: "command", command: hookCommand(nodePath, alignHome, harness, event), timeout: 5 };
     const group: Record<string, unknown> = event === "PreToolUse" ? { matcher: "*", hooks: [handler] } : { hooks: [handler] };
@@ -139,18 +162,35 @@ export function install(paths: Paths, o: InstallOptions): { lines: string[]; rec
   }
 
   if (o.claude) {
-    const file = path.join(paths.claudeDir, "settings.json");
-    const settings = readJsonFile(file);
-    const hooks = (settings.hooks && typeof settings.hooks === "object" ? settings.hooks : {}) as Record<string, unknown>;
+    const dir = pluginDir(paths);
+    if (fs.existsSync(dir) && !isOurPlugin(paths)) throw new Error(`${dir} exists and is not Align's plugin; move it and run align install again`);
+    const hooks: Record<string, unknown> = {};
     mergeHooks(hooks, home, o.nodePath, "claude");
-    settings.hooks = hooks;
-    const b = backup(file, o.dryRun);
-    say(`${o.dryRun ? "Would merge" : "Merged"} Claude Code hooks (SessionStart, UserPromptSubmit, PreToolUse matcher "*", Stop) into ${file}${b ? `; backup ${b}` : ""}.`);
+    say(`${o.dryRun ? "Would install" : "Installed"} the Align plugin for Claude Code at ${dir} (hooks ${hookEvents("claude").join(", ")}; PreToolUse matcher "*"). New sessions load it; \`claude plugin disable align@skills-dir\` turns it off.`);
     if (!o.dryRun) {
-      fs.mkdirSync(paths.claudeDir, { recursive: true });
-      writeJsonFile(file, settings);
+      fs.mkdirSync(path.join(dir, ".claude-plugin"), { recursive: true });
+      fs.mkdirSync(path.join(dir, "hooks"), { recursive: true });
+      writeJsonFile(path.join(dir, ".claude-plugin", "plugin.json"), {
+        name: "align",
+        description: "Gives shared sessions their Align goal and enforces stops from the Align workspace. Hooks only.",
+        version: o.version,
+        author: { name: "Liminal" },
+      });
+      writeJsonFile(pluginHooksFile(paths), { hooks });
     }
-    record.claude = { settings: file, backup: prev?.claude?.backup ?? b ?? null };
+    // Handlers an earlier Align merged into settings.json would run a second time next to the plugin's.
+    const file = path.join(paths.claudeDir, "settings.json");
+    if (fs.existsSync(file)) {
+      const settings = readJsonFile(file);
+      const removed = stripHooks(settings.hooks as Record<string, unknown>, home);
+      if (removed) {
+        if (settings.hooks && !Object.keys(settings.hooks as object).length) delete settings.hooks;
+        const b = backup(file, o.dryRun);
+        if (!o.dryRun) writeJsonFile(file, settings);
+        say(`${o.dryRun ? "Would remove" : "Removed"} ${removed} hook handlers an earlier Align added to ${file} (backup ${b}).`);
+      }
+    }
+    record.claude = { plugin: dir };
   }
 
   if (o.codex) {
@@ -186,7 +226,11 @@ export function uninstall(paths: Paths, opts: { purge: boolean }): string[] {
   const home = paths.alignHome;
   const lines: string[] = [];
   const rec = readJson<InstallRecord>(layout.install(home));
-  const claudeFile = rec?.claude?.settings || path.join(paths.claudeDir, "settings.json");
+  if (isOurPlugin(paths)) {
+    fs.rmSync(pluginDir(paths), { recursive: true, force: true });
+    lines.push(`Removed the Align plugin for Claude Code (${pluginDir(paths)}).`);
+  }
+  const claudeFile = path.join(paths.claudeDir, "settings.json");
   if (fs.existsSync(claudeFile)) {
     const s = readJsonFile(claudeFile);
     const removed = stripHooks(s.hooks as Record<string, unknown>, home);
