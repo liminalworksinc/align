@@ -40,7 +40,7 @@ export type RecordTab = "summary" | "receipts" | "legend";
 
 const TABS: { id: RecordTab; label: string }[] = [
   { id: "summary", label: "Summary" },
-  { id: "receipts", label: "Receipts" },
+  { id: "receipts", label: "Activity" }, // results aren't signed (EvidenceView), so not "Receipts"
   { id: "legend", label: "How to read this" },
 ];
 
@@ -181,16 +181,19 @@ export function CopyText({ text }: { text: string }) {
 function actionWords(action: string, L: Labels) {
   const words: Record<string, string> = {
     ceo_change_viewed: L.northstar ? "saw the CEO's change" : "saw the company goal change",
-    brief_reviewed: "read What to do next",
+    brief_reviewed: "read Ways forward",
     scenario_reviewed: "opened the plan test",
-    evidence_opened: "opened Evidence",
+    evidence_opened: "opened the test results",
     propose: "proposed a change",
     counter: "asked for changes",
     acknowledge: `accepted ${poss(L.team.security)} changes`,
     ratify: "approved",
     ratify_and_push_company_goal: "approved the company goal and sent it to every team",
     saw_accepted_version: "saw the approved version",
-    launch: "decided the launch",
+    ratify_untested: "approved without a sandbox test",
+    reject: "declined the proposal",
+    launch_approved: "approved the launch",
+    launch_not_yet: "said not yet to the launch",
     reset: "reset the demo",
   };
   return words[action] ?? action.replaceAll("_", " ");

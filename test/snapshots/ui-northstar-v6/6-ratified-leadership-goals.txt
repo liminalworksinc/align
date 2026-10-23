@@ -32,7 +32,7 @@ Security
 COMPANY · CEO
 read-only
 v2
-KR2 changed today
+Requirement changed today
 Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
 KR1 · Product says the beta is ready to launch
 KR2 · Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer → Security

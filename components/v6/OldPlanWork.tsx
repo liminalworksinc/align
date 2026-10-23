@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { StateView, WorkItem } from "@/lib/types";
-import type { ViewProps } from "../props";
 import { currentGoal, priorVersion } from "../select";
 import { workFor } from "../TeamLens";
 import { Button } from "../ui";
@@ -117,7 +116,7 @@ export function OldPlanWork({ s }: { s: StateView }) {
         </div>
       ))}
       {found && found.items.length === 0 && <p className="text-[15px] text-zinc-500">No work items are linked to the goal that changed.</p>}
-      <NotBuilt title="Keep, re-scope or stop, per item">Needs a decision field on work items. Not built yet.</NotBuilt>
+      <NotBuilt title="Keep, re-scope or stop, per item">Coming next: decide for each item whether to keep it, re-scope it or stop it.</NotBuilt>
       <div className="flex flex-wrap items-center gap-3 border-t border-zinc-200 pt-4">
         <span className="min-w-0 flex-1 text-[13.5px] text-zinc-500">
           Nobody is notified automatically.
@@ -138,16 +137,5 @@ export function OldPlanWork({ s }: { s: StateView }) {
         </label>
       )}
     </section>
-  );
-}
-
-/** The whole v6 Work screen for either scenario: the cascade, then the old-plan sweep. */
-export function WorkScreen(props: ViewProps) {
-  const L = labelsFor(props.s);
-  return (
-    <div className="flex flex-col gap-8">
-      <OldPlanWork s={props.s} />
-      <GoalCascade s={props.s} L={L} />
-    </div>
   );
 }
