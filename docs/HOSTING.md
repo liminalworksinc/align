@@ -85,10 +85,11 @@ One workspace per tester:
 
 1. Open `https://<host>/new`, enter one unused invite code and the tester's two-team conflict, and create it. The card shows the link `/w/<id>` and the three passcodes, **once**. The open link waits for "I've saved all three passcodes" and opens a new tab.
 2. Send the tester the link and the passcodes they need. In an unmoderated test, one tester plays all three roles in turn, and a browser profile holds one workspace session at a time.
-3. Without the page, a JSON POST works too:
+3. Without the page, a JSON POST works too. It must carry the site's own Origin, exactly `https://<host>`: a hosted
+   write with no Origin, an `http://` one or another port is refused (403).
 
    ```sh
-   curl -sS https://<host>/api/workspaces -H 'content-type: application/json' \
+   curl -sS https://<host>/api/workspaces -H 'content-type: application/json' -H 'Origin: https://<host>' \
      -d @tester.json   # the /setup body without "confirm", plus "signup_code": "<one invite code>"
    ```
 
