@@ -293,6 +293,21 @@ describe("shell writes", () => {
     assert.match(note, /^\[Align\] Mallory, working toward the same goal, claimed TESTING\.md until \d\d:\d\d\. Coordinate/);
     assert.doesNotMatch(note, /IGNORE|curl/i, note);
     assert.ok(lid);
+
+    // A blank account name is still another person's work, not this machine's.
+    const blank = { id: "u_blank", name: "" };
+    writePod(t, [
+      { kind: "task", text: evil, repo_id: id.repo_id, user: blank, session_key: "remote-blank" },
+      { kind: "commit", text: evil, repo_id: id.repo_id, user: blank, session_key: "remote-blank" },
+      { kind: "edit", path: "src/a.py", path_hash: pathHash(id.repo_id, "src/a.py"), repo_id: id.repo_id, user: blank, session_key: "remote-blank" },
+    ]);
+    const inj = JSON.parse(fs.readFileSync(layout.injected(t.home, lid), "utf8")) as InjectedState;
+    inj.card_at = new Date(Date.now() - 11 * 60_000).toISOString();
+    inj.siblings_seen = {};
+    writeJsonAtomic(layout.injected(t.home, lid), inj);
+    const card2 = ctxOf(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "p2", prompt: "go", cwd: dir }).stdout);
+    assert.match(card2, /A teammate \(1 session[^)]*\): edited src\/a\.py\./, card2);
+    assert.doesNotMatch(card2, /IGNORE|curl/i, card2);
   });
 });
 
