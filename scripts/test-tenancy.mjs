@@ -98,7 +98,9 @@ function hosted(method, p, { body, cookie, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const data = body === undefined ? undefined : JSON.stringify(body);
     // As Fly's edge forwards it: allowlisted Host, X-Forwarded-Proto https and Fly-Client-IP. undefined drops a header.
-    const h = { host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": "198.51.100.7", ...headers };
+    // A browser sends Origin on every write; on the hosted site it is https://<Host> (QA-exit finding: checked exactly).
+    const write = !["GET", "HEAD"].includes(method);
+    const h = { host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": "198.51.100.7", ...(write ? { origin: `https://${HOSTED_HOST}` } : {}), ...headers };
     for (const k of Object.keys(h)) if (h[k] === undefined) delete h[k];
     if (data) Object.assign(h, { "content-type": h["content-type"] ?? "application/json", "content-length": Buffer.byteLength(data) });
     if (cookie) h.cookie = cookie;
@@ -1332,6 +1334,25 @@ try {
   const hsB = await hosted("GET", "/api/state", { cookie: hlB.cookie });
   check("H7 two hosted workspaces can't see each other", hsA.status === 200 && hsB.status === 200 && hsA.text.includes("HAMARK") && !hsA.text.includes("HBMARK") && hsB.text.includes("HBMARK") && !hsB.text.includes("HAMARK"), `${hsA.status} ${hsB.status}`);
   check("H7 no Northstar content in a hosted workspace", !/Northstar|Sparta/.test(hsA.text), hsA.text.match(/Northstar|Sparta/)?.[0]);
+
+  // HO QA-exit finding: a hosted write's Origin must be exactly https://<Host>. http:// (same name), another port and no
+  // Origin are refused and change nothing; the site's own https Origin still approves.
+  {
+    const hId = hA.json.workspace.id;
+    const hSec = await hosted("POST", "/api/session", { body: { workspace: hId, role: "security", passcode: hA.json.passcodes.security } });
+    const hp = await hosted("POST", "/api/proposals", { cookie: hl.cookie, body: { proposed_measure_text: "HAMARK origin target", rationale: "HAMARK why", reciprocal_commitment: "HAMARK commit" } });
+    const approve = (origin) => hosted("POST", `/api/proposals/${hp.json?.id}/accept`, { cookie: hSec.cookie, body: { rationale: "HAMARK ok", accept_untested: true }, headers: { origin } });
+    const hTree = treeHash(path.join(hostedDir, "workspaces", hId));
+    const refused = [];
+    for (const o of [`http://${HOSTED_HOST}`, `https://${HOSTED_HOST}:8443`, undefined, "null"]) refused.push({ o, r: await approve(o) });
+    const unchanged = treeHash(path.join(hostedDir, "workspaces", hId)) === hTree;
+    check("HO1 setup: hosted security signed in and a proposal is open", hSec.status === 200 && hp.status === 200, `${hSec.status} ${hp.status} ${hp.text.slice(0, 120)}`);
+    check(`HO1 hosted approve with Origin http://${HOSTED_HOST} -> 403, state unchanged`, refused[0].r.status === 403 && unchanged, `${refused[0].r.status} ${refused[0].r.text.slice(0, 120)} unchanged=${unchanged}`);
+    check(`HO2 hosted approve with Origin https://${HOSTED_HOST}:8443 (another port), none, or "null" -> 403`, refused.slice(1).every((x) => x.r.status === 403) && unchanged, refused.map((x) => `${x.o}:${x.r.status}`).join(" "));
+    const ok = await approve(`https://${HOSTED_HOST}`);
+    const hState = await hosted("GET", "/api/state", { cookie: hSec.cookie });
+    check(`HO3 hosted approve with Origin https://${HOSTED_HOST} -> 200, ratified`, ok.status === 200 && hState.json?.proposals?.find((x) => x.id === hp.json?.id)?.state === "RATIFIED", `${ok.status} ${ok.text.slice(0, 160)}`);
+  }
 
   // H9 backoff is per client: an attacker's wrong tries lock out only the attacker
   const att = [];
