@@ -47,18 +47,23 @@ So a goal change or stop issued from the web lands within one sync interval, at 
 ## What `align install` changes
 
 Copies the built `dist/` to `ALIGN_HOME/bin/<version>/` (adds a `package.json` with `"type": "module"`) and points the
-symlink `ALIGN_HOME/bin/current` at it, so hooks never run from a git checkout. Every edited file gets a
-`<file>.align-backup-<timestamp>` copy first, and `ALIGN_HOME/install.json` records what was added.
+symlink `ALIGN_HOME/bin/current` at it, so hooks never run from a git checkout. `ALIGN_HOME/install.json` records
+what was added.
 
-- `--claude` (default when no flag is given): `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude/settings.json`)
-  gets one handler each for `SessionStart`, `UserPromptSubmit` and `PreToolUse` (matcher `"*"`):
-  `'<node>' '<ALIGN_HOME>/bin/current/hook.js' claude <Event>`, timeout 5. Every other key and hook is kept;
-  re-running replaces Align's own handlers.
-- `--codex` (default when no flag is given): `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`) gets the same
-  three events with `codex`. Codex lists new hooks for review; trust them in Codex `/hooks`. `config.toml` is not
-  edited.
-- `--dry-run` prints the plan and writes nothing. `align uninstall` removes only Align's handlers and keeps
-  `ALIGN_HOME` unless `--purge`.
+- `--claude` (default when no flag is given): writes the Claude Code plugin folder
+  `$CLAUDE_CONFIG_DIR/skills/align/` (default `~/.claude/skills/align/`): `.claude-plugin/plugin.json` and
+  `hooks/hooks.json` with one handler each for `SessionStart`, `UserPromptSubmit`, `PreToolUse` (matcher `"*"`),
+  `Stop` and `StopFailure`: `'<node>' '<ALIGN_HOME>/bin/current/hook.js' claude <Event>`, timeout 5. Claude Code
+  loads it in every new session with no install step (`claude plugin list` shows `align@skills-dir`);
+  `claude plugin disable align@skills-dir` turns it off. `settings.json` is not edited, except that handlers an
+  earlier Align merged there are removed (with a `settings.json.align-backup-<timestamp>` copy first). Install
+  refuses to replace a `skills/align` folder that is not Align's.
+- `--codex` (default when no flag is given): `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`) gets
+  `SessionStart`, `UserPromptSubmit`, `PreToolUse` and `Stop` with `codex`, after a
+  `hooks.json.align-backup-<timestamp>` copy. Codex lists new hooks for review; trust them in Codex `/hooks`.
+  `config.toml` is not edited.
+- `--dry-run` prints the plan and writes nothing. `align uninstall` deletes the plugin folder, removes only Align's
+  Codex handlers and keeps `ALIGN_HOME` unless `--purge`.
 
 ## State (`ALIGN_HOME`, default `~/.align`, 0700, must be owned by you)
 

@@ -82,8 +82,9 @@ async function main(): Promise<void> {
       await kickSync(home, process.argv[1] || "", process.env, event).catch(() => undefined);
       return emit(out);
     }
-    case "Stop": {
-      decided = null; // Stop adds nothing to context and never continues the turn
+    case "Stop":
+    case "StopFailure": {
+      decided = null; // the turn is over: add nothing to context and never continue it
       await kickSync(home, process.argv[1] || "", process.env, event).catch(() => undefined);
       return emit(null);
     }

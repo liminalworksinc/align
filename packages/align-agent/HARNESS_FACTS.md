@@ -23,6 +23,22 @@ Source: https://code.claude.com/docs/en/hooks (markdown at https://code.claude.c
 - `timeout` is in seconds (600 default; 30 on UserPromptSubmit). Align sets 5 and enforces 300 ms internally.
 - `additionalContext` and `systemMessage` are each capped at 10,000 characters (overflow goes to a file plus a
   2,000-character preview). `systemMessage` is "a warning shown to the user". `suppressOutput` "has no effect".
+- Subagents: "When a subagent calls a tool, tool events such as `PreToolUse` and `PostToolUse` fire the same
+  configured hooks as in the main conversation", with `agent_id`/`agent_type` set. Context lands "at the point where the
+  hook fired". Checked with Claude Code 2.1.309 on 10-22: a marker returned from the subagent's PreToolUse appeared only
+  in `subagents/agent-<id>.jsonl`, never in the main transcript. So the mid-turn delta skips calls with `agent_id`
+  (the stop latch still applies there).
+- "When an event fires, Claude Code runs the matching hooks in parallel", and parallel tool calls each fire
+  PreToolUse. The mid-turn delta takes a lock directory so only one of them delivers it.
+- `Stop` hooks "don't fire on user interrupts. API errors fire StopFailure instead." StopFailure's output and exit
+  code are ignored; Align uses it only to start the end-of-turn sync. Codex has no StopFailure.
+- A `Stop` hook that returns `additionalContext` or `decision: "block"` keeps the turn going, so Align's Stop prints
+  nothing.
+- Plugins: a folder in `~/.claude/skills/` "that contains a `.claude-plugin/plugin.json` is a skills-directory plugin"
+  that Claude Code "loads ... when a session starts, with no flag and no install step"; its `hooks/hooks.json` uses
+  the settings `hooks` shape. `claude plugin disable <name>@skills-dir` turns it off. Checked with 2.1.309:
+  `claude plugin list` shows `align@skills-dir` loaded and its hooks fire. A hook in both settings.json and a plugin
+  "runs twice", hence install removes older Align handlers from settings.json.
 
 ## Claude Code telemetry
 
@@ -34,7 +50,7 @@ https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md
   `http://localhost:4318/v1/logs`); `OTEL_METRICS_EXPORTER=none` is valid; `OTEL_LOGS_EXPORT_INTERVAL` in ms, default
   5000; `OTEL_LOG_USER_PROMPTS` "default: disabled"; `OTEL_LOG_TOOL_DETAILS` default disabled.
 - "Claude Code ignores the OpenTelemetry exporter variables in a repository's `.claude/settings.json`"; set them in
-  managed settings or `~/.claude/settings.json` `env`. Install therefore edits the user settings file.
+  managed settings or `~/.claude/settings.json` `env`. (Align no longer uses telemetry, so install does not edit it.)
 - `claude_code.api_request` attributes: `event.name` (`"api_request"`), `event.timestamp`, `model`, `cost_usd`,
   `cost_usd_micros`, `duration_ms`, `input_tokens` ("excluding tokens read from or written to the prompt cache"),
   `output_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `request_id`, `client_request_id`, `speed`,

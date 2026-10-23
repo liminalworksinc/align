@@ -13,7 +13,7 @@ import { layout, listSpool, localId } from "../src/shared/layout.ts";
 import { writeJsonAtomic } from "../src/shared/fsx.ts";
 import type { GoalSnapshot, Harness } from "../src/shared/types.ts";
 import { ingestSpool } from "../src/sync.ts";
-import { ctxFor, makeEnv, PKG, runHook, type TestEnv } from "./helpers.ts";
+import { ctxFor, HOOK, makeEnv, PKG, runHook, type TestEnv } from "./helpers.ts";
 
 const BLOCK_NET = ["--import", path.join(PKG, "test", "fixtures", "block-net.mjs")];
 const envs: TestEnv[] = [];
@@ -126,6 +126,8 @@ describe("claude hooks", () => {
     const v4 = { ...GOAL, version: 4, title: "Ship the v2 onboarding flow, SSO first" };
     ctx.db.prepare("UPDATE shares SET goal_json=? WHERE local_id=?").run(JSON.stringify(v4), lid);
     renderHot(ctx, lid);
+    const sub = { session_id: sid, agent_id: "a1b2c3", agent_type: "Explore", tool_name: "Bash" };
+    assert.equal(runHook(t, "claude", "PreToolUse", sub).stdout, "", "a subagent's tool call does not take the delta: it would land in the subagent's context only");
     const mid = JSON.parse(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: "Bash" }).stdout);
     assert.equal(mid.hookSpecificOutput.hookEventName, "PreToolUse");
     assert.equal(mid.hookSpecificOutput.permissionDecision, undefined, "context only, no permission decision");
@@ -133,6 +135,27 @@ describe("claude hooks", () => {
     assert.ok(mid.hookSpecificOutput.additionalContext.length <= 300);
     assert.equal(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: "Bash" }).stdout, "", "delivered once");
     assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "n1", prompt: "go" }).stdout, "", "and not repeated at the next prompt");
+  });
+
+  test("parallel tool calls run their hooks at once; the goal edit is delivered by exactly one of them", async () => {
+    const { t, ctx } = setup();
+    const sid = "sess-parallel";
+    const lid = shareSession(ctx, "claude-code", sid);
+    runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup", cwd: "/tmp/synthetic-repo" });
+    ctx.db.prepare("UPDATE shares SET goal_json=? WHERE local_id=?").run(JSON.stringify({ ...GOAL, version: 4 }), lid);
+    renderHot(ctx, lid);
+    const { spawn } = await import("node:child_process");
+    const one = () =>
+      new Promise<string>((resolve) => {
+        const p = spawn(process.execPath, [HOOK, "claude", "PreToolUse"], { env: t.env });
+        let out = "";
+        p.stdout.on("data", (d) => (out += d));
+        p.on("close", () => resolve(out));
+        p.stdin.end(JSON.stringify({ session_id: sid, tool_name: "Read" }));
+      });
+    const outs = await Promise.all(Array.from({ length: 8 }, one));
+    assert.equal(outs.filter((o) => o.includes("additionalContext")).length, 1, "one delivery across 8 concurrent hooks");
+    assert.equal(fs.existsSync(`${layout.injected(t.home, lid)}.lock`), false, "lock released");
   });
 
   test("private sessions produce no output on any event", () => {
@@ -287,6 +310,13 @@ describe("background sync from hooks", () => {
     assert.equal(stop.stdout, "", "Stop adds 0 bytes");
     assert.ok(await until(() => JSON.parse(fs.readFileSync(layout.lastSync(t.home), "utf8")).pid !== first.pid, 8000), "Stop started a new sync");
     assert.equal(listSpool(t.home).length, 0, "and it drained the spool");
+    // StopFailure runs instead of Stop when the turn ended on an API error; it carries that turn's usage up the same way.
+    const second = JSON.parse(fs.readFileSync(layout.lastSync(t.home), "utf8")).pid;
+    assert.ok(await until(() => !alive(second), 5000), "Stop's sync exited");
+    const failed = run("StopFailure");
+    assert.equal(failed.status, 0);
+    assert.equal(failed.stdout, "", "StopFailure adds 0 bytes");
+    assert.ok(await until(() => JSON.parse(fs.readFileSync(layout.lastSync(t.home), "utf8")).pid !== second, 8000), "StopFailure started a new sync");
   });
 });
 
