@@ -12,6 +12,7 @@ import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace
 import { pollDirectives } from "./directives.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { tailAll, type TailResult } from "./tailer.ts";
+import { detectGitEdits, fetchPod, uploadActivity } from "./activity.ts";
 import { layout, listSpool, localId } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
 import type { SpoolRecord } from "./shared/types.ts";
@@ -391,6 +392,7 @@ export interface SyncResult {
   sent: number;
   uploaded: number;
   directives: number;
+  activity?: number;
 }
 
 /**
@@ -442,6 +444,14 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     }
     for (const w of me?.workspaces || []) refresh.add(w.id);
     for (const ws of refresh) await refreshFeed(ctx, ws).catch(() => undefined);
+    // Pod activity: this machine's in-flight work up, other machines' down (a few hundred bytes when quiet).
+    try {
+      detectGitEdits(ctx);
+    } catch {
+      /* best effort */
+    }
+    res.activity = await uploadActivity(ctx).catch(() => 0);
+    for (const ws of refresh) await fetchPod(ctx, ws).catch(() => 0);
     return res;
   } finally {
     try {

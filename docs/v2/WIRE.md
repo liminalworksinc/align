@@ -1,6 +1,6 @@
 # Align v2 wire contract (local agent ⇄ hosted server)
 
-Status: v2.1, 2026-10-22 (directive SSE stream removed; cursor polling only). Source of truth for both halves. Plan: `~/.claude/plans/no-we-need-a-logical-lark.md` (rev 2).
+Status: v2.2, 2026-10-22 (goal tree fields; in-flight activity). v2.1: directive SSE stream removed; cursor polling only. Source of truth for both halves. Plan: `~/.claude/plans/no-we-need-a-logical-lark.md` (rev 2).
 Everything here is behind `ALIGN_V2=1`; with it unset every `/app*` and `/api/v2/*` path is 404.
 
 ## Conventions
@@ -46,6 +46,14 @@ The full set the caller may see (own private + pod + workspace). `bindable` = th
 (own goal, a goal of a pod they belong to, or a goal they hold an approved allocation transfer to). Anchors are
 matched locally by the agent only.
 
+Goal tree (v2.2, additive): `Goal` also carries `"depends_on": [goal id]` (goals whose output it consumes, filtered to
+those the caller can read; a versioned field set with the goal, at most 5) and `"contributes_to": [ { "id", "title",
+"version", "reviewed_version": int|null, "stale": boolean } ]` (targets of its approved alignments, i.e. its parents).
+A child is `stale` when a parent has a version newer than the one its owner last reviewed it against. Saving a new
+version of the child reviews it against all parents; `POST /api/v2/workspaces/:ws/goals/:goal/review { "parent_id" }`
+(cookie, the child's owner) confirms one. Because parents' versions are part of each child's entry, a parent edit
+changes the feed version, so agents refetch and give every session under a child goal the parent's new version.
+
 ## Shared sessions
 `session_key = base64url(HMAC-SHA256(device_secret, ws + "\0" + harness + "\0" + native_session_id))` (43 chars).
 `repo_key = base64url(HMAC-SHA256(device_secret, ws + "\0repo\0" + realpath(git toplevel or cwd)))`.
@@ -83,6 +91,21 @@ Only structured content reaches agents: ratified goal fields and enumerated stat
 `GET /api/v2/directives?cursor=<seq>` (Bearer) → `{ "directives": [Directive], "next_cursor": "<seq>" }` (≤100, this device's sessions only).
 There is no push channel: the local agent has no daemon, and each hook-started sync pass fetches by cursor.
 `POST /api/v2/directives/:id/receipts` (Bearer) → req `{ "session_key", "state": "received"|"applied"|"enforced", "at" }` → 200 `{ "fresh": bool }` (idempotent, ≤2 KB).
+
+## Activity (v2.2)
+In-flight work signals for agents toward related goals. Deterministic metadata from the user's own hooks, never model
+output, prompts, tool output or file contents.
+`POST /api/v2/workspaces/:ws/activity` (Bearer) `{ "items": [ { "session_key", "kind": "edit"|"commit"|"task"|"claim",
+"at", "repo_id": hex, "path_hash": hex|null, "path": repo-relative string|null, "text": string|null } ] }` → `{ "accepted" }`.
+At most 200 items and 128 KB. Items for sessions this device didn't share, sessions not in `shared`, or older than 24 h
+are skipped. `path` and `text` are sent only when the user turned on work signals (`align share ... --signals`);
+otherwise only `path_hash` goes up. `repo_id` = sha256(ws + "\0repo\0" + normalized git remote) so clones on different
+machines match; `path_hash` = sha256(repo_id + "\0" + repo-relative path). Absolute and `..` paths are refused.
+Kept 24 hours; a `claim` 1 hour. The session's open epoch's goal is recorded with each item.
+`GET /api/v2/workspaces/:ws/activity?after=<seq>` (Bearer) → `{ "cursor", "items": [ { "seq", "session_key", "harness",
+"user": { "id", "name" }, "mine", "goal_id", "repo_id", "kind", "path_hash", "path", "text", "at", "expires_at" } ] }`,
+oldest first, at most 500, only items on goals the caller can read (an unbound session's items only to its own user).
+The agent uploads and fetches inside the normal hook-started sync pass; hooks read the cached copy.
 
 ## Spend
 `GET /api/v2/workspaces/:ws/spend?by=goal|pod|session&from&to` (cookie) → rows with token sums by basis and

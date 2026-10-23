@@ -34,6 +34,13 @@ Source: https://code.claude.com/docs/en/hooks (markdown at https://code.claude.c
   code are ignored; Align uses it only to start the end-of-turn sync. Codex has no StopFailure.
 - A `Stop` hook that returns `additionalContext` or `decision: "block"` keeps the turn going, so Align's Stop prints
   nothing.
+- Codex 0.163 "code mode" (observed in the 10-22 recorded demo): the model calls one `exec` tool whose input is
+  JavaScript calling `tools.apply_patch(...)` and `tools.exec_command(...)`. A nested `apply_patch` still fires
+  PreToolUse with `tool_name: "apply_patch"` and the patch in `tool_input.command` (its edits were recorded and its
+  hook context reached the model as a developer message), but a file written by a script inside `exec_command`
+  (`python3 - <<PY ... write_bytes`) is invisible to every hook. Claude Sonnet 5.5 and Haiku 5.5 also wrote files with
+  `printf >>` and `cat >> <<EOF` in that demo. Hence shell-write parsing in PreToolUse and git-based detection in the
+  sync pass.
 - Plugins: a folder in `~/.claude/skills/` "that contains a `.claude-plugin/plugin.json` is a skills-directory plugin"
   that Claude Code "loads ... when a session starts, with no flag and no install step"; its `hooks/hooks.json` uses
   the settings `hooks` shape. `claude plugin disable <name>@skills-dir` turns it off. Checked with 2.1.309:

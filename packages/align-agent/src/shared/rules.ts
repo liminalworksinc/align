@@ -11,6 +11,8 @@ export interface FolderRule {
   workspace_name: string;
   goal_id: string | null;
   goal_title: string | null;
+  /** Share work signals (repo-relative paths, commit subjects, task labels) with people who can read the goal. */
+  signals?: boolean;
   created_at: string;
 }
 

@@ -158,6 +158,64 @@ describe("claude hooks", () => {
     assert.equal(fs.existsSync(`${layout.injected(t.home, lid)}.lock`), false, "lock released");
   });
 
+  test("sessions toward the same goal: a card with the other's edits and commits at the next prompt, once; an edit to a file it just changed is held once", () => {
+    const { t, ctx } = setup();
+    const repo = "/tmp/synthetic-repo";
+    const a = "sess-claude-sib";
+    const b = "019a-codex-sib";
+    shareSession(ctx, "claude-code", a);
+    shareSession(ctx, "codex", b);
+    const other = "sess-other-goal";
+    shareSession(ctx, "claude-code", other, { ...GOAL, id: "g_other", title: "Another goal" });
+    runHook(t, "claude", "SessionStart", { session_id: a, source: "startup", cwd: repo });
+    assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: a, prompt_id: "p1", prompt: "go", cwd: repo }).stdout, "", "no sibling work yet: 0 bytes");
+
+    // Codex edits two files and commits.
+    const patch = "*** Begin Patch\n*** Update File: fair/campaign_v5.py\n@@\n-x\n+y\n*** Add File: infra/queue.sh\n+echo hi\n*** End Patch\n";
+    assert.equal(runHook(t, "codex", "PreToolUse", { session_id: b, turn_id: "t1", cwd: repo, tool_name: "apply_patch", tool_input: { command: patch } }).stdout, "");
+    runHook(t, "codex", "PreToolUse", { session_id: b, turn_id: "t1", cwd: repo, tool_name: "Bash", tool_input: { command: 'git add -A && git commit -m "Add held-out read path"' } });
+
+    const card = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: a, prompt_id: "p2", prompt: "continue", cwd: repo }).stdout).hookSpecificOutput.additionalContext;
+    assert.match(card, /^\[Align\] Also working toward this goal on this machine: Codex session 019a-cod/);
+    assert.match(card, /fair\/campaign_v5\.py/);
+    assert.match(card, /infra\/queue\.sh/);
+    assert.match(card, /committed "Add held-out read path"/);
+    assert.ok(card.length <= 300, `card ${card.length}`);
+    assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: a, prompt_id: "p3", prompt: "more", cwd: repo }).stdout, "", "seen: 0 bytes until the sibling does more");
+    assert.doesNotMatch(runHook(t, "claude", "UserPromptSubmit", { session_id: other, prompt_id: "o1", prompt: "go", cwd: repo }).stdout, /Also working/, "a session on another goal gets no card");
+
+    // Claude edits the file Codex just changed: held once with the reason, then allowed on retry.
+    const edit = { session_id: a, cwd: repo, tool_name: "Edit", tool_input: { file_path: `${repo}/fair/campaign_v5.py`, old_string: "y", new_string: "z" } };
+    const held = JSON.parse(runHook(t, "claude", "PreToolUse", edit).stdout).hookSpecificOutput;
+    assert.equal(held.permissionDecision, "deny");
+    assert.match(held.permissionDecisionReason, /^Align: Codex session 019a-cod, working toward the same goal, edited fair\/campaign_v5\.py (less than a minute|\d+ min) ago\. Read the file again/);
+    assert.equal(runHook(t, "claude", "PreToolUse", edit).stdout, "", "retry after re-reading goes through");
+    // A file Claude read after Codex changed it is not held.
+    runHook(t, "codex", "PreToolUse", { session_id: b, turn_id: "t1", cwd: repo, tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** Update File: DESIGN.md\n@@\n-a\n+b\n*** End Patch\n" } });
+    runHook(t, "claude", "PreToolUse", { session_id: a, cwd: repo, tool_name: "Read", tool_input: { file_path: `${repo}/DESIGN.md` } });
+    assert.equal(runHook(t, "claude", "PreToolUse", { session_id: a, cwd: repo, tool_name: "Edit", tool_input: { file_path: `${repo}/DESIGN.md` } }).stdout, "", "read since their edit: not held");
+    assert.equal(runHook(t, "claude", "PreToolUse", { ...edit, tool_input: { file_path: `${repo}/README.md` } }).stdout, "", "untouched files are never held");
+    assert.equal(runHook(t, "claude", "PreToolUse", { session_id: other, cwd: repo, tool_name: "Write", tool_input: { file_path: `${repo}/fair/campaign_v5.py` } }).stdout, "", "another goal's session is not held");
+
+    // Now Codex is the one behind: its next edit of that file is held, naming the Claude session.
+    const back = JSON.parse(runHook(t, "codex", "PreToolUse", { session_id: b, turn_id: "t2", cwd: repo, tool_name: "apply_patch", tool_input: { command: patch } }).stdout).hookSpecificOutput;
+    assert.match(back.permissionDecisionReason, /Claude Code session sess-cla/);
+    const codexCard = JSON.parse(runHook(t, "codex", "UserPromptSubmit", { session_id: b, turn_id: "t3", prompt: "next", cwd: repo }).stdout).hookSpecificOutput.additionalContext;
+    assert.match(codexCard, /Claude Code session sess-cla \(active (just now|\d+ min ago)\): edited README\.md, DESIGN\.md, fair\/campaign_v5\.py\./);
+  });
+
+  test("commit subjects come from -m, including Claude's heredoc form; private sessions record nothing", () => {
+    const { t, ctx } = setup();
+    const a = "sess-heredoc";
+    const lid = shareSession(ctx, "claude-code", a);
+    const cmd = "git commit -m \"$(cat <<'EOF'\nFix the queue runner\n\nLonger body.\nEOF\n)\"";
+    runHook(t, "claude", "PreToolUse", { session_id: a, cwd: "/tmp/r", tool_name: "Bash", tool_input: { command: cmd } });
+    const acts = fs.readFileSync(layout.activity(t.home, lid), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.deepEqual(acts.map((x) => x.s), ["Fix the queue runner"]);
+    runHook(t, "claude", "PreToolUse", { session_id: "sess-private-act", cwd: "/tmp/r", tool_name: "Write", tool_input: { file_path: "/tmp/r/a.txt" } });
+    assert.equal(fs.existsSync(layout.activity(t.home, localId("claude-code", "sess-private-act"))), false);
+  });
+
   test("private sessions produce no output on any event", () => {
     const { t } = setup();
     const sid = "sess-private";

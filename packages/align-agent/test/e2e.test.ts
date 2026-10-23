@@ -11,6 +11,7 @@ import { layout, localId } from "../src/shared/layout.ts";
 import { readJson } from "../src/shared/fsx.ts";
 import type { HotState } from "../src/shared/types.ts";
 import { FakeServer } from "./fake-server.ts";
+import { pathHash, repoIdentity } from "../src/hooks/siblings.ts";
 import { appendLines, claudeAssistant, claudeUser, ctxFor, makeEnv, rows, runCli, runHook, usage, waitFor, writeLines, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -274,6 +275,63 @@ describe("e2e", () => {
     const after = runHook(t, "claude", "SessionStart", { session_id: "late-1", source: "startup", cwd: repo });
     assert.ok(!after.stdout.includes("shared with"));
     void ctx;
+    await halt();
+  });
+
+  test("pod activity: uploaded inside the sync pass with names only under consent; another person's edit reaches the card; our own never echoes back", async () => {
+    const { fake, t } = await world();
+    await login(t);
+    const mkRepo = (name: string) => {
+      const dir = path.join(t.root, name);
+      fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
+      fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ".git", "HEAD"), "ref: refs/heads/feat/sso\n");
+      fs.writeFileSync(path.join(dir, ".git", "config"), `[remote "origin"]\n\turl = git@github.example:acme/${name}.git\n`);
+      return dir;
+    };
+    const named = mkRepo("app");
+    const hashed = mkRepo("infra");
+    const on = await runCli(t, ["share", "--dir", named, "--workspace", "ws_acme", "--goal", "g_ship", "--signals", "--yes"]);
+    assert.equal(on.code, 0, on.stderr);
+    assert.match(on.stdout, /Work signals ON: repo-relative paths of edited files, commit subjects, task labels and the branch name/);
+    assert.match(on.stdout, /Never sent: prompts, responses, tool input or output\./);
+    const off = await runCli(t, ["share", "--dir", hashed, "--workspace", "ws_acme", "--goal", "g_ship", "--yes"]);
+    assert.match(off.stdout, /Work signals OFF: only keyed hashes of edited files are sent/);
+    assert.match((await runCli(t, ["rules"])).stdout, /app +-> +Acme \/ Ship.*work signals on/);
+    const { halt } = await startSyncing(t);
+    const A = "a0a0a0a0-1111-2222-3333-444444444444";
+    const B = "b0b0b0b0-1111-2222-3333-444444444444";
+    runHook(t, "claude", "SessionStart", { session_id: A, source: "startup", cwd: named });
+    runHook(t, "claude", "SessionStart", { session_id: B, source: "startup", cwd: hashed });
+    await waitFor(() => hot(t, A)?.share?.state === "shared" && hot(t, B)?.share?.state === "shared", 5000, "both shared");
+    runHook(t, "claude", "UserPromptSubmit", { session_id: A, prompt_id: "a1", prompt: "::align task SSO wiring", cwd: named });
+    for (const [sid, cwd] of [[A, named], [B, hashed]]) {
+      runHook(t, "claude", "PreToolUse", { session_id: sid, cwd, tool_name: "Edit", tool_input: { file_path: path.join(cwd, "src/sso.ts") } });
+      runHook(t, "claude", "PreToolUse", { session_id: sid, cwd, tool_name: "Bash", tool_input: { command: 'git commit -am "Wire SSO callback"' } });
+    }
+    const kA = hot(t, A)!.share!.session_key;
+    const kB = hot(t, B)!.share!.session_key;
+    await waitFor(() => fake.activity.filter((i) => i.session_key === kA).length >= 4 && fake.activity.filter((i) => i.session_key === kB).length >= 2, 5000, "activity uploaded");
+    const of = (k: string) => fake.activity.filter((i) => i.session_key === k);
+    const idA = repoIdentity("ws_acme", named)!;
+    assert.deepEqual(of(kA).find((i) => i.kind === "edit"), { ...of(kA).find((i) => i.kind === "edit"), path: "src/sso.ts", path_hash: pathHash(idA.repo_id, "src/sso.ts"), repo_id: idA.repo_id });
+    assert.equal(of(kA).find((i) => i.kind === "commit").text, "Wire SSO callback");
+    assert.deepEqual(of(kA).filter((i) => i.kind === "task").map((i) => i.text).sort(), ["SSO wiring", "branch feat/sso"]);
+    const eB = of(kB).find((i) => i.kind === "edit");
+    assert.equal(eB.path, null, "no consent: no path");
+    assert.match(eB.path_hash, /^[a-f0-9]{32}$/);
+    assert.equal(of(kB).find((i) => i.kind === "commit").text, null, "no consent: no commit subject");
+    assert.ok(!of(kB).some((i) => i.kind === "task"), "no consent: no task or branch");
+    assert.ok(!JSON.stringify(fake.activity).includes(t.root), "never an absolute path");
+
+    // Yoonseo's machine edits the same file in the same repo (a different clone, same remote).
+    fake.addRemoteActivity("ws_acme", { session_key: "y".repeat(43), user: { id: "u_yoon", name: "Yoonseo" }, kind: "edit", repo_id: idA.repo_id, path: "src/sso.ts", path_hash: pathHash(idA.repo_id, "src/sso.ts") });
+    await waitFor(() => (readJson<{ items: { user: { name: string } }[] }>(layout.podFeed(t.home, "ws_acme"))?.items || []).some((i) => i.user.name === "Yoonseo"), 5000, "pod feed fetched");
+    const card = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: A, prompt_id: "a2", prompt: "continue", cwd: named }).stdout).hookSpecificOutput.additionalContext as string;
+    assert.match(card, /Yoonseo \(1 session, (just now|1 min ago)\): edited src\/sso\.ts \(yours too\)\./);
+    assert.doesNotMatch(card, /Sean/, "this machine's own uploads are not shown back as someone else's");
+    const pod = await runCli(t, ["pod", "--cwd", named]);
+    assert.match(pod.stdout, /- Yoonseo \(1 session\), active (just now|1 min ago): overlaps your files: src\/sso\.ts/);
     await halt();
   });
 

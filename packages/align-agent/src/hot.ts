@@ -4,7 +4,10 @@ import type { Ctx } from "./context.ts";
 import { getSession } from "./ledger.ts";
 import { layout } from "./shared/layout.ts";
 import { removeFile, writeJsonAtomic } from "./shared/fsx.ts";
+import { contextGoals, snapshot } from "./shared/goaltree.ts";
 import type { GoalSnapshot, HotState, Latch, ShareState } from "./shared/types.ts";
+
+export { snapshot };
 
 export interface ShareRow {
   local_id: string;
@@ -29,17 +32,6 @@ export interface ShareRow {
 
 export function getShare(ctx: Ctx, lid: string): ShareRow | null {
   return (ctx.db.prepare("SELECT * FROM shares WHERE local_id=?").get(lid) as unknown as ShareRow) || null;
-}
-
-export function snapshot(goal: { id: string; version: number; title: string; measures: unknown; status: string } | null | undefined): GoalSnapshot | null {
-  if (!goal) return null;
-  return {
-    id: goal.id,
-    version: goal.version,
-    title: goal.title,
-    measures: Array.isArray(goal.measures) ? (goal.measures as GoalSnapshot["measures"]) : [],
-    status: goal.status as GoalSnapshot["status"],
-  };
 }
 
 const CONTEXT_KINDS = new Set(["goal_version", "binding_changed", "binding_suspended"]);
@@ -75,6 +67,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
         : null,
     pending_directives: live ? pendingDirs : [],
     notices,
+    context_goals: live && live.goal_json ? contextGoals(ctx.home, live.workspace_id, (JSON.parse(live.goal_json) as GoalSnapshot).id) : [],
     updated_at: new Date().toISOString(),
   };
   writeJsonAtomic(layout.hot(ctx.home, lid), hot);
