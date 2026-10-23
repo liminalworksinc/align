@@ -20,6 +20,8 @@ export interface HookInput {
   prompt?: string;
   tool_name?: string;
   model?: string;
+  /** Set when a tool event fires inside a Claude Code subagent. */
+  agent_id?: string;
 }
 
 export type HookOutput = Record<string, unknown> | null;
@@ -301,7 +303,8 @@ export function preToolUse(home: string, harness: Harness, input: HookInput): Ho
     (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
     (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
   if (!allowed) return denyOutput();
-  return midTurnDelta(home, lid);
+  // Context from a subagent's tool call reaches only that subagent, so the delta waits for the main agent.
+  return input.agent_id ? null : midTurnDelta(home, lid);
 }
 
 /**
@@ -309,21 +312,59 @@ export function preToolUse(home: string, harness: Harness, input: HookInput): Ho
  * for the next prompt. Same bytes as the prompt-time delta, and nothing when unchanged. Binding switches still wait
  * for the next prompt, so usage moves to another goal only at a root-turn boundary.
  */
+function deltaKind(hot: HotState, inj: InjectedState): DeltaKind | null {
+  const share = hot.share;
+  if (share?.state === "shared" && hot.goal && inj.share_state === "shared" && inj.goal_id === hot.goal.id) {
+    if (inj.goal_version !== hot.goal.version || inj.goal_status !== hot.goal.status) return "updated";
+  } else if (share?.state === "suspended" && (inj.goal_id || inj.share_state === "shared")) return "unbound";
+  return null;
+}
+
+/**
+ * Parallel tool calls run their PreToolUse hooks at the same time, and each would see the same undelivered change.
+ * Only the hook that creates this lock directory delivers it; a lock older than the hook deadline was left by a hook
+ * that died and is taken over.
+ */
+function claimDelta(home: string, lid: string): (() => void) | null {
+  const dir = `${layout.injected(home, lid)}.lock`;
+  fs.mkdirSync(path.dirname(dir), { recursive: true, mode: 0o700 });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.mkdirSync(dir, { mode: 0o700 });
+      return () => fs.rmSync(dir, { recursive: true, force: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return null;
+      let age = 0;
+      try {
+        age = Date.now() - fs.statSync(dir).mtimeMs;
+      } catch {
+        continue; // released meanwhile
+      }
+      if (age < 2_000) return null;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  return null;
+}
+
 function midTurnDelta(home: string, lid: string): HookOutput {
   const hot = readHot(home, lid);
-  if (!hot?.share) return null;
-  const inj = readInjected(home, lid);
-  let kind: DeltaKind | null = null;
-  if (hot.share.state === "shared" && hot.goal && inj.share_state === "shared" && inj.goal_id === hot.goal.id) {
-    if (inj.goal_version !== hot.goal.version || inj.goal_status !== hot.goal.status) kind = "updated";
-  } else if (hot.share.state === "suspended" && (inj.goal_id || inj.share_state === "shared")) kind = "unbound";
-  if (!kind) return null;
-  const goal = kind === "unbound" ? null : hot.goal;
-  const context = renderDelta(kind, goal);
-  markInjected(inj, goal, hot.share.state);
-  reportApplied(home, lid, inj, hot.pending_directives);
-  writeInjected(home, lid, inj);
-  return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: context } };
+  if (!hot?.share || !deltaKind(hot, readInjected(home, lid))) return null;
+  const release = claimDelta(home, lid);
+  if (!release) return null;
+  try {
+    const inj = readInjected(home, lid); // re-read under the lock: another hook may have just delivered it
+    const kind = deltaKind(hot, inj);
+    if (!kind) return null;
+    const goal = kind === "unbound" ? null : hot.goal;
+    const context = renderDelta(kind, goal);
+    markInjected(inj, goal, hot.share.state);
+    reportApplied(home, lid, inj, hot.pending_directives);
+    writeInjected(home, lid, inj);
+    return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: context } };
+  } finally {
+    release();
+  }
 }
 
 export function anyLatch(home: string): boolean {

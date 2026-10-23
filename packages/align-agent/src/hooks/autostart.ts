@@ -5,10 +5,12 @@ import path from "node:path";
 import { layout } from "../shared/layout.ts";
 
 /**
- * Minimum time between hook-started syncs, by event. SessionStart syncs unless one was just spawned. Stop always syncs:
- * it is the last hook of a turn, so it carries that turn's usage up even if the session then sits idle.
+ * Minimum time between hook-started syncs, by event. SessionStart syncs unless one was just spawned. A turn end (Stop, or
+ * StopFailure when the turn ended on an API error) always syncs: it is the last hook of a turn, so it carries that turn's
+ * usage up even if the session then sits idle.
  */
-const SYNC_EVERY_MS: Record<string, number> = { SessionStart: 0, Stop: 0, UserPromptSubmit: 10_000, PreToolUse: 30_000 };
+const SYNC_EVERY_MS: Record<string, number> = { SessionStart: 0, UserPromptSubmit: 10_000, PreToolUse: 30_000 };
+const TURN_END = new Set(["Stop", "StopFailure"]);
 const STOP_SETTLE_MS = 1_500;
 const SPAWN_GAP_MS = 3_000;
 
@@ -23,8 +25,8 @@ function ageMs(file: string): number {
 export async function kickSync(home: string, hookScript: string, env: NodeJS.ProcessEnv, event: string): Promise<void> {
   if (env.ALIGN_NO_AUTOSTART === "1") return;
   const every = SYNC_EVERY_MS[event] ?? 30_000;
-  // Stop always spawns (its pass waits for a running one); other events respect the interval and the spawn gap.
-  if (event !== "Stop" && (ageMs(layout.lastSync(home)) < every || ageMs(layout.spawnLock(home)) < Math.max(SPAWN_GAP_MS, every))) return;
+  // A turn end always spawns (its pass waits for a running one); other events respect the interval and the spawn gap.
+  if (!TURN_END.has(event) && (ageMs(layout.lastSync(home)) < every || ageMs(layout.spawnLock(home)) < Math.max(SPAWN_GAP_MS, every))) return;
   const cli = path.join(path.dirname(hookScript), "cli.js");
   if (!fs.existsSync(cli)) return;
   try {
@@ -39,6 +41,6 @@ export async function kickSync(home: string, hookScript: string, env: NodeJS.Pro
   } catch {
     /* no log */
   }
-  const args = [cli, "sync", "--hook", ...(event === "Stop" ? ["--settle", String(STOP_SETTLE_MS)] : [])];
+  const args = [cli, "sync", "--hook", ...(TURN_END.has(event) ? ["--settle", String(STOP_SETTLE_MS)] : [])];
   spawn(process.execPath, args, { detached: true, cwd: home, stdio: ["ignore", logFd, logFd], env: { ...env, ALIGN_HOME: home } }).unref();
 }
