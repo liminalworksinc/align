@@ -1,0 +1,27 @@
+# Required check for main's branch protection: a pull request must contain the current tip of its base branch.
+# Branch protection also requires branches to be up to date, so a PR that falls behind main is blocked until rebased.
+name: rebased-on-main
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  contents: read
+jobs:
+  rebased-on-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Contains the base branch tip
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git merge-base --is-ancestor "$BASE_SHA" HEAD; then
+            echo "Up to date with $BASE_REF ($BASE_SHA)."
+          else
+            echo "::error::This branch is behind $BASE_REF. Rebase it onto $BASE_REF and push again."
+            exit 1
+          fi
