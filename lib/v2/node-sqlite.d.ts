@@ -1,4 +1,4 @@
-// The part of node:sqlite (Node 22.5+) that Align v2 uses. The repo pins @types/node 20, which has no types for
+// The part of node:sqlite (Node 22.5+) that goal sessions use. The repo pins @types/node 20, which has no types for
 // this module; this declaration covers only what lib/v2 calls.
 declare module "node:sqlite" {
   export type SQLInputValue = null | number | bigint | string | Uint8Array;

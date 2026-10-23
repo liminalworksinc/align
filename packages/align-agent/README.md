@@ -1,6 +1,6 @@
 # @liminal/align-agent
 
-The local half of Align v2: the `align` CLI, Claude Code and Codex hooks, and local metering from transcripts.
+The local half of goal sessions: the `align` CLI, Claude Code and Codex hooks, and local metering from transcripts.
 There is no daemon and no telemetry setup. Hooks answer from local files and, at most every 10 to 30 seconds, start a
 short `align sync` in the background that makes one pass and exits.
 

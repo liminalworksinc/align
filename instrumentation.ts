@@ -6,8 +6,8 @@ export async function register() {
     const { startup } = await import("./lib/startup");
     try {
       startup();
-      // Align v2 opens (and migrates) its database only when ALIGN_V2=1, never during a build.
-      if (process.env.ALIGN_V2 === "1" && process.env.NEXT_PHASE !== "phase-production-build") {
+      // Goal sessions opens (and migrates) its database only when ALIGN_GOAL_SESSIONS=1, never during a build.
+      if (process.env.ALIGN_GOAL_SESSIONS === "1" && process.env.NEXT_PHASE !== "phase-production-build") {
         const { ready } = await import("./lib/v2/init");
         await ready();
       }

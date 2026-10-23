@@ -80,33 +80,35 @@ export async function eitherAuth(req: Request): Promise<Principal> {
 }
 
 /** CSRF for cookie writes: a browser always sends Origin on these, and it must be this server's own host.
- *  Fetch metadata, when sent, must say same-origin. Scripts send neither (as lib/http.ts requireJson allows). */
+ *  Hosted (as lib/http.ts since LIM-2437): Origin is required and must be exactly https://<Host>, so an http:// page or
+ *  another port can't write. Local: an Origin, when sent, must match Host; scripts send none.
+ *  Fetch metadata, when sent, must say same-origin. */
 export function requireSameSite(req: Request) {
   const origin = req.headers.get("origin");
-  if (origin !== null) {
+  if (config().hosted) {
+    const host = req.headers.get("host")?.toLowerCase();
+    if (!origin || !host || !hostAllowed(host) || origin.toLowerCase() !== `https://${host}`) throw new V2Error(403, "cross_site", "This request came from another site");
+  } else if (origin !== null) {
     let host: string | null = null;
     try {
       host = new URL(origin).host;
     } catch {}
-    const allowed = config().hosted ? !!host && hostAllowed(host) && host === req.headers.get("host") : !!host && host === req.headers.get("host");
-    if (!allowed) throw new V2Error(403, "cross_site", "This request came from another site");
+    if (!host || host !== req.headers.get("host")) throw new V2Error(403, "cross_site", "This request came from another site");
   }
   const site = req.headers.get("sec-fetch-site");
   if (site && site !== "same-origin" && site !== "none") throw new V2Error(403, "cross_site", "This request came from another site");
 }
 
-/** The cookie path for a write: session, then same-site check. */
+/** The cookie path for a write: same-site check, then session (a cross-site write is refused before any session read). */
 export async function webWrite(req: Request): Promise<WebPrincipal> {
-  const p = await webAuth(req);
   requireSameSite(req);
-  return p;
+  return webAuth(req);
 }
 
-/** A write open to both credentials. */
+/** A write open to both credentials. No Authorization header means the cookie path, so it gets the same-site check first. */
 export async function eitherWrite(req: Request): Promise<Principal> {
-  const p = await eitherAuth(req);
-  if (p.kind === "web") requireSameSite(req);
-  return p;
+  if (req.headers.get("authorization") === null) requireSameSite(req);
+  return eitherAuth(req);
 }
 
 /** Path segments that can't be ids are simply not found. */

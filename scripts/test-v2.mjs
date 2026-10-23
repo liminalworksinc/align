@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Align v2 hosted-server tests (docs/v2/WIRE.md). Builds once, then starts its own production servers (next start)
+// Goal sessions hosted-server tests (docs/v2/WIRE.md). Builds once, then starts its own production servers (next start)
 // on <port> with a temp ALIGN_DATA_DIR, one per phase:
-//   off     ALIGN_V2 unset                          -> every /app and /api/v2 path is 404, no v2 database
-//   on      ALIGN_V2=1 ALIGN_V2_TEST_IDP=1 (Mode L) -> identity, RBAC, devices, sessions, usage, spend, directives,
+//   off     ALIGN_GOAL_SESSIONS unset                          -> every /app and /api/v2 path is 404, no v2 database
+//   on      ALIGN_GOAL_SESSIONS=1 ALIGN_GOAL_SESSIONS_TEST_IDP=1 (Mode L) -> identity, RBAC, devices, sessions, usage, spend, directives,
 //                                                      directive cursor, receipts, alignments, stop sharing, delete, web UI
-//   hosted  HOSTED=1 ALIGN_V2=1                      -> startup refusals for v2 settings, then the v2 routes behind
+//   hosted  HOSTED=1 ALIGN_GOAL_SESSIONS=1                      -> startup refusals for v2 settings, then the v2 routes behind
 //                                                      the hosted host/https/edge checks
 // Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port)
 
@@ -87,7 +87,7 @@ function hosted(method, p, { body, cookie, headers = {} } = {}) {
 
 // ---- servers ----
 let server = null;
-const CLEAN_KEYS = ["AI_GATEWAY_API_KEY", "ALIGN_CAPTURE", "ALIGN_SECRET", "ALIGN_URL", "ALIGN_MCP_URL", "ALIGN_ALLOW_OPEN_CREATE", "ALIGN_SIGNUP_CODE", "ALIGN_SIGNUP_CODES", "ALIGN_MAX_WORKSPACES", "ALIGN_CREATE_PER_HOUR", "ALIGN_DATA_DIR", "ALIGN_PUBLIC", "HOSTED", "ALIGN_HOSTS", "ALIGN_NORTHSTAR_PUBLIC", "ALIGN_PRODUCT_PASSCODE", "ALIGN_SECURITY_PASSCODE", "ALIGN_LEADERSHIP_PASSCODE", "ALIGN_DELETE_BY", "ALIGN_V2", "ALIGN_V2_TEST_IDP", "BETTER_AUTH_SECRET", "BETTER_AUTH_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "ALIGN_PUBLIC_ORIGIN"];
+const CLEAN_KEYS = ["AI_GATEWAY_API_KEY", "ALIGN_CAPTURE", "ALIGN_SECRET", "ALIGN_URL", "ALIGN_MCP_URL", "ALIGN_ALLOW_OPEN_CREATE", "ALIGN_SIGNUP_CODE", "ALIGN_SIGNUP_CODES", "ALIGN_MAX_WORKSPACES", "ALIGN_CREATE_PER_HOUR", "ALIGN_DATA_DIR", "ALIGN_PUBLIC", "HOSTED", "ALIGN_HOSTS", "ALIGN_NORTHSTAR_PUBLIC", "ALIGN_PRODUCT_PASSCODE", "ALIGN_SECURITY_PASSCODE", "ALIGN_LEADERSHIP_PASSCODE", "ALIGN_DELETE_BY", "ALIGN_GOAL_SESSIONS", "ALIGN_GOAL_SESSIONS_TEST_IDP", "BETTER_AUTH_SECRET", "BETTER_AUTH_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "ALIGN_PUBLIC_ORIGIN"];
 async function startServer(env) {
   rmSync(NS_STATE, { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
@@ -224,14 +224,14 @@ function invariantHolds(s) {
 }
 
 const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "align-v2-"));
-const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "", ALIGN_V2: "" } });
+const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "", ALIGN_GOAL_SESSIONS: "" } });
 if (build.status !== 0) {
   console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
   process.exit(1);
 }
 
 try {
-  // ======== phase off: ALIGN_V2 unset ========
+  // ======== phase off: ALIGN_GOAL_SESSIONS unset ========
   const offDir = path.join(tmpRoot, "off");
   await mustStart({ ALIGN_DATA_DIR: offDir });
   const routes = v2Routes();
@@ -245,9 +245,9 @@ try {
   check("off: v1 routes still answer", v1.status === 200, `${v1.status}`);
   await stopServer();
 
-  // ======== phase on: ALIGN_V2=1 with the test identity provider ========
+  // ======== phase on: ALIGN_GOAL_SESSIONS=1 with the test identity provider ========
   const onDir = path.join(tmpRoot, "on");
-  await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_V2: "1", ALIGN_V2_TEST_IDP: "1" });
+  await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_GOAL_SESSIONS: "1", ALIGN_GOAL_SESSIONS_TEST_IDP: "1" });
   dbFile = path.join(onDir, "v2", "align.sqlite");
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
@@ -884,7 +884,7 @@ try {
     ALIGN_PRODUCT_PASSCODE: "product-strong-pass-1",
     ALIGN_SECURITY_PASSCODE: "security-strong-pass-1",
     ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-1",
-    ALIGN_V2: "1",
+    ALIGN_GOAL_SESSIONS: "1",
     BETTER_AUTH_SECRET: "b".repeat(40),
     GOOGLE_CLIENT_ID: "test-google-id",
     GOOGLE_CLIENT_SECRET: "test-google-secret",
@@ -902,13 +902,13 @@ try {
     ["no ALIGN_PUBLIC_ORIGIN", { ALIGN_PUBLIC_ORIGIN: undefined }, "ALIGN_PUBLIC_ORIGIN must be an https origin"],
     ["an http ALIGN_PUBLIC_ORIGIN", { ALIGN_PUBLIC_ORIGIN: `http://${HOSTED_HOST}` }, "ALIGN_PUBLIC_ORIGIN must be an https origin"],
     ["an ALIGN_PUBLIC_ORIGIN outside ALIGN_HOSTS", { ALIGN_PUBLIC_ORIGIN: "https://other.example" }, "must be listed in ALIGN_HOSTS"],
-    ["ALIGN_V2_TEST_IDP", { ALIGN_V2_TEST_IDP: "1" }, "ALIGN_V2_TEST_IDP is not allowed when hosted"],
+    ["ALIGN_GOAL_SESSIONS_TEST_IDP", { ALIGN_GOAL_SESSIONS_TEST_IDP: "1" }, "ALIGN_GOAL_SESSIONS_TEST_IDP is not allowed when hosted"],
   ];
   for (const [what, delta, needle] of refusals) {
     const env = { ...good, ...delta };
     for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
     const r = await startServer(env);
-    check(`hosted: ALIGN_V2=1 refuses to serve with ${what}`, !r.started && (r.exited || r.last === 503) && r.stderr().includes(needle), r.started ? "it started" : `exited=${r.exited} last=${r.last} ${r.stderr().slice(-300)}`);
+    check(`hosted: ALIGN_GOAL_SESSIONS=1 refuses to serve with ${what}`, !r.started && (r.exited || r.last === 503) && r.stderr().includes(needle), r.started ? "it started" : `exited=${r.exited} last=${r.last} ${r.stderr().slice(-300)}`);
     await stopServer();
   }
   await mustStart(good);
@@ -925,6 +925,17 @@ try {
     http.get({ host: "127.0.0.1", port: PORT, path: "/api/v2/me", headers: { host: "evil.example", "x-forwarded-proto": "https", "fly-client-ip": "1.2.3.4" } }, (res) => resolve(res.statusCode));
   });
   check("hosted: v2 routes pass the same checks (http -> 403, no Fly-Client-IP -> 403, foreign Host -> 421)", hHttp.status === 403 && hNoEdge.status === 403 && hForeign === 421, `${hHttp.status} ${hNoEdge.status} ${hForeign}`);
+  // Hosted cookie writes: Origin is required and must be exactly https://<Host> (as lib/http.ts, LIM-2437). The site
+  // check runs before the session, so with no session the right Origin gets 401 and every other one 403 cross_site.
+  const hOrigins = [undefined, `http://${HOSTED_HOST}`, `https://${HOSTED_HOST}:8443`, "null", "https://evil.example"];
+  const hRefused = [];
+  for (const o of hOrigins) hRefused.push({ o: o ?? "none", r: await hosted("POST", "/api/v2/workspaces", { body: { name: "x" }, headers: { origin: o } }) });
+  const hRightOrigin = await hosted("POST", "/api/v2/workspaces", { body: { name: "x" }, headers: { origin: `https://${HOSTED_HOST}` } });
+  check(
+    "hosted: a cookie write needs Origin exactly https://<Host> (none, http, another port, null, foreign -> 403 cross_site; exact -> on to sign-in, 401)",
+    hRefused.every((x) => x.r.status === 403 && x.r.json?.error === "cross_site") && hRightOrigin.status === 401,
+    `${hRefused.map((x) => `${x.o}:${x.r.status}`).join(" ")} exact:${hRightOrigin.status}`,
+  );
   const hNorthstar = await hosted("GET", "/api/sessions");
   check("hosted: non-tester v1 routes stay 404 with v2 on", hNorthstar.status === 404, `${hNorthstar.status}`);
   const hDev = await hosted("POST", "/api/v2/device/authorize", { body: { device_name: "x", public_key: newDeviceKeys().pub } });
