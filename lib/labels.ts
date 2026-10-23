@@ -4,13 +4,15 @@
 
 import type { Acceptance, Actor, AppState, Owner, ScenarioKind, ScenarioTeam } from "./types";
 
-type LabelState = Pick<AppState, "company" | "simulations" | "scenario" | "teams" | "scenario_config"> & Partial<Pick<AppState, "acceptances">>;
+// company_note: the anonymous view carries it at the top level (no scenario_config there).
+type LabelState = Pick<AppState, "company" | "simulations" | "scenario" | "teams" | "scenario_config"> & Partial<Pick<AppState, "acceptances">> & { company_note?: string };
 
 export interface Labels {
   northstar: boolean;
   launchApproved: boolean; // custom: leadership approved the launch of the latest agreement (statuses read "launch approved")
   sandbox: boolean; // northstar, or a custom scenario that has sandbox runs; everything tied to runs hides when false
   company: string;
+  companyNote?: string; // custom: the setup's company_note, shown under the company name; never set for Northstar
   team: Record<Owner, string>; // team name per goal slot
   role: Record<Actor, string>; // team name per signed-in role
   person: Record<Owner | Actor, string>; // who speaks for each slot or role
@@ -80,6 +82,7 @@ export function labelsFor(s: LabelState): Labels {
     launchApproved: s.acceptances?.at(-1)?.launch_decision?.decision === "approved",
     sandbox: s.simulations.length > 0,
     company: s.company,
+    ...((s.scenario_config?.company_note ?? s.company_note) ? { companyNote: s.scenario_config?.company_note ?? s.company_note } : {}),
     team: { ceo: t.ceo.team, product: t.product.team, security: t.security.team },
     role: { product: t.product.team, security: t.security.team, leadership: t.ceo.team },
     person: {

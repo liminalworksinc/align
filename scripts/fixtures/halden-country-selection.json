@@ -1,6 +1,6 @@
 {
-  "confirm": "replace",
   "company": "Halden Therapeutics",
+  "company_note": "Example company (fictional), based on an anonymized real workflow.",
   "timeframe": "This quarter",
   "leadership": {
     "team": "Clinical Leadership",

@@ -170,6 +170,9 @@ export function requireSession(req: Request): Session {
   return t.session;
 }
 
+/** The only 409 that carries a `code`: the page treats it as "signed in elsewhere", every other 409 as a reason to show. */
+export const WORKSPACE_MISMATCH = "workspace_mismatch";
+
 /** For workspace-aware routes: the only way a route reaches custom state. ctx.mutate and ctx.read are bound to ctx.ws. */
 export function requireWsSession(req: Request): WsContext {
   const s = wsSessionFrom(req);
@@ -177,7 +180,7 @@ export function requireWsSession(req: Request): WsContext {
   // The cookie is per origin: a tab left open on one workspace would otherwise write into whichever workspace this
   // browser signed in to since. The page names the workspace it shows; a mismatch is refused (review M7).
   const shown = req.headers.get("x-align-workspace");
-  if (shown && shown !== s.ws) throw new HttpError(409, "This tab is for another workspace than you are signed in to. Reload it.");
+  if (shown && shown !== s.ws) throw new HttpError(409, "This tab is for another workspace than you are signed in to. Reload it.", WORKSPACE_MISMATCH);
   return bindWs(s);
 }
 

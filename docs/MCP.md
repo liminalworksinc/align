@@ -70,6 +70,7 @@ A workspace connects its agents with its own token, not the server's `ALIGN_MCP_
 - **Wake-ups.** Poll, ack and stream all use the workspace. Its approvals never reach the default store, and the default store's never reach it.
 - **Scope.** A token reads and acknowledges only its own harness and repo's sessions (poll, ack, stream and the work-map and directives tools); another's are 403. A token that no longer verifies is 401, never the default store. An ack records only a real authority event.
 - **Expiry and revocation.** A token lasts 7 days (`expires_at` in the mint response). Leadership disconnects agents with `DELETE /api/workspaces/agent-token` (`{"harness","repo"}` for one, `{}` for all): the consent and that repo's captured sessions go, and every agent token for the workspace stops, so connect the ones you keep again. Restart does the same for all agents. A deleted workspace's token fails too. Human sign-ins are unaffected.
+- **Tokens from a #5 build.** Agent tokens minted on a PR #5 build stop working once the merged build runs (they're refused with 401). Mint a new one: `scripts/agent-session.sh` mints one each time it starts and prints its `expires_at`. When a token is refused, `scripts/align-watch.mjs` exits with one line on stderr instead of waiting silently.
 - **Hosted mode.** None of this exists when hosted: the routes are 404 and tokens are never accepted.
 
 `scripts/agent-session.sh` does all of it:
@@ -96,3 +97,10 @@ By default the session plans only:
 - so are shell commands that run code or reach other machines (`--allow-edits` lifts that).
 
 Run it inside `tmux` to keep the session up while the teams decide. Its restraint comes from that deny list and from the prompt: Align supplies the agreement and the wake-up, and enforces nothing in the agent's host.
+
+**The agent can read its own token.** In workspace mode the hooks need the agent token, so `agent-session.sh` puts it in the session's environment as `ALIGN_AGENT_TOKEN`. The plan-only deny list doesn't block `env` or `printenv`, so the agent (and anything it runs) can read the token. This is inherent to hooks: they run as the agent's own user. What a leaked token allows is bounded:
+- reading that workspace through MCP;
+- capture and wake-ups for its own harness and repo only;
+- nothing on human sign-ins, approvals or launch decisions.
+
+It lasts 7 days, and leadership revokes it with `DELETE /api/workspaces/agent-token` or Restart. Don't run untrusted code in a session that holds one.

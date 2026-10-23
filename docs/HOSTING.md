@@ -41,7 +41,7 @@ The server won't serve until all of these hold. On `next start` it exits with th
 - `ALIGN_SECRET`: 32+ characters. Session tokens are signed with it, so rotating it signs everyone out.
 - `ALIGN_DATA_DIR`: an absolute path outside the app directory (the volume, `/data`).
 - `ALIGN_SIGNUP_CODES`: one or more invite codes, each 12+ characters. `ALIGN_SIGNUP_CODE` (a single shared code) is refused.
-- `ALIGN_DELETE_BY`: the deletion date, `YYYY-MM-DD`, not yet passed. Once that day ends (midnight Pacific), a running server answers 410 to every request and a restart is refused. Testers keep the whole day; the operator purges with `ws-admin` that evening.
+- `ALIGN_DELETE_BY`: the deletion date, `YYYY-MM-DD`. Once that day ends (midnight Pacific), the server is closed: it answers 410 to every request, whatever its headers, and a restart comes back closed (it starts and logs `has passed: closed`, so it never crash-loops). Testers keep the whole day; the operator purges with `ws-admin` that evening (see "Deleting workspaces").
 - `ALIGN_PRODUCT_PASSCODE`, `ALIGN_SECURITY_PASSCODE`, `ALIGN_LEADERSHIP_PASSCODE`: set, not the `*-demo` defaults, and 12+ characters. They serve nothing while Northstar is off; they're required so a mistake there could never expose the demo passcodes.
 - These must be unset (any value is refused, `"0"` included): `AI_GATEWAY_API_KEY`, `ALIGN_CREATE_PER_HOUR`, `ALIGN_NORTHSTAR_PUBLIC`. These must be unset or off: `ALIGN_CAPTURE` (or `0`), `ALIGN_ALLOW_OPEN_CREATE` and `ALIGN_PUBLIC` (anything but `1`).
 
@@ -113,7 +113,29 @@ It deletes the way the app does:
 2. It removes the folder.
 3. It appends a `deleted` row to `_events.jsonl`.
 
-It's safe while the server runs (test-tenancy H11). Wiping the volume is the last resort.
+You can run it while the server runs (test-tenancy H11), with these limits:
+- The rename is atomic, and the server never recreates a workspace folder (a write to a missing workspace is refused). So once the rename lands, nothing new is written for that workspace.
+- A request for that workspace that is already in flight fails (404, or a server error if it was mid-write) instead of finishing. A tester using it at that moment loses that one action.
+- ws-admin doesn't take the server's locks (they live in the server's memory). Run one ws-admin at a time.
+
+### After the deletion date (closed mode)
+
+Once `ALIGN_DELETE_BY` has ended the machine keeps running, closed: every request gets 410, and a restart or deploy comes back closed rather than refusing to start. `fly ssh console` and the purge above still work (test-tenancy H12). Fly's health check also gets 410 then, so Fly marks the machine unhealthy; that's expected and harmless, because Fly doesn't restart a machine for a failing `http_service` check. Purge, then stop the machine:
+
+```sh
+fly ssh console -C "sh -c 'cd /app && setpriv --reuid=node --regid=node --init-groups node scripts/ws-admin.mjs delete --all --yes'"
+fly machine stop <machine id>
+```
+
+If the machine won't run at all (a bad image or config), purge from a one-off machine that mounts the volume instead. A volume attaches to one machine at a time, so stop the app's machine first. Not run yet (no app exists); check the flags against `fly machine run --help` before use:
+
+```sh
+fly machine stop <machine id>
+fly machine run <the app's image, from fly image show> node scripts/ws-admin.mjs delete --all --yes \
+  --volume align_data:/data --env ALIGN_DATA_DIR=/data --user node --rm
+```
+
+Wiping the volume (`fly volumes destroy`) is the last resort.
 
 ## Deploy steps (for after Sean's go; not run)
 
@@ -129,7 +151,10 @@ fly scale count 1
 **The image** (`Dockerfile`):
 - The build context is an allowlist (`.dockerignore`), so only the app's own source goes in.
 - The runtime has production dependencies, the build output and `scripts/ws-admin.mjs`. It has no `data/`, `sparta/`, `agent/` or test scripts, and no `.env` file.
-- The container hands `/data` to the `node` user, then `setpriv` execs the server as `node`, so the server itself is PID 1.
+- The container hands `/data` to the `node` user (`chown -R` as root on every start), then `setpriv` execs the server as `node`. So the server itself is PID 1, with no shell, npx or root parent (`scripts/test-image.sh` checks this).
+- What PID 1 means here:
+  - The kernel gives PID 1 no default signal action. Fly's SIGINT/SIGTERM stop the server only because `next start` installs its own handlers: it finishes in-flight requests, then exits. `NEXT_MANUAL_SIG_HANDLE` must stay unset.
+  - No init reaps orphaned child processes. The server starts none while serving, so none build up.
 
 **The health check** (`fly.toml`) calls `/api/workspaces/config` with the Host, `X-Forwarded-Proto` and `Fly-Client-IP` headers Fly's edge would send. Without them the app answers 421 or 403.
 
@@ -150,6 +175,7 @@ Delete the synthetic workspaces afterwards with `ws-admin.mjs`.
 
 - **Fly-Client-IP is only a presence check against other machines on Fly's private network.** Fly's edge sets it, but a machine inside the same Fly organization could forge it. Keep this app the only app in its organization.
 - **The rate limits and invite checks live in process memory, apart from used invites, which are on disk.** A restart clears the hourly create bucket and the wrong-code counts.
+- Sign-ins: at most 2 in flight per client and 2+8 scrypt slots overall, so about five client IPs can delay every tenant's sign-ins (creation is unaffected); NAT64 clients (64:ff9b::/96) share one rate-limit bucket.
 
 ## Local test
 

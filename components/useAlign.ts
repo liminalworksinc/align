@@ -31,7 +31,10 @@ export async function api<T = unknown>(path: string, init?: { method?: string; b
     cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error((data as { error?: string }).error || `HTTP ${res.status}`), { status: res.status });
+  if (!res.ok) {
+    const d = data as { error?: string; code?: string };
+    throw Object.assign(new Error(d.error || `HTTP ${res.status}`), { status: res.status, code: d.code });
+  }
   return data as T;
 }
 
@@ -135,8 +138,9 @@ export function useAlign(workspace?: string) {
         return out;
       } catch (e) {
         if (isEnded(e)) endSession();
-        else if ((e as { status?: number }).status === 409) {
+        else if ((e as { code?: string }).code === "workspace_mismatch") {
           // Signed in to another workspace in another tab: stop showing this one and say so (the Elsewhere notice).
+          // Only the stale-tab guard sends this code; any other 409 (an open proposal, a pending acceptance) is shown below.
           live.current = false;
           setState(null);
           void loadMe();

@@ -28,6 +28,7 @@ export const ScenarioInput = z
   .object({
     confirm: z.literal("replace"),
     company: text(80),
+    company_note: text(200).optional(), // e.g. "Example company (fictional), …": shown under the company name
     timeframe: text(40).optional(),
     leadership: z // optional: defaults to "Leadership" for both
       .object({ team: text(80).default("Leadership"), lead: text(80).default("Leadership") })
@@ -239,6 +240,7 @@ export function buildCustomState(input: ScenarioInput, at: string, input_sha256:
       company_measure_id: `KR${input.company_measure + 1}`,
       plan_id: plan.plan_id,
       plan_version: plan.plan_version,
+      ...(input.company_note ? { company_note: input.company_note } : {}), // custom-only, last, absent when not sent
     },
   };
   s.registry_version = registryVersion(s);

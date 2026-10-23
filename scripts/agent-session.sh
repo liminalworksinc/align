@@ -49,11 +49,13 @@ if [ -n "$WS" ]; then
   curl -sf -o /dev/null -c "$JAR/cookies" -H 'content-type: application/json' --data @"$JAR/login.json" "$ALIGN_URL/api/session" \
     || die "workspace leadership sign-in failed (check ALIGN_WORKSPACE and ALIGN_WORKSPACE_PASSCODE)"
   rm -f "$JAR/login.json"
-  TOKEN="$(curl -sf -b "$JAR/cookies" -H 'content-type: application/json' \
-    -d "{\"harness\":\"claude-code\",\"repo\":\"$REPO_NAME\"}" "$ALIGN_URL/api/workspaces/agent-token" \
-    | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write(JSON.parse(d).token||"")}catch{}})')"
+  curl -sf -b "$JAR/cookies" -H 'content-type: application/json' \
+    -d "{\"harness\":\"claude-code\",\"repo\":\"$REPO_NAME\"}" "$ALIGN_URL/api/workspaces/agent-token" > "$JAR/mint.json" || true
+  field() { node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write(String(JSON.parse(d)[process.argv[1]]||""))}catch{}})' "$1" < "$JAR/mint.json"; }
+  TOKEN="$(field token)"; EXPIRES="$(field expires_at)"
+  rm -f "$JAR/mint.json"
   [ -n "$TOKEN" ] || die "could not mint an agent token for $REPO_NAME in $WS"
-  echo "agent-session: agent token minted for claude-code + $REPO_NAME in $WS (also its capture consent)" >&2
+  echo "agent-session: agent token minted for claude-code + $REPO_NAME in $WS (also its capture consent), expires ${EXPIRES:-unknown}" >&2
 else
   A_PASS="${ALIGN_LEADERSHIP_PASSCODE:-leadership-demo}" node -e 'console.log(JSON.stringify({ role: "leadership", passcode: process.env.A_PASS }))' > "$JAR/login.json"
   curl -sf -o /dev/null -c "$JAR/cookies" -H 'content-type: application/json' --data @"$JAR/login.json" "$ALIGN_URL/api/session" \
