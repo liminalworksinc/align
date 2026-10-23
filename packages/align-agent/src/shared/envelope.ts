@@ -1,5 +1,7 @@
-// The only text Align ever adds to model context. Fixed wording; the interpolated fields are ratified goal fields and,
-// in the sibling card, file paths and commit subjects recorded by the user's own sessions on this machine.
+// The only text Align ever adds to model context. Fixed wording; the interpolated fields are ratified goal fields,
+// file paths, task labels and commit subjects recorded by the user's own sessions on this machine, and, from other
+// machines, only a person's first name (letters only) and repo-relative paths made of path characters. Other people's
+// free text (task labels, commit subjects, claim reasons) reaches the user through `align pod`, never through hooks.
 // Budgets (plan rev 2): envelope <= 1,200 chars (target 1,000), delta <= 300 chars (target 250), card <= 300 chars.
 import type { ContextGoal, GoalSnapshot, Measure } from "./types.ts";
 
@@ -153,25 +155,49 @@ export interface SiblingSummary {
   claims?: string[];
 }
 
+/** Shown for another machine signed in as the same user. */
+export const SELF_ELSEWHERE = "You, on another machine";
+/** Shown for a claim whose file name was not shared. */
+export const NAME_NOT_SHARED = "a file (name not shared)";
+
+/** Another person's name in model context: the first word of their account name, letters only. */
+export function personName(name: unknown): string {
+  if (name === SELF_ELSEWHERE) return name;
+  const first = String(name ?? "").normalize("NFKC").trim().split(/\s+/)[0] || "";
+  return first.replace(/[^\p{L}\p{M}'.-]/gu, "").slice(0, 20) || "A teammate";
+}
+
+/** A path from another machine in model context: repo-relative path characters only, otherwise withheld. */
+export function remotePath(p: unknown): string {
+  const s = String(p ?? "");
+  if (s === NAME_NOT_SHARED) return s;
+  return /^[A-Za-z0-9._@+\-][A-Za-z0-9._@+\-/]{0,79}$/.test(s) && !s.includes("..") ? s : "a file with an unusual name";
+}
+
 const harnessLabel = (h: SiblingSummary["harness"]) => (h === "codex" ? "Codex" : "Claude Code");
 const ago = (m: number) => (m < 1 ? "just now" : `${m} min ago`);
 
-/** One sender's line. `detail` 2 keeps everything, 1 drops commit subjects, 0 also drops task and goal labels. */
+/**
+ * One sender's line. `detail` 2 keeps everything, 1 drops commit subjects, 0 also drops task and goal labels. Another
+ * person's (`who`) task label and commit subjects are never shown: they are free text from someone else's machine.
+ */
 function siblingLine(s: SiblingSummary, maxFiles: number, detail = 2): string {
+  const remote = !!s.who;
   const name = s.who
-    ? `${clean(s.who, 30)} (${s.sessions ?? 1} session${(s.sessions ?? 1) > 1 ? "s" : ""}, ${ago(s.minutes_ago)})`
+    ? `${personName(s.who)} (${s.sessions ?? 1} session${(s.sessions ?? 1) > 1 ? "s" : ""}, ${ago(s.minutes_ago)})`
     : `${harnessLabel(s.harness)} session ${clean(String(s.id).slice(0, 8), 20)} (active ${ago(s.minutes_ago)})`;
   const overlap = (s.overlap || []).slice(0, Math.max(1, maxFiles)).map((f) => clean(f, 60));
-  const files = s.files.filter((f) => !(s.overlap || []).includes(f)).slice(0, Math.max(0, maxFiles - overlap.length)).map((f) => clean(f, 60));
+  const path = (f: string) => (remote ? remotePath(f) : clean(f, 60));
+  const files = s.files.filter((f) => !(s.overlap || []).includes(f)).slice(0, Math.max(0, maxFiles - overlap.length)).map(path);
   const more = s.files.length - files.length - overlap.length + (s.unnamed || 0);
   const parts: string[] = [];
   if (detail >= 1 && s.goal) parts.push(`toward "${clean(s.goal, 60)}"`);
-  if (detail >= 1 && s.task) parts.push(`on "${clean(s.task, 50)}"`);
+  if (detail >= 1 && s.task && !remote) parts.push(`on "${clean(s.task, 50)}"`);
   const named = [...overlap.map((f) => `${f} (yours too)`), ...files];
   if (named.length) parts.push(`edited ${named.join(", ")}${more > 0 ? ` and ${more} more` : ""}`);
   else if (more > 0) parts.push(`edited ${more} file${more > 1 ? "s" : ""}`);
-  if (detail >= 1 && s.claims?.length) parts.push(`claimed ${s.claims.slice(0, 2).map((f) => clean(f, 60)).join(", ")}`);
-  if (detail >= 2 && s.commits.length) parts.push(`committed "${clean(s.commits[0], 60)}"`);
+  if (detail >= 1 && s.claims?.length) parts.push(`claimed ${s.claims.slice(0, 2).map(path).join(", ")}`);
+  if (detail >= 2 && s.commits.length && !remote) parts.push(`committed "${clean(s.commits[0], 60)}"`);
   return `${name}${parts.length ? `: ${parts.join("; ")}` : ""}.`;
 }
 
@@ -195,13 +221,22 @@ export function renderCard(sibs: SiblingSummary[]): string | null {
   return `${head} ${sibs.length} other senders. ${tail}`.slice(0, CARD_MAX);
 }
 
-/** Another person's session toward a related goal touched or claimed a file this session is about to edit. */
-export function crossNote(who: string, file: string, minutesAgo: number, opts: { goal?: string | null; claimUntil?: string | null; task?: string | null } = {}): string {
+/**
+ * A session toward a related goal touched or claimed a file this session is about to edit. `file` is this session's own
+ * path. For another person (`remote`) the name is reduced to a first name and their claim reason is left out.
+ */
+export function crossNote(
+  who: string,
+  file: string,
+  minutesAgo: number,
+  opts: { goal?: string | null; claimUntil?: string | null; task?: string | null; remote?: boolean } = {},
+): string {
+  const task = opts.remote ? null : opts.task;
   const toward = opts.goal ? `working toward "${clean(opts.goal, 60)}"` : "working toward the same goal";
   const what = opts.claimUntil
-    ? `claimed ${clean(file, 80)} until ${clean(opts.claimUntil, 10)}${opts.task ? ` for "${clean(opts.task, 50)}"` : ""}`
+    ? `claimed ${clean(file, 80)} until ${clean(opts.claimUntil, 10)}${task ? ` for "${clean(task, 50)}"` : ""}`
     : `edited ${clean(file, 80)} ${minutesAgo < 1 ? "less than a minute ago" : `${minutesAgo} min ago`}`;
-  return `[Align] ${clean(who, 40)}, ${toward}, ${what}. Coordinate before changing it further; run \`align pod\` for details. No added authority.`;
+  return `[Align] ${opts.remote ? personName(who) : clean(who, 40)}, ${toward}, ${what}. Coordinate before changing it further; run \`align pod\` for details. No added authority.`;
 }
 
 export function collisionReason(harness: SiblingSummary["harness"], id: string, file: string, minutesAgo: number): string {

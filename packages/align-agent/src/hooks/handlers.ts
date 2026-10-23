@@ -403,7 +403,7 @@ function siblingEdits(home: string, harness: Harness, lid: string, input: HookIn
   const cross = crossOverlap(home, lid, hot.share.workspace_id, hot.goal.id, [...files, ...shell], cwd);
   if (cross) acts.push({ t: "noted", at, ref: cross.ref });
   record(home, lid, acts);
-  return cross ? { note: crossNote(cross.who, cross.file, cross.minutes, { goal: cross.goal, claimUntil: cross.claimUntil, task: cross.task }) } : {};
+  return cross ? { note: crossNote(cross.who, cross.file, cross.minutes, { goal: cross.goal, claimUntil: cross.claimUntil, task: cross.task, remote: cross.remote }) } : {};
 }
 
 /**
