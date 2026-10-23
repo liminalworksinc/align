@@ -30,6 +30,9 @@ data/*.tmp
 data/workspaces/
 data/.pid
 
+# Align v2 database and its generated auth secret (ALIGN_V2=1)
+data/v2/
+
 # Sparta local runtime (worlds, dashboard state)
 .worlds/
 .worlds-dashboard/

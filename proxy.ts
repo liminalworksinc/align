@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { config as alignConfig, hostAllowed, hostName, startupProblems, testServerClosed } from "@/lib/config";
 import { LOCAL_HOSTS } from "@/lib/local-guard";
+import { v2Enabled } from "@/lib/v2/config";
 
 // Runs before every page and API route.
 // Mode L (default): every route is for this machine only. A DNS-rebound page reaches the server under its own
@@ -22,6 +23,9 @@ const HOSTED_ROUTES = [
   /^\/api\/proposals$/,
   /^\/api\/proposals\/[^/]+\/(?:accept|acknowledge|counter|launch|reject)$/,
 ];
+// Align v2 (ALIGN_V2=1 only): the web app and its API. With the flag unset these are 404 in both modes; when
+// hosted they pass the same host, https and edge checks as the tester routes and are allowed alongside them.
+const V2_ROUTES = /^\/(?:app|api\/v2)(?:\/|$)/;
 const TO_NEW = new Set(["/", "/setup"]); // Northstar's pages: a tester lands on workspace creation instead
 
 const text = (status: number, body: string) => new NextResponse(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -30,8 +34,9 @@ export function proxy(request: NextRequest) {
   const cfg = alignConfig();
   const name = hostName(request.headers.get("host"));
   if (!cfg.hosted) {
-    if (name && LOCAL_HOSTS.has(name)) return NextResponse.next();
-    return text(421, "Misdirected request: this server answers to localhost only\n");
+    if (!name || !LOCAL_HOSTS.has(name)) return text(421, "Misdirected request: this server answers to localhost only\n");
+    if (V2_ROUTES.test(request.nextUrl.pathname) && !v2Enabled()) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.next();
   }
   // A misconfigured hosted server serves nothing, even if the platform kept the process up after startup refused.
   if (startupProblems().length) return text(503, "This server is not configured to serve testers yet\n");
@@ -44,7 +49,8 @@ export function proxy(request: NextRequest) {
   if (!request.headers.get("fly-client-ip")) return NextResponse.json({ error: "Use the public address" }, { status: 403 });
   const p = request.nextUrl.pathname;
   if (TO_NEW.has(p)) return NextResponse.redirect(new URL("/new", `https://${name}`), 307);
-  if (!HOSTED_ROUTES.some((r) => r.test(p))) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const v2 = V2_ROUTES.test(p) && v2Enabled();
+  if (!v2 && !HOSTED_ROUTES.some((r) => r.test(p))) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.next();
 }
 
