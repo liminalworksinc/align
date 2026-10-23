@@ -27,6 +27,17 @@ function loopbackHost(host: string | null): boolean {
 }
 
 /**
+ * Hosted (QA-exit finding): the site is https only and a browser sends Origin on every write, so a write's Origin must
+ * be exactly https://<Host>. Comparing the host alone let an http:// page (same name, other scheme) write. A wrong
+ * scheme, another port, or no Origin at all is refused. Local mode keeps its host:port rule below.
+ */
+function requireHostedOrigin(req: Request) {
+  const origin = req.headers.get("origin")?.toLowerCase();
+  const host = req.headers.get("host")?.toLowerCase();
+  if (!origin || !host || origin !== `https://${host}`) throw new HttpError(403, "This request came from another site");
+}
+
+/**
  * CSRF for cookie-authenticated writes that keep the default store's parsing (Northstar and /setup scenarios).
  * A browser sends Origin on every cross-origin POST, so when one is present it must be this server's own Host, port
  * included: SameSite=Strict doesn't separate localhost ports. A request that has a body must also be JSON. Scripts
@@ -34,7 +45,8 @@ function loopbackHost(host: string | null): boolean {
  */
 export function requireSameOrigin(req: Request) {
   const origin = req.headers.get("origin");
-  if (origin !== null) {
+  if (config().hosted) requireHostedOrigin(req);
+  else if (origin !== null) {
     let host: string | null = null;
     try {
       host = new URL(origin).host;
@@ -57,7 +69,8 @@ export function requireJson(req: Request) {
   } else if (!loopbackHost(req.headers.get("host"))) throw new HttpError(403, "This request must come from this machine");
   // Compare with the Host the browser actually used; Next's req.url may normalize it (e.g. to localhost).
   const origin = req.headers.get("origin");
-  if (origin) {
+  if (config().hosted) requireHostedOrigin(req);
+  else if (origin) {
     let host: string | null = null;
     try {
       host = new URL(origin).host;
