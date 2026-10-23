@@ -5,6 +5,8 @@
 //   accept -> approve without a sandbox test, by visible labels only; then both see the agreed version, the
 //   decision record shows the conditions, no screen shows Northstar copy, and the agent session has exactly one
 //   wake-up with the conditions quoted. Cleans up: consent revoked (purges the synthetic session), back to Northstar.
+// First, for Northstar and for the fixture (LIM-2424, Sean #6): two tabs sharing one cookie; a tab whose sign-in
+//   changed in the other tab sends no write, names both teams, and continues as the new team only when asked.
 //
 // Usage: node scripts/test-ui-loop.mjs <baseUrl> [fixture.json]   (default data/scenarios/example-custom.json)
 // Chrome: CHROME_PATH, else /Applications/Google Chrome.app.
@@ -110,8 +112,8 @@ async function waitText(page, needle) {
   }
   return false;
 }
-async function signInUi(page, team, passcode) {
-  await page.goto(BASE + "/", { waitUntil: "networkidle2", timeout: 60000 });
+async function signInUi(page, team, passcode, at = "/") {
+  await page.goto(BASE + at, { waitUntil: "networkidle2", timeout: 60000 });
   await click(page, team, "label");
   await fill(page, "Passcode", passcode).catch(() => page.type("input[type=password]", passcode));
   await click(page, "Sign in");
@@ -123,13 +125,90 @@ async function openProposals(page) {
   if (await waitText(page, MEASURE.slice(0, 30))) await click(page, MEASURE.slice(0, 30)).catch(() => {}); // open it from the inbox
 }
 
+// One click, no waiting: false when no visible enabled button carries the text (the page already stopped).
+const clickNow = (page, label) =>
+  page.evaluate((label) => {
+    const el = [...document.querySelectorAll("button")].find((b) => b.offsetParent !== null && !b.disabled && b.innerText.replace(/\s+/g, " ").includes(label));
+    el?.click();
+    return !!el;
+  }, label);
+const STATE_FILE = path.join(ROOT, "data/state.json"); // the audit log is not in any API view
+const audit = () => JSON.parse(readFileSync(STATE_FILE, "utf8")).audit ?? [];
+
+/**
+ * LIM-2424 (Sean #6): two tabs of one browser share the session cookie. Tab A signs in as team X; tab B then signs in
+ * as team Y; tab A, still showing X's screen, tries a write right after B's sign-in lands. No write may reach the
+ * server as Y; A stops, names both teams, and "Continue as Y" loads Y's view.
+ * prepare(A) gets A one click away from the write; `write` is that click's label.
+ */
+async function crossTab(name, { X, Y, xPass, yPass, yRole, at = "/", prepare, write }) {
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+  try {
+    const ctx = await browser.createBrowserContext(); // one profile, two tabs: one cookie jar
+    const [A, B] = [await ctx.newPage(), await ctx.newPage()];
+    for (const pg of [A, B]) await pg.setViewport({ width: 1440, height: 900 });
+    const signedX = await signInUi(A, X, xPass, at);
+    await prepare(A);
+    const before = audit();
+    // Tab B (already showing X: one cookie) signs in as Y, as a quick sign-out/sign-in or a background tab A allows;
+    // the moment its sign-in lands, tab A, still showing X, clicks the write.
+    await B.goto(BASE + at, { waitUntil: "networkidle2", timeout: 60000 });
+    const signedY = await B.evaluate(
+      async (role, passcode) => (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role, passcode }) })).status === 200,
+      yRole,
+      yPass,
+    );
+    const clicked = await clickNow(A, write);
+    const notice = `You signed in as ${Y} in another tab. This tab was ${X}.`;
+    const told = await waitText(A, notice);
+    await sleep(1000);
+    console.log(`      (${name}: tab A's write click ${clicked ? `was made while it still showed ${X}` : "found the tab already stopped by its poll"})`);
+    const after = audit();
+    const fresh = after.slice(before.length);
+    check(
+      `CT1 ${name}: a write from a tab signed in as ${X} after another tab signed in as ${Y} never reaches the server (no new audit row)`,
+      signedX && signedY && fresh.length === 0,
+      JSON.stringify({ signedX, signedY, clicked, fresh }),
+    );
+    check(`CT2 ${name}: the stale tab stops and names both teams, with Continue as ${Y}`, told && (await text(A)).includes(`Continue as ${Y}`), (await text(A)).slice(0, 400));
+    const continued = await click(A, `Continue as ${Y}`).then(() => true, () => false);
+    const t0 = Date.now();
+    let head = "";
+    while (Date.now() - t0 < WAIT_MS && !head.includes(`${Y} ·`)) {
+      head = await A.evaluate(() => document.querySelector("header")?.innerText.replace(/\s+/g, " ") ?? "");
+      await sleep(300);
+    }
+    check(`CT3 ${name}: Continue as ${Y} loads ${Y}'s view in the stale tab`, continued && head.includes(`${Y} ·`) && !(await text(A)).includes(notice), head.slice(0, 300));
+  } finally {
+    await browser.close();
+  }
+}
+
 async function main() {
   console.log(`Align custom-scenario browser loop against ${BASE} (fixture ${path.relative(ROOT, FIXTURE)})\n`);
   if (!check("Chrome is available", existsSync(CHROME), `set CHROME_PATH; not found at ${CHROME}`)) return;
   const lead = await signIn(BASE, "leadership");
   const r0 = await api(lead, "POST", "/api/reset", { confirm: "reset" });
+  // Northstar: any team may start the demo over (?ops), so a write sent as the other team would land.
+  await crossTab("Northstar", {
+    X: "Product", Y: "Security", xPass: PASSCODES.product, yPass: PASSCODES.security, yRole: "security", at: "/?ops",
+    prepare: (A) => click(A, "Start the demo over"),
+    write: "Click again to reset",
+  });
   const s0 = await api(lead, "POST", "/api/scenario", { ...fixture, confirm: "replace" });
   check("setup: Northstar reset, then leadership sets up the fixture", r0.status === 200 && s0.status === 200, `${r0.status} ${s0.status} ${s0.text.slice(0, 200)}`);
+  // The custom fixture: the asking team's tab has a proposal ready to send when the owning team signs in elsewhere.
+  await crossTab("custom", {
+    X: ASKING, Y: OWNING, xPass: PASSCODES.product, yPass: PASSCODES.security, yRole: "security",
+    prepare: async (A) => {
+      await click(A, "Proposals");
+      if (!(await waitText(A, "Send proposal to"))) await click(A, "Propose a change");
+      await fill(A, `New target for ${OWNING}`, `${MEASURE} (cross-tab)`);
+      await fill(A, "Why", "UILOOP cross-tab check.");
+      await fill(A, `What ${ASKING} will do in return`, "UILOOP cross-tab check.");
+    },
+    write: "Send proposal to",
+  });
 
   // The agent: a session that reads Align after setup, as the capture hook reports it.
   const g = await api(lead, "POST", "/api/sessions/consent", { harness: "claude-code", repo: AGENT_REPO });

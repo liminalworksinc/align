@@ -308,7 +308,7 @@ function NorthstarLogin({ onDone, L, elsewhere, initialRole }: { onDone: () => v
 /** The app. `workspace` is the /w/<id> slug for a custom workspace; omitted for Northstar at /. `hosted` comes from
  *  the server render (HOSTED=1), so the sign-in screen can word a failed fetch for testers. */
 export default function Home({ workspace, hosted }: { workspace?: string; hosted?: boolean }) {
-  const { state, me, error, setError, loadError, meError, loadMe, act, mark, refresh, ended, elsewhere } = useAlign(workspace);
+  const { state, me, error, setError, loadError, meError, loadMe, act, mark, refresh, ended, elsewhere, switched, continueAs } = useAlign(workspace);
   const [nextRole, setNextRole] = useState<Role | null>(null); // the team chosen in Switch team, until it signs in
   const [view, setView] = useState<View>("turn");
   const landed = useRef<string | null>(null); // the role the landing view was set for; null when signed out
@@ -348,6 +348,26 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
     if (actor) setView("turn");
   }, [me]);
 
+  // Another tab signed this browser in as another team: this tab's next write would act as that team, so it stops
+  // and says so (Sean #6). Nothing is sent until the person chooses to continue as the new team.
+  if (switched)
+    return (
+      <main className="p-10 text-[16px]">
+        <p role="alert" className="mb-4 max-w-[560px] rounded-[10px] bg-zinc-100 px-3 py-2.5 text-[15px] text-zinc-700">
+          You signed in as {switched.to} in another tab. This tab was {switched.from}. Nothing was sent from this tab. A
+          browser holds one session at a time.
+        </p>
+        <Button
+          onClick={() => {
+            setSelection(null);
+            setDrawer(null);
+            continueAs();
+          }}
+        >
+          Continue as {switched.to}
+        </Button>
+      </main>
+    );
   if (!me)
     return meError ? (
       <main className="p-10 text-[16px]">
