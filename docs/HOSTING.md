@@ -158,6 +158,7 @@ Delete the synthetic workspaces afterwards with `ws-admin.mjs`.
 
 - **Fly-Client-IP is only a presence check against other machines on Fly's private network.** Fly's edge sets it, but a machine inside the same Fly organization could forge it. Keep this app the only app in its organization.
 - **The rate limits and invite checks live in process memory, apart from used invites, which are on disk.** A restart clears the hourly create bucket and the wrong-code counts.
+- Sign-ins: at most 2 in flight per client and 2+8 scrypt slots overall, so about five client IPs can delay every tenant's sign-ins (creation is unaffected); NAT64 clients (64:ff9b::/96) share one rate-limit bucket.
 
 ## Local test
 
