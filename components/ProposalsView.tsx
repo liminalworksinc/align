@@ -159,7 +159,8 @@ export function ProposalsView(props: ViewProps) {
   const selected = selection?.kind === "proposal" ? s.proposals.find((p) => p.id === selection.id) : undefined;
   const active = selected ?? activeProposal(s);
   const isProduct = me.actor === "product";
-  const showComposer = isProduct && !openOne && (composing || !active);
+  // + New conflict and the Your turn card ask for the composer (props.compose) until a proposal is picked or sent.
+  const showComposer = isProduct && !openOne && (composing || !!props.compose || !active);
   const L = labelsFor(s);
   const who = whoFor(L);
 
@@ -186,6 +187,7 @@ export function ProposalsView(props: ViewProps) {
                     type="button"
                     onClick={() => {
                       setComposing(false);
+                      props.setCompose?.(false);
                       props.select({ kind: "proposal", id: p.id });
                     }}
                     aria-current={isSel ? "true" : undefined}
@@ -221,7 +223,7 @@ export function ProposalsView(props: ViewProps) {
 
       <main className="min-w-0 flex-1">
         {showComposer ? (
-          <Composer {...props} busy={busy} run={run} onSent={() => setComposing(false)} />
+          <Composer {...props} busy={busy} run={run} onSent={() => { setComposing(false); props.setCompose?.(false); }} />
         ) : active ? (
           // Keyed on state and revision count so Detail's local state (the untested tick) never carries over to a new revision.
           <Detail key={`${active.id}:${active.state}:${active.counter_versions.length}`} {...props} p={active} busy={busy} run={run} />

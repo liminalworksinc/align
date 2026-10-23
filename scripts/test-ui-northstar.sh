@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Northstar's rendered UI, text only: every nav view for every role at every stage of the demo flow, compared with
-# 850971e's (test/snapshots/ui-northstar-850971e, captured on a production build of 850971e). Runs on a production
+# the v6 baseline (test/snapshots/ui-northstar-v6: v6 #7 at a54570f plus the timer fix, re-captured on a production build). Runs on a production
 # build: next dev can reload open pages in a loop while it settles, which stalls a browser script.
 # Usage: scripts/test-ui-northstar.sh <port>   (from a worktree; refuses 3100 and the main checkout)
 set -u
@@ -21,8 +21,8 @@ trap 'kill $SERVER 2>/dev/null; pkill -f "next start -H 127.0.0.1 -p $PORT" 2>/d
 for _ in $(seq 1 60); do curl -s -o /dev/null "http://127.0.0.1:$PORT/api/state" && break; sleep 1; done
 node scripts/ui-snapshot.mjs "http://127.0.0.1:$PORT" "$OUT/run" --flow northstar >"$OUT/snapshot.log" 2>&1 || { echo "FAIL  ui-snapshot (see $OUT/snapshot.log)"; exit 1; }
 n="$(ls "$OUT/run"/*.txt | wc -l | tr -d ' ')"
-if diff -r -x '*.png' test/snapshots/ui-northstar-850971e "$OUT/run" >"$OUT/diff.txt"; then
-  echo "PASS  Northstar UI text identical to 850971e ($n files)"
+if diff -r -x '*.png' test/snapshots/ui-northstar-v6 "$OUT/run" >"$OUT/diff.txt"; then
+  echo "PASS  Northstar UI text identical to the v6 baseline ($n files)"
 else
-  echo "FAIL  Northstar UI text differs from 850971e: see $OUT/diff.txt"; exit 1
+  echo "FAIL  Northstar UI text differs from the v6 baseline: see $OUT/diff.txt"; exit 1
 fi

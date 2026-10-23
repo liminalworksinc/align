@@ -90,9 +90,11 @@ DOING IT BY HAND · ESTIMATE
 Our own estimate, not measured
 Show steps
 TIME TO AGREEMENT IN ALIGN · MEASURED
-Not started
-Starts when someone first opens the CEO's change
-2 people · 0 steps
+<DUR> <DUR>
+▲
+still running
+since the CEO's change was opened at <TIME>
+2 people · 6 steps
 Not counted: 27 practice test runs done beforehand (<DUR> <DUR>)
 WHO APPROVED
 Product Director
