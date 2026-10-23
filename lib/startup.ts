@@ -16,14 +16,22 @@ function alive(pid: number) {
   }
 }
 
+/** An atomic write's temp file: <file>.<random hex or uuid>.tmp, written then renamed over <file> (lib/store.ts,
+ *  bumpAgentEpoch's auth.json, the used-invites list). A crash between the write and the rename leaves it behind. */
+const TEMP_FILE = /^[\w.-]+\.json\.[0-9a-f-]{8,}\.tmp$/;
+
 /** A crash mid-create leaves .tmp-<id> (state and passcode hashes) and a crash mid-delete leaves .deleting-<id>
  *  (the whole workspace). Neither is a live workspace; at startup, with this server holding the pid file and no
- *  request in flight, they are removed so tester data never outlives a delete (review M10). */
+ *  request in flight, they are removed so tester data never outlives a delete (review M10). So are atomic-write temp
+ *  files, in the workspaces root and in each workspace (auth.json.<hex>.tmp holds passcode hashes; Sean's #6 review). */
 function sweepLeftovers() {
   const root = config().workspacesRoot;
   if (!existsSync(root)) return;
   for (const n of readdirSync(root)) {
     if (/^\.(tmp|deleting)-w_[a-z2-7]{12}$/.test(n)) rmSync(path.join(root, n), { recursive: true, force: true });
+    else if (TEMP_FILE.test(n)) rmSync(path.join(root, n), { force: true });
+    else if (/^w_[a-z2-7]{12}$/.test(n))
+      for (const f of readdirSync(path.join(root, n))) if (TEMP_FILE.test(f)) rmSync(path.join(root, n, f), { force: true });
   }
 }
 

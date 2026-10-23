@@ -10,11 +10,13 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+// Sean #6 low (c): the /new form's matcher for code refusals (lib/codes.ts has no imports, so Node loads it directly).
+const { isCodeRefusal, CREATION_CLOSED } = await import("../lib/codes.ts");
 
 const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 /** Poll `fn` until it returns true, up to `ms`. */
@@ -267,6 +269,7 @@ try {
   await mustStart({ ALIGN_DATA_DIR: path.join(tmpRoot, "code"), ALIGN_SIGNUP_CODE: "tenancy-code-1", ALIGN_MAX_WORKSPACES: "3", ALIGN_CREATE_PER_HOUR: "100" });
   const wrong = await create({ ...FIXTURE, signup_code: "nope" });
   check("B13 wrong signup code -> 403", wrong.status === 403, `${wrong.status} ${wrong.text}`);
+  check("LC1 the /new form recognises Mode L's wrong signup code as a code-field error", isCodeRefusal(wrong.json?.error), wrong.text);
   const c1 = await create({ ...FIXTURE, signup_code: "tenancy-code-1" });
   const c2 = await create({ ...FIXTURE, signup_code: "tenancy-code-1" });
   check("B13 right signup code -> 201", c1.status === 201 && c2.status === 201, `${c1.status} ${c2.status}`);
@@ -684,6 +687,12 @@ try {
   const delivered = (await call("GET", "/api/state", { cookie: sb.leadership })).json.sessions.find((x) => x.session_id === "w-agent-1")?.directives ?? [];
   check("W5 the watcher's ack marks delivery in B's state; the next poll is empty", wAck.status === 200 && delivered.length === 1 && (await dirW()).length === 0, `${wAck.status} ${JSON.stringify(delivered)}`);
   check("W5 the ack recorded B's authority event id", delivered.some((d) => d.event_id === wAfter[0]?.event_id), JSON.stringify(delivered));
+  // Sean #6 low (g): capture can't move a session onto another repo. The token is bound to its repo, so an event that
+  // names another repo is refused and the session keeps its repo and history.
+  const w1Before = (await call("GET", "/api/state", { cookie: sb.leadership })).json.sessions.find((x) => x.session_id === "w-agent-1");
+  const wMove = await ev("w-agent-1", "Bash", bearer, "w-moved-repo");
+  const w1After = (await call("GET", "/api/state", { cookie: sb.leadership })).json.sessions.find((x) => x.session_id === "w-agent-1");
+  check("W5 capture onto another repo with the session's own token -> 403; the session keeps its repo and history", wMove.status === 403 && w1After?.repo === w1Before?.repo && JSON.stringify(w1After) === JSON.stringify(w1Before), `${wMove.status} ${w1Before?.repo} -> ${w1After?.repo}`);
   // M2: an ack is small and names a real authority event; anything else records nothing
   const junkAck = await call("POST", "/api/directives/ack", { body: { session: "claude-code:w-agent-1", event_id: "not-an-authority-event" }, headers: bearer });
   const bigAck = await call("POST", "/api/directives/ack", { raw: JSON.stringify({ session: "claude-code:w-agent-1", event_id: wAfter[0]?.event_id, pad: "x".repeat(5000) }), headers: bearer });
@@ -692,6 +701,10 @@ try {
   // M3: a token for another harness and repo of the same workspace can't read or ack this session
   const oMint = await call("POST", "/api/workspaces/agent-token", { cookie: sb.leadership, body: { harness: "codex", repo: "w-other-repo" } });
   const other = { authorization: `Bearer ${oMint.json?.token}` };
+  const w1Pre = (await call("GET", "/api/state", { cookie: sb.leadership })).json.sessions.find((x) => x.session_id === "w-agent-1");
+  const oOnto = await ev("w-agent-1", "Bash", other);
+  const w1Post = (await call("GET", "/api/state", { cookie: sb.leadership })).json.sessions.find((x) => x.session_id === "w-agent-1");
+  check("W5 another repo's token can't capture onto this repo's session (-> 403, session unchanged)", oOnto.status === 403 && JSON.stringify(w1Post) === JSON.stringify(w1Pre), `${oOnto.status}`);
   const oPoll = await call("GET", "/api/directives?session=claude-code:w-agent-1", { headers: other });
   const oAck = await call("POST", "/api/directives/ack", { body: { session: "claude-code:w-agent-1", event_id: wAfter[0]?.event_id }, headers: other });
   const [ownMap, oMap] = [await mcpCall(wTok, "align_get_work_map"), await mcpCall(oMint.json?.token, "align_get_work_map")];
@@ -724,6 +737,32 @@ try {
   for (let i = 0; i < 11; i++) loop.push((await call("POST", "/api/reset", { cookie: sb.leadership, body: { confirm: "reset" } })).status);
   check("M5 a Restart loop is limited: 429 within 11 more in a minute, never more than 10 accepted", loop.includes(429) && loop.filter((x) => x === 200).length <= 9 && loop.every((x) => x === 200 || x === 429), loop.join(","));
 
+  // ---- Sean #6 low (e): disconnecting agents fails closed, and is rate limited (on workspace A) ----
+  const eRepo = "le-repo";
+  const eMint = await call("POST", "/api/workspaces/agent-token", { cookie: sa.leadership, body: { harness: "claude-code", repo: eRepo } });
+  const eAuth = { authorization: `Bearer ${eMint.json?.token}` };
+  const eCap = (sid) => call("POST", "/api/sessions/events", { body: { harness: "claude-code", session_id: sid, hook_event: "PostToolUse", repo: eRepo, cwd: eRepo, tool_name: "Bash" }, headers: eAuth });
+  if (process.platform === "darwin") {
+    // Make the epoch bump fail (auth.json can't be replaced); the state file stays writable.
+    const authFile = path.join(wsRoot, a, "auth.json");
+    spawnSync("chflags", ["uchg", authFile]);
+    const eFail = await call("DELETE", "/api/workspaces/agent-token", { cookie: sa.leadership, body: {} });
+    spawnSync("chflags", ["nouchg", authFile]);
+    for (const f of readdirSync(path.join(wsRoot, a))) if (/^auth\.json\..+\.tmp$/.test(f)) rmSync(path.join(wsRoot, a, f), { force: true });
+    const [mcpAfterFail, capAfterFail] = [await mcpCall(eMint.json?.token, "align_list_goals"), await eCap("le-agent-1")];
+    check(
+      "LE1 a disconnect whose revoke fails changes nothing: the token and its consent both still work (never a live token with its consent gone)",
+      eMint.status === 200 && eFail.status >= 500 && mcpAfterFail.status === 200 && capAfterFail.status === 200,
+      `mint=${eMint.status} delete=${eFail.status} mcp=${mcpAfterFail.status} capture=${capAfterFail.status}`,
+    );
+  } else check("LE1 skipped: needs chflags (macOS) to make the epoch bump fail", true);
+  const eOk = await call("DELETE", "/api/workspaces/agent-token", { cookie: sa.leadership, body: {} });
+  const [mcpAfterOk, capAfterOk] = [await mcpCall(eMint.json?.token, "align_list_goals"), await eCap("le-agent-2")];
+  check("LE2 a successful disconnect revokes the token (MCP and capture -> 401)", eOk.status === 200 && mcpAfterOk.status === 401 && capAfterOk.status === 401, `${eOk.status} ${mcpAfterOk.status} ${capAfterOk.status}`);
+  const eLoop = [];
+  for (let i = 0; i < 11; i++) eLoop.push((await call("DELETE", "/api/workspaces/agent-token", { cookie: sa.leadership, body: {} })).status);
+  check("LE3 a disconnect loop is limited: 429 within 11 more in a minute, never more than 10 accepted", eLoop.includes(429) && eLoop.filter((x) => x === 200).length <= 9 && eLoop.every((x) => x === 200 || x === 429), eLoop.join(","));
+
   // ---- spec section 11 tests 9, 18, 20 ----
   // 9: a Northstar leadership token can't export, rotate or delete a workspace, and data/ doesn't change. Those
   // operations aren't routes in this build (ws-admin.mjs deletes on the host), so every call must fail closed.
@@ -734,7 +773,7 @@ try {
     call("DELETE", `/api/workspaces/${b}`, { cookie: nsR.leadership }),
     call("POST", `/api/workspaces/${b}/delete`, { cookie: nsR.leadership, body: {} }),
   ]);
-  check("S9 Northstar leadership: export, rotate and delete of a workspace all fail (no such routes), data/ unchanged", t9.every((r) => [403, 404, 405].includes(r.status)) && treeHash(dataDir) + treeHash(path.join(ROOT, "data")) === dataBefore9, t9.map((r) => r.status).join(","));
+  check("S9 Northstar leadership: export, rotate and delete of a workspace all fail (no such routes -> exactly 404), data/ unchanged", t9.every((r) => r.status === 404) && treeHash(dataDir) + treeHash(path.join(ROOT, "data")) === dataBefore9, t9.map((r) => r.status).join(","));
 
   // 18: at the size cap a growing write is 413 and changes nothing (no archive rows either); below it, a write
   // with a long audit log trims it to 1000 rows and archives the rest.
@@ -868,7 +907,17 @@ try {
   const onTheDay = await startServer({ ...good, ALIGN_DELETE_BY: today });
   check(`P1-5 a hosted server with ALIGN_DELETE_BY = today (${today}) still serves until that day ends`, onTheDay.started, `exited=${onTheDay.exited} last=${onTheDay.last} ${onTheDay.stderr.slice(-200)}`);
   await stopServer();
+  // ---- Sean #6 low (f): startup removes atomic-write temp files a crash left behind, in the root and in workspaces ----
+  const fRoot = path.join(good.ALIGN_DATA_DIR, "workspaces");
+  const fWs = path.join(fRoot, "w_ffffffffffff");
+  mkdirSync(fWs, { recursive: true });
+  const fLeft = [path.join(fWs, "auth.json.0a1b2c3d4e5f.tmp"), path.join(fWs, "state.json.1b4e28ba-2fa1-11d2-883f-0016d3cca427.tmp"), path.join(fRoot, "_used_invites.json.0a1b2c3d4e5f.tmp")];
+  for (const f of fLeft) writeFileSync(f, "{}");
+  const fKeep = path.join(fWs, "notes.tmp"); // not an atomic-write temp file: left alone
+  writeFileSync(fKeep, "keep");
   await mustStart(good);
+  check("LF1 startup removes auth.json.<hex>.tmp, state.json.<uuid>.tmp and _used_invites.json.<hex>.tmp; other files stay", fLeft.every((f) => !existsSync(f)) && existsSync(fKeep), fLeft.filter(existsSync).join(" "));
+  rmSync(fWs, { recursive: true, force: true });
 
   // H2 the host, scheme and proxy rules
   const hLoop = await call("GET", "/api/workspaces/config");
@@ -881,6 +930,30 @@ try {
   const hNew = await hosted("GET", "/new");
   const hCfg = await hosted("GET", "/api/workspaces/config");
   check("H2 /new answers; config states the test server and its deletion date", hNew.status === 200 && hCfg.json?.test_server?.delete_by === "2026-11-06", `${hNew.status} ${hCfg.text}`);
+
+  // ---- Sean #6 low (d): the test-server notice is in the server-rendered HTML and on the max-reached screen ----
+  const LONG_DELETE = new Date(Date.parse("2026-11-06T00:00:00Z")).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const visibleHtml = hNew.text.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "");
+  check("LD1 /new's server HTML (no JS, before the config fetch) carries the notice and the deletion date", visibleHtml.includes("This is a test server.") && visibleHtml.includes(`deleted by ${LONG_DELETE}`), visibleHtml.slice(0, 300));
+  {
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check", `--host-resolver-rules=MAP ${HOSTED_HOST} 127.0.0.1`] });
+    try {
+      const page = await browser.newPage();
+      // As Fly's edge would forward it; the config answer is replaced to reach the max-reached screen.
+      await page.setExtraHTTPHeaders({ "x-forwarded-proto": "https", "fly-client-ip": "198.51.100.77" });
+      await page.setRequestInterception(true);
+      page.on("request", (r) =>
+        new URL(r.url()).pathname === "/api/workspaces/config"
+          ? r.respond({ status: 200, contentType: "application/json", body: JSON.stringify({ signup_code_required: true, max_reached: true, test_server: { delete_by: "2026-11-06" } }) })
+          : r.continue(),
+      );
+      await page.goto(`http://${HOSTED_HOST}:${PORT}/new`, { waitUntil: "networkidle0" });
+      const text = await page.evaluate(() => document.body.innerText);
+      check("LD2 the max-reached screen also shows the test-server notice", /as many workspaces as it allows/.test(text) && text.includes("This is a test server.") && text.includes(`deleted by ${LONG_DELETE}`), text.slice(0, 300));
+    } finally {
+      await browser.close();
+    }
+  }
 
   // H8 Northstar is off: its pages go to /new, its sign-in and data are 404, and no Northstar token counts
   const toNew = await Promise.all(["/", "/setup"].map((p) => hosted("GET", p)));
@@ -927,6 +1000,24 @@ try {
   for (let i = 0; i < 11; i++) guess.push((await hosted("POST", "/api/workspaces", { body: { ...FIXTURE, signup_code: `wrong-code-${i}-xxxx` }, headers: { "fly-client-ip": "203.0.113.50" } })).status);
   const otherClient = await hosted("POST", "/api/workspaces", { body: { ...marked("HCMARK"), signup_code: INVITES[2] }, headers: { "fly-client-ip": "198.51.100.60" } });
   check("H3 wrong codes: 10 refused (403), then 429 for that client; another client still creates", guess.slice(0, 10).every((x) => x === 403) && guess[10] === 429 && otherClient.status === 201, `${guess.join(",")} other=${otherClient.status}`);
+
+  // ---- Sean #6 low (a): an IPv4-mapped Fly-Client-IP is its IPv4 client, not one shared ::ffff:0:0/64 bucket ----
+  const wrongFrom = async (ip, i) => (await hosted("POST", "/api/workspaces", { body: { ...FIXTURE, signup_code: `wrong-mapped-${i}-xxxx` }, headers: { "fly-client-ip": ip } })).status;
+  const mappedLimited = [await wrongFrom("::ffff:203.0.113.50", 0), await wrongFrom("::ffff:cb00:7132", 1)];
+  check("LA1 the IPv4-mapped forms of a limited IPv4 client are that client (dotted and hex -> 429)", mappedLimited.every((x) => x === 429), mappedLimited.join(","));
+  const mappedA = [];
+  for (let i = 0; i < 10; i++) mappedA.push(await wrongFrom("::ffff:192.0.2.10", 10 + i));
+  const mappedB = await wrongFrom("::ffff:192.0.2.11", 30);
+  check("LA2 10 wrong codes from ::ffff:192.0.2.10 don't limit ::ffff:192.0.2.11 (a different IPv4 client -> 403, not 429)", mappedA.every((x) => x === 403) && mappedB === 403, `${mappedA.join(",")} other=${mappedB}`);
+  const v6a = [];
+  for (let i = 0; i < 10; i++) v6a.push(await wrongFrom("2001:db8:aa:1::1", 40 + i));
+  const v6Same64 = await wrongFrom("2001:db8:aa:1:ffff::9", 50);
+  check("LA3 IPv6 still keys by /64: another address in the same /64 is limited (429)", v6a.every((x) => x === 403) && v6Same64 === 429, `${v6a.join(",")} same64=${v6Same64}`);
+
+  // ---- Sean #6 low (c): the hosted invite refusal ("invite code") gets the form's field-level hint ----
+  check("LC2 the /new form recognises the hosted invite refusal (wrong or spent) as a code-field error", reuse.status === 403 && isCodeRefusal(reuse.json?.error), reuse.text);
+  check("LC3 'creation is closed' is not a code-field error (no code would help)", !isCodeRefusal(CREATION_CLOSED));
+  check("LC4 the /new form uses the shared matcher, not its own pattern", /isCodeRefusal\(error\)/.test(readFileSync(path.join(ROOT, "app/new/NewWorkspace.tsx"), "utf8")) && !/\/signup code\/i/.test(readFileSync(path.join(ROOT, "app/new/NewWorkspace.tsx"), "utf8")));
 
   // H4 the cookie
   const hl = await hosted("POST", "/api/session", { body: { workspace: hA.json.workspace.id, role: "product", passcode: hA.json.passcodes.product } });

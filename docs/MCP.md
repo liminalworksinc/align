@@ -96,3 +96,10 @@ By default the session plans only:
 - so are shell commands that run code or reach other machines (`--allow-edits` lifts that).
 
 Run it inside `tmux` to keep the session up while the teams decide. Its restraint comes from that deny list and from the prompt: Align supplies the agreement and the wake-up, and enforces nothing in the agent's host.
+
+**The agent can read its own token.** In workspace mode the hooks need the agent token, so `agent-session.sh` puts it in the session's environment as `ALIGN_AGENT_TOKEN`. The plan-only deny list doesn't block `env` or `printenv`, so the agent (and anything it runs) can read the token. This is inherent to hooks: they run as the agent's own user. What a leaked token allows is bounded:
+- reading that workspace through MCP;
+- capture and wake-ups for its own harness and repo only;
+- nothing on human sign-ins, approvals or launch decisions.
+
+It lasts 7 days, and leadership revokes it with `DELETE /api/workspaces/agent-token` or Restart. Don't run untrusted code in a session that holds one.
