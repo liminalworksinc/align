@@ -63,7 +63,7 @@ const setupAt = (s: AppState) => [...s.audit].reverse().find((a) => a.action ===
 export const quoted = (text: string) => `«${oneLine(text.replace(/[«»]/g, '"'))}»`;
 /** Agent-facing text is one instruction per line: any line break inside a line (a name, an objective, a quote) becomes
  *  one space, so nothing a person typed can start a line of its own (Sean's #6 and #7 reviews, fix 4). */
-export const oneLine = (text: string) => text.replace(/[\r\n\u2028\u2029]+/g, " ");
+export const oneLine = (text: string) => text.replace(/[\r\n\v\f\u0085\u2028\u2029]+/g, " "); // incl. VT, FF and NEL (Sean's #7 re-review)
 
 function relevant(s: AppState, session: AgentSession, ev: AuthorityEventRow): boolean {
   if (ev.at < session.started_at) return false; // only changes that happened while this session existed
