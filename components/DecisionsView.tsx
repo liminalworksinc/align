@@ -6,11 +6,11 @@ import { agreementStatus, recordFacts } from "./launch";
 import { STATE_LABEL, fmtTime } from "./ui";
 import { Pill, type PillTone } from "./v6/record";
 
-type Filter = "all" | "open" | "accepted";
+type Filter = "all" | "open" | "accepted" | "declined";
 
 interface Row {
   key: string;
-  kind: "open" | "accepted";
+  kind: "open" | "accepted" | "declined";
   pill: string;
   tone: PillTone;
   title: string;
@@ -65,7 +65,28 @@ export function DecisionsView(props: ViewProps) {
     };
   });
 
-  const rows = [...openRows, ...accRows]
+  // A declined proposal stays visible, so "the asking team sees that you declined" (ProposalsView) is true.
+  const declinedRows: Row[] = s.proposals
+    .filter((p) => p.state === "REJECTED")
+    .map((p) => {
+      const latest = p.counter_versions.at(-1);
+      const at = [...(s.audit ?? [])].reverse().find((e) => e.action === "reject" && e.target === p.id)?.at ?? latest?.at ?? p.created_at;
+      return {
+        key: `r-${p.id}`,
+        kind: "declined",
+        pill: "Declined",
+        tone: "grey",
+        title: `Change ${poss(owning)} goal`,
+        sub: `Declined by ${L.person.security} · ${latest?.proposed_measure_text ?? p.proposed_measure_text}`,
+        at,
+        open: () => {
+          props.select({ kind: "proposal", id: p.id });
+          props.go("proposals");
+        },
+      };
+    });
+
+  const rows = [...openRows, ...accRows, ...declinedRows]
     .filter((r) => filter === "all" || r.kind === filter)
     .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 
@@ -88,6 +109,7 @@ export function DecisionsView(props: ViewProps) {
           {seg("all", "All")}
           {seg("open", "Open")}
           {seg("accepted", "Accepted")}
+          {declinedRows.length > 0 && seg("declined", "Declined")}
         </span>
       </div>
       {rows.map((r) => (

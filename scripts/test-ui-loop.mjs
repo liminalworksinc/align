@@ -136,6 +136,7 @@ async function main() {
   const c = await api(null, "POST", "/api/sessions/events", { harness: "claude-code", session_id: AGENT, hook_event: "PostToolUse", repo: AGENT_REPO, cwd: AGENT_REPO, tool_name: "mcp__align__align_get_accepted_plan" });
   check("agent: consent for a synthetic repo, and a session that read Align", g.status === 200 && c.status === 200, `${g.status} ${c.status}`);
 
+  let directivesAfterApproval = null; // read before U14 replaces the scenario, which clears the agent's wake-ups
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
   try {
     const [A, O] = await Promise.all([browser.createBrowserContext(), browser.createBrowserContext()].map(async (ctx) => (await ctx).newPage()));
@@ -328,12 +329,38 @@ async function main() {
     // U13 After a decided proposal, + New conflict opens the composer, not the old decided thread.
     await click(A, "New conflict");
     check("U13 after a ratified proposal, + New conflict opens the composer", await waitText(A, "Send proposal to"), (await text(A)).slice(0, 400));
+
+    // U14 A declined proposal is visible to the asking team. Fresh fixture, the asking team proposes, the owner
+    // declines (ProposalsView tells the owner "… sees that you declined"): Your turn and Decisions both say so.
+    directivesAfterApproval = await api(null, "GET", `/api/directives?session=claude-code:${AGENT}`);
+    const s14 = await api(lead, "POST", "/api/scenario", { ...fixture, confirm: "replace" });
+    await A.reload({ waitUntil: "networkidle2" });
+    await click(A, "New conflict");
+    if (!(await waitText(A, "Send proposal to"))) await click(A, "Propose a change");
+    await fill(A, `New target for ${OWNING}`, `${MEASURE} (declined run)`);
+    await fill(A, "Why", "UILOOP decline path.");
+    await fill(A, `What ${ASKING} will do in return`, "UILOOP nothing extra.");
+    await click(A, "Send proposal to");
+    await waitText(A, "Waiting");
+    const owner = await signIn(BASE, "security");
+    const pend = (await api(lead, "GET", "/api/state")).json?.proposals?.find((x) => x.state === "PENDING_SECURITY");
+    const rj = await api(owner, "POST", `/api/proposals/${pend?.id}/reject`, {});
+    await A.reload({ waitUntil: "networkidle2" });
+    await click(A, "Your turn");
+    const yt = await waitText(A, "declined your last proposal");
+    await click(A, "Decisions");
+    const dl = await waitText(A, "Declined by");
+    check(
+      "U14 after the owner declines, the asking team's Your turn and Decisions both show the decline",
+      s14.status === 200 && rj.status === 200 && yt && dl,
+      JSON.stringify({ setup: s14.status, reject: rj.status, body: rj.text.slice(0, 120), yt, dl, tail: (await text(A)).slice(0, 300) }),
+    );
   } finally {
     await browser.close();
   }
 
   // The agent's wake-up: one, with the conditions quoted and no command
-  const after = await api(null, "GET", `/api/directives?session=claude-code:${AGENT}`);
+  const after = directivesAfterApproval ?? (await api(null, "GET", `/api/directives?session=claude-code:${AGENT}`));
   const d = after.json?.pending ?? [];
   check(
     "U10 after approval the agent has exactly one wake-up, conditions quoted, no run command",

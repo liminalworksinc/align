@@ -115,7 +115,10 @@ export function waitingOnMe(s: StateView, actor: Actor, open: (v: View, p?: Prop
       me: true,
       title: `The new company requirement needs ${L.team.security} to change its goal`,
       quote: kr?.text,
-      sub: `${L.team.product} and ${L.team.security} haven’t agreed yet`,
+      // After a decline the asking team is told so here (ProposalsView tells the owner they will be).
+      sub: [...s.proposals].reverse().find((p) => p.state !== "DRAFT")?.state === "REJECTED"
+        ? `${L.person.security} declined your last proposal. ${L.team.product} and ${L.team.security} haven’t agreed yet`
+        : `${L.team.product} and ${L.team.security} haven’t agreed yet`,
       cta: "Propose a change",
       open: () => open("proposals", undefined, true),
     });
