@@ -115,11 +115,11 @@ async function signInUi(page, team, passcode) {
   await click(page, team, "label");
   await fill(page, "Passcode", passcode).catch(() => page.type("input[type=password]", passcode));
   await click(page, "Sign in");
-  return waitText(page, "Proposals");
+  return waitText(page, "Your turn");
 }
 async function openProposals(page) {
   await page.reload({ waitUntil: "networkidle2" });
-  await click(page, "Proposals");
+  await click(page, "Your turn");
   if (await waitText(page, MEASURE.slice(0, 30))) await click(page, MEASURE.slice(0, 30)).catch(() => {}); // open it from the inbox
 }
 
@@ -150,8 +150,8 @@ async function main() {
     const home = await text(A);
     check("U2 the asking team's home has no Northstar copy", !LEAK.test(home), leakIn(home));
 
-    // Propose (with no proposal yet, Proposals opens the composer directly)
-    await click(A, "Proposals");
+    // Propose (with no proposal yet, + New conflict opens the composer directly)
+    await click(A, "New conflict");
     if (!(await waitText(A, "Send proposal to"))) await click(A, "Propose a change");
     await fill(A, `New target for ${OWNING}`, MEASURE);
     await fill(A, "Why", "UILOOP the asking team needs the shared resource alone for long blocks.");
@@ -227,7 +227,7 @@ async function main() {
     const acc = (await api(lead, "GET", "/api/state")).json?.acceptances?.at(-1);
     for (const [pg, team] of [[A, ASKING], [O, OWNING]]) {
       await pg.reload({ waitUntil: "networkidle2" });
-      await click(pg, "Next decision");
+      await click(pg, "Your turn");
       await sleep(800);
       const t = await text(pg);
       check(`U9 ${team} sees the agreed version ${acc?.accepted_version} and the teams agreed`, !!acc && t.includes(acc.accepted_version) && t.includes(COUNTER.slice(0, 40)) && /agreed/i.test(t), t.slice(0, 400));

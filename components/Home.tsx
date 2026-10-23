@@ -10,26 +10,26 @@ import { ScenarioDrawer } from "@/components/ScenarioDrawer";
 import { TeamLens } from "@/components/TeamLens";
 import { AgentPane } from "@/components/AgentPane";
 import { DecisionView } from "@/components/DecisionView";
+import { DecisionsView } from "@/components/DecisionsView";
+import { YourTurnView, waitingOnMe } from "@/components/YourTurnView";
 import { OrgView } from "@/components/OrgView";
 import { WorkMap } from "@/components/WorkMap";
 import { agreementStatus } from "@/components/launch";
-import { accepted, activeProposal, currentGoal } from "@/components/select";
+import { accepted, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, SESSION_ENDED, useAlign, type Selection } from "@/components/useAlign";
-import { ROLE_SWITCH, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, type Labels } from "@/lib/labels";
+import { ROLE_SWITCH, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
 
-type NavItem = { id: View; label: string; sub: string; icon: string };
+// v6 rail (LIM-2424). One nav for teams and leadership; leadership also keeps its Company goal entry (OrgView).
+// `also` lists the views a nav item stays highlighted for (the record under Decisions, a review under Your turn).
+type NavItem = { id: View; label: string; also?: View[]; leadershipOnly?: boolean };
 const NAV: NavItem[] = [
-  { id: "decision", label: "Next decision", sub: "What needs you", icon: "◆" },
-  { id: "goals", label: "Goals", sub: "How they connect", icon: "◎" },
-  { id: "proposals", label: "Proposals", sub: "Changes in progress", icon: "✉" },
-  { id: "evidence", label: "Evidence", sub: "Decisions and proof", icon: "▤" },
-];
-const NAV_LEADERSHIP: NavItem[] = [
-  { id: "company", label: "Company goal", sub: "Set and send", icon: "◆" },
-  { id: "goals", label: "Goals", sub: "How they connect", icon: "◎" },
-  { id: "work", label: "Work", sub: "Where AI agent work goes", icon: "⌁" },
-  { id: "evidence", label: "Evidence", sub: "Decisions and proof", icon: "▤" },
+  { id: "turn", label: "Your turn", also: ["proposals"] },
+  { id: "company", label: "Company goal", leadershipOnly: true },
+  { id: "goals", label: "Goals", also: ["team"] },
+  { id: "studio", label: "Scenario Studio", also: ["evidence"] },
+  { id: "decisions", label: "Decisions", also: ["decision", "today"] },
+  { id: "work", label: "Work" },
 ];
 const TEAM_OF: Record<string, string> = { product: "Product", security: "Security", leadership: "Leadership" };
 const initials = (name: string) =>
@@ -45,8 +45,8 @@ const ROLES = [
   { id: "security", name: "Alex / Security Lead", blurb: "Owns how customer issues get handled" },
 ] as const;
 type Role = (typeof ROLES)[number]["id"];
-// Custom scenarios show only the decision path in Build A; these views stay Northstar-only.
-const CUSTOM_HIDDEN: View[] = ["goals", "evidence", "work"];
+/** Scenario Studio lists sandbox runs; a custom scenario without any shows the item disabled with this reason. */
+const NO_SANDBOX = "No sandbox in custom scenarios";
 const CUSTOM_BLURB: Record<Role, string> = {
   leadership: "sets the company goal",
   product: "asks for the change",
@@ -307,7 +307,7 @@ function NorthstarLogin({ onDone, L, elsewhere, initialRole }: { onDone: () => v
 export default function Home({ workspace }: { workspace?: string }) {
   const { state, me, error, setError, loadError, meError, loadMe, act, mark, refresh, ended, elsewhere } = useAlign(workspace);
   const [nextRole, setNextRole] = useState<Role | null>(null); // the team chosen in Switch team, until it signs in
-  const [view, setView] = useState<View>("decision");
+  const [view, setView] = useState<View>("turn");
   const landed = useRef<string | null>(null); // the role the landing view was set for; null when signed out
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -341,7 +341,7 @@ export default function Home({ workspace }: { workspace?: string }) {
     if (actor === landed.current) return;
     landed.current = actor;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (actor) setView(actor === "leadership" ? "company" : "decision");
+    if (actor) setView("turn");
   }, [me]);
 
   if (!me)
@@ -403,20 +403,25 @@ export default function Home({ workspace }: { workspace?: string }) {
     attached,
     setAttached,
   };
-  const pendingForMe = state.proposals.filter((p) =>
-    me.actor === "security" ? ["PENDING_SECURITY", "ACKNOWLEDGED_BY_PRODUCT"].includes(p.state) : p.state === "COUNTERED",
-  ).length;
+  const turnCount = waitingOnMe(state, me.actor, () => undefined).length;
   const rel = state.relations.find((r) => r.id === dependencyId(state));
   const unresolved = rel?.status === "UNKNOWN";
   const lastPush = state.pushes?.at(-1);
   const ceo = currentGoal(state, "ceo");
-  const nav = (me.actor === "leadership" ? NAV_LEADERSHIP : NAV)
-    .filter((n) => !custom || !CUSTOM_HIDDEN.includes(n.id))
-    .map((n) => (custom && n.id === "company" ? { ...n, sub: "Shared with both teams" } : n));
-  const openProposal = activeProposal(state);
-  const proposalOpen = openProposal && !["RATIFIED", "REJECTED"].includes(openProposal.state);
-  const decisionCount = pendingForMe + (me.actor === "product" && unresolved && !proposalOpen ? 1 : 0);
-  const counts: Partial<Record<View, number>> = { decision: decisionCount, proposals: pendingForMe };
+  const nav = NAV.filter((n) => !n.leadershipOnly || me.actor === "leadership");
+  const proposalOpen = state.proposals.some((p) => !["RATIFIED", "REJECTED"].includes(p.state));
+  const counts: Partial<Record<View, number>> = { turn: turnCount, goals: unresolved ? 1 : 0 };
+  // + New conflict: leadership sets one up (/setup on this server; a workspace's leadership starts a new workspace
+  // at /new, since /setup refuses workspace sessions); the asking team opens the composer. Disabled, with the reason,
+  // wherever the server would refuse the proposal (createProposal: asking team only, one open proposal at a time).
+  const newConflict: { href?: string; go?: View; why?: string } =
+    me.actor === "leadership"
+      ? { href: workspace ? "/new" : "/setup" }
+      : me.actor !== "product"
+        ? { why: `Only ${L.team.product} proposes a change. You review it here when it arrives.` }
+        : proposalOpen
+          ? { why: "A proposal is already open. Finish it first." }
+          : { go: "proposals" };
   const myGoal = me.actor === "product" || me.actor === "security" ? currentGoal(state, me.actor) : undefined;
   const kr2 = ceo?.measures.find((m) => m.id === companyMeasureId(state));
   // Custom: the goal's current target. An approval swaps the owner's measure, not its objective.
@@ -428,6 +433,7 @@ export default function Home({ workspace }: { workspace?: string }) {
     : undefined;
   // Custom scenarios have no live agent, so the rail always shows the Inspector.
   const focus = !custom && (view === "decision" || view === "today");
+  const myGoalLine = me.actor === "leadership" ? "owns the company goal" : myGoal ? `owns ${poss(L.team[me.actor])} goal ${myGoal.version}` : "";
   const alikeOk = state.brief?.alike_status === "retrieved";
   const ops = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("ops");
 
@@ -451,7 +457,7 @@ export default function Home({ workspace }: { workspace?: string }) {
     await act("/api/reset", { confirm: "reset" });
     setSelection(null);
     setAttached(null);
-    setView(me?.actor === "leadership" ? "company" : "decision");
+    setView("turn");
   }
 
   return (
@@ -463,26 +469,37 @@ export default function Home({ workspace }: { workspace?: string }) {
           <span className="font-display text-[22px] leading-none">Align</span>
           <span className="border-l border-zinc-200 pl-2.5 text-[13px] text-zinc-500">by Liminal</span>
         </div>
-        <nav className="mt-1.5 flex flex-col gap-1" aria-label="Main">
+        {newConflict.href ? (
+          <a href={newConflict.href} className="mb-3.5 mt-1 inline-flex min-h-11 items-center justify-center rounded-[10px] bg-violet-700 px-[18px] text-[15px] font-semibold text-black hover:brightness-110">
+            + New conflict
+          </a>
+        ) : (
+          <div className="mb-3.5 mt-1 flex flex-col gap-1">
+            <Button disabled={!newConflict.go} onClick={() => newConflict.go && props.go(newConflict.go)}>
+              + New conflict
+            </Button>
+            {newConflict.why && <span className="px-1 text-[12.5px] leading-snug text-zinc-500">{newConflict.why}</span>}
+          </div>
+        )}
+        <nav className="flex flex-col gap-0.5" aria-label="Main">
           {nav.map((n) => {
-            const on = view === n.id;
+            const on = view === n.id || !!n.also?.includes(view);
             const count = counts[n.id] ?? 0;
+            const off = n.id === "studio" && !L.sandbox;
             return (
               <button
                 key={n.id}
                 onClick={() => props.go(n.id)}
+                disabled={off}
                 aria-current={on ? "page" : undefined}
-                className={`flex min-h-[60px] w-full items-center gap-3.5 rounded-xl border px-3.5 text-left transition ${on ? "border-violet-700 bg-violet-50" : "border-transparent hover:bg-zinc-100"}`}
+                className={`flex min-h-12 w-full items-center gap-3 rounded-[10px] px-3.5 text-left text-[15px] font-semibold transition ${on ? "bg-violet-50 text-zinc-900 shadow-[inset_2px_0_0_var(--color-violet-700)]" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"} disabled:cursor-not-allowed disabled:hover:bg-transparent`}
               >
-                <span aria-hidden className={`grid size-7 shrink-0 place-items-center rounded-lg border-[1.5px] font-mono text-[13px] ${on ? "border-violet-700 text-violet-700" : "border-zinc-500 text-zinc-700"}`}>
-                  {n.icon}
-                </span>
                 <span className="flex min-w-0 flex-col">
-                  <span className="text-[15px] font-semibold leading-tight text-zinc-900">{n.label}</span>
-                  <span className="text-[13px] leading-snug text-zinc-500">{n.sub}</span>
+                  <span className={off ? "text-zinc-500" : undefined}>{n.label}</span>
+                  {off && <span className="text-[12.5px] font-normal leading-snug text-zinc-500">{NO_SANDBOX}</span>}
                 </span>
                 {count > 0 && (
-                  <span className={`ml-auto grid h-6 min-w-6 place-items-center rounded-full px-1.5 text-[12px] font-bold ${n.id === "decision" ? "bg-violet-700 text-black" : "bg-zinc-100 text-zinc-900"}`}>
+                  <span className={`ml-auto grid h-[22px] min-w-[22px] place-items-center rounded-full px-1.5 text-[12px] font-bold ${n.id === "turn" ? "bg-violet-700 text-black" : "bg-zinc-100 text-zinc-900"}`}>
                     {count}
                   </span>
                 )}
@@ -511,6 +528,15 @@ export default function Home({ workspace }: { workspace?: string }) {
           </div>
         </div>
         )}
+        <div className={`${custom ? "mt-auto" : "mt-3"} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
+          <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
+            {custom ? teamInitials(L.role[me.actor]) : initials(me.name ?? "")}
+          </span>
+          <div className="min-w-0 leading-tight">
+            <div className="truncate text-[14px] font-semibold text-zinc-900">{custom ? L.person[me.actor] : me.name}</div>
+            <div className="text-[12.5px] text-zinc-500">{myGoalLine}</div>
+          </div>
+        </div>
       </aside>
 
       {/* Top bar */}
@@ -636,14 +662,17 @@ export default function Home({ workspace }: { workspace?: string }) {
             </div>
           </div>
         )}
+        {/* v6 routes: nav id → view. "decision" is the record route; "proposals" is the review a Your turn card opens. */}
+        {view === "turn" && <YourTurnView {...props} />}
+        {view === "goals" && <GoalsView {...props} />}
+        {(view === "studio" || view === "evidence") && L.sandbox && <EvidenceView {...props} />}
+        {view === "decisions" && <DecisionsView {...props} />}
+        {view === "work" && <WorkMap {...props} />}
         {view === "decision" && <DecisionView {...props} />}
         {view === "today" && <DecisionView {...props} />}
         {view === "company" && <OrgView {...props} />}
-        {view === "work" && !custom && <WorkMap {...props} />}
-        {view === "goals" && !custom && <GoalsView {...props} />}
         {view === "team" && <TeamLens {...props} />}
         {view === "proposals" && <ProposalsView {...props} />}
-        {view === "evidence" && !custom && <EvidenceView {...props} />}
 
         {drawer && !custom && (
           <div className="fixed inset-y-0 left-[236px] right-[360px] top-16 z-20 flex justify-end bg-[rgba(5,5,7,0.55)]" onClick={closeDrawer}>
