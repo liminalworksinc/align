@@ -159,6 +159,7 @@ export interface CounterVersion {
   changes_plan: boolean; // true when the counter changes test-relevant plan parameters
   plan_text?: string; // custom scenarios: the counter's revised inline plan text
   plan_hash?: string;
+  conditions?: string; // custom scenarios: what the owning team's approval depends on (≤ 1000 chars); never written in Northstar
 }
 
 export type ProposalState =
@@ -207,6 +208,15 @@ export interface Acceptance {
   new_measure_id?: string;
   owning_work_item_ids?: string[]; // operator work items whose team's goal changed ("Work still on the old plan")
   asking_work_item_ids?: string[]; // the asking team's own work items, to check against its new commitment
+  launch_decision?: LaunchDecision; // leadership's launch call after the teams agree; appended last
+}
+
+/** Custom only. Leadership's decision on launching what the two teams agreed. Changing it overwrites it. */
+export interface LaunchDecision {
+  decision: "approved" | "not_yet";
+  note?: string; // at most 500 characters; never written to the audit log
+  by: "leadership";
+  at: string;
 }
 
 export interface Touchpoint {
@@ -286,6 +296,7 @@ export interface ScenarioConfig {
   deferred_work_item_id?: string;
   plan_id: string;
   plan_version: number;
+  company_note?: string; // shown under the company name in the custom header (setup input company_note)
 }
 
 // B1-6: /api/state is a per-role allowlist projection (lib/flow.ts viewFor), never a spread of AppState.
@@ -302,6 +313,7 @@ export interface AnonStateView {
   company: string;
   scenario?: ScenarioKind;
   teams?: Record<Owner, ScenarioTeam>;
+  company_note?: string; // custom, when set up with one (the sign-in screen shows it); never for Northstar
   me: null;
 }
 

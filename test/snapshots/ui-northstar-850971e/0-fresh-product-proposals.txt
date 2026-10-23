@@ -1,0 +1,97 @@
+A
+Align
+by Liminal
+◆
+Next decision
+What needs you
+◎
+Goals
+How they connect
+✉
+Proposals
+Changes in progress
+▤
+Evidence
+Decisions and proof
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+Northstar Security · Q4 2026
+PD
+Product Director
+Product · Owner
+Sign out
+◎
+COMPANY GOAL
+Q4 2026
+Launch the beta of our new monitoring product.
+THE CEO'S NEW REQUIREMENT
+No new requirement yet
+YOUR GOAL · V3
+Ship the beta and clear anything blocking the launch.
+INBOX
+
+No proposals yet.
+
+Propose a change to Security's goal
+SECURITY'S GOAL TODAY
+●
+Security's goal · view only — you can propose a change, not edit it
+Owner Alex / Security Lead · version v1
+
+Handle customer and security issues quickly and correctly.
+
+Close as many tickets as possible each day, oldest first
+Critical security tickets keep getting the same careful handling
+THE CEO'S NEW REQUIREMENT
+Set by CEO · view only · CEO goal (v1)
+
+The CEO's new requirement isn't available right now.
+
+WHAT YOU'RE PROPOSING
+TODAY SECURITY IS MEASURED ON
+
+Close as many tickets as possible each day, oldest first
+
++
+New target for Security
+Why
+What Product will do in return
+TEST RESULTS FROM SPARTA
+▲
+No test results added
+
+If you send now, the new plan goes without any test runs, and the proposal will show as not tested.
+
+Test which plan follows the new priority
+
+Plan that will be sent: New plan: beta issues first
+
+EARLIER TEAM DECISION (SAVED BY ALIKE, OUR AI-AGENT MEMORY TOOL)
+Saved <TIME>
+
+Beta issues only count as handled when they're marked urgent, tagged as beta (keeping existing tags), and get one private note for engineers plus one reply to the customer. The critical security ticket stays untouched. Rejected: handling tickets oldest first just to close more of them.
+
+Send proposal to Alex / Security Lead
+DETAILS
+CEO
+v1
+
+Launch the beta of our new monitoring product.
+
+GOAL
+OWNER
+CEO
+VERSION
+v1
+WHO CAN EDIT
+Set by CEO · view only
+HOW SUCCESS IS MEASURED
+Product says the beta is ready to launch
+WHERE THIS COMES FROM
+●
+Confirmed
+Approved by CEO at <TIME>
+Review the conflict with Security

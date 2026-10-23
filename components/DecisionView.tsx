@@ -1,11 +1,13 @@
 "use client";
 import { useEffect, type ReactNode } from "react";
-import { companyMeasureId, decisionMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { AGREED_STATUS, CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, decisionMeasureId, labelsFor, poss, switchHint, type Labels } from "@/lib/labels";
 import type { SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { AuthorityStrip } from "./AuthorityStrip";
+import { agreementStatus, launchLine, launchState } from "./launch";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
+import { nextStepHint } from "./nextStep";
 import { depRelation } from "./TeamLens";
 import { Badge, Button, OWNER_LABEL, StateBadge, fmtTime } from "./ui";
 
@@ -101,7 +103,7 @@ export function DecisionView(props: ViewProps) {
     const goal = s.goals.find((g) => g.id === acc.new_goal_id);
     return (
       <div className="flex flex-col gap-4">
-        <Header label="Decision record" right={<Badge tone="neutral">Agreement reached</Badge>} />
+        <Header label="Decision record" right={<Badge tone="neutral">{L.northstar ? "Agreement reached" : AGREED_STATUS}</Badge>} />
         <div className="al-in">
           <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
             Security&apos;s updated goal ({acc.accepted_version}) is now the shared plan for both teams.
@@ -263,6 +265,11 @@ export function DecisionView(props: ViewProps) {
 // ---- Custom scenario: the same decision path, built only from the operator's own setup. ----
 // No sandbox runs and no agents exist here, so nothing below mentions tests passing or agents acting.
 
+/** A waiting screen's next step for someone testing alone: the team whose move it is (P1 items 2 and 4). */
+function SoloNext({ team }: { team: string }) {
+  return <span className="text-zinc-500">{switchHint(team)}</span>;
+}
+
 function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
   const { s, me } = props;
   const isProduct = me.actor === "product";
@@ -280,17 +287,52 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
   if (acc && rel?.status === "ACCEPTED") {
     const goal = s.goals.find((g) => g.id === acc.new_goal_id);
     const newTarget = goal?.measures.find((m) => m.id === decisionMeasureId(s, acc))?.text ?? goal?.objective ?? "";
+    // What the owning team's approval depends on: its conditions field only. Its reason for asking for changes is shown
+    // separately, never as a condition. One condition per line; Align stores them as one text and never checks them.
+    const lastCounter = s.proposals.find((p) => p.id === acc.proposal_id)?.counter_versions.at(-1);
+    const conditions = lastCounter?.conditions?.trim() ?? "";
+    const reason = lastCounter?.rationale?.trim() ?? "";
+    const conditionLines = conditions.split("\n").map((c) => c.trim()).filter(Boolean);
     return (
       <div className="flex flex-col gap-4">
-        <Header label="Decision record" right={<Badge tone="neutral">Agreement reached</Badge>} />
+        {/* One status wording (lib/labels.ts via agreementStatus); open conditions are marked once, in their box. */}
+        <Header label="Decision record" right={<Badge tone="neutral">{agreementStatus(acc)}</Badge>} />
         <div className="al-in">
           <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">
-            {poss(owning)} updated goal ({acc.accepted_version}) is now the shared plan for both teams.
+            {launchState(acc) === "approved"
+              ? `${poss(owning)} updated goal (${acc.accepted_version}) is now the shared plan for both teams.`
+              : `Both teams agreed on ${poss(owning)} updated goal (${acc.accepted_version}). Launch is pending until leadership decides.`}
           </h1>
           <p className="mt-2 max-w-[680px] text-[16px] text-zinc-700">
             The previous version is kept.{acc.ratified_at ? ` Approved by ${owner} at ${fmtTime(acc.ratified_at)}.` : ""}
           </p>
+          <p className="mt-1 max-w-[680px] text-[16px] font-semibold text-zinc-900">{launchLine(acc, L)}</p>
         </div>
+        {conditions && (
+          <section aria-label="Conditions" className="rounded-[14px] border border-amber-300 bg-amber-50 p-[18px]">
+            <div className="flex items-center gap-2">
+              <h2 className="al-lbl !text-amber-700">Conditions</h2>
+              <Badge tone="amber">{CONDITIONS_UNCONFIRMED}</Badge>
+            </div>
+            {conditionLines.length > 1 ? (
+              <ol className="mt-1 list-decimal pl-5 text-[16px] text-zinc-900">
+                {conditionLines.map((c, i) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ol>
+            ) : (
+              <p className="mt-1 whitespace-pre-wrap text-[16px] text-zinc-900">{conditions}</p>
+            )}
+            <p className="mt-1 text-[14px] text-zinc-600">
+              {owning} asked for {conditionLines.length > 1 ? "these" : "this"} when it asked for changes. {conditionsUnconfirmedNote(conditionLines.length)}
+            </p>
+          </section>
+        )}
+        {reason && (
+          <p className="max-w-[680px] text-[16px] text-zinc-700">
+            <span className="font-semibold text-zinc-900">Why {owning} asked for changes:</span> {reason}
+          </p>
+        )}
         {/* The approved target shows once, at the top of the old-plan panel (and in the header card). */}
         <ul aria-label="What this record shows" className="flex flex-col gap-1.5 rounded-[14px] border border-zinc-200 bg-white p-[18px] text-[17px] text-zinc-900">
           <li>
@@ -322,7 +364,7 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
       : prop.state === "COUNTERED"
         ? `Your requested changes are with ${asking}.`
         : prop.state === "ACKNOWLEDGED_BY_PRODUCT"
-          ? `${asking} accepted your changes. Approve to make it the shared plan.`
+          ? `${asking} accepted your changes. Approve to record the agreement; the launch is still leadership's call.`
           : `${asking} proposes a change to your goal.`;
     return (
       <div className="flex flex-col gap-4">
@@ -359,9 +401,12 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
           {needsMe ? (
             <Button onClick={() => props.go("proposals")}>Review and decide →</Button>
           ) : (
-            <span className="text-[16px] text-zinc-600">Nothing for you to do until {isProduct ? owning : asking} responds.</span>
+            <span className="text-[16px] text-zinc-600">
+              Nothing for you to do until {isProduct ? owning : asking} responds.
+            </span>
           )}
         </div>
+        {nextStepHint(prop, me.actor, L) && <p className="text-[16px] text-zinc-700">{nextStepHint(prop, me.actor, L)}</p>}
       </div>
     );
   }
@@ -381,7 +426,8 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
   const ownerGoal = currentGoal(s, "security");
   return (
     <div className="flex flex-col gap-5">
-      <Header label={`Should ${owning} change its goal?`} right={<Badge tone="amber">Needs your judgment</Badge>} />
+      {/* Only the asking team can act before a proposal exists, so only it is told this needs its judgment. */}
+      <Header label={`Should ${owning} change its goal?`} right={isProduct ? <Badge tone="amber">Needs your judgment</Badge> : <Badge tone="neutral">Waiting for {asking}</Badge>} />
       <div>
         <h1 className="text-[34px] font-semibold leading-[1.15] tracking-[-0.015em] text-zinc-900">
           The company goal changed. {poss(owning)} goal didn&apos;t.
@@ -424,7 +470,9 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
         {isProduct ? (
           <Button onClick={() => props.go("proposals")}>Propose the change →</Button>
         ) : (
-          <span className="text-[16px] text-zinc-600">{asking} hasn&apos;t proposed it yet. When they do, you decide here.</span>
+          <span className="text-[16px] text-zinc-600">
+            {asking} hasn&apos;t proposed it yet. When they do, you decide here. <SoloNext team={asking} />
+          </span>
         )}
       </div>
     </div>

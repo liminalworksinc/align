@@ -1,6 +1,6 @@
 import { requireSession } from "@/lib/auth";
 import { audit } from "@/lib/flow";
-import { body, handle } from "@/lib/http";
+import { body, handle, requireSameOrigin } from "@/lib/http";
 import { HttpError, mutate } from "@/lib/store";
 
 
@@ -9,6 +9,7 @@ import { HttpError, mutate } from "@/lib/store";
 export async function POST(req: Request) {
   return handle(async () => {
     const who = requireSession(req);
+    requireSameOrigin(req); // cross-port CSRF (review M4)
     const b = await body<Record<string, string>>(req);
     for (const k of ["decision_id", "summary", "recorded_at", "retrieved_in_session", "plan_before", "plan_after"])
       if (!b[k]?.trim()) throw new HttpError(400, `Missing ${k}`);

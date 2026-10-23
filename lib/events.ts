@@ -9,6 +9,7 @@ export interface AuthorityEvent {
   event_id: string;
   kind: "push" | "ratify";
   at: string;
+  ws?: string; // a custom workspace's id; absent for the default store (Northstar or a /setup scenario)
 }
 
 export function emitAuthority(e: AuthorityEvent) {

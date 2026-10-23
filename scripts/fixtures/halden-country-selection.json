@@ -1,0 +1,60 @@
+{
+  "company": "Halden Therapeutics",
+  "company_note": "Example company (fictional), based on an anonymized real workflow.",
+  "timeframe": "This quarter",
+  "leadership": {
+    "team": "Clinical Leadership",
+    "lead": "VP of Clinical Research"
+  },
+  "company_goal": {
+    "objective": "Pull the Phase 3 study start forward one quarter to keep pace with a competing program.",
+    "measures": [
+      "First patient in by the end of Q2, with enrollment complete in under a year"
+    ]
+  },
+  "company_measure": 0,
+  "asking": {
+    "team": "Clinical Operations",
+    "lead": "Clinical Operations Lead",
+    "objective": "Finish feasibility and site selection for the Phase 3 study.",
+    "measures": [
+      "Feasibility signed off with an enrollment forecast the study can meet"
+    ]
+  },
+  "owning": {
+    "team": "Regulatory Affairs",
+    "lead": "Head of Regulatory Affairs",
+    "objective": "File the Phase 3 applications in the five planned countries.",
+    "measures": [
+      "Applications filed in the five planned countries by March 1"
+    ]
+  },
+  "owner_measure": 0,
+  "dependency": "Feasibility shows the five planned countries can't enroll fast enough for the new start date. Adding countries means new applications, and only Regulatory Affairs can change the submission plan.",
+  "work_items": [
+    {
+      "team": "asking",
+      "task": "CRO feasibility survey for three candidate countries",
+      "status": "in progress"
+    },
+    {
+      "team": "asking",
+      "task": "Site shortlist for the five planned countries",
+      "status": "planned"
+    },
+    {
+      "team": "owning",
+      "task": "Application packages for the five planned countries",
+      "status": "in progress"
+    },
+    {
+      "team": "owning",
+      "task": "Regulatory timeline for the quarterly portfolio review",
+      "status": "planned"
+    }
+  ],
+  "plan": {
+    "title": "Add a second wave of countries",
+    "text": "Regulatory Affairs adds three second-wave countries to the submission plan and files them now, in parallel with the five planned countries, which stay unchanged. In return, Clinical Operations finishes CRO feasibility for the three countries within two weeks, drops any country that forecasts below 0.5 patients per site per month, and holds one contingency country in reserve. Sites take roughly seven months to open, so the extra countries only help if they are filed now. Illustrative math from published medians: at about 0.9 patients per site per month, 60 open sites enroll 540 patients in about 10 months, versus about 15 months on the original 40 sites."
+  }
+}

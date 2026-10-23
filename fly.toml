@@ -1,0 +1,44 @@
+# DRAFT (LIM-2424 L0, not applied): no app, volume, DNS or account exists yet. Sean approves on LIM-2424 first.
+# One machine only: locks are in process memory and the volume attaches to a single machine (docs/HOSTING.md).
+app = "align-pg-draft"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  HOSTED = "1"
+  ALIGN_DATA_DIR = "/data"
+  ALIGN_HOSTS = "align-pg-draft.fly.dev"
+  ALIGN_MAX_WORKSPACES = "25"
+  ALIGN_DELETE_BY = "2026-11-06"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  # The health check comes from inside Fly's network, so it sends what Fly's edge would: the allowlisted Host,
+  # forwarded https and a Fly-Client-IP. Without them proxy.ts answers 421 or 403 and the check would fail.
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/api/workspaces/config"
+    [http_service.checks.headers]
+      Host = "align-pg-draft.fly.dev"
+      X-Forwarded-Proto = "https"
+      Fly-Client-IP = "fly-health-check"
+
+[[mounts]]
+  source = "align_data"
+  destination = "/data"
+  # No automatic volume snapshots: they would keep tester data past ALIGN_DELETE_BY (go-C condition 4).
+  scheduled_snapshots = false
+
+[[vm]]
+  memory = "1gb"
+  cpus = 1

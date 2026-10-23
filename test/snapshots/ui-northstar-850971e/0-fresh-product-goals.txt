@@ -1,0 +1,107 @@
+A
+Align
+by Liminal
+◆
+Next decision
+What needs you
+◎
+Goals
+How they connect
+✉
+Proposals
+Changes in progress
+▤
+Evidence
+Decisions and proof
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+Northstar Security · Q4 2026
+PD
+Product Director
+Product · Owner
+Sign out
+◎
+COMPANY GOAL
+Q4 2026
+Launch the beta of our new monitoring product.
+THE CEO'S NEW REQUIREMENT
+No new requirement yet
+YOUR GOAL · V3
+Ship the beta and clear anything blocking the launch.
+How the goals connect
+Company
+Teams
+My Goal
+CEO
+●
+Set by CEO · view only
+v1
+
+Launch the beta of our new monitoring product.
+
+Product says the beta is ready to launch
+▼
+follows the CEO's goal
+▼
+follows the CEO's goal
+Product Director
+v3
+ⓘ
+Your goal · you can edit
+
+Ship the beta and clear anything blocking the launch.
+
+Beta usage tracking fully set up
+No launch blockers left on Product's side
+WORK IN PRIORITY ORDER
+#1
+Set up usage tracking for the beta
+in progress
+#2
+Beta customer onboarding checklist
+in progress
+#3
+Ticket dashboard polish
+queued
+Alex / Security Lead
+v1
+●
+Security's goal · view only
+
+Handle customer and security issues quickly and correctly.
+
+Close as many tickets as possible each day, oldest first
+Critical security tickets keep getting the same careful handling
+WORK IN PRIORITY ORDER
+#1
+Tag and answer every ticket, oldest first
+running
+#2
+Investigate the critical security issue (ticket #1, off-limits)
+running
+#3
+Handle beta customers' issues (not part of Security's current target)
+not prioritized
+DETAILS
+CEO
+v1
+
+Launch the beta of our new monitoring product.
+
+GOAL
+OWNER
+CEO
+VERSION
+v1
+WHO CAN EDIT
+Set by CEO · view only
+HOW SUCCESS IS MEASURED
+Product says the beta is ready to launch
+WHERE THIS COMES FROM
+●
+Confirmed
+Approved by CEO at <TIME>
+Review the conflict with Security

@@ -41,7 +41,9 @@ function CustomProof({ s, L }: { s: StateView; L: Labels }) {
           <ul className="space-y-2 text-[16px]">
             <li>
               <div className="font-semibold text-zinc-900">{L.person.product}</div>
-              <div className="text-zinc-600">accepted {poss(L.team.security)} changes at {fmtTime(acc.acknowledged_at)}</div>
+              <div className="text-zinc-600">
+                {acc.acknowledged_via === "authored_in_proposal" ? "committed to its part in the proposal" : `accepted ${poss(L.team.security)} changes`} at {fmtTime(acc.acknowledged_at)}
+              </div>
             </li>
             <li>
               <div className="font-semibold text-zinc-900">{L.person.security}</div>

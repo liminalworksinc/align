@@ -1,20 +1,21 @@
-import { requireSession } from "@/lib/auth";
+import { requireWsSession } from "@/lib/auth";
 import { ratifyProposal } from "@/lib/flow";
-import { body, handle } from "@/lib/http";
-import { scenarioOf } from "@/lib/labels";
-import { mutate } from "@/lib/store";
+import { bodyFor, handle } from "@/lib/http";
 import { emitAuthority } from "@/lib/events";
 
 
 export async function POST(req: Request, ctx: RouteContext<"/api/proposals/[id]/accept">) {
   return handle(async () => {
-    const who = requireSession(req);
+    const who = requireWsSession(req);
     const { id } = await ctx.params;
-    const b = await body(req);
+    const b = await bodyFor(req, who.ws);
     void b;
-    const { out, scenario } = await mutate((s) => ({ out: ratifyProposal(s, who, id, b), scenario: scenarioOf(s) }));
-    // The authority stream is Northstar's (agent replan); a custom approval emits nothing.
-    if (scenario !== "custom") emitAuthority({ event_id: `accept:${id}`, kind: "ratify", at: new Date().toISOString() });
+    const out = await who.mutate((s) => ratifyProposal(s, who, id, b));
+    // Every approval wakes the agents that read the same store: the default one (Northstar, or a /setup scenario)
+    // or, tagged with its id, a workspace whose agents connect with an agent token (Mode L). The default store's
+    // event keeps its shape; the wire view (?session=*) never shows a workspace's events.
+    const at = new Date().toISOString();
+    emitAuthority({ event_id: `accept:${id}`, kind: "ratify", at, ...(who.ws !== "northstar" ? { ws: who.ws } : {}) });
     return out;
   });
 }

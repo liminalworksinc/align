@@ -1,5 +1,5 @@
 import { requireSession, type Session } from "@/lib/auth";
-import { body, handle, requireJson } from "@/lib/http";
+import { body, handle, requireJson, requireSameOrigin } from "@/lib/http";
 import { captureConsents, HttpError, id, mutate, now, readState, setCaptureConsents, type CaptureHarness } from "@/lib/store";
 
 // Capture consent (B1-1): a server-side record per harness and repo. /api/sessions/events refuses events
@@ -35,6 +35,7 @@ export async function POST(req: Request) {
   return handle(async () => {
     const who = requireLeadership(req);
     requireJson(req);
+    requireSameOrigin(req); // cross-port CSRF (review M4)
     const { harness, repo } = parse(await body(req));
     return mutate((s) => {
       const list = captureConsents(s).filter((c) => !(c.harness === harness && c.repo === repo));
@@ -50,6 +51,7 @@ export async function DELETE(req: Request) {
   return handle(async () => {
     const who = requireLeadership(req);
     requireJson(req);
+    requireSameOrigin(req); // cross-port CSRF (review M4)
     const { harness, repo } = parse(await body(req));
     return mutate((s) => {
       const before = captureConsents(s);

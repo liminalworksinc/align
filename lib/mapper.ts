@@ -48,6 +48,8 @@ export function mappingEnabled(): boolean {
 // Read from the process environment only. No .env file anywhere is read for it.
 
 function apiKey(): string | null {
+  // Hosted never calls a model, whatever reaches the environment (startup also refuses the key).
+  if (process.env.HOSTED === "1") return null;
   return process.env.AI_GATEWAY_API_KEY || null;
 }
 

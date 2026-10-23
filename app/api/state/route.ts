@@ -1,15 +1,25 @@
-import { sessionFrom } from "@/lib/auth";
+import { stateContext } from "@/lib/auth";
 import { ingestEvidence } from "@/lib/evidence";
 import { recordExcludedPrep, viewFor } from "@/lib/flow";
+import { config } from "@/lib/config";
 import { handle } from "@/lib/http";
+import { HttpError } from "@/lib/store";
 import { ensureRegistryFresh } from "@/lib/mapper";
-import { mutate } from "@/lib/store";
 
 
 export async function GET(req: Request) {
   return handle(async () => {
-    const who = sessionFrom(req);
-    const s = await mutate(async (st) => {
+    // Anonymous is Northstar, as before. A custom session ended by expiry or revocation gets 401, never Northstar.
+    const ctx = stateContext(req);
+    const who = ctx.who;
+    // Hosted: no Northstar, so an anonymous caller has nothing to read (the store refuses too).
+    if (!who && config().hosted) throw new HttpError(404, "Not found");
+    if (who && who.ws !== "northstar") {
+      // Custom workspaces have no Sparta evidence, prep exclusions or agent registry. The view names its workspace
+      // (appended last), so a tab showing another workspace or Northstar can tell the cookie changed under it.
+      return { ...viewFor(await ctx.read(), who.actor), workspace: who.ws };
+    }
+    const s = await ctx.mutate(async (st) => {
       try {
         await ingestEvidence(st);
         st.ingest_errors = [];

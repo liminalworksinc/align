@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Build A gate runner. Usage: scripts/test-all.sh <port>   (run from a lane or integration worktree)
 # Checks frozen files, lint and types, starts a fresh dev server on <port>, then runs in fixed order:
-# snapshot, test-flow, test-scenario, test-mcp, test-capture, test-mapper. Capture and mapper add sessions
-# that survive reset, so they run last. One summary line per step; exits non-zero if any step fails.
+# snapshot, test-flow, test-scenario (default fixture, then each scripts/fixtures/*.json), test-ui-loop, test-mcp,
+# test-capture, test-mapper. Capture and mapper add sessions
+# that survive reset, so they run last. Then test-tenancy and ui-northstar, which start their own production
+# servers on <port>.
+# One summary line per step; exits non-zero if any step fails.
 set -u
 
 PORT="${1:-}"
@@ -59,10 +62,20 @@ curl -s -o /dev/null "$BASE/login" || { summary FAIL server "did not start, see 
 step snapshot env ALIGN_MCP_TOKEN="$TOKEN" node scripts/snapshot-northstar.mjs "$BASE"
 # test-flow keeps its known baseline failure; the gate is its stdout matching the baseline's.
 step test-flow bash -c "node scripts/test-flow.mjs '$BASE' | tail -n +2 | diff -u test/snapshots/northstar-850971e/test-flow.out - && echo 'stdout identical to the baseline'"
-step test-scenario node scripts/test-scenario.mjs "$BASE"
+# test-scenario runs once per custom fixture: the default example, then every scripts/fixtures/*.json.
+step test-scenario env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-scenario.mjs "$BASE"
+for f in scripts/fixtures/*.json; do step "scenario:$(basename "$f" .json)" env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-scenario.mjs "$BASE" "$f"; done
+# The same custom loop in a browser: two team profiles by visible labels, plus a synthetic agent's wake-up. Needs Chrome.
+step test-ui-loop node scripts/test-ui-loop.mjs "$BASE"
 step test-mcp env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-mcp.mjs "$BASE/api/mcp"
 step test-capture node scripts/test-capture.mjs "$BASE"
 step test-mapper env ALIGN_URL="$BASE" node scripts/test-mapper.mjs
+# Multi-workspace tests need their own server configs (creation closed, signup code, open create).
+stop_server
+SERVER=""
+step test-tenancy node scripts/test-tenancy.mjs "$PORT"
+# Northstar's rendered UI text against 850971e's, on its own production server (needs Chrome).
+step ui-northstar scripts/test-ui-northstar.sh "$PORT"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "test-all: all steps passed (logs in $LOGDIR)"; else echo "test-all: $FAILS step(s) failed (logs in $LOGDIR)"; fi

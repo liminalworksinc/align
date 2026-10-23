@@ -6,6 +6,7 @@ import { Badge, Button, OWNER_LABEL, Section, StateBadge, fmtTime } from "./ui";
 import { reviewConflictLabel, teamName } from "./TeamLens";
 import { accepted, comparablePair, currentGoal, priorVersion } from "./select";
 import { companyMeasureId, conflictMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { agreementStatus, nextWorkLine } from "./launch";
 
 const DEFAULT_RELATION = "r-product-security";
 
@@ -521,7 +522,13 @@ function CustomRelation({ p, L, r }: { p: ViewProps; L: Labels; r: GoalRelation 
     <>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <h2 className="text-[20px] font-bold text-zinc-900">{isConflict ? `${L.team.product} needs ${owning}` : "How these goals connect"}</h2>
-        {r.status === "UNKNOWN" ? <Badge tone="amber">Not agreed yet</Badge> : <StateBadge state={r.status} labels={L} />}
+        {r.status === "UNKNOWN" ? (
+          <Badge tone="amber">Not agreed yet</Badge>
+        ) : isConflict && r.status === "ACCEPTED" ? (
+          <Badge tone="neutral">{agreementStatus(accepted(s))}</Badge> // the decision itself; other accepted links keep "Agreed"
+        ) : (
+          <StateBadge state={r.status} labels={L} />
+        )}
       </div>
       <button
         type="button"
@@ -572,10 +579,10 @@ function CustomRelation({ p, L, r }: { p: ViewProps; L: Labels; r: GoalRelation 
             <Row label="Approved by">
               {L.person.security} · {fmtTime(acc.ratified_at)}
             </Row>
-            <Row label="Changes accepted by">
+            <Row label={acc.acknowledged_via === "authored_in_proposal" ? "Committed to its part" : "Changes accepted by"}>
               {L.person.product} · {fmtTime(acc.acknowledged_at)}
             </Row>
-            <Row label="Next step">{acc.next_work}</Row>
+            <Row label="Next step">{nextWorkLine(acc, L)}</Row>
             {plan && <Row label="Plan">{plan.title}</Row>}
             <Row label="Sandbox test">
               <Badge tone="amber">Not sandbox-tested</Badge>

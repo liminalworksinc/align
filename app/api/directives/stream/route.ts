@@ -1,3 +1,4 @@
+import { agentOrRefuse, assertSessionInGrant } from "@/lib/agent-token";
 import { describeEvent, pendingFor, recipientsFor } from "@/lib/directives";
 import { bus, listening, type AuthorityEvent } from "@/lib/events";
 import { assertLocal } from "@/lib/local-guard";
@@ -13,6 +14,19 @@ export async function GET(req: Request) {
     return Response.json({ error: (e as HttpError).message }, { status: 403 });
   }
   const sid = new URL(req.url).searchParams.get("session") || "*";
+  // With an agent token, this stream serves that workspace's session only (the wire view (*) is the default store's),
+  // and only a session of the token's own harness and repo. A token that no longer verifies is 401, never the default.
+  let agent: ReturnType<typeof agentOrRefuse>;
+  try {
+    agent = agentOrRefuse(req);
+    if (agent && sid !== "*") assertSessionInGrant(await readState(agent.ws), agent, sid);
+  } catch (e) {
+    return Response.json({ error: (e as HttpError).message }, { status: (e as HttpError).status ?? 500 });
+  }
+  if (agent && sid === "*") return Response.json({ error: "An agent token streams one session, not the wire view" }, { status: 400 });
+  const ws = agent?.ws;
+  // `listening` is the default store's live view (GET /api/sessions, the wire view): workspace streams stay out of it.
+  const tracksListening = sid !== "*" && !ws;
   const enc = new TextEncoder();
   let cleanup = () => {};
 
@@ -31,16 +45,17 @@ export async function GET(req: Request) {
       const sent = new Set<string>();
       const flush = async () => {
         if (sid === "*") return;
-        for (const d of pendingFor(await readState(), sid)) {
+        for (const d of pendingFor(await readState(ws), sid)) {
           if (sent.has(d.event_id)) continue;
           sent.add(d.event_id);
           send("directive", d);
         }
       };
-      if (sid !== "*") listening.set(sid, now());
+      if (tracksListening) listening.set(sid, now());
       await flush();
 
       const onAuthority = async (e: AuthorityEvent) => {
+        if (e.ws !== ws) return; // another store's event: a workspace's never reaches the default store, and back
         if (sid === "*") {
           const st = await readState();
           const all = recipientsFor(st, e.event_id);
@@ -67,7 +82,7 @@ export async function GET(req: Request) {
         bus.off("authority", onAuthority);
         bus.off("delivered", onDelivered);
         clearInterval(ping);
-        if (sid !== "*") listening.delete(sid);
+        if (tracksListening) listening.delete(sid);
       };
       req.signal.addEventListener("abort", () => {
         cleanup();

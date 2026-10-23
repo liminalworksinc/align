@@ -1,10 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { companyMeasureId, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { CONDITIONS_UNCONFIRMED, companyMeasureId, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { agreementStatus } from "./launch";
 import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { activeProposal, currentGoal } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
+import { nextStepHint } from "./nextStep";
 import { ProofStrip } from "./ProofStrip";
 import { SpartaProof } from "./SpartaProof";
 
@@ -472,7 +474,8 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
             <span className="mb-1 flex items-center gap-2 text-[15px] font-semibold text-violet-800">
               <span aria-hidden className="font-mono">+</span> {L.northstar ? "New target for Security" : `New target for ${L.team.security}`}
             </span>
-            <textarea className={inputCls} rows={3} value={measure} onChange={(e) => setMeasure(e.target.value)} />
+            <textarea className={inputCls} rows={3} maxLength={300} value={measure} onChange={(e) => setMeasure(e.target.value)} />
+            {measure.length >= 300 && <span className="mt-1 block text-[14px] text-amber-700">Keep the new target under 300 characters.</span>}
           </label>
           <label className="mt-3 block">
             <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Why</span>
@@ -582,13 +585,19 @@ function CounterEdit({ p, by }: { p: Proposal; by: string }) {
   const last = p.counter_versions.at(-1);
   if (!last) return null;
   const prev = p.counter_versions.length > 1 ? p.counter_versions[p.counter_versions.length - 2].proposed_measure_text : p.proposed_measure_text;
-  const added = addedText(prev, last.proposed_measure_text);
+  // Drop the joining punctuation the diff keeps (", " or ". ") so the quote starts at the added words.
+  const added = addedText(prev, last.proposed_measure_text)?.replace(/^[,.\s]+/, "") || null;
   return (
     <div className="mt-1 space-y-1 text-[16px] text-amber-950">
       <p>
         {by} {added ? "added" : "changed the new target to"}: &ldquo;{added ?? last.proposed_measure_text}&rdquo;
       </p>
       {last.rationale && <p>Why: {last.rationale}</p>}
+      {last.conditions && (
+        <p>
+          Conditions ({CONDITIONS_UNCONFIRMED.toLowerCase()}): {last.conditions}
+        </p>
+      )}
       <p>The change is highlighted below.</p>
     </div>
   );
@@ -619,6 +628,10 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
   // Custom: an untested plan is approved only with this explicit acknowledgement (sent as accept_untested).
   const needsAck = !L.northstar && p.test_status !== "TESTED";
   const [ackUntested, setAckUntested] = useState(false);
+  // Custom: what the owning team made its approval depend on: its conditions field only, as on the decision record.
+  const lastCounter = p.counter_versions.at(-1);
+  const conditions = L.northstar ? "" : (lastCounter?.conditions?.trim() ?? "");
+  const hint = nextStepHint(p, me.actor, L);
 
   // Seeing the ratified record counts as "accepted version seen" for this session (server dedupes per actor).
   const marked = useRef<string | null>(null);
@@ -678,11 +691,13 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           <p className="text-[16px] text-zinc-800">
             <Badge tone="amber">Waiting for {who("security")}</Badge>
           </p>
+          {hint && <p className="mt-2 text-[16px] text-zinc-700">{hint}</p>}
         </Card>
       )}
       {isProduct && p.state === "ACKNOWLEDGED_BY_PRODUCT" && (
         <Card tone="readonly">
           <Badge tone="amber">You accepted the changes · waiting for {who("security")} to approve</Badge>
+          {hint && <p className="mt-2 text-[16px] text-zinc-700">{hint}</p>}
         </Card>
       )}
       {isProduct &&
@@ -698,6 +713,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
       {isSecurity && p.state === "COUNTERED" && (
         <Card tone="readonly">
           <Badge tone="amber">{L.northstar ? "Waiting for Product to accept your changes" : `Waiting for ${ask} to accept your changes`}</Badge>
+          {hint && <p className="mt-2 text-[16px] text-zinc-700">{hint}</p>}
         </Card>
       )}
       {isSecurity && canDecide && (
@@ -709,6 +725,11 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
                 <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Why you&apos;re approving</span>
                 <input className={inputCls} value={ratifyWhy} onChange={(e) => setRatifyWhy(e.target.value)} />
               </label>
+              {conditions && (
+                <p aria-label="Your conditions" className="mt-3 whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-[16px] text-zinc-800 ring-1 ring-zinc-200">
+                  <span className="font-semibold">You asked for:</span> {conditions}
+                </p>
+              )}
               {needsAck && (
                 <label className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-[16px] text-amber-950 ring-1 ring-amber-300">
                   <input
@@ -763,7 +784,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           <Card>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone="neutral">
-                Approved: {poss(own)} goal ({acc.accepted_version})
+                {agreementStatus(acc)}: {poss(own)} goal ({acc.accepted_version})
               </Badge>
               <TestStatusBadge status={acc.test_status} L={L} />
             </div>
@@ -938,6 +959,7 @@ function CounterForm({ p, latestText, busy, run, L }: { p: Proposal; latestText:
   );
   const [why, setWhy] = useState(L.northstar ? "Keep the critical security ticket off-limits." : "");
   const [changesPlan, setChangesPlan] = useState(false);
+  const [conditions, setConditions] = useState("");
   return (
     <form
       onSubmit={(e) => {
@@ -945,18 +967,26 @@ function CounterForm({ p, latestText, busy, run, L }: { p: Proposal; latestText:
         if (busy || !text.trim()) return;
         // Custom plans have no agent run, so the counter carries only the wording and the reason.
         if (L.northstar) void run(`/api/proposals/${p.id}/counter`, { proposed_measure_text: text, rationale: why, changes_plan: changesPlan });
-        else void run(`/api/proposals/${p.id}/counter`, { proposed_measure_text: text, rationale: why });
+        else void run(`/api/proposals/${p.id}/counter`, { proposed_measure_text: text, rationale: why, ...(conditions.trim() ? { conditions } : {}) });
       }}
       className="space-y-2"
     >
       <label className="block">
         <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Or ask for changes: your version of the target</span>
-        <textarea className={inputCls} rows={4} value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea className={inputCls} rows={4} maxLength={300} value={text} onChange={(e) => setText(e.target.value)} />
+        {text.length >= 300 && <span className="mt-1 block text-[14px] text-amber-700">Keep the new target under 300 characters.</span>}
       </label>
       <label className="block">
         <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Why you want these changes</span>
         <input className={inputCls} value={why} onChange={(e) => setWhy(e.target.value)} />
       </label>
+      {!L.northstar && (
+        <label className="block">
+          <span className="mb-1 block text-[15px] font-semibold text-zinc-700">Conditions (optional)</span>
+          <span className="mb-1 block text-[14px] text-zinc-500">What your approval depends on, e.g. &ldquo;Approve if X and Y&rdquo;.</span>
+          <textarea className={inputCls} rows={2} maxLength={1000} value={conditions} onChange={(e) => setConditions(e.target.value)} />
+        </label>
+      )}
       {L.northstar && (
         <label className="flex items-start gap-2 text-[15px] text-zinc-800">
           <input

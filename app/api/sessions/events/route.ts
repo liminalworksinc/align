@@ -2,8 +2,10 @@ import path from "node:path";
 import { handle } from "@/lib/http";
 import { scheduleMapping } from "@/lib/mapper";
 import { markActed } from "@/lib/directives";
-import { hasCaptureConsent, HttpError, mutate, now, readState } from "@/lib/store";
-import type { AgentSession, SessionOriginKind } from "@/lib/types";
+import { agentFrom } from "@/lib/agent-token";
+import { originIsThisServer } from "@/lib/local-guard";
+import { hasCaptureConsent, HttpError, mutate, mutateWs, now, readState } from "@/lib/store";
+import type { AgentSession, AppState, SessionOriginKind } from "@/lib/types";
 
 // Ingest for local agent hooks (scripts/align-capture.mjs). No session cookie: hooks run on this machine.
 // Browsers always send Origin on cross-site POSTs, so any non-localhost Origin is refused.
@@ -12,7 +14,6 @@ const MAX_BODY = 16 * 1024;
 const MAX_TEXT = 1000;
 const MAX_FILES = 50;
 const MAX_PROMPTS = 200;
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 interface CaptureEvent {
   harness?: unknown;
@@ -31,13 +32,8 @@ interface CaptureEvent {
 function assertLocalOrigin(req: Request) {
   const origin = req.headers.get("origin");
   if (!origin) return;
-  let host = "";
-  try {
-    host = new URL(origin).hostname;
-  } catch {
-    // "null" or malformed origins are not local.
-  }
-  if (!LOCAL_HOSTS.has(host)) throw new HttpError(403, "Capture events are accepted from this machine only");
+  // Another localhost port is another site: only this server's own origin (or no Origin, i.e. a script) may post.
+  if (!originIsThisServer(req, origin)) throw new HttpError(403, "Capture events are accepted from this machine only");
 }
 
 async function readCapped(req: Request): Promise<string> {
@@ -152,15 +148,16 @@ export async function POST(req: Request) {
     const filePath = clean(ev.file_path);
     const id = `${harness}:${sessionId}`;
 
-    // B1-1: no consent record for this harness and repo means 403, and nothing is written or mapped.
+    // An agent token routes the event to its own workspace (Mode L); the token is that repo's capture consent.
+    // A token that no longer verifies (revoked by an epoch bump, or its workspace deleted) is refused outright,
+    // never treated as a Northstar event.
+    const agent = agentFrom(req);
+    if (!agent && /^Bearer\s+agt\./i.test(req.headers.get("authorization") ?? "")) throw new HttpError(401, "This agent token is no longer valid");
     const consentRepo = repo || cwdName;
-    if (!hasCaptureConsent(await readState(), harness, consentRepo)) {
-      throw new HttpError(403, "No capture consent for this harness and repo");
-    }
+    if (agent && (harness !== agent.harness || consentRepo !== agent.repo))
+      throw new HttpError(403, `This agent token is for ${agent.harness} in ${agent.repo}`);
 
-    const scenario = await mutate((s) => {
-      // Re-checked under the write lock so a revoke that lands in between still wins. Throwing here writes nothing.
-      if (!hasCaptureConsent(s, harness, consentRepo)) throw new HttpError(403, "No capture consent for this harness and repo");
+    const upsert = (s: AppState) => {
       const at = now();
       let sess = s.sessions.find((x) => x.id === id);
       if (!sess) {
@@ -207,6 +204,28 @@ export async function POST(req: Request) {
         sess.origin = originFor(texts, sess.branch);
       }
       return { scenario: s.scenario };
+    };
+    if (agent) {
+      // B1-1 inside a workspace: the token is not the consent. The workspace's consent record for this harness and
+      // repo must still exist (Restart and DELETE /api/workspaces/agent-token remove it), checked under the write lock.
+      await mutateWs(agent.ws, (s) => {
+        if (!hasCaptureConsent(s, agent.harness, agent.repo)) throw new HttpError(403, "No capture consent for this harness and repo");
+        // A token writes only its own repo's sessions: never adopt (and re-label) a session another repo started.
+        const existing = s.sessions.find((x) => x.id === id);
+        if (existing && existing.repo !== agent.repo) throw new HttpError(403, `This session belongs to ${existing.repo}, not ${agent.repo}`);
+        return upsert(s);
+      }); // custom workspaces are never mapped
+      return { ok: true, id };
+    }
+
+    // B1-1: no consent record for this harness and repo means 403, and nothing is written or mapped.
+    if (!hasCaptureConsent(await readState(), harness, consentRepo)) {
+      throw new HttpError(403, "No capture consent for this harness and repo");
+    }
+    const scenario = await mutate((s) => {
+      // Re-checked under the write lock so a revoke that lands in between still wins. Throwing here writes nothing.
+      if (!hasCaptureConsent(s, harness, consentRepo)) throw new HttpError(403, "No capture consent for this harness and repo");
+      return upsert(s);
     });
 
     // B1-4: the external model is off unless ALIGN_MAPPER_EXTERNAL=1 (scheduleMapping also checks); custom scenarios schedule nothing.

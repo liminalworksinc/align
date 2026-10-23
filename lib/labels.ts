@@ -4,12 +4,15 @@
 
 import type { Acceptance, Actor, AppState, Owner, ScenarioKind, ScenarioTeam } from "./types";
 
-type LabelState = Pick<AppState, "company" | "simulations" | "scenario" | "teams" | "scenario_config">;
+// company_note: the anonymous view carries it at the top level (no scenario_config there).
+type LabelState = Pick<AppState, "company" | "simulations" | "scenario" | "teams" | "scenario_config"> & Partial<Pick<AppState, "acceptances">> & { company_note?: string };
 
 export interface Labels {
   northstar: boolean;
+  launchApproved: boolean; // custom: leadership approved the launch of the latest agreement (statuses read "launch approved")
   sandbox: boolean; // northstar, or a custom scenario that has sandbox runs; everything tied to runs hides when false
   company: string;
+  companyNote?: string; // custom: the setup's company_note, shown under the company name; never set for Northstar
   team: Record<Owner, string>; // team name per goal slot
   role: Record<Actor, string>; // team name per signed-in role
   person: Record<Owner | Actor, string>; // who speaks for each slot or role
@@ -66,6 +69,7 @@ export function labelsFor(s: LabelState): Labels {
   if (!t) {
     return {
       northstar: true,
+      launchApproved: false,
       sandbox: true,
       company: NORTHSTAR.company,
       team: { ...NORTHSTAR.team },
@@ -75,8 +79,10 @@ export function labelsFor(s: LabelState): Labels {
   }
   return {
     northstar: false,
+    launchApproved: s.acceptances?.at(-1)?.launch_decision?.decision === "approved",
     sandbox: s.simulations.length > 0,
     company: s.company,
+    ...((s.scenario_config?.company_note ?? s.company_note) ? { companyNote: s.scenario_config?.company_note ?? s.company_note } : {}),
     team: { ceo: t.ceo.team, product: t.product.team, security: t.security.team },
     role: { product: t.product.team, security: t.security.team, leadership: t.ceo.team },
     person: {
@@ -99,6 +105,25 @@ export function poss(name: string): string {
 }
 
 /**
+ * The one way a custom scenario states an approved decision (founder ruling 10-22, P1 item 3): the record, the
+ * agents' directive and MCP, and every screen say the same thing, so nobody reads the agreement as a go.
+ */
+export const AGREED_STATUS = "Agreed, launch pending";
+/** The same status once leadership has decided the launch (custom launch decision, components/launch.ts). */
+export const agreedStatus = (launchApproved: boolean) => (launchApproved ? "Agreed, launch approved" : AGREED_STATUS);
+/** Conditions are recorded, never checked (P1 item 4): every place that shows them says so. */
+export const CONDITIONS_UNCONFIRMED = "Not confirmed yet";
+export const conditionsUnconfirmedNote = (n: number) =>
+  n > 1 ? "Nobody has confirmed these are met. Align records them; it doesn't check them." : "Nobody has confirmed this is met. Align records it; it doesn't check it.";
+
+/** The one role-switch instruction for a tester playing every team: the in-app Switch team control (founder ruling
+ *  10-22, LIM-2437 bd53f6f6; it replaced every browser-window wording). */
+export const ROLE_SWITCH = "Testing on your own? Use Switch team (top right) to act as the next team. Your work is saved.";
+/** The waiting screen's version, naming the team whose move it is. */
+export const switchHint = (team: string) => `Testing on your own? Use Switch team to act as ${team} next.`;
+export const AGREED_NOT_LAUNCH = "Both teams agreed. This is not approval to launch: the launch decision is still pending.";
+
+/**
  * Team-specific proposal states in a custom scenario. Returns undefined for Northstar and for every
  * other state, so callers fall back to their own STATE_LABEL and Northstar text never changes.
  */
@@ -107,6 +132,7 @@ export function customStateLabel(state: string, L: Labels): string | undefined {
   if (state === "PENDING_SECURITY") return `Waiting for ${L.team.security}`;
   if (state === "COUNTERED") return `${L.team.security} asked for changes`;
   if (state === "ACKNOWLEDGED_BY_PRODUCT") return `${L.team.product} accepted changes`;
+  if (state === "RATIFIED") return agreedStatus(L.launchApproved); // follows leadership's launch decision
   return undefined;
 }
 

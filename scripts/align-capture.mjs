@@ -193,9 +193,11 @@ async function main() {
   };
 
   const base = (process.env.ALIGN_URL || "http://localhost:3100").replace(/\/$/, "");
+  // ALIGN_AGENT_TOKEN (a workspace's agent token, Mode L) sends the event to that workspace instead of the default store.
+  const auth = process.env.ALIGN_AGENT_TOKEN ? { authorization: `Bearer ${process.env.ALIGN_AGENT_TOKEN}` } : {};
   await fetch(`${base}/api/sessions/events`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...auth },
     body: JSON.stringify(event),
     signal: AbortSignal.timeout(800),
   }).catch(() => undefined);
