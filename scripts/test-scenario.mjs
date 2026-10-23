@@ -444,6 +444,23 @@ async function main() {
     JSON.stringify({ plan: (mPlanL?.content?.[0]?.text ?? "").slice(0, 240), record: (mRecordL?.content?.[0]?.text ?? "").slice(0, 240), launch: mPlanL?.structuredContent?.agreement?.launch }),
   );
 
+  // F17 (Sean, #7 review): a counter that gives a reason but no conditions. The reason is stored as the rationale and
+  // never becomes a condition, so the agreement an agent or the record reads has none.
+  const f17s = await setup("leadership", fixture);
+  const f17p = await call("product", "POST", "/api/proposals", body);
+  const f17id = f17p.json?.id;
+  const f17c = await call("security", "POST", `/api/proposals/${f17id}/counter`, { ...counterBody, rationale: "Only the reason, no conditions" });
+  const f17v = f17c.json?.counter_versions?.at(-1);
+  await call("product", "POST", `/api/proposals/${f17id}/acknowledge`, {});
+  const f17a = await call("security", "POST", `/api/proposals/${f17id}/accept`, { rationale: "Agreed", accept_untested: true });
+  const f17pol = (await call("product", "GET", "/api/policy/security")).json;
+  check(
+    "F17 a reason-only counter stores the reason as the rationale, no conditions; the agreement has conditions null",
+    f17s.status === 200 && f17c.status === 200 && f17v?.rationale === "Only the reason, no conditions" && f17v?.conditions === undefined &&
+      f17a.json?.state === "RATIFIED" && f17pol?.agreement?.conditions === null,
+    JSON.stringify({ setup: f17s.status, counter: f17c.status, cv: f17v, state: f17a.json?.state, conditions: f17pol?.agreement?.conditions }),
+  );
+
   // ---- R4: custom back to Northstar ----
   const r4p = await call("product", "POST", "/api/reset", { confirm: "reset" });
   const stillCustom = (await state()).scenario === "custom";
