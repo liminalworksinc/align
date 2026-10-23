@@ -1,44 +1,59 @@
 @import "tailwindcss";
 
 /*
- * Align dark theme. Tokens below were authored for this app; the Tailwind palette the
- * components already use is mapped onto them so every zinc/violet/amber/red/emerald class
- * resolves here. Truth colors keep their meaning:
- *   violet = selected/candidate (--al-accent), amber = unresolved (--al-warn),
- *   red = real failed check (--al-fail), emerald = Sparta-verified only (--al-pass).
+ * Display face. Founder ruling: Nineties Headliner loads at runtime from the viewer's machine
+ * via local() and is NEVER committed to this public repo. Anton (next/font) is the fallback
+ * when the face is not installed.
+ */
+@font-face {
+  font-family: "Nineties Headliner";
+  src: local("Nineties Headliner"), local("NinetiesHeadliner-Regular");
+  font-display: swap;
+}
+
+/*
+ * Align dark theme, retuned to the v6 design. Values are the Liminal design-system tokens v6
+ * uses (liminal-prototype design-system/tokens/design-tokens.css), named in the comments.
+ * The Tailwind palette the components already use is mapped onto these tokens so every
+ * zinc/violet/amber/red/emerald class resolves here. Truth colors keep their meaning:
+ *   violet = selected/candidate (--al-accent, the Liminal magenta),
+ *   amber = unresolved (--al-warn), red = real failed check (--al-fail),
+ *   emerald = Sparta-verified only (--al-pass).
  */
 :root {
   color-scheme: dark;
 
-  --al-bg: #0b0b0e;
-  --al-rail: #09090b;
-  --al-surface: #111115;
-  --al-surface-sunk: #0d0d10;
-  --al-surface-raised: #18181d;
-  --al-line: #2a2a31;
-  --al-line-strong: #3a3a43;
+  /* Near-black page with layered frame surfaces. */
+  --al-bg: #0a0a0b; /* --bg */
+  --al-rail: #08080a; /* --rail-bg */
+  --al-surface: #0e0e11; /* --frame-bg: cards */
+  --al-surface-sunk: #0c0c0f; /* --frame-bg-2: insets, inputs, grey pills */
+  --al-surface-raised: #15161a; /* --frame-bg-3: hover, chips */
+  --al-line: #232327; /* --card-border */
+  --al-line-strong: #2a2a2f; /* --card-border-2: secondary buttons, options */
 
-  --al-ink: #f2f0ec;
-  --al-ink-2: #d6d2ca;
-  --al-ink-3: #aaa59d;
-  --al-ink-4: #8e8a83;
+  /* Ink: --text / --text-mid / (one step between) / --text-dim. */
+  --al-ink: #f4f2ee;
+  --al-ink-2: #c9c5bd;
+  --al-ink-3: #a6a29a;
+  --al-ink-4: #8a8780;
 
-  --al-accent: #c46bff;
-  --al-accent-bg: rgb(196 107 255 / 0.1);
-  --al-warn: #f5b342;
-  --al-warn-bg: rgb(245 179 66 / 0.09);
-  --al-fail: #ff5c6c;
-  --al-fail-bg: rgb(255 92 108 / 0.09);
-  --al-pass: #3ddc84;
-  --al-pass-bg: rgb(61 220 132 / 0.08);
+  --al-accent: #cc24f5; /* --liminal (orchid-500) */
+  --al-accent-bg: rgb(204 36 245 / 0.1); /* --liminal-bg */
+  --al-warn: #fdc237; /* --watch (amber-orn-500) */
+  --al-warn-bg: rgb(253 194 55 / 0.08);
+  --al-fail: #ed214f; /* --alarm (stability-500) */
+  --al-fail-bg: rgb(237 33 79 / 0.08);
+  --al-pass: #31e682; /* --ui-state-success (connection-500) */
+  --al-pass-bg: rgb(49 230 130 / 0.08);
   --al-info: #6fa8ff;
   --al-info-bg: rgb(111 168 255 / 0.08);
-  --al-focus: #9b7bff;
+  --al-focus: #8e66fb; /* --ui-focus-ring (clarity-500) */
   --al-ease: cubic-bezier(0.4, 0, 0.2, 1);
 
-  --al-sans: var(--font-space-grotesk), system-ui, sans-serif;
-  --al-mono: var(--font-space-mono), ui-monospace, monospace;
-  --al-display: var(--font-anton), Impact, sans-serif;
+  --al-sans: var(--font-space-grotesk), "Space Grotesk", system-ui, sans-serif;
+  --al-mono: var(--font-space-mono), "Space Mono", ui-monospace, monospace;
+  --al-display: "Nineties Headliner", var(--font-anton), Impact, sans-serif;
 }
 
 @theme inline {
@@ -103,8 +118,8 @@ body {
   background: var(--al-bg);
   color: var(--al-ink);
   font-family: var(--al-sans);
-  font-size: 16px;
-  line-height: 1.4;
+  font-size: 15px;
+  line-height: 1.45;
 }
 
 :focus-visible {
@@ -133,11 +148,11 @@ body {
   animation: al-in 0.3s var(--al-ease);
 }
 
-/* Mono uppercase section label. */
+/* Mono uppercase section label (v6 .lbl). */
 .al-lbl {
   font-family: var(--al-mono);
-  font-size: 13px;
+  font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--al-ink-3);
+  color: var(--al-ink-4);
 }

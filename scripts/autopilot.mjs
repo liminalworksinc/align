@@ -5,6 +5,10 @@
 //   node scripts/autopilot.mjs --fast     shorter holds
 //   node scripts/autopilot.mjs --no-reset keep current state (default resets to company goal v1)
 //   node scripts/autopilot.mjs --no-agent skip Act 4 (Claude Code in tmux)
+//   AUTOPILOT_HEADLESS=1                  no windows; exits when done (status 1 if any step was missing)
+//
+// Selectors follow the v6 UI (LIM-2424): nav is Your turn / Company goal / Goals / Scenario Studio / Decisions / Work;
+// a proposal opens from its Your turn card; the owner answers with Accept / Counter / Decline.
 //
 // Act 1  Leadership ratifies and pushes company goal v2
 // Act 2  Jev re-matches captured agent sessions to the new goals (Work map)
@@ -22,7 +26,8 @@ const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Conte
 const FAST = process.argv.includes("--fast");
 const RESET = !process.argv.includes("--no-reset");
 const AGENT = !process.argv.includes("--no-agent");
-const HOLD = FAST ? 700 : 2200;
+const HEADLESS = process.env.AUTOPILOT_HEADLESS === "1";
+const HOLD = HEADLESS ? 300 : FAST ? 700 : 2200;
 const TMUX = process.env.TMUX_SESSION || "align";
 const EVIDENCE_DIR = path.join(ROOT, "sparta/walkthrough-lab/evidence");
 const PASS = {
@@ -43,7 +48,7 @@ async function api(p, init = {}) {
 // ---------- browser helpers ----------
 const browser = await puppeteer.launch({
   executablePath: CHROME,
-  headless: false,
+  headless: HEADLESS,
   defaultViewport: null,
   args: ["--no-first-run", "--no-default-browser-check", "--window-size=1440,900", "--window-position=40,40"],
 });
@@ -51,6 +56,10 @@ async function windowFor(role) {
   const ctx = await browser.createBrowserContext();
   const page = await ctx.newPage();
   page.on("pageerror", (e) => problems.push(`${role}: ${e.message}`));
+  if (HEADLESS) {
+    await page.setViewport({ width: 1440, height: 900 });
+    return page;
+  }
   const cdp = await page.createCDPSession();
   const { windowId } = await cdp.send("Browser.getWindowForTarget");
   await cdp.send("Browser.setWindowBounds", { windowId, bounds: { left: 40, top: 40, width: 1440, height: 900 } });
@@ -65,7 +74,7 @@ async function caption(page, text) {
       Object.assign(el.style, {
         position: "fixed", left: "50%", bottom: "24px", transform: "translateX(-50%)", zIndex: 99999,
         background: "rgba(20,20,28,.92)", color: "#fff", padding: "12px 20px", borderRadius: "12px",
-        font: "600 18px system-ui, sans-serif", boxShadow: "0 8px 30px rgba(0,0,0,.35)", maxWidth: "80%", textAlign: "center",
+        font: "600 18px system-ui, sans-serif", boxShadow: "0 8px 30px rgba(0,0,0,.35)", maxWidth: "80%", textAlign: "center", pointerEvents: "none",
       });
       document.body.appendChild(el);
     }
@@ -86,7 +95,7 @@ async function press(page, label, { exact = false, within = "button", nav = fals
       const norm = (s) => s.replace(/\s+/g, " ").trim();
       return [...document.querySelectorAll(within)].find((e) => {
         const t = norm(e.textContent || "");
-        return !e.disabled && (nav ? t.endsWith(label) : exact ? t === label : t.startsWith(label) || t.includes(label));
+        return !e.disabled && (nav ? t.startsWith(label) : exact ? t === label : t.startsWith(label) || t.includes(label));
       }) || null;
     },
     { timeout: 15000, polling: 250 },
@@ -173,7 +182,7 @@ await focus(L, "Act 1 · Leadership reviews the next company goal");
 await press(L, "Company goal", { nav: true });
 await sleep(HOLD);
 await focus(L, "Act 1 · Ratify & push to every team");
-await press(L, "Ratify & push to teams");
+await press(L, "Approve and send to teams");
 await focus(P, "Product sees company goal v2 land, with one dependency unconfirmed");
 await press(P, "Goals", { nav: true });
 await sleep(HOLD * 1.5);
@@ -191,26 +200,33 @@ await sleep(HOLD * 2);
 // ---- ACT 3 ----
 log("ACT 3 · Product and Security negotiate");
 await focus(P, "Act 3 · Product opens the cross-team dependency");
-await press(P, "Show impact");
-await press(P, "Product → Security");
-await focus(P, "The brief: ranked options, evidence and what could disprove it");
-await press(P, "Review priorities");
+await press(P, "Goals", { nav: true });
+await focus(P, "The brief: ranked ways forward, evidence and what could disprove it");
+await press(P, "See ways forward");
 await focus(P, "Sparta: current plan FAILS, candidate PASSES the same checks");
-await press(P, "Compare ways forward in Sparta");
+await press(P, "Test in Scenario Studio");
 await sleep(HOLD * 1.5);
-await press(P, "Attach tested plan");
+await press(P, "Attach to proposal");
 await focus(P, "Product sends the proposal, pinned to the tested plan");
-await press(P, "Send proposal");
+await press(P, "Send proposal to");
 await focus(S, "Security reviews the proposal to its own goal");
-await press(S, "Proposals", { nav: true });
+await S.reload({ waitUntil: "networkidle0" });
+await press(S, "Your turn", { nav: true });
+await press(S, "Review the proposal");
 await sleep(HOLD);
 await focus(S, "Security counters: protect P0 non-beta incidents");
-await press(S, "Counter", { exact: true });
-await focus(P, "Product acknowledges the revised terms");
-await press(P, "Proposals", { nav: true });
-await press(P, "Acknowledge revised terms");
-await focus(S, "Security ratifies its own goal revision");
-await press(S, "Ratify my goal revision");
+await press(S, "Counter", { within: "button[aria-pressed]" });
+await press(S, "Ask for changes", { exact: true });
+await focus(P, "Product accepts the revised terms");
+await P.reload({ waitUntil: "networkidle0" });
+await press(P, "Your turn", { nav: true });
+await press(P, "Review the changes");
+await press(P, "Accept Security's changes and confirm what Product will do");
+await focus(S, "Security approves its own goal revision");
+await S.reload({ waitUntil: "networkidle0" });
+await press(S, "Your turn", { nav: true });
+await press(S, "Review and approve");
+await press(S, "Approve the change to my goal");
 await focus(S, "Agreed: Security goal revised by its owner");
 await press(S, "Goals", { nav: true });
 await focus(P, "Both owners see the same agreed version");
@@ -250,12 +266,19 @@ if (AGENT) {
   await L.reload({ waitUntil: "networkidle0" });
   await press(L, "Work", { nav: true });
   await sleep(HOLD * 2);
-  await focus(L, "Evidence: the full decision record and every Sparta run");
-  await press(L, "Evidence", { nav: true });
+  await focus(L, "The decision record, then every Sparta run");
+  await press(L, "Decisions", { nav: true });
+  await press(L, "Agreement reached");
+  await sleep(HOLD * 2);
+  await press(L, "Scenario Studio", { nav: true });
   await sleep(HOLD * 2);
 }
 
 await focus(P, "Done · the people who own the goals agreed; the agent followed the agreement");
 log(problems.length ? `Finished with ${problems.length} problem(s):\n  - ${problems.join("\n  - ")}` : "Finished: all acts completed.");
+if (HEADLESS) {
+  await browser.close();
+  process.exit(problems.length ? 1 : 0);
+}
 log("Windows stay open. Close them when done (Ctrl-C here closes the browser).");
 await new Promise(() => {});

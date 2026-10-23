@@ -1,13 +1,16 @@
 import type { StateView } from "@/lib/types";
 import type { Me, Selection } from "./useAlign";
 
-export type View = "decision" | "today" | "company" | "goals" | "team" | "work" | "proposals" | "evidence";
+// v6 nav ids: "turn" (Your turn), "studio" (Scenario Studio), "decisions" (the decisions list). "decision" is the record.
+export type View = "turn" | "studio" | "decisions" | "decision" | "today" | "company" | "goals" | "team" | "work" | "proposals" | "evidence";
 export type Drawer = "brief" | "scenario" | null;
 
 /** Props every view/panel component receives from app/page.tsx. */
 export interface ViewProps {
   s: StateView;
   me: Me; // me.actor is "product" | "security" (views only render when signed in)
+  /** The workspace this page shows: the /w/<id> slug, or "northstar". Sent with writes, as act() does. */
+  workspace: string;
   selection: Selection | null;
   select: (sel: Selection) => void;
   go: (view: View) => void;

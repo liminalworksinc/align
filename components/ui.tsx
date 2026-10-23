@@ -4,21 +4,21 @@ import { customStateLabel, type Labels } from "@/lib/labels";
 
 export type Tone = "violet" | "amber" | "neutral" | "red" | "green" | "blue";
 
-// Outline pills: mono, rounded, colored border + text, no fill.
+// v6 pills: rounded, tone text + tone border + tinted tone fill. Neutral is the v6 grey pill.
 const TONES: Record<Tone, string> = {
-  violet: "text-violet-700 border-violet-700",
-  amber: "text-amber-700 border-amber-700",
-  neutral: "text-zinc-700 border-zinc-300",
-  red: "text-red-700 border-red-700",
-  green: "text-emerald-700 border-emerald-700",
-  blue: "text-sky-800 border-sky-800",
+  violet: "text-violet-700 border-violet-700 bg-violet-50",
+  amber: "text-amber-700 border-amber-700 bg-amber-50",
+  neutral: "text-zinc-700 border-zinc-200 bg-zinc-50",
+  red: "text-red-700 border-red-700 bg-red-50",
+  green: "text-emerald-700 border-emerald-700 bg-emerald-50",
+  blue: "text-sky-800 border-sky-800 bg-sky-50",
 };
 
 const ICONS: Record<Tone, string> = { violet: "◆", amber: "▲", neutral: "●", red: "✕", green: "✓", blue: "ⓘ" };
 
 export function Badge({ tone, children, icon = true }: { tone: Tone; children: ReactNode; icon?: boolean }) {
   return (
-    <span className={`inline-flex max-w-full shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[12px] leading-[1.4] tracking-[0.04em] ${TONES[tone]}`}>
+    <span className={`inline-flex max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-[3px] font-mono text-[12px] font-bold leading-[1.3] tracking-[0.04em] ${TONES[tone]}`}>
       {icon && <span aria-hidden>{ICONS[tone]}</span>}
       {children}
     </span>
@@ -79,13 +79,16 @@ export function Button({
   type?: "button" | "submit";
 }) {
   const k = {
-    primary: "border-transparent bg-violet-700 text-black hover:brightness-110",
-    secondary: "border-zinc-300 text-zinc-900 hover:border-zinc-500 hover:bg-zinc-100",
-    danger: "border-red-700 text-red-700 hover:bg-red-50",
-    ghost: "border-transparent text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900",
+    // v6 .btn.p: Liminal magenta fill, near-black text.
+    primary: "border-transparent bg-violet-700 text-black hover:brightness-112",
+    // v6 .btn.s: outlined on card-border-2, hover lifts the surface.
+    secondary: "border-zinc-300 bg-transparent text-zinc-900 hover:bg-zinc-100",
+    danger: "border-red-700 bg-transparent text-red-700 hover:bg-red-50",
+    // v6 .btn.g: no border, mid ink, brightens on hover.
+    ghost: "border-transparent bg-transparent text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900",
   }[kind];
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-[18px] text-[15px] font-semibold transition ${k} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-[18px] text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100`}>
       {children}
     </button>
   );
@@ -104,7 +107,7 @@ export function Section({ title, children, right }: { title: string; children: R
 }
 
 export function Mono({ children }: { children: ReactNode }) {
-  return <code className="rounded bg-zinc-100 px-1.5 py-px font-mono text-[13px] text-zinc-900 [overflow-wrap:anywhere]">{children}</code>;
+  return <code className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-px font-mono text-[12.5px] text-zinc-700 [overflow-wrap:anywhere]">{children}</code>;
 }
 
 export const OWNER_LABEL: Record<string, string> = {

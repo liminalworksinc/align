@@ -37,3 +37,8 @@ export function tally(s: StateView, planId: string, scenario?: SimulationRun["sc
 export function accepted(s: StateView) {
   return s.acceptances.at(-1) ?? null;
 }
+
+/** True when the date is today in the viewer's time zone. */
+export const isToday = (iso?: string | null) => !!iso && new Date(iso).toDateString() === new Date().toDateString();
+/** "Changed today" only when the goal is flagged as changed and that version was approved today. */
+export const changedToday = (g?: Goal | null) => !!g?.changed && isToday(g.approved_at);

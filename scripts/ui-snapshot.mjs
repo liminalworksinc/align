@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Rendered-UI snapshot: drives a flow over HTTP and, at each stage, signs in each role in its own
-// browser context, visits every nav view and writes <stage>-<role>-<view>.txt (document.body.innerText,
+// browser context, visits every nav view (plus the proposal review, decision record and run details when they
+// exist at that stage) and writes <stage>-<role>-<view>.txt (document.body.innerText,
 // clock times / durations / random ids masked) plus a PNG.
 //
 // Usage: node scripts/ui-snapshot.mjs <baseUrl> <outDir> [--flow northstar|custom] [--fixture file.json]
@@ -76,6 +77,52 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: true,
 const violations = [];
 let files = 0;
 
+async function capture(page, name) {
+  const text = mask(await page.evaluate(() => document.body.innerText));
+  const f = `${out}/${name}`;
+  writeFileSync(`${f}.txt`, text + "\n");
+  await page.screenshot({ path: `${f}.png` });
+  files++;
+  const m = forbid && text.match(forbid);
+  if (m) violations.push(`${name}: "${m[0]}"`);
+}
+
+// [file suffix, nav item, where to look, text the button must contain]
+const DEEP = [
+  // A proposal card (yours or another team's); never leadership's company-goal or launch card.
+  ["review", "Your turn", 'section[aria-label="Waiting on you"] button, section[aria-label="Waiting on others"] button', /(Review the proposal|Review the changes|Review and approve|Propose a change|Open)$/],
+  ["record", "Decisions", "main button", /Approved by /],
+  ["run-details", "Scenario Studio", "main button", /^Run details$/],
+];
+
+/** Click a nav item, then the first enabled button in `within` whose text matches; false when there is none. */
+async function openDeep(page, nav, within, match) {
+  const clicked = await page.evaluate(
+    (nav) => {
+      const norm = (t) => t.replace(/\s+/g, " ").trim();
+      const item = [...document.querySelectorAll("nav[aria-label=Main] button")].find((b) => !b.disabled && norm(b.innerText).startsWith(nav));
+      if (!item) return false;
+      item.click();
+      return true;
+    },
+    nav,
+  );
+  if (!clicked) return false;
+  await new Promise((r) => setTimeout(r, 800));
+  return page.evaluate(
+    (within, src) => {
+      const re = new RegExp(src);
+      const norm = (t) => t.replace(/\s+/g, " ").trim();
+      const el = [...document.querySelectorAll(within)].find((b) => !b.disabled && re.test(norm(b.innerText)));
+      if (!el) return false;
+      el.click();
+      return true;
+    },
+    within,
+    match.source,
+  );
+}
+
 async function shoot(stage, roles) {
   mkdirSync(out, { recursive: true });
   const { hostname } = new URL(BASE);
@@ -91,16 +138,24 @@ async function shoot(stage, roles) {
     const n = (await page.$$("nav[aria-label=Main] button")).length;
     for (let i = 0; i < n; i++) {
       const btn = (await page.$$("nav[aria-label=Main] button"))[i];
-      const label = (await btn.$eval("span.font-semibold", (e) => e.innerText)).replace(/\W+/g, "-").toLowerCase();
+      // The nav label: pre-v6 nav marked it span.font-semibold; the v6 rail (LIM-2424) bolds the whole button, so take
+      // the first span's first line (a count badge or a "no sandbox" note never comes first).
+      const label = (
+        await btn.evaluate((b) => (b.querySelector("span.font-semibold") ?? b.querySelector("span span") ?? b).innerText.split("\n")[0].trim())
+      )
+        .replace(/\W+/g, "-")
+        .toLowerCase();
       await btn.click();
       await new Promise((r) => setTimeout(r, 800));
-      const text = mask(await page.evaluate(() => document.body.innerText));
-      const f = `${out}/${stage}-${role}-${label}`;
-      writeFileSync(`${f}.txt`, text + "\n");
-      await page.screenshot({ path: `${f}.png` });
-      files++;
-      const m = forbid && text.match(forbid);
-      if (m) violations.push(`${stage}-${role}-${label}: "${m[0]}"`);
+      await capture(page, `${stage}-${role}-${label}`);
+    }
+    // Screens a nav item doesn't land on, each captured when it exists at this stage (LIM-2424 v6 review):
+    // the proposal review (opened from its Your turn card), the decision record (Decisions -> the agreed item) and a
+    // run's details (Scenario Studio -> Run details).
+    for (const [name, nav, within, match] of DEEP) {
+      if (!(await openDeep(page, nav, within, match))) continue;
+      await new Promise((r) => setTimeout(r, 800));
+      await capture(page, `${stage}-${role}-${name}`);
     }
     await ctx.close();
   }

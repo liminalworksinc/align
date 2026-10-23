@@ -1,0 +1,95 @@
+A
+Align
+by Liminal
+Your turn
+Goals
+Scenario Studio
+Decisions
+Work
+CONNECTED
+Sparta
+Practice tests · 27 runs
+Alike
+Team decision memory · 1 earlier decision
+PD
+Product Director
+owns Product’s goal v3
+Northstar Security · Q4 2026
+PD
+Product Director
+Product · Owner
+Sign out
+◎
+COMPANY GOAL
+Q4 2026
+Launch the beta of our new monitoring product.
+THE CEO'S NEW REQUIREMENT
+No new requirement yet
+YOUR GOAL · V3
+Ship the beta and clear anything blocking the launch.
+Work still on the old plan
+
+No approved decision yet, so nothing to move.
+
+Keep, re-scope or stop, per item
+Needs a decision field on work items. Not built yet.
+Nobody is notified automatically.
+Copy a nudge for the owner
+COMPANY GOAL → TEAM GOALS → WORK
+COMPANY · V1
+Launch the beta of our new monitoring product.
+PRODUCT
+v3
+Ship the beta and clear anything blocking the launch.
+#1
+Set up usage tracking for the beta
+in progress
+#2
+Beta customer onboarding checklist
+in progress
+#3
+Ticket dashboard polish
+queued
+SECURITY
+v1
+Handle customer and security issues quickly and correctly.
+#1
+Tag and answer every ticket, oldest first
+running
+#2
+Investigate the critical security issue (ticket #1, off-limits)
+running
+#3
+Handle beta customers' issues (not part of Security's current target)
+not prioritized
+Where AI agent work is going
+
+AI coding sessions (Claude Code and Codex) are recorded automatically and linked to the approved goal each one seems to serve. Each link is only a guess until that goal's owner confirms it.
+
+Company v1
+Product v3
+Security v1
+Not linked to a goal
+
+No AI coding sessions yet. They show up here once session recording is turned on.
+
+DETAILS
+CEO
+v1
+
+Launch the beta of our new monitoring product.
+
+GOAL
+OWNER
+CEO
+VERSION
+v1
+WHO CAN EDIT
+Set by CEO · view only
+HOW SUCCESS IS MEASURED
+Product says the beta is ready to launch
+WHERE THIS COMES FROM
+●
+Confirmed
+Approved by CEO at <TIME>
+Review the conflict with Security

@@ -35,3 +35,10 @@ export function recordFacts(s: StateView, acc: Acceptance) {
   const lastCounter = s.proposals.find((p) => p.id === acc.proposal_id)?.counter_versions.at(-1);
   return { target, conditions: lastCounter?.conditions?.trim() ?? "" };
 }
+
+/** Northstar: the acceptance was approved with stale evidence, acknowledged as untested (the server's ratify_untested). */
+export function approvedStale(s: StateView, acc: Acceptance): boolean {
+  return s.audit.some((a) => a.action === "ratify_untested" && a.target === acc.proposal_id);
+}
+export const STALE_APPROVAL_NOTE =
+  "Approved without a passing test: the sandbox test no longer matched this plan, and the owner acknowledged that before approving.";

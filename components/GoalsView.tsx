@@ -1,240 +1,148 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { Goal, Measure } from "@/lib/types";
+import { companyMeasureId, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
+import type { StateView } from "@/lib/types";
+import { agreementStatus } from "./launch";
 import type { ViewProps } from "./props";
 import { ProofStrip } from "./ProofStrip";
-import { comparablePair, currentGoal } from "./select";
-import { EditTag, MissingGoal, RING, TeamLens, VersionTag, depRelation, isSel, workFor } from "./TeamLens";
-import { Badge, Button, STATE_LABEL, StateBadge } from "./ui";
+import { activeProposal, changedToday, currentGoal, priorVersion } from "./select";
+import { MissingGoal, depRelation, workFor } from "./TeamLens";
+import { Button, STATE_LABEL } from "./ui";
+import { Chip, H1, Lbl, NODE, Pill, Row, Seg, nodeState, type PillTone } from "./v6/kit";
 
-type Lens = "company" | "team" | "me";
-const LENS_LABEL: Record<Lens, string> = { company: "Company", team: "Teams", me: "My goal" };
-const LINE = "border-zinc-300";
+// v6 "Goals": the company node, then the two team nodes with the dependency between them. The lens dims what
+// doesn't connect to the chosen team; the strip under the tree explains the selected node and offers one next step.
 
-function MeasureRow({ m, changed, conflict }: { m: Measure; changed?: boolean; conflict?: boolean }) {
-  return (
-    <li className={`rounded-md px-2.5 py-1 text-[15px] ${changed ? "bg-amber-50 ring-1 ring-amber-300" : ""}`}>
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="flex-1 text-zinc-900">{m.text}</span>
-      </div>
-      <div className="mt-1 flex flex-wrap gap-1.5 empty:hidden">
-        {changed && <Badge tone="amber">Changed today</Badge>}
-        {conflict && <Badge tone="amber">Clashes with the CEO&apos;s new requirement</Badge>}
-        {m.inherited_from && <Badge tone="neutral" icon={false}>From the CEO&apos;s goal</Badge>}
-        {m.verifiable_by === "sparta" && <span className="text-[13px] text-zinc-500">Can be checked in a practice test</span>}
-      </div>
-    </li>
-  );
+type Lens = "all" | "product" | "security";
+type Sel = "ceo" | "product" | "security" | "dep";
+
+/** Where the dependency stands, from state only: agreed, a proposal in flight, or unresolved. */
+function depStage(s: StateView): "accepted" | "pending" | "open" {
+  if (s.acceptances.length) return "accepted";
+  const p = activeProposal(s);
+  if (p && p.state !== "RATIFIED") return "pending";
+  return "open";
 }
 
-function CeoCard({ props, g, only }: { props: ViewProps; g: Goal; only?: string }) {
-  const onClick = () => {
-    props.select({ kind: "goal", id: g.id });
-    props.mark("ceo_change_viewed");
-  };
-  return (
-    <button
-      onClick={onClick}
-      className={`w-full rounded-xl bg-white px-5 py-4 text-left ring-1 ring-zinc-300 hover:ring-zinc-400 ${isSel(props.selection, "goal", g.id) ? RING : ""}`}
-    >
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <span className="text-[15px] font-bold text-zinc-600">{g.owner_name}</span>
-        <Badge tone="neutral">Set by CEO · view only</Badge>
-        <Badge tone="neutral" icon={false}>{g.version}</Badge>
-      </div>
-      <p className="mb-2 text-[19px] font-semibold leading-snug text-zinc-900">{g.objective}</p>
-      <ul className="space-y-0.5">
-        {g.measures
-          .filter((m) => !only || m.id === only)
-          .map((m) => (
-            <MeasureRow key={m.id} m={m} changed={m.id === "KR2" && g.changed} />
-          ))}
-      </ul>
-    </button>
-  );
+function depPill(s: StateView, L: Labels): { tone: PillTone; text: string } {
+  const st = depStage(s);
+  if (st === "accepted") return { tone: "white", text: L.northstar ? STATE_LABEL.ACCEPTED : agreementStatus(s.acceptances.at(-1)) };
+  if (st === "pending") return { tone: "violet", text: STATE_LABEL.PROPOSED };
+  return { tone: "amber", text: STATE_LABEL[depRelation(s)?.status ?? "UNKNOWN"] ?? STATE_LABEL.UNKNOWN };
 }
 
-function TeamCard({ props, owner, allWork }: { props: ViewProps; owner: "product" | "security"; allWork?: boolean }) {
-  const { s, me, selection, select } = props;
+function TeamNode({ props, L, owner, sel, dim, onPick }: { props: ViewProps; L: Labels; owner: "product" | "security"; sel: boolean; dim: boolean; onPick: () => void }) {
+  const { s, me } = props;
   const g = currentGoal(s, owner);
-  if (!g) return <MissingGoal owner={owner} />;
-  const unresolved = depRelation(s)?.status === "UNKNOWN";
-  const work = workFor(s, g).slice(0, allWork ? undefined : 3);
+  if (!g) return <MissingGoal owner={L.northstar ? owner : L.team[owner]} />;
+  const prior = priorVersion(s, g);
+  const conflictId = conflictMeasureId(s);
+  const open = depStage(s) === "open";
+  const work = workFor(s, g).slice(0, 3);
+  const updated = owner === "security" && s.acceptances.length > 0;
   return (
-    <article className={`flex h-full flex-col rounded-xl bg-white ring-1 ring-zinc-300 ${isSel(selection, "goal", g.id) ? RING : ""}`}>
-      <button onClick={() => select({ kind: "goal", id: g.id })} className="flex flex-1 flex-col justify-start rounded-t-xl p-4 text-left hover:bg-zinc-50">
-        <div className="mb-1 text-[16px] font-bold text-zinc-900">{g.owner_name}</div>
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          <VersionTag s={s} g={g} />
-          <EditTag g={g} me={me} />
-        </div>
-        <p className="mb-3 text-[17px] font-semibold leading-snug text-zinc-900">{g.objective}</p>
-        <ul className="space-y-1">
-          {g.measures.map((m) => (
-            <MeasureRow key={m.id} m={m} conflict={m.id === "S-M1" && unresolved} />
-          ))}
-        </ul>
-      </button>
-      <div className="border-t border-zinc-200 p-3">
-        <div className="mb-1 px-1 al-lbl">Work in priority order</div>
-        {work.length ? (
-          <ol className="space-y-1">
-            {work.map((w, i) => (
-              <li key={w.id}>
-                <button
-                  onClick={() => select({ kind: "work", id: w.id })}
-                  className={`flex w-full items-baseline gap-2 rounded-md px-2 py-1.5 text-left text-[15px] hover:bg-zinc-50 ${isSel(selection, "work", w.id) ? RING : ""}`}
-                >
-                  <span className="font-mono text-[13px] text-zinc-500">#{i + 1}</span>
-                  <span className="flex-1 text-zinc-900">{w.task}</span>
-                  <span className="shrink-0 text-[13px] text-zinc-500">{w.observed_status}</span>
-                </button>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="px-1 text-[15px] text-zinc-500">No work linked to this goal yet.</p>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function DependencyButton({ props }: { props: ViewProps }) {
-  const rel = depRelation(props.s);
-  if (!rel) return <div className={`w-full border-t-2 border-dashed ${LINE}`} aria-hidden />;
-  const open = rel.status === "UNKNOWN";
-  return (
-    <>
-      <div className={`absolute inset-x-0 top-[3.25rem] border-t-2 ${open ? "border-dashed border-amber-400" : LINE}`} aria-hidden />
+    <div className={`relative ${NODE} ${updated ? "border-[var(--al-ink)]" : "border-zinc-200"} ${nodeState(sel, dim)}`}>
+      {/* The whole card selects the node: one empty button over it (no list or block content inside a button). */}
       <button
-        onClick={() => props.select({ kind: "relation", id: rel.id })}
-        aria-label={`Product needs Security: ${rel.label}. Status: ${STATE_LABEL[rel.status] ?? rel.status}`}
-        className={`relative z-10 mx-2 flex flex-col items-center gap-1.5 rounded-lg px-2.5 py-2 text-center ${open ? "ring-1 ring-amber-300 [background:linear-gradient(var(--al-warn-bg),var(--al-warn-bg)),var(--al-surface)]" : "bg-white ring-1 ring-zinc-300"} hover:brightness-125 ${isSel(props.selection, "relation", rel.id) ? RING : ""}`}
-      >
-        <span className="al-lbl">Product needs Security</span>
-        <span className="text-[14px] font-semibold leading-snug text-zinc-900">{rel.label}</span>
-        {rel.status === "ACCEPTED" ? <Badge tone="neutral">Agreed by Security</Badge> : <StateBadge state={rel.status} />}
-      </button>
-    </>
-  );
-}
-
-function Leg({ side, label }: { side: "left" | "right"; label: string }) {
-  return (
-    <div className="relative">
-      <div className={`absolute top-5 border-t-2 ${LINE} ${side === "left" ? "left-1/2 right-0" : "left-0 right-1/2"}`} />
-      <div className={`absolute bottom-0 left-1/2 top-5 border-l-2 ${LINE}`} />
-      <span className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 text-[11px] leading-none text-zinc-400">▼</span>
-      <span className="absolute left-1/2 top-6 ml-2 text-[13px] font-medium text-zinc-500">{label}</span>
-    </div>
-  );
-}
-
-/** Elbow connectors from the CEO card to both team cards, aligned to the team-row grid. */
-function InheritConnectors({ props }: { props: ViewProps }) {
-  const label = (id: string) => props.s.relations.find((r) => r.id === id)?.label ?? "follows";
-  return (
-    <div className="relative grid h-12 grid-cols-[1fr_184px_1fr]" aria-hidden>
-      <div className={`absolute left-1/2 top-0 h-5 border-l-2 ${LINE}`} />
-      <Leg side="left" label={label("r-ceo-product")} />
-      <div className="relative">
-        <div className={`absolute inset-x-0 top-5 border-t-2 ${LINE}`} />
+        type="button"
+        onClick={onPick}
+        aria-pressed={sel}
+        aria-label={`${L.team[owner]} goal ${g.version}`}
+        className="absolute inset-0 z-10 rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Lbl>
+          {L.team[owner]} · {me.actor === owner ? "you" : "peer"}
+        </Lbl>
+        <Chip>{prior ? `${prior.version} → ${g.version}` : g.version}</Chip>
       </div>
-      <Leg side="right" label={label("r-ceo-security")} />
-    </div>
-  );
-}
-
-function Banner({ props }: { props: ViewProps }) {
-  const { s } = props;
-  const acc = s.acceptances.at(-1);
-  if (acc)
-    return (
-      <div className="al-in flex items-center gap-3.5 rounded-xl border border-zinc-300 bg-white px-[18px] py-3 text-[17px] text-zinc-900">
-        <Badge tone="neutral">Approved</Badge>
-        <span>Agreement reached: Security approved its updated goal ({acc.accepted_version}), and Product accepted Security&apos;s changes.</span>
-      </div>
-    );
-  if (depRelation(s)?.status !== "UNKNOWN") return null;
-  const oldMeasure = currentGoal(s, "security")?.measures.find((m) => m.id === "S-M1");
-  const kr2 = currentGoal(s, "ceo")?.measures.find((m) => m.id === "KR2");
-  const { baseline } = comparablePair(s);
-  const passed = baseline?.checks.filter((c) => c.passed).length ?? 0;
-  return (
-    <div className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-3.5 rounded-xl border border-zinc-200 bg-zinc-50 px-[18px] py-3" role="status">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="al-lbl">What Security&apos;s AI agents aim for now</span>
-        <span className="text-[17px] text-zinc-900">{oldMeasure?.text ?? "Unknown: Security hasn't shared its target"}</span>
-        {baseline && (
-          <span className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-zinc-500">
-            <StateBadge state={baseline.verdict} />
-            Current plan: oldest tickets first · {passed} of {baseline.checks.length} independent checks passed in the practice test (Sparta sandbox)
-          </span>
+      <span className="text-[17px] font-semibold leading-[1.3]">{g.objective}</span>
+      <ul className="flex flex-col gap-1">
+        {g.measures.map((m) => (
+          <li key={m.id} className="flex flex-wrap items-baseline gap-2 text-[13.5px] text-zinc-600">
+            <span className="min-w-0 flex-1">{m.text}</span>
+            {owner === "security" && m.id === conflictId && open && <Pill tone="amber" small>{L.northstar ? `Clashes with ${companyMeasureId(s)}` : "In conflict"}</Pill>}
+          </li>
+        ))}
+      </ul>
+      <div className="border-t border-zinc-200 pt-2">
+        {work.length ? (
+          work.map((w, i) => (
+            <Row key={w.id} n={`#${i + 1}`} status={w.observed_status} statusTone={w.observed_status === "not prioritized" ? "amber" : undefined}>
+              {w.task}
+            </Row>
+          ))
+        ) : (
+          <p className="py-2 text-[14px] text-zinc-500">No work linked to this goal yet.</p>
         )}
       </div>
-      <span aria-label="does not match" className="font-mono text-[20px] text-zinc-500">
-        ≠
-      </span>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="al-lbl !text-amber-700">{s.pushes.at(-1) ? `Company goal ${s.pushes.at(-1)!.version}` : "The CEO"} now requires</span>
-        <span className="line-clamp-2 text-[17px] text-zinc-900" title={kr2?.text}>
-          {kr2?.text ?? "Unknown"}
-        </span>
-      </div>
-      <Button
-        kind="secondary"
-        onClick={() => {
-          const ceo = currentGoal(s, "ceo");
-          if (ceo) props.select({ kind: "goal", id: ceo.id });
-          props.mark("ceo_change_viewed");
-        }}
-      >
-        Show impact
-      </Button>
     </div>
   );
 }
 
-function Ladder({ props }: { props: ViewProps }) {
-  const ceo = currentGoal(props.s, "ceo");
-  return (
-    <div>
-      <div className="mx-auto max-w-[560px]">{ceo ? <CeoCard props={props} g={ceo} /> : <MissingGoal owner="ceo" />}</div>
-      <InheritConnectors props={props} />
-      <div className="grid grid-cols-[1fr_184px_1fr] items-stretch">
-        <TeamCard props={props} owner="product" />
-        <div className="relative flex items-start justify-center pt-5">
-          <DependencyButton props={props} />
-        </div>
-        <TeamCard props={props} owner="security" />
-      </div>
-    </div>
-  );
-}
+function selInfo(props: ViewProps, L: Labels, sel: Sel) {
+  const { s, me, go, openDrawer } = props;
+  const st = depStage(s);
+  const acc = s.acceptances.at(-1);
+  const ceo = currentGoal(s, "ceo");
+  const kr = ceo?.measures.find((m) => m.id === companyMeasureId(s));
+  const sec = currentGoal(s, "security");
+  const oldMeasure = sec?.measures.find((m) => m.id === conflictMeasureId(s));
+  const pill = depPill(s, L);
+  // The one next step per stage. Ways forward is Northstar's brief; custom has no generated options, so it goes to Proposals.
+  const forward = L.northstar
+    ? { cta: "See ways forward", run: () => openDrawer("brief") }
+    : { cta: me.actor === "product" ? "Open proposals" : "See proposals", run: () => go("proposals") };
+  const record = L.northstar ? { cta: "Open record", run: () => go("evidence") } : { cta: "Open proposals", run: () => go("proposals") };
+  const next = st === "accepted" ? record : st === "pending" ? { cta: "Open proposal", run: () => go("proposals") } : forward;
 
-function MeLens({ props }: { props: ViewProps }) {
-  const actor = props.me.actor;
-  const ceo = currentGoal(props.s, "ceo");
-  if (!actor) return <MissingGoal owner="you" />;
-  if (actor === "leadership")
-    return <div className="mx-auto max-w-[620px]">{ceo ? <CeoCard props={props} g={ceo} /> : <MissingGoal owner="ceo" />}</div>;
-  return (
-    <div className="mx-auto flex max-w-[620px] flex-col gap-3">
-      <div className="al-lbl">The CEO&apos;s new requirement your goal depends on</div>
-      {ceo ? <CeoCard props={props} g={ceo} only={ceo.measures.some((m) => m.id === "KR2") ? "KR2" : undefined} /> : <MissingGoal owner="ceo" />}
-      <div className="flex justify-center" aria-hidden>
-        <div className={`h-8 border-l-2 ${LINE}`} />
-      </div>
-      <TeamCard props={props} owner={actor} allWork />
-    </div>
-  );
+  if (sel === "ceo")
+    return {
+      tone: (ceo?.changed ? "amber" : "grey") as PillTone,
+      text: ceo?.changed ? (changedToday(ceo) ? "changed today" : "changed") : (ceo?.version ?? "—"),
+      title: kr?.text ?? ceo?.objective ?? `No current goal has been shared for ${L.team.ceo}.`,
+      sub: `Set by ${L.person.ceo}. Read-only for both teams; ${L.team.security} inherits it and ${L.team.product} depends on it.`,
+      ...next,
+    };
+  if (sel === "product") {
+    const g = currentGoal(s, "product");
+    return {
+      tone: "grey" as PillTone,
+      text: g?.version ?? "—",
+      title: g ? `${L.team.product} owns: ${g.objective}` : `No current goal has been shared for ${L.team.product}.`,
+      sub: `Depends on ${L.team.security}: ${depRelation(s)?.label ?? "no dependency recorded"}.`,
+      cta: "Open dependency",
+      run: undefined,
+    };
+  }
+  if (sel === "security")
+    return {
+      tone: (st === "accepted" ? "white" : "amber") as PillTone,
+      text: st === "accepted" ? `${acc?.accepted_version ?? sec?.version} ${L.northstar ? STATE_LABEL.ACCEPTED.toLowerCase() : ""}`.trim() : "in conflict",
+      title: st === "accepted" ? `${poss(L.team.security)} goal ${sec?.version}: ${sec?.objective}` : `${L.team.security} is measured on: ${oldMeasure?.text ?? "not shared"}`,
+      sub: st === "accepted" ? `Approved by ${L.person.security}. The earlier version is kept as superseded.` : `That measure doesn't cover what ${L.person.ceo} now requires.`,
+      ...(st === "accepted" ? record : next),
+    };
+  return {
+    tone: pill.tone,
+    text: pill.text,
+    title: depRelation(s)?.label ?? `${L.team.product} depends on ${L.team.security}`,
+    sub:
+      st === "accepted"
+        ? `${depPill(s, L).text}: both owners signed off.`
+        : st === "pending"
+          ? `A proposal is in progress between ${L.team.product} and ${L.person.security}.`
+          : `Work can complete while the goal is still not met: ${poss(L.team.security)} measure hasn't changed.`,
+    ...next,
+  };
 }
 
 export function GoalsView(props: ViewProps) {
-  const [lens, setLens] = useState<Lens>("company");
-  const accepted = props.s.acceptances.length > 0;
-  const { mark } = props;
+  const { s, mark, select } = props;
+  const L = labelsFor(s);
+  const [lens, setLens] = useState<Lens>("all");
+  const [sel, setSel] = useState<Sel>("dep");
+  const accepted = s.acceptances.length > 0;
   const sawAccepted = useRef(false);
   useEffect(() => {
     if (accepted && !sawAccepted.current) {
@@ -243,33 +151,147 @@ export function GoalsView(props: ViewProps) {
     }
   }, [accepted, mark]);
 
+  const ceo = currentGoal(s, "ceo");
+  const rel = depRelation(s);
+  const pill = depPill(s, L);
+  const st = depStage(s);
+  const krId = companyMeasureId(s);
+  const dimP = lens === "security";
+  const dimS = lens === "product";
+
+  const pick = (next: Sel) => {
+    setSel(next);
+    if (next === "ceo" && ceo) {
+      select({ kind: "goal", id: ceo.id });
+      mark("ceo_change_viewed");
+    } else if (next === "dep" && rel) select({ kind: "relation", id: rel.id });
+    else if (next === "product" || next === "security") {
+      const g = currentGoal(s, next);
+      if (g) select({ kind: "goal", id: g.id });
+    }
+  };
+  const setLensAndSel = (l: Lens) => {
+    setLens(l);
+    if (l !== "all") pick(l);
+  };
+
+  /** Which team inherits a company measure, for the chip arrow ("KR2 · … → Security"). */
+  const inheritor = (mId: string) =>
+    (["product", "security"] as const).find((o) => currentGoal(s, o)?.measures.some((m) => m.inherited_from === mId)) ??
+    (mId === krId ? "security" : undefined); // the requirement in conflict is, by construction, the owning team's
+
+  const info = selInfo(props, L, sel);
+  const line = st === "accepted" ? "border-solid border-zinc-700" : st === "pending" ? "border-dashed border-violet-500" : "border-dashed border-amber-500";
+  const depBorder = st === "accepted" ? "border-[var(--al-ink)]" : st === "pending" ? "border-violet-500" : "border-amber-500";
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em]">
-          {depRelation(props.s)?.status === "UNKNOWN" ? "Your launch depends on a Security priority that hasn’t changed." : "How the goals connect"}
-        </h1>
-        <div role="group" aria-label="Choose a view" className="inline-flex gap-0.5 rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
-          {(["company", "team", "me"] as const).map((l) => (
-            <button
-              key={l}
-              onClick={() => setLens(l)}
-              aria-pressed={lens === l}
-              className={`min-h-9 rounded-md px-3.5 text-[14px] capitalize transition ${lens === l ? "bg-zinc-100 text-zinc-900" : "text-zinc-500 hover:text-zinc-900"}`}
-            >
-              {LENS_LABEL[l]}
-            </button>
-          ))}
+    <div className="flex flex-col gap-[18px]">
+      <div className="flex flex-wrap items-center gap-3">
+        <H1 sub="Select a team to see only what connects to it.">Goals</H1>
+        <span className="ml-auto">
+          <Seg
+            label="Lens"
+            value={lens}
+            onChange={setLensAndSel}
+            options={[
+              { id: "all", label: "Everything" },
+              { id: "product", label: L.team.product },
+              { id: "security", label: L.team.security },
+            ]}
+          />
+        </span>
+      </div>
+
+      <div className="flex justify-center">
+        {ceo ? (
+          <button type="button" onClick={() => pick("ceo")} aria-pressed={sel === "ceo"} className={`${NODE} max-w-[720px] border-zinc-200 ${nodeState(sel === "ceo", false)}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Lbl>
+                {L.team.ceo} · {L.person.ceo}
+              </Lbl>
+              <Chip>read-only</Chip>
+              <Chip>{ceo.version}</Chip>
+              {ceo.changed && (
+                <span className="ml-auto">
+                  <Pill tone="amber" small>
+                    {`${ceo.measures.some((m) => m.id === krId) ? `${L.northstar ? krId : "Requirement"} changed` : "Changed"}${changedToday(ceo) ? " today" : ""}`}
+                  </Pill>
+                </span>
+              )}
+            </div>
+            <span className="text-[18px] font-semibold leading-[1.3]">{ceo.objective}</span>
+            <div className="flex flex-wrap gap-1.5">
+              {ceo.measures.map((m) => {
+                const to = inheritor(m.id);
+                return (
+                  <Chip key={m.id} tone={m.id === krId && ceo.changed ? "amber" : undefined}>
+                    {L.northstar ? `${m.id} · ` : ""}
+                    {m.text}
+                    {to ? ` → ${L.team[to]}` : ""}
+                  </Chip>
+                );
+              })}
+            </div>
+          </button>
+        ) : (
+          <MissingGoal owner={L.northstar ? "ceo" : L.team.ceo} />
+        )}
+      </div>
+
+      {/* Connectors: from the company node down to both teams; each leg dims with its team. */}
+      <div className="grid h-7 grid-cols-[1fr_200px_1fr]" aria-hidden>
+        <div className={`relative transition-opacity ${dimP ? "opacity-30" : ""}`}>
+          <div className="absolute left-1/2 right-0 top-0 border-t-2 border-zinc-300" />
+          <div className="absolute bottom-0 left-1/2 top-0 border-l-2 border-zinc-300" />
+        </div>
+        <div className="relative">
+          <div className="absolute inset-x-0 top-0 border-t-2 border-zinc-300" />
+          <div className="absolute -top-4 left-1/2 h-4 border-l-2 border-zinc-300" />
+        </div>
+        <div className={`relative transition-opacity ${dimS ? "opacity-30" : ""}`}>
+          <div className="absolute left-0 right-1/2 top-0 border-t-2 border-zinc-300" />
+          <div className="absolute bottom-0 left-1/2 top-0 border-l-2 border-zinc-300" />
         </div>
       </div>
 
-      <Banner props={props} />
+      <div className="grid grid-cols-[1fr_200px_1fr] items-stretch">
+        <TeamNode props={props} L={L} owner="product" sel={sel === "product"} dim={dimP} onPick={() => pick("product")} />
+        <div className="relative flex justify-center pt-[18px]">
+          <div className={`absolute inset-x-0 top-[46px] border-t-2 ${line}`} aria-hidden />
+          {rel ? (
+            <button
+              type="button"
+              onClick={() => pick("dep")}
+              aria-pressed={sel === "dep"}
+              aria-label={`${L.team.product} depends on ${L.team.security}: ${rel.label}. Status: ${pill.text}`}
+              className={`${NODE} relative z-10 h-fit w-[176px] items-center px-3 py-3.5 text-center ${depBorder} ${nodeState(sel === "dep", false)}`}
+            >
+              <Lbl>
+                {L.team.product} → {L.team.security}
+              </Lbl>
+              <span className="text-[14px] font-semibold leading-[1.3]">{rel.label}</span>
+              <Pill tone={pill.tone}>{pill.text}</Pill>
+              <span className="text-[12.5px] text-zinc-500">{st === "accepted" ? `goal ${currentGoal(s, "security")?.version ?? ""}` : st === "pending" ? "proposal in progress" : "select to see why"}</span>
+            </button>
+          ) : (
+            <span className="relative z-10 mt-6 bg-[var(--al-bg)] px-2 text-[12.5px] text-zinc-500">No dependency recorded</span>
+          )}
+        </div>
+        <TeamNode props={props} L={L} owner="security" sel={sel === "security"} dim={dimS} onPick={() => pick("security")} />
+      </div>
 
-      {lens === "company" && <Ladder props={props} />}
-      {lens === "team" && <TeamLens {...props} embedded />}
-      {lens === "me" && <MeLens props={props} />}
+      <div className="al-in flex w-full max-w-[1000px] items-start gap-3.5 self-center rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4" role="status">
+        <Pill tone={info.tone}>{info.text}</Pill>
+        <div className="min-w-0 flex-1">
+          <b className="text-zinc-900">{info.title}</b>
+          <div className="text-[14px] text-zinc-500">{info.sub}</div>
+        </div>
+        <span className="self-center">
+          <Button onClick={info.run ?? (() => pick("dep"))}>{info.cta}</Button>
+        </span>
+      </div>
 
-      {accepted && <ProofStrip s={props.s} />}
+      {accepted && <ProofStrip s={s} />}
     </div>
   );
 }
