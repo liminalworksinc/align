@@ -42,10 +42,13 @@ export async function resetWorkspace(ws: CustomWsId, who: Session) {
   const { confirm: _confirm, ...saved } = (await readScenarioFile(ws)) as Record<string, unknown>;
   void _confirm;
   const { input, input_sha256 } = validate(saved);
+  // Revoke first, as the agent-token DELETE does: the epoch is in auth.json under its own lock, so a failure between
+  // the two writes leaves either nothing changed or every token revoked, never a live token whose consent the
+  // rebuilt state dropped (Sean's #6 review).
+  await bumpAgentEpoch(ws);
   await replaceWorkspaceState(ws, (current) => {
     const next = buildCustomState(input, now(), input_sha256);
     next.audit = [...current.audit, { id: id("a"), actor: who.actor, session_id: who.sid, action: "reset", target: "workspace", at: now() }];
     return next;
   });
-  await bumpAgentEpoch(ws);
 }

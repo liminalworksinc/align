@@ -969,7 +969,19 @@ try {
       eMint.status === 200 && eFail.status >= 500 && mcpAfterFail.status === 200 && capAfterFail.status === 200,
       `mint=${eMint.status} delete=${eFail.status} mcp=${mcpAfterFail.status} capture=${capAfterFail.status}`,
     );
-  } else check("LE1 skipped: needs chflags (macOS) to make the epoch bump fail", true);
+    // Restart has the same two writes (rebuilt state drops consents; the epoch bump revokes tokens): a Restart whose
+    // revoke fails must change nothing either.
+    spawnSync("chflags", ["uchg", authFile]);
+    const rFail = await call("POST", "/api/reset", { cookie: sa.leadership, body: { confirm: "reset" } });
+    spawnSync("chflags", ["nouchg", authFile]);
+    for (const f of readdirSync(path.join(wsRoot, a))) if (/^auth\.json\..+\.tmp$/.test(f)) rmSync(path.join(wsRoot, a, f), { force: true });
+    const [mcpAfterReset, capAfterReset] = [await mcpCall(eMint.json?.token, "align_list_goals"), await eCap("le-agent-3")];
+    check(
+      "LE4 a Restart whose revoke fails changes nothing: the token and its consent both still work (never a live token with its consent gone)",
+      rFail.status >= 500 && mcpAfterReset.status === 200 && capAfterReset.status === 200,
+      `reset=${rFail.status} mcp=${mcpAfterReset.status} capture=${capAfterReset.status}`,
+    );
+  } else check("LE1 and LE4 skipped: need chflags (macOS) to make the epoch bump fail", true);
   const eOk = await call("DELETE", "/api/workspaces/agent-token", { cookie: sa.leadership, body: {} });
   const [mcpAfterOk, capAfterOk] = [await mcpCall(eMint.json?.token, "align_list_goals"), await eCap("le-agent-2")];
   check("LE2 a successful disconnect revokes the token (MCP and capture -> 401)", eOk.status === 200 && mcpAfterOk.status === 401 && capAfterOk.status === 401, `${eOk.status} ${mcpAfterOk.status} ${capAfterOk.status}`);
