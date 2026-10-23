@@ -1,6 +1,7 @@
 "use client";
 import { type ReactNode } from "react";
 import { Button } from "@/components/ui";
+import { ConflictSentence } from "@/components/v6/ConflictSentence";
 
 // The two-team conflict form, shared by /setup (replace the demo workspace) and /new (create a workspace).
 // Every field maps 1:1 to the scenario schema in lib/scenario.ts. Operator text is rendered as plain text only.
@@ -88,7 +89,8 @@ export function issuesFrom(list: { path: string; message: string }[]): Issues {
   return next;
 }
 
-export const field = "w-full rounded-[10px] border border-zinc-300 bg-white px-3 py-2.5 text-[16px] text-zinc-900 focus:border-violet-700 focus:outline-none";
+export const field =
+  "w-full rounded-[10px] border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-[16px] leading-[1.5] text-zinc-900 focus:outline-2 focus:outline-offset-1 focus:outline-[var(--al-focus)]";
 
 export function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string[]; children: ReactNode }) {
   return (
@@ -108,8 +110,8 @@ export function Field({ label, hint, error, children }: { label: string; hint?: 
 function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
     <section className="mb-6 rounded-[14px] border border-zinc-200 bg-white p-5">
-      <h2 className="mb-4 text-[20px] font-semibold text-zinc-900">
-        {n}. {title}
+      <h2 className="mb-4 flex items-baseline gap-2.5 text-[20px] font-semibold text-zinc-900">
+        <span className="font-mono text-[12px] text-zinc-500">{n}.</span> {title}
       </h2>
       {children}
     </section>
@@ -196,6 +198,16 @@ export function ScenarioFields({
 
   return (
     <>
+    <section aria-label="The conflict in one sentence" className="mb-6 rounded-[14px] border border-zinc-200 bg-white px-5 py-4">
+      <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-zinc-500">Say it as one sentence</span>
+      <ConflictSentence
+        asking={form.asking.team}
+        owning={form.owning.team}
+        measure={form.owning.measures[form.owner_measure] ?? ""}
+        because={form.company_goal.measures[form.company_measure] ?? ""}
+      />
+      <p className="mt-1 text-[14px] text-zinc-500">Fill in the steps below; this line updates as you type.</p>
+    </section>
     <div className="mb-6 rounded-[14px] border border-zinc-200 bg-white p-4">
       <Button kind="ghost" onClick={() => setMore((m) => !m)}>
         {more ? "Hide optional detail" : "Add more detail (optional)"}

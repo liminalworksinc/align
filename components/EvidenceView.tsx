@@ -7,6 +7,7 @@ import { tally } from "./select";
 import { Badge, ForEngineers, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtDuration, fmtTime } from "./ui";
 import { checkWords } from "./SpartaProof";
 import { AuthorityStrip } from "./AuthorityStrip";
+import { CARD, H1 } from "./v6/kit";
 
 /* ------------------------------------------------------------------ */
 /* Shared evidence helpers (also used by ScenarioDrawer)              */
@@ -193,11 +194,16 @@ export function EvidenceView(props: ViewProps) {
   return (
     <div className="mx-auto max-w-6xl px-6 py-6 text-[16px] text-zinc-900">
       <header className="mb-6">
-        <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em]">Evidence</h1>
-        <p className="mt-1 text-[16px] text-zinc-600">
-          What was decided, the practice test runs, who did what, and how long it took to agree. These results aren&apos;t signed, but anyone can re-run them with the
-          command in the README.
-        </p>
+        <H1
+          sub={
+            <>
+              What was decided, the practice test runs, who did what, and how long it took to agree. These results aren&apos;t signed, but anyone can re-run them
+              with the command in the README.
+            </>
+          }
+        >
+          Evidence
+        </H1>
       </header>
       <div className="mb-6">
         <AuthorityStrip s={props.s} />
@@ -211,7 +217,7 @@ export function EvidenceView(props: ViewProps) {
 }
 
 function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-xl bg-white p-5 ring-1 ring-zinc-200 ${className}`}>{children}</div>;
+  return <div className={`${CARD} p-5 ${className}`}>{children}</div>;
 }
 
 function ChainStep({ title, who, at, children, tone = "neutral" }: { title: string; who?: string; at?: string | null; children: ReactNode; tone?: "neutral" | "amber" | "violet" }) {
