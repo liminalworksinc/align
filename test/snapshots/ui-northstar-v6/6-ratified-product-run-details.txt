@@ -11,15 +11,15 @@ Sparta
 Practice tests · 27 runs
 Alike
 Team decision memory · 1 earlier decision
-AS
-Alex / Security Lead
-owns Security’s goal v2.2
+PD
+Product Director
+owns Product’s goal v3
 Northstar Security · Q4 2026
 ●
 Company goal v2 · Product and Security agreed
-AS
-Alex / Security Lead
-Security · Owner
+PD
+Product Director
+Product · Owner
 Sign out
 ◎
 COMPANY GOAL
@@ -30,8 +30,8 @@ Launch the beta of our new monitoring product, with support ready to help beta c
 THE CEO'S NEW REQUIREMENT
 Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
 Product and Security: agreed
-YOUR GOAL · V2.2
-Handle customer and security issues quickly and correctly.
+YOUR GOAL · V3
+Ship the beta and clear anything blocking the launch.
 Evidence
 
 What was decided, the practice test runs, who did what, and how long it took to agree. These results aren't signed, but anyone can re-run them with the command in the README.
@@ -345,27 +345,76 @@ Passed	9 of 9	<TIME>
 WHO DID WHAT, WHEN
 Names come from who was signed in, so a request can't claim to be someone else.
 TIME	WHO	WHAT THEY DID
+<TIME>	Product Director	saw the approved version
 <TIME>	Alex / Security Lead	ratify untested
 <TIME>	Product Director	accepted Security's changes
 <TIME>	Alex / Security Lead	asked for changes
 <TIME>	Product Director	accepted Security's changes
 <TIME>	Alex / Security Lead	asked for changes
 <TIME>	Product Director	proposed a change
+<TIME>	CEO / Leadership	opened Evidence
+<TIME>	CEO / Leadership	opened the plan test
+<TIME>	Alex / Security Lead	opened Evidence
+<TIME>	Alex / Security Lead	opened the plan test
+<TIME>	Product Director	opened Evidence
+<TIME>	Product Director	opened the plan test
+<TIME>	Product Director	saw the CEO's change
 <TIME>	CEO / Leadership	approved the company goal and sent it to every team
 <TIME>	CEO / Leadership	reset the demo
 For engineers
 TIME TO AGREEMENT
 Started
-Not started
+<TIME>
 Ended
-—
+Still running
+Saw final version
+Product Director
 Not counted
 27 practice test runs done beforehand (<DUR> <DUR> in total)
 For engineers
-STEPS (0)
-
-No steps recorded yet.
-
+STEPS (14)
+<TIME>
+Product Director
+saw the CEO's change
+<TIME>
+Product Director
+opened the plan test
+<TIME>
+Product Director
+opened Evidence
+<TIME>
+Alex / Security Lead
+opened the plan test
+<TIME>
+Alex / Security Lead
+opened Evidence
+<TIME>
+CEO / Leadership
+opened the plan test
+<TIME>
+CEO / Leadership
+opened Evidence
+<TIME>
+Product Director
+proposed a change
+<TIME>
+Alex / Security Lead
+asked for changes
+<TIME>
+Product Director
+accepted Security's changes
+<TIME>
+Alex / Security Lead
+asked for changes
+<TIME>
+Product Director
+accepted Security's changes
+<TIME>
+Alex / Security Lead
+approved
+<TIME>
+Product Director
+saw the approved version
 DETAILS
 New plan: beta issues first
 ✓

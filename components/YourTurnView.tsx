@@ -1,5 +1,5 @@
 "use client";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { agreementStatus, launchState, recordFacts } from "@/components/launch";
 import type { View, ViewProps } from "@/components/props";
 import { accepted, changedToday, currentGoal, isToday } from "@/components/select";
@@ -89,7 +89,7 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
 }
 
 /** What waits on the signed-in actor. Exported so the shell's nav badge counts the same list. */
-export function waitingOnMe(s: StateView, actor: Actor, open: (v: View, p?: Proposal) => void): Item[] {
+export function waitingOnMe(s: StateView, actor: Actor, open: (v: View, p?: Proposal, compose?: boolean) => void): Item[] {
   const L = labelsFor(s);
   const items: Item[] = [];
   for (const p of [...s.proposals].reverse()) {
@@ -117,7 +117,7 @@ export function waitingOnMe(s: StateView, actor: Actor, open: (v: View, p?: Prop
       quote: kr?.text,
       sub: `${L.team.product} and ${L.team.security} haven’t agreed yet`,
       cta: "Propose a change",
-      open: () => open("proposals"),
+      open: () => open("proposals", undefined, true),
     });
   }
   // Northstar: the next company goal waits on leadership to approve and send it. Same rule as OrgView's button
@@ -136,7 +136,7 @@ export function waitingOnMe(s: StateView, actor: Actor, open: (v: View, p?: Prop
   }
   // Custom: leadership decides the launch once the teams agree (lib/flow.ts launch decision, custom only).
   const acc = accepted(s);
-  if (actor === "leadership" && !L.northstar && acc && !acc.launch_decision) {
+  if (actor === "leadership" && !L.northstar && acc && launchState(acc) !== "approved") {
     items.push({
       key: "launch",
       team: L.role.leadership,
@@ -158,9 +158,10 @@ export function YourTurnView(props: ViewProps) {
   // The server allows one open proposal, and ProposalsView opens it (activeProposal) when nothing else is selected,
   // so a card only re-points a selection left on a different proposal. Other selections (the rail's dependency
   // details by default) stay as they are.
-  const open = (v: View, p?: Proposal) => {
+  const open = (v: View, p?: Proposal, compose?: boolean) => {
     if (p && props.selection?.kind === "proposal" && props.selection.id !== p.id) select({ kind: "proposal", id: p.id });
     go(v);
+    if (compose) props.setCompose?.(true); // after go(), which clears any earlier request
   };
   const mine = waitingOnMe(s, actor, open);
 
@@ -179,7 +180,7 @@ export function YourTurnView(props: ViewProps) {
     });
   }
   const acc = accepted(s);
-  if (acc && !L.northstar && !acc.launch_decision && actor !== "leadership") {
+  if (acc && !L.northstar && launchState(acc) !== "approved" && actor !== "leadership") {
     others.push({
       key: "launch",
       team: L.role.leadership,
@@ -193,6 +194,12 @@ export function YourTurnView(props: ViewProps) {
   const ceo = currentGoal(s, "ceo");
   const kr = ceo?.measures.find((m) => m.id === companyMeasureId(s));
   const rel = s.relations.find((r) => r.id === dependencyId(s));
+  // Landing here while the company change is unresolved is seeing that change: start the time-to-agreement clock,
+  // as DecisionView does (the landing view moved from "decision" to "turn").
+  const ceoChangeOpen = Boolean(kr && rel?.status === "UNKNOWN" && !s.timer?.started_at);
+  useEffect(() => {
+    if (ceoChangeOpen) mark("ceo_change_viewed");
+  }, [ceoChangeOpen, mark]);
   const depStatus: { text: string; tone: Tone } | null = !rel
     ? null
     : rel.status === "ACCEPTED"

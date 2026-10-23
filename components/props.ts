@@ -22,4 +22,7 @@ export interface ViewProps {
   /** Scenario → Proposal hand-off: plan + simulation refs chosen in Scenario Studio. */
   attached: { plan_id: string; plan_version: number; simulation_refs: string[] } | null;
   setAttached: (a: { plan_id: string; plan_version: number; simulation_refs: string[] } | null) => void;
+  /** One-shot request to open the proposal composer on the next Proposals visit (+ New conflict, Propose a change). */
+  compose?: boolean;
+  setCompose?: (on: boolean) => void;
 }

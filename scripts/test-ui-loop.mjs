@@ -301,6 +301,33 @@ async function main() {
       const t = await text(pg);
       check(`U9 ${team} sees the agreed version ${acc?.accepted_version} and the teams agreed`, !!acc && t.includes(acc.accepted_version) && t.includes(COUNTER.slice(0, 40)) && /agreed/i.test(t), t.slice(0, 400));
     }
+
+    // U11 The time-to-agreement clock starts on landing. This run never clicks "See goals" or the company node: both
+    // teams landed on Your turn while the company change was unresolved, which counts as seeing it.
+    const timer = (await api(lead, "GET", "/api/state")).json?.timer;
+    check("U11 the time-to-agreement clock started from landing on Your turn (no goals click)", !!timer?.started_at && (timer?.touchpoints?.length ?? 0) > 0, JSON.stringify(timer).slice(0, 300));
+
+    // U12 "Not yet" keeps the launch pending: leadership still has the decision waiting, and the teams still see it.
+    const ratified = (await api(lead, "GET", "/api/state")).json?.proposals?.find((x) => x.state === "RATIFIED");
+    const ny = await api(lead, "POST", `/api/proposals/${ratified?.id}/launch`, { decision: "not_yet" });
+    const LP = await (await browser.createBrowserContext()).newPage();
+    await LP.setViewport({ width: 1440, height: 900 });
+    const leadIn = await signInUi(LP, fixture.leadership?.team ?? "Leadership", PASSCODES.leadership);
+    await sleep(800);
+    const lt = await text(LP);
+    check(
+      "U12 after \"not yet\" leadership's Your turn still shows the launch decision, and counts it",
+      ny.status === 200 && leadIn && lt.includes("Decide the launch") && /1 thing waiting on you/.test(lt),
+      JSON.stringify({ status: ny.status, body: ny.text.slice(0, 120), tail: lt.slice(0, 400) }),
+    );
+    await A.reload({ waitUntil: "networkidle2" });
+    await click(A, "Your turn");
+    check("U12 after \"not yet\" the asking team still sees that leadership decides the launch", await waitText(A, "decides the launch"), (await text(A)).slice(0, 400));
+    await LP.close();
+
+    // U13 After a decided proposal, + New conflict opens the composer, not the old decided thread.
+    await click(A, "New conflict");
+    check("U13 after a ratified proposal, + New conflict opens the composer", await waitText(A, "Send proposal to"), (await text(A)).slice(0, 400));
   } finally {
     await browser.close();
   }

@@ -313,6 +313,7 @@ export default function Home({ workspace }: { workspace?: string }) {
   const landed = useRef<string | null>(null); // the role the landing view was set for; null when signed out
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [compose, setCompose] = useState(false); // + New conflict asks ProposalsView for the composer
   // The attached tested plan survives a reload, so a refreshed tab never sends an UNTESTED proposal by accident.
   const [attached, setAttachedState] = useState<ViewProps["attached"]>(() => {
     if (typeof window === "undefined") return null;
@@ -398,6 +399,7 @@ export default function Home({ workspace }: { workspace?: string }) {
     select: setSelection,
     go: (v) => {
       setDrawer(null);
+      setCompose(false); // a compose request lasts one visit; callers that want it set it after go()
       setView(v);
     },
     openDrawer: setDrawer,
@@ -405,6 +407,8 @@ export default function Home({ workspace }: { workspace?: string }) {
     mark,
     attached,
     setAttached,
+    compose,
+    setCompose,
   };
   const turnCount = waitingOnMe(state, me.actor, () => undefined).length;
   const rel = state.relations.find((r) => r.id === dependencyId(state));
@@ -481,7 +485,7 @@ export default function Home({ workspace }: { workspace?: string }) {
           </a>
         ) : (
           <div className="mb-3.5 mt-1 flex flex-col gap-1">
-            <Button disabled={!newConflict.go} onClick={() => newConflict.go && props.go(newConflict.go)}>
+            <Button disabled={!newConflict.go} onClick={() => { if (!newConflict.go) return; props.go(newConflict.go); setCompose(true); }}>
               + New conflict
             </Button>
             {newConflict.why && <span className="px-1 text-[12.5px] leading-snug text-zinc-500">{newConflict.why}</span>}
