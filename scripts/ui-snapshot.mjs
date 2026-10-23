@@ -91,7 +91,13 @@ async function shoot(stage, roles) {
     const n = (await page.$$("nav[aria-label=Main] button")).length;
     for (let i = 0; i < n; i++) {
       const btn = (await page.$$("nav[aria-label=Main] button"))[i];
-      const label = (await btn.$eval("span.font-semibold", (e) => e.innerText)).replace(/\W+/g, "-").toLowerCase();
+      // The nav label: pre-v6 nav marked it span.font-semibold; the v6 rail (LIM-2424) bolds the whole button, so take
+      // the first span's first line (a count badge or a "no sandbox" note never comes first).
+      const label = (
+        await btn.evaluate((b) => (b.querySelector("span.font-semibold") ?? b.querySelector("span span") ?? b).innerText.split("\n")[0].trim())
+      )
+        .replace(/\W+/g, "-")
+        .toLowerCase();
       await btn.click();
       await new Promise((r) => setTimeout(r, 800));
       const text = mask(await page.evaluate(() => document.body.innerText));
