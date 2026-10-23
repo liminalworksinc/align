@@ -379,7 +379,7 @@ async function main() {
   const own = new Set(Object.values(t1.teams ?? {}).map((x) => x.team));
   const nsTeams = ["Company", "Product", "Security"].filter((x) => !own.has(x)).join("|");
   const leak = mText.match(new RegExp(`Northstar|Sparta|run-plan|"team":"(?:${nsTeams})"|- (?:${nsTeams}) \\[`));
-  check("M2 accepted plan, goals, work map and decision record name this company and its teams, never Northstar's", !leak && mText.includes(t1.company), leak?.[0] ?? "company missing");
+  check("M2 accepted plan, goals, work map and decision record name this company and its teams, never Northstar's", !leak && mText.includes(t1.company.replace(/[\r\n\u2028\u2029]+/g, " ")), leak?.[0] ?? "company missing"); // agent text has the name on one line
   const r1 = await call("leadership", "DELETE", "/api/sessions/consent", { harness: "claude-code", repo: AGENT_REPO });
   const gone = !((await state()).sessions ?? []).some((x) => x.repo === AGENT_REPO);
   check("D4 consent revoked, both synthetic sessions purged", r1.status === 200 && gone, short(r1));
