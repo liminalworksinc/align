@@ -15,14 +15,26 @@ ok() { if [ "$1" = 0 ]; then echo "PASS  $2"; else echo "FAIL  $2${3:+  -> $3}";
 cleanup() { docker rm -f "$NAME" "$NAME-bad" >/dev/null 2>&1; docker volume rm -f "$VOL" >/dev/null 2>&1; }
 trap cleanup EXIT
 
-docker info >/dev/null 2>&1 || { echo "test-image: no Docker daemon"; exit 2; }
+# What must never be in the image: these top-level names in /app, and a .env file at ANY depth. find prints absolute
+# paths (/app/lib/.env.local), so the .env rule matches the last path segment, not the whole line (Sean's #6 review).
+forbidden() { # forbidden <ls -A /app listing> <find output>: exit 0 if anything forbidden is present
+  printf '%s\n' "$1" | grep -qxE 'data|sparta|agent|test|docs|\.env(\..*)?' || printf '%s\n' "$2" | grep -qE '(^|/)\.env(\.[^/]*)?$'
+}
+# The matcher itself, without Docker: a nested .env must be caught, a clean image must not be.
+forbidden "package.json" "/app/lib/.env.local"; ok $? "matcher: a nested /app/lib/.env.local is caught"
+forbidden "package.json" "/srv/x/.env"; ok $? "matcher: a nested /srv/x/.env is caught"
+forbidden $'package.json\n.env.production' ""; ok $? "matcher: a top-level .env.production is caught"
+! forbidden $'package.json\nnode_modules\nscripts' $'/app/lib/env.ts\n/app/.envrc-not'; ok $? "matcher: a clean listing passes (env.ts and .envrc-not are not .env files)"
+
+docker info >/dev/null 2>&1 || { echo "test-image: no Docker daemon"; [ $fails = 0 ] && echo "test-image: matcher checks passed"; exit 2; }
 docker build -q -t "$TAG" . >/dev/null || { echo "FAIL  docker build"; exit 1; }
 echo "PASS  docker build"
 
-inside="$(docker run --rm --entrypoint sh "$TAG" -c 'ls -A /app; ls /app/scripts; find / \( -name ".env" -o -name ".env.*" \) -not -path "/proc/*" -not -path "/sys/*" -not -path "*/node_modules/*" 2>/dev/null')"
-echo "$inside" | grep -qxE 'data|sparta|agent|test|docs|\.env.*'; nobad=$?
+listing="$(docker run --rm --entrypoint sh "$TAG" -c 'ls -A /app')"
+envs="$(docker run --rm --entrypoint sh "$TAG" -c 'find / \( -name ".env" -o -name ".env.*" \) -not -path "/proc/*" -not -path "/sys/*" -not -path "*/node_modules/*" 2>/dev/null')"
+forbidden "$listing" "$envs"; nobad=$?
 # The listing must be real (it names package.json), or "none of these names" would pass on an empty listing.
-echo "$inside" | grep -qx 'package.json' && [ "$nobad" -ne 0 ]; ok $? "the image has no data/, sparta/, agent/, test/, docs/ or .env" "$(echo "$inside" | tr '\n' ' ')"
+printf '%s\n' "$listing" | grep -qx 'package.json' && [ "$nobad" -ne 0 ]; ok $? "the image has no data/, sparta/, agent/, test/, docs/ or .env at any depth" "$(echo "$listing $envs" | tr '\n' ' ')"
 [ "$(docker run --rm --entrypoint sh "$TAG" -c 'ls /app/scripts')" = "ws-admin.mjs" ]; ok $? "the only script in the image is ws-admin.mjs"
 
 docker run --name "$NAME-bad" "$TAG" >/dev/null 2>&1

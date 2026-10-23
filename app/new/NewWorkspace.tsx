@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { EMPTY, Field, field, issuesFrom, ScenarioFields, toBody, type Form, type Issues } from "@/components/ScenarioForm";
+import { isCodeRefusal } from "@/lib/codes";
 import { ROLE_SWITCH } from "@/lib/labels";
 
 // Create a new custom workspace from the same form as /setup. No sign-in is needed and creating does not sign anyone in.
@@ -101,7 +102,7 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
       if (res.status === 400 && Array.isArray(data.issues)) {
         setIssues(issuesFrom(data.issues));
         setProblem("Some fields need fixing. They are marked below.");
-      } else if (res.status === 403 && cfg?.signup_code_required && error && /signup code/i.test(error)) {
+      } else if (res.status === 403 && cfg?.signup_code_required && isCodeRefusal(error)) {
         setIssues({ signup_code: [error] });
         setProblem("Check the signup code.");
       } else if (res.status === 413) setProblem("This setup is too long. Shorten the plan or the work items and try again.");
@@ -115,7 +116,15 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
     }
   }
 
-  const page = (children: ReactNode) => <main className="mx-auto min-h-screen max-w-3xl bg-zinc-50 px-5 py-8 text-[16px] text-zinc-900">{children}</main>;
+  // The test-server notice is part of the page frame, so the server render carries it whatever state the form is in:
+  // loading (the first HTML, before the config fetch), max reached, or the form (Sean's #6 review). The created screen
+  // states the deletion date itself.
+  const page = (children: ReactNode, notice = true) => (
+    <main className="mx-auto min-h-screen max-w-3xl bg-zinc-50 px-5 py-8 text-[16px] text-zinc-900">
+      {notice && testServer && <TestServerNotice deleteBy={longDate(testServer.delete_by)} />}
+      {children}
+    </main>
+  );
 
   if (created) {
     const link = `${window.location.origin}${created.workspace.path}`; // only reached after a submit, so always in the browser
@@ -176,6 +185,7 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
           </span>
         )}
       </section>,
+      false,
     );
   }
 
@@ -189,7 +199,6 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
 
   return page(
     <>
-      {testServer && <TestServerNotice deleteBy={longDate(testServer.delete_by)} />}
       <h1 className="mb-2 text-[28px] font-semibold">Create a workspace</h1>
       <p className="mb-6 text-[16px] text-zinc-700">
         Describe one real disagreement between two teams. This makes a new, separate workspace with its own passcodes. Nothing in any other workspace changes.

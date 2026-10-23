@@ -113,7 +113,10 @@ It deletes the way the app does:
 2. It removes the folder.
 3. It appends a `deleted` row to `_events.jsonl`.
 
-It's safe while the server runs (test-tenancy H11).
+You can run it while the server runs (test-tenancy H11), with these limits:
+- The rename is atomic, and the server never recreates a workspace folder (a write to a missing workspace is refused). So once the rename lands, nothing new is written for that workspace.
+- A request for that workspace that is already in flight fails (404, or a server error if it was mid-write) instead of finishing. A tester using it at that moment loses that one action.
+- ws-admin doesn't take the server's locks (they live in the server's memory). Run one ws-admin at a time.
 
 ### After the deletion date (closed mode)
 
@@ -148,7 +151,10 @@ fly scale count 1
 **The image** (`Dockerfile`):
 - The build context is an allowlist (`.dockerignore`), so only the app's own source goes in.
 - The runtime has production dependencies, the build output and `scripts/ws-admin.mjs`. It has no `data/`, `sparta/`, `agent/` or test scripts, and no `.env` file.
-- The container hands `/data` to the `node` user, then `setpriv` execs the server as `node`, so the server itself is PID 1.
+- The container hands `/data` to the `node` user (`chown -R` as root on every start), then `setpriv` execs the server as `node`. So the server itself is PID 1, with no shell, npx or root parent (`scripts/test-image.sh` checks this).
+- What PID 1 means here:
+  - The kernel gives PID 1 no default signal action. Fly's SIGINT/SIGTERM stop the server only because `next start` installs its own handlers: it finishes in-flight requests, then exits. `NEXT_MANUAL_SIG_HANDLE` must stay unset.
+  - No init reaps orphaned child processes. The server starts none while serving, so none build up.
 
 **The health check** (`fly.toml`) calls `/api/workspaces/config` with the Host, `X-Forwarded-Proto` and `Fly-Client-IP` headers Fly's edge would send. Without them the app answers 421 or 403.
 

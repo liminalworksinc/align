@@ -54,6 +54,11 @@ export async function DELETE(req: Request) {
     const harness = harnessOf(b.harness);
     if (one && (!harness || !validRepo(b.repo))) throw new HttpError(400, "Send harness and repo to disconnect one agent, or {} for all");
     const repo = one ? (b.repo as string) : null;
+    takeWorkspaceAction(who.ws, "disconnect_agent"); // a disconnect loop can't churn the audit archive (review M5)
+    // Revoke first. The epoch lives in auth.json under its own lock, so the two writes can't be one transaction:
+    // bumping before the state write means a failure leaves either nothing changed or every token revoked, never
+    // tokens that still work after their consent was removed (Sean's #6 review).
+    const agent_epoch = await bumpAgentEpoch(who.ws);
     const removed = await who.mutate((s) => {
       const gone = captureConsents(s).filter((c) => !one || (c.harness === harness && c.repo === repo));
       setCaptureConsents(s, captureConsents(s).filter((c) => !gone.includes(c)));
@@ -63,7 +68,6 @@ export async function DELETE(req: Request) {
       audit(s, who, "agents_disconnected", one ? `${harness}/${repo}` : "all");
       return { consents: gone.length, sessions: before - s.sessions.length };
     });
-    const agent_epoch = await bumpAgentEpoch(who.ws);
     return Response.json({ revoked: true, removed_consents: removed.consents, purged_sessions: removed.sessions, agent_epoch }, { headers: { "cache-control": "no-store" } });
   });
 }

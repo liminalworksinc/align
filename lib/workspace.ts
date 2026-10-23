@@ -5,6 +5,7 @@ import { config } from "./config";
 import { HttpError } from "./errors";
 import { withLock } from "./locks";
 import type { Actor, AppState } from "./types";
+import { BAD_INVITE } from "./codes";
 
 // Custom workspaces: ids, directories, passcodes, create and delete. Northstar is not a directory here:
 // it stays in data/ and is handled only by store.ts. Every function that touches a custom directory
@@ -202,8 +203,6 @@ async function usedInvites(): Promise<string[]> {
 export async function inviteUnused(code: string): Promise<boolean> {
   return !(await usedInvites()).includes(codeHash(code));
 }
-/** One message for a wrong code and a spent one, so the answer never confirms that a guessed code is real. */
-export const BAD_INVITE = "That invite code isn’t valid or was already used";
 
 async function writeUsed(list: string[]) {
   await fs.mkdir(config().workspacesRoot, { recursive: true, mode: 0o700 });
