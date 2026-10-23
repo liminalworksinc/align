@@ -276,6 +276,16 @@ describe("codex rollout", () => {
 });
 
 describe("keys, prices, epochs", () => {
+  test("Sonnet 5.5 and Haiku 5.5 rows; Haiku switches rate card above a 100K-token prompt", () => {
+    const zero = { input: 0, output: 0, cache_read: 0, cache_write_5m: 0, cache_write_1h: 0, cache_write_unsplit: 0 };
+    // 1M input + 1M output at $2/$10 = $12.
+    assert.equal(priceRequest("claude-sonnet-5-5", { ...zero, input: 1_000_000, output: 1_000_000 }).est_list_usd_micros, 12_000_000);
+    // Short prompt: 50K input at $0.10 + 10K output at $0.50 = $0.005 + $0.005.
+    assert.equal(priceRequest("claude-haiku-5-5", { ...zero, input: 50_000, output: 10_000 }).est_list_usd_micros, 10_000);
+    // Long prompt (cache reads count toward length): 20K input + 200K cache read at the $0.50 card, cache read 0.05.
+    assert.equal(priceRequest("claude-haiku-5-5", { ...zero, input: 20_000, cache_read: 200_000, output: 1_000 }).est_list_usd_micros, 10_000 + 10_000 + 2_500);
+  });
+
   test("device secret: created once, stable, never silently replaced", () => {
     const t = makeEnv();
     envs.push(t);
