@@ -313,11 +313,9 @@ function Composer(props: ViewProps & { busy: boolean; run: Run; onSent: () => vo
         title={L.northstar ? "Security's goal today" : `${poss(L.team.security)} goal today`}
         right={
           L.northstar ? (
-            <Badge tone="neutral">Security&apos;s goal · view only — you can propose a change, not edit it</Badge>
+            <Badge tone="neutral" wrap>Security&apos;s goal · view only — you can propose a change, not edit it</Badge>
           ) : (
-            <span className="ml-3 min-w-0">
-              <Badge tone="neutral">{poss(L.team.security)} goal · view only — you can propose a change, not edit it</Badge>
-            </span>
+            <Badge tone="neutral" wrap>{poss(L.team.security)} goal · view only — you can propose a change, not edit it</Badge>
           )
         }
       >
@@ -817,7 +815,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
 
       {isProduct && p.state === "COUNTERED" && (
         <div className={footer}>
-          <span className="min-w-0 flex-1 text-[15px] text-zinc-700">
+          <span className="min-w-0 flex-[1_1_16rem] text-[15px] text-zinc-700">
             {who(p.recipient_owner)} asked for changes. Accept them to send the proposal back for final approval.
           </span>
           <Button disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/acknowledge`, {})}>
@@ -833,7 +831,9 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           ) : (
             <Badge tone="amber">You accepted the changes · waiting for {who("security")} to approve</Badge>
           )}
-          <span className="min-w-0 flex-1 text-[15px] text-zinc-500">
+          {/* A 16rem basis, not flex-1's 0: with a 0 basis flex-wrap never breaks the line and squeezes this text to
+              one word per line between the badge and the button. */}
+          <span className="min-w-0 flex-[1_1_16rem] text-[15px] text-zinc-500">
             {L.northstar ? "Only Security can approve a change to Security's goal." : `Only ${own} can approve a change to ${poss(own)} goal.`}
           </span>
           <TryApprove key={`${p.id}:${p.state}`} p={p} owner={own} workspace={props.workspace} />
