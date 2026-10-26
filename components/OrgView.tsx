@@ -35,13 +35,15 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
   const L = labelsFor(s);
   const { target, conditions } = recordFacts(s, acc);
   const d = acc.launch_decision;
-  const [note, setNote] = useState(d?.note ?? "");
+  // The saved note shows on the record above; this box is for a new decision's note, so it starts empty.
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const canDecide = me.actor === "leadership";
 
   async function decide(decision: "approved" | "not_yet") {
     setBusy(true);
     await act(`/api/proposals/${acc.proposal_id}/launch`, { decision, note: note.trim() });
+    setNote("");
     setBusy(false);
   }
 
@@ -105,13 +107,18 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
                 {note.length}/{MAX_NOTE}
               </span>
             </label>
+            {/* Once decided, offer only the other choice, so re-clicking the current one can't look like a new action. */}
             <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={() => decide("approved")} disabled={busy}>
-                Approve launch
-              </Button>
-              <Button kind="secondary" onClick={() => decide("not_yet")} disabled={busy}>
-                Not yet
-              </Button>
+              {d?.decision !== "approved" && (
+                <Button onClick={() => decide("approved")} disabled={busy}>
+                  Approve launch
+                </Button>
+              )}
+              {d?.decision !== "not_yet" && (
+                <Button kind="secondary" onClick={() => decide("not_yet")} disabled={busy}>
+                  {d ? "Change to not yet" : "Not yet"}
+                </Button>
+              )}
             </div>
           </div>
         </Section>
