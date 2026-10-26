@@ -1,6 +1,6 @@
 # Hosting Align for unmoderated tests (HOSTED=1)
 
-**Status: draft.** Nothing has been deployed: there's no app, volume, DNS record or account yet. The account creation and the deploy each need Sean's separate go on LIM-2424. This page goes with `Dockerfile`, `.dockerignore` and `fly.toml`.
+**Status: approved for deploy (founder go 2026-10-26, final authority on code).** Not yet deployed as of this edit. The founder creates the Fly account, sets the secrets and runs the deploy; the smoke test below runs before any tester gets a link. This page goes with `Dockerfile`, `.dockerignore` and `fly.toml`.
 
 **Purpose (founder ruling 10-21 "go C").** Every Proving Ground interviewee gets their own workspace and a link, and runs the test without a moderator. One server serves all the workspaces.
 
@@ -55,7 +55,7 @@ test-tenancy H1 checks every one of these on a production server: each must exit
 | `ALIGN_DATA_DIR` | Dockerfile / `fly.toml` | `/data` (the volume) |
 | `ALIGN_HOSTS` | `fly.toml` | the app hostname, e.g. `align-pg-draft.fly.dev` |
 | `ALIGN_MAX_WORKSPACES` | `fly.toml` | `25`. The cap exists for polling cost (spec section 10). `0`, a negative or a non-number falls back to 25; it can't close creation. |
-| `ALIGN_DELETE_BY` | `fly.toml` | `2026-11-06` (Sean's suggested date; change it in one place) |
+| `ALIGN_DELETE_BY` | `fly.toml` | `2026-11-13` (founder ruling 2026-10-22; change it in one place) |
 | `ALIGN_SECRET` | `fly secrets` | `openssl rand -hex 32` |
 | `ALIGN_SIGNUP_CODES` | `fly secrets` | one code per planned tester, e.g. five of `openssl rand -hex 8`, comma-separated. To add testers later, set the list again with the new codes added. |
 | `ALIGN_*_PASSCODE` (3) | `fly secrets` | random; unused while Northstar is off |
@@ -138,7 +138,7 @@ fly machine run <the app's image, from fly image show> node scripts/ws-admin.mjs
 
 Wiping the volume (`fly volumes destroy`) is the last resort.
 
-## Deploy steps (for after Sean's go; not run)
+## Deploy steps (founder go 2026-10-26)
 
 ```sh
 fly apps create align-pg-draft
