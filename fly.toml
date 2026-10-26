@@ -1,4 +1,4 @@
-# DRAFT (LIM-2424 L0, not applied): no app, volume, DNS or account exists yet. Sean approves on LIM-2424 first.
+# LIM-2437 hosted tester build. Founder go 2026-10-26 (final authority on code); deploy steps in docs/HOSTING.md.
 # One machine only: locks are in process memory and the volume attaches to a single machine (docs/HOSTING.md).
 app = "align-pg-draft"
 primary_region = "sjc"
@@ -11,7 +11,7 @@ primary_region = "sjc"
   ALIGN_DATA_DIR = "/data"
   ALIGN_HOSTS = "align-pg-draft.fly.dev"
   ALIGN_MAX_WORKSPACES = "25"
-  ALIGN_DELETE_BY = "2026-11-06"
+  ALIGN_DELETE_BY = "2026-11-13"
 
 [http_service]
   internal_port = 8080
