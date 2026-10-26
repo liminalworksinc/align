@@ -53,6 +53,11 @@ if (cmd === "list") {
     process.exit(2);
   }
   for (const id of ids()) remove(id);
+  // AI apps that registered themselves (names and redirect URIs, lib/oauth/clients.ts) go with the workspaces.
+  if (existsSync(path.join(root, "_oauth_clients.json"))) {
+    rmSync(path.join(root, "_oauth_clients.json"), { force: true });
+    console.log("removed _oauth_clients.json");
+  }
   // Crash leftovers hold tester data too (.tmp-<id>: state and passcode hashes; .deleting-<id>: a whole workspace).
   for (const n of existsSync(root) ? readdirSync(root) : []) {
     if (/^\.(tmp|deleting)-w_[a-z2-7]{12}$/.test(n)) {

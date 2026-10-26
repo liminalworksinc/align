@@ -4,7 +4,7 @@ import { authorityEvents, describeEvent, oneLine, pendingFor, quoted } from "../
 import { acceptedPlan, launchApproved } from "../policy";
 import { activeRegistry, currentGoals } from "../registry";
 import { readState } from "../store";
-import { AGREED_NOT_LAUNCH, AGREED_STATUS, agreedStatus, leadOf, poss, scenarioOf, teamOf } from "../labels";
+import { AGREED_NOT_LAUNCH, AGREED_STATUS, agreedStatus, customStateLabel, labelsFor, leadOf, poss, scenarioOf, teamOf } from "../labels";
 import type { AgentSession, AppState, Owner, SessionMapping } from "../types";
 import type { WsId } from "../workspace";
 import { scopeToGrant, type AgentHarness } from "../agent-token";
@@ -113,6 +113,9 @@ function listGoals(s: AppState): z.infer<typeof ListGoalsOut> {
     registry: visibleRegistry(s).map((e) => ({ key: e.key, label: e.label, team: e.team, version: e.version })),
   };
 }
+
+/** The proposal still waiting for a decision, if any (custom scenarios allow one at a time). */
+const openProposal = (s: AppState) => s.proposals.findLast((p) => p.state !== "RATIFIED" && p.state !== "REJECTED");
 
 // ---------- align_get_accepted_plan ----------
 
@@ -457,7 +460,11 @@ export function registerAlign(server: McpServer) {
             : [
                 `${a.company}: no change is agreed. ${out.authority}.`,
                 `${poss(a.owning_team)} current measures: ${a.owning_measures.map(quoted).join("; ")}`,
-                `Plan ${quoted(a.plan_title)} is proposed only, not agreed. Do not act on it.`,
+                // Before anyone proposes it, the plan is only the candidate written at setup: an agent read it as
+                // "proposed" in the end-to-end test (10-26), so say which it is.
+                openProposal(s)
+                  ? `Plan ${quoted(a.plan_title)} is proposed (${openProposal(s)!.id}), not agreed: ${customStateLabel(openProposal(s)!.state, labelsFor(s)) ?? openProposal(s)!.state}. Do not act on it.`
+                  : `Plan ${quoted(a.plan_title)} is the candidate plan written at setup. Nobody has proposed it yet, and it is not agreed. Do not act on it.`,
               ];
         return result(out, lines.filter(Boolean).map(oneLine).join("\n"));
       }
@@ -516,7 +523,7 @@ export function registerAlign(server: McpServer) {
           ? "no sandbox test exists for this plan"
           : `${x.sparta_runs.length} Sparta run(s): ${x.sparta_runs.map((y) => `${y.plan} ${y.verdict}`).join(", ") || "none"}`;
       const summary = r
-        ? `Proposal ${r.proposal_id} (${r.state}) on ${r.target_goal_id} ${r.target_goal_version}; ${r.counters.length} counter(s); ${
+        ? `Proposal ${r.proposal_id} (${scenarioOf(s) === "custom" ? (customStateLabel(r.state, labelsFor(s)) ?? r.state) : r.state}) on ${r.target_goal_id} ${r.target_goal_version}; ${r.counters.length} counter(s); ${
             r.ratification ? `ratified as ${r.ratification.accepted_version} at ${r.ratification.ratified_at} (${r.ratification.test_status})` : "not ratified"
           }; ${runs(r)}. ${scenarioOf(s) === "custom" && r.ratification ? (launchApproved(s) ? `Status: ${agreedStatus(true).toLowerCase()} by ${leadOf(s, "ceo")}. ` : `Status: ${AGREED_STATUS.toLowerCase()}. ${AGREED_NOT_LAUNCH} `) : ""}${OUTCOME_NOTE}`
         : `${proposal_id ? `No proposal ${proposal_id}.` : "No proposals recorded yet."} ${OUTCOME_NOTE}`;

@@ -4,7 +4,8 @@ Align exposes a read-only MCP server so a coding agent can read the goals people
 
 - Endpoint: `http://localhost:3100/api/mcp` (Streamable HTTP; stateless)
 - Auth: `Authorization: Bearer $ALIGN_MCP_TOKEN`. The token lives in `.env.local` (gitignored). If `ALIGN_MCP_TOKEN` is unset, every request is rejected with `401`. Next reads `.env.local` at startup, so restart the dev server after changing it.
-- Protected resource metadata (RFC 9728): `http://localhost:3100/.well-known/oauth-protected-resource`
+- Protected resource metadata (RFC 9728): `<origin>/.well-known/oauth-protected-resource/api/mcp` (also at the root path). It names Align's own authorization server.
+- A custom workspace (`/w/<id>`) can also be read with OAuth: any MCP client that supports OAuth connects with just the URL, and the person approves it with a team passcode. This is the only way in when hosted. See "Connected AI apps" below.
 
 ## Connect
 
@@ -104,3 +105,26 @@ Run it inside `tmux` to keep the session up while the teams decide. Its restrain
 - nothing on human sign-ins, approvals or launch decisions.
 
 It lasts 7 days, and leadership revokes it with `DELETE /api/workspaces/agent-token` or Restart. Don't run untrusted code in a session that holds one.
+
+## Connected AI apps (OAuth, Mode L and hosted)
+
+Any MCP client with OAuth support connects to one custom workspace with only the URL `<origin>/api/mcp`: Claude (desktop, Cowork, claude.ai), ChatGPT, Claude Code and Codex. The workspace shows the steps for each under "Your AI apps".
+
+1. The app gets 401 with a `resource_metadata` link, reads `/.well-known/oauth-protected-resource/api/mcp` and `/.well-known/oauth-authorization-server`, and identifies itself with a client metadata document (Claude Code, Codex) or registers at `/oauth/register`.
+2. It sends the person to `/oauth/authorize`. They paste the workspace link, pick a team and enter its passcode (or use the session their browser already has) and allow read-only access. `/api/oauth/approve` checks it all again and sends them back to the app with a code.
+3. The app exchanges the code at `/oauth/token` (PKCE S256) for an `alm.` access token (1 hour) and an `alr.` refresh token (7 days, rotated on each use).
+
+Claude Code, for example:
+
+```bash
+claude mcp add --transport http align https://<host>/api/mcp
+# then in Claude Code: /mcp, pick align, Authenticate (or: claude mcp login align)
+```
+
+Codex: `codex mcp add align --url https://<host>/api/mcp`, then `codex mcp login align`.
+
+Claude Desktop (or any app that runs MCP servers on this computer): `packages/align-connect/align-connect.mjs <align url>` is a local stdio server that signs in the same way and relays to `/api/mcp`. See its README. It works against a server on this machine, where the Claude app's own connectors can't reach.
+
+The token reads only that workspace, through the same five read-only tools; the work map and directives are workspace-wide (an app has no harness or repo). The server's instructions tell the app to call `align_get_directives` and `align_get_decision_record` at the start of each request and before acting on a plan, and to stop and name the approver while a change is waiting. Chat apps can't be woken: they see a change the next time the person sends a message.
+
+The workspace's "Your AI apps" card lists apps once they have read something. The team that connected an app, or leadership, disconnects it (`DELETE /api/workspaces/connections` with `{"id"}`; `{}` for all, leadership only). Restart disconnects every app. Tests: `node scripts/test-oauth.mjs <port>`.
