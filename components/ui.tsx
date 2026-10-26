@@ -16,9 +16,11 @@ const TONES: Record<Tone, string> = {
 
 const ICONS: Record<Tone, string> = { violet: "◆", amber: "▲", neutral: "●", red: "✕", green: "✓", blue: "ⓘ" };
 
-export function Badge({ tone, children, icon = true }: { tone: Tone; children: ReactNode; icon?: boolean }) {
+/** `wrap` lets a long badge (a sentence, not a status word) wrap inside its pill instead of running off the edge. */
+export function Badge({ tone, children, icon = true, wrap = false }: { tone: Tone; children: ReactNode; icon?: boolean; wrap?: boolean }) {
+  const fit = wrap ? "min-w-0 whitespace-normal rounded-[14px]" : "shrink-0 whitespace-nowrap rounded-full";
   return (
-    <span className={`inline-flex max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-[3px] font-mono text-[12px] font-bold leading-[1.3] tracking-[0.04em] ${TONES[tone]}`}>
+    <span className={`inline-flex max-w-full items-center gap-1.5 border px-2.5 py-[3px] font-mono text-[12px] font-bold leading-[1.3] tracking-[0.04em] ${fit} ${TONES[tone]}`}>
       {icon && <span aria-hidden>{ICONS[tone]}</span>}
       {children}
     </span>
@@ -97,7 +99,7 @@ export function Button({
 export function Section({ title, children, right }: { title: string; children: ReactNode; right?: ReactNode }) {
   return (
     <section className="mb-5">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
         <h3 className="al-lbl">{title}</h3>
         {right}
       </div>
