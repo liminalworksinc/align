@@ -282,7 +282,8 @@ export function decideLaunch(s: AppState, who: Session, pid: string, body: { dec
     by: "leadership",
     at: now(),
   };
-  audit(s, who, body.decision === "approved" ? (untested ? "launch_approved_untested" : "launch_approved") : "launch_not_yet", p.id); // never the note text
+  // The untested acknowledgement lives on launch_decision.untested; the audit action keeps its two names.
+  audit(s, who, body.decision === "approved" ? "launch_approved" : "launch_not_yet", p.id); // never the note text
   return acc!.launch_decision;
 }
 
