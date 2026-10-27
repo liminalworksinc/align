@@ -1,10 +1,25 @@
 # Align
 
-**When the CEO changes priorities, Align gets the right owner's approval and puts the approved plan into the agents already running.**
+**A priority changes. Who can approve the new plan, and which work is still on the old one? Align lets only the goal's owner approve the change, keeps both versions, and lets AI agents read the approved plan.**
 
-> AI teams move at machine speed. Why does alignment still take a week of meetings?
+Align is Liminal's wedge product, a working prototype. We built the first version in one day at SpeedHacks (Oct 11, 2026), where it won Best Use of Sparta, and rebuilt it during the Proving Ground founder sprint (Oct 21 to 23, 2026) so a team can set up its own two-team case without us. Built by Shayaun Nejad and Shruti Rajagopal.
 
-Align is a one-day SpeedHacks prototype (Oct 11, 2026), built by Shayaun Nejad and Shruti Rajagopal.
+## What it does today
+
+- **Set up your own case.** One team (the asking team) proposes a change to another team's goal. Leadership sees it.
+- **Only the owner decides.** Only the goal's owning team can counter, reject or approve. Anyone else is refused by the server (HTTP 403).
+- **Nothing is overwritten.** Approval creates a new goal version and keeps the old one, with an acceptance entry and an audit row. A plan with no sandbox test needs an explicit "accept untested". Leadership makes a separate launch decision.
+- **Agents read the approved plan.** A read-only MCP server (5 tools, no write tools) serves the current approved plan. Claude Code sessions connected to a workspace are notified when a plan is approved (local setup; see docs/MCP.md).
+
+## What it does not do yet
+
+- It does not stop an agent that ignores the approved plan. (A manual Stop is in testing behind a flag.)
+- It does not sign records. Liminal's desktop app keeps signed, offline-verifiable decision records; connecting it to Align is next.
+- It is not hosted yet, and no outside team has completed a test.
+
+## The original SpeedHacks demo (Oct 11, 2026)
+
+The walkthrough below is the one-day demo: the CEO changes a priority, a running Claude Code agent holds, the owning team approves, and the agent replans. That scenario pushes the approved plan into a connected session; custom scenarios set up in the app do not yet.
 
 ## The 60-second version
 
