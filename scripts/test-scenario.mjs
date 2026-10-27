@@ -454,12 +454,20 @@ async function main() {
   const NOTE = "Launch after the partner briefing";
   const l4 = await launch("leadership", { decision: "not_yet", note: `  ${NOTE} ` });
   check("L4 leadership says not yet -> 200 with the trimmed note", l4.status === 200 && l4.json?.decision === "not_yet" && l4.json?.note === NOTE && l4.json?.by === "leadership", short(l4));
-  const l5 = await launch("leadership", { decision: "approved" });
+  // L5u (LIM-2437 finding 3): approving the launch of an untested plan needs accept_untested, as the owner's approval did.
+  const l5u = await launch("leadership", { decision: "approved" });
+  const stillNotYet = (await state()).acceptances?.find((a) => a.proposal_id === pid)?.launch_decision;
+  check(
+    "L5u approving the launch of an untested plan without accept_untested -> 409, the \"not yet\" decision unchanged",
+    l5u.status === 409 && /no sandbox test/i.test(l5u.json?.error ?? l5u.text) && stillNotYet?.decision === "not_yet",
+    `${short(l5u)} | ${JSON.stringify(stillNotYet)}`,
+  );
+  const l5 = await launch("leadership", { decision: "approved", accept_untested: true });
   const afterLaunch = await state("product");
   const lacc = afterLaunch.acceptances?.find((a) => a.proposal_id === pid);
   check(
     "L5 leadership approves the launch -> 200, overwrites the earlier decision, launch_decision is the acceptance's last field",
-    l5.status === 200 && lacc?.launch_decision?.decision === "approved" && lacc.launch_decision.note === undefined && Object.keys(lacc).at(-1) === "launch_decision",
+    l5.status === 200 && lacc?.launch_decision?.decision === "approved" && lacc.launch_decision.untested === true && lacc.launch_decision.note === undefined && Object.keys(lacc).at(-1) === "launch_decision",
     `${short(l5)} | ${JSON.stringify(lacc?.launch_decision)}`,
   );
   // Fix 4 with an approved launch: the decision record's "Status: … launch approved by <lead>" line names the injected

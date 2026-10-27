@@ -23,7 +23,7 @@ export function nextWorkLine(acc: Acceptance, L: Labels): string {
 /** The record's launch line: leadership's decision once made, otherwise that the agreement is not a launch approval. */
 export function launchLine(acc: Acceptance, L: Labels): string {
   const d = acc.launch_decision;
-  if (d?.decision === "approved") return `Launch: approved by ${L.person.leadership}`;
+  if (d?.decision === "approved") return `Launch: approved by ${L.person.leadership}${d.untested ? ", without a sandbox test" : ""}`;
   if (d?.decision === "not_yet") return "Launch: not yet";
   return "This records what the two teams agreed. It is not approval to launch.";
 }

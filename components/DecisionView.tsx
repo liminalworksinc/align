@@ -7,7 +7,7 @@ import { AuthorityStrip } from "./AuthorityStrip";
 import { STALE_APPROVAL_NOTE, agreementStatus, approvedStale, launchLine, launchState } from "./launch";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
-import { nextStepHint } from "./nextStep";
+import { NextStepAction } from "./Handoff";
 import { depRelation } from "./TeamLens";
 import { SpartaProof } from "./SpartaProof";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, StateBadge, fmtTime } from "./ui";
@@ -406,7 +406,7 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
             </span>
           )}
         </div>
-        {nextStepHint(prop, me.actor, L) && <p className="text-[16px] text-zinc-700">{nextStepHint(prop, me.actor, L)}</p>}
+        <NextStepAction p={prop} viewer={me.actor ?? ""} L={L} onSwitch={props.switchTeam} />
       </div>
     );
   }
