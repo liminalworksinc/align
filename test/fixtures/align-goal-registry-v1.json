@@ -1,0 +1,332 @@
+{
+  "contract": "liminal.align_goal_registry.v1",
+  "vectors": [
+    {
+      "name": "unicode-escapes-null-target-unsorted-relations",
+      "registry_instance_id": "11111111-1111-4111-8111-111111111111",
+      "workspace_id": "ws_fixture",
+      "observed_at": "2026-10-25T00:00:00.000Z",
+      "goal": {
+        "id": "g_fixture",
+        "version": 7,
+        "title": "Ship café 🚀 \"safe\"\\path\nnext",
+        "measures": [
+          {
+            "id": "m_β",
+            "text": "Keep é exact\tand controls\u0001",
+            "target": null
+          },
+          {
+            "id": "m_two",
+            "text": "Count",
+            "target": "≥ 2"
+          }
+        ],
+        "status": "active",
+        "visibility": "workspace",
+        "owner": {
+          "id": "u_owner",
+          "name": "Display only"
+        },
+        "pod": null,
+        "anchors": {
+          "repos": [
+            "org/repo",
+            "unicode/日本語"
+          ],
+          "branch_patterns": [
+            "main",
+            "feat/*"
+          ],
+          "issues": [
+            "#7"
+          ]
+        },
+        "depends_on": [
+          "g_z",
+          "g_a"
+        ],
+        "bindable": true,
+        "contributes_to": [
+          {
+            "id": "g_z",
+            "title": "Z",
+            "version": 2,
+            "reviewed_version": null,
+            "stale": true
+          },
+          {
+            "id": "g_a",
+            "title": "A",
+            "version": 3,
+            "reviewed_version": 3,
+            "stale": false
+          }
+        ]
+      },
+      "encoding": "[\"liminal.align_goal_view.v1\",\"11111111-1111-4111-8111-111111111111\",\"ws_fixture\",\"g_fixture\",7,\"u_owner\",\"Ship café 🚀 \\\"safe\\\"\\\\path\\nnext\",\"active\",\"workspace\",null,[[\"m_β\",\"Keep é exact\\tand controls\\u0001\",null],[\"m_two\",\"Count\",\"≥ 2\"]],[[\"org/repo\",\"unicode/日本語\"],[\"main\",\"feat/*\"],[\"#7\"]],[\"g_a\",\"g_z\"],[[\"g_a\",\"A\",3,3,false],[\"g_z\",\"Z\",2,null,true]],true]",
+      "view_digest": "35d47cbce1e077f88ebde4dbf0e108accbaabc7026493a21c3bc36b74de31887",
+      "projection_id": "align:741ccc1198bdf07ac94f734672b77e1510c87ca154fdfcfbc229b701722efc10"
+    },
+    {
+      "name": "reordered-object-keys-and-display-name",
+      "registry_instance_id": "11111111-1111-4111-8111-111111111111",
+      "workspace_id": "ws_fixture",
+      "observed_at": "2026-10-26T00:00:00.000Z",
+      "goal": {
+        "contributes_to": [
+          {
+            "id": "g_z",
+            "title": "Z",
+            "version": 2,
+            "reviewed_version": null,
+            "stale": true
+          },
+          {
+            "id": "g_a",
+            "title": "A",
+            "version": 3,
+            "reviewed_version": 3,
+            "stale": false
+          }
+        ],
+        "bindable": true,
+        "depends_on": [
+          "g_z",
+          "g_a"
+        ],
+        "anchors": {
+          "repos": [
+            "org/repo",
+            "unicode/日本語"
+          ],
+          "branch_patterns": [
+            "main",
+            "feat/*"
+          ],
+          "issues": [
+            "#7"
+          ]
+        },
+        "pod": null,
+        "owner": {
+          "id": "u_owner",
+          "name": "Changed excluded display name"
+        },
+        "visibility": "workspace",
+        "status": "active",
+        "measures": [
+          {
+            "id": "m_β",
+            "text": "Keep é exact\tand controls\u0001",
+            "target": null
+          },
+          {
+            "id": "m_two",
+            "text": "Count",
+            "target": "≥ 2"
+          }
+        ],
+        "title": "Ship café 🚀 \"safe\"\\path\nnext",
+        "version": 7,
+        "id": "g_fixture"
+      },
+      "encoding": "[\"liminal.align_goal_view.v1\",\"11111111-1111-4111-8111-111111111111\",\"ws_fixture\",\"g_fixture\",7,\"u_owner\",\"Ship café 🚀 \\\"safe\\\"\\\\path\\nnext\",\"active\",\"workspace\",null,[[\"m_β\",\"Keep é exact\\tand controls\\u0001\",null],[\"m_two\",\"Count\",\"≥ 2\"]],[[\"org/repo\",\"unicode/日本語\"],[\"main\",\"feat/*\"],[\"#7\"]],[\"g_a\",\"g_z\"],[[\"g_a\",\"A\",3,3,false],[\"g_z\",\"Z\",2,null,true]],true]",
+      "view_digest": "35d47cbce1e077f88ebde4dbf0e108accbaabc7026493a21c3bc36b74de31887",
+      "projection_id": "align:741ccc1198bdf07ac94f734672b77e1510c87ca154fdfcfbc229b701722efc10"
+    },
+    {
+      "name": "authorized-view-after-hidden-relations-filtered",
+      "registry_instance_id": "11111111-1111-4111-8111-111111111111",
+      "workspace_id": "ws_fixture",
+      "observed_at": "2026-10-25T00:00:00.000Z",
+      "goal": {
+        "id": "g_fixture",
+        "version": 7,
+        "title": "Ship café 🚀 \"safe\"\\path\nnext",
+        "measures": [
+          {
+            "id": "m_β",
+            "text": "Keep é exact\tand controls\u0001",
+            "target": null
+          },
+          {
+            "id": "m_two",
+            "text": "Count",
+            "target": "≥ 2"
+          }
+        ],
+        "status": "active",
+        "visibility": "workspace",
+        "owner": {
+          "id": "u_owner",
+          "name": "Display only"
+        },
+        "pod": null,
+        "anchors": {
+          "repos": [
+            "org/repo",
+            "unicode/日本語"
+          ],
+          "branch_patterns": [
+            "main",
+            "feat/*"
+          ],
+          "issues": [
+            "#7"
+          ]
+        },
+        "depends_on": [
+          "g_a"
+        ],
+        "bindable": true,
+        "contributes_to": [
+          {
+            "id": "g_a",
+            "title": "A",
+            "version": 3,
+            "reviewed_version": 3,
+            "stale": false
+          }
+        ]
+      },
+      "encoding": "[\"liminal.align_goal_view.v1\",\"11111111-1111-4111-8111-111111111111\",\"ws_fixture\",\"g_fixture\",7,\"u_owner\",\"Ship café 🚀 \\\"safe\\\"\\\\path\\nnext\",\"active\",\"workspace\",null,[[\"m_β\",\"Keep é exact\\tand controls\\u0001\",null],[\"m_two\",\"Count\",\"≥ 2\"]],[[\"org/repo\",\"unicode/日本語\"],[\"main\",\"feat/*\"],[\"#7\"]],[\"g_a\"],[[\"g_a\",\"A\",3,3,false]],true]",
+      "view_digest": "7de3a379c46eec89405e736afc23779378ce9f817d4dcbd04bf8a1e53923ac1e",
+      "projection_id": "align:741ccc1198bdf07ac94f734672b77e1510c87ca154fdfcfbc229b701722efc10"
+    },
+    {
+      "name": "foreign-instance",
+      "registry_instance_id": "22222222-2222-4222-8222-222222222222",
+      "workspace_id": "ws_fixture",
+      "observed_at": "2026-10-25T00:00:00.000Z",
+      "goal": {
+        "id": "g_fixture",
+        "version": 7,
+        "title": "Ship café 🚀 \"safe\"\\path\nnext",
+        "measures": [
+          {
+            "id": "m_β",
+            "text": "Keep é exact\tand controls\u0001",
+            "target": null
+          },
+          {
+            "id": "m_two",
+            "text": "Count",
+            "target": "≥ 2"
+          }
+        ],
+        "status": "active",
+        "visibility": "workspace",
+        "owner": {
+          "id": "u_owner",
+          "name": "Display only"
+        },
+        "pod": null,
+        "anchors": {
+          "repos": [
+            "org/repo",
+            "unicode/日本語"
+          ],
+          "branch_patterns": [
+            "main",
+            "feat/*"
+          ],
+          "issues": [
+            "#7"
+          ]
+        },
+        "depends_on": [
+          "g_z",
+          "g_a"
+        ],
+        "bindable": true,
+        "contributes_to": [
+          {
+            "id": "g_z",
+            "title": "Z",
+            "version": 2,
+            "reviewed_version": null,
+            "stale": true
+          },
+          {
+            "id": "g_a",
+            "title": "A",
+            "version": 3,
+            "reviewed_version": 3,
+            "stale": false
+          }
+        ]
+      },
+      "encoding": "[\"liminal.align_goal_view.v1\",\"22222222-2222-4222-8222-222222222222\",\"ws_fixture\",\"g_fixture\",7,\"u_owner\",\"Ship café 🚀 \\\"safe\\\"\\\\path\\nnext\",\"active\",\"workspace\",null,[[\"m_β\",\"Keep é exact\\tand controls\\u0001\",null],[\"m_two\",\"Count\",\"≥ 2\"]],[[\"org/repo\",\"unicode/日本語\"],[\"main\",\"feat/*\"],[\"#7\"]],[\"g_a\",\"g_z\"],[[\"g_a\",\"A\",3,3,false],[\"g_z\",\"Z\",2,null,true]],true]",
+      "view_digest": "f3338a984a38a2319df61fd95d0c9e1c5744dff6b3a08f304caae4d231c9ce9d",
+      "projection_id": "align:29e6ca21aca695317df630766a1b09d0315ac4d26f4aaf95f4db378070ccd4e9"
+    },
+    {
+      "name": "foreign-workspace",
+      "registry_instance_id": "11111111-1111-4111-8111-111111111111",
+      "workspace_id": "ws_other",
+      "observed_at": "2026-10-25T00:00:00.000Z",
+      "goal": {
+        "id": "g_fixture",
+        "version": 7,
+        "title": "Ship café 🚀 \"safe\"\\path\nnext",
+        "measures": [
+          {
+            "id": "m_β",
+            "text": "Keep é exact\tand controls\u0001",
+            "target": null
+          },
+          {
+            "id": "m_two",
+            "text": "Count",
+            "target": "≥ 2"
+          }
+        ],
+        "status": "active",
+        "visibility": "workspace",
+        "owner": {
+          "id": "u_owner",
+          "name": "Display only"
+        },
+        "pod": null,
+        "anchors": {
+          "repos": [
+            "org/repo",
+            "unicode/日本語"
+          ],
+          "branch_patterns": [
+            "main",
+            "feat/*"
+          ],
+          "issues": [
+            "#7"
+          ]
+        },
+        "depends_on": [
+          "g_z",
+          "g_a"
+        ],
+        "bindable": true,
+        "contributes_to": [
+          {
+            "id": "g_z",
+            "title": "Z",
+            "version": 2,
+            "reviewed_version": null,
+            "stale": true
+          },
+          {
+            "id": "g_a",
+            "title": "A",
+            "version": 3,
+            "reviewed_version": 3,
+            "stale": false
+          }
+        ]
+      },
+      "encoding": "[\"liminal.align_goal_view.v1\",\"11111111-1111-4111-8111-111111111111\",\"ws_other\",\"g_fixture\",7,\"u_owner\",\"Ship café 🚀 \\\"safe\\\"\\\\path\\nnext\",\"active\",\"workspace\",null,[[\"m_β\",\"Keep é exact\\tand controls\\u0001\",null],[\"m_two\",\"Count\",\"≥ 2\"]],[[\"org/repo\",\"unicode/日本語\"],[\"main\",\"feat/*\"],[\"#7\"]],[\"g_a\",\"g_z\"],[[\"g_a\",\"A\",3,3,false],[\"g_z\",\"Z\",2,null,true]],true]",
+      "view_digest": "7d087a65e106c95b32333e8a0a7ef2390aa3117758cccf59f4fdd18fe8b95435",
+      "projection_id": "align:4d0b46d73ac640ed475d83311bc0eeabcc0fe20a8d217525a4f24072ef71afaa"
+    }
+  ]
+}

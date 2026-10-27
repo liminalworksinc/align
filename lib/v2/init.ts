@@ -1,3 +1,4 @@
+import { initializeGoalRegistry } from "./goal-registry";
 import { migrateAuth } from "./auth";
 import { migrate, openDb } from "./db";
 
@@ -10,6 +11,7 @@ export function ready(): Promise<void> {
     openDb();
     await migrateAuth();
     migrate();
+    await initializeGoalRegistry();
   })().catch((e) => {
     g.__alignV2Ready = undefined;
     throw e;
