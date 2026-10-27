@@ -222,6 +222,10 @@ async function phase(name, env, invites = []) {
   const unknown = await req("GET", q(authParams("dcr_AAAAAAAAAAAAAAAAAAAAAA", challenge)));
   const cimdLocal = await req("GET", q(authParams("https://localhost/client.json", challenge)));
   check("unknown client id, and a client metadata document on a private address, are refused", unknown.text.includes("doesn’t recognize") && cimdLocal.text.includes("doesn’t recognize"), `${unknown.status} ${cimdLocal.status}`);
+  // A client document that can't be fetched (.invalid never resolves) is a temporary problem: say so, and don't
+  // remember it, so the same app works once its host answers.
+  const unreachable = await req("GET", q(authParams("https://align-test.invalid/client.json", challenge)));
+  check("a client document that can't be fetched -> 'try again', not 'remove it'", unreachable.text.includes("couldn’t reach") && !unreachable.text.includes("doesn’t recognize"), unreachable.status);
   const noPkce = await approve(authParams(clientId, challenge, { code_challenge_method: "plain" }), { workspace: A.id, role: "security", passcode: A.passcodes.security });
   check("plain PKCE -> the app gets invalid_request, no code", noPkce.status === 200 && /error=invalid_request/.test(noPkce.json?.redirect ?? "") && !/code=/.test(noPkce.json.redirect), noPkce.text);
   const wrongRes = await approve(authParams(clientId, challenge, { resource: "https://other.example/api/mcp" }), { workspace: A.id, role: "security", passcode: A.passcodes.security });
@@ -264,6 +268,13 @@ async function phase(name, env, invites = []) {
   const tools = ["align_get_accepted_plan", "align_get_work_map", "align_get_decision_record", "align_get_directives"];
   const rest = await Promise.all(tools.map((t) => mcp(t2.access_token, t)));
   check("every read-only tool answers for a connected app", rest.every((r) => r.status === 200 && structured(r)), rest.map((r) => r.status).join(","));
+  // What the app is shown: no Northstar argument (a chat app displayed it as "Team: security"), and no internal
+  // team id in what the tools say. This workspace calls that team by its own name.
+  const toolList = await req("POST", "/api/mcp", { body: { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, headers: { accept: "application/json, text/event-stream", authorization: `Bearer ${t2.access_token}` } });
+  const listed = JSON.parse(toolList.text.includes("data:") ? toolList.text.split("\n").find((l) => l.startsWith("data:")).slice(5) : toolList.text).result?.tools ?? [];
+  const planTool = listed.find((t) => t.name === "align_get_accepted_plan");
+  const said = rest.map((r) => r.text).join(" ") + toolList.text;
+  check("a connected app sees no internal team ids: the accepted plan takes no team, and no tool calls a team 'security' (ids like g-security-v1 aside)", !!planTool && !planTool.inputSchema?.properties?.team && !/(?<![-\w])security(?![-\w])/i.test(said), JSON.stringify(planTool?.inputSchema) + " " + (said.match(/.{60}(?<![-\w])security(?![-\w]).{60}/i)?.[0] ?? ""));
   const otherHost = HOSTED ? { status: 421 } : await mcp(t2.access_token, "align_list_goals", { host: `localhost:${PORT}` });
   check("a token is bound to its resource: the same token at another origin -> 401 (hosted: other hosts are 421)", HOSTED || otherHost.status === 401, otherHost.status);
   if (HOSTED) {
@@ -312,9 +323,12 @@ async function phase(name, env, invites = []) {
   const rfReset = await token({ grant_type: "refresh_token", refresh_token: t4.refresh_token, client_id: clientId });
   check("Restart disconnects every app: access 401, refresh invalid_grant", reset.status === 200 && afterReset.status === 401 && rfReset.json?.error === "invalid_grant", `${reset.status} ${afterReset.status} ${rfReset.text}`);
   const t5 = await connect(clientId, { workspace: A.id, role: "security", passcode: A.passcodes.security });
+  const t6 = await connect(clientId, { workspace: A.id, role: "security", passcode: A.passcodes.security });
+  const l6 = (await req("GET", "/api/workspaces/connections", { cookie: secCookie })).json.apps.filter((a) => a.role === "security" && a.name === "Test CLI");
+  check("connecting the same app as the same team again replaces the earlier connection (one row; the old token stops)", l6.length === 1 && (await mcp(t5.access_token)).status === 401 && (await mcp(t6.access_token)).status === 200, JSON.stringify(l6));
   const allProd = await req("DELETE", "/api/workspaces/connections", { body: {}, cookie: prodCookie, headers: site() });
   const allLead = await req("DELETE", "/api/workspaces/connections", { body: {}, cookie: await signIn(A, "leadership"), headers: site() });
-  check("Disconnect all: leadership only (403 otherwise), then every token stops", allProd.status === 403 && allLead.status === 200 && (await mcp(t5.access_token)).status === 401, `${allProd.status} ${allLead.status}`);
+  check("Disconnect all: leadership only (403 otherwise), then every token stops", allProd.status === 403 && allLead.status === 200 && (await mcp(t6.access_token)).status === 401, `${allProd.status} ${allLead.status}`);
 
   // audit and files
   const stFile = JSON.parse(readFileSync(path.join(dataDir, "workspaces", A.id, "state.json"), "utf8"));

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
 
 // The consent form. One choice: allow this app to read one workspace, as one role, or cancel. Read-only is stated
@@ -28,8 +28,9 @@ export default function AuthorizeForm(props: {
   provider: string;
   signedIn: SignedIn | null;
 }) {
-  const { params, clientName, registered, redirectHost, provider, signedIn } = props;
-  const [useSession, setUseSession] = useState(Boolean(signedIn));
+  const { params, clientName, registered, redirectHost, provider } = props;
+  const [signedIn, setSignedIn] = useState<SignedIn | null>(props.signedIn);
+  const [useSession, setUseSession] = useState(Boolean(props.signedIn));
   const [link, setLink] = useState("");
   const [roles, setRoles] = useState<Role[] | null>(null);
   const [company, setCompany] = useState("");
@@ -37,8 +38,30 @@ export default function AuthorizeForm(props: {
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const typed = useRef(false); // the person started on the passcode form: don't switch it away under them
+
+  // The session cookie is SameSite=Strict, so when Claude or ChatGPT sends the person here from their own site the
+  // server render can't see it. A request from this page is same-site and carries it: ask, and offer the workspace
+  // this browser is signed in to instead of the passcode form. Approving still goes through /api/oauth/approve.
+  useEffect(() => {
+    if (props.signedIn) return;
+    let live = true;
+    void (async () => {
+      const s = await fetch("/api/session").then((r) => (r.ok ? r.json() : null), () => null);
+      if (!s?.workspace || !s.actor) return;
+      const info = await fetch(`/api/workspaces/${s.workspace}/login-info`).then((r) => (r.ok ? r.json() : null), () => null);
+      if (!live || !info) return;
+      const team = (info.roles as Role[] | undefined)?.find((r) => r.id === s.actor)?.team || s.actor;
+      setSignedIn({ workspace: s.workspace, company: info.name ?? "", team, name: s.name && s.name !== s.actor ? s.name : "" });
+      if (!typed.current) setUseSession(true);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [props.signedIn]);
 
   async function lookUp(value: string) {
+    typed.current = true;
     setLink(value);
     setRoles(null);
     setRole("");
@@ -60,7 +83,8 @@ export default function AuthorizeForm(props: {
     setError(null);
     try {
       const body = useSession ? { params, decision, use_session: true } : { params, decision, workspace: link, role, passcode };
-      const res = await fetch("/api/oauth/approve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      // A server that stopped answering (a paused machine) must not leave the buttons disabled forever.
+      const res = await fetch("/api/oauth/approve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
       const data = await res.json().catch(() => ({}));
       if (res.ok && typeof data.redirect === "string") {
         window.location.assign(data.redirect);
@@ -68,7 +92,7 @@ export default function AuthorizeForm(props: {
       }
       setError(data.error ?? "That didn’t work. Try again.");
     } catch {
-      setError("Align didn’t answer. Check your connection and try again.");
+      setError("Align didn’t answer. Reload this page and choose Allow again.");
     }
     setBusy(false);
   }

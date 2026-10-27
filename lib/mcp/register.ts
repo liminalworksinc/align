@@ -404,7 +404,12 @@ function directives(s: AppState, sessionId: string | undefined): z.infer<typeof 
 
 // ---------- registration ----------
 
-export function registerAlign(server: McpServer) {
+/**
+ * `apps`: the tools as AI apps signed in through Align's OAuth see them (one custom workspace). The accepted plan
+ * takes no `team` there: the argument is Northstar's (its schema is frozen in the Northstar snapshot) and a chat app
+ * showed it to the person as "Team: security", a name the workspace never uses.
+ */
+export function registerAlign(server: McpServer, { apps = false }: { apps?: boolean } = {}) {
   server.registerTool(
     "align_list_goals",
     {
@@ -430,7 +435,7 @@ export function registerAlign(server: McpServer) {
       title: "Get the accepted plan",
       description:
         "Which plan a team's agents are authorized to run right now, per the latest ratified decision. ACCEPTED is a human decision, not proof of success.",
-      inputSchema: z.object({ team: z.enum(["security"]).default("security") }),
+      inputSchema: apps ? z.object({}) : z.object({ team: z.enum(["security"]).default("security") }),
       outputSchema: AcceptedPlanOut,
       annotations: READ_ONLY,
     },

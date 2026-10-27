@@ -28,6 +28,7 @@ const NAME_MAX = 80;
 const CIMD_MAX_BYTES = 5 * 1024;
 const CIMD_TIMEOUT_MS = 3000;
 const CIMD_CACHE_MS = 10 * 60 * 1000;
+const CIMD_BAD_CACHE_MS = 60 * 1000; // a document that answered but can't be used: re-checked after a minute
 const DCR_ID = /^dcr_[A-Za-z0-9_-]{22}$/;
 
 const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -126,7 +127,7 @@ function publicLookup(hostname: string, options: object, cb: (err: Error | null,
   lookup(hostname, { ...options, all: true }, (err, addrs) => {
     if (err) return cb(err, "");
     const list = addrs as { address: string; family: number }[];
-    if (!list.length || list.some((a) => privateAddress(a.address))) return cb(new Error("refused address"), "");
+    if (!list.length || list.some((a) => privateAddress(a.address))) return cb(Object.assign(new Error("refused address"), { refused: true }), "");
     if ((options as { all?: boolean }).all) return cb(null, list);
     cb(null, list[0].address, list[0].family);
   });
@@ -137,7 +138,7 @@ function fetchDocument(url: URL): Promise<unknown> {
     const req = https.get(url, { lookup: publicLookup as never, timeout: CIMD_TIMEOUT_MS, headers: { accept: "application/json" } }, (res) => {
       if (res.statusCode !== 200) {
         res.resume();
-        return reject(new Error(`status ${res.statusCode}`));
+        return reject(Object.assign(new Error(`status ${res.statusCode}`), { status: res.statusCode }));
       }
       let size = 0;
       const chunks: Buffer[] = [];
@@ -175,18 +176,31 @@ export function cimdUrl(clientId: string): URL | null {
 const g = globalThis as unknown as { __alignCimd?: Map<string, { at: number; client: OAuthClient | null }> };
 const cimdCache = (g.__alignCimd ??= new Map());
 
+/** The app's client document couldn't be fetched (network, timeout, a 5xx): not cached, so a retry can work. */
+export class ClientUnreachable extends Error {}
+
 async function resolveCimd(url: URL, clientId: string): Promise<OAuthClient | null> {
   const hit = cimdCache.get(clientId);
-  if (hit && Date.now() - hit.at < CIMD_CACHE_MS) return hit.client;
-  let client: OAuthClient | null = null;
-  try {
-    const doc = (await fetchDocument(url)) as Record<string, unknown>;
-    const uris = doc?.redirect_uris;
-    if (doc && doc.client_id === clientId && Array.isArray(uris) && uris.length && uris.length <= MAX_REDIRECTS && uris.every(validRedirect))
-      client = { client_id: clientId, client_name: cleanName(doc.client_name, url.hostname), redirect_uris: uris as string[], kind: "cimd" };
-  } catch {
-    client = null;
+  if (hit && Date.now() - hit.at < (hit.client ? CIMD_CACHE_MS : CIMD_BAD_CACHE_MS)) return hit.client;
+  let doc: Record<string, unknown> | null = null;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      doc = (await fetchDocument(url)) as Record<string, unknown>;
+      break;
+    } catch (e) {
+      const { status, refused } = e as { status?: number; refused?: boolean };
+      if (refused || (status && status < 500)) break; // a private address, or the host answered: this document can't be used
+      if (attempt === 1) {
+        console.warn(`[oauth] client document ${url.href} unreachable: ${(e as Error).message}`);
+        throw new ClientUnreachable(url.hostname);
+      }
+    }
   }
+  let client: OAuthClient | null = null;
+  const uris = doc?.redirect_uris;
+  if (doc && doc.client_id === clientId && Array.isArray(uris) && uris.length && uris.length <= MAX_REDIRECTS && uris.every(validRedirect))
+    client = { client_id: clientId, client_name: cleanName(doc.client_name, url.hostname), redirect_uris: uris as string[], kind: "cimd" };
+  else console.warn(`[oauth] client document ${url.href} can't be used`);
   while (cimdCache.size >= 200) cimdCache.delete(cimdCache.keys().next().value!);
   cimdCache.set(clientId, { at: Date.now(), client });
   return client;

@@ -111,20 +111,19 @@ It lasts 7 days, and leadership revokes it with `DELETE /api/workspaces/agent-to
 Any MCP client with OAuth support connects to one custom workspace with only the URL `<origin>/api/mcp`: Claude (desktop, Cowork, claude.ai), ChatGPT, Claude Code and Codex. The workspace shows the steps for each under "Your AI apps".
 
 1. The app gets 401 with a `resource_metadata` link, reads `/.well-known/oauth-protected-resource/api/mcp` and `/.well-known/oauth-authorization-server`, and identifies itself with a client metadata document (Claude Code, Codex) or registers at `/oauth/register`.
-2. It sends the person to `/oauth/authorize`. They paste the workspace link, pick a team and enter its passcode (or use the session their browser already has) and allow read-only access. `/api/oauth/approve` checks it all again and sends them back to the app with a code.
+2. It sends the person to `/oauth/authorize`. If their browser is signed in to a workspace, they confirm it and allow read-only access in one click (the page asks for the session from the browser, since the Strict session cookie isn't sent when Claude or ChatGPT links to it). Otherwise they paste the workspace link, pick a team and enter its passcode. `/api/oauth/approve` checks it all again and sends them back to the app with a code.
 3. The app exchanges the code at `/oauth/token` (PKCE S256) for an `alm.` access token (1 hour) and an `alr.` refresh token (7 days, rotated on each use).
 
-Claude Code, for example:
+Claude Code, in one line (user scope, so it works in every folder; `;` so running it again still signs in):
 
 ```bash
-claude mcp add --transport http align https://<host>/api/mcp
-# then in Claude Code: /mcp, pick align, Authenticate (or: claude mcp login align)
+claude mcp add --transport http --scope user align https://<host>/api/mcp; claude mcp login align
 ```
 
-Codex: `codex mcp add align --url https://<host>/api/mcp`, then `codex mcp login align`.
+Codex: `codex mcp add align --url https://<host>/api/mcp` detects the OAuth server and starts the sign-in itself; `codex mcp login align` signs in again later.
 
 Claude Desktop (or any app that runs MCP servers on this computer): `packages/align-connect/align-connect.mjs <align url>` is a local stdio server that signs in the same way and relays to `/api/mcp`. See its README. It works against a server on this machine, where the Claude app's own connectors can't reach.
 
-The token reads only that workspace, through the same five read-only tools; the work map and directives are workspace-wide (an app has no harness or repo). The server's instructions tell the app to call `align_get_directives` and `align_get_decision_record` at the start of each request and before acting on a plan, and to stop and name the approver while a change is waiting. Chat apps can't be woken: they see a change the next time the person sends a message.
+The token reads only that workspace, through the same five read-only tools; the work map and directives are workspace-wide (an app has no harness or repo). Apps on an `alm.` token get `align_get_accepted_plan` without Northstar's `team` argument (a chat app showed it as "Team: security"); the Northstar schema is unchanged. Claude asks before each tool call until the person sets the connector's read-only tools to Always allow, which the workspace's Connect dialog tells them to do. The server's instructions tell the app to call `align_get_directives` and `align_get_decision_record` at the start of each request and before acting on a plan, and to stop and name the approver while a change is waiting. Chat apps can't be woken: they see a change the next time the person sends a message.
 
-The workspace's "Your AI apps" card lists apps once they have read something. The team that connected an app, or leadership, disconnects it (`DELETE /api/workspaces/connections` with `{"id"}`; `{}` for all, leadership only). Restart disconnects every app. Tests: `node scripts/test-oauth.mjs <port>`.
+The workspace's "Your AI apps" card lists apps once they have read something. The team that connected an app, or leadership, disconnects it (`DELETE /api/workspaces/connections` with `{"id"}`; `{}` for all, leadership only). Restart disconnects every app. If an app's client metadata document can't be fetched (network, timeout, 5xx), the page says to reload in a minute and nothing is cached; a document that answers but can't be used is re-checked after a minute. Tests: `node scripts/test-oauth.mjs <port>`.

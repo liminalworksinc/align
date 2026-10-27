@@ -170,8 +170,8 @@ Run this before the first tester gets a link, and post the results on LIM-2424:
 4. Capture (`/api/sessions/events`) is 404.
 5. `/api/state` without a session is 404.
 6. Northstar sign-in and `/api/policy/security`: 404, and `/` redirects to `/new`. `/api/mcp` without a token is 401 with a `resource_metadata` link to `https://<host>/.well-known/oauth-protected-resource/api/mcp`, and with an `Origin` header it is 403.
-8. Connect one real app (Claude Code: `claude mcp add --transport http align https://<host>/api/mcp`, then `/mcp` and Authenticate) to a synthetic workspace, ask it for the goals, and check the workspace's "Your AI apps" card lists it. Disconnect it there and check the app is refused.
 7. Two synthetic workspaces can't read each other.
+8. Connect one real app (Claude Code: the one line in the workspace's "Connect an AI app" dialog) to a synthetic workspace, ask it for the goals, and check the workspace's "Your AI apps" card lists it. Disconnect it there and check the app is refused.
 
 Delete the synthetic workspaces afterwards with `ws-admin.mjs`.
 

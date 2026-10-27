@@ -3,7 +3,7 @@ import { signPayload } from "../auth";
 import { config } from "../config";
 import type { Actor } from "../types";
 import { agentEpochOf, parseCustomWs, readAuth, type CustomWsId } from "../workspace";
-import { redirectAllowed, resolveClient, type OAuthClient } from "./clients";
+import { ClientUnreachable, redirectAllowed, resolveClient, type OAuthClient } from "./clients";
 import { createGrant, liveGrants, parseRefresh, removeGrant, rotateGrant } from "./grants";
 
 // The OAuth 2.1 authorization server for Align's MCP endpoint (MCP authorization spec 2026-07-28): authorization code
@@ -119,7 +119,13 @@ export function redirectWith(uri: string, params: Record<string, string | null>,
 const CHALLENGE = /^[A-Za-z0-9._~-]{43,128}$/;
 
 export async function checkAuthorize(q: Record<string, string | undefined>, origin: string): Promise<AuthorizeCheck> {
-  const client = await resolveClient(q.client_id);
+  let client: OAuthClient | null;
+  try {
+    client = await resolveClient(q.client_id);
+  } catch (e) {
+    if (e instanceof ClientUnreachable) return { ok: false, fatal: `Align couldn’t reach ${e.message} to check this app. Reload this page in a minute.` };
+    throw e;
+  }
   if (!client) return { ok: false, fatal: "Align doesn’t recognize this app. Remove it and add Align again." };
   const redirect = q.redirect_uri;
   if (!redirect || !redirectAllowed(client, redirect)) return { ok: false, fatal: "This app asked Align to send you somewhere it didn’t register. Nothing was shared." };

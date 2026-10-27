@@ -114,7 +114,10 @@ export async function createGrant(ws: CustomWsId, a: { client_id: string; client
     prev_refresh_hash: null,
     refresh_exp: refreshExpiry(now),
   };
-  await update(ws, (list) => ({ grants: [...list.filter((x) => x.ep === grant.ep).slice(-(MAX_GRANTS - 1)), grant], out: null }));
+  // Connecting the same app as the same team again replaces its earlier connection: the app has dropped that refresh
+  // token, and the workspace shouldn't list one app twice.
+  const kept = (list: Grant[]) => list.filter((x) => x.ep === grant.ep && !(x.client_id === grant.client_id && x.role === grant.role));
+  await update(ws, (list) => ({ grants: [...kept(list).slice(-(MAX_GRANTS - 1)), grant], out: null }));
   return { grant, refresh_token: refreshToken(ws, grant.id, secret) };
 }
 
