@@ -426,13 +426,20 @@ function directives(s: AppState, sessionId: string | undefined): z.infer<typeof 
  * showed it to the person as "Team: security", a name the workspace never uses.
  */
 export function registerAlign(server: McpServer, { apps = false }: { apps?: boolean } = {}) {
+  // Apps get titles and descriptions that say what each tool holds, so an agent asked to plan team work picks Align
+  // (live 10-27: Codex, asked for a cutover runbook, searched Drive instead and used a superseded date). Northstar's
+  // wording stays as frozen in its snapshot.
+  const say = (northstar: string, app: string) => (apps ? app : northstar);
   if (apps) registerWorkspaceTools(server);
   server.registerTool(
     "align_list_goals",
     {
-      title: "List ratified goals",
+      title: say("List ratified goals", "List the teams' goals"),
       description:
-        "Current company and team goals in Align (company goals pushed by Leadership, team goals ratified by their owners), the latest Leadership push, and the goal registry that agent work is mapped against. Read before you work.",
+        say(
+          "Current company and team goals in Align (company goals pushed by Leadership, team goals ratified by their owners), the latest Leadership push, and the goal registry that agent work is mapped against. Read before you work.",
+          "This company's goals for each team, with targets and deadlines, as their owners approved them. Check before you plan or do work for one of these teams: deadlines here override older docs.",
+        ),
       inputSchema: z.object({}),
       outputSchema: ListGoalsOut,
       annotations: READ_ONLY,
@@ -449,9 +456,12 @@ export function registerAlign(server: McpServer, { apps = false }: { apps?: bool
   server.registerTool(
     "align_get_accepted_plan",
     {
-      title: "Get the accepted plan",
+      title: say("Get the accepted plan", "Get the agreed plan"),
       description:
-        "Which plan a team's agents are authorized to run right now, per the latest ratified decision. ACCEPTED is a human decision, not proof of success.",
+        say(
+          "Which plan a team's agents are authorized to run right now, per the latest ratified decision. ACCEPTED is a human decision, not proof of success.",
+          "The plan the teams agreed on: what changed, new targets and dates, what each team committed to in return, and whether launch is approved. Check before planning or starting work, runbooks, migrations or schema changes included. Agreed is a human decision, not proof of success.",
+        ),
       inputSchema: apps ? z.object({}) : z.object({ team: z.enum(["security"]).default("security") }),
       outputSchema: AcceptedPlanOut,
       annotations: READ_ONLY,
@@ -527,9 +537,12 @@ export function registerAlign(server: McpServer, { apps = false }: { apps?: bool
   server.registerTool(
     "align_get_decision_record",
     {
-      title: "Get a decision record",
+      title: say("Get a decision record", "Get the latest request between teams"),
       description:
-        "The latest (or a given) proposal to change a team goal: proposed text, counters, Product acknowledgment, ratification, and referenced Sparta sandbox runs. VERIFIED only means a sandbox check passed; the company outcome is not verified by this record.",
+        say(
+          "The latest (or a given) proposal to change a team goal: proposed text, counters, Product acknowledgment, ratification, and referenced Sparta sandbox runs. VERIFIED only means a sandbox check passed; the company outcome is not verified by this record.",
+          "The latest request from one team to change another team's goal: what was asked, what the asking team gives in return, counters, and whether the owning team accepted it. Check before work that touches either team's goal.",
+        ),
       inputSchema: z.object({ proposal_id: z.string().max(100).optional() }),
       outputSchema: DecisionOut,
       annotations: READ_ONLY,
@@ -538,6 +551,11 @@ export function registerAlign(server: McpServer, { apps = false }: { apps?: bool
       requireRead(ctx);
       const s = await readState(storeOf(ctx));
       const out = decisionRecord(s, proposal_id);
+      // Apps see the workspace's own team names, not the slots behind them ("security" is Data Platform here).
+      if (apps && out.record && scenarioOf(s) === "custom") {
+        const n = (o: string) => teamName(s, o);
+        out.record = { ...out.record, proposed_by: n(out.record.proposed_by), recipient: n(out.record.recipient), counters: out.record.counters.map((c) => ({ ...c, by: n(c.by) })) };
+      }
       const r = out.record;
       // A custom plan is inline text with no sandbox, so its record names no Sparta runs.
       const runs = (x: NonNullable<typeof r>) =>
@@ -545,7 +563,7 @@ export function registerAlign(server: McpServer, { apps = false }: { apps?: bool
           ? "no sandbox test exists for this plan"
           : `${x.sparta_runs.length} Sparta run(s): ${x.sparta_runs.map((y) => `${y.plan} ${y.verdict}`).join(", ") || "none"}`;
       const summary = r
-        ? `Proposal ${r.proposal_id} (${scenarioOf(s) === "custom" ? (customStateLabel(r.state, labelsFor(s)) ?? r.state) : r.state}) on ${r.target_goal_id} ${r.target_goal_version}; ${r.counters.length} counter(s); ${
+        ? `Proposal ${r.proposal_id} (${scenarioOf(s) === "custom" ? (customStateLabel(r.state, labelsFor(s)) ?? r.state) : r.state}) on ${apps && scenarioOf(s) === "custom" ? `${r.recipient}'s goal` : r.target_goal_id} ${r.target_goal_version}; ${r.counters.length} counter(s); ${
             r.ratification ? `ratified as ${r.ratification.accepted_version} at ${r.ratification.ratified_at} (${r.ratification.test_status})` : "not ratified"
           }; ${runs(r)}. ${scenarioOf(s) === "custom" && r.ratification ? (launchApproved(s) ? `Status: ${agreedStatus(true).toLowerCase()} by ${leadOf(s, "ceo")}. ` : `Status: ${AGREED_STATUS.toLowerCase()}. ${AGREED_NOT_LAUNCH} `) : ""}${OUTCOME_NOTE}`
         : `${proposal_id ? `No proposal ${proposal_id}.` : "No proposals recorded yet."} ${OUTCOME_NOTE}`;
@@ -556,9 +574,11 @@ export function registerAlign(server: McpServer, { apps = false }: { apps?: bool
   server.registerTool(
     "align_get_directives",
     {
-      title: "Get authority directives",
-      description:
+      title: say("Get authority directives", "Get what changed and what is waiting"),
+      description: say(
         "Authority changes (a Leadership company-goal push or a goal owner's ratification) that Align routes to agent sessions. Pass session_id (full id or a suffix of the raw session id) to get the directives that session has not received yet. Also lists the 10 most recent authority events with delivery counts.",
+        "Call first, at the start of every work request for this company's teams: what changed (new company requirements, changes a team accepted) and what is waiting on someone's approval. If a change you depend on is not approved, stop and say who has to approve it.",
+      ),
       inputSchema: z.object({ session_id: z.string().max(200).optional() }),
       outputSchema: DirectivesOut,
       annotations: READ_ONLY,

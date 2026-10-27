@@ -120,7 +120,7 @@ Claude Code, in one line (user scope, so it works in every folder; `;` so runnin
 claude mcp add --transport http --scope user align https://<host>/api/mcp; claude mcp login align
 ```
 
-Codex: `codex mcp add align --url https://<host>/api/mcp` detects the OAuth server and starts the sign-in itself; `codex mcp login align` signs in again later.
+Codex: `codex mcp add align --url https://<host>/api/mcp` detects the OAuth server and starts the sign-in itself; `codex mcp login align` signs in again later. The dialog's Codex line also adds one line to Codex's global `AGENTS.md` (once): "For any work for <company>'s teams, check Align first...". Without it, Codex asked for a cutover runbook searched other sources and used a date the teams had moved (live test, 10-27); with it, Codex read Align first. Claude Code read Align unprompted. Apps also get plainer tool titles and descriptions and their own server instructions (`registerAlign(server, { apps: true })`), and decision records name teams, not slots; Northstar's wording is unchanged.
 
 Claude Desktop (or any app that runs MCP servers on this computer): `packages/align-connect/align-connect.mjs <align url>` is a local stdio server that signs in the same way and relays to `/api/mcp`. See its README. It works against a server on this machine, where the Claude app's own connectors can't reach.
 
