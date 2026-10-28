@@ -1,6 +1,7 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { promises as fs, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { signPayload } from "../auth";
 import { config, testServerClosesAt } from "../config";
 import { HttpError } from "../errors";
 import { withLock } from "../locks";
@@ -9,7 +10,8 @@ import { agentEpochOf, readAuth, wsDir, type CustomWsId } from "../workspace";
 
 // Connected AI apps, one grant per app sign-in, in <workspace>/oauth.json (deleted with the workspace). A grant holds
 // the app's name and redirect host as it introduced itself, the role that approved it, the hash of its current
-// refresh token (and the one before, to catch reuse), and the agent epoch it was approved under: Restart and
+// refresh token (and the one before, to catch reuse) keyed with ALIGN_SECRET, so rotating the secret ends every
+// connected app, and the agent epoch it was approved under: Restart and
 // "Disconnect all" bump that epoch, so every grant from before stops at once. last_used_at is set by the first
 // successful MCP call, and the workspace shows an app as connected only from then on.
 
@@ -32,7 +34,9 @@ export const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const USE_WRITE_MS = 5 * 60 * 1000;
 
 const file = (ws: CustomWsId) => path.join(wsDir(ws), "oauth.json");
-const sha = (v: string) => createHash("sha256").update(v).digest("hex");
+// Keyed with ALIGN_SECRET (domain-separated from session, agent and access tokens): a refresh token only works under
+// the secret it was issued with, so rotating ALIGN_SECRET ends every connected app (docs/HOSTING.md).
+const refreshHash = (v: string) => signPayload(`alr.${v}`);
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 // Every MCP call checks its grant, so the file is read synchronously and cached by mtime, as auth.json is.
@@ -99,18 +103,21 @@ export function parseRefresh(token: unknown): { ws: string; id: string; secret: 
   return m ? { ws: m[1], id: m[2], secret: m[3] } : null;
 }
 
-export async function createGrant(ws: CustomWsId, a: { client_id: string; client_name: string; redirect_host: string; role: Actor }): Promise<{ grant: Grant; refresh_token: string }> {
+/** A new grant id: the token endpoint takes one before creating the grant, so a replayed code can name it at once. */
+export const newGrantId = () => `gr_${randomBytes(12).toString("base64url")}`;
+
+export async function createGrant(ws: CustomWsId, a: { client_id: string; client_name: string; redirect_host: string; role: Actor }, id = newGrantId()): Promise<{ grant: Grant; refresh_token: string }> {
   const auth = readAuth(ws);
   if (!auth) throw new HttpError(404, "This workspace no longer exists");
   const secret = randomBytes(32).toString("base64url");
   const now = Date.now();
   const grant: Grant = {
-    id: `gr_${randomBytes(12).toString("base64url")}`,
+    id,
     ...a,
     ep: agentEpochOf(auth),
     created_at: new Date(now).toISOString(),
     last_used_at: null,
-    refresh_hash: sha(secret),
+    refresh_hash: refreshHash(secret),
     prev_refresh_hash: null,
     refresh_exp: refreshExpiry(now),
   };
@@ -135,10 +142,10 @@ export async function rotateGrant(ws: CustomWsId, id: string, secret: string, cl
     const i = list.findIndex((x) => x.id === id);
     if (i < 0) return { grants: list, out: null };
     const gr = list[i];
-    const h = sha(secret);
+    const h = refreshHash(secret);
     if (gr.prev_refresh_hash && same(gr.prev_refresh_hash, h)) return { grants: list.filter((x) => x.id !== id), out: null };
     if (!same(gr.refresh_hash, h) || gr.client_id !== clientId || gr.ep !== ep || gr.refresh_exp <= Date.now()) return { grants: list, out: null };
-    const rotated: Grant = { ...gr, prev_refresh_hash: gr.refresh_hash, refresh_hash: sha(next) };
+    const rotated: Grant = { ...gr, prev_refresh_hash: gr.refresh_hash, refresh_hash: refreshHash(next) };
     list[i] = rotated;
     return { grants: list, out: { grant: rotated, refresh_token: refreshToken(ws, id, next) } };
   });

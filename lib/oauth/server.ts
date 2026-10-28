@@ -4,7 +4,8 @@ import { config } from "../config";
 import type { Actor } from "../types";
 import { agentEpochOf, parseCustomWs, readAuth, type CustomWsId } from "../workspace";
 import { ClientUnreachable, redirectAllowed, resolveClient, type OAuthClient } from "./clients";
-import { createGrant, liveGrants, parseRefresh, removeGrant, rotateGrant } from "./grants";
+import { HttpError } from "../errors";
+import { createGrant, liveGrants, newGrantId, parseRefresh, removeGrant, rotateGrant } from "./grants";
 
 // The OAuth 2.1 authorization server for Align's MCP endpoint (MCP authorization spec 2026-07-28): authorization code
 // with PKCE S256 only, public clients (CIMD or DCR, lib/oauth/clients.ts), refresh token rotation, RFC 8707 resource
@@ -215,14 +216,18 @@ export async function exchange(form: URLSearchParams, origin: string): Promise<T
     const verifier = form.get("code_verifier") ?? "";
     if (!CHALLENGE.test(verifier) || s256(verifier) !== entry.challenge) throw new TokenError("invalid_grant", "PKCE verification failed");
     if (entry.resource !== resource) throw new TokenError("invalid_target", "The code was issued for another resource");
-    entry.used = { ws: entry.ws, grant: "" };
-    const { grant, refresh_token } = await createGrant(entry.ws, {
-      client_id: entry.client_id,
-      client_name: entry.client_name,
-      redirect_host: new URL(entry.redirect_uri).host,
-      role: entry.role,
-    });
-    entry.used.grant = grant.id;
+    // The grant id is fixed before the await, so a replay that arrives while the grant is being written still
+    // revokes it (removeGrant queues behind createGrant on the same workspace lock).
+    entry.used = { ws: entry.ws, grant: newGrantId() };
+    let created: Awaited<ReturnType<typeof createGrant>>;
+    try {
+      created = await createGrant(entry.ws, { client_id: entry.client_id, client_name: entry.client_name, redirect_host: new URL(entry.redirect_uri).host, role: entry.role }, entry.used.grant);
+    } catch (e) {
+      // The workspace was deleted while the code was outstanding: the code is worth nothing now.
+      if (e instanceof HttpError && e.status === 404) throw new TokenError("invalid_grant", "This workspace no longer exists");
+      throw e;
+    }
+    const { grant, refresh_token } = created;
     return {
       access_token: mintAccess(entry.ws, grant.id, grant.client_id, grant.role, resource, grant.ep),
       token_type: "Bearer",

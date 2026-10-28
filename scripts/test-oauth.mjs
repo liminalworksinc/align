@@ -398,6 +398,40 @@ async function phase(name, env, invites = []) {
   const secret = t5.refresh_token.split(".").at(-1);
   check("oauth.json is 0600 and no refresh secret or access token is stored", mode === "600" && !all.includes(secret) && !all.includes(t5.access_token), mode);
 
+  // codes under load and deletion (review L1, L2), in workspace B, which nothing above needs any more
+  {
+    const p = pkce();
+    const code = codeFrom(await approve(authParams(clientId, p.challenge), { workspace: B.id, role: "security", passcode: B.passcodes.security }));
+    const f = { grant_type: "authorization_code", code, redirect_uri: REDIRECT, client_id: clientId, code_verifier: p.verifier };
+    const [x, y] = await Promise.all([token(f), token(f)]);
+    const won = x.json?.access_token ?? y.json?.access_token;
+    check("L1 a code exchanged twice at once: one gets invalid_grant, and the other's token is revoked too (401)", [x, y].some((r) => r.json?.error === "invalid_grant") && !!won && (await mcp(won)).status === 401, `${x.status} ${y.status}`);
+  }
+  {
+    const p = pkce();
+    const code = codeFrom(await approve(authParams(clientId, p.challenge), { workspace: B.id, role: "product", passcode: B.passcodes.product }));
+    const del = spawnSync("node", [path.join(ROOT, "scripts/ws-admin.mjs"), "delete", B.id], { env: { ...process.env, ALIGN_DATA_DIR: dataDir }, encoding: "utf8" });
+    const late = await token({ grant_type: "authorization_code", code, redirect_uri: REDIRECT, client_id: clientId, code_verifier: p.verifier });
+    check("L2 a code outstanding when its workspace is deleted -> invalid_grant (400), not a server error", del.status === 0 && late.status === 400 && late.json?.error === "invalid_grant", `${del.status} ${late.status} ${late.text}`);
+  }
+
+  await stop();
+}
+
+// Rotating ALIGN_SECRET (review M1): a restart with a new secret ends every connected app, refresh tokens included.
+async function rotation(env, invite) {
+  phaseName = "rotate";
+  HOSTED = true;
+  await start(env);
+  const W = await makeWorkspace("Harbor Rotate", invite);
+  const c = (await req("POST", "/oauth/register", { body: { client_name: "Rotate CLI", redirect_uris: [REDIRECT] } })).json.client_id;
+  const t = await connect(c, { workspace: W.id, role: "security", passcode: W.passcodes.security });
+  const before = (await mcp(t.access_token)).status;
+  await stop();
+  await start({ ...env, ALIGN_SECRET: "r".repeat(48) });
+  const access = await mcp(t.access_token);
+  const rf = await token({ grant_type: "refresh_token", refresh_token: t.refresh_token, client_id: c });
+  check("M1 rotating ALIGN_SECRET ends every connected app: the old access token 401, the old refresh token invalid_grant", before === 200 && access.status === 401 && rf.json?.error === "invalid_grant", `${before} ${access.status} ${rf.text}`);
   await stop();
 }
 
@@ -412,7 +446,7 @@ try {
   // Every server in this test loads the network stand-ins (scripts/oauth-test-net.mjs) and reaches the document server.
   const net = { NODE_OPTIONS: `--import ${pathToFileURL(path.join(ROOT, "scripts/oauth-test-net.mjs")).href}`, ALIGN_TEST_DOC_PORT: String(await startDocServer(tmp)) };
   await phase("local", { ...net, ALIGN_DATA_DIR: path.join(tmp, "local"), ALIGN_ALLOW_OPEN_CREATE: "1", ALIGN_CREATE_PER_HOUR: "50" });
-  const invites = ["oauth-invite-000001", "oauth-invite-000002"];
+  const invites = ["oauth-invite-000001", "oauth-invite-000002", "oauth-invite-000003"];
   const hosted = {
     ...net,
     HOSTED: "1",
@@ -426,6 +460,7 @@ try {
     ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-1",
   };
   await phase("hosted", hosted, invites);
+  await rotation(hosted, invites[2]);
 } catch (e) {
   fail++;
   console.log(`FAIL  [${phaseName}] stopped: ${e.message}`);
