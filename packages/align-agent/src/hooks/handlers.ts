@@ -8,6 +8,7 @@ import { contextGoals } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
+import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
 import type { FeedFile, GoalSnapshot, Harness, HotState, InjectedState, Latch, MeFile } from "../shared/types.ts";
 import { CLAIM_MS, collision, commitSubject, crossOverlap, display, editedPaths, podReport, readPath, record, shellWrites, siblingNews, type Act } from "./siblings.ts";
 
@@ -178,6 +179,8 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
     }
     const card = cardFor(home, lid, hot.goal.id, inj, cwd, hot.share.workspace_id);
     if (card) context = context ? `${context}\n${card}` : card;
+    const steer = steerOnce(home, lid, source, hot.share.workspace_id, hot.goal.id, inj);
+    if (steer) context = context ? `${context}\n${steer}` : steer;
   } else if (!hot?.share && (source === "startup" || source === "clear") && autoShare(home, harness, sid, cwd, inj, messages)) {
     const rule = matchRule(readRules(home), cwd);
     const goal = rule?.goal_id ? feedGoal(home, rule.workspace_id, rule.goal_id) : null;
@@ -189,6 +192,8 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
       inj.context_epoch++;
       const card = cardFor(home, lid, goal.id, inj, cwd, rule!.workspace_id);
       if (card) context = `${context}\n${card}`;
+      const steer = steerOnce(home, lid, source, rule!.workspace_id, goal.id, inj);
+      if (steer) context = `${context}\n${steer}`;
     }
   } else if (!hot?.share || hot.share.state === "stopped") {
     if (source === "fork" || source === "clear") {
@@ -211,6 +216,10 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
   }
   const notices = takeNotices(hot, inj);
   if (notices) messages.push(notices);
+  if (source === "startup") {
+    const note = unsharedNote(home);
+    if (note) messages.push(note);
+  }
   if (!context && !messages.length) {
     if (hot) writeInjected(home, lid, inj);
     return null;
@@ -220,6 +229,21 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
   if (context) out.hookSpecificOutput = { hookEventName: "SessionStart", additionalContext: context };
   if (messages.length) out.systemMessage = messages.join("\n");
   return out;
+}
+
+/** The session's one steering line (fresh starts only), queued for the next sync to report. */
+function steerOnce(home: string, lid: string, source: string, ws: string, goalId: string, inj: InjectedState): string | null {
+  if ((source !== "startup" && source !== "clear") || inj.steering_at) return null;
+  const pick = steeringLine(goalId, readJson<FeedFile>(layout.feed(home, ws)));
+  if (!pick) return null;
+  const at = new Date().toISOString();
+  inj.steering_at = at;
+  try {
+    queueSteering(home, { local_id: lid, workspace_id: ws, goal_id: pick.goal_id, suggested_goal_id: pick.suggested_goal_id, share: pick.share, target: pick.target, at });
+  } catch {
+    /* counting is best effort; the line still shows */
+  }
+  return pick.text;
 }
 
 /** Cards are rate-limited per session; work that overlaps this session's own files comes through at once. */

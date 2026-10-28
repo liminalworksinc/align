@@ -429,6 +429,57 @@ const MIGRATIONS: string[] = [
   CREATE INDEX v2_activity_ws ON v2_activity(ws_id, seq);
   CREATE INDEX v2_activity_expiry ON v2_activity(ws_id, expires_at);
   `,
+  // 3: allocation. A goal's owner sets the share of the workspace's agent time it should get; the workspace owner can
+  // turn steering (one line at session start) on or off; steering lines shown are counted; and a change to several
+  // goals' targets can be proposed and approved by every affected owner.
+  `
+  ALTER TABLE v2_goals ADD COLUMN target_share INTEGER CHECK (target_share IS NULL OR (target_share BETWEEN 0 AND 100));
+  ALTER TABLE v2_goal_versions ADD COLUMN target_share INTEGER;
+  ALTER TABLE v2_workspaces ADD COLUMN steering TEXT NOT NULL DEFAULT 'off' CHECK (steering IN ('off','on'));
+  CREATE TABLE v2_steering_events (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    session_key TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    suggested_goal_id TEXT NOT NULL,
+    share INTEGER NOT NULL,
+    target INTEGER NOT NULL,
+    at TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, session_key, at),
+    FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_steering_events_at ON v2_steering_events(ws_id, at);
+  CREATE TABLE v2_reallocations (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    requester_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('pending','countered','approved','rejected','withdrawn')),
+    revision INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    decided_at TEXT
+  );
+  CREATE INDEX v2_reallocations_ws ON v2_reallocations(ws_id, updated_at);
+  CREATE TABLE v2_reallocation_revisions (
+    ws_id TEXT NOT NULL,
+    reallocation_id TEXT NOT NULL REFERENCES v2_reallocations(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL,
+    targets_json TEXT NOT NULL,
+    approvers_json TEXT NOT NULL,
+    note TEXT,
+    author_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (reallocation_id, revision)
+  );
+  CREATE TABLE v2_reallocation_approvals (
+    ws_id TEXT NOT NULL,
+    reallocation_id TEXT NOT NULL REFERENCES v2_reallocations(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (reallocation_id, revision, user_id)
+  );
+  `,
 ];
 
 export function migrate() {

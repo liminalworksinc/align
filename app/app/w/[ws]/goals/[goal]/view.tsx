@@ -2,13 +2,13 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
-import { AnchorsEditor, MeasuresEditor, VISIBILITY_LABEL, anchorsDraft, anchorsOut, measuresDraft, measuresOut } from "../../../../_ui/goalform";
+import { AnchorsEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, measuresDraft, measuresOut, takenBy, targetOut } from "../../../../_ui/goalform";
 import type { Me } from "../../../../_ui/server";
 import type { Goal, MySession } from "../../../../_ui/types";
 
 interface Detail {
   goal: Goal;
-  versions: { version: number; title: string; status: string; content_hash: string; created_at: string }[];
+  versions: { version: number; title: string; status: string; target_share: number | null; content_hash: string; created_at: string }[];
   contributions: { goal: { id: string; title: string } | null }[];
   can_edit: boolean;
 }
@@ -19,6 +19,7 @@ function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () =
   const [measures, setMeasures] = useState(measuresDraft(goal));
   const [anchors, setAnchors] = useState(anchorsDraft(goal));
   const [deps, setDeps] = useState<string[]>(goal.depends_on ?? []);
+  const [target, setTarget] = useState(goal.target_share === null || goal.target_share === undefined ? "" : String(goal.target_share));
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const others = feed.data?.goals.filter((g) => g.id !== goal.id && g.status === "active") ?? [];
   const act = useAction();
@@ -29,7 +30,7 @@ function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () =
         onSubmit={(e) => {
           e.preventDefault();
           void act.run(
-            () => api(`/api/v2/workspaces/${ws}/goals/${goal.id}/versions`, { body: { version: goal.version, title, status, measures: measuresOut(measures), anchors: anchorsOut(anchors), depends_on: deps } }),
+            () => api(`/api/v2/workspaces/${ws}/goals/${goal.id}/versions`, { body: { version: goal.version, title, status, measures: measuresOut(measures), anchors: anchorsOut(anchors), depends_on: deps, target_share: targetOut(target) } }),
             onDone,
           );
         }}
@@ -45,6 +46,7 @@ function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () =
             <option value="dropped">Dropped</option>
           </Select>
         </Field>
+        <TargetShareField value={target} onChange={setTarget} taken={takenBy(feed.data?.goals, goal.id)} />
         <AnchorsEditor value={anchors} onChange={setAnchors} />
         {others.length > 0 && (
           <div className="mb-3">
@@ -199,6 +201,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             <Pill>{VISIBILITY_LABEL[g.visibility]}</Pill>
             {g.pod && <Pill>{g.pod.name}</Pill>}
             <Pill>version {g.version}</Pill>
+            {g.target_share !== null && g.target_share !== undefined && <Pill tone="violet">target {g.target_share}% of agent time</Pill>}
             <span className="text-[14px] text-zinc-500">Owner: {g.owner.id === me.id ? "you" : g.owner.name}</span>
           </div>
           <Card title="Measures">
@@ -225,7 +228,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             <ul className="text-[14px] text-zinc-600">
               {d.data!.versions.map((v) => (
                 <li key={v.version} className="py-1">
-                  Version {v.version}: {v.title} ({v.status}), {when(v.created_at)} <span className="font-mono text-zinc-500">{v.content_hash.slice(0, 12)}</span>
+                  Version {v.version}: {v.title} ({v.status}{v.target_share !== null && v.target_share !== undefined ? `, target ${v.target_share}%` : ""}), {when(v.created_at)} <span className="font-mono text-zinc-500">{v.content_hash.slice(0, 12)}</span>
                 </li>
               ))}
             </ul>

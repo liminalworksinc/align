@@ -62,6 +62,10 @@ export class FakeServer {
   user = { id: "u_sean", name: "Sean", email: "sean@example.test" };
   workspaces = [{ id: "ws_acme", name: "Acme", role: "owner", pods: [{ id: "pod_core", name: "Core", role: "lead" }] }];
   goals = new Map<string, Goal[]>();
+  /** Workspace steering switch, as the goals feed reports it. */
+  steering = new Map<string, "on" | "off">();
+  /** POST /steering events as accepted. */
+  steeringEvents: any[] = [];
   pending = new Map<string, Pending>();
   devices = new Map<string, Device>();
   access = new Map<string, { device: string; exp: number }>();
@@ -119,7 +123,7 @@ export class FakeServer {
   }
 
   feedVersion(ws: string): string {
-    return crypto.createHash("sha256").update(JSON.stringify(this.goals.get(ws) || [])).digest("hex").slice(0, 12);
+    return crypto.createHash("sha256").update(JSON.stringify({ g: this.goals.get(ws) || [], s: this.steering.get(ws) || "off" })).digest("hex").slice(0, 12);
   }
 
   bumpGoal(ws: string, id: string, patch: Partial<Goal> = {}): Goal {
@@ -242,7 +246,7 @@ export class FakeServer {
       if (m && req.method === "GET") {
         const v = this.feedVersion(m[1]);
         if (req.headers["if-none-match"] === `"${v}"`) return send(304, undefined, { etag: `"${v}"` });
-        return send(200, { version: v, goals: this.goals.get(m[1]) || [] }, { etag: `"${v}"` });
+        return send(200, { version: v, goals: this.goals.get(m[1]) || [], steering: this.steering.get(m[1]) || "off" }, { etag: `"${v}"` });
       }
       m = /^\/api\/v2\/workspaces\/([^/]+)\/sessions\/([^/]+)(\/(epochs|usage|stop-sharing))?$/.exec(p);
       if (m) {
@@ -323,6 +327,18 @@ export class FakeServer {
           this.streams.delete(s);
         });
         return;
+      }
+      m = /^\/api\/v2\/workspaces\/([^/]+)\/steering$/.exec(p);
+      if (m && req.method === "POST") {
+        const events = Array.isArray(body?.events) ? body.events : [];
+        let accepted = 0;
+        for (const e of events) {
+          const sess = this.sessions.get(e.session_key);
+          if (!sess || sess.device !== dev.id) continue;
+          this.steeringEvents.push({ ...e, ws: m[1] });
+          accepted++;
+        }
+        return send(200, { accepted });
       }
       m = /^\/api\/v2\/workspaces\/([^/]+)\/activity$/.exec(p);
       if (m && req.method === "POST") {

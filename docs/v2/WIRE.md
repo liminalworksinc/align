@@ -1,6 +1,6 @@
 # Goal sessions wire contract (local agent ⇄ hosted server)
 
-Status: v2.2, 2026-10-22 (goal tree fields; in-flight activity). v2.1: directive SSE stream removed; cursor polling only. Source of truth for both halves. Plan: `~/.claude/plans/no-we-need-a-logical-lark.md` (rev 2).
+Status: v2.3, 2026-10-27 (allocation: target shares, steering, reallocation proposals). v2.2, 2026-10-22 (goal tree fields; in-flight activity). v2.1: directive SSE stream removed; cursor polling only. Source of truth for both halves. Plan: `~/.claude/plans/no-we-need-a-logical-lark.md` (rev 2).
 Everything here is behind `ALIGN_GOAL_SESSIONS=1`; with it unset every `/app*` and `/api/v2/*` path is 404.
 
 ## Conventions
@@ -106,6 +106,38 @@ Kept 24 hours; a `claim` 1 hour. The session's open epoch's goal is recorded wit
 "user": { "id", "name" }, "mine", "goal_id", "repo_id", "kind", "path_hash", "path", "text", "at", "expires_at" } ] }`,
 oldest first, at most 500, only items on goals the caller can read (an unbound session's items only to its own user).
 The agent uploads and fetches inside the normal hook-started sync pass; hooks read the cached copy.
+
+## Allocation (v2.3)
+Additive fields; older agents ignore them.
+- `Goal.target_share`: int 0..100 or null. The share of the workspace's agent time the goal should get, set by its owner.
+  It is a versioned field (create: `POST .../goals { target_share }`; change: `POST .../goals/:goal/versions { version,
+  target_share }`), so a change sends the usual `goal_version` directive. Active targets in a workspace, private goals
+  included, sum to 100 or less; otherwise `409 targets_over_100` (the message names only the sums).
+- Goals feed: each goal also carries `"allocation": { "target_share", "share_7d", "gap_7d" } | null` (whole percents over
+  the trailing 7 days; `gap_7d` is null without a target or without usage), and the response carries `"steering":
+  "off"|"on"`. Shares are rounded before hashing, so the feed version changes only when a share moves a full point.
+- Agent time is counted in fresh tokens: `input + output + cache_write_5m + cache_write_1h + cache_write_unsplit`, for
+  every model, priced or not. Cache reads are left out. Shares are of all shared usage in the workspace in the window.
+- `GET /api/v2/workspaces/:ws/allocation?from&to&weeks` (Bearer or cookie; `spend.read`) → `{ "window": { "from", "to",
+  "total_fresh_tokens", "total_est_list_usd_micros", "unpriced_requests", "rows": [ { "kind": "goal"|"private"|
+  "unallocated", "goal": { "id", "title" } | null, "fresh_tokens", "share", "target_share", "gap",
+  "est_list_usd_micros", "unpriced_requests", "sessions" } ], "note" }, "weekly": [ { "week_start", "total_fresh_tokens",
+  "rows": [...] } ], "steering": { "steering", "total", "days": [ { "day", "n" } ] } }`. Default window: last 7 days;
+  default weeks: 6 (Monday 00:00 UTC). Invariant: Σ rows.fresh_tokens = total. Privacy as spend; no per-person view.
+- `PATCH /api/v2/workspaces/:ws { "steering": "on"|"off" }` (cookie, workspace owner). `GET /api/v2/workspaces/:ws`
+  includes `workspace.steering`.
+- `POST /api/v2/workspaces/:ws/steering` (Bearer) `{ "events": [ { "session_key", "goal_id", "suggested_goal_id",
+  "share", "target", "at" } ] }`, at most 100 → `{ "accepted" }`. Only this device's shared sessions count; others are
+  skipped. Goal ids and whole percents only.
+- Steering rule (agent, `packages/align-agent/src/shared/steering.ts`): with steering on, a shared session at
+  `SessionStart` with source `startup` or `clear`, bound to a goal at least 10 points over its target while another
+  readable active goal with a target above 0 is at least 10 points under, gets one line in context naming both goals
+  and shares, once per session. Never at resume or compact; never names people.
+- Reallocation (cookie): `POST /api/v2/workspaces/:ws/reallocations { "targets": [ { "goal_id", "target_share" } ],
+  "note" }`; `GET .../reallocations`, `GET .../reallocations/:id`; `POST .../reallocations/:id/{approve|counter|
+  accept_counter|reject|withdraw}` (approve and accept carry `revision`; counter carries `targets`). Required
+  approvers: the owner of every goal whose target changes; the author approves by writing a revision. On approval each
+  changed goal gets a new version with its new target, written as its owner's. Visible only to the people involved.
 
 ## Spend
 `GET /api/v2/workspaces/:ws/spend?by=goal|pod|session&from&to` (cookie) → rows with token sums by basis and
