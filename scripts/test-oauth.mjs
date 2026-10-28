@@ -140,9 +140,9 @@ async function connect(clientId, who) {
   const t = await token({ grant_type: "authorization_code", code, redirect_uri: REDIRECT, client_id: clientId, code_verifier: verifier, resource: `${origin()}/api/mcp` });
   return t.json;
 }
-async function mcp(tokenValue, name = "align_list_goals", { headers = {}, host } = {}) {
+async function mcp(tokenValue, name = "align_list_goals", { headers = {}, host, args = {}, meta } = {}) {
   return req("POST", "/api/mcp", {
-    body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } },
+    body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args, ...(meta ? { _meta: meta } : {}) } },
     headers: { accept: "application/json, text/event-stream", ...(tokenValue ? { authorization: `Bearer ${tokenValue}` } : {}), ...headers },
     host,
   });
@@ -352,6 +352,114 @@ async function phase(name, env, invites = []) {
   const planTool = listed.find((t) => t.name === "align_get_accepted_plan");
   const said = rest.map((r) => r.text).join(" ") + toolList.text;
   check("a connected app sees no internal team ids: the accepted plan takes no team, and no tool calls a team 'security' (ids like g-security-v1 aside)", !!planTool && !planTool.inputSchema?.properties?.team && !/(?<![-\w])security(?![-\w])/i.test(said), JSON.stringify(planTool?.inputSchema) + " " + (said.match(/.{60}(?<![-\w])security(?![-\w]).{60}/i)?.[0] ?? ""));
+  // Asks (from meetings) and goal activity: what a connected app reads before work. Asks are set in local mode only
+  // (hosted keeps the route closed); both tools answer in every mode, short and without a model call.
+  const textOf = (r) => {
+    const t = r.text.includes("data:") ? r.text.split("\n").find((l) => l.startsWith("data:"))?.slice(5) : r.text;
+    try {
+      return JSON.parse(t).result?.content?.[0]?.text ?? "";
+    } catch {
+      return "";
+    }
+  };
+  const askBody = { asks: [
+    { id: "a1", from: "Faculty", to: "security", text: "AMARK send the cutover options", source: { title: "Lab meeting", date: "2026-10-26" }, history: [{ date: "2026-10-27", text: "asked again", source: "Standup" }] },
+    { id: "a2", from: "A labmate", to: "product", text: "AMARK share the repo", source: { title: "Lab meeting", date: "2026-10-19" } },
+  ] };
+  const putAsks = await req("PUT", "/api/workspaces/asks", { body: askBody, cookie: await signIn(A, "leadership"), headers: site() });
+  if (HOSTED) check("hosted: the asks route is closed (404)", putAsks.status === 404, putAsks.status);
+  else {
+    const putByTeam = await req("PUT", "/api/workspaces/asks", { body: askBody, cookie: await signIn(A, "product"), headers: site() });
+    const wrongTeam = await req("PATCH", "/api/workspaces/asks", { body: { id: "a1", status: "accepted" }, cookie: await signIn(A, "product"), headers: site() });
+    const rightTeam = await req("PATCH", "/api/workspaces/asks", { body: { id: "a1", status: "accepted" }, cookie: await signIn(A, "security"), headers: site() });
+    check("asks: leadership imports them (200, others 403); only the team asked, or leadership, changes one", putAsks.status === 200 && putByTeam.status === 403 && wrongTeam.status === 403 && rightTeam.status === 200, `${putAsks.status} ${putByTeam.status} ${wrongTeam.status} ${rightTeam.status}`);
+    const asked = textOf(await mcp(t2.access_token, "align_get_asks"));
+    check("align_get_asks: the caller's team first, by its own name, with source, status and later mentions", /Asked of your team \(Data Platform\)/.test(asked) && asked.indexOf("AMARK send") < asked.indexOf("AMARK share") && asked.includes("accepted") && asked.includes("Lab meeting, 2026-10-26") && asked.includes("Came up again"), asked.slice(0, 300));
+  }
+  // Limits: suggested from pasted notes, confirmed only by the goal's owner, then read word for word by apps (in
+  // align_get_directives and alone in align_get_limits, which a hook calls after the agent's context is summarized).
+  const notes = { notes: "LMARK the cutover must not touch the billing tables. What time is it? Lunch was good.", source: { title: "Lab meeting", date: "2026-10-22" } };
+  const postLimits = await req("POST", "/api/workspaces/limits", { body: notes, cookie: await signIn(A, "security"), headers: site() });
+  if (HOSTED) check("hosted: the limits route is closed (404)", postLimits.status === 404, postLimits.status);
+  else {
+    const typed = postLimits.json?.ids ?? [];
+    const before = textOf(await mcp(t2.access_token, "align_get_limits"));
+    const limId = typed[0];
+    const wrongOwner = await req("PATCH", "/api/workspaces/limits", { body: { id: limId, action: "confirm" }, cookie: await signIn(A, "leadership"), headers: site() });
+    const state = await req("GET", "/api/state", { cookie: await signIn(A, "product"), headers: { "x-align-workspace": A.id } });
+    const lim = state.json?.limits?.find((l) => l.id === limId);
+    const owner = lim ? { ceo: "leadership", product: "product", security: "security" }[lim.team] : "security";
+    const ok = await req("PATCH", "/api/workspaces/limits", { body: { id: limId, action: "confirm" }, cookie: await signIn(A, owner), headers: site() });
+    check(
+      "limits: pasted notes suggest only the rule-shaped sentence; it is no rule until its goal's owner confirms it (another team 403)",
+      postLimits.status === 200 && typed.length === 1 && lim?.state === "suggested" && lim.type === "must_not" && !before.includes("LMARK") && /1 suggested limit/.test(before) && (owner === "leadership" || wrongOwner.status === 403) && ok.status === 200,
+      `${postLimits.status} ${JSON.stringify(postLimits.json)} ${lim?.team} ${wrongOwner.status} ${ok.status} ${before.slice(0, 120)}`,
+    );
+    // From what a person tells an agent, and back: a captured prompt suggests a limit on the goal it names; once
+    // confirmed, a later agent report that says the opposite is flagged on the limit for its owner.
+    const minted = await req("POST", "/api/workspaces/agent-token", { body: { harness: "codex", repo: "warehouse" }, cookie: await signIn(A, "leadership"), headers: site() });
+    const agentEv = (ev) => req("POST", "/api/sessions/events", { body: { harness: "codex", session_id: "lim-s1", cwd: "/x/warehouse", repo: "warehouse", ...ev }, headers: { authorization: `Bearer ${minted.json?.token}` } });
+    await agentEv({ hook_event: "UserPromptSubmit", prompt: "Plan the next step. The migration cutover must never run during month-end close." });
+    const afterPrompt = await req("GET", "/api/state", { cookie: await signIn(A, "security"), headers: { "x-align-workspace": A.id } });
+    const fromPrompt = afterPrompt.json?.limits?.find((l) => /month-end close/.test(l.text));
+    const confirmPrompt = fromPrompt ? await req("PATCH", "/api/workspaces/limits", { body: { id: fromPrompt.id, action: "confirm" }, cookie: await signIn(A, "security"), headers: site() }) : { status: 0 };
+    await agentEv({ hook_event: "Stop", last_message: "Done. The migration cutover will run during month-end close on the 31st. Tables moved." });
+    const afterReport = await req("GET", "/api/state", { cookie: await signIn(A, "security"), headers: { "x-align-workspace": A.id } });
+    const flagged = afterReport.json?.limits?.find((l) => l.id === fromPrompt?.id)?.flags ?? [];
+    check(
+      "limits from agents: a prompt suggests one for the goal it names (security's); a later report crossing it is flagged on it",
+      minted.status === 200 && fromPrompt?.team === "security" && fromPrompt.state === "suggested" && confirmPrompt.status === 200 && flagged.length === 1 && /will run during month-end close/.test(flagged[0].sentence),
+      `${minted.status} ${JSON.stringify(fromPrompt)} ${confirmPrompt.status} ${JSON.stringify(flagged)}`,
+    );
+    const limits = textOf(await mcp(t2.access_token, "align_get_limits"));
+    const directives = textOf(await mcp(t2.access_token, "align_get_directives"));
+    check(
+      "align_get_limits and align_get_directives give a confirmed limit word for word, marked to survive summaries, in a few hundred characters",
+      limits.includes("MUST NOT: LMARK the cutover must not touch the billing tables") && /keep them word for word in any summary/.test(limits) && directives.startsWith("LIMITS") && directives.includes("LMARK") && limits.length < 800,
+      limits.slice(0, 300),
+    );
+  }
+  // The brief hook (Codex sends _meta.threadId with each call): a thread gets the brief on its first prompt and not again
+  // while it is unchanged; another thread gets its own; after compaction (SessionStart) it is always sent; a change in
+  // what the brief says reaches the thread on its next prompt.
+  const hookCall = (event, threadId) => mcp(t2.access_token, "align_get_brief", { args: { format: "hook", event }, meta: { threadId } });
+  const added = (r) => {
+    try {
+      return JSON.parse(textOf(r)).hookSpecificOutput?.additionalContext ?? null;
+    } catch {
+      return undefined;
+    }
+  };
+  const first = added(await hookCall("UserPromptSubmit", "thread-1"));
+  const again = added(await hookCall("UserPromptSubmit", "thread-1"));
+  const other = added(await hookCall("UserPromptSubmit", "thread-2"));
+  const compacted = added(await hookCall("SessionStart", "thread-1"));
+  const afterCompact = added(await hookCall("UserPromptSubmit", "thread-1"));
+  check(
+    "brief hook: sent on a thread's first prompt, not again while unchanged, separately per thread, always after compaction (once)",
+    /^ALIGN brief/.test(first ?? "") && again === null && /^ALIGN brief/.test(other ?? "") && /^ALIGN brief/.test(compacted ?? "") && afterCompact === null && first.length <= 1800,
+    `${first?.slice(0, 40)} | ${again} | ${other?.slice(0, 20)} | ${compacted?.slice(0, 20)} | ${afterCompact}`,
+  );
+  // Claude Code names no thread; its hook passes the session id instead. An unfilled "${session_id}" names nothing, so it
+  // always sends.
+  const sessionCall = (session) => mcp(t2.access_token, "align_get_brief", { args: { format: "hook", event: "UserPromptSubmit", session } });
+  const s1 = added(await sessionCall("cc-1"));
+  const s1again = added(await sessionCall("cc-1"));
+  const s2 = added(await sessionCall("cc-2"));
+  const raw1 = added(await sessionCall("${session_id}"));
+  const raw2 = added(await sessionCall("${session_id}"));
+  check(
+    "brief hook without a thread id: keyed by the session id it passes (once per session); an unfilled placeholder always sends",
+    /^ALIGN brief/.test(s1 ?? "") && s1again === null && /^ALIGN brief/.test(s2 ?? "") && /^ALIGN brief/.test(raw1 ?? "") && /^ALIGN brief/.test(raw2 ?? ""),
+    `${s1?.slice(0, 20)} | ${s1again} | ${s2?.slice(0, 20)} | ${raw1?.slice(0, 20)} | ${raw2?.slice(0, 20)}`,
+  );
+  if (!HOSTED) {
+    await req("PATCH", "/api/workspaces/asks", { body: { id: "a1", status: "done" }, cookie: await signIn(A, "security"), headers: site() });
+    const changed = added(await hookCall("UserPromptSubmit", "thread-1"));
+    check("brief hook: when what the brief says changes, the thread gets the new one on its next prompt", /^ALIGN brief/.test(changed ?? "") && changed !== first && !changed.includes("AMARK send"), changed?.slice(0, 200));
+  }
+  const act = textOf(await mcp(t2.access_token, "align_get_goal_activity"));
+  check("align_get_goal_activity answers in a few hundred tokens (capped at 2,400 characters)", act.startsWith("What agents did on each goal") && act.length <= 2400, act.slice(0, 160));
   const otherHost = HOSTED ? { status: 421 } : await mcp(t2.access_token, "align_list_goals", { host: `localhost:${PORT}` });
   check("a token is bound to its resource: the same token at another origin -> 401 (hosted: other hosts are 421)", HOSTED || otherHost.status === 401, otherHost.status);
   if (HOSTED) {
