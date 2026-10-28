@@ -1,8 +1,8 @@
 import { HttpError } from "../errors";
 
 // Per-client limits for the unauthenticated OAuth endpoints (in memory, like lib/ratelimit.ts): registrations 20 an
-// hour, token calls 120 a minute. `client` is clientOf(req): Fly-Client-IP when hosted, "local" in Mode L.
-const LIMITS = { register: { n: 20, ms: 60 * 60 * 1000 }, token: { n: 120, ms: 60 * 1000 }, approve: { n: 30, ms: 60 * 1000 } } as const;
+// hour, token calls 120 a minute, consent page views 30 a minute (each can fetch an app's client document). `client` is clientOf(req): Fly-Client-IP when hosted, "local" in Mode L.
+const LIMITS = { register: { n: 20, ms: 60 * 60 * 1000 }, token: { n: 120, ms: 60 * 1000 }, approve: { n: 30, ms: 60 * 1000 }, authorize: { n: 30, ms: 60 * 1000 } } as const;
 const g = globalThis as unknown as { __alignOAuthCalls?: Map<string, number[]> };
 const calls: Map<string, number[]> = (g.__alignOAuthCalls ??= new Map());
 

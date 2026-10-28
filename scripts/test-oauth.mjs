@@ -9,8 +9,10 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const PORT = Number(process.argv[2]);
 const BUILD = !process.argv.includes("--no-build");
@@ -166,6 +168,29 @@ async function signIn(ws, role) {
   return r.cookie;
 }
 
+// ---- a client-document host: scripts/oauth-test-net.mjs, preloaded into the server, sends pub*.addr.align-test here ----
+// /doc answers at once with a document that names its app "Claude"; anything else drips one byte a second for 12 s.
+// `open` and `max` count the fetches in flight, so a test can see how many the server makes at once.
+const docServer = { open: 0, max: 0, srv: null };
+async function startDocServer(dir) {
+  const [key, cert] = [path.join(dir, "doc-key.pem"), path.join(dir, "doc-cert.pem")];
+  const made = spawnSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=align-test"], { stdio: "ignore" });
+  if (made.status !== 0) throw new Error("openssl could not make the test certificate");
+  docServer.srv = https.createServer({ key: readFileSync(key), cert: readFileSync(cert) }, (rq, rs) => {
+    docServer.max = Math.max(docServer.max, ++docServer.open);
+    rs.on("close", () => docServer.open--);
+    rs.writeHead(200, { "content-type": "application/json" });
+    if (rq.url === "/doc") return rs.end(JSON.stringify({ client_id: `https://${rq.headers.host}/doc`, client_name: "Claude", redirect_uris: [REDIRECT] }));
+    let n = 0;
+    const drip = setInterval(() => (++n > 12 ? (clearInterval(drip), rs.end()) : rs.write(" ")), 1000);
+    rs.on("close", () => clearInterval(drip));
+  });
+  await new Promise((r) => docServer.srv.listen(0, "127.0.0.1", r));
+  return docServer.srv.address().port;
+}
+/** React splits text with empty comments; page text as a person reads it. */
+const plain = (t) => t.replace(/<!-- -->/g, "");
+
 // ---- the checks, run once per phase ----
 async function phase(name, env, invites = []) {
   phaseName = name;
@@ -207,6 +232,8 @@ async function phase(name, env, invites = []) {
     req("POST", "/oauth/register", { body: { redirect_uris: [REDIRECT], token_endpoint_auth_method: "client_secret_basic" } }),
   ]);
   check("DCR refuses an http redirect off loopback, a fragment, and a confidential client (400)", regBad.every((r) => r.status === 400), regBad.map((r) => r.status).join(","));
+  const bidi = await req("POST", "/oauth/register", { body: { client_name: "Clau\u202Ede\u200B\uFEFF App\u2066", redirect_uris: [REDIRECT] } });
+  check("L3 an app's name loses bidi and zero-width characters", bidi.status === 201 && bidi.json.client_name === "Claude App", bidi.text);
 
   // the consent page
   const { challenge } = pkce();
@@ -226,6 +253,30 @@ async function phase(name, env, invites = []) {
   // remember it, so the same app works once its host answers.
   const unreachable = await req("GET", q(authParams("https://align-test.invalid/client.json", challenge)));
   check("a client document that can't be fetched -> 'try again', not 'remove it'", unreachable.text.includes("couldn’t reach") && !unreachable.text.includes("doesn’t recognize"), unreachable.status);
+  if (HOSTED) {
+    // Client documents (review L4, L5, M2). The consent page views below come from their own client addresses.
+    const named = await req("GET", q(authParams("https://pub-named.addr.align-test/doc", challenge)), { headers: { "fly-client-ip": "198.51.100.30" } });
+    check("L4 a client document can name its app anything: the page says it named itself", plain(named.text).includes("Connect Claude to Align") && plain(named.text).includes("This app named itself"), plain(named.text).match(/<h1[^>]*>[^<]*/)?.[0]);
+    const kinds = ["mapped", "compat", "sixtofour", "teredo", "nat64", "ula", "linklocal", "doc4"];
+    const through = [];
+    for (const k of kinds) {
+      const r = await req("GET", q(authParams(`https://${k}.addr.align-test/client.json`, challenge)), { headers: { "fly-client-ip": "198.51.100.31" } });
+      if (!r.text.includes("doesn’t recognize")) through.push(k);
+    }
+    check("L5 a client document on a private address in disguise (hex v4-mapped, v4-compatible, 6to4, Teredo, NAT64, ULA, link-local, TEST-NET) is refused", through.length === 0, `fetched: ${through.join(",")}`);
+    const views = [];
+    for (let i = 0; i < 31; i++) views.push(plain((await req("GET", q(authParams(clientId, challenge)), { headers: { "fly-client-ip": "198.51.100.32" } })).text));
+    check("M2 the consent page allows 30 views a minute per client, then says too many requests", views.slice(0, 30).every((v) => v.includes("Connect Test CLI")) && views[30].includes("Too many requests"), views[30].slice(0, 200));
+    const t0 = Date.now();
+    const slow = await req("GET", q(authParams("https://pub-slow.addr.align-test/slow", challenge)), { headers: { "fly-client-ip": "198.51.100.33" } });
+    const ms = Date.now() - t0;
+    check("M2 a client document that drips a byte a second is cut off at 3 s in all ('try again'), not held open", ms < 5000 && slow.text.includes("couldn’t reach"), `${ms} ms`);
+    docServer.max = 0;
+    const t1 = Date.now();
+    const many = await Promise.all(Array.from({ length: 12 }, (_, i) => req("GET", q(authParams(`https://pub-c${i}.addr.align-test/slow`, challenge)), { headers: { "fly-client-ip": `198.51.100.${40 + i}` } })));
+    const ms2 = Date.now() - t1;
+    check("M2 at most 8 client documents are fetched at once across the server; the rest are told to try again", docServer.max >= 1 && docServer.max <= 8 && many.every((r) => r.text.includes("couldn’t reach")) && ms2 < 6000, `max ${docServer.max} at once, ${ms2} ms`);
+  }
   const noPkce = await approve(authParams(clientId, challenge, { code_challenge_method: "plain" }), { workspace: A.id, role: "security", passcode: A.passcodes.security });
   check("plain PKCE -> the app gets invalid_request, no code", noPkce.status === 200 && /error=invalid_request/.test(noPkce.json?.redirect ?? "") && !/code=/.test(noPkce.json.redirect), noPkce.text);
   const wrongRes = await approve(authParams(clientId, challenge, { resource: "https://other.example/api/mcp" }), { workspace: A.id, role: "security", passcode: A.passcodes.security });
@@ -358,9 +409,12 @@ if (BUILD) {
 }
 const tmp = mkdtempSync(path.join(os.tmpdir(), "align-oauth-"));
 try {
-  await phase("local", { ALIGN_DATA_DIR: path.join(tmp, "local"), ALIGN_ALLOW_OPEN_CREATE: "1", ALIGN_CREATE_PER_HOUR: "50" });
+  // Every server in this test loads the network stand-ins (scripts/oauth-test-net.mjs) and reaches the document server.
+  const net = { NODE_OPTIONS: `--import ${pathToFileURL(path.join(ROOT, "scripts/oauth-test-net.mjs")).href}`, ALIGN_TEST_DOC_PORT: String(await startDocServer(tmp)) };
+  await phase("local", { ...net, ALIGN_DATA_DIR: path.join(tmp, "local"), ALIGN_ALLOW_OPEN_CREATE: "1", ALIGN_CREATE_PER_HOUR: "50" });
   const invites = ["oauth-invite-000001", "oauth-invite-000002"];
-  await phase("hosted", {
+  const hosted = {
+    ...net,
     HOSTED: "1",
     ALIGN_HOSTS: HOSTED_HOST,
     ALIGN_SECRET: "o".repeat(48),
@@ -370,12 +424,15 @@ try {
     ALIGN_PRODUCT_PASSCODE: "product-strong-pass-1",
     ALIGN_SECURITY_PASSCODE: "security-strong-pass-1",
     ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-1",
-  }, invites);
+  };
+  await phase("hosted", hosted, invites);
 } catch (e) {
   fail++;
   console.log(`FAIL  [${phaseName}] stopped: ${e.message}`);
 } finally {
   await stop();
+  docServer.srv?.close();
+  docServer.srv?.closeAllConnections?.();
   rmSync(tmp, { recursive: true, force: true });
 }
 console.log(`\ntest-oauth: ${pass} passed, ${fail} failed`);

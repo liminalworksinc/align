@@ -23,12 +23,12 @@ const WS_IN = /w_[a-z2-7]{12}/;
 export default function AuthorizeForm(props: {
   params: Record<string, string>;
   clientName: string;
-  registered: boolean;
+  selfNamed: boolean;
   redirectHost: string;
   provider: string;
   signedIn: SignedIn | null;
 }) {
-  const { params, clientName, registered, redirectHost, provider } = props;
+  const { params, clientName, selfNamed, redirectHost, provider } = props;
   const [signedIn, setSignedIn] = useState<SignedIn | null>(props.signedIn);
   const [useSession, setUseSession] = useState(Boolean(props.signedIn));
   const [link, setLink] = useState("");
@@ -102,7 +102,7 @@ export default function AuthorizeForm(props: {
     <main className="mx-auto max-w-[560px] p-6 text-[16px] text-zinc-900">
       <h1 className="mb-1 text-[24px] font-semibold">Connect {clientName} to Align</h1>
       <p className="mb-5 text-zinc-700">
-        {registered ? "This app named itself. " : ""}After you allow it, Align sends you back to <span className="font-mono">{redirectHost}</span>.
+        {selfNamed ? "This app named itself. " : ""}After you allow it, Align sends you back to <span className="font-mono">{redirectHost}</span>.
       </p>
 
       <section className="mb-5 rounded-[14px] border border-zinc-200 bg-white p-5">
