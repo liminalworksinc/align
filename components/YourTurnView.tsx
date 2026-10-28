@@ -50,6 +50,11 @@ function mineTitle(p: Proposal, L: Labels) {
   if (p.state === "COUNTERED") return `${L.person[p.recipient_owner]} asked for changes to your proposal`;
   return `${L.person[p.proposing_owner]} accepted your changes. Your final approval is next`;
 }
+/** Custom: the avatar is the person the card's sentence names (Priya Shah asks… → PS), matching the thread. Northstar
+ *  keeps the viewer's team (its snapshots are frozen). */
+function mineFrom(p: Proposal): Actor {
+  return p.state === "COUNTERED" ? p.recipient_owner : p.proposing_owner;
+}
 function mineCta(p: Proposal) {
   if (p.state === "PENDING_SECURITY") return "Review the proposal";
   if (p.state === "COUNTERED") return "Review the changes";
@@ -96,7 +101,7 @@ export function waitingOnMe(s: StateView, actor: Actor, open: (v: View, p?: Prop
     if (!OPEN(p) || nextActor(p) !== actor) continue;
     items.push({
       key: p.id,
-      team: L.role[actor],
+      team: L.northstar ? L.role[actor] : L.person[mineFrom(p)],
       me: true,
       title: mineTitle(p, L),
       quote: quotedText(p),
@@ -174,7 +179,7 @@ export function YourTurnView(props: ViewProps) {
     if (!OPEN(p) || !who || who === actor) continue;
     others.push({
       key: p.id,
-      team: L.role[who],
+      team: L.northstar ? L.role[who] : L.person[who],
       title: othersTitle(p, who, L),
       quote: quotedText(p),
       sub: `${poss(L.team.security)} goal ${p.target_goal_version}`,
@@ -275,14 +280,12 @@ export function YourTurnView(props: ViewProps) {
             <Card
               it={{
                 key: "decided",
-                team: L.role.security,
+                team: L.northstar ? L.role.security : L.person.security,
                 title: `${L.team.product} and ${L.team.security} agreed on ${poss(L.team.security)} goal ${acc.accepted_version}`,
                 quote: decided.target || undefined,
-                sub: (
-                  <Badge tone={L.northstar || launchState(acc) === "approved" ? "neutral" : "amber"}>
-                    {L.northstar ? STATE_LABEL.ACCEPTED : agreementStatus(acc)}
-                  </Badge>
-                ),
+                // Neutral like every other agreement-status chip (the company card above, the decision record); the
+                // amber ▲ here made one status look like two.
+                sub: <Badge tone="neutral">{L.northstar ? STATE_LABEL.ACCEPTED : agreementStatus(acc)}</Badge>,
                 cta: "See the decision",
                 open: () => go("decision"),
               }}

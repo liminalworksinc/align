@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { CONDITIONS_UNCONFIRMED, conditionsUnconfirmedNote, labelsFor, poss } from "@/lib/labels";
 import type { Acceptance, Measure } from "@/lib/types";
-import { agreementStatus, launchLine, launchState, recordFacts } from "./launch";
+import { agreementStatus, launchLine, recordFacts } from "./launch";
 import type { ViewProps } from "./props";
 import { accepted, currentGoal, priorVersion } from "./select";
 import { Badge, Button, Section, fmtTime } from "./ui";
@@ -29,21 +29,47 @@ function MeasureList({ measures, compare }: { measures: Measure[]; compare?: Mea
 
 const MAX_NOTE = 500;
 
+/** A person's initials in a 30px circle, as on the Your turn cards and the thread. */
+function Initials({ name, muted }: { name: string; muted?: boolean }) {
+  const w = name.split(/[\s/]+/).filter(Boolean);
+  const text = (w.length >= 2 ? w[0][0] + w[1][0] : (w[0] ?? "").slice(0, 2)).toUpperCase();
+  return (
+    <span aria-hidden className={`grid size-[30px] shrink-0 place-items-center rounded-full border text-[11px] font-bold ${muted ? "border-dashed border-zinc-300 text-zinc-500" : "border-zinc-300 bg-zinc-100 text-zinc-700"}`}>
+      {text}
+    </span>
+  );
+}
+
 /** Custom only: the teams' decision record, read-only, and leadership's launch decision on it. */
 function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
   const { s, me, act } = props;
   const L = labelsFor(s);
   const { target, conditions } = recordFacts(s, acc);
   const d = acc.launch_decision;
-  const [note, setNote] = useState(d?.note ?? "");
+  // The saved note shows on the record above; this box is for a new decision's note, so it starts empty.
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const canDecide = me.actor === "leadership";
+  // Same rule as the server (decideLaunch): approving the launch of an untested plan needs an explicit acknowledgement.
+  const untested = acc.test_status !== "TESTED";
+  const [ackUntested, setAckUntested] = useState(false);
 
   async function decide(decision: "approved" | "not_yet") {
     setBusy(true);
-    await act(`/api/proposals/${acc.proposal_id}/launch`, { decision, note: note.trim() });
+    await act(`/api/proposals/${acc.proposal_id}/launch`, { decision, note: note.trim(), ...(decision === "approved" && untested ? { accept_untested: ackUntested } : {}) });
+    setNote("");
+    setAckUntested(false);
     setBusy(false);
   }
+
+  // Tool Concepts v2 §05: who decided, newest first, instead of sentences about it.
+  const decided: { who: string; did: string; at?: string; waiting?: boolean }[] = [
+    d
+      ? { who: L.person.leadership, did: d.decision === "approved" ? "Approved the launch" : "Said not yet to the launch", at: d.at }
+      : { who: L.person.leadership, did: "Decides the launch", waiting: true },
+    { who: L.person.security, did: `Approved ${poss(L.team.security)} goal ${acc.accepted_version}`, at: acc.ratified_at },
+    { who: L.person.product, did: "Committed to its part", at: acc.acknowledged_at },
+  ];
 
   return (
     <>
@@ -51,15 +77,22 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
         title="Decision record"
         right={<Badge tone="neutral">{agreementStatus(acc)}</Badge>} // one status; open conditions are marked in their box
       >
-        <div className="flex flex-col gap-3 rounded-xl bg-white p-5 ring-1 ring-zinc-300">
-          <p style={{ fontSize: 17 }} className="text-zinc-700">
-            {L.team.product} and {L.team.security} agreed on {poss(L.team.security)} updated goal ({acc.accepted_version}).{" "}
-            {launchState(acc) === "approved" ? "It is now the shared plan." : "Launch is pending until leadership decides."}
-          </p>
+        <div className="flex flex-col gap-4 rounded-xl bg-white p-5 ring-1 ring-zinc-300">
           <div>
-            <div className="mb-1 al-lbl">Approved target</div>
+            <div className="mb-1 al-lbl">Agreed target</div>
             <p className="text-[18px] font-semibold leading-snug">{target}</p>
           </div>
+          <ol aria-label="Who decided" className="flex flex-col gap-2">
+            {decided.map((r) => (
+              <li key={r.did} className="flex items-center gap-3 text-[15px]">
+                <Initials name={r.who} muted={r.waiting} />
+                <span className={`min-w-0 flex-1 ${r.waiting ? "text-zinc-500" : "text-zinc-900"}`}>
+                  <span className="font-semibold">{r.who}</span> · {r.did}
+                </span>
+                {r.at ? <span className="shrink-0 text-[13px] text-zinc-500">{fmtTime(r.at)}</span> : <Badge tone="amber">waiting</Badge>}
+              </li>
+            ))}
+          </ol>
           {conditions && (
             <section aria-label="Conditions" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
               <div className="flex items-center gap-2">
@@ -70,30 +103,21 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
               <p className="mt-1 text-[14px] text-zinc-600">{conditionsUnconfirmedNote(conditions.split("\n").filter((c) => c.trim()).length)}</p>
             </section>
           )}
-          <ul aria-label="What this record shows" className="flex flex-col gap-1.5 text-[17px] text-zinc-900">
-            <li>
-              <span className="font-semibold">Decision:</span> recorded
-            </li>
-            <li>
-              <span className="font-semibold">Work done:</span> not verified yet
-            </li>
-            <li>
-              <span className="font-semibold">Outcome:</span> not measured yet
-            </li>
+          {/* What the record does not show, as chips rather than three sentences. */}
+          <ul aria-label="What this record shows" className="flex flex-wrap gap-2">
+            {untested && <li><Badge tone="amber">Not sandbox-tested</Badge></li>}
+            <li><Badge tone="neutral">Work done: not verified</Badge></li>
+            <li><Badge tone="neutral">Outcome: not measured</Badge></li>
           </ul>
-          <p className="text-[16px] font-semibold text-zinc-900">{launchLine(acc, L)}</p>
+          <p className="text-[15px] font-semibold text-zinc-900">{launchLine(acc, L)}</p>
           {d?.note && <p className="whitespace-pre-wrap text-[15px] text-zinc-600">Note: {d.note}</p>}
-          {d && <p className="text-[14px] text-zinc-500">Decided {fmtTime(d.at)}.</p>}
         </div>
       </Section>
       {canDecide && (
-        <Section title={d ? "Change the launch decision" : "Launch decision"}>
+        <Section title={d ? "Change the launch decision" : "Launch decision"} right={untested && d?.decision !== "approved" ? <Badge tone="amber">Not sandbox-tested</Badge> : undefined}>
           <div className="flex flex-col gap-3 rounded-xl bg-white p-5 ring-1 ring-violet-300">
-            <p style={{ fontSize: 16 }} className="text-zinc-700">
-              The teams agreed on the plan. Only you decide whether it launches. Both teams see your decision on their record.
-            </p>
             <label className="block">
-              <span className="mb-1 block al-lbl">Note (optional)</span>
+              <span className="mb-1 block al-lbl">Note for both teams (optional)</span>
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -105,13 +129,24 @@ function LaunchRecord({ props, acc }: { props: ViewProps; acc: Acceptance }) {
                 {note.length}/{MAX_NOTE}
               </span>
             </label>
+            {untested && d?.decision !== "approved" && (
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-[15px] text-zinc-900">
+                <input type="checkbox" checked={ackUntested} onChange={(e) => setAckUntested(e.target.checked)} className="mt-1 size-4 accent-amber-600" />
+                <span>I&apos;m launching a plan that was not sandbox-tested</span>
+              </label>
+            )}
+            {/* Once decided, offer only the other choice, so re-clicking the current one can't look like a new action. */}
             <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={() => decide("approved")} disabled={busy}>
-                Approve launch
-              </Button>
-              <Button kind="secondary" onClick={() => decide("not_yet")} disabled={busy}>
-                Not yet
-              </Button>
+              {d?.decision !== "approved" && (
+                <Button onClick={() => decide("approved")} disabled={busy || (untested && !ackUntested)}>
+                  Approve launch
+                </Button>
+              )}
+              {d?.decision !== "not_yet" && (
+                <Button kind="secondary" onClick={() => decide("not_yet")} disabled={busy}>
+                  {d ? "Change to not yet" : "Not yet"}
+                </Button>
+              )}
             </div>
           </div>
         </Section>

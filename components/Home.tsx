@@ -145,8 +145,10 @@ function WorkspaceLogin({ workspace, hosted, onDone, ended, elsewhere, initialRo
   const [info, setInfo] = useState<LoginInfo | null>(null);
   const [missing, setMissing] = useState<"gone" | "unreachable" | null>(null);
   const [attempt, setAttempt] = useState(0); // Try again re-runs the login-info fetch
-  const [role, setRole] = useState<Role>(initialRole ?? "product"); // Switch team preselects the team chosen
+  // Switch team preselects the team chosen; otherwise this browser's last team here, so a returning tester skips a click.
+  const [role, setRole] = useState<Role>(initialRole ?? lastRole(workspace) ?? "product");
   const [passcode, setPasscode] = useState("");
+  const [show, setShow] = useState(false);
   const [err, setErr] = useState<string | null>(ended ? SESSION_ENDED : null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -164,6 +166,7 @@ function WorkspaceLogin({ workspace, hosted, onDone, ended, elsewhere, initialRo
     setErr(null);
     try {
       await api("/api/session", { body: { role, passcode, workspace } });
+      rememberRole(workspace, role);
       onDone();
     } catch (x) {
       setErr(plainError((x as Error).message));
@@ -187,46 +190,94 @@ function WorkspaceLogin({ workspace, hosted, onDone, ended, elsewhere, initialRo
       </main>
     );
   if (!info) return <main className="p-10 text-[16px] text-zinc-500">Loading Align…</main>;
+  const team = info.roles.find((r) => r.id === role)?.team ?? "";
   return (
     <main className="flex min-h-screen items-center justify-center p-4 sm:p-8">
-      <form onSubmit={submit} className="al-in w-full max-w-[560px] rounded-[14px] border border-zinc-200 bg-white p-6 sm:p-9">
-        <div className="mb-1 flex items-baseline gap-2.5">
-          <span className="font-display text-[34px] leading-none">Align</span>
-          <span className="al-lbl text-violet-700">by Liminal</span>
+      <form onSubmit={submit} className="al-in w-full max-w-[560px] rounded-[14px] border border-zinc-200 bg-white p-6 sm:p-8">
+        <div className="mb-5 flex items-center gap-2">
+          <span aria-hidden className="grid size-6 place-items-center rounded-md bg-violet-700 font-display text-[15px] text-black">A</span>
+          <span className="font-display text-[18px] leading-none">Align</span>
+          <span className="al-lbl text-zinc-500">by Liminal</span>
         </div>
-        <p className="mb-2 text-[16px] text-zinc-600">{info.name}. Choose your team; each person signs in separately with their own passcode.</p>
-        {info.company_note && <p className="mb-2 text-[14px] text-zinc-500">{info.company_note}</p>}
-        <p className="mb-6 text-[14px] text-zinc-500">{ROLE_SWITCH}</p>
-        <Elsewhere id={elsewhere} />
-        <fieldset className="mb-4">
-          <legend className="al-lbl mb-2">I am on</legend>
+        <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">{info.name}</h1>
+        {info.company_note && <p className="mt-1 text-[14px] text-zinc-500">{info.company_note}</p>}
+        <div className="mt-5">
+          <Elsewhere id={elsewhere} />
+        </div>
+        <fieldset className="mb-5">
+          <legend className="al-lbl mb-2">Sign in as</legend>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {info.roles.map((r) => (
-              <label key={r.id} className={`cursor-pointer rounded-[14px] border p-3.5 text-[16px] transition ${role === r.id ? "border-zinc-300 bg-zinc-100 outline-2 outline-offset-2 outline-violet-700" : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-100"}`}>
-                <input type="radio" name="role" value={r.id} checked={role === r.id} onChange={() => setRole(r.id)} className="sr-only" />
-                <div className="font-semibold leading-snug">{r.team}</div>
-                <div className="text-[16px] text-zinc-500">{r.blurb}</div>
-              </label>
-            ))}
+            {info.roles.map((r, i) => {
+              const on = role === r.id;
+              return (
+                <label
+                  key={r.id}
+                  className={`relative cursor-pointer rounded-[12px] border px-3.5 py-3 transition has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-violet-700 ${on ? "border-violet-700 bg-violet-50" : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-100"}`}
+                >
+                  <input type="radio" name="role" value={r.id} checked={on} onChange={() => setRole(r.id)} className="sr-only" />
+                  <span aria-hidden className={`al-lbl ${on ? "text-violet-700" : "text-zinc-500"}`}>{on ? "✓ " : ""}0{i + 1}</span>
+                  <div className="mt-1 text-[16px] font-semibold leading-snug text-zinc-900">{r.team}</div>
+                  <div className="text-[14px] text-zinc-500">{r.blurb}</div>
+                </label>
+              );
+            })}
           </div>
         </fieldset>
-        <label className="mb-4 block">
-          <span className="al-lbl mb-1.5 block">Passcode</span>
-          <input
-            type="password"
+        {/* Lets a password manager keep one passcode per team of this workspace. */}
+        <input type="text" name="username" autoComplete="username" value={`${info.name} · ${team}`} readOnly hidden />
+        <div className="mb-4 flex items-end gap-2">
+          <label className="block min-w-0 flex-1">
+            <span className="al-lbl mb-1 block">Passcode</span>
+            <input
+            type={show ? "text" : "password"}
             value={passcode}
             onChange={(e) => setPasscode(e.target.value)}
-            className="w-full rounded-[10px] border border-zinc-300 bg-zinc-50 px-3 py-2.5 text-[16px] text-zinc-900"
+            placeholder="xxxx-xxxx-xxxx-xxxx"
+            autoComplete="current-password"
+            autoCapitalize="off"
+            spellCheck={false}
+            className="w-full rounded-[10px] border border-zinc-300 bg-zinc-50 px-3 py-2.5 font-mono text-[16px] tracking-[0.04em] text-zinc-900 placeholder:text-zinc-400"
             autoFocus
-          />
-        </label>
-        {err && <p className="mb-3 text-[15px] font-medium text-red-700">{err}</p>}
-        <Button type="submit" disabled={busy || !passcode}>
-          {busy ? "Signing in…" : "Sign in"}
-        </Button>
+            />
+          </label>
+          <Button kind="secondary" onClick={() => setShow((v) => !v)}>
+            {show ? "Hide" : "Show"}
+          </Button>
+        </div>
+        {err && (
+          <p role="alert" className="mb-3 text-[15px] font-medium text-red-700">
+            {err}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={busy || !passcode}
+          className="inline-flex min-h-11 w-full items-center justify-center rounded-[10px] bg-violet-700 px-[18px] text-[15px] font-semibold text-black transition hover:brightness-112 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? "Signing in…" : `Sign in as ${team}`}
+        </button>
+        <p className="mt-3 text-center text-[13px] text-zinc-500">Testing alone? Sign in as any team, then use Switch team.</p>
       </form>
     </main>
   );
+}
+
+// Per-workspace last team, a convenience only: storage can be blocked or empty, so every access is guarded.
+const roleKey = (ws: string) => `align:last-role:${ws}`;
+function lastRole(ws: string): Role | null {
+  try {
+    const r = localStorage.getItem(roleKey(ws));
+    return r === "leadership" || r === "product" || r === "security" ? r : null;
+  } catch {
+    return null;
+  }
+}
+function rememberRole(ws: string, r: Role) {
+  try {
+    localStorage.setItem(roleKey(ws), r);
+  } catch {
+    /* storage blocked: nothing to remember */
+  }
 }
 
 function NorthstarLogin({ onDone, L, elsewhere, initialRole }: { onDone: () => void; L?: Labels; elsewhere?: string | null; initialRole?: Role }) {
@@ -432,6 +483,7 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
     setAttached,
     compose,
     setCompose,
+    switchTeam: custom ? (r) => void switchTo(r) : undefined,
   };
   const turnCount = waitingOnMe(state, me.actor, () => undefined).length;
   const rel = state.relations.find((r) => r.id === dependencyId(state));

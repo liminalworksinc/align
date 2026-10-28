@@ -256,7 +256,7 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
 export const MAX_LAUNCH_NOTE = 500;
 
 /** Custom only: leadership approves the launch of the agreed plan, or says not yet. A later call replaces the earlier one. */
-export function decideLaunch(s: AppState, who: Session, pid: string, body: { decision?: unknown; note?: unknown }, beforeWrite?: () => void) {
+export function decideLaunch(s: AppState, who: Session, pid: string, body: { decision?: unknown; note?: unknown; accept_untested?: unknown }, beforeWrite?: () => void) {
   if (s.scenario !== "custom") throw new HttpError(404, "Launch decisions exist only in custom scenarios");
   if (who.actor !== "leadership") forbid("Only leadership can decide on the launch");
   const p = openProposal(s, pid);
@@ -269,8 +269,20 @@ export function decideLaunch(s: AppState, who: Session, pid: string, body: { dec
     note = body.note.trim() || undefined;
     if (note && note.length > MAX_LAUNCH_NOTE) throw new HttpError(400, `Keep the note to ${MAX_LAUNCH_NOTE} characters or fewer`);
   }
+  // The launch is where an untested plan meets the world, so approving it needs the same explicit acknowledgement as the
+  // owning team's approval (LIM-2437 finding 3). "Not yet" needs none.
+  const untested = p.test_status !== "TESTED";
+  if (body.decision === "approved" && untested && body.accept_untested !== true)
+    conflict("This plan has no sandbox test. Approve the launch explicitly as not sandbox-tested.");
   beforeWrite?.(); // the route's rate limit: only a decision that would be written counts, not a refused one
-  acc!.launch_decision = { decision: body.decision, ...(note ? { note } : {}), by: "leadership", at: now() };
+  acc!.launch_decision = {
+    decision: body.decision,
+    ...(note ? { note } : {}),
+    ...(body.decision === "approved" && untested ? { untested: true as const } : {}),
+    by: "leadership",
+    at: now(),
+  };
+  // The untested acknowledgement lives on launch_decision.untested; the audit action keeps its two names.
   audit(s, who, body.decision === "approved" ? "launch_approved" : "launch_not_yet", p.id); // never the note text
   return acc!.launch_decision;
 }
