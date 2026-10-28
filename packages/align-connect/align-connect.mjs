@@ -47,7 +47,7 @@ let store = load();
 async function json(url, init) {
   const r = await fetch(url, init);
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`${init?.method ?? "GET"} ${url}: ${r.status} ${body.error_description ?? body.error ?? ""}`.trim());
+  if (!r.ok) throw Object.assign(new Error(`${init?.method ?? "GET"} ${url}: ${r.status} ${body.error_description ?? body.error ?? ""}`.trim()), { code: body.error });
   return body;
 }
 
@@ -112,7 +112,17 @@ async function signIn() {
 
 const tokenFields = (t) => ({ access_token: t.access_token, refresh_token: t.refresh_token, expires_at: Date.now() + (t.expires_in ?? 3600) * 1000 });
 
+/**
+ * A new access token from the refresh token: true, or false when the sign-in has ended (invalid_grant). Another
+ * align-connect for the same Align (Claude Desktop and a terminal, say) may have refreshed first, so the file is read
+ * again before refreshing. A network error throws and keeps the tokens, so a blip doesn't ask for a new sign-in.
+ */
 async function refresh() {
+  const disk = load();
+  if (disk.refresh_token && disk.refresh_token !== store.refresh_token) {
+    store = disk;
+    if (store.access_token && store.expires_at > Date.now() + 30_000) return true;
+  }
   if (!store.refresh_token) return false;
   try {
     const t = await json(store.token_endpoint, {
@@ -124,6 +134,7 @@ async function refresh() {
     save(store);
     return true;
   } catch (e) {
+    if (e.code !== "invalid_grant") throw e;
     log(`refresh failed (${e.message}); signing in again`);
     store = {};
     save(store);
@@ -131,11 +142,14 @@ async function refresh() {
   }
 }
 
-/** A usable access token: the stored one, a refreshed one, or a new sign-in (one at a time). */
+/** A usable access token: the stored one, a refreshed one, or a new sign-in. One refresh and one sign-in at a time:
+ * Align ends a connection whose refresh token is used twice, and parallel tool calls would otherwise do that. */
 let signing = null;
+let refreshing = null;
 async function token(force = false) {
   if (!force && store.access_token && store.expires_at > Date.now() + 30_000) return store.access_token;
-  if (await refresh()) return store.access_token;
+  refreshing ??= refresh().finally(() => (refreshing = null));
+  if (await refreshing) return store.access_token;
   signing ??= signIn().finally(() => (signing = null));
   await signing;
   return store.access_token;

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { signPayload } from "../auth";
 import { config } from "../config";
+import { HttpError } from "../errors";
 import type { Actor } from "../types";
 import { agentEpochOf, parseCustomWs, readAuth, type CustomWsId } from "../workspace";
 import { ClientUnreachable, redirectAllowed, resolveClient, type OAuthClient } from "./clients";
@@ -234,7 +235,8 @@ export async function exchange(form: URLSearchParams, origin: string): Promise<T
   if (type === "refresh_token") {
     const r = parseRefresh(form.get("refresh_token"));
     const ws = r ? parseCustomWs(r.ws) : null;
-    const out = r && ws ? await rotateGrant(ws, r.id, r.secret, clientId).catch(() => null) : null;
+    // A deleted workspace ends the sign-in; any other failure is a server error, so the app keeps its refresh token.
+    const out = r && ws ? await rotateGrant(ws, r.id, r.secret, clientId).catch((e) => (e instanceof HttpError && e.status === 404 ? null : Promise.reject(e))) : null;
     if (!out || !ws) throw new TokenError("invalid_grant", "This sign-in has ended. Connect Align again.");
     return {
       access_token: mintAccess(ws, out.grant.id, out.grant.client_id, out.grant.role, resource, out.grant.ep),

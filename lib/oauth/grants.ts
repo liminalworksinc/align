@@ -25,11 +25,20 @@ export interface Grant {
   refresh_hash: string;
   prev_refresh_hash: string | null;
   refresh_exp: number;
+  /** When the refresh token last rotated, and the extra tokens issued to parallel refreshes just after it. */
+  rotated_at?: number;
+  alt_hashes?: string[];
+  prev_alt_hashes?: string[];
 }
 
 const MAX_GRANTS = 20;
 export const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const USE_WRITE_MS = 5 * 60 * 1000;
+// Two refreshes sent at once (parallel tool calls after an idle hour, two processes sharing one token file) present
+// the same token; for this long after a rotation the second gets its own new token instead of ending the connection.
+// ALIGN_REFRESH_GRACE_MS is for tests. At most MAX_ALT extra tokens per rotation.
+const GRACE_MS = Math.min(Math.max(Number(process.env.ALIGN_REFRESH_GRACE_MS ?? 30_000) || 0, 0), 60_000);
+const MAX_ALT = 3;
 
 const file = (ws: CustomWsId) => path.join(wsDir(ws), "oauth.json");
 const sha = (v: string) => createHash("sha256").update(v).digest("hex");
@@ -122,23 +131,34 @@ export async function createGrant(ws: CustomWsId, a: { client_id: string; client
 }
 
 /**
- * Rotate a refresh token. The presented secret must be the grant's current one, for the same client, under the
- * current epoch and before its expiry. Presenting the previous secret again means it was copied: the grant is
- * removed, so neither copy works any more (OAuth 2.1 refresh token rotation).
+ * Rotate a refresh token. The presented secret must be one of the grant's current ones, for the same client, under
+ * the current epoch and before its expiry. A previous secret presented within GRACE_MS of the rotation, by the same
+ * client, is a parallel refresh: it gets another current token. Later, or by another client, it means the token was
+ * copied: the grant is removed, so no copy works any more (OAuth 2.1 refresh token rotation).
  */
 export async function rotateGrant(ws: CustomWsId, id: string, secret: string, clientId: string): Promise<{ grant: Grant; refresh_token: string } | null> {
   const auth = readAuth(ws);
   if (!auth) return null;
   const ep = agentEpochOf(auth);
   const next = randomBytes(32).toString("base64url");
+  const now = Date.now();
   return update(ws, (list) => {
     const i = list.findIndex((x) => x.id === id);
     if (i < 0) return { grants: list, out: null };
     const gr = list[i];
     const h = sha(secret);
-    if (gr.prev_refresh_hash && same(gr.prev_refresh_hash, h)) return { grants: list.filter((x) => x.id !== id), out: null };
-    if (!same(gr.refresh_hash, h) || gr.client_id !== clientId || gr.ep !== ep || gr.refresh_exp <= Date.now()) return { grants: list, out: null };
-    const rotated: Grant = { ...gr, prev_refresh_hash: gr.refresh_hash, refresh_hash: sha(next) };
+    const valid = gr.client_id === clientId && gr.ep === ep && gr.refresh_exp > now;
+    const current = [gr.refresh_hash, ...(gr.alt_hashes ?? [])];
+    const previous = [gr.prev_refresh_hash, ...(gr.prev_alt_hashes ?? [])].filter((x): x is string => !!x);
+    let rotated: Grant;
+    if (current.some((x) => same(x, h))) {
+      if (!valid) return { grants: list, out: null };
+      rotated = { ...gr, prev_refresh_hash: gr.refresh_hash, prev_alt_hashes: gr.alt_hashes ?? [], refresh_hash: sha(next), alt_hashes: [], rotated_at: now };
+    } else if (previous.some((x) => same(x, h))) {
+      const parallel = valid && gr.rotated_at !== undefined && now - gr.rotated_at < GRACE_MS && (gr.alt_hashes?.length ?? 0) < MAX_ALT;
+      if (!parallel) return { grants: list.filter((x) => x.id !== id), out: null };
+      rotated = { ...gr, alt_hashes: [...(gr.alt_hashes ?? []), sha(next)] };
+    } else return { grants: list, out: null };
     list[i] = rotated;
     return { grants: list, out: { grant: rotated, refresh_token: refreshToken(ws, id, next) } };
   });

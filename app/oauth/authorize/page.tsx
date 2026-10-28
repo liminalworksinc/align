@@ -3,7 +3,9 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { bindWs, wsSessionFrom } from "@/lib/auth";
 import { slotOf } from "@/lib/labels";
+import { takeOAuthCall } from "@/lib/oauth/limits";
 import { checkAuthorize, originFromHost } from "@/lib/oauth/server";
+import { clientOf } from "@/lib/ratelimit";
 import AuthorizeForm, { type SignedIn } from "./AuthorizeForm";
 
 // OAuth authorization endpoint: an AI app (Claude, ChatGPT, Claude Code, Codex) sends the person here to connect
@@ -43,6 +45,16 @@ async function Authorize({ searchParams }: { searchParams: PageProps<"/oauth/aut
   const h = await headers();
   const raw = await searchParams;
   const params = Object.fromEntries(Object.entries(raw).flatMap(([k, v]) => (typeof v === "string" ? [[k, v]] : [])));
+  try {
+    takeOAuthCall(clientOf(new Request("http://align.invalid/", { headers: h })), "authorize");
+  } catch {
+    return (
+      <main className="mx-auto max-w-[560px] p-6 text-[16px] text-zinc-900">
+        <h1 className="mb-3 text-[24px] font-semibold">Too many tries</h1>
+        <p>Wait a minute, then reload this page.</p>
+      </main>
+    );
+  }
   const check = await checkAuthorize(params, originFromHost(h.get("host")));
   if (!check.ok && "fatal" in check) {
     return (

@@ -10,7 +10,10 @@ import { withLock } from "../locks";
 // OAuth clients for the MCP connector (Claude, ChatGPT, Claude Code, Codex). Public clients only (PKCE, no secret).
 // Two kinds, both resolved here:
 // - CIMD: the client_id is an https URL whose JSON document lists the client's name and redirect URIs (the MCP
-//   authorization spec's preferred way). Fetched with a lookup that refuses private addresses, 3 s, 5 KB, cached.
+//   authorization spec's preferred way). Anyone can make the consent page fetch one, so the fetch is bounded: private
+//   addresses refused, 3 s from start to end, 5 KB, one fetch per URL at a time, and an unreachable host is not tried
+//   again for a minute. At most 2 run at once: a lookup that hangs holds one of libuv's 4 threads (which sign-in's
+//   scrypt and file reads share) even after the request is dropped, so 2 always stay free. Results are cached.
 // - DCR: POST /oauth/register stores {client_name, redirect_uris} under a random dcr_ id in
 //   <workspacesRoot>/_oauth_clients.json, so the end-of-test purge removes it with the workspaces.
 // A redirect URI is https, or http on a loopback host (Claude Code and Codex listen on a local port).
@@ -29,6 +32,8 @@ const CIMD_MAX_BYTES = 5 * 1024;
 const CIMD_TIMEOUT_MS = 3000;
 const CIMD_CACHE_MS = 10 * 60 * 1000;
 const CIMD_BAD_CACHE_MS = 60 * 1000; // a document that answered but can't be used: re-checked after a minute
+const CIMD_MAX_IN_FLIGHT = 2;
+const CIMD_DOWN_MS = 60 * 1000; // an unreachable host is not tried again for this long
 const DCR_ID = /^dcr_[A-Za-z0-9_-]{22}$/;
 
 const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -135,7 +140,7 @@ function publicLookup(hostname: string, options: object, cb: (err: Error | null,
 
 function fetchDocument(url: URL): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { lookup: publicLookup as never, timeout: CIMD_TIMEOUT_MS, headers: { accept: "application/json" } }, (res) => {
+    const req = https.get(url, { lookup: publicLookup as never, headers: { accept: "application/json", "user-agent": "Align (OAuth client metadata check)" } }, (res) => {
       if (res.statusCode !== 200) {
         res.resume();
         return reject(Object.assign(new Error(`status ${res.statusCode}`), { status: res.statusCode }));
@@ -155,7 +160,9 @@ function fetchDocument(url: URL): Promise<unknown> {
         }
       });
     });
-    req.on("timeout", () => req.destroy(new Error("timeout")));
+    // From start to end, not idle time: a host that sends a byte every few seconds still stops here.
+    const deadline = setTimeout(() => req.destroy(new Error("timeout")), CIMD_TIMEOUT_MS);
+    req.on("close", () => clearTimeout(deadline));
     req.on("error", reject);
   });
 }
@@ -170,18 +177,40 @@ export function cimdUrl(clientId: string): URL | null {
     return null;
   }
   if (u.protocol !== "https:" || u.hash || u.username || u.password || u.port || u.pathname === "/" || isIP(u.hostname.replace(/^\[|\]$/g, ""))) return null;
+  // A public name only: no single-label hosts and no local-only suffixes, which never resolve to a public address.
+  if (!u.hostname.includes(".") || /(^|\.)(localhost|local|internal|localdomain|home\.arpa)$/i.test(u.hostname)) return null;
   return u;
 }
 
-const g = globalThis as unknown as { __alignCimd?: Map<string, { at: number; client: OAuthClient | null }> };
+const g = globalThis as unknown as {
+  __alignCimd?: Map<string, { at: number; client: OAuthClient | null }>;
+  __alignCimdPending?: Map<string, Promise<OAuthClient | null>>;
+  __alignCimdDown?: Map<string, number>;
+};
 const cimdCache = (g.__alignCimd ??= new Map());
+const pending = (g.__alignCimdPending ??= new Map());
+const down = (g.__alignCimdDown ??= new Map());
 
-/** The app's client document couldn't be fetched (network, timeout, a 5xx): not cached, so a retry can work. */
+/** The app's client document couldn't be fetched (network, timeout, a 5xx, a 403 or 429 from a bot wall, or too many
+ *  checks at once): not cached as unusable, so a retry later can work. */
 export class ClientUnreachable extends Error {}
+
+// Hosted logs carry no request-supplied text (go-C condition 5), not even the host.
+const where = (url: URL) => (config().hosted ? "(hosted)" : url.href);
 
 async function resolveCimd(url: URL, clientId: string): Promise<OAuthClient | null> {
   const hit = cimdCache.get(clientId);
   if (hit && Date.now() - hit.at < (hit.client ? CIMD_CACHE_MS : CIMD_BAD_CACHE_MS)) return hit.client;
+  if ((down.get(url.hostname) ?? 0) > Date.now()) throw new ClientUnreachable(url.hostname);
+  const running = pending.get(clientId);
+  if (running) return running;
+  if (pending.size >= CIMD_MAX_IN_FLIGHT) throw new ClientUnreachable(url.hostname);
+  const p = fetchCimd(url, clientId).finally(() => pending.delete(clientId));
+  pending.set(clientId, p);
+  return p;
+}
+
+async function fetchCimd(url: URL, clientId: string): Promise<OAuthClient | null> {
   let doc: Record<string, unknown> | null = null;
   for (let attempt = 0; ; attempt++) {
     try {
@@ -189,9 +218,13 @@ async function resolveCimd(url: URL, clientId: string): Promise<OAuthClient | nu
       break;
     } catch (e) {
       const { status, refused } = e as { status?: number; refused?: boolean };
-      if (refused || (status && status < 500)) break; // a private address, or the host answered: this document can't be used
-      if (attempt === 1) {
-        console.warn(`[oauth] client document ${url.href} unreachable: ${(e as Error).message}`);
+      // A private address, or the host answered with a client error: this document can't be used. 403 and 429 are
+      // more often a bot wall in front of the real document, so those count as unreachable.
+      if (refused || (status && status < 500 && status !== 403 && status !== 429)) break;
+      if (attempt === 1 || status === 403 || status === 429) {
+        console.warn(`[oauth] client document at ${where(url)} unreachable`, config().hosted ? (e as Error)?.name : (e as Error).message);
+        while (down.size >= 1000) down.delete(down.keys().next().value!);
+        down.set(url.hostname, Date.now() + CIMD_DOWN_MS);
         throw new ClientUnreachable(url.hostname);
       }
     }
@@ -200,7 +233,7 @@ async function resolveCimd(url: URL, clientId: string): Promise<OAuthClient | nu
   const uris = doc?.redirect_uris;
   if (doc && doc.client_id === clientId && Array.isArray(uris) && uris.length && uris.length <= MAX_REDIRECTS && uris.every(validRedirect))
     client = { client_id: clientId, client_name: cleanName(doc.client_name, url.hostname), redirect_uris: uris as string[], kind: "cimd" };
-  else console.warn(`[oauth] client document ${url.href} can't be used`);
+  else console.warn(`[oauth] client document at ${where(url)} can't be used`);
   while (cimdCache.size >= 200) cimdCache.delete(cimdCache.keys().next().value!);
   cimdCache.set(clientId, { at: Date.now(), client });
   return client;

@@ -81,6 +81,7 @@ const site = () => ({ origin: origin() });
 
 // ---- server ----
 let server = null;
+let serverLog = ""; // the server's stderr, where its warnings go
 async function start(env) {
   rmSync(path.join(ROOT, "data/state.json"), { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
@@ -88,7 +89,11 @@ async function start(env) {
   for (const k of Object.keys(clean)) if (/^(ALIGN_|HOSTED$|AI_GATEWAY_API_KEY$)/.test(k)) delete clean[k];
   server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "ignore", "pipe"], detached: true });
   let err = "";
-  server.stderr.on("data", (c) => (err += c));
+  serverLog = "";
+  server.stderr.on("data", (c) => {
+    err += c;
+    serverLog += c;
+  });
   for (let i = 0; i < 90; i++) {
     try {
       const r = await req("GET", "/api/workspaces/config");
@@ -300,9 +305,23 @@ async function phase(name, env, invites = []) {
   check("refresh -> a new access token and a new refresh token", rf.status === 200 && rf.json.refresh_token !== t2.refresh_token && (await mcp(rf.json.access_token)).status === 200, rf.text);
   const rfWrongClient = await token({ grant_type: "refresh_token", refresh_token: rf.json.refresh_token, client_id: "dcr_BBBBBBBBBBBBBBBBBBBBBB" });
   check("refresh by another client -> invalid_grant", rfWrongClient.json?.error === "invalid_grant", rfWrongClient.text);
-  const rfReuse = await token({ grant_type: "refresh_token", refresh_token: t2.refresh_token, client_id: clientId });
-  const rfAfter = await token({ grant_type: "refresh_token", refresh_token: rf.json.refresh_token, client_id: clientId });
-  check("an old refresh token used again -> invalid_grant, and the grant ends (new token refused, access 401)", rfReuse.json?.error === "invalid_grant" && rfAfter.json?.error === "invalid_grant" && (await mcp(rf.json.access_token)).status === 401, `${rfReuse.text} ${rfAfter.text}`);
+  // Two refreshes sent at once with the same token (parallel tool calls after an idle hour, or two processes sharing
+  // one token file): both get working tokens and the connection stays.
+  const [par1, par2] = await Promise.all([1, 2].map(() => token({ grant_type: "refresh_token", refresh_token: rf.json.refresh_token, client_id: clientId })));
+  const par3 = await token({ grant_type: "refresh_token", refresh_token: par2.json?.refresh_token, client_id: clientId });
+  check(
+    "two refreshes at once with one token: both get working tokens, and the connection stays",
+    par1.status === 200 && par2.status === 200 && par3.status === 200 && (await mcp(par1.json.access_token)).status === 200 && (await mcp(par3.json.access_token)).status === 200,
+    `${par1.text} ${par2.text} ${par3.text}`,
+  );
+  await sleep(1600); // past the grace window (ALIGN_REFRESH_GRACE_MS 1500 in these tests)
+  const rfReuse = await token({ grant_type: "refresh_token", refresh_token: par2.json.refresh_token, client_id: clientId });
+  const rfAfter = await token({ grant_type: "refresh_token", refresh_token: par3.json.refresh_token, client_id: clientId });
+  check(
+    "an old refresh token used again after the grace window -> invalid_grant, and the grant ends (new token refused, access 401)",
+    rfReuse.json?.error === "invalid_grant" && rfAfter.json?.error === "invalid_grant" && (await mcp(par3.json.access_token)).status === 401,
+    `${rfReuse.text} ${rfAfter.text}`,
+  );
 
   // disconnect, restart, session approval
   const t3 = await connect(clientId, { workspace: A.id, role: "product", passcode: A.passcodes.product });
@@ -347,6 +366,27 @@ async function phase(name, env, invites = []) {
   const secret = t5.refresh_token.split(".").at(-1);
   check("oauth.json is 0600 and no refresh secret or access token is stored", mode === "600" && !all.includes(secret) && !all.includes(t5.access_token), mode);
 
+  // The consent page can make Align fetch any URL, so its loads are limited per client (60 a minute).
+  const pageFrom = (ip, query = "") => req("GET", `/oauth/authorize${query}`, { headers: HOSTED ? { "fly-client-ip": ip } : {} });
+  if (HOSTED) {
+    // An unreachable client document: the hosted log names neither its host nor its path (go-C condition 5).
+    const gone = await pageFrom("203.0.113.70", `?${new URLSearchParams(authParams("https://align-test-gone.invalid/private-path-77.json", "x".repeat(43)))}`);
+    await sleep(300);
+    check(
+      "hosted: an unreachable client document is reported, and the log has no host or path from the request",
+      gone.text.includes("couldn’t reach") && serverLog.includes("client document at (hosted) unreachable") && !serverLog.includes("private-path-77") && !serverLog.includes("align-test-gone"),
+      serverLog.split("\n").filter((l) => l.includes("oauth")).join(" | ").slice(0, 300),
+    );
+    const loads = [];
+    for (let i = 0; i < 61; i++) loads.push(await pageFrom("203.0.113.71"));
+    const other = await pageFrom("203.0.113.72");
+    check(
+      "hosted: the consent page allows 60 loads a minute per client, then says too many tries (other clients unaffected)",
+      loads.slice(0, 60).every((r) => !r.text.includes("Too many tries")) && loads[60].text.includes("Too many tries") && !other.text.includes("Too many tries"),
+      loads.map((r) => r.status).join(","),
+    );
+  }
+
   await stop();
 }
 
@@ -358,10 +398,11 @@ if (BUILD) {
 }
 const tmp = mkdtempSync(path.join(os.tmpdir(), "align-oauth-"));
 try {
-  await phase("local", { ALIGN_DATA_DIR: path.join(tmp, "local"), ALIGN_ALLOW_OPEN_CREATE: "1", ALIGN_CREATE_PER_HOUR: "50" });
+  await phase("local", { ALIGN_DATA_DIR: path.join(tmp, "local"), ALIGN_ALLOW_OPEN_CREATE: "1", ALIGN_CREATE_PER_HOUR: "50", ALIGN_REFRESH_GRACE_MS: "1500" });
   const invites = ["oauth-invite-000001", "oauth-invite-000002"];
   await phase("hosted", {
     HOSTED: "1",
+    ALIGN_REFRESH_GRACE_MS: "1500",
     ALIGN_HOSTS: HOSTED_HOST,
     ALIGN_SECRET: "o".repeat(48),
     ALIGN_DATA_DIR: path.join(tmp, "hosted"),
