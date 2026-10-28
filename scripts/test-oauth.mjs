@@ -377,6 +377,15 @@ async function phase(name, env, invites = []) {
       gone.text.includes("couldn’t reach") && serverLog.includes("client document at (hosted) unreachable") && !serverLog.includes("private-path-77") && !serverLog.includes("align-test-gone"),
       serverLog.split("\n").filter((l) => l.includes("oauth")).join(" | ").slice(0, 300),
     );
+    // Hosted, a client document is fetched only from the AI providers' domains (or ALIGN_CIMD_HOSTS): any other host is
+    // refused before any DNS lookup, so an attacker's slow host or nameserver can't tie up the server.
+    const before = serverLog.length;
+    const elsewhere = await pageFrom("203.0.113.73", `?${new URLSearchParams(authParams("https://apps.example.org/client.json", "x".repeat(43)))}`);
+    check(
+      "hosted: a client document on another host is refused without fetching it (other apps use registration)",
+      elsewhere.text.includes("doesn’t recognize") && !serverLog.slice(before).includes("client document"),
+      elsewhere.text.slice(0, 200),
+    );
     const loads = [];
     for (let i = 0; i < 61; i++) loads.push(await pageFrom("203.0.113.71"));
     const other = await pageFrom("203.0.113.72");
@@ -403,6 +412,7 @@ try {
   await phase("hosted", {
     HOSTED: "1",
     ALIGN_REFRESH_GRACE_MS: "1500",
+    ALIGN_CIMD_HOSTS: "align-test.invalid,align-test-gone.invalid",
     ALIGN_HOSTS: HOSTED_HOST,
     ALIGN_SECRET: "o".repeat(48),
     ALIGN_DATA_DIR: path.join(tmp, "hosted"),

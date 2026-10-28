@@ -68,12 +68,13 @@ function Step({ n, children }: { n: number; children: ReactNode }) {
  * The Codex line also adds one instruction to Codex's global AGENTS.md: live (10-27), Codex asked for a cutover
  * runbook searched Drive and Linear and used a date the teams had moved; with this line it read Align first and used
  * the agreed one. Claude Code read Align unprompted. The company name is reduced to characters that are safe inside
- * double quotes, and the line is added once.
+ * double quotes, and the line is added once per company. It stays after Disconnect, so the dialog says where it is.
  */
+const codexName = (company: string) => company.replace(/[^\p{L}\p{N} .&'-]/gu, "").trim() || "this company";
 function codexLine(url: string, company: string) {
-  const name = company.replace(/[^\p{L}\p{N} .&'-]/gu, "").trim() || "this company";
+  const name = codexName(company);
   const rule = `- For any work for ${name}'s teams, check Align first: call the align MCP server's align_get_directives and align_get_accepted_plan before planning. Its dates and commitments replace older documents.`;
-  return `codex mcp add align --url ${url}; F="\${CODEX_HOME:-$HOME/.codex}/AGENTS.md"; grep -qs "check Align first" "$F" || printf '%s\\n' "${rule}" >> "$F"`;
+  return `codex mcp add align --url ${url}; F="\${CODEX_HOME:-$HOME/.codex}/AGENTS.md"; grep -qsF "${name}'s teams, check Align first" "$F" || printf '%s\\n' "${rule}" >> "$F"`;
 }
 
 function Steps({ tab, url, company }: { tab: Tab; url: string; company: string }) {
@@ -95,7 +96,11 @@ function Steps({ tab, url, company }: { tab: Tab; url: string; company: string }
         <Step n={1}>
           Paste this in a terminal:
           <Command text={codexLine(url, company)} />
-          <span className="text-zinc-600">It adds Align and one line to Codex’s instructions so Codex checks Align before planning your teams’ work. The Codex CLI, IDE extension and the ChatGPT desktop app’s Codex mode all use it.</span>
+          <span className="text-zinc-600">
+            It adds Align, and one line to ~/.codex/AGENTS.md so Codex checks Align before planning {codexName(company)}’s work. That file applies to every Codex
+            session on this computer and the line stays after you disconnect: to stop it, delete the line that starts “- For any work for {codexName(company)}’s
+            teams”. The Codex CLI, IDE extension and the ChatGPT desktop app’s Codex mode all use it.
+          </span>
         </Step>
         {allow}
       </ol>

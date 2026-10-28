@@ -136,8 +136,10 @@ async function refresh() {
   } catch (e) {
     if (e.code !== "invalid_grant") throw e;
     log(`refresh failed (${e.message}); signing in again`);
+    // Clear the file only if it still holds the token that failed: another align-connect may have signed in since.
+    const failed = store.refresh_token;
     store = {};
-    save(store);
+    if (load().refresh_token === failed) save(store);
     return false;
   }
 }

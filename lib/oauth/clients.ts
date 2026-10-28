@@ -10,10 +10,12 @@ import { withLock } from "../locks";
 // OAuth clients for the MCP connector (Claude, ChatGPT, Claude Code, Codex). Public clients only (PKCE, no secret).
 // Two kinds, both resolved here:
 // - CIMD: the client_id is an https URL whose JSON document lists the client's name and redirect URIs (the MCP
-//   authorization spec's preferred way). Anyone can make the consent page fetch one, so the fetch is bounded: private
-//   addresses refused, 3 s from start to end, 5 KB, one fetch per URL at a time, and an unreachable host is not tried
-//   again for a minute. At most 2 run at once: a lookup that hangs holds one of libuv's 4 threads (which sign-in's
-//   scrypt and file reads share) even after the request is dropped, so 2 always stay free. Results are cached.
+//   authorization spec's preferred way). Anyone can make the consent page fetch one, so the fetch is bounded. When
+//   hosted, only documents on the AI providers' own domains are fetched (CIMD_HOSTS, plus ALIGN_CIMD_HOSTS); other apps
+//   use DCR. Everywhere: private addresses refused, 3 s from start to end, 5 KB, no retry, one fetch per URL at a
+//   time, and a URL that failed is not tried again for 30 s. DNS lookups are counted until they return, not until the
+//   request gives up: a lookup can't be cancelled and holds one of libuv's 4 threads (which sign-in's scrypt and file
+//   reads share), so at most 2 run at once and 2 threads always stay free. Results are cached.
 // - DCR: POST /oauth/register stores {client_name, redirect_uris} under a random dcr_ id in
 //   <workspacesRoot>/_oauth_clients.json, so the end-of-test purge removes it with the workspaces.
 // A redirect URI is https, or http on a loopback host (Claude Code and Codex listen on a local port).
@@ -32,8 +34,13 @@ const CIMD_MAX_BYTES = 5 * 1024;
 const CIMD_TIMEOUT_MS = 3000;
 const CIMD_CACHE_MS = 10 * 60 * 1000;
 const CIMD_BAD_CACHE_MS = 60 * 1000; // a document that answered but can't be used: re-checked after a minute
-const CIMD_MAX_IN_FLIGHT = 2;
-const CIMD_DOWN_MS = 60 * 1000; // an unreachable host is not tried again for this long
+const CIMD_MAX_LOOKUPS = 2;
+const CIMD_DOWN_MS = 30 * 1000; // a document that couldn't be fetched is not tried again for this long
+// The AI providers' own domains: Claude Code's and the Claude apps' documents are on claude.ai, Codex's on chatgpt.com.
+const CIMD_HOSTS = ["claude.ai", "anthropic.com", "chatgpt.com", "openai.com"];
+const cimdHostAllowed = (host: string) =>
+  !config().hosted ||
+  [...CIMD_HOSTS, ...(process.env.ALIGN_CIMD_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean)].some((d) => host === d || host.endsWith(`.${d}`));
 const DCR_ID = /^dcr_[A-Za-z0-9_-]{22}$/;
 
 const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -127,9 +134,14 @@ export function privateAddress(ip: string): boolean {
   return true;
 }
 
+const lk = globalThis as unknown as { __alignCimdLookups?: number };
+
 /** dns.lookup that fails for a private address, so the check and the connection use the same answer (no rebinding). */
 function publicLookup(hostname: string, options: object, cb: (err: Error | null, address: string | { address: string; family: number }[], family?: number) => void) {
+  if ((lk.__alignCimdLookups ?? 0) >= CIMD_MAX_LOOKUPS) return cb(new Error("busy"), "");
+  lk.__alignCimdLookups = (lk.__alignCimdLookups ?? 0) + 1;
   lookup(hostname, { ...options, all: true }, (err, addrs) => {
+    lk.__alignCimdLookups = Math.max((lk.__alignCimdLookups ?? 1) - 1, 0);
     if (err) return cb(err, "");
     const list = addrs as { address: string; family: number }[];
     if (!list.length || list.some((a) => privateAddress(a.address))) return cb(Object.assign(new Error("refused address"), { refused: true }), "");
@@ -155,8 +167,8 @@ function fetchDocument(url: URL): Promise<unknown> {
       res.on("end", () => {
         try {
           resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        } catch (e) {
-          reject(e);
+        } catch {
+          reject(Object.assign(new Error("not JSON"), { status: 200 })); // it answered: can't be used
         }
       });
     });
@@ -178,7 +190,8 @@ export function cimdUrl(clientId: string): URL | null {
   }
   if (u.protocol !== "https:" || u.hash || u.username || u.password || u.port || u.pathname === "/" || isIP(u.hostname.replace(/^\[|\]$/g, ""))) return null;
   // A public name only: no single-label hosts and no local-only suffixes, which never resolve to a public address.
-  if (!u.hostname.includes(".") || /(^|\.)(localhost|local|internal|localdomain|home\.arpa)$/i.test(u.hostname)) return null;
+  if (!u.hostname.includes(".") || u.hostname.endsWith(".") || /(^|\.)(localhost|local|internal|localdomain|home\.arpa)$/i.test(u.hostname)) return null;
+  if (!cimdHostAllowed(u.hostname)) return null;
   return u;
 }
 
@@ -189,6 +202,7 @@ const g = globalThis as unknown as {
 };
 const cimdCache = (g.__alignCimd ??= new Map());
 const pending = (g.__alignCimdPending ??= new Map());
+const MAX_PENDING = 50;
 const down = (g.__alignCimdDown ??= new Map());
 
 /** The app's client document couldn't be fetched (network, timeout, a 5xx, a 403 or 429 from a bot wall, or too many
@@ -201,10 +215,10 @@ const where = (url: URL) => (config().hosted ? "(hosted)" : url.href);
 async function resolveCimd(url: URL, clientId: string): Promise<OAuthClient | null> {
   const hit = cimdCache.get(clientId);
   if (hit && Date.now() - hit.at < (hit.client ? CIMD_CACHE_MS : CIMD_BAD_CACHE_MS)) return hit.client;
-  if ((down.get(url.hostname) ?? 0) > Date.now()) throw new ClientUnreachable(url.hostname);
+  if ((down.get(clientId) ?? 0) > Date.now()) throw new ClientUnreachable(url.hostname);
   const running = pending.get(clientId);
   if (running) return running;
-  if (pending.size >= CIMD_MAX_IN_FLIGHT) throw new ClientUnreachable(url.hostname);
+  if (pending.size >= MAX_PENDING) throw new ClientUnreachable(url.hostname);
   const p = fetchCimd(url, clientId).finally(() => pending.delete(clientId));
   pending.set(clientId, p);
   return p;
@@ -212,21 +226,19 @@ async function resolveCimd(url: URL, clientId: string): Promise<OAuthClient | nu
 
 async function fetchCimd(url: URL, clientId: string): Promise<OAuthClient | null> {
   let doc: Record<string, unknown> | null = null;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      doc = (await fetchDocument(url)) as Record<string, unknown>;
-      break;
-    } catch (e) {
-      const { status, refused } = e as { status?: number; refused?: boolean };
-      // A private address, or the host answered with a client error: this document can't be used. 403 and 429 are
-      // more often a bot wall in front of the real document, so those count as unreachable.
-      if (refused || (status && status < 500 && status !== 403 && status !== 429)) break;
-      if (attempt === 1 || status === 403 || status === 429) {
-        console.warn(`[oauth] client document at ${where(url)} unreachable`, config().hosted ? (e as Error)?.name : (e as Error).message);
+  try {
+    doc = (await fetchDocument(url)) as Record<string, unknown>;
+  } catch (e) {
+    const { status, refused } = e as { status?: number; refused?: boolean };
+    // A private address, or the host answered with a client error: this document can't be used. 403 and 429 are more
+    // often a bot wall in front of the real document, so those count as unreachable, like a 5xx or no answer.
+    if (!(refused || (status && status < 500 && status !== 403 && status !== 429))) {
+      console.warn(`[oauth] client document at ${where(url)} unreachable`, config().hosted ? (e as Error)?.name : (e as Error).message);
+      if ((e as Error).message !== "busy") {
         while (down.size >= 1000) down.delete(down.keys().next().value!);
-        down.set(url.hostname, Date.now() + CIMD_DOWN_MS);
-        throw new ClientUnreachable(url.hostname);
+        down.set(clientId, Date.now() + CIMD_DOWN_MS);
       }
+      throw new ClientUnreachable(url.hostname);
     }
   }
   let client: OAuthClient | null = null;
