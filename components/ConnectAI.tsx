@@ -77,15 +77,30 @@ function codexLine(url: string, company: string) {
   return `codex mcp add align --url ${url}; F="\${CODEX_HOME:-$HOME/.codex}/AGENTS.md"; grep -qsF "${name}'s teams, check Align first" "$F" || printf '%s\\n' "${rule}" >> "$F"`;
 }
 
+/**
+ * The Claude Code line also adds two hooks to .claude/settings.local.json in the folder it runs in. Each calls
+ * align_get_brief on the Align server Claude Code already signed in to: on the session's first prompt (Claude Code
+ * can't call an MCP tool from a hook at launch, before its servers connect), and again after it compacts its context,
+ * so the limits come back word for word (live 10-27: with the hook the agent quoted the limit after a lossy compaction;
+ * without it, it had none). The session id lets Align skip later prompts that already have the brief. Folder only, so
+ * unrelated sessions don't carry it. The script adds each hook once and leaves a file that isn't plain JSON as it is.
+ */
+const BRIEF_HOOKS = String.raw`const fs=require("fs"),p=require("path"),f=p.join(process.cwd(),".claude","settings.local.json");let s={};try{s=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){if(e.code!=="ENOENT"){console.log("Align: left "+f+" as it is (not plain JSON). Add the hooks by hand: see docs/MCP.md.");process.exit(0)}}const H=(s.hooks??={}),add=(ev,m)=>{const a=(H[ev]??=[]);if(!JSON.stringify(a).includes("align_get_brief"))a.push({...m,hooks:[{type:"mcp_tool",server:"align",tool:"align_get_brief",input:{format:"hook",event:ev,session:"$"+"{session_id}"}}]})};add("UserPromptSubmit",{});add("SessionStart",{matcher:"compact"});fs.mkdirSync(p.dirname(f),{recursive:true});fs.writeFileSync(f,JSON.stringify(s,null,2));console.log("Align: brief hooks in "+f)`;
+const claudeCodeLine = (url: string) =>
+  `claude mcp add --transport http --scope user align ${url}; claude mcp login align; command -v node >/dev/null && node -e '${BRIEF_HOOKS}'`;
+
 function Steps({ tab, url, company }: { tab: Tab; url: string; company: string }) {
   const allow = <Step n={2}>Your browser opens an Align page. Check the workspace and team, then choose Allow.</Step>;
   if (tab === "claude-code")
     return (
       <ol className="space-y-3">
         <Step n={1}>
-          Paste this in a terminal:
-          <Command text={`claude mcp add --transport http --scope user align ${url}; claude mcp login align`} />
-          <span className="text-zinc-600">It works in every folder. Already in Claude Code? Run the same line with ! in front, or type /mcp.</span>
+          Paste this in a terminal, in the folder where you work on these goals:
+          <Command text={claudeCodeLine(url)} />
+          <span className="text-zinc-600">
+            Align works in every folder. In this one, Claude Code also gets a short brief (limits, what isn’t agreed, your goal, open asks) on its first prompt and
+            again after it compacts its context. Already in Claude Code? Run the same line with ! in front.
+          </span>
         </Step>
         {allow}
       </ol>

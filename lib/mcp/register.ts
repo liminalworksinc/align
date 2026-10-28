@@ -1,6 +1,11 @@
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { authorityEvents, describeEvent, oneLine, pendingFor, quoted } from "../directives";
+import { activityText, goalActivity } from "../activity";
+import { asksText } from "../asks";
+import { briefText } from "../brief";
+import { limitsText } from "../limits";
 import { acceptedPlan, launchApproved } from "../policy";
 import { activeRegistry, currentGoals } from "../registry";
 import { readState } from "../store";
@@ -40,6 +45,17 @@ async function sessionState(ctx: ServerContext): Promise<AppState> {
   const s = await readState(storeOf(ctx));
   const g = grantOf(ctx);
   return g ? scopeToGrant(s, g) : s;
+}
+
+/** The goal slot of an app signed in through Align's OAuth (leadership holds the company goal); null otherwise. */
+function roleOf(ctx: ServerContext): Owner | null {
+  const r = ctx.http?.authInfo?.extra?.role;
+  return r === "leadership" ? "ceo" : r === "product" || r === "security" ? r : null;
+}
+
+/** Confirmed limits for an app in a custom workspace, placed first in what it reads; nothing for Northstar. */
+function limitsHead(s: AppState, ctx: ServerContext): string {
+  return scenarioOf(s) === "custom" && (s.limits ?? []).length ? `${limitsText(s, (o) => teamName(s, o), roleOf(ctx))}\n\n` : "";
 }
 
 /** Defense in depth: withMcpAuth already rejected unauthenticated requests. */
@@ -414,6 +430,7 @@ export function registerAlign(server: McpServer, { apps = false }: { apps?: bool
   // (live 10-27: Codex, asked for a cutover runbook, searched Drive instead and used a superseded date). Northstar's
   // wording stays as frozen in its snapshot.
   const say = (northstar: string, app: string) => (apps ? app : northstar);
+  if (apps) registerWorkspaceTools(server);
   server.registerTool(
     "align_list_goals",
     {
@@ -568,14 +585,131 @@ export function registerAlign(server: McpServer, { apps = false }: { apps?: bool
     },
     async ({ session_id }, ctx) => {
       requireRead(ctx);
-      const out = directives(await sessionState(ctx), session_id);
+      const st = await sessionState(ctx);
+      const out = directives(st, session_id);
       const head = out.session_id
         ? out.session_found
           ? `${out.directives.length} pending directive(s) for ${out.session_id}${out.directives.length ? `: ${out.directives.map((d) => d.title).join("; ")}` : ""}.`
           : `No captured session matches "${out.session_id}".`
         : "No session_id given; pending directives not computed.";
       const lines = out.recent.map((e) => oneLine(`- ${e.title} at ${e.at}: delivered ${e.delivered}, acted ${e.acted}`));
-      return result(out, `${oneLine(head)}\n${out.recent.length} recent authority event(s)${lines.length ? `:\n${lines.join("\n")}` : "."}`);
+      // Apps read the goals' limits first: this is the call they make before every piece of work.
+      const limits = apps ? limitsHead(st, ctx) : "";
+      return result(out, `${limits}${oneLine(head)}\n${out.recent.length} recent authority event(s)${lines.length ? `:\n${lines.join("\n")}` : "."}`);
     },
   );
+}
+
+/**
+ * Two reads only apps get (Northstar's tool list is frozen in its snapshot): what was asked of the caller's team,
+ * mostly in meetings, and what agents have done on each goal. Both are custom-workspace reads, capped, and need no
+ * model call, so checking Align before work stays cheap.
+ */
+function registerWorkspaceTools(server: McpServer) {
+  server.registerTool(
+    "align_get_asks",
+    {
+      title: "Get what's asked of you",
+      description:
+        "What people asked of your team and of other teams (mostly in meetings): who asked, when and where, whether it is open, accepted or done, and every later meeting where it came up again. Check before planning work so you know what is expected of you.",
+      inputSchema: z.object({}),
+      annotations: READ_ONLY,
+    },
+    async (_args, ctx) => {
+      requireRead(ctx);
+      const s = await readState(storeOf(ctx));
+      if (scenarioOf(s) !== "custom") return { content: [{ type: "text" as const, text: "Asks are recorded in workspaces only." }] };
+      return { content: [{ type: "text" as const, text: asksText(s, (o) => teamName(s, o), roleOf(ctx)) }] };
+    },
+  );
+  server.registerTool(
+    "align_get_goal_activity",
+    {
+      title: "Get what agents did on each goal",
+      description:
+        "A short summary, per goal, of what Claude Code and Codex sessions in this workspace worked on in the last 14 days: how many, which are active now, what the latest ones were asked and how they ended, and the files they touched most. Check before starting work so you build on it instead of redoing it.",
+      inputSchema: z.object({}),
+      annotations: READ_ONLY,
+    },
+    async (_args, ctx) => {
+      requireRead(ctx);
+      const s = await readState(storeOf(ctx));
+      if (scenarioOf(s) !== "custom") return { content: [{ type: "text" as const, text: "Goal activity is available in workspaces only." }] };
+      return { content: [{ type: "text" as const, text: activityText(goalActivity(s, (g) => teamName(s, g.owner_id))) }] };
+    },
+  );
+  // Limits alone, for a hook that runs after the agent's context is summarized (SessionStart "compact" in Claude Code
+  // and Codex, an mcp_tool hook on this already-connected server): the rules come back without a full check.
+  server.registerTool(
+    "align_get_limits",
+    {
+      title: "Get the goals' limits",
+      description:
+        "The limits the goal owners confirmed: what each team's goal must cover, must not do, and leaves out of scope. Short. Also part of align_get_directives; call this alone to get them back after your context was summarized.",
+      inputSchema: HOOK_INPUT,
+      annotations: READ_ONLY,
+    },
+    async (input, ctx) => {
+      requireRead(ctx);
+      const s = await readState(storeOf(ctx));
+      const text = scenarioOf(s) !== "custom" ? "Limits are recorded in workspaces only." : limitsText(s, (o) => teamName(s, o), roleOf(ctx));
+      return hookOrText(text, input, ctx, "limits");
+    },
+  );
+  // The brief, for hooks that add it to an agent's context on each prompt and after compaction (Codex and Claude Code
+  // UserPromptSubmit / SessionStart): limits, what is not agreed and who decides, the caller's goal, its open asks.
+  server.registerTool(
+    "align_get_brief",
+    {
+      title: "Get a short brief for your team",
+      description:
+        "About 300 tokens: the goals' confirmed limits, proposals not agreed yet and who has to approve them, your team's goal and measures, and what was asked of your team and isn't done. Read it before planning; the other align tools have the details.",
+      inputSchema: HOOK_INPUT,
+      annotations: READ_ONLY,
+    },
+    async (input, ctx) => {
+      requireRead(ctx);
+      const s = await readState(storeOf(ctx));
+      const text = scenarioOf(s) !== "custom" ? "The brief is for workspaces only." : briefText(s, (o) => teamName(s, o), roleOf(ctx));
+      return hookOrText(text, input, ctx, "brief");
+    },
+  );
+}
+
+// format "hook": the output Claude Code and Codex hooks inject as context (hookSpecificOutput.additionalContext). Live
+// 10-27, Claude Code logged an mcp_tool hook's plain text after compaction but did not give it to the model.
+// session: the hook's own session id, for clients that don't name a thread (Claude Code fills "${session_id}").
+const HOOK_INPUT = z.object({
+  format: z.enum(["text", "hook"]).optional(),
+  event: z.enum(["SessionStart", "UserPromptSubmit"]).optional(),
+  session: z.string().max(200).optional(),
+});
+
+// A hook on every prompt must not resend what the thread already holds. Codex names its thread in each call
+// (_meta.threadId, seen live 10-27); Claude Code doesn't, so its hook passes the session id. A prompt gets the text only
+// when this thread hasn't had this exact version, or had it more than 12 hours ago. SessionStart (after compaction,
+// which drops it) always sends, and records it, so a compaction at a prompt sends it once, not twice. Without either id
+// it always sends. In memory only: after a restart a thread gets it once more. Capped, oldest dropped first.
+const SENT = new Map<string, { hash: string; at: number }>();
+const SENT_MAX = 2000;
+const RESEND_MS = 12 * 60 * 60 * 1000;
+
+function hookOrText(text: string, input: z.infer<typeof HOOK_INPUT>, ctx: ServerContext, what: string) {
+  const { format, event = "SessionStart", session } = input;
+  if (format !== "hook") return { content: [{ type: "text" as const, text }] };
+  // An unfilled "${session_id}" (a client that doesn't substitute) names no session.
+  const meta = ctx.mcpReq?._meta?.threadId;
+  const thread = typeof meta === "string" && meta ? meta : session && !session.includes("${") ? `s:${session}` : undefined;
+  const auth = ctx.http?.authInfo;
+  if (typeof thread === "string" && thread && auth) {
+    const key = `${what}:${auth.clientId}:${String(auth.extra?.ws ?? "")}:${String(auth.extra?.role ?? "")}:${thread.slice(0, 100)}`;
+    const hash = createHash("sha256").update(text).digest("hex");
+    const prev = SENT.get(key);
+    if (event === "UserPromptSubmit" && prev?.hash === hash && Date.now() - prev.at < RESEND_MS)
+      return { content: [{ type: "text" as const, text: JSON.stringify({ hookSpecificOutput: { hookEventName: event } }) }] };
+    SENT.delete(key);
+    SENT.set(key, { hash, at: Date.now() });
+    while (SENT.size > SENT_MAX) SENT.delete(SENT.keys().next().value!);
+  }
+  return { content: [{ type: "text" as const, text: JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }) }] };
 }

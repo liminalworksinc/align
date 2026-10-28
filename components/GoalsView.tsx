@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { companyMeasureId, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
-import type { StateView } from "@/lib/types";
+import { LIMIT_WORDS, limitsFor } from "@/lib/limits";
+import type { Goal, StateView } from "@/lib/types";
 import { agreementStatus } from "./launch";
 import type { ViewProps } from "./props";
 import { ProofStrip } from "./ProofStrip";
@@ -29,6 +30,22 @@ function depPill(s: StateView, L: Labels): { tone: PillTone; text: string } {
   if (st === "accepted") return { tone: "white", text: L.northstar ? STATE_LABEL.ACCEPTED : agreementStatus(s.acceptances.at(-1)) };
   if (st === "pending") return { tone: "violet", text: STATE_LABEL.PROPOSED };
   return { tone: "amber", text: STATE_LABEL[depRelation(s)?.status ?? "UNKNOWN"] ?? STATE_LABEL.UNKNOWN };
+}
+
+/** The limits this goal's owner confirmed, under its measures: what agents read word for word. */
+function Limits({ s, g }: { s: StateView; g: Goal }) {
+  const ls = limitsFor(s, g);
+  if (!ls.length) return null;
+  return (
+    <ul aria-label="Limits" className="flex flex-col gap-1 text-left">
+      {ls.map((l) => (
+        <li key={l.id} className="flex items-baseline gap-2 text-[13.5px] text-zinc-700">
+          <span className="shrink-0 text-[11.5px] font-bold uppercase tracking-[0.04em] text-zinc-500">{LIMIT_WORDS[l.type]}</span>
+          <span className="min-w-0 flex-1">{l.text}</span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function TeamNode({ props, L, owner, sel, dim, onPick }: { props: ViewProps; L: Labels; owner: "product" | "security"; sel: boolean; dim: boolean; onPick: () => void }) {
@@ -65,6 +82,7 @@ function TeamNode({ props, L, owner, sel, dim, onPick }: { props: ViewProps; L: 
           </li>
         ))}
       </ul>
+      <Limits s={s} g={g} />
       <div className="border-t border-zinc-200 pt-2">
         {work.length ? (
           work.map((w, i) => (
@@ -220,6 +238,7 @@ export function GoalsView(props: ViewProps) {
               )}
             </div>
             <span className="text-[18px] font-semibold leading-[1.3]">{ceo.objective}</span>
+            <Limits s={s} g={ceo} />
             <div className="flex flex-wrap gap-1.5">
               {ceo.measures.map((m) => {
                 const to = inheritor(m.id);

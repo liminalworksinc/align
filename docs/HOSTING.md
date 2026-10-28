@@ -186,7 +186,7 @@ Not in force until Shruti approves PR #21, which reopens `/api/mcp` and `/oauth/
 - **Revoking:** the team that connected an app, or leadership, disconnects it from the workspace; leadership can disconnect all. Restart disconnects every app. Rotating `ALIGN_SECRET` ends access tokens and sessions, but not app connections: apps refresh with their refresh token, which doesn't depend on the secret. To end every app, use Disconnect all or Restart in each workspace.
 - **What leaves Align:** what the app reads is sent to that app's AI provider (Anthropic or OpenAI for their apps; for any other app, the company behind it). The consent page says so. Claude and ChatGPT call the URL from their own servers, so the machine has to stay up (a paid Fly org; the trial stops machines).
 - **Copy check:** the steps shown for ChatGPT and the Claude app come from their docs on 2026-10-26. Claude Code 2.1.311 was connected end to end against this code on a local server (add, sign in through the consent page, call the tools); the other apps, and any app against the Fly URL, are not checked yet (smoke test item 8 covers one app).
-- Tests: `node scripts/test-oauth.mjs <port>` (81 checks, local and hosted phases).
+- Tests: `node scripts/test-oauth.mjs <port>` (95 checks, local and hosted phases).
 
 ## Limits worth knowing
 
