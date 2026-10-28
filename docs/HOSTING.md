@@ -27,7 +27,7 @@ Without `HOSTED`, nothing changes. The loopback rules, cookie and Northstar beha
 | Cookies | `__Host-align_session`, with `Secure; HttpOnly; SameSite=Strict; Path=/`. A cookie without the prefix isn't accepted. |
 | Creation | **One single-use invite code per tester** (`ALIGN_SIGNUP_CODES`). A used code is refused, and used codes are kept only as SHA-256 hashes. Wrong codes: 10 per 10 minutes per client, then 429. 5 creates per rolling hour (fixed). `ALIGN_MAX_WORKSPACES` caps the total (default 25). |
 | Sign-in | Passcode hashing runs at most 2 at a time, with 8 waiting; the rest get 429. Backoff is per workspace, role and client: after 5 wrong tries, that client waits. Another person's tries never lock you out. |
-| Notice | `/new` says it's a test server, says not to enter confidential details, and gives the deletion date (`ALIGN_DELETE_BY`). The passcode card repeats the date (go-C condition 3). Shruti owns the wording. |
+| Notice | `/new` says it's a test server, says not to enter confidential details, says Liminal analyzes the workspaces (founder ruling 2026-10-27, LIM-2424), and gives the deletion date (`ALIGN_DELETE_BY`). The passcode card repeats the analysis note and the date (go-C condition 3). Shruti owns the wording. |
 | Capture and AI | `/api/sessions/events` is 404. No AI key is used, even if one is set (startup refuses it too). |
 | Files | Workspace folders are 0700 and files 0600, owned by the `node` user. |
 | Logs | Server errors log only the error's name, never a message, body or path (go-C condition 5). |
