@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { bindWs, wsSessionFrom } from "@/lib/auth";
 import { slotOf } from "@/lib/labels";
 import { takeOAuthCall } from "@/lib/oauth/limits";
+import { knownProvider } from "@/lib/oauth/clients";
 import { checkAuthorize, originFromHost } from "@/lib/oauth/server";
 import { clientOf } from "@/lib/ratelimit";
 import AuthorizeForm, { type SignedIn } from "./AuthorizeForm";
@@ -17,14 +18,6 @@ export default function AuthorizePage({ searchParams }: PageProps<"/oauth/author
       <Authorize searchParams={searchParams} />
     </Suspense>
   );
-}
-
-/** The AI provider a host belongs to, or null. */
-function knownProvider(host: string): string | null {
-  const h = host.split(":")[0];
-  if (h === "claude.ai" || h.endsWith(".claude.ai") || h.endsWith(".anthropic.com")) return "Anthropic";
-  if (h === "chatgpt.com" || h.endsWith(".chatgpt.com") || h.endsWith(".openai.com")) return "OpenAI";
-  return null;
 }
 
 /** Who the app's data goes to, from where it sends the person back. */

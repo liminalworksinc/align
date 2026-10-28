@@ -11,7 +11,9 @@ import { withLock } from "../locks";
 // Two kinds, both resolved here:
 // - CIMD: the client_id is an https URL whose JSON document lists the client's name and redirect URIs (the MCP
 //   authorization spec's preferred way). Fetched with a lookup that refuses private addresses, 3 s in all, 5 KB, at
-//   most CIMD_MAX_FETCHES at once across the server, cached.
+//   most CIMD_MAX_FETCHES at once across the server, cached. Anthropic's and OpenAI's own documents have a cap of their
+//   own, and an app seen before keeps its last good document while the cap is full: stalled documents elsewhere can't
+//   block them.
 // - DCR: POST /oauth/register stores {client_name, redirect_uris} under a random dcr_ id in
 //   <workspacesRoot>/_oauth_clients.json, so the end-of-test purge removes it with the workspaces.
 // A redirect URI is https, or http on a loopback host (Claude Code and Codex listen on a local port).
@@ -28,7 +30,7 @@ const MAX_REDIRECTS = 10;
 const NAME_MAX = 80;
 const CIMD_MAX_BYTES = 5 * 1024;
 const CIMD_TIMEOUT_MS = 3000; // the whole fetch, connect to last byte (a slow drip is cut off too)
-const CIMD_MAX_FETCHES = 8; // in flight at once, all clients together: past this an app is told to try again
+const CIMD_MAX_FETCHES = 8; // in flight at once, per pool (known providers, everyone else): past this an app is told to try again
 const CIMD_CACHE_MS = 10 * 60 * 1000;
 const CIMD_BAD_CACHE_MS = 60 * 1000; // a document that answered but can't be used: re-checked after a minute
 const DCR_ID = /^dcr_[A-Za-z0-9_-]{22}$/;
@@ -130,7 +132,8 @@ export function privateAddress(ip: string): boolean {
   if (w[0] === 0x64 && w[1] === 0xff9b) return true; // NAT64 64:ff9b::/96 and 64:ff9b:1::/48
   if (w[0] === 0x2002) return true; // 6to4
   if (w[0] === 0x2001 && (w[1] === 0 || w[1] === 0xdb8 || w[1] < 0x200)) return true; // Teredo, documentation, IETF special purpose
-  if (w[0] === 0x100 && zeroTo(4)) return true; // discard 100::/64
+  if (zeroTo(4) && w[4] === 0xffff && w[5] === 0) return true; // IPv4-translated ::ffff:0:0/96
+  if (w[0] === 0x100 && w[1] === 0 && w[2] === 0 && w[3] === 0) return true; // discard 100::/64
   if ((w[0] & 0xfe00) === 0xfc00) return true; // unique local fc00::/7
   if ((w[0] & 0xffc0) === 0xfe80 || (w[0] & 0xffc0) === 0xfec0) return true; // link-local, old site-local
   if ((w[0] & 0xff00) === 0xff00) return true; // multicast
@@ -218,8 +221,16 @@ export function cimdUrl(clientId: string): URL | null {
 
 const g = globalThis as unknown as { __alignCimd?: Map<string, { at: number; client: OAuthClient | null }>; __alignCimdFetching?: Map<string, Promise<OAuthClient | null>> };
 const cimdCache = (g.__alignCimd ??= new Map());
-// Fetches in flight, by client_id: the same app asked for twice shares one fetch, and the map's size is the global cap.
+// Fetches in flight, by client_id: the same app asked for twice shares one fetch, and the map holds both capped pools.
 const fetching = (g.__alignCimdFetching ??= new Map());
+
+/** The AI provider a host belongs to, or null. */
+export function knownProvider(host: string): string | null {
+  const h = host.split(":")[0];
+  if (h === "claude.ai" || h.endsWith(".claude.ai") || h.endsWith(".anthropic.com")) return "Anthropic";
+  if (h === "chatgpt.com" || h.endsWith(".chatgpt.com") || h.endsWith(".openai.com")) return "OpenAI";
+  return null;
+}
 
 /** The app's client document couldn't be fetched (network, timeout, a 5xx): not cached, so a retry can work. */
 export class ClientUnreachable extends Error {}
@@ -229,7 +240,11 @@ async function resolveCimd(url: URL, clientId: string): Promise<OAuthClient | nu
   if (hit && Date.now() - hit.at < (hit.client ? CIMD_CACHE_MS : CIMD_BAD_CACHE_MS)) return hit.client;
   const pending = fetching.get(clientId);
   if (pending) return pending;
-  if (fetching.size >= CIMD_MAX_FETCHES) throw new ClientUnreachable(url.hostname); // busy: "try again in a minute"
+  const known = !!knownProvider(url.hostname);
+  if ([...fetching.keys()].filter((id) => !!knownProvider(new URL(id).hostname) === known).length >= CIMD_MAX_FETCHES) {
+    if (hit?.client) return hit.client; // busy: an app seen before keeps its last good document
+    throw new ClientUnreachable(url.hostname); // "try again in a minute"
+  }
   const p = fetchCimd(url, clientId).finally(() => fetching.delete(clientId));
   fetching.set(clientId, p);
   return p;

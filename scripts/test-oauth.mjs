@@ -276,6 +276,30 @@ async function phase(name, env, invites = []) {
     const many = await Promise.all(Array.from({ length: 12 }, (_, i) => req("GET", q(authParams(`https://pub-c${i}.addr.align-test/slow`, challenge)), { headers: { "fly-client-ip": `198.51.100.${40 + i}` } })));
     const ms2 = Date.now() - t1;
     check("M2 at most 8 client documents are fetched at once across the server; the rest are told to try again", docServer.max >= 1 && docServer.max <= 8 && many.every((r) => r.text.includes("couldn’t reach")) && ms2 < 6000, `max ${docServer.max} at once, ${ms2} ms`);
+    // I2: two more IPv6 forms that carry or stand for a private address.
+    const more = [];
+    for (const k of ["siit", "discard"]) {
+      const r = await req("GET", q(authParams(`https://${k}.addr.align-test/client.json`, challenge)), { headers: { "fly-client-ip": "198.51.100.34" } });
+      if (!r.text.includes("doesn’t recognize")) more.push(k);
+    }
+    check("I2 a client document on IPv4-translated ::ffff:0:a.b.c.d or discard 100::/64 is refused", more.length === 0, `fetched: ${more.join(",")}`);
+    // N1: 8 stalled documents fill the cap. An app seen before (its cached document now stale) and an app whose
+    // document is on Anthropic's or OpenAI's own site must still get the consent page, not 'try again'.
+    const seen = "https://pub-seen.addr.align-test/doc";
+    const warm = await req("GET", q(authParams(seen, challenge)), { headers: { "fly-client-ip": "198.51.100.60" } });
+    await req("GET", q(authParams("https://clock.addr.align-test/client.json", challenge)), { headers: { "fly-client-ip": "198.51.100.61" } });
+    const stalled = Promise.all(Array.from({ length: 8 }, (_, i) => req("GET", q(authParams(`https://pub-n${i}.addr.align-test/slow`, challenge)), { headers: { "fly-client-ip": `198.51.100.${70 + i}` } })));
+    await sleep(800);
+    const full = docServer.open;
+    const [again, provider, stranger] = await Promise.all([
+      req("GET", q(authParams(seen, challenge)), { headers: { "fly-client-ip": "198.51.100.62" } }),
+      req("GET", q(authParams("https://align-test.claude.ai/doc", challenge)), { headers: { "fly-client-ip": "198.51.100.63" } }),
+      req("GET", q(authParams("https://pub-new.addr.align-test/doc", challenge)), { headers: { "fly-client-ip": "198.51.100.64" } }),
+    ]);
+    await stalled;
+    check("N1 the cap still holds: a new app off those sites, while it is full, is told to try again", full >= 8 && stranger.text.includes("couldn’t reach"), `${full} stalled; ${plain(stranger.text).match(/<h1[^>]*>[^<]*/)?.[0]}`);
+    check("N1 with the cap full of stalled documents, an app seen before still connects (its last good document)", plain(warm.text).includes("Connect Claude") && full >= 8 && plain(again.text).includes("Connect Claude"), `${full} stalled; ${plain(again.text).match(/<h1[^>]*>[^<]*/)?.[0]}`);
+    check("N1 with the cap full of stalled documents, an app on Anthropic's or OpenAI's own site still connects", full >= 8 && plain(provider.text).includes("Connect Claude") && !plain(provider.text).includes("This app named itself"), `${full} stalled; ${plain(provider.text).match(/<h1[^>]*>[^<]*/)?.[0]}`);
   }
   const noPkce = await approve(authParams(clientId, challenge, { code_challenge_method: "plain" }), { workspace: A.id, role: "security", passcode: A.passcodes.security });
   check("plain PKCE -> the app gets invalid_request, no code", noPkce.status === 200 && /error=invalid_request/.test(noPkce.json?.redirect ?? "") && !/code=/.test(noPkce.json.redirect), noPkce.text);
