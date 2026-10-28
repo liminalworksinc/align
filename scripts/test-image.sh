@@ -57,10 +57,15 @@ st() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 [ "$(st -H 'host: align.test' -H 'x-forwarded-proto: http' -H 'fly-client-ip: 192.0.2.1' "$B/api/workspaces/config")" = 403 ]; ok $? "plain http -> 403"
 [ "$(st -H 'host: align.test' -H 'x-forwarded-proto: https' "$B/api/workspaces/config")" = 403 ]; ok $? "no Fly-Client-IP -> 403"
 [ "$(st "${EDGE[@]}" "$B/")" = 307 ]; ok $? "/ -> 307 to /new"
-ns="$(st "${EDGE[@]}" -H 'content-type: application/json' -d '{"role":"product","passcode":"product-demo"}' "$B/api/session")"
+# With the site's own Origin, as a browser on the site sends it (hosted writes need it since #14), so the 404 is Northstar's.
+ns="$(st "${EDGE[@]}" -H 'origin: https://align.test' -H 'content-type: application/json' -d '{"role":"product","passcode":"product-demo"}' "$B/api/session")"
 [ "$ns" = 404 ]; ok $? "Northstar sign-in -> 404" "$ns"
-closed="$(for p in /api/mcp /api/policy/security /api/evidence/x /api/sessions /api/sessions/events /api/simulations /api/directives /api/org/push; do st "${EDGE[@]}" "$B$p"; echo; done | sort -u | tr '\n' ' ')"
-[ "$closed" = "404 " ]; ok $? "MCP, policy, evidence, sessions, capture, simulations, directives, org push -> 404" "$closed"
+closed="$(for p in /api/policy/security /api/evidence/x /api/sessions /api/sessions/events /api/simulations /api/directives /api/org/push; do st "${EDGE[@]}" "$B$p"; echo; done | sort -u | tr '\n' ' ')"
+[ "$closed" = "404 " ]; ok $? "policy, evidence, sessions, capture, simulations, directives, org push -> 404" "$closed"
+# Connected AI apps (PR #21): the MCP endpoint asks for Align's OAuth sign-in, and the OAuth metadata names this host.
+mcp="$(curl -s -o /dev/null -D - "${EDGE[@]}" -X POST "$B/api/mcp" | tr -d '\r' | grep -i '^www-authenticate:')"
+echo "$mcp" | grep -q 'resource_metadata="https://align.test/.well-known/oauth-protected-resource/api/mcp"'; ok $? "MCP without a token -> 401 pointing at the OAuth metadata" "$mcp"
+curl -s "${EDGE[@]}" "$B/.well-known/oauth-authorization-server" | grep -q '"issuer":"https://align.test"'; ok $? "the OAuth server metadata is served, issuer https://align.test"
 
 proc="$(docker exec "$NAME" sh -c 'grep -m1 "^Name" /proc/1/status | cut -f2; grep -m1 "^Uid" /proc/1/status | cut -f2')"
 echo "$proc" | head -1 | grep -q '^next-server' && [ "$(echo "$proc" | tail -1)" = 1000 ]; ok $? "PID 1 is the server itself, as the node user (uid 1000)" "$(echo "$proc" | tr '\n' ' ')"

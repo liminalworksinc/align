@@ -14,6 +14,7 @@ import { DecisionsView } from "@/components/DecisionsView";
 import { YourTurnView, waitingOnMe } from "@/components/YourTurnView";
 import { OrgView } from "@/components/OrgView";
 import { WorkMap } from "@/components/WorkMap";
+import ConnectAI from "@/components/ConnectAI";
 import { ScenarioStudio } from "@/components/v6/ScenarioStudio";
 import { agreementStatus } from "@/components/launch";
 import { accepted, changedToday, currentGoal } from "@/components/select";
@@ -609,7 +610,8 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
           </div>
         </div>
         )}
-        <div className={`${custom ? "mt-auto" : "mt-3"} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
+        {workspace && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} />}
+        <div className={`${custom ? (workspace ? "mt-3" : "mt-auto") : "mt-3"} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
           <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
             {custom ? teamInitials(L.role[me.actor]) : initials(me.name ?? "")}
           </span>
