@@ -175,7 +175,7 @@ Run this before the first tester gets a link, and post the results on LIM-2424:
 
 Delete the synthetic workspaces afterwards with `ws-admin.mjs`.
 
-## Connected AI apps (founder ruling 2026-10-26, amending go-C)
+## Connected AI apps (founder ruling 2026-10-27, amending go-C (LIM-2424 0ed9b310))
 
 Testers can point the AI they already use at their own workspace. The app gets read-only access to one workspace, approved with that workspace's role passcode. Agent tokens (`agt.`), `ALIGN_MCP_TOKEN`, capture and wake-ups stay closed when hosted.
 
@@ -187,7 +187,7 @@ Testers can point the AI they already use at their own workspace. The app gets r
 - **Client documents** (an app whose client_id is a URL): fetched from public addresses only (an IPv6 address that carries an IPv4 one is refused), 3 s in all, at most 5 KB, at most 8 at once across the server. The consent page allows 30 views a minute per client, and says "This app named itself" for every app except a client document on Anthropic's or OpenAI's own sites.
 - **What leaves Align:** what the app reads is sent to that app's AI provider (Anthropic or OpenAI). The consent page says so. Claude and ChatGPT call the URL from their own servers, so the machine has to stay up (a paid Fly org; the trial stops machines).
 - **Copy check:** the steps shown for ChatGPT and the Claude app come from their docs on 2026-10-26. Claude Code 2.1.311 was connected end to end against this code on a local server (add, sign in through the consent page, call the tools); the other apps, and any app against the Fly URL, are not checked yet (smoke test item 8 covers one app).
-- Tests: `node scripts/test-oauth.mjs <port>` (70 checks, local and hosted phases).
+- Tests: `node scripts/test-oauth.mjs <port>` (88 checks: local and hosted phases, then a restart with a new `ALIGN_SECRET`).
 
 ## Limits worth knowing
 
