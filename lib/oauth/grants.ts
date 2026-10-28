@@ -5,6 +5,7 @@ import { signPayload } from "../auth";
 import { config, testServerClosesAt } from "../config";
 import { HttpError } from "../errors";
 import { withLock } from "../locks";
+import { pinClient } from "./clients";
 import type { Actor } from "../types";
 import { agentEpochOf, readAuth, wsDir, type CustomWsId } from "../workspace";
 
@@ -12,7 +13,9 @@ import { agentEpochOf, readAuth, wsDir, type CustomWsId } from "../workspace";
 // the app's name and redirect host as it introduced itself, the role that approved it, the hash of its current
 // refresh token (and the one before, to catch reuse) keyed with ALIGN_SECRET, so rotating the secret ends every
 // connected app, and the agent epoch it was approved under: Restart and
-// "Disconnect all" bump that epoch, so every grant from before stops at once. last_used_at is set by the first
+// "Disconnect all" bump that epoch, so every grant from before stops at once. Each grant also records which
+// ALIGN_SECRET it was made under (kid): after a rotation its refresh token can never work again, so it is treated as
+// gone, not listed, and dropped on the next write. last_used_at is set by the first
 // successful MCP call, and the workspace shows an app as connected only from then on.
 
 export interface Grant {
@@ -27,6 +30,7 @@ export interface Grant {
   refresh_hash: string;
   prev_refresh_hash: string | null;
   refresh_exp: number;
+  kid: string;
 }
 
 const MAX_GRANTS = 20;
@@ -37,6 +41,9 @@ const file = (ws: CustomWsId) => path.join(wsDir(ws), "oauth.json");
 // Keyed with ALIGN_SECRET (domain-separated from session, agent and access tokens): a refresh token only works under
 // the secret it was issued with, so rotating ALIGN_SECRET ends every connected app (docs/HOSTING.md).
 const refreshHash = (v: string) => signPayload(`alr.${v}`);
+/** Names the current ALIGN_SECRET without revealing it. */
+const grantKid = () => signPayload("align-grant-kid").slice(0, 16);
+const current = (x: Grant) => x.kid === grantKid();
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 // Every MCP call checks its grant, so the file is read synchronously and cached by mtime, as auth.json is.
@@ -67,18 +74,18 @@ export function readGrants(ws: CustomWsId): Grant[] {
   return grants;
 }
 
-/** Grants still valid under the workspace's current agent epoch. */
+/** Grants still valid under the workspace's current agent epoch and ALIGN_SECRET. */
 export function liveGrants(ws: CustomWsId): Grant[] {
   const auth = readAuth(ws);
   if (!auth) return [];
   const ep = agentEpochOf(auth);
-  return readGrants(ws).filter((x) => x.ep === ep && x.refresh_exp > Date.now());
+  return readGrants(ws).filter((x) => x.ep === ep && x.refresh_exp > Date.now() && current(x));
 }
 
 async function update<T>(ws: CustomWsId, fn: (grants: Grant[]) => { grants: Grant[]; out: T }): Promise<T> {
   return withLock(`oauth:${ws}`, async () => {
     if (!readAuth(ws)) throw new HttpError(404, "This workspace no longer exists");
-    const { grants, out } = fn(readGrants(ws).map((x) => ({ ...x })));
+    const { grants, out } = fn(readGrants(ws).filter(current).map((x) => ({ ...x })));
     const tmp = `${file(ws)}.${randomBytes(6).toString("hex")}.tmp`;
     await fs.writeFile(tmp, JSON.stringify({ grants }, null, 2), { mode: 0o600 });
     await fs.rename(tmp, file(ws));
@@ -120,11 +127,13 @@ export async function createGrant(ws: CustomWsId, a: { client_id: string; client
     refresh_hash: refreshHash(secret),
     prev_refresh_hash: null,
     refresh_exp: refreshExpiry(now),
+    kid: grantKid(),
   };
   // Connecting the same app as the same team again replaces its earlier connection: the app has dropped that refresh
   // token, and the workspace shouldn't list one app twice.
   const kept = (list: Grant[]) => list.filter((x) => x.ep === grant.ep && !(x.client_id === grant.client_id && x.role === grant.role));
   await update(ws, (list) => ({ grants: [...kept(list).slice(-(MAX_GRANTS - 1)), grant], out: null }));
+  pinClient(grant.client_id, grant.refresh_exp);
   return { grant, refresh_token: refreshToken(ws, grant.id, secret) };
 }
 
@@ -147,6 +156,7 @@ export async function rotateGrant(ws: CustomWsId, id: string, secret: string, cl
     if (!same(gr.refresh_hash, h) || gr.client_id !== clientId || gr.ep !== ep || gr.refresh_exp <= Date.now()) return { grants: list, out: null };
     const rotated: Grant = { ...gr, prev_refresh_hash: gr.refresh_hash, refresh_hash: refreshHash(next) };
     list[i] = rotated;
+    pinClient(rotated.client_id, rotated.refresh_exp);
     return { grants: list, out: { grant: rotated, refresh_token: refreshToken(ws, id, next) } };
   });
 }

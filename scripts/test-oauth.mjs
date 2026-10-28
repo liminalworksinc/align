@@ -234,6 +234,8 @@ async function phase(name, env, invites = []) {
   check("DCR refuses an http redirect off loopback, a fragment, and a confidential client (400)", regBad.every((r) => r.status === 400), regBad.map((r) => r.status).join(","));
   const bidi = await req("POST", "/oauth/register", { body: { client_name: "Clau\u202Ede\u200B\uFEFF App\u2066", redirect_uris: [REDIRECT] } });
   check("L3 an app's name loses bidi and zero-width characters", bidi.status === 201 && bidi.json.client_name === "Claude App", bidi.text);
+  const blank = await req("POST", "/oauth/register", { body: { client_name: "Cl\u115Fau\u3164de\u034F\u1160\uFFA0\u2800\u17B4\u17B5", redirect_uris: [REDIRECT] } });
+  check("I4 an app's name loses blank letters (Hangul fillers, combining grapheme joiner, blank Braille, Khmer vowels)", blank.status === 201 && blank.json.client_name === "Claude", JSON.stringify(blank.json?.client_name));
 
   // the consent page
   const { challenge } = pkce();
@@ -443,6 +445,7 @@ async function phase(name, env, invites = []) {
 }
 
 // Rotating ALIGN_SECRET (review M1): a restart with a new secret ends every connected app, refresh tokens included.
+// Client-document cache (re-review N1-evict and stale redirect URIs) runs here too, on a fresh server.
 async function rotation(env, invite) {
   phaseName = "rotate";
   HOSTED = true;
@@ -451,11 +454,53 @@ async function rotation(env, invite) {
   const c = (await req("POST", "/oauth/register", { body: { client_name: "Rotate CLI", redirect_uris: [REDIRECT] } })).json.client_id;
   const t = await connect(c, { workspace: W.id, role: "security", passcode: W.passcodes.security });
   const before = (await mcp(t.access_token)).status;
+
+  // N1-evict: an app with a live grant keeps its good document while 200 others pass through the cache.
+  const { challenge } = pkce();
+  const page = (clientId, ip) => req("GET", `/oauth/authorize?${new URLSearchParams(authParams(clientId, challenge))}`, { headers: { "fly-client-ip": ip } });
+  const kept = "https://pub-kept.addr.align-test/doc";
+  const plainApp = "https://pub-plain.addr.align-test/doc";
+  const tk = await connect(kept, { workspace: W.id, role: "product", passcode: W.passcodes.product });
+  const warmPlain = await page(plainApp, "198.51.100.99");
+  for (let i = 0; i < 25; i++) await Promise.all(Array.from({ length: 8 }, (_, j) => page(`https://pub-f${i * 8 + j}.addr.align-test/doc`, `198.51.100.${100 + j}`)));
+  const stalled = Promise.all(Array.from({ length: 8 }, (_, i) => page(`https://pub-r${i}.addr.align-test/slow`, `198.51.100.${120 + i}`)));
+  await sleep(800);
+  const full = docServer.open;
+  const [keptPage, plainPage] = await Promise.all([page(kept, "198.51.100.130"), page(plainApp, "198.51.100.131")]);
+  await stalled;
+  check(
+    "N1-evict an app with a live grant keeps its document through 200 others, and still connects with the cap full",
+    /^alm\./.test(tk?.access_token ?? "") && full >= 8 && plain(keptPage.text).includes("Connect Claude"),
+    `${full} stalled; ${plain(keptPage.text).match(/<h1[^>]*>[^<]*/)?.[0]}`,
+  );
+  check(
+    "N1-evict the 200-document bound still holds for an app without a grant: pushed out, so 'try again' with the cap full",
+    plain(warmPlain.text).includes("Connect Claude") && full >= 8 && plainPage.text.includes("couldn’t reach"),
+    `${full} stalled; ${plain(plainPage.text).match(/<h1[^>]*>[^<]*/)?.[0]}`,
+  );
   await stop();
+
   await start({ ...env, ALIGN_SECRET: "r".repeat(48) });
   const access = await mcp(t.access_token);
   const rf = await token({ grant_type: "refresh_token", refresh_token: t.refresh_token, client_id: c });
   check("M1 rotating ALIGN_SECRET ends every connected app: the old access token 401, the old refresh token invalid_grant", before === 200 && access.status === 401 && rf.json?.error === "invalid_grant", `${before} ${access.status} ${rf.text}`);
+  const after = await req("GET", "/api/workspaces/connections", { cookie: await signIn(W, "leadership") });
+  check("I3 after the rotation the workspace lists no connected apps (their grants can never refresh)", before === 200 && after.status === 200 && after.json.apps.length === 0, after.text);
+
+  // Stale redirect URIs: a document more than a day old is not served when the cap is full.
+  const old = "https://pub-old.addr.align-test/doc";
+  const warmOld = await page(old, "198.51.100.140");
+  await page("https://clock-1500.addr.align-test/client.json", "198.51.100.141");
+  const stalled2 = Promise.all(Array.from({ length: 8 }, (_, i) => page(`https://pub-o${i}.addr.align-test/slow`, `198.51.100.${150 + i}`)));
+  await sleep(800);
+  const full2 = docServer.open;
+  const oldPage = await page(old, "198.51.100.142");
+  await stalled2;
+  check(
+    "a document more than a day old is not served with the cap full ('try again'), so removed redirects don't live on",
+    plain(warmOld.text).includes("Connect Claude") && full2 >= 8 && oldPage.text.includes("couldn’t reach"),
+    `${full2} stalled; ${plain(oldPage.text).match(/<h1[^>]*>[^<]*/)?.[0]}`,
+  );
   await stop();
 }
 

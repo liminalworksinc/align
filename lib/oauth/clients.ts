@@ -12,8 +12,9 @@ import { withLock } from "../locks";
 // - CIMD: the client_id is an https URL whose JSON document lists the client's name and redirect URIs (the MCP
 //   authorization spec's preferred way). Fetched with a lookup that refuses private addresses, 3 s in all, 5 KB, at
 //   most CIMD_MAX_FETCHES at once across the server, cached. Anthropic's and OpenAI's own documents have a cap of their
-//   own, and an app seen before keeps its last good document while the cap is full: stalled documents elsewhere can't
-//   block them.
+//   own, and an app seen before keeps its last good document (up to a day old) while the cap is full: stalled
+//   documents elsewhere can't block them. The cache holds 200 documents; an app with a live grant keeps its good one
+//   on top of that, so a flood of other documents can't push it out.
 // - DCR: POST /oauth/register stores {client_name, redirect_uris} under a random dcr_ id in
 //   <workspacesRoot>/_oauth_clients.json, so the end-of-test purge removes it with the workspaces.
 // A redirect URI is https, or http on a loopback host (Claude Code and Codex listen on a local port).
@@ -33,6 +34,9 @@ const CIMD_TIMEOUT_MS = 3000; // the whole fetch, connect to last byte (a slow d
 const CIMD_MAX_FETCHES = 8; // in flight at once, per pool (known providers, everyone else): past this an app is told to try again
 const CIMD_CACHE_MS = 10 * 60 * 1000;
 const CIMD_BAD_CACHE_MS = 60 * 1000; // a document that answered but can't be used: re-checked after a minute
+const CIMD_STALE_MS = 24 * 60 * 60 * 1000; // the oldest document served while the cap is full
+const CIMD_CACHE_MAX = 200; // documents, not counting the good ones of apps with a live grant
+const MAX_PINNED = 1000; // apps with a live grant, across the server
 const DCR_ID = /^dcr_[A-Za-z0-9_-]{22}$/;
 
 const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -66,8 +70,9 @@ export function redirectAllowed(client: OAuthClient, uri: string): boolean {
 const cleanName = (v: unknown, fallback: string) => {
   // A name is self-asserted and shown on the consent page and in the audit log: one line, no control characters.
   // Format characters (bidi overrides and isolates, zero-width spaces and joiners, BOM) go too: they can make a name
-  // read as another (review L3).
-  const s = typeof v === "string" ? v.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").replace(/\p{Cf}+/gu, "").slice(0, NAME_MAX).trim() : "";
+  // read as another (review L3). So do the blank letters that aren't format characters (Hangul fillers, the combining
+  // grapheme joiner, Khmer inherent vowels, the blank Braille pattern; re-review I4).
+  const s = typeof v === "string" ? v.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").replace(/[\p{Cf}\u034F\u115F\u1160\u17B4\u17B5\u2800\u3164\uFFA0]+/gu, "").slice(0, NAME_MAX).trim() : "";
   return s || fallback;
 };
 
@@ -219,8 +224,37 @@ export function cimdUrl(clientId: string): URL | null {
   return u;
 }
 
-const g = globalThis as unknown as { __alignCimd?: Map<string, { at: number; client: OAuthClient | null }>; __alignCimdFetching?: Map<string, Promise<OAuthClient | null>> };
+const g = globalThis as unknown as {
+  __alignCimd?: Map<string, { at: number; client: OAuthClient | null }>;
+  __alignCimdFetching?: Map<string, Promise<OAuthClient | null>>;
+  __alignCimdPinned?: Map<string, number>;
+};
 const cimdCache = (g.__alignCimd ??= new Map());
+// Apps with a live grant, by client_id, until their refresh token expires (lib/oauth/grants.ts sets these). Their good
+// document is never evicted from cimdCache. Only a grant pins an app, and there are at most MAX_PINNED.
+const pinned = (g.__alignCimdPinned ??= new Map());
+const isPinned = (clientId: string) => (pinned.get(clientId) ?? 0) > Date.now();
+
+/** Keep this app's good client document cached until `until` (it holds a grant). */
+export function pinClient(clientId: string, until: number) {
+  pinned.delete(clientId);
+  pinned.set(clientId, until);
+  while (pinned.size > MAX_PINNED) pinned.delete(pinned.keys().next().value!);
+}
+
+/** Cache a document, then drop the oldest ones past CIMD_CACHE_MAX, skipping the good ones of pinned apps. */
+function cacheDocument(clientId: string, client: OAuthClient | null) {
+  cimdCache.delete(clientId);
+  cimdCache.set(clientId, { at: Date.now(), client });
+  const kept = (id: string, e: { client: OAuthClient | null }) => !!e.client && isPinned(id);
+  let over = cimdCache.size - CIMD_CACHE_MAX - [...cimdCache].filter(([id, e]) => kept(id, e)).length;
+  for (const [id, e] of cimdCache) {
+    if (over <= 0) break;
+    if (kept(id, e)) continue;
+    cimdCache.delete(id);
+    over--;
+  }
+}
 // Fetches in flight, by client_id: the same app asked for twice shares one fetch, and the map holds both capped pools.
 const fetching = (g.__alignCimdFetching ??= new Map());
 
@@ -242,7 +276,7 @@ async function resolveCimd(url: URL, clientId: string): Promise<OAuthClient | nu
   if (pending) return pending;
   const known = !!knownProvider(url.hostname);
   if ([...fetching.keys()].filter((id) => !!knownProvider(new URL(id).hostname) === known).length >= CIMD_MAX_FETCHES) {
-    if (hit?.client) return hit.client; // busy: an app seen before keeps its last good document
+    if (hit?.client && Date.now() - hit.at < CIMD_STALE_MS) return hit.client; // busy: an app seen in the last day keeps its last good document
     throw new ClientUnreachable(url.hostname); // "try again in a minute"
   }
   const p = fetchCimd(url, clientId).finally(() => fetching.delete(clientId));
@@ -271,8 +305,7 @@ async function fetchCimd(url: URL, clientId: string): Promise<OAuthClient | null
   if (doc && doc.client_id === clientId && Array.isArray(uris) && uris.length && uris.length <= MAX_REDIRECTS && uris.every(validRedirect))
     client = { client_id: clientId, client_name: cleanName(doc.client_name, url.hostname), redirect_uris: uris as string[], kind: "cimd" };
   else console.warn(`[oauth] client document ${url.href} can't be used`);
-  while (cimdCache.size >= 200) cimdCache.delete(cimdCache.keys().next().value!);
-  cimdCache.set(clientId, { at: Date.now(), client });
+  cacheDocument(clientId, client);
   return client;
 }
 

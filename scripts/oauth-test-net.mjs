@@ -5,8 +5,8 @@
 // - pub[-<anything>].addr.align-test resolves to a public address, and its TLS connection goes to the test's own
 //   document server on 127.0.0.1:ALIGN_TEST_DOC_PORT (slow or quick answers, chosen by the URL path).
 //   align-test.claude.ai goes there too: a document on a known provider's host, without reaching Anthropic.
-// - Looking up clock.addr.align-test moves the server's clock 11 minutes on (and fails), so the test can let cached
-//   client documents go stale.
+// - Looking up clock[-<minutes>].addr.align-test moves the server's clock on (11 minutes unless given) and fails, so
+//   the test can let cached client documents go stale.
 import dns from "node:dns";
 import { syncBuiltinESMExports } from "node:module";
 import tls from "node:tls";
@@ -34,8 +34,9 @@ Date.now = () => realNow() + skew;
 const realLookup = dns.lookup;
 dns.lookup = function lookup(host, options, cb) {
   if (typeof options === "function") [cb, options] = [options, {}];
-  if (host === "clock.addr.align-test") {
-    skew += 11 * 60 * 1000;
+  const clock = /^clock(?:-(\d+))?\.addr\.align-test$/.exec(String(host));
+  if (clock) {
+    skew += Number(clock[1] ?? 11) * 60 * 1000;
     return process.nextTick(() => cb(Object.assign(new Error("clock moved"), { code: "ENOTFOUND" })));
   }
   const m = NAME.exec(host === PROVIDER ? "pub.addr.align-test" : String(host));
