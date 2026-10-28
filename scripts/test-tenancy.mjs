@@ -1231,6 +1231,7 @@ try {
   const NOTICE_FIRST = "Liminal Align is an early-testing product running on a test server.";
   const visibleHtml = hNew.text.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "");
   check("LD1 /new's server HTML (no JS, before the config fetch) carries the notice once, with the deletion date", visibleHtml.split(NOTICE_FIRST).length === 2 && visibleHtml.includes(`deleted by ${LONG_DELETE}. You can request earlier deletion.`), visibleHtml.slice(0, 300));
+  check("LD1 /new's notice says Liminal analyzes the workspaces (founder ruling 2026-10-27)", visibleHtml.includes("This is a research test: Liminal analyzes the workspaces people create here, including every proposal and decision."), visibleHtml.slice(0, 300));
   {
     const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check", `--host-resolver-rules=MAP ${HOSTED_HOST} 127.0.0.1`] });
     try {
