@@ -640,6 +640,8 @@ function CustomGoal({ p, L, g }: { p: ViewProps; L: Labels; g: Goal }) {
 function CustomProposal({ p, L, pr }: { p: ViewProps; L: Labels; pr: Proposal }) {
   const counter = pr.counter_versions.at(-1);
   const plan = p.s.plans.find((x) => x.plan_id === pr.plan_ref.plan_id && x.plan_version === pr.plan_ref.plan_version);
+  // Once ratified, show the version it produced too, so the panel never reads as still on the old goal.
+  const ratifiedTo = p.s.acceptances.find((a) => a.proposal_id === pr.id)?.accepted_version;
   return (
     <>
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -653,6 +655,7 @@ function CustomProposal({ p, L, pr }: { p: ViewProps; L: Labels; pr: Proposal })
       <Section title="What would change">
         <Row label="Goal">
           {L.team.security} {pr.target_goal_version}
+          {ratifiedTo && ratifiedTo !== pr.target_goal_version && ` → ${ratifiedTo} (approved)`}
         </Row>
         <Row label="Proposed new target">{pr.proposed_measure_text}</Row>
         {counter && (

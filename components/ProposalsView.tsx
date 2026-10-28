@@ -6,7 +6,7 @@ import type { ViewProps } from "./props";
 import { activeProposal, changedToday, currentGoal, priorVersion } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
 import { api, type Me } from "./useAlign";
-import { nextStepHint } from "./nextStep";
+import { NextStepAction, ProgressStrip } from "./Handoff";
 import { ProofStrip } from "./ProofStrip";
 import { SpartaProof } from "./SpartaProof";
 import { STALE_APPROVAL_NOTE, agreementStatus, approvedStale, launchLine } from "./launch";
@@ -494,7 +494,6 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
   // Custom: what the owning team made its approval depend on: its conditions field only, as on the decision record.
   const lastCounter = p.counter_versions.at(-1);
   const conditions = L.northstar ? "" : (lastCounter?.conditions?.trim() ?? "");
-  const hint = nextStepHint(p, me.actor, L);
   const [answer, setAnswer] = useState<Answer>("accept");
 
   const ceo = currentGoal(s, "ceo");
@@ -531,6 +530,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
         <p className="text-[15px] text-zinc-600">
           From {who(p.proposing_owner)} to {who(p.recipient_owner)} · sent {fmtTime(p.created_at)}
         </p>
+        <ProgressStrip p={p} acc={acc} L={L} viewer={me.actor ?? ""} />
       </header>
 
       <ol className="space-y-3.5" aria-label="Conversation about this proposal">
@@ -809,7 +809,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
       {isSecurity && p.state === "COUNTERED" && (
         <div className={footer}>
           <Badge tone="amber">{L.northstar ? "Waiting for Product to accept your changes" : `Waiting for ${ask} to accept your changes`}</Badge>
-          {hint && <p className="w-full text-[15px] text-zinc-600">{hint}</p>}
+          <NextStepAction p={p} viewer={me.actor ?? ""} L={L} onSwitch={props.switchTeam} />
         </div>
       )}
 
@@ -832,12 +832,10 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
             <Badge tone="amber">You accepted the changes · waiting for {who("security")} to approve</Badge>
           )}
           {/* A 16rem basis, not flex-1's 0: with a 0 basis flex-wrap never breaks the line and squeezes this text to
-              one word per line between the badge and the button. */}
-          <span className="min-w-0 flex-[1_1_16rem] text-[15px] text-zinc-500">
-            {L.northstar ? "Only Security can approve a change to Security's goal." : `Only ${own} can approve a change to ${poss(own)} goal.`}
-          </span>
+              one word per line between the badge and the button. Custom: the progress strip already says whose step it is. */}
+          {L.northstar && <span className="min-w-0 flex-[1_1_16rem] text-[15px] text-zinc-500">Only Security can approve a change to Security&apos;s goal.</span>}
           <TryApprove key={`${p.id}:${p.state}`} p={p} owner={own} workspace={props.workspace} />
-          {hint && <p className="w-full text-[15px] text-zinc-600">{hint}</p>}
+          <NextStepAction p={p} viewer={me.actor ?? ""} L={L} onSwitch={props.switchTeam} />
         </div>
       )}
     </div>

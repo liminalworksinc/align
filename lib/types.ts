@@ -215,6 +215,7 @@ export interface Acceptance {
 export interface LaunchDecision {
   decision: "approved" | "not_yet";
   note?: string; // at most 500 characters; never written to the audit log
+  untested?: true; // approved knowing the plan had no sandbox test (the request carried accept_untested)
   by: "leadership";
   at: string;
 }

@@ -454,7 +454,7 @@ try {
   const bTree6l = treeHash(path.join(wsRoot, b));
   const lB = await call("POST", `/api/proposals/${pid}/launch`, { cookie: sb.leadership, body: { decision: "approved" } });
   check("A6 B's leadership cannot launch A's proposal -> 404, A and B unchanged", lB.status === 404 && treeHash(path.join(wsRoot, a)) === aTree6 && treeHash(path.join(wsRoot, b)) === bTree6l, `${lB.status} ${lB.text}`);
-  const lA = await call("POST", `/api/proposals/${pid}/launch`, { cookie: sa.leadership, body: { decision: "approved" } });
+  const lA = await call("POST", `/api/proposals/${pid}/launch`, { cookie: sa.leadership, body: { decision: "approved", accept_untested: true } });
   const launchedA = JSON.parse(readFileSync(path.join(wsRoot, a, "state.json"), "utf8")).acceptances.find((x) => x.proposal_id === pid)?.launch_decision;
   check("A6 A's leadership launches A's proposal -> 200, recorded in A only", lA.status === 200 && launchedA?.decision === "approved" && treeHash(path.join(wsRoot, b)) === bTree6l, `${lA.status} ${lA.text}`);
   // L7 (Sean's #7 review): the launch route refuses a page on another local port and is rate-limited per workspace.
@@ -462,7 +462,7 @@ try {
   const lX = await call("POST", `/api/proposals/${pid}/launch`, { cookie: sa.leadership, body: { decision: "not_yet" }, headers: { origin: "http://localhost:5173" } });
   check("L7 launch from another local port (Origin http://localhost:5173) -> 403, A unchanged", lX.status === 403 && treeHash(path.join(wsRoot, a)) === aTreeL7, `${lX.status} ${lX.text}`);
   const lLoop = [];
-  for (let i = 0; i < 11; i++) lLoop.push((await call("POST", `/api/proposals/${pid}/launch`, { cookie: sa.leadership, body: { decision: "approved" } })).status);
+  for (let i = 0; i < 11; i++) lLoop.push((await call("POST", `/api/proposals/${pid}/launch`, { cookie: sa.leadership, body: { decision: "approved", accept_untested: true } })).status);
   check("L7 a launch-decision loop is limited: 429 within 11 more in a minute, never more than 10 accepted", lLoop.includes(429) && lLoop.filter((x) => x === 200).length <= 9 && lLoop.every((x) => x === 200 || x === 429), lLoop.join(","));
   const p6b = await call("POST", "/api/proposals", { cookie: sa.product, body: { proposed_measure_text: "AMARK second", rationale: "r", reciprocal_commitment: "c" } });
   const rj = await call("POST", `/api/proposals/${p6b.json?.id}/reject`, { cookie: sa.security, body: {} });
@@ -710,7 +710,7 @@ try {
       const seen = [];
       page.on("request", (r) => seen.push(new URL(r.url()).pathname));
       await page.goto(`${BASE}/w/${b}`, { waitUntil: "domcontentloaded", timeout: 90000 });
-      const shown = await waitFor(async () => /Choose your team/.test(await page.evaluate(() => document.body.innerText).catch(() => "")), 45000);
+      const shown = await waitFor(async () => /Sign in as/.test(await page.evaluate(() => document.body.innerText).catch(() => "")), 45000);
       await new Promise((r) => setTimeout(r, 4000)); // > two poll intervals (1.5 s)
       check("U1 /w/<id> before sign-in shows the sign-in and never requests /api/state", shown && !seen.includes("/api/state"), `shown=${shown} state requests=${seen.filter((p) => p === "/api/state").length}`);
       // Sign in, then end the session server-side (epoch bump, as a passcode reset does): the page must say so.
@@ -1231,6 +1231,7 @@ try {
   const NOTICE_FIRST = "Liminal Align is an early-testing product running on a test server.";
   const visibleHtml = hNew.text.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "");
   check("LD1 /new's server HTML (no JS, before the config fetch) carries the notice once, with the deletion date", visibleHtml.split(NOTICE_FIRST).length === 2 && visibleHtml.includes(`deleted by ${LONG_DELETE}. You can request earlier deletion.`), visibleHtml.slice(0, 300));
+  check("LD1 /new's notice says Liminal analyzes the workspaces (founder ruling 2026-10-27)", visibleHtml.includes("This is a research test: Liminal analyzes the workspaces people create here, including every proposal and decision."), visibleHtml.slice(0, 300));
   {
     const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check", `--host-resolver-rules=MAP ${HOSTED_HOST} 127.0.0.1`] });
     try {
