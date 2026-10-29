@@ -3,7 +3,8 @@ import { v2Problems } from "./v2/config";
 
 // Every multi-workspace setting, read from the environment only (never from request headers).
 // Mode L (loopback) is the default. HOSTED=1 is the hosted tester mode (founder ruling 10-21 "go C"): one server
-// behind Fly's HTTPS proxy, an explicit hostname allowlist, strong secrets, no capture, no AI key, and no Northstar
+// behind Fly's HTTPS proxy, an explicit hostname allowlist, strong secrets, no capture, no AI key except the intake
+// interview's own (ALIGN_INTERVIEW_API_KEY, founder ruling 10-29), and no Northstar
 // at all (the demo, its fixture and Sparta evidence are never served or read). ALIGN_PUBLIC=1 (full Mode P) is refused.
 
 export interface Config {
@@ -91,6 +92,11 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
     else if (v.length < 12) p.push(`${k} must be 12+ characters`);
   }
   if (env.AI_GATEWAY_API_KEY) p.push("AI_GATEWAY_API_KEY must not be set when hosted (no AI key)");
+  // The intake interview (founder ruling 10-29, LIM-2424 9976b9e0) uses ALIGN_INTERVIEW_API_KEY and nothing else, so the
+  // Anthropic SDK's own environment credentials must not be set: they would be picked up silently.
+  if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN) p.push("ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN must not be set when hosted (use ALIGN_INTERVIEW_API_KEY)");
+  if (env.ALIGN_INTERVIEW === "1") p.push("ALIGN_INTERVIEW=1 is for Mode L only; hosted, set ALIGN_INTERVIEW_API_KEY");
+  if (env.ALIGN_INTERVIEW_API_KEY && env.ALIGN_INTERVIEW_API_KEY.length < 20) p.push("ALIGN_INTERVIEW_API_KEY looks too short to be an API key");
   if (env.ALIGN_CAPTURE && env.ALIGN_CAPTURE !== "0") p.push("ALIGN_CAPTURE must be off when hosted");
   p.push(...v2Problems(env)); // empty unless ALIGN_GOAL_SESSIONS=1
   return p;

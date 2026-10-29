@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
+import { InterviewPanel } from "@/components/InterviewPanel";
 import { EMPTY, Field, field, issuesFrom, ScenarioFields, toBody, type Form, type Issues } from "@/components/ScenarioForm";
 import { isCodeRefusal } from "@/lib/codes";
 import { NO_ANSWER_HOSTED, NO_ANSWER_LOCAL, ROLE_SWITCH } from "@/lib/labels";
@@ -55,7 +56,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 
 /** `testServer` comes from the server render (page.tsx), so the notice shows even if the config fetch fails (review M9). */
 export default function NewWorkspace({ testServer }: { testServer: { delete_by: string | null } | null }) {
-  const [cfg, setCfg] = useState<{ signup_code_required: boolean; max_reached: boolean; test_server?: { delete_by: string | null } } | null | undefined>(undefined);
+  const [cfg, setCfg] = useState<{ signup_code_required: boolean; max_reached: boolean; interview?: boolean; test_server?: { delete_by: string | null } } | null | undefined>(undefined);
   const [form, setForm] = useState<Form>(EMPTY);
   const [code, setCode] = useState("");
   const [issues, setIssues] = useState<Issues>({});
@@ -221,6 +222,8 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
           </Field>
         </section>
       )}
+
+      {cfg?.interview && <InterviewPanel code={code} set={set} />}
 
       <ScenarioFields form={form} set={set} issues={issues} more={more} setMore={setMore} />
 
