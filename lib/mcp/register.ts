@@ -2,7 +2,7 @@ import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { authorityEvents, describeEvent, oneLine, pendingFor, quoted } from "../directives";
-import { activityText, goalActivity } from "../activity";
+import { activityText, goalActivity, matchSessions } from "../activity";
 import { asksText } from "../asks";
 import { briefText } from "../brief";
 import { limitsText } from "../limits";
@@ -51,6 +51,52 @@ async function sessionState(ctx: ServerContext): Promise<AppState> {
 function roleOf(ctx: ServerContext): Owner | null {
   const r = ctx.http?.authInfo?.extra?.role;
   return r === "leadership" ? "ceo" : r === "product" || r === "security" ? r : null;
+}
+
+/**
+ * What a connected app may read (founder ruling 2026-10-29 on #32): an app approved by leadership reads the whole
+ * workspace; one approved by a team reads that team's asks, limits and agent sessions (goal activity, the work map,
+ * directives' delivery counts, the brief), plus what every signed-in person sees in the app: the shared goals, the
+ * plans and the proposals between teams. The role is the one stored on the grant (lib/oauth/server.ts readMcpToken);
+ * a grant with no valid role (made before roles were stored, or damaged) reads no team's data, never leadership's.
+ */
+type AppView = { all: true } | { all: false; team: Owner | null };
+function appViewOf(ctx: ServerContext): AppView {
+  const r = ctx.http?.authInfo?.extra?.role;
+  if (r === "leadership") return { all: true };
+  return { all: false, team: r === "product" || r === "security" ? r : null };
+}
+
+/** The team whose goal a session served, by the same placement the Work view and goal activity use (lib/activity.ts),
+ *  computed on the whole workspace so every reader places a session the same way; null when no goal matched. */
+function sessionTeams(s: AppState): Map<string, Owner | null> {
+  const ownerOf = new Map(s.goals.map((g) => [g.id, g.owner_id]));
+  const placed = matchSessions(s);
+  return new Map(s.sessions.map((x) => [x.id, (placed.get(x.id) && ownerOf.get(placed.get(x.id)!)) || null]));
+}
+
+/** The workspace as one app may read it (AppView). Leadership's view is the state unchanged. */
+function scopeToApp(s: AppState, v: AppView): AppState {
+  if (v.all) return s;
+  const team = v.team;
+  const teams = sessionTeams(s);
+  // A session counts as the team's only when it was placed under that team's goal; unplaced sessions are nobody's.
+  const sessions = team ? s.sessions.filter((x) => teams.get(x.id) === team) : [];
+  const ids = new Set(sessions.map((x) => x.id));
+  return {
+    ...s,
+    sessions,
+    mappings: (s.mappings ?? []).filter((m) => ids.has(m.session_id)),
+    asks: team ? (s.asks ?? []).filter((a) => a.to === team) : [],
+    limits: team ? (s.limits ?? []).filter((l) => l.team === team) : [],
+    private_constraints: [],
+  };
+}
+
+/** State for an app's reads: its agent-token scope (sessionState), then its team's scope when it is a connected app. */
+async function readFor(ctx: ServerContext, apps: boolean): Promise<AppState> {
+  const s = await sessionState(ctx);
+  return apps ? scopeToApp(s, appViewOf(ctx)) : s;
 }
 
 /** Confirmed limits for an app in a custom workspace, placed first in what it reads; nothing for Northstar. */
@@ -520,7 +566,7 @@ export function registerAlign(server: McpServer, { apps = false }: { apps?: bool
     },
     async ({ session_id }, ctx) => {
       requireRead(ctx);
-      const out = workMap(await sessionState(ctx), session_id);
+      const out = workMap(await readFor(ctx, apps), session_id);
       const summary = out.query
         ? out.total_sessions
           ? (() => {
@@ -585,7 +631,7 @@ export function registerAlign(server: McpServer, { apps = false }: { apps?: bool
     },
     async ({ session_id }, ctx) => {
       requireRead(ctx);
-      const st = await sessionState(ctx);
+      const st = await readFor(ctx, apps);
       const out = directives(st, session_id);
       const head = out.session_id
         ? out.session_found
@@ -617,7 +663,7 @@ function registerWorkspaceTools(server: McpServer) {
     },
     async (_args, ctx) => {
       requireRead(ctx);
-      const s = await readState(storeOf(ctx));
+      const s = await readFor(ctx, true);
       if (scenarioOf(s) !== "custom") return { content: [{ type: "text" as const, text: "Asks are recorded in workspaces only." }] };
       return { content: [{ type: "text" as const, text: asksText(s, (o) => teamName(s, o), roleOf(ctx)) }] };
     },
@@ -633,9 +679,15 @@ function registerWorkspaceTools(server: McpServer) {
     },
     async (_args, ctx) => {
       requireRead(ctx);
-      const s = await readState(storeOf(ctx));
+      const s = await sessionState(ctx);
       if (scenarioOf(s) !== "custom") return { content: [{ type: "text" as const, text: "Goal activity is available in workspaces only." }] };
-      return { content: [{ type: "text" as const, text: activityText(goalActivity(s, (g) => teamName(s, g.owner_id))) }] };
+      // Placed on the whole workspace (so a session lands under the same goal for every reader), then cut to what this
+      // app may read: a team's app sees its own team's goals and their sessions, and no count of anyone else's.
+      const a = goalActivity(s, (g) => teamName(s, g.owner_id));
+      const v = appViewOf(ctx);
+      const owner = new Map(s.goals.map((g) => [g.id, g.owner_id]));
+      const shown = v.all ? a : { ...a, goals: a.goals.filter((g) => v.team !== null && owner.get(g.goal_id) === v.team), unmatched: 0 };
+      return { content: [{ type: "text" as const, text: activityText(shown) }] };
     },
   );
   // Limits alone, for a hook that runs after the agent's context is summarized (SessionStart "compact" in Claude Code
@@ -651,7 +703,7 @@ function registerWorkspaceTools(server: McpServer) {
     },
     async (input, ctx) => {
       requireRead(ctx);
-      const s = await readState(storeOf(ctx));
+      const s = await readFor(ctx, true);
       const text = scenarioOf(s) !== "custom" ? "Limits are recorded in workspaces only." : limitsText(s, (o) => teamName(s, o), roleOf(ctx));
       return hookOrText(text, input, ctx, "limits");
     },
@@ -669,7 +721,7 @@ function registerWorkspaceTools(server: McpServer) {
     },
     async (input, ctx) => {
       requireRead(ctx);
-      const s = await readState(storeOf(ctx));
+      const s = await readFor(ctx, true);
       const text = scenarioOf(s) !== "custom" ? "The brief is for workspaces only." : briefText(s, (o) => teamName(s, o), roleOf(ctx));
       return hookOrText(text, input, ctx, "brief");
     },
