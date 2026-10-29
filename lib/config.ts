@@ -55,7 +55,9 @@ export function hostName(host: string | null): string {
 /** The one host rule: the Host header names an allowed host (ALIGN_HOSTS when hosted, else loopback). */
 export function hostAllowed(host: string | null): boolean {
   const name = hostName(host);
-  return !!name && config().allowedHosts.has(name);
+  // Anything after the name may only be a numeric port: the Host header is echoed into connect URLs and paste lines.
+  const rest = (host || "").toLowerCase().slice(name.length);
+  return !!name && /^(?::\d{1,5})?$/.test(rest) && config().allowedHosts.has(name);
 }
 
 const DEFAULT_PASSCODES: Record<string, string> = {
@@ -93,8 +95,10 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
   }
   if (env.AI_GATEWAY_API_KEY) p.push("AI_GATEWAY_API_KEY must not be set when hosted (no AI key)");
   // The intake interview (founder ruling 10-29, LIM-2424 9976b9e0) uses ALIGN_INTERVIEW_API_KEY and nothing else, so the
-  // Anthropic SDK's own environment credentials must not be set: they would be picked up silently.
-  if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN) p.push("ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN must not be set when hosted (use ALIGN_INTERVIEW_API_KEY)");
+  // Anthropic SDK's own environment settings must not be set: credentials, but also ANTHROPIC_BASE_URL, custom headers,
+  // logging and telemetry, which the SDK picks up silently and which could send the key and testers' text elsewhere.
+  const sdkEnv = Object.keys(env).filter((k) => k.startsWith("ANTHROPIC_") && env[k]);
+  if (sdkEnv.length) p.push(`${sdkEnv.join(", ")} must not be set when hosted (the interview uses ALIGN_INTERVIEW_API_KEY only)`);
   if (env.ALIGN_INTERVIEW === "1") p.push("ALIGN_INTERVIEW=1 is for Mode L only; hosted, set ALIGN_INTERVIEW_API_KEY");
   if (env.ALIGN_INTERVIEW_API_KEY && env.ALIGN_INTERVIEW_API_KEY.length < 20) p.push("ALIGN_INTERVIEW_API_KEY looks too short to be an API key");
   if (env.ALIGN_CAPTURE && env.ALIGN_CAPTURE !== "0") p.push("ALIGN_CAPTURE must be off when hosted");
