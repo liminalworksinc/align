@@ -28,7 +28,7 @@ Without `HOSTED`, nothing changes. The loopback rules, cookie and Northstar beha
 | Creation | **One single-use invite code per tester** (`ALIGN_SIGNUP_CODES`). A used code is refused, and used codes are kept only as SHA-256 hashes. Wrong codes: 10 per 10 minutes per client, then 429. 5 creates per rolling hour (fixed). `ALIGN_MAX_WORKSPACES` caps the total (default 25). |
 | Sign-in | Passcode hashing runs at most 2 at a time, with 8 waiting; the rest get 429. Backoff is per workspace, role and client: after 5 wrong tries, that client waits. Another person's tries never lock you out. |
 | Notice | `/new` says it's a test server, says not to enter confidential details, says Liminal analyzes the workspaces (founder ruling 2026-10-27, LIM-2424), and gives the deletion date (`ALIGN_DELETE_BY`). The passcode card repeats the analysis note and the date (go-C condition 3). Shruti owns the wording. |
-| Capture and AI | `/api/sessions/events` is 404. No AI key is used, even if one is set (startup refuses it too). A tester may connect their own AI app read-only ("Connected AI apps"); agent tokens and capture stay off. |
+| Capture and AI | `/api/sessions/events` is 404. `AI_GATEWAY_API_KEY` is never used (startup refuses it). The only AI key is `ALIGN_INTERVIEW_API_KEY`, used solely by the intake interview on `/new` ("Intake interview" below). A tester may connect their own AI app read-only ("Connected AI apps"); agent tokens and capture stay off. |
 | Files | Workspace folders are 0700 and files 0600, owned by the `node` user. |
 | Logs | Server errors log only the error's name, never a message, body or path (go-C condition 5). |
 | Isolation | Each tester workspace is its own directory under `$ALIGN_DATA_DIR/workspaces/<id>/`. A workspace session can't read or write another workspace (test-tenancy A1 to A12, H7). |
@@ -43,7 +43,7 @@ The server won't serve until all of these hold. On `next start` it exits with th
 - `ALIGN_SIGNUP_CODES`: one or more invite codes, each 12+ characters. `ALIGN_SIGNUP_CODE` (a single shared code) is refused.
 - `ALIGN_DELETE_BY`: the deletion date, `YYYY-MM-DD`. Once that day ends (midnight Pacific), the server is closed: it answers 410 to every request, whatever its headers, and a restart comes back closed (it starts and logs `has passed: closed`, so it never crash-loops). Testers keep the whole day; the operator purges with `ws-admin` that evening (see "Deleting workspaces").
 - `ALIGN_PRODUCT_PASSCODE`, `ALIGN_SECURITY_PASSCODE`, `ALIGN_LEADERSHIP_PASSCODE`: set, not the `*-demo` defaults, and 12+ characters. They serve nothing while Northstar is off; they're required so a mistake there could never expose the demo passcodes.
-- These must be unset (any value is refused, `"0"` included): `AI_GATEWAY_API_KEY`, `ALIGN_CREATE_PER_HOUR`, `ALIGN_NORTHSTAR_PUBLIC`. These must be unset or off: `ALIGN_CAPTURE` (or `0`), `ALIGN_ALLOW_OPEN_CREATE` and `ALIGN_PUBLIC` (anything but `1`).
+- These must be unset (any value is refused, `"0"` included): `AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ALIGN_CREATE_PER_HOUR`, `ALIGN_NORTHSTAR_PUBLIC`. `ALIGN_INTERVIEW=1` (the Mode L development switch) is refused too; `ALIGN_INTERVIEW_API_KEY`, when set, must look like a key (20+ characters). These must be unset or off: `ALIGN_CAPTURE` (or `0`), `ALIGN_ALLOW_OPEN_CREATE` and `ALIGN_PUBLIC` (anything but `1`).
 
 test-tenancy H1 checks every one of these on a production server: each must exit, or stay up answering only 503, and name its problem. `scripts/test-image.sh` checks a refusal on the built image.
 
@@ -57,6 +57,7 @@ test-tenancy H1 checks every one of these on a production server: each must exit
 | `ALIGN_MAX_WORKSPACES` | `fly.toml` | `25`. The cap exists for polling cost (spec section 10). `0`, a negative or a non-number falls back to 25; it can't close creation. |
 | `ALIGN_DELETE_BY` | `fly.toml` | `2026-11-13` (founder ruling 2026-10-22; change it in one place) |
 | `ALIGN_SECRET` | `fly secrets` | `openssl rand -hex 32` |
+| `ALIGN_INTERVIEW_API_KEY` | `fly secrets` | optional. An Anthropic API key for the intake interview on `/new`. Unset, the interview is off and its route is 404. |
 | `ALIGN_SIGNUP_CODES` | `fly secrets` | one code per planned tester, e.g. five of `openssl rand -hex 8`, comma-separated. To add testers later, set the list again with the new codes added. |
 | `ALIGN_*_PASSCODE` (3) | `fly secrets` | random; unused while Northstar is off |
 
@@ -174,6 +175,18 @@ Run this before the first tester gets a link, and post the results on LIM-2424:
 8. Connect one real app (Claude Code: the one line in the workspace's "Connect an AI app" dialog) to a synthetic workspace, ask it for the goals, and check the workspace's "Your AI apps" card lists it. Disconnect it there and check the app is refused.
 
 Delete the synthetic workspaces afterwards with `ws-admin.mjs`.
+
+## Intake interview (founder ruling 2026-10-29, amending go-C (LIM-2424 9976b9e0))
+
+Instead of typing the conflict form, a tester can talk it through: on `/new`, "Start the interview" opens a chat where Claude (`claude-opus-5-5`, effort low, server-side refusal fallback on) asks one short question at a time and drafts the form below it. Voice uses the browser's own speech recognition; the mic button is hidden where there is none.
+
+- **It only drafts.** The tester reviews every field and presses Create, which runs the normal checks. A field the tester edited is never overwritten.
+- **Entry rule:** the same code check as creating (`lib/create-access.ts`): the tester's own unspent invite, checked read-only. Interviewing never spends it, and the code is never sent to the model.
+- **Limits:** at most 30 messages a conversation (2,000 characters each, 30,000 in all, 48 KB body), 40 turns per client per 30 minutes, 300 per server per hour, 4 at a time. Over a limit is 429 or 413 before any model call.
+- **Nothing is stored.** What the tester says goes to Anthropic to draft the form; only what they create is kept. The `/new` notice keeps its research line and doesn't name the provider (founder's call, 10-29). Server errors log only the error's name.
+- **Turning it off:** unset `ALIGN_INTERVIEW_API_KEY` (`fly secrets unset`); the route then answers 404 and `/new` hides the panel.
+- **Local development:** `ALIGN_INTERVIEW=1` in Mode L uses the SDK's own credentials (an `ant auth login` profile) instead of a key.
+- Tests: `node scripts/test-interview.mjs <port>` (Anthropic is never reached; `scripts/interview-test-net.mjs` answers locally).
 
 ## Connected AI apps (founder ruling 2026-10-27, amending go-C (LIM-2424 0ed9b310))
 

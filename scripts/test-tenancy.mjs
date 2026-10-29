@@ -1275,7 +1275,7 @@ try {
       else if (/^(route|page)\.tsx?$/.test(e.name)) routes.push(url || "/");
     }
   })(path.join(ROOT, "app"), "");
-  const TESTER = [/^\/new$/, /^\/w\/x$/, /^\/api\/workspaces$/, /^\/api\/workspaces\/config$/, /^\/api\/workspaces\/x\/login-info$/, /^\/api\/session$/, /^\/api\/state$/, /^\/api\/timer$/, /^\/api\/reset$/, /^\/api\/proposals$/, /^\/api\/proposals\/x\/(?:accept|acknowledge|counter|launch|reject)$/,
+  const TESTER = [/^\/new$/, /^\/w\/x$/, /^\/api\/workspaces$/, /^\/api\/workspaces\/config$/, /^\/api\/workspaces\/interview$/ /* intake interview, scripts/test-interview.mjs */, /^\/api\/workspaces\/x\/login-info$/, /^\/api\/session$/, /^\/api\/state$/, /^\/api\/timer$/, /^\/api\/reset$/, /^\/api\/proposals$/, /^\/api\/proposals\/x\/(?:accept|acknowledge|counter|launch|reject)$/,
     // Connected AI apps (proxy.ts, founder ruling 10-26): OAuth-only MCP, the OAuth server, the connected-apps list. scripts/test-oauth.mjs covers them.
     /^\/api\/mcp$/, /^\/\.well-known\/oauth-protected-resource(?:\/api\/mcp)?$/, /^\/\.well-known\/oauth-authorization-server$/, /^\/oauth\/(?:authorize|token|register)$/, /^\/api\/oauth\/approve$/, /^\/api\/workspaces\/connections$/];
   const shut = routes.filter((r) => !TESTER.some((t) => t.test(r)) && !["/", "/setup"].includes(r));

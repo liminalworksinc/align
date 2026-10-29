@@ -3,8 +3,9 @@ import { audit } from "@/lib/flow";
 import { bodyFor, handle } from "@/lib/http";
 import { clearGrants, liveGrants, removeGrant } from "@/lib/oauth/grants";
 import { MCP_PATH, originOf } from "@/lib/oauth/server";
+import { planChangedAt, planRev } from "@/lib/plan-rev";
 import { takeWorkspaceAction } from "@/lib/ratelimit";
-import { HttpError } from "@/lib/store";
+import { HttpError, readState } from "@/lib/store";
 import { bumpAgentEpoch, type CustomWsId } from "@/lib/workspace";
 
 // AI apps connected to this workspace through Align's OAuth flow (lib/oauth). Any signed-in team sees the list and
@@ -20,6 +21,10 @@ function workspaceOf(req: Request): WsContext & { ws: CustomWsId } {
 export async function GET(req: Request) {
   return handle(async () => {
     const who = workspaceOf(req);
+    // Which connected agents have read the plan as it stands now (lib/plan-rev.ts). An app that last read an older
+    // plan may still be working on it; Align can't see what it does (capture is off), only what it last read.
+    const state = await readState(who.ws);
+    const rev = planRev(state);
     const apps = liveGrants(who.ws).map((g) => ({
       id: g.id,
       name: g.client_name,
@@ -27,8 +32,9 @@ export async function GET(req: Request) {
       role: g.role,
       approved_at: g.created_at,
       last_used_at: g.last_used_at, // null until its first successful read: the app is not shown as connected before
+      on_current_plan: !!g.last_used_at && g.last_read_rev === rev,
     }));
-    return Response.json({ url: `${originOf(req)}${MCP_PATH}`, apps }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ url: `${originOf(req)}${MCP_PATH}`, plan: { changed_at: planChangedAt(state) }, apps }, { headers: { "cache-control": "no-store" } });
   });
 }
 

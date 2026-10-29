@@ -79,6 +79,7 @@ SERVER=""
 step test-tenancy node scripts/test-tenancy.mjs "$PORT"
 # Connected AI apps: the OAuth server and the OAuth-only MCP endpoint, Mode L and hosted (reuses the build test-tenancy made).
 step test-oauth node scripts/test-oauth.mjs "$PORT" --no-build
+step test-interview node scripts/test-interview.mjs "$PORT" --no-build
 # The goal sessions hosted server (docs/v2/WIRE.md): flag off, Mode L with the test identity provider, hosted refusals.
 step test-v2 node scripts/test-v2.mjs "$PORT"
 # The same Northstar snapshot against the same baseline with ALIGN_GOAL_SESSIONS=1 (its database in a temp ALIGN_DATA_DIR, so

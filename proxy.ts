@@ -15,6 +15,7 @@ const HOSTED_ROUTES = [
   /^\/w\/[^/]+$/,
   /^\/api\/workspaces$/,
   /^\/api\/workspaces\/config$/,
+  /^\/api\/workspaces\/interview$/, // the intake interview on /new (founder ruling 10-29, LIM-2424 9976b9e0)
   /^\/api\/workspaces\/[^/]+\/login-info$/,
   /^\/api\/session$/,
   /^\/api\/state$/,
@@ -22,7 +23,7 @@ const HOSTED_ROUTES = [
   /^\/api\/reset$/,
   /^\/api\/proposals$/,
   /^\/api\/proposals\/[^/]+\/(?:accept|acknowledge|counter|launch|reject)$/,
-  // Connected AI apps (founder ruling 10-26, amending go-C): the read-only MCP endpoint, which takes only Align's own
+  // Connected AI apps (founder ruling 10-27, amending go-C (LIM-2424 0ed9b310)): the read-only MCP endpoint, which takes only Align's own
   // OAuth tokens when hosted (app/api/mcp/route.ts), the OAuth server that issues them after a passcode sign-in, and
   // the workspace's list of connected apps. Capture, wake-ups and agent tokens stay closed.
   /^\/api\/mcp$/,
