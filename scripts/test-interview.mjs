@@ -225,7 +225,7 @@ async function phaseHosted(net, dataDir) {
   };
 
   // Startup refusals: the SDK's own credentials would be picked up silently, so they must be unset when hosted.
-  for (const [k, v] of [["ANTHROPIC_API_KEY", "sk-ant-should-not-be-here-000"], ["ALIGN_INTERVIEW", "1"]]) {
+  for (const [k, v] of [["ANTHROPIC_API_KEY", "sk-ant-should-not-be-here-000"], ["ANTHROPIC_BASE_URL", "http://127.0.0.1:9"], ["ALIGN_INTERVIEW", "1"]]) {
     const s = await start({ ...env, [k]: v }, { expectUp: false });
     check(`${k} set when hosted -> the server refuses to serve`, !s.up, serverErr.slice(-200));
     await stop();
@@ -245,6 +245,22 @@ async function phaseHosted(net, dataDir) {
   check("hosted: the same invite still creates the workspace afterwards (201)", created.status === 201, `${created.status} ${created.text}`);
   const spent = await turn(say("one more"), invites[0]);
   check("hosted: once that invite is spent, the interview refuses it (403)", spent.status === 403, `${spent.status}`);
+
+  // Per-code cap: one valid code used from many addresses still stops at 60 turns a day (spend is bounded by codes).
+  let codeStatus = 200;
+  let codeTurns = 0;
+  while (codeStatus === 200 && codeTurns < 70) {
+    const r = await turn(say("hello"), invites[1], { ...site(), "fly-client-ip": `203.0.113.${codeTurns + 1}` });
+    codeStatus = r.status;
+    codeTurns++;
+    if (codeStatus === 429) check("hosted: per-code cap -> 429 within 60 turns, across 60+ client addresses", codeTurns <= 61 && /limit for today/.test(r.json?.error ?? ""), `${codeTurns} ${r.text}`);
+  }
+  if (codeStatus !== 429) check("hosted: per-code cap -> 429 within 60 turns, across 60+ client addresses", false, `status ${codeStatus} after ${codeTurns}`);
+
+  // Host header: only an allowed name with an optional numeric port; anything else after it is refused.
+  const portOk = await req("GET", "/api/workspaces/config", { headers: { host: `${HOSTED_HOST}:443` } });
+  const junk = await req("GET", "/api/workspaces/config", { headers: { host: `${HOSTED_HOST}:443;touch\${IFS}/tmp/pwn;` } });
+  check("hosted: Host with a numeric port is served; Host with anything else after the name is refused", portOk.status === 200 && junk.status !== 200 && !junk.text.includes("pwn"), `${portOk.status} ${junk.status} ${junk.text.slice(0, 80)}`);
   await stop();
 }
 

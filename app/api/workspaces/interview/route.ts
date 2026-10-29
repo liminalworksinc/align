@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     const client = clientOf(req);
     await checkCreateCode(client, parsed.data.signup_code);
     checkConversation(parsed.data.messages);
-    takeInterviewTurn(client);
+    takeInterviewTurn(client, parsed.data.signup_code ?? "");
     const out = await interviewTurn(parsed.data.messages);
     return Response.json(out, { headers: { "cache-control": "no-store" } });
   });
