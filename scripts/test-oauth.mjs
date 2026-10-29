@@ -479,6 +479,19 @@ async function phase(name, env, invites = []) {
   check("the workspace lists the app as reading, with its role and redirect host, and the URL to connect", list.status === 200 && !!app && app.role === "security" && app.redirect_host === "127.0.0.1:33418" && list.json.url === `${origin()}/api/mcp`, list.text);
   const bList = await req("GET", "/api/workspaces/connections", { cookie: await signIn(B, "leadership") });
   check("B's list doesn't show A's apps", bList.status === 200 && bList.json.apps.length === 0, bList.text);
+  // L1: proxy.ts checks only the name before ":", so the rest of a Host must never reach the URL people paste.
+  const hostName0 = HOSTED ? HOSTED_HOST : "127.0.0.1";
+  const evilHosts = [`${hostName0}:443;touch$` + "{IFS}/tmp/pwn;", `${hostName0}:443` + "`id`", `${hostName0}:x'$(id)'`, `${hostName0}:443/../x`];
+  const evilUrls = [];
+  for (const h of evilHosts) {
+    const r = await req("GET", "/api/workspaces/connections", { cookie: secCookie, host: h });
+    evilUrls.push(r.json?.url ?? `(refused ${r.status})`);
+  }
+  check(
+    "L1 a Host with anything after its name but a numeric port never reaches the connect URL",
+    evilUrls.every((u) => u.startsWith("(refused") || u === `${HOSTED ? "https" : "http"}://invalid.invalid/api/mcp`),
+    evilUrls.join(" | "),
+  );
 
   // Agents on this plan (lib/plan-rev.ts): an app is on the current plan until the plan changes, then again once it reads
   check("an app that read the workspace is on the current plan", app?.on_current_plan === true, JSON.stringify(app));
