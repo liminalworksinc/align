@@ -3,7 +3,7 @@ import { type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { ConflictSentence } from "@/components/v6/ConflictSentence";
 
-// The two-team conflict form, shared by /setup (replace the demo workspace) and /new (create a workspace).
+// The priority-change form (what changed, who is changing it, whose plan has to change), shared by /setup (replace the demo workspace) and /new (create a workspace).
 // Every field maps 1:1 to the scenario schema in lib/scenario.ts. Operator text is rendered as plain text only.
 
 export type Side = "asking" | "owning";
@@ -118,7 +118,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
   );
 }
 
-/** The optional-detail toggle and the six steps. The page owns the state and the submit. */
+/** The six steps, then the optional-detail toggle. The page owns the state and the submit. */
 export function ScenarioFields({
   form,
   set,
@@ -137,22 +137,37 @@ export function ScenarioFields({
     const t = form[side];
     return (
       <Step n={n} title={title}>
-        <Field label="Team name" error={err(`${side}.team`)}>
+        <Field label="Team or role" hint={side === "asking" ? "For example: Go-to-market, the CEO, Product" : "For example: Engineering"} error={err(`${side}.team`)}>
           <input className={field} value={t.team} onChange={(e) => set((f) => ((f[side].team = e.target.value), f))} />
         </Field>
-        <Field label="Team lead" hint="The person who speaks for this team." error={err(`${side}.lead`)}>
+        <Field label="Who decides for them" hint="The person who speaks for that side." error={err(`${side}.lead`)}>
           <input className={field} value={t.lead} onChange={(e) => set((f) => ((f[side].lead = e.target.value), f))} />
         </Field>
-        <Field label="Team goal" error={err(`${side}.objective`)}>
+        <Field label={side === "asking" ? "What they’re after" : "What they were working toward"} error={err(`${side}.objective`)}>
           <input className={field} value={t.objective} onChange={(e) => set((f) => ((f[side].objective = e.target.value), f))} />
         </Field>
         {t.measures.map((m, i) => (
-          <Field key={i} label={side === "asking" ? `Measure ${i + 1} (optional)` : t.measures.length > 1 && i === form.owner_measure ? `Measure ${i + 1} (measured on today)` : `Measure ${i + 1}`} error={err(`${side}.measures.${i}`)}>
+          <Field
+            key={i}
+            label={
+              t.measures.length === 1
+                ? side === "asking"
+                  ? "How they track it (optional)"
+                  : "How they track it"
+                : side === "asking"
+                  ? `Target or metric ${i + 1} (optional)`
+                  : i === form.owner_measure
+                    ? `Target or metric ${i + 1} (the one they track today)`
+                    : `Target or metric ${i + 1}`
+            }
+            hint={i === 0 ? "A date, target or metric" : undefined}
+            error={err(`${side}.measures.${i}`)}
+          >
             <div className="flex gap-2">
               <input className={field} value={m} onChange={(e) => set((f) => ((f[side].measures[i] = e.target.value), f))} />
               {side === "owning" && t.measures.length > 1 && (
                 <Button kind="ghost" onClick={() => set((f) => ((f.owner_measure = i), f))} disabled={form.owner_measure === i}>
-                  {form.owner_measure === i ? "Measured on this today" : "Pick"}
+                  {form.owner_measure === i ? "They track this today" : "Pick"}
                 </Button>
               )}
               {(side === "asking" || t.measures.length > 1) && (
@@ -180,7 +195,7 @@ export function ScenarioFields({
         {more && t.measures.length < 5 && (
           <div className="mb-4">
             <Button kind="ghost" onClick={() => set((f) => (f[side].measures.push(""), f))}>
-              {side === "asking" ? "Add a measure (optional)" : "Add another measure"}
+              {side === "asking" ? "Add a target or metric (optional)" : "Add another target or metric"}
             </Button>
           </div>
         )}
@@ -191,14 +206,15 @@ export function ScenarioFields({
 
   const workCount = (side: Side) => form.work_items.filter((w) => w.team === side).length;
   const full = (side: Side) => workCount(side) >= MAX_WORK_PER_TEAM;
-  const named = (side: Side) => form[side].team.trim() || (side === "asking" ? "the asking team" : "the owning team");
+  const named = (side: Side) => form[side].team.trim() || (side === "asking" ? "the side changing the priority" : "the side whose plan changes");
+  const upFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const show = (value: string) => more || value !== ""; // an optional field: visible when expanded, or once it has a value
   // The two starting rows (one per team) need no team picker; any other mix shows it.
   const simpleWork = form.work_items.length === 2 && form.work_items[0].team === "asking" && form.work_items[1].team === "owning";
 
   return (
     <>
-    <section aria-label="The conflict in one sentence" className="mb-6 rounded-[14px] border border-zinc-200 bg-white px-5 py-4">
+    <section aria-label="The change in one sentence" className="mb-6 rounded-[14px] border border-zinc-200 bg-white px-5 py-4">
       <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-zinc-500">Say it as one sentence</span>
       <ConflictSentence
         asking={form.asking.team}
@@ -208,16 +224,6 @@ export function ScenarioFields({
       />
       <p className="mt-1 text-[14px] text-zinc-500">Fill in the steps below; this line updates as you type.</p>
     </section>
-    <div className="mb-6 rounded-[14px] border border-zinc-200 bg-white p-4">
-      <Button kind="ghost" onClick={() => setMore((m) => !m)}>
-        {more ? "Hide optional detail" : "Add more detail (optional)"}
-      </Button>
-      <p className="mt-2 text-[16px] text-zinc-600">
-        {more
-          ? "Optional fields are marked below. Anything left empty is filled in for you."
-          : "Only the fields needed for the conflict are shown. More detail adds a timeframe, leadership names, more requirements and measures, more work items, statuses and a plan title."}
-      </p>
-    </div>
 
     <Step n={1} title={more ? "Company and leadership" : "Company"}>
       <Field label="Company name" error={err("company")}>
@@ -241,20 +247,18 @@ export function ScenarioFields({
     </Step>
 
     <Step n={2} title="The priority that changed">
-      <Field label="Company goal" error={err("company_goal.objective")}>
-        <input className={field} value={form.company_goal.objective} onChange={(e) => set((f) => ((f.company_goal.objective = e.target.value), f))} />
-      </Field>
       {form.company_goal.measures.map((m, i) => (
         <Field
           key={i}
-          label={form.company_goal.measures.length === 1 ? "The requirement in conflict" : i === form.company_measure ? `Requirement ${i + 1} (the one in conflict)` : `Requirement ${i + 1}`}
+          label={form.company_goal.measures.length === 1 ? "What changed" : i === form.company_measure ? `Change ${i + 1} (the one this is about)` : `Change ${i + 1}`}
+          hint={i === 0 ? "A new deal, deadline, customer request, rule or goal from leadership." : undefined}
           error={err(`company_goal.measures.${i}`)}
         >
           <div className="flex gap-2">
             <input className={field} value={m} onChange={(e) => set((f) => ((f.company_goal.measures[i] = e.target.value), f))} />
             {form.company_goal.measures.length > 1 && (
               <Button kind="ghost" onClick={() => set((f) => ((f.company_measure = i), f))} disabled={form.company_measure === i}>
-                {form.company_measure === i ? "This is the one in conflict" : "Pick"}
+                {form.company_measure === i ? "This is the one" : "Pick"}
               </Button>
             )}
             {form.company_goal.measures.length > 1 && (
@@ -281,9 +285,12 @@ export function ScenarioFields({
       ))}
       {more && form.company_goal.measures.length < 5 && (
         <Button kind="ghost" onClick={() => set((f) => (f.company_goal.measures.push(""), f))}>
-          Add another requirement
+          Add another change
         </Button>
       )}
+      <Field label="The goal it affects" hint="For example: Close the reseller deal this quarter" error={err("company_goal.objective")}>
+        <input className={field} value={form.company_goal.objective} onChange={(e) => set((f) => ((f.company_goal.objective = e.target.value), f))} />
+      </Field>
     </Step>
 
     {teamStep("asking", 3, "Who’s changing the priority")}
@@ -297,7 +304,7 @@ export function ScenarioFields({
             {m}
           </p>
         ))}
-        <Field label={`Why ${named("asking")} needs ${named("owning")}`} hint="What they need from the team whose plan changes, in one or two sentences." error={err("dependency")}>
+        <Field label={`Why ${named("asking")} needs ${named("owning")}`} hint="What they need from the side whose plan changes, in one or two sentences." error={err("dependency")}>
           <textarea className={field} rows={3} value={form.dependency} onChange={(e) => set((f) => ((f.dependency = e.target.value), f))} />
         </Field>
       </>,
@@ -311,7 +318,7 @@ export function ScenarioFields({
       {form.work_items.map((w, i) => (
         <div key={i} className="mb-4 rounded-[10px] border border-zinc-200 p-3">
           {(more || !simpleWork) && (
-            <Field label="Team" error={err(`work_items.${i}.team`)}>
+            <Field label="Whose work" error={err(`work_items.${i}.team`)}>
               <select className={field} value={w.team} onChange={(e) => set((f) => ((f.work_items[i].team = e.target.value as Side), f))}>
                 <option value="asking" disabled={w.team !== "asking" && full("asking")}>
                   {named("asking")}
@@ -322,7 +329,7 @@ export function ScenarioFields({
               </select>
             </Field>
           )}
-          <Field label={more || !simpleWork ? "Work item" : `Work item for ${named(w.team)}`} error={err(`work_items.${i}.task`)}>
+          <Field label={more || !simpleWork ? "Running on the old plan" : `Running on the old plan for ${named(w.team)}`} error={err(`work_items.${i}.task`)}>
             <input className={field} value={w.task} onChange={(e) => set((f) => ((f.work_items[i].task = e.target.value), f))} />
           </Field>
           {show(w.status) && (
@@ -344,12 +351,12 @@ export function ScenarioFields({
       ))}
       {(["asking", "owning"] as const).filter(full).map((side) => (
         <p key={side} className="mb-3 text-[16px] text-zinc-700">
-          {named(side)} has {MAX_WORK_PER_TEAM} work items, the most this form takes.
+          {upFirst(named(side))} has {MAX_WORK_PER_TEAM} items running on the old plan, the most this form takes.
         </p>
       ))}
       {more && !(full("asking") && full("owning")) && (
         <Button kind="ghost" onClick={() => set((f) => (f.work_items.push({ team: workCount("owning") < workCount("asking") ? "owning" : "asking", task: "", status: "" }), f))}>
-          Add a work item
+          Add another item running on the old plan
         </Button>
       )}
     </Step>
@@ -366,6 +373,16 @@ export function ScenarioFields({
       <p className="text-[16px] text-zinc-600">This plan has not been sandbox-tested. Approving it later will need an explicit acknowledgement.</p>
     </Step>
 
+    <div className="mb-6 rounded-[14px] border border-zinc-200 bg-white p-4">
+      <Button kind="ghost" onClick={() => setMore((m) => !m)}>
+        {more ? "Hide optional detail" : "Add more detail (optional)"}
+      </Button>
+      <p className="mt-2 text-[16px] text-zinc-600">
+        {more
+          ? "Optional fields are marked in the steps above. Anything left empty is filled in for you."
+          : "Only the fields needed for the change are shown. More detail adds a timeframe, leadership names, more changes, targets and metrics, more work running on the old plan, statuses and a plan title."}
+      </p>
+    </div>
     </>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-// v6 "Say it as one sentence": the conflict read back as one line. Every blank is plain text (React escapes it); an
+// v6 "Say it as one sentence": the priority change read back as one line. Every blank is plain text (React escapes it); an
 // empty blank shows its placeholder in a dimmer style so it reads as "not filled in yet".
 
 function Blank({ value, placeholder, quote }: { value: string; placeholder: string; quote?: boolean }) {
