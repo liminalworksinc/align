@@ -170,7 +170,8 @@ for (const s of sessions) {
     skipped++;
     continue;
   }
-  const base = { harness: s.harness, session_id: s.id, cwd: DIR, repo: REPO };
+  // import: true says these events are from the past, so the server keeps their `at` (live capture never sends it).
+  const base = { harness: s.harness, session_id: s.id, cwd: DIR, repo: REPO, import: true };
   await send(token, { ...base, hook_event: "SessionStart", at: s.first });
   for (const p of s.prompts) await send(token, { ...base, hook_event: "UserPromptSubmit", prompt: p.text.slice(0, 1000), at: p.at });
   for (const f of s.files) await send(token, { ...base, hook_event: "PostToolUse", tool_name: "Edit", file_path: f, at: s.lastAt });

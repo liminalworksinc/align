@@ -11,6 +11,8 @@ import type { Actor, AgentSession, AppState, Goal, Limit, Owner } from "./types"
 export const LIMIT_MAX_CHARS = 160;
 const MAX_CONFIRMED = 5; // per team: limits are read on every check, so they stay few and short
 const MAX_WAITING = 10; // suggestions per team waiting on the owner
+/** Suggestions one agent token's prompts may have waiting at once, across teams (the capture route passes it). */
+export const PROMPT_WAITING_MAX = 3;
 const MAX_ALL = 80;
 const MAX_SOURCES = 5;
 const QUOTE_MAX = 200;
@@ -107,11 +109,20 @@ const newId = () => `lim-${Math.random().toString(36).slice(2, 10)}`;
  * Suggest limits from free text. A sentence that repeats a limit Align already has adds its source to that limit
  * ("came up again") instead of a new card; a dismissed limit stays dismissed. `fallback` is the team a sentence goes
  * to when no goal matches it (a person typing a limit for their own goal), `prefer` the team a tie goes to (the person
- * pasting notes); prompts have neither, so only sentences clearly about one goal become suggestions. Returns the ids
- * touched.
+ * pasting notes); prompts have neither, so only sentences clearly about one goal become suggestions. `perSource`, when
+ * given, caps the suggestions waiting from this same source (kind and title) across teams. Returns the ids touched.
  */
-export function suggestLimits(s: AppState, text: string, src: LimitSourceIn, at: string, fallback: Owner | null = null, prefer: Owner | null = fallback): string[] {
+export function suggestLimits(
+  s: AppState,
+  text: string,
+  src: LimitSourceIn,
+  at: string,
+  fallback: Owner | null = null,
+  prefer: Owner | null = fallback,
+  perSource: number | null = null,
+): string[] {
   s.limits ??= [];
+  const fromSource = () => s.limits!.filter((l) => l.state === "suggested" && l.sources[0]?.kind === src.kind && l.sources[0]?.title === src.title).length;
   const touched: string[] = [];
   for (const sentence of sentences(text).slice(0, 200)) {
     const type = limitType(sentence);
@@ -132,6 +143,7 @@ export function suggestLimits(s: AppState, text: string, src: LimitSourceIn, at:
       continue;
     }
     if (s.limits.filter((l) => l.team === team && l.state === "suggested").length >= MAX_WAITING) continue;
+    if (perSource !== null && fromSource() >= perSource) continue;
     if (s.limits.length >= MAX_ALL) {
       // Make room by forgetting the oldest dismissed one; never a confirmed or waiting limit.
       const old = s.limits.findIndex((l) => l.state === "dismissed");

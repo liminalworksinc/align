@@ -418,6 +418,36 @@ async function phase(name, env, invites = []) {
       limits.includes("MUST NOT: LMARK the cutover must not touch the billing tables") && /keep them word for word in any summary/.test(limits) && directives.startsWith("LIMITS") && directives.includes("LMARK") && limits.length < 800,
       limits.slice(0, 300),
     );
+    // Review L3: a live hook can't backdate an event (only an import marks `at` as real); one token's prompts can have at
+    // most 3 suggestions waiting; deciding limits is rate limited per team.
+    const capTok = await req("POST", "/api/workspaces/agent-token", { body: { harness: "claude-code", repo: "capcheck" }, cookie: await signIn(A, "leadership"), headers: site() });
+    const capEv = (ev) => req("POST", "/api/sessions/events", { body: { harness: "claude-code", cwd: "/x/capcheck", repo: "capcheck", ...ev }, headers: { authorization: `Bearer ${capTok.json?.token}` } });
+    const longAgo = new Date(Date.now() - 10 * 86400000).toISOString();
+    await capEv({ session_id: "bd-live", hook_event: "SessionStart", at: longAgo });
+    await capEv({ session_id: "bd-import", hook_event: "SessionStart", at: longAgo, import: true });
+    const bdState = await req("GET", "/api/state", { cookie: await signIn(A, "leadership"), headers: { "x-align-workspace": A.id } });
+    const started = (sid) => bdState.json?.sessions?.find((x) => x.session_id === sid)?.started_at ?? "";
+    check(
+      "L3 a past `at` is kept only with the import marker; a live event without it is recorded as now",
+      Date.now() - Date.parse(started("bd-live")) < 120000 && started("bd-import") === longAgo,
+      `${started("bd-live")} ${started("bd-import")}`,
+    );
+    const spam = [
+      "The warehouse migration must not drop the reporting tables.",
+      "The migration cutover must never happen on a weekend.",
+      "Reporting tables must keep their indexes through the warehouse migration.",
+      "The warehouse migration must not exceed four hours of downtime.",
+      "Migration cutover must be announced two days ahead to the reporting owners.",
+      "The warehouse cutover must never skip the rollback rehearsal.",
+    ];
+    for (const prompt of spam) await capEv({ session_id: "cap-1", hook_event: "UserPromptSubmit", prompt });
+    const capState = await req("GET", "/api/state", { cookie: await signIn(A, "leadership"), headers: { "x-align-workspace": A.id } });
+    const fromCap = (capState.json?.limits ?? []).filter((l) => l.state === "suggested" && l.sources?.[0]?.title === "Claude Code session in capcheck");
+    check("L3 one agent token's prompts leave at most 3 suggestions waiting (6 limit-shaped prompts sent)", fromCap.length === 3, JSON.stringify(fromCap.map((l) => l.text)));
+    const leadPatch = await signIn(A, "leadership");
+    const patches = [];
+    for (let i = 0; i < 12; i++) patches.push((await req("PATCH", "/api/workspaces/limits", { body: { id: "lim-none", action: "dismiss" }, cookie: leadPatch, headers: site() })).status);
+    check("L3 deciding limits is rate limited per team: past 10 a minute -> 429", patches.includes(429) && patches.slice(0, patches.indexOf(429)).every((x) => x === 404) && patches.slice(patches.indexOf(429)).every((x) => x === 429), patches.join(","));
   }
   // The brief hook (Codex sends _meta.threadId with each call): a thread gets the brief on its first prompt and not again
   // while it is unchanged; another thread gets its own; after compaction (SessionStart) it is always sent; a change in

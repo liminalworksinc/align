@@ -3,7 +3,7 @@ import { handle } from "@/lib/http";
 import { scheduleMapping } from "@/lib/mapper";
 import { markActed } from "@/lib/directives";
 import { agentFrom } from "@/lib/agent-token";
-import { flagReports, suggestLimits } from "@/lib/limits";
+import { flagReports, PROMPT_WAITING_MAX, suggestLimits } from "@/lib/limits";
 import { originIsThisServer } from "@/lib/local-guard";
 import { hasCaptureConsent, HttpError, mutate, mutateWs, now, readState } from "@/lib/store";
 import type { AgentSession, AppState, SessionOriginKind } from "@/lib/types";
@@ -29,6 +29,7 @@ interface CaptureEvent {
   branch?: unknown;
   repo?: unknown;
   at?: unknown; // imports of past sessions (scripts/align-import-sessions.mjs): when this event happened
+  import?: unknown; // true only from that importer; without it `at` is ignored and the event is "now"
 }
 
 const IMPORT_MAX_AGE_MS = 120 * 86400000;
@@ -168,7 +169,8 @@ export async function POST(req: Request) {
     if (agent && (harness !== agent.harness || consentRepo !== agent.repo))
       throw new HttpError(403, `This agent token is for ${agent.harness} in ${agent.repo}`);
 
-    const past = eventTime(ev.at);
+    // A past time is kept only for an explicit import (review L3): a live hook can't backdate what it reports.
+    const past = ev.import === true ? eventTime(ev.at) : null;
     const upsert = (s: AppState) => {
       const at = past ?? now();
       let sess = s.sessions.find((x) => x.id === id);
@@ -231,7 +233,9 @@ export async function POST(req: Request) {
         // it becomes a suggestion that goal's owner confirms, never a rule by itself. Only sentences about a goal count.
         if (hookEvent === "UserPromptSubmit" && prompt) {
           const at = past ?? now();
-          suggestLimits(s, prompt, { kind: "prompt", title: `${harness === "codex" ? "Codex" : "Claude Code"} session in ${agent.repo}`, date: at.slice(0, 10) }, at);
+          // One agent token (a harness in one folder) may have at most PROMPT_WAITING_MAX suggestions waiting, so its
+          // prompts can't fill a team's waiting list (review L3).
+          suggestLimits(s, prompt, { kind: "prompt", title: `${harness === "codex" ? "Codex" : "Claude Code"} session in ${agent.repo}`, date: at.slice(0, 10) }, at, null, null, PROMPT_WAITING_MAX);
         }
         // An agent's report is checked against the confirmed limits when it arrives, and kept if it may cross one.
         if (lastMessage) {

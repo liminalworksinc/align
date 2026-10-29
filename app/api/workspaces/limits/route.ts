@@ -46,6 +46,7 @@ export async function PATCH(req: Request) {
     const b = await bodyFor<{ id?: unknown; action?: unknown; text?: unknown; session?: unknown }>(req, who.ws);
     if (typeof b.id !== "string") throw new HttpError(400, "Send { id, action: confirm | dismiss | clear }");
     const id = b.id;
+    takeWorkspaceAction(who.ws, `limit-decide:${who.actor}`); // 10 a minute per team (review L3)
     return who.mutate((s) => {
       const l = decideLimit(s, who.actor, id, b.action, now(), b.text, b.session);
       audit(s, who, `limit_${String(b.action)}`, l.id);
