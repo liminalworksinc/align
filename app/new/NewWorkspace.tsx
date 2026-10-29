@@ -207,7 +207,8 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
     <>
       <h1 className="mb-2 text-[28px] font-semibold">Create a workspace</h1>
       <p className="mb-6 text-[16px] text-zinc-700">
-        Describe one real disagreement between two teams. This makes a new, separate workspace with its own passcodes. Nothing in any other workspace changes.
+        Describe one recent priority change that hit work already in flight: yours, your team’s, or your AI agents’. This makes a new, separate workspace with
+        its own passcodes. Nothing in any other workspace changes.
       </p>
       {cfg === null && (
         <p role="alert" className="mb-4 rounded-[10px] border border-amber-300 bg-amber-50 p-4 text-[16px]">

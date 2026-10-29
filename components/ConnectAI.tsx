@@ -5,7 +5,9 @@ import { api } from "@/components/useAlign";
 
 // "Your AI apps" in a custom workspace's sidebar: the one URL any AI app connects with (Align's read-only MCP
 // endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. An app shows as
-// connected only after its first successful read (last_used_at), never just because someone approved it.
+// connected only after its first successful read (last_used_at), never just because someone approved it. Each app
+// also shows whether it has read the plan as it stands now (on_current_plan, lib/plan-rev.ts): one that last read an
+// older plan may still be working on it. Align sees only what an app last read, never what it does.
 
 interface App {
   id: string;
@@ -14,6 +16,7 @@ interface App {
   role: string;
   approved_at: string;
   last_used_at: string | null;
+  on_current_plan?: boolean;
 }
 
 type Tab = "claude-code" | "codex" | "claude" | "chatgpt";
@@ -118,14 +121,14 @@ function Steps({ tab, url }: { tab: Tab; url: string }) {
 const when = (iso: string) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export default function ConnectAI({ workspace, teamOf, actor }: { workspace: string; teamOf: (role: string) => string; actor: string }) {
-  const [data, setData] = useState<{ url: string; apps: App[]; at: number } | null>(null);
+  const [data, setData] = useState<{ url: string; apps: App[]; plan?: { changed_at: string | null }; at: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("claude-code");
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
     () =>
-      api<{ url: string; apps: App[] }>("/api/workspaces/connections", { workspace }).then(
+      api<{ url: string; apps: App[]; plan?: { changed_at: string | null } }>("/api/workspaces/connections", { workspace }).then(
         (d) => setData({ ...d, at: Date.now() }),
         () => setData(null),
       ),
@@ -160,8 +163,26 @@ export default function ConnectAI({ workspace, teamOf, actor }: { workspace: str
   const fresh = reading.filter((a) => data && data.at - Date.parse(a.approved_at) < 15 * 60 * 1000);
   return (
     <div className="mt-auto flex flex-col gap-2 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
-      <span className="al-lbl !text-violet-700">Your AI apps</span>
-      <div className="text-[13px] text-zinc-600">{!data ? "\u00a0" : reading.length ? `${reading.length} reading this workspace` : "None connected"}</div>
+      <span className="al-lbl !text-violet-700">Agents on this plan</span>
+      {!data ? (
+        <div className="text-[13px] text-zinc-600">{"\u00a0"}</div>
+      ) : reading.length === 0 ? (
+        <div className="text-[13px] text-zinc-600">None connected. Connect your AI agents and every session works from this one plan.</div>
+      ) : (
+        <ul aria-label="Connected agents" className="space-y-1">
+          {reading.map((a) => (
+            <li key={a.id} className="flex items-start gap-1.5 text-[13px] leading-snug">
+              <span aria-hidden className={a.on_current_plan ? "text-emerald-700" : "text-amber-700"}>
+                {a.on_current_plan ? "✓" : "▲"}
+              </span>
+              <span className="min-w-0">
+                <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
+                <span className={a.on_current_plan ? "text-emerald-800" : "text-amber-800"}>{a.on_current_plan ? "on the latest plan" : "still on an older plan"}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       <Button kind="secondary" onClick={() => setOpen(true)}>
         Connect an AI app
       </Button>
@@ -214,6 +235,13 @@ export default function ConnectAI({ workspace, teamOf, actor }: { workspace: str
                       <div className="text-[14px] text-zinc-600">
                         As {teamOf(a.role)} · {a.last_used_at ? `last read ${when(a.last_used_at)}` : "approved, hasn’t read anything yet"}
                       </div>
+                      {a.last_used_at && (
+                        <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-emerald-800" : "text-amber-800"}`}>
+                          {a.on_current_plan
+                            ? "✓ On the latest plan."
+                            : `▲ Hasn’t read the plan since it changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}. It may still be working on the old plan. Send it a message to catch it up.`}
+                        </div>
+                      )}
                     </div>
                     {(a.role === actor || actor === "leadership") && (
                       <Button kind="ghost" onClick={() => void disconnect(a.id)}>

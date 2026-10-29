@@ -5,6 +5,8 @@ import { signPayload } from "../auth";
 import { config, testServerClosesAt } from "../config";
 import { HttpError } from "../errors";
 import { withLock } from "../locks";
+import { planRev } from "../plan-rev";
+import { readState } from "../store";
 import { pinClient } from "./clients";
 import type { Actor } from "../types";
 import { agentEpochOf, readAuth, wsDir, type CustomWsId } from "../workspace";
@@ -27,6 +29,7 @@ export interface Grant {
   ep: number;
   created_at: string;
   last_used_at: string | null;
+  last_read_rev?: string | null; // lib/plan-rev.ts: the plan fingerprint as of this app's last read
   refresh_hash: string;
   prev_refresh_hash: string | null;
   refresh_exp: number;
@@ -47,9 +50,10 @@ const current = (x: Grant) => x.kid === grantKid();
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 // Every MCP call checks its grant, so the file is read synchronously and cached by mtime, as auth.json is.
-const g = globalThis as unknown as { __alignGrants?: Map<string, { mtimeMs: number; grants: Grant[] }>; __alignGrantUse?: Map<string, number> };
+const g = globalThis as unknown as { __alignGrants?: Map<string, { mtimeMs: number; grants: Grant[] }>; __alignGrantUse?: Map<string, number>; __alignGrantRev?: Map<string, string> };
 const cache = (g.__alignGrants ??= new Map());
 const lastWrite = (g.__alignGrantUse ??= new Map());
+const lastRev: Map<string, string> = (g.__alignGrantRev ??= new Map());
 
 export function readGrants(ws: CustomWsId): Grant[] {
   let mtimeMs: number;
@@ -169,14 +173,23 @@ export async function clearGrants(ws: CustomWsId): Promise<number> {
   return update(ws, (list) => ({ grants: [], out: list.length }));
 }
 
-/** Record a successful MCP call: the first one at once (that is what makes an app show as connected), then at most
- *  every 5 minutes per grant, so the file isn't rewritten on every tool call. Failures are logged, never thrown. */
+/** Record a successful MCP call. The first one is written at once (that is what makes an app show as connected),
+ *  and so is any call made after the plan changed (lib/plan-rev.ts), so the workspace knows the moment an agent has
+ *  read the new plan; otherwise at most every 5 minutes per grant, so the file isn't rewritten on every tool call.
+ *  Failures are logged by name, never thrown. */
 export function noteGrantUse(ws: CustomWsId, id: string) {
   const now = Date.now();
-  if (now - (lastWrite.get(id) ?? 0) < USE_WRITE_MS) return;
-  lastWrite.set(id, now);
-  while (lastWrite.size > 10_000) lastWrite.delete(lastWrite.keys().next().value!);
-  void update(ws, (list) => ({ grants: list.map((x) => (x.id === id ? { ...x, last_used_at: new Date(now).toISOString() } : x)), out: null })).catch((e) =>
-    console.error("grant use not recorded", (e as Error)?.name),
-  );
+  void (async () => {
+    let rev: string | null = null;
+    try {
+      rev = planRev(await readState(ws));
+    } catch {}
+    const newPlan = rev !== null && rev !== lastRev.get(id);
+    if (!newPlan && now - (lastWrite.get(id) ?? 0) < USE_WRITE_MS) return;
+    lastWrite.set(id, now);
+    if (rev !== null) lastRev.set(id, rev);
+    while (lastWrite.size > 10_000) lastWrite.delete(lastWrite.keys().next().value!);
+    while (lastRev.size > 10_000) lastRev.delete(lastRev.keys().next().value!);
+    await update(ws, (list) => ({ grants: list.map((x) => (x.id === id ? { ...x, last_used_at: new Date(now).toISOString(), ...(rev !== null ? { last_read_rev: rev } : {}) } : x)), out: null }));
+  })().catch((e) => console.error("grant use not recorded", (e as Error)?.name));
 }

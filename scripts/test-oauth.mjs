@@ -372,6 +372,18 @@ async function phase(name, env, invites = []) {
   const bList = await req("GET", "/api/workspaces/connections", { cookie: await signIn(B, "leadership") });
   check("B's list doesn't show A's apps", bList.status === 200 && bList.json.apps.length === 0, bList.text);
 
+  // Agents on this plan (lib/plan-rev.ts): an app is on the current plan until the plan changes, then again once it reads
+  check("an app that read the workspace is on the current plan", app?.on_current_plan === true, JSON.stringify(app));
+  const planProd = await signIn(A, "product");
+  const moved = await req("POST", "/api/proposals", { body: { proposed_measure_text: "PLANREV new target", rationale: "PLANREV why", reciprocal_commitment: "PLANREV in return" }, cookie: planProd, headers: site() });
+  const staleList = await req("GET", "/api/workspaces/connections", { cookie: secCookie });
+  const stale = staleList.json?.apps?.find((a) => a.id === app?.id);
+  check("after the plan changes (a new proposal), the app is shown as still on an older plan, with when it changed", moved.status < 300 && stale?.on_current_plan === false && !!staleList.json?.plan?.changed_at, `${moved.status} ${staleList.text}`);
+  await mcp(t2.access_token);
+  await sleep(800); // recorded off the request path
+  const caught = (await req("GET", "/api/workspaces/connections", { cookie: secCookie })).json?.apps?.find((a) => a.id === app?.id);
+  check("once the app reads again it is back on the current plan (recorded at once, not after 5 minutes)", caught?.on_current_plan === true, JSON.stringify(caught));
+
   // refresh rotation
   const rf = await token({ grant_type: "refresh_token", refresh_token: t2.refresh_token, client_id: clientId });
   check("refresh -> a new access token and a new refresh token", rf.status === 200 && rf.json.refresh_token !== t2.refresh_token && (await mcp(rf.json.access_token)).status === 200, rf.text);

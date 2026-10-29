@@ -240,7 +240,7 @@ export function ScenarioFields({
       )}
     </Step>
 
-    <Step n={2} title="The company goal that changed">
+    <Step n={2} title="The priority that changed">
       <Field label="Company goal" error={err("company_goal.objective")}>
         <input className={field} value={form.company_goal.objective} onChange={(e) => set((f) => ((f.company_goal.objective = e.target.value), f))} />
       </Field>
@@ -286,25 +286,28 @@ export function ScenarioFields({
       )}
     </Step>
 
-    {teamStep("asking", 3, "The team that asks for the change")}
+    {teamStep("asking", 3, "Who’s changing the priority")}
     {teamStep(
       "owning",
       4,
-      "The team that owns the goal being changed",
+      "Whose plan has to change",
       <>
         {err("owner_measure")?.map((m) => (
           <p key={m} className="mb-3 text-[16px] text-red-700">
             {m}
           </p>
         ))}
-        <Field label={`Why ${named("asking")} needs ${named("owning")}`} hint="The dependency in one or two sentences." error={err("dependency")}>
+        <Field label={`Why ${named("asking")} needs ${named("owning")}`} hint="What they need from the team whose plan changes, in one or two sentences." error={err("dependency")}>
           <textarea className={field} rows={3} value={form.dependency} onChange={(e) => set((f) => ((f.dependency = e.target.value), f))} />
         </Field>
       </>,
     )}
 
-    <Step n={5} title="Work in progress">
-      <p className="mb-4 text-[16px] text-zinc-700">One item for each team, up to {MAX_WORK_PER_TEAM}. These show who has work on the old plan after a decision.</p>
+    <Step n={5} title="Work already running on the old plan">
+      <p className="mb-4 text-[16px] text-zinc-700">
+        One item for each side, up to {MAX_WORK_PER_TEAM}: a project, a ticket, or an AI agent session already working on the old plan. After the decision, Align shows what
+        is still on the old plan, and which connected agents haven’t read the new one yet.
+      </p>
       {form.work_items.map((w, i) => (
         <div key={i} className="mb-4 rounded-[10px] border border-zinc-200 p-3">
           {(more || !simpleWork) && (
@@ -357,7 +360,7 @@ export function ScenarioFields({
           <input className={field} value={form.plan.title} onChange={(e) => set((f) => ((f.plan.title = e.target.value), f))} />
         </Field>
       )}
-      <Field label="The plan" hint="What would change, and what the asking team gives in return. 20 to 4,000 characters." error={err("plan.text")}>
+      <Field label="The plan" hint="What changes now, and what the side changing the priority gives in return. 20 to 4,000 characters." error={err("plan.text")}>
         <textarea className={field} rows={6} value={form.plan.text} onChange={(e) => set((f) => ((f.plan.text = e.target.value), f))} />
       </Field>
       <p className="text-[16px] text-zinc-600">This plan has not been sandbox-tested. Approving it later will need an explicit acknowledgement.</p>

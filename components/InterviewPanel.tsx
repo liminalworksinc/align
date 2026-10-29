@@ -11,7 +11,7 @@ type Turn = { role: "user" | "assistant"; text: string };
 type Draft = Record<string, string>;
 
 const GREETING =
-  "Hi! Tell me about one recent disagreement where a team needed another team to change a goal, because something at the company changed. Use made-up or anonymized names. You can type or press the mic and talk.";
+  "Hi! Tell me about the last time a priority changed while work was already underway. What changed, and what work (yours, your team’s, or your AI agents’) was still going in the old direction? Use made-up or anonymized names. You can type, or press Talk and say it.";
 
 /** Where each draft key lands in the form. */
 const PATHS: Record<string, (f: Form, v: string) => void> = {
@@ -70,8 +70,16 @@ export function InterviewPanel({ code, set }: { code: string; set: (fn: (f: Form
   // Only rendered after /new's client-side config fetch, never on the server, so this needs no effect.
   const canSpeak = !!speechCtor();
 
-  useEffect(() => end.current?.scrollIntoView({ block: "nearest" }), [turns, busy]);
-  useEffect(() => () => rec.current?.stop(), []);
+  // Block bodies: an effect may return only a cleanup function, and scrollIntoView returns a Promise in current Chrome.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" });
+  }, [turns, busy]);
+  useEffect(
+    () => () => {
+      rec.current?.stop();
+    },
+    [],
+  );
 
   /** Fill a field only when it's empty or still holds what the interviewer wrote: never over the person's own edits. */
   function apply(draft: Draft) {
@@ -148,7 +156,7 @@ export function InterviewPanel({ code, set }: { code: string; set: (fn: (f: Form
     return (
       <section className="mb-6 rounded-[14px] border border-violet-300 bg-violet-50 p-5">
         <h2 className="mb-1 text-[20px] font-semibold text-zinc-900">Rather talk it through?</h2>
-        <p className="mb-3 text-[16px] text-zinc-700">An AI interviewer asks a few short questions, by voice or text, and fills in the form below for you. You check every field before creating.</p>
+        <p className="mb-3 text-[16px] text-zinc-700">Tell an AI interviewer about one recent priority change, by voice or text. It asks a few short questions and fills in the form below for you. You check every field before creating.</p>
         <Button onClick={() => setOpen(true)}>Start the interview</Button>
       </section>
     );
