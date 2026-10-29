@@ -89,8 +89,11 @@ export function Button({
     // v6 .btn.g: no border, mid ink, brightens on hover.
     ghost: "border-transparent bg-transparent text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900",
   }[kind];
+  // Disabled: a faded magenta fill left near-black text at ~1.7:1 on the dark page, so the primary button turns into a
+  // neutral surface with readable mid-grey text instead; the outlined kinds keep the plain fade.
+  const off = kind === "primary" ? "disabled:bg-zinc-200 disabled:text-zinc-600" : "disabled:opacity-40";
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-[18px] text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-[18px] text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed ${off} disabled:hover:brightness-100`}>
       {children}
     </button>
   );
