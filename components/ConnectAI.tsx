@@ -2,6 +2,7 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import { api } from "@/components/useAlign";
+import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 
 // "Your AI apps" in a custom workspace's sidebar: the one URL any AI app connects with (Align's read-only MCP
 // endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. An app shows as
@@ -48,7 +49,8 @@ function Copy({ value }: { value: string }) {
   );
 }
 
-function Command({ text }: { text: string }) {
+function Command({ text }: { text: string | null }) {
+  if (text === null) return <div className="my-2 text-zinc-600">This server’s address can’t be turned into a command. Copy the URL from the Claude or ChatGPT tab instead.</div>;
   return (
     <div className="my-2 flex flex-wrap items-center gap-2">
       <code className="break-all rounded-[8px] bg-zinc-100 px-3 py-2 font-mono text-[14px]">{text}</code>
@@ -66,31 +68,8 @@ function Step({ n, children }: { n: number; children: ReactNode }) {
   );
 }
 
-/**
- * The Claude Code line also adds two hooks to .claude/settings.local.json in the folder it runs in. Each calls
- * align_get_brief on the Align server Claude Code already signed in to: on the session's first prompt (Claude Code
- * can't call an MCP tool from a hook at launch, before its servers connect), and again after it compacts its context,
- * so the limits come back word for word (live 10-27: with the hook the agent quoted the limit after a lossy compaction;
- * without it, it had none). The session id lets Align skip later prompts that already have the brief. Folder only, so
- * unrelated sessions don't carry it. The script adds each hook once and leaves a file that isn't plain JSON as it is.
- */
-const BRIEF_HOOKS = String.raw`const fs=require("fs"),p=require("path"),f=p.join(process.cwd(),".claude","settings.local.json");let s={};try{s=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){if(e.code!=="ENOENT"){console.log("Align: left "+f+" as it is (not plain JSON). Add the hooks by hand: see docs/MCP.md.");process.exit(0)}}const H=(s.hooks??={}),add=(ev,m)=>{const a=(H[ev]??=[]);if(!JSON.stringify(a).includes("align_get_brief"))a.push({...m,hooks:[{type:"mcp_tool",server:"align",tool:"align_get_brief",input:{format:"hook",event:ev,session:"$"+"{session_id}"}}]})};add("UserPromptSubmit",{});add("SessionStart",{matcher:"compact"});fs.mkdirSync(p.dirname(f),{recursive:true});fs.writeFileSync(f,JSON.stringify(s,null,2));console.log("Align: brief hooks in "+f)`;
-const claudeCodeLine = (url: string) =>
-  `claude mcp add --transport http --scope user align ${url}; claude mcp login align; command -v node >/dev/null && node -e '${BRIEF_HOOKS}'`;
-
-// One paste for the terminal apps: the command adds Align and starts the sign-in. The chat apps take the URL.
-/**
- * The Codex line also adds one instruction to Codex's global AGENTS.md: live (10-27), Codex asked for a cutover
- * runbook searched Drive and Linear and used a date the teams had moved; with this line it read Align first and used
- * the agreed one. Claude Code read Align unprompted. The company name is reduced to characters that are safe inside
- * double quotes, and the line is added once.
- */
-function codexLine(url: string, company: string) {
-  const name = company.replace(/[^\p{L}\p{N} .&'-]/gu, "").trim() || "this company";
-  const rule = `- For any work for ${name}'s teams, check Align first: call the align MCP server's align_get_directives and align_get_accepted_plan before planning. Its dates and commitments replace older documents.`;
-  return `codex mcp add align --url ${url}; F="\${CODEX_HOME:-$HOME/.codex}/AGENTS.md"; grep -qs "check Align first" "$F" || printf '%s\\n' "${rule}" >> "$F"`;
-}
-
+// One paste for the terminal apps: the command adds Align and starts the sign-in. The chat apps take the URL. The lines
+// are built in lib/paste-lines.ts, which quotes every value; a URL Align could not have made shows no command.
 function Steps({ tab, url, company }: { tab: Tab; url: string; company: string }) {
   const allow = <Step n={2}>Your browser opens an Align page. Check the workspace and team, then choose Allow.</Step>;
   if (tab === "claude-code")

@@ -51,6 +51,8 @@ fi
 step lint npm run lint
 step typecheck bash -c 'npx next typegen && npx tsc --noEmit'
 step syntax bash -c 'for f in scripts/*.mjs scripts/lib/*.mjs; do node --check "$f" || exit 1; done; echo "node --check clean"'
+# The Connect dialog's paste lines run in sh, bash and zsh with hostile company names and URLs (no server needed).
+step test-paste-lines node scripts/test-paste-lines.mjs
 
 # ---- fresh server ----
 rm -f data/state.json data/.secret
