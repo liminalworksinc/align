@@ -48,6 +48,9 @@ async function* lines(file) {
   }
 }
 
+/** A session's working folder is DIR or a folder inside it (never a sibling that merely starts with DIR's name). */
+const isInside = (cwd) => cwd === DIR || cwd.startsWith(`${DIR}/`);
+
 function newer(file) {
   try {
     return statSync(file).mtimeMs >= SINCE;
@@ -62,13 +65,21 @@ async function claudeSessions() {
   const slug = DIR.replace(/[^A-Za-z0-9]/g, "-");
   if (!existsSync(root)) return [];
   const out = [];
-  // The folder itself and folders inside it (Claude Code names a project by its path with "/" as "-").
+  // Candidates: the folder itself and anything whose name starts the same way. Claude Code names a project by its path
+  // with "/", "-" and "." all as "-", so /work/app-secret and /work/app.v2 look like folders inside /work/app: each
+  // session counts only if its own cwd (on its lines) is the folder or inside it, as for Codex below.
   for (const d of readdirSync(root).filter((n) => n === slug || n.startsWith(`${slug}-`))) {
     for (const f of readdirSync(path.join(root, d)).filter((n) => n.endsWith(".jsonl"))) {
       const file = path.join(root, d, f);
       if (!newer(file)) continue;
       const s = { harness: "claude-code", id: f.replace(/\.jsonl$/, ""), prompts: [], files: [], last: "", first: null, lastAt: null };
+      let inside = null;
       for await (const e of lines(file)) {
+        if (typeof e.cwd === "string" && e.cwd) {
+          // Every line that names a cwd must be inside the folder; one that isn't drops the session.
+          inside = inside !== false && isInside(e.cwd);
+          if (!inside) break;
+        }
         const at = e.timestamp;
         if (at) [s.first, s.lastAt] = [s.first ?? at, at];
         const c = e.message?.content;
@@ -81,7 +92,7 @@ async function claudeSessions() {
           }
         }
       }
-      if (s.prompts.length) out.push(s);
+      if (inside && s.prompts.length) out.push(s); // no cwd on any line: not provably this folder's, so left out
     }
   }
   return out;
@@ -107,7 +118,7 @@ async function codexSessions() {
     for await (const e of lines(file)) {
       if (inside === null && e.type === "session_meta") {
         const cwd = e.payload?.cwd ?? "";
-        inside = cwd === DIR || cwd.startsWith(`${DIR}/`);
+        inside = isInside(cwd);
         if (!inside) break;
         continue;
       }
