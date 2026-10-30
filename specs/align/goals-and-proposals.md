@@ -75,7 +75,7 @@ stateDiagram-v2
 
 ### Requirement: Creating a company or team goal
 
-The server SHALL create a goal on `POST /api/v2/workspaces/{ws}/goals` (browser session; workspace owners and members, viewers 403 `read_only`) from `{title, level?, team_id?, visibility?, measures?, anchors?, depends_on?}`, owned by the caller, at version 1 with status `active`, responding 201 with the goal. `level` SHALL default to `team`; only a workspace owner may create a `company` goal (403 `owner_only` otherwise), and a company goal SHALL have no team (400 when `team_id` is sent) and visibility `workspace` (400 when another `visibility` is sent). A team goal's `visibility` SHALL default to `workspace`; a `team` goal SHALL name a team (400 otherwise), an unknown `team_id` SHALL be 404, and naming a team the caller is not in SHALL be 403 `not_in_team`. A workspace already holding 1,000 goals SHALL answer 409 `too_many_goals`. Creating a goal SHALL write audit action `goal.created` with the caller as actor. Level, owning team and visibility never change after creation.
+The server SHALL create a goal on `POST /api/v2/workspaces/{ws}/goals` (browser session; workspace owners and members, viewers 403 `read_only`) from `{title, level?, team_id?, visibility?, measures?, anchors?, depends_on?}`, owned by the caller, at version 1 with status `active`, responding 201 with the goal. `level` SHALL default to `team`; only a workspace owner may create a `company` goal (403 `owner_only` otherwise), and a company goal SHALL have no team (400 when `team_id` is sent) and visibility `workspace` (400 when another `visibility` is sent). A team goal's `visibility` SHALL default to `workspace`; a goal with visibility `team` SHALL name a team (400 otherwise), an unknown `team_id` SHALL be 404, and naming a team the caller is not in SHALL be 403 `not_in_team`. A workspace already holding 1,000 goals SHALL answer 409 `too_many_goals`. Creating a goal SHALL write audit action `goal.created` with the caller as actor. Level, owning team and visibility never change after creation.
 
 #### Scenario: Owner creates a company goal
 
@@ -201,7 +201,7 @@ The server SHALL let only a goal's owner confirm the goal still fits a parent's 
 
 ### Requirement: Bindable goals
 
-The server SHALL mark a goal `bindable` for the caller only when it is `active`, the caller is not a viewer, and the goal is the caller's own, belongs to a team the caller is in, or is the target of an approved `work_toward` alignment whose current revision lists one of the caller's sessions. Binding a session to a goal that is not bindable for its owner SHALL be refused with 403 `alignment_required` (the epoch route is specified in `workspaces`).
+The server SHALL mark a goal `bindable` for the caller only when it is `active`, the caller is not a viewer, and the goal is the caller's own, belongs to a team the caller is in, or is the target of an approved `work_toward` alignment whose current revision lists one of the caller's sessions. Binding a session to a goal its owner may read but that is not their own, not their team's and not covered by such an alignment SHALL be refused with 403 `alignment_required`, and binding it to a goal that is not `active` with 409 `goal_not_active` (the epoch route is specified in `workspaces`).
 
 #### Scenario: Teammate's goal
 
@@ -238,7 +238,7 @@ Wherever a goal's consent is needed (an alignment requirement or a change reques
 
 ### Requirement: Requesting an alignment
 
-The server SHALL let a workspace owner or member (viewers 403 `read_only`) request an alignment on `POST /api/v2/workspaces/{ws}/alignments {target_goal_id, source_goal_id?, choice, session_keys?, note?}` (browser session, body at most 16 KB), with `choice` `contribution` (effect `contributes_to`) or `work_toward` (effects `contributes_to`, `governing_goal` and `allocation_transfer`), and respond 201 with the alignment view. It SHALL answer 404 for a target or source goal the caller may not read and for a session key that is unknown or not the caller's own; 409 `goal_not_active` for a target that is not `active`; 400 when the source is the target, `choice` is invalid, `note` exceeds 1000 characters, `session_keys` exceeds 50, a `work_toward` request lists no session, or a `contribution` request has neither a source nor a session; 403 `source_not_yours` when the source goal is not bindable for the caller; 409 `sharing_stopped` for a stopped session; and 409 `already_governed` when a `work_toward` session already follows another goal through an alignment. Creating writes audit action `alignment.requested`.
+The server SHALL let a workspace owner or member (viewers 403 `read_only`) request an alignment on `POST /api/v2/workspaces/{ws}/alignments {target_goal_id, source_goal_id?, choice, session_keys?, note?}` (browser session, body at most 16 KB), with `choice` `contribution` (effect `contributes_to`) or `work_toward` (effects `contributes_to`, `governing_goal` and `allocation_transfer`), and respond 201 with the alignment view. It SHALL answer 404 for a target or source goal the caller may not read and for a session key that is unknown or not the caller's own; 409 `goal_not_active` for a target that is not `active`; 400 when the source is the target, `choice` is invalid, `note` exceeds 1000 characters, `session_keys` exceeds 50, a `work_toward` request lists no session, or a `contribution` request has neither a source nor a session; 403 `source_not_yours` when the source goal is neither the caller's own nor a goal of a team the caller is in (an approved `work_toward` alignment does not make another goal a valid source, and the source's status is not checked); 409 `sharing_stopped` for a stopped session; and 409 `already_governed` when a `work_toward` session already follows another goal through an alignment. Creating writes audit action `alignment.requested`.
 
 #### Scenario: Contribution of my team's goal to a company goal
 
@@ -294,7 +294,7 @@ The server SHALL approve an alignment, in the transaction of the action that com
 
 ### Requirement: Alignment actions
 
-The server SHALL accept `POST /api/v2/workspaces/{ws}/alignments/{id}/{action}` (browser session, body at most 16 KB) for `approve`, `counter`, `accept_counter`, `reject`, `withdraw` and `revoke`, from people involved in the alignment (the requester and everyone in any requirement set of any revision; others 404, viewers 403 `read_only`, an unknown action 404). An approver is someone in a requirement set of the current revision. `approve {revision}` SHALL need the current `revision` (409 `stale_revision`), state `pending` (409 `wrong_state`) and an approver (403 `not_an_approver`). `counter {revision?, choice?, keep?|session_keys?, note?}` SHALL come from an approver who is not the requester (403 `not_an_approver`) on a `pending` request, may only keep or drop sessions of the current revision (400 otherwise), SHALL write a new revision with recomputed requirements, void every earlier approval and set `countered`. `accept_counter` SHALL come only from the requester (403 `not_requester`) on a `countered` request and return it to `pending`. `reject` SHALL come from an approver who is not the requester on a `pending` or `countered` request; `withdraw` only from the requester on a `pending` or `countered` request. A request that changed since the caller read it SHALL be 409 `stale_revision`. Each action SHALL write an audit row (`alignment.countered`, `.rejected`, `.withdrawn`, `.revoked`, `.approved`) naming its actor and respond with the alignment view.
+The server SHALL accept `POST /api/v2/workspaces/{ws}/alignments/{id}/{action}` (browser session, body at most 16 KB) for `approve`, `counter`, `accept_counter`, `reject`, `withdraw` and `revoke`, from people involved in the alignment (the requester and everyone in any requirement set of any revision; others 404, viewers 403 `read_only`, an unknown action 404). An approver is someone in a requirement set of the current revision. `approve {revision}` SHALL need the current `revision` (409 `stale_revision`), state `pending` (409 `wrong_state`) and an approver (403 `not_an_approver`). `counter {revision?, choice?, keep?|session_keys?, note?}` SHALL come from an approver who is not the requester (403 `not_an_approver`) on a `pending` request, may only keep or drop sessions of the current revision (400 otherwise), SHALL write a new revision with recomputed requirements, void every earlier approval and set `countered`. `accept_counter` SHALL come only from the requester (403 `not_requester`) on a `countered` request, count as the requester's approval for every requirement of the current revision whose set contains them, and return it to `pending`. `reject` SHALL come from an approver who is not the requester on a `pending` or `countered` request; `withdraw` only from the requester on a `pending` or `countered` request. A request that changed since the caller read it SHALL be 409 `stale_revision`. `counter`, `reject`, `withdraw` and `revoke` SHALL each write an audit row (`alignment.countered`, `.rejected`, `.withdrawn`, `.revoked`) naming its actor; an `approve` or `accept_counter` SHALL write `alignment.approved` only when it completes the alignment, and otherwise no audit row. Every action SHALL respond with the alignment view.
 
 #### Scenario: Stale or wrong approval
 
@@ -427,7 +427,7 @@ The server SHALL write an audit row naming its actor for every change request ac
 
 ### Requirement: Reading change requests and decision records
 
-The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, each list item being the same object as the single read below, with its `can` flags, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `waiting_on_me` holds the requests where the caller's `approve` or `accept_counter` flag is true, `mine` the caller's other requests, and `others` the rest. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title}`, `state`, `revision`, `base_version`, `requester`, `changes`, `reason`, `revisions` (each `{revision, changes, note, author, created_at}`), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; after a decision, from the resulting version), `approvers` (the current approval set), `approved_by`, `rejected_by`, decision `note` or `reason`, `version`, `can` flags `{approve, reject, counter, accept_counter, withdraw, rebase}` that are true exactly when the server would accept that action from the caller (all false for a viewer), `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read.
+The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, each list item being the same object as the single read below, with its `can` flags, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `waiting_on_me` holds the requests where the caller's `approve` or `accept_counter` flag is true, `mine` the caller's other requests, and `others` the rest. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title, version}`, `state`, `revision`, `base_version`, `behind` (true while the request is open and the goal has moved past `base_version`), `requester`, `changes`, `reason` (the requester's), `revisions` (each `{revision, base_version, changes, note, author, created_at}`), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; once approved, from the resulting version), `approvers` (the effective approval set after the requester rule), `approved_by`, `rejected_by`, `decision_note` (the approval note or the rejection reason) also shown as `note` when approved and `rejection_reason` when rejected, `version` (the goal version an approval created), `can` flags `{approve, reject, counter, accept_counter, withdraw, rebase}` that are true exactly when the server would accept that action from the caller (`approve` false while `behind`; all false for a viewer), `waiting_on_me`, `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read, or on a goal other than the one in the path, SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read.
 
 #### Scenario: Viewer reads but cannot act
 
@@ -441,7 +441,7 @@ The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goa
 
 ### Requirement: Change request controls in the app
 
-The goal page SHALL offer **Propose a change** on any `active` goal the person can read but does not own, unless they are a viewer, and a "Change requests" list whose approve, reject and counter controls appear only for people in the goal's approval set; the workspace SHALL have a "Requests" tab, read from `GET /api/v2/workspaces/{ws}/change-requests`, with the groups waiting on me, mine and others, each control appearing only when the server's `can` flag allows it.
+The goal page SHALL offer **Propose a change** on any `active` goal the person can read but does not own, unless they are a viewer, and a "Change requests" list whose approve, reject and counter controls appear only for people in the goal's approval set; the workspace SHALL have a "Requests" tab, read from `GET /api/v2/workspaces/{ws}/change-requests`, with the groups waiting on me, mine and others, each control appearing only when the server's `can` flag allows it. The "Requests" tab SHALL show change requests only; alignments keep their own "Alignments" tab.
 
 #### Scenario: Non-owner proposes from the goal page
 
@@ -485,32 +485,41 @@ The `/app` page SHALL offer **Create the Northstar sample** when the signed-in p
 - Evidence (sandbox test results) attached to change requests is out of scope and remains an open product decision.
 - Whether directives may instruct agents, beyond delivering goal versions and bindings, remains open.
 - When the requester is the only person who could approve a goal's requirement and no other workspace owner exists, the request stays open indefinitely; should it instead be refused up front?
-- The sample's pending change request comes from the caller, who also owns the Security goal, although an owner may not propose a change to their own goal through the API; the sample seeds it directly. Should the sample instead show a request from a second (placeholder) person?
-- Whether the workspace "Requests" tab also shows alignments, or alignments keep their own tab, is not decided; this part specifies change requests only.
 
 ## Sources
 
 - `lib/v2/goals.ts`
+- `lib/v2/approval.ts`
 - `lib/v2/alignments.ts`
-- `lib/v2/changes.ts` (new)
+- `lib/v2/changes.ts`
+- `lib/v2/changes-read.ts`
+- `lib/v2/sample.ts`
 - `lib/v2/policy.ts`
+- `lib/v2/lifecycle.ts`
 - `lib/v2/validate.ts`
-- `lib/v2/directives.ts` (`goalTargets`, `goalVersionDirective` only)
-- `lib/v2/sessions.ts` (`sessionRow`, `openEpoch` only)
+- `lib/v2/directives.ts` (`goalTargets`, `goalVersionDirective`, `writeDirective` only)
+- `lib/v2/sessions.ts` (`sessionRow`, `openEpoch`, the epoch binding check only)
 - `lib/v2/workspaces.ts` (`need`, `memberName`, `createWorkspace` only)
 - `lib/v2/db.ts`
 - `lib/v2/errors.ts`
 - `lib/v2/http.ts`
 - `docs/v2/WIRE.md`
-- `app/api/v2/workspaces/sample/route.ts` (new)
+- `app/api/v2/workspaces/sample/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/versions/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/review/route.ts`
-- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/route.ts` (new)
-- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/route.ts` (new)
-- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/[action]/route.ts` (new)
-- `app/api/v2/workspaces/[ws]/change-requests/route.ts` (new)
+- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/[action]/route.ts`
+- `app/api/v2/workspaces/[ws]/change-requests/route.ts`
 - `app/api/v2/workspaces/[ws]/alignments/route.ts`
 - `app/api/v2/workspaces/[ws]/alignments/[id]/route.ts`
 - `app/api/v2/workspaces/[ws]/alignments/[id]/[action]/route.ts`
+- `app/app/view.tsx`
+- `app/app/_ui/kit.tsx`
+- `app/app/_ui/changes.tsx`
+- `app/app/w/[ws]/goals/[goal]/view.tsx`
+- `app/app/w/[ws]/requests/view.tsx`
+- `app/app/w/[ws]/alignments/view.tsx`
+- `scripts/test-v2.mjs`
