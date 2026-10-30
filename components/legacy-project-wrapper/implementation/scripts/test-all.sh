@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# Build A gate runner. Usage: scripts/test-all.sh <port>   (run from a lane or integration worktree)
-# Checks lint and types, starts a fresh dev server on <port>, then runs in fixed order:
-# snapshot, test-flow, test-scenario (default fixture, then each scripts/fixtures/*.json), test-ui-loop, test-mcp (Northstar, then custom),
-# test-capture, test-mapper. Capture and mapper add sessions
-# that survive reset, so they run last. Then test-tenancy and test-v2 (v2 is always on: the snapshot above already ran with it),
-# which start their own production servers on <port>; and ui-northstar, on its own production server.
+# Gate runner. Usage: scripts/test-all.sh <port>   (run from a worktree; test-v2 also uses <port>+1)
+# Runs in fixed order: lint, typecheck, syntax (node --check on every script), test-v2 and test-oauth (each starts its
+# own production servers on <port>; test-oauth reuses the build test-v2 made), then the align-agent package tests.
 # One summary line per step; exits non-zero if any step fails.
 set -u
 
@@ -13,17 +10,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 die() { echo "test-all: $*" >&2; exit 2; }
 [[ "$PORT" =~ ^[0-9]+$ ]] || die "usage: scripts/test-all.sh <port>"
-[ "$PORT" = 3100 ] && die "refusing port 3100 (the demo server)"
+[ "$PORT" = 3100 ] && die "refusing port 3100 (the local server)"
 [ "$ROOT" = "$HOME/liminal/align" ] && die "refusing the main checkout $ROOT; run from a worktree"
 lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 && die "port $PORT is already in use"
 cd "$ROOT"
-unset AI_GATEWAY_API_KEY ALIGN_CAPTURE ALIGN_SECRET ALIGN_URL ALIGN_MCP_URL
 
-BASE="http://127.0.0.1:$PORT"
-TOKEN="$(openssl rand -hex 16)"
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/align-test-all.XXXXXX")"
 FAILS=0
-SERVER=""
 
 summary() { printf '%-5s %-14s %s\n' "$1" "$2" "$3"; [ "$1" = PASS ] || FAILS=$((FAILS + 1)); }
 step() { # step <name> <command...>: run, keep output in the log dir, one summary line
@@ -31,51 +24,20 @@ step() { # step <name> <command...>: run, keep output in the log dir, one summar
   if "$@" >"$LOGDIR/$name.log" 2>&1; then summary PASS "$name" "$(tail -n 1 "$LOGDIR/$name.log")"
   else summary FAIL "$name" "see $LOGDIR/$name.log"; fi
 }
-stop_server() {
-  [ -n "$SERVER" ] && kill "$SERVER" 2>/dev/null
-  pkill -f "next dev -H 127.0.0.1 -p $PORT" 2>/dev/null
-  sleep 2
-  rm -f data/state.json data/.secret # a shutdown can rewrite state.json
-}
-trap stop_server EXIT
 
 # ---- static checks ----
 step lint npm run lint
-step typecheck bash -c 'npx next typegen && npx tsc --noEmit'
-step syntax bash -c 'for f in scripts/*.mjs scripts/lib/*.mjs; do node --check "$f" || exit 1; done; echo "node --check clean"'
+step typecheck bash -c 'npx next typegen && npx tsc --noEmit && echo "tsc clean"'
+step syntax bash -c 'for f in scripts/*.mjs packages/align-connect/*.mjs; do node --check "$f" || exit 1; done; bash -n scripts/test-all.sh scripts/test-image.sh || exit 1; echo "node --check and bash -n clean"'
 
-# ---- fresh server ----
-rm -f data/state.json data/.secret
-ALIGN_MCP_TOKEN="$TOKEN" npx next dev -H 127.0.0.1 -p "$PORT" >"$LOGDIR/server.log" 2>&1 &
-SERVER=$!
-for _ in $(seq 1 90); do curl -s -o /dev/null "$BASE/login" && break; sleep 1; done
-curl -s -o /dev/null "$BASE/login" || { summary FAIL server "did not start, see $LOGDIR/server.log"; exit 1; }
-
-# ---- runtime gates, fixed order ----
-step snapshot env ALIGN_MCP_TOKEN="$TOKEN" node scripts/snapshot-northstar.mjs "$BASE"
-# test-flow keeps its known baseline failure; the gate is its stdout matching the baseline's.
-step test-flow bash -c "node scripts/test-flow.mjs '$BASE' | tail -n +2 | diff -u test/snapshots/northstar-850971e/test-flow.out - && echo 'stdout identical to the baseline'"
-# test-scenario runs once per custom fixture: the default example, then every scripts/fixtures/*.json.
-step test-scenario env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-scenario.mjs "$BASE"
-for f in scripts/fixtures/*.json; do step "scenario:$(basename "$f" .json)" env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-scenario.mjs "$BASE" "$f"; done
-# The same custom loop in a browser: two team profiles by visible labels, plus a synthetic agent's wake-up. Needs Chrome.
-step test-ui-loop node scripts/test-ui-loop.mjs "$BASE"
-step test-mcp env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-mcp.mjs "$BASE/api/mcp"
-# The same validating client on a custom scenario (its `agreement` output), then back to Northstar.
-step test-mcp:custom env ALIGN_MCP_TOKEN="$TOKEN" node scripts/test-mcp-custom.mjs "$BASE"
-step test-capture node scripts/test-capture.mjs "$BASE"
-step test-mapper env ALIGN_URL="$BASE" node scripts/test-mapper.mjs
-# Multi-workspace tests need their own server configs (creation closed, signup code, open create).
-stop_server
-SERVER=""
-step test-tenancy node scripts/test-tenancy.mjs "$PORT"
-# Connected AI apps: the OAuth server and the OAuth-only MCP endpoint, Mode L and hosted (reuses the build test-tenancy made).
-step test-oauth node scripts/test-oauth.mjs "$PORT" --no-build
-step test-interview node scripts/test-interview.mjs "$PORT" --no-build
-# The v2 server (docs/v2/WIRE.md): Mode L sign-in and local owner, Mode L with the test identity provider, hosted.
+# ---- servers: each test starts its own production servers on <port> ----
+# The v2 server (docs/v2/WIRE.md): Mode L sign-in and local owner, the edge, Mode L with the test identity provider, hosted.
 step test-v2 node scripts/test-v2.mjs "$PORT"
-# Northstar's rendered UI text against 850971e's, on its own production server (needs Chrome).
-step ui-northstar scripts/test-ui-northstar.sh "$PORT"
+# Connected AI apps: the OAuth server and the MCP endpoint, Mode L and hosted (reuses the build test-v2 made).
+step test-oauth node scripts/test-oauth.mjs "$PORT" --no-build
+
+# ---- the local agent package ----
+step align-agent bash -c 'cd packages/align-agent && npm test'
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "test-all: all steps passed (logs in $LOGDIR)"; else echo "test-all: $FAILS step(s) failed (logs in $LOGDIR)"; fi

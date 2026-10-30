@@ -11,6 +11,18 @@ import { config as alignConfig, hostAllowed, hostName, LOOPBACK, startupProblems
 // below are served: everything else is 404, so a route added later is closed when hosted until it is listed here.
 const HOSTED_ROUTES = /^\/(?:app|api\/v2|api\/mcp|oauth|\.well-known|api\/oauth)(?:\/|$)/;
 
+/** /app on the loopback name and port the browser used (Next may normalize nextUrl's host), so its cookies still apply. */
+function toApp(request: NextRequest): URL {
+  try {
+    return new URL("/app", `http://${request.headers.get("host")}`);
+  } catch {
+    const u = request.nextUrl.clone();
+    u.pathname = "/app";
+    u.search = "";
+    return u;
+  }
+}
+
 const text = (status: number, body: string) => new NextResponse(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
 export function proxy(request: NextRequest) {
@@ -19,8 +31,7 @@ export function proxy(request: NextRequest) {
   const p = request.nextUrl.pathname;
   if (!cfg.hosted) {
     if (!name || !LOOPBACK.has(name)) return text(421, "Misdirected request: this server answers to localhost only\n");
-    // Relative, so the browser stays on the loopback name and port it used.
-    if (p === "/") return new NextResponse(null, { status: 307, headers: { location: "/app" } });
+    if (p === "/") return NextResponse.redirect(toApp(request), 307);
     return NextResponse.next();
   }
   // A misconfigured hosted server serves nothing, even if the platform kept the process up after startup refused.

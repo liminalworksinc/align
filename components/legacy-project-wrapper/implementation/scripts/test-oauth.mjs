@@ -97,7 +97,6 @@ const plain = (t) => t.replace(/<!-- -->/g, "").replace(/&#x27;/g, "'").replace(
 // ---- server ----
 let server = null;
 async function start(env) {
-  rmSync(path.join(ROOT, "data/state.json"), { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
   const clean = { ...process.env };
   for (const k of Object.keys(clean)) if (/^(ALIGN_|HOSTED$|AI_GATEWAY_API_KEY$|BETTER_AUTH_|GOOGLE_|GITHUB_)/.test(k)) delete clean[k];
@@ -106,7 +105,7 @@ async function start(env) {
   server.stderr.on("data", (c) => (err += c));
   for (let i = 0; i < 90; i++) {
     try {
-      const r = await req("GET", "/api/workspaces/config");
+      const r = await req("GET", "/api/v2/auth/get-session");
       if (r.status === 200) return;
     } catch {}
     await sleep(1000);
@@ -121,7 +120,6 @@ async function stop() {
   spawnSync("pkill", ["-f", `next start -H 127.0.0.1 -p ${PORT}`]);
   server = null;
   await sleep(2500);
-  rmSync(path.join(ROOT, "data/state.json"), { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
 }
 process.on("exit", () => {
@@ -1024,12 +1022,8 @@ try {
     ...common,
     HOSTED: "1",
     ALIGN_HOSTS: HOSTED_HOST,
-    ALIGN_SIGNUP_CODES: "oauth-invite-000001,oauth-invite-000002",
     ALIGN_DELETE_BY: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().slice(0, 10),
-    ALIGN_PRODUCT_PASSCODE: "product-strong-pass-1",
-    ALIGN_SECURITY_PASSCODE: "security-strong-pass-1",
-    ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-1",
-    // v2 is always on: hosted also needs Better Auth's secret (in common), the public origin and a way to sign in
+    // Hosted also needs Better Auth's secret (in common), the public origin and a way to sign in
     // (lib/v2/config.ts). Google and GitHub are configured; the email code is not, so hosted sign-in offers no code.
     ALIGN_PUBLIC_ORIGIN: `https://${HOSTED_HOST}`,
     GOOGLE_CLIENT_ID: "test-google-id",

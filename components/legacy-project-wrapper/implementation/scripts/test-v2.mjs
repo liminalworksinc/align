@@ -1,15 +1,19 @@
 #!/usr/bin/env node
-// v2 server tests (docs/v2/WIRE.md). Builds once, then starts its own production servers (next start) on <port> with a
-// temp ALIGN_DATA_DIR, one per phase. v2 is always on: there is no flag.
-//   local   Mode L, no settings        -> every /app and /api/v2 path is served; the local owner and its printed code;
+// Align server tests (docs/v2/WIRE.md). Builds once, then starts its own production servers (next start) on <port> with
+// a temp ALIGN_DATA_DIR, one per phase. v2 is the only model: there is no flag, and v1's routes are gone.
+//   local   Mode L, no settings        -> every /app and /api/v2 path is served; / redirects to /app; retired paths are
+//                                         404; the loopback Host check (421); one server per data directory (a second
+//                                         server is started on <port>+1); the local owner and its printed code;
 //                                         email codes (hashed, 5 min, 3 tries, send limits, no account disclosure);
 //                                         sign-in-link; test IdP off
 //   on      Mode L, ALIGN_TEST_IDP=1    -> identity, RBAC, devices (recent sign-in), sessions, usage, spend, directives,
 //                                         directive cursor, receipts, alignments, stop sharing, delete, web UI
-//   hosted  HOSTED=1                    -> startup refusals for v2 settings, then the v2 routes behind the hosted
-//                                         host/https/edge checks; then email codes through a fake HTTPS email API
-//                                         (first owner, invites, unknown addresses, API failure)
-// Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port)
+//   hosted  HOSTED=1                    -> startup refusals, then the hosted host/https/edge checks and the route
+//                                         allowlist (/ -> /app, everything else 404); the closing date (served on the
+//                                         day, 410 for everything after it); then email codes through a fake HTTPS
+//                                         email API (first owner, invites, unknown addresses, API failure)
+// Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port;
+//                                           also uses <port>+1 for the second-server check)
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
@@ -36,7 +40,6 @@ if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
   process.exit(2);
 }
 const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const NS_STATE = path.join(ROOT, "data/state.json");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let pass = 0;
@@ -89,15 +92,29 @@ function hosted(method, p, { body, cookie, headers = {} } = {}) {
   });
 }
 
+/** A request with exactly these headers (fetch() won't send a forged Host; node:http will). */
+function rawGet(p, headers) {
+  return new Promise((resolve, reject) => {
+    for (const k of Object.keys(headers)) if (headers[k] === undefined) delete headers[k];
+    http
+      .get({ host: "127.0.0.1", port: PORT, path: p, headers }, (res) => {
+        let t = "";
+        res.on("data", (c) => (t += c));
+        res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, text: t }));
+      })
+      .on("error", reject);
+  });
+}
+
 // ---- servers ----
 let server = null;
 let stdout = ""; // the current server's standard output (Mode L prints sign-in links there)
-const CLEAN_KEYS = ["AI_GATEWAY_API_KEY", "ALIGN_CAPTURE", "ALIGN_SECRET", "ALIGN_URL", "ALIGN_MCP_URL", "ALIGN_ALLOW_OPEN_CREATE", "ALIGN_SIGNUP_CODE", "ALIGN_SIGNUP_CODES", "ALIGN_MAX_WORKSPACES", "ALIGN_CREATE_PER_HOUR", "ALIGN_DATA_DIR", "ALIGN_PUBLIC", "HOSTED", "ALIGN_HOSTS", "ALIGN_NORTHSTAR_PUBLIC", "ALIGN_PRODUCT_PASSCODE", "ALIGN_SECURITY_PASSCODE", "ALIGN_LEADERSHIP_PASSCODE", "ALIGN_DELETE_BY", "ALIGN_GOAL_SESSIONS", "ALIGN_GOAL_SESSIONS_TEST_IDP", "ALIGN_TEST_IDP", "ALIGN_EMAIL_API_URL", "ALIGN_EMAIL_API_KEY", "ALIGN_EMAIL_FROM", "ALIGN_FIRST_OWNER_EMAIL", "ALIGN_LOCAL_OWNER_EMAIL", "BETTER_AUTH_SECRET", "BETTER_AUTH_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "ALIGN_PUBLIC_ORIGIN"];
+// Every server setting is cleared from the inherited environment, so each phase runs with exactly what it names.
+const SETTING = /^(ALIGN_|HOSTED$|AI_GATEWAY_API_KEY$|ANTHROPIC_|BETTER_AUTH_|GOOGLE_|GITHUB_)/;
 async function startServer(env) {
-  rmSync(NS_STATE, { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
   const clean = { ...process.env };
-  for (const k of CLEAN_KEYS) delete clean[k];
+  for (const k of Object.keys(clean)) if (SETTING.test(k)) delete clean[k];
   server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "pipe", "pipe"], detached: true });
   let exited = false;
   let stderr = "";
@@ -108,10 +125,11 @@ async function startServer(env) {
   let last = 0;
   for (let i = 0; i < 90 && !exited; i++) {
     try {
-      const r = env.HOSTED === "1" ? await hosted("GET", "/api/workspaces/config") : await fetch(`${BASE}/api/workspaces/config`);
+      const r = env.HOSTED === "1" ? await hosted("GET", "/api/v2/auth/get-session") : await fetch(`${BASE}/api/v2/auth/get-session`);
       last = r.status;
       if (r.status === 200) return { started: true, stderr: () => stderr, stdout: () => stdout, exited, last };
-      if (r.status === 503) break;
+      if (r.status === 503) break; // up, but serving nothing (proxy.ts startupProblems)
+      if (r.status === 410) return { started: false, closed: true, stderr: () => stderr, stdout: () => stdout, exited, gone: () => exited, last }; // up, closed
     } catch {}
     await sleep(1000);
   }
@@ -125,7 +143,6 @@ async function stopServer() {
   spawnSync("pkill", ["-f", `next start -H 127.0.0.1 -p ${PORT}`]);
   server = null;
   await sleep(2500);
-  rmSync(NS_STATE, { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
 }
 async function mustStart(env) {
@@ -273,8 +290,51 @@ try {
   // The old flag answered {"error":"Not found"} from proxy.ts; a route's own 404 is {"error":"not_found"} (or Better Auth's).
   const closed = routes.filter((_, i) => [probes[2 * i], probes[2 * i + 1]].some((r) => r.status === 404 && r.json?.error === "Not found"));
   check(`local: all ${routes.length} v2 paths (/app pages and /api/v2 routes) are served with no flag set`, routes.length >= 40 && closed.length === 0, `closed: ${closed.join(" ")}`);
-  const v1 = await call("anon", "GET", "/api/workspaces/config");
-  check("local: v1 routes still answer", v1.status === 200, `${v1.status}`);
+  // -- the edge: / -> /app, retired v1 paths, the loopback Host rule --
+  const root = await call("anon", "GET", "/");
+  check("local: / redirects to /app (307, Location ending in /app)", root.status === 307 && /\/app$/.test(root.headers.get("location") ?? ""), `${root.status} ${root.headers.get("location")}`);
+  const retired = await Promise.all(["/setup", "/new", "/w/x", "/api/session", "/api/proposals", "/api/state", "/api/workspaces/config", "/api/directives"].map((p) => call("anon", "GET", p).then((r) => ({ p, r }))));
+  const retiredPost = await Promise.all(["/api/sessions/events", "/api/proposals", "/api/workspaces"].map((p) => call("anon", "POST", p, { body: {} }).then((r) => ({ p, r }))));
+  check("local: retired v1 paths answer 404 (/setup, /new, /w/<id>, /api/session, /api/proposals, /api/state, /api/workspaces*, /api/directives, /api/sessions/events)", [...retired, ...retiredPost].every((x) => x.r.status === 404), [...retired, ...retiredPost].map((x) => `${x.p}:${x.r.status}`).join(" "));
+  const rebound = await Promise.all(["/", "/app", "/api/v2/me", "/api/v2/auth/get-session"].map((p) => rawGet(p, { host: "evil.example" })));
+  const reboundPort = await rawGet("/app", { host: `evil.example:${PORT}` });
+  const loopNames = await Promise.all(["localhost", "[::1]"].map((h) => rawGet("/api/v2/me", { host: `${h}:${PORT}` })));
+  check(
+    "local: a non-loopback Host (DNS rebinding) -> 421 'Misdirected request: this server answers to localhost only' on every path; localhost and [::1] are served",
+    [...rebound, reboundPort].every((r) => r.status === 421 && r.text.includes("Misdirected request: this server answers to localhost only")) && loopNames.every((r) => r.status === 401),
+    `${[...rebound, reboundPort].map((r) => r.status).join(",")} loopback:${loopNames.map((r) => r.status).join(",")}`,
+  );
+  // -- one server per data directory: <data>/.pid names the live server, and a second one refuses to start --
+  const pidFile = path.join(localDir, ".pid");
+  const heldPid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) : 0;
+  let pidAlive = false;
+  try {
+    process.kill(heldPid, 0);
+    pidAlive = heldPid > 0;
+  } catch {}
+  check("single server: <data>/.pid holds the live server's pid, mode 0600", pidAlive && (statSync(pidFile).mode & 0o777) === 0o600, `${heldPid} ${existsSync(pidFile) ? (statSync(pidFile).mode & 0o777).toString(8) : "missing"}`);
+  if (spawnSync("lsof", ["-nP", `-iTCP:${PORT + 1}`, "-sTCP:LISTEN"]).status === 0) check(`single server: port ${PORT + 1} is free for the second server`, false, "in use");
+  else {
+    const clean = { ...process.env };
+    for (const k of Object.keys(clean)) if (SETTING.test(k)) delete clean[k];
+    const second = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT + 1)], { env: { ...clean, ALIGN_DATA_DIR: localDir }, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    let out2 = "";
+    second.stdout.on("data", (c) => (out2 += c));
+    second.stderr.on("data", (c) => (out2 += c));
+    const code2 = await new Promise((resolve) => {
+      const t = setTimeout(() => resolve("still running"), 60000);
+      second.on("exit", (c) => (clearTimeout(t), resolve(c)));
+    });
+    try {
+      process.kill(-second.pid, "SIGTERM");
+    } catch {}
+    const stillOne = await call("anon", "GET", "/api/v2/me");
+    check(
+      "single server: a second server on the same data directory exits with 'Another Align server (pid <n>) is using <dir>. Stop it first.' and the first keeps serving",
+      code2 !== 0 && code2 !== "still running" && out2.includes(`Another Align server (pid ${heldPid}) is using ${localDir}. Stop it first.`) && Number(readFileSync(pidFile, "utf8").trim()) === heldPid && stillOne.status === 401,
+      `exit=${code2} ${out2.slice(-300)}`,
+    );
+  }
   const owners = withDb((d) => d.prepare("SELECT id, name, email, emailVerified FROM ba_user").all());
   check("local owner: the first start makes exactly one account, Local owner <owner@align.localhost>, email verified", owners.length === 1 && owners[0].name === "Local owner" && owners[0].email === "owner@align.localhost" && owners[0].emailVerified === 1, JSON.stringify(owners));
   check("local owner: in no workspace", withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_members").get().n) === 0, "");
@@ -373,6 +433,7 @@ try {
   const loopback = await call("anon", "GET", "/api/v2/me");
   check("local: loopback is not a credential (/api/v2/me without a cookie -> 401)", loopback.status === 401 && loopback.json?.error === "unauthorized", loopback.text);
   await stopServer();
+  check("single server: a stopped server removes its <data>/.pid", !existsSync(path.join(localDir, ".pid")), "still there");
   const lineBefore = signInLine(localDir);
   const restarted = await mustStart({ ALIGN_DATA_DIR: localDir });
   check("local owner: a later start makes no account and sends no code", !restarted.stdout().includes("Align sign-in for") && signInLine(localDir) === lineBefore && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_user WHERE name = 'Local owner'").get().n) === 1, restarted.stdout().slice(-300));
@@ -527,6 +588,13 @@ try {
   const crossSite = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, headers: { origin: "http://evil.example" }, body: { title: "csrf" } });
   const textPlain = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, headers: { "content-type": "text/plain" }, raw: JSON.stringify({ title: "csrf" }) });
   check("web writes: a foreign Origin -> 403 cross_site; text/plain -> 415", crossSite.status === 403 && crossSite.json?.error === "cross_site" && textPlain.status === 415, `${crossSite.status} ${textPlain.status}`);
+  const otherPorts = await Promise.all([`http://localhost:5555`, `http://127.0.0.1:${PORT + 1}`, "null"].map((o) => call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, headers: { origin: o }, body: { title: "csrf" } })));
+  const crossSiteFetch = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, headers: { "sec-fetch-site": "cross-site" }, body: { title: "csrf" } });
+  check(
+    "web writes (Mode L): another local port, a null Origin, or Sec-Fetch-Site cross-site -> 403 cross_site",
+    [...otherPorts, crossSiteFetch].every((r) => r.status === 403 && r.json?.error === "cross_site"),
+    [...otherPorts, crossSiteFetch].map((r) => `${r.status}:${r.json?.error}`).join(" "),
+  );
 
   // exhaustive policy matrix, straight from lib/v2/policy.ts (role x pod role x visibility x ownership x action)
   const policy = await import(path.join(ROOT, "lib/v2/policy.ts"));
@@ -1693,11 +1761,7 @@ try {
     ALIGN_HOSTS: HOSTED_HOST,
     ALIGN_SECRET: "t".repeat(48),
     ALIGN_DATA_DIR: hostedDir,
-    ALIGN_SIGNUP_CODES: "hosted-invite-0001,hosted-invite-0002",
     ALIGN_DELETE_BY: deleteBy,
-    ALIGN_PRODUCT_PASSCODE: "product-strong-pass-1",
-    ALIGN_SECURITY_PASSCODE: "security-strong-pass-1",
-    ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-1",
     BETTER_AUTH_SECRET: "b".repeat(40),
     GOOGLE_CLIENT_ID: "test-google-id",
     GOOGLE_CLIENT_SECRET: "test-google-secret",
@@ -1706,7 +1770,17 @@ try {
     ALIGN_PUBLIC_ORIGIN: `https://${HOSTED_HOST}`,
   };
   const noProviders = { GOOGLE_CLIENT_ID: undefined, GOOGLE_CLIENT_SECRET: undefined, GITHUB_CLIENT_ID: undefined, GITHUB_CLIENT_SECRET: undefined };
+  // Every hosted startup check (lib/config.ts hostedProblems and lib/v2/config.ts v2Problems), each on its own server.
   const refusals = [
+    ["no ALIGN_HOSTS", { ALIGN_HOSTS: undefined }, "ALIGN_HOSTS must list"],
+    ["a loopback name in ALIGN_HOSTS", { ALIGN_HOSTS: `${HOSTED_HOST},localhost` }, "ALIGN_HOSTS must not include loopback names"],
+    ["no ALIGN_SECRET", { ALIGN_SECRET: undefined }, "ALIGN_SECRET must be set (32+ characters)"],
+    ["a short ALIGN_SECRET", { ALIGN_SECRET: "s".repeat(20) }, "ALIGN_SECRET must be set (32+ characters)"],
+    ["a relative ALIGN_DATA_DIR", { ALIGN_DATA_DIR: "data/hosted" }, "ALIGN_DATA_DIR must be an absolute path"],
+    ["an ALIGN_DATA_DIR inside the app", { ALIGN_DATA_DIR: path.join(ROOT, "data", "hosted-inside") }, "ALIGN_DATA_DIR must be outside the app directory"],
+    ["no ALIGN_DELETE_BY", { ALIGN_DELETE_BY: undefined }, "ALIGN_DELETE_BY must be a date (YYYY-MM-DD)"],
+    ["a bad ALIGN_DELETE_BY", { ALIGN_DELETE_BY: "Nov 6" }, "ALIGN_DELETE_BY must be a date (YYYY-MM-DD)"],
+    ["ALIGN_PUBLIC=1", { ALIGN_PUBLIC: "1" }, "Public mode is not supported"],
     ["no BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: undefined }, "BETTER_AUTH_SECRET must be set"],
     ["a short BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: "short" }, "BETTER_AUTH_SECRET must be set"],
     ["no ALIGN_PUBLIC_ORIGIN", { ALIGN_PUBLIC_ORIGIN: undefined }, "ALIGN_PUBLIC_ORIGIN must be an https origin"],
@@ -1726,11 +1800,55 @@ try {
     check(`hosted: refuses to serve with ${what}`, !r.started && (r.exited || r.last === 503) && r.stderr().includes(needle), r.started ? "it started" : `exited=${r.exited} last=${r.last} ${r.stderr().slice(-300)}`);
     await stopServer();
   }
+  // The retired v1 settings are neither required (good has no passcodes or signup codes) nor refused.
+  const v1Env = { ALIGN_SIGNUP_CODES: "x", ALIGN_PRODUCT_PASSCODE: "product-demo", AI_GATEWAY_API_KEY: "sk-test", ANTHROPIC_API_KEY: "sk-test", ALIGN_CAPTURE: "1", ALIGN_MCP_TOKEN: "t".repeat(32), ALIGN_GOAL_SESSIONS: "0" };
+  const withV1 = await startServer({ ...good, ...v1Env });
+  check("hosted: starts without v1's passcodes or signup codes, and ignores v1-era settings (signup codes, default passcodes, AI keys, capture, ALIGN_MCP_TOKEN, ALIGN_GOAL_SESSIONS)", withV1.started, withV1.stderr().slice(-300));
+  const v1Off = await Promise.all([hosted("GET", "/api/v2/me"), hosted("GET", "/api/mcp", { headers: { authorization: `Bearer ${v1Env.ALIGN_MCP_TOKEN}` } })]);
+  check("hosted: with ALIGN_GOAL_SESSIONS=0 v2 is still on, and ALIGN_MCP_TOKEN is no credential (/api/mcp -> 401)", v1Off[0].status === 401 && v1Off[1].status === 401, v1Off.map((r) => r.status).join(","));
+  await stopServer();
   await mustStart(good);
+  // -- the hosted route allowlist: / -> /app; /app*, /api/v2/*, /api/mcp, /oauth/*, /.well-known/*, /api/oauth/* and static assets; else 404 --
+  const hRoot = await hosted("GET", "/");
+  check("hosted: / redirects to https://<host>/app (307)", hRoot.status === 307 && hRoot.headers.location === `https://${HOSTED_HOST}/app`, `${hRoot.status} ${hRoot.headers.location}`);
+  const outside = [
+    ["GET", "/api/state"],
+    ["POST", "/api/sessions/events"],
+    ["GET", "/setup"],
+    ["GET", "/new"],
+    ["GET", "/w/x"],
+    ["POST", "/api/session"],
+    ["GET", "/api/workspaces/config"],
+    ["GET", "/api/policy/security"],
+    ["GET", "/apps"],
+    ["GET", "/api/v2x"],
+    ["GET", "/oauthx"],
+    ["GET", "/file.svg"],
+  ];
+  const outsideR = await Promise.all(outside.map(([m, p]) => hosted(m, p, m === "POST" ? { body: {}, headers: { origin: `https://${HOSTED_HOST}` } } : {})));
+  check(
+    `hosted: every path outside the allowlist -> 404 {"error":"Not found"} (${outside.map(([m, p]) => `${m} ${p}`).join(", ")})`,
+    outsideR.every((r) => r.status === 404 && r.json?.error === "Not found"),
+    outsideR.map((r, i) => `${outside[i][1]}:${r.status}`).join(" "),
+  );
+  const inside = await Promise.all([
+    hosted("GET", "/app"),
+    hosted("GET", "/api/mcp"),
+    hosted("GET", "/.well-known/oauth-authorization-server"),
+    hosted("GET", "/.well-known/oauth-protected-resource/api/mcp"),
+    hosted("POST", "/oauth/register", { body: {} }),
+    hosted("POST", "/api/oauth/approve", { body: {}, headers: { origin: `https://${HOSTED_HOST}` } }),
+    hosted("GET", "/favicon.ico"),
+  ]);
+  check(
+    "hosted: allowlisted paths reach their routes (/app, /api/mcp 401, /.well-known/* 200, /oauth/register 400, /api/oauth/approve, /favicon.ico 200)",
+    inside.every((r) => r.status !== 404 || r.json?.error !== "Not found") && inside[1].status === 401 && inside[2].status === 200 && inside[3].status === 200 && inside[4].status === 400 && inside[6].status === 200,
+    inside.map((r) => `${r.status}`).join(" "),
+  );
   const hMe = await hosted("GET", "/api/v2/me");
   const hSignIn = await hosted("GET", "/app/sign-in");
   const hSession = await hosted("GET", "/api/v2/auth/get-session");
-  check("hosted: v2 routes are served alongside the tester routes (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
+  check("hosted: v2 routes are served (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
   check("hosted: the sign-in page offers Google and GitHub, never the test sign-in; without email settings, no email code", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in") && !hSignIn.text.includes("Send code"), "");
   dbFile = path.join(hostedDir, "v2", "align.sqlite");
   const hNoEmail = await hosted("POST", SEND, { body: { email: "x@example.test", type: "sign-in" }, headers: { origin: `https://${HOSTED_HOST}` } });
@@ -1744,7 +1862,7 @@ try {
     http.get({ host: "127.0.0.1", port: PORT, path: "/api/v2/me", headers: { host: "evil.example", "x-forwarded-proto": "https", "fly-client-ip": "1.2.3.4" } }, (res) => resolve(res.statusCode));
   });
   check("hosted: v2 routes pass the same checks (http -> 403, no Fly-Client-IP -> 403, foreign Host -> 421)", hHttp.status === 403 && hNoEdge.status === 403 && hForeign === 421, `${hHttp.status} ${hNoEdge.status} ${hForeign}`);
-  // Hosted cookie writes: Origin is required and must be exactly https://<Host> (as lib/http.ts, LIM-2437). The site
+  // Hosted cookie writes: Origin is required and must be exactly https://<Host> (as lib/http.ts). The site
   // check runs before the session, so with no session the right Origin gets 401 and every other one 403 cross_site.
   const hOrigins = [undefined, `http://${HOSTED_HOST}`, `https://${HOSTED_HOST}:8443`, "null", "https://evil.example"];
   const hRefused = [];
@@ -1755,10 +1873,32 @@ try {
     hRefused.every((x) => x.r.status === 403 && x.r.json?.error === "cross_site") && hRightOrigin.status === 401,
     `${hRefused.map((x) => `${x.o}:${x.r.status}`).join(" ")} exact:${hRightOrigin.status}`,
   );
-  const hNorthstar = await hosted("GET", "/api/sessions");
-  check("hosted: non-tester v1 routes stay 404", hNorthstar.status === 404, `${hNorthstar.status}`);
   const hDev = await hosted("POST", "/api/v2/device/authorize", { body: { device_name: "x", public_key: newDeviceKeys().pub } });
   check("hosted: the device verification URI is the public origin", hDev.status === 200 && hDev.json.verification_uri === `https://${HOSTED_HOST}/app/device`, hDev.text);
+  await stopServer();
+
+  // ======== the closing date (ALIGN_DELETE_BY): served through that whole day, then 410 for everything ========
+  const today = new Date().toISOString().slice(0, 10); // today's UTC date has never ended by the Pacific rule
+  const onTheDay = await startServer({ ...good, ALIGN_DELETE_BY: today });
+  check(`closing date: a hosted server with ALIGN_DELETE_BY = today (${today}) still serves`, onTheDay.started, `${onTheDay.last} ${onTheDay.stderr().slice(-200)}`);
+  await stopServer();
+  const shut = await startServer({ ...good, ALIGN_DELETE_BY: "2020-01-01" });
+  await sleep(3000); // a refused start would have exited by now
+  const shutProbes = await Promise.all([
+    hosted("GET", "/"),
+    hosted("GET", "/app"),
+    hosted("GET", "/api/v2/me"),
+    hosted("POST", "/api/v2/workspaces", { body: { name: "x" }, headers: { origin: `https://${HOSTED_HOST}` } }),
+    hosted("GET", "/api/mcp"),
+    hosted("GET", "/api/state"),
+    hosted("GET", "/api/v2/me", { headers: { "fly-client-ip": undefined, "x-forwarded-proto": undefined } }),
+    rawGet("/api/v2/me", { host: "evil.example" }),
+  ]);
+  check(
+    "closing date: after ALIGN_DELETE_BY the server starts closed and stays up; every request, whatever its path, Host or headers, gets 410 'This test server closed on 2020-01-01.'",
+    shut.closed && !shut.gone?.() && shutProbes.every((r) => r.status === 410 && r.text.includes("This test server closed on 2020-01-01.")) && shut.stderr().includes("has passed: closed, every request gets 410"),
+    `closed=${shut.closed} ${shutProbes.map((r) => r.status).join(",")} ${shut.stderr().slice(-200)}`,
+  );
   await stopServer();
 
   // ======== hosted email codes, through a fake Resend-compatible HTTPS email API ========
