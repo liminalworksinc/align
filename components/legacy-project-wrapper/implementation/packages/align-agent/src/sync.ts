@@ -10,6 +10,7 @@ import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
 import { applyShare, bind, enqueue, forgetShare, planShare, stopSharing } from "./share.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
+import { answerRequest } from "./requests.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { tailAll, type TailResult } from "./tailer.ts";
 import { detectGitEdits, fetchPod, uploadActivity } from "./activity.ts";
@@ -87,6 +88,12 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
     }
     case "applied": {
       for (const id of r.directive_ids) markApplied(ctx, r.local_id, id, r.ts);
+      return r.local_id;
+    }
+    case "request_answer": {
+      const res = answerRequest(ctx, r.local_id, r.request_id, r.answer, r.auto, r.ts);
+      // The agent's own auto-accept loses quietly to an earlier answer; the developer hears why theirs failed.
+      if (!res.ok && !r.auto) addNotice(ctx, r.local_id, `ans_${r.request_id}_${Date.parse(r.ts) || 0}`, `Align: ${r.answer === "accepted" ? "accept" : "decline"} failed: ${res.why}.`);
       return r.local_id;
     }
     case "command":

@@ -8,6 +8,7 @@ import {
   clean,
   collisionReason,
   crossNote,
+  holdReason,
   LIMIT_WORDS,
   limitChange,
   limitsSeen,
@@ -17,6 +18,12 @@ import {
   renderContextDelta,
   renderDelta,
   renderEnvelope,
+  requestAnswerLine,
+  requestContext,
+  requestNotice,
+  requestShortId,
+  requestWithdrawnNotice,
+  SAFE_REQUESTS,
   type DeltaKind,
 } from "../shared/envelope.ts";
 import { teamAsks } from "../shared/asks.ts";
@@ -25,7 +32,7 @@ import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
-import type { DriftFile, FeedFile, GoalSnapshot, Harness, HotState, InjectedState, Latch, MeFile, TeamAsks } from "../shared/types.ts";
+import type { DriftFile, FeedFile, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collision, commitSubject, crossOverlap, display, editedPaths, podReport, readPath, record, shellWrites, siblingNews, type Act } from "./siblings.ts";
 
 export interface HookInput {
@@ -73,6 +80,7 @@ function writeInjected(home: string, lid: string, inj: InjectedState): void {
   inj.at = new Date().toISOString();
   inj.applied = inj.applied.slice(-200);
   inj.notices_shown = inj.notices_shown.slice(-200);
+  if (inj.requests_seen) inj.requests_seen = Object.fromEntries(Object.entries(inj.requests_seen).slice(-100));
   writeJsonAtomic(layout.injected(home, lid), inj);
 }
 
@@ -205,6 +213,73 @@ function autoShare(home: string, harness: Harness, sid: string, cwd: string | nu
   return true;
 }
 
+// ---------- requests (REQ-002) ----------
+/** A request's state as this session knows it: the developer's in-session answer counts before the sync records it. */
+function requestState(r: HotRequest, seen: NonNullable<InjectedState["requests_seen"]>[string] | undefined): RequestState {
+  if (seen?.answer === "declined" && (r.state === "pending" || r.state === "auto_accepted")) return "declined";
+  if (seen?.answer === "accepted" && (r.state === "pending" || (r.state === "auto_accepted" && r.type === "replan"))) return "accepted";
+  if (seen?.auto && r.state === "pending") return "auto_accepted";
+  return r.state;
+}
+
+/**
+ * At a prompt (never mid-turn): each new request once, as a user notice plus Align-worded model context; then the
+ * developer's answer once as one context line; a withdrawal as one user notice. A request answered or withdrawn before
+ * it reached the session tells the model nothing it did not already have.
+ */
+function requestParts(hot: HotState, inj: InjectedState, boundGoalId: string | null): { context: string[]; notices: string[] } {
+  const out = { context: [] as string[], notices: [] as string[] };
+  if (!hot.share || hot.share.state === "stopped") return out;
+  const seen = (inj.requests_seen = inj.requests_seen || {});
+  for (const r of hot.requests || []) {
+    const s = seen[r.id] || {};
+    const state = requestState(r, s);
+    if (s.told && s.told === state) continue;
+    if (state === "withdrawn") {
+      if (s.shown) out.notices.push(requestWithdrawnNotice(r));
+      seen[r.id] = { ...s, shown: true, told: "withdrawn" };
+      continue;
+    }
+    if (!s.shown) {
+      if (state === "pending") {
+        out.notices.push(requestNotice(r));
+        out.context.push(requestContext(r, boundGoalId));
+        seen[r.id] = { ...s, shown: true };
+      } else if (state === "accepted") {
+        // Accepted from the terminal before the next prompt: the model still needs what a safe request asks for.
+        if (r.type !== "switch_goal") out.context.push(requestContext(r, boundGoalId));
+        out.context.push(requestAnswerLine(r, "accepted"));
+        seen[r.id] = { ...s, shown: true, told: "accepted" };
+      } else seen[r.id] = { ...s, shown: true, told: state };
+      continue;
+    }
+    if (state === "accepted" || state === "declined") out.context.push(requestAnswerLine(r, state));
+    if (state !== "pending") seen[r.id] = { ...s, told: state };
+  }
+  return out;
+}
+
+/** Context a compact or clear dropped: the model context of each request still waiting for the developer's answer. */
+function pendingRequestContext(hot: HotState | null, inj: InjectedState, boundGoalId: string | null): string[] {
+  if (!hot?.share || hot.share.state === "stopped") return [];
+  return (hot.requests || []).filter((r) => inj.requests_seen?.[r.id]?.shown && requestState(r, inj.requests_seen[r.id]) === "pending").map((r) => requestContext(r, boundGoalId));
+}
+
+/** Stop: a checkpoint or replan draft the developer has not declined by the end of the turn it arrived in is accepted by the agent. */
+function autoAccept(home: string, lid: string, hot: HotState | null): void {
+  if (!hot?.share || !hot.requests?.length) return;
+  const inj = readInjected(home, lid);
+  let changed = false;
+  for (const r of hot.requests) {
+    const s = inj.requests_seen?.[r.id];
+    if (!s?.shown || !SAFE_REQUESTS.has(r.type) || requestState(r, s) !== "pending") continue;
+    spoolWrite(home, { type: "request_answer", local_id: lid, request_id: r.id, answer: "accepted", auto: true, ts: new Date().toISOString() });
+    s.auto = true;
+    changed = true;
+  }
+  if (changed) writeInjected(home, lid, inj);
+}
+
 // ---------- SessionStart ----------
 export function sessionStart(home: string, harness: Harness, input: HookInput, env: NodeJS.ProcessEnv): HookOutput {
   const sid = input.session_id;
@@ -274,6 +349,10 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
         }
       }
     }
+  }
+  if (source === "compact" || source === "clear") {
+    const again = pendingRequestContext(hot, inj, hot?.goal?.id ?? null);
+    if (again.length) context = [context, ...again].filter(Boolean).join("\n");
   }
   const notices = takeNotices(hot, inj);
   if (notices) messages.push(notices);
@@ -406,7 +485,9 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   if (kind || sameAsInjected(inj, goal, hot.share.state)) {
     reportApplied(home, lid, inj, [...hot.pending_directives, ...applied]);
   }
-  const notices = [takeNotices(hot, inj), takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
+  const req = requestParts(hot, inj, hot.share.state === "shared" && goal ? goal.id : null);
+  if (req.context.length) context = [context, ...req.context].filter(Boolean).join("\n");
+  const notices = [takeNotices(hot, inj), ...req.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   writeInjected(home, lid, inj);
   if (!context && !notices) return null;
   const out: Record<string, unknown> = {};
@@ -417,7 +498,8 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
 
 // ---------- Stop ----------
 /**
- * Local drift check (D5): for a shared session bound to a goal with limits, compare the turn's last reply with each
+ * Auto-accepts the safe requests delivered this turn (spooled for the sync, which posts the receipt). Then the
+ * local drift check (D5): for a shared session bound to a goal with limits, compare the turn's last reply with each
  * limit not yet noticed and leave a notice for the next prompt. Prints nothing (a Stop hook's output would continue the
  * turn), uploads nothing, keeps no reply text.
  */
@@ -426,6 +508,7 @@ export function stop(home: string, harness: Harness, input: HookInput): void {
   if (!sid) return;
   const lid = localId(harness, sid);
   const hot = readHot(home, lid);
+  autoAccept(home, lid, hot);
   if (hot?.share?.state !== "shared" || !hot.goal) return;
   const limits = Array.isArray(hot.goal.limits) ? hot.goal.limits : [];
   if (!limits.length || !driftOn(home)) return;
@@ -457,11 +540,30 @@ const READ_ONLY: Record<Harness, Set<string>> = {
 export const DENY_REASON =
   "Align: this session was stopped from its Align workspace. Tools are blocked until it is resumed there. Tell the user and wait for instructions.";
 
-export function denyOutput(): Record<string, unknown> {
-  return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: DENY_REASON } };
+export function denyOutput(reason = DENY_REASON): Record<string, unknown> {
+  return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
 }
 
-/** Fail closed: a latch file that exists but cannot be read denies. Otherwise, deliver a pending goal change. */
+/** The goal-hold latch: a hold file that names a hold, or one that can't be read, blocks every tool (read-only ones too). */
+function holdDeny(home: string, lid: string): HookOutput {
+  const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
+  if (h.state === "absent") return null;
+  if (h.state === "ok" && h.value && Array.isArray(h.value.holds) && !h.value.holds.length) return null;
+  return denyOutput(holdReason(h.state === "ok" ? h.value : null));
+}
+
+/** The deny a crashed PreToolUse emits: the stop wording unless only a goal hold is known for this session. */
+export function failureDeny(home: string, harness: Harness, sessionId: string | null): Record<string, unknown> {
+  if (!sessionId) return denyOutput();
+  const lid = localId(harness, sessionId);
+  if (!fs.existsSync(layout.latch(home, lid)) && fs.existsSync(layout.hold(home, lid))) return denyOutput(holdReason(readJson<HoldLatch>(layout.hold(home, lid))));
+  return denyOutput();
+}
+
+/**
+ * Fail closed: a latch file that exists but cannot be read denies. The stop latch and the goal-hold latch are
+ * independent; a tool runs only when neither blocks it. Otherwise, deliver a pending goal change.
+ */
 export function preToolUse(home: string, harness: Harness, input: HookInput): HookOutput {
   const sid = input.session_id;
   if (!sid) return anyLatch(home) ? denyOutput() : null;
@@ -472,6 +574,8 @@ export function preToolUse(home: string, harness: Harness, input: HookInput): Ho
     (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
     (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
   if (!allowed) return denyOutput();
+  const held = holdDeny(home, lid);
+  if (held) return held;
   const sib = siblingEdits(home, harness, lid, input);
   if (sib.held) return sib.held;
   // Context from a subagent's tool call reaches only that subagent, so the delta waits for the main agent.
@@ -583,16 +687,20 @@ function midTurnDelta(home: string, lid: string): HookOutput {
   }
 }
 
-/** After a crash or the deadline in PreToolUse: deny when this session's latch exists or can't be ruled out. With no
- *  known session (unreadable input), any latch on the machine denies. Another session's latch never blocks this one. */
+/** After a crash or the deadline in PreToolUse: deny when this session's stop latch or goal hold exists or can't be
+ *  ruled out. With no known session (unreadable input), any latch on the machine denies. Another session's latch
+ *  never blocks this one. */
 export function latchedOnFailure(home: string, harness: Harness, sessionId: string | null): boolean {
   if (!sessionId) return anyLatch(home);
-  try {
-    fs.accessSync(layout.latch(home, localId(harness, sessionId)));
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code !== "ENOENT";
-  }
+  const lid = localId(harness, sessionId);
+  return [layout.latch(home, lid), layout.hold(home, lid)].some((f) => {
+    try {
+      fs.accessSync(f);
+      return true;
+    } catch (e) {
+      return (e as NodeJS.ErrnoException).code !== "ENOENT";
+    }
+  });
 }
 
 export function anyLatch(home: string): boolean {
@@ -604,6 +712,37 @@ export function anyLatch(home: string): boolean {
 }
 
 // ---------- ::align commands ----------
+const STATE_LABELS: Record<RequestState, string> = {
+  pending: "waiting for your answer",
+  accepted: "accepted by you",
+  auto_accepted: "done by the agent",
+  declined: "declined",
+  withdrawn: "withdrawn",
+};
+const stateLabel = (s: RequestState) => STATE_LABELS[s] || s;
+
+/** One line about a request for people (never model context). */
+function requestLine(r: HotRequest): string {
+  const what =
+    r.type === "switch_goal" ? `switch to "${clean(r.target_goal?.title, 60)}"` : r.type === "checkpoint" ? "checkpoint" : `replan toward "${clean(r.goal?.title, 60)}" v${Math.trunc(Number(r.goal?.version) || 0)}`;
+  return `${what}, from ${clean(r.sender?.name, 50) || "someone"}${r.note ? ` (note: "${clean(r.note, 80)}")` : ""}`;
+}
+
+/** Requests still open for an answer: waiting, or done by the agent and still declinable. */
+function openRequests(hot: HotState | null, inj: InjectedState): HotRequest[] {
+  return (hot?.requests || []).filter((r) => {
+    const st = requestState(r, inj.requests_seen?.[r.id]);
+    return st === "pending" || st === "auto_accepted";
+  });
+}
+
+function holdLine(home: string, lid: string): string {
+  const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
+  if (h.state === "absent" || (h.state === "ok" && Array.isArray(h.value?.holds) && !h.value.holds.length)) return "  Goal hold: off";
+  if (h.state !== "ok" || !Array.isArray(h.value?.holds)) return "  Goal hold: unreadable (tools blocked)";
+  return h.value.holds.map((x) => `  Goal hold: on goal "${clean(x.goal_title, 80)}" by ${clean(x.by, 50) || "someone"} (all tools blocked)`).join("\n");
+}
+
 function lastSync(home: string): string {
   const d = readJson<{ at: string }>(layout.lastSync(home));
   return d ? `${Math.round((Date.now() - Date.parse(d.at)) / 1000)} s ago` : "never";
@@ -648,6 +787,14 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         hot?.pending_binding ? `  Next prompt switches to: ${hot.pending_binding.goal ? hot.pending_binding.goal.title : "no goal"}` : "",
         `  In context: ${inj.goal_id ? `goal v${inj.goal_version}` : "nothing from Align"}`,
         `  Stop latch: ${latch.state === "absent" ? "off" : latch.state === "ok" && latch.value.stopped ? "on (tools blocked)" : "unreadable (tools blocked)"}`,
+        holdLine(home, lid),
+        ...openRequests(hot, inj).map((r) =>
+          requestState(r, inj.requests_seen?.[r.id]) === "pending"
+            ? `  Request:  ${requestLine(r)}; \`::align accept ${requestShortId(r.id)}\` or \`::align decline ${requestShortId(r.id)}\``
+            : r.type === "replan"
+              ? `  Request:  ${requestLine(r)}; plan drafted by the agent, \`::align accept ${requestShortId(r.id)}\` to agree or \`::align decline ${requestShortId(r.id)}\``
+              : `  Request:  ${requestLine(r)}; done by the agent, \`::align decline ${requestShortId(r.id)}\` to decline it`,
+        ),
         `  Last sync: ${lastSync(home)}`,
         hot?.goal?.limits?.length ? `  Limits:   ${hot.goal.limits.length} on this goal; drift notice ${driftOn(home) ? "on" : "off"} (\`align config drift on|off\`)` : "",
         (() => {
@@ -658,6 +805,38 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         })(),
       ];
       return lines.filter(Boolean).join("\n");
+    }
+    case "requests": {
+      const list = (hot?.requests || []).slice(-10);
+      if (!list.length) return "Align: no requests for this session.";
+      const inj = readInjected(home, lid);
+      return [
+        "Align requests for this session (sent by people who can approve its goal):",
+        ...list.map((r) => `  ${requestShortId(r.id)} ${requestLine(r)} [${stateLabel(requestState(r, inj.requests_seen?.[r.id]))}]`),
+        "Answer with `::align accept <id>` or `::align decline <id>`.",
+      ].join("\n");
+    }
+    case "accept":
+    case "decline": {
+      const inj = readInjected(home, lid);
+      const answer = verb === "accept" ? "accepted" : "declined";
+      const open = (hot?.requests || []).filter((r) => {
+        const st = requestState(r, inj.requests_seen?.[r.id]);
+        return st === "pending" || (st === "auto_accepted" && (answer === "declined" || r.type === "replan"));
+      });
+      const ref = arg.toLowerCase().replace(/^rq_/, "");
+      const hits = ref ? open.filter((r) => r.id.toLowerCase().replace(/^rq_/, "").startsWith(ref)) : open;
+      if (!hits.length) return ref ? `Align: no open request matches "${arg}". Type \`::align requests\` to list them.` : "Align: no request is waiting for an answer.";
+      if (hits.length > 1) return `Align: ${hits.length} requests match; use one of the ids: ${hits.map((r) => requestShortId(r.id)).join(", ")}.`;
+      const r = hits[0];
+      spoolWrite(home, { type: "request_answer", local_id: lid, request_id: r.id, answer, auto: false, ts });
+      const seen = (inj.requests_seen = inj.requests_seen || {});
+      seen[r.id] = { ...(seen[r.id] || {}), answer };
+      writeInjected(home, lid, inj);
+      const who = clean(r.sender?.name, 50) || "the sender";
+      if (answer === "declined") return `Align: you declined ${who}'s request; ${who} will see that.${seen[r.id].shown ? " The agent hears it at your next prompt." : ""}`;
+      if (r.type === "switch_goal") return `Align: you accepted ${who}'s request. From your next prompt this session counts toward "${clean(r.target_goal?.title, 100)}".`;
+      return `Align: you accepted ${who}'s request; ${who} will see that. The agent hears it at your next prompt.`;
     }
     case "goals": {
       const feed = feedFor(home, hot);
@@ -754,6 +933,6 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       return podReport(home, lid, hot.share.workspace_id, hot.goal.id, cwd, 1500);
     }
     default:
-      return "Align commands: `::align status`, `::align goals`, `::align share [--dir] [goal]`, `::align bind <goal>`, `::align unshare [--dir]`, `::align task <label>`, `::align claim <file>`, `::align team`. They stay local and never reach the model.";
+      return "Align commands: `::align status`, `::align goals`, `::align share [--dir] [goal]`, `::align bind <goal>`, `::align unshare [--dir]`, `::align task <label>`, `::align claim <file>`, `::align team`, `::align requests`, `::align accept|decline <id>`. They stay local and never reach the model.";
   }
 }

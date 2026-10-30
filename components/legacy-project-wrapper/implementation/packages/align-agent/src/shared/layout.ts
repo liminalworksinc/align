@@ -49,6 +49,8 @@ export const layout = {
   injected: (h: string, lid: string) => path.join(h, "injected", `${safe(lid)}.json`),
   latchDir: (h: string) => path.join(h, "latch"),
   latch: (h: string, lid: string) => path.join(h, "latch", `${safe(lid)}.json`),
+  /** Goal holds on a session (REQ-002), a latch independent of the stop latch. */
+  hold: (h: string, lid: string) => path.join(h, "latch", `${safe(lid)}.hold.json`),
   spool: (h: string) => path.join(h, "spool"),
   activityDir: (h: string) => path.join(h, "activity"),
   activity: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.jsonl`),

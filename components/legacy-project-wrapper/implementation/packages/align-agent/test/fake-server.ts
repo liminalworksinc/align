@@ -2,7 +2,8 @@
 // device flow (with slow_down), key-bound rotating refresh (signature + reuse revocation), /me, goal feed with ETag,
 // session/epoch/usage idempotency (and epoch_overlap: an epoch may not start before the session, the open epoch or the
 // last closed one), stop-sharing, delete, directives (poll + SSE with Last-Event-ID) and receipts, goal limits (PORT-002)
-// and the asks feed with ETag (PORT-003's `GET /asks`).
+// and the asks feed with ETag (PORT-003's `GET /asks`), requests and goal holds (REQ-001's directive wire: `request`,
+// `hold` and `release` directives; `accepted`/`declined` receipts with `auto_accepted`).
 import crypto from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -35,7 +36,29 @@ export interface FakeDirective {
   session_keys: string[];
   goal: Goal | null;
   binding: { goal_id: string | null; effective: string; cause: string } | null;
+  request?: FakeRequestWire;
+  hold?: Record<string, unknown>;
   created_at: string;
+}
+
+/** `request` of a `kind: "request"` directive, as REQ-001 specifies it. */
+export interface FakeRequestWire {
+  id: string;
+  type: "replan" | "checkpoint" | "switch_goal";
+  cancelled: boolean;
+  goal: { id: string; title: string; version: number };
+  target_goal: { id: string; title: string; version: number } | null;
+  sender: { id: string; name: string };
+  note: string | null;
+  created_at: string;
+}
+
+/** A request and its per-session target states (`v2_request_targets`). */
+export interface FakeRequest {
+  wire: FakeRequestWire;
+  ws: string;
+  directive_id: string;
+  targets: Map<string, { state: "sent" | "received" | "accepted" | "declined" | "expired"; auto_accepted: boolean }>;
 }
 
 export interface FakeOptions {
@@ -76,7 +99,10 @@ export class FakeServer {
   asks = new Map<string, (Ask & { can: Record<string, boolean> })[]>();
   usage = new Map<string, any>();
   directives: FakeDirective[] = [];
-  receipts: { id: string; session_key: string; state: string; at: string }[] = [];
+  receipts: { id: string; session_key: string; state: string; at: string; auto_accepted?: boolean }[] = [];
+  requests = new Map<string, FakeRequest>();
+  /** Goal holds by `${ws}/${goal}` (`v2_goal_holds`). */
+  holds = new Map<string, { held_by: { id: string; name: string }; reason: string | null; at: string; directive_id: string }>();
   refreshes = 0;
   private streams = new Set<{ res: http.ServerResponse; device: string }>();
   private seq = 0;
@@ -173,6 +199,58 @@ export class FakeServer {
       if (this.ownsAny(s.device, full.session_keys)) s.res.write(`id: ${full.seq}\nevent: directive\ndata: ${JSON.stringify(full)}\n\n`);
     }
     return full;
+  }
+
+  private goalRef(ws: string, id: string): { id: string; title: string; version: number } {
+    const g = (this.goals.get(ws) || []).find((x) => x.id === id)!;
+    return { id: g.id, title: g.title, version: g.version };
+  }
+
+  /** POST …/goals/{goal}/requests: one `request` directive to the target sessions. */
+  sendRequest(
+    ws: string,
+    o: { type: FakeRequestWire["type"]; goal_id: string; session_keys: string[]; target_goal_id?: string; note?: string | null; sender?: { id: string; name: string } },
+  ): FakeRequest {
+    const wire: FakeRequestWire = {
+      id: `rq_${Array.from(crypto.randomBytes(24), (b) => "abcdefghijklmnopqrstuvwxyz234567"[b % 32]).join("")}`,
+      type: o.type,
+      cancelled: false,
+      goal: this.goalRef(ws, o.goal_id),
+      target_goal: o.target_goal_id ? this.goalRef(ws, o.target_goal_id) : null,
+      sender: o.sender || { id: "u_dana", name: "Dana Lee" },
+      note: o.note ?? null,
+      created_at: new Date().toISOString(),
+    };
+    const d = this.pushDirective({ ws, kind: "request", session_keys: o.session_keys, goal: null, binding: null, request: wire });
+    const req: FakeRequest = { wire, ws, directive_id: d.id, targets: new Map(o.session_keys.map((k) => [k, { state: "sent" as const, auto_accepted: false }])) };
+    this.requests.set(wire.id, req);
+    return req;
+  }
+
+  /** DELETE …/requests/{id}: a `request` directive with `cancelled: true` to the targets still sent/received; they expire. */
+  cancelRequest(id: string): FakeDirective | null {
+    const req = this.requests.get(id)!;
+    const open = [...req.targets].filter(([, t]) => t.state === "sent" || t.state === "received").map(([k]) => k);
+    for (const k of open) req.targets.get(k)!.state = "expired";
+    if (!open.length) return null;
+    return this.pushDirective({ ws: req.ws, kind: "request", session_keys: open, goal: null, binding: null, request: { ...req.wire, cancelled: true } });
+  }
+
+  /** PUT …/goals/{goal}/hold: idempotent; a `hold` directive to every session on the goal. */
+  holdGoal(ws: string, goalId: string, session_keys: string[], reason: string | null = null, by = { id: "u_dana", name: "Dana Lee" }): FakeDirective | null {
+    if (this.holds.has(`${ws}/${goalId}`)) return null;
+    const g = this.goalRef(ws, goalId);
+    const at = new Date().toISOString();
+    const d = this.pushDirective({ ws, kind: "hold", session_keys, goal: null, binding: null, hold: { goal: { id: g.id, title: g.title }, held_by: by, reason, at } });
+    this.holds.set(`${ws}/${goalId}`, { held_by: by, reason, at, directive_id: d.id });
+    return d;
+  }
+
+  /** DELETE …/goals/{goal}/hold: a `release` directive. */
+  releaseGoal(ws: string, goalId: string, session_keys: string[], by = { id: "u_dana", name: "Dana Lee" }): FakeDirective {
+    this.holds.delete(`${ws}/${goalId}`);
+    const g = this.goalRef(ws, goalId);
+    return this.pushDirective({ ws, kind: "release", session_keys, goal: null, binding: null, hold: { goal: { id: g.id, title: g.title }, released_by: by, at: new Date().toISOString() } });
   }
 
   private ownsAny(device: string, keys: string[]): boolean {
@@ -316,6 +394,11 @@ export class FakeServer {
         }
         if (sub === "epochs") {
           if (this.epochs.has(body.epoch_id)) return send(200, this.epochs.get(body.epoch_id));
+          // As the server: "manual", or a directive that was sent to this session.
+          const cause = String(body.cause || "");
+          if (cause !== "manual" && !(cause.startsWith("directive:") && this.directives.some((d) => d.id === cause.slice(10) && d.session_keys.includes(key)))) {
+            return send(400, { error: "bad_request", message: "cause names a directive that was not sent to this session" });
+          }
           const goal = body.goal_id ? (this.goals.get(ws) || []).find((g) => g.id === body.goal_id) : null;
           if (body.goal_id && (!goal || !goal.bindable)) return send(403, { error: "alignment_required" });
           // No backdating: not before the session's start, the open epoch's start, or the last epoch's end.
@@ -396,8 +479,23 @@ export class FakeServer {
       if (m && req.method === "POST") {
         const d = this.directives.find((x) => x.id === m![1]);
         if (!d || !d.session_keys.includes(body.session_key) || this.sessions.get(body.session_key)?.device !== dev.id) return send(404, { error: "not_found" });
-        const fresh = !this.receipts.some((r) => r.id === d.id && r.session_key === body.session_key && r.state === body.state);
-        if (fresh) this.receipts.push({ id: d.id, session_key: body.session_key, state: body.state, at: body.at });
+        const states = d.kind === "request" ? ["received", "accepted", "declined"] : ["received", "applied", "enforced"];
+        if (!states.includes(body.state)) return send(400, { error: "bad_request", message: "state" });
+        const auto = body.auto_accepted === true;
+        if (body.auto_accepted !== undefined && (typeof body.auto_accepted !== "boolean" || body.state !== "accepted")) return send(400, { error: "bad_request", message: "auto_accepted" });
+        const req = d.kind === "request" && d.request && !d.request.cancelled ? this.requests.get(d.request.id) : null;
+        if (auto && req?.wire.type === "switch_goal") return send(400, { error: "bad_request", message: "a switch_goal is never auto-accepted" });
+        const fresh = !this.receipts.some((r) => r.id === d.id && r.session_key === body.session_key && r.state === body.state && !!r.auto_accepted === auto);
+        if (fresh) this.receipts.push({ id: d.id, session_key: body.session_key, state: body.state, at: body.at, ...(auto ? { auto_accepted: true } : {}) });
+        const t = req?.targets.get(body.session_key);
+        if (t && t.state !== "expired") {
+          // A later decline overrides an auto-accept; nothing moves an answered target back to received.
+          if (body.state === "received" && t.state === "sent") t.state = "received";
+          else if (body.state === "accepted" && (t.state === "sent" || t.state === "received")) Object.assign(t, { state: "accepted", auto_accepted: auto });
+          // The developer agreeing to a replan the agent drafted: accepted by the developer from then on.
+          else if (body.state === "accepted" && !auto && t.state === "accepted" && t.auto_accepted) t.auto_accepted = false;
+          else if (body.state === "declined" && (t.state !== "accepted" || t.auto_accepted)) Object.assign(t, { state: "declined", auto_accepted: false });
+        }
         return send(200, { fresh });
       }
       return send(404, { error: "not_found" });

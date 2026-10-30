@@ -1,12 +1,12 @@
 // Hook entry point: `node <ALIGN_HOME>/bin/current/hook.js <claude|codex> <Event>`.
 // Contract: offline, local files only, internal 300 ms deadline, exit 0 silently on any failure, EXCEPT PreToolUse,
-// which denies when a stop latch exists for the session (or cannot be ruled out) and fails closed. Before the input is
+// which denies when a stop latch or a goal hold exists for the session (or cannot be ruled out) and fails closed. Before the input is
 // read, any latch on the machine denies; after, only this session's.
 import fs from "node:fs";
 import { alignHomeForHook } from "./shared/layout.ts";
 import type { Harness } from "./shared/types.ts";
 import { kickSync } from "./hooks/autostart.ts";
-import { denyOutput, latchedOnFailure, preToolUse, sessionStart, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
+import { denyOutput, failureDeny, latchedOnFailure, preToolUse, sessionStart, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
 
 const DEADLINE_MS = Number(process.env.ALIGN_HOOK_DEADLINE_MS || 300);
 const MAX_INPUT = 8 * 1024 * 1024;
@@ -35,7 +35,7 @@ function emit(out: HookOutput): never {
 
 function failure(): never {
   if (decided !== undefined) emit(decided);
-  // Fail open everywhere except the stop latch.
+  // Fail open everywhere except the stop latch and goal holds.
   if (event === "PreToolUse" && !settled) {
     let latched = true;
     try {
@@ -43,7 +43,15 @@ function failure(): never {
     } catch {
       latched = true;
     }
-    if (latched) emit(denyOutput());
+    if (latched) {
+      let out: HookOutput = null;
+      try {
+        out = harness ? failureDeny(home, harness, sessionId) : null;
+      } catch {
+        /* the stop wording below */
+      }
+      emit(out || denyOutput());
+    }
   }
   emit(null);
 }

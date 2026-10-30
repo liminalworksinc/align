@@ -1,12 +1,14 @@
 // Directive intake: polled by cursor from the hook-started sync. A directive is accepted only for session keys this device owns, written durably, projected into hot files, and
-// acknowledged with a `received` receipt (plus `enforced` once a stop latch is set).
+// acknowledged with a `received` receipt (plus `enforced` once a stop latch or a goal hold is set, `applied` once a
+// resume or release lifts it). Requests (REQ-002) get `accepted` or `declined` later, when they are answered.
 import type { Ctx } from "./context.ts";
 import { api } from "./api.ts";
 import { bumpGap, kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
 import { enqueue } from "./share.ts";
-import type { Goal } from "./shared/types.ts";
+import type { Goal, WireHold, WireRequest } from "./shared/types.ts";
 import { loadFeed } from "./goals.ts";
+import { applyHold, applyRequest, validRequest } from "./requests.ts";
 
 /** Workspaces whose feed should be refreshed because a directive referenced a goal we have not cached. */
 const refreshNeeded = new Set<string>();
@@ -15,10 +17,14 @@ export interface Directive {
   id: string;
   seq: number;
   ws: string;
-  kind: "goal_version" | "binding_changed" | "binding_suspended" | "stop" | "resume";
+  kind: "goal_version" | "binding_changed" | "binding_suspended" | "stop" | "resume" | "request" | "hold" | "release";
   session_keys: string[];
   goal: Goal | null;
   binding: { goal_id: string | null; effective: string; cause: string } | null;
+  /** kind "request" only. */
+  request?: WireRequest;
+  /** kind "hold" and "release" only. */
+  hold?: WireHold;
   created_at: string;
 }
 
@@ -54,6 +60,7 @@ export function handleDirective(ctx: Ctx, d: Directive): HandleResult {
       | undefined;
     if (s && (!d.ws || s.workspace_id === d.ws)) owned.push(s);
   }
+  if (d.kind === "request" && !validRequest(d.request)) bumpGap(ctx.db, "request_malformed");
   const at = nowIso();
   tx(ctx.db, () => {
     ctx.db.prepare("INSERT INTO directives(id, seq, kind, json, received_at) VALUES(?,?,?,?,?)").run(d.id, seq, d.kind, JSON.stringify(d), at);
@@ -142,6 +149,11 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
         .run(lid, d.id, seq, at);
       return "applied";
     }
+    case "request":
+      return share ? applyRequest(ctx, d.id, d.request, lid, at) : "stale";
+    case "hold":
+    case "release":
+      return applyHold(ctx, d.id, d.hold, d.kind === "hold", lid, seq, at);
     default:
       return "stale";
   }

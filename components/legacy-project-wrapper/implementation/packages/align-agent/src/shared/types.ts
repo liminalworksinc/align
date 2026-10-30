@@ -82,7 +82,51 @@ export interface HotState {
   notices: { id: string; text: string }[];
   /** Parents and dependencies of the bound goal, from the cached feed. */
   context_goals?: ContextGoal[];
+  /** Requests sent to this session (REQ-002): pending ones, and recently answered or withdrawn ones the hooks still tell. */
+  requests?: HotRequest[];
   updated_at: string;
+}
+
+/** The request types someone with authority over a goal may send to its sessions (REQ-002). */
+export type RequestType = "replan" | "checkpoint" | "switch_goal";
+
+/** `request` of a `kind: "request"` directive, as the server sends it. */
+export interface WireRequest {
+  id: string;
+  type: RequestType;
+  cancelled: boolean;
+  goal: { id: string; title: string; version: number };
+  target_goal: { id: string; title: string; version: number } | null;
+  /** `role` is optional: "owner" when a workspace owner outside the goal's approval set sent it. */
+  sender: { id: string; name: string; role?: string };
+  note: string | null;
+  created_at: string;
+}
+
+/** `hold` of a `kind: "hold"` or `kind: "release"` directive. */
+export interface WireHold {
+  goal: { id: string; title: string };
+  held_by?: { id: string; name: string };
+  released_by?: { id: string; name: string };
+  reason?: string | null;
+  at: string;
+}
+
+/**
+ * A request's local state for one session: `pending` until answered; `accepted` or `declined` by the developer;
+ * `auto_accepted` when the agent did a safe request (checkpoint, replan draft) by itself; `withdrawn` by its sender.
+ */
+export type RequestState = "pending" | "accepted" | "auto_accepted" | "declined" | "withdrawn";
+
+export interface HotRequest extends Omit<WireRequest, "cancelled"> {
+  state: RequestState;
+  answered_at: string | null;
+}
+
+/** latch/<lid>.hold.json: the goal holds on this session. Any hold, or a file that can't be read, blocks every tool. */
+export interface HoldLatch {
+  v: 1;
+  holds: { goal_id: string; goal_title: string; by: string; reason: string | null; directive_id: string; seq: number; at: string }[];
 }
 
 export interface InjectedState {
@@ -109,6 +153,12 @@ export interface InjectedState {
   asks_seen?: { team_id: string; ids: string[] };
   /** Limit ids a local drift notice was already shown for (D5): once per limit per session. */
   drift_shown?: string[];
+  /**
+   * Requests (REQ-002) by id: `shown` once the user notice and model context went out, `told` the answer last put into
+   * context, `answer` the developer's `::align accept|decline` before the sync has recorded it, `auto` once the Stop hook
+   * auto-accepted a safe request.
+   */
+  requests_seen?: Record<string, { shown?: boolean; told?: string; answer?: "accepted" | "declined"; auto?: boolean }>;
   at: string;
 }
 
@@ -219,6 +269,15 @@ export type SpoolRecord =
       ts: string;
     }
   | { type: "applied"; local_id: string; directive_ids: string[]; ts: string }
+  | {
+      /** The developer's `::align accept|decline`, or the Stop hook auto-accepting a safe request (`auto`). */
+      type: "request_answer";
+      local_id: string;
+      request_id: string;
+      answer: "accepted" | "declined";
+      auto: boolean;
+      ts: string;
+    }
   | {
       type: "command";
       harness: Harness;

@@ -146,6 +146,28 @@ CREATE TABLE IF NOT EXISTS latches (
   seq INTEGER NOT NULL,
   at TEXT NOT NULL
 );
+-- REQ-002: requests sent to a session (one row per request and session) and goal holds on a session.
+CREATE TABLE IF NOT EXISTS goal_requests (
+  request_id TEXT NOT NULL,
+  local_id TEXT NOT NULL,
+  directive_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  json TEXT NOT NULL,
+  state TEXT NOT NULL,
+  answered_at TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(request_id, local_id)
+);
+CREATE TABLE IF NOT EXISTS holds (
+  local_id TEXT NOT NULL,
+  goal_id TEXT NOT NULL,
+  held INTEGER NOT NULL,
+  json TEXT NOT NULL,
+  directive_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  at TEXT NOT NULL,
+  PRIMARY KEY(local_id, goal_id)
+);
 CREATE UNIQUE INDEX IF NOT EXISTS shares_by_key ON shares(session_key);
 CREATE TABLE IF NOT EXISTS repo_aliases (
   workspace_id TEXT NOT NULL,

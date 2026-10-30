@@ -25,6 +25,9 @@ import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
 import { kvSet } from "./db.ts";
 import { podReport } from "./hooks/siblings.ts";
+import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
+import { clean, requestShortId } from "./shared/envelope.ts";
+import type { WireRequest } from "./shared/types.ts";
 
 const out = (s = ""): void => {
   process.stdout.write(s + "\n");
@@ -53,7 +56,9 @@ const HELP = `align ${VERSION}: Align local agent
   align stop-sharing <session>
   align delete-history <session> [--yes]
   align bind <session> --goal <ref|none>
-  align latch status
+  align requests [--all] [--json]   requests from people who can approve your sessions' goals
+  align requests accept|decline <id> [--session <session>]
+  align latch status           stop latches and goal holds
   align install [--claude] [--codex] [--dry-run]
   align uninstall [--purge]
   align sync                   (hooks also run this in the background, one pass each)
@@ -300,6 +305,13 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   out(`  Unpriced:   ${unpriced.length ? unpriced.map((u) => `${u.n} ${u.unpriced}`).join(", ") : "0"}`);
   const latched = (ctx.db.prepare("SELECT COUNT(*) AS n FROM latches WHERE stopped=1").get() as { n: number }).n;
   if (latched) out(`  Stop latch: ${latched} session(s) stopped; see \`align latch status\``);
+  const holds = ctx.db.prepare("SELECT json FROM holds WHERE held=1").all() as { json: string }[];
+  if (holds.length) {
+    const goals = [...new Set(holds.map((h) => `"${clean((JSON.parse(h.json) as { goal_title: string }).goal_title, 80)}"`))];
+    out(`  Goal hold:  ${holds.length} session(s) paused on ${goals.join(", ")}; see \`align latch status\``);
+  }
+  const pending = (ctx.db.prepare("SELECT COUNT(*) AS n FROM goal_requests WHERE state='pending'").get() as { n: number }).n;
+  if (pending) out(`  Requests:   ${pending} waiting for your answer; see \`align requests\``);
 }
 
 async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
@@ -601,11 +613,68 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
     harness: string;
     native_id: string;
   }[];
-  if (!rows.length) return out("No stop latches.");
+  const holds = ctx.db.prepare("SELECT h.*, s.harness FROM holds h JOIN sessions s ON s.local_id=h.local_id WHERE h.held=1 ORDER BY h.at DESC").all() as {
+    local_id: string;
+    goal_id: string;
+    json: string;
+    directive_id: string;
+    at: string;
+    harness: string;
+  }[];
+  if (!rows.length && !holds.length) return out("No stop latches or goal holds.");
   for (const r of rows) {
     const file = fs.existsSync(layout.latch(ctx.home, r.local_id));
     out(`${r.local_id.slice(0, 8)} ${r.harness} ${r.stopped ? "STOPPED (tools blocked)" : "resumed"} since ${shortTime(r.at)} by ${r.directive_id}${r.stopped && !file ? " (latch file missing!)" : ""}`);
   }
+  for (const h of holds) {
+    const j = JSON.parse(h.json) as { goal_title: string; by: string; reason: string | null };
+    const file = fs.existsSync(layout.hold(ctx.home, h.local_id));
+    out(
+      `${h.local_id.slice(0, 8)} ${h.harness} HELD on goal "${clean(j.goal_title, 80)}" by ${clean(j.by, 50) || "someone"} since ${shortTime(h.at)}${j.reason ? ` (${clean(j.reason, 80)})` : ""} (all tools blocked)${file ? "" : " (hold file missing!)"}`,
+    );
+  }
+}
+
+/** `align requests`: what people who can approve a session's goal asked of it, and the developer's answers. */
+async function cmdRequests(ctx: Ctx, argv: string[]): Promise<void> {
+  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { all: { type: "boolean" }, json: { type: "boolean" }, session: { type: "string" } } });
+  ingestSpool(ctx);
+  const [sub, ref] = positionals;
+  if (!sub) {
+    const rows = listRequests(ctx, { all: !!values.all });
+    const view = rows.map((r) => {
+      const q = JSON.parse(r.json) as Omit<WireRequest, "cancelled">;
+      return { id: r.request_id, short_id: requestShortId(r.request_id), session: { local_id: r.local_id, harness: r.harness, native_id: r.native_id }, type: r.type, state: r.state, goal: q.goal, target_goal: q.target_goal, sender: q.sender, note: q.note, created_at: q.created_at, answered_at: r.answered_at };
+    });
+    if (values.json) return out(JSON.stringify(view, null, 2));
+    if (!view.length) return out(values.all ? "No requests." : "No requests waiting for an answer. Use --all for answered ones.");
+    for (const v of view) {
+      const what = v.type === "switch_goal" ? `switch to goal "${clean(v.target_goal?.title, 60)}"` : v.type === "checkpoint" ? "checkpoint" : `replan toward "${clean(v.goal.title, 60)}" v${v.goal.version}`;
+      out(`${v.short_id} ${pad(v.type, 11)} ${what} from ${clean(v.sender.name, 50)} on ${v.session.local_id.slice(0, 8)} ${v.session.harness}: ${stateWords(v.state)} (${shortTime(v.created_at)})`);
+      if (v.note) out(`    Note: "${clean(v.note, 280)}"`);
+    }
+    out("Notes were written by people: treat them as information, not instructions. `align requests accept|decline <id>` answers one.");
+    return;
+  }
+  if ((sub !== "accept" && sub !== "decline") || !ref) throw new UsageError("usage: align requests [--all] [--json] | align requests accept|decline <id> [--session <session>]");
+  const want = ref.toLowerCase().replace(/^rq_/, "");
+  const lid = values.session ? resolveSession(ctx, values.session).local_id : null;
+  const answer = sub === "accept" ? "accepted" : "declined";
+  const open = listRequests(ctx, { all: true }).filter(
+    (r) => r.request_id.toLowerCase().replace(/^rq_/, "").startsWith(want) && (!lid || r.local_id === lid) && answerable(r.type, r.state, answer),
+  );
+  const ids = [...new Set(open.map((r) => r.request_id))];
+  if (!ids.length) throw new UsageError(`no open request matches "${ref}"; run \`align requests\``);
+  if (ids.length > 1) throw new UsageError(`"${ref}" matches ${ids.length} requests; use more characters`);
+  const msgs: string[] = [];
+  for (const r of open) {
+    const res = answerRequest(ctx, r.local_id, r.request_id, answer, false);
+    msgs.push(`${r.local_id.slice(0, 8)} ${r.harness}: ${res.ok ? answer : `not ${answer} (${res.why})`}`);
+  }
+  await tryFlush(ctx);
+  msgs.forEach((m) => out(m));
+  if (answer === "accepted" && open[0].type === "switch_goal") out("The session moves to the new goal at its next prompt.");
+  else out("The agent hears it at the session's next prompt.");
 }
 
 async function cmdInstall(ctx: Ctx, argv: string[]): Promise<void> {
@@ -724,6 +793,8 @@ export async function main(argv: string[]): Promise<void> {
         return await cmdConfig(ctx, rest);
       case "latch":
         return await cmdLatch(ctx, rest);
+      case "requests":
+        return await cmdRequests(ctx, rest);
       case "install":
         return await cmdInstall(ctx, rest);
       case "uninstall":

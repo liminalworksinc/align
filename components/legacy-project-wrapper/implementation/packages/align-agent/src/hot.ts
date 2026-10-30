@@ -5,7 +5,7 @@ import { getSession } from "./ledger.ts";
 import { layout } from "./shared/layout.ts";
 import { removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { contextGoals, snapshot } from "./shared/goaltree.ts";
-import type { GoalSnapshot, HotState, Latch, ShareState } from "./shared/types.ts";
+import type { GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, RequestState, ShareState } from "./shared/types.ts";
 
 export { snapshot };
 
@@ -35,6 +35,17 @@ export function getShare(ctx: Ctx, lid: string): ShareRow | null {
 }
 
 const CONTEXT_KINDS = new Set(["goal_version", "binding_changed", "binding_suspended"]);
+
+/** Answered and withdrawn requests stay in the hot file this long, so the hooks can still tell the session. */
+const REQUEST_KEEP_MS = 14 * 86_400_000;
+
+function hotRequests(ctx: Ctx, lid: string): HotRequest[] {
+  const since = new Date(Date.now() - REQUEST_KEEP_MS).toISOString();
+  const rows = ctx.db
+    .prepare("SELECT json, state, answered_at FROM goal_requests WHERE local_id=? AND (state='pending' OR created_at>=?) ORDER BY created_at DESC LIMIT 20")
+    .all(lid, since) as { json: string; state: RequestState; answered_at: string | null }[];
+  return rows.reverse().map((r) => ({ ...(JSON.parse(r.json) as Omit<HotRequest, "state" | "answered_at">), state: r.state, answered_at: r.answered_at }));
+}
 
 export function renderHot(ctx: Ctx, lid: string): HotState | null {
   const s = getSession(ctx.db, lid);
@@ -68,6 +79,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     pending_directives: live ? pendingDirs : [],
     notices,
     context_goals: live && live.goal_json ? contextGoals(ctx.home, live.workspace_id, (JSON.parse(live.goal_json) as GoalSnapshot).id) : [],
+    requests: live ? hotRequests(ctx, lid) : [],
     updated_at: new Date().toISOString(),
   };
   writeJsonAtomic(layout.hot(ctx.home, lid), hot);
@@ -77,6 +89,26 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     writeJsonAtomic(layout.latch(ctx.home, lid), l);
   } else {
     removeFile(layout.latch(ctx.home, lid));
+  }
+  // Goal holds: a latch of their own, so a stop and a hold are set and lifted independently.
+  const holds = ctx.db.prepare("SELECT goal_id, json, directive_id, seq, at FROM holds WHERE local_id=? AND held=1 ORDER BY seq").all(lid) as {
+    goal_id: string;
+    json: string;
+    directive_id: string;
+    seq: number;
+    at: string;
+  }[];
+  if (holds.length) {
+    const h: HoldLatch = {
+      v: 1,
+      holds: holds.map((r) => {
+        const j = JSON.parse(r.json) as { goal_title: string; by: string; reason: string | null };
+        return { goal_id: r.goal_id, goal_title: j.goal_title, by: j.by, reason: j.reason, directive_id: r.directive_id, seq: r.seq, at: r.at };
+      }),
+    };
+    writeJsonAtomic(layout.hold(ctx.home, lid), h);
+  } else {
+    removeFile(layout.hold(ctx.home, lid));
   }
   return hot;
 }

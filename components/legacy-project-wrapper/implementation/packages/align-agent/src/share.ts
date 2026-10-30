@@ -150,6 +150,7 @@ export function stopSharing(ctx: Ctx, lid: string): void {
     ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=? WHERE local_id=?").run(nowIso(), lid);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
+    ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
     enqueue(ctx, lid, "stop_sharing", { ws: share.workspace_id, session_key: share.session_key });
   });
   renderHot(ctx, lid);
@@ -162,6 +163,7 @@ export function deleteHistory(ctx: Ctx, lid: string): void {
     ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=COALESCE(stopped_at, ?) WHERE local_id=?").run(nowIso(), lid);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
+    ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
     enqueue(ctx, lid, "delete_session", { ws: share.workspace_id, session_key: share.session_key });
   });
   renderHot(ctx, lid);

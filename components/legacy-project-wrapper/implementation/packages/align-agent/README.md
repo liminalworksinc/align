@@ -29,7 +29,9 @@ align config [drift on|off]                           local settings; drift noti
 align stop-sharing <session>                          future usage stays local
 align delete-history <session> [--yes]                server hard delete; totals change
 align bind <session> --goal <ref|none>                takes effect at the next prompt (root turn)
-align latch status                                    stop latches (stop/resume come from the web)
+align requests [--all] [--json]                       requests sent to your sessions and their answers (offline)
+align requests accept|decline <id> [--session S]      answer one; the receipt goes to the sender
+align latch status                                    stop latches and goal holds (they come from the web)
 align install [--claude] [--codex] [--dry-run]
 align uninstall [--purge]
 align sync                                            one pass: spool, transcripts, outbox, directives, upload
@@ -38,7 +40,8 @@ align doctor                                          checks plus hook latency
 
 In a session: `::align status`, `::align goals`, `::align share [--dir] [--signals] [goal]` (then `... confirm`),
 `::align bind <goal>`, `::align unshare [--dir]`, `::align task <label>`, `::align claim <file> [what for]`,
-`::align team`. These are answered locally and never reach the model.
+`::align team`, `::align requests`, `::align accept <id>`, `::align decline <id>`. These are answered locally and never
+reach the model.
 
 ## How updates reach a session
 
@@ -46,10 +49,29 @@ In a session: `::align status`, `::align goals`, `::align share [--dir] [--signa
    `align sync --hook` detached, then returns. The hook itself never touches the network.
 2. The sync pass reads new transcript lines, uploads usage for shared sessions, fetches new directives by cursor and
    writes them to local files (`hot/`, `latch/`), then exits. A lock file keeps passes from overlapping.
-3. The next hook reads those files: a goal change goes into context at the next prompt as a short delta; a stop makes
-   the next tool call fail closed.
+3. The next hook reads those files: a goal change goes into context at the next prompt as a short delta; a stop or a
+   goal hold makes the next tool call fail closed.
 
-So a goal change or stop issued from the web lands within one sync interval, at the next prompt or tool call.
+So a goal change, request, stop or hold issued from the web lands within one sync interval, at the next prompt or tool
+call.
+
+## Requests and goal holds
+
+- **Requests.** Someone who can approve a goal (or a workspace owner) can send its sessions a `replan`, `checkpoint`
+  or `switch_goal` request. The sync stores it and posts `received`. At the session's next prompt (never mid-turn,
+  once) you see a notice naming the sender, and the model gets fixed Align wording for that type, with the sender's
+  note quoted as data. A checkpoint and drafting an updated plan are safe: the agent does them on its own, and if you
+  have not declined by the end of that turn, the Stop hook marks the request done by the agent (an `accepted` receipt
+  with `auto_accepted: true`); you can still decline. A replan never changes course until you agree (tell the agent,
+  or `::align accept <id>`, which tells it to follow the updated plan), and a
+  `switch_goal` waits for `::align accept <id>` (or `align requests accept <id>`), which moves the session to the
+  target goal at its next prompt like `align bind`. Your answer goes back as an `accepted` or `declined` receipt and
+  reaches the model as one line at the next prompt. A withdrawn request is one notice for you and nothing for the
+  model. After a compact, requests still waiting are put back into context.
+- **Goal holds.** A `hold` directive writes `latch/<lid>.hold.json`; while it exists, every tool (read-only ones too)
+  is denied with who paused the goal and why, without needing a sync, and an unreadable file denies too. `release`
+  removes it and tells you once. Holds and the stop latch are independent: a tool runs only when neither blocks it.
+  Stopping sharing lifts both.
 
 ## Goal tree and pod awareness
 
@@ -121,8 +143,8 @@ what was added.
 
 `config.json`, `credentials.json` (0600), `device_key` (Ed25519 PKCS#8, 0600), `device_secret` (32 random bytes,
 0600, never sent), `align.db` (SQLite WAL: sessions, root turns, epochs, request ledger, file offsets, outbox,
-directives, shares, aliases), `rules.json` folder share rules, `hot/` and `injected/` per-session JSON for hooks,
-`latch/` stop latches, `spool/` hook records for the next sync, `feeds/` cached goals (`<ws>.json`), team activity
+directives, requests, holds, shares, aliases), `rules.json` folder share rules, `hot/` and `injected/` per-session JSON for hooks,
+`latch/` stop latches and goal holds, `spool/` hook records for the next sync, `feeds/` cached goals (`<ws>.json`), team activity
 (`activity-<ws>.json`) and asks (`asks-<ws>.json`), `drift/` drift notices waiting for the next prompt (limit ids only),
 `me.json`, `last-sync.json`, `logs/`.
 
@@ -132,13 +154,14 @@ without `--dir`.
 ## Privacy rules in code
 
 - Hooks read only local state, never the network or credentials, and exit within 300 ms. The one transcript read is
-  the Stop hook's drift check, which keeps no text. The only thing they start is the detached sync. A stop latch
-  denies tools fail-closed, even if the sync never ran.
+  the Stop hook's drift check, which keeps no text. The only thing they start is the detached sync. A stop latch or a
+  goal hold denies tools fail-closed, even if the sync never ran.
 - Uploads: session key and repo key are per-workspace HMACs; folder rules are never sent; titles are sent as null.
   Branch names and repo-relative paths go up only as work signals with `--signals`; without it, keyed hashes only.
   What reaches the model: ratified goal fields (with the version's limits) inside a fixed envelope (<= 1,200 chars, or
   1,800 with limits) or delta (<= 300 chars), the accepted asks of the goal's team (<= 2,200 more, quoted with who
-  asked and who accepted), and the pod card and notes (<= 300 chars), all passed through the same sanitizer, and
+  asked and who accepted), Align-worded requests that name their sender and quote the sender's note as data, and the
+  pod card and notes (<= 300 chars), all passed through the same sanitizer, and
   nothing at all when unchanged. From
   this machine's own sessions the card carries file paths, task labels and commit subjects. From other people it
   carries only a first name (letters only) and paths made of path characters (overlap is named by this session's own
