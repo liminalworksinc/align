@@ -500,8 +500,13 @@ The server SHALL answer `GET /api/session` without requiring a session: for a cu
 The server SHALL, when `HOSTED=1`, refuse to start with any problem from its environment check, and at the request
 edge answer 503 when misconfigured, 410 after `ALIGN_DELETE_BY` has ended (08:00 UTC the next day), 421 for a host not
 in `ALIGN_HOSTS`, 403 without `X-Forwarded-Proto: https` or `Fly-Client-IP`, 307 to `/new` for `/` and `/setup`, and 404
-for every path outside its tester allowlist (capture and agent tokens included), except `/app*` and `/api/v2/*`, which
+for every path outside its tester allowlist (capture and agent tokens included). The allowlist is exactly `/new`, `/w/<id>`, `/api/workspaces`, `/api/workspaces/config`, `/api/workspaces/interview`, `/api/workspaces/{id}/login-info`, `/api/session`, `/api/state`, `/api/timer`, `/api/reset`, `/api/proposals`, `/api/proposals/{id}/accept|acknowledge|counter|launch|reject`, `/api/mcp`, `/.well-known/oauth-protected-resource` (also with `/api/mcp` appended), `/.well-known/oauth-authorization-server`, `/oauth/authorize|token|register`, `/api/oauth/approve` and `/api/workspaces/connections`, except `/app*` and `/api/v2/*`, which
 pass the same edge checks and are served when `ALIGN_GOAL_SESSIONS=1`.
+
+#### Scenario: Routes outside the allowlist when hosted
+
+- **WHEN** a hosted server receives `GET /api/directives/stream`, `POST /api/workspaces/agent-token` or `GET /api/policy/security`
+- **THEN** it responds 404 `{"error":"Not found"}`
 
 #### Scenario: Capture when hosted
 

@@ -699,7 +699,7 @@ team passcode) manage goal-sessions workspaces, and SHALL send a signed-out visi
 - `TodayView` ("Good to see you", "What needs you", "Time to agreement") is implemented but no view renders it: the `today` view id renders the decision view. Is it dead code or meant to return?
 - The team view (`TeamLens`, "Team view") is routed under the Goals nav item, but no control in the current code navigates to it, so it is unreachable. Is it meant to return, or should it be removed?
 - The Inspector and team view label the viewer's own goal "Your goal · you can edit", but no screen offers a way to edit one's own goal directly. Is that wording intended?
-- `docs/DEMO_SCRIPT.md` names labels the current code does not show, such as a "How the goals connect" screen heading (the view is titled "Goals"), a "Waiting for your decision" badge (present only in the unrendered `TodayView`), and "Test which plan follows the new priority" inside the brief, which now reads **Test in Scenario Studio**. Which labels should the spec treat as authoritative?
+- `docs/DEMO_SCRIPT.md` still names labels and steps the current code does not have: a "How the goals connect" screen heading (the view is titled "Goals"), a "Waiting for your decision" badge (present only in the unrendered `TodayView`), and a **Test which plan follows the new priority** step taken from the brief. In the code the brief's button reads **Test in Scenario Studio** and opens Scenario Studio; that label survives only on the composer's "No test results added" card, which opens the plan test drawer. This spec follows the code. Should the script be updated, or should the brief open the plan test drawer again?
 
 ## Sources
 
