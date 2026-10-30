@@ -1282,7 +1282,9 @@ try {
   })(path.join(ROOT, "app"), "");
   const TESTER = [/^\/new$/, /^\/w\/x$/, /^\/api\/workspaces$/, /^\/api\/workspaces\/config$/, /^\/api\/workspaces\/interview$/ /* intake interview, scripts/test-interview.mjs */, /^\/api\/workspaces\/x\/login-info$/, /^\/api\/session$/, /^\/api\/state$/, /^\/api\/timer$/, /^\/api\/reset$/, /^\/api\/proposals$/, /^\/api\/proposals\/x\/(?:accept|acknowledge|counter|launch|reject)$/,
     // Connected AI apps (proxy.ts, founder ruling 10-26): OAuth-only MCP, the OAuth server, the connected-apps list. scripts/test-oauth.mjs covers them.
-    /^\/api\/mcp$/, /^\/\.well-known\/oauth-protected-resource(?:\/api\/mcp)?$/, /^\/\.well-known\/oauth-authorization-server$/, /^\/oauth\/(?:authorize|token|register)$/, /^\/api\/oauth\/approve$/, /^\/api\/workspaces\/connections$/];
+    /^\/api\/mcp$/, /^\/\.well-known\/oauth-protected-resource(?:\/api\/mcp)?$/, /^\/\.well-known\/oauth-authorization-server$/, /^\/oauth\/(?:authorize|token|register)$/, /^\/api\/oauth\/approve$/, /^\/api\/workspaces\/connections$/,
+    // The v2 web app and its API, always on (proxy.ts). scripts/test-v2.mjs covers them when hosted.
+    /^\/(?:app|api\/v2)(?:\/|$)/];
   const shut = routes.filter((r) => !TESTER.some((t) => t.test(r)) && !["/", "/setup"].includes(r));
   const probes = await Promise.all(shut.flatMap((r) => [hosted("GET", r), hosted("POST", r, { body: {} })]).map((x) => x.then((y) => y.status)));
   const open = shut.filter((_, i) => probes[2 * i] !== 404 || probes[2 * i + 1] !== 404);
