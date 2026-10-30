@@ -1,5 +1,12 @@
 # LIM-2449 · Align Decision Desk — design proposal
 
+> **Current design target — October 30, 2026: v2.** Read the [source-pinned v1/v2 screen comparison and recommendations](./ALIGN_V1_V2_SCREEN_COMPARISON.md), based on v1 `e044f11` and v2 `237268f058ca`. It implements the design-review direction in [LIM-2454 founder ruling e3a14f87](https://linear.app/liminal-space-io/issue/LIM-2454#comment-e3a14f87): named people, teams, change requests and approval sets. Separate leadership launch and **Accept if…** conditions remain required additions. This is design analysis, not implementation clearance.
+>
+> The original concept below is retained as **historical v1 design exploration**. Its fixed role/passcode model, `lib/flow.ts` implementation contract and old source baseline no longer govern the v2 redesign. Its screenshots/prototype do not establish v2 usability.
+
+---
+
+
 **Status:** interactive concept B, **not approved**, **not production UI**, **not connected to API**.
 **Source:** \`liminalworksinc/align\` \`main\` at \`1c2941ea22fb395cc346c30b2744bd6f6631f376\` (Oct 29, 2026).
 **Design owner/gate:** [LIM-2449](https://linear.app/liminal-space-io/issue/LIM-2449), [LIM-2454 founder ruling](https://linear.app/liminal-space-io/issue/LIM-2454).
