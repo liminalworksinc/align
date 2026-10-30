@@ -24,6 +24,9 @@ export interface CodexFileState {
   emitted_tc: boolean;
   prev_total: Totals | null;
   group: string;
+  /** The session's folder from session_meta, and other folders later turns named (at most 8). */
+  cwd?: string | null;
+  other_cwds?: string[];
 }
 
 export function initCodexState(group: string): CodexFileState {
@@ -96,10 +99,16 @@ export function parseCodexLine(line: string, st: CodexFileState): ParsedEvent[] 
       st.auto_review = c.autoReview;
       if (str(payload.model)) st.model = str(payload.model);
       if (st.native && c.qs === "main") out.push({ kind: "session", harness: "codex", native_session_id: st.native, cwd: str(payload.cwd), ts });
+      st.cwd = str(payload.cwd);
       return out;
     }
     case "turn_context": {
       if (str(payload.model)) st.model = str(payload.model);
+      const cwd = str(payload.cwd);
+      if (cwd && st.native && st.query_source === "main" && st.cwd && cwd !== st.cwd && !(st.other_cwds || []).includes(cwd) && (st.other_cwds || []).length < 8) {
+        st.other_cwds = [...(st.other_cwds || []), cwd];
+        out.push({ kind: "session", harness: "codex", native_session_id: st.native, cwd, ts });
+      }
       st.root_turn = str(payload.root_turn_id) || str(payload.turn_id) || st.root_turn;
       return out;
     }

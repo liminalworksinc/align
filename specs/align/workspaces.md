@@ -1,6 +1,6 @@
 ---
 name: Identity and workspaces
-summary: How people sign in as themselves (Google, GitHub, an emailed one-time code, printed locally in Mode L, or a passkey), how long a sign-in lasts, and how workspaces, roles, invites, teams, the audit trail, paired devices, shared sessions, usage and spend, activity, account and workspace deletion, the data retention schedule, rate limits and the local and hosted edges work.
+summary: How people sign in as themselves (Google, GitHub, an emailed one-time code, printed locally in Mode L, or a passkey), how long a sign-in lasts, and how workspaces, roles, invites, teams, the audit trail, paired devices, shared sessions, usage and spend, activity, asks between teams, goal activity counts, account and workspace deletion, the data retention schedule, rate limits and the local and hosted edges work.
 kind: area
 ---
 
@@ -23,7 +23,8 @@ workspace **role**: `owner`, `member` or `viewer`. Members are grouped into flat
 team role. A person pairs a **device** (the `align` CLI on their machine) with a key-bound device-code flow, grants it
 some of their workspaces, and the device then shares chosen coding-agent **sessions**, opens binding **epochs**,
 uploads **usage** and posts **activity** signals. Members read **spend** reports and the workspace's people, teams
-and devices; owners also read the **audit** trail.
+and devices; owners also read the **audit** trail. Members record **asks** (what a team was asked to do) and read each
+goal's agent **activity** counts.
 
 Goals, goal visibility, approval sets, alignments and change requests are specified in `goals-and-proposals`.
 Directives (including stop and resume) are in `directives`, the MCP endpoint and OAuth consent in `mcp`, the CLI in
@@ -45,6 +46,9 @@ Directives (including stop and resume) are in `directives`, the MCP endpoint and
 | Device | A paired machine (`dv_…`) with an Ed25519 key, workspace grants, a 1-hour access token and a rotating 30-day refresh token |
 | Shared session | A coding-agent session a device chose to share, addressed by a 43-character `session_key` |
 | Epoch | A period of a shared session bound to one goal (or none); usage counts under its epoch's goal |
+| Ask | `ask_…`: something a person recorded that a team was asked to do (by "Faculty", in a meeting or by hand), owned by the team asked; `open`, `accepted`, `done`, `declined` or `withdrawn` |
+| Mention | A later time an ask came up again (date, what was said, where), at most 10 per ask |
+| Goal activity | Counts of the sessions bound to a goal over the last 14 days, from bindings, usage times and work signals, never from what agents wrote |
 | Creation code | `alc_…`: a single-use, expiring code that lets one hosted workspace be created, optionally bound to one email address; only its HMAC is stored |
 | Access request | `ar_…`: someone's request, from the public `/app/request-access` form, for a creation code; pending, approved or declined by the operator |
 | Operator | Whoever runs the hosted server; `scripts/align-admin.mjs` is their tool for codes, requests and workspaces |
@@ -959,7 +963,7 @@ owners see and revoke every grant and other members only their own.
 ### Requirement: Workspace audit trail
 
 The server SHALL write an audit row naming its actor for every change a person makes to a workspace's settings,
-members, invites, teams, goals, alignments, change requests, connected-app revocations and session controls (stop sharing, history
+members, invites, teams, goals, alignments, change requests, asks, connected-app revocations and session controls (stop sharing, history
 deletion, agent stop and resume), with actor null only for system actions and the row that records an account
 deletion, show a former member as `{id:"fm_<n>", name:"Former member #<n>"}`, and serve the newest 200 rows of that
 workspace to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`. Device uploads (sharing a session, opening an
@@ -975,6 +979,11 @@ signing out everywhere are recorded without a workspace, so they never appear in
 
 - **WHEN** an owner withdraws an invite, a lead changes a team member, or a person revokes their own device
 - **THEN** each writes a row (`invite.withdrawn` and `team.member_set` in the workspace's audit, `device.revoked` with no workspace) whose actor is that person; only automatic events such as revocation for refresh-token reuse have a null actor
+
+#### Scenario: Ask actions in the audit
+
+- **WHEN** a person records, imports, accepts, declines, finishes, reopens, withdraws or mentions an ask
+- **THEN** the workspace's audit gets `ask.created`, `ask.imported` (object: the number created and merged), `ask.accepted`, `ask.declined`, `ask.done`, `ask.reopened`, `ask.withdrawn` or `ask.mentioned` with that person as actor and the ask as object; a refused action writes nothing
 
 ### Requirement: Device pairing flow
 
@@ -1113,6 +1122,111 @@ sessions, only the caller's own.
 - **WHEN** a device calls `GET .../activity?after=<seq>`
 - **THEN** the response is `{cursor, items}`, each item with `seq, session_key, harness, user:{id, name}, mine, goal_id, repo_id, kind, path_hash, path, text, at, expires_at`, leaving out items on goals the caller cannot read and other people's unbound sessions
 
+### Requirement: Asks between teams
+
+The server SHALL store asks of a team on `POST /api/v2/workspaces/{ws}/asks {team_id, text, from_label?, goal_id?,
+source:{kind, title?, date}}` (browser session, same-site; workspace owners and members, viewers 403 `read_only`),
+with `text` 1..400, `from_label` up to 80, `source.kind` `meeting` (title 1..120 required) or `manual` (title
+optional), `source.date` `YYYY-MM-DD`, control characters in people's text replaced by spaces, and an optional
+`goal_id` that the person can read (else 404) and that belongs to the team asked (else 400); it SHALL let read an ask
+only its requester, the members and leads of the team asked and workspace owners (404 for anyone else), show its goal
+as null to a reader who can't read that goal, refuse a 501st open or accepted ask in a workspace (409
+`too_many_asks`) and a 61st ask recorded in a workspace in an hour (429 `rate_limited`), and record `first_ask` once
+per workspace (`metrics`).
+
+#### Scenario: Record an ask
+
+- **WHEN** a member posts an ask of another team
+- **THEN** the response is 201 with the AskView `{id, state:"open", team:{id, name}, goal:{id, title}|null, text, from_label, requester:{id, name}, source:{kind, title, date}, mentions:[], decided_by:null, decided_at:null, created_at, updated_at, waiting_on_me, can:{accept, decline, done, reopen, withdraw, mention}}`
+
+#### Scenario: Who reads an ask
+
+- **WHEN** the requester, a lead, member or viewer of the team asked, a workspace owner, another member, or a member in no team reads `GET .../asks/{id}`
+- **THEN** the first five get 200 and the last two 404, and only the first five find it in `GET .../asks`
+
+#### Scenario: Goal checks
+
+- **WHEN** the `goal_id` is another team's goal, or a goal the person can't read
+- **THEN** the server responds 400, or 404, and stores nothing
+
+### Requirement: Ask actions
+
+The server SHALL change an ask on `POST /api/v2/workspaces/{ws}/asks/{id}/{action}` (browser session, same-site) only
+for a reader of it (404 otherwise) who is not a viewer (403 `read_only`): `accept` and `decline` from `open`, and
+`reopen` from `done` or `declined` back to `open`, by a lead of the team asked or a workspace owner (403
+`not_team_lead`); `done` from `accepted` by a member or lead of the team asked or a workspace owner (403
+`not_in_team`); `withdraw` from `open` or `accepted` by its requester (403 `not_requester`); and `mention {date, text
+1..300, source_title 1..120}` on an `open` or `accepted` ask by any owner or member who reads it, at most 10 per ask (409
+`too_many_mentions`); any other state is 409 `wrong_state`, and a person gets at most 30 ask actions a minute (429).
+Each change records who made it (`decided_by`, `decided_at`), and a mention its author.
+
+#### Scenario: State machine
+
+- **WHEN** the team's lead accepts an open ask, a member marks it done, the lead reopens it and a workspace owner declines it
+- **THEN** each answers the AskView in its new state (`accepted`, `done`, `open`, `declined`) with `decided_by` that person, and withdrawing or mentioning the declined ask is 409 `wrong_state`
+
+#### Scenario: Can flags and waiting on me
+
+- **WHEN** a person reads an ask
+- **THEN** `can` holds exactly the actions the server would accept from them (all false for a viewer), and `waiting_on_me` is true for an open ask of a team they lead, or an accepted ask of a team they are in, and for a workspace owner outside the team only when the team has no lead (open) or no members (accepted)
+
+### Requirement: Ask import
+
+The server SHALL let workspace owners import asks on `POST /api/v2/workspaces/{ws}/asks/import {asks:[…]}` (members 403
+`owner_only`, viewers 403 `read_only`), at most 60 a call, each an ask as in "Asks between teams" plus an optional
+`state` (`open`, `accepted`, `done` or `declined`, recorded as decided by the importer) and up to 10 earlier `mentions`,
+all validated before anything is stored (400 naming the item); it SHALL append and merge, never replace: an item whose
+team, text (ignoring case and runs of spaces) and source date equal an existing ask changes nothing, one whose team and
+text match an open or accepted ask with another date becomes a mention of it, and anything else is created, within the
+caps of "Asks between teams" (an import that would pass one stores nothing), answering 201 `{created, merged,
+unchanged}`.
+
+#### Scenario: Merge on import
+
+- **WHEN** an owner imports an exact duplicate of an ask, the same text on a new date, and two new asks
+- **THEN** the response is `{created:2, merged:1, unchanged:1}`, the existing ask gains one mention dated the new date from the item's meeting, and the audit records `ask.imported` with object `3`
+
+#### Scenario: Refused import
+
+- **WHEN** an import has 61 items, or one invalid item among valid ones
+- **THEN** the server responds 400 and stores nothing
+
+### Requirement: Asks feed
+
+The server SHALL serve the asks a person reads on `GET /api/v2/workspaces/{ws}/asks?state=&team_id=&limit=` to a
+browser session or a device token with a grant for the workspace, as `{version, asks:[AskView]}` with an `ETag` of the
+version and 304 with no body for a matching `If-None-Match`, where `state` is one state or a comma-separated list (else
+400), `team_id` keeps one team's asks (a malformed id is 400), `limit` is 1..500 (default 500), and the order is the
+person's own (their teams' asks and the asks they recorded) first, then open, accepted and closed, then the newest
+source date.
+
+#### Scenario: Accepted asks of a team for the agent
+
+- **WHEN** a device asks for `?state=accepted&team_id=<team>` and then again with the `ETag` it got
+- **THEN** the first response holds only that team's accepted asks the person reads and the second is 304; a device gets exactly what the same person's browser gets
+
+### Requirement: Goal activity counts
+
+The server SHALL serve `GET /api/v2/workspaces/{ws}/goals/{goal}/activity` (browser session) to readers of the goal
+(404 otherwise) as `{window_days:14, sessions, active_now, by_harness:{claude-code, codex}, last_activity_at, detail}`,
+counting the distinct shared sessions with an epoch bound to the goal (or governed by it) that overlaps the last 14
+days, of those the ones shared, with the agent not stopped, still on the goal and with usage or a binding in the last
+90 minutes (`active_now`), and the latest usage, epoch start or work signal on the goal; `detail` SHALL be
+`{files, files_hidden, mine}` (the top 4 repo-relative paths of unexpired work signals on the goal, the number of
+distinct path hashes with no path, and the person's own counted sessions with harness, state and last activity) only
+for the goal's owner, members and leads of its team and workspace owners, else null; the response SHALL never hold
+prompts, replies, task labels, commit subjects, claim reasons, session titles, tokens or cost.
+
+#### Scenario: Counts from bindings
+
+- **WHEN** two sessions are bound to the goal, a Claude Code one with usage 30 minutes ago and a Codex one with usage 3 hours ago, and a third was bound to it only 20 to 15 days ago
+- **THEN** a reader gets `sessions:2, active_now:1, by_harness:{claude-code:1, codex:1}`; stopping the first session's agent makes `active_now` 0
+
+#### Scenario: Detail only for the goal's team
+
+- **WHEN** a member of the goal's team and a member of another team read the activity of a workspace-visible team goal with work signals
+- **THEN** the first gets the files, the hidden count and their own sessions; the second gets the counts with `detail:null`; neither response holds the commit subjects, task labels or claim reasons those signals carried
+
 ### Requirement: Account deletion
 
 The server SHALL let a signed-in person with a sign-in from the last 15 minutes delete their own account on
@@ -1123,12 +1237,13 @@ delete their devices, pairing requests, Better Auth sessions, linked accounts, p
 their dismissal of the add-a-passkey prompt, codes, access requests, unused creation codes bound to their email, the
 durable rate-limit counters keyed by their email and the user row, clear their email and id from used creation codes
 and their actor hash from product events (`metrics`), and keep the rows other people rely on (goals, change requests
-with the evidence links they added, alignments, sessions and their spend) without their name or email.
+with the evidence links they added, alignments, sessions and their spend, asks they recorded or decided, the mentions
+they added and their value reports) without their name or email.
 
 #### Scenario: Delete my account
 
 - **WHEN** a member with goals, a change request, a paired device, shared sessions with usage and a passkey, who once signed out everywhere and dismissed the passkey prompt, and who has an access request and creation codes bound to their email, DELETEs `/api/v2/me` with their email
-- **THEN** the response is 204, their cookie and device tokens are refused with 401, their goals, change requests and sessions show `{id:"fm_<n>", name:"Former member #<n>"}`, their sessions keep their usage but no device, spend totals are unchanged, no row in any table holds their id or email (a used creation code stays, with neither), no rate-limit counter is keyed by their email, each workspace's audit records `member.account_deleted` by the former member, and one audit row with no workspace, actor or object records `account.deleted`
+- **THEN** the response is 204, their cookie and device tokens are refused with 401, their goals, change requests, sessions, asks (as requester or decider), mentions and value reports show `{id:"fm_<n>", name:"Former member #<n>"}`, their sessions keep their usage but no device, spend totals are unchanged, no row in any table holds their id or email (a used creation code stays, with neither), no rate-limit counter is keyed by their email, each workspace's audit records `member.account_deleted` by the former member, and one audit row with no workspace, actor or object records `account.deleted`
 
 #### Scenario: Only owner with other members
 
@@ -1151,12 +1266,15 @@ The server SHALL apply the retention schedule published in `docs/RETENTION.md` w
 in `lib/v2/retention-core.mts`, that runs at every server start and every 24 hours (never during a build) and from
 `node scripts/align-admin.mjs retention run [--dry-run]` (or its alias `node scripts/retention.mjs [--dry-run]`), each
 step in its own transaction, logging counts only; it purges a workspace with the same function as the operator's
-`workspaces delete --purge`, and deletes product events (`v2_events`, specified in `metrics`) after 13 months.
+`workspaces delete --purge`, deletes product events (`v2_events`, specified in `metrics`) after 13 months, deletes
+asks that are `done`, `declined` or `withdrawn` with their mentions 13 months after their last change (`asks_deleted`),
+and deletes value reports on approved change requests 13 months after their last change
+(`value_reports_deleted`).
 
 #### Scenario: Deleted workspaces
 
 - **WHEN** the job runs 30 days or more after a workspace was deleted
-- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members, change-request evidence and devices' grants included, and pairing requests and the creation code that made it forget it, and its content-free product events carry a random `wsx_` id instead of its id), so no row anywhere mentions it and restoring it is 404
+- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members, change-request evidence, asks and their mentions, value reports and devices' grants included, and pairing requests and the creation code that made it forget it, and its content-free product events carry a random `wsx_` id instead of its id), so no row anywhere mentions it and restoring it is 404
 
 #### Scenario: Session roll-up
 
@@ -1187,6 +1305,11 @@ step in its own transaction, logging counts only; it purges a workspace with the
 
 - **WHEN** the job runs
 - **THEN** product events older than 13 months are deleted and younger ones are kept
+
+#### Scenario: Closed asks and value reports
+
+- **WHEN** the job runs 12 months, and then 13 months and 2 days, after asks in every state and a value report last changed
+- **THEN** the first run deletes nothing; the second deletes the `done`, `declined` and `withdrawn` asks with their mentions (`asks_deleted` 3) and the value report (`value_reports_deleted`), keeps the `open` and `accepted` asks, and a dry run before it reports the same counts and changes nothing
 
 #### Scenario: Operator run and dry run
 
@@ -1315,3 +1438,10 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 - app/api/v2/workspaces/[ws]/sessions/[key]/stop-sharing/route.ts
 - app/api/v2/workspaces/[ws]/spend/route.ts
 - app/api/v2/workspaces/[ws]/activity/route.ts
+- lib/v2/asks.ts
+- lib/v2/goal-activity.ts
+- app/api/v2/workspaces/[ws]/asks/route.ts
+- app/api/v2/workspaces/[ws]/asks/import/route.ts
+- app/api/v2/workspaces/[ws]/asks/[id]/route.ts
+- app/api/v2/workspaces/[ws]/asks/[id]/[action]/route.ts
+- app/api/v2/workspaces/[ws]/goals/[goal]/activity/route.ts

@@ -12,6 +12,8 @@ export interface Config {
   tail_days: number;
   goals_refresh_ms: number;
   device_name: string | null;
+  /** The local drift notice (D5): the Stop hook checks the last reply against the bound goal's limits. */
+  drift: boolean;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -20,6 +22,7 @@ export const DEFAULT_CONFIG: Config = {
   tail_days: 14,
   goals_refresh_ms: 10 * 60_000,
   device_name: null,
+  drift: true,
 };
 
 export interface Ctx {

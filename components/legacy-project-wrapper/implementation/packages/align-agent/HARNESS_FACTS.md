@@ -34,6 +34,11 @@ Source: https://code.claude.com/docs/en/hooks (markdown at https://code.claude.c
   code are ignored; Align uses it only to start the end-of-turn sync. Codex has no StopFailure.
 - A `Stop` hook that returns `additionalContext` or `decision: "block"` keeps the turn going, so Align's Stop prints
   nothing.
+- `Stop` input carries `last_assistant_message` (checked 10-30): `transcript_path` "may not yet include the current
+  turn's most recent messages when a hook fires. Hooks that need the final assistant text of the current turn should
+  use `last_assistant_message` on Stop". Codex's Stop input has `last_assistant_message` (`string | null`, "Latest
+  assistant message text, if available"). The drift check (D5) uses it, and reads the transcript tail only when it is
+  absent.
 - Codex 0.163 "code mode" (observed in the 10-22 recorded demo): the model calls one `exec` tool whose input is
   JavaScript calling `tools.apply_patch(...)` and `tools.exec_command(...)`. A nested `apply_patch` still fires
   PreToolUse with `tool_name: "apply_patch"` and the patch in `tool_input.command` (its edits were recorded and its

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, useAction, useApi } from "../../_ui/kit";
-import { AnchorsEditor, MeasuresEditor, VISIBILITY_LABEL, anchorsDraft, anchorsOut, measuresDraft, measuresOut } from "../../_ui/goalform";
+import { AnchorsEditor, LimitEditor, MeasuresEditor, VISIBILITY_LABEL, anchorsDraft, anchorsOut, limitsOut, measuresDraft, measuresOut, type LimitDraft } from "../../_ui/goalform";
 import { LimitChips, NotesSuggest } from "../../_ui/limits";
 import type { Me } from "../../_ui/server";
 import type { Goal, WsDetail } from "../../_ui/types";
@@ -18,6 +18,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
   const [team, setTeam] = useState("");
   const [measures, setMeasures] = useState(measuresDraft());
   const [anchors, setAnchors] = useState(anchorsDraft());
+  const [limits, setLimits] = useState<LimitDraft[]>([]);
   const act = useAction();
   const myTeams = detail.data?.teams.filter((p) => p.my_role) ?? [];
   const canCreate = detail.data && detail.data.role !== "viewer";
@@ -63,13 +64,14 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
                 () =>
                   api(`/api/v2/workspaces/${ws}/goals`, {
                     body: company
-                      ? { title, level: "company", visibility: "workspace", measures: measuresOut(measures), anchors: anchorsOut(anchors) }
-                      : { title, level: "team", visibility, team_id: team || null, measures: measuresOut(measures), anchors: anchorsOut(anchors) },
+                      ? { title, level: "company", visibility: "workspace", measures: measuresOut(measures), anchors: anchorsOut(anchors), limits: limitsOut(limits) }
+                      : { title, level: "team", visibility, team_id: team || null, measures: measuresOut(measures), anchors: anchorsOut(anchors), limits: limitsOut(limits) },
                   }),
                 () => {
                   setTitle("");
                   setMeasures(measuresDraft());
                   setAnchors(anchorsDraft());
+                  setLimits([]);
                   feed.reload();
                 },
               );
@@ -79,6 +81,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
               <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required />
             </Field>
             <MeasuresEditor value={measures} onChange={setMeasures} />
+            <LimitEditor value={limits} onChange={setLimits} />
             {owner && (
               <Field label="Level" hint="Only workspace owners create company goals. A company goal has no team and everyone in the workspace sees it.">
                 <Select value={level} onChange={(e) => setLevel(e.target.value as Goal["level"])}>

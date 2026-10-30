@@ -16,6 +16,10 @@ import { eventActor, purgeWorkspace, RESTORE_DAYS, sessionMaxDays, testIdpEnable
 //   6. Access requests (PRESEED-002) are deleted 13 months after they were approved or declined, or, still pending,
 //      13 months after they were made.
 //   7. Product events (v2_events, PRESEED-007) older than 13 months are deleted.
+//   8. Closed asks (done, declined or withdrawn: PORT-003) are deleted, with their mentions, 13 months after their last
+//      change; open and accepted ones stay.
+//   9. Value reports on approved change requests (PORT-004) are deleted 13 months after their last change.
+// Asks, their mentions and value reports go with their workspace when it is purged (they cascade from v2_workspaces).
 // Like lib/v2/core.mts, Node runs this file directly (type stripping): it imports only core.mts and takes its database
 // as an argument. Account deletion (lib/v2/account.ts) uses pseudonymise() at once instead of after 30 days.
 
@@ -26,6 +30,8 @@ export const AUDIT_MONTHS = 12;
 export const INVITE_GRACE_DAYS = 7;
 export const ACCESS_REQUEST_MONTHS = 13;
 export const EVENT_MONTHS = 13;
+export const CLOSED_ASK_MONTHS = 13;
+export const VALUE_REPORT_MONTHS = 13;
 export const RETENTION_INTERVAL_MS = 24 * 3600 * 1000;
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -176,6 +182,8 @@ export interface RetentionCounts {
   invites_deleted: number;
   access_requests_deleted: number;
   events_deleted: number;
+  asks_deleted: number;
+  value_reports_deleted: number;
 }
 
 interface StepOptions {
@@ -247,6 +255,17 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, o: StepOptions) => void)[
   (db, now, c) => {
     c.events_deleted += db.run("DELETE FROM v2_events WHERE at < ?", monthsBefore(now, EVENT_MONTHS));
   },
+  // 8. Closed asks keep 13 months after their last change (state change or mention); their mentions go with them.
+  (db, now, c) => {
+    const before = monthsBefore(now, CLOSED_ASK_MONTHS);
+    const closed = "state IN ('done','declined','withdrawn') AND updated_at < ?";
+    db.run(`DELETE FROM v2_ask_mentions WHERE ask_id IN (SELECT id FROM v2_asks WHERE ${closed})`, before);
+    c.asks_deleted += db.run(`DELETE FROM v2_asks WHERE ${closed}`, before);
+  },
+  // 9. Value reports keep 13 months after their last change.
+  (db, now, c) => {
+    c.value_reports_deleted += db.run("DELETE FROM v2_value_reports WHERE updated_at < ?", monthsBefore(now, VALUE_REPORT_MONTHS));
+  },
 ];
 
 const ROLLBACK = Symbol("dry run");
@@ -276,6 +295,8 @@ export async function runRetention(
     invites_deleted: 0,
     access_requests_deleted: 0,
     events_deleted: 0,
+    asks_deleted: 0,
+    value_reports_deleted: 0,
   };
   if (dryRun) {
     try {

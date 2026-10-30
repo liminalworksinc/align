@@ -1,14 +1,31 @@
 // Hook handlers for Claude Code and Codex. Hook-safe: imports only node:fs, node:path, node:crypto (via shared/*).
-// They read local files only (hot/, injected/, latch/, feeds/, me.json), never the network, credentials or transcripts.
+// They read local files only (hot/, injected/, latch/, feeds/, drift/, me.json, config.json), never the network or
+// credentials. The one transcript read is the Stop hook's local drift check (D5), which keeps no reply text.
 import fs from "node:fs";
 import path from "node:path";
 import { gitInfo, matchAnchors } from "../shared/anchors.ts";
-import { collisionReason, crossNote, measureKey, renderCard, renderContextDelta, renderDelta, renderEnvelope, type DeltaKind } from "../shared/envelope.ts";
-import { contextGoals } from "../shared/goaltree.ts";
-import { randomId, readJson, readJsonStrict, writeJsonAtomic } from "../shared/fsx.ts";
+import {
+  clean,
+  collisionReason,
+  crossNote,
+  LIMIT_WORDS,
+  limitChange,
+  limitsSeen,
+  measureKey,
+  renderAsksDelta,
+  renderCard,
+  renderContextDelta,
+  renderDelta,
+  renderEnvelope,
+  type DeltaKind,
+} from "../shared/envelope.ts";
+import { teamAsks } from "../shared/asks.ts";
+import { crossing, lastReply } from "../shared/drift.ts";
+import { contextGoals, snapshot } from "../shared/goaltree.ts";
+import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
-import type { FeedFile, GoalSnapshot, Harness, HotState, InjectedState, Latch, MeFile } from "../shared/types.ts";
+import type { DriftFile, FeedFile, GoalSnapshot, Harness, HotState, InjectedState, Latch, MeFile, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collision, commitSubject, crossOverlap, display, editedPaths, podReport, readPath, record, shellWrites, siblingNews, type Act } from "./siblings.ts";
 
 export interface HookInput {
@@ -25,6 +42,8 @@ export interface HookInput {
   model?: string;
   /** Set when a tool event fires inside a Claude Code subagent. */
   agent_id?: string;
+  /** Stop: the turn's final reply, when the harness passes it (else it is read from the local transcript). */
+  last_assistant_message?: string;
 }
 
 export type HookOutput = Record<string, unknown> | null;
@@ -62,6 +81,48 @@ function markInjected(inj: InjectedState, goal: GoalSnapshot | null, shareState:
   inj.goal_version = goal ? goal.version : null;
   inj.goal_status = goal ? goal.status : null;
   inj.share_state = shareState;
+  inj.limits_seen = limitsSeen(goal);
+}
+
+/** The accepted asks put into context with an envelope; a fresh envelope replaces whatever context held before. */
+function markAsks(inj: InjectedState, ta: TeamAsks | null): void {
+  inj.asks_seen = ta ? { team_id: ta.team.id, ids: ta.asks.map((a) => a.id) } : undefined;
+}
+
+/**
+ * The accepted asks of the bound goal's team changed since they were last put into context (D3): one short note, once.
+ * Nothing when the goal has no team or the asks feed has not been fetched yet.
+ */
+function asksNote(home: string, ws: string, goalId: string, inj: InjectedState): string | null {
+  const ta = teamAsks(home, ws, goalId);
+  if (!ta) return null;
+  const prev = inj.asks_seen && inj.asks_seen.team_id === ta.team.id ? inj.asks_seen.ids : [];
+  const ids = ta.asks.map((a) => a.id);
+  const added = ta.asks.filter((a) => !prev.includes(a.id));
+  // Closed (done, declined, reopened, withdrawn), not merely pushed past the first five by newer ones.
+  const removed = prev.filter((id) => !ids.includes(id) && !(ta.accepted_ids || ids).includes(id)).length;
+  inj.asks_seen = { team_id: ta.team.id, ids };
+  return added.length || removed ? renderAsksDelta(ta, added, removed) : null;
+}
+
+/** The drift check is on unless `align config drift off` turned it off. */
+function driftOn(home: string): boolean {
+  return readJson<{ drift?: boolean }>(layout.config(home))?.drift !== false;
+}
+
+/** A drift notice the Stop hook left for this session: shown once to the user, never to the model. */
+function takeDrift(home: string, lid: string, hot: HotState | null, inj: InjectedState): string | null {
+  const file = readJson<DriftFile>(layout.drift(home, lid));
+  if (!file) return null;
+  removeFile(layout.drift(home, lid));
+  if (!hot?.goal || hot.goal.id !== file.goal_id || !Array.isArray(file.items)) return null;
+  const shown = inj.drift_shown || [];
+  const items = file.items.filter((i) => !shown.includes(i.limit_id));
+  if (!items.length) return null;
+  inj.drift_shown = [...shown, ...items.map((i) => i.limit_id)].slice(-50);
+  const first = items[0];
+  const more = items.length > 1 ? ` (and ${items.length - 1} more of its limits)` : "";
+  return `Align: the agent's last reply may conflict with a limit on goal "${clean(file.goal_title, 80)}": ${LIMIT_WORDS[first.type] ?? "Must"} "${clean(first.text, 160)}"${more}. This is a word check on this machine only; nothing was sent or added to the agent's context. \`align config drift off\` turns it off.`;
 }
 
 function sameAsInjected(inj: InjectedState, goal: GoalSnapshot | null, shareState: string): boolean {
@@ -91,8 +152,9 @@ function feeds(home: string): FeedFile[] {
     return fs
       .readdirSync(layout.feeds(home))
       .filter((f) => f.endsWith(".json"))
+      .filter((f) => !f.startsWith("activity-") && !f.startsWith("asks-"))
       .map((f) => readJson<FeedFile>(path.join(layout.feeds(home), f)))
-      .filter((f): f is FeedFile => !!f);
+      .filter((f): f is FeedFile => !!f && Array.isArray(f.goals));
   } catch {
     return [];
   }
@@ -117,7 +179,7 @@ function recentSharedSibling(home: string, cwd: string | null, selfLid: string):
 function feedGoal(home: string, ws: string, goalId: string): GoalSnapshot | null {
   const g = readJson<FeedFile>(layout.feed(home, ws))?.goals.find((x) => x.id === goalId);
   if (!g || !g.bindable || g.status !== "active") return null;
-  return { id: g.id, version: g.version, title: g.title, measures: Array.isArray(g.measures) ? g.measures : [], status: g.status };
+  return snapshot(g);
 }
 
 /** A folder rule covers this session: ask the next sync to share it from session start. Forks stay private. */
@@ -170,8 +232,10 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
     const full = source === "startup" || source === "clear" || source === "compact";
     const need = full || ((source === "resume" || source === "fork") && !sameAsInjected(inj, hot.goal, "shared"));
     if (need) {
-      context = renderEnvelope(hot.goal, hot.context_goals || []);
+      const ta = teamAsks(home, hot.share.workspace_id, hot.goal.id);
+      context = renderEnvelope(hot.goal, hot.context_goals || [], ta);
       markInjected(inj, hot.goal, "shared");
+      markAsks(inj, ta);
       markContext(inj, hot.context_goals);
       inj.context_epoch++;
       reportApplied(home, lid, inj, hot.pending_directives);
@@ -183,8 +247,10 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
     const goal = rule?.goal_id ? feedGoal(home, rule.workspace_id, rule.goal_id) : null;
     if (goal) {
       const related = contextGoals(home, rule!.workspace_id, goal.id);
-      context = renderEnvelope(goal, related);
+      const ta = teamAsks(home, rule!.workspace_id, goal.id);
+      context = renderEnvelope(goal, related, ta);
       markInjected(inj, goal, "shared");
+      markAsks(inj, ta);
       markContext(inj, related);
       inj.context_epoch++;
       const card = cardFor(home, lid, goal.id, inj, cwd, rule!.workspace_id);
@@ -323,26 +389,63 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   }
   let context: string | null = null;
   if (kind) {
-    context = renderDelta(kind, goal);
+    // A newly bound goal's limits, or a version whose limits changed, are named in the note (the rest come with the
+    // next envelope).
+    const limits = goal && kind === "bound" ? limitChange(goal, []) : goal && kind === "updated" ? limitChange(goal, inj.limits_seen) : null;
+    context = renderDelta(kind, goal, limits);
     markInjected(inj, kind === "unbound" ? null : goal, hot.share.state);
   }
   if (hot.share.state === "shared" && goal) {
     // A newly bound goal's parents arrive with the bound note; later parent or dependency versions as short notes.
     const notes = kind === "bound" ? (markContext(inj, hot.context_goals), []) : goal.id === hot.goal?.id ? contextNotes(inj, hot.context_goals) : [];
+    const asks = asksNote(home, hot.share.workspace_id, goal.id, inj);
     const card = cardFor(home, lid, goal.id, inj, input.cwd || hot.cwd, hot.share.workspace_id);
-    const parts = [context, ...notes, card].filter((x): x is string => !!x);
+    const parts = [context, ...notes, asks, card].filter((x): x is string => !!x);
     context = parts.length ? parts.join("\n") : null;
   }
   if (kind || sameAsInjected(inj, goal, hot.share.state)) {
     reportApplied(home, lid, inj, [...hot.pending_directives, ...applied]);
   }
-  const notices = takeNotices(hot, inj);
+  const notices = [takeNotices(hot, inj), takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   writeInjected(home, lid, inj);
   if (!context && !notices) return null;
   const out: Record<string, unknown> = {};
   if (context) out.hookSpecificOutput = { hookEventName: "UserPromptSubmit", additionalContext: context };
   if (notices) out.systemMessage = notices;
   return out;
+}
+
+// ---------- Stop ----------
+/**
+ * Local drift check (D5): for a shared session bound to a goal with limits, compare the turn's last reply with each
+ * limit not yet noticed and leave a notice for the next prompt. Prints nothing (a Stop hook's output would continue the
+ * turn), uploads nothing, keeps no reply text.
+ */
+export function stop(home: string, harness: Harness, input: HookInput): void {
+  const sid = input.session_id;
+  if (!sid) return;
+  const lid = localId(harness, sid);
+  const hot = readHot(home, lid);
+  if (hot?.share?.state !== "shared" || !hot.goal) return;
+  const limits = Array.isArray(hot.goal.limits) ? hot.goal.limits : [];
+  if (!limits.length || !driftOn(home)) return;
+  const pending = readJson<DriftFile>(layout.drift(home, lid));
+  const keep = pending && pending.goal_id === hot.goal.id && Array.isArray(pending.items) ? pending.items : [];
+  const known = new Set([...(readInjected(home, lid).drift_shown || []), ...keep.map((i) => i.limit_id)]);
+  const open = limits.filter((l) => !known.has(l.id));
+  if (!open.length) return;
+  const reply = lastReply(input);
+  if (!reply) return;
+  const hits = open.filter((l) => crossing(l, reply));
+  if (!hits.length) return;
+  const file: DriftFile = {
+    v: 1,
+    goal_id: hot.goal.id,
+    goal_title: hot.goal.title,
+    items: [...keep, ...hits.map((l) => ({ limit_id: l.id, type: l.type, text: l.text }))],
+    at: new Date().toISOString(),
+  };
+  writeJsonAtomic(layout.drift(home, lid), file);
 }
 
 // ---------- PreToolUse ----------
@@ -467,7 +570,7 @@ function midTurnDelta(home: string, lid: string): HookOutput {
     const parts: string[] = [];
     if (kind) {
       const goal = kind === "unbound" ? null : hot.goal;
-      parts.push(renderDelta(kind, goal));
+      parts.push(renderDelta(kind, goal, goal ? limitChange(goal, inj.limits_seen) : null));
       markInjected(inj, goal, hot.share.state);
       reportApplied(home, lid, inj, hot.pending_directives);
     }
@@ -546,6 +649,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         `  In context: ${inj.goal_id ? `goal v${inj.goal_version}` : "nothing from Align"}`,
         `  Stop latch: ${latch.state === "absent" ? "off" : latch.state === "ok" && latch.value.stopped ? "on (tools blocked)" : "unreadable (tools blocked)"}`,
         `  Last sync: ${lastSync(home)}`,
+        hot?.goal?.limits?.length ? `  Limits:   ${hot.goal.limits.length} on this goal; drift notice ${driftOn(home) ? "on" : "off"} (\`align config drift on|off\`)` : "",
         (() => {
           const r = matchRule(readRules(home), cwd);
           if (!r) return "";

@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api, ApiError, Btn, Err, Field, Input, Loading, Note, num, Pill, Select, TextArea, usd, useAction, useApi, when } from "./kit";
-import { MeasuresEditor, measuresDraft, measuresOut, type MeasureDraft } from "./goalform";
+import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, measuresOut, sameLimits, type LimitDraft, type MeasureDraft } from "./goalform";
+import { LIMIT_WORDS } from "./limits";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
 import { ValueCard } from "./value";
 
@@ -19,7 +20,7 @@ export const CR_STATE_WORDS: Record<ChangeRequest["state"], string> = {
 };
 const tone = (s: ChangeRequest["state"]) => (s === "approved" ? "green" : s === "pending" || s === "countered" ? "amber" : "neutral");
 
-const FIELD_LABEL: Record<keyof ChangeFields, string> = { title: "Goal", measures: "Measures", depends_on: "Depends on", status: "Status" };
+const FIELD_LABEL: Record<keyof ChangeFields, string> = { title: "Goal", measures: "Measures", depends_on: "Depends on", status: "Status", limits: "Limits" };
 const STATUS_WORD: Record<Goal["status"], string> = { active: "Active", achieved: "Achieved", dropped: "Dropped" };
 
 /** One field's value in plain words (dependencies by title when the person can see them). */
@@ -44,6 +45,19 @@ function FieldValue({ k, v, titles }: { k: keyof ChangeFields; v: ChangeFields[k
     return <span>{ids.length ? ids.map((id) => titles.get(id) ?? "a goal").join(", ") : "Nothing"}</span>;
   }
   if (k === "status") return <span>{STATUS_WORD[v as Goal["status"]] ?? String(v)}</span>;
+  if (k === "limits") {
+    const ls = v as Goal["limits"];
+    if (!ls.length) return <span className="text-zinc-500">No limits</span>;
+    return (
+      <ul className="list-disc pl-5">
+        {ls.map((l, i) => (
+          <li key={`${l.id}-${i}`}>
+            {LIMIT_WORDS[l.type]}: {l.text}
+          </li>
+        ))}
+      </ul>
+    );
+  }
   return <span>{String(v)}</span>;
 }
 
@@ -101,6 +115,7 @@ function ChangesForm({
   const [status, setStatus] = useState<Goal["status"]>(start.status ?? goal.status);
   const [measures, setMeasures] = useState<MeasureDraft[]>(measuresDraft({ ...goal, measures: start.measures ?? goal.measures }));
   const [deps, setDeps] = useState<string[]>(start.depends_on ?? goal.depends_on ?? []);
+  const [limits, setLimits] = useState<LimitDraft[]>(limitsDraft(start.limits ?? goal.limits ?? []));
   const [note, setNote] = useState("");
   const others = feed.data?.goals.filter((g) => g.id !== goal.id && (g.status === "active" || deps.includes(g.id))) ?? [];
   const out = measuresOut(measures);
@@ -109,7 +124,9 @@ function ChangesForm({
   if (!sameMeasures(out, goal.measures) || keep.includes("measures")) changes.measures = out as Goal["measures"];
   if (status !== goal.status || keep.includes("status")) changes.status = status;
   if (!sameIds(deps, goal.depends_on ?? []) || keep.includes("depends_on")) changes.depends_on = deps;
-  const differs = title.trim() !== goal.title || !sameMeasures(out, goal.measures) || status !== goal.status || !sameIds(deps, goal.depends_on ?? []) || keep.length > 0;
+  const limitsChanged = !sameLimits(limits, goal.limits ?? []);
+  if (limitsChanged || keep.includes("limits")) changes.limits = limitsOut(limits) as Goal["limits"];
+  const differs = title.trim() !== goal.title || !sameMeasures(out, goal.measures) || status !== goal.status || !sameIds(deps, goal.depends_on ?? []) || limitsChanged || keep.length > 0;
   return (
     <form
       onSubmit={(e) => {
@@ -121,6 +138,7 @@ function ChangesForm({
         <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required />
       </Field>
       <MeasuresEditor value={measures} onChange={setMeasures} />
+      <LimitEditor value={limits} onChange={setLimits} />
       <Field label="Status">
         <Select value={status} onChange={(e) => setStatus(e.target.value as Goal["status"])}>
           <option value="active">Active</option>

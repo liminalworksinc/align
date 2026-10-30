@@ -32,6 +32,7 @@ screen says "team".
 | `/app/w/<ws>/sessions` | Sessions tab | Workspace members | Shared sessions, stop and resume |
 | `/app/w/<ws>/alignments` | Alignments tab | Workspace members | Alignment requests the person is part of |
 | `/app/w/<ws>/requests` | Requests tab | Workspace members | Change requests: waiting on me, mine, others |
+| `/app/w/<ws>/asks` | Asks tab | Workspace members | What teams were asked to do: waiting on me, my teams', mine, others; record and import asks |
 | `/app/w/<ws>/spend` | Spend tab | Workspace members | Usage and estimated cost by goal, team or session |
 | `/app/w/<ws>/apps` | Apps tab | Workspace members | Connected AI apps and how to connect one |
 | `/privacy` | Privacy policy | Anyone, signed in or not | Align's privacy policy (public, also when hosted) |
@@ -43,7 +44,7 @@ Navigation: every `/app` page except sign-in has a top bar with the **Align** ma
 switcher (shown once the person has a workspace), **Devices**, **Account**, the person's name (email on hover) and
 **Sign out**. Under it, a person with no passkey who has not dismissed the offer sees the add-a-passkey prompt. Inside
 a workspace a second bar shows the workspace name, the person's role and the tabs Goals,
-People, Sessions, Alignments, Requests, Spend and Apps, with the current tab highlighted.
+People, Sessions, Alignments, Requests, Asks, Spend and Apps, with the current tab highlighted.
 
 ### Requirement: Root path redirects to the web app
 
@@ -429,17 +430,43 @@ and SHALL give everyone but viewers a "New goal" form that posts to `POST /api/v
 #### Scenario: Goal list
 
 - **WHEN** a member opens the tab
-- **THEN** each goal links to its goal page and shows its status pill, a "company" pill for a company goal, its visibility ("Only me", "My team", "Everyone in the workspace"), its team, "you can bind sessions" (green) or "needs alignment to bind" (amber), its owner ("Yours" for the person's own) and version, and its measures; with none, "No goals you can see yet."
+- **THEN** each goal links to its goal page and shows its status pill, a "company" pill for a company goal, its visibility ("Only me", "My team", "Everyone in the workspace"), its team, "you can bind sessions" (green) or "needs alignment to bind" (amber), its owner ("Yours" for the person's own) and version, its measures, and one chip per limit ("Must", "Must not" or "Out of scope" and its text, at most 5); with none, "No goals you can see yet."
 
 #### Scenario: Create a team goal
 
 - **WHEN** a member fills Goal (up to 300 characters), measures (up to 10, each with an optional target), "Who can see it", Team ("No team" or one of the person's teams; hint "Members of the team can bind their sessions to it") and the optional anchors, and presses **Create goal**
-- **THEN** the page posts `{title, level:"team", visibility, team_id, measures, anchors}` and lists the new goal; "My team" is disabled for a person in no team, and **Create goal** stays disabled for "My team" without a team
+- **THEN** the page posts `{title, level:"team", visibility, team_id, measures, anchors, limits}` (limits from the limit editor, empty rows left out) and lists the new goal; "My team" is disabled for a person in no team, and **Create goal** stays disabled for "My team" without a team
 
 #### Scenario: Create a company goal
 
 - **WHEN** a workspace owner chooses Level "Company goal"
 - **THEN** the Team field is hidden, visibility is fixed to "Everyone in the workspace", and the page posts `{level:"company", visibility:"workspace", …}` with no `team_id`; members and viewers are not offered the Level choice
+
+### Requirement: Limits from pasted meeting notes
+
+The Goals tab and the goal page's "Limits" card SHALL give everyone but viewers **Paste meeting notes**, which sends
+`{notes, source:{title, date}, prefer_goal_id?}` to `POST /api/v2/workspaces/<ws>/limits/suggest` (`prefer_goal_id`
+is the goal page's goal) and shows the suggestions grouped by goal, each with a checkbox (ticked unless the goal
+already has a limit like it), its kind and text, and the sentence it came from. Nothing is saved until the person acts
+on a group: **Add to a new version** (only when the response says `can_edit`) opens that goal's page with the new-version
+form filled in with the goal's limits plus the ticked ones, and **Propose these limits** (when `can_propose`) posts a
+change request with `changes.limits` set to the goal's current limits plus the ticked ones and the reason
+"Limits from <meeting>, <date>".
+
+#### Scenario: Notes with no rule
+
+- **WHEN** a member pastes notes in which no sentence reads like a rule
+- **THEN** the page shows "No limits found. Write them as rules, like “The three models must not all fit on the GPU.”"
+
+#### Scenario: Proposing suggested limits
+
+- **WHEN** a member who does not own a suggested goal presses **Propose these limits**
+- **THEN** the page reads the goal again, posts `{base_version, changes:{limits}, reason:"Limits from <meeting>, <date>"}` to its change requests, and says the request was proposed with a link to the Requests tab; more than 5 limits in all shows "A goal keeps at most 5 limits …" and sends nothing
+
+#### Scenario: Owner adds suggested limits
+
+- **WHEN** the goal's owner presses **Add to a new version**
+- **THEN** the goal page opens at its "New version" form with the limit editor filled in with the goal's limits and the ticked suggestions, and nothing is saved until they press **Save version <n+1>**
 
 ### Requirement: Goal page details and new version
 
@@ -449,11 +476,11 @@ tree and every version, and SHALL give a person the server lets edit it (`can_ed
 #### Scenario: Reading a goal
 
 - **WHEN** a member opens a goal
-- **THEN** the page shows its title, status, level, visibility, team, version, owner ("you" for the person's own), measures with targets, anchors, contributing goals and every version (title, status, time and the first 12 characters of its content hash); a goal the server does not return shows "This goal does not exist or you can't see it."
+- **THEN** the page shows its title, status, level, visibility, team, version, owner ("you" for the person's own), measures with targets, anchors, contributing goals, a "Limits" card with the version's limits (kind, text, and where and when each was said) or "No limits on this version.", and every version (title, status, time and the first 12 characters of its content hash); a goal the server does not return shows "This goal does not exist or you can't see it."
 
 #### Scenario: Save a new version
 
-- **WHEN** the owner edits Goal, measures, Status (Active, Achieved, Dropped), anchors and "Depends on" (other active goals) and presses **Save version <n+1>**
+- **WHEN** the owner edits Goal, measures, limits (kind "Must", "Must not" or "Out of scope", text up to 160 characters, an optional meeting and date; at most 5), Status (Active, Achieved, Dropped), anchors and "Depends on" (other active goals) and presses **Save version <n+1>**
 - **THEN** the page posts them with `version` to `POST .../goals/<goal>/versions`; a 409 `cycle` shows "That would make these goals depend on each other in a loop." and other errors show the server's message
 
 #### Scenario: Goal tree
@@ -485,8 +512,13 @@ viewer and does not own it, and SHALL send the proposal with
 
 #### Scenario: Propose a change
 
-- **WHEN** a member presses **Propose a change**, edits the pre-filled Goal, measures, Status and "Depends on", writes "Why this change" (required, 1 to 2000 characters) and presses **Send for approval**
+- **WHEN** a member presses **Propose a change**, edits the pre-filled Goal, measures, limits, Status and "Depends on", writes "Why this change" (required, 1 to 2000 characters) and presses **Send for approval**
 - **THEN** the page posts `{base_version:<current version>, changes:<only the fields that differ>, reason}` and the new request appears in the goal's "Change requests" list as "waiting for approval"; **Send for approval** stays disabled while nothing differs or the reason is empty
+
+#### Scenario: Suggest a limit
+
+- **WHEN** a member who can propose a change presses **Suggest a limit** in the goal's "Limits" card, adds a limit to the editor (pre-filled with the goal's limits), writes "Why this limit" and presses **Send for approval**
+- **THEN** the page posts `{base_version, changes:{limits}, reason}` to the goal's change requests and the goal's "Change requests" list reloads with it; change request cards show a "Limits" row with the limits before and after
 
 #### Scenario: Stale or duplicate proposal
 
@@ -697,6 +729,46 @@ only the actions the server allows.
 - **WHEN** **Approve** gets 409 `cycle`
 - **THEN** the card shows "Approving this would make these goals contribute to each other in a loop." and the request stays pending
 
+### Requirement: Workspace Asks tab
+
+The Asks tab at `/app/w/<ws>/asks` SHALL show the asks the person reads, from `GET /api/v2/workspaces/<ws>/asks`, under
+"Waiting on you" (asks whose `waiting_on_me` is set), "Asked of your teams", "Your asks" and, for workspace owners,
+"Others", each card with only the buttons its `can` flags allow; it SHALL give owners and members a "Record an ask"
+form and workspace owners an import.
+
+#### Scenario: Ask card
+
+- **WHEN** a member opens the tab
+- **THEN** each card shows "<who asked> asked <team>" (the requester's name when nobody is named), the state pill (open amber, accepted violet, done green, declined and withdrawn neutral), the goal it concerns as a link when the person can read it, the text in quotes, "<meeting>, <date>" (just the date for an ask recorded by hand) followed by " · came up again <n> times, last on <date> (<where>)" when it has mentions, who recorded and who last decided it, the mentions under "When it came up again", and **Accept**, **Mark done**, **Decline**, **Reopen**, **Came up again** and **Withdraw**, which post to `.../asks/<id>/<action>`; with none in a section, "Nothing is waiting on you." or "No asks yet."
+
+#### Scenario: Came up again
+
+- **WHEN** a person presses **Came up again**
+- **THEN** a form with When (a date), What was said (up to 300 characters) and Where (up to 120) posts `{date, text, source_title}` to `.../asks/<id>/mention`
+
+#### Scenario: Record an ask
+
+- **WHEN** an owner or member fills Team asked, What they were asked (up to 400 characters), Who asked (optional, up to 80), Where it was asked ("In a meeting" with its title, or "Recorded by hand"), Date and the optional goal it concerns (the selected team's active goals) and presses **Record ask**
+- **THEN** the page posts `{team_id, text, from_label, goal_id, source:{kind, title, date}}` to `POST .../asks` and lists the new ask; viewers see no form, and a workspace with no teams says "This workspace has no teams yet. A workspace owner adds them on the People tab."
+
+#### Scenario: Import asks
+
+- **WHEN** a workspace owner opens "Import asks (JSON, at most 60)", pastes a list of asks (or `{"asks": [...]}`) and presses **Import**
+- **THEN** the page posts `{asks}` to `POST .../asks/import` and shows "Imported: <created> new, <merged> came up again, <unchanged> already recorded."
+
+### Requirement: Agent activity on the goal page
+
+The goal page SHALL show an "Agent activity" card from `GET /api/v2/workspaces/<ws>/goals/<goal>/activity`, saying
+"Sessions people shared toward this goal, last 14 days. Counts come from bindings, not from what agents wrote.", with
+Sessions (and how many per harness, as "<n> Claude Code, <n> Codex"), Active now and Last activity ("None yet" when
+there is none), and, when the response has `detail`, "Files agents are working on" (its paths, then "and <n> more whose
+paths aren't shared") and "Your sessions" (harness, a state pill and the last activity).
+
+#### Scenario: Activity card
+
+- **WHEN** a member of the goal's team opens a goal with two bound sessions, one active, and work signals with paths
+- **THEN** the card shows "Sessions 2 (1 Claude Code, 1 Codex)", "Active now 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card says "No shared sessions worked toward this goal in the last 14 days."
+
 ### Requirement: Workspace Spend tab
 
 The Spend tab SHALL show token usage and estimated list cost from
@@ -793,12 +865,13 @@ The app SHALL show a plain error page for any render error, without the error me
 
 Pages under `/app` SHALL mark states with plain-word pills whose colors follow one rule: green for a settled good
 state, amber for something waiting or needing attention, red for revoked or stopped, violet for names and labels that
-are not states (a team, a "company" goal, an active goal's status), neutral otherwise.
+are not states (a team, a "company" goal, an active goal's status) and for an accepted ask (agreed, under way, like an
+active goal), neutral otherwise.
 
 #### Scenario: Pill colors
 
 - **WHEN** a page shows a state
-- **THEN** an approved alignment, alignment requirement or change request, an active device, a linked sign-in method, a shared session, an achieved goal, a goal "you can bind sessions" to and a reviewed parent goal are green; a pending or countered alignment or change request, a requirement still waiting, a suspended session, "needs alignment to bind" and a parent not reviewed against its current version are amber; a revoked device and a stopped agent are red
+- **THEN** an approved alignment, alignment requirement or change request, an active device, a linked sign-in method, a shared session, an achieved goal, a goal "you can bind sessions" to and a reviewed parent goal are green; a pending or countered alignment or change request, a requirement still waiting, a suspended session, "needs alignment to bind" and a parent not reviewed against its current version are amber; a revoked device and a stopped agent are red; an open ask is amber, an accepted ask violet, a done ask green, and a declined or withdrawn ask neutral
 
 ## Open questions
 
@@ -819,6 +892,7 @@ are not states (a team, a "company" goal, an active goal's status), neutral othe
 - `app/app/_ui/passkey.ts`
 - `app/app/_ui/types.ts`
 - `app/app/_ui/goalform.tsx`
+- `app/app/_ui/limits.tsx`
 - `app/app/_ui/changes.tsx`
 - `app/app/_ui/value.tsx`
 - `lib/v2/value-core.mts`
@@ -855,6 +929,9 @@ are not states (a team, a "company" goal, an active goal's status), neutral othe
 - `app/app/w/[ws]/sessions/view.tsx`
 - `app/app/w/[ws]/alignments/view.tsx`
 - `app/app/w/[ws]/requests/view.tsx`
+- `app/app/w/[ws]/asks/page.tsx`
+- `app/app/w/[ws]/asks/view.tsx`
+- `app/app/_ui/activity.tsx`
 - `app/app/w/[ws]/spend/view.tsx`
 - `app/app/w/[ws]/apps/view.tsx`
 - `app/oauth/authorize/page.tsx`

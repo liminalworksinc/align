@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
-import { AnchorsEditor, MeasuresEditor, VISIBILITY_LABEL, anchorsDraft, anchorsOut, measuresDraft, measuresOut } from "../../../../_ui/goalform";
+import { AnchorsEditor, LimitEditor, MeasuresEditor, VISIBILITY_LABEL, anchorsDraft, anchorsOut, limitsDraft, limitsOut, measuresDraft, measuresOut, type LimitDraft } from "../../../../_ui/goalform";
 import type { Me } from "../../../../_ui/server";
 import { ChangeRequestCard, ProposeChange, useGoalTitles } from "../../../../_ui/changes";
-import { GoalLimits } from "../../../../_ui/limits";
+import { GoalLimits, useStashedLimits } from "../../../../_ui/limits";
 import { GoalActivityCard } from "../../../../_ui/activity";
 import type { ChangeRequest, Goal, MySession } from "../../../../_ui/types";
 
@@ -22,50 +22,56 @@ function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () =
   const [measures, setMeasures] = useState(measuresDraft(goal));
   const [anchors, setAnchors] = useState(anchorsDraft(goal));
   const [deps, setDeps] = useState<string[]>(goal.depends_on ?? []);
+  const [limits, setLimits] = useState<LimitDraft[]>(limitsDraft(goal.limits));
+  // "Add to a new version" from suggested limits fills this form in.
+  useStashedLimits(goal.id, useCallback((d: LimitDraft[]) => setLimits(d), []));
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const others = feed.data?.goals.filter((g) => g.id !== goal.id && g.status === "active") ?? [];
   const act = useAction();
   return (
-    <Card title="New version">
-      <Note>Each change is a new version. Agents of sessions bound to this goal get the new version at their next turn.</Note>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void act.run(
-            () => api(`/api/v2/workspaces/${ws}/goals/${goal.id}/versions`, { body: { version: goal.version, title, status, measures: measuresOut(measures), anchors: anchorsOut(anchors), depends_on: deps } }),
-            onDone,
-          );
-        }}
-      >
-        <Field label="Goal">
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required />
-        </Field>
-        <MeasuresEditor value={measures} onChange={setMeasures} />
-        <Field label="Status">
-          <Select value={status} onChange={(e) => setStatus(e.target.value as Goal["status"])}>
-            <option value="active">Active</option>
-            <option value="achieved">Achieved</option>
-            <option value="dropped">Dropped</option>
-          </Select>
-        </Field>
-        <AnchorsEditor value={anchors} onChange={setAnchors} />
-        {others.length > 0 && (
-          <div className="mb-3">
-            <p className="mb-1 text-[14px] text-zinc-600">Depends on (agents on this goal hear when these change)</p>
-            {others.map((g) => (
-              <label key={g.id} className="mb-1 flex items-center gap-2 text-[15px]">
-                <input type="checkbox" checked={deps.includes(g.id)} onChange={(e) => setDeps((d) => (e.target.checked ? [...d, g.id] : d.filter((x) => x !== g.id)))} />
-                {g.title}
-              </label>
-            ))}
-          </div>
-        )}
-        <Btn type="submit" disabled={act.busy}>
-          Save version {goal.version + 1}
-        </Btn>
-        <Err>{act.error}</Err>
-      </form>
-    </Card>
+    <section id="new-version">
+      <Card title="New version">
+        <Note>Each change is a new version. Agents of sessions bound to this goal get the new version at their next turn.</Note>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void act.run(
+              () => api(`/api/v2/workspaces/${ws}/goals/${goal.id}/versions`, { body: { version: goal.version, title, status, measures: measuresOut(measures), anchors: anchorsOut(anchors), depends_on: deps, limits: limitsOut(limits) } }),
+              onDone,
+            );
+          }}
+        >
+          <Field label="Goal">
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required />
+          </Field>
+          <MeasuresEditor value={measures} onChange={setMeasures} />
+          <LimitEditor value={limits} onChange={setLimits} />
+          <Field label="Status">
+            <Select value={status} onChange={(e) => setStatus(e.target.value as Goal["status"])}>
+              <option value="active">Active</option>
+              <option value="achieved">Achieved</option>
+              <option value="dropped">Dropped</option>
+            </Select>
+          </Field>
+          <AnchorsEditor value={anchors} onChange={setAnchors} />
+          {others.length > 0 && (
+            <div className="mb-3">
+              <p className="mb-1 text-[14px] text-zinc-600">Depends on (agents on this goal hear when these change)</p>
+              {others.map((g) => (
+                <label key={g.id} className="mb-1 flex items-center gap-2 text-[15px]">
+                  <input type="checkbox" checked={deps.includes(g.id)} onChange={(e) => setDeps((d) => (e.target.checked ? [...d, g.id] : d.filter((x) => x !== g.id)))} />
+                  {g.title}
+                </label>
+              ))}
+            </div>
+          )}
+          <Btn type="submit" disabled={act.busy}>
+            Save version {goal.version + 1}
+          </Btn>
+          <Err>{act.error}</Err>
+        </form>
+      </Card>
+    </section>
   );
 }
 
@@ -217,6 +223,13 @@ function ChangeRequests({ ws, goal, me, role, onGoalChanged }: { ws: string; goa
 
 export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: string }) {
   const d = useApi<Detail>(`/api/v2/workspaces/${ws}/goals/${goal}`);
+  // A limit proposed from the Limits card is a new change request: the list below reloads with it.
+  const [proposed, setProposed] = useState(0);
+  const reloadDetail = d.reload;
+  const limitsDone = useCallback(() => {
+    reloadDetail();
+    setProposed((n) => n + 1);
+  }, [reloadDetail]);
   const ws0 = useApi<{ role: string }>(`/api/v2/workspaces/${ws}`);
   const g = d.data?.goal;
   return (
@@ -251,11 +264,11 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             )}
             {d.data!.contributions.length > 0 && <p className="mt-3 text-[14px] text-zinc-500">Contributing goals: {d.data!.contributions.map((c) => c.goal!.title).join(", ")}</p>}
           </Card>
-          <GoalLimits ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={d.reload} />
+          <GoalLimits ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={limitsDone} />
           <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={d.reload} />
           <GoalActivityCard ws={ws} goal={g} me={me} />
           {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} onDone={d.reload} />}
-          {ws0.data && <ChangeRequests key={g.version} ws={ws} goal={g} me={me} role={ws0.data.role} onGoalChanged={d.reload} />}
+          {ws0.data && <ChangeRequests key={`${g.version}:${proposed}`} ws={ws} goal={g} me={me} role={ws0.data.role} onGoalChanged={d.reload} />}
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}
           <Card title="Versions">
             <ul className="text-[14px] text-zinc-600">

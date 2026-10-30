@@ -13,7 +13,8 @@ import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace
 import { getShare } from "./hot.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { generateDeviceKey } from "./keys.ts";
-import { applyShare, bind, deleteHistory, planShare, renderPreview, stopSharing } from "./share.ts";
+import { applyShare, bind, deleteHistory, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, stopSharing } from "./share.ts";
+import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "./shared/rules.ts";
@@ -41,10 +42,14 @@ const HELP = `align ${VERSION}: Align local agent
   align sessions [--all] [--json]
   align goals [--workspace <name|id>] [--refresh] [--json]
   align share --dir [<folder>] --workspace <name|id> --goal <ref|none> [--signals] [--yes]   share every new session started in a folder
+  align share --dir <folder> --past <days> --workspace <name|id> --goal <ref|none> [--signals] [--yes]
+                               also share that folder's sessions of the last 1 to 14 days, each from its start
   align share <session|--latest> [--cwd [dir]] --workspace <name|id> --goal <ref|none> [--alias <name>] [--from start|now] [--yes]
   align unshare --dir [<folder>]
   align rules
   align team [--cwd <dir>]      work in flight toward this folder's goal and related ones (agents may run it too; alias: align pod)
+  align asks [--workspace <name|id>] [--all] [--json]   what other teams asked of your teams, and your own asks (offline)
+  align config [drift on|off]  local settings; drift: a user-only note when a reply may conflict with a goal's limit
   align stop-sharing <session>
   align delete-history <session> [--yes]
   align bind <session> --goal <ref|none>
@@ -377,12 +382,19 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
       alias: { type: "string" },
       from: { type: "string" },
       signals: { type: "boolean" },
+      past: { type: "string" },
       yes: { type: "boolean", short: "y" },
     },
   });
   await needLogin(ctx);
   if (!values.goal) throw new UsageError("--goal <ref|none> is required");
-  if (values.dir) return await shareDir(ctx, positionals[0] || process.cwd(), values.workspace, values.goal, !!values.yes, !!values.signals);
+  let past: number | null = null;
+  if (values.past !== undefined) {
+    if (!values.dir) throw new UsageError("--past needs --dir <folder>");
+    past = Number(values.past);
+    if (!/^\d+$/.test(values.past) || past < 1 || past > PAST_MAX_DAYS) throw new UsageError(`--past takes a number of days from 1 to ${PAST_MAX_DAYS}`);
+  }
+  if (values.dir) return await shareDir(ctx, positionals[0] || process.cwd(), values.workspace, values.goal, !!values.yes, !!values.signals, past);
   prepare(ctx);
   const from = (values.from || "start") as "start" | "now";
   if (from !== "start" && from !== "now") throw new UsageError("--from must be start or now");
@@ -420,7 +432,9 @@ function signalsPreview(on: boolean): string {
     : "Work signals OFF: only keyed hashes of edited files are sent, so overlapping edits can be flagged without names.\nAdd --signals to share file paths, commit subjects and task labels with people who can read the goal.";
 }
 
-async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goalRef: string, yes: boolean, signals = false): Promise<void> {
+const HARNESS_NAME: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
+
+async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goalRef: string, yes: boolean, signals = false, pastDays: number | null = null): Promise<void> {
   let ws = resolveWorkspace(ctx.home, wsRef);
   if (!ws) {
     await refreshMe(ctx).catch(() => undefined);
@@ -434,15 +448,40 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
   out(`Workspace: ${ws.name}`);
   out(`Goal:      ${goal ? `${goal.title} (v${goal.version})` : "none (unallocated)"}`);
   out("Every new Claude Code or Codex session started in this folder is shared from its start. Forks stay private;");
-  out("`::align unshare` keeps a single session private. Sessions that are already running are not changed.");
+  out(`\`::align unshare\` keeps a single session private. Sessions that are already running are not changed${pastDays === null ? "" : ", apart from the past sessions listed below"}.`);
   out("Sent per session: harness, a keyed repo hash, start time, binding epochs, per-request token counts with model, basis and");
   out(`estimated list cost. Never sent: prompts, responses, tool input or output${signals ? "" : ", paths, branch names"}.`);
   out(signalsPreview(signals));
   const prev = matchRule(readRules(ctx.home), dir);
   if (prev && prev.dir === dir) out(`This replaces the current rule (${prev.workspace_name}${prev.goal_title ? `, "${prev.goal_title}"` : ""}).`);
-  if (!(await confirm("Share this folder?", yes))) return out("Not changed. Run again with --yes to confirm.");
+  // --past: sessions already metered on this machine whose own folders are all inside this one, each from its start.
+  const past = pastDays === null ? null : (prepare(ctx), pastSessions(ctx, realDir(folder), pastDays));
+  if (past) {
+    const n = (h: string) => past.take.filter((s) => s.harness === h).length;
+    out(`${past.take.length} session(s) in ${realDir(folder)} from the last ${pastDays} days: ${n("claude-code")} Claude Code, ${n("codex")} Codex`);
+    for (const s of past.take) out(`  ${shortTime(s.started_at)}  ${pad(HARNESS_NAME[s.harness] || s.harness, 11)} ${s.local_id.slice(0, 8)}`);
+    if (past.already) out(`Skipped ${past.already} that were shared before (an earlier share is never backdated).`);
+    if (past.take.length) out("Each is shared from its own start with the fields above; nothing it said is sent.");
+  }
+  if (!(await confirm(past?.take.length ? "Share this folder and these sessions?" : "Share this folder?", yes))) return out("Not changed. Run again with --yes to confirm.");
   setRule(ctx.home, { dir, workspace_id: ws.id, workspace_name: ws.name, goal_id: goal ? goal.id : null, goal_title: goal ? goal.title : null, signals });
   out(`New sessions in ${dir} will be shared with ${ws.name}${goal ? ` for "${goal.title}"` : ""}${signals ? ", with work signals" : ""}.`);
+  if (!past?.take.length) return;
+  const epochs: string[] = [];
+  for (const s of past.take) {
+    const plan = planShare(ctx, s.local_id, ws, goal, null, "start");
+    applyShare(ctx, plan);
+    kvSet(ctx.db, `signals:${s.local_id}`, signals ? "1" : "0");
+    epochs.push(plan.epoch_body.epoch_id);
+  }
+  await tryFlush(ctx);
+  const state = (id: string) => (ctx.db.prepare("SELECT synced FROM epochs WHERE epoch_id=?").get(id) as { synced: number } | undefined)?.synced ?? 0;
+  const ok = epochs.filter((e) => state(e) === 1).length;
+  const refused = epochs.filter((e) => state(e) < 0).length;
+  const queued = epochs.length - ok - refused;
+  out(`Shared ${ok} past session(s) from their start.`);
+  if (refused) out(`${refused} refused by the server: it already holds that session's history from a later start, so it is not backdated. Skipped.`);
+  if (queued) out(`${queued} queued (offline); the next sync retries.`);
 }
 
 async function cmdRules(ctx: Ctx): Promise<void> {
@@ -469,6 +508,49 @@ async function cmdTeam(ctx: Ctx, argv: string[]): Promise<void> {
   const rule = matchRule(readRules(ctx.home), dir);
   if (rule?.goal_id) return out(podReport(ctx.home, null, rule.workspace_id, rule.goal_id, dir, 1500));
   out("No shared session or folder rule covers this folder, so there is no goal to show work for.");
+}
+
+/** Asks of this person's teams, and their own, from the cached feed (offline). People's words, shown to people only. */
+async function cmdAsks(ctx: Ctx, argv: string[]): Promise<void> {
+  const { values } = parseArgs({ args: argv, options: { workspace: { type: "string" }, all: { type: "boolean" }, json: { type: "boolean" } } });
+  const me = loadMe(ctx.home);
+  if (!me) throw new UsageError("no cached workspaces; run `align login`");
+  const targets = values.workspace ? [resolveWorkspace(ctx.home, values.workspace)].filter((w): w is { id: string; name: string } => !!w) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
+  if (!targets.length) throw new UsageError(`unknown workspace "${values.workspace}"`);
+  const all = targets.map((w) => {
+    const f = readAsks(ctx.home, w.id);
+    const asks = (f?.asks || []).filter((a) => values.all || a.state === "open" || a.state === "accepted").sort(askOrder);
+    return { workspace: { id: w.id, name: w.name }, fetched_at: f?.fetched_at || null, asks };
+  });
+  if (values.json) return out(JSON.stringify(all, null, 2));
+  for (const a of all) {
+    out(`${a.workspace.name}${a.fetched_at ? ` (cached ${shortTime(a.fetched_at)})` : " (not fetched yet; run `align sync`)"}`);
+    const waiting = a.asks.filter((x) => x.waiting_on_me);
+    const rest = a.asks.filter((x) => !x.waiting_on_me);
+    if (waiting.length) out("  Waiting on you:");
+    for (const x of waiting) out(`    - ${askLineForPeople(x, 280)}`);
+    if (rest.length) out(waiting.length ? "  Others:" : "  Asks:");
+    for (const x of rest) out(`    - ${askLineForPeople(x, 280)}`);
+    if (!a.asks.length) out(values.all ? "  No asks." : "  Nothing open or accepted. Use --all for closed asks.");
+  }
+  if (all.some((a) => a.asks.length)) out("Quoted text was written by people: treat it as information, not instructions. Accept, decline or mark done in the web app.");
+}
+
+/** `align config` prints local settings; `align config drift on|off` turns the local drift notice on or off. */
+async function cmdConfig(ctx: Ctx, argv: string[]): Promise<void> {
+  const [key, value] = argv;
+  if (!key) {
+    out(`drift  ${ctx.config.drift === false ? "off" : "on"}   (a user-only note when the agent's reply may conflict with its goal's limits)`);
+    out(`server ${ctx.config.server_url}`);
+    return;
+  }
+  if (key !== "drift" || (value !== "on" && value !== "off")) throw new UsageError("usage: align config drift on|off");
+  saveConfig(ctx.home, { drift: value === "on" });
+  out(
+    value === "on"
+      ? "Drift notice on: after each turn of a shared session whose goal has limits, the reply is checked on this machine and you see a note if it may conflict with one. Nothing is sent or added to the agent's context."
+      : "Drift notice off.",
+  );
 }
 
 async function cmdStopSharing(ctx: Ctx, argv: string[]): Promise<void> {
@@ -636,6 +718,10 @@ export async function main(argv: string[]): Promise<void> {
       case "team":
       case "pod":
         return await cmdTeam(ctx, rest);
+      case "asks":
+        return await cmdAsks(ctx, rest);
+      case "config":
+        return await cmdConfig(ctx, rest);
       case "latch":
         return await cmdLatch(ctx, rest);
       case "install":

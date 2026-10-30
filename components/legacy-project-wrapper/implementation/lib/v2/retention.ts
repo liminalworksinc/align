@@ -8,6 +8,7 @@ import * as core from "./retention-core.mts";
 
 export {
   AUDIT_MONTHS,
+  CLOSED_ASK_MONTHS,
   describeCounts,
   EVENT_MONTHS,
   FORMER_MEMBER_DAYS,
@@ -19,6 +20,7 @@ export {
   RETENTION_INTERVAL_MS,
   retentionNow,
   SESSION_MONTHS,
+  VALUE_REPORT_MONTHS,
   type RetentionCounts,
 } from "./retention-core.mts";
 
