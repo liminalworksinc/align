@@ -35,7 +35,7 @@ export function ProofStrip({ s }: { s: StateView }) {
 function CustomProof({ s, L }: { s: StateView; L: Labels }) {
   const acc = s.acceptances.at(-1) ?? null;
   return (
-    <div className="grid grid-cols-2 gap-3" aria-label="Summary: approvals and sandbox test">
+    <div className="grid grid-cols-2 gap-3 @max-md:grid-cols-1" aria-label="Summary: approvals and sandbox test">
       <Tile label="Who approved">
         {acc ? (
           <ul className="space-y-2 text-[16px]">

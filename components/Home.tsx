@@ -63,13 +63,20 @@ const teamInitials = (team: string) => {
 // "<Team> lead", except when the team name already says it (a leadership team, or a name ending in "Lead").
 // Custom shell: below 1100px the page scrolls as a whole and the Inspector rail stacks under the main column, so
 // independent testers on 900–1024px laptops never scroll sideways. The header wraps at every width.
+// Phones (below md, 768px; max-md: variants only, so 768px and up is exactly as before): one column. The sidebar becomes
+// a stacked bar above the header (its nav in a row), so the main column gets the full width. Layout only: the sidebar
+// stays mounted at every width, so its state (ConnectAI's dialog, the composer, Switch team) survives a resize.
 const CUSTOM_SHELL =
-  "grid min-h-screen grid-cols-[236px_minmax(0,1fr)] grid-rows-[auto_auto_auto] min-[1100px]:h-screen min-[1100px]:grid-cols-[236px_minmax(0,1fr)_360px] min-[1100px]:grid-rows-[auto_minmax(0,1fr)] min-[1100px]:overflow-hidden";
+  "grid min-h-screen grid-cols-[236px_minmax(0,1fr)] grid-rows-[auto_auto_auto] min-[1100px]:h-screen min-[1100px]:grid-cols-[236px_minmax(0,1fr)_360px] min-[1100px]:grid-rows-[auto_minmax(0,1fr)] min-[1100px]:overflow-hidden max-md:grid-cols-1 max-md:grid-rows-none";
 const CUSTOM_SIDEBAR =
-  "sticky top-0 row-span-3 flex h-screen flex-col self-start border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5 min-[1100px]:static min-[1100px]:row-span-2 min-[1100px]:h-auto min-[1100px]:self-stretch";
-const CUSTOM_HEADER = "flex min-h-16 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-200 px-6 py-2.5 min-[1100px]:col-span-2";
-const CUSTOM_MAIN = "@container relative min-w-0 p-6 text-[16px] min-[1100px]:overflow-y-auto";
-const CUSTOM_RAIL = "min-w-0 border-t border-zinc-200 bg-zinc-50 p-[22px] min-[1100px]:overflow-y-auto min-[1100px]:border-t-0 min-[1100px]:border-l";
+  "sticky top-0 row-span-3 flex h-screen flex-col self-start border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5 min-[1100px]:static min-[1100px]:row-span-2 min-[1100px]:h-auto min-[1100px]:self-stretch max-md:static max-md:row-span-1 max-md:h-auto max-md:min-w-0 max-md:self-auto max-md:border-r-0 max-md:border-b";
+// Below md: the nav runs as a wrapping row, and the sidebar's footer (the same person and team as the header) is hidden.
+const CUSTOM_NAV = "max-md:flex-row max-md:flex-wrap max-md:gap-1";
+const CUSTOM_NAV_ITEM = "max-md:w-auto max-md:min-h-11";
+const CUSTOM_SIDEBAR_FOOTER = "max-md:hidden";
+const CUSTOM_HEADER = "flex min-h-16 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-200 px-6 py-2.5 min-[1100px]:col-span-2 max-md:px-4";
+const CUSTOM_MAIN = "@container relative min-w-0 p-6 text-[16px] min-[1100px]:overflow-y-auto max-md:p-4";
+const CUSTOM_RAIL = "min-w-0 border-t border-zinc-200 bg-zinc-50 p-[22px] min-[1100px]:overflow-y-auto min-[1100px]:border-t-0 min-[1100px]:border-l max-md:p-4";
 // The company-goal strip stacks its three parts when the main column is narrow.
 const CUSTOM_STRIP =
   "mb-4 grid grid-cols-1 items-center gap-4 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5 @[60rem]:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] @[60rem]:gap-6";
@@ -567,7 +574,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
             {newConflict.why && <span className="px-1 text-[12.5px] leading-snug text-zinc-500">{newConflict.why}</span>}
           </div>
         )}
-        <nav className="flex flex-col gap-0.5" aria-label="Main">
+        <nav className={`flex flex-col gap-0.5 ${custom ? CUSTOM_NAV : ""}`} aria-label="Main">
           {nav.map((n) => {
             const on = view === n.id || !!n.also?.includes(view);
             const count = counts[n.id] ?? 0;
@@ -576,7 +583,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
                 key={n.id}
                 onClick={() => props.go(n.id)}
                 aria-current={on ? "page" : undefined}
-                className={`flex min-h-12 w-full items-center gap-3 rounded-[10px] px-3.5 text-left text-[15px] font-semibold transition ${on ? "bg-violet-50 text-zinc-900 shadow-[inset_2px_0_0_var(--color-violet-700)]" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"} disabled:cursor-not-allowed disabled:hover:bg-transparent`}
+                className={`flex min-h-12 w-full items-center gap-3 rounded-[10px] px-3.5 text-left text-[15px] font-semibold transition ${custom ? CUSTOM_NAV_ITEM : ""} ${on ? "bg-violet-50 text-zinc-900 shadow-[inset_2px_0_0_var(--color-violet-700)]" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"} disabled:cursor-not-allowed disabled:hover:bg-transparent`}
               >
                 <span className="flex min-w-0 flex-col">
                   <span>{n.label}</span>
@@ -612,7 +619,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
         </div>
         )}
         {workspace && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} />}
-        <div className={`${custom ? (workspace ? "mt-3" : "mt-auto") : "mt-3"} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
+        <div className={`${custom ? (workspace ? "mt-3" : "mt-auto") : "mt-3"} ${custom ? CUSTOM_SIDEBAR_FOOTER : ""} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
           <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
             {custom ? teamInitials(L.role[me.actor]) : initials(me.name ?? "")}
           </span>
@@ -625,7 +632,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
 
       {/* Top bar */}
       <header className={custom ? CUSTOM_HEADER : "col-span-2 flex items-center gap-4 border-b border-zinc-200 px-6"}>
-        <div className="shrink-0 whitespace-nowrap text-[15px] text-zinc-500">
+        <div className={custom ? "shrink-0 whitespace-nowrap text-[15px] text-zinc-500 max-md:min-w-0 max-md:shrink max-md:whitespace-normal" : "shrink-0 whitespace-nowrap text-[15px] text-zinc-500"}>
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
           {custom && state.scenario_config?.company_note && (
             <div className="whitespace-normal text-[13px] text-zinc-500">{state.scenario_config.company_note}</div>
@@ -662,7 +669,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
         ) : lastPush ? (
           <Badge tone="neutral">Company goal {lastPush.version} sent {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Badge>
         ) : null}
-        <div className={custom ? "ml-auto flex min-w-0 items-center gap-3" : "ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap"}>
+        <div className={custom ? "ml-auto flex min-w-0 items-center gap-3 max-md:flex-wrap" : "ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap"}>
           {ops && !custom && (
             <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
               {confirmReset ? "Click again to reset" : "Start the demo over"}

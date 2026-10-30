@@ -85,7 +85,7 @@ export function RecordHeader({
 }) {
   return (
     <div className="al-in flex flex-col gap-2">
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2.5 @max-md:flex-wrap">
         {onBack && (
           <Button kind="ghost" onClick={onBack}>
             ← Decisions
