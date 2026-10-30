@@ -232,7 +232,7 @@ In Mode L, the MCP server SHALL accept the `ALIGN_MCP_TOKEN` environment value a
 In Mode L, the MCP server SHALL accept an `agt.<payload>.<HMAC>` token only when all of the following hold:
 
 - The HMAC verifies.
-- The payload has `kind: "agent"`, a valid custom workspace id, harness `claude-code` or `codex`, and a repo name matching `^[\w.-]{1,120}$`.
+- The payload has `kind: "agent"`, a valid custom workspace id, harness `claude-code` or `codex`, and a repo name matching `^[\w.-]{1,120}$` other than `.` or `..`.
 - `exp` is in the future. Tokens last 7 days from minting.
 - The workspace exists and its current agent epoch equals the token's `ep`.
 
@@ -337,7 +337,7 @@ The authorization server SHALL accept RFC 7591 registration at `POST /oauth/regi
 
 ### Requirement: Client ID metadata documents
 
-The authorization server SHALL accept as `client_id` an https URL that has a non-root path, no fragment, no userinfo, no explicit port, no IP-literal host, and at most 500 characters. It SHALL resolve the client by fetching the JSON document at that URL with these limits:
+The authorization server SHALL accept as `client_id` an https URL that has a non-root path, no fragment, no userinfo, no non-default port (an explicit `:443` is normalized away and accepted), no IP-literal host, and at most 500 characters. It SHALL resolve the client by fetching the JSON document at that URL with these limits:
 
 - Addresses that resolve to private, loopback, link-local, CGNAT, multicast, documentation, reserved or IPv4-embedding IPv6 ranges are refused.
 - The whole fetch has a 3 s deadline and a 5 KB size limit.
