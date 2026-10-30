@@ -204,7 +204,11 @@ team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST ..
 `POST .../teams/:team/members`, `DELETE .../teams/:team/members/:user` (the `/pods` paths are aliases), `POST .../goals`
 (`{ title, level?, visibility?, team_id?, measures?, anchors?, depends_on? }`), `GET .../goals/:goal`,
 `POST .../goals/:goal/versions` (`{ version, title?, measures?, anchors?, status? }`, `409 stale_version` /
-`no_change`), `GET .../sessions`, `GET .../alignments`, `GET .../alignments/:id`, `GET /api/v2/device/requests/:code`,
+`no_change`), `GET .../sessions`, `GET .../alignments`, `GET .../alignments/:id`, `POST /api/v2/workspaces/sample`
+(a new "Northstar (sample)" workspace owned by the caller, counted like any workspace creation), change requests
+(`GET`/`POST .../goals/:goal/change-requests` with `{ base_version, changes, reason }`, `GET .../change-requests/:id`,
+`POST .../change-requests/:id/{approve|reject|counter|accept_counter|withdraw|rebase}`, and the workspace-wide
+`GET .../change-requests?state=` as `{ waiting_on_me, mine, others }`; see `lib/v2/changes.ts`), `GET /api/v2/device/requests/:code`,
 `POST /api/v2/device/approve` (`{ user_code, workspace_ids }`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,
 `DELETE /api/v2/devices/:id`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,
 `__Secure-` prefixed when hosted).

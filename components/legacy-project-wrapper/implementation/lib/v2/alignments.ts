@@ -208,25 +208,29 @@ export async function createAlignment(pp: PolicyPrincipal, b: Body) {
   if (choice === "contribution" && !sessions.length && !source) throw badRequest("Pick a goal of yours or at least one session that contributes");
   if (choice === "work_toward" && governedElsewhere(pp.wsId, keys, null)) throw conflict("already_governed", "One of these sessions already follows another goal through an alignment; revoke that first");
   const note = optStr(b, "note", 1000);
-  const reqs = requirementsFor(pp.userId, target, source, choice, sessions);
-  const id = newId("al");
   const at = nowIso();
-  await tx(() => {
-    run(
-      "INSERT INTO v2_alignments (id, ws_id, requester_id, target_goal_id, source_goal_id, state, revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending', 1, ?, ?)",
-      id,
-      pp.wsId,
-      pp.userId,
-      target.id,
-      source?.id ?? null,
-      at,
-      at,
-    );
-    writeRevision({ id, ws: pp.wsId }, 1, choice, keys, reqs, note, pp.userId, at);
-    audit(pp.wsId, pp.userId, "alignment.requested", id, at);
-    maybeApprove(alignmentRow(pp.wsId, id)!, at, pp.userId);
-  });
+  const id = await tx(() => insertAlignment(pp, target, source, choice, sessions, note, at));
   return alignmentView(pp, alignmentRow(pp.wsId, id)!);
+}
+
+/** Write a validated request (inside the caller's tx) and approve it at once if the requester alone satisfies every
+ *  requirement. Used by createAlignment and the sample workspace. */
+export function insertAlignment(pp: PolicyPrincipal, target: GoalRow, source: GoalRow | undefined, choice: Choice, sessions: SessionRow[], note: string | null, at: string): string {
+  const id = newId("al");
+  run(
+    "INSERT INTO v2_alignments (id, ws_id, requester_id, target_goal_id, source_goal_id, state, revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending', 1, ?, ?)",
+    id,
+    pp.wsId,
+    pp.userId,
+    target.id,
+    source?.id ?? null,
+    at,
+    at,
+  );
+  writeRevision({ id, ws: pp.wsId }, 1, choice, sessions.map((s) => s.session_key), requirementsFor(pp.userId, target, source, choice, sessions), note, pp.userId, at);
+  audit(pp.wsId, pp.userId, "alignment.requested", id, at);
+  maybeApprove(alignmentRow(pp.wsId, id)!, at, pp.userId);
+  return id;
 }
 
 const alignmentRow = (ws: string, id: string) => get<AlignmentRow>("SELECT * FROM v2_alignments WHERE ws_id = ? AND id = ?", ws, id);

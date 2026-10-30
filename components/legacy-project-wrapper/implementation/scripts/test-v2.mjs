@@ -252,7 +252,7 @@ try {
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
-  check("storage: WAL, migrated (user_version 3), v2_ tables and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 3 && pragmas.tables.includes("v2_usage") && pragmas.tables.includes("v2_activity") && pragmas.tables.includes("v2_goal_acks") && pragmas.tables.includes("ba_user"), JSON.stringify(pragmas));
+  check("storage: WAL, migrated (user_version 4), v2_ tables and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 4 && pragmas.tables.includes("v2_usage") && pragmas.tables.includes("v2_activity") && pragmas.tables.includes("v2_goal_acks") && pragmas.tables.includes("v2_change_requests") && pragmas.tables.includes("v2_change_request_revisions") && pragmas.tables.includes("ba_user"), JSON.stringify(pragmas));
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -893,6 +893,268 @@ try {
     `${legacySeen.text.slice(0, 300)} ${legacy1.json?.state} ${legacy2.json?.state}`,
   );
 
+  // -- change requests: a member proposes a new version of a goal they don't own; the goal's approval set decides --
+  const crPath = (g) => `/api/v2/workspaces/${A}/goals/${g}/change-requests`;
+  const propose = (u, g, body) => call(u.who, "POST", crPath(g), { cookie: u.cookie, body });
+  const crAct = (u, g, id, action, body = {}) => call(u.who, "POST", `${crPath(g)}/${id}/${action}`, { cookie: u.cookie, body });
+  const crGet = (u, g, id) => call(u.who, "GET", `${crPath(g)}/${id}`, { cookie: u.cookie });
+  const crList = (u, q = "") => call(u.who, "GET", `/api/v2/workspaces/${A}/change-requests${q}`, { cookie: u.cookie });
+  const drain = async (dev) => {
+    for (let c = "0"; ; ) {
+      const r = await dirs(dev, c);
+      if (!r.directives.length) return c;
+      c = r.next_cursor;
+    }
+  };
+  const goalVersionsFor = (list, goalId) => (list?.directives ?? []).filter((d) => d.kind === "goal_version" && d.goal?.id === goalId);
+  const auditOf = (action, objectId) => withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = ? AND object_id = ?").all(A, action, objectId)).map((r) => r.actor_id);
+  // GL: U3's workspace-visible goal in team P1 (lead U2), so its approval set is U3 (owner) and U2 (lead).
+  const GL = (await mkGoal(U3, { title: "Pen-test the platform", visibility: "workspace", team_id: P1, measures: [{ text: "Open findings", target: "0" }] })).json;
+  const SC = sessionKey(D3, A, "claude-code", "native-cr");
+  await put(D3, SC);
+  const scBind = await epoch(D3, SC, { epoch_id: epochId(), goal_id: GL.id, starts_at: new Date().toISOString() });
+  const mPen = { text: "Pen-test window booked", target: "May" };
+  const cr1 = await propose(U1, GL.id, { base_version: 1, changes: { measures: [...GL.measures, mPen] }, reason: "Onboarding needs a pen-test window in May" });
+  check(
+    "change requests: a member proposes on a goal they don't own -> 201 cr_ pending, revision 1, base_version 1, requester, diff, approvers = the goal's set; audit change_request.created",
+    scBind.status === 200 && cr1.status === 201 && /^cr_/.test(cr1.json.id) && cr1.json.state === "pending" && cr1.json.revision === 1 && cr1.json.base_version === 1 && cr1.json.requester.id === U1.id && cr1.json.goal.id === GL.id && cr1.json.diff.before.measures.length === 1 && cr1.json.diff.after.measures.length === 2 && !("title" in cr1.json.diff.after) && cr1.json.approvers.map((a) => a.id).sort().join() === [U2.id, U3.id].sort().join() && auditOf("change_request.created", cr1.json.id).join() === U1.id,
+    `${scBind.status} ${cr1.text.slice(0, 400)}`,
+  );
+  const ownCr = await propose(U3, GL.id, { base_version: 1, changes: { title: "x" }, reason: "mine" });
+  const viewerCr = await propose(U4, GL.id, { base_version: 1, changes: { title: "x" }, reason: "viewer" });
+  const privCr = await propose(U1, GP.id, { base_version: 1, changes: { title: "x" }, reason: "hidden" });
+  const staleCr = await propose(U2, GL.id, { base_version: 2, changes: { title: "x" }, reason: "stale" });
+  const againCr = await propose(U1, GL.id, { base_version: 1, changes: { title: "Second try" }, reason: "again" });
+  check(
+    "change requests: the owner -> 403 own_goal; a viewer -> 403 read_only; a goal you can't read -> 404; an old base_version -> 409 stale_version; a second open one -> 409 already_open",
+    ownCr.status === 403 && ownCr.json?.error === "own_goal" && viewerCr.status === 403 && viewerCr.json?.error === "read_only" && privCr.status === 404 && staleCr.status === 409 && staleCr.json?.error === "stale_version" && againCr.status === 409 && againCr.json?.error === "already_open",
+    [ownCr, viewerCr, privCr, staleCr, againCr].map((r) => `${r.status} ${r.json?.error}`).join(" "),
+  );
+  const bad = await Promise.all([
+    propose(U2, GL.id, { base_version: 1, changes: { anchors: { repos: ["x"] } }, reason: "anchors" }),
+    propose(U2, GL.id, { base_version: 1, changes: {}, reason: "empty" }),
+    propose(U2, GL.id, { base_version: 1, changes: "title", reason: "not an object" }),
+    propose(U2, GL.id, { base_version: 1, changes: { title: "x" } }),
+    propose(U2, GL.id, { base_version: 1, changes: { title: "x" }, reason: "   " }),
+    propose(U2, GL.id, { base_version: 1, changes: { title: "x" }, reason: "r".repeat(2001) }),
+    propose(U2, GL.id, { base_version: 1, changes: { title: "t".repeat(301) }, reason: "long title" }),
+    propose(U2, GL.id, { base_version: 1, changes: { status: "archived" }, reason: "bad status" }),
+  ]);
+  const noChange = await propose(U2, GL.id, { base_version: 1, changes: { title: GL.title }, reason: "same" });
+  const crBig = await call("U2", "POST", crPath(GL.id), { cookie: U2.cookie, raw: JSON.stringify({ base_version: 1, changes: { title: "x" }, reason: "x", pad: "x".repeat(33 * 1024) }) });
+  const okLong = await propose(U2, GL.id, { base_version: 1, changes: { title: "Pen-test the platform twice" }, reason: "r".repeat(2000) });
+  check(
+    "change requests: anchors, an empty or non-object changes, a missing, blank or 2001-character reason, an invalid title or status -> 400; nothing changing -> 409 no_change; over 32 KB -> 413; a 2000-character reason is accepted",
+    bad.every((r) => r.status === 400) && noChange.status === 409 && noChange.json?.error === "no_change" && crBig.status === 413 && okLong.status === 201,
+    `${bad.map((r) => r.status).join(",")} ${noChange.status} ${crBig.status} ${okLong.status} ${okLong.text.slice(0, 200)}`,
+  );
+  await crAct(U2, GL.id, okLong.json?.id, "withdraw");
+  const cycleCr = await propose(U1, GYb.id, { base_version: 1, changes: { depends_on: [GXa.id] }, reason: "loop" });
+  const g3Now = (await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${G3.id}`, { cookie: U1.cookie })).json?.goal;
+  const hiddenDep = await propose(U1, G3.id, { base_version: g3Now?.version, changes: { depends_on: [GP.id] }, reason: "hidden dependency" });
+  check("change requests: a depends_on that closes a loop -> 409 cycle; a dependency you can't read -> 404", cycleCr.status === 409 && cycleCr.json?.error === "cycle" && hiddenDep.status === 404, `${cycleCr.text} ${hiddenDep.status}`);
+
+  const viewerSees = await crGet(U4, GL.id, cr1.json.id);
+  const viewerApprove = await crAct(U4, GL.id, cr1.json.id, "approve", { revision: 1 });
+  const selfApprove = await crAct(U1, GL.id, cr1.json.id, "approve", { revision: 1 });
+  const wrongGoal = await crGet(U1, G1.id, cr1.json.id);
+  const badAction = await crAct(U2, GL.id, cr1.json.id, "merge", {});
+  const u2Sees = await crGet(U2, GL.id, cr1.json.id);
+  check(
+    "change requests: a viewer reads it with every can flag false and approving -> 403 read_only; the requester (not the owner) approving -> 403 not_an_approver; another goal's path or an unknown action -> 404",
+    viewerSees.status === 200 && Object.values(viewerSees.json.can).every((v) => v === false) && viewerApprove.status === 403 && viewerApprove.json?.error === "read_only" && selfApprove.status === 403 && selfApprove.json?.error === "not_an_approver" && wrongGoal.status === 404 && badAction.status === 404,
+    `${viewerSees.text.slice(0, 200)} ${viewerApprove.status} ${selfApprove.text} ${wrongGoal.status} ${badAction.status}`,
+  );
+  check(
+    "change requests: can flags match the actions: the lead may approve, reject and counter; the requester may withdraw and rebase",
+    JSON.stringify(u2Sees.json?.can) === JSON.stringify({ approve: true, reject: true, counter: true, accept_counter: false, withdraw: false, rebase: false }) && cr1.json.can.withdraw === true && cr1.json.can.rebase === true && cr1.json.can.approve === false,
+    `${JSON.stringify(u2Sees.json?.can)} ${JSON.stringify(cr1.json.can)}`,
+  );
+  const crLists = {
+    U1: await crList(U1),
+    U2: await crList(U2),
+    U4: await crList(U4),
+  };
+  check(
+    "change requests: the workspace list splits waiting on me (the lead) / mine (the requester) / others (the viewer)",
+    crLists.U2.json?.waiting_on_me.some((c) => c.id === cr1.json.id) && crLists.U1.json?.mine.some((c) => c.id === cr1.json.id) && !crLists.U1.json?.waiting_on_me.some((c) => c.id === cr1.json.id) && crLists.U4.json?.others.some((c) => c.id === cr1.json.id && !c.can.approve),
+    JSON.stringify(Object.fromEntries(Object.entries(crLists).map(([k, v]) => [k, v.json && Object.fromEntries(Object.entries(v.json).map(([g, l]) => [g, l.length]))]))),
+  );
+  const rejectEmpty = await crAct(U2, GL.id, cr1.json.id, "reject", {});
+  const afterRejectEmpty = await crGet(U1, GL.id, cr1.json.id);
+  check("change requests: reject without a reason -> 400 and the request is unchanged", rejectEmpty.status === 400 && afterRejectEmpty.json?.state === "pending" && afterRejectEmpty.json.revision === 1, `${rejectEmpty.text} ${afterRejectEmpty.json?.state}`);
+
+  let cursor3 = await drain(D3);
+  const counterMeasures = [...GL.measures, { text: "Pen-test window booked", target: "April" }];
+  const counterNoNote = await crAct(U2, GL.id, cr1.json.id, "counter", { changes: { measures: counterMeasures } });
+  const counterAnchors = await crAct(U2, GL.id, cr1.json.id, "counter", { changes: { anchors: { repos: ["x"] } }, note: "anchors" });
+  const counter1 = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: counterMeasures }, note: "April works better for us" });
+  const cr_approveCountered = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 2 });
+  const acceptByLead = await crAct(U2, GL.id, cr1.json.id, "accept_counter", {});
+  const accept1 = await crAct(U1, GL.id, cr1.json.id, "accept_counter", { revision: 2 });
+  const approveOld = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 1 });
+  const dirsAfterCounter = await dirs(D3, cursor3);
+  check(
+    "change requests: a counter needs a note and proposable fields (400); a counter -> countered at revision 2 with the approver's changes; approving it -> 409 wrong_state; only the requester accepts (403 not_requester) -> pending at revision 2; approve naming revision 1 -> 409 stale_revision",
+    counter1.status === 200 && counter1.json.state === "countered" && counter1.json.revision === 2 && counter1.json.changes.measures[1].target === "April" && counter1.json.revisions.length === 2 && counter1.json.revisions[1].note === "April works better for us" && counter1.json.revisions[1].author.id === U2.id && counterNoNote.status === 400 && counterAnchors.status === 400 && cr_approveCountered.status === 409 && cr_approveCountered.json?.error === "wrong_state" && acceptByLead.status === 403 && acceptByLead.json?.error === "not_requester" && accept1.json?.state === "pending" && accept1.json.revision === 2 && approveOld.status === 409 && approveOld.json?.error === "stale_revision",
+    `${counter1.text.slice(0, 300)} ${counterNoNote.status} ${cr_approveCountered.text} ${acceptByLead.text} ${accept1.json?.state} ${approveOld.text}`,
+  );
+  const approve1 = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 2, note: "Agreed for Q3" });
+  const dirsAfterApprove = await dirs(D3, cursor3);
+  const glV2 = withDb((d) => d.prepare("SELECT version, created_by FROM v2_goal_versions WHERE goal_id = ? ORDER BY version DESC LIMIT 1").get(GL.id));
+  const gvCr = goalVersionsFor(dirsAfterApprove, GL.id);
+  check(
+    "change requests: the lead approves -> approved with approved_by, note and version 2; the goal is at version 2 authored by the approver",
+    approve1.status === 200 && approve1.json.state === "approved" && approve1.json.approved_by?.id === U2.id && approve1.json.note === "Agreed for Q3" && approve1.json.decision_note === "Agreed for Q3" && approve1.json.version === 2 && approve1.json.decided_at && glV2.version === 2 && glV2.created_by === U2.id,
+    `${approve1.text.slice(0, 300)} ${JSON.stringify(glV2)}`,
+  );
+  check(
+    "change requests (directives): counter and accept_counter write no directive; the approval writes one goal_version directive for the bound session with the new version, and no request text reaches it",
+    goalVersionsFor(dirsAfterCounter, GL.id).length === 0 && gvCr.length === 1 && gvCr[0].session_keys.includes(SC) && gvCr[0].goal.version === 2 && gvCr[0].goal.measures.some((m) => m.target === "April") && !JSON.stringify(dirsAfterApprove).includes("Agreed for Q3") && !JSON.stringify(dirsAfterApprove).includes("pen-test window in May") && !JSON.stringify(dirsAfterApprove).includes("April works better"),
+    JSON.stringify(dirsAfterApprove.directives.map((d) => [d.kind, d.goal?.id, d.goal?.version])),
+  );
+  const record = await crGet(U4, GL.id, cr1.json.id);
+  check(
+    "change requests: the decided request is its decision record: requester, approver, reason, before/after diff from the resulting version, revisions",
+    record.status === 200 && record.json.state === "approved" && record.json.requester.id === U1.id && record.json.approved_by.id === U2.id && record.json.reason === "Onboarding needs a pen-test window in May" && record.json.diff.before.measures.length === 1 && record.json.diff.after.measures.length === 2 && record.json.version === 2 && record.json.revisions.length === 2,
+    record.text.slice(0, 400),
+  );
+  const afterDecided = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 2 });
+  check("change requests: a decided request takes no more actions (409 wrong_state)", afterDecided.status === 409 && afterDecided.json?.error === "wrong_state", afterDecided.text);
+
+  // Reject, withdraw and rebase write no directive; stale requests need a rebase before approval.
+  cursor3 = await drain(D3);
+  const crR = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test everything" }, reason: "Wider scope" });
+  const crRbyReq = await crAct(U1, GL.id, crR.json?.id, "reject", { reason: "no" });
+  const crRrej = await crAct(U3, GL.id, crR.json?.id, "reject", { reason: "Out of scope this quarter" });
+  const crW = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the API" }, reason: "Narrower" });
+  const crWbyLead = await crAct(U2, GL.id, crW.json?.id, "withdraw", {});
+  const crWok = await crAct(U1, GL.id, crW.json?.id, "withdraw", {});
+  check(
+    "change requests: reject by the requester -> 403 not_an_approver; by the owner -> rejected with rejected_by and the reason; withdraw by someone else -> 403 not_requester, by the requester -> withdrawn",
+    crRbyReq.status === 403 && crRbyReq.json?.error === "not_an_approver" && crRrej.json?.state === "rejected" && crRrej.json.rejected_by?.id === U3.id && crRrej.json.rejection_reason === "Out of scope this quarter" && crRrej.json.decision_note === "Out of scope this quarter" && crWbyLead.status === 403 && crWbyLead.json?.error === "not_requester" && crWok.json?.state === "withdrawn",
+    `${crRbyReq.text} ${crRrej.text.slice(0, 200)} ${crWbyLead.text} ${crWok.json?.state}`,
+  );
+  const crA = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the platform and the API" }, reason: "Both" });
+  const crB = await propose(U2, GL.id, { base_version: 2, changes: { measures: [{ text: "Critical findings", target: "0" }] }, reason: "Track criticals" });
+  const crBapprovers = crB.json?.approvers?.map((a) => a.id).join();
+  const approveA = await crAct(U3, GL.id, crA.json?.id, "approve", { revision: 1 });
+  const bNow = await crGet(U2, GL.id, crB.json?.id);
+  const cr_approveB = await crAct(U3, GL.id, crB.json?.id, "approve", { revision: 1 });
+  const rebaseOld = await crAct(U2, GL.id, crB.json?.id, "rebase", { base_version: 2 });
+  const rebaseByOther = await crAct(U1, GL.id, crB.json?.id, "rebase", { base_version: 3 });
+  const cursorBeforeRebase = await drain(D3);
+  const rebaseB = await crAct(U2, GL.id, crB.json?.id, "rebase", { base_version: 3 });
+  const dirsAfterRebase = await dirs(D3, cursorBeforeRebase);
+  const approveB2 = await crAct(U3, GL.id, crB.json?.id, "approve", { revision: 2 });
+  check(
+    "change requests: a lead's own request is decided by the rest of the set (the owner); after another request is approved it stays pending, behind, approve -> 409 stale_version",
+    crBapprovers === U3.id && approveA.json?.state === "approved" && approveA.json.version === 3 && bNow.json?.state === "pending" && bNow.json.behind === true && bNow.json.can.approve === false && bNow.json.can.rebase === true && cr_approveB.status === 409 && cr_approveB.json?.error === "stale_version",
+    `${crBapprovers} ${approveA.text.slice(0, 200)} ${bNow.json?.state} ${cr_approveB.text}`,
+  );
+  check(
+    "change requests: rebase with an old base -> 409 stale_version, by someone else -> 403 not_requester; to the current version -> base 3, revision 2 (no directive), then approve -> version 4",
+    rebaseOld.status === 409 && rebaseOld.json?.error === "stale_version" && rebaseByOther.status === 403 && rebaseByOther.json?.error === "not_requester" && rebaseB.json?.base_version === 3 && rebaseB.json.revision === 2 && rebaseB.json.behind === false && goalVersionsFor(dirsAfterRebase, GL.id).length === 0 && approveB2.json?.state === "approved" && approveB2.json.version === 4,
+    `${rebaseOld.text} ${rebaseByOther.status} ${rebaseB.text.slice(0, 200)} ${approveB2.text.slice(0, 200)}`,
+  );
+  const dirsRejWd = await dirs(D3, cursor3);
+  check(
+    "change requests (directives): only approvals write goal_version directives (two approvals here, none for create, reject, withdraw or rebase)",
+    goalVersionsFor(dirsRejWd, GL.id).map((d) => d.goal.version).join() === "3,4",
+    JSON.stringify(goalVersionsFor(dirsRejWd, GL.id).map((d) => d.goal.version)),
+  );
+
+  // A goal that is dropped supersedes its open requests.
+  const crS1 = await propose(U1, GL.id, { base_version: 4, changes: { title: "Pen-test it all" }, reason: "s1" });
+  const crS2 = await propose(U2, GL.id, { base_version: 4, changes: { status: "achieved" }, reason: "s2" });
+  const crS2c = await crAct(U3, GL.id, crS2.json?.id, "counter", { changes: { status: "achieved", title: "Pen-test done" }, note: "with a new title" });
+  const drop = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GL.id}/versions`, { cookie: U3.cookie, body: { version: 4, status: "dropped" } });
+  const s1 = await crGet(U1, GL.id, crS1.json?.id);
+  const s2 = await crGet(U2, GL.id, crS2.json?.id);
+  const actSuperseded = await crAct(U1, GL.id, crS1.json?.id, "withdraw", {});
+  const onDropped = await propose(U1, GL.id, { base_version: 5, changes: { title: "Revive" }, reason: "revive" });
+  check(
+    "change requests: the owner drops the goal -> its pending and countered requests become superseded (audit names the owner), take no action (409 wrong_state), and a new one -> 409 goal_not_active",
+    crS2c.json?.state === "countered" && drop.status === 201 && s1.json?.state === "superseded" && s2.json?.state === "superseded" && auditOf("change_request.superseded", crS1.json?.id).join() === U3.id && auditOf("change_request.superseded", crS2.json?.id).join() === U3.id && actSuperseded.status === 409 && actSuperseded.json?.error === "wrong_state" && onDropped.status === 409 && onDropped.json?.error === "goal_not_active",
+    `${crS2c.json?.state} ${drop.status} ${s1.json?.state} ${s2.json?.state} ${actSuperseded.status} ${onDropped.text}`,
+  );
+  // An approved request that marks the goal achieved supersedes the others too.
+  const GA = (await mkGoal(U3, { title: "Write the runbook", visibility: "workspace" })).json;
+  const crX = await propose(U1, GA.id, { base_version: 1, changes: { status: "achieved" }, reason: "It is written" });
+  const crY = await propose(U2, GA.id, { base_version: 1, changes: { title: "Write the runbooks" }, reason: "plural" });
+  const approveX = await crAct(U3, GA.id, crX.json?.id, "approve", { revision: 1 });
+  const y = await crGet(U2, GA.id, crY.json?.id);
+  check("change requests: approving a request that marks the goal achieved supersedes the goal's other open requests", approveX.json?.state === "approved" && y.json?.state === "superseded", `${approveX.text.slice(0, 200)} ${y.json?.state}`);
+
+  // Team goals: requests are as visible as their goal.
+  const crTeam = await propose(U3, G2.id, { base_version: (await call("U3", "GET", `/api/v2/workspaces/${A}/goals/${G2.id}`, { cookie: U3.cookie })).json.goal.version, changes: { title: "Platform reliability (p99 and p999)" }, reason: "Track tails" });
+  const teamHidden = await crGet(U4, G2.id, crTeam.json?.id);
+  const u4All = await crList(U4);
+  const u4Ids = [...u4All.json.waiting_on_me, ...u4All.json.mine, ...u4All.json.others].map((c) => c.id);
+  const byState = await call("U1", "GET", `${crPath(GL.id)}?state=superseded`, { cookie: U1.cookie });
+  const badState = await call("U1", "GET", `${crPath(GL.id)}?state=archived`, { cookie: U1.cookie });
+  const wsBadState = await crList(U1, "?state=open");
+  const wsApproved = await crList(U1, "?state=approved");
+  check(
+    "change requests: a team goal's request is hidden from someone who can't read the goal (404, not listed); ?state= filters; an unknown state -> 400",
+    crTeam.status === 201 && teamHidden.status === 404 && !u4Ids.includes(crTeam.json.id) && u4Ids.includes(cr1.json.id) && byState.status === 200 && byState.json.change_requests.length === 2 && byState.json.change_requests.every((c) => c.state === "superseded") && badState.status === 400 && wsBadState.status === 400 && [...wsApproved.json.waiting_on_me, ...wsApproved.json.mine, ...wsApproved.json.others].every((c) => c.state === "approved"),
+    `${crTeam.status} ${teamHidden.status} ${byState.status} ${byState.json?.change_requests?.length} ${badState.status} ${wsBadState.status}`,
+  );
+  const crAudit = withDb((d) => d.prepare("SELECT action, actor_id FROM v2_audit WHERE ws_id = ? AND action LIKE 'change_request.%'").all(A));
+  const crActions = ["created", "approved", "rejected", "countered", "counter_accepted", "withdrawn", "rebased", "superseded"].map((a) => `change_request.${a}`);
+  check(
+    "change requests: every action is audited with its actor (created, approved, rejected, countered, counter_accepted, withdrawn, rebased, superseded); an approval also writes goal.versioned by the approver",
+    crActions.every((a) => crAudit.some((r) => r.action === a)) && crAudit.every((r) => r.actor_id) && auditOf("goal.versioned", GL.id).includes(U2.id) && auditOf("change_request.counter_accepted", cr1.json.id).join() === U1.id,
+    JSON.stringify(crAudit.slice(-10)),
+  );
+
+  // -- the Northstar sample workspace --
+  const s1ws = await call("U2", "POST", "/api/v2/workspaces/sample", { cookie: U2.cookie, body: {} });
+  const s2ws = await call("U2", "POST", "/api/v2/workspaces/sample", { cookie: U2.cookie });
+  const SW = s1ws.json?.id;
+  check("sample: POST /api/v2/workspaces/sample -> 201 {id, name \"Northstar (sample)\", role owner}; twice -> two workspaces", s1ws.status === 201 && /^ws_/.test(SW) && s1ws.json.name === "Northstar (sample)" && s1ws.json.role === "owner" && s2ws.status === 201 && s2ws.json.id !== SW, `${s1ws.text} ${s2ws.text}`);
+  const sDetail = (await call("U2", "GET", `/api/v2/workspaces/${SW}`, { cookie: U2.cookie })).json;
+  const sFeed = (await call("U2", "GET", `/api/v2/workspaces/${SW}/goals`, { cookie: U2.cookie })).json?.goals ?? [];
+  const sByTitle = Object.fromEntries(sFeed.map((g) => [g.title, g]));
+  const sCo = sByTitle["Expand to regulated customers"];
+  const sOn = sByTitle["Ship self-serve onboarding"];
+  const sSec = sByTitle["Pass the security review"];
+  check(
+    "sample: teams Product and Security with the caller as lead of both; every goal owned by the caller",
+    sDetail?.teams?.map((t) => t.name).sort().join() === "Product,Security" && sDetail.teams.every((t) => t.my_role === "lead" && t.members.length === 1 && t.members[0].id === U2.id) && sFeed.length === 3 && sFeed.every((g) => g.owner.id === U2.id),
+    JSON.stringify(sDetail?.teams),
+  );
+  check(
+    "sample: a company goal, two workspace-visible team goals (Product, Security) contributing to it (stale false), and onboarding depends on the security review",
+    sCo?.level === "company" && sCo.visibility === "workspace" && sOn?.level === "team" && sOn.team?.name === "Product" && sOn.visibility === "workspace" && sSec?.team?.name === "Security" && sSec.visibility === "workspace" && [sOn, sSec].every((g) => g.contributes_to.length === 1 && g.contributes_to[0].id === sCo.id && g.contributes_to[0].stale === false) && sOn.depends_on.join() === sSec.id && sFeed[0].id === sCo.id,
+    JSON.stringify(sFeed.map((g) => [g.title, g.level, g.team?.name, g.contributes_to, g.depends_on])),
+  );
+  const sAligns = (await call("U2", "GET", `/api/v2/workspaces/${SW}/alignments`, { cookie: U2.cookie })).json;
+  const sAll = [...(sAligns?.waiting_on_me ?? []), ...(sAligns?.mine ?? []), ...(sAligns?.others ?? [])];
+  check("sample: both contributions are approved alignments the caller requested and approved", sAll.length === 2 && sAll.every((a) => a.state === "approved" && a.choice === "contribution" && a.requester.id === U2.id && a.requirements.every((r) => r.approved_by?.id === U2.id)), JSON.stringify(sAll.map((a) => [a.state, a.choice])));
+  const sCrs = (await call("U2", "GET", `/api/v2/workspaces/${SW}/change-requests`, { cookie: U2.cookie })).json;
+  const sCr = sCrs?.waiting_on_me?.[0];
+  check(
+    "sample: one pending change request on the security goal, from the caller, explaining why the sample shows it; the caller can approve, counter, reject, withdraw and rebase it",
+    sCrs?.waiting_on_me?.length === 1 && sCrs.mine.length === 0 && sCrs.others.length === 0 && sCr.goal.id === sSec.id && sCr.state === "pending" && sCr.requester.id === U2.id && /sample/i.test(sCr.reason) && sCr.diff.after.measures.length === sSec.measures.length + 1 && Object.values(sCr.can).filter(Boolean).length === 5 && !sCr.can.accept_counter,
+    JSON.stringify(sCrs).slice(0, 400),
+  );
+  const sApprove = await call("U2", "POST", `/api/v2/workspaces/${SW}/goals/${sSec.id}/change-requests/${sCr?.id}/approve`, { cookie: U2.cookie, body: { revision: 1 } });
+  const sSecNow = (await call("U2", "GET", `/api/v2/workspaces/${SW}/goals/${sSec.id}`, { cookie: U2.cookie })).json?.goal;
+  check("sample: approving the sample request -> the security goal is at version 2 and the request approved by the caller", sApprove.json?.state === "approved" && sApprove.json.approved_by?.id === U2.id && sSecNow?.version === 2, `${sApprove.text.slice(0, 200)} ${sSecNow?.version}`);
+  const sAudit = withDb((d) => d.prepare("SELECT action, actor_id FROM v2_audit WHERE ws_id = ?").all(SW));
+  check("sample: every audit row names the caller", sAudit.length >= 10 && sAudit.every((r) => r.actor_id === U2.id) && ["workspace.created", "team.created", "goal.created", "alignment.approved", "change_request.created"].every((a) => sAudit.some((r) => r.action === a)), JSON.stringify(sAudit.slice(0, 5)));
+  const sRename = await call("U2", "PATCH", `/api/v2/workspaces/${s2ws.json?.id}`, { cookie: U2.cookie, body: { name: "Northstar, renamed" } });
+  const sDelete = await call("U2", "DELETE", `/api/v2/workspaces/${s2ws.json?.id}`, { cookie: U2.cookie });
+  const sAnon = await call("anon", "POST", "/api/v2/workspaces/sample", { body: {} });
+  check("sample: it is ordinary data (rename, delete); signed out -> 401", sRename.status === 200 && sDelete.status === 204 && sAnon.status === 401, `${sRename.status} ${sDelete.status} ${sAnon.status}`);
+  const U7 = await signUp("U7", "Uri Seven", "u7@example.test");
+  const u7ws = [];
+  for (let i = 0; i < 9; i++) u7ws.push((await call("U7", "POST", "/api/v2/workspaces", { cookie: U7.cookie, body: { name: `W${i}` } })).status);
+  const u7s1 = await call("U7", "POST", "/api/v2/workspaces/sample", { cookie: U7.cookie, body: {} });
+  const u7s2 = await call("U7", "POST", "/api/v2/workspaces/sample", { cookie: U7.cookie, body: {} });
+  check("sample: it counts toward the workspace-creation limit (9 workspaces + 1 sample, then 429 rate_limited)", u7ws.every((s) => s === 201) && u7s1.status === 201 && u7s2.status === 429 && u7s2.json?.error === "rate_limited", `${u7ws.join(",")} ${u7s1.status} ${u7s2.text}`);
+
   // -- invites that name a team, member roles, removal, leaving, last owner --
   const U5 = await signUp("U5", "Ugo Five", "u5@example.test");
   const U6 = await signUp("U6", "Ula Six", "u6@example.test");
@@ -1084,7 +1346,7 @@ try {
   check("device: authorize is limited to 10 per hour per client (then 429)", limited > 0, `${limited}`);
 
   // -- the web UI renders: pages need a session, then load --
-  const pagePaths = ["/app", "/app/device", "/app/devices", `/app/w/${A}`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/spend`, `/app/invite/${"x".repeat(43)}`];
+  const pagePaths = ["/app", "/app/device", "/app/devices", `/app/w/${A}`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/requests`, `/app/w/${A}/spend`, `/app/invite/${"x".repeat(43)}`];
   const anonPages = await Promise.all(pagePaths.map((p) => call("anon", "GET", p)));
   check("ui: every /app page without a session sends you to /app/sign-in", anonPages.every((r) => (r.status === 307 && /\/app\/sign-in/.test(r.headers.get("location") || "")) || (r.status === 200 && r.text.includes("/app/sign-in?next="))), anonPages.map((r) => r.status).join(","));
   const userPages = await Promise.all(pagePaths.map((p) => call("U1", "GET", p, { cookie: U1.cookie })));
@@ -1105,7 +1367,25 @@ try {
       await page.type('input[type="email"]', "ui@example.test");
       await page.type('input[type="password"]', "browser-pass-1");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => document.querySelector("form button[type=submit]")?.click())]);
-      await page.waitForFunction(() => document.body.innerText.includes("Your workspaces"), { timeout: 15000 });
+      await page.waitForFunction(() => document.body.innerText.includes("Your workspaces") && document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
+      // First run: the sample, then its pending change request approved from the Requests tab.
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create the Northstar sample")?.click())]);
+      await page.waitForFunction(() => document.body.innerText.includes("Expand to regulated customers") && document.body.innerText.includes("Pass the security review"), { timeout: 15000 });
+      const sampleUrl = page.url();
+      await page.goto(`${sampleUrl}/requests`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Waiting on you") && document.body.innerText.includes("waiting for approval") && document.body.innerText.includes("Pen test window booked"), { timeout: 15000 });
+      const requestsText = await page.evaluate(() => document.body.innerText);
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve")?.click());
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve as version 2"), { timeout: 15000 });
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve as version 2")?.click());
+      await page.waitForFunction(() => document.body.innerText.includes("Approved by") && document.body.innerText.includes("It became version 2"), { timeout: 15000 });
+      const sampleGoal = await page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Pass the security review")?.getAttribute("href"));
+      await page.goto(`${BASE}${sampleGoal}`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Change requests") && document.body.innerText.includes("approved") && document.body.innerText.includes("version 2"), { timeout: 15000 });
+      const ownGoalText = await page.evaluate(() => document.body.innerText);
+      check("ui (Chrome): first run offers the Northstar sample; its request is approved from the Requests tab; the owner's goal page lists it without Propose a change", !ownGoalText.includes("Propose a change") && /Your requests/.test(requestsText), "");
+      await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Northstar (sample)") && !document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
       await page.type("main form input", "UI workspace");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create")?.click())]);
       await page.waitForFunction(() => document.body.innerText.includes("New goal") && document.body.innerText.includes("Level"), { timeout: 15000 });
@@ -1120,9 +1400,9 @@ try {
       await page.goto(`${wsUrl}/people`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => ["Invite someone", "Teams", "No teams yet.", "Leave workspace", "Create team"].every((x) => document.body.innerText.includes(x)), { timeout: 15000 });
       const peopleText = await page.evaluate(() => document.body.innerText);
-      for (const t of ["sessions", "alignments"]) {
+      for (const t of ["sessions", "alignments", "requests"]) {
         await page.goto(`${wsUrl}/${t}`, { waitUntil: "networkidle0" });
-        await page.waitForFunction((x) => document.body.innerText.includes(x), { timeout: 15000 }, t === "sessions" ? "Shared sessions" : "Waiting on you");
+        await page.waitForFunction((x) => document.body.innerText.includes(x), { timeout: 15000 }, t === "sessions" ? "Shared sessions" : t === "requests" ? "You have not proposed a change" : "Waiting on you");
       }
       await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Your devices"), { timeout: 15000 });

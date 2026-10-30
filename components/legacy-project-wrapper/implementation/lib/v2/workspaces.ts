@@ -50,7 +50,8 @@ export function workspacesFor(p: Principal) {
   }));
 }
 
-export async function createWorkspace(userId: string, name: string) {
+/** A new workspace owned by `userId`. `seed`, when given, fills it in the same transaction (the sample workspace). */
+export async function createWorkspace(userId: string, name: string, seed?: (wsId: string, at: string) => void) {
   take(`ws-create:${userId}`, 10, 60 * 60 * 1000);
   const owned = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_members WHERE user_id = ? AND role = 'owner'", userId)?.n ?? 0;
   if (owned >= 50) throw conflict("too_many_workspaces", "You own the maximum number of workspaces");
@@ -60,6 +61,7 @@ export async function createWorkspace(userId: string, name: string) {
     run("INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)", id, name, userId, at);
     run("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)", id, userId, at);
     audit(id, userId, "workspace.created", id, at);
+    seed?.(id, at);
   });
   return { id, name, role: "owner" as const };
 }

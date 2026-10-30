@@ -20,7 +20,7 @@ export function rand32(bytes = 15): string {
   return out;
 }
 
-export type IdPrefix = "u" | "ws" | "pod" | "g" | "al" | "dv" | "dir" | "inv" | "m" | "dr";
+export type IdPrefix = "u" | "ws" | "pod" | "g" | "al" | "dv" | "dir" | "inv" | "m" | "dr" | "cr";
 
 /** `<prefix>_<24 base32 chars>` (120 random bits). Never sequential. */
 export const newId = (prefix: IdPrefix) => `${prefix}_${rand32(15)}`;

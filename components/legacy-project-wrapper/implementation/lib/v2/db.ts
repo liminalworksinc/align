@@ -511,6 +511,45 @@ const MIGRATIONS: string[] = [
   ALTER TABLE v2_invites ADD COLUMN team_role TEXT CHECK (team_role IN ('lead','member'));
   CREATE INDEX v2_audit_ws ON v2_audit(ws_id, seq);
   `,
+  // 4: change requests: a proposed new version of a goal the requester does not own (lib/v2/changes.ts). One open
+  // (pending or countered) request per goal and requester. Each revision keeps the changes and the base version it
+  // was made against; the decision (approved_by or rejected_by, its note, the resulting goal version) is on the row.
+  `
+  CREATE TABLE v2_change_requests (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    goal_id TEXT NOT NULL,
+    requester_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('pending','countered','approved','rejected','withdrawn','superseded')),
+    revision INTEGER NOT NULL,
+    base_version INTEGER NOT NULL,
+    changes_json TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    approved_by TEXT,
+    rejected_by TEXT,
+    decision_note TEXT,
+    version INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    decided_at TEXT,
+    UNIQUE (ws_id, id),
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_change_requests_goal ON v2_change_requests(ws_id, goal_id);
+  CREATE UNIQUE INDEX v2_change_requests_open ON v2_change_requests(goal_id, requester_id) WHERE state IN ('pending','countered');
+  CREATE TABLE v2_change_request_revisions (
+    ws_id TEXT NOT NULL,
+    change_request_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    base_version INTEGER NOT NULL,
+    changes_json TEXT NOT NULL,
+    note TEXT,
+    author_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (change_request_id, revision),
+    FOREIGN KEY (ws_id, change_request_id) REFERENCES v2_change_requests(ws_id, id) ON DELETE CASCADE
+  );
+  `,
 ];
 
 export function migrate() {
