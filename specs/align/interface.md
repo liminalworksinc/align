@@ -318,7 +318,7 @@ to a proposal.
 #### Scenario: Product adds passing results
 
 - **WHEN** Product presses **Add test results to the proposal** after the new plan passed
-- **THEN** the plan and the attached run ids are kept (surviving a reload in session storage), the drawer closes and the Proposals composer opens
+- **THEN** the plan and the attached run ids are kept (surviving a reload in session storage), the drawer closes and Proposals opens: on the composer when no proposal is open, otherwise on the open proposal, with the attachment kept for the next composer
 
 #### Scenario: Results not ready
 
