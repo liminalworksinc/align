@@ -230,7 +230,7 @@ The server SHALL, when session capture records a tool name matching `align_get_a
 
 ### Requirement: Watcher wake contract
 
-The watcher hook SHALL run only when the hook input has a `session_id` and the repo opted in (`ALIGN_CAPTURE=1` or a `.claude/settings.json` mentioning `align-watch` in `cwd` or up to 7 parent folders), hold one lock per session, connect to the stream for `claude-code:<session_id>` and fall back to polling `GET /api/directives` every 2 seconds for up to 20 seconds before reconnecting, for a window of `ALIGN_WATCH_WINDOW_MS` (default 55 minutes); on the first `directive` it SHALL post the ack (3-second timeout, waking the agent even if the ack fails), write the directive `text` to stderr and exit with code 2 so Claude Code wakes the session with that text.
+The watcher hook SHALL run only when the hook input has a `session_id` and the repo opted in (`ALIGN_CAPTURE=1` or a `.claude/settings.json` mentioning `align-watch` in `cwd` or up to 7 parent folders), hold one lock per session, talk to `ALIGN_URL` (default `http://localhost:3100`) and, when `ALIGN_AGENT_TOKEN` is set, send it as `Authorization: Bearer <token>` on every stream, poll and ack request (so wake-ups come from that token's workspace instead of the default store), connect to the stream for `claude-code:<session_id>` and fall back to polling `GET /api/directives` every 2 seconds for up to 20 seconds before reconnecting, for a window of `ALIGN_WATCH_WINDOW_MS` (default 55 minutes); on the first `directive` it SHALL post the ack (3-second timeout, waking the agent even if the ack fails), write the directive `text` to stderr and exit with code 2 so Claude Code wakes the session with that text.
 
 #### Scenario: Directive wakes an idle agent
 
@@ -253,7 +253,7 @@ The project hook configuration SHALL start the watcher as an `asyncRewake` hook 
 
 #### Scenario: Two decisions close together
 
-- **WHEN** a push and a ratification are both pending for a session whose watcher is armed
+- **WHEN** a push and a later ratification are both pending for a session whose watcher is armed
 - **THEN** the agent is woken with the push directive first, and the ratification is delivered by the watcher started on the following `Stop` hook
 
 ### Requirement: Agents read directives and the accepted plan over read-only MCP
@@ -322,7 +322,7 @@ The Sparta lab SHALL grade every run of mission `obs-beta-triage` with exactly 9
 
 ### Requirement: Evidence verification
 
-`scripts/verify-run.mjs <evidence.json> [--expect PASS|FAIL] [--plan <id@v>] [--json]` SHALL report `PASS` only when the evidence has `grade.passed === true` and `execution.exitCode === 0` (otherwise `FAIL`), take the plan and scenario from the file name pattern `<plan>@<v>-<normal|interruption>-<digits>`, count passed checks with `assertion:` prefixes stripped, treat the protected ticket as unchanged from the `protected-p0` check (or, without it, from ticket `1` being absent from the updated-ticket diff), print `Verified by Sparta: <plan> · <verdict> · <passed>/<total> checks · protected security ticket <unchanged|CHANGED> · exit <code>` plus a `failed checks:` line when any check failed, and exit 0 when it verifies and matches the options, 1 on a mismatch, 2 on missing or unreadable input.
+`scripts/verify-run.mjs <evidence.json> [--expect PASS|FAIL] [--plan <id@v>] [--json]` SHALL report `PASS` only when the evidence has `grade.passed === true` and `execution.exitCode === 0` (otherwise `FAIL`), take the plan and scenario from the file name pattern `<plan>@<v>-<normal|interruption>-<digits>`, count passed checks with `assertion:` prefixes stripped, treat the protected ticket as unchanged from the `protected-p0` check (or, without it, from ticket `1` being absent from the updated-ticket diff), print `Verified by Sparta: <plan> · <verdict> · <passed>/<total> checks · protected security ticket <unchanged|CHANGED> · exit <code>` plus a `failed checks:` line when any check failed, and exit 0 whenever the evidence is readable and matches any given `--expect`/`--plan` (a `FAIL` verdict with no `--expect` still exits 0), 1 on a mismatch with those options, 2 on missing or unreadable input.
 
 #### Scenario: Expectation mismatch
 
@@ -345,7 +345,7 @@ When goal sessions are enabled (`ALIGN_GOAL_SESSIONS=1`; otherwise `/api/v2/*` i
 
 ### Requirement: v2 stop and resume
 
-The server SHALL accept `POST /api/v2/workspaces/{ws}/sessions/{key}/stop` and `.../resume` only with a same-site browser session of the session's owner or a workspace owner, set the session's `agent_stopped` flag and write one `stop` or `resume` directive targeting that session, responding `{ directive_id, agent_stopped }`; it SHALL answer HTTP 404 for an unknown session and HTTP 409 `sharing_stopped` when sharing was stopped for the session.
+The server SHALL accept `POST /api/v2/workspaces/{ws}/sessions/{key}/stop` and `.../resume` only with a same-site browser session of the session's owner or a workspace owner, set the session's `agent_stopped` flag and write one `stop` or `resume` directive targeting that session, responding `{ directive_id, agent_stopped }`; it SHALL answer HTTP 404 for an unknown session or a caller who is neither its owner nor a workspace owner, and HTTP 409 `sharing_stopped` when sharing was stopped for the session.
 
 #### Scenario: Workspace owner stops a member's agent
 
