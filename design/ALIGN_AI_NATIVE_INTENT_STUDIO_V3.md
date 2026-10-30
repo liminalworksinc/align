@@ -2,7 +2,7 @@
 
 **Status:** design prototype / proposed direction; founder ruling outstanding. **No production code, model calls or backend integrations.**
 **GitHub:** draft [PR #34](https://github.com/liminalworksinc/align/pull/34), [interactive HTML concept](./prototypes/lim-2449-intent-studio-v3.html).
-**Existing sources:** current v13 product mechanics at Fly source SHA `5b74d8683592eeea4ae0850156ea7b9759b23258`; D0 evidence accepted [LIM-2446](https://linear.app/liminalworksinc/issue/LIM-2446) and privately held; Claude's real feasibility analysis [LIM-2447](https://linear.app/liminal-space-io/issue/LIM-2447). **Main advanced separately after v13; this is not a sync/rebase and this design branch is intentionally unmerged.**
+**Existing sources:** current v13 product mechanics at Fly source SHA `5b74d8683592eeea4ae0850156ea7b9759b23258`; D0 evidence accepted [LIM-2446](https://linear.app/liminal-space-io/issue/LIM-2446) and privately held; Claude's real feasibility analysis [LIM-2447](https://linear.app/liminal-space-io/issue/LIM-2447). **Main advanced separately after v13; this is not a sync/rebase and this design branch is intentionally unmerged.**
 
 ## The correction
 
