@@ -1,3 +1,7 @@
+> **SUPERSEDED by founder-ruled R2 (2026-10-30):** [Current v2 R2 design contract](./ALIGN_V2_E2E_DESIGN_CONTRACT_R2.md), [updated interactive prototype](./prototypes/lim-2449-v2-sample-e2e-r2.html). The R1 external-verifier, condition confirmation, verification launch block and speculative Leadership identity are **withdrawn**. Founder ruled: approval records agreement, launch releases plan to agents; conditions are requester-only acknowledgment (not verified/confirmed); one adaptive Home; v2 launcher authority remains OPEN. This file is preserved solely as historical R1.
+
+---
+
 # Align v2 — R1 end-to-end product/design contract (proposed)
 
 **Owner:** LIM-2449 → founder R-n ruling in LIM-2454 → implementation in LIM-2455 / draft PR #39. **Date:** 2026-10-30. **Status: SPECIFIED FOR REVIEW, NOT FOUNDER-RATIFIED, NOT SHIPPED.** This document resolves the interaction design sufficiently to prototype/test, but the **choice of launch enforcement semantics still requires explicit founder + security approval** before any v2 backend implementation.
