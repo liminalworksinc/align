@@ -149,7 +149,7 @@ The token SHALL be checked against the stored grant and the membership on every 
 
 ### Requirement: Device tokens on the MCP endpoint
 
-The MCP server SHALL accept a v2 device access token (`alnd_` followed by 20 to 100 base64url characters) when it names a stored, unexpired access token of a device that is not revoked and whose person still exists. The caller SHALL act as the device's person, and the readable workspaces SHALL be the device's granted workspaces in which that person is still a member. An expired, unknown or revoked device token SHALL get `401`. A device refresh token (`alnr_`) SHALL never be accepted at `/api/mcp`.
+The MCP server SHALL accept a v2 device access token (`alnd_` followed by 20 to 100 base64url characters) when it names a stored, unexpired access token of a device that is not revoked and whose person still exists. The caller SHALL act as the device's person, and the readable workspaces SHALL be the device's granted workspaces in which that person is still a member. An expired, unknown or revoked device token SHALL get `401`. A device refresh token (`alnr_`) SHALL never be accepted at `/api/mcp`. Leaving a workspace or being removed from it does not revoke the device: it ends the device's grant for that workspace only, so the token still authenticates and the workspace is no longer readable with it.
 
 #### Scenario: Paired device reads goals
 
@@ -158,8 +158,13 @@ The MCP server SHALL accept a v2 device access token (`alnd_` followed by 20 to 
 
 #### Scenario: Revoked device
 
-- **WHEN** a device is revoked (by its person at `/app/devices`, by refresh-token reuse, or because its person left the workspace) and it then calls `/api/mcp` with an access token issued before
-- **THEN** the response is `401`, or, if the device keeps other workspace grants, a tool call naming the left workspace fails with `Workspace not found`
+- **WHEN** a device is revoked (by its person at `/app/devices` or by refresh-token reuse) and it then calls `/api/mcp` with an access token issued before
+- **THEN** the response is `401`
+
+#### Scenario: Device whose person left a workspace
+
+- **WHEN** a device granted workspaces A and B belongs to a person who then leaves B, and it calls `align_list_goals` with its current access token
+- **THEN** the call with `{workspace: "<B id>"}` fails with `Workspace not found` and the call with `{}` reads A; once the person has left A as well, the call with `{}` fails with `This device has no workspaces. Approve it for one in Align.`
 
 ### Requirement: MCP workspace selection
 
@@ -342,7 +347,7 @@ The authorization server SHALL accept RFC 7591 registration at `POST /oauth/regi
 The authorization server SHALL accept as `client_id` an https URL that has a non-root path, no fragment, no userinfo, no non-default port (an explicit `:443` is normalized away and accepted), no IP-literal host, and at most 500 characters. It SHALL resolve the client by fetching the JSON document at that URL with these limits:
 
 - Addresses that resolve to private, loopback, link-local, CGNAT, multicast, documentation, reserved or IPv4-embedding IPv6 ranges are refused.
-- The whole fetch has a 3 s deadline and a 5 KB size limit.
+- Each fetch attempt has a 3 s deadline, from connecting to the last byte, and a 5 KB size limit.
 - Any failure other than a refused address or a non-5xx HTTP status (a dropped connection, a 5xx answer, a body over 5 KB or a body that is not JSON) gets one retry, none after the 3 s deadline. If the retry fails too, the document is treated as unreachable.
 - At most 8 fetches run at once per pool. Anthropic/OpenAI hosts form one pool and all other hosts form the other. While a pool is full, an app whose last good document is under a day old gets that document; any other app is told Align couldn't reach its host.
 
@@ -460,7 +465,7 @@ On approval the endpoint SHALL write a v2 audit row in that workspace with the p
 
 ### Requirement: Authorization codes
 
-The authorization server SHALL issue each authorization code as 32 random bytes in base64url, held in memory for 60 seconds. Each code SHALL be single-use and bound to the client id, client name, redirect URI, PKCE challenge, resource, person (`user_id`) and workspace (`ws_id`). At most 1000 codes SHALL be held. Expired codes SHALL be kept a further 60 seconds so that reuse can be detected. A restart SHALL drop all codes.
+The authorization server SHALL issue each authorization code as 32 random bytes in base64url, held in memory for 60 seconds. Each code SHALL be single-use (only one exchange can succeed; a failed exchange, such as one with a wrong `code_verifier`, does not use it up) and bound to the client id, client name, redirect URI, PKCE challenge, resource, person (`user_id`) and workspace (`ws_id`). At most 1000 codes SHALL be held. Expired codes SHALL be kept a further 60 seconds so that reuse can be detected. A restart SHALL drop all codes.
 
 #### Scenario: Code replay
 
@@ -478,7 +483,7 @@ The authorization server SHALL accept `POST /oauth/token` with `application/x-ww
 - A matching resource.
 - A workspace that still exists, with the code's person still a member.
 
-It SHALL then create a grant for that person and workspace and return `200 {access_token: "alm.…", token_type: "Bearer", expires_in: 3600, refresh_token: "alr.…", scope: "goals:read"}`. All errors SHALL be `400` with `{error, error_description}`:
+It SHALL then create a grant for that person and workspace and return `200 {access_token: "alm.…", token_type: "Bearer", expires_in: 3600, refresh_token: "alr.…", scope: "goals:read"}`. All errors other than the rate limit (`429`, see "OAuth endpoint rate limits") and an internal failure (`500 {"error":"server_error"}`) SHALL be `400` with `{error, error_description}`:
 
 - `invalid_grant` for an unknown or expired code, another client, a mismatched `redirect_uri`, failed PKCE, a deleted workspace, or a person who is no longer a member.
 - `invalid_target` for a wrong resource.
@@ -521,7 +526,7 @@ The authorization server SHALL issue refresh tokens of the form `alr.<ws id>.<gr
 
 ### Requirement: Connected app grants
 
-The authorization server SHALL store each grant in the v2 database with its id, `client_id`, client name, redirect host, `user_id`, `ws_id`, creation time, `last_used_at`, current and previous refresh-token hashes, refresh expiry and the `ALIGN_SECRET` key id it was made under. A grant is created when a code is exchanged at `/oauth/token`, not at approval. A new grant for the same `client_id`, person and workspace SHALL replace the earlier one, and at most 20 grants SHALL be kept per person per workspace, the oldest dropped first. A grant SHALL stop working, together with its access and refresh tokens, in each of these cases:
+The authorization server SHALL store each grant in the v2 database with its id, `client_id`, client name, redirect host, `user_id`, `ws_id`, creation time, `last_used_at`, current and previous refresh-token hashes, refresh expiry and the `ALIGN_SECRET` key id it was made under. A grant is created when a code is exchanged at `/oauth/token`, not at approval. A new grant for the same `client_id`, person and workspace SHALL replace the earlier one (the person's grants in that workspace made under an earlier `ALIGN_SECRET` are deleted at the same time), and at most 20 grants SHALL be kept per person per workspace, the oldest dropped first. A grant SHALL stop working, together with its access and refresh tokens, in each of these cases:
 
 - The person or a workspace owner disconnects it at `/app/w/{ws}/apps`.
 - The person leaves the workspace or is removed from it.
@@ -560,7 +565,7 @@ When a member leaves a workspace or a workspace owner removes them (`DELETE /api
 
 The server SHALL list and revoke a workspace's connected apps through cookie-authenticated v2 routes, with the v2 error shape `{error, message}`:
 
-- `GET /api/v2/workspaces/{ws}/apps` returns `{url: "<origin>/api/mcp", apps: [{id, name, redirect_host, user: {id, name}, approved_at, last_used_at}]}` with live grants only. A workspace owner sees every grant in the workspace; any other member sees only their own. A non-member gets `404 not_found`.
+- `GET /api/v2/workspaces/{ws}/apps` returns `{url: "<origin>/api/mcp", apps: [{id, name, redirect_host, user: {id, name}, approved_at, last_used_at}]}` with live grants only, oldest first. A workspace owner sees every grant in the workspace; any other member sees only their own. A non-member gets `404 not_found`, and a request with an `Authorization` header gets `403 bearer_not_allowed`.
 - `DELETE /api/v2/workspaces/{ws}/apps/{grant}` revokes one grant and returns `204`. It is allowed for the grant's person and for a workspace owner. A grant the caller cannot see, or one that does not exist, gets `404 not_found`. The route requires the same-site check of cookie writes (`403 cross_site`) and refuses an `Authorization` header (`403 bearer_not_allowed`). It writes a v2 audit row with the caller as actor and action `oauth.app_revoked`.
 
 The Apps tab at `/app/w/{ws}/apps` (its full content is in the `interface` part) SHALL show the MCP URL with a `Copy` button to people who can connect an app and one row per listed grant with the app's name, redirect host, person, approval time, last use (`Never` when null) and a `Disconnect` button, on the rows the caller may revoke, that calls the `DELETE` route. With no grants it SHALL say `No AI apps are connected to this workspace.`
@@ -612,7 +617,7 @@ Align SHALL ship `packages/align-connect/align-connect.mjs`, a dependency-free N
 
 `align-connect` SHALL refuse to sign in, open no browser, register no client and send no code or token, unless all of the following hold:
 
-- The Align URL, the authorization server's `authorization_endpoint`, `token_endpoint` and `registration_endpoint` each use `https`, or `http` on `localhost`, `127.0.0.1` or `[::1]`.
+- The Align URL, the authorization server named in the protected resource metadata, and that server's `authorization_endpoint`, `token_endpoint` and `registration_endpoint` each use `https`, or `http` on `localhost`, `127.0.0.1` or `[::1]`.
 - The authorization server metadata's `issuer` equals, exactly, the authorization server named first in the protected resource metadata (`authorization_servers[0]`).
 
 An Align URL that fails the scheme rule at start SHALL make the script write `align-connect: use https, or http only on localhost, 127.0.0.1 or [::1]` to stderr and exit with code `2`. A metadata failure SHALL fail the pending request with JSON-RPC error `-32603` `Align is not reachable: <reason>`, where the reason names the failed check, and SHALL leave the token file unchanged.
@@ -653,7 +658,8 @@ An Align URL that fails the scheme rule at start SHALL make the script write `al
 - `app/api/oauth/approve/route.ts`
 - `app/api/v2/workspaces/[ws]/apps/route.ts`
 - `app/api/v2/workspaces/[ws]/apps/[grant]/route.ts`
-- `app/app/w/[ws]/apps/page.tsx`
+- `app/app/w/[ws]/apps/page.tsx`, `app/app/w/[ws]/apps/view.tsx`
+- `app/app/_ui/kit.tsx` (`SignInAgain`)
 - `app/app/sign-in/page.tsx`, `app/app/_ui/server.ts` (`next` handling)
 - `lib/oauth/server.ts`
 - `lib/oauth/clients.ts`
@@ -665,6 +671,10 @@ An Align URL that fails the scheme rule at start SHALL make the script write `al
 - `lib/v2/directives.ts`
 - `lib/v2/goals.ts`
 - `lib/v2/changes.ts`
+- `lib/v2/changes-read.ts`
+- `lib/v2/lifecycle.ts`
+- `lib/v2/config.ts`
+- `lib/secret.ts`
 - `lib/v2/http.ts`
 - `lib/v2/limits.ts`
 - `lib/v2/policy.ts`
@@ -675,6 +685,6 @@ An Align URL that fails the scheme rule at start SHALL make the script write `al
 - `proxy.ts`
 - `next.config.ts` (consent page headers)
 - `package.json`, `package-lock.json` (mcp-handler 2.3.0, @modelcontextprotocol/server 2.3.1)
-- `scripts/test-mcp.mjs`
+- `scripts/test-v2.mjs`
 - `scripts/test-oauth.mjs`
 - `packages/align-connect/align-connect.mjs`, `packages/align-connect/README.md`
