@@ -444,7 +444,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     }
     for (const w of me?.workspaces || []) refresh.add(w.id);
     for (const ws of refresh) await refreshFeed(ctx, ws).catch(() => undefined);
-    // Pod activity: this machine's in-flight work up, other machines' down (a few hundred bytes when quiet).
+    // Team activity: this machine's in-flight work up, other machines' down (a few hundred bytes when quiet).
     try {
       detectGitEdits(ctx);
     } catch {

@@ -395,7 +395,7 @@ function siblingEdits(home: string, harness: Harness, lid: string, input: HookIn
     const reason = collisionReason(hit.sib.hot.harness, hit.sib.hot.native_session_id, display(hit.file, cwd), Math.floor((Date.now() - Date.parse(hit.at)) / 60_000));
     return { held: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } } };
   }
-  // Files written through the shell count as edits for the pod (never held: one command can't be partly denied).
+  // Files written through the shell count as edits for the team (never held: one command can't be partly denied).
   const shell = shellWrites(input.tool_name, input.tool_input, cwd).filter((p) => !files.includes(p));
   const acts: Act[] = [...files, ...shell].map((p) => ({ t: "edit", at, p }));
   const read = readPath(harness, input.tool_name, input.tool_input, cwd);
@@ -589,7 +589,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
             `  Sent per session: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
             signals
               ? `  Work signals on: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who can read the goal, kept 24 hours. Never sent: prompts, responses, tool output, file contents.`
-              : `  Never sent: prompts, responses, tool input or output, paths, branch names. (Add --signals to share file paths and task labels with the pod.)`,
+              : `  Never sent: prompts, responses, tool input or output, paths, branch names. (Add --signals to share file paths and task labels with the team.)`,
             `Type \`::align share --dir ${signals ? "--signals " : ""}${arg ? `${arg} ` : ""}confirm\` to turn it on.`,
           ].join("\n");
         }
@@ -644,11 +644,12 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       const until = new Date(Date.now() + CLAIM_MS).toTimeString().slice(0, 5);
       return `Align: ${display(abs, cwd)} is claimed by this session until ${until}. Sessions toward related goals get a note before editing it.`;
     }
+    case "team":
     case "pod": {
-      if (hot?.share?.state !== "shared" || !hot.goal) return "Align: this session is not bound to a goal, so there is no pod work to show.";
+      if (hot?.share?.state !== "shared" || !hot.goal) return "Align: this session is not bound to a goal, so there is no team work to show.";
       return podReport(home, lid, hot.share.workspace_id, hot.goal.id, cwd, 1500);
     }
     default:
-      return "Align commands: `::align status`, `::align goals`, `::align share [--dir] [goal]`, `::align bind <goal>`, `::align unshare [--dir]`, `::align task <label>`, `::align claim <file>`, `::align pod`. They stay local and never reach the model.";
+      return "Align commands: `::align status`, `::align goals`, `::align share [--dir] [goal]`, `::align bind <goal>`, `::align unshare [--dir]`, `::align task <label>`, `::align claim <file>`, `::align team`. They stay local and never reach the model.";
   }
 }

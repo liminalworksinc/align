@@ -60,7 +60,7 @@ export class FakeServer {
   offline = false;
   log: { method: string; path: string; status: number; auth: boolean; origin: boolean }[] = [];
   user = { id: "u_sean", name: "Sean", email: "sean@example.test" };
-  workspaces = [{ id: "ws_acme", name: "Acme", role: "owner", pods: [{ id: "pod_core", name: "Core", role: "lead" }] }];
+  workspaces = [{ id: "ws_acme", name: "Acme", role: "owner", teams: [{ id: "pod_core", name: "Core", role: "lead" }] }];
   goals = new Map<string, Goal[]>();
   pending = new Map<string, Pending>();
   devices = new Map<string, Device>();
@@ -95,8 +95,9 @@ export class FakeServer {
       measures: [{ id: `${id}_m1`, text: `${title} measured`, target: null }],
       status: "active",
       visibility: "workspace",
+      level: "team",
       owner: { id: "u_sean", name: "Sean" },
-      pod: null,
+      team: null,
       anchors: { repos: [], branch_patterns: [], issues: [] },
       bindable,
     };

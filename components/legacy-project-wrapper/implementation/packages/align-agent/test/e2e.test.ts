@@ -198,6 +198,21 @@ describe("e2e", () => {
     await halt();
   });
 
+  test("align goals shows visibility as private, team or workspace (an older server's pod reads as team)", async () => {
+    const { fake, t } = await world();
+    await login(t);
+    const ws = fake.goals.get("ws_acme")!;
+    ws[1] = { ...ws[1], visibility: "team", team: { id: "pod_core", name: "Core" } };
+    ws[2] = { ...ws[2], visibility: "pod" };
+    const r = await runCli(t, ["goals", "--refresh"]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /g_ship +v1 +active +workspace +Ship the v2 onboarding flow/);
+    assert.match(r.stdout, /g_perf +v1 +active +team +Cut hook latency/);
+    assert.match(r.stdout, /g_theirs +v1 +active +team +Someone else's private plan/);
+    assert.doesNotMatch(r.stdout, / pod /);
+    assert.match(r.stdout, /\* = you can bind a session to it now\./);
+  });
+
   test("private session causes zero session or usage hits while signed in", async () => {
     const { fake, t } = await world();
     await login(t);
@@ -339,8 +354,11 @@ describe("e2e", () => {
     const card = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: A, prompt_id: "a2", prompt: "continue", cwd: named }).stdout).hookSpecificOutput.additionalContext as string;
     assert.match(card, /Yoonseo \(1 session, (just now|1 min ago)\): edited src\/sso\.ts \(yours too\)\./);
     assert.doesNotMatch(card, /Sean/, "this machine's own uploads are not shown back as someone else's");
-    const pod = await runCli(t, ["pod", "--cwd", named]);
-    assert.match(pod.stdout, /- Yoonseo \(1 session\), active (just now|1 min ago): overlaps your files: src\/sso\.ts/);
+    const team = await runCli(t, ["team", "--cwd", named]);
+    assert.match(team.stdout, /^Align team: work in flight toward "Ship the v2 onboarding flow" and related goals, last 6 hours\./);
+    assert.match(team.stdout, /- Yoonseo \(1 session\), active (just now|1 min ago): overlaps your files: src\/sso\.ts/);
+    const alias = await runCli(t, ["pod", "--cwd", named]);
+    assert.equal(alias.stdout, team.stdout, "align pod is an alias of align team");
     await halt();
   });
 
@@ -355,6 +373,7 @@ describe("e2e", () => {
     const pv = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "x", cwd: repo, prompt: "::align share --dir Ship" }).stdout);
     assert.equal(pv.decision, "block");
     assert.match(pv.reason, /folder share preview/);
+    assert.match(pv.reason, /\(Add --signals to share file paths and task labels with the team\.\)/);
     assert.equal((await runCli(t, ["rules"])).stdout.includes("repo-b"), false);
     const ok = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "x2", cwd: repo, prompt: "::align share --dir Ship confirm" }).stdout);
     assert.match(ok.reason, /now shared with Acme/);

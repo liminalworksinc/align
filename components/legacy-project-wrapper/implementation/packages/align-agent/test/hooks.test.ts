@@ -306,7 +306,7 @@ describe("claude hooks", () => {
       version: "v1",
       etag: null,
       fetched_at: nowIso(),
-      goals: [{ ...GOAL, visibility: "workspace", owner: { id: "u_1", name: "A" }, pod: null, anchors: { repos: ["liminalworksinc/align"], branch_patterns: ["feature/*"], issues: [] }, bindable: true }],
+      goals: [{ ...GOAL, visibility: "workspace", owner: { id: "u_1", name: "A" }, team: null, anchors: { repos: ["liminalworksinc/align"], branch_patterns: ["feature/*"], issues: [] }, bindable: true }],
     });
     void ctx;
     const r = runHook(t, "claude", "SessionStart", { session_id: "sess-anchor", source: "startup", cwd: repo }, {}, BLOCK_NET);

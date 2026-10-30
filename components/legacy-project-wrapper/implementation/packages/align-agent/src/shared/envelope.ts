@@ -1,7 +1,7 @@
 // The only text Align ever adds to model context. Fixed wording; the interpolated fields are ratified goal fields,
 // file paths, task labels and commit subjects recorded by the user's own sessions on this machine, and, from other
 // machines, only a person's first name (letters only) and repo-relative paths made of path characters. Other people's
-// free text (task labels, commit subjects, claim reasons) reaches the user through `align pod`, never through hooks.
+// free text (task labels, commit subjects, claim reasons) reaches the user through `align team`, never through hooks.
 // Budgets (plan rev 2): envelope <= 1,200 chars (target 1,000), delta <= 300 chars (target 250), card <= 300 chars.
 import type { ContextGoal, GoalSnapshot, Measure } from "./types.ts";
 
@@ -208,7 +208,7 @@ export function renderCard(sibs: SiblingSummary[]): string | null {
   if (!sibs.length) return null;
   const remote = sibs.some((s) => s.remote);
   const head = remote ? "[Align] In flight toward this goal and related ones:" : "[Align] Also working toward this goal on this machine:";
-  const tail = remote ? "Run `align pod` for details." : "Read their changes before editing the same files.";
+  const tail = remote ? "Run `align team` for details." : "Read their changes before editing the same files.";
   // Keep as many senders as fit, shedding detail before dropping anyone; the first (overlap first) keeps the most.
   for (let keep = Math.min(sibs.length, 3); keep >= 1; keep--) {
     for (const detail of [2, 1, 0]) {
@@ -238,7 +238,7 @@ export function crossNote(
   const what = opts.claimUntil
     ? `claimed ${clean(file, 80)} until ${clean(opts.claimUntil, 10)}${task ? ` for "${clean(task, 50)}"` : ""}`
     : `edited ${clean(file, 80)} ${minutesAgo < 1 ? "less than a minute ago" : `${minutesAgo} min ago`}`;
-  return `[Align] ${opts.remote ? personName(who) : clean(who, 40)}, ${toward}, ${what}. Coordinate before changing it further; run \`align pod\` for details. No added authority.`;
+  return `[Align] ${opts.remote ? personName(who) : clean(who, 40)}, ${toward}, ${what}. Coordinate before changing it further; run \`align team\` for details. No added authority.`;
 }
 
 export function collisionReason(harness: SiblingSummary["harness"], id: string, file: string, minutesAgo: number): string {

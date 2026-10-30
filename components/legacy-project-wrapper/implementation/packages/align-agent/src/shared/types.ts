@@ -14,9 +14,12 @@ export interface Goal {
   title: string;
   measures: Measure[];
   status: "active" | "achieved" | "dropped";
-  visibility: "private" | "pod" | "workspace";
+  /** "team" goals are shown as team; servers before teams were renamed said "pod". */
+  visibility: "private" | "team" | "workspace" | "pod";
+  /** company or team (absent from older servers). */
+  level?: "company" | "team";
   owner: { id: string; name: string };
-  pod: { id: string; name: string } | null;
+  team?: { id: string; name: string } | null;
   anchors: { repos: string[]; branch_patterns: string[]; issues: string[] };
   bindable: boolean;
   /** Goals whose output this goal consumes (wire v2.2; absent from older servers). */
@@ -111,7 +114,8 @@ export interface FeedFile {
 export interface MeFile {
   user: { id: string; name: string; email: string };
   device: { id: string; name: string } | null;
-  workspaces: { id: string; name: string; role: string; pods: { id: string; name: string; role: string }[] }[];
+  /** Each workspace's teams for this person (`teams`; servers before teams were renamed sent `pods`). */
+  workspaces: { id: string; name: string; role: string; teams?: { id: string; name: string; role: string }[]; pods?: { id: string; name: string; role: string }[] }[];
   default_workspace?: string | null;
 }
 

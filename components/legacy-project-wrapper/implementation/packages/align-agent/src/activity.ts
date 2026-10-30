@@ -1,4 +1,4 @@
-// Pod activity inside the normal sync pass (no extra process): upload what this machine's shared sessions recorded in
+// Team activity inside the normal sync pass (no extra process): upload what this machine's shared sessions recorded in
 // activity/<lid>.jsonl, and cache other machines' activity for the hooks. Repo-relative paths, commit subjects and
 // task labels go up only with the user's "share work signals" consent; without it only keyed hashes do, which still
 // let two sessions see they touched the same file. docs/v2/WIRE.md "Activity".
@@ -191,7 +191,7 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
   return sent;
 }
 
-/** Fetch new pod activity by cursor and keep the last 6 hours of unexpired items (at most 1,000). */
+/** Fetch new team activity by cursor and keep the last 6 hours of unexpired items (at most 1,000). */
 export async function fetchPod(ctx: Ctx, ws: string): Promise<number> {
   const prev = readJson<PodFeed>(layout.podFeed(ctx.home, ws));
   const r = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(ws)}/activity?after=${prev?.cursor ?? 0}`);

@@ -52,7 +52,7 @@ export const layout = {
   spool: (h: string) => path.join(h, "spool"),
   activityDir: (h: string) => path.join(h, "activity"),
   activity: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.jsonl`),
-  /** Pod activity fetched from the server for one workspace (other machines' sessions). */
+  /** Team activity fetched from the server for one workspace (other machines' sessions). */
   podFeed: (h: string, ws: string) => path.join(h, "feeds", `activity-${safe(ws)}.json`),
 };
 

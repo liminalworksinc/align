@@ -44,7 +44,7 @@ const HELP = `align ${VERSION}: Align local agent
   align share <session|--latest> [--cwd [dir]] --workspace <name|id> --goal <ref|none> [--alias <name>] [--from start|now] [--yes]
   align unshare --dir [<folder>]
   align rules
-  align pod [--cwd <dir>]       work in flight toward this folder's goal and related ones (agents may run it too)
+  align team [--cwd <dir>]      work in flight toward this folder's goal and related ones (agents may run it too; alias: align pod)
   align stop-sharing <session>
   align delete-history <session> [--yes]
   align bind <session> --goal <ref|none>
@@ -347,7 +347,7 @@ async function cmdGoals(ctx: Ctx, argv: string[]): Promise<void> {
   if (values.json) return out(JSON.stringify(all, null, 2));
   for (const a of all) {
     out(`${a.ws}${a.fetched ? ` (cached ${shortTime(a.fetched)})` : " (not fetched yet; use --refresh)"}`);
-    for (const g of a.goals) out(`  ${g.bindable ? "*" : " "} ${pad(g.id, 14)} v${pad(String(g.version), 3)} ${pad(g.status, 9)} ${pad(g.visibility, 10)} ${g.title}`);
+    for (const g of a.goals) out(`  ${g.bindable ? "*" : " "} ${pad(g.id, 14)} v${pad(String(g.version), 3)} ${pad(g.status, 9)} ${pad(g.visibility === "pod" ? "team" : g.visibility, 10)} ${g.title}`);
   }
   out("* = you can bind a session to it now.");
 }
@@ -413,7 +413,7 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   out(`Session ${session.local_id.slice(0, 8)} is ${after?.state === "pending" ? "queued to share (offline; the next sync retries)" : after?.state}.`);
 }
 
-/** What pod awareness sends, with and without the user's consent to share names. */
+/** What team awareness sends, with and without the user's consent to share names. */
 function signalsPreview(on: boolean): string {
   return on
     ? "Work signals ON: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who\ncan read the goal, kept 24 hours, so their agents can avoid overlapping work. File contents are never sent."
@@ -455,7 +455,7 @@ async function cmdRules(ctx: Ctx): Promise<void> {
 }
 
 /** Work in flight toward the goal of the newest shared session in this folder, and related goals. Offline. */
-async function cmdPod(ctx: Ctx, argv: string[]): Promise<void> {
+async function cmdTeam(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { cwd: { type: "string" } } });
   const dir = realDir(values.cwd || process.cwd());
   const rows = ctx.db
@@ -633,8 +633,9 @@ export async function main(argv: string[]): Promise<void> {
         return await cmdBind(ctx, rest);
       case "rules":
         return await cmdRules(ctx);
+      case "team":
       case "pod":
-        return await cmdPod(ctx, rest);
+        return await cmdTeam(ctx, rest);
       case "latch":
         return await cmdLatch(ctx, rest);
       case "install":
