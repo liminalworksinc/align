@@ -54,6 +54,11 @@ export const layout = {
   activity: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.jsonl`),
   /** Team activity fetched from the server for one workspace (other machines' sessions). */
   podFeed: (h: string, ws: string) => path.join(h, "feeds", `activity-${safe(ws)}.json`),
+  /** Asks of this person's teams and their own, for one workspace (`align asks`, `align team`, the envelope). */
+  asksFeed: (h: string, ws: string) => path.join(h, "feeds", `asks-${safe(ws)}.json`),
+  driftDir: (h: string) => path.join(h, "drift"),
+  /** A local drift notice waiting for the session's next prompt. */
+  drift: (h: string, lid: string) => path.join(h, "drift", `${safe(lid)}.json`),
 };
 
 function safe(s: string): string {

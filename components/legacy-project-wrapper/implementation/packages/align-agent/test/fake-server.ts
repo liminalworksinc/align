@@ -1,10 +1,12 @@
 // In-memory fake of the hosted server, implementing docs/v2/WIRE.md closely enough to exercise the agent end to end:
 // device flow (with slow_down), key-bound rotating refresh (signature + reuse revocation), /me, goal feed with ETag,
-// session/epoch/usage idempotency, stop-sharing, delete, directives (poll + SSE with Last-Event-ID) and receipts.
+// session/epoch/usage idempotency (and epoch_overlap: an epoch may not start before the session, the open epoch or the
+// last closed one), stop-sharing, delete, directives (poll + SSE with Last-Event-ID) and receipts, goal limits (PORT-002)
+// and the asks feed with ETag (PORT-003's `GET /asks`).
 import crypto from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Goal } from "../src/shared/types.ts";
+import type { Ask, Goal } from "../src/shared/types.ts";
 
 interface Device {
   id: string;
@@ -70,6 +72,8 @@ export class FakeServer {
   activity: any[] = [];
   activitySeq = 0;
   epochs = new Map<string, any>();
+  /** AskView per workspace, as `GET /api/v2/workspaces/:ws/asks` returns them (the reader's `can` flags included). */
+  asks = new Map<string, (Ask & { can: Record<string, boolean> })[]>();
   usage = new Map<string, any>();
   directives: FakeDirective[] = [];
   receipts: { id: string; session_key: string; state: string; at: string }[] = [];
@@ -121,6 +125,38 @@ export class FakeServer {
 
   feedVersion(ws: string): string {
     return crypto.createHash("sha256").update(JSON.stringify(this.goals.get(ws) || [])).digest("hex").slice(0, 12);
+  }
+
+  asksVersion(ws: string): string {
+    return crypto.createHash("sha256").update(JSON.stringify(this.asks.get(ws) || [])).digest("hex").slice(0, 12);
+  }
+
+  /** Record an ask as the real server would show it to this reader. */
+  addAsk(ws: string, a: Partial<Ask> & { id: string; text: string }): Ask {
+    const now = new Date().toISOString();
+    const full = {
+      state: "open" as Ask["state"],
+      team: { id: "pod_core", name: "Core" },
+      goal: null,
+      from_label: null,
+      requester: { id: "u_dana", name: "Dana Lee" },
+      source: { kind: "meeting" as const, title: "Board sync", date: now.slice(0, 10) },
+      mentions: [],
+      decided_by: null,
+      decided_at: null,
+      created_at: now,
+      updated_at: now,
+      waiting_on_me: false,
+      can: { accept: false, decline: false, done: false, reopen: false, withdraw: false, mention: true },
+      ...a,
+    };
+    this.asks.set(ws, [...(this.asks.get(ws) || []), full]);
+    return full;
+  }
+
+  setAsk(ws: string, id: string, patch: Partial<Ask>): void {
+    const a = (this.asks.get(ws) || []).find((x) => x.id === id);
+    if (a) Object.assign(a, patch, { updated_at: new Date().toISOString() });
   }
 
   bumpGoal(ws: string, id: string, patch: Partial<Goal> = {}): Goal {
@@ -245,6 +281,15 @@ export class FakeServer {
         if (req.headers["if-none-match"] === `"${v}"`) return send(304, undefined, { etag: `"${v}"` });
         return send(200, { version: v, goals: this.goals.get(m[1]) || [] }, { etag: `"${v}"` });
       }
+      m = /^\/api\/v2\/workspaces\/([^/]+)\/asks$/.exec(p);
+      if (m && req.method === "GET") {
+        const v = this.asksVersion(m[1]);
+        if (req.headers["if-none-match"] === `"${v}"`) return send(304, undefined, { etag: `"${v}"` });
+        const state = url.searchParams.get("state");
+        const team = url.searchParams.get("team_id");
+        const list = (this.asks.get(m[1]) || []).filter((a) => (!state || a.state === state) && (!team || a.team.id === team));
+        return send(200, { version: v, asks: list }, { etag: `"${v}"` });
+      }
       m = /^\/api\/v2\/workspaces\/([^/]+)\/sessions\/([^/]+)(\/(epochs|usage|stop-sharing))?$/.exec(p);
       if (m) {
         const [, ws, key, , sub] = m;
@@ -253,7 +298,8 @@ export class FakeServer {
         if (!sub && req.method === "PUT") {
           if (!/^[A-Za-z0-9_-]{43}$/.test(key) || !/^[A-Za-z0-9_-]{43}$/.test(body.repo_key)) return send(400, { error: "bad_key" });
           const state = sess?.state === "suspended" ? "suspended" : "shared";
-          this.sessions.set(key, { ws, device: dev.id, body, state });
+          // A re-PUT never changes started_at.
+          this.sessions.set(key, { ws, device: dev.id, body: sess ? { ...body, started_at: sess.body.started_at } : body, state });
           const open = [...this.epochs.values()].find((e) => e.session_key === key && !e.ends_at) || null;
           return send(200, { session_key: key, state, current_epoch: open });
         }
@@ -272,6 +318,10 @@ export class FakeServer {
           if (this.epochs.has(body.epoch_id)) return send(200, this.epochs.get(body.epoch_id));
           const goal = body.goal_id ? (this.goals.get(ws) || []).find((g) => g.id === body.goal_id) : null;
           if (body.goal_id && (!goal || !goal.bindable)) return send(403, { error: "alignment_required" });
+          // No backdating: not before the session's start, the open epoch's start, or the last epoch's end.
+          const mine = [...this.epochs.values()].filter((e) => e.session_key === key);
+          const floor = [sess.body.started_at, ...mine.map((e) => e.ends_at || e.starts_at)].filter(Boolean).sort().pop();
+          if (floor && body.starts_at < floor) return send(409, { error: "epoch_overlap" });
           for (const e of this.epochs.values()) if (e.session_key === key && !e.ends_at) e.ends_at = body.starts_at;
           const epoch = { epoch_id: body.epoch_id, goal_id: body.goal_id, goal_version_at_start: goal ? goal.version : null, starts_at: body.starts_at, ends_at: null, root_turn: body.root_turn, cause: body.cause, session_key: key };
           this.epochs.set(body.epoch_id, epoch);
