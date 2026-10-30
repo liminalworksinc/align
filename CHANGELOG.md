@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Ported main's v1 work (PRs #32, #33, #35, #36: LIM-2437 and LIM-2445 / #30) onto v2 (PORT-001 … 005):
+  - Limits (must / must not / out of scope, at most 5) are goal content, confirmed by the goal's approval set and
+    delivered with goal versions; pasting meeting notes suggests limits and stores nothing.
+  - Asks between teams (accept, decline, done, reopen, withdraw, "came up again"), an Asks tab and an owner import;
+    goal activity from bindings, usage and work signals (never prompts) with a card on the goal page.
+  - MCP tools `align_get_limits`, `align_get_asks`, `align_get_goal_activity` and `align_get_brief` under the
+    2026-10-29 read rule in v2 terms; quoted paste lines on the Apps tab; strict Host for every derived origin.
+  - The decision value card on approved change requests, with per-decision value reports (estimate and an optional
+    note) and a follow-up link; access requests record where they came from.
+  - The local agent puts the bound goal's limits and the team's accepted asks in context as quoted, attributed data;
+    a local-only drift notice tells the user (never the model) when a reply may cross a limit; `align asks`; and
+    `align share --dir --past` replaces the import script without ever backdating a live session.
+  - A live test runs the real `align` CLI and hooks against a real server.
+- Fixed: a goal-version directive that the goals feed delivered first was marked stale and never reported applied.
 - Pre-seed build list (PRESEED-001 … 008):
   - Hosted Align no longer has a closing date (`ALIGN_DELETE_BY` is ignored); Fly volume snapshots are kept 7 days.
   - Hosted workspace creation is gated (`ALIGN_CREATION` = codes, open or closed): single-use creation codes, a global

@@ -184,7 +184,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] test-v2 checks the pages are served hosted
   - [x] Every claim cross-checked against the code
 
-### [ ] PORT-001 — Port foundation: schema, stubs and test slots
+### [x] PORT-001 — Port foundation: schema, stubs and test slots
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (v2 schema)
@@ -193,12 +193,12 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** none
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Migration 11, SCHEMA_VERSION 11, EVENT_PROPS and PERSON_COLUMNS additions
-  - [ ] Stub modules and UI slots; test marker blocks
+  - [x] Migration 11, SCHEMA_VERSION 11, EVENT_PROPS and PERSON_COLUMNS additions
+  - [x] Stub modules and UI slots; test marker blocks
 - **Evidence:**
-  - [ ] Full npm test passes on the foundation commit
+  - [x] Full npm test passes on the foundation commit
 
-### [ ] PORT-002 — Port limits as goal content and suggestions from notes
+### [x] PORT-002 — Port limits as goal content and suggestions from notes
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (goals)
@@ -207,13 +207,13 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PORT-001
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Goal content, hash, change requests and directive snapshot carry limits
-  - [ ] Suggest route, Goals tab and goal page UI
+  - [x] Goal content, hash, change requests and directive snapshot carry limits
+  - [x] Suggest route, Goals tab and goal page UI
 - **Evidence:**
-  - [ ] test-v2 port:limits checks
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 port:limits checks
+  - [x] Spec requirements updated and validated
 
-### [ ] PORT-003 — Port asks and goal activity
+### [x] PORT-003 — Port asks and goal activity
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (asks, activity)
@@ -222,14 +222,14 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PORT-001
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Asks routes, rules and Asks tab
-  - [ ] Goal activity data and card
-  - [ ] Retention rules
+  - [x] Asks routes, rules and Asks tab
+  - [x] Goal activity data and card
+  - [x] Retention rules
 - **Evidence:**
-  - [ ] test-v2 port:asks, port:activity and port:retention checks
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 port:asks, port:activity and port:retention checks
+  - [x] Spec requirements updated and validated
 
-### [ ] PORT-004 — Port MCP tools, paste lines and the decision value card
+### [x] PORT-004 — Port MCP tools, paste lines and the decision value card
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (MCP, app surface)
@@ -238,14 +238,14 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PORT-002, PORT-003
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Four MCP tools with scoping and instructions
-  - [ ] Paste lines and strict Host
-  - [ ] Value card, value reports, follow-up link, events and report section
+  - [x] Four MCP tools with scoping and instructions
+  - [x] Paste lines and strict Host
+  - [x] Value card, value reports, follow-up link, events and report section
 - **Evidence:**
-  - [ ] test-oauth port:mcp and test-v2 port:value checks; paste-line tests
-  - [ ] Spec requirements updated and validated
+  - [x] test-oauth port:mcp and test-v2 port:value checks; paste-line tests
+  - [x] Spec requirements updated and validated
 
-### [ ] PORT-005 — Port agent context: limits, accepted asks, drift notice, past sessions
+### [x] PORT-005 — Port agent context: limits, accepted asks, drift notice, past sessions
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation/packages/align-agent
@@ -254,9 +254,9 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PORT-001
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Limits and accepted asks in the envelope and deltas
-  - [ ] Local drift notice with an off switch
-  - [ ] align asks and share --dir --past
+  - [x] Limits and accepted asks in the envelope and deltas
+  - [x] Local drift notice with an off switch
+  - [x] align asks and share --dir --past
 - **Evidence:**
-  - [ ] align-agent tests for each behaviour
-  - [ ] Spec requirements updated and validated
+  - [x] align-agent tests for each behaviour
+  - [x] Spec requirements updated and validated
