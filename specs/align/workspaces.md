@@ -173,7 +173,8 @@ hashing globally.
 
 ### Requirement: Session cookie
 
-The server SHALL issue a signed (HMAC-SHA256 with `ALIGN_SECRET`) session cookie named `align_session` in Mode L and
+The server SHALL issue a signed (HMAC-SHA256 keyed with `ALIGN_SECRET`, or, when it is unset, a random key generated
+once into `data/.secret` with mode 0600) session cookie named `align_session` in Mode L and
 `__Host-align_session` when hosted, with `Path=/; HttpOnly; SameSite=Strict; Max-Age=43200` (plus `Secure` when
 hosted), whose custom-workspace token carries the workspace, the workspace epoch and a 12-hour expiry.
 
