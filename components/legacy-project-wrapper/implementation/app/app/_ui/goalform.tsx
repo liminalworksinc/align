@@ -60,6 +60,6 @@ export function AnchorsEditor({ value, onChange }: { value: AnchorDraft; onChang
 
 export const VISIBILITY_LABEL: Record<Goal["visibility"], string> = {
   private: "Only me",
-  pod: "My pod",
+  team: "My team",
   workspace: "Everyone in the workspace",
 };

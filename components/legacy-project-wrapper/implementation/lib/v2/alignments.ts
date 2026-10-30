@@ -1,7 +1,8 @@
 import { all, audit, get, run, tx } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { newId, nowIso } from "./ids";
-import { goalCore, goalObj, goalRow, reviewParents, visibleGoal, type GoalRow } from "./goals";
+import { effectiveSet } from "./approval";
+import { goalCore, goalObj, goalRow, parentIds, reviewParents, visibleGoal, type GoalRow } from "./goals";
 import { canBind, canReadGoal, type PolicyPrincipal } from "./policy";
 import { writeDirective } from "./directives";
 import { openEpoch, sessionRow, type SessionRow } from "./sessions";
@@ -11,10 +12,16 @@ import { oneOf, optStr, strList, type Body } from "./validate";
 // Alignment = effect-scoped approval (plan rev 2, option D). Two choices in the UI:
 //   contribution -> contributes_to only (a relationship; nothing about usage or directives changes)
 //   work_toward  -> contributes_to + governing_goal + allocation_transfer for the listed sessions
-// Required approvers are computed from the effects and snapshotted on each revision:
-//   the target goal's owner, always;
-//   when allocation moves: each listed session's owner, and the owner of the goal the allocation leaves (each
-//   session's current goal, and the source goal) when the requester doesn't own it.
+// Each revision snapshots its approval requirements {for, set} (lib/v2/approval.ts gives each goal's set):
+//   the target goal's approval set, always;
+//   the source goal's approval set, when there is a source;
+//   when allocation moves: each listed session's owner (a singleton set, for "sessions:<user>") and the approval set
+//   of each listed session's currently bound goal.
+// One approval from a set satisfies its requirement; an approval satisfies every requirement whose set holds the
+// approver. The alignment is approved when every requirement is satisfied, so creating one is instant only when the
+// requester alone satisfies all of them (they own every goal involved). Approving a link that would make the
+// contribution tree loop is refused (409 cycle), at creation and at the approval that would complete it.
+// Rows written before requirements stored a plain user-id array; each id reads as its own singleton requirement.
 // A counter is a new revision by an approver; it voids every earlier approval. Approve names the revision.
 // Revocation is prospective: a session whose current binding exists only because of the revoked alignment is
 // suspended (binding_suspended), never moved back.
@@ -50,19 +57,56 @@ interface RevisionRow {
 
 const effectsOf = (choice: Choice): EffectKind[] => (choice === "contribution" ? ["contributes_to"] : ["contributes_to", "governing_goal", "allocation_transfer"]);
 
-function requiredApprovers(requester: string, target: GoalRow, source: GoalRow | undefined, choice: Choice, sessions: SessionRow[]): string[] {
-  const set = new Set<string>([target.owner_id]);
-  // Linking a goal under another one changes the source goal's tree, so its owner must agree, whatever the effects.
-  if (source && source.owner_id !== requester) set.add(source.owner_id);
+/** One approval requirement. `for` is a goal id, "sessions:<user id>", or null for a legacy row. */
+export interface Requirement {
+  for: string | null;
+  set: string[];
+  approved_by: string | null;
+}
+
+function requirementsFor(requester: string, target: GoalRow, source: GoalRow | undefined, choice: Choice, sessions: SessionRow[]): Requirement[] {
+  const out: Requirement[] = [];
+  const add = (forId: string, set: string[]) => {
+    if (!out.some((r) => r.for === forId)) out.push({ for: forId, set: [...new Set(set)].sort(), approved_by: null });
+  };
+  add(target.id, effectiveSet(target, requester));
+  // Linking a goal under another one changes the source goal's tree, so its approval set must agree too.
+  if (source) add(source.id, effectiveSet(source, requester));
   if (effectsOf(choice).includes("allocation_transfer")) {
-    for (const s of sessions) set.add(s.user_id);
+    for (const s of sessions) add(`sessions:${s.user_id}`, [s.user_id]);
     for (const s of sessions) {
       const e = openEpoch(s.ws_id, s.session_key);
       const cur = e?.goal_id ? goalRow(s.ws_id, e.goal_id) : undefined;
-      if (cur && cur.owner_id !== requester) set.add(cur.owner_id);
+      if (cur) add(cur.id, effectiveSet(cur, requester));
     }
   }
-  return [...set].sort();
+  return out;
+}
+
+/** A revision's requirements, with who satisfied each (legacy arrays read as one singleton set per user). */
+function requirementsOf(rev: { approvers_json: string }, approvals: { user_id: string }[]): Requirement[] {
+  const raw = JSON.parse(rev.approvers_json) as unknown[];
+  const reqs: Requirement[] = raw.map((x) => (typeof x === "string" ? { for: null, set: [x], approved_by: null } : { ...(x as Requirement), approved_by: (x as Requirement).approved_by ?? null }));
+  for (const r of reqs) if (!r.approved_by) r.approved_by = approvals.find((a) => r.set.includes(a.user_id))?.user_id ?? null;
+  return reqs;
+}
+
+const approversIn = (reqs: Requirement[]) => [...new Set(reqs.flatMap((r) => r.set))].sort();
+
+const CONTRIBUTION_CYCLE = "Approving this would make these goals contribute to each other in a loop.";
+/** Would `source` contributing to `target` loop? True when the source is already reachable from the target by
+ *  following approved parents. */
+function contributionCycle(ws: string, sourceId: string, targetId: string): boolean {
+  const seen = new Set<string>();
+  const stack = [targetId];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (id === sourceId) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    stack.push(...parentIds(ws, id));
+  }
+  return false;
 }
 
 function sessionsIn(pp: PolicyPrincipal, keys: string[], ownerId: string): SessionRow[] {
@@ -81,7 +125,7 @@ function governedElsewhere(ws: string, keys: string[], alignmentId: string | nul
   });
 }
 
-function writeRevision(a: { id: string; ws: string }, revision: number, choice: Choice, keys: string[], approvers: string[], note: string | null, author: string, at: string) {
+function writeRevision(a: { id: string; ws: string }, revision: number, choice: Choice, keys: string[], reqs: Requirement[], note: string | null, author: string, at: string) {
   run(
     "INSERT INTO v2_alignment_revisions (ws_id, alignment_id, revision, choice, effects_json, approvers_json, note, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     a.ws,
@@ -89,35 +133,46 @@ function writeRevision(a: { id: string; ws: string }, revision: number, choice: 
     revision,
     choice,
     JSON.stringify(effectsOf(choice)),
-    JSON.stringify(approvers),
+    JSON.stringify(reqs),
     note,
     author,
     at,
   );
   for (const k of keys) run("INSERT INTO v2_alignment_sessions (ws_id, alignment_id, revision, session_key) VALUES (?, ?, ?, ?)", a.ws, a.id, revision, k);
   // The revision's author agrees with it by writing it.
-  if (approvers.includes(author)) run("INSERT OR IGNORE INTO v2_alignment_approvals (ws_id, alignment_id, revision, user_id, at) VALUES (?, ?, ?, ?, ?)", a.ws, a.id, revision, author, at);
+  if (approversIn(reqs).includes(author)) recordApproval(a.ws, a.id, revision, author, at);
 }
 
 const revisionOf = (id: string, revision: number) => get<RevisionRow>("SELECT * FROM v2_alignment_revisions WHERE alignment_id = ? AND revision = ?", id, revision)!;
+const approvalRows = (id: string, revision: number) =>
+  all<{ user_id: string }>("SELECT user_id FROM v2_alignment_approvals WHERE alignment_id = ? AND revision = ? ORDER BY at, rowid", id, revision);
+const currentRequirements = (id: string, revision: number) => requirementsOf(revisionOf(id, revision), approvalRows(id, revision));
+
+/** `user` approves this revision: every requirement whose set holds them records them as approved_by (if no one
+ *  satisfied it first). */
+function recordApproval(ws: string, id: string, revision: number, user: string, at: string) {
+  run("INSERT OR IGNORE INTO v2_alignment_approvals (ws_id, alignment_id, revision, user_id, at) VALUES (?, ?, ?, ?, ?)", ws, id, revision, user, at);
+  const reqs = currentRequirements(id, revision);
+  run("UPDATE v2_alignment_revisions SET approvers_json = ? WHERE alignment_id = ? AND revision = ?", JSON.stringify(reqs), id, revision);
+}
 const keysOf = (id: string, revision: number) =>
   all<{ session_key: string }>("SELECT session_key FROM v2_alignment_sessions WHERE alignment_id = ? AND revision = ? ORDER BY session_key", id, revision).map((r) => r.session_key);
 const approvalsOf = (id: string, revision: number) => new Set(all<{ user_id: string }>("SELECT user_id FROM v2_alignment_approvals WHERE alignment_id = ? AND revision = ?", id, revision).map((r) => r.user_id));
 
-/** Everyone who appears on any revision: the requester and every approver ever required. */
+/** Everyone who appears on any revision: the requester and everyone in any requirement's set. */
 function involved(a: AlignmentRow): string[] {
   const set = new Set([a.requester_id]);
-  for (const r of all<{ approvers_json: string }>("SELECT approvers_json FROM v2_alignment_revisions WHERE alignment_id = ?", a.id)) for (const u of JSON.parse(r.approvers_json) as string[]) set.add(u);
+  for (const r of all<{ approvers_json: string }>("SELECT approvers_json FROM v2_alignment_revisions WHERE alignment_id = ?", a.id)) for (const u of approversIn(requirementsOf(r, []))) set.add(u);
   return [...set];
 }
 
-/** Approve, if every required approver of the current revision has. Applies the effects in this transaction.
+/** Approve, if every requirement of the current revision is satisfied (409 cycle if the link would loop). Applies the
+ *  effects in this transaction.
  *  `actor` is whoever's action completed the approvals; the audit row names them. */
 function maybeApprove(a: AlignmentRow, at: string, actor: string): boolean {
   const rev = revisionOf(a.id, a.revision);
-  const need = JSON.parse(rev.approvers_json) as string[];
-  const got = approvalsOf(a.id, a.revision);
-  if (!need.every((u) => got.has(u))) return false;
+  if (!currentRequirements(a.id, a.revision).every((r) => r.approved_by)) return false;
+  if (a.source_goal_id && contributionCycle(a.ws_id, a.source_goal_id, a.target_goal_id)) throw conflict("cycle", CONTRIBUTION_CYCLE);
   const keys = keysOf(a.id, a.revision);
   if (rev.choice === "work_toward") {
     if (governedElsewhere(a.ws_id, keys, a.id)) throw conflict("already_governed", "One of these sessions already follows another goal through an alignment; revoke that first");
@@ -144,7 +199,8 @@ export async function createAlignment(pp: PolicyPrincipal, b: Body) {
   const sourceId = optStr(b, "source_goal_id", 64);
   const source = sourceId ? visibleGoal(pp, sourceId) : undefined;
   if (source && source.id === target.id) throw badRequest("A goal can't align with itself");
-  if (source && !canBind(pp, goalObj(source), false)) throw forbidden("source_not_yours", "The source goal must be yours or your pod's");
+  if (source && !canBind(pp, goalObj(source), false)) throw forbidden("source_not_yours", "The source goal must be yours or your team's");
+  if (source && contributionCycle(pp.wsId, source.id, target.id)) throw conflict("cycle", CONTRIBUTION_CYCLE);
   const choice = oneOf(b, "choice", ["contribution", "work_toward"] as const);
   const keys = strList(b, "session_keys", { max: 50, itemMax: 43 });
   const sessions = sessionsIn(pp, keys, pp.userId);
@@ -152,7 +208,7 @@ export async function createAlignment(pp: PolicyPrincipal, b: Body) {
   if (choice === "contribution" && !sessions.length && !source) throw badRequest("Pick a goal of yours or at least one session that contributes");
   if (choice === "work_toward" && governedElsewhere(pp.wsId, keys, null)) throw conflict("already_governed", "One of these sessions already follows another goal through an alignment; revoke that first");
   const note = optStr(b, "note", 1000);
-  const approvers = requiredApprovers(pp.userId, target, source, choice, sessions);
+  const reqs = requirementsFor(pp.userId, target, source, choice, sessions);
   const id = newId("al");
   const at = nowIso();
   await tx(() => {
@@ -166,7 +222,7 @@ export async function createAlignment(pp: PolicyPrincipal, b: Body) {
       at,
       at,
     );
-    writeRevision({ id, ws: pp.wsId }, 1, choice, keys, approvers, note, pp.userId, at);
+    writeRevision({ id, ws: pp.wsId }, 1, choice, keys, reqs, note, pp.userId, at);
     audit(pp.wsId, pp.userId, "alignment.requested", id, at);
     maybeApprove(alignmentRow(pp.wsId, id)!, at, pp.userId);
   });
@@ -191,7 +247,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
     const a = alignmentRow(pp.wsId, id)!; // re-read inside the transaction
     if (a.revision !== a0.revision || a.state !== a0.state) throw conflict("stale_revision", "This request changed meanwhile; reload and try again");
     const rev = revisionOf(a.id, a.revision);
-    const approvers = JSON.parse(rev.approvers_json) as string[];
+    const approvers = approversIn(currentRequirements(a.id, a.revision));
     const isRequester = a.requester_id === me;
     const isApprover = approvers.includes(me);
     const expectRevision = () => {
@@ -205,7 +261,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         expectRevision();
         inState("pending");
         if (!isApprover) throw forbidden("not_an_approver", "Your approval is not needed on this request");
-        run("INSERT OR IGNORE INTO v2_alignment_approvals (ws_id, alignment_id, revision, user_id, at) VALUES (?, ?, ?, ?, ?)", a.ws_id, a.id, a.revision, me, at);
+        recordApproval(a.ws_id, a.id, a.revision, me, at);
         run("UPDATE v2_alignments SET updated_at = ? WHERE id = ?", at, a.id);
         maybeApprove(a, at, me);
         break;
@@ -228,7 +284,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         if (choice === "contribution" && !keys.length && !source) throw badRequest("Keep at least one session or the source goal");
         const sessions = keys.map((k) => sessionRow(a.ws_id, k)).filter((s): s is SessionRow => !!s);
         const next = a.revision + 1;
-        writeRevision({ id: a.id, ws: a.ws_id }, next, choice, keys, requiredApprovers(a.requester_id, target, source, choice, sessions), optStr(b, "note", 1000), me, at);
+        writeRevision({ id: a.id, ws: a.ws_id }, next, choice, keys, requirementsFor(a.requester_id, target, source, choice, sessions), optStr(b, "note", 1000), me, at);
         run("UPDATE v2_alignments SET state = 'countered', revision = ?, updated_at = ? WHERE id = ?", next, at, a.id);
         audit(a.ws_id, me, "alignment.countered", a.id, at);
         break;
@@ -237,7 +293,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         if (b.revision !== undefined) expectRevision();
         inState("countered");
         if (!isRequester) throw forbidden("not_requester", "Only the person who asked can accept a counter");
-        if (isApprover) run("INSERT OR IGNORE INTO v2_alignment_approvals (ws_id, alignment_id, revision, user_id, at) VALUES (?, ?, ?, ?, ?)", a.ws_id, a.id, a.revision, me, at);
+        if (isApprover) recordApproval(a.ws_id, a.id, a.revision, me, at);
         run("UPDATE v2_alignments SET state = 'pending', updated_at = ? WHERE id = ?", at, a.id);
         maybeApprove({ ...a, state: "pending" }, at, me);
         break;
@@ -295,7 +351,8 @@ const named = (l: ReturnType<typeof goalLabel>) => (l?.visible ? `"${l.title}"` 
 
 function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
   const rev = revisionOf(a.id, a.revision);
-  const approvers = JSON.parse(rev.approvers_json) as string[];
+  const reqs = currentRequirements(a.id, a.revision);
+  const approvers = approversIn(reqs);
   const approved = approvalsOf(a.id, a.revision);
   const keys = keysOf(a.id, a.revision);
   const target = goalLabel(pp, a.target_goal_id);
@@ -354,6 +411,12 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
     source_goal: source,
     sessions,
     effects,
+    requirements: reqs.map((r) => ({
+      // A goal the caller can't read stays unnamed; "sessions:<user>" names the person whose sessions move.
+      for: r.for && !r.for.startsWith("sessions:") && !goalLabel(pp, r.for)?.visible ? null : r.for,
+      approvers: r.set.map((u) => ({ id: u, name: memberName(u) })),
+      approved_by: r.approved_by ? { id: r.approved_by, name: memberName(r.approved_by) } : null,
+    })),
     approvers: approvers.map((u) => ({ id: u, name: memberName(u), approved: approved.has(u) })),
     note: rev.note,
     history,

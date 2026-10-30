@@ -49,7 +49,7 @@ function Row({ label, s, strong }: { label: string; s: Sums; strong?: boolean })
 }
 
 export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
-  const [by, setBy] = useState<"goal" | "pod" | "session">("goal");
+  const [by, setBy] = useState<"goal" | "team" | "session">("goal");
   const d = useApi<Spend>(`/api/v2/workspaces/${ws}/spend?by=${by}`);
   return (
     <Shell me={me} ws={ws} tab="Spend">
@@ -57,9 +57,9 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
       <p className="mb-5 text-[15px] text-zinc-600">Tokens from shared sessions, counted under the goal each session was bound to when the work happened.</p>
       <Card
         actions={
-          <Select aria-label="Group by" value={by} onChange={(e) => setBy(e.target.value as "goal" | "pod" | "session")}>
+          <Select aria-label="Group by" value={by} onChange={(e) => setBy(e.target.value as "goal" | "team" | "session")}>
             <option value="goal">By goal</option>
-            <option value="pod">By pod</option>
+            <option value="team">By team</option>
             <option value="session">By my sessions</option>
           </Select>
         }
@@ -74,7 +74,7 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
               <table className="w-full text-[15px]">
                 <thead>
                   <tr className="text-left text-[13px] text-zinc-500">
-                    <th className="py-2 pr-3 font-normal">{by === "goal" ? "Goal" : by === "pod" ? "Pod" : "Session"}</th>
+                    <th className="py-2 pr-3 font-normal">{by === "goal" ? "Goal" : by === "team" ? "Team" : "Session"}</th>
                     <th className="py-2 pr-3 text-right font-normal">Requests</th>
                     <th className="py-2 pr-3 text-right font-normal">Input</th>
                     <th className="py-2 pr-3 text-right font-normal">Output</th>

@@ -14,6 +14,18 @@ const STATE_WORDS: Record<Alignment["state"], string> = {
 };
 const named = (g: Alignment["target_goal"]) => (!g ? "" : g.visible ? g.title : "a goal you can't see");
 
+/** What an approval requirement is for, in words: a goal (by title when visible) or a person's sessions. */
+function requirementLabel(a: Alignment, forId: string | null): string {
+  if (!forId) return a.requirements.some((r) => r.for) ? "A goal you can't see" : "Approval";
+  if (forId.startsWith("sessions:")) {
+    const owner = a.sessions.find((s) => `sessions:${s.owner.id}` === forId)?.owner.name;
+    return owner ? `${owner}'s sessions` : "Their sessions";
+  }
+  const goals = [a.target_goal, a.source_goal, ...a.sessions.map((s) => s.current_goal)];
+  const g = goals.find((x) => x?.id === forId);
+  return g?.title ? `"${g.title}"` : "A goal";
+}
+
 function Counter({ ws, a, onDone }: { ws: string; a: Alignment; onDone: () => void }) {
   const [choice, setChoice] = useState(a.choice);
   const keep = a.sessions;
@@ -72,7 +84,15 @@ function AlignmentCard({ ws, a, onDone }: { ws: string; a: Alignment; onDone: ()
         ))}
       </ul>
       {a.sessions.length > 0 && <p className="text-[14px] text-zinc-500">Sessions: {a.sessions.map((s) => `${s.label}${s.current_goal ? `, now on ${s.current_goal.visible ? s.current_goal.title : "a goal you can't see"}` : ""}`).join("; ")}</p>}
-      <p className="text-[14px] text-zinc-500">Approvals needed: {a.approvers.map((p) => `${p.name} (${p.approved ? "approved" : "waiting"})`).join(", ")}</p>
+      <p className="text-[14px] text-zinc-500">Approvals needed (one from each):</p>
+      <ul className="mb-1 list-disc pl-5 text-[14px] text-zinc-500">
+        {a.requirements.map((r, i) => (
+          <li key={`${r.for}-${i}`}>
+            {requirementLabel(a, r.for)}: {r.approvers.map((p) => p.name).join(" or ") || "nobody yet"}{" "}
+            {r.approved_by ? <Pill tone="green">approved by {r.approved_by.name}</Pill> : <Pill tone="amber">waiting</Pill>}
+          </li>
+        ))}
+      </ul>
       {a.note && <p className="mt-1 text-[14px] text-zinc-600">Note: {a.note}</p>}
       {a.history.length > 1 && (
         <details className="mt-1 text-[14px] text-zinc-500">

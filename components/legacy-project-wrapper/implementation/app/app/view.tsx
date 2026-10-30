@@ -22,7 +22,7 @@ export default function Home({ me }: { me: Me }) {
                 {w.name}
               </Link>
               <Pill>{w.role}</Pill>
-              {w.pods.map((p) => (
+              {w.teams.map((p) => (
                 <Pill key={p.id} tone="violet">
                   {p.name}
                   {p.role === "lead" ? " (lead)" : ""}

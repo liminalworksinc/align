@@ -79,7 +79,7 @@ export interface WsSummary {
   id: string;
   name: string;
   role: "owner" | "member" | "viewer";
-  pods: { id: string; name: string; role: "lead" | "member" }[];
+  teams: { id: string; name: string; role: "lead" | "member" }[];
 }
 
 const WS_TABS = [

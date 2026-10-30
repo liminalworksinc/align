@@ -4,6 +4,7 @@
 //   visible but not allowed   -> 403 with a code
 // The rules are data (the tables below), so a test can walk role x visibility x action exhaustively.
 // A workspace owner does NOT read private goals: only a goal's owner does.
+// Teams are stored as pods (pod_id, visibility value "pod"); everything a person or agent sees says "team".
 
 export type WsRole = "owner" | "member" | "viewer";
 export type PodRole = "lead" | "member";
@@ -40,7 +41,7 @@ export type PolicyObject =
 /** Workspace-level actions and the roles that hold them. */
 export type WsAction =
   | "workspace.read"
-  | "workspace.manage" // invites, pods
+  | "workspace.manage" // invites, teams, member roles and removal, rename, delete, the audit trail
   | "goal.create"
   | "session.share" // share sessions, bind them, upload usage
   | "session.stop_any" // stop or resume any shared session's agent in the workspace
@@ -121,7 +122,7 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
     case "goal.create": {
       if (!wsCan(p, "goal.create")) return roleDenied(p);
       if (obj.kind !== "goal_draft") return hidden();
-      if (obj.podId && !podCan(p, obj.podId, "goal.create_in_pod")) return deny("not_in_pod", "Only members of that pod can add its goals");
+      if (obj.podId && !podCan(p, obj.podId, "goal.create_in_pod")) return deny("not_in_team", "Only members of that team can add its goals");
       return ALLOW;
     }
 
@@ -146,7 +147,7 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
     case "pod.manage_members": {
       if (obj.kind !== "pod") return hidden();
       if (wsCan(p, "workspace.manage") || podCan(p, obj.podId, "pod.manage_members")) return ALLOW;
-      return p.wsRole === "viewer" ? roleDenied(p) : deny("not_pod_lead", "Only a workspace owner or the pod's lead can change its members");
+      return p.wsRole === "viewer" ? roleDenied(p) : deny("not_team_lead", "Only a workspace owner or the team's lead can change its members");
     }
 
     case "session.manage":

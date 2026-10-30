@@ -196,8 +196,9 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">{g.title}</h1>
           <div className="mb-5 flex flex-wrap gap-2">
             <Pill tone="violet">{g.status}</Pill>
+            <Pill>{g.level === "company" ? "company goal" : "team goal"}</Pill>
             <Pill>{VISIBILITY_LABEL[g.visibility]}</Pill>
-            {g.pod && <Pill>{g.pod.name}</Pill>}
+            {g.team && <Pill>team {g.team.name}</Pill>}
             <Pill>version {g.version}</Pill>
             <span className="text-[14px] text-zinc-500">Owner: {g.owner.id === me.id ? "you" : g.owner.name}</span>
           </div>

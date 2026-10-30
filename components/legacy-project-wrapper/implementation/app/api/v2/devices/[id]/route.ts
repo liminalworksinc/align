@@ -8,6 +8,6 @@ export const DELETE = route<{ id: string }>(async (req, params) => {
   const p = await webWrite(req);
   const id = idParam(params.id, ID_RE);
   if (!deviceOwnedBy(id, p.user.id)) throw notFound();
-  await revokeDevice(id, "revoked_on_web");
+  await revokeDevice(id, "revoked_on_web", p.user.id);
   return noContent();
 });

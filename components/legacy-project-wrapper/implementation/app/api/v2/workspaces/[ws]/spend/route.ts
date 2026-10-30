@@ -11,11 +11,12 @@ const time = (v: string | null, k: string) => {
   return new Date(t).toISOString();
 };
 
-// GET /api/v2/workspaces/:ws/spend?by=goal|pod|session&from&to (cookie)
+// GET /api/v2/workspaces/:ws/spend?by=goal|team|session&from&to (cookie). by=pod is accepted as by=team.
 export const GET = route<{ ws: string }>(async (req, params) => {
   const pp = enter(await webAuth(req), idParam(params.ws, ID_RE));
   const q = new URL(req.url).searchParams;
-  const by = (q.get("by") || "goal") as SpendBy;
-  if (!["goal", "pod", "session"].includes(by)) throw badRequest("by must be goal, pod or session");
+  const raw = q.get("by") || "goal";
+  const by = (raw === "pod" ? "team" : raw) as SpendBy;
+  if (!["goal", "team", "session"].includes(by)) throw badRequest("by must be goal, team or session");
   return spend(pp, by, time(q.get("from"), "from"), time(q.get("to"), "to"));
 });

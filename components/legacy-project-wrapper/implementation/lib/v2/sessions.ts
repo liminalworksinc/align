@@ -1,4 +1,4 @@
-import { all, get, run, tx } from "./db";
+import { all, audit, get, run, tx } from "./db";
 import { V2Error, badRequest, conflict, notFound } from "./errors";
 import { nowIso } from "./ids";
 import { goalObj, goalRow, transferFor } from "./goals";
@@ -11,6 +11,8 @@ import { b64url, iso, nonNegInt, oneOf, optInt, optStr, str, type Body } from ".
 
 // Shared sessions, binding epochs and usage. docs/v2/WIRE.md "Shared sessions".
 // A session belongs to the device (and user) that shared it: any other caller gets 404 for its key.
+// Audit rows for session actions name the actor but not the session key, so deleting a session's history leaves no
+// row that mentions it.
 
 export interface SessionRow {
   ws_id: string;
@@ -271,6 +273,7 @@ export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string
       pp.wsId,
       key,
     );
+    audit(pp.wsId, pp.userId, "session.sharing_stopped", null, at);
   });
   return { session_key: key, state: "stopped" as const };
 }
@@ -282,6 +285,7 @@ export async function deleteSession(pp: PolicyPrincipal, p: Principal, key: stri
   await tx(() => {
     run("DELETE FROM v2_sessions WHERE ws_id = ? AND session_key = ?", pp.wsId, key);
     run("DELETE FROM v2_directives WHERE ws_id = ? AND NOT EXISTS (SELECT 1 FROM v2_directive_targets t WHERE t.directive_id = v2_directives.id)", pp.wsId);
+    audit(pp.wsId, pp.userId, "session.history_deleted", null, nowIso());
   });
 }
 
@@ -294,6 +298,7 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
   const at = nowIso();
   const id = await tx(() => {
     run("UPDATE v2_sessions SET agent_stopped = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?", stop ? 1 : 0, at, pp.wsId, key);
+    audit(pp.wsId, pp.userId, stop ? "session.agent_stopped" : "session.agent_resumed", null, at);
     return writeDirective(pp.wsId, stop ? "stop" : "resume", [key], null, null);
   });
   return { directive_id: id, agent_stopped: stop };

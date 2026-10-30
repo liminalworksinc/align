@@ -5,6 +5,8 @@ import type { Me } from "../../_ui/server";
 interface Preview {
   workspace: { id: string; name: string };
   role: string;
+  team: { id: string; name: string } | null;
+  team_role: string | null;
   email_matches: boolean;
   invited_email: string;
 }
@@ -21,7 +23,15 @@ export default function InviteAccept({ me, token }: { me: Me; token: string }) {
         {p.data && (
           <>
             <p className="mb-3 text-[16px] text-zinc-700">
-              You are invited to <strong className="text-zinc-900">{p.data.workspace.name}</strong> as {p.data.role}.
+              You are invited to <strong className="text-zinc-900">{p.data.workspace.name}</strong> as {p.data.role}
+              {p.data.team ? (
+                <>
+                  {" "}
+                  and to the team <strong className="text-zinc-900">{p.data.team.name}</strong> as {p.data.team_role ?? "member"}.
+                </>
+              ) : (
+                "."
+              )}
             </p>
             {p.data.email_matches ? (
               <Btn

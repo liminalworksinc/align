@@ -252,7 +252,7 @@ try {
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
-  check("storage: WAL, migrated (user_version 2), v2_ tables and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 2 && pragmas.tables.includes("v2_usage") && pragmas.tables.includes("v2_activity") && pragmas.tables.includes("v2_goal_acks") && pragmas.tables.includes("ba_user"), JSON.stringify(pragmas));
+  check("storage: WAL, migrated (user_version 3), v2_ tables and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 3 && pragmas.tables.includes("v2_usage") && pragmas.tables.includes("v2_activity") && pragmas.tables.includes("v2_goal_acks") && pragmas.tables.includes("ba_user"), JSON.stringify(pragmas));
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -274,7 +274,7 @@ try {
   const otherPortSignIn = await call("anon", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: `http://127.0.0.1:${Number(PORT) + 1}` }, body: { email: "u1@example.test", password: "pw-U1-123456" } });
   check("auth: sign-in from another localhost port is refused (only this server's own origin is trusted)", otherPortSignIn.status === 403, `${otherPortSignIn.status}`);
 
-  // -- workspaces, invites, pods --
+  // -- workspaces, invites, teams --
   const wsA = await call("U1", "POST", "/api/v2/workspaces", { cookie: U1.cookie, body: { name: "Workspace A" } });
   const wsB = await call("U4", "POST", "/api/v2/workspaces", { cookie: U4.cookie, body: { name: "Workspace B" } });
   const A = wsA.json?.id;
@@ -298,32 +298,54 @@ try {
   check("invites: an invite works once (reuse -> 404)", reuse.status === 404, `${reuse.status}`);
   const memberInvite = await call("U3", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U3.cookie, body: { email: "z@example.test", role: "member" } });
   check("rbac: a member creating an invite -> 403 owner_only", memberInvite.status === 403 && memberInvite.json?.error === "owner_only", memberInvite.text);
-  const pod = await call("U1", "POST", `/api/v2/workspaces/${A}/pods`, { cookie: U1.cookie, body: { name: "Platform pod" } });
+  const pod = await call("U1", "POST", `/api/v2/workspaces/${A}/teams`, { cookie: U1.cookie, body: { name: "Platform team" } });
   const P1 = pod.json?.id;
-  const addLead = await call("U1", "POST", `/api/v2/workspaces/${A}/pods/${P1}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "lead" } });
-  const leadAdds = await call("U2", "POST", `/api/v2/workspaces/${A}/pods/${P1}/members`, { cookie: U2.cookie, body: { user_id: U3.id, role: "member" } });
-  const memberAdds = await call("U3", "POST", `/api/v2/workspaces/${A}/pods/${P1}/members`, { cookie: U3.cookie, body: { user_id: U4.id, role: "member" } });
-  check("pods: owner creates a pod and adds a lead; the lead adds a member; a pod member can't (403 not_pod_lead)", pod.status === 201 && addLead.status === 200 && leadAdds.status === 200 && memberAdds.status === 403 && memberAdds.json?.error === "not_pod_lead", `${pod.status} ${addLead.status} ${leadAdds.status} ${memberAdds.status} ${memberAdds.text}`);
-  const leadPromotes = await call("U2", "POST", `/api/v2/workspaces/${A}/pods/${P1}/members`, { cookie: U2.cookie, body: { user_id: U3.id, role: "lead" } });
-  check("pods: a lead can't make someone a lead (403 owner_only); only a workspace owner can", leadPromotes.status === 403 && leadPromotes.json?.error === "owner_only", `${leadPromotes.status} ${leadPromotes.text}`);
+  const addLead = await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "lead" } });
+  const leadAdds = await call("U2", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U2.cookie, body: { user_id: U3.id, role: "member" } });
+  const memberAdds = await call("U3", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U3.cookie, body: { user_id: U4.id, role: "member" } });
+  check("teams: owner creates a team (pod_ id) and adds a lead; the lead adds a member ({team_id, user_id, role}); a team member can't (403 not_team_lead)", pod.status === 201 && /^pod_/.test(P1) && addLead.status === 200 && addLead.json?.team_id === P1 && !("pod_id" in (addLead.json ?? {})) && leadAdds.status === 200 && memberAdds.status === 403 && memberAdds.json?.error === "not_team_lead", `${pod.status} ${addLead.text} ${leadAdds.status} ${memberAdds.status} ${memberAdds.text}`);
+  const leadPromotes = await call("U2", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U2.cookie, body: { user_id: U3.id, role: "lead" } });
+  check("teams: a lead can't make someone a lead (403 owner_only, says team lead); only a workspace owner can", leadPromotes.status === 403 && leadPromotes.json?.error === "owner_only" && /team lead/.test(leadPromotes.json?.message) && !/pod/i.test(leadPromotes.text), `${leadPromotes.status} ${leadPromotes.text}`);
+  // The old /pods paths answer exactly like /teams.
+  const aliasPod = await call("U1", "POST", `/api/v2/workspaces/${A}/pods`, { cookie: U1.cookie, body: { name: "Alias team" } });
+  const aliasSet = await call("U1", "POST", `/api/v2/workspaces/${A}/pods/${aliasPod.json?.id}/members`, { cookie: U1.cookie, body: { user_id: U3.id, role: "member" } });
+  const aliasDel = await call("U1", "DELETE", `/api/v2/workspaces/${A}/pods/${aliasPod.json?.id}/members/${U3.id}`, { cookie: U1.cookie });
+  check("teams: the /pods paths are aliases (create 201, set member -> {team_id,...}, remove 204)", aliasPod.status === 201 && /^pod_/.test(aliasPod.json?.id) && aliasSet.status === 200 && aliasSet.json?.team_id === aliasPod.json?.id && aliasDel.status === 204, `${aliasPod.status} ${aliasSet.text} ${aliasDel.status}`);
+  const multi = await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${aliasPod.json?.id}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "member" } });
+  const wsView = await call("U2", "GET", `/api/v2/workspaces/${A}`, { cookie: U2.cookie });
+  const wsList = await call("U2", "GET", "/api/v2/workspaces", { cookie: U2.cookie });
+  const inTeams = (wsView.json?.teams ?? []).filter((t) => t.members.some((m) => m.id === U2.id)).map((t) => t.id);
+  check(
+    "teams: a person can be in several teams; GET /workspaces/{ws} lists teams (no pods key), GET /workspaces lists my teams",
+    multi.status === 200 && inTeams.includes(P1) && inTeams.includes(aliasPod.json?.id) && !("pods" in (wsView.json ?? {})) && wsList.json?.workspaces?.find((w) => w.id === A)?.teams?.length === 2,
+    `${multi.status} ${JSON.stringify(inTeams)} ${wsList.text.slice(0, 200)}`,
+  );
+  await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${aliasPod.json?.id}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "lead" } });
+  const leadSelf = await call("U2", "DELETE", `/api/v2/workspaces/${A}/teams/${aliasPod.json?.id}/members/${U2.id}`, { cookie: U2.cookie });
+  check("teams: a lead removes themselves from the team -> 204", leadSelf.status === 204, `${leadSelf.status} ${leadSelf.text}`);
 
   // -- goals --
   const CANARY = `CANARY-PRIV-${randomBytes(6).toString("hex")}`;
   const mkGoal = (u, body) => call(u.who, "POST", `/api/v2/workspaces/${A}/goals`, { cookie: u.cookie, body });
   const G1 = (await mkGoal(U1, { title: "Ship onboarding v2", visibility: "workspace", measures: [{ text: "Activation rate", target: "40%" }], anchors: { repos: ["github.com/acme/web"] } })).json;
-  const G2 = (await mkGoal(U2, { title: "Platform reliability", visibility: "pod", pod_id: P1, measures: [{ text: "p99 latency", target: "200ms" }] })).json;
+  const G2 = (await mkGoal(U2, { title: "Platform reliability", visibility: "team", team_id: P1, measures: [{ text: "p99 latency", target: "200ms" }] })).json;
   const GP = (await mkGoal(U2, { title: `${CANARY} secret plan`, visibility: "private", measures: [{ text: `${CANARY} measure`, target: null }] })).json;
   const G3 = (await mkGoal(U3, { title: "Docs refresh", visibility: "workspace" })).json;
   const GB = (await call("U4", "POST", `/api/v2/workspaces/${B}/goals`, { cookie: U4.cookie, body: { title: "B goal" } })).json;
-  check("goals: create workspace, pod, private and B goals -> g_ ids at version 1", [G1, G2, GP, G3, GB].every((g) => /^g_/.test(g?.id) && g.version === 1), JSON.stringify([G1, G2, GP, G3, GB].map((g) => g?.id ?? g)));
+  check("goals: create workspace, team, private and B goals -> g_ ids at version 1", [G1, G2, GP, G3, GB].every((g) => /^g_/.test(g?.id) && g.version === 1), JSON.stringify([G1, G2, GP, G3, GB].map((g) => g?.id ?? g)));
   const viewerGoal = await mkGoal(U4, { title: "Viewer goal" });
   check("rbac: a viewer creating a goal -> 403 read_only", viewerGoal.status === 403 && viewerGoal.json?.error === "read_only", viewerGoal.text);
-  const notInPod = await mkGoal(U1, { title: "Owner pod goal", visibility: "pod", pod_id: P1 });
-  check("rbac: a pod goal from someone outside the pod (even the workspace owner) -> 403 not_in_pod", notInPod.status === 403 && notInPod.json?.error === "not_in_pod", notInPod.text);
+  const notInPod = await mkGoal(U1, { title: "Owner team goal", visibility: "team", team_id: P1 });
+  check("rbac: a team goal from someone outside the team (even the workspace owner) -> 403 not_in_team", notInPod.status === 403 && notInPod.json?.error === "not_in_team", notInPod.text);
+  const teamNoId = await mkGoal(U2, { title: "Team goal without a team", visibility: "team" });
+  const podVis = await mkGoal(U2, { title: "Old visibility word", visibility: "pod", team_id: P1 });
+  const podIdAlias = await mkGoal(U2, { title: "Old key", visibility: "team", pod_id: P1 });
+  check("goals: visibility team without team_id -> 400; the old visibility pod and the old pod_id key are not accepted (400)", teamNoId.status === 400 && podVis.status === 400 && podIdAlias.status === 400, `${teamNoId.status} ${podVis.status} ${podIdAlias.status}`);
+  check("goals: the wire says team, team_id never pod (visibility team, team {id, name}, level team)", G2.visibility === "team" && G2.team?.id === P1 && G2.team?.name === "Platform team" && G2.level === "team" && !("pod" in G2), JSON.stringify(G2).slice(0, 300));
   const feedOf = async (u) => (await call(u.who, "GET", `/api/v2/workspaces/${A}/goals`, { cookie: u.cookie })).json?.goals?.map((g) => g.id) ?? [];
   const feeds = { U1: await feedOf(U1), U2: await feedOf(U2), U3: await feedOf(U3), U4: await feedOf(U4) };
   check("visibility: the private goal is in its owner's feed only (not the workspace owner's)", feeds.U2.includes(GP.id) && !feeds.U1.includes(GP.id) && !feeds.U3.includes(GP.id) && !feeds.U4.includes(GP.id), JSON.stringify(feeds));
-  check("visibility: the pod goal reaches pod members and the workspace owner, not the viewer outside the pod", feeds.U1.includes(G2.id) && feeds.U2.includes(G2.id) && feeds.U3.includes(G2.id) && !feeds.U4.includes(G2.id), JSON.stringify(feeds));
+  check("visibility: the team goal reaches team members and the workspace owner, not the viewer outside the team", feeds.U1.includes(G2.id) && feeds.U2.includes(G2.id) && feeds.U3.includes(G2.id) && !feeds.U4.includes(G2.id), JSON.stringify(feeds));
   const ownerReadsPrivate = await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${GP.id}`, { cookie: U1.cookie });
   check("visibility: the workspace owner reading the private goal by id -> 404", ownerReadsPrivate.status === 404, `${ownerReadsPrivate.status}`);
   const crossGoal = await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${GB.id}`, { cookie: U1.cookie });
@@ -336,7 +358,7 @@ try {
     [
       [`/api/v2/workspaces/${B}/goals`, { title: "x" }],
       [`/api/v2/workspaces/${B}/invites`, { email: "a@b.c", role: "member" }],
-      [`/api/v2/workspaces/${B}/pods`, { name: "x" }],
+      [`/api/v2/workspaces/${B}/teams`, { name: "x" }],
       [`/api/v2/workspaces/${B}/alignments`, { target_goal_id: GB.id, choice: "contribution", session_keys: [] }],
       [`/api/v2/workspaces/${B}/goals/${GB.id}/versions`, { title: "y" }],
     ].map(([p, b]) => call("U1", "POST", p, { cookie: U1.cookie, body: b })),
@@ -346,10 +368,10 @@ try {
   check("rbac: editing someone else's goal -> 403 not_goal_owner", notOwnerEdit.status === 403 && notOwnerEdit.json?.error === "not_goal_owner", notOwnerEdit.text);
   const viewerWrites = await Promise.all([
     call("U4", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U4.cookie, body: { email: "q@example.test", role: "member" } }),
-    call("U4", "POST", `/api/v2/workspaces/${A}/pods`, { cookie: U4.cookie, body: { name: "x" } }),
+    call("U4", "POST", `/api/v2/workspaces/${A}/teams`, { cookie: U4.cookie, body: { name: "x" } }),
     call("U4", "POST", `/api/v2/workspaces/${A}/alignments`, { cookie: U4.cookie, body: { target_goal_id: G1.id, choice: "contribution", session_keys: [] } }),
   ]);
-  check("rbac: viewer writes (invite, pod, alignment) -> 403", viewerWrites.every((r) => r.status === 403), viewerWrites.map((r) => `${r.status}:${r.json?.error}`).join(","));
+  check("rbac: viewer writes (invite, team, alignment) -> 403", viewerWrites.every((r) => r.status === 403), viewerWrites.map((r) => `${r.status}:${r.json?.error}`).join(","));
   const bearerOnWeb = await Promise.all([
     call("anon", "GET", "/api/v2/workspaces", { bearer: "alnd_x", cookie: U1.cookie }),
     call("anon", "GET", "/api/v2/auth/get-session", { bearer: "alnd_x", cookie: U1.cookie }),
@@ -502,9 +524,9 @@ try {
   const f2 = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access, headers: { "if-none-match": etag } });
   const bind = Object.fromEntries((f1.json?.goals ?? []).map((g) => [g.id, g.bindable]));
   check("feed: ETag matches the version; If-None-Match -> 304 with no body", f1.status === 200 && etag === `"${f1.json.version}"` && f2.status === 304 && f2.text === "", `${f1.status} ${etag} ${f2.status}`);
-  check("feed: bindable = own goal or pod goal (U3: G3 yes, G2 yes via pod, G1 no)", bind[G3.id] === true && bind[G2.id] === true && bind[G1.id] === false && !(GP.id in bind), JSON.stringify(bind));
+  check("feed: bindable = own goal or team goal (U3: G3 yes, G2 yes via team, G1 no)", bind[G3.id] === true && bind[G2.id] === true && bind[G1.id] === false && !(GP.id in bind), JSON.stringify(bind));
   const f1Goal = f1.json.goals.find((g) => g.id === G1.id);
-  check("feed: a Goal carries id, version, title, measures (id, text, target), status, visibility, owner, pod, anchors", f1Goal && f1Goal.measures[0].id && f1Goal.measures[0].target === "40%" && f1Goal.owner.id === U1.id && f1Goal.pod === null && f1Goal.anchors.repos[0] === "github.com/acme/web" && Array.isArray(f1Goal.anchors.issues), JSON.stringify(f1Goal));
+  check("feed: a Goal carries id, version, title, measures (id, text, target), status, level, visibility, owner, team, anchors (no pod key)", f1Goal && f1Goal.measures[0].id && f1Goal.measures[0].target === "40%" && f1Goal.owner.id === U1.id && f1Goal.team === null && f1Goal.level === "team" && f1Goal.visibility === "workspace" && !("pod" in f1Goal) && f1Goal.anchors.repos[0] === "github.com/acme/web" && Array.isArray(f1Goal.anchors.issues), JSON.stringify(f1Goal));
 
   // -- sessions, epochs, usage --
   const T0 = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
@@ -529,7 +551,7 @@ try {
   const E1 = epochId();
   const E2 = epochId();
   const needAl = await epoch(D3, S3a, { epoch_id: E1, goal_id: G1.id, starts_at: T0 });
-  check("epochs: binding to a goal that isn't yours or your pod's -> 403 alignment_required", needAl.status === 403 && needAl.json?.error === "alignment_required", needAl.text);
+  check("epochs: binding to a goal that isn't yours or your team's -> 403 alignment_required", needAl.status === 403 && needAl.json?.error === "alignment_required", needAl.text);
   const privBind = await epoch(D3, S3a, { epoch_id: E1, goal_id: GP.id, starts_at: T0 });
   check("epochs: binding to someone's private goal -> 404", privBind.status === 404, `${privBind.status}`);
   const e1 = await epoch(D3, S3a, { epoch_id: E1, goal_id: G3.id, starts_at: T0 });
@@ -538,7 +560,7 @@ try {
   check("epochs: a first epoch may start at the session's start; the same epoch again is idempotent; same id with other values -> 409", e1.status === 200 && e1.json.starts_at === T0 && e1.json.ends_at === null && e1.json.goal_version_at_start === 1 && e1Again.status === 200 && e1Conflict.status === 409, `${e1.text} ${e1Again.status} ${e1Conflict.status}`);
   const e2 = await epoch(D3, S3a, { epoch_id: E2, goal_id: G2.id, starts_at: at(60), root_turn: "turn-7" });
   const e1Row = withDb((d) => d.prepare("SELECT ends_at FROM v2_epochs WHERE epoch_id = ?").get(E1));
-  check("epochs: a pod goal binds; opening it closes the previous epoch at its start", e2.status === 200 && e1Row.ends_at === at(60), `${e2.text} ${JSON.stringify(e1Row)}`);
+  check("epochs: a team goal binds; opening it closes the previous epoch at its start", e2.status === 200 && e1Row.ends_at === at(60), `${e2.text} ${JSON.stringify(e1Row)}`);
   const overlap = await epoch(D3, S3a, { epoch_id: epochId(), goal_id: G3.id, starts_at: at(30) });
   const early = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date(Date.parse(T0) - 60000).toISOString() });
   const badCause = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G3.id, starts_at: T0, cause: "directive:dir_aaaaaaaaaaaaaaaaaaaaaaaa" });
@@ -573,8 +595,8 @@ try {
   // -- spend --
   const spendOf = async (u, by) => (await call(u.who, "GET", `/api/v2/workspaces/${A}/spend?by=${by}`, { cookie: u.cookie })).json;
   const sp = {};
-  for (const u of users) for (const by of ["goal", "pod", "session"]) sp[`${u.who}:${by}`] = await spendOf(u, by);
-  check("spend: total = sum of rows + unallocated, for every number, for U1..U4 by goal, pod and session", Object.values(sp).every((s) => s && invariantHolds(s)), Object.entries(sp).filter(([, s]) => !s || !invariantHolds(s)).map(([k]) => k).join(" "));
+  for (const u of users) for (const by of ["goal", "team", "session"]) sp[`${u.who}:${by}`] = await spendOf(u, by);
+  check("spend: total = sum of rows + unallocated, for every number, for U1..U4 by goal, team and session", Object.values(sp).every((s) => s && invariantHolds(s)), Object.entries(sp).filter(([, s]) => !s || !invariantHolds(s)).map(([k]) => k).join(" "));
   const g1 = sp["U1:goal"];
   check("spend: 8 requests in total; 2 unallocated; 1 unpriced; basis sums present", g1.total.requests === 8 && g1.unallocated.requests === 2 && g1.unpriced_requests === 1 && g1.total.by_basis.subscription_included.requests >= 4 && g1.total.by_basis.api_usd.requests === 1, JSON.stringify(g1.total).slice(0, 300));
   const privRowU1 = g1.rows.find((r) => r.kind === "private");
@@ -583,7 +605,15 @@ try {
   const sessRows = sp["U3:session"].rows;
   check("spend: by session names only the caller's own sessions; everyone else's is one row", sessRows.some((r) => r.kind === "session") && sessRows.filter((r) => r.kind === "others").length === 1 && !sessRows.some((r) => r.kind === "session" && r.label.startsWith("U1")), JSON.stringify(sessRows.map((r) => r.label)));
   const viewerSpend = sp["U4:goal"];
-  check("spend: a viewer may read spend; the pod goal it can't see is in the private row", viewerSpend.rows.some((r) => r.kind === "private") && !viewerSpend.rows.some((r) => r.goal?.id === G2.id), JSON.stringify(viewerSpend.rows.map((r) => r.label)));
+  const teamRows = sp["U1:team"].rows;
+  const podAlias = await spendOf(U1, "pod");
+  const badBy = await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=person`, { cookie: U1.cookie });
+  check(
+    "spend: by=team rows carry team {id, name}; goals with no team are one 'Goals without a team' row; by=pod is the same as by=team; another by -> 400",
+    teamRows.some((r) => r.kind === "team" && r.team?.id === P1 && r.label === "Platform team") && teamRows.filter((r) => r.kind === "no_team" && r.label === "Goals without a team").length === 1 && teamRows.every((r) => !("pod" in r) && r.kind !== "pod" && r.kind !== "no_pod") && podAlias.by === "team" && JSON.stringify(podAlias.rows) === JSON.stringify(teamRows) && badBy.status === 400,
+    `${JSON.stringify(teamRows.map((r) => [r.kind, r.label]))} ${podAlias.by} ${badBy.status}`,
+  );
+  check("spend: a viewer may read spend; the team goal it can't see is in the private row", viewerSpend.rows.some((r) => r.kind === "private") && !viewerSpend.rows.some((r) => r.goal?.id === G2.id), JSON.stringify(viewerSpend.rows.map((r) => r.label)));
   const ranged = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal&from=${encodeURIComponent(new Date().toISOString())}`, { cookie: U1.cookie })).json;
   check("spend: from/to filter by request time", ranged.total.requests === 0 && invariantHolds(ranged), JSON.stringify(ranged.total).slice(0, 100));
 
@@ -593,7 +623,7 @@ try {
   const v2G2 = await call("U2", "POST", `/api/v2/workspaces/${A}/goals/${G2.id}/versions`, { cookie: U2.cookie, body: { version: 1, title: "Platform reliability (p99)" } });
   const after3 = await dirs(D3, before3.next_cursor);
   const gv = after3.directives.find((d) => d.kind === "goal_version");
-  check("directives: a new goal version -> 201 version 2, and a goal_version directive for the session bound to it", v2G2.status === 201 && v2G2.json.version === 2 && gv && gv.session_keys.length === 1 && gv.session_keys[0] === S3a && gv.goal.version === 2 && gv.goal.title === "Platform reliability (p99)" && /^dir_/.test(gv.id) && gv.ws === A && gv.binding === null, JSON.stringify(after3));
+  check("directives: a new goal version -> 201 version 2, and a goal_version directive for the session bound to it (its goal snapshot carries team and level)", v2G2.status === 201 && v2G2.json.version === 2 && gv && gv.session_keys.length === 1 && gv.session_keys[0] === S3a && gv.goal.version === 2 && gv.goal.title === "Platform reliability (p99)" && gv.goal.team?.id === P1 && gv.goal.level === "team" && gv.goal.visibility === "team" && !("pod" in gv.goal) && /^dir_/.test(gv.id) && gv.ws === A && gv.binding === null, JSON.stringify(after3));
   const dirRow = withDb((d) => d.prepare("SELECT d.created_at AS dc, g.updated_at AS gu FROM v2_directives d JOIN v2_goals g ON g.id = d.goal_id WHERE d.id = ?").get(gv?.id ?? ""));
   check("directives: the directive row was written in the goal version's transaction (same timestamp)", dirRow && dirRow.dc >= dirRow.gu, JSON.stringify(dirRow));
   const d2dirs = await dirs(D2);
@@ -653,7 +683,12 @@ try {
   const act = (u, id, action, body = {}) => call(u.who, "POST", `/api/v2/workspaces/${A}/alignments/${id}/${action}`, { cookie: u.cookie, body });
   const getAl = (u, id) => call(u.who, "GET", `/api/v2/workspaces/${A}/alignments/${id}`, { cookie: u.cookie });
   const contrib = await al(U3, { target_goal_id: G1.id, source_goal_id: G3.id, choice: "contribution", session_keys: [], note: "Docs help onboarding" });
-  check("alignment (contribution): effects contributes_to only; approvers = the target's owner only", contrib.status === 201 && contrib.json.effects.map((e) => e.kind).join() === "contributes_to" && contrib.json.approvers.map((a) => a.id).join() === U1.id && contrib.json.state === "pending", contrib.text);
+  const reqOf = (v, forId) => v?.requirements?.find((r) => r.for === forId);
+  check(
+    "alignment (contribution): effects contributes_to only; requirements = the target's set (its owner) and the source's set (the requester, who owns it, already counted)",
+    contrib.status === 201 && contrib.json.effects.map((e) => e.kind).join() === "contributes_to" && contrib.json.requirements.length === 2 && reqOf(contrib.json, G1.id)?.approvers.map((a) => a.id).join() === U1.id && reqOf(contrib.json, G1.id)?.approved_by === null && reqOf(contrib.json, G3.id)?.approved_by?.id === U3.id && contrib.json.state === "pending",
+    contrib.text,
+  );
   const cApprove = await act(U1, contrib.json.id, "approve", { revision: 1 });
   const d3AfterContrib = await dirs(D3, page2.next_cursor);
   const feedAfterContrib = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access });
@@ -685,10 +720,10 @@ try {
   check("tree: depends_on is a versioned field of the goal; itself -> 400, a goal you can't see -> 404, more than 5 -> 400", depOk.status === 201 && depOk.json.version === 2 && depOk.json.depends_on.join() === G1.id && depSelf.status === 400 && depPriv.status === 404 && depMany.status === 400, `${depOk.status} ${depSelf.status} ${depPriv.status} ${depMany.status}`);
   const depSeen = await childIn(U4, D4);
   check("tree: a reader who can't see a dependency doesn't learn its id", depSeen && Array.isArray(depSeen.depends_on) && depSeen.depends_on.every((id) => id === G1.id), JSON.stringify(depSeen?.depends_on));
-  // A pod member may name a pod-mate's goal as the source, but linking it under their own goal needs its owner's approval.
+  // A team member may name a team-mate's goal as the source, but linking it under their own goal needs its owner's approval.
   const podMateSource = await al(U3, { target_goal_id: G3.id, source_goal_id: G2.id, choice: "contribution", session_keys: [], note: null });
   const podMateSeen = await getAl(U2, podMateSource.json?.id);
-  check("alignment: a pod-mate's goal as the source -> pending until its owner approves; the owner can see the request", podMateSource.status === 201 && podMateSource.json.state === "pending" && podMateSource.json.approvers.some((a) => a.id === U2.id) && podMateSeen.status === 200, `${podMateSource.text.slice(0, 300)} ${podMateSeen.status}`);
+  check("alignment: a team-mate's goal as the source -> pending until its owner approves; the owner can see the request", podMateSource.status === 201 && podMateSource.json.state === "pending" && podMateSource.json.approvers.some((a) => a.id === U2.id) && podMateSeen.status === 200, `${podMateSource.text.slice(0, 300)} ${podMateSeen.status}`);
   await act(U3, podMateSource.json.id, "withdraw", {});
 
   // -- activity: in-flight work signals between members, kept 24 hours --
@@ -723,10 +758,14 @@ try {
   const actWeb = await call("U3", "GET", `/api/v2/workspaces/${A}/activity`, { cookie: U3.cookie });
   check("activity: absolute or ../ paths, bad hashes and over 200 items -> 400; a browser or a cookie -> refused", badPath.status === 400 && dotdot.status === 400 && badRepo.status === 400 && actTooMany.status === 400 && actBrowser.status === 403 && actWeb.status === 403, `${badPath.status} ${dotdot.status} ${badRepo.status} ${actTooMany.status} ${actBrowser.status} ${actWeb.status}`);
 
-  // work_toward for S3a, currently on G2 (U2's pod goal): approvers U1 (target), U3 (session owner), U2 (goal it leaves)
+  // work_toward for S3a, currently on G2 (U2's team goal): requirements G1 (U1), sessions:U3 (U3), G2 (U2: its owner and the team's lead)
   const wt = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3a], note: "Moving to onboarding" });
   const expected = [U1.id, U2.id, U3.id].sort().join();
-  check("alignment (work_toward): effects contributes_to + governing_goal + allocation_transfer; approvers = target owner, session owner, owner of the goal the allocation leaves", wt.status === 201 && wt.json.effects.map((e) => e.kind).join() === "contributes_to,governing_goal,allocation_transfer" && wt.json.approvers.map((a) => a.id).sort().join() === expected && wt.json.approvers.find((a) => a.id === U3.id).approved === true, wt.text);
+  check(
+    "alignment (work_toward): effects contributes_to + governing_goal + allocation_transfer; requirements for the target, sessions:<owner> and the goal the allocation leaves",
+    wt.status === 201 && wt.json.effects.map((e) => e.kind).join() === "contributes_to,governing_goal,allocation_transfer" && wt.json.approvers.map((a) => a.id).sort().join() === expected && wt.json.approvers.find((a) => a.id === U3.id).approved === true && reqOf(wt.json, `sessions:${U3.id}`)?.approved_by?.id === U3.id && reqOf(wt.json, G2.id)?.approvers.map((a) => a.id).join() === U2.id && reqOf(wt.json, G1.id)?.approved_by === null,
+    wt.text,
+  );
   check("alignment: effects are plain words", wt.json.effects.every((e) => e.text.length > 20 && !/\u2014/.test(e.text)) && /Past usage stays/.test(wt.json.effects[2].text), JSON.stringify(wt.json.effects));
   const outsider = await getAl(U4, wt.json.id);
   check("alignment: someone not part of it -> 404", outsider.status === 404, `${outsider.status}`);
@@ -790,6 +829,228 @@ try {
   const privSource = await call("U2", "POST", `/api/v2/workspaces/${A}/alignments`, { cookie: U2.cookie, body: { target_goal_id: G1.id, source_goal_id: GP.id, choice: "contribution", session_keys: [] } });
   const privSourceSeen = await getAl(U1, privSource.json?.id);
   check("alignment: a private source goal is unnamed for the approver", privSource.status === 201 && privSourceSeen.status === 200 && privSourceSeen.json.source_goal.visible === false && /a goal you can't see/.test(privSourceSeen.json.effects[0].text), privSourceSeen.text.slice(0, 300));
+  check("alignment: the requirement for a goal the approver can't read has for: null (its id is not shown)", privSourceSeen.json?.requirements?.some((r) => r.for === null) && !privSourceSeen.text.includes(GP.id), JSON.stringify(privSourceSeen.json?.requirements));
+
+  // -- company goals --
+  const GCo = await mkGoal(U1, { title: "Expand to regulated customers", level: "company" });
+  check("company goals: an owner creates one -> 201 level company, team null, visibility workspace", GCo.status === 201 && GCo.json.level === "company" && GCo.json.team === null && GCo.json.visibility === "workspace" && GCo.json.version === 1 && GCo.json.owner.id === U1.id, GCo.text);
+  const coMember = await mkGoal(U2, { title: "Member company goal", level: "company" });
+  const coTeam = await mkGoal(U1, { title: "x", level: "company", team_id: P1 });
+  const coPriv = await mkGoal(U1, { title: "x", level: "company", visibility: "private" });
+  const coLevel = await mkGoal(U1, { title: "x", level: "division" });
+  check("company goals: a member -> 403 owner_only; with a team or another visibility -> 400; an unknown level -> 400", coMember.status === 403 && coMember.json?.error === "owner_only" && coTeam.status === 400 && coPriv.status === 400 && coLevel.status === 400, `${coMember.status} ${coTeam.status} ${coPriv.status} ${coLevel.status}`);
+  const viewerSeesCo = (await call("U4", "GET", `/api/v2/workspaces/${A}/goals`, { cookie: U4.cookie })).json?.goals?.find((g) => g.id === GCo.json.id);
+  check("company goals: a viewer reads every company goal", viewerSeesCo?.level === "company", JSON.stringify(viewerSeesCo));
+
+  // -- approval sets: never instant against others; instant when the requester owns every goal --
+  const toCo = await al(U3, { target_goal_id: GCo.json.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
+  check("approval: a member's goal contributing to a company goal -> pending; the company goal's set is the workspace owners", toCo.status === 201 && toCo.json.state === "pending" && reqOf(toCo.json, GCo.json.id)?.approvers.map((a) => a.id).join() === U1.id, toCo.text);
+  const toCoOk = await act(U1, toCo.json.id, "approve", { revision: 1 });
+  check("approval: one approval from the set satisfies the requirement and records approved_by", toCoOk.json?.state === "approved" && reqOf(toCoOk.json, GCo.json.id)?.approved_by?.id === U1.id, toCoOk.text);
+  const own = await al(U1, { target_goal_id: GCo.json.id, source_goal_id: G1.id, choice: "contribution", session_keys: [] });
+  const g1Parents = (await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${G1.id}`, { cookie: U1.cookie })).json?.goal?.contributes_to ?? [];
+  check("approval: instant when the requester owns both goals; the child lists the parent, reviewed", own.status === 201 && own.json.state === "approved" && g1Parents.some((p) => p.id === GCo.json.id && p.stale === false), `${own.text.slice(0, 200)} ${JSON.stringify(g1Parents)}`);
+  // A lead asking against their own team's goal: their request doesn't satisfy it; the goal's owner must approve.
+  await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U1.cookie, body: { user_id: U3.id, role: "lead" } });
+  const leadAsks = await al(U3, { target_goal_id: G2.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
+  check("approval: a team lead requesting against their team's goal does not count; the set is the other people in it", leadAsks.status === 201 && leadAsks.json.state === "pending" && reqOf(leadAsks.json, G2.id)?.approvers.map((a) => a.id).join() === U2.id && reqOf(leadAsks.json, G2.id)?.approved_by === null, leadAsks.text);
+  await act(U3, leadAsks.json.id, "withdraw");
+  await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U1.cookie, body: { user_id: U3.id, role: "member" } });
+
+  // -- cycles --
+  const backwards = await al(U1, { target_goal_id: G3.id, source_goal_id: GCo.json.id, choice: "contribution", session_keys: [] });
+  check("cycles: a contribution whose approval would loop (the source is already above the target) -> 409 cycle at creation", backwards.status === 409 && backwards.json?.error === "cycle", backwards.text);
+  const GXa = (await mkGoal(U3, { title: "Loop A", visibility: "workspace" })).json;
+  const GYb = (await mkGoal(U2, { title: "Loop B", visibility: "workspace" })).json;
+  const xy = await al(U3, { target_goal_id: GYb.id, source_goal_id: GXa.id, choice: "contribution", session_keys: [] });
+  const yx = await al(U2, { target_goal_id: GXa.id, source_goal_id: GYb.id, choice: "contribution", session_keys: [] });
+  const xyOk = await act(U2, xy.json.id, "approve", { revision: 1 });
+  const yxLoop = await act(U3, yx.json.id, "approve", { revision: 1 });
+  const yxAfter = await getAl(U3, yx.json.id);
+  check(
+    "cycles: two pending links in opposite directions; approving the second -> 409 cycle and it stays pending with no approval recorded",
+    xy.json?.state === "pending" && yx.json?.state === "pending" && xyOk.json?.state === "approved" && yxLoop.status === 409 && yxLoop.json?.error === "cycle" && /contribute to each other in a loop/.test(yxLoop.json?.message) && yxAfter.json?.state === "pending" && reqOf(yxAfter.json, GXa.id)?.approved_by === null,
+    `${xyOk.status} ${yxLoop.text} ${yxAfter.json?.state}`,
+  );
+  await act(U2, yx.json.id, "withdraw");
+  const depAB = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GXa.id}/versions`, { cookie: U3.cookie, body: { version: 1, depends_on: [GYb.id] } });
+  const depBA = await call("U2", "POST", `/api/v2/workspaces/${A}/goals/${GYb.id}/versions`, { cookie: U2.cookie, body: { version: 1, depends_on: [GXa.id] } });
+  const gybNow = (await call("U2", "GET", `/api/v2/workspaces/${A}/goals/${GYb.id}`, { cookie: U2.cookie })).json?.goal;
+  check("cycles: a depends_on change that closes a loop -> 409 cycle and the goal stays at its version", depAB.status === 201 && depBA.status === 409 && depBA.json?.error === "cycle" && /depend on each other in a loop/.test(depBA.json?.message) && gybNow?.version === 1, `${depAB.status} ${depBA.text} ${gybNow?.version}`);
+
+  // -- an alignment stored before requirements (a plain user-id array) --
+  const legacy = await al(U3, { target_goal_id: G1.id, source_goal_id: GXa.id, choice: "contribution", session_keys: [] });
+  withDb((d) => {
+    d.prepare("UPDATE v2_alignment_revisions SET approvers_json = ? WHERE alignment_id = ?").run(JSON.stringify([U1.id, U2.id]), legacy.json.id);
+    d.prepare("DELETE FROM v2_alignment_approvals WHERE alignment_id = ?").run(legacy.json.id);
+  });
+  const legacySeen = await getAl(U1, legacy.json.id);
+  const legacy1 = await act(U1, legacy.json.id, "approve", { revision: 1 });
+  const legacy2 = await act(U2, legacy.json.id, "approve", { revision: 1 });
+  check(
+    "requirements: an old row's user-id array reads as singleton sets (for null); it approves once each of them approved",
+    legacySeen.json?.requirements?.length === 2 && legacySeen.json.requirements.every((r) => r.for === null && r.approvers.length === 1 && r.approved_by === null) && legacy1.json?.state === "pending" && legacy2.json?.state === "approved" && legacy2.json.requirements.map((r) => r.approved_by?.id).join() === `${U1.id},${U2.id}`,
+    `${legacySeen.text.slice(0, 300)} ${legacy1.json?.state} ${legacy2.json?.state}`,
+  );
+
+  // -- invites that name a team, member roles, removal, leaving, last owner --
+  const U5 = await signUp("U5", "Ugo Five", "u5@example.test");
+  const U6 = await signUp("U6", "Ula Six", "u6@example.test");
+  const sec = await call("U1", "POST", `/api/v2/workspaces/${A}/teams`, { cookie: U1.cookie, body: { name: "Security" } });
+  const P2 = sec.json?.id;
+  const inv5 = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: U5.email, role: "member", team_id: P2 } });
+  const invBadTeam = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "nt@example.test", role: "member", team_id: "pod_aaaaaaaaaaaaaaaaaaaaaaaa" } });
+  const invBadRole = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "nt@example.test", role: "member", team_id: P2, team_role: "boss" } });
+  const invRoleOnly = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "nt@example.test", role: "member", team_role: "lead" } });
+  check(
+    "team invites: an invite may name a team (team_role member by default); an unknown team -> 404, a bad team_role -> 400, team_role without team_id -> 400",
+    inv5.status === 201 && inv5.json.team_id === P2 && inv5.json.team_role === "member" && invBadTeam.status === 404 && invBadRole.status === 400 && invRoleOnly.status === 400,
+    `${inv5.text} ${invBadTeam.status} ${invBadRole.status} ${invRoleOnly.status}`,
+  );
+  const prev5 = await call("U5", "GET", `/api/v2/invites/${inv5.json.token}`, { cookie: U5.cookie });
+  const acc5 = await call("U5", "POST", `/api/v2/invites/${inv5.json.token}/accept`, { cookie: U5.cookie, body: {} });
+  const secTeam = (await call("U1", "GET", `/api/v2/workspaces/${A}`, { cookie: U1.cookie })).json?.teams?.find((t) => t.id === P2);
+  check(
+    "team invites: the preview names the team; accepting joins the workspace and the team ({workspace_id, role, team_id})",
+    prev5.json?.team?.id === P2 && prev5.json.team.name === "Security" && prev5.json.team_role === "member" && acc5.status === 200 && acc5.json.team_id === P2 && secTeam?.members.some((m) => m.id === U5.id && m.role === "member"),
+    `${prev5.text} ${acc5.text}`,
+  );
+  const inv6 = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: U6.email, role: "viewer" } });
+  await call("U6", "POST", `/api/v2/invites/${inv6.json.token}/accept`, { cookie: U6.cookie, body: {} });
+  const D5 = await pairDevice("U5", U5, [A]);
+  const G5 = (await mkGoal(U5, { title: "Pass the security review", visibility: "workspace", team_id: P2 })).json;
+  const S5 = sessionKey(D5, A, "claude-code", "native-5");
+  await put(D5, S5);
+  const e5 = await epoch(D5, S5, { epoch_id: epochId(), goal_id: G5.id, starts_at: T0 });
+  await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P2}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "lead" } });
+  await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P2}/members`, { cookie: U1.cookie, body: { user_id: U6.id, role: "lead" } });
+  const setBefore = await al(U3, { target_goal_id: G5.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
+  check(
+    "approval: a team goal's set is its owner and the team's leads; a viewer who leads the team is never in it",
+    G5?.id && e5.status === 200 && reqOf(setBefore.json, G5.id)?.approvers.map((a) => a.id).sort().join() === [U2.id, U5.id].sort().join(),
+    `${e5.status} ${JSON.stringify(setBefore.json?.requirements)}`,
+  );
+  await act(U3, setBefore.json.id, "withdraw");
+
+  const mem = (u, target, body) => call(u.who, body ? "POST" : "DELETE", `/api/v2/workspaces/${A}/members/${target}`, { cookie: u.cookie, ...(body ? { body } : {}) });
+  const roleByMember = await mem(U3, U5.id, { role: "viewer" });
+  const roleByViewer = await mem(U4, U5.id, { role: "viewer" });
+  const roleUnknown = await mem(U1, "u_aaaaaaaaaaaaaaaaaaaaaaaa", { role: "viewer" });
+  const roleBad = await mem(U1, U5.id, { role: "admin" });
+  const roleOk = await mem(U1, U5.id, { role: "viewer" });
+  const roleBack = await mem(U1, U5.id, { role: "member" });
+  check(
+    "members: an owner changes a role ({user_id, role}); a member -> 403 owner_only, a viewer -> 403 read_only, an unknown person -> 404, a bad role -> 400",
+    roleByMember.status === 403 && roleByMember.json?.error === "owner_only" && roleByViewer.status === 403 && roleByViewer.json?.error === "read_only" && roleUnknown.status === 404 && roleBad.status === 400 && roleOk.status === 200 && roleOk.json.role === "viewer" && roleOk.json.user_id === U5.id && roleBack.json?.role === "member",
+    `${roleByMember.status} ${roleByViewer.status} ${roleUnknown.status} ${roleBad.status} ${roleOk.text} ${roleBack.text}`,
+  );
+  const lastLeave = await mem(U1, U1.id);
+  const lastDemote = await mem(U1, U1.id, { role: "member" });
+  const stillOwner = (await call("U1", "GET", `/api/v2/workspaces/${A}`, { cookie: U1.cookie })).json?.role;
+  check("last owner: the only owner leaving or demoting themselves -> 409 last_owner and nothing changes", lastLeave.status === 409 && lastLeave.json?.error === "last_owner" && lastDemote.status === 409 && lastDemote.json?.error === "last_owner" && stillOwner === "owner", `${lastLeave.text} ${lastDemote.text} ${stillOwner}`);
+  const twoOwners = await mem(U1, U2.id, { role: "owner" });
+  const selfDemote = await mem(U2, U2.id, { role: "member" });
+  check("last owner: with a second owner, an owner may demote themselves", twoOwners.json?.role === "owner" && selfDemote.status === 200 && selfDemote.json.role === "member", `${twoOwners.text} ${selfDemote.text}`);
+  const memberRemoves = await mem(U3, U5.id);
+  check("members: a member removing someone else -> 403 owner_only", memberRemoves.status === 403 && memberRemoves.json?.error === "owner_only", memberRemoves.text);
+  const d5Before = await call("U5", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D5.access });
+  const removed = await mem(U1, U5.id);
+  const d5After = await call("U5", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D5.access });
+  const d5Me = await call("U5", "GET", "/api/v2/me", { bearer: D5.access });
+  const afterRemoval = withDb((d) => ({
+    grants: d.prepare("SELECT COUNT(*) AS n FROM v2_device_grants WHERE device_id = ?").get(D5.id).n,
+    teams: d.prepare("SELECT COUNT(*) AS n FROM v2_pod_members WHERE user_id = ? AND ws_id = ?").get(U5.id, A).n,
+    session: d.prepare("SELECT user_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(A, S5)?.user_id,
+    revoked: d.prepare("SELECT revoked_at FROM v2_devices WHERE id = ?").get(D5.id).revoked_at,
+  }));
+  const g5Seen = (await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${G5.id}`, { cookie: U1.cookie })).json?.goal;
+  const u5Gone = await call("U5", "GET", `/api/v2/workspaces/${A}`, { cookie: U5.cookie });
+  check(
+    "members: removal -> 204; their team places and device grants for the workspace end (the device stays paired); goals and sessions stay under their name",
+    d5Before.status === 200 && removed.status === 204 && d5After.status === 404 && d5Me.status === 200 && d5Me.json.workspaces.length === 0 && afterRemoval.grants === 0 && afterRemoval.teams === 0 && afterRemoval.session === U5.id && !afterRemoval.revoked && g5Seen?.owner?.name === "Ugo Five" && u5Gone.status === 404,
+    `${d5Before.status} ${removed.status} ${d5After.status} ${JSON.stringify(afterRemoval)} ${JSON.stringify(g5Seen?.owner)} ${u5Gone.status}`,
+  );
+  const setAfter = await al(U3, { target_goal_id: G5.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
+  const fallback = await al(U2, { target_goal_id: G5.id, source_goal_id: G2.id, choice: "contribution", session_keys: [] });
+  check(
+    "approval: a former owner is never in a set (the lead remains); when the requester is the only one left, the workspace owners decide",
+    reqOf(setAfter.json, G5.id)?.approvers.map((a) => a.id).join() === U2.id && reqOf(fallback.json, G5.id)?.approvers.map((a) => a.id).join() === U1.id && fallback.json.state === "pending",
+    `${JSON.stringify(setAfter.json?.requirements)} ${JSON.stringify(fallback.json?.requirements)}`,
+  );
+  await act(U3, setAfter.json.id, "withdraw");
+  await act(U2, fallback.json.id, "withdraw");
+  const leave6 = await mem(U6, U6.id);
+  const u6Gone = await call("U6", "GET", `/api/v2/workspaces/${A}`, { cookie: U6.cookie });
+  check("members: a viewer leaves (DELETE their own id) -> 204, then the workspace is 404 for them", leave6.status === 204 && u6Gone.status === 404, `${leave6.status} ${leave6.text} ${u6Gone.status}`);
+  const inv5b = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: U5.email, role: "member" } });
+  const rejoin = await call("U5", "POST", `/api/v2/invites/${inv5b.json?.token}/accept`, { cookie: U5.cookie, body: {} });
+  check("members: a removed person can be invited back", inv5b.status === 201 && rejoin.status === 200, `${inv5b.status} ${rejoin.text}`);
+  const invW = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "withdrawn@example.test", role: "member" } });
+  await call("U1", "DELETE", `/api/v2/workspaces/${A}/invites/${invW.json.id}`, { cookie: U1.cookie });
+
+  // -- workspace rename --
+  const renByMember = await call("U3", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U3.cookie, body: { name: "Hijacked" } });
+  const renByViewer = await call("U4", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U4.cookie, body: { name: "Hijacked" } });
+  const ren = await call("U1", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U1.cookie, body: { name: "Workspace A renamed" } });
+  check("workspaces: an owner renames (PATCH -> {id, name}); a member -> 403 owner_only, a viewer -> 403 read_only", ren.status === 200 && ren.json.id === A && ren.json.name === "Workspace A renamed" && renByMember.json?.error === "owner_only" && renByViewer.json?.error === "read_only", `${ren.text} ${renByMember.text} ${renByViewer.text}`);
+
+  // -- audit trail --
+  withDb((d) => d.prepare("INSERT INTO v2_audit (ws_id, actor_id, action, object_id, at) VALUES (?, ?, 'pod.created', 'pod_legacyrowxxxxxxxxxxxxxx', ?)").run(A, U1.id, new Date().toISOString()));
+  const aud = await call("U1", "GET", `/api/v2/workspaces/${A}/audit`, { cookie: U1.cookie });
+  const audMember = await call("U3", "GET", `/api/v2/workspaces/${A}/audit`, { cookie: U3.cookie });
+  const audViewer = await call("U4", "GET", `/api/v2/workspaces/${A}/audit`, { cookie: U4.cookie });
+  const audRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ?").get(A).n);
+  const rows = aud.json?.audit ?? [];
+  const has = (action, actor) => rows.some((r) => r.action === action && r.actor?.id === actor);
+  check(
+    "audit: owners only (member 403 owner_only, viewer 403 read_only); newest first, at most 200 rows, each {at, actor:{id,name}, action, object_id}",
+    aud.status === 200 && audMember.json?.error === "owner_only" && audViewer.json?.error === "read_only" && rows.length === Math.min(200, audRows) && audRows > 0 && rows.every((r, i) => i === 0 || r.at <= rows[i - 1].at) && rows.every((r) => "object_id" in r && (r.actor === null || r.actor.name)),
+    `${aud.status} ${audMember.status} ${audViewer.status} ${rows.length}/${audRows}`,
+  );
+  check(
+    "audit: changes name their actor (renamed, member removed, member left, invite withdrawn, role changed); old pod.* rows show as team.*",
+    has("workspace.renamed", U1.id) && has("member.removed", U1.id) && has("member.left", U6.id) && has("invite.withdrawn", U1.id) && has("member.role_changed", U2.id) && rows.some((r) => r.action === "team.created" && r.object_id === "pod_legacyrowxxxxxxxxxxxxxx") && !rows.some((r) => r.action.startsWith("pod.")) && rows.every((r) => r.actor !== null),
+    JSON.stringify(rows.slice(0, 8).map((r) => [r.action, r.actor?.name])),
+  );
+  const allAudit = withDb((d) => d.prepare("SELECT ws_id, actor_id, action FROM v2_audit WHERE ws_id = ? OR action LIKE 'device.%' OR action LIKE 'team.%'").all(A));
+  check(
+    "audit: team actions are written as team.*; a person revoking a device is its actor; only refresh-token reuse has no actor",
+    allAudit.some((r) => r.action === "team.member_set" && r.actor_id === U2.id) && allAudit.some((r) => r.action === "team.member_removed") && allAudit.some((r) => r.action === "device.revoked" && r.actor_id === U3.id) && allAudit.filter((r) => r.actor_id === null).length >= 1 && allAudit.filter((r) => r.actor_id === null).every((r) => r.action === "device.revoked"),
+    JSON.stringify(allAudit.filter((r) => r.actor_id === null)),
+  );
+
+  // -- deleting a workspace: B (owned by U4) with a team, invite, goals, an alignment, a shared session with usage and activity --
+  const tB = await call("U4", "POST", `/api/v2/workspaces/${B}/teams`, { cookie: U4.cookie, body: { name: "B team" } });
+  await call("U4", "POST", `/api/v2/workspaces/${B}/invites`, { cookie: U4.cookie, body: { email: "bq@example.test", role: "member", team_id: tB.json.id } });
+  const GB2 = (await call("U4", "POST", `/api/v2/workspaces/${B}/goals`, { cookie: U4.cookie, body: { title: "B company", level: "company" } })).json;
+  const alB = await call("U4", "POST", `/api/v2/workspaces/${B}/alignments`, { cookie: U4.cookie, body: { target_goal_id: GB2.id, source_goal_id: GB.id, choice: "contribution", session_keys: [] } });
+  const SB = sessionKey(D4, B, "claude-code", "native-b");
+  await call("U4", "PUT", `/api/v2/workspaces/${B}/sessions/${SB}`, { bearer: D4.access, body: { harness: "claude-code", repo_key: repoKey(D4, B, "/src/b"), started_at: T0, title: null } });
+  const EB = epochId();
+  await call("U4", "POST", `/api/v2/workspaces/${B}/sessions/${SB}/epochs`, { bearer: D4.access, body: { epoch_id: EB, goal_id: GB.id, starts_at: T0, root_turn: null, cause: "manual" } });
+  const upB = await call("U4", "POST", `/api/v2/workspaces/${B}/sessions/${SB}/usage`, { bearer: D4.access, body: { rows: [usageRow(D4, "b-1", EB)] } });
+  await call("U4", "POST", `/api/v2/workspaces/${B}/activity`, { bearer: D4.access, body: { items: [{ session_key: SB, kind: "edit", at: new Date().toISOString(), repo_id: "f".repeat(32), path_hash: "e".repeat(32) }] } });
+  await call("U4", "POST", `/api/v2/workspaces/${B}/sessions/${SB}/stop`, { cookie: U4.cookie, body: {} });
+  const delByOther = await call("U1", "DELETE", `/api/v2/workspaces/${B}`, { cookie: U1.cookie });
+  const delA = await call("U3", "DELETE", `/api/v2/workspaces/${A}`, { cookie: U3.cookie });
+  const delB = await call("U4", "DELETE", `/api/v2/workspaces/${B}`, { cookie: U4.cookie });
+  const bGone = await call("U4", "GET", `/api/v2/workspaces/${B}`, { cookie: U4.cookie });
+  const d4OnAStill = await call("U4", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D4.access });
+  const bLeft = withDb((d) => {
+    const out = {};
+    for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'v2_%'").all()) {
+      const cols = d.prepare(`PRAGMA table_info(${name})`).all().map((c) => c.name);
+      let n = 0;
+      for (const row of d.prepare(`SELECT * FROM ${name}`).all()) if (cols.some((c) => typeof row[c] === "string" && row[c].includes(B))) n++;
+      if (n) out[name] = n;
+    }
+    return out;
+  });
+  check(
+    "workspaces: only an owner deletes (a non-member -> 404, a member -> 403 owner_only); delete -> 204, then 404, and no v2 row anywhere mentions it; the device keeps its other workspace",
+    alB.json?.state === "approved" && upB.json?.accepted === 1 && delByOther.status === 404 && delA.status === 403 && delA.json?.error === "owner_only" && delB.status === 204 && bGone.status === 404 && d4OnAStill.status === 200 && Object.keys(bLeft).length === 0,
+    `${alB.status} ${upB.text} ${delByOther.status} ${delA.status} ${delB.status} ${bGone.status} ${d4OnAStill.status} ${JSON.stringify(bLeft)}`,
+  );
 
   // -- stop sharing, then delete --
   const stopShare = await call("U3", "POST", `/api/v2/workspaces/${A}/sessions/${S3b}/stop-sharing`, { cookie: U3.cookie, body: {} });
@@ -847,7 +1108,7 @@ try {
       await page.waitForFunction(() => document.body.innerText.includes("Your workspaces"), { timeout: 15000 });
       await page.type("main form input", "UI workspace");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create")?.click())]);
-      await page.waitForFunction(() => document.body.innerText.includes("New goal"), { timeout: 15000 });
+      await page.waitForFunction(() => document.body.innerText.includes("New goal") && document.body.innerText.includes("Level"), { timeout: 15000 });
       await page.type('main form input:not([aria-label])', "Browser goal");
       await page.type('input[aria-label="Measure 1"]', "Browser measure");
       await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create goal")?.click());
@@ -857,15 +1118,17 @@ try {
       await page.waitForFunction(() => document.body.innerText.includes("Estimated list cost") && document.body.innerText.includes("Total"), { timeout: 15000 });
       const spendText = await page.evaluate(() => document.body.innerText);
       await page.goto(`${wsUrl}/people`, { waitUntil: "networkidle0" });
-      await page.waitForFunction(() => document.body.innerText.includes("Invite someone"), { timeout: 15000 });
+      await page.waitForFunction(() => ["Invite someone", "Teams", "No teams yet.", "Leave workspace", "Create team"].every((x) => document.body.innerText.includes(x)), { timeout: 15000 });
+      const peopleText = await page.evaluate(() => document.body.innerText);
       for (const t of ["sessions", "alignments"]) {
         await page.goto(`${wsUrl}/${t}`, { waitUntil: "networkidle0" });
         await page.waitForFunction((x) => document.body.innerText.includes(x), { timeout: 15000 }, t === "sessions" ? "Shared sessions" : "Waiting on you");
       }
       await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Your devices"), { timeout: 15000 });
-      const allText = spendText + (await page.evaluate(() => document.body.innerText));
-      check("ui (Chrome): test sign-up, create a workspace and a goal, then spend, people, sessions, alignments and devices render without page errors", errors.length === 0 && /estimate/i.test(spendText), errors.join(" | "));
+      const allText = spendText + peopleText + (await page.evaluate(() => document.body.innerText));
+      check("ui (Chrome): test sign-up, create a workspace and a goal (an owner is offered the Level choice), then spend, people (teams, leave), sessions, alignments and devices render without page errors", errors.length === 0 && /estimate/i.test(spendText), errors.join(" | "));
+      check("ui (Chrome): the People and Spend tabs say team, never pod", !/\bpods?\b/i.test(peopleText + spendText), "pod found");
       check("ui (Chrome): no em dashes in rendered copy", !allText.includes("\u2014"), "em dash found");
     } catch (e) {
       check("ui (Chrome) run", false, e?.stack ?? e);

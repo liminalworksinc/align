@@ -5,7 +5,7 @@ Everything here is behind `ALIGN_GOAL_SESSIONS=1`; with it unset every `/app*` a
 
 ## Conventions
 - JSON only (`content-type: application/json`), UTF-8. Errors: `{ "error": "<code>", "message": "<human text>" }`.
-- Ids: `u_` user, `ws_` workspace, `pod_`, `g_` goal, `al_` alignment, `dv_` device, `dir_` directive, `ep_` epoch
+- Ids: `u_` user, `ws_` workspace, `pod_` team (teams were called pods; ids and storage keep the name), `g_` goal, `al_` alignment, `dv_` device, `dir_` directive, `ep_` epoch
   (client-generated, 22+ url-safe chars). Random parts are base32/base64url, never sequential.
 - Times: ISO 8601 UTC strings. Money: integer micro-USD (`*_usd_micros`). Tokens: non-negative integers.
 - Device API auth: `Authorization: Bearer alnd_<opaque>` (access token, 1 h). Device routes reject cookies and any
@@ -35,15 +35,15 @@ The user signs in at `/app/device`, types the code, sees device name + request a
 
 ## Identity and workspaces (device view)
 `GET /api/v2/me` (Bearer or cookie)
-→ `{ "user": { "id", "name", "email" }, "device": { "id", "name" } | null, "workspaces": [ { "id", "name", "role": "owner"|"member"|"viewer", "pods": [ { "id", "name", "role": "lead"|"member" } ] } ] }`
+→ `{ "user": { "id", "name", "email" }, "device": { "id", "name" } | null, "workspaces": [ { "id", "name", "role": "owner"|"member"|"viewer", "teams": [ { "id", "name", "role": "lead"|"member" } ] } ] }`
 Only workspaces the device was granted (device) or the user belongs to (cookie).
 
 ## Goals feed
 `GET /api/v2/workspaces/:ws/goals` (Bearer; `If-None-Match` supported → 304)
 → `{ "version": "<short hash>", "goals": [ Goal ] }` with header `ETag: "<version>"`.
-`Goal = { "id", "version": <int>, "title", "measures": [ { "id", "text", "target": string|null } ], "status": "active"|"achieved"|"dropped", "visibility": "private"|"pod"|"workspace", "owner": { "id", "name" }, "pod": { "id", "name" } | null, "anchors": { "repos": [string], "branch_patterns": [string], "issues": [string] }, "bindable": boolean }`
-The full set the caller may see (own private + pod + workspace). `bindable` = the caller may bind a session to it now
-(own goal, a goal of a pod they belong to, or a goal they hold an approved allocation transfer to). Anchors are
+`Goal = { "id", "version": <int>, "title", "measures": [ { "id", "text", "target": string|null } ], "status": "active"|"achieved"|"dropped", "level": "company"|"team", "visibility": "private"|"team"|"workspace", "owner": { "id", "name" }, "team": { "id", "name" } | null, "anchors": { "repos": [string], "branch_patterns": [string], "issues": [string] }, "bindable": boolean }`
+The full set the caller may see (own private + team + workspace). `bindable` = the caller may bind a session to it now
+(own goal, a goal of a team they belong to, or a goal they hold an approved allocation transfer to). Anchors are
 matched locally by the agent only.
 
 Goal tree (v2.2, additive): `Goal` also carries `"depends_on": [goal id]` (goals whose output it consumes, filtered to
@@ -108,14 +108,14 @@ oldest first, at most 500, only items on goals the caller can read (an unbound s
 The agent uploads and fetches inside the normal hook-started sync pass; hooks read the cached copy.
 
 ## Spend
-`GET /api/v2/workspaces/:ws/spend?by=goal|pod|session&from&to` (cookie) → rows with token sums by basis and
+`GET /api/v2/workspaces/:ws/spend?by=goal|team|session&from&to` (`by=pod` is accepted as `by=team`) (cookie) → rows with token sums by basis and
 `est_list_usd_micros` sums (labelled estimates), plus `unallocated` and `unpriced_requests`. Invariant: total =
 Σ goals + unallocated. Private-goal spend visible to its owner only; others see it inside an unnamed "private" bucket.
 
 ## Alignment (web, cookie)
 `POST /api/v2/workspaces/:ws/alignments` → req `{ "target_goal_id", "source_goal_id": string|null, "choice": "contribution"|"work_toward", "session_keys": [string], "note": string|null }`
 Effects: `contribution` → `contributes_to` only. `work_toward` → `contributes_to` + `governing_goal` + `allocation_transfer` for the listed sessions.
-Required approvers computed from effects and snapshotted on the revision. States: `pending` → `approved` | `rejected` |
+Approval requirements computed from effects and snapshotted on the revision (see "Alignment (web)" below). States: `pending` → `approved` | `rejected` |
 `withdrawn`; `countered` (new revision by an approver, e.g. fewer sessions) → requester `accept_counter` → `pending`.
 Actions: `POST .../alignments/:id/{approve|counter|accept_counter|reject|withdraw|revoke}` (approve carries `revision`).
 On approval with `allocation_transfer`: a `binding_changed` directive per session. Revoke is prospective; sessions whose
@@ -163,30 +163,46 @@ Alignment (web)
   Wrong state is `409 wrong_state`; wrong person `403`. Viewers can't act.
 - `counter` body: `{ revision?, choice?, keep?: [ref], session_keys?: [string], note? }`. A counter can only keep or
   remove sessions; `ref` is `sessions[].ref` from the alignment view (approvers don't see other people's keys).
-- The author of a revision is counted as approving it when they are a required approver (the requester on revision 1,
-  the counterer on later ones); `accept_counter` records the requester's approval. A request whose approvers are all
-  satisfied at once (for example your own goal) is approved immediately.
+- Requirements: each revision stores `approvers_json` as `[ { "for": <goal id>|"sessions:<user id>", "set": [user id],
+  "approved_by": user id|null } ]`: the target goal's approval set, the source goal's (if any), and for `work_toward`
+  each session owner (singleton) and each session's currently bound goal's set. A goal's approval set
+  (`lib/v2/approval.ts`) is its owner, its team's leads and, for a company goal, every workspace owner, current owners
+  and members only; the requester counts only if they own the goal, and if nobody else is left the workspace owners
+  (other than the requester) are the set. Older rows hold a plain user-id array: each id is a singleton requirement
+  with `for: null`. One approval satisfies every requirement whose set holds the approver; the request is approved
+  when every requirement is satisfied. The view adds `requirements: [ { for, approvers: [{id, name}], approved_by:
+  {id, name}|null } ]` (`for` null for a goal the caller can't read) and keeps `approvers` (everyone in any set).
+- The author of a revision is counted as approving it for every requirement whose set holds them (the requester on
+  revision 1, the counterer on later ones); `accept_counter` records the requester's approval. A request the requester
+  alone satisfies (they own every goal involved) is approved immediately; never otherwise.
+- `409 cycle`: an alignment whose approval would make the contribution tree loop (the source is already reachable from
+  the target through approved parents), at creation and at the approval that would complete it; a goal version whose
+  `depends_on` would make a dependency loop.
 - One governing goal per session: requesting or approving `work_toward` for a session already governed by another
   approved alignment is `409 already_governed` (revoke that one first).
-- `source_goal_id` must be a goal the requester may bind (own or pod), `403 source_not_yours` otherwise.
+- `source_goal_id` must be a goal the requester may bind (own or team), `403 source_not_yours` otherwise.
 - A goal the viewer can't see is shown as `{ id: null, title: null, visible: false }` and named "a goal you can't see".
 
 Spend
 - Response: `{ by, from, to, note, total: Sums, unallocated: Sums, unpriced_requests, rows: [ { key, kind, label,
-  goal?, pod?, session_key?, ...Sums } ] }` with `Sums = { requests, input, output, cache_read, cache_write_5m,
+  goal?, team?, session_key?, ...Sums } ] }` with `Sums = { requests, input, output, cache_read, cache_write_5m,
   cache_write_1h, cache_write_unsplit, est_list_usd_micros, unpriced_requests, by_basis: { <basis>: same numbers } }`.
-- `kind`: `goal` | `pod` | `no_pod` | `session` | `others` | `private`. Every goal the caller can't see (others'
-  private goals, pod goals of pods they're not in) is in the one unnamed `private` row, in `by=goal` and `by=pod`.
+- `kind`: `goal` | `team` | `no_team` | `session` | `others` | `private`. Every goal the caller can't see (others'
+  private goals, team goals of teams they're not in) is in the one unnamed `private` row, in `by=goal` and `by=team`.
   `by=session` names only the caller's own sessions; everyone else's are one `others` row. `total = Σ rows +
   unallocated` holds for every number in all three groupings. `from` inclusive, `to` exclusive, on request `ts`.
 
 Visibility
-- `pod` goals: the pod's members and workspace owners. `private`: the owner only (workspace owners included in "not").
+- `team` goals (stored as `pod`): the team's members and workspace owners. Company goals: everyone (always `workspace`). `private`: the owner only (workspace owners included in "not").
 - Invite acceptance needs the signed-in email to equal the invited one; when hosted, the provider must have verified it.
 
 Web-only routes (cookie) added for the app: `GET/POST /api/v2/workspaces`, `GET /api/v2/workspaces/:ws`,
-`GET/POST .../invites`, `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST .../accept`, `POST .../pods`,
-`POST .../pods/:pod/members`, `DELETE .../pods/:pod/members/:user`, `POST .../goals`, `GET .../goals/:goal`,
+`PATCH`/`DELETE /api/v2/workspaces/:ws` (owners: rename, delete), `POST .../members/:user { role }` (owners),
+`DELETE .../members/:user` (owners remove; anyone leaves with their own id; `409 last_owner`), `GET .../audit` (owners,
+newest 200 `{ at, actor: {id, name}|null, action, object_id }`), `GET/POST .../invites` (`{ email, role, team_id?,
+team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST .../accept`, `POST .../teams`,
+`POST .../teams/:team/members`, `DELETE .../teams/:team/members/:user` (the `/pods` paths are aliases), `POST .../goals`
+(`{ title, level?, visibility?, team_id?, measures?, anchors?, depends_on? }`), `GET .../goals/:goal`,
 `POST .../goals/:goal/versions` (`{ version, title?, measures?, anchors?, status? }`, `409 stale_version` /
 `no_change`), `GET .../sessions`, `GET .../alignments`, `GET .../alignments/:id`, `GET /api/v2/device/requests/:code`,
 `POST /api/v2/device/approve` (`{ user_code, workspace_ids }`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,

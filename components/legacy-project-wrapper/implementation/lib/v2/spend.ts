@@ -4,10 +4,10 @@ import { goalObj, type GoalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { need } from "./workspaces";
 
-// Spend: token sums by basis and estimated list cost, per goal, pod or session. Each request counts under the
+// Spend: token sums by basis and estimated list cost, per goal, team or session. Each request counts under the
 // goal of the epoch it was uploaded with (history never moves); requests in epochs with no goal are unallocated.
 // Invariant: total = sum of rows + unallocated, for every number.
-// Privacy: a goal the caller can't see (another person's private goal, another pod's goal) is never named; its
+// Privacy: a goal the caller can't see (another person's private goal, another team's goal) is never named; its
 // usage sits in one unnamed "private" row. by=session names only the caller's own sessions; everyone else's are one
 // "other people's sessions" row. No per-person view exists.
 
@@ -35,7 +35,7 @@ function add(s: Sums, a: Agg) {
   }
 }
 
-export type SpendBy = "goal" | "pod" | "session";
+export type SpendBy = "goal" | "team" | "session";
 
 export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to: string | null) {
   need(pp, "spend.read");
@@ -65,7 +65,7 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
 
   const total = emptySums();
   const unallocated = emptySums();
-  const buckets = new Map<string, { key: string; kind: string; label: string; goal?: { id: string; title: string }; pod?: { id: string; name: string } } & { sums: Sums }>();
+  const buckets = new Map<string, { key: string; kind: string; label: string; goal?: { id: string; title: string }; team?: { id: string; name: string } } & { sums: Sums }>();
   const bucket = (key: string, kind: string, label: string, extra: Record<string, unknown> = {}) => {
     let b = buckets.get(key);
     if (!b) buckets.set(key, (b = { key, kind, label, ...extra, sums: emptySums() }));
@@ -91,8 +91,8 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
       continue;
     }
     if (by === "goal") add(bucket(`goal:${g.id}`, "goal", g.title, { goal: { id: g.id, title: g.title } }), r);
-    else if (g.pod_id) add(bucket(`pod:${g.pod_id}`, "pod", pods.get(g.pod_id) ?? "Pod", { pod: { id: g.pod_id, name: pods.get(g.pod_id) ?? "" } }), r);
-    else add(bucket("no_pod", "no_pod", "Goals without a pod"), r);
+    else if (g.pod_id) add(bucket(`team:${g.pod_id}`, "team", pods.get(g.pod_id) ?? "Team", { team: { id: g.pod_id, name: pods.get(g.pod_id) ?? "" } }), r);
+    else add(bucket("no_team", "no_team", "Goals without a team"), r);
   }
 
   const out = [...buckets.values()]

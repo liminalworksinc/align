@@ -1,18 +1,28 @@
 import { all, audit, get, run, tx } from "./db";
-import { badRequest, conflict, notFound } from "./errors";
+import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { newId, nowIso, sha256hex } from "./ids";
-import { canBind, canReadGoal, VISIBILITIES, type GoalObject, type PolicyPrincipal, type Visibility } from "./policy";
+import { canBind, canReadGoal, type GoalObject, type PolicyPrincipal, type Visibility } from "./policy";
 import { goalVersionDirective } from "./directives";
 import { need } from "./workspaces";
 import { optStr, str, type Body } from "./validate";
 
 // Goals and their immutable versions. A goal's current fields live on v2_goals; every version (including the
-// first) is also kept in v2_goal_versions with a content hash. Visibility and pod are fixed at creation.
+// first) is also kept in v2_goal_versions with a content hash. Level, team and visibility are fixed at creation.
+// A goal's level is company or team (default team): only workspace owners create company goals, which have no team
+// and are visible to the whole workspace. Teams are stored as pods: pod_id on the row, visibility "pod" in storage;
+// the wire says team, team_id and visibility "team" (no pod aliases on input).
 // The goal tree: a goal contributes to the targets of its approved alignments (its parents) and may depend on other
 // goals whose output it consumes. A child records which version of each parent its owner last reviewed it against;
 // a newer parent version marks the child stale until its owner confirms it or saves a new version.
 
 export type GoalStatus = "active" | "achieved" | "dropped";
+export type GoalLevel = "company" | "team";
+export const GOAL_LEVELS: readonly GoalLevel[] = ["company", "team"];
+/** Visibility as people and agents see it ("team" is stored as "pod"). */
+export type WireVisibility = "private" | "team" | "workspace";
+export const WIRE_VISIBILITIES: readonly WireVisibility[] = ["private", "team", "workspace"];
+export const toWireVisibility = (v: Visibility): WireVisibility => (v === "pod" ? "team" : v);
+const fromWireVisibility = (v: WireVisibility): Visibility => (v === "team" ? "pod" : v);
 export const GOAL_STATUSES: readonly GoalStatus[] = ["active", "achieved", "dropped"];
 
 export interface Measure {
@@ -38,6 +48,7 @@ export interface GoalRow {
   anchors_json: string;
   depends_on_json: string;
   status: GoalStatus;
+  level: GoalLevel;
   created_at: string;
   updated_at: string;
 }
@@ -49,9 +60,10 @@ export interface GoalCore {
   title: string;
   measures: Measure[];
   status: GoalStatus;
-  visibility: Visibility;
+  level: GoalLevel;
+  visibility: WireVisibility;
   owner: { id: string; name: string };
-  pod: { id: string; name: string } | null;
+  team: { id: string; name: string } | null;
   anchors: Anchors;
   /** Goals whose output this goal consumes. */
   depends_on: string[];
@@ -89,9 +101,10 @@ export function goalCore(g: GoalRow): GoalCore {
     title: g.title,
     measures: JSON.parse(g.measures_json),
     status: g.status,
-    visibility: g.visibility,
+    level: g.level ?? "team",
+    visibility: toWireVisibility(g.visibility),
     owner: { id: g.owner_id, name: owner?.name ?? "" },
-    pod: pod ? { id: pod.id, name: pod.name } : null,
+    team: pod ? { id: pod.id, name: pod.name } : null,
     anchors: JSON.parse(g.anchors_json),
     depends_on: JSON.parse(g.depends_on_json || "[]"),
   };
@@ -260,18 +273,49 @@ function dependsIn(pp: PolicyPrincipal, v: unknown, self: string | null, prev: s
   return out;
 }
 
+/** Would `goalId` depending on `deps` close a loop? Follows every goal's depends_on in the workspace, readable or not. */
+function dependencyCycle(wsId: string, goalId: string, deps: string[]): boolean {
+  const edges = new Map(all<{ id: string; depends_on_json: string }>("SELECT id, depends_on_json FROM v2_goals WHERE ws_id = ?", wsId).map((r) => [r.id, JSON.parse(r.depends_on_json || "[]") as string[]]));
+  edges.set(goalId, deps);
+  const seen = new Set<string>();
+  const stack = [...deps];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (id === goalId) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    stack.push(...(edges.get(id) ?? []));
+  }
+  return false;
+}
+
+export const DEPENDENCY_CYCLE = "That would make these goals depend on each other in a loop.";
+
+/** 409 cycle when these dependencies would make the goal depend on itself. Exported for change requests. */
+export function assertNoDependencyCycle(wsId: string, goalId: string, deps: string[]) {
+  if (dependencyCycle(wsId, goalId, deps)) throw conflict("cycle", DEPENDENCY_CYCLE);
+}
+
 const contentHash = (c: { title: string; measures: Measure[]; anchors: Anchors; status: GoalStatus; depends_on?: string[] }) =>
   sha256hex(
     JSON.stringify({ title: c.title, measures: c.measures, anchors: c.anchors, status: c.status, ...(c.depends_on?.length ? { depends_on: [...c.depends_on].sort() } : {}) }),
   );
 
 export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
-  const visibility = (b.visibility ?? "workspace") as Visibility;
-  if (!VISIBILITIES.includes(visibility)) throw badRequest("visibility must be private, pod or workspace");
-  const podId = optStr(b, "pod_id", 64);
+  const level = (b.level ?? "team") as GoalLevel;
+  if (!GOAL_LEVELS.includes(level)) throw badRequest("level must be company or team");
+  const wire = (b.visibility ?? "workspace") as WireVisibility;
+  if (!WIRE_VISIBILITIES.includes(wire)) throw badRequest("visibility must be private, team or workspace");
+  const visibility = fromWireVisibility(wire);
+  const podId = optStr(b, "team_id", 64);
+  if (level === "company") {
+    if (podId) throw badRequest("A company goal has no team");
+    if (visibility !== "workspace") throw badRequest("A company goal is visible to the whole workspace");
+  }
   if (podId && !get("SELECT 1 AS x FROM v2_pods WHERE ws_id = ? AND id = ?", pp.wsId, podId)) throw notFound();
-  if (visibility === "pod" && !podId) throw badRequest("A pod goal needs a pod");
+  if (visibility === "pod" && !podId) throw badRequest("A team goal needs a team");
   need(pp, "goal.create", { kind: "goal_draft", podId });
+  if (level === "company" && pp.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can create a company goal");
   const title = str(b, "title", 300);
   const measures = measuresIn(b.measures ?? []);
   const anchors = anchorsIn(b.anchors ?? {});
@@ -282,13 +326,14 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   if (count >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals");
   await tx(() => {
     run(
-      `INSERT INTO v2_goals (id, ws_id, owner_id, pod_id, visibility, version, title, measures_json, anchors_json, depends_on_json, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'active', ?, ?)`,
+      `INSERT INTO v2_goals (id, ws_id, owner_id, pod_id, visibility, level, version, title, measures_json, anchors_json, depends_on_json, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'active', ?, ?)`,
       id,
       pp.wsId,
       pp.userId,
       podId,
       visibility,
+      level,
       title,
       JSON.stringify(measures),
       JSON.stringify(anchors),
@@ -327,6 +372,7 @@ export async function newGoalVersion(pp: PolicyPrincipal, goalId: string, b: Bod
   if (!GOAL_STATUSES.includes(status)) throw badRequest("status must be active, achieved or dropped");
   const prevDeps: string[] = JSON.parse(g.depends_on_json || "[]");
   const dependsOn = dependsIn(pp, b.depends_on, g.id, prevDeps);
+  assertNoDependencyCycle(pp.wsId, g.id, dependsOn);
   const hash = contentHash({ title, measures, anchors, status, depends_on: dependsOn });
   if (hash === contentHash({ title: g.title, measures: JSON.parse(g.measures_json), anchors: JSON.parse(g.anchors_json), status: g.status, depends_on: prevDeps })) {
     throw conflict("no_change", "Nothing changed");
@@ -334,6 +380,7 @@ export async function newGoalVersion(pp: PolicyPrincipal, goalId: string, b: Bod
   const at = nowIso();
   const v = g.version + 1;
   await tx(() => {
+    if (dependsOn.length) assertNoDependencyCycle(pp.wsId, goalId, dependsOn); // again, inside the transaction
     const n = run(
       "UPDATE v2_goals SET version = ?, title = ?, measures_json = ?, anchors_json = ?, depends_on_json = ?, status = ?, updated_at = ? WHERE ws_id = ? AND id = ? AND version = ?",
       v,

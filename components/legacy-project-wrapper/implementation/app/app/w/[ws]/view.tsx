@@ -12,13 +12,16 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
   const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const [title, setTitle] = useState("");
+  const [level, setLevel] = useState<Goal["level"]>("team");
   const [visibility, setVisibility] = useState<Goal["visibility"]>("workspace");
-  const [pod, setPod] = useState("");
+  const [team, setTeam] = useState("");
   const [measures, setMeasures] = useState(measuresDraft());
   const [anchors, setAnchors] = useState(anchorsDraft());
   const act = useAction();
-  const myPods = detail.data?.pods.filter((p) => p.my_role) ?? [];
+  const myTeams = detail.data?.teams.filter((p) => p.my_role) ?? [];
   const canCreate = detail.data && detail.data.role !== "viewer";
+  const owner = detail.data?.role === "owner";
+  const company = owner && level === "company";
 
   return (
     <Shell me={me} ws={ws} tab="Goals">
@@ -35,8 +38,9 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
                   {g.title}
                 </Link>
                 <Pill tone={STATUS_TONE[g.status]}>{g.status}</Pill>
+                {g.level === "company" && <Pill tone="violet">company</Pill>}
                 <Pill>{VISIBILITY_LABEL[g.visibility]}</Pill>
-                {g.pod && <Pill tone="violet">{g.pod.name}</Pill>}
+                {g.team && <Pill tone="violet">{g.team.name}</Pill>}
                 {g.bindable ? <Pill tone="green">you can bind sessions</Pill> : <Pill tone="amber">needs alignment to bind</Pill>}
               </div>
               <p className="text-[14px] text-zinc-500">
@@ -55,7 +59,9 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
               void act.run(
                 () =>
                   api(`/api/v2/workspaces/${ws}/goals`, {
-                    body: { title, visibility, pod_id: pod || null, measures: measuresOut(measures), anchors: anchorsOut(anchors) },
+                    body: company
+                      ? { title, level: "company", visibility: "workspace", measures: measuresOut(measures), anchors: anchorsOut(anchors) }
+                      : { title, level: "team", visibility, team_id: team || null, measures: measuresOut(measures), anchors: anchorsOut(anchors) },
                   }),
                 () => {
                   setTitle("");
@@ -70,36 +76,47 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
               <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required />
             </Field>
             <MeasuresEditor value={measures} onChange={setMeasures} />
+            {owner && (
+              <Field label="Level" hint="Only workspace owners create company goals. A company goal has no team and everyone in the workspace sees it.">
+                <Select value={level} onChange={(e) => setLevel(e.target.value as Goal["level"])}>
+                  <option value="team">Team goal</option>
+                  <option value="company">Company goal</option>
+                </Select>
+              </Field>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Who can see it">
                 <Select
-                  value={visibility}
+                  value={company ? "workspace" : visibility}
+                  disabled={company}
                   onChange={(e) => {
                     const v = e.target.value as Goal["visibility"];
                     setVisibility(v);
-                    if (v === "pod" && !pod && myPods[0]) setPod(myPods[0].id);
+                    if (v === "team" && !team && myTeams[0]) setTeam(myTeams[0].id);
                   }}
                 >
                   <option value="workspace">{VISIBILITY_LABEL.workspace}</option>
-                  <option value="pod" disabled={!myPods.length}>
-                    {VISIBILITY_LABEL.pod}
+                  <option value="team" disabled={!myTeams.length}>
+                    {VISIBILITY_LABEL.team}
                   </option>
                   <option value="private">{VISIBILITY_LABEL.private}</option>
                 </Select>
               </Field>
-              <Field label="Pod" hint="Members of the pod can bind their sessions to it">
-                <Select value={pod} onChange={(e) => setPod(e.target.value)}>
-                  <option value="">No pod</option>
-                  {myPods.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+              {!company && (
+                <Field label="Team" hint="Members of the team can bind their sessions to it">
+                  <Select value={team} onChange={(e) => setTeam(e.target.value)}>
+                    <option value="">No team</option>
+                    {myTeams.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
             </div>
             <AnchorsEditor value={anchors} onChange={setAnchors} />
-            <Btn type="submit" disabled={act.busy || !title.trim() || (visibility === "pod" && !pod)}>
+            <Btn type="submit" disabled={act.busy || !title.trim() || (!company && visibility === "team" && !team)}>
               Create goal
             </Btn>
             <Err>{act.error}</Err>

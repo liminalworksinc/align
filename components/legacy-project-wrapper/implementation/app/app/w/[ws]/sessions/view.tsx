@@ -67,7 +67,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                   kind="danger"
                   disabled={act.busy}
                   onClick={() => {
-                    if (window.confirm("Delete this session's shared history? Its usage is removed from every total, so goal and pod totals will change. This can't be undone.")) {
+                    if (window.confirm("Delete this session's shared history? Its usage is removed from every total, so goal and team totals will change. This can't be undone.")) {
                       void act.run(() => api(`${base}/${s.session_key}`, { method: "DELETE" }), d.reload);
                     }
                   }}

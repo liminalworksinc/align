@@ -429,21 +429,112 @@ const MIGRATIONS: string[] = [
   CREATE INDEX v2_activity_ws ON v2_activity(ws_id, seq);
   CREATE INDEX v2_activity_expiry ON v2_activity(ws_id, expires_at);
   `,
+  // 3: company and team goals, invites that name a team, and people who leave. A goal, session or alignment keeps
+  // naming a person after they leave or are removed, so those rows no longer point at v2_members (the tables are
+  // rebuilt without that foreign key; SQLite can't drop one in place). v2_members holds current members only.
+  `
+  CREATE TABLE v2_goals_new (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    owner_id TEXT NOT NULL,
+    pod_id TEXT,
+    visibility TEXT NOT NULL CHECK (visibility IN ('private','pod','workspace')),
+    version INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    measures_json TEXT NOT NULL,
+    anchors_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active','achieved','dropped')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    depends_on_json TEXT NOT NULL DEFAULT '[]',
+    level TEXT NOT NULL DEFAULT 'team' CHECK (level IN ('company','team')),
+    UNIQUE (ws_id, id),
+    CHECK (visibility <> 'pod' OR pod_id IS NOT NULL),
+    CHECK (level <> 'company' OR (pod_id IS NULL AND visibility = 'workspace')),
+    FOREIGN KEY (ws_id, pod_id) REFERENCES v2_pods(ws_id, id)
+  );
+  INSERT INTO v2_goals_new (id, ws_id, owner_id, pod_id, visibility, version, title, measures_json, anchors_json, status, created_at, updated_at, depends_on_json, level)
+    SELECT id, ws_id, owner_id, pod_id, visibility, version, title, measures_json, anchors_json, status, created_at, updated_at, depends_on_json, 'team' FROM v2_goals;
+  DROP TABLE v2_goals;
+  ALTER TABLE v2_goals_new RENAME TO v2_goals;
+  CREATE INDEX v2_goals_ws ON v2_goals(ws_id);
+
+  CREATE TABLE v2_alignments_new (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    requester_id TEXT NOT NULL,
+    target_goal_id TEXT NOT NULL,
+    source_goal_id TEXT,
+    state TEXT NOT NULL CHECK (state IN ('pending','countered','approved','rejected','withdrawn','revoked')),
+    revision INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    decided_at TEXT,
+    revoked_at TEXT,
+    revoked_by TEXT,
+    UNIQUE (ws_id, id),
+    FOREIGN KEY (ws_id, target_goal_id) REFERENCES v2_goals(ws_id, id),
+    FOREIGN KEY (ws_id, source_goal_id) REFERENCES v2_goals(ws_id, id)
+  );
+  INSERT INTO v2_alignments_new SELECT id, ws_id, requester_id, target_goal_id, source_goal_id, state, revision, created_at, updated_at, decided_at, revoked_at, revoked_by FROM v2_alignments;
+  DROP TABLE v2_alignments;
+  ALTER TABLE v2_alignments_new RENAME TO v2_alignments;
+
+  CREATE TABLE v2_sessions_new (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    session_key TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    device_id TEXT NOT NULL REFERENCES v2_devices(id),
+    harness TEXT NOT NULL CHECK (harness IN ('claude-code','codex')),
+    repo_key TEXT NOT NULL,
+    repo_alias TEXT,
+    title TEXT,
+    started_at TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('shared','suspended','stopped')),
+    stopped_at TEXT,
+    governing_goal_id TEXT,
+    governing_alignment_id TEXT,
+    agent_stopped INTEGER NOT NULL DEFAULT 0,
+    conflicts INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, session_key),
+    FOREIGN KEY (ws_id, governing_goal_id) REFERENCES v2_goals(ws_id, id),
+    FOREIGN KEY (ws_id, governing_alignment_id) REFERENCES v2_alignments(ws_id, id)
+  );
+  INSERT INTO v2_sessions_new SELECT ws_id, session_key, user_id, device_id, harness, repo_key, repo_alias, title, started_at, state, stopped_at, governing_goal_id, governing_alignment_id, agent_stopped, conflicts, created_at, updated_at FROM v2_sessions;
+  DROP TABLE v2_sessions;
+  ALTER TABLE v2_sessions_new RENAME TO v2_sessions;
+  CREATE INDEX v2_sessions_device ON v2_sessions(device_id);
+
+  ALTER TABLE v2_invites ADD COLUMN team_id TEXT;
+  ALTER TABLE v2_invites ADD COLUMN team_role TEXT CHECK (team_role IN ('lead','member'));
+  CREATE INDEX v2_audit_ws ON v2_audit(ws_id, seq);
+  `,
 ];
 
 export function migrate() {
   const d = openDb().domain;
   const current = Number((d.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
-  for (let v = current; v < MIGRATIONS.length; v++) {
-    d.exec("BEGIN IMMEDIATE");
-    try {
-      d.exec(MIGRATIONS[v]);
-      d.exec(`PRAGMA user_version = ${v + 1}`);
-      d.exec("COMMIT");
-    } catch (e) {
-      d.exec("ROLLBACK");
-      throw e;
+  if (current >= MIGRATIONS.length) return lockDown(openDb().file);
+  // Rebuilding a table (drop, then rename the copy) needs foreign keys off; it can't change inside a transaction.
+  d.exec("PRAGMA foreign_keys = OFF");
+  try {
+    for (let v = current; v < MIGRATIONS.length; v++) {
+      d.exec("BEGIN IMMEDIATE");
+      try {
+        d.exec(MIGRATIONS[v]);
+        const broken = d.prepare("PRAGMA foreign_key_check").all();
+        if (broken.length) throw new Error(`migration ${v + 1} left ${broken.length} broken references`);
+        d.exec(`PRAGMA user_version = ${v + 1}`);
+        d.exec("COMMIT");
+      } catch (e) {
+        d.exec("ROLLBACK");
+        throw e;
+      }
     }
+  } finally {
+    d.exec("PRAGMA foreign_keys = ON");
   }
   lockDown(openDb().file);
 }

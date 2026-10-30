@@ -172,7 +172,7 @@ export async function refresh(input: { device_id: string; refresh_token: string;
     );
     if (!t) return null;
     if (t.rotated_at) {
-      revokeInTx(input.device_id, "refresh_reuse");
+      revokeInTx(input.device_id, "refresh_reuse", null);
       return null;
     }
     if (Date.parse(t.expires_at) <= nowMs) return null;
@@ -185,15 +185,17 @@ export async function refresh(input: { device_id: string; refresh_token: string;
   return out;
 }
 
-function revokeInTx(deviceId: string, reason: string) {
+/** `actor` is the person who revoked it; null for automatic revocation (refresh-token reuse). The reason stays on the
+ *  device row. */
+function revokeInTx(deviceId: string, reason: string, actor: string | null) {
   const at = nowIso();
   run("UPDATE v2_devices SET revoked_at = COALESCE(revoked_at, ?), revoked_reason = COALESCE(revoked_reason, ?) WHERE id = ?", at, reason, deviceId);
   run("DELETE FROM v2_device_tokens WHERE device_id = ?", deviceId);
-  audit(null, null, `device.revoked:${reason}`, deviceId, at);
+  audit(null, actor, "device.revoked", deviceId, at);
 }
 
-export async function revokeDevice(deviceId: string, reason: string) {
-  await tx(() => revokeInTx(deviceId, reason));
+export async function revokeDevice(deviceId: string, reason: string, actor: string) {
+  await tx(() => revokeInTx(deviceId, reason, actor));
 }
 
 /** The device behind a Bearer access token, or null (unknown, expired, revoked). */

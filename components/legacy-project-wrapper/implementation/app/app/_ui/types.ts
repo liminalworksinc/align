@@ -6,9 +6,10 @@ export interface Goal {
   title: string;
   measures: { id: string; text: string; target: string | null }[];
   status: "active" | "achieved" | "dropped";
-  visibility: "private" | "pod" | "workspace";
+  level: "company" | "team";
+  visibility: "private" | "team" | "workspace";
   owner: { id: string; name: string };
-  pod: { id: string; name: string } | null;
+  team: { id: string; name: string } | null;
   anchors: { repos: string[]; branch_patterns: string[]; issues: string[] };
   bindable: boolean;
   depends_on: string[];
@@ -20,7 +21,7 @@ export interface WsDetail {
   role: "owner" | "member" | "viewer";
   me: string;
   members: { id: string; name: string; email: string; role: "owner" | "member" | "viewer" }[];
-  pods: { id: string; name: string; my_role: "lead" | "member" | null; members: { id: string; name: string; role: "lead" | "member" }[] }[];
+  teams: { id: string; name: string; my_role: "lead" | "member" | null; members: { id: string; name: string; role: "lead" | "member" }[] }[];
 }
 
 export interface GoalLabel {
@@ -71,8 +72,9 @@ export interface Alignment {
   requester: { id: string; name: string };
   target_goal: { id: string | null; title: string | null; visible: boolean } | null;
   source_goal: { id: string | null; title: string | null; visible: boolean } | null;
-  sessions: { ref: number; session_key: string | null; owner: { id: string; name: string }; label: string; current_goal: { title: string | null; visible: boolean } | null }[];
+  sessions: { ref: number; session_key: string | null; owner: { id: string; name: string }; label: string; current_goal: { id: string | null; title: string | null; visible: boolean } | null }[];
   effects: { kind: string; text: string }[];
+  requirements: { for: string | null; approvers: { id: string; name: string }[]; approved_by: { id: string; name: string } | null }[];
   approvers: { id: string; name: string; approved: boolean }[];
   note: string | null;
   history: { revision: number; choice: string; author: { id: string; name: string }; note: string | null; created_at: string }[];
