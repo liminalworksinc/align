@@ -258,7 +258,7 @@ The server SHALL, on approval, append a copy of the target goal with `version` e
 
 ### Requirement: Approval moves dependents to the new version
 
-The server SHALL, on approval, set the dependency relation (`r-product-security`, or the custom `scenario_config.dependency_id`) to `status: "ACCEPTED"` with `target_goal` the new goal and an "Agreed" `label` and `provenance` naming the version, retarget every other relation and every work item that pointed at the old goal to the new goal, and apply scenario work-item updates (Northstar: `w-s3` gets `priority_rank: 0`, status `next up, approved in goal <version>` and a task saying beta customers' issues come first using the tested new plan, `w-p3` gets status `deferred (Product commitment)`; custom: the configured unblocked and deferred work items likewise).
+The server SHALL, on approval, set the dependency relation (`r-product-security`, or the custom `scenario_config.dependency_id`) to `status: "ACCEPTED"` with `target_goal` the new goal and an "Agreed" `label` and `provenance` naming the version, retarget every other relation and every work item that pointed at the old goal to the new goal, and apply scenario work-item updates (Northstar: `w-s3` gets `priority_rank: 0`, status `next up, approved in goal <version>` and a task saying beta customers' issues come first using the tested new plan, `w-p3` gets status `deferred (Product commitment)`). In a custom scenario the profile would update the work items named by `scenario_config.unblocks_work_item_id` and `deferred_work_item_id`, but scenario setup never writes those fields, so a custom approval changes no work item's priority or status beyond retargeting its goal.
 
 #### Scenario: Dependency becomes agreed
 
@@ -345,12 +345,17 @@ The server SHALL, in a custom scenario, report `plan: "none"` and `plan_hash: ""
 
 ### Requirement: Alike decision reference is recorded on the brief
 
-The server SHALL accept `POST /api/alike` only from a signed-in session and a same-origin request, SHALL require non-blank `decision_id`, `summary`, `recorded_at`, `retrieved_in_session`, `plan_before` and `plan_after` (HTTP 400 `Missing <field>` otherwise), and SHALL store them, trimmed and with `summary`, `plan_before` and `plan_after` cut to 600 characters, as `brief.alike_ref`, set `brief.alike_status` to `retrieved`, append audit action `alike_ref_recorded` with the decision id, and return the brief. It SHALL store only these fields, never a transcript.
+The server SHALL accept `POST /api/alike` only from a default-store (Northstar) session of any role (HTTP 401 without a session, HTTP 403 for a custom-workspace session, which never reaches the default store) and a same-origin request (HTTP 403 for a foreign `Origin`, HTTP 415 for a non-JSON body; an unparseable JSON body is treated as `{}`), SHALL write to the default store, SHALL require non-blank `decision_id`, `summary`, `recorded_at`, `retrieved_in_session`, `plan_before` and `plan_after` (HTTP 400 `Missing <field>` otherwise), and SHALL store them, trimmed and with `summary`, `plan_before` and `plan_after` cut to 600 characters, as `brief.alike_ref`, set `brief.alike_status` to `retrieved`, append audit action `alike_ref_recorded` with the decision id, and return the brief. It SHALL store only these fields, never a transcript.
 
 #### Scenario: Recording a retrieved decision
 
-- **WHEN** a signed-in user posts all six fields to `POST /api/alike` from the app's own origin
-- **THEN** the brief's `alike_status` becomes `retrieved`, `alike_ref.decision_id` equals the posted id, and a later proposal's `source_refs` include `alike:<decision_id>`
+- **WHEN** a Northstar session posts all six fields to `POST /api/alike` from the app's own origin
+- **THEN** the brief's `alike_status` becomes `retrieved`, `alike_ref.decision_id` equals the posted id, and a later Northstar proposal's `source_refs` include `alike:<decision_id>`
+
+#### Scenario: Custom workspace session cannot record a reference
+
+- **WHEN** a session signed in to a custom workspace calls `POST /api/alike`
+- **THEN** the response is HTTP 403 and the default store is unchanged
 
 #### Scenario: Missing field
 
@@ -359,7 +364,7 @@ The server SHALL accept `POST /api/alike` only from a signed-in session and a sa
 
 ### Requirement: Sparta evidence ingestion
 
-The server SHALL ingest JSON files from `sparta/walkthrough-lab/evidence/` whose basename matches `<plan_id>@<version>-(normal|interruption)-<digits>`, skipping any file whose sha256 equals an ingested run's `report_sha256`, creating one run per file (or per element of a `runs` array) with `id` `sim-<first 10 hex of file sha256>[-<index>]`, `verdict: "PASS"` only when the evidence grade passed and the exit code is 0, `plan_hash` from the agent trace's `plan_sha256` (else the plan's hash), `seed_version` and `checks_version` as 12-hex digests, and protected ticket `1` marked unchanged unless updated. In a custom scenario ingestion SHALL add nothing.
+The server SHALL ingest JSON files from `sparta/walkthrough-lab/evidence/` whose basename matches `<plan_id>@<version>-(normal|interruption)-<digits>`, skipping any file whose sha256 equals an ingested run's `report_sha256`, creating one run per file (or per element of a `runs` array) with `id` `sim-<first 10 hex of file sha256>[-<index>]`, `verdict: "PASS"` only when the evidence grade passed and the exit code is 0, `plan_hash` from the agent trace's `plan_sha256` (else the plan's hash), `seed_version` as the first 12 characters of the evidence `seedHash` and `checks_version` as the first 12 hex of the sha256 of the mission's canonicalized checks, and protected ticket `1` marked unchanged unless updated. In a custom scenario ingestion SHALL add nothing.
 
 #### Scenario: Idempotent ingestion
 
@@ -437,7 +442,7 @@ The server SHALL accept `POST /api/reset` only with body `{"confirm":"reset"}` (
 
 ### Requirement: Custom scenario setup
 
-The server SHALL accept `POST /api/scenario` only from a default-store `leadership` session (HTTP 401 without a session, HTTP 403 for other roles or a custom-workspace session), as JSON (HTTP 415) from a loopback `Host` locally (or an allowed host when hosted) with no foreign `Origin` (HTTP 403 otherwise), of at most 64 KB (HTTP 413), parse it (HTTP 400 for invalid JSON or reserved keys `__proto__`, `constructor`, `prototype`), validate it strictly (`confirm: "replace"`, company, company goal, asking and owning teams, dependency, 2 to 6 work items with 1 to 3 per team, plan text of 20 to 4000 characters) responding HTTP 400 `{ error, issues: [{ path, message }] }` on failure, and refuse with HTTP 409 while a proposal is open. On success it SHALL replace the default store with goals `g-ceo-v1`, `g-product-v1`, `g-security-v1` (all `shared`), relation `r-product-security` (`UNKNOWN`), plan `p-custom@1`, `scenario: "custom"`, keeping capture consents, consented sessions and the audit log plus a `scenario_setup` row whose target is `sha256:<input hash>`.
+The server SHALL accept `POST /api/scenario` only from a default-store `leadership` session (HTTP 401 without a session, HTTP 403 for other roles or a custom-workspace session), as JSON (HTTP 415) from a loopback `Host` with no foreign `Origin` (HTTP 403 otherwise; a hosted server never reaches this check because it honours no default-store session, so every hosted call gets HTTP 401 or 403), of at most 64 KB (HTTP 413), parse it (HTTP 400 for invalid JSON or reserved keys `__proto__`, `constructor`, `prototype`), validate it strictly (`confirm: "replace"`, company, company goal, asking and owning teams, dependency, 2 to 6 work items with 1 to 3 per team, plan text of 20 to 4000 characters) responding HTTP 400 `{ error, issues: [{ path, message }] }` on failure, and refuse with HTTP 409 while a proposal is open. On success it SHALL replace the default store with goals `g-ceo-v1`, `g-product-v1`, `g-security-v1` (all `shared`), relation `r-product-security` (`UNKNOWN`), plan `p-custom@1`, `scenario: "custom"`, keeping capture consents, consented sessions and the audit log plus a `scenario_setup` row whose target is `sha256:<input hash>`.
 
 #### Scenario: Invalid setup
 
@@ -481,7 +486,7 @@ The server SHALL compute a 16-hex plan revision from the goals (`id`, `version`,
 - Northstar's next owner-goal version is the literal `v2` (`NORTHSTAR_PROFILE.nextVersion`). A second approved proposal in the same Northstar state would again produce `v2` or `v2.N`, which could duplicate an earlier goal id (for example `g-security-v2`); there is no guard. It is unclear whether repeated approvals in Northstar are meant to be supported.
 - `POST /api/proposals` in Northstar does not require leadership's company-goal push to have happened first, yet `source_refs` always names `g-ceo-v2#KR2`, which can reference a goal that does not exist yet.
 - The server never computes conflicts or at-risk work. The only conflict record is the `depends_on` relation `r-product-security` with status `UNKNOWN`. The `conflicts_with` relation type and the `DRAFT` proposal state are declared but never produced, and conflict or "old plan" displays are computed in client components. Should any of this be a server guarantee?
-- `CounterVersion.plan_text` and `plan_hash` are declared in the type and the policy agreement reads `plan_text` from the latest counter, but no route writes either field. Custom plans have empty `params`, so any `plan_params` sent in a custom counter counts as a plan change. Is a counter that revises the plan text meant to exist?
+- `CounterVersion.plan_text` and `plan_hash` are declared in the type and the policy agreement reads `plan_text` from the latest counter, but no route writes either field. Custom plans have empty `params`, so any non-empty `plan_params` sent in a custom counter counts as a plan change. Is a counter that revises the plan text meant to exist?
 - Locking is per Node process (a global promise queue and lock map). Behavior with several server processes sharing one store is not defined.
 - `GET /api/simulations` and `GET /api/evidence/{id}` need no session, and `GET /api/simulations` writes state (it ingests evidence). Both always use the default store, even for a custom-workspace caller. Northstar `POST /api/reset` is allowed for any signed-in role, Product included, with no rate limit. These may be intentional demo conveniences.
 - In hosted mode every default-store read returns HTTP 404 (`readState`), so the policy, simulations, evidence and anonymous state routes stop working. Their hosted behavior belongs to the `workspaces` part.

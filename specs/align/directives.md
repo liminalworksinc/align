@@ -133,14 +133,14 @@ The server SHALL send an authority event to a session only when the event happen
 
 ### Requirement: Team membership for targeting
 
-The server SHALL treat a session as belonging to a team when its confirmed mapping choice is a goal owned by that team, and SHALL treat it as belonging to Security when the user's prompts or the tools the session used (never the agent's own replies) match `triage`, `p-throughput`, `p-beta`, `run-plan`, `security` or `align_get_accepted_plan`, case-insensitively.
+The server SHALL treat a session as belonging to a team when its mapping's `choice` is a goal owned by that team, whatever the mapping's state (a mapper proposal, an unassigned low-confidence choice, a confirmed or even a rejected mapping all count), and SHALL treat it as belonging to Security when the user's prompts or the tools the session used (never the agent's own replies) match `triage`, `p-throughput`, `p-beta`, `run-plan`, `security` or `align_get_accepted_plan`, case-insensitively.
 
 #### Scenario: Tool use enrolls a session in Security
 
 - **WHEN** an unmapped session's captured tools include `mcp__align__align_get_accepted_plan`
 - **THEN** a later Security ratification is pending for that session
 
-### Requirement: Pending directives are exactly-once per session and oldest first
+### Requirement: Pending directives exclude acknowledged events and are oldest first
 
 The server SHALL compute a session's pending directives as every relevant authority event whose `event_id` is not already in the session's delivery records, ordered by event time ascending, generated from live state at read time.
 
@@ -299,7 +299,7 @@ The goal-triage agent SHALL accept a plan reference only from `--plan` (or `ALIG
 
 ### Requirement: Triage agent budgets, retries and trace
 
-The goal-triage agent SHALL bound a run to `WORLDS_AGENT_MAX_STEPS` model steps (default 12, max 32), 48 tool calls and `WORLDS_AGENT_TIMEOUT_MS` (default 120000, max 600000), retry a model request up to 3 times with 2 s, 4 s and 8 s backoff on HTTP 429/500/502/503/504 (logged as `model_retry` steps), retry a connector request up to 3 attempts on the same statuses, send an `idempotency-key` derived from mission, tool name and input on every write, redact configured secrets, write `agent/traces/<run label>.trace.json` on exit, and exit 1 on any failure.
+The goal-triage agent SHALL bound a run to `WORLDS_AGENT_MAX_STEPS` model steps (default 12, max 32), 48 tool calls and `WORLDS_AGENT_TIMEOUT_MS` (default 120000, max 600000), retry a model request up to 3 times with 2 s, 4 s and 8 s backoff on HTTP 429/500/502/503/504 (logged as `model_retry` steps), retry a connector request up to 3 attempts on the same statuses, send an `idempotency-key` derived from mission, tool name and input on every write, redact configured secrets, and write `agent/traces/<run label>.trace.json` on exit. A failed tool call (including a connector error after its retries) SHALL be returned to the model as an error tool result and the run SHALL continue; the agent SHALL exit 1, printing `Align agent failed: <message>`, when the run itself fails (step, tool-call or time budget exhausted, a non-retryable or exhausted model error, or a malformed model response).
 
 #### Scenario: Provider rate limit
 
@@ -336,7 +336,7 @@ The Sparta lab SHALL grade every run of mission `obs-beta-triage` with exactly 9
 
 ### Requirement: v2 directive kinds and targets
 
-When goal sessions are enabled (`ALIGN_GOAL_SESSIONS=1`; otherwise `/api/v2/*` is HTTP 404), the server SHALL write v2 directives inside the transaction of the change that caused them, with a monotonically increasing `seq`, one of the kinds `goal_version` (a new goal version, to sessions whose sharing has not been stopped and that are bound to the goal by their open epoch or governed by it), `binding_changed` (an approved alignment, one per session, `effective` `next_root_turn`, `cause` `alignment:<id>`), `binding_suspended` (a revoked alignment), `stop` or `resume`, and SHALL write no directive when there are no target sessions.
+When goal sessions are enabled (`ALIGN_GOAL_SESSIONS=1`; otherwise `/api/v2/*` is HTTP 404), the server SHALL write v2 directives inside the transaction of the change that caused them, with a monotonically increasing `seq`, one of the kinds `goal_version` (a new goal version, to sessions whose sharing has not been stopped and that are bound to the goal by their open epoch or governed by it), `binding_changed` (an approved `work_toward` alignment, one per listed session whose sharing is not stopped, `effective` `next_root_turn`, `cause` `alignment:<id>`), `binding_suspended` (a revoked `work_toward` alignment, one directive for the sessions whose open binding existed only through it), `stop` or `resume`, and SHALL write no directive when there are no target sessions.
 
 #### Scenario: New goal version with no bound sessions
 
@@ -368,7 +368,7 @@ The server SHALL serve `GET /api/v2/directives?cursor=<seq>` to a device bearer 
 
 ### Requirement: Agent intake of v2 directives
 
-The local agent package SHALL, during sync, page `GET /api/v2/directives` from its stored cursor (up to 20 pages, stopping on a non-200 or empty page), ignore a directive whose `id` it already stored or whose `seq` is not above its cursor, store each new directive durably and advance the cursor in one transaction, apply it only to session keys it owns in the directive's workspace, and enqueue a `received` receipt per owned session plus `enforced` for a `stop` and `applied` for a `resume`.
+The local agent package SHALL, during sync, page `GET /api/v2/directives` from its stored cursor (up to 20 pages, stopping on a non-200 or empty page), ignore a directive whose `id` it already stored or whose `seq` is not above its cursor, store each new directive durably and advance the cursor in one transaction, apply it only to session keys it owns in the directive's workspace, and enqueue a `received` receipt per owned session plus `enforced` when a `stop` sets the latch and `applied` when a `resume` clears it (a stop or resume whose `seq` is not above the latch's gets only `received`; `applied` for the other kinds is reported later by the hooks, see the local-agent part).
 
 #### Scenario: Replayed directive
 
