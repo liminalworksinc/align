@@ -621,7 +621,7 @@ one role, and SHALL refuse requests it cannot trust without redirecting.
 
 #### Scenario: Allow with the browser's session
 
-- **WHEN** the browser is signed in to a workspace and the person keeps "<company>, as <team>. You’re signed in to it in this browser." and presses **Allow read-only access**
+- **WHEN** the browser is signed in to a workspace and the person keeps "<company>, as <person> (<team>). You’re signed in to it in this browser." (just "as <team>" when no person name is known) and presses **Allow read-only access**
 - **THEN** the page posts `{params, decision: "approve", use_session: true}` to `POST /api/oauth/approve` and follows the returned redirect to the app
 
 #### Scenario: Allow with a passcode
