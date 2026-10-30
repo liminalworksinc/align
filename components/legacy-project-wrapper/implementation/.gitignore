@@ -1,0 +1,52 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# next.js / build
+/.next/
+/out/
+/build
+*.tsbuildinfo
+next-env.d.ts
+
+# env + secrets (never commit keys)
+.env
+.env.*
+!.env.example
+*.pem
+data/.secret
+
+# Align runtime state (regenerated from data/fixture.json)
+data/state.json
+data/*.tmp
+
+# Custom workspaces and the single-server guard
+data/workspaces/
+data/.pid
+
+# Goal sessions database and its generated auth secret (ALIGN_GOAL_SESSIONS=1)
+data/v2/
+
+# Sparta local runtime (worlds, dashboard state)
+.worlds/
+.worlds-dashboard/
+sparta/walkthrough-lab/projects/*/.env
+
+# misc
+.DS_Store
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.vercel
+.claude/settings.local.json
+
+# Saved custom-scenario setup input (operator text; never committed)
+data/custom-scenario.json
