@@ -400,10 +400,17 @@ The authorization server SHALL render a consent page at `GET /oauth/authorize` w
 
 The person SHALL choose either the custom workspace this browser is signed in to, detected server-side or through same-site `GET /api/session`, or a workspace link, a role and that role's passcode. Northstar sessions SHALL never be offered.
 
+Every response from `/oauth/authorize` SHALL carry `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `Referrer-Policy: no-referrer` and `Cache-Control: no-store` (set in `next.config.ts`), so the consent page cannot be framed, cached or leaked in a `Referer` to the app.
+
 #### Scenario: Signed-in browser
 
 - **WHEN** a person arriving from an AI app has a valid custom-workspace session cookie in this browser
 - **THEN** the page offers that workspace and team as a one-click option, with `Allow read-only access` and `Cancel` buttons
+
+#### Scenario: Consent page cannot be framed
+
+- **WHEN** a client sends `GET /oauth/authorize` with a valid request
+- **THEN** the `200` response has `X-Frame-Options: DENY`, a `Content-Security-Policy` containing `frame-ancestors 'none'`, and `Cache-Control: no-store`
 
 ### Requirement: Approval endpoint
 
@@ -489,7 +496,7 @@ The authorization server SHALL keep at most 20 grants per workspace, in `<worksp
 - A rotation of `ALIGN_SECRET`.
 - Deletion of the workspace.
 
-A grant's `last_used_at` SHALL be set (asynchronously) by the first `/api/mcp` request whose access token verifies, then at most every 5 minutes, or at once when the plan fingerprint has changed. `GET /api/workspaces/connections` SHALL list live grants as `{id,name,redirect_host,role,approved_at,last_used_at,on_current_plan}`, together with the `url` to connect.
+A grant's `last_used_at` SHALL be set (asynchronously) by the first `/api/mcp` request whose access token verifies, then at most every 5 minutes, or at once when the plan fingerprint has changed. `GET /api/workspaces/connections` SHALL list live grants as `{id,name,redirect_host,role,approved_at,last_used_at,on_current_plan}`, together with the `url` to connect and `plan: {changed_at}` (the full route is specified in the `workspaces` part).
 
 #### Scenario: Same app connected twice
 
@@ -578,3 +585,4 @@ Align SHALL ship `packages/align-connect/align-connect.mjs`, a dependency-free N
 - `scripts/test-mcp.mjs`
 - `scripts/test-oauth.mjs`
 - `packages/align-connect/align-connect.mjs`, `packages/align-connect/README.md`
+- `next.config.ts` (consent page headers)
