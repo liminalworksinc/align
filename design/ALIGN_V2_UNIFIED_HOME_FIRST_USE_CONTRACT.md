@@ -1,3 +1,7 @@
+> **FOUNDER RULING UPDATE (2026-10-30):** the previously proposed **one adaptive Home exposing both work-first and decision-first paths, with no separate chooser**, is now explicitly approved as the entry presentation (LIM-2454 comment `35376283`). Current first complete interaction candidate: [R2 contract](./ALIGN_V2_E2E_DESIGN_CONTRACT_R2.md) and [R2 prototype](./prototypes/lim-2449-v2-sample-e2e-r2.html). This does **not** constitute D2 visual clearance or implement v2 launch authority.
+
+---
+
 # Align v2 — Unified Home, first use and decision journey
 
 **Status:** D2 interaction design contract, **not** founder-approved visual UI or executable backend spec. Prepared Friday Oct 30, 2026 for [LIM-2449](https://linear.app/liminal-space-io/issue/LIM-2449), [LIM-2454](https://linear.app/liminal-space-io/issue/LIM-2454) and draft [PR #34](https://github.com/liminalworksinc/align/pull/34).
