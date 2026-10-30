@@ -123,7 +123,7 @@ The server SHALL, when an approver approves a change request, create the goal's 
 
 ### Requirement: binding_changed on an approved work_toward alignment
 
-The server SHALL, when a `work_toward` alignment becomes approved, set each listed session's governing goal to the target goal and write one `binding_changed` directive per listed session whose sharing is not stopped, with `goal` the target goal's snapshot and `binding` `{ goal_id: <target goal id>, effective: "next_root_turn", cause: "alignment:<alignment id>" }`, and write no `binding_changed` directive for other alignment choices.
+The server SHALL, when a `work_toward` alignment becomes approved, for each listed session whose sharing is not stopped (stopped sessions are skipped entirely), set its governing goal to the target goal and write one `binding_changed` directive targeting it, with `goal` the target goal's snapshot and `binding` `{ goal_id: <target goal id>, effective: "next_root_turn", cause: "alignment:<alignment id>" }`, and write no `binding_changed` directive for other alignment choices.
 
 #### Scenario: Two sessions follow a goal
 
@@ -320,6 +320,7 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 - lib/v2/changes.ts
 - lib/v2/alignments.ts
 - lib/v2/workspaces.ts
+- lib/v2/lifecycle.ts
 - lib/v2/devices.ts
 - lib/v2/policy.ts
 - lib/v2/http.ts
@@ -336,6 +337,7 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 - app/api/v2/workspaces/[ws]/sessions/[key]/stop-sharing/route.ts
 - app/api/v2/workspaces/[ws]/goals/[goal]/versions/route.ts
 - app/api/v2/workspaces/[ws]/alignments/[id]/[action]/route.ts
+- app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/[action]/route.ts
 - app/app/w/[ws]/sessions/view.tsx
 - packages/align-agent/src/directives.ts
 - packages/align-agent/src/hot.ts
