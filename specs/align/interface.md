@@ -34,6 +34,8 @@ screen says "team".
 | `/app/w/<ws>/requests` | Requests tab | Workspace members | Change requests: waiting on me, mine, others |
 | `/app/w/<ws>/spend` | Spend tab | Workspace members | Usage and estimated cost by goal, team or session |
 | `/app/w/<ws>/apps` | Apps tab | Workspace members | Connected AI apps and how to connect one |
+| `/privacy` | Privacy policy | Anyone, signed in or not | Align's privacy policy (public, also when hosted) |
+| `/trust` | Trust | Anyone, signed in or not | Security overview, subprocessors, retention, DPA, questionnaire answers and contact |
 | `/oauth/authorize` | Connect <app> to Align | A person connecting an AI app (recent sign-in) | Grant an AI app read-only access to one workspace as themselves (or, when the app asks, read access plus agent-reported evidence links) |
 | (any) | Error page | Anyone | Plain error with Try again |
 
@@ -45,8 +47,8 @@ People, Sessions, Alignments, Requests, Spend and Apps, with the current tab hig
 
 ### Requirement: Root path redirects to the web app
 
-The server SHALL answer `/` with a redirect to `/app`, and SHALL serve no other page outside `/app` and
-`/oauth/authorize`.
+The server SHALL answer `/` with a redirect to `/app`, and SHALL serve no other page outside `/app`,
+`/oauth/authorize` and the public trust pages `/privacy` and `/trust`.
 
 #### Scenario: Opening the root
 
@@ -305,6 +307,32 @@ an agreement, commits neither the person nor their employer, and asks nobody to 
 
 - **WHEN** the page is read
 - **THEN** it says "Sending this form only asks for access. It is not an agreement, and asking for a follow-up or a letter of intent doesn't commit you or your employer to anything. Nothing here asks you to sign for your organization."; in Mode L it also notes that anyone signed in on this machine can create a workspace without a code
+
+### Requirement: Public trust pages
+
+The server SHALL serve `/privacy` (the privacy policy, `docs/trust/privacy-policy.md`) and `/trust` (the security
+overview, the subprocessor list, the retention schedule `docs/RETENTION.md`, the DPA cover note, the questionnaire
+answers and a contact section, each from its file in `docs/trust`, with a link to `/privacy`) to anyone, signed in or
+not, in Mode L and hosted; it SHALL build both pages from that Markdown when the app is built, show no HTML and no
+comment from the documents, keep a link's target only when it is https, http, mailto, an anchor or another trust
+document, and fill the placeholders `[LEGAL ENTITY]`, `[ADDRESS]`, `[PRIVACY CONTACT EMAIL]` and
+`[SECURITY CONTACT EMAIL]` from `lib/trust/entity.ts`; the sign-in and request-access cards SHALL end with links to
+both pages, and the request-access form SHALL link to `/privacy`.
+
+#### Scenario: Reading the trust page
+
+- **WHEN** anyone opens `/trust`
+- **THEN** the page lists its sections (Security overview, Subprocessors, Retention, Data processing agreement, Questionnaire answers, Privacy policy, Contact) and shows each document below, its title one heading level down, with every link between documents pointing at `/trust#<section>` or `/privacy`
+
+#### Scenario: Source notes stay out
+
+- **WHEN** a trust document carries an HTML comment (a source note or a `PRESEED-…` marker) or raw HTML
+- **THEN** the comment does not appear in the page, and the raw HTML is shown as text
+
+#### Scenario: Links from sign-in
+
+- **WHEN** someone opens `/app/sign-in` or `/app/request-access`
+- **THEN** the card ends with **Privacy** (`/privacy`) and **Trust and security** (`/trust`)
 
 ### Requirement: Device approval screen
 
@@ -753,6 +781,17 @@ are not states (a team, a "company" goal, an active goal's status), neutral othe
 - `app/app/request-access/page.tsx`
 - `app/app/request-access/view.tsx`
 - `app/app/_ui/turnstile.tsx`
+- `app/privacy/page.tsx`
+- `app/trust/page.tsx`
+- `app/_trust/doc.tsx`
+- `lib/trust/markdown.mts`
+- `lib/trust/docs.ts`
+- `lib/trust/entity.ts`
+- `docs/trust/privacy-policy.md`
+- `docs/trust/security-overview.md`
+- `docs/trust/subprocessors.md`
+- `docs/trust/dpa.md`
+- `docs/trust/questionnaire.md`
 - `app/app/account/page.tsx`
 - `app/app/device/page.tsx`
 - `app/app/account/view.tsx`

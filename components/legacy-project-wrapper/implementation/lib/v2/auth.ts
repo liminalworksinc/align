@@ -5,11 +5,11 @@ import { passkey } from "@better-auth/passkey";
 import { betterAuth, type BetterAuthOptions, type BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
-import { emailOTP } from "better-auth/plugins";
+import { emailOTP, genericOAuth } from "better-auth/plugins";
 import { config, hostAllowed } from "../config";
 import { clientNet } from "../ratelimit";
 import { captchaPlugin } from "./captcha";
-import { emailSignInEnabled, githubConfigured, googleConfigured, publicOrigin, RECENT_SIGN_IN_MS, sessionMaxDays, testIdpEnabled } from "./config";
+import { emailSignInEnabled, githubConfigured, googleConfigured, publicOrigin, RECENT_SIGN_IN_MS, sessionMaxDays, testIdpEnabled, testOAuthUrl } from "./config";
 import { liveCodeFor } from "./core.mts";
 import { audit, authDb, dbDir, get, LIVE_WS, run, sql, tx } from "./db";
 import { nowIso, rand32 } from "./ids";
@@ -31,13 +31,20 @@ import { sendSignInCode } from "./mail";
 //     the public origin's host when hosted; in Mode L it is localhost, so passkeys work at http://localhost:<port>
 //     only (WebAuthn needs a domain, and 127.0.0.1 is not one). A passkey sign-in is a new session, so it is a
 //     fresh sign-in;
-//   - ALIGN_TEST_IDP=1 (never when hosted) adds email + password so the flow can be tested without OAuth apps.
+//   - ALIGN_TEST_IDP=1 (never when hosted) adds email + password so the flow can be tested without OAuth apps, and,
+//     with ALIGN_TEST_OAUTH_URL (a loopback stub the test serves), an "align-test" OAuth provider that signs in and links
+//     through the same Better Auth routes as Google and GitHub.
+// The access and refresh tokens a provider issues at sign-in or linking are encrypted in ba_account
+// (account.encryptOAuthTokens: XChaCha20-Poly1305 under BETTER_AUTH_SECRET); Align never uses them. An ID token
+// (Google issues one; a signed statement of who signed in) is stored as issued, as are session tokens.
 // Account linking is explicit only (/app/account); nothing is linked by a matching email.
 // Sessions: 7 days, extended on use (Better Auth's expiresIn and updateAge), and never longer than
 // ALIGN_SESSION_MAX_DAYS (30) after the sign-in that made them: an older session is deleted the next time it is
 // presented, and the daily retention job (lib/v2/retention.ts) deletes the rest with the expired ones.
 
 export const AUTH_BASE_PATH = "/api/v2/auth";
+/** The test-only OAuth provider's id (ALIGN_TEST_IDP=1 with ALIGN_TEST_OAUTH_URL). */
+export const TEST_OAUTH_PROVIDER = "align-test";
 /** Cookie prefix: Better Auth's session cookie is align_v2.session_token (__Secure- when hosted), never align_session. */
 export const COOKIE_PREFIX = "align_v2";
 
@@ -249,6 +256,24 @@ export function authOptions(): BetterAuthOptions {
       }),
     );
   }
+  const testOAuth = testOAuthUrl();
+  if (testOAuth) {
+    plugins.push(
+      genericOAuth({
+        config: [
+          {
+            providerId: TEST_OAUTH_PROVIDER,
+            clientId: "align-test",
+            clientSecret: "align-test-secret",
+            authorizationUrl: `${testOAuth}/authorize`,
+            tokenUrl: `${testOAuth}/token`,
+            userInfoUrl: `${testOAuth}/userinfo`,
+            scopes: ["email"],
+          },
+        ],
+      }),
+    );
+  }
   const party = passkeyParty();
   plugins.push(
     passkey({
@@ -315,8 +340,9 @@ export function authOptions(): BetterAuthOptions {
       },
     },
     emailAndPassword: { enabled: testIdpEnabled() && !hosted, autoSignIn: true, minPasswordLength: 8, maxPasswordLength: 128 },
-    // Linking is explicit only: POST /api/v2/auth/link-social from /app/account. Never by a matching email.
-    account: { modelName: "ba_account", accountLinking: { enabled: true, disableImplicitLinking: true } },
+    // Linking is explicit only: POST /api/v2/auth/link-social from /app/account. Never by a matching email. Provider
+    // access and refresh tokens are stored encrypted (Align keeps them only because Better Auth does).
+    account: { modelName: "ba_account", encryptOAuthTokens: true, accountLinking: { enabled: true, disableImplicitLinking: true } },
     user: { modelName: "ba_user" },
     // 7 days, extended on use; freshAge matches Align's recent sign-in, for Better Auth's own fresh-session checks.
     session: { modelName: "ba_session", expiresIn: 7 * 24 * 60 * 60, updateAge: 24 * 60 * 60, freshAge: RECENT_SIGN_IN_MS / 1000 },

@@ -8,6 +8,19 @@ export { sessionMaxDays, testIdpEnabled };
 
 const hostedEnv = (env: NodeJS.ProcessEnv) => env.HOSTED === "1";
 
+/** Tests only (with ALIGN_TEST_IDP=1, never hosted): ALIGN_TEST_OAUTH_URL, a loopback http(s) OAuth 2.0 stub that
+ *  lib/v2/auth.ts adds as the "align-test" sign-in provider, so a provider sign-in and linking can be tested end to end
+ *  (scripts/test-v2.mjs serves it). Null otherwise. */
+export function testOAuthUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (!testIdpEnabled(env) || !env.ALIGN_TEST_OAUTH_URL) return null;
+  try {
+    const u = new URL(env.ALIGN_TEST_OAUTH_URL);
+    return ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname) && /^https?:$/.test(u.protocol) ? u.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 export const googleConfigured = (env: NodeJS.ProcessEnv = process.env) => !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 export const githubConfigured = (env: NodeJS.ProcessEnv = process.env) => !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
 
@@ -151,6 +164,7 @@ export function v2Problems(env: NodeJS.ProcessEnv = process.env): string[] {
   if (maxDays && !validMaxDays(maxDays)) p.push("ALIGN_SESSION_MAX_DAYS must be a whole number of days from 1 to 365");
   if (env.ALIGN_TEST_IDP) p.push("ALIGN_TEST_IDP is not allowed when hosted");
   if (env.ALIGN_TEST_NOW) p.push("ALIGN_TEST_NOW is not allowed when hosted (tests only)");
+  if (env.ALIGN_TEST_OAUTH_URL) p.push("ALIGN_TEST_OAUTH_URL is not allowed when hosted (tests only)");
   if (env.ALIGN_LOCAL_OWNER_EMAIL) p.push("ALIGN_LOCAL_OWNER_EMAIL is not allowed when hosted (Mode L only)");
   p.push(...gateProblems(env));
   return p;

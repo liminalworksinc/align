@@ -76,7 +76,9 @@ generated Better Auth secret beside it. One server runs per data directory: a se
 `data/.secret`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`,
 `ALIGN_SESSION_MAX_DAYS` (the absolute session cap, 1 to 365 days, default 30; Mode L ignores a bad value).
 `ALIGN_TEST_IDP=1` turns on email-and-password sign-up for tests only; with it, `ALIGN_TEST_NOW` (an ISO time) is the
-retention job's clock, for tests only (both are refused when hosted).
+retention job's clock and `ALIGN_TEST_OAUTH_URL` (a loopback OAuth 2.0 stub) adds an `align-test` sign-in provider,
+for tests only (all three are refused when hosted). Google and GitHub access and refresh tokens are stored encrypted
+under `BETTER_AUTH_SECRET`; rotating that secret makes them unreadable, which Align doesn't mind (it never uses them).
 
 **Retention.** The server applies the retention schedule in [docs/RETENTION.md](docs/RETENTION.md) at every start and
 every 24 hours: deleted workspaces are purged after 30 days, people who left become "Former member #n" after 30 days,
@@ -89,7 +91,8 @@ hand against `ALIGN_DATA_DIR` (default `./data`); run it with the server's envir
 ## Hosted (HOSTED=1)
 
 One server behind an HTTPS edge (Fly.io), for one public origin. Only `/app*`, `/api/v2/*`, `/api/mcp`, `/oauth/*`,
-`/.well-known/*`, `/api/oauth/*` and static assets are served; `/` redirects to `/app` and everything else is 404.
+`/.well-known/*`, `/api/oauth/*`, the public trust pages `/privacy` and `/trust`, and static assets are served; `/`
+redirects to `/app` and everything else is 404.
 The server refuses to start unless these are set:
 
 | Setting | Value |
@@ -137,6 +140,16 @@ npm run admin -- retention run --dry-run        # the retention schedule: what i
 Disposable email domains (`lib/v2/disposable-domains.json`, the CC0 disposable-email-domains list) can't request access
 or create a workspace; they can still sign in when invited.
 
+## Trust pages and the security pack
+
+`docs/trust/` holds the security pack: the privacy policy, the DPA cover note (Common Paper DPA), the subprocessor
+list, the security overview and questionnaire answers; the retention schedule is `docs/RETENTION.md`, and
+vulnerability reporting is `SECURITY.md`. They describe the code, so change them with it. The app builds `/privacy` and
+`/trust` from those files (`lib/trust/`, `app/privacy`, `app/trust`), in both modes. The legal entity, address and
+contact emails are placeholders (`[LEGAL ENTITY]`, `[ADDRESS]`, `[PRIVACY CONTACT EMAIL]`, `[SECURITY CONTACT EMAIL]`):
+the pages fill them from `lib/trust/entity.ts`, the one place to set them. `test-v2` checks that the subprocessor
+list names every external host the server code can call.
+
 ## Tests
 
 ```sh
@@ -169,4 +182,5 @@ directories (`test-v2` also uses `<port>+1`). They refuse port 3100 and a port t
 | `scripts/align-admin.mjs`, `lib/v2/core.mts` | The operator script and the code it shares with the app |
 | `packages/align-agent/` | The `align` CLI and hooks |
 | `packages/align-connect/` | A stdio MCP bridge for clients without OAuth |
+| `docs/trust/`, `SECURITY.md`, `lib/trust/`, `app/privacy`, `app/trust` | The security pack and the public trust pages built from it |
 | `docs/archive/` | Pages about the retired v1 prototype |

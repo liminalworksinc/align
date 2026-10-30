@@ -21,7 +21,7 @@ retention schedule in [RETENTION.md](RETENTION.md), which the server applies its
 
 | Area | HOSTED=1 behaviour |
 |---|---|
-| Routes | Only `/app*`, `/api/v2/*`, `/api/mcp`, `/oauth/*`, `/.well-known/*`, `/api/oauth/*` and Next's static assets. `/` redirects to `https://<host>/app`. **Every other path is 404** `{"error":"Not found"}`, so a route added later stays closed until it is added to `proxy.ts`. |
+| Routes | Only `/app*`, `/api/v2/*`, `/api/mcp`, `/oauth/*`, `/.well-known/*`, `/api/oauth/*`, exactly `/privacy` and `/trust` (the public trust pages, built from `docs/trust` and `docs/RETENTION.md`), and Next's static assets. `/` redirects to `https://<host>/app`. **Every other path is 404** `{"error":"Not found"}`, so a route added later stays closed until it is added to `proxy.ts`. |
 | Hosts | Only the host names in `ALIGN_HOSTS` are served. Every other Host gets 421, loopback included. |
 | Proxy | Without `X-Forwarded-Proto: https`, 403 `{"error":"Use https"}`. Without `Fly-Client-IP`, 403 `{"error":"Use the public address"}`. |
 | Sign-in | Email one-time codes through an HTTPS email API, and Google or GitHub when configured; passkeys (added from `/app/account`) with the `ALIGN_PUBLIC_ORIGIN` host as relying party. No account is made at startup. An email code creates an account only for a pending invite, an unused creation code bound to the address, or `ALIGN_FIRST_OWNER_EMAIL` while the server has no account. The test identity provider is refused. |
@@ -39,14 +39,15 @@ ever kept a refused process up, `proxy.ts` would still answer 503 to everything.
 - `ALIGN_HOSTS`: the public host name(s), comma-separated, with no loopback names.
 - `ALIGN_SECRET`: 32+ characters. It signs MCP access tokens and keys refresh-token hashes, so rotating it ends every
   connected AI app.
-- `BETTER_AUTH_SECRET`: 32+ characters. Rotating it signs everyone out.
+- `BETTER_AUTH_SECRET`: 32+ characters. Rotating it signs everyone out and makes the stored (encrypted) Google and GitHub
+  tokens unreadable; Align never uses them, so nothing else changes.
 - `ALIGN_DATA_DIR`: an absolute path outside the app directory (the volume, `/data`).
 - `ALIGN_PUBLIC_ORIGIN`: a bare `https://<host>` origin whose host is in `ALIGN_HOSTS`.
 - A way to sign in: all three of `ALIGN_EMAIL_API_URL` (https), `ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM`, or
   Google's or GitHub's client id and secret (each pair together).
 - `ALIGN_SESSION_MAX_DAYS`, when set: a whole number of days from 1 to 365.
-- These must be unset: `ALIGN_TEST_IDP`, `ALIGN_TEST_NOW`, `ALIGN_LOCAL_OWNER_EMAIL`. `ALIGN_PUBLIC=1` is refused in every
-  mode.
+- These must be unset: `ALIGN_TEST_IDP`, `ALIGN_TEST_NOW`, `ALIGN_TEST_OAUTH_URL`, `ALIGN_LOCAL_OWNER_EMAIL`.
+  `ALIGN_PUBLIC=1` is refused in every mode.
 - When set: `ALIGN_CREATION` is `codes`, `open` or `closed`; each cap is a positive whole number; the two Turnstile keys
   are set together; `ALIGN_TURNSTILE_VERIFY_URL` is https.
 
@@ -135,8 +136,12 @@ Then open `https://<host>/app`, sign in as `ALIGN_FIRST_OWNER_EMAIL`, create a w
 this first one) and invite people from its People tab. For Turnstile, add a widget for the host name in Cloudflare and
 set `ALIGN_TURNSTILE_SITE_KEY` in `fly.toml` and `ALIGN_TURNSTILE_SECRET_KEY` with `fly secrets set`.
 
+Before the first public deploy, fill in the legal entity, address and contact emails in `lib/trust/entity.ts` (the
+`/privacy` and `/trust` pages show them) once counsel has reviewed `docs/trust`.
+
 **The image** (`Dockerfile`):
-- The build context is an allowlist (`.dockerignore`): only the app's own source goes in.
+- The build context is an allowlist (`.dockerignore`): only the app's own source goes in, plus `docs/trust` and
+  `docs/RETENTION.md` for the build stage, which builds `/privacy` and `/trust` from them.
 - The runtime has production dependencies and the build output only, plus the operator script and `lib/v2/core.mts`:
   no other scripts, no tests, docs or `.env` file.
 - The container hands `/data` to the `node` user (`chown -R` as root on every start), then `setpriv` execs the server

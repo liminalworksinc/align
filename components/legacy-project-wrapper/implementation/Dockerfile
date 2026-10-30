@@ -3,7 +3,7 @@
 # The build context is an allowlist (.dockerignore): only the app's own source goes in. Scripts, tests, docs, the
 # local agent packages and any .env file never reach the image, except the operator script (scripts/align-admin.mjs)
 # and the two modules it imports (lib/v2/core.mts, lib/v2/retention-core.mts), which the runtime gets so
-# `fly ssh console` can run it.
+# `fly ssh console` can run it. The trust documents (docs/trust, docs/RETENTION.md) enter the build stage only.
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -12,6 +12,9 @@ COPY app ./app
 COPY lib ./lib
 COPY public ./public
 COPY proxy.ts instrumentation.ts next.config.ts tsconfig.json ./
+# The public /privacy and /trust pages are built from these (lib/trust/docs.ts); the runtime stage doesn't copy them.
+COPY docs/trust ./docs/trust
+COPY docs/RETENTION.md ./docs/RETENTION.md
 RUN npx next build
 
 # Runtime: production dependencies and the build output only, run as the unprivileged node user.

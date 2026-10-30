@@ -244,10 +244,23 @@ account only by an explicit request from `/app/account`.
 - **WHEN** a signed-in person chooses Link GitHub on `/app/account` and completes GitHub's consent
 - **THEN** that GitHub account is linked to their account and can sign them in afterwards; a GitHub account already linked to another Align account is refused and stays where it was
 
+### Requirement: Provider tokens encrypted at rest
+
+The server SHALL store the access and refresh tokens a sign-in provider (Google, GitHub) issues at sign-in or linking
+only encrypted (Better Auth's `account.encryptOAuthTokens`: XChaCha20-Poly1305 under `BETTER_AUTH_SECRET`), never as
+issued; an ID token and browser session tokens are stored as issued. Align does not use provider tokens after sign-in.
+
+#### Scenario: Provider sign-in
+
+- **WHEN** a person signs in through a provider, or links one, and the provider issues an access token and a refresh token
+- **THEN** `ba_account` holds neither as issued (the database file does not contain them), the sign-in or link works as before, and Better Auth can still decrypt them
+
 ### Requirement: Test identity provider
 
 The server SHALL offer Better Auth email-and-password sign-up and sign-in only when `ALIGN_TEST_IDP=1` and the server
-is not hosted, for tests.
+is not hosted, for tests, and with it, when `ALIGN_TEST_OAUTH_URL` names a loopback OAuth 2.0 stub, an `align-test`
+sign-in provider that signs in and links through the same Better Auth routes as Google and GitHub; a hosted server
+refuses to start with `ALIGN_TEST_OAUTH_URL` set.
 
 #### Scenario: Off by default
 
@@ -444,12 +457,18 @@ both modes and without any feature flag.
 
 The server SHALL, when `HOSTED=1`, answer at the request edge 503 when misconfigured, 421 for a `Host` not in `ALIGN_HOSTS`, 403 without `X-Forwarded-Proto: https` or
 without `Fly-Client-IP`, and 404 `{"error":"Not found"}` for every path outside `/app*`, `/api/v2/*`, `/api/mcp`,
-`/oauth/*`, `/.well-known/*`, `/api/oauth/*` and the static assets.
+`/oauth/*`, `/.well-known/*`, `/api/oauth/*`, exactly `/privacy` and `/trust` (the public trust pages), and the
+static assets.
 
 #### Scenario: Paths outside the allowlist
 
-- **WHEN** a hosted server receives `GET /api/state`, `POST /api/sessions/events` or `GET /setup`
+- **WHEN** a hosted server receives `GET /api/state`, `POST /api/sessions/events`, `GET /setup`, `GET /trust/security`, `GET /privacy/x` or `GET /SECURITY.md`
 - **THEN** it responds 404 `{"error":"Not found"}`
+
+#### Scenario: Public trust pages when hosted
+
+- **WHEN** a hosted server receives `GET /privacy` or `GET /trust` through the edge checks
+- **THEN** it serves the page (200) without sign-in
 
 #### Scenario: Edge checks
 
@@ -481,7 +500,7 @@ URL; and SHALL log one warning when it starts hosted without the Turnstile keys.
 
 #### Scenario: Partial or unsafe settings
 
-- **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, a Google or GitHub client id without its secret (or the reverse), an `ALIGN_SESSION_MAX_DAYS` that is not a whole number from 1 to 365, `ALIGN_TEST_IDP`, `ALIGN_TEST_NOW` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`
+- **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, a Google or GitHub client id without its secret (or the reverse), an `ALIGN_SESSION_MAX_DAYS` that is not a whole number from 1 to 365, `ALIGN_TEST_IDP`, `ALIGN_TEST_NOW`, `ALIGN_TEST_OAUTH_URL` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`
 - **THEN** it refuses to start and names each problem; any mode refuses `ALIGN_PUBLIC=1`
 
 #### Scenario: Creation and bot-check settings
