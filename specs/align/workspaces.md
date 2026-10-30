@@ -1,6 +1,6 @@
 ---
 name: Identity and workspaces
-summary: How people sign in as themselves (Google, GitHub or an emailed one-time code, printed locally in Mode L), and how workspaces, roles, invites, teams, the audit trail, paired devices, shared sessions, usage and spend, activity, rate limits and the local and hosted edges work.
+summary: How people sign in as themselves (Google, GitHub, an emailed one-time code, printed locally in Mode L, or a passkey), how long a sign-in lasts, and how workspaces, roles, invites, teams, the audit trail, paired devices, shared sessions, usage and spend, activity, rate limits and the local and hosted edges work.
 kind: area
 ---
 
@@ -10,7 +10,9 @@ Everyone who uses Align is a **person** with their own Better Auth account (`ba_
 shared secret: there are no role passcodes, access codes or shared agent tokens. A person signs in with Google or
 GitHub (each only when configured) or with a one-time code sent to their email address. When hosted, the code is
 emailed; in **Mode L** (the default, loopback-only mode) it is printed to the server's terminal and written to a
-private file, and the server creates one local owner account on first start.
+private file, and the server creates one local owner account on first start. Once signed in, a person can add
+**passkeys** and then sign in with one. A browser sign-in lasts 7 days from its last use and never more than 30 days;
+sensitive actions need a **recent sign-in** (15 minutes), and **sign out everywhere** ends every sign-in at once.
 
 Signed in, a person creates **workspaces** (`ws_…`) or joins one by an email-bound **invite**. Each member has one
 workspace **role**: `owner`, `member` or `viewer`. Members are grouped into flat **teams** with a `lead` or `member`
@@ -40,6 +42,8 @@ Directives (including stop and resume) are in `directives`, the MCP endpoint and
 | Shared session | A coding-agent session a device chose to share, addressed by a 43-character `session_key` |
 | Epoch | A period of a shared session bound to one goal (or none); usage counts under its epoch's goal |
 | Audit row | `{at, actor, action, object_id}` written by each change a person makes (and by a few automatic events); `actor` is null only for system actions |
+| Passkey | A WebAuthn credential (Better Auth's `ba_passkey`) that signs one person in; its relying party is the public host when hosted and `localhost` in Mode L |
+| Recent sign-in | A Better Auth session created within the last 15 minutes; a passkey sign-in makes one like any other sign-in |
 
 **Person lifecycle.** Sign in (provider or email code) → create a workspace or accept an invite → pair a device →
 share sessions → change role, leave or be removed (team memberships, device grants and OAuth grants for that
@@ -56,12 +60,13 @@ that workspace.
 
 The server SHALL mount Better Auth at `/api/v2/auth/*`, offer Google sign-in only when `GOOGLE_CLIENT_ID` and
 `GOOGLE_CLIENT_SECRET` are both set, GitHub sign-in only when `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are both
-set, and email one-time-code sign-in always in Mode L and, when hosted, whenever the email settings are set.
+set, email one-time-code sign-in always in Mode L and, when hosted, whenever the email settings are set, and passkey
+sign-in in both modes for passkeys people have added.
 
 #### Scenario: Only configured providers
 
 - **WHEN** a Mode L server starts with GitHub's client id and secret set and no Google settings
-- **THEN** the sign-in page offers GitHub and email code, a Google sign-in request is refused by Better Auth, and no other sign-in method exists
+- **THEN** the sign-in page offers GitHub, email code and passkeys, a Google sign-in request is refused by Better Auth, and no other sign-in method exists
 
 #### Scenario: Hosted without email settings
 
@@ -231,10 +236,15 @@ is not hosted, for tests.
 - **WHEN** a hosted server's environment sets `ALIGN_TEST_IDP` to any value
 - **THEN** the server refuses to start and names `ALIGN_TEST_IDP is not allowed when hosted`
 
-### Requirement: Recent sign-in for device and app approval
+### Requirement: Recent sign-in for sensitive actions
 
-The server SHALL require a sign-in no older than 15 minutes to approve a device on `POST /api/v2/device/approve` and
-to approve an MCP app at `/oauth/authorize`, and otherwise ask the person to sign in again.
+The server SHALL require a sign-in no older than 15 minutes, and otherwise refuse with 403 `reauth_required` and change
+nothing, for: approving a device on `POST /api/v2/device/approve`; approving an MCP app at `/oauth/authorize`; an
+owner changing a member's role (making someone an owner included) on `POST /api/v2/workspaces/{ws}/members/{user}`;
+an owner removing another member; an owner creating an invite with role `owner`; an owner deleting a workspace;
+adding a passkey (`/api/v2/auth/passkey/generate-register-options` and `/verify-registration`); deleting a passkey;
+linking a Google or GitHub account (`/api/v2/auth/link-social`); and signing out everywhere. Better Auth's own
+fresh-session age SHALL be the same 15 minutes.
 
 #### Scenario: Old session approving a device
 
@@ -245,6 +255,99 @@ to approve an MCP app at `/oauth/authorize`, and otherwise ask the person to sig
 
 - **WHEN** the same person signs in again and approves within 15 minutes
 - **THEN** the approval succeeds; looking up a code and denying it need no recent sign-in
+
+#### Scenario: Old session on an owner action
+
+- **WHEN** a workspace owner whose session was created 20 minutes ago changes a role, makes someone an owner, removes a member, invites someone as an owner or deletes the workspace
+- **THEN** the server responds 403 `{error:"reauth_required", message:"Sign in again to <action>. This needs a sign-in from the last 15 minutes."}` and nothing changes; a member or viewer attempting the same still gets `owner_only` or `read_only`, and leaving a workspace, inviting a member or viewer, renaming a workspace and revoking one's own device or app need no recent sign-in
+
+#### Scenario: Old session on account actions
+
+- **WHEN** a person whose session was created 20 minutes ago asks to add a passkey, delete a passkey, link a provider or sign out everywhere
+- **THEN** the server responds 403 `reauth_required` (in Better Auth's `{code, message}` shape on `/api/v2/auth/*`, in `{error, message}` elsewhere) and nothing is added, deleted, linked or ended
+
+### Requirement: Session lifetime and absolute cap
+
+The server SHALL keep a browser session for 7 days, extended to 7 days from now at most once a day when it is used,
+and SHALL never let a session outlive `ALIGN_SESSION_MAX_DAYS` days (a whole number from 1 to 365, default 30) after
+the sign-in that created it: a session older than that is refused by every session read (Better Auth's
+`/api/v2/auth/get-session`, the `/api/v2` web routes and the `/app` pages) and its row is deleted, and its expiry is
+never set past that limit.
+
+#### Scenario: Older than the cap
+
+- **WHEN** a browser presents a session created 31 days ago that was used yesterday
+- **THEN** `GET /api/v2/auth/get-session` answers `null`, `/api/v2/me` 401 `unauthorized`, an `/app` page sends the person to sign-in, and the session's row is gone
+
+#### Scenario: Extended up to the cap
+
+- **WHEN** a session created 29 days ago, with 5 days left, is used
+- **THEN** it still works and its expiry moves to exactly 30 days after its creation, not 7 days from now; a new session expires 7 days after it was made, or at the cap if `ALIGN_SESSION_MAX_DAYS` is shorter
+
+#### Scenario: Sweep
+
+- **WHEN** sessions older than the cap are never presented again
+- **THEN** the server deletes them at most an hour after it next handles a sign-in request or session read
+
+### Requirement: Passkeys
+
+The server SHALL let a signed-in person add passkeys through Better Auth's passkey plugin
+(`@better-auth/passkey`, the same version as `better-auth`) at `/api/v2/auth/passkey/*`, with the relying party
+`Align`, id the `ALIGN_PUBLIC_ORIGIN` host and origin `ALIGN_PUBLIC_ORIGIN` when hosted, and id `localhost` and origin
+`http://localhost:<port>` in Mode L; SHALL require discoverable credentials so a passkey signs in with no email typed;
+SHALL list the person's passkeys on `GET /api/v2/account/passkeys`, rename one on `PATCH /api/v2/account/passkeys/{id}
+{name}` and delete one on `DELETE /api/v2/account/passkeys/{id}`; and SHALL keep Better Auth's own passkey list,
+update and delete routes off.
+
+#### Scenario: Adding a passkey
+
+- **WHEN** a person with a recent sign-in gets `/api/v2/auth/passkey/generate-register-options` and posts the authenticator's answer to `/api/v2/auth/passkey/verify-registration`
+- **THEN** the passkey is stored for them in `ba_passkey`, the audit (no workspace) records `passkey.added` with them as actor and the passkey's id, and the authenticator labels it with their email; a name over 100 characters is 400
+
+#### Scenario: Listing, renaming and deleting
+
+- **WHEN** a person calls `GET /api/v2/account/passkeys`, then `PATCH .../passkeys/{id} {name}` and `DELETE .../passkeys/{id}`
+- **THEN** the list is `{passkeys:[{id, name, created_at, last_used_at}], prompt}` (their own only, oldest first, `last_used_at` null until the passkey first signs them in), the rename answers `{id, name}` (1 to 100 characters), and the delete answers 204 and records `passkey.deleted`; another person's passkey, an unknown id or a malformed one is 404 `not_found`
+
+#### Scenario: Signing in with a passkey
+
+- **WHEN** someone posts a valid assertion from a registered passkey to `/api/v2/auth/passkey/verify-authentication` (after `generate-authenticate-options`, which needs no session)
+- **THEN** the server creates a new session for the passkey's person, which is a recent sign-in, and records the passkey's last use; an unknown credential is 401 `PASSKEY_NOT_FOUND`; when hosted, Better Auth allows 20 option requests and 10 verifications per client per minute
+
+#### Scenario: Mode L at 127.0.0.1
+
+- **WHEN** a Mode L server is opened at `http://127.0.0.1:<port>`
+- **THEN** passkeys cannot be added or used there (WebAuthn needs a domain name, and the relying party is `localhost`); they work at `http://localhost:<port>`
+
+### Requirement: Add-a-passkey prompt state
+
+The server SHALL report, as `prompt` on `GET /api/v2/account/passkeys` and to the `/app` pages, that a person should be
+offered a passkey when they have none and have not dismissed the offer, and SHALL remember a dismissal per person on
+`DELETE /api/v2/account/passkey-prompt` (204).
+
+#### Scenario: Dismissed
+
+- **WHEN** a person with no passkey dismisses the prompt
+- **THEN** `prompt` is false for them from then on, on every browser; adding a passkey also ends the prompt
+
+### Requirement: Sign out everywhere
+
+The server SHALL, on `POST /api/v2/account/sign-out-everywhere {devices?, apps?}` from a person with a recent sign-in,
+delete every Better Auth session of that person (the calling one included) and clear the caller's session cookie;
+with `devices: true` also revoke every paired device of theirs (reason `signed_out_everywhere`); with `apps: true`
+also delete every OAuth grant of theirs in every workspace; all in one transaction, answering
+`{sessions, devices, apps}` with how many ended. Better Auth's own `/revoke-session`, `/revoke-sessions` and
+`/revoke-other-sessions` SHALL be off.
+
+#### Scenario: Everything
+
+- **WHEN** a person signed in on three browsers, with a paired device and a connected AI app, signs out everywhere with `{devices:true, apps:true}`
+- **THEN** the response is 200 with `devices:1` and `apps` counting the live grants ended, each browser's next request is 401, the device's token is 401, the app's access token is 401 and its refresh `invalid_grant`, and the audit records `account.signed_out_everywhere` (no workspace) plus `device.revoked` and, in each workspace, `oauth.app_revoked`, each with the person as actor
+
+#### Scenario: Sessions only
+
+- **WHEN** a person signs out everywhere with `{}`
+- **THEN** only their web sessions end; their devices and apps keep working; an option that is not a boolean is 400
 
 ### Requirement: Web and device credentials
 
@@ -341,7 +444,8 @@ The server SHALL refuse to start when hosted, naming each problem, unless `ALIGN
 (no loopback names), `ALIGN_SECRET` and `BETTER_AUTH_SECRET` each have 32+ characters, `ALIGN_DATA_DIR` is an absolute
 path outside the app directory, `ALIGN_PUBLIC_ORIGIN` is a bare `https://host`
 origin whose host is in `ALIGN_HOSTS`, and sign-in is possible: all three of `ALIGN_EMAIL_API_URL` (https),
-`ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM` are set, or Google's or GitHub's client id and secret are.
+`ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM` are set, or Google's or GitHub's client id and secret are, and
+`ALIGN_SESSION_MAX_DAYS`, when set, is a whole number from 1 to 365.
 
 #### Scenario: No way to sign in
 
@@ -350,7 +454,7 @@ origin whose host is in `ALIGN_HOSTS`, and sign-in is possible: all three of `AL
 
 #### Scenario: Partial or unsafe settings
 
-- **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, a Google or GitHub client id without its secret (or the reverse), `ALIGN_TEST_IDP` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`
+- **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, a Google or GitHub client id without its secret (or the reverse), an `ALIGN_SESSION_MAX_DAYS` that is not a whole number from 1 to 365, `ALIGN_TEST_IDP` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`
 - **THEN** it refuses to start and names each problem; any mode refuses `ALIGN_PUBLIC=1`
 
 #### Scenario: Email only
@@ -589,8 +693,8 @@ The server SHALL write an audit row naming its actor for every change a person m
 members, invites, teams, goals, alignments, change requests, connected-app revocations and session controls (stop sharing, history
 deletion, agent stop and resume), with actor null only for system actions, and serve the newest 200 rows of that
 workspace to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`. Device uploads (sharing a session, opening an
-epoch, usage and activity) write no audit row, and device pairing and revocation are recorded without a workspace, so
-they never appear in a workspace's audit.
+epoch, usage and activity) write no audit row, and device pairing and revocation, passkeys added and deleted, and
+signing out everywhere are recorded without a workspace, so they never appear in a workspace's audit.
 
 #### Scenario: Reading the audit
 
@@ -754,7 +858,8 @@ off its IP tracking.
 ## Open questions
 
 - Who may create hosted workspaces (Owner decision 2026-10-30 keeps it open): today any signed-in account can create up to 10 per hour and own 50.
-- Passkeys, SSO, SAML and SCIM are out of scope for now.
+- SSO (OIDC or SAML) and SCIM are out of scope and offered on request: which comes first, and whether to build it
+  on Better Auth or buy it, waits for the first deal that names it.
 - Unlinking a Google or GitHub account from `/app/account` is out of scope; should a person be able to unlink a provider while another sign-in method remains?
 - Removing or leaving keeps a person's goals and sessions. Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.
 
@@ -782,6 +887,7 @@ off its IP tracking.
 - lib/v2/policy.ts
 - lib/v2/validate.ts
 - lib/v2/workspaces.ts
+- lib/v2/account.ts
 - lib/v2/lifecycle.ts
 - lib/v2/devices.ts
 - lib/v2/sessions.ts
@@ -820,6 +926,10 @@ off its IP tracking.
 - app/api/v2/devices/route.ts
 - app/api/v2/devices/self/route.ts
 - app/api/v2/devices/[id]/route.ts
+- app/api/v2/account/passkeys/route.ts
+- app/api/v2/account/passkeys/[id]/route.ts
+- app/api/v2/account/passkey-prompt/route.ts
+- app/api/v2/account/sign-out-everywhere/route.ts
 - app/api/v2/workspaces/[ws]/sessions/route.ts
 - app/api/v2/workspaces/[ws]/sessions/[key]/route.ts
 - app/api/v2/workspaces/[ws]/sessions/[key]/epochs/route.ts

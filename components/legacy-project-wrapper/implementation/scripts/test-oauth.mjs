@@ -829,6 +829,19 @@ async function local(env) {
   const revokeD2 = await web(U2, "DELETE", `/api/v2/devices/${D2.id}`);
   check("a revoked device's access token -> 401", revokeD2.status === 204 && (await mcp(D2.access, "tools/list")).status === 401, revokeD2.status);
 
+  // -- sign out everywhere, also disconnecting apps (lib/v2/account.ts): every grant of the person, in every workspace --
+  const t4A = await connect(clientId, U4, A);
+  const soe = await web(U4, "POST", "/api/v2/account/sign-out-everywhere", { apps: true });
+  const rf4 = await token({ grant_type: "refresh_token", refresh_token: t4A.refresh_token, client_id: clientId });
+  const soeAudit = withDb((d) => d.prepare("SELECT ws_id, action FROM v2_audit WHERE actor_id = ? AND action IN ('oauth.app_revoked', 'account.signed_out_everywhere')").all(U4.id));
+  check(
+    "sign out everywhere with apps: 200 {apps >= 1}; the person's app tokens stop (access 401, refresh invalid_grant), no grant of theirs is left, each is audited oauth.app_revoked in its workspace, and the web session ends",
+    soe.status === 200 && soe.json?.apps >= 1 && (await mcp(t4A.access_token, "tools/list")).status === 401 && rf4.json?.error === "invalid_grant" && grantsOf("user_id = ?", U4.id) === 0 &&
+      soeAudit.some((r) => r.action === "oauth.app_revoked" && r.ws_id === A) && soeAudit.some((r) => r.action === "account.signed_out_everywhere" && r.ws_id === null) &&
+      (await web(U4, "GET", "/api/v2/me")).status === 401,
+    `${soe.status} ${soe.text} ${rf4.text} ${JSON.stringify(soeAudit)}`,
+  );
+
   // -- the Apps tab --
   const appsPage = await req("GET", `/app/w/${A}/apps`, { cookie: U1.cookie });
   const appsAnon = await req("GET", `/app/w/${A}/apps`);

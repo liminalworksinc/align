@@ -570,6 +570,18 @@ const MIGRATIONS: string[] = [
     FOREIGN KEY (ws_id, change_request_id) REFERENCES v2_change_requests(ws_id, id) ON DELETE CASCADE
   );
   `,
+  // PRESEED-005: when each passkey last signed someone in (Better Auth's ba_passkey has no such column), and the
+  // people who dismissed the "add a passkey" prompt.
+  `
+  CREATE TABLE v2_passkey_use (
+    passkey_id TEXT PRIMARY KEY REFERENCES ba_passkey(id) ON DELETE CASCADE,
+    last_used_at TEXT NOT NULL
+  );
+  CREATE TABLE v2_passkey_prompt_dismissed (
+    user_id TEXT PRIMARY KEY REFERENCES ba_user(id) ON DELETE CASCADE,
+    dismissed_at TEXT NOT NULL
+  );
+  `,
 ];
 
 export function migrate() {

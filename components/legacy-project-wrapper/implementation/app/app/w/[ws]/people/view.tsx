@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { api, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, useAction, useApi, when } from "../../../_ui/kit";
+import { api, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
 import type { WsDetail } from "../../../_ui/types";
 
@@ -109,6 +109,12 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
   return (
     <Shell me={me} ws={ws} tab="People">
       <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">People</h1>
+      {/* Role changes, removing someone and owner invites need a sign-in from the last 15 minutes. */}
+      {act.reauth && (
+        <SignInAgain me={me} next={`/app/w/${ws}/people`}>
+          {act.reauth}
+        </SignInAgain>
+      )}
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (

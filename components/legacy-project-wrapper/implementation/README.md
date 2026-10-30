@@ -45,6 +45,15 @@ npm run sign-in-link            # or: npm run sign-in-link someone@example.com
 The server prints the new link in its own terminal. Any address can sign in by email code in Mode L (the code is
 printed, never sent), so you can add people by inviting them from a workspace's People tab.
 
+**Passkeys.** Once signed in, add a passkey on `/app/account`; then **Sign in with a passkey** (or pick it from the
+email field's suggestions) signs you in. In Mode L passkeys work only at `http://localhost:3100`, not
+`http://127.0.0.1:3100`: a passkey needs a domain name.
+
+**Sessions.** A browser sign-in lasts 7 days, extended each day it is used, and never more than 30 days
+(`ALIGN_SESSION_MAX_DAYS`) after you signed in. Approving a device or an AI app, changing roles, removing someone,
+inviting an owner, deleting a workspace, adding or deleting a passkey, linking an account and **Sign out everywhere**
+(on `/app/account`) need a sign-in from the last 15 minutes; the page asks you to sign in again and brings you back.
+
 To connect a machine's coding agents, build the CLI and pair it:
 
 ```sh
@@ -60,7 +69,8 @@ generated Better Auth secret beside it. One server runs per data directory: a se
 `Another Align server (pid <n>) is using <dir>. Stop it first.` Delete `data/` to start over.
 
 **Mode L settings** (all optional): `ALIGN_DATA_DIR`, `ALIGN_LOCAL_OWNER_EMAIL`, `ALIGN_SECRET` (else generated into
-`data/.secret`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`.
+`data/.secret`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`,
+`ALIGN_SESSION_MAX_DAYS` (the absolute session cap, 1 to 365 days, default 30; Mode L ignores a bad value).
 `ALIGN_TEST_IDP=1` turns on email-and-password sign-up for tests only.
 
 ## Hosted (HOSTED=1)
@@ -78,7 +88,9 @@ The server refuses to start unless these are set:
 | Sign-in | `ALIGN_EMAIL_API_URL` (https), `ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM`, or a Google or GitHub client |
 
 `ALIGN_FIRST_OWNER_EMAIL` lets one address make the first account by email code; after that, an email code signs in
-only an existing account or someone with a pending invite. `docs/HOSTING.md` has the image, the volume and the deploy
+only an existing account or someone with a pending invite. `ALIGN_SESSION_MAX_DAYS` (optional, 1 to 365, default 30)
+caps how long a sign-in lasts; hosted startup refuses any other value. Passkeys use the public host as their relying
+party, so changing `ALIGN_PUBLIC_ORIGIN`'s host makes existing passkeys unusable. `docs/HOSTING.md` has the image, the volume and the deploy
 steps.
 
 ## Tests

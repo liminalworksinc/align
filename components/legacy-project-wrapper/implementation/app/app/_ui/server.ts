@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getAuth } from "@/lib/v2/auth";
+import { passkeyPromptDue } from "@/lib/v2/account";
+import { getAuth, passkeyParty } from "@/lib/v2/auth";
 import { config } from "@/lib/config";
 import { emailSignInEnabled, githubConfigured, googleConfigured, testIdpEnabled } from "@/lib/v2/config";
 import { ready } from "@/lib/v2/init";
@@ -12,15 +13,18 @@ export interface Me {
   id: string;
   name: string;
   email: string;
-  /** When this session signed in (ISO): approving a device needs a recent sign-in. */
+  /** When this session signed in (ISO): sensitive actions need a recent sign-in. */
   signedInAt: string;
+  /** Offer to add a passkey: the person has none and has not said "Not now". */
+  passkeyPrompt: boolean;
 }
 
 export async function currentUser(): Promise<Me | null> {
   const h = await headers();
   await ready();
   const s = await getAuth().api.getSession({ headers: h });
-  return s?.user ? { id: s.user.id, name: s.user.name, email: s.user.email, signedInAt: new Date(s.session.createdAt).toISOString() } : null;
+  if (!s?.user) return null;
+  return { id: s.user.id, name: s.user.name, email: s.user.email, signedInAt: new Date(s.session.createdAt).toISOString(), passkeyPrompt: passkeyPromptDue(s.user.id) };
 }
 
 /** The signed-in user, or a redirect to sign-in that comes back to `next`. */
@@ -37,10 +41,15 @@ export interface SignInOptions {
   testIdp: boolean;
   /** Mode L: codes are printed, not emailed. */
   local: boolean;
+  /** The passkey relying party: passkeys work only on a page served from this host (localhost in Mode L). */
+  passkeyHost: string;
+  /** Where passkeys work, for the hint shown on any other host (Mode L at 127.0.0.1). */
+  passkeyOrigin: string;
 }
 
 export function signInOptions(): SignInOptions {
-  return { google: googleConfigured(), github: githubConfigured(), email: emailSignInEnabled(), testIdp: testIdpEnabled(), local: !config().hosted };
+  const party = passkeyParty();
+  return { google: googleConfigured(), github: githubConfigured(), email: emailSignInEnabled(), testIdp: testIdpEnabled(), local: !config().hosted, passkeyHost: party.rpID, passkeyOrigin: party.origin };
 }
 
 /** Only an /app path or an AI app's consent request (/oauth/authorize?...) is followed after sign-in; anything else

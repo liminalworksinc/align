@@ -1,15 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { passkey } from "@better-auth/passkey";
 import { betterAuth, type BetterAuthOptions, type BetterAuthPlugin } from "better-auth";
-import { APIError, createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
 import { emailOTP } from "better-auth/plugins";
 import { config, hostAllowed } from "../config";
 import { clientNet } from "../ratelimit";
-import { emailSignInEnabled, githubConfigured, googleConfigured, publicOrigin, testIdpEnabled } from "./config";
-import { authDb, dbDir, get } from "./db";
-import { rand32 } from "./ids";
+import { emailSignInEnabled, githubConfigured, googleConfigured, publicOrigin, RECENT_SIGN_IN_MS, sessionMaxDays, testIdpEnabled } from "./config";
+import { audit, authDb, dbDir, get, run, tx } from "./db";
+import { nowIso, rand32 } from "./ids";
 import { takeAll } from "./limits";
 import { sendSignInCode } from "./mail";
 
@@ -21,8 +22,15 @@ import { sendSignInCode } from "./mail";
 //     10 minutes and 10 per client per hour. The send answer never says whether an account exists. A code signs in
 //     the account with that verified email; a new account is made only for a pending invite, in Mode L, or (hosted)
 //     for ALIGN_FIRST_OWNER_EMAIL while the server has no account;
+//   - a passkey (@better-auth/passkey), added from /app/account by a person already signed in. The relying party is
+//     the public origin's host when hosted; in Mode L it is localhost, so passkeys work at http://localhost:<port>
+//     only (WebAuthn needs a domain, and 127.0.0.1 is not one). A passkey sign-in is a new session, so it is a
+//     fresh sign-in;
 //   - ALIGN_TEST_IDP=1 (never when hosted) adds email + password so the flow can be tested without OAuth apps.
 // Account linking is explicit only (/app/account); nothing is linked by a matching email.
+// Sessions: 7 days, extended on use (Better Auth's expiresIn and updateAge), and never longer than
+// ALIGN_SESSION_MAX_DAYS (30) after the sign-in that made them: an older session is deleted the next time it is
+// presented, and an hourly sweep deletes the rest.
 
 export const AUTH_BASE_PATH = "/api/v2/auth";
 /** Cookie prefix: Better Auth's session cookie is align_v2.session_token (__Secure- when hosted), never align_session. */
@@ -45,8 +53,16 @@ const otpIdentifier = (email: string) => `sign-in-otp-${email}`;
 /** Better Auth's "hashed" OTP storage: base64url(SHA-256(code)), unpadded. */
 const otpHash = (code: string) => createHash("sha256").update(code).digest("base64url");
 
-/** The email plugin's other routes (password reset, email change, code checks) are not part of Align. */
-const DISABLED_OTP_PATHS = [
+/** The email plugin's other routes (password reset, email change, code checks) are not part of Align. Nor are Better
+ *  Auth's own session revocation and passkey management routes: Align's are /api/v2/account/* (a recent sign-in where
+ *  it matters, and audited). */
+const DISABLED_PATHS = [
+  "/revoke-session",
+  "/revoke-sessions",
+  "/revoke-other-sessions",
+  "/passkey/list-user-passkeys",
+  "/passkey/update-passkey",
+  "/passkey/delete-passkey",
   "/email-otp/check-verification-otp",
   "/email-otp/verify-email",
   "/email-otp/request-password-reset",
@@ -74,11 +90,63 @@ function linkOrigin(headers: Headers | undefined): string {
   return host && hostAllowed(host) ? `http://${host}` : `http://127.0.0.1:${process.env.PORT || "3100"}`;
 }
 
+/** True when a sign-in at `signedInAt` is recent enough for a sensitive action (15 minutes). */
+export function isRecentSignIn(signedInAt: Date | string, now = Date.now()): boolean {
+  const t = new Date(signedInAt).getTime();
+  return Number.isFinite(t) && now - t <= RECENT_SIGN_IN_MS;
+}
+
+/** Better Auth routes that need a recent sign-in, and what the person is asked to sign in again for. */
+const RECENT_PATHS: Record<string, string> = {
+  "/passkey/generate-register-options": "add a passkey",
+  "/passkey/verify-registration": "add a passkey",
+  "/link-social": "link an account",
+};
+export const reauthMessage = (what: string) => `Sign in again to ${what}. This needs a sign-in from the last 15 minutes.`;
+
+/** The latest a session made at `createdAt` may last. */
+export const sessionCap = (createdAt: Date | string) => new Date(new Date(createdAt).getTime() + sessionMaxDays() * 86_400_000);
+
+/** The passkey relying party: the public origin's host when hosted; localhost on this server's port in Mode L. */
+export function passkeyParty(): { rpID: string; origin: string } {
+  const pub = publicOrigin();
+  if (config().hosted && pub) return { rpID: new URL(pub).hostname, origin: pub };
+  return { rpID: "localhost", origin: `http://localhost:${process.env.PORT || "3100"}` };
+}
+
+const g0 = globalThis as unknown as { __alignSessionSweep?: number };
+type HookCtx = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
+
+/** The absolute cap: the session this request presents is deleted if it is older than the cap (so every session read
+ *  after this, Better Auth's get-session and our webAuth and page reads alike, finds none), and at most hourly every
+ *  such session is deleted. */
+async function endCappedSessions(ctx: HookCtx) {
+  const cutoff = new Date(Date.now() - sessionMaxDays() * 86_400_000);
+  const token = await ctx.getSignedCookie(ctx.context.authCookies.sessionToken.name, ctx.context.secret);
+  if (token) {
+    await ctx.context.adapter.deleteMany({ model: "session", where: [{ field: "token", value: token }, { field: "createdAt", operator: "lt", value: cutoff }] });
+  }
+  if (Date.now() - (g0.__alignSessionSweep ?? 0) > 60 * 60 * 1000) {
+    g0.__alignSessionSweep = Date.now();
+    await ctx.context.adapter.deleteMany({ model: "session", where: [{ field: "createdAt", operator: "lt", value: cutoff }] });
+  }
+}
+
 const tooMany = () => new APIError("TOO_MANY_REQUESTS", { code: "rate_limited", message: "Too many codes were sent. Wait a few minutes, then try again." });
 
-/** Before every Better Auth request (and server-side api call): email-code send limits, and the unverified-email
- *  refusal. Anything else passes untouched. */
+/** Before every Better Auth request (and server-side api call): the absolute session cap, a recent sign-in for adding a
+ *  passkey or linking an account, email-code send limits, and the unverified-email refusal. */
 const beforeHook = createAuthMiddleware(async (ctx) => {
+  await endCappedSessions(ctx);
+  const what = RECENT_PATHS[ctx.path];
+  if (what) {
+    // No session: Better Auth answers 401 itself.
+    const s = await getSessionFromCtx(ctx);
+    if (s && !isRecentSignIn(s.session.createdAt)) throw new APIError("FORBIDDEN", { code: "reauth_required", message: reauthMessage(what) });
+    const name = (ctx.body as { name?: unknown } | undefined)?.name;
+    if (typeof name === "string" && name.trim().length > 100) throw new APIError("BAD_REQUEST", { code: "bad_request", message: "A passkey name is at most 100 characters" });
+    return;
+  }
   const body = (ctx.body ?? {}) as { email?: unknown; type?: unknown; otp?: unknown };
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   if (ctx.path === OTP_SEND) {
@@ -112,12 +180,32 @@ const beforeHook = createAuthMiddleware(async (ctx) => {
 /** Send requests whose delivery failed (lib/v2/mail.ts threw). Their code is already deleted. */
 const failedSends = new WeakSet<Request>();
 
-/** After a send request: a failed delivery fails the request (5xx), never a success that sent nothing. */
+/** After a send request: a failed delivery fails the request (5xx), never a success that sent nothing. After a passkey
+ *  is added: the audit row (no workspace, like device pairing). */
 const afterHook = createAuthMiddleware(async (ctx) => {
   if (ctx.path === OTP_SEND && ctx.request && failedSends.has(ctx.request)) {
     throw new APIError("INTERNAL_SERVER_ERROR", { code: "email_failed", message: "The sign-in email could not be sent. Try again later." });
   }
+  if (ctx.path === "/passkey/verify-registration") {
+    const r = ctx.context.returned as { id?: unknown; userId?: unknown } | undefined;
+    if (r && !(r instanceof Error) && typeof r.id === "string" && typeof r.userId === "string") {
+      const [id, userId] = [r.id, r.userId];
+      await tx(() => audit(null, userId, "passkey.added", id, nowIso()));
+    }
+  }
 });
+
+/** A passkey just signed someone in: its "last used" time (lib/v2/account.ts lists it). */
+async function notePasskeyUse(credentialId: string) {
+  const at = nowIso();
+  await tx(() =>
+    run(
+      "INSERT INTO v2_passkey_use (passkey_id, last_used_at) SELECT id, ? FROM ba_passkey WHERE credentialID = ? ON CONFLICT (passkey_id) DO UPDATE SET last_used_at = excluded.last_used_at",
+      at,
+      credentialId,
+    ),
+  );
+}
 
 export function authOptions(): BetterAuthOptions {
   const hosted = config().hosted;
@@ -150,6 +238,22 @@ export function authOptions(): BetterAuthOptions {
       }),
     );
   }
+  const party = passkeyParty();
+  plugins.push(
+    passkey({
+      rpID: party.rpID,
+      rpName: "Align",
+      origin: party.origin,
+      // Discoverable credentials, so a passkey signs in with no email typed (and through the email field's autofill).
+      authenticatorSelection: { residentKey: "required", userVerification: "preferred" },
+      schema: { passkey: { modelName: "ba_passkey" } },
+      authentication: {
+        async afterVerification({ clientData }) {
+          if (typeof clientData.id === "string") await notePasskeyUse(clientData.id);
+        },
+      },
+    }),
+  );
   const loopback = ["localhost", "127.0.0.1", "[::1]"];
   const port = process.env.PORT || "3100";
   return {
@@ -164,9 +268,27 @@ export function authOptions(): BetterAuthOptions {
     trustedOrigins: hosted && origin ? [origin] : [],
     socialProviders: social,
     plugins,
-    disabledPaths: DISABLED_OTP_PATHS,
+    disabledPaths: DISABLED_PATHS,
     hooks: { before: beforeHook, after: afterHook },
     databaseHooks: {
+      // The absolute cap: no session is ever extended past ALIGN_SESSION_MAX_DAYS after its sign-in. On a refresh, the
+      // session being refreshed is the one Better Auth just read (ctx.context.session).
+      session: {
+        create: {
+          async before(s) {
+            const cap = sessionCap(s.createdAt ?? new Date());
+            if (s.expiresAt && new Date(s.expiresAt) > cap) return { data: { ...s, expiresAt: cap } };
+          },
+        },
+        update: {
+          async before(s, ctx) {
+            const createdAt = ctx?.context.session?.session.createdAt;
+            if (!s.expiresAt || !createdAt) return;
+            const cap = sessionCap(createdAt);
+            if (new Date(s.expiresAt) > cap) return { data: { ...s, expiresAt: cap } };
+          },
+        },
+      },
       user: {
         create: {
           // An email code makes an account only for a pending invite, in Mode L, or for the hosted first owner.
@@ -185,7 +307,8 @@ export function authOptions(): BetterAuthOptions {
     // Linking is explicit only: POST /api/v2/auth/link-social from /app/account. Never by a matching email.
     account: { modelName: "ba_account", accountLinking: { enabled: true, disableImplicitLinking: true } },
     user: { modelName: "ba_user" },
-    session: { modelName: "ba_session" },
+    // 7 days, extended on use; freshAge matches Align's recent sign-in, for Better Auth's own fresh-session checks.
+    session: { modelName: "ba_session", expiresIn: 7 * 24 * 60 * 60, updateAge: 24 * 60 * 60, freshAge: RECENT_SIGN_IN_MS / 1000 },
     verification: { modelName: "ba_verification" },
     rateLimit: {
       enabled: true,
@@ -199,6 +322,8 @@ export function authOptions(): BetterAuthOptions {
         // The email-code limits that matter (per email, per client) are ours, in beforeHook.
         [OTP_SEND]: { window: 60, max: 20 },
         [OTP_SIGN_IN]: { window: 60, max: 10 },
+        "/passkey/generate-authenticate-options": { window: 60, max: 20 },
+        "/passkey/verify-authentication": { window: 60, max: 10 },
       },
     },
     telemetry: { enabled: false },
@@ -220,7 +345,8 @@ export function getAuth(): Auth {
   return (g.__alignV2Auth ??= betterAuth(authOptions()));
 }
 
-/** Better Auth's own tables (ba_user, ba_session, ba_account, ba_verification), via its programmatic migrations. */
+/** Better Auth's own tables (ba_user, ba_session, ba_account, ba_verification, ba_passkey), via its programmatic
+ *  migrations. */
 export async function migrateAuth() {
   const { runMigrations } = await getMigrations(authOptions());
   await runMigrations();

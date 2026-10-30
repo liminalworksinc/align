@@ -54,10 +54,12 @@ export function useApi<T>(path: string | null) {
   return { ...state, reload };
 }
 
-/** Run an action, keep its error for display, reload afterwards. */
+/** Run an action, keep its error for display, reload afterwards. A 403 reauth_required (the action needs a sign-in from
+ *  the last 15 minutes) is kept as `reauth` instead, with its message, so the page can show <SignInAgain>. */
 export function useAction() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reauth, setReauth] = useState<string | null>(null);
   const run = useCallback(async (fn: () => Promise<unknown>, after?: () => void) => {
     setBusy(true);
     setError(null);
@@ -66,13 +68,14 @@ export function useAction() {
       after?.();
       return true;
     } catch (e) {
-      setError((e as Error).message);
+      if (e instanceof ApiError && e.code === "reauth_required") setReauth(e.message);
+      else setError((e as Error).message);
       return false;
     } finally {
       setBusy(false);
     }
   }, []);
-  return { busy, error, run, setError };
+  return { busy, error, run, setError, reauth, setReauth };
 }
 
 export interface WsSummary {
@@ -97,8 +100,30 @@ async function signOut() {
   go("/app/sign-in");
 }
 
-/** Page frame: top bar (workspace switcher, devices, sign out) and, inside a workspace, its tabs. */
-export function Shell({ me, ws, tab, children }: { me: { name: string; email: string }; ws?: string; tab?: string; children: ReactNode }) {
+/** The "add a passkey" prompt under the top bar, for a person with no passkey who has not said "Not now". */
+function PasskeyPrompt() {
+  const [open, setOpen] = useState(true);
+  if (!open) return null;
+  const notNow = () => {
+    setOpen(false);
+    void fetch("/api/v2/account/passkey-prompt", { method: "DELETE", credentials: "same-origin" }).catch(() => undefined);
+  };
+  return (
+    <div id="passkey-prompt" className="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-violet-50 px-6 py-2 text-[15px] text-zinc-800">
+      <span className="flex-1">Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code. A passkey can&apos;t be phished.</span>
+      <Link href="/app/account#passkeys" className="font-medium text-violet-700 hover:underline">
+        Add a passkey
+      </Link>
+      <button type="button" onClick={notNow} className="text-zinc-600 hover:text-zinc-900">
+        Not now
+      </button>
+    </div>
+  );
+}
+
+/** Page frame: top bar (workspace switcher, devices, sign out), the passkey prompt when due and, inside a workspace,
+ *  its tabs. */
+export function Shell({ me, ws, tab, children }: { me: { name: string; email: string; passkeyPrompt?: boolean }; ws?: string; tab?: string; children: ReactNode }) {
   const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
   const current = list.data?.workspaces.find((w) => w.id === ws);
   return (
@@ -139,6 +164,7 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
           </button>
         </nav>
       </header>
+      {me.passkeyPrompt && <PasskeyPrompt />}
       {ws && (
         <nav className="flex flex-wrap gap-1 border-b border-zinc-200 px-6 pt-2" aria-label="Workspace">
           <span className="mr-4 self-center text-[15px] text-zinc-500">
@@ -161,7 +187,8 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
   );
 }
 
-/** The recent-sign-in prompt (device approval, app consent): sign out, then sign in again and come back to `next`. */
+/** The recent-sign-in prompt (device approval, app consent, and any action answered 403 reauth_required): sign out,
+ *  then sign in again and come back to `next`. */
 export function SignInAgain({ me, next, children }: { me: { email: string }; next: string; children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const again = async () => {

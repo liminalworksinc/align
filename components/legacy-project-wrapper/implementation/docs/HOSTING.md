@@ -24,7 +24,8 @@ retention schedule in the spec.
 | Routes | Only `/app*`, `/api/v2/*`, `/api/mcp`, `/oauth/*`, `/.well-known/*`, `/api/oauth/*` and Next's static assets. `/` redirects to `https://<host>/app`. **Every other path is 404** `{"error":"Not found"}`, so a route added later stays closed until it is added to `proxy.ts`. |
 | Hosts | Only the host names in `ALIGN_HOSTS` are served. Every other Host gets 421, loopback included. |
 | Proxy | Without `X-Forwarded-Proto: https`, 403 `{"error":"Use https"}`. Without `Fly-Client-IP`, 403 `{"error":"Use the public address"}`. |
-| Sign-in | Email one-time codes through an HTTPS email API, and Google or GitHub when configured. No account is made at startup. An email code creates an account only for a pending invite, or for `ALIGN_FIRST_OWNER_EMAIL` while the server has no account. The test identity provider is refused. |
+| Sign-in | Email one-time codes through an HTTPS email API, and Google or GitHub when configured; passkeys (added from `/app/account`) with the `ALIGN_PUBLIC_ORIGIN` host as relying party. No account is made at startup. An email code creates an account only for a pending invite, or for `ALIGN_FIRST_OWNER_EMAIL` while the server has no account. The test identity provider is refused. |
+| Sessions | 7 days, extended on use, and never more than `ALIGN_SESSION_MAX_DAYS` (default 30) after the sign-in. Sensitive actions need a sign-in from the last 15 minutes. **Sign out everywhere** on `/app/account` ends every session of the person, and optionally unpairs their devices and disconnects their AI apps. |
 | Cookies | `__Secure-align_v2.session_token`; every cookie-authenticated write must carry `Origin: https://<host>` exactly. |
 | Logs | Server errors log only the error's name, never a message, body or path. Sign-in codes are never logged. |
 
@@ -41,6 +42,7 @@ ever kept a refused process up, `proxy.ts` would still answer 503 to everything.
 - `ALIGN_PUBLIC_ORIGIN`: a bare `https://<host>` origin whose host is in `ALIGN_HOSTS`.
 - A way to sign in: all three of `ALIGN_EMAIL_API_URL` (https), `ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM`, or
   Google's or GitHub's client id and secret (each pair together).
+- `ALIGN_SESSION_MAX_DAYS`, when set: a whole number of days from 1 to 365.
 - These must be unset: `ALIGN_TEST_IDP`, `ALIGN_LOCAL_OWNER_EMAIL`. `ALIGN_PUBLIC=1` is refused in every mode.
 
 `scripts/test-v2.mjs` checks every refusal on a production server, and `scripts/test-image.sh` checks one on the
@@ -55,6 +57,7 @@ built image.
 | `ALIGN_HOSTS` | `fly.toml` | the app's host name, e.g. `align-pg-draft.fly.dev` |
 | `ALIGN_PUBLIC_ORIGIN` | `fly.toml` | `https://<the ALIGN_HOSTS name>` |
 | `ALIGN_FIRST_OWNER_EMAIL` | `fly.toml` | optional: the one address an email code may make an account for while the server has none |
+| `ALIGN_SESSION_MAX_DAYS` | `fly.toml` | optional: the absolute session cap in days, 1 to 365 (default 30) |
 | `ALIGN_EMAIL_FROM` | `fly.toml` | e.g. `Align <signin@example.com>` |
 | `ALIGN_EMAIL_API_URL` | `fly.toml` | a Resend-compatible email API, https (e.g. `https://api.resend.com/emails`) |
 | `ALIGN_EMAIL_API_KEY` | `fly secrets` | that API's key |
