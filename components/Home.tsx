@@ -20,7 +20,7 @@ import { agreementStatus } from "@/components/launch";
 import { accepted, changedToday, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, SESSION_ENDED, useAlign, type Selection } from "@/components/useAlign";
-import { NO_ANSWER_HOSTED, NO_ANSWER_WORKSPACE_LOCAL, ROLE_SWITCH, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { NO_ANSWER_HOSTED, NO_ANSWER_WORKSPACE_LOCAL, roleSwitch, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
 
 // v6 rail (LIM-2424). One nav for teams and leadership; leadership also keeps its Company goal entry (OrgView).
 // `also` lists the views a nav item stays highlighted for (the record under Decisions, a review under Your turn).
@@ -263,7 +263,7 @@ function WorkspaceLogin({ workspace, hosted, onDone, ended, elsewhere, initialRo
         >
           {busy ? "Signing in…" : `Sign in as ${team}`}
         </button>
-        <p className="mt-3 text-center text-[13px] text-zinc-500">Testing alone? Sign in as any team, then use Switch team.</p>
+        <p className="mt-3 text-center text-[13px] text-zinc-500">{roleSwitch(info.roles.find((r) => r.id === "product")?.team ?? "the team asking for the change")}</p>
       </form>
     </main>
   );
@@ -316,7 +316,7 @@ function NorthstarLogin({ onDone, L, elsewhere, initialRole }: { onDone: () => v
           <>
             <p className="mb-2 text-[16px] text-zinc-600">{L.company}. Choose who you are; each person signs in separately.</p>
             {L.companyNote && <p className="mb-2 text-[14px] text-zinc-500">{L.companyNote}</p>}
-            <p className="mb-6 text-[14px] text-zinc-500">{ROLE_SWITCH}</p>
+            <p className="mb-6 text-[14px] text-zinc-500">{roleSwitch(L.team.product)}</p>
           </>
         ) : (
           <p className="mb-6 text-[16px] text-zinc-600">Northstar Security, a made-up company for this demo. Choose who you are; each person signs in separately.</p>
