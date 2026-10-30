@@ -7,8 +7,8 @@ kind: product
 # Align
 
 Align is a web application, a read-only MCP server and a local agent package. When
-leadership changes a priority, Align identifies the goals and cross-team dependencies
-the change puts at risk, lets the affected team propose a change to the owning team's
+leadership changes a priority, Align re-parents the team goals onto the new company goal,
+marks the affected cross-team dependency as unconfirmed so the screens show it at risk, lets the affected team propose a change to the owning team's
 goal with sandbox-tested evidence attached, and lets only the goal's owner approve it.
 Approval creates a new goal version, records the decision, and notifies running coding
 agents, which read the newly approved plan from the MCP server before acting.

@@ -57,8 +57,8 @@ workspace's **Agents on this plan** card (`/w/<id>` only) and the signed-in pers
 the company and timeframe, a status badge, reset controls, the person, **Switch team ▾** (custom) and
 **Sign out**. A nav item stays highlighted for its sub-views (Your turn for Proposals, Goals for the
 team view, Scenario Studio for Evidence, Decisions for the record). Opening any view closes an open
-drawer. On a hosted server (`HOSTED=1`), `/` and `/setup` redirect to `/new`, and only `/new`,
-`/w/<id>`, the OAuth pages and their APIs exist (plus the goal sessions pages under `/app` and
+drawer. On a hosted server (`HOSTED=1`), `/` and `/setup` redirect to `/new`, and of the pages only `/new`,
+`/w/<id>` and the OAuth pages exist, together with the APIs on the hosted allowlist (see the `workspaces` part) (plus the goal sessions pages under `/app` and
 `/api/v2` when `ALIGN_GOAL_SESSIONS=1`; with the flag unset those answer 404 in every mode).
 
 ### Requirement: Northstar sign-in
