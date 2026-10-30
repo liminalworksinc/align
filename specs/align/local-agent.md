@@ -32,7 +32,7 @@ seconds (always at the end of a turn) a hook starts a detached `align sync --hoo
 | `align status` | Identity, last sync, hook install state and hash, outbox, shares, unpriced rows, latches | no |
 | `align sessions [--all] [--json]` | Local sessions with tokens, basis and list-price estimate | no |
 | `align goals [--workspace <name\|id>] [--refresh] [--json]` | Cached goal feed (`--refresh` refetches) | for `--refresh` |
-| `align share <session\|--latest> [--cwd [dir]] --workspace W --goal <ref\|none> [--alias <name>] [--from start\|now] [--signals] [--yes]` | Share one session | yes |
+| `align share <session\|--latest> [--cwd <dir>] --workspace W --goal <ref\|none> [--alias <name>] [--from start\|now] [--signals] [--yes]` | Share one session | yes |
 | `align share --dir [<folder>] --workspace W --goal <ref\|none> [--signals] [--yes]` | Folder rule: share every new session started in a folder | yes |
 | `align unshare --dir [<folder>]` / `align stop-sharing --dir [<folder>]` | Remove a folder rule | no |
 | `align rules` | List folder rules | no |
@@ -78,8 +78,12 @@ never an `Origin` header, and time out after 15 s. Endpoints used: `POST /api/v2
 ### Requirement: CLI entry point and exit codes
 
 The `align` CLI SHALL print its help for `align`, `align help`, `--help` or `-h`, print `0.2.0` for
-`align version` or `--version`, report errors on stderr as `align: <message>`, and exit 2 for usage errors and 1
-for any other failure.
+`align version` or `--version`, report errors on stderr as `align: <message>`, and exit 2 for the usage errors it
+detects itself (such as an unknown command, not being signed in for a command that needs it, a missing, unmatched or ambiguous `<session>`, a missing `--goal`, an unknown
+workspace, a non-bindable goal, `align bind` on a session that was never shared, sharing a session that is already
+shared, a bad `--from`, an unknown `align latch` subcommand, no cached workspaces) and 1 for any other failure,
+including a goal reference that matches no cached goal and option-parsing errors such as an unknown flag or a string
+option given without its value (so `--cwd` needs a folder argument, or `--cwd=` for the current folder).
 
 #### Scenario: Unknown command
 
