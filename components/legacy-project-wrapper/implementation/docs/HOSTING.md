@@ -60,6 +60,11 @@ test-tenancy H1 checks every one of these on a production server: each must exit
 | `ALIGN_INTERVIEW_API_KEY` | `fly secrets` | optional. An Anthropic API key for the intake interview on `/new`. Unset, the interview is off and its route is 404. |
 | `ALIGN_SIGNUP_CODES` | `fly secrets` | one code per planned tester, e.g. five of `openssl rand -hex 8`, comma-separated. To add testers later, set the list again with the new codes added. |
 | `ALIGN_*_PASSCODE` (3) | `fly secrets` | random; unused while Northstar is off |
+| `BETTER_AUTH_SECRET` | `fly secrets` | `openssl rand -hex 32` (32+ characters) |
+| `ALIGN_PUBLIC_ORIGIN` | `fly.toml` | `https://<the ALIGN_HOSTS name>` |
+| `ALIGN_EMAIL_API_URL`, `ALIGN_EMAIL_API_KEY`, `ALIGN_EMAIL_FROM` | `fly.toml` / `fly secrets` | a Resend-compatible email API (https) for sign-in codes: all three or none. Startup needs these, or Google or GitHub. |
+| `GOOGLE_CLIENT_ID`/`_SECRET`, `GITHUB_CLIENT_ID`/`_SECRET` | `fly secrets` | optional, each pair together |
+| `ALIGN_FIRST_OWNER_EMAIL` | `fly.toml` | optional: the one address an email code may make an account for while the server has none. Everyone else needs an invite (or Google or GitHub). |
 
 ## The volume
 

@@ -1,17 +1,21 @@
 #!/usr/bin/env node
-// Goal sessions hosted-server tests (docs/v2/WIRE.md). Builds once, then starts its own production servers (next start)
-// on <port> with a temp ALIGN_DATA_DIR, one per phase:
-//   off     ALIGN_GOAL_SESSIONS unset                          -> every /app and /api/v2 path is 404, no v2 database
-//   on      ALIGN_GOAL_SESSIONS=1 ALIGN_GOAL_SESSIONS_TEST_IDP=1 (Mode L) -> identity, RBAC, devices, sessions, usage, spend, directives,
-//                                                      directive cursor, receipts, alignments, stop sharing, delete, web UI
-//   hosted  HOSTED=1 ALIGN_GOAL_SESSIONS=1                      -> startup refusals for v2 settings, then the v2 routes behind
-//                                                      the hosted host/https/edge checks
+// v2 server tests (docs/v2/WIRE.md). Builds once, then starts its own production servers (next start) on <port> with a
+// temp ALIGN_DATA_DIR, one per phase. v2 is always on: there is no flag.
+//   local   Mode L, no settings        -> every /app and /api/v2 path is served; the local owner and its printed code;
+//                                         email codes (hashed, 5 min, 3 tries, send limits, no account disclosure);
+//                                         sign-in-link; test IdP off
+//   on      Mode L, ALIGN_TEST_IDP=1    -> identity, RBAC, devices (recent sign-in), sessions, usage, spend, directives,
+//                                         directive cursor, receipts, alignments, stop sharing, delete, web UI
+//   hosted  HOSTED=1                    -> startup refusals for v2 settings, then the v2 routes behind the hosted
+//                                         host/https/edge checks; then email codes through a fake HTTPS email API
+//                                         (first owner, invites, unknown addresses, API failure)
 // Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port)
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -87,28 +91,31 @@ function hosted(method, p, { body, cookie, headers = {} } = {}) {
 
 // ---- servers ----
 let server = null;
-const CLEAN_KEYS = ["AI_GATEWAY_API_KEY", "ALIGN_CAPTURE", "ALIGN_SECRET", "ALIGN_URL", "ALIGN_MCP_URL", "ALIGN_ALLOW_OPEN_CREATE", "ALIGN_SIGNUP_CODE", "ALIGN_SIGNUP_CODES", "ALIGN_MAX_WORKSPACES", "ALIGN_CREATE_PER_HOUR", "ALIGN_DATA_DIR", "ALIGN_PUBLIC", "HOSTED", "ALIGN_HOSTS", "ALIGN_NORTHSTAR_PUBLIC", "ALIGN_PRODUCT_PASSCODE", "ALIGN_SECURITY_PASSCODE", "ALIGN_LEADERSHIP_PASSCODE", "ALIGN_DELETE_BY", "ALIGN_GOAL_SESSIONS", "ALIGN_GOAL_SESSIONS_TEST_IDP", "BETTER_AUTH_SECRET", "BETTER_AUTH_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "ALIGN_PUBLIC_ORIGIN"];
+let stdout = ""; // the current server's standard output (Mode L prints sign-in links there)
+const CLEAN_KEYS = ["AI_GATEWAY_API_KEY", "ALIGN_CAPTURE", "ALIGN_SECRET", "ALIGN_URL", "ALIGN_MCP_URL", "ALIGN_ALLOW_OPEN_CREATE", "ALIGN_SIGNUP_CODE", "ALIGN_SIGNUP_CODES", "ALIGN_MAX_WORKSPACES", "ALIGN_CREATE_PER_HOUR", "ALIGN_DATA_DIR", "ALIGN_PUBLIC", "HOSTED", "ALIGN_HOSTS", "ALIGN_NORTHSTAR_PUBLIC", "ALIGN_PRODUCT_PASSCODE", "ALIGN_SECURITY_PASSCODE", "ALIGN_LEADERSHIP_PASSCODE", "ALIGN_DELETE_BY", "ALIGN_GOAL_SESSIONS", "ALIGN_GOAL_SESSIONS_TEST_IDP", "ALIGN_TEST_IDP", "ALIGN_EMAIL_API_URL", "ALIGN_EMAIL_API_KEY", "ALIGN_EMAIL_FROM", "ALIGN_FIRST_OWNER_EMAIL", "ALIGN_LOCAL_OWNER_EMAIL", "BETTER_AUTH_SECRET", "BETTER_AUTH_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "ALIGN_PUBLIC_ORIGIN"];
 async function startServer(env) {
   rmSync(NS_STATE, { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
   const clean = { ...process.env };
   for (const k of CLEAN_KEYS) delete clean[k];
-  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "ignore", "pipe"], detached: true });
+  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "pipe", "pipe"], detached: true });
   let exited = false;
   let stderr = "";
+  stdout = "";
   server.stderr.on("data", (c) => (stderr += c));
+  server.stdout.on("data", (c) => (stdout += c));
   server.on("exit", () => (exited = true));
   let last = 0;
   for (let i = 0; i < 90 && !exited; i++) {
     try {
       const r = env.HOSTED === "1" ? await hosted("GET", "/api/workspaces/config") : await fetch(`${BASE}/api/workspaces/config`);
       last = r.status;
-      if (r.status === 200) return { started: true, stderr: () => stderr, exited, last };
+      if (r.status === 200) return { started: true, stderr: () => stderr, stdout: () => stdout, exited, last };
       if (r.status === 503) break;
     } catch {}
     await sleep(1000);
   }
-  return { started: false, stderr: () => stderr, exited, last };
+  return { started: false, stderr: () => stderr, stdout: () => stdout, exited, last };
 }
 async function stopServer() {
   if (!server) return;
@@ -133,7 +140,7 @@ process.on("exit", () => {
     } catch {}
 });
 
-// ---- v2 routes on disk (for the flag-off walk) ----
+// ---- v2 routes on disk (for the always-on walk) ----
 function v2Routes() {
   const out = [];
   const walk = (dir, url) => {
@@ -160,6 +167,32 @@ async function signUp(who, name, email) {
   // Better Auth wants the Origin a browser sends on these.
   const r = await call(who, "POST", "/api/v2/auth/sign-up/email", { headers: { origin: BASE }, body: { name, email, password: `pw-${who}-123456` } });
   return { status: r.status, id: r.json?.user?.id, cookie: cookieOf(r.setCookies), setCookies: r.setCookies, who, email, name };
+}
+
+/** Where a page response sends the browser: a 3xx Location, or the refresh tag Next streams for a redirect made after
+ *  the page shell was sent (a redirect inside <Suspense>). */
+function redirectTarget(r) {
+  const loc = r.headers.get?.("location");
+  if (r.status >= 300 && r.status < 400 && loc) return loc;
+  const m = /id="__next-page-redirect" http-equiv="refresh" content="\d;url=([^"]*)"/.exec(r.text);
+  return m ? m[1].replace(/&amp;/g, "&") : null;
+}
+
+// Email one-time codes. Mode L prints each link and writes it to <data>/v2/sign-in.txt; the test reads that file.
+const SEND = "/api/v2/auth/email-otp/send-verification-otp";
+const OTP_SIGN_IN = "/api/v2/auth/sign-in/email-otp";
+// Better Auth wants the Origin a browser sends on these (fetch sends Sec-Fetch-Mode, so it counts as a browser).
+const sendCode = (who, email) => call(who, "POST", SEND, { headers: { origin: BASE }, body: { email, type: "sign-in" } });
+const codeSignIn = (who, email, otp) => call(who, "POST", OTP_SIGN_IN, { headers: { origin: BASE }, body: { email, otp } });
+const signInLine = (dir) => (existsSync(path.join(dir, "v2", "sign-in.txt")) ? readFileSync(path.join(dir, "v2", "sign-in.txt"), "utf8") : "");
+const codeIn = (text) => /[?&]code=(\d{6})/.exec(text)?.[1] ?? "";
+const otpHash = (code) => createHash("sha256").update(code).digest("base64url");
+const LINE_RE = (email) => new RegExp(`^Align sign-in for ${email.replace(/[.]/g, "\\.")}: http://127\\.0\\.0\\.1:${PORT}/app/sign-in\\?email=${encodeURIComponent(email).replace(/[.]/g, "\\.")}&code=\\d{6}$`, "m");
+/** Make a Better Auth session look as if it signed in `minutes` ago (the test has file access, like a host admin). */
+function ageSession(cookie, minutes) {
+  const value = /align_v2\.session_token=([^;]+)/.exec(cookie)?.[1] ?? "";
+  const token = decodeURIComponent(value).split(".")[0];
+  return withDb((d) => d.prepare("UPDATE ba_session SET createdAt = ? WHERE token = ?").run(new Date(Date.now() - minutes * 60 * 1000).toISOString(), token).changes);
 }
 
 let dbFile = "";
@@ -224,30 +257,132 @@ function invariantHolds(s) {
 }
 
 const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "align-v2-"));
-const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "", ALIGN_GOAL_SESSIONS: "" } });
+const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "" } });
 if (build.status !== 0) {
   console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
   process.exit(1);
 }
 
 try {
-  // ======== phase off: ALIGN_GOAL_SESSIONS unset ========
-  const offDir = path.join(tmpRoot, "off");
-  await mustStart({ ALIGN_DATA_DIR: offDir });
+  // ======== phase local: Mode L with no settings (v2 always on, the local owner, email codes) ========
+  const localDir = path.join(tmpRoot, "local");
+  const localRun = await mustStart({ ALIGN_DATA_DIR: localDir });
+  dbFile = path.join(localDir, "v2", "align.sqlite");
   const routes = v2Routes();
   const probes = await Promise.all(routes.flatMap((r) => [call("anon", "GET", r), call("anon", "POST", r, { body: {} })]));
-  const open = routes.filter((_, i) => probes[2 * i].status !== 404 || probes[2 * i + 1].status !== 404);
-  check(`off: all ${routes.length} v2 paths (/app pages and /api/v2 routes) -> 404 for GET and POST`, routes.length >= 40 && open.length === 0, `open: ${open.join(" ")}`);
-  const offAuth = await call("anon", "POST", "/api/v2/auth/sign-up/email", { body: { name: "x", email: "x@example.test", password: "password-123" } });
-  check("off: Better Auth endpoints are 404 too", offAuth.status === 404, `${offAuth.status}`);
-  check("off: no v2 database is created", !existsSync(path.join(offDir, "v2")), "data/v2 exists");
+  // The old flag answered {"error":"Not found"} from proxy.ts; a route's own 404 is {"error":"not_found"} (or Better Auth's).
+  const closed = routes.filter((_, i) => [probes[2 * i], probes[2 * i + 1]].some((r) => r.status === 404 && r.json?.error === "Not found"));
+  check(`local: all ${routes.length} v2 paths (/app pages and /api/v2 routes) are served with no flag set`, routes.length >= 40 && closed.length === 0, `closed: ${closed.join(" ")}`);
   const v1 = await call("anon", "GET", "/api/workspaces/config");
-  check("off: v1 routes still answer", v1.status === 200, `${v1.status}`);
+  check("local: v1 routes still answer", v1.status === 200, `${v1.status}`);
+  const owners = withDb((d) => d.prepare("SELECT id, name, email, emailVerified FROM ba_user").all());
+  check("local owner: the first start makes exactly one account, Local owner <owner@align.localhost>, email verified", owners.length === 1 && owners[0].name === "Local owner" && owners[0].email === "owner@align.localhost" && owners[0].emailVerified === 1, JSON.stringify(owners));
+  check("local owner: in no workspace", withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_members").get().n) === 0, "");
+  const ownerLine = LINE_RE("owner@align.localhost");
+  check("local owner: stdout prints `Align sign-in for owner@align.localhost: http://127.0.0.1:<port>/app/sign-in?email=…&code=<6 digits>`", ownerLine.test(localRun.stdout()), localRun.stdout().slice(-400));
+  const signInFile = path.join(localDir, "v2", "sign-in.txt");
+  const firstCode = codeIn(signInLine(localDir));
+  check("local owner: sign-in.txt holds the same line, mode 0600", ownerLine.test(signInLine(localDir)) && (statSync(signInFile).mode & 0o777) === 0o600 && localRun.stdout().includes(signInLine(localDir).trim()), `${(statSync(signInFile).mode & 0o777).toString(8)} ${signInLine(localDir)}`);
+  const otpRows = withDb((d) => d.prepare("SELECT identifier, value, expiresAt FROM ba_verification").all());
+  check(
+    "email code: stored hashed (SHA-256), never the code itself, with 0 attempts and a 5-minute expiry",
+    otpRows.length === 1 && otpRows[0].identifier === "sign-in-otp-owner@align.localhost" && otpRows[0].value === `${otpHash(firstCode)}:0` && !otpRows[0].value.includes(firstCode) && Math.abs(Date.parse(otpRows[0].expiresAt) - Date.now() - 5 * 60 * 1000) < 60 * 1000,
+    JSON.stringify(otpRows),
+  );
+  const noTestIdp = await call("anon", "POST", "/api/v2/auth/sign-up/email", { headers: { origin: BASE }, body: { name: "x", email: "x@example.test", password: "password-123" } });
+  check("test IdP: without ALIGN_TEST_IDP=1 email + password sign-up is refused, no account made", noTestIdp.status !== 200 && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_user").get().n) === 1, `${noTestIdp.status}`);
+  const lPage = await call("anon", "GET", "/app/sign-in");
+  check("ui: the Mode L sign-in page offers the email code (Send code) and nothing else", lPage.status === 200 && lPage.text.includes("Send code") && !lPage.text.includes("Test sign-in") && !lPage.text.includes("Continue with Google") && !lPage.text.includes("Continue with GitHub") && !lPage.text.includes("No sign-in method"), `${lPage.status}`);
+  const linkPage = await call("anon", "GET", `/app/sign-in?email=${encodeURIComponent("owner@align.localhost")}&code=${firstCode}&next=%2Fapp%2Fdevices`);
+  check(
+    "ui: the link in a code message only fills the form (code step, email and code filled, Mode L hint) and sets no cookie",
+    linkPage.status === 200 && linkPage.text.includes(`value="${firstCode}"`) && linkPage.text.includes('value="owner@align.localhost"') && linkPage.text.includes("npm run sign-in-link") && linkPage.setCookies.length === 0,
+    `${linkPage.status} ${linkPage.setCookies.join(" ")}`,
+  );
+  const stillThere = withDb((d) => d.prepare("SELECT value FROM ba_verification").get()?.value);
+  check("email code: opening the link spends nothing (the code is still stored, 0 attempts)", stillThere === `${otpHash(firstCode)}:0`, stillThere);
+  const otpWrong = await codeSignIn("anon", "owner@align.localhost", firstCode === "000000" ? "000001" : "000000");
+  check("email code: a wrong code -> 400 INVALID_OTP, no cookie", otpWrong.status === 400 && otpWrong.json?.code === "INVALID_OTP" && otpWrong.setCookies.length === 0, otpWrong.text);
+  const ownerIn = await codeSignIn("LO", "owner@align.localhost", firstCode);
+  const LO = { who: "LO", cookie: cookieOf(ownerIn.setCookies) };
+  const loMe = await call("LO", "GET", "/api/v2/me", { cookie: LO.cookie });
+  check("email code: the printed code signs the local owner in (session cookie; /me is Local owner)", ownerIn.status === 200 && loMe.status === 200 && loMe.json.user.email === "owner@align.localhost", `${ownerIn.status} ${loMe.text}`);
+  const otpReuse = await codeSignIn("anon", "owner@align.localhost", firstCode);
+  check("email code: a code works once (reuse -> 400)", otpReuse.status === 400, otpReuse.text);
+  const linkScript = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT), ALIGN_LOCAL_OWNER_EMAIL: "" } });
+  const scriptCode = codeIn(signInLine(localDir));
+  for (let i = 0; i < 20 && !localRun.stdout().includes(signInLine(localDir).trim()); i++) await sleep(100); // the server's stdout arrives through a pipe
+  check(
+    "sign-in-link: asks the running server for a fresh code (exit 0); the server prints it and rewrites sign-in.txt; the script never shows the code",
+    linkScript.status === 0 && scriptCode && scriptCode !== firstCode && ownerLine.test(signInLine(localDir)) && localRun.stdout().includes(signInLine(localDir).trim()) && !linkScript.stdout.includes(scriptCode) && /printed in the terminal/.test(linkScript.stdout),
+    `${linkScript.status} ${linkScript.stdout} ${linkScript.stderr}`,
+  );
+  let clientSends = 1; // the script's send; the server's own send for the local owner has no client
+  // A new address in Mode L: the code is printed for any email, and signing in makes the account.
+  const anaSend = await sendCode("anon", "Ana@Example.test");
+  clientSends++;
+  const ownerSend = await sendCode("anon", "owner@align.localhost");
+  clientSends++;
+  check("email code: the send answer is the same for an address with no account as for one with an account (no disclosure)", anaSend.status === 200 && ownerSend.status === 200 && anaSend.text === ownerSend.text && anaSend.text === '{"success":true}', `${anaSend.status} ${anaSend.text} | ${ownerSend.status} ${ownerSend.text}`);
+  const lastCodeFor = (email) => codeIn(stdout.split("\n").filter((l) => l.includes(`?email=${encodeURIComponent(email)}&`)).pop() ?? "");
+  const anaCode = lastCodeFor("ana@example.test");
+  const anaIn = await codeSignIn("anon", "ana@example.test", anaCode);
+  const ana = withDb((d) => d.prepare("SELECT name, emailVerified FROM ba_user WHERE email = ?").get("ana@example.test"));
+  check("accounts: in Mode L a valid code for a new address creates its account (email verified, named from the address) and signs in", anaIn.status === 200 && ana?.emailVerified === 1 && ana?.name === "ana" && cookieOf(anaIn.setCookies).includes("align_v2.session_token"), `${anaIn.status} ${anaIn.text} ${JSON.stringify(ana)}`);
+  // Expired and used-up codes.
+  withDb((d) => d.prepare("UPDATE ba_verification SET expiresAt = ? WHERE identifier = ?").run(new Date(Date.now() - 1000).toISOString(), "sign-in-otp-owner@align.localhost"));
+  const ownerCode2 = lastCodeFor("owner@align.localhost");
+  const expired = await codeSignIn("anon", "owner@align.localhost", ownerCode2);
+  check("email code: a code older than 5 minutes -> 400 OTP_EXPIRED, nobody signed in", expired.status === 400 && expired.json?.code === "OTP_EXPIRED" && expired.setCookies.length === 0, expired.text);
+  await sendCode("anon", "tries@example.test");
+  clientSends++;
+  const triesCode = codeIn(signInLine(localDir));
+  const otpBad = triesCode === "000000" ? "000001" : "000000";
+  const tries = [];
+  for (let i = 0; i < 3; i++) tries.push(await codeSignIn("anon", "tries@example.test", otpBad));
+  const fourth = await codeSignIn("anon", "tries@example.test", triesCode);
+  check(
+    "email code: 3 wrong tries, then even the right code -> 403 TOO_MANY_ATTEMPTS; the code is gone and no account is made",
+    tries.every((r) => r.status === 400 && r.json?.code === "INVALID_OTP") && fourth.status === 403 && fourth.json?.code === "TOO_MANY_ATTEMPTS" && !withDb((d) => d.prepare("SELECT 1 FROM ba_verification WHERE identifier = ?").get("sign-in-otp-tries@example.test")) && !withDb((d) => d.prepare("SELECT 1 FROM ba_user WHERE email = ?").get("tries@example.test")),
+    `${tries.map((r) => r.status).join(",")} ${fourth.status} ${fourth.text}`,
+  );
+  const onlySignIn = await call("anon", "POST", SEND, { headers: { origin: BASE }, body: { email: "x@example.test", type: "forget-password" } });
+  const resetRoute = await call("anon", "POST", "/api/v2/auth/email-otp/request-password-reset", { headers: { origin: BASE }, body: { email: "x@example.test" } });
+  check("email code: only sign-in codes are sent (other types -> 400); the plugin's other routes are off (404)", onlySignIn.status === 400 && resetRoute.status === 404, `${onlySignIn.status} ${resetRoute.status}`);
+  // Send limits: 3 per email per 10 minutes, 10 per client per hour.
+  const lim = [];
+  for (let i = 0; i < 4; i++) lim.push(await sendCode("anon", "limit@example.test"));
+  clientSends += 3;
+  const afterLimit = signInLine(localDir);
+  check(
+    "send limits: a 4th code for the same email within 10 minutes -> 429; nothing printed, the 3rd code stays",
+    lim.slice(0, 3).every((r) => r.status === 200) && lim[3].status === 429 && afterLimit.includes("limit%40example.test") && localRun.stdout().split("\n").filter((l) => l.includes("limit%40example.test")).length === 3,
+    lim.map((r) => r.status).join(","),
+  );
+  const clientLim = [];
+  for (let i = 0; clientSends + i < 10; i++) clientLim.push(await sendCode("anon", `c${i}@example.test`));
+  const printedBefore = localRun.stdout().length;
+  const eleventh = await sendCode("anon", "c-last@example.test");
+  check(
+    "send limits: the 11th code from one client within an hour, for any address -> 429, nothing printed",
+    clientLim.every((r) => r.status === 200) && eleventh.status === 429 && localRun.stdout().length === printedBefore && !signInLine(localDir).includes("c-last"),
+    `${clientLim.map((r) => r.status).join(",")} 11th:${eleventh.status}`,
+  );
+  const scriptLimited = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT) } });
+  check("sign-in-link: when the server answers 429 it exits 1 saying too many codes were sent", scriptLimited.status === 1 && /Too many codes/.test(scriptLimited.stderr), `${scriptLimited.status} ${scriptLimited.stderr}`);
+  const loopback = await call("anon", "GET", "/api/v2/me");
+  check("local: loopback is not a credential (/api/v2/me without a cookie -> 401)", loopback.status === 401 && loopback.json?.error === "unauthorized", loopback.text);
   await stopServer();
+  const lineBefore = signInLine(localDir);
+  const restarted = await mustStart({ ALIGN_DATA_DIR: localDir });
+  check("local owner: a later start makes no account and sends no code", !restarted.stdout().includes("Align sign-in for") && signInLine(localDir) === lineBefore && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_user WHERE name = 'Local owner'").get().n) === 1, restarted.stdout().slice(-300));
+  await stopServer();
+  const noServer = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT) } });
+  check("sign-in-link: with no server running it exits 1 saying so", noServer.status === 1 && /No Align server is running/.test(noServer.stderr), `${noServer.status} ${noServer.stderr}`);
 
-  // ======== phase on: ALIGN_GOAL_SESSIONS=1 with the test identity provider ========
+  // ======== phase on: Mode L with the test identity provider (ALIGN_TEST_IDP=1) ========
   const onDir = path.join(tmpRoot, "on");
-  await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_GOAL_SESSIONS: "1", ALIGN_GOAL_SESSIONS_TEST_IDP: "1" });
+  await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1" });
   dbFile = path.join(onDir, "v2", "align.sqlite");
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
@@ -273,6 +408,17 @@ try {
   check("auth: sign-in from a foreign Origin is refused", evilSignIn.status === 403, `${evilSignIn.status}`);
   const otherPortSignIn = await call("anon", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: `http://127.0.0.1:${Number(PORT) + 1}` }, body: { email: "u1@example.test", password: "pw-U1-123456" } });
   check("auth: sign-in from another localhost port is refused (only this server's own origin is trusted)", otherPortSignIn.status === 403, `${otherPortSignIn.status}`);
+  // A test-IdP account's email is not verified: an email code for it is refused, and the account is left as it was.
+  await sendCode("anon", "u1@example.test");
+  const u1Code = codeIn(signInLine(onDir));
+  const u1Wrong = await codeSignIn("anon", "u1@example.test", u1Code === "000000" ? "000001" : "000000");
+  const u1Right = await codeSignIn("anon", "u1@example.test", u1Code);
+  const u1Row = withDb((d) => d.prepare("SELECT emailVerified, (SELECT COUNT(*) FROM ba_account WHERE userId = ba_user.id) AS accounts FROM ba_user WHERE id = ?").get(U1.id));
+  check(
+    "accounts: a valid code for an account whose email is unverified -> 403 email_unverified; nothing signed in or changed (a wrong code is just INVALID_OTP)",
+    u1Wrong.status === 400 && u1Wrong.json?.code === "INVALID_OTP" && u1Right.status === 403 && u1Right.json?.code === "email_unverified" && u1Right.setCookies.length === 0 && u1Row.emailVerified === 0 && u1Row.accounts === 1,
+    `${u1Wrong.status} ${u1Right.status} ${u1Right.text} ${JSON.stringify(u1Row)}`,
+  );
 
   // -- workspaces, invites, pods --
   const wsA = await call("U1", "POST", "/api/v2/workspaces", { cookie: U1.cookie, body: { name: "Workspace A" } });
@@ -411,18 +557,37 @@ try {
   const look = await call("U1", "GET", `/api/v2/device/requests/${auth1.json.user_code.toLowerCase().replace("-", " ")}`, { cookie: U1.cookie });
   const lookBad = await call("U1", "GET", `/api/v2/device/requests/BBBB-BBBB`, { cookie: U1.cookie });
   check("device: the signed-in user looks the code up (any case/spacing): device name and age; an unknown code -> 404", look.status === 200 && look.json.device_name === "Una's MacBook" && look.json.age_seconds >= 0 && lookBad.status === 404, `${look.text} ${lookBad.status}`);
+  // Recent sign-in: approving a device needs a sign-in from the last 15 minutes; looking up and denying do not.
+  const U1old = { ...U1, cookie: cookieOf((await call("U1", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: U1.email, password: "pw-U1-123456" } })).setCookies) };
+  const aged = ageSession(U1old.cookie, 20);
+  const lookOld = await call("U1", "GET", `/api/v2/device/requests/${auth1.json.user_code}`, { cookie: U1old.cookie });
+  const approveOld = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1old.cookie, body: { user_code: auth1.json.user_code, workspace_ids: [A] } });
+  const stillPending = withDb((d) => d.prepare("SELECT state FROM v2_device_requests WHERE user_code = ?").get(auth1.json.user_code)?.state);
+  check(
+    "recent sign-in: a 20-minute-old session approving a device -> 403 reauth_required, nothing approved (looking the code up still works)",
+    aged === 1 && lookOld.status === 200 && approveOld.status === 403 && approveOld.json?.error === "reauth_required" && stillPending === "pending",
+    `${aged} ${lookOld.status} ${approveOld.status} ${approveOld.text} ${stillPending}`,
+  );
+  const devPageOld = await call("U1", "GET", `/app/device?code=${auth1.json.user_code}`, { cookie: U1old.cookie });
+  const devPageNew = await call("U1", "GET", "/app/device", { cookie: U1.cookie });
+  check(
+    "ui: /app/device with an old sign-in shows the sign-in-again prompt instead of the code form; a recent one shows the form",
+    devPageOld.status === 200 && devPageOld.text.includes("Sign in again to approve a device. Approving needs a sign-in from the last 15 minutes.") && !devPageOld.text.includes("Look up") && devPageNew.text.includes("Look up") && !devPageNew.text.includes("Sign in again to approve"),
+    `${devPageOld.status} ${devPageNew.status}`,
+  );
   const approveB = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: auth1.json.user_code, workspace_ids: [A, B] } });
   check("device: approving a workspace you are not in (B) -> 404", approveB.status === 404, `${approveB.status}`);
   const approve = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: auth1.json.user_code, workspace_ids: [A] } });
   withDb((d) => d.prepare("UPDATE v2_device_requests SET last_poll_at = NULL WHERE user_code = ?").run(auth1.json.user_code));
   const tok = await poll(auth1.json.device_code);
-  check("device: after approval, token -> 200 dv_ id, alnd_ access (3600 s), alnr_ refresh, user", approve.status === 200 && tok.status === 200 && /^dv_/.test(tok.json.device_id) && /^alnd_/.test(tok.json.access_token) && tok.json.expires_in === 3600 && /^alnr_/.test(tok.json.refresh_token) && tok.json.user.id === U1.id, tok.text);
+  check("device: after approval (a recent sign-in), token -> 200 dv_ id, alnd_ access (3600 s), alnr_ refresh, user", approve.status === 200 && tok.status === 200 && /^dv_/.test(tok.json.device_id) && /^alnd_/.test(tok.json.access_token) && tok.json.expires_in === 3600 && /^alnr_/.test(tok.json.refresh_token) && tok.json.user.id === U1.id, tok.text);
   withDb((d) => d.prepare("UPDATE v2_device_requests SET last_poll_at = NULL WHERE user_code = ?").run(auth1.json.user_code));
   const tokAgain = await poll(auth1.json.device_code);
   check("device: the device code is spent after one success (second token -> 400 expired_token)", tokAgain.status === 400 && tokAgain.json.error === "expired_token", tokAgain.text);
   const stored = withDb((d) => d.prepare("SELECT token_hash FROM v2_device_tokens WHERE device_id = ?").all(tok.json.device_id).map((r) => r.token_hash));
   check("device: tokens are stored only as SHA-256 hashes", stored.length === 2 && stored.includes(sha256hex(tok.json.access_token)) && !stored.some((h) => h.includes(tok.json.access_token)), stored.join(","));
   const D1 = { ...k1, who: "U1", user: U1, id: tok.json.device_id, access: tok.json.access_token, refresh: tok.json.refresh_token };
+
 
   const kExp = newDeviceKeys();
   const authExp = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "expiring", public_key: kExp.pub } });
@@ -432,9 +597,9 @@ try {
   check("device: an expired code -> expired_token for the agent and 404 at /app/device", expPoll.json?.error === "expired_token" && expLook.status === 404, `${expPoll.text} ${expLook.status}`);
   const kDen = newDeviceKeys();
   const authDen = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "denied", public_key: kDen.pub } });
-  const deny = await call("U1", "POST", "/api/v2/device/deny", { cookie: U1.cookie, body: { user_code: authDen.json.user_code } });
+  const deny = await call("U1", "POST", "/api/v2/device/deny", { cookie: U1old.cookie, body: { user_code: authDen.json.user_code } });
   const denPoll = await poll(authDen.json.device_code);
-  check("device: a denied code -> access_denied", deny.status === 200 && denPoll.json?.error === "access_denied", `${deny.status} ${denPoll.text}`);
+  check("device: a denied code -> access_denied (denying needs no recent sign-in: this session is 20 minutes old)", deny.status === 200 && denPoll.json?.error === "access_denied", `${deny.status} ${denPoll.text}`);
   const unknownCode = await poll(randomBytes(32).toString("base64url"));
   check("device: an unknown device code -> 400 invalid_grant", unknownCode.status === 400 && unknownCode.json?.error === "invalid_grant", unknownCode.text);
 
@@ -823,13 +988,31 @@ try {
   check("device: authorize is limited to 10 per hour per client (then 429)", limited > 0, `${limited}`);
 
   // -- the web UI renders: pages need a session, then load --
-  const pagePaths = ["/app", "/app/device", "/app/devices", `/app/w/${A}`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/spend`, `/app/invite/${"x".repeat(43)}`];
+  const pagePaths = ["/app", "/app/account", "/app/device", "/app/devices", `/app/w/${A}`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/spend`, `/app/invite/${"x".repeat(43)}`];
   const anonPages = await Promise.all(pagePaths.map((p) => call("anon", "GET", p)));
   check("ui: every /app page without a session sends you to /app/sign-in", anonPages.every((r) => (r.status === 307 && /\/app\/sign-in/.test(r.headers.get("location") || "")) || (r.status === 200 && r.text.includes("/app/sign-in?next="))), anonPages.map((r) => r.status).join(","));
   const userPages = await Promise.all(pagePaths.map((p) => call("U1", "GET", p, { cookie: U1.cookie })));
   check("ui: every /app page renders for a signed-in user (200, no error page)", userPages.every((r) => r.status === 200 && !/Application error|Internal Server Error/.test(r.text)), userPages.map((r) => r.status).join(","));
   const signInPage = await call("anon", "GET", "/app/sign-in");
-  check("ui: the sign-in page offers the test sign-in only (no OAuth configured here)", signInPage.status === 200 && signInPage.text.includes("Test sign-in") && !signInPage.text.includes("Continue with Google"), `${signInPage.status}`);
+  check("ui: the sign-in page offers the email code and the test sign-in (no Google or GitHub configured here)", signInPage.status === 200 && signInPage.text.includes("Test sign-in") && signInPage.text.includes("Send code") && !signInPage.text.includes("Continue with Google") && !signInPage.text.includes("Continue with GitHub"), `${signInPage.status}`);
+  const accountPage = await call("U1", "GET", "/app/account", { cookie: U1.cookie });
+  check("ui: /app/account shows the person and \"Ways you can sign in\", with no Link buttons when no provider is configured", accountPage.status === 200 && accountPage.text.includes("Your account") && accountPage.text.includes("Ways you can sign in") && accountPage.text.includes(U1.email) && !accountPage.text.includes("Link Google") && !accountPage.text.includes("Link GitHub"), `${accountPage.status}`);
+  const nexts = [
+    ["/oauth/authorize?client_id=c1&response_type=code", "/oauth/authorize?client_id=c1&response_type=code"],
+    ["/app/w/x/people?tab=1", "/app/w/x/people?tab=1"],
+    ["https://evil.example/", "/app"],
+    ["//evil.example/app", "/app"],
+    ["/apple", "/app"],
+    ["/app\\@evil.example", "/app"],
+  ];
+  const nextRes = await Promise.all(nexts.map(([n]) => call("U1", "GET", `/app/sign-in?next=${encodeURIComponent(n)}`, { cookie: U1.cookie })));
+  check(
+    "sign-in: next may be an /app path or an /oauth/authorize URL; anything else returns to /app",
+    nextRes.every((r, i) => redirectTarget(r) === nexts[i][1]),
+    nextRes.map((r) => `${r.status} ${redirectTarget(r)}`).join(" | "),
+  );
+  const reauthPage = await call("U1", "GET", "/app/sign-in?reauth=1&next=%2Fapp%2Fdevice", { cookie: U1.cookie });
+  check("sign-in: reauth=1 shows the form even to someone signed in", reauthPage.status === 200 && reauthPage.text.includes("Send code"), `${reauthPage.status}`);
   if (existsSync(CHROME)) {
     const { default: puppeteer } = await import("puppeteer-core");
     const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
@@ -837,13 +1020,40 @@ try {
       const page = await browser.newPage();
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
+      // Email code: Send code, read the printed code, Sign in (the button waits for 6 digits), land on next.
+      await page.goto(`${BASE}/app/sign-in?next=/app/account`, { waitUntil: "networkidle0" });
+      await page.type('#email-code input[type="email"]', "chrome@example.test");
+      await page.evaluate(() => [...document.querySelectorAll("#email-code button")].find((b) => b.textContent === "Send code")?.click());
+      await page.waitForFunction(() => document.body.innerText.includes("a 6-digit code is on its way") && document.body.innerText.includes("npm run sign-in-link"), { timeout: 15000 });
+      const chromeCode = codeIn(signInLine(onDir));
+      const disabledAt5 = await (async () => {
+        await page.type('#email-code input[name="code"]', chromeCode.slice(0, 5));
+        return page.evaluate(() => [...document.querySelectorAll("#email-code button")].find((b) => b.textContent === "Sign in")?.disabled);
+      })();
+      await page.type('#email-code input[name="code"]', chromeCode.slice(5));
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("#email-code button")].find((b) => b.textContent === "Sign in")?.click())]);
+      await page.waitForFunction(() => document.body.innerText.includes("Your account") && document.body.innerText.includes("Email code"), { timeout: 15000 });
+      check("ui (Chrome): email code sign-in (Send code, the printed code, Sign in enabled only at 6 digits) lands on next (/app/account)", disabledAt5 === true && new URL(page.url()).pathname === "/app/account", `${disabledAt5} ${page.url()}`);
+      // Recent sign-in prompt: an aged session on /app/device gets Sign in again, which signs out and comes back.
+      const chromeCookie = (await page.cookies()).find((c) => c.name === "align_v2.session_token");
+      ageSession(`align_v2.session_token=${chromeCookie?.value}`, 20);
+      await page.goto(`${BASE}/app/device?code=BCDF-GHJK`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Sign in again to approve a device"), { timeout: 15000 });
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Sign in again")?.click())]);
+      const back = new URL(page.url());
+      const signedOut = (await page.cookies()).every((c) => c.name !== "align_v2.session_token" || !c.value);
+      check(
+        "ui (Chrome): Sign in again signs out and opens /app/sign-in?next=<the device page with its code>&email=<their email>",
+        back.pathname === "/app/sign-in" && back.searchParams.get("next") === "/app/device?code=BCDF-GHJK" && back.searchParams.get("email") === "chrome@example.test" && signedOut,
+        `${page.url()} signedOut=${signedOut}`,
+      );
       await page.goto(`${BASE}/app/sign-in?next=/app`, { waitUntil: "networkidle0" });
-      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("Create a test account"))?.click());
-      await page.waitForSelector('input[autocomplete="name"]');
-      await page.type('input[autocomplete="name"]', "Browser User");
-      await page.type('input[type="email"]', "ui@example.test");
-      await page.type('input[type="password"]', "browser-pass-1");
-      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => document.querySelector("form button[type=submit]")?.click())]);
+      await page.evaluate(() => [...document.querySelectorAll("#test-idp button")].find((b) => b.textContent?.includes("Create a test account"))?.click());
+      await page.waitForSelector('#test-idp input[autocomplete="name"]');
+      await page.type('#test-idp input[autocomplete="name"]', "Browser User");
+      await page.type('#test-idp input[type="email"]', "ui@example.test");
+      await page.type('#test-idp input[type="password"]', "browser-pass-1");
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => document.querySelector("#test-idp button[type=submit]")?.click())]);
       await page.waitForFunction(() => document.body.innerText.includes("Your workspaces"), { timeout: 15000 });
       await page.type("main form input", "UI workspace");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create")?.click())]);
@@ -893,7 +1103,6 @@ try {
     ALIGN_PRODUCT_PASSCODE: "product-strong-pass-1",
     ALIGN_SECURITY_PASSCODE: "security-strong-pass-1",
     ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-1",
-    ALIGN_GOAL_SESSIONS: "1",
     BETTER_AUTH_SECRET: "b".repeat(40),
     GOOGLE_CLIENT_ID: "test-google-id",
     GOOGLE_CLIENT_SECRET: "test-google-secret",
@@ -901,23 +1110,25 @@ try {
     GITHUB_CLIENT_SECRET: "test-github-secret",
     ALIGN_PUBLIC_ORIGIN: `https://${HOSTED_HOST}`,
   };
+  const noProviders = { GOOGLE_CLIENT_ID: undefined, GOOGLE_CLIENT_SECRET: undefined, GITHUB_CLIENT_ID: undefined, GITHUB_CLIENT_SECRET: undefined };
   const refusals = [
     ["no BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: undefined }, "BETTER_AUTH_SECRET must be set"],
     ["a short BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: "short" }, "BETTER_AUTH_SECRET must be set"],
-    ["no GOOGLE_CLIENT_ID", { GOOGLE_CLIENT_ID: undefined }, "GOOGLE_CLIENT_ID must be set"],
-    ["no GOOGLE_CLIENT_SECRET", { GOOGLE_CLIENT_SECRET: undefined }, "GOOGLE_CLIENT_SECRET must be set"],
-    ["no GITHUB_CLIENT_ID", { GITHUB_CLIENT_ID: undefined }, "GITHUB_CLIENT_ID must be set"],
-    ["no GITHUB_CLIENT_SECRET", { GITHUB_CLIENT_SECRET: undefined }, "GITHUB_CLIENT_SECRET must be set"],
     ["no ALIGN_PUBLIC_ORIGIN", { ALIGN_PUBLIC_ORIGIN: undefined }, "ALIGN_PUBLIC_ORIGIN must be an https origin"],
     ["an http ALIGN_PUBLIC_ORIGIN", { ALIGN_PUBLIC_ORIGIN: `http://${HOSTED_HOST}` }, "ALIGN_PUBLIC_ORIGIN must be an https origin"],
     ["an ALIGN_PUBLIC_ORIGIN outside ALIGN_HOSTS", { ALIGN_PUBLIC_ORIGIN: "https://other.example" }, "must be listed in ALIGN_HOSTS"],
-    ["ALIGN_GOAL_SESSIONS_TEST_IDP", { ALIGN_GOAL_SESSIONS_TEST_IDP: "1" }, "ALIGN_GOAL_SESSIONS_TEST_IDP is not allowed when hosted"],
+    ["no way to sign in (no email settings, no Google, no GitHub)", noProviders, "Sign-in needs the email settings"],
+    ["only some of the email settings", { ...noProviders, ALIGN_EMAIL_API_URL: "https://mail.example/emails", ALIGN_EMAIL_API_KEY: "k".repeat(20) }, "Set all of ALIGN_EMAIL_API_URL, ALIGN_EMAIL_API_KEY, ALIGN_EMAIL_FROM or none (missing ALIGN_EMAIL_FROM)"],
+    ["an http ALIGN_EMAIL_API_URL", { ALIGN_EMAIL_API_URL: "http://mail.example/emails", ALIGN_EMAIL_API_KEY: "k".repeat(20), ALIGN_EMAIL_FROM: "Align <a@mail.example>" }, "ALIGN_EMAIL_API_URL must be an https URL"],
+    ["a Google id without its secret", { GOOGLE_CLIENT_SECRET: undefined }, "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together"],
+    ["ALIGN_TEST_IDP", { ALIGN_TEST_IDP: "1" }, "ALIGN_TEST_IDP is not allowed when hosted"],
+    ["ALIGN_LOCAL_OWNER_EMAIL", { ALIGN_LOCAL_OWNER_EMAIL: "me@example.test" }, "ALIGN_LOCAL_OWNER_EMAIL is not allowed when hosted"],
   ];
   for (const [what, delta, needle] of refusals) {
     const env = { ...good, ...delta };
     for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
     const r = await startServer(env);
-    check(`hosted: ALIGN_GOAL_SESSIONS=1 refuses to serve with ${what}`, !r.started && (r.exited || r.last === 503) && r.stderr().includes(needle), r.started ? "it started" : `exited=${r.exited} last=${r.last} ${r.stderr().slice(-300)}`);
+    check(`hosted: refuses to serve with ${what}`, !r.started && (r.exited || r.last === 503) && r.stderr().includes(needle), r.started ? "it started" : `exited=${r.exited} last=${r.last} ${r.stderr().slice(-300)}`);
     await stopServer();
   }
   await mustStart(good);
@@ -925,7 +1136,11 @@ try {
   const hSignIn = await hosted("GET", "/app/sign-in");
   const hSession = await hosted("GET", "/api/v2/auth/get-session");
   check("hosted: v2 routes are served alongside the tester routes (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
-  check("hosted: the sign-in page offers Google and GitHub, never the test sign-in", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in"), "");
+  check("hosted: the sign-in page offers Google and GitHub, never the test sign-in; without email settings, no email code", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in") && !hSignIn.text.includes("Send code"), "");
+  dbFile = path.join(hostedDir, "v2", "align.sqlite");
+  const hNoEmail = await hosted("POST", SEND, { body: { email: "x@example.test", type: "sign-in" }, headers: { origin: `https://${HOSTED_HOST}` } });
+  check("hosted: without the email settings a request to send a code is refused (404) and nothing is sent", hNoEmail.status === 404 && !existsSync(path.join(hostedDir, "v2", "sign-in.txt")), `${hNoEmail.status}`);
+  check("hosted: no local owner is made", withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_user").get().n) === 0, "");
   const hSignUp = await hosted("POST", "/api/v2/auth/sign-up/email", { body: { name: "x", email: "x@example.test", password: "password-123" }, headers: { origin: `https://${HOSTED_HOST}` } });
   check("hosted: email + password sign-up is off", hSignUp.status !== 200, `${hSignUp.status} ${hSignUp.text.slice(0, 100)}`);
   const hHttp = await hosted("GET", "/api/v2/me", { headers: { "x-forwarded-proto": "http" } });
@@ -946,9 +1161,89 @@ try {
     `${hRefused.map((x) => `${x.o}:${x.r.status}`).join(" ")} exact:${hRightOrigin.status}`,
   );
   const hNorthstar = await hosted("GET", "/api/sessions");
-  check("hosted: non-tester v1 routes stay 404 with v2 on", hNorthstar.status === 404, `${hNorthstar.status}`);
+  check("hosted: non-tester v1 routes stay 404", hNorthstar.status === 404, `${hNorthstar.status}`);
   const hDev = await hosted("POST", "/api/v2/device/authorize", { body: { device_name: "x", public_key: newDeviceKeys().pub } });
   check("hosted: the device verification URI is the public origin", hDev.status === 200 && hDev.json.verification_uri === `https://${HOSTED_HOST}/app/device`, hDev.text);
+  await stopServer();
+
+  // ======== hosted email codes, through a fake Resend-compatible HTTPS email API ========
+  const ssl = spawnSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", path.join(tmpRoot, "tls-key.pem"), "-out", path.join(tmpRoot, "tls-cert.pem"), "-days", "2", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"], { encoding: "utf8" });
+  if (ssl.status !== 0) throw new Error(`openssl: ${ssl.stderr}`);
+  const caFile = path.join(tmpRoot, "ca.pem");
+  writeFileSync(caFile, (process.env.NODE_EXTRA_CA_CERTS && existsSync(process.env.NODE_EXTRA_CA_CERTS) ? readFileSync(process.env.NODE_EXTRA_CA_CERTS, "utf8") + "\n" : "") + readFileSync(path.join(tmpRoot, "tls-cert.pem"), "utf8"));
+  const mails = [];
+  const mailApi = https.createServer({ key: readFileSync(path.join(tmpRoot, "tls-key.pem")), cert: readFileSync(path.join(tmpRoot, "tls-cert.pem")) }, (req, res) => {
+    let t = "";
+    req.on("data", (c) => (t += c));
+    req.on("end", () => {
+      let body = null;
+      try {
+        body = JSON.parse(t);
+      } catch {}
+      mails.push({ method: req.method, url: req.url, auth: req.headers.authorization, type: req.headers["content-type"], body });
+      const fail = body?.to === "fail@example.test";
+      res.writeHead(fail ? 500 : 200, { "content-type": "application/json" });
+      res.end(fail ? '{"error":"down"}' : `{"id":"${randomBytes(6).toString("hex")}"}`);
+    });
+  });
+  await new Promise((r) => mailApi.listen(0, "127.0.0.1", r));
+  const MAIL_KEY = `re_${randomBytes(12).toString("hex")}`;
+  const emailDir = path.join(tmpRoot, "hosted-email");
+  const emailEnv = { ...good, ...noProviders, ALIGN_DATA_DIR: emailDir, ALIGN_EMAIL_API_URL: `https://127.0.0.1:${mailApi.address().port}/emails`, ALIGN_EMAIL_API_KEY: MAIL_KEY, ALIGN_EMAIL_FROM: "Align <signin@align.test>", ALIGN_FIRST_OWNER_EMAIL: "Ops@Example.test", NODE_EXTRA_CA_CERTS: caFile };
+  for (const k of Object.keys(emailEnv)) if (emailEnv[k] === undefined) delete emailEnv[k];
+  const eRun = await startServer(emailEnv);
+  check("hosted email: starts with only the three email settings (no Google, no GitHub)", eRun.started, eRun.stderr().slice(-400));
+  dbFile = path.join(emailDir, "v2", "align.sqlite");
+  const hOrigin = { origin: `https://${HOSTED_HOST}` };
+  const hSend = (email) => hosted("POST", SEND, { body: { email, type: "sign-in" }, headers: hOrigin });
+  const hCodeSignIn = (email, otp) => hosted("POST", OTP_SIGN_IN, { body: { email, otp }, headers: hOrigin });
+  const hCookie = (r) => cookieOf([].concat(r.headers["set-cookie"] ?? []));
+  const mailCode = (to) => /code is (\d{6})/.exec(mails.filter((m) => m.body?.to === to).pop()?.body?.text ?? "")?.[1] ?? "";
+  const ePage = await hosted("GET", "/app/sign-in?email=ops%40example.test&code=123456");
+  check("hosted email: the sign-in page offers the email code only (no provider buttons); the link fills the form without the Mode L hint", ePage.status === 200 && ePage.text.includes('value="123456"') && !ePage.text.includes("Continue with") && !ePage.text.includes("npm run sign-in-link") && !ePage.text.includes("Test sign-in"), `${ePage.status}`);
+  const opsSend = await hSend("ops@example.test");
+  const m0 = mails[0];
+  const opsCode = mailCode("ops@example.test");
+  check(
+    "hosted email: a code is one HTTPS POST of {from, to, subject, text} with the Bearer key; subject \"Your Align sign-in code\"; the text has the code, the public-origin link and the 5-minute expiry",
+    opsSend.status === 200 && mails.length === 1 && m0.method === "POST" && m0.url === "/emails" && m0.auth === `Bearer ${MAIL_KEY}` && /application\/json/.test(m0.type) && Object.keys(m0.body).sort().join() === "from,subject,text,to" && m0.body.from === "Align <signin@align.test>" && m0.body.to === "ops@example.test" && m0.body.subject === "Your Align sign-in code" && /^\d{6}$/.test(opsCode) && m0.body.text.includes(`https://${HOSTED_HOST}/app/sign-in?email=ops%40example.test&code=${opsCode}`) && m0.body.text.includes("5 minutes"),
+    `${opsSend.status} ${JSON.stringify(mails)}`,
+  );
+  const unknownSend = await hSend("nobody@example.test");
+  check("hosted email: the send answer for an address with no account and no invite is the same as for any other (no disclosure)", unknownSend.status === opsSend.status && unknownSend.text === opsSend.text, `${unknownSend.status} ${unknownSend.text} | ${opsSend.text}`);
+  const nobodyIn = await hCodeSignIn("nobody@example.test", mailCode("nobody@example.test"));
+  check(
+    "hosted email: a valid code for an address with no account and no pending invite -> 403 \"This email can't sign in here yet. Ask a workspace owner to invite you.\"; no account, no session",
+    nobodyIn.status === 403 && nobodyIn.json?.message === "This email can't sign in here yet. Ask a workspace owner to invite you." && !hCookie(nobodyIn) && !withDb((d) => d.prepare("SELECT 1 FROM ba_user WHERE email = ?").get("nobody@example.test")),
+    `${nobodyIn.status} ${nobodyIn.text}`,
+  );
+  const opsIn = await hCodeSignIn("ops@example.test", opsCode);
+  const OPS = { cookie: hCookie(opsIn) };
+  const opsRow = withDb((d) => d.prepare("SELECT emailVerified FROM ba_user WHERE email = ?").get("ops@example.test"));
+  check("hosted email: ALIGN_FIRST_OWNER_EMAIL (any case) is the first account: its code creates it (verified) and signs in with the __Secure- cookie", opsIn.status === 200 && OPS.cookie.includes("__Secure-align_v2.session_token") && opsRow?.emailVerified === 1, `${opsIn.status} ${opsIn.text}`);
+  const eWs = await hosted("POST", "/api/v2/workspaces", { body: { name: "Hosted email" }, cookie: OPS.cookie, headers: hOrigin });
+  const eInv = await hosted("POST", `/api/v2/workspaces/${eWs.json?.id}/invites`, { body: { email: "Invitee@Example.test", role: "member" }, cookie: OPS.cookie, headers: hOrigin });
+  await hSend("invitee@example.test");
+  const invIn = await hCodeSignIn("invitee@example.test", mailCode("invitee@example.test"));
+  const invAccept = await hosted("POST", `/api/v2/invites/${eInv.json?.token}/accept`, { body: {}, cookie: hCookie(invIn), headers: hOrigin });
+  check("hosted email: an address with a pending invite gets an account from its code, then accepts the invite", eWs.status === 201 && eInv.status === 201 && invIn.status === 200 && invAccept.status === 200 && invAccept.json?.role === "member", `${eWs.status} ${eInv.status} ${invIn.status} ${invIn.text} ${invAccept.status} ${invAccept.text}`);
+  const mailsBefore = mails.length;
+  const failSend = await hSend("fail@example.test");
+  await sleep(300);
+  const failLog = eRun.stderr() + eRun.stdout();
+  check(
+    "hosted email: an email API failure fails the send (5xx), the code is deleted, and the log names only the status (never the address, code or key)",
+    failSend.status >= 500 && mails.length === mailsBefore + 1 && !withDb((d) => d.prepare("SELECT 1 FROM ba_verification WHERE identifier = ?").get("sign-in-otp-fail@example.test")) && failLog.includes("Sign-in email failed: HTTP 500") && !failLog.includes("fail@example.test") && !failLog.includes(MAIL_KEY),
+    `${failSend.status} ${failSend.text} ${failLog.slice(-300)}`,
+  );
+  const codes = mails.map((m) => /code is (\d{6})/.exec(m.body?.text ?? "")?.[1]).filter(Boolean);
+  check("hosted email: no code is ever printed or logged, and no sign-in.txt is written", codes.length >= 3 && codes.every((c) => !failLog.includes(c)) && !existsSync(path.join(emailDir, "v2", "sign-in.txt")), `${codes.length}`);
+  await stopServer();
+  const lateRun = await startServer({ ...emailEnv, ALIGN_FIRST_OWNER_EMAIL: "late@example.test" });
+  await hSend("late@example.test");
+  const lateIn = await hCodeSignIn("late@example.test", mailCode("late@example.test"));
+  check("hosted email: ALIGN_FIRST_OWNER_EMAIL gets no exception once any account exists (403)", lateRun.started && lateIn.status === 403 && !withDb((d) => d.prepare("SELECT 1 FROM ba_user WHERE email = ?").get("late@example.test")), `${lateIn.status} ${lateIn.text}`);
+  mailApi.close();
 } catch (e) {
   check("v2 run", false, e?.stack ?? e);
 } finally {

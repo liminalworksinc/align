@@ -1,7 +1,7 @@
 # Goal sessions wire contract (local agent ⇄ hosted server)
 
 Status: v2.2, 2026-10-22 (goal tree fields; in-flight activity). v2.1: directive SSE stream removed; cursor polling only. Source of truth for both halves. Plan: `~/.claude/plans/no-we-need-a-logical-lark.md` (rev 2).
-Everything here is behind `ALIGN_GOAL_SESSIONS=1`; with it unset every `/app*` and `/api/v2/*` path is 404.
+Always on (no flag): every `/app*` and `/api/v2/*` path is served in Mode L and when hosted.
 
 ## Conventions
 - JSON only (`content-type: application/json`), UTF-8. Errors: `{ "error": "<code>", "message": "<human text>" }`.
@@ -189,6 +189,15 @@ Web-only routes (cookie) added for the app: `GET/POST /api/v2/workspaces`, `GET 
 `POST .../pods/:pod/members`, `DELETE .../pods/:pod/members/:user`, `POST .../goals`, `GET .../goals/:goal`,
 `POST .../goals/:goal/versions` (`{ version, title?, measures?, anchors?, status? }`, `409 stale_version` /
 `no_change`), `GET .../sessions`, `GET .../alignments`, `GET .../alignments/:id`, `GET /api/v2/device/requests/:code`,
-`POST /api/v2/device/approve` (`{ user_code, workspace_ids }`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,
+`POST /api/v2/device/approve` (`{ user_code, workspace_ids }`; needs a sign-in from the last 15 minutes, else
+`403 reauth_required`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,
 `DELETE /api/v2/devices/:id`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,
 `__Secure-` prefixed when hosted).
+
+Sign-in (Better Auth): Google and GitHub when configured; an email one-time code always in Mode L and, hosted, with
+`ALIGN_EMAIL_API_URL`/`ALIGN_EMAIL_API_KEY`/`ALIGN_EMAIL_FROM`: `POST /api/v2/auth/email-otp/send-verification-otp`
+`{ email, type: "sign-in" }` (always `{ success: true }`; 429 past 3 per email per 10 min or 10 per client per hour),
+then `POST /api/v2/auth/sign-in/email-otp` `{ email, otp }` (6 digits, 5 min, 3 attempts; Better Auth errors
+`INVALID_OTP`, `OTP_EXPIRED`, `TOO_MANY_ATTEMPTS`; ours `cannot_sign_in`, `email_unverified`). Mode L prints the link and
+writes `<data>/v2/sign-in.txt`; `npm run sign-in-link [email]` asks for a fresh one. Linking Google or GitHub is
+explicit (`POST /api/v2/auth/link-social` from `/app/account`). `ALIGN_TEST_IDP=1` (never hosted) adds email + password.
