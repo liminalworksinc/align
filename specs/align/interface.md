@@ -58,9 +58,10 @@ The server SHALL answer `/` with a redirect to `/app`, and SHALL serve no other 
 
 ### Requirement: Signed-out visitors are sent to sign-in
 
-Every `/app` page other than `/app/sign-in`, and `/oauth/authorize`, SHALL send a signed-out visitor to
-`/app/sign-in?next=<page>`, and sign-in SHALL return only to an `/app` path or an `/oauth/authorize` URL, falling
-back to `/app` for anything else.
+Every `/app` page other than `/app/sign-in` SHALL send a signed-out visitor to `/app/sign-in?next=<page>`, and
+`/oauth/authorize`, once the request itself is valid, SHALL show a signed-out visitor a **Sign in** link to
+`/app/sign-in?next=<this /oauth/authorize URL>` (as the `mcp` part specifies); sign-in SHALL return only to an `/app`
+path or an `/oauth/authorize` URL, falling back to `/app` for anything else.
 
 #### Scenario: Deep link while signed out
 
@@ -80,8 +81,9 @@ back to `/app` for anything else.
 ### Requirement: Sign-in screen
 
 The `/app/sign-in` page SHALL offer **Continue with Google** and **Continue with GitHub** only when that provider's
-client id and secret are configured, and SHALL always offer the email-code form; a person who is already signed in
-SHALL be sent straight to `next`.
+client id and secret are configured, and SHALL offer the email-code form whenever email sign-in is available (always
+in Mode L; when hosted, whenever the email settings are set, as the `workspaces` part specifies); a person who is
+already signed in SHALL be sent straight to `next`.
 
 #### Scenario: Social sign-in
 
@@ -90,7 +92,7 @@ SHALL be sent straight to `next`.
 
 #### Scenario: Neither provider configured
 
-- **WHEN** neither Google nor GitHub is configured
+- **WHEN** neither Google nor GitHub is configured (in Mode L, or hosted with the email settings set)
 - **THEN** the page shows only the email-code form; it never says that no sign-in method is configured
 
 #### Scenario: Test identity provider
@@ -272,7 +274,7 @@ and SHALL give everyone but viewers a "New goal" form that posts to `POST /api/v
 #### Scenario: Create a company goal
 
 - **WHEN** a workspace owner chooses Level "Company goal"
-- **THEN** the Team field is hidden, visibility is fixed to "Everyone in the workspace", and the page posts `{level:"company", visibility:"workspace", team_id:null, …}`; members and viewers are not offered the Level choice
+- **THEN** the Team field is hidden, visibility is fixed to "Everyone in the workspace", and the page posts `{level:"company", visibility:"workspace", …}` with no `team_id`; members and viewers are not offered the Level choice
 
 ### Requirement: Goal page details and new version
 
@@ -311,8 +313,8 @@ is not a viewer, and SHALL send the request with `POST /api/v2/workspaces/<ws>/a
 
 ### Requirement: Propose a change from the goal page
 
-The goal page SHALL offer **Propose a change** to every member who can read the goal, is not a viewer and does not
-own it, and SHALL send the proposal with
+The goal page SHALL offer **Propose a change** on an `active` goal to every member who can read the goal, is not a
+viewer and does not own it, and SHALL send the proposal with
 `POST /api/v2/workspaces/<ws>/goals/<goal>/change-requests`.
 
 #### Scenario: Propose a change
@@ -327,7 +329,7 @@ own it, and SHALL send the proposal with
 
 #### Scenario: Who does not see it
 
-- **WHEN** the goal's owner or a viewer opens the goal page
+- **WHEN** the goal's owner or a viewer opens the goal page, or anyone opens an achieved or dropped goal
 - **THEN** there is no **Propose a change**; the owner uses the "New version" form instead
 
 ### Requirement: Change request controls on the goal page
@@ -369,7 +371,7 @@ The Requests tab at `/app/w/<ws>/requests` SHALL show the change requests the pe
 #### Scenario: Sections
 
 - **WHEN** a member opens the tab
-- **THEN** "Waiting on you" holds pending requests the person may approve, "Your requests" holds the person's own requests (including a countered one that waits on them), and "Others" holds every other request they can see; each card names the goal (a link to its goal page), the requester, the state pill, the reason and the changed fields, with the same actions as on the goal page
+- **THEN** "Waiting on you" holds the requests whose `approve` or `accept_counter` flag is true for the person (pending requests they may approve, and their own countered requests waiting for them to accept), "Your requests" holds the person's other requests, and "Others" holds every other request they can see; each card names the goal (a link to its goal page), the requester, the state pill, the reason and the changed fields, with the same actions as on the goal page
 
 #### Scenario: Empty sections
 
@@ -523,12 +525,12 @@ refuse requests it cannot trust without redirecting.
 #### Scenario: Viewer workspaces
 
 - **WHEN** the person is a viewer in some workspaces
-- **THEN** those workspaces are not offered; with no workspace they own or are a member of, the page shows "You have no workspace you can connect an app to. Viewers can't connect apps." and no **Allow** button
+- **THEN** those workspaces are not offered; with no workspace they own or are a member of, the page shows "You have no workspace where you can connect an app. Viewers can't connect apps." and no **Allow** button
 
 #### Scenario: Loopback redirect
 
 - **WHEN** the redirect URI is on `localhost`, `127.0.0.1` or `[::1]`
-- **THEN** the page shows an amber warning "This app runs on your computer (<host>). Allow it only if you just started it yourself."
+- **THEN** the page shows an amber warning "This app sends you back to a program on this computer (<host>). Allow it only if you started it yourself just now."
 
 #### Scenario: Untrusted or rate-limited request
 
@@ -566,14 +568,8 @@ state, amber for something waiting or needing attention, red for revoked or stop
 
 ## Open questions
 
-- Should **Propose a change** be offered on an achieved or dropped goal? This spec offers it on any goal the person
-  can read but does not own (so a request can propose reopening it); open requests are superseded only when a goal
-  becomes achieved or dropped.
-- The recent-sign-in refusal code (`reauth_required`), the member routes (`POST`/`DELETE
-  /api/v2/workspaces/{ws}/members/{user}`), the workspace-wide change-request list
-  (`GET /api/v2/workspaces/{ws}/change-requests` as `{waiting_on_me, mine, others}` with `can` flags), the apps
-  routes (`GET`/`DELETE /api/v2/workspaces/{ws}/apps…`) and `spend?by=team` are not named by the owner's decision;
-  this spec chose them and the `workspaces`, `goals-and-proposals` and `mcp` parts must name the same ones.
+- Should a person be able to propose reopening an achieved or dropped goal? The server refuses change requests on
+  such goals (409 `goal_not_active`), so this spec offers **Propose a change** only on active goals.
 - Should the account page also let a person unlink a provider? The owner's decision names only linking, so this
   spec offers no unlink.
 

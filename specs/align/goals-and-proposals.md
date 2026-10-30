@@ -441,7 +441,7 @@ The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goa
 
 ### Requirement: Change request controls in the app
 
-The goal page SHALL offer **Propose a change** on any goal the person can read but does not own, unless they are a viewer, and a "Change requests" list whose approve, reject and counter controls appear only for people in the goal's approval set; the workspace SHALL have a "Requests" tab, read from `GET /api/v2/workspaces/{ws}/change-requests`, with the groups waiting on me, mine and others, each control appearing only when the server's `can` flag allows it.
+The goal page SHALL offer **Propose a change** on any `active` goal the person can read but does not own, unless they are a viewer, and a "Change requests" list whose approve, reject and counter controls appear only for people in the goal's approval set; the workspace SHALL have a "Requests" tab, read from `GET /api/v2/workspaces/{ws}/change-requests`, with the groups waiting on me, mine and others, each control appearing only when the server's `can` flag allows it.
 
 #### Scenario: Non-owner proposes from the goal page
 

@@ -3,7 +3,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
-import { config, hostAllowed } from "../config";
+import { config } from "../config";
 import { publicOrigin, testIdpEnabled } from "./config";
 import { authDb, dbDir } from "./db";
 import { rand32 } from "./ids";
@@ -36,16 +36,17 @@ export function authOptions(): BetterAuthOptions {
     social.github = { clientId: process.env.GITHUB_CLIENT_ID, clientSecret: process.env.GITHUB_CLIENT_SECRET };
   }
   const loopback = ["localhost", "127.0.0.1", "[::1]"];
+  const port = process.env.PORT || "3100";
   return {
     appName: "Align",
     database: authDb(),
     basePath: AUTH_BASE_PATH,
     secret: secret(),
-    // Hosted: the one public origin. Mode L: whatever loopback host and port this server answers on.
-    baseURL: hosted && origin ? origin : { allowedHosts: loopback.flatMap((h) => [h, `${h}:*`]), protocol: "http" },
-    // Mode L trusts only the origin this request was sent to (proxy.ts has already refused non-loopback hosts),
-    // not every port on localhost: another local web app must not pass Better Auth's origin checks.
-    trustedOrigins: hosted && origin ? [origin] : (request) => (request && hostAllowed(request.headers.get("host")) ? [`http://${request.headers.get("host")}`] : []),
+    // Hosted: the one public origin. Mode L: the loopback names on this server's own port (next start and next dev
+    // set PORT). Better Auth trusts every allowed host as an origin, so `127.0.0.1:*` would let another local web
+    // app pass its origin checks.
+    baseURL: hosted && origin ? origin : { allowedHosts: loopback.map((h) => `${h}:${port}`), protocol: "http" },
+    trustedOrigins: hosted && origin ? [origin] : [],
     socialProviders: social,
     emailAndPassword: { enabled: testIdpEnabled() && !hosted, autoSignIn: true, minPasswordLength: 8, maxPasswordLength: 128 },
     account: { modelName: "ba_account", accountLinking: { enabled: false, disableImplicitLinking: true } },

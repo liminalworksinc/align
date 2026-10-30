@@ -576,7 +576,7 @@ owners see and revoke every grant and other members only their own.
 #### Scenario: Member revokes their app
 
 - **WHEN** a member DELETEs one of their own grants
-- **THEN** the server responds 204, that app's access and refresh tokens stop working, and the audit records `app.revoked` with the member as actor
+- **THEN** the server responds 204, that app's access and refresh tokens stop working, and the audit records `oauth.app_revoked` with the member as actor
 
 #### Scenario: Someone else's grant
 
