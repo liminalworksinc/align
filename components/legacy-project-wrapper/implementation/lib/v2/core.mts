@@ -19,7 +19,7 @@ export interface Sql {
 
 /** The PRAGMA user_version of a fully migrated database (lib/v2/db.ts MIGRATIONS.length; db.ts checks they agree).
  *  The operator script refuses any other, so it never writes to a schema it doesn't know. */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 // ---- settings shared with the operator script (lib/v2/config.ts re-exports these) ----
 
@@ -108,7 +108,7 @@ export const EVENT_PROPS = {
   second_member_joined: {},
   first_change_request: {},
   first_approval: {},
-  first_directive: { kind: ["goal_version", "binding_changed", "binding_suspended", "stop", "resume"] },
+  first_directive: { kind: ["goal_version", "binding_changed", "binding_suspended", "stop", "resume", "request", "hold", "release"] },
   first_mcp_read: { client: ["app", "device"] },
   loi_sent: { note_ref: NOTE_REF_RE },
   loi_signed: { note_ref: NOTE_REF_RE, verified_original: ["yes"] },
@@ -117,6 +117,8 @@ export const EVENT_PROPS = {
   value_card_viewed: {},
   value_reported: { estimate: ESTIMATES },
   follow_up_clicked: {},
+  first_request: { type: ["replan", "checkpoint", "switch_goal"] },
+  first_hold: {},
 } as const satisfies Record<string, Record<string, PropRule>>;
 export type EventName = keyof typeof EVENT_PROPS;
 export type EventProps = Record<string, string | number>;
@@ -136,6 +138,8 @@ export const ONCE_PER_WORKSPACE: readonly EventName[] = [
   "loi_signed",
   "first_ask",
   "first_limit",
+  "first_request",
+  "first_hold",
 ];
 
 /** Recorded at most once per person in a workspace (the unique index v2_events_once_person in lib/v2/db.ts lists the

@@ -1,6 +1,6 @@
 ---
 name: Directives
-summary: How Align writes structured v2 directives (goal versions, binding changes and suspensions, stop and resume) for shared agent sessions, how a device fetches them by cursor and reports receipts, and who may stop or resume an agent.
+summary: How Align writes structured v2 directives (goal versions, binding changes and suspensions, stop and resume, typed requests from a goal's approvers, and goal holds and releases) for shared agent sessions, how a device fetches them by cursor and reports receipts, and who may stop or resume an agent.
 kind: area
 ---
 
@@ -9,8 +9,19 @@ kind: area
 A directive is a structured record that Align writes for one or more shared agent sessions when a human decision
 changes what those sessions work under. The objective is that a recorded decision by an accountable person, and only
 that, changes what a running agent sees: a saved goal version (published by its owner or by an approver of a change
-request), an approved or revoked alignment, or a stop or resume by the session's owner or a workspace owner. Change
-requests in flight, counters, alignment notes and drafts never reach agents.
+request), an approved or revoked alignment, a stop or resume by the session's owner or a workspace owner, or a
+request or goal hold from someone who can approve for the goal. Change requests in flight, counters, alignment notes
+and drafts never reach agents.
+
+Align reaches agents at three levels (owner decision, 2026-10-30). **Inform**: facts the agent works under (goal
+versions with their limits, bindings, accepted asks). **Request**: one of a fixed set of typed requests (`replan`,
+`checkpoint`, `switch_goal`) from someone who can approve for the goal or a workspace owner; Align writes the wording,
+the sender is named, and their note is passed on quoted, as data. Safe requests run on their own: the agent does a
+checkpoint, or drafts an updated plan for a replan, without asking, and the developer can still decline; anything
+that changes direction asks first, so a replan's new plan and a `switch_goal` take effect only when the developer
+accepts. The developer is always told, and every answer is a receipt. **Enforce**: Align blocks tools itself without
+asking the model: the per-session `stop`, and a goal hold that pauses every session on a goal until it is released.
+The request and hold routes are specified in the goals part.
 
 Directives are always on: there is no feature flag, and they work the same in Mode L and when hosted. Align does not
 wake an idle agent. The local `align-agent` package pulls directives by cursor whenever a hook starts a sync,
@@ -23,12 +34,14 @@ Vocabulary:
 | Term | Meaning |
 | --- | --- |
 | Directive | A row in `v2_directives` with an id `dir_<24 base32 chars>`, a workspace, a `kind`, a monotonically increasing `seq`, an optional goal snapshot and an optional binding, plus one target row per session key |
-| Kind | One of `goal_version`, `binding_changed`, `binding_suspended`, `stop`, `resume` |
+| Kind | One of `goal_version`, `binding_changed`, `binding_suspended`, `stop`, `resume`, `request`, `hold`, `release` |
+| Request | A typed request to the agents on a goal (`v2_requests`, `rq_<24 base32 chars>`): `replan`, `checkpoint` or `switch_goal`, with its sender, an optional quoted note of at most 280 characters, and a state per targeted session (`sent`, `received`, `accepted`, `declined`, `expired`) |
+| Goal hold | A goal whose agents are paused (`v2_goal_holds`) until someone who can approve for it releases it |
 | Session key | The 43-character key of a shared session (`v2_sessions.session_key`), owned by one person on one device |
 | Goal snapshot | The goal's core fields as of the saved version that caused the directive: `id`, `version`, `title`, `measures`, `status`, `visibility`, `level`, `owner` `{id, name}`, `team` `{id, name}` or null, `anchors`, `depends_on`, `limits` (the version's limits, each `{id, type, text, source}`; `[]` for a snapshot stored before limits existed) |
 | Binding | `{ goal_id, effective, cause }`, where `effective` is `next_root_turn` and `cause` is `alignment:<alignment id>` |
 | Cursor | The highest `seq` a device has already taken; a fetch returns directives with a larger `seq` |
-| Receipt | A per-directive, per-session delivery report from the device: `received`, `applied` or `enforced` |
+| Receipt | A per-directive, per-session report from the device: `received`, `applied` or `enforced` for delivery, and `accepted` or `declined` answering a request |
 | Stop latch | The local agent's per-session record that the session was stopped; while set, the agent's hooks block every tool except read-only ones |
 
 The stop path, end to end:
@@ -52,7 +65,7 @@ sequenceDiagram
 
 ### Requirement: Directives carry only structured decision content
 
-The server SHALL put into a directive only its kind, the goal snapshot of a saved goal version, a binding object and the enumerated fields of the fetch response, and never alignment notes, change-request reasons, approval or rejection notes, counter-proposals, goal drafts or any free-form instruction to the agent.
+The server SHALL put into a directive only its kind, the goal snapshot of a saved goal version, a binding object, a request's typed fields (its type, goal, target goal, sender and the sender's quoted note) or a hold's (its goal, who held or released it, the reason and the time), and the enumerated fields of the fetch response, and never alignment notes, change-request reasons, approval or rejection notes, counter-proposals, goal drafts or any instruction text other than a request's quoted note; the wording that tells an agent what a request asks is Align's, fixed per type.
 
 #### Scenario: A countered change request reaches no agent
 
@@ -213,7 +226,7 @@ The server SHALL include, for every session returned by `GET /api/v2/workspaces/
 
 ### Requirement: Device fetch of v2 directives by cursor
 
-The server SHALL serve `GET /api/v2/directives?cursor=<seq>` to a v2 device access token (`alnd_…`) only, returning HTTP 200 `{ directives, next_cursor }` with up to 100 directives whose `seq` is greater than the cursor and that target sessions owned by the token's person on the token's device in workspaces the device is still granted, oldest first, each as `{ id, seq, ws, kind, session_keys, goal, binding, created_at }`, where `session_keys` lists only that device's targeted keys, `goal` is the snapshot plus `bindable` or null when the person can no longer read the goal, and `next_cursor` is the last returned `seq` as a string (or the given cursor when none is returned).
+The server SHALL serve `GET /api/v2/directives?cursor=<seq>` to a v2 device access token (`alnd_…`) only, returning HTTP 200 `{ directives, next_cursor }` with up to 100 directives whose `seq` is greater than the cursor and that target sessions owned by the token's person on the token's device in workspaces the device is still granted, oldest first, each as `{ id, seq, ws, kind, session_keys, goal, binding, created_at }` plus `request` on kind `request` and `hold` on kinds `hold` and `release`, where `session_keys` lists only that device's targeted keys, `goal` is the snapshot plus `bindable` or null when the person can no longer read the goal, and `next_cursor` is the last returned `seq` as a string (or the given cursor when none is returned).
 
 #### Scenario: First fetch
 
@@ -251,7 +264,7 @@ The server SHALL stop serving a workspace's directives and accepting receipts fo
 
 ### Requirement: Directive receipts are idempotent
 
-The server SHALL accept `POST /api/v2/directives/{id}/receipts` from a device access token with a JSON body of at most 2048 bytes `{ session_key, state, at }`, where `session_key` is a string of at most 43 characters, `state` is one of `received`, `applied` or `enforced` and `at` is an ISO 8601 time, record at most one receipt per directive, session and state, and respond HTTP 200 `{ "fresh": <whether a receipt was added> }`.
+The server SHALL accept `POST /api/v2/directives/{id}/receipts` from a device access token with a JSON body of at most 2048 bytes `{ session_key, state, at, auto_accepted? }`, where `session_key` is a string of at most 43 characters, `state` is one of `received`, `applied`, `enforced`, `accepted` or `declined`, `at` is an ISO 8601 time and `auto_accepted` an optional boolean, record at most one receipt per directive, session and state, and respond HTTP 200 `{ "fresh": <whether a receipt was added> }`, plus `request_state` for a `request` directive.
 
 #### Scenario: Repeated receipt
 
@@ -268,9 +281,70 @@ The server SHALL accept `POST /api/v2/directives/{id}/receipts` from a device ac
 - **WHEN** `state` is `delivered`, or `at` is not an ISO 8601 time, or the body exceeds 2048 bytes
 - **THEN** the response is HTTP 400 `bad_request` for the first two and HTTP 413 `too_large` for the last
 
+### Requirement: Request directives on the device wire
+
+The server SHALL serve a request, and its cancellation, to the targeted sessions as a directive of kind `request` with `goal` and `binding` null and a `request` field `{id, type, cancelled, goal: {id, title, version}, target_goal: {id, title, version} | null, sender: {id, name, role}, note, created_at}`, where `type` is `replan`, `checkpoint` or `switch_goal`, `goal.version` is the goal's version when the request was sent, `target_goal` is set only for `switch_goal`, `sender.role` is `approver` when the sender was in the goal's approval set when they sent it and `owner` for a workspace owner outside it, `note` is the sender's quoted note or null, a goal's `title` is null for a person who can no longer read that goal, and `request` is null when the request no longer exists. Directives of the other kinds SHALL carry no `request` or `hold` field.
+
+#### Scenario: Checkpoint reaches the device
+
+- **WHEN** a goal's approver sends a checkpoint with a note while two of a member's sessions on one device are bound to the goal
+- **THEN** that device's next fetch returns one `request` directive listing both keys, with `request.type` `checkpoint`, `request.cancelled` false, the goal's id, title and version, the sender's id, name and role `approver` and the note, and no `hold` field
+
+#### Scenario: Cancelled request
+
+- **WHEN** the sender cancels a request one session has not answered
+- **THEN** that session's device gets a second `request` directive with the same `request.id` and `request.cancelled` true
+
+### Requirement: Request answers move a session's request state
+
+The server SHALL treat receipts `accepted` and `declined` on a `request` directive as the answer for that session (the developer's, or with `auto_accepted: true` the agent's own accept of a safe request: a `checkpoint`, or drafting a `replan`) and update `v2_request_targets` in the receipt's transaction: `received` moves `sent` to `received`; `accepted` moves a pending session (`sent` or `received`) to `accepted` and records `auto_accepted`; the developer's own `accepted` clears `auto_accepted` on an accepted session; `declined` moves a pending session, or one the agent accepted on its own, to `declined`; any other answer, and any answer for an `expired` session, leaves the state unchanged. Receipts SHALL be idempotent per directive, session, state and `auto_accepted`, so the developer's `accepted` after the agent's own is recorded as a receipt of its own (`fresh: true`). Each answer that changes the state SHALL be audited with the session's person as actor and the request id as object: `request.accepted` (the developer's accept, including one that confirms the agent's own), `request.done_by_agent` (an `auto_accepted` accept) or `request.declined`. The response SHALL add `request_state` (the session's state after the receipt). The server SHALL answer 400 for `accepted` or `declined` on a directive of another kind, for `auto_accepted` with a state other than `accepted` or not a boolean, and for `auto_accepted` on a `switch_goal` request, which takes effect only when the developer accepts; a refused receipt SHALL record nothing.
+
+#### Scenario: The agent does a checkpoint, then the developer declines
+
+- **WHEN** the agent posts `accepted` with `auto_accepted: true` for a checkpoint and the developer later declines it
+- **THEN** the first response has `request_state` `accepted` and the request shows that session as done by the agent, and the second has `request_state` `declined`
+
+#### Scenario: The developer agrees after the agent drafted the plan
+
+- **WHEN** the agent posts `accepted` with `auto_accepted: true` for a replan and the developer later posts `accepted` without it
+- **THEN** both receipts are recorded (the second answers `fresh: true`), the session reads accepted by the developer (`auto_accepted` false), and the audit has `request.done_by_agent` then `request.accepted` by the session's person
+
+#### Scenario: Switch goal is never auto-accepted
+
+- **WHEN** a device posts `accepted` with `auto_accepted: true` for a `switch_goal` request
+- **THEN** the response is 400 and no receipt is recorded, while the developer's own `accepted` is recorded and moves the session to `accepted`
+
+#### Scenario: Accepting a switch moves the binding by the existing path
+
+- **WHEN** the developer accepted a `switch_goal` request and the agent opens an epoch toward the target goal with `cause` `directive:<the request directive's id>`
+- **THEN** the epoch is accepted under the usual binding rules
+
+### Requirement: Hold and release directives
+
+The server SHALL serve a goal hold as a directive of kind `hold` with `goal` and `binding` null and a `hold` field `{goal: {id, title}, held_by: {id, name}, reason, at}`, and its release as kind `release` with `hold` `{goal: {id, title}, released_by: {id, name}, at}`, where the goal's `title` is null for a person who can no longer read it. A device acknowledges a hold with `received` and then `enforced`, as it does a `stop`, and a release with `received` and then `applied`; the hold and the per-session stop are independent. A release SHALL reach every session the hold reached (the hold directive written when the goal was held and any written for a session that bound to it later) whether or not it is still on the goal, since such a session keeps the hold until a release reaches it, and every session on the goal at that time.
+
+#### Scenario: A session that left the held goal is released too
+
+- **WHEN** a session the hold reached moves to another goal and the goal is then released
+- **THEN** the `release` directive lists that session as well as the sessions still on the goal
+
+#### Scenario: Hold reaches a bound session
+
+- **WHEN** an approver holds a goal with reason "Pause for the incident" while one session is bound to it
+- **THEN** that session's device fetches a `hold` directive whose `hold` is `{goal: {id, title}, held_by: {id, name}, reason: "Pause for the incident", at}` and whose `goal` is null, and its `received` and `enforced` receipts are each answered `fresh: true`
+
+### Requirement: A held goal holds sessions that join it later
+
+The server SHALL, in the transaction that binds a session to a held goal (opening an epoch toward it) or makes it governed by one (an approved work_toward alignment), write a fresh `hold` directive for that session carrying the hold's `held_by`, `reason` and `at`, unless a hold directive of the current hold already reached that session.
+
+#### Scenario: New session binds to a held goal
+
+- **WHEN** a member opens an epoch toward a held goal for a session the hold has not reached, and later opens another epoch toward it
+- **THEN** the first epoch's transaction writes one `hold` directive for that session and the second writes none
+
 ### Requirement: Deleting shared history deletes its directive deliveries
 
-The server SHALL, when a session owner deletes a session's shared history, delete that session's directive targets and receipts in the same transaction and delete every directive in the workspace left with no target.
+The server SHALL, when a session owner deletes a session's shared history, delete that session's directive targets, receipts and request states in the same transaction and delete every directive in the workspace left with no target.
 
 #### Scenario: Stop directive removed with the session
 
@@ -321,13 +395,13 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 
 ## Open questions
 
-- Whether directives may instruct agents (Owner decision 2026-10-30 keeps it open): today a directive carries only goal and binding state, and the agent decides what to do with it. A `stop` blocks tools locally but tells the agent nothing beyond the fixed stop reason.
 - Waking idle agents is out of scope (Owner decision 2026-10-30 keeps it open): a stop or a new goal version takes effect only when the session's next hook starts a sync, so an idle agent learns nothing until someone uses it again, and the Sessions tab shows "Stop sent, not yet received" until then.
 - A removed member's sessions stay recorded and keep their `shared` state, so goal versions and an owner's stop still write directives for them that no device can fetch any more. Whether removal should stop sharing for those sessions (and so write nothing) is not decided.
 
 ## Sources
 
 - lib/v2/directives.ts
+- lib/v2/requests.ts
 - lib/v2/sessions.ts
 - lib/v2/goals.ts
 - lib/v2/changes.ts

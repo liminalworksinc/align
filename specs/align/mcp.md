@@ -314,7 +314,7 @@ The MCP server SHALL add, from `align_add_change_request_evidence` (listed only 
 
 ### Requirement: align_get_directives output
 
-The MCP server SHALL return from `align_get_directives` the fields `workspace` (`{id, name}`) and `directives`: the newest 50 v2 directives in that workspace that target at least one session owned by the person, from any of their devices, newest first. Each directive SHALL carry `id`, `kind` (`goal_version` | `binding_changed` | `binding_suspended` | `stop` | `resume`), `created_at`, `session_keys` (only the person's own targeted sessions), `binding` (or `null`) and `goal`: the goal as ratified when the directive was written, with `bindable` and the snapshot's `limits` (or `null` when not shared, as in `align_list_goals`), or `null` when there is none or the person can no longer read that goal. Directives that target only other people's sessions SHALL never be returned.
+The MCP server SHALL return from `align_get_directives` the fields `workspace` (`{id, name}`) and `directives`: the newest 50 v2 directives in that workspace that target at least one session owned by the person, from any of their devices, newest first. Each directive SHALL carry `id`, `kind` (`goal_version` | `binding_changed` | `binding_suspended` | `stop` | `resume` | `request` | `hold` | `release`), `created_at`, `session_keys` (only the person's own targeted sessions), `binding` (or `null`) and `goal`: the goal as ratified when the directive was written, with `bindable` and the snapshot's `limits` (or `null` when not shared, as in `align_list_goals`), or `null` when there is none or the person can no longer read that goal. A `request` directive SHALL also carry `request` `{id, type, cancelled, goal: {id, title, version}, target_goal, sender: {id, name}, note, created_at}` and a `hold` or `release` directive `hold` `{goal: {id, title}, held_by or released_by: {id, name}, reason (hold only), at}`, as the device wire has them (the `directives` part), with goal titles, people's names and the note marked `untrusted_text` (a title the person can no longer read is `null`); other kinds carry neither field. The tool is read-only: no MCP tool sends a request or holds a goal. Directives that target only other people's sessions SHALL never be returned.
 
 #### Scenario: Goal changed under a bound session
 
@@ -325,6 +325,11 @@ The MCP server SHALL return from `align_get_directives` the fields `workspace` (
 
 - **WHEN** a stop directive targets only another member's session in the same workspace
 - **THEN** it is absent from the person's `align_get_directives` result
+
+#### Scenario: Request and hold through MCP
+
+- **WHEN** a goal's lead sends a checkpoint with a note and holds the goal while the person's session is bound to it, and the person's device calls `align_get_directives`
+- **THEN** the result holds a `request` directive whose `request.note.untrusted_text` is the note and whose `request.sender.name` is marked `untrusted_text`, and a `hold` directive whose `hold.reason` is marked `untrusted_text`, and the text summary names the checkpoint request
 
 ### Requirement: Limits through MCP follow the 2026-10-29 ruling
 
@@ -769,7 +774,6 @@ An Align URL that fails the scheme rule at start SHALL make the script write `al
 - **No rate limit on `/api/mcp`.** The MCP endpoint has no request rate limit of its own. Only the OAuth endpoints and the device routes are limited. Is that intended?
 - **Viewer after consent.** The consent page offers only workspaces where the person is an owner or member, but a grant keeps working if the person is later demoted to viewer (the tools then read with viewer visibility). Should demotion to viewer also revoke the person's grants for that workspace?
 - **align-connect "token issuer".** The owner decision says the token issuer must match. This part reads that as the authorization server metadata `issuer` equalling the server named in the protected resource metadata, plus the existing callback `iss` check. If it was meant to also pin `token_endpoint` to the issuer's origin, that is an extra check.
-- **Whether directives may instruct agents** is an open product decision. `align_get_directives` returns structured directives only, and the server instructions treat people's text as data.
 - **Some SDK-level behavior is unverified.** The exact error form for an unknown tool, invalid arguments or a tool handler failure (JSON-RPC error vs `isError` result), how `GET`/`DELETE` on `/api/mcp` behave (session handling), and the exact 401 body and `WWW-Authenticate` parameters, are decided by `mcp-handler` 2.3.0 and `@modelcontextprotocol/server` 2.3.1, not Align code. The token itself is extracted by `mcp-handler`'s `withMcpAuth`, whose parsing (for example of extra whitespace) is not in Align code.
 - **Several instances.** Codes, rate-limit counters and the CIMD cache live in process memory, so a code issued by one instance can't be exchanged at another and limits apply per instance. Is running more than one instance supported?
 
@@ -805,6 +809,7 @@ An Align URL that fails the scheme rule at start SHALL make the script write `al
 - `lib/v2/db.ts`
 - `lib/v2/devices.ts`
 - `lib/v2/directives.ts`
+- `lib/v2/requests.ts`
 - `lib/v2/goals.ts`
 - `lib/v2/changes.ts`
 - `lib/v2/changes-read.ts`

@@ -6,12 +6,14 @@ import { goalCore, goalObj, bindableFor, goalRow, type GoalCore, type GoalRow } 
 import { canReadGoal } from "./policy";
 import type { DevicePrincipal } from "./devices";
 import { principalIn } from "./workspaces";
+import { holdWire, requestReceipt, requestWire, type HoldJson, type RequestJson } from "./requests";
 
-// Directives: what reaches local agents. Only structured content: ratified goal fields and enumerated states,
-// never alignment notes or counters. Rows are written inside the transaction of the change that caused them
-// (callers run these functions inside tx()); devices fetch them by cursor.
+// Directives: what reaches local agents. Only structured content: ratified goal fields, enumerated states and
+// Align's typed requests (lib/v2/requests.ts: a request's type, goal, sender and quoted note; a goal hold), never
+// alignment notes or counters. Rows are written inside the transaction of the change that caused them (callers run
+// these functions inside tx()); devices fetch them by cursor.
 
-export type DirectiveKind = "goal_version" | "binding_changed" | "binding_suspended" | "stop" | "resume";
+export type DirectiveKind = "goal_version" | "binding_changed" | "binding_suspended" | "stop" | "resume" | "request" | "hold" | "release";
 export interface Binding {
   goal_id: string | null;
   effective: "next_root_turn";
@@ -26,22 +28,34 @@ interface DirectiveRow {
   goal_id: string | null;
   goal_json: string | null;
   binding_json: string | null;
+  request_json: string | null;
+  hold_json: string | null;
   created_at: string;
 }
 
+/** What a request, hold or release directive carries besides its kind: the goal it is about (no snapshot) and the
+ *  request reference or the hold's who, why and when. */
+export interface DirectiveExtra {
+  goalId: string;
+  request?: RequestJson;
+  hold?: HoldJson;
+}
+
 /** Write one directive and its targets. No targets, no directive. */
-export function writeDirective(ws: string, kind: DirectiveKind, sessionKeys: string[], goal: GoalCore | null, binding: Binding | null): string | null {
+export function writeDirective(ws: string, kind: DirectiveKind, sessionKeys: string[], goal: GoalCore | null, binding: Binding | null, extra?: DirectiveExtra): string | null {
   const keys = [...new Set(sessionKeys)];
   if (!keys.length) return null;
   const id = newId("dir");
   run(
-    "INSERT INTO v2_directives (id, ws_id, kind, goal_id, goal_json, binding_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO v2_directives (id, ws_id, kind, goal_id, goal_json, binding_json, request_json, hold_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     id,
     ws,
     kind,
-    goal?.id ?? null,
+    goal?.id ?? extra?.goalId ?? null,
     goal ? JSON.stringify(goal) : null,
     binding ? JSON.stringify(binding) : null,
+    extra?.request ? JSON.stringify(extra.request) : null,
+    extra?.hold ? JSON.stringify(extra.hold) : null,
     nowIso(),
   );
   for (const k of keys) run("INSERT INTO v2_directive_targets (ws_id, directive_id, session_key) VALUES (?, ?, ?)", ws, id, k);
@@ -85,9 +99,9 @@ export function goalSnapshot(json: string): GoalCore {
 
 function serialize(dev: DevicePrincipal, d: DirectiveRow, keys: string[]) {
   let goal: (GoalCore & { bindable: boolean }) | null = null;
+  const pp = principalIn(dev, d.ws_id);
   if (d.goal_json) {
     // The goal as ratified when the directive was written; withheld if this user can no longer see it.
-    const pp = principalIn(dev, d.ws_id);
     const live = d.goal_id ? goalRow(d.ws_id, d.goal_id) : undefined;
     if (live && canReadGoal(pp, goalObj(live))) goal = { ...goalSnapshot(d.goal_json), bindable: bindableFor(pp, live) };
   }
@@ -100,6 +114,9 @@ function serialize(dev: DevicePrincipal, d: DirectiveRow, keys: string[]) {
     goal,
     binding: d.binding_json ? (JSON.parse(d.binding_json) as Binding) : null,
     created_at: d.created_at,
+    // Only on the kinds that carry them, so the other kinds' shape is unchanged.
+    ...(d.kind === "request" ? { request: d.request_json ? requestWire(pp, JSON.parse(d.request_json) as RequestJson) : null } : {}),
+    ...(d.kind === "hold" || d.kind === "release" ? { hold: d.hold_json && d.goal_id ? holdWire(pp, d.kind, d.goal_id, JSON.parse(d.hold_json) as HoldJson) : null } : {}),
   };
 }
 
@@ -110,7 +127,7 @@ export function directivesFor(dev: DevicePrincipal, cursor: number, limit = 100)
   const ws = [...dev.grants];
   if (!ws.length) return [];
   const rows = all<DirectiveRow & { keys: string }>(
-    `SELECT d.seq, d.id, d.ws_id, d.kind, d.goal_id, d.goal_json, d.binding_json, d.created_at, group_concat(t.session_key, ' ') AS keys
+    `SELECT d.seq, d.id, d.ws_id, d.kind, d.goal_id, d.goal_json, d.binding_json, d.request_json, d.hold_json, d.created_at, group_concat(t.session_key, ' ') AS keys
      FROM v2_directives d
      JOIN v2_directive_targets t ON t.directive_id = d.id
      JOIN v2_sessions s ON s.ws_id = t.ws_id AND s.session_key = t.session_key
@@ -131,14 +148,19 @@ export function parseCursor(v: string | null): number {
   return Number(v);
 }
 
-export const RECEIPT_STATES = ["received", "applied", "enforced"] as const;
+export const RECEIPT_STATES = ["received", "applied", "enforced", "accepted", "declined"] as const;
 export type ReceiptState = (typeof RECEIPT_STATES)[number];
 
-/** Three-state delivery receipt (idempotent): only for a directive that targets one of this user's sessions on
- *  this device. */
-export async function recordReceipt(dev: DevicePrincipal, directiveId: string, sessionKey: string, state: ReceiptState, at: string) {
-  const t = get<{ ws_id: string }>(
-    `SELECT t.ws_id FROM v2_directive_targets t JOIN v2_sessions s ON s.ws_id = t.ws_id AND s.session_key = t.session_key
+/** A delivery receipt (idempotent per directive, session, state and auto_accepted, so the developer's accept after the
+ *  agent's own is recorded too): only for a directive that targets one of this user's sessions on this device.
+ *  received, applied and enforced report delivery; accepted and declined answer a request directive (the developer's
+ *  answer, or, with `autoAccepted`, the agent doing a safe request on its own) and move that session's request state
+ *  (lib/v2/requests.ts requestReceipt), whose result is returned as `request_state`. */
+export async function recordReceipt(dev: DevicePrincipal, directiveId: string, sessionKey: string, state: ReceiptState, at: string, autoAccepted = false) {
+  const t = get<{ ws_id: string; kind: DirectiveKind; request_json: string | null }>(
+    `SELECT t.ws_id, d.kind, d.request_json FROM v2_directive_targets t
+     JOIN v2_directives d ON d.id = t.directive_id
+     JOIN v2_sessions s ON s.ws_id = t.ws_id AND s.session_key = t.session_key
      WHERE t.directive_id = ? AND t.session_key = ? AND s.user_id = ? AND s.device_id = ?`,
     directiveId,
     sessionKey,
@@ -146,10 +168,24 @@ export async function recordReceipt(dev: DevicePrincipal, directiveId: string, s
     dev.deviceId,
   );
   if (!t || !dev.grants.has(t.ws_id)) throw notFound();
-  const n = await tx(() =>
-    run("INSERT OR IGNORE INTO v2_receipts (ws_id, directive_id, session_key, state, at, recorded_at) VALUES (?, ?, ?, ?, ?, ?)", t.ws_id, directiveId, sessionKey, state, at, nowIso()),
-  );
-  return { fresh: n > 0 };
+  const answer = state === "accepted" || state === "declined";
+  if (answer && t.kind !== "request") throw badRequest("accepted and declined answer a request directive");
+  if (autoAccepted && state !== "accepted") throw badRequest("auto_accepted goes only with state accepted");
+  const request = t.kind === "request" && t.request_json ? (JSON.parse(t.request_json) as RequestJson) : null;
+  return tx(() => {
+    const n = run(
+      "INSERT OR IGNORE INTO v2_receipts (ws_id, directive_id, session_key, state, at, recorded_at, auto_accepted) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      t.ws_id,
+      directiveId,
+      sessionKey,
+      state,
+      at,
+      nowIso(),
+      autoAccepted ? 1 : 0,
+    );
+    if (!request) return { fresh: n > 0 };
+    return { fresh: n > 0, request_state: requestReceipt(t.ws_id, request.request_id, sessionKey, state, autoAccepted, dev.user.id) };
+  });
 }
 
 /** For the sessions page: the latest stop/resume directive for a session and how far it got. */

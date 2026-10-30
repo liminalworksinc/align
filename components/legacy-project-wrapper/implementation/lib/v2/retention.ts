@@ -20,6 +20,7 @@ export {
   RETENTION_INTERVAL_MS,
   retentionNow,
   SESSION_MONTHS,
+  REQUEST_MONTHS,
   VALUE_REPORT_MONTHS,
   type RetentionCounts,
 } from "./retention-core.mts";

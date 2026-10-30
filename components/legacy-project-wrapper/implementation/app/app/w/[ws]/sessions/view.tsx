@@ -1,6 +1,7 @@
 "use client";
 import { api, Btn, Card, Err, Loading, Note, Pill, Shell, num, useAction, useApi, when } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
+import { HoldBanner } from "../../../_ui/requests";
 import type { AnySession, GoalLabel, MySession, StopStatus } from "../../../_ui/types";
 
 const goalText = (g: GoalLabel | null | undefined) => (!g ? "no goal" : g.private ? "a goal you can't see" : g.title);
@@ -15,6 +16,7 @@ function stopText(s: StopStatus | null, stopped: boolean) {
 
 export default function Sessions({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<{ mine: MySession[]; all: AnySession[] | null }>(`/api/v2/workspaces/${ws}/sessions`);
+  const holds = useApi<{ holds: { goal: { id: string; title: string }; held_by: { id: string; name: string }; reason: string | null; held_at: string }[] }>(`/api/v2/workspaces/${ws}/holds`);
   const act = useAction();
   const base = `/api/v2/workspaces/${ws}/sessions`;
   const post = (key: string, verb: string) => act.run(() => api(`${base}/${key}/${verb}`, { body: {} }), d.reload);
@@ -23,6 +25,9 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
     <Shell me={me} ws={ws} tab="Sessions">
       <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">Shared sessions</h1>
       <p className="mb-5 text-[15px] text-zinc-600">Sessions you shared from your machine with align share. Nothing else from your machine reaches this workspace.</p>
+      {holds.data?.holds.map((h) => (
+        <HoldBanner key={h.goal.id} hold={h} goalTitle={h.goal.title} />
+      ))}
       {d.loading && <Loading />}
       <Err>{d.error ?? act.error}</Err>
       <Card title="Yours">

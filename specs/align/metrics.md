@@ -60,6 +60,8 @@ The events, where they are recorded and what they may carry:
 | `value_card_viewed` | a person's value card was at least half on screen, the first time in the workspace | the workspace, the person | none |
 | `value_reported` | a person's first value report in the workspace | the workspace, the person | `estimate`: `same_day`, `two_to_three_days`, `about_a_week`, `longer` or `would_not_be_decided` |
 | `follow_up_clicked` | a person's first click on the value card's follow-up link in the workspace | the workspace, the person | none |
+| `first_request` | the workspace's first request to a goal's agents (the `goals-and-proposals` part) | the workspace, the sender | `type`: `replan`, `checkpoint` or `switch_goal` |
+| `first_hold` | the workspace's first goal hold | the workspace, the person who held it | none |
 
 ## Requirements
 
@@ -232,6 +234,7 @@ names the workspace while the report still counts it.
 - lib/v2/db.ts
 - lib/v2/access.ts
 - lib/v2/value.ts
+- lib/v2/requests.ts
 - lib/v2/creation.ts
 - lib/v2/workspaces.ts
 - lib/v2/devices.ts

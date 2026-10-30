@@ -769,6 +769,46 @@ paths aren't shared") and "Your sessions" (harness, a state pill and the last ac
 - **WHEN** a member of the goal's team opens a goal with two bound sessions, one active, and work signals with paths
 - **THEN** the card shows "Sessions 2 (1 Claude Code, 1 Codex)", "Active now 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card says "No shared sessions worked toward this goal in the last 14 days."
 
+### Requirement: Agents on this goal card
+
+The goal page SHALL show, under the "Agent activity" card, an "Agents on this goal" card from
+`GET /api/v2/workspaces/<ws>/goals/<goal>/requests`, shown when the reader may send requests or hold the goal or
+when the goal has requests. For a person who may hold the goal it SHALL offer **Hold all agents on this goal** with an
+optional reason (at most 280 characters, "shown to the developers") while the goal is active and not held, and
+**Release** while it is held, calling `PUT` and `DELETE /api/v2/workspaces/<ws>/goals/<goal>/hold` and showing
+**Sign in again** on 403 `reauth_required`. For a person who may send requests it SHALL offer "Send a request" with
+the type choices Replan, Checkpoint and Switch goal (each with a sentence saying what the agent does and whether the
+developer is asked first), for Switch goal a checkbox per session on the goal and a target-goal picker of the other
+active goals, an optional note (at most 280 characters, "shown to the developer and the agent, quoted") and
+**Send** (`POST …/requests`), or "No shared session is working on this goal, so there is no one to send a request
+to." when there is no session. Each request SHALL be listed with its type, a pill (waiting, answered or cancelled), its
+sender and time, the goal version it was sent at, the target goal ("a goal you can't see" when hidden), the quoted
+note, who cancelled it, the counts, and per visible session a pill: pending, accepted by the developer, done by the
+agent (an `auto_accepted` accept), declined or expired, with **Cancel** when its `can_cancel` is true.
+
+#### Scenario: Approver sends a replan
+
+- **WHEN** a goal's lead picks Replan, types a note and presses **Send** while sessions work on the goal
+- **THEN** the request is created (201) and listed with "waiting", the lead as sender and the quoted note
+
+#### Scenario: Agent did the checkpoint
+
+- **WHEN** a session's agent accepted a checkpoint on its own and another session's developer accepted it
+- **THEN** the request's sessions show "done by the agent" and "accepted by the developer"
+
+### Requirement: Hold banner
+
+The app SHALL show, while a goal is held, a banner "All agents on this goal are on hold." naming who paused them,
+when, and the reason, saying their tools are blocked until someone who can approve for the goal releases it: at the
+top of the goal page (from `GET …/goals/<goal>/hold`), and on the Sessions tab for each held goal the reader can read
+(from `GET /api/v2/workspaces/<ws>/holds`, naming the goal); the Goals tab SHALL mark a held goal's row with an
+"agents on hold" pill.
+
+#### Scenario: Member's Sessions tab during a hold
+
+- **WHEN** a member whose sessions work on a held goal opens the Sessions tab
+- **THEN** a banner says all agents on that goal, by its title, are on hold, with who held it and the reason
+
 ### Requirement: Workspace Spend tab
 
 The Spend tab SHALL show token usage and estimated list cost from
@@ -932,6 +972,7 @@ active goal), neutral otherwise.
 - `app/app/w/[ws]/asks/page.tsx`
 - `app/app/w/[ws]/asks/view.tsx`
 - `app/app/_ui/activity.tsx`
+- `app/app/_ui/requests.tsx`
 - `app/app/w/[ws]/spend/view.tsx`
 - `app/app/w/[ws]/apps/view.tsx`
 - `app/oauth/authorize/page.tsx`

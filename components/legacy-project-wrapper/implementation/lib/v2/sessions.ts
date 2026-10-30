@@ -11,6 +11,7 @@ import { stopStatus, writeDirective } from "./directives";
 import type { DevicePrincipal } from "./devices";
 import type { Principal } from "./http";
 import { need } from "./workspaces";
+import { holdNewlyBound } from "./requests";
 import { personName } from "./retention";
 import { b64url, iso, nonNegInt, oneOf, optInt, optStr, str, type Body } from "./validate";
 
@@ -192,6 +193,8 @@ export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal
       pp.wsId,
       key,
     );
+    // A held goal holds this session too.
+    if (goalId) holdNewlyBound(pp.wsId, goalId, key);
     // First value: the first time a session in this workspace is bound to a goal.
     if (goalId && authority !== "none") event("first_session_bound", { ws: pp.wsId, user: pp.userId, props: { harness: cur.harness, authority }, at });
     return epochOut(get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epochId)!);

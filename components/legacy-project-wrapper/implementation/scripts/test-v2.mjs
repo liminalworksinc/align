@@ -713,7 +713,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 11, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, and value reports included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 11 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 12, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 12 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -3411,6 +3411,365 @@ try {
   }
   // ==== end port:value ====
 
+  // ==== req:requests ====
+  // Requests and goal holds (REQ-001), on a workspace of their own: QO owns it; team Core has a lead (QL) and a member
+  // (QM, whose sessions work on the goal); QX is a member in no team; QV a viewer. QL owns the goal GR (workspace
+  // visible, team Core): its approval set is QL; QO sends as a workspace owner.
+  {
+    const qUsers = {};
+    for (const [who, name] of [
+      ["QO", "Quinn Owner"],
+      ["QL", "Quill Lead"],
+      ["QM", "Quade Member"],
+      ["QX", "Quorra Other"],
+      ["QV", "Quincy Viewer"],
+    ])
+      qUsers[who] = await signUp(who, name, `${who.toLowerCase()}@requests.example.test`);
+    const { QO, QL, QM, QX, QV } = qUsers;
+    const QW = (await call("QO", "POST", "/api/v2/workspaces", { cookie: QO.cookie, body: { name: "Requests workspace" } })).json?.id;
+    const qa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${QW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [QL, "member"],
+      [QM, "member"],
+      [QX, "member"],
+      [QV, "viewer"],
+    ]) {
+      const i = await qa(QO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const QT = (await qa(QO, "POST", "/teams", { name: "Core" })).json?.id;
+    await qa(QO, "POST", `/teams/${QT}/members`, { user_id: QL.id, role: "lead" });
+    await qa(QO, "POST", `/teams/${QT}/members`, { user_id: QM.id, role: "member" });
+    const GR = (await qa(QL, "POST", "/goals", { title: "Ship the scheduler", visibility: "workspace", team_id: QT })).json;
+    const G2 = (await qa(QL, "POST", "/goals", { title: "Harden the scheduler", visibility: "workspace", team_id: QT })).json;
+    const GX = (await qa(QX, "POST", "/goals", { title: "Quorra's own goal", visibility: "workspace" })).json;
+    const GE = (await qa(QL, "POST", "/goals", { title: "Nobody works on this", visibility: "workspace", team_id: QT })).json;
+    const qDevice = (u) => {
+      const keys = newDeviceKeys();
+      const d = insertDevice(u.id, `${u.who}'s laptop`);
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, QW));
+      return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
+    };
+    const DQM = qDevice(QM);
+    const qT0 = new Date(Date.now() - 3600_000).toISOString();
+    const qShare = async (dev, native, goalId) => {
+      const key = sessionKey(dev, QW, "claude-code", native);
+      await call(dev.who, "PUT", `/api/v2/workspaces/${QW}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, QW, `/src/${native}`), repo_alias: `repo-${native}`, started_at: qT0, title: `REQ-TITLE ${native}` } });
+      const e = await call(dev.who, "POST", `/api/v2/workspaces/${QW}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: epochId(), goal_id: goalId, starts_at: qT0, root_turn: null, cause: "manual" } });
+      return { key, status: e.status };
+    };
+    const SM1 = await qShare(DQM, "req-1", GR.id);
+    const SM2 = await qShare(DQM, "req-2", GR.id);
+    check("requests setup: a workspace with a team (lead, member), a member in no team, a viewer, goals, and two of the member's sessions bound to the goal", !!QW && !!QT && !!GR?.id && !!G2?.id && !!GX?.id && SM1.status === 200 && SM2.status === 200, `${QW} ${QT} ${SM1.status} ${SM2.status}`);
+    const qDirs = async (dev, cursor = 0) => (await call(dev.who, "GET", `/api/v2/directives?cursor=${cursor}`, { bearer: dev.access })).json;
+    const qRec = (id, key, state, extra = {}) => call("QM", "POST", `/api/v2/directives/${id}/receipts`, { bearer: DQM.access, body: { session_key: key, state, at: new Date().toISOString(), ...extra } });
+    const send = (u, body, g = GR.id) => qa(u, "POST", `/goals/${g}/requests`, body);
+    const list = (u, g = GR.id) => qa(u, "GET", `/goals/${g}/requests`);
+    const qAudit = (action, obj) => withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = ? AND object_id = ?").all(QW, action, obj)).map((r) => r.actor_id);
+
+    // -- who may send, and what a request must be --
+    const who = await Promise.all([send(QV, { type: "checkpoint" }), send(QX, { type: "checkpoint" }), send(QM, { type: "checkpoint" })]);
+    check(
+      "requests: a viewer -> 403 read_only; a member who is not in the goal's approval set (in no team, or a team member who isn't its lead or owner) -> 403 not_approver",
+      who[0].status === 403 && who[0].json?.error === "read_only" && who[1].status === 403 && who[1].json?.error === "not_approver" && who[2].status === 403 && who[2].json?.error === "not_approver",
+      who.map((r) => r.text).join(" | "),
+    );
+    const bad = await Promise.all([
+      send(QL, { type: "stop" }),
+      send(QL, { type: "checkpoint", note: "n".repeat(281) }),
+      send(QL, { type: "checkpoint", target_goal_id: G2.id }),
+      send(QL, { type: "switch_goal", target_goal_id: G2.id }),
+      send(QL, { type: "checkpoint", session_keys: ["A".repeat(43)] }),
+      send(QL, { type: "switch_goal", session_keys: [SM1.key], target_goal_id: GR.id }),
+      send(QL, { type: "checkpoint" }, GE.id),
+    ]);
+    check(
+      "requests: an unknown type, a note over 280, target_goal_id without switch_goal, switch_goal without session_keys, a session key not on the goal, a switch to the same goal -> 400; a goal no session works on -> 409 no_sessions",
+      bad.slice(0, 6).every((r) => r.status === 400) && bad[6].status === 409 && bad[6].json?.error === "no_sessions",
+      bad.map((r) => `${r.status} ${r.json?.error}`).join(" | "),
+    );
+
+    // -- a checkpoint from the goal's approver --
+    const qBefore = await qDirs(DQM);
+    const QNOTE = `Please checkpoint before the demo REQ-NOTE-${randomBytes(3).toString("hex")}`;
+    const cp = await send(QL, { type: "checkpoint", note: QNOTE });
+    const CP = cp.json?.request;
+    const cpDirs = (await qDirs(DQM, qBefore.next_cursor)).directives;
+    const cpDir = cpDirs.find((d) => d.kind === "request");
+    check(
+      "requests: the goal's approver sends a checkpoint -> 201 { request } (rq_ id, type, goal with its version, sender, quoted note, open, both sessions pending, counts)",
+      cp.status === 201 && /^rq_[a-z2-7]{24}$/.test(CP?.id) && CP.type === "checkpoint" && CP.goal.id === GR.id && CP.goal.version === 1 && CP.target_goal === null && CP.sender.id === QL.id && CP.sender.name === "Quill Lead" && CP.note === QNOTE &&
+        CP.state === "open" && CP.counts.pending === 2 && CP.sessions.length === 2 && CP.sessions.every((s) => s.state === "sent" && !s.auto_accepted) && CP.can_cancel === true,
+      cp.text,
+    );
+    check(
+      "requests (wire): one request directive for both sessions: goal and binding null, request {id, type, cancelled false, goal {id, title, version}, target_goal null, sender {id, name, role approver}, note, created_at}, and no hold field",
+      cpDirs.length === 1 && cpDir && JSON.stringify(cpDir.session_keys) === JSON.stringify([SM1.key, SM2.key].sort()) && cpDir.goal === null && cpDir.binding === null && !("hold" in cpDir) &&
+        JSON.stringify(Object.keys(cpDir.request).sort()) === JSON.stringify(["cancelled", "created_at", "goal", "id", "note", "sender", "target_goal", "type"]) &&
+        cpDir.request.id === CP.id && cpDir.request.type === "checkpoint" && cpDir.request.cancelled === false && JSON.stringify(cpDir.request.goal) === JSON.stringify({ id: GR.id, title: "Ship the scheduler", version: 1 }) &&
+        cpDir.request.target_goal === null && JSON.stringify(cpDir.request.sender) === JSON.stringify({ id: QL.id, name: "Quill Lead", role: "approver" }) && cpDir.request.note === QNOTE && cpDir.request.created_at === CP.created_at,
+      JSON.stringify(cpDirs),
+    );
+    const again = await send(QL, { type: "checkpoint" });
+    const rp = await send(QO, { type: "replan" });
+    check(
+      "requests: a second open checkpoint on the goal -> 409 already_open; a replan from a workspace owner outside the approval set -> 201 with sender.role owner (the approver's is approver)",
+      again.status === 409 && again.json?.error === "already_open" && rp.status === 201 && rp.json.request.sender.id === QO.id && rp.json.request.sender.role === "owner" && CP.sender.role === "approver",
+      `${again.text} ${rp.status} ${JSON.stringify(rp.json?.request?.sender)}`,
+    );
+    check("requests: audited as request.sent by the sender", qAudit("request.sent", CP.id).join() === QL.id && qAudit("request.sent", rp.json?.request?.id).join() === QO.id, "");
+
+    // -- receipts: received, the agent's own accept of a safe request, the developer's decline and accept --
+    const r1 = await qRec(cpDir.id, SM1.key, "received");
+    const r2 = await qRec(cpDir.id, SM1.key, "accepted", { auto_accepted: true });
+    const midView = (await list(QL)).json?.requests?.find((r) => r.id === CP.id);
+    const r3 = await qRec(cpDir.id, SM1.key, "declined");
+    const r4a = await qRec(cpDir.id, SM2.key, "accepted", { auto_accepted: true });
+    const r4 = await qRec(cpDir.id, SM2.key, "accepted");
+    const r4again = await qRec(cpDir.id, SM2.key, "accepted");
+    const r5 = await qRec(cpDir.id, SM2.key, "declined");
+    const cpView = (await list(QL)).json?.requests?.find((r) => r.id === CP.id);
+    const s1 = cpView?.sessions.find((s) => s.session_key === SM1.key);
+    const s2 = cpView?.sessions.find((s) => s.session_key === SM2.key);
+    const acceptRows = withDb((d) => d.prepare("SELECT auto_accepted FROM v2_receipts WHERE directive_id = ? AND session_key = ? AND state = 'accepted' ORDER BY auto_accepted").all(cpDir.id, SM2.key)).map((r) => r.auto_accepted);
+    check(
+      "request receipts: the developer's accept after the agent's own is recorded as a receipt of its own (fresh true, both kept), turns the session into accepted by the developer and is audited request.accepted by the session's person; the agent's accepts are audited request.done_by_agent and the decline request.declined; the same accept again -> fresh false",
+      r4a.json?.request_state === "accepted" && r4.json?.fresh === true && r4.json.request_state === "accepted" && r4again.json?.fresh === false && JSON.stringify(acceptRows) === "[0,1]" &&
+        qAudit("request.accepted", CP.id).join() === QM.id && qAudit("request.done_by_agent", CP.id).length === 2 && qAudit("request.declined", CP.id).join() === QM.id,
+      `${r4a.text} ${r4.text} ${r4again.text} ${JSON.stringify(acceptRows)}`,
+    );
+    check(
+      "request receipts: received -> request_state received; accepted with auto_accepted -> accepted, shown as done by the agent; a later decline overrides it; the developer's accept stays (a later decline changes nothing); counts follow",
+      r1.json?.fresh === true && r1.json.request_state === "received" && r2.json?.request_state === "accepted" && midView?.counts.done_by_agent === 1 && midView.sessions.find((s) => s.session_key === SM1.key)?.auto_accepted === true &&
+        r3.json?.request_state === "declined" && r4.json?.request_state === "accepted" && r5.json?.request_state === "accepted" && s1?.state === "declined" && !s1.auto_accepted && s2?.state === "accepted" && !s2.auto_accepted &&
+        cpView.state === "answered" && cpView.counts.accepted === 1 && cpView.counts.declined === 1 && cpView.counts.pending === 0 && cpView.can_cancel === false,
+      `${r1.text} ${r2.text} ${r3.text} ${r4.text} ${r5.text} ${JSON.stringify(cpView?.sessions)}`,
+    );
+    const stopQ = await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM2.key}/stop`, { cookie: QM.cookie, body: {} });
+    const stopDir = (await qDirs(DQM, cpDir.seq)).directives.find((d) => d.kind === "stop");
+    await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM2.key}/resume`, { cookie: QM.cookie, body: {} });
+    const badRec = await Promise.all([qRec(stopDir?.id, SM2.key, "accepted"), qRec(cpDir.id, SM2.key, "received", { auto_accepted: true }), qRec(cpDir.id, SM2.key, "accepted", { auto_accepted: "yes" })]);
+    check(
+      "request receipts: accepted on a stop directive, auto_accepted with any state but accepted, and a non-boolean auto_accepted -> 400",
+      stopQ.status === 200 && badRec.every((r) => r.status === 400),
+      badRec.map((r) => r.text).join(" | "),
+    );
+
+    // -- switch_goal: needs session_keys and a target every chosen session's owner may bind; only the developer accepts --
+    const notBindable = await send(QL, { type: "switch_goal", session_keys: [SM1.key], target_goal_id: GX.id });
+    const sw = await send(QL, { type: "switch_goal", session_keys: [SM1.key], target_goal_id: G2.id, note: "Hardening first" });
+    const swDir = (await qDirs(DQM, cpDir.seq)).directives.find((d) => d.kind === "request" && d.request?.id === sw.json?.request?.id);
+    check(
+      "switch_goal: a target goal the session's owner can't bind -> 409 not_bindable naming nothing; a bindable one -> 201 to the chosen session only, with target_goal {id, title, version} on the wire",
+      notBindable.status === 409 && notBindable.json?.error === "not_bindable" && !notBindable.text.includes("Quorra") && sw.status === 201 && sw.json.request.target_goal?.id === G2.id &&
+        swDir && JSON.stringify(swDir.session_keys) === JSON.stringify([SM1.key]) && JSON.stringify(swDir.request.target_goal) === JSON.stringify({ id: G2.id, title: "Harden the scheduler", version: 1 }),
+      `${notBindable.text} ${sw.text} ${JSON.stringify(swDir)}`,
+    );
+    const swAuto = await qRec(swDir?.id, SM1.key, "accepted", { auto_accepted: true });
+    const swAutoRow = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_receipts WHERE directive_id = ? AND state = 'accepted'").get(swDir?.id ?? "").n);
+    const swAcc = await qRec(swDir?.id, SM1.key, "accepted");
+    const swBind = await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM1.key}/epochs`, { bearer: DQM.access, body: { epoch_id: epochId(), goal_id: G2.id, starts_at: new Date().toISOString(), root_turn: null, cause: `directive:${swDir?.id}` } });
+    check(
+      "switch_goal: auto_accepted -> 400 and nothing recorded (it changes direction, so only the developer accepts); the developer's accept -> accepted; the binding then moves through the existing epoch path with the request directive as its cause",
+      swAuto.status === 400 && swAutoRow === 0 && swAcc.json?.request_state === "accepted" && swBind.status === 200 && swBind.json.goal_id === G2.id,
+      `${swAuto.text} ${swAutoRow} ${swAcc.text} ${swBind.text}`,
+    );
+
+    // -- reading: the sender, approvers and workspace owners see every session; others their own rows and counts --
+    const views = { QO: await list(QO), QM: await list(QM), QX: await list(QX), QV: await list(QV) };
+    const rpOf = (v) => v.json?.requests?.find((r) => r.id === rp.json?.request?.id);
+    check(
+      "requests list: anyone who reads the goal reads it, newest first; the workspace owner sees every session's row and can send; the sessions' owner sees their own rows (with titles) but can't send; another member and a viewer see the counts and no rows",
+      Object.values(views).every((v) => v.status === 200) && views.QO.json.requests[0].id === sw.json.request.id && views.QO.json.can_send === true && rpOf(views.QO)?.sessions.length === 2 && views.QO.json.sessions.length === 1 &&
+        views.QM.json.can_send === false && views.QM.json.sessions === null && rpOf(views.QM)?.sessions.length === 2 && rpOf(views.QM).sessions.every((s) => s.mine && s.title?.startsWith("REQ-TITLE")) &&
+        rpOf(views.QX)?.sessions.length === 0 && rpOf(views.QX).counts.pending === 2 && rpOf(views.QV)?.sessions.length === 0 && views.QV.json.can_send === false && !views.QO.text.includes("REQ-TITLE"),
+      JSON.stringify(Object.fromEntries(Object.entries(views).map(([k, v]) => [k, v.text.slice(0, 160)]))),
+    );
+
+    // -- cancel --
+    const RP = rp.json.request;
+    const cBy = await Promise.all([qa(QX, "DELETE", `/goals/${GR.id}/requests/${RP.id}`), qa(QL, "DELETE", `/goals/${GR.id}/requests/${RP.id}`), qa(QV, "DELETE", `/goals/${GR.id}/requests/${RP.id}`), qa(QO, "DELETE", `/goals/${GR.id}/requests/rq_aaaaaaaaaaaaaaaaaaaaaaaa`)]);
+    const rpDir = (await qDirs(DQM, cpDir.seq)).directives.find((d) => d.kind === "request" && d.request?.id === RP.id);
+    await qRec(rpDir?.id, SM2.key, "declined");
+    const cBefore = (await qDirs(DQM, swDir?.seq ?? 0)).next_cursor;
+    const cancel = await qa(QO, "DELETE", `/goals/${GR.id}/requests/${RP.id}`);
+    const cDirs = (await qDirs(DQM, cBefore)).directives.filter((d) => d.kind === "request");
+    const cancel2 = await qa(QO, "DELETE", `/goals/${GR.id}/requests/${RP.id}`);
+    const cDirs2 = (await qDirs(DQM, cBefore)).directives.filter((d) => d.kind === "request");
+    const late = await qRec(rpDir?.id, SM1.key, "accepted");
+    check(
+      "cancel: another member, the goal's approver who didn't send it -> 403 not_sender or read_only for a viewer; an unknown id -> 404; the workspace owner cancels -> the sessions still pending get a request directive with cancelled true and become expired (an answered one keeps its answer); again changes nothing; a late accept keeps expired",
+      cBy[0].status === 403 && cBy[0].json?.error === "not_sender" && cBy[1].status === 403 && cBy[1].json?.error === "not_sender" && cBy[2].status === 403 && cBy[2].json?.error === "read_only" && cBy[3].status === 404 &&
+        cancel.status === 200 && cancel.json.request.state === "cancelled" && cancel.json.request.cancelled_by?.id === QO.id && cancel.json.request.sessions.find((s) => s.session_key === SM1.key)?.state === "expired" && cancel.json.request.sessions.find((s) => s.session_key === SM2.key)?.state === "declined" &&
+        cDirs.length === 1 && JSON.stringify(cDirs[0].session_keys) === JSON.stringify([SM1.key]) && cDirs[0].request.cancelled === true && cDirs[0].request.id === RP.id && cancel2.status === 200 && cDirs2.length === 1 && late.json?.request_state === "expired" && qAudit("request.cancelled", RP.id).join() === QO.id,
+      `${cBy.map((r) => r.status).join(",")} ${cancel.text.slice(0, 300)} ${JSON.stringify(cDirs)} ${late.text}`,
+    );
+
+    // -- limits and state --
+    withDb((d) => {
+      d.exec("PRAGMA foreign_keys = OFF");
+      const ins = d.prepare("INSERT INTO v2_requests (id, ws_id, goal_id, type, goal_version, sender_id, sender_role, directive_id, created_at) VALUES (?, ?, ?, 'replan', 1, ?, 'owner', 'dir_none', ?)");
+      for (let i = 0; i < 20; i++) ins.run(`rq_fake${String(i).padStart(17, "a")}`, QW, GE.id, QO.id, new Date().toISOString());
+    });
+    const limited = await send(QO, { type: "replan" });
+    withDb((d) => d.prepare("DELETE FROM v2_requests WHERE id LIKE 'rq_fake%'").run());
+    check("requests: the 21st request a person sends in an hour -> 429 rate_limited", limited.status === 429 && limited.json?.error === "rate_limited", limited.text);
+
+    // -- goal holds --
+    const holdOf = (u, g = GR.id) => qa(u, "GET", `/goals/${g}/hold`);
+    const put = (u, body = {}, g = GR.id) => qa(u, "PUT", `/goals/${g}/hold`, body);
+    const hBy = await Promise.all([put(QM), put(QV), put(QX)]);
+    ageSession(QL.cookie, 20);
+    const hStale = await put(QL, { reason: "Pause for the incident" });
+    ageSession(QL.cookie, 0);
+    const hBefore = (await qDirs(DQM)).next_cursor;
+    const QREASON = `Pause for the incident REQ-REASON-${randomBytes(3).toString("hex")}`;
+    const h1 = await put(QL, { reason: QREASON });
+    const h2 = await put(QL, { reason: "again" });
+    const hDirs = (await qDirs(DQM, hBefore)).directives;
+    const hDir = hDirs.find((d) => d.kind === "hold");
+    check(
+      "hold: the sessions' owner and another member -> 403 not_approver, a viewer -> 403 read_only; the approver with a sign-in older than 15 minutes -> 403 reauth_required",
+      hBy[0].json?.error === "not_approver" && hBy[1].json?.error === "read_only" && hBy[2].json?.error === "not_approver" && hStale.status === 403 && hStale.json?.error === "reauth_required",
+      `${hBy.map((r) => r.text).join(" | ")} ${hStale.text}`,
+    );
+    check(
+      "hold: the goal's approver holds it -> 201 { held {held_by, reason, held_at}, can_hold }; again -> 200 and no new directive; one hold directive to the session on the goal: hold {goal {id, title}, held_by {id, name}, reason, at}, goal null; audited goal.held",
+      h1.status === 201 && h1.json.held?.held_by?.id === QL.id && h1.json.held.reason === QREASON && h1.json.can_hold === true && h2.status === 200 && h2.json.held.reason === QREASON &&
+        hDirs.filter((d) => d.kind === "hold").length === 1 && JSON.stringify(hDir.session_keys) === JSON.stringify([SM2.key]) && hDir.goal === null && !("request" in hDir) &&
+        JSON.stringify(hDir.hold) === JSON.stringify({ goal: { id: GR.id, title: "Ship the scheduler" }, held_by: { id: QL.id, name: "Quill Lead" }, reason: QREASON, at: h1.json.held.held_at }) && qAudit("goal.held", GR.id).join() === QL.id,
+      `${h1.text} ${h2.status} ${JSON.stringify(hDirs)}`,
+    );
+    const hr = await Promise.all([qRec(hDir?.id, SM2.key, "received"), qRec(hDir?.id, SM2.key, "enforced")]);
+    const holdsX = await qa(QX, "GET", "/holds");
+    const holdM = await holdOf(QM);
+    check(
+      "hold: acknowledged with received then enforced like a stop; GET /holds lists it for any reader of the goal; GET hold tells the sessions' owner it's held and that they can't hold or release it",
+      hr.every((r) => r.json?.fresh === true) && holdsX.status === 200 && holdsX.json.holds.length === 1 && holdsX.json.holds[0].goal.id === GR.id && holdsX.json.holds[0].held_by.name === "Quill Lead" && holdM.json?.held?.reason === QREASON && holdM.json.can_hold === false,
+      `${hr.map((r) => r.text).join(" ")} ${holdsX.text} ${holdM.text}`,
+    );
+    const SM3 = await qShare(DQM, "req-3", GR.id);
+    const nb = (await qDirs(DQM, hDir?.seq ?? 0)).directives.filter((d) => d.kind === "hold");
+    await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM3.key}/epochs`, { bearer: DQM.access, body: { epoch_id: epochId(), goal_id: GR.id, starts_at: new Date().toISOString(), root_turn: null, cause: "manual" } });
+    const nb2 = (await qDirs(DQM, hDir?.seq ?? 0)).directives.filter((d) => d.kind === "hold");
+    check(
+      "hold: a session that binds to the held goal later gets a fresh hold directive (the same held_by, reason and at) in the binding's transaction; binding it again sends none",
+      SM3.status === 200 && nb.length === 1 && JSON.stringify(nb[0].session_keys) === JSON.stringify([SM3.key]) && nb[0].hold.reason === QREASON && nb[0].hold.at === hDir?.hold?.at && nb2.length === 1,
+      JSON.stringify(nb2),
+    );
+    const mcpQ = await mcpCall("QM", DQM, "align_get_directives");
+    const mReq = mcpQ.sc?.directives?.find((d) => d.kind === "request" && d.request?.id === CP.id);
+    const mHold = mcpQ.sc?.directives?.find((d) => d.kind === "hold");
+    check(
+      "mcp: align_get_directives includes requests (note, titles and names as untrusted_text) and holds, read-only; other kinds keep their fields",
+      mcpQ.status === 200 && mReq?.request?.note?.untrusted_text === QNOTE && mReq.request.goal.title?.untrusted_text === "Ship the scheduler" && mReq.request.sender.name.untrusted_text === "Quill Lead" && mReq.request.type === "checkpoint" &&
+        mHold?.hold?.reason?.untrusted_text === QREASON && mHold.hold.held_by?.id === QL.id && mcpQ.text.includes("checkpoint request") && mcpQ.sc.directives.filter((d) => d.kind === "stop").every((d) => !("request" in d) && !("hold" in d)),
+      `${mcpQ.status} ${mcpQ.text.slice(0, 300)}`,
+    );
+
+    // -- the web UI (Chrome): the hold banner and the "Agents on this goal" card; the Goals and Sessions tabs --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await page.setViewport({ width: 1100, height: 1400 });
+        const asUser = async (u) => {
+          const [name, ...v] = u.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+          await page.setCookie({ name, value: v.join("="), url: BASE });
+        };
+        await asUser(QL);
+        await page.goto(`${BASE}/app/w/${QW}/goals/${GR.id}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-request="${CP.id}"]`, { timeout: 15000 });
+        const ui = await page.evaluate(
+          (ids) => ({
+            banner: document.querySelector("[data-hold-banner]")?.innerText ?? "",
+            card: document.querySelector("#agents-on-goal")?.innerText ?? "",
+            cp: document.querySelector(`[data-request="${ids.cp}"]`)?.innerText ?? "",
+            radios: [...document.querySelectorAll('input[name="request-type"]')].map((r) => r.value),
+          }),
+          { cp: CP.id },
+        );
+        check(
+          "ui (Chrome): the goal page shows the hold banner with who and why, and the Agents on this goal card: Release, Send a request (Replan, Checkpoint, Switch goal), and each request with its sender, quoted note and per-session pills (declined, accepted by the developer)",
+          /All agents on this goal are on hold/.test(ui.banner) && ui.banner.includes("Quill Lead") && ui.banner.includes(QREASON) && /Agents on this goal/.test(ui.card) && /Release/.test(ui.card) && /Send a request/.test(ui.card) &&
+            JSON.stringify(ui.radios) === JSON.stringify(["replan", "checkpoint", "switch_goal"]) && /Checkpoint/.test(ui.cp) && ui.cp.includes(QNOTE) && /declined/.test(ui.cp) && /accepted by the developer/.test(ui.cp) && errors.length === 0,
+          `${JSON.stringify(ui).slice(0, 600)} ${errors.join(" | ")}`,
+        );
+        await page.click('input[name="request-type"][value="replan"]');
+        await page.type("#send-request textarea", "From the browser");
+        const sentResp = page.waitForResponse((r) => r.url().endsWith(`/goals/${GR.id}/requests`) && r.request().method() === "POST");
+        await page.evaluate(() => [...document.querySelectorAll("#send-request button")].find((b) => b.textContent === "Send")?.click());
+        const sentStatus = (await sentResp).status();
+        await page.waitForFunction(() => document.body.innerText.includes("From the browser"), { timeout: 15000 });
+        check("ui (Chrome): sending a replan from the card -> 201, and it is listed", sentStatus === 201 && errors.length === 0, `${sentStatus} ${errors.join(" | ")}`);
+        await page.goto(`${BASE}/app/w/${QW}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-held-goal="${GR.id}"]`, { timeout: 15000 });
+        await asUser(QM);
+        await page.goto(`${BASE}/app/w/${QW}/sessions`, { waitUntil: "networkidle0" });
+        await page.waitForSelector("[data-hold-banner]", { timeout: 15000 });
+        const sBanner = await page.$eval("[data-hold-banner]", (el) => el.innerText);
+        check("ui (Chrome): the Goals tab marks the held goal; the Sessions tab shows the hold banner naming the goal", sBanner.includes('"Ship the scheduler"') && errors.length === 0, `${sBanner} ${errors.join(" | ")}`);
+      } catch (e) {
+        check("ui (Chrome) requests and holds run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for requests and holds", false, `no Chrome at ${CHROME}`);
+
+    // -- release, and release on achieved: SM3 leaves the goal first, and still carries the hold until a release --
+    const left = await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM3.key}/epochs`, { bearer: DQM.access, body: { epoch_id: epochId(), goal_id: G2.id, starts_at: new Date(Date.now() + 1000).toISOString(), root_turn: null, cause: "manual" } });
+    const relBefore = (await qDirs(DQM)).next_cursor;
+    const relBy = await qa(QM, "DELETE", `/goals/${GR.id}/hold`);
+    const rel = await qa(QL, "DELETE", `/goals/${GR.id}/hold`);
+    const rel2 = await qa(QL, "DELETE", `/goals/${GR.id}/hold`);
+    const relDirs = (await qDirs(DQM, relBefore)).directives.filter((d) => d.kind === "release");
+    check(
+      "release: the sessions' owner -> 403 not_approver; the approver -> 200 held null, one release directive {goal, released_by, at} to every session the hold reached (one that has since left the goal included); again -> 200 and nothing new; audited goal.released; GET /holds is empty",
+      left.status === 200 && relBy.status === 403 && rel.status === 200 && rel.json.held === null && rel2.status === 200 && relDirs.length === 1 && JSON.stringify(relDirs[0].session_keys) === JSON.stringify([SM2.key, SM3.key].sort()) &&
+        JSON.stringify(Object.keys(relDirs[0].hold).sort()) === JSON.stringify(["at", "goal", "released_by"]) && relDirs[0].hold.released_by.id === QL.id && qAudit("goal.released", GR.id).join() === QL.id && (await qa(QX, "GET", "/holds")).json?.holds?.length === 0,
+      `${relBy.status} ${rel.text} ${JSON.stringify(relDirs)}`,
+    );
+    const relRc = await Promise.all([qRec(relDirs[0]?.id, SM3.key, "received"), qRec(relDirs[0]?.id, SM3.key, "applied")]);
+    check("release: acknowledged with received then applied", relRc.every((r) => r.json?.fresh === true), relRc.map((r) => r.text).join(" "));
+    await put(QL, {});
+    const achBefore = (await qDirs(DQM)).next_cursor;
+    const ach = await qa(QL, "POST", `/goals/${GR.id}/versions`, { version: GR.version, status: "achieved" });
+    const achDirs = (await qDirs(DQM, achBefore)).directives;
+    const afterAch = await Promise.all([send(QL, { type: "replan" }), put(QL, {})]);
+    check(
+      "release: achieving a held goal releases it in the same transaction (a release directive after the goal_version); an achieved goal takes no request and no hold -> 409 wrong_state",
+      ach.status === 201 && achDirs.map((d) => d.kind).join() === "goal_version,release" && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_goal_holds WHERE ws_id = ?").get(QW).n) === 0 &&
+        afterAch.every((r) => r.status === 409 && r.json?.error === "wrong_state"),
+      `${ach.status} ${JSON.stringify(achDirs.map((d) => d.kind))} ${afterAch.map((r) => r.text).join(" | ")}`,
+    );
+
+    // -- events, deletion, retention --
+    const qEv = (name) => withDb((d) => d.prepare("SELECT props FROM v2_events WHERE name = ? AND ws_id = ?").all(name, QW)).map((r) => r.props);
+    check("events: first_request once for the workspace with its type, first_hold once with no props; first_directive allows the new kinds", JSON.stringify(qEv("first_request")) === JSON.stringify(['{"type":"checkpoint"}']) && JSON.stringify(qEv("first_hold")) === JSON.stringify(["{}"]) && qEv("first_directive").length === 1, `${qEv("first_request")} ${qEv("first_hold")}`);
+    const tBefore = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_request_targets WHERE session_key = ?").get(SM2.key).n);
+    const del = await call("QM", "DELETE", `/api/v2/workspaces/${QW}/sessions/${SM2.key}`, { cookie: QM.cookie });
+    const tAfter = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_request_targets WHERE session_key = ?").get(SM2.key).n);
+    check("deleting a session's shared history deletes its request states with its directive deliveries", tBefore >= 2 && del.status === 204 && tAfter === 0, `${tBefore} ${del.status} ${tAfter}`);
+    const reqN = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_requests").get().n);
+    const dry = (months) => {
+      const t = new Date();
+      t.setUTCMonth(t.getUTCMonth() + months);
+      const r = admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: t.toISOString() });
+      try {
+        return JSON.parse(r.out.trim().split("\n").pop()).requests_deleted;
+      } catch {
+        return `${r.status} ${r.out} ${r.err}`;
+      }
+    };
+    const dry12 = dry(12);
+    const dry14 = dry(14);
+    check("retention (dry run): requests are kept 12 months and deleted after 13 (requests_deleted counts every one)", dry12 === 0 && dry14 === reqN && reqN >= 4, `${dry12} ${dry14} ${reqN}`);
+  }
+  // ==== end req:requests ====
+
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
   const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));
@@ -4231,7 +4590,7 @@ try {
       access_requested: ["interest", "via"], access_approved: [], access_declined: [], code_created: ["source"], code_redeemed: [], workspace_created: ["kind"], invite_sent: ["role"], invite_accepted: ["role"],
       device_paired: ["workspaces"], first_session_captured: ["harness"], member_first_session_captured: ["harness"], first_session_bound: ["harness", "authority"], second_member_joined: [],
       first_change_request: [], first_approval: [], first_directive: ["kind"], first_mcp_read: ["client"], loi_sent: ["note_ref"], loi_signed: ["note_ref", "verified_original"],
-      first_ask: [], first_limit: [], value_card_viewed: [], value_reported: ["estimate"], follow_up_clicked: [],
+      first_ask: [], first_limit: [], value_card_viewed: [], value_reported: ["estimate"], follow_up_clicked: [], first_request: ["type"], first_hold: [],
     };
     const offList = q("SELECT name, props FROM v2_events").filter((r) => !ALLOWED[r.name] || Object.keys(JSON.parse(r.props)).some((k) => !ALLOWED[r.name].includes(k)));
     check(

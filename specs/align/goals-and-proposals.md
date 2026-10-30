@@ -1,6 +1,6 @@
 ---
 name: Goals, alignments and change requests
-summary: Company and team goals with immutable versions, owners, teams, visibility and dependencies; approval sets; alignments that make goals and sessions contribute to a goal with every affected goal's consent; change requests that let a member propose a new version of someone else's goal, with advisory evidence (typed links and an Align snapshot per revision); and the Northstar sample workspace.
+summary: Company and team goals with immutable versions, owners, teams, visibility and dependencies; approval sets; typed requests to a goal's agents and goal holds; alignments that make goals and sessions contribute to a goal with every affected goal's consent; change requests that let a member propose a new version of someone else's goal, with advisory evidence (typed links and an Align snapshot per revision); and the Northstar sample workspace.
 kind: area
 ---
 
@@ -612,14 +612,115 @@ The `/app` page SHALL offer **Create the Northstar sample** when the signed-in p
 - **WHEN** a person with no workspaces opens `/app`
 - **THEN** the page shows **Create the Northstar sample** alongside creating their own workspace
 
+### Requirement: Who sends requests and holds to a goal's agents
+
+The server SHALL let a person send requests to the agents on a goal, hold them and release them only when they can read the goal and are in its approval set (its owner, the leads of its owning team, and for a company goal the workspace owners, keeping only members with role owner or member) or are a workspace owner, answering 404 for a goal the caller cannot read, 403 `read_only` to a viewer and 403 `not_approver` to anyone else.
+
+#### Scenario: Team member who is not the lead
+
+- **WHEN** a member of a goal's team who neither owns the goal nor leads the team sends `POST /api/v2/workspaces/{ws}/goals/{goal}/requests` with `{type: "checkpoint"}`
+- **THEN** the response is 403 `not_approver` and no request, directive or audit row is written
+
+#### Scenario: Workspace owner outside the approval set
+
+- **WHEN** a workspace owner who is not in a team goal's approval set sends a `replan` to it
+- **THEN** the response is 201 and the request names the workspace owner as its sender
+
+### Requirement: Sending a request to a goal's agents
+
+The server SHALL accept `POST /api/v2/workspaces/{ws}/goals/{goal}/requests` with a JSON body of at most 4096 bytes `{type, note?, session_keys?, target_goal_id?}`, where `type` is `replan`, `checkpoint` or `switch_goal` and `note` is at most 280 characters, from a person who may send requests to that goal, and SHALL, in one transaction, write a `v2_requests` row (`rq_<24 base32>`, the goal and its version at sending, the type, the note, the sender and their role: `approver` when in the goal's approval set, else `owner`), one `v2_request_targets` row in state `sent` per target session, one `request` directive to those sessions and the audit row `request.sent`, and answer 201 `{request}` with the request as the goal's request list shows it. The targets SHALL be the sessions the goal reaches (not stopped, and bound to the goal by their open epoch or governed by it); `session_keys` (1 to 20) SHALL narrow them, and a key that is not one of them SHALL be 400. The server SHALL answer 409 `wrong_state` when the goal is achieved or dropped, 409 `no_sessions` when there is no target, 400 for `target_goal_id` on a type other than `switch_goal`, and 400 for a malformed field. Align writes the wording the developer and the agent see for each type; the server stores no instruction text other than the quoted note.
+
+#### Scenario: Checkpoint to every session on the goal
+
+- **WHEN** the goal's owner sends `{type: "checkpoint", note: "Before the demo"}` while two shared sessions are bound to the goal
+- **THEN** the response is 201 with `request.state` `open`, `counts.pending` 2 and both sessions in state `sent`, and one `request` directive lists both session keys
+
+#### Scenario: Goal nobody works on
+
+- **WHEN** an approver sends a request to an active goal that no shared session is bound to or governed by
+- **THEN** the response is 409 `no_sessions`
+
+### Requirement: Switch goal requests name sessions and a bindable goal
+
+The server SHALL require, for a `switch_goal` request, `session_keys` (1 to 20 sessions on the goal) and `target_goal_id`, a goal other than this one that the sender can read (else 404), and SHALL answer 409 `not_bindable`, naming no goal, session or person, unless the target goal is active and every chosen session's owner may bind that session to it now (their own goal, their team's goal, or an approved allocation transfer for that session).
+
+#### Scenario: Target the session's owner cannot bind
+
+- **WHEN** an approver asks a member's session to switch to a workspace-visible goal owned by someone in no shared team with that member
+- **THEN** the response is 409 `not_bindable` and its message names neither the goal nor its owner
+
+#### Scenario: Switch to a team goal
+
+- **WHEN** a team lead asks one of a team member's sessions to switch to another active goal of that team
+- **THEN** the response is 201, the request's `target_goal` is `{id, title, version}`, and the `request` directive targets only that session
+
+### Requirement: One open request per goal and type, and an hourly limit
+
+The server SHALL refuse a request with 409 `already_open` while another request of the same type on the same goal is not cancelled and at least one of its sessions is still `sent` or `received`, and with 429 `rate_limited` when its sender has already sent 20 requests in the last hour (in any workspace).
+
+#### Scenario: Second checkpoint while the first waits
+
+- **WHEN** an approver sends a second `checkpoint` to a goal while a session has not answered the first
+- **THEN** the response is 409 `already_open`, while a `replan` to the same goal is accepted
+
+### Requirement: Cancelling a request
+
+The server SHALL let the request's sender or a workspace owner cancel it with `DELETE /api/v2/workspaces/{ws}/goals/{goal}/requests/{id}`, answering 403 `not_sender` to anyone else who may write (403 `read_only` to a viewer) and 404 for a request not on that goal, and SHALL, in one transaction, set `cancelled_at` and `cancelled_by`, write a `request` directive with `request.cancelled` true to the sessions still `sent` or `received`, set those sessions' state to `expired` (sessions that already answered keep their answer), and write the audit row `request.cancelled`, answering 200 `{request}`. Cancelling a cancelled request SHALL change nothing and answer 200.
+
+#### Scenario: Owner withdraws a replan one developer declined
+
+- **WHEN** a workspace owner cancels a replan that one session declined and another has not answered
+- **THEN** only the unanswered session gets a cancelled `request` directive and becomes `expired`, the declined one stays `declined`, and `request.state` is `cancelled`
+
+### Requirement: Reading a goal's requests
+
+The server SHALL answer `GET /api/v2/workspaces/{ws}/goals/{goal}/requests` for anyone who can read the goal with `{requests, can_send, sessions, hold}`: the newest 50 requests on the goal, each `{id, type, goal:{id, title, version}, target_goal, note, sender: {id, name, role}, created_at, cancelled_at, cancelled_by, state, counts, sessions, can_cancel}` with `state` `open` (a session still pending), `answered` or `cancelled`, `counts` `{pending, accepted, declined, expired, done_by_agent}`, and `sessions` rows `{session_key, owner, mine, repo_alias, harness, title, state, auto_accepted, updated_at}` where `state` is `sent`, `received`, `accepted`, `declined` or `expired` and `title` is shown only on the reader's own sessions. The sender, the goal's approval set and workspace owners SHALL get every session's row; anyone else only their own sessions' rows, with the counts. `target_goal` SHALL be `{id: null, title: null, version: null, private: true}` for a reader who cannot read that goal. `can_send` SHALL be true only for a person who may send requests while the goal is active, `sessions` SHALL list the sessions on the goal (owner, repository alias, harness) for such a person and be null otherwise, and `hold` SHALL be as `GET …/hold` answers.
+
+#### Scenario: A member who reads the goal but has no session on it
+
+- **WHEN** a member in no team reads the requests of a workspace-visible goal whose only sessions belong to someone else
+- **THEN** each request has `counts` and an empty `sessions` list, and `can_send` is false
+
+### Requirement: Holding a goal's agents
+
+The server SHALL accept `PUT /api/v2/workspaces/{ws}/goals/{goal}/hold` with `{reason?}` (at most 280 characters) from a person who may send requests to the goal and whose sign-in is from the last 15 minutes (else 403 `reauth_required`, checked after 404 and the other 403s), and SHALL, in one transaction, write a `v2_goal_holds` row (who, why, when), a `hold` directive to every session the goal reaches, the audit row `goal.held` and the product event `first_hold`, answering 201 `{held: {held_by, reason, held_at}, can_hold}`. When the goal is already held it SHALL answer 200 with the current hold and write nothing; when the goal is achieved or dropped, 409 `wrong_state`. `GET …/hold` SHALL answer `{held, can_hold}` (`held` null when not held) to anyone who can read the goal, and `GET /api/v2/workspaces/{ws}/holds` SHALL list `{goal:{id, title}, held_by, reason, held_at}` for the held goals the caller can read.
+
+#### Scenario: Hold with a stale sign-in
+
+- **WHEN** a goal's lead who signed in 20 minutes ago holds the goal
+- **THEN** the response is 403 `reauth_required` and nothing is written
+
+#### Scenario: Holding twice
+
+- **WHEN** an approver holds a goal that is already held
+- **THEN** the response is 200 with the first hold's reason and time, and no new directive is written
+
+### Requirement: Releasing a goal hold
+
+The server SHALL accept `DELETE /api/v2/workspaces/{ws}/goals/{goal}/hold` from the people who may hold the goal, with a sign-in from the last 15 minutes, and SHALL, in one transaction, write a `release` directive to every session a hold directive of this hold reached (including one that has since left the goal) and every session the goal reaches, delete the `v2_goal_holds` row and write the audit row `goal.released`, answering 200 `{held: null, can_hold}`; releasing a goal that is not held SHALL change nothing. The transaction that gives a held goal status `achieved` or `dropped` SHALL release it the same way, with the person whose action changed the status as actor.
+
+#### Scenario: Achieving a held goal
+
+- **WHEN** the owner of a held goal saves a version with `status: "achieved"`
+- **THEN** the same transaction writes a `goal_version` directive and then a `release` directive, the goal is no longer held, and a later hold or request on it answers 409 `wrong_state`
+
+### Requirement: Request and hold audit and events
+
+The server SHALL write audit rows naming the actor for `request.sent` and `request.cancelled` (the request id as object), for the answers that change a session's request state (`request.accepted`, `request.done_by_agent`, `request.declined`, as the `directives` part specifies), and for `goal.held` and `goal.released` (the goal id as object), and record the product events `first_request` (props `{type}`) and `first_hold` (no props) once per workspace in the transaction of the first request and the first hold.
+
+#### Scenario: First request in a workspace
+
+- **WHEN** the first request in a workspace is a `checkpoint` and a `replan` follows
+- **THEN** the workspace has exactly one `first_request` event, with props `{"type": "checkpoint"}`
+
 ## Open questions
 
-- Whether directives may instruct agents, beyond delivering goal versions and bindings, remains open.
 - When the requester is the only person who could approve a goal's requirement and no other workspace owner exists, the request stays open indefinitely; should it instead be refused up front?
 
 ## Sources
 
 - `lib/v2/goals.ts`
+- `lib/v2/requests.ts`
 - `lib/v2/approval.ts`
 - `lib/v2/alignments.ts`
 - `lib/v2/changes.ts`
@@ -646,6 +747,10 @@ The `/app` page SHALL offer **Create the Northstar sample** when the signed-in p
 - `app/api/v2/workspaces/[ws]/goals/[goal]/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/versions/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/review/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/requests/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/requests/[id]/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/hold/route.ts`
+- `app/api/v2/workspaces/[ws]/holds/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/[action]/route.ts`

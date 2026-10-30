@@ -5,6 +5,7 @@ import { effectiveSet } from "./approval";
 import { goalCore, goalObj, goalRow, parentIds, reviewParents, visibleGoal, type GoalRow } from "./goals";
 import { canBind, canReadGoal, type PolicyPrincipal } from "./policy";
 import { writeDirective } from "./directives";
+import { holdNewlyBound } from "./requests";
 import { openEpoch, sessionRow, type SessionRow } from "./sessions";
 import { memberName, need } from "./workspaces";
 import { oneOf, optStr, strList, type Body } from "./validate";
@@ -184,6 +185,7 @@ function maybeApprove(a: AlignmentRow, at: string, actor: string): boolean {
       run("UPDATE v2_sessions SET governing_goal_id = ?, governing_alignment_id = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?", target.id, a.id, at, a.ws_id, k);
       // One binding_changed per session: the agent opens a new epoch with this goal at its next root turn.
       writeDirective(a.ws_id, "binding_changed", [k], core, { goal_id: target.id, effective: "next_root_turn", cause: `alignment:${a.id}` });
+      holdNewlyBound(a.ws_id, target.id, k); // a held goal holds the sessions that now follow it
     }
   }
   run("UPDATE v2_alignments SET state = 'approved', decided_at = ?, updated_at = ? WHERE id = ?", at, at, a.id);

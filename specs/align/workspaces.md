@@ -1270,13 +1270,15 @@ in `lib/v2/retention-core.mts`, that runs at every server start and every 24 hou
 step in its own transaction, logging counts only; it purges a workspace with the same function as the operator's
 `workspaces delete --purge`, deletes product events (`v2_events`, specified in `metrics`) after 13 months, deletes
 asks that are `done`, `declined` or `withdrawn` with their mentions 13 months after their last change (`asks_deleted`),
-and deletes value reports on approved change requests 13 months after their last change
-(`value_reports_deleted`).
+deletes value reports on approved change requests 13 months after their last change
+(`value_reports_deleted`), and deletes requests to agents (the `goals-and-proposals` part) 13 months after they were
+sent, with their per-session states and the directives that carried them (`requests_deleted`); a goal hold has no
+expiry and ends only when it is released.
 
 #### Scenario: Deleted workspaces
 
 - **WHEN** the job runs 30 days or more after a workspace was deleted
-- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members, change-request evidence, asks and their mentions, value reports and devices' grants included, and pairing requests and the creation code that made it forget it, and its content-free product events carry a random `wsx_` id instead of its id), so no row anywhere mentions it and restoring it is 404
+- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members, change-request evidence, asks and their mentions, value reports, requests to agents, goal holds and devices' grants included, and pairing requests and the creation code that made it forget it, and its content-free product events carry a random `wsx_` id instead of its id), so no row anywhere mentions it and restoring it is 404
 
 #### Scenario: Session roll-up
 
@@ -1286,7 +1288,7 @@ and deletes value reports on approved change requests 13 months after their last
 #### Scenario: Former members
 
 - **WHEN** the job runs 30 days or more after a person left or was removed and they are not a member again
-- **THEN** in that workspace every row naming them (goals and goal versions, alignments, their revisions, approval requirements and approvals, sessions, activity, change requests, their revisions and the evidence links they added, asks they recorded or last decided and the mentions they added, their value reports, invites they created, directive goal snapshots, the workspace's creator and its audit rows) names `fm_<n>` instead, numbered in the order people left and stable in that workspace, their sessions no longer point at a device, invites to or accepted by them are deleted, that workspace's product events no longer carry their actor hash (`metrics`), nothing records which person `fm_<n>` was, and their account itself is untouched
+- **THEN** in that workspace every row naming them (goals and goal versions, alignments, their revisions, approval requirements and approvals, sessions, activity, change requests, their revisions and the evidence links they added, asks they recorded or last decided and the mentions they added, their value reports, requests they sent or cancelled, holds they placed, invites they created, directive goal snapshots, the person named by hold and release directives, the workspace's creator and its audit rows) names `fm_<n>` instead, numbered in the order people left and stable in that workspace, their sessions no longer point at a device, invites to or accepted by them are deleted, that workspace's product events no longer carry their actor hash (`metrics`), nothing records which person `fm_<n>` was, and their account itself is untouched
 
 #### Scenario: Audit log
 
@@ -1312,6 +1314,11 @@ and deletes value reports on approved change requests 13 months after their last
 
 - **WHEN** the job runs 12 months, and then 13 months and 2 days, after asks in every state and a value report last changed
 - **THEN** the first run deletes nothing; the second deletes the `done`, `declined` and `withdrawn` asks with their mentions (`asks_deleted` 3) and the value report (`value_reports_deleted`), keeps the `open` and `accepted` asks, and a dry run before it reports the same counts and changes nothing
+
+#### Scenario: Requests to agents
+
+- **WHEN** a dry run of the job runs 12 months, and then 14 months, after requests were sent to a goal's agents
+- **THEN** the first reports `requests_deleted` 0 and the second counts every one of them
 
 #### Scenario: Operator run and dry run
 
