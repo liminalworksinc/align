@@ -445,6 +445,22 @@ SHALL show `::align status`.
 - **WHEN** the user types `::align share Ship`, then `::align share Ship confirm` (test `e2e` "in-session ::align share needs confirm ...")
 - **THEN** the first reason contains ``Type `::align share Ship confirm` `` and nothing is uploaded, the second reason contains `sharing requested`, and the session's usage is uploaded from session start toward `g_ship`
 
+### Requirement: Sync-time outcomes reach the user as notices
+
+The `align sync` pass SHALL record the outcome of each spooled in-session command and of server refusals as a
+per-session notice, and the `align` hook SHALL show each notice once as `systemMessage` text (never
+`additionalContext`). A spooled `share`, `bind` or `unshare` that cannot be applied (for example no default
+workspace, a goal that is unknown or not bindable, or a session that is not shared) SHALL produce `Align: <command>
+failed: <reason>`; an applied single-session `::align share` produces `Align: sharing this session with <workspace>
+...`, `::align bind` produces `Align: from your next prompt this session counts toward ...` and `::align unshare`
+produces `Align: this session stopped sharing. ...`. Notices SHALL be shown at the next `UserPromptSubmit` only while
+the session has a live share (any state except `error`); otherwise they wait for the session's next `SessionStart`.
+
+#### Scenario: Share confirmed with no default workspace
+
+- **WHEN** a user whose cached `me.json` has two workspaces and no default types `::align share confirm`, a sync runs, and the user then submits a prompt and later resumes the session
+- **THEN** the prompt prints nothing because the session has no share, and the resume's `SessionStart` returns `systemMessage` `Align: share failed: no default workspace; run \`align share --latest --workspace <name>\` in a terminal`
+
 ### Requirement: Stop latch fails closed
 
 The `align` hook SHALL deny every `PreToolUse` with `permissionDecision: "deny"` and the reason `Align: this session
