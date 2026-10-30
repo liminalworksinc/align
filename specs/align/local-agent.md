@@ -580,8 +580,11 @@ tell the user `Align: sharing failed (<code>). This session stays private.`; a 4
 
 ### Requirement: Nothing private leaves the machine
 
-The `align` CLI, hooks and sync pass SHALL never upload or store prompts, responses, tool input or output, file
-contents or transcript text; SHALL identify repos to the session API only by the keyed `repo_key` hash (plus a
+The `align` CLI, hooks and sync pass SHALL never upload or store prompts, responses, tool output, file contents or
+transcript text. The only exceptions are local activity records in `~/.align/activity/<lid>.jsonl` for shared
+sessions: file paths taken from edit and read tool input and shell write targets, `git commit -m` subjects taken
+from shell commands, and the labels and reasons the user types in `::align task` and `::align claim`. These leave the
+machine only as described under pod activity upload. The agent SHALL identify repos to the session API only by the keyed `repo_key` hash (plus a
 `repo_alias` only when the user chose one) and send session titles as null; SHALL identify repos in pod activity
 only by `repo_id`, an unkeyed hash of the workspace and the normalized git remote (or local folder) that is the same on
 every member's machine; SHALL keep folder rules, repo paths and branch names local unless work signals are on; and
