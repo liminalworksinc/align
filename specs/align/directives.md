@@ -267,7 +267,7 @@ The MCP server SHALL expose `align_get_directives` (pending directives for a `se
 
 ### Requirement: Accepted-plan resolution
 
-The server SHALL resolve the Security team's accepted plan (`GET /api/policy/security` and `align_get_accepted_plan`) as the plan reference `<plan_id>@<plan_version>` of the latest acceptance when that acceptance's `new_goal_id` is the current Security goal, and otherwise, outside custom scenarios, as `p-throughput@1` with `authority` `current approved goal (no change ratified)` and `test_status` null; in a custom scenario the fallback is `plan` `none` with `authority` `no change agreed: <team>'s current goal stands`, and the result also carries an `agreement` object, which `GET /api/policy/security` includes only for a signed-in caller.
+The server SHALL resolve the Security team's accepted plan (`GET /api/policy/security` and `align_get_accepted_plan`) as the plan reference `<plan_id>@<plan_version>` of the latest acceptance when that acceptance's `new_goal_id` is the current Security goal, and otherwise, outside custom scenarios, as `p-throughput@1` with `authority` `current approved goal (no change ratified)` and `test_status` null; in a custom scenario the fallback is `plan` `none` with `authority` `no change agreed: <team>'s current goal stands`, and the result also carries an `agreement` object, which `GET /api/policy/security` includes only when the request carries a valid default-store (Northstar) session cookie; a custom-workspace session or an anonymous caller gets no `agreement`.
 
 #### Scenario: No change ratified yet
 

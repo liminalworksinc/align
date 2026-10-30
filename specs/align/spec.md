@@ -25,7 +25,7 @@ screens), not the framework, hosting, or language choices.
 | Term | Meaning |
 | --- | --- |
 | Workspace | One organization's isolated Align instance: the Northstar demo store, a custom workspace (`w_…`), or a goal-sessions workspace (`ws_…`) whose members sign in as themselves with role `owner`, `member` or `viewer` |
-| Goal | A team-owned objective with versioned, approved plans |
+| Goal | An objective with immutable versions, owned by a team slot (`ceo`, `product`, `security`) in the demo and custom workspaces, or by one person in goal sessions; changed only by its owner's approval |
 | Owner | In team workspaces, the team (and its leader) entitled to change a goal; in goal sessions, the person who owns the goal |
 | Proposal | A requested change to another team's goal, with evidence |
 | Directive | A message Align delivers to running agents: in local mode a hold (`push`) or replan (`ratify`); with goal sessions also `goal_version`, `binding_changed`, `binding_suspended`, `stop` and `resume` |
@@ -41,5 +41,5 @@ screens), not the framework, hosting, or language choices.
 - `directives` — pushes from Align to running agents and their acknowledgement, running and verifying the accepted plan in Sparta, and v2 directives with the stop latch
 - `mcp` — the read-only MCP server, its OAuth authorization and the `align-connect` stdio relay
 - `workspaces` — workspace setup, onboarding interview, access, session capture, and the goal sessions (v2) API
-- `local-agent` — the `align` CLI, its hooks, the one-pass sync and local metering
+- `local-agent` — the `align` CLI, its hooks, the one-pass sync and local metering, plus the repo-local capture and watcher hooks
 - `interface` — the screens people use, including the goal sessions web app under `/app`
