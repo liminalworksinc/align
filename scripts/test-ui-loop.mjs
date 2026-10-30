@@ -134,7 +134,15 @@ async function narrow(page, label, needle) {
     const W = window.innerWidth;
     const el = needle ? [...document.querySelectorAll("button, a, span")].filter((e) => e.offsetParent !== null && e.innerText?.replace(/\s+/g, " ").trim() === needle).at(-1) : null;
     const b = el?.getBoundingClientRect();
-    return { scrollWidth: document.documentElement.scrollWidth, W, found: !!el, left: b ? Math.round(b.left) : null, right: b ? Math.round(b.right) : null };
+    // On a failure, name what runs past the edge: the text nodes and elements whose right side is beyond the width.
+    const past = [];
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n && past.length < 3; n = walk.nextNode()) {
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      if (range.getBoundingClientRect().right > W + 1) past.push(`"${n.nodeValue.slice(0, 40)}" in ${n.parentElement?.tagName}.${String(n.parentElement?.className).slice(0, 80)}`);
+    }
+    return { scrollWidth: document.documentElement.scrollWidth, W, found: !!el, left: b ? Math.round(b.left) : null, right: b ? Math.round(b.right) : null, past };
   }, needle ?? null);
   await page.setViewport({ width: 1440, height: 900 });
   await sleep(300);

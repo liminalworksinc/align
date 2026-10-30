@@ -645,7 +645,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
         )}
         {custom ? (
           rel?.status === "ACCEPTED" ? (
-            <Badge tone="neutral">
+            <Badge tone="neutral" wrap>
               {L.team.product} and {L.team.security}: {agreementStatus(accepted(state)).toLowerCase()}
             </Badge>
           ) : unresolved && me.actor !== "leadership" ? (
