@@ -380,7 +380,8 @@ const RequestOut = z.object({
   cancelled: z.boolean(),
   goal: RequestGoalOut,
   target_goal: RequestGoalOut.nullable(),
-  sender: Person,
+  /** role: approver (in the goal's approval set) or owner (a workspace owner outside it), when it was sent. */
+  sender: Person.extend({ role: z.enum(["approver", "owner"]) }),
   note: UT.nullable(),
   created_at: z.string(),
 });
@@ -448,7 +449,7 @@ function requestOut(pp: PolicyPrincipal, d: DirectiveRow): z.infer<typeof Reques
   const r = d.request_json ? requestWire(pp, JSON.parse(d.request_json) as RequestJson) : null;
   if (!r) return null;
   const g = (x: { id: string; title: string | null; version: number | null }) => ({ id: x.id, title: utOrNull(x.title), version: x.version });
-  return { id: r.id, type: r.type, cancelled: r.cancelled, goal: g(r.goal), target_goal: r.target_goal ? g(r.target_goal) : null, sender: personOut(r.sender), note: utOrNull(r.note), created_at: r.created_at };
+  return { id: r.id, type: r.type, cancelled: r.cancelled, goal: g(r.goal), target_goal: r.target_goal ? g(r.target_goal) : null, sender: { ...personOut(r.sender), role: r.sender.role }, note: utOrNull(r.note), created_at: r.created_at };
 }
 
 function holdOut(pp: PolicyPrincipal, d: DirectiveRow): z.infer<typeof HoldOut> | null {

@@ -21,7 +21,7 @@ interface RequestView {
   goal: { id: string; title: string; version: number };
   target_goal: { id: string | null; title: string | null; version: number | null; private?: boolean } | null;
   note: string | null;
-  sender: Person;
+  sender: Person & { role: "approver" | "owner" };
   created_at: string;
   cancelled_at: string | null;
   cancelled_by: Person | null;
@@ -179,7 +179,7 @@ function RequestRow({ ws, r, onDone }: { ws: string; r: RequestView; onDone: () 
         <span className="text-[16px] text-zinc-900">{TYPE_LABEL[r.type]}</span>
         {r.state === "cancelled" ? <Pill>cancelled</Pill> : r.state === "open" ? <Pill tone="amber">waiting</Pill> : <Pill tone="green">answered</Pill>}
         <span className="text-[14px] text-zinc-500">
-          from {r.sender.name}, {when(r.created_at)}, goal version {r.goal.version}
+          from {r.sender.name} ({r.sender.role === "approver" ? "approver" : "workspace owner"}), {when(r.created_at)}, goal version {r.goal.version}
         </span>
         {r.can_cancel && (
           <span className="ml-auto">

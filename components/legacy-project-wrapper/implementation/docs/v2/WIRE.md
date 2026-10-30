@@ -100,7 +100,8 @@ plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absen
 - `stop` / `resume`: set / clear the local stop latch.
 - `request` (`goal` and `binding` null): `"request": { "id": "rq_...", "type": "replan"|"checkpoint"|"switch_goal",
   "cancelled": bool, "goal": { "id", "title"|null, "version" }, "target_goal": { "id", "title"|null, "version" }|null,
-  "sender": { "id", "name" }, "note": string|null, "created_at" }` (null if the request no longer exists). `goal.version`
+  "sender": { "id", "name", "role": "approver"|"owner" }, "note": string|null, "created_at" }` (null if the request no
+  longer exists; `role` is how the sender could send it: in the goal's approval set, or a workspace owner outside it). `goal.version`
   is the goal's version when it was sent; `target_goal` only on `switch_goal`; a title is null for a goal the person
   can no longer read. A cancellation is a second `request` directive with the same `request.id` and `cancelled: true`,
   sent to the sessions that had not answered. checkpoint and drafting a replan are safe (the agent may accept them
@@ -116,7 +117,9 @@ There is no push channel: the local agent has no daemon, and each hook-started s
 `POST /api/v2/directives/:id/receipts` (Bearer) → req `{ "session_key", "state": "received"|"applied"|"enforced"|"accepted"|"declined", "at", "auto_accepted"?: bool }` → 200 `{ "fresh": bool }`, plus `"request_state": "sent"|"received"|"accepted"|"declined"|"expired"` on a `request` directive (idempotent, ≤2 KB).
 `accepted`/`declined` only on a `request` directive (else 400); `auto_accepted: true` only with `accepted` and never on a
 `switch_goal` (400, nothing recorded). A later `declined` overrides an accept the agent made itself; an answer to a
-cancelled (`expired`) request changes nothing.
+cancelled (`expired`) request changes nothing. Receipts are unique per (directive, session, state, auto_accepted): the
+developer's `accepted` after the agent's own is a receipt of its own (`fresh: true`, audited `request.accepted`).
+A `release` reaches every session its hold reached, including one that has since left the goal (ack `received`, `applied`).
 Requests and holds are sent from the web (cookie): `GET`/`POST /api/v2/workspaces/:ws/goals/:goal/requests`
 (`{ type, note?, session_keys?, target_goal_id? }`), `DELETE .../requests/:id`, `GET`/`PUT`/`DELETE
 .../goals/:goal/hold` (`{ reason? }`, recent sign-in) and `GET /api/v2/workspaces/:ws/holds`; see `lib/v2/requests.ts`.

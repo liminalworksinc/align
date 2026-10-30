@@ -3503,16 +3503,20 @@ try {
       cp.text,
     );
     check(
-      "requests (wire): one request directive for both sessions: goal and binding null, request {id, type, cancelled false, goal {id, title, version}, target_goal null, sender {id, name}, note, created_at}, and no hold field",
+      "requests (wire): one request directive for both sessions: goal and binding null, request {id, type, cancelled false, goal {id, title, version}, target_goal null, sender {id, name, role approver}, note, created_at}, and no hold field",
       cpDirs.length === 1 && cpDir && JSON.stringify(cpDir.session_keys) === JSON.stringify([SM1.key, SM2.key].sort()) && cpDir.goal === null && cpDir.binding === null && !("hold" in cpDir) &&
         JSON.stringify(Object.keys(cpDir.request).sort()) === JSON.stringify(["cancelled", "created_at", "goal", "id", "note", "sender", "target_goal", "type"]) &&
         cpDir.request.id === CP.id && cpDir.request.type === "checkpoint" && cpDir.request.cancelled === false && JSON.stringify(cpDir.request.goal) === JSON.stringify({ id: GR.id, title: "Ship the scheduler", version: 1 }) &&
-        cpDir.request.target_goal === null && JSON.stringify(cpDir.request.sender) === JSON.stringify({ id: QL.id, name: "Quill Lead" }) && cpDir.request.note === QNOTE && cpDir.request.created_at === CP.created_at,
+        cpDir.request.target_goal === null && JSON.stringify(cpDir.request.sender) === JSON.stringify({ id: QL.id, name: "Quill Lead", role: "approver" }) && cpDir.request.note === QNOTE && cpDir.request.created_at === CP.created_at,
       JSON.stringify(cpDirs),
     );
     const again = await send(QL, { type: "checkpoint" });
     const rp = await send(QO, { type: "replan" });
-    check("requests: a second open checkpoint on the goal -> 409 already_open; a replan from a workspace owner -> 201", again.status === 409 && again.json?.error === "already_open" && rp.status === 201 && rp.json.request.sender.id === QO.id, `${again.text} ${rp.status}`);
+    check(
+      "requests: a second open checkpoint on the goal -> 409 already_open; a replan from a workspace owner outside the approval set -> 201 with sender.role owner (the approver's is approver)",
+      again.status === 409 && again.json?.error === "already_open" && rp.status === 201 && rp.json.request.sender.id === QO.id && rp.json.request.sender.role === "owner" && CP.sender.role === "approver",
+      `${again.text} ${rp.status} ${JSON.stringify(rp.json?.request?.sender)}`,
+    );
     check("requests: audited as request.sent by the sender", qAudit("request.sent", CP.id).join() === QL.id && qAudit("request.sent", rp.json?.request?.id).join() === QO.id, "");
 
     // -- receipts: received, the agent's own accept of a safe request, the developer's decline and accept --
@@ -3520,11 +3524,20 @@ try {
     const r2 = await qRec(cpDir.id, SM1.key, "accepted", { auto_accepted: true });
     const midView = (await list(QL)).json?.requests?.find((r) => r.id === CP.id);
     const r3 = await qRec(cpDir.id, SM1.key, "declined");
+    const r4a = await qRec(cpDir.id, SM2.key, "accepted", { auto_accepted: true });
     const r4 = await qRec(cpDir.id, SM2.key, "accepted");
+    const r4again = await qRec(cpDir.id, SM2.key, "accepted");
     const r5 = await qRec(cpDir.id, SM2.key, "declined");
     const cpView = (await list(QL)).json?.requests?.find((r) => r.id === CP.id);
     const s1 = cpView?.sessions.find((s) => s.session_key === SM1.key);
     const s2 = cpView?.sessions.find((s) => s.session_key === SM2.key);
+    const acceptRows = withDb((d) => d.prepare("SELECT auto_accepted FROM v2_receipts WHERE directive_id = ? AND session_key = ? AND state = 'accepted' ORDER BY auto_accepted").all(cpDir.id, SM2.key)).map((r) => r.auto_accepted);
+    check(
+      "request receipts: the developer's accept after the agent's own is recorded as a receipt of its own (fresh true, both kept), turns the session into accepted by the developer and is audited request.accepted by the session's person; the agent's accepts are audited request.done_by_agent and the decline request.declined; the same accept again -> fresh false",
+      r4a.json?.request_state === "accepted" && r4.json?.fresh === true && r4.json.request_state === "accepted" && r4again.json?.fresh === false && JSON.stringify(acceptRows) === "[0,1]" &&
+        qAudit("request.accepted", CP.id).join() === QM.id && qAudit("request.done_by_agent", CP.id).length === 2 && qAudit("request.declined", CP.id).join() === QM.id,
+      `${r4a.text} ${r4.text} ${r4again.text} ${JSON.stringify(acceptRows)}`,
+    );
     check(
       "request receipts: received -> request_state received; accepted with auto_accepted -> accepted, shown as done by the agent; a later decline overrides it; the developer's accept stays (a later decline changes nothing); counts follow",
       r1.json?.fresh === true && r1.json.request_state === "received" && r2.json?.request_state === "accepted" && midView?.counts.done_by_agent === 1 && midView.sessions.find((s) => s.session_key === SM1.key)?.auto_accepted === true &&
@@ -3595,7 +3608,7 @@ try {
     // -- limits and state --
     withDb((d) => {
       d.exec("PRAGMA foreign_keys = OFF");
-      const ins = d.prepare("INSERT INTO v2_requests (id, ws_id, goal_id, type, goal_version, sender_id, directive_id, created_at) VALUES (?, ?, ?, 'replan', 1, ?, 'dir_none', ?)");
+      const ins = d.prepare("INSERT INTO v2_requests (id, ws_id, goal_id, type, goal_version, sender_id, sender_role, directive_id, created_at) VALUES (?, ?, ?, 'replan', 1, ?, 'owner', 'dir_none', ?)");
       for (let i = 0; i < 20; i++) ins.run(`rq_fake${String(i).padStart(17, "a")}`, QW, GE.id, QO.id, new Date().toISOString());
     });
     const limited = await send(QO, { type: "replan" });
@@ -3706,18 +3719,21 @@ try {
       }
     } else check("ui (Chrome) available for requests and holds", false, `no Chrome at ${CHROME}`);
 
-    // -- release, and release on achieved --
+    // -- release, and release on achieved: SM3 leaves the goal first, and still carries the hold until a release --
+    const left = await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM3.key}/epochs`, { bearer: DQM.access, body: { epoch_id: epochId(), goal_id: G2.id, starts_at: new Date(Date.now() + 1000).toISOString(), root_turn: null, cause: "manual" } });
     const relBefore = (await qDirs(DQM)).next_cursor;
     const relBy = await qa(QM, "DELETE", `/goals/${GR.id}/hold`);
     const rel = await qa(QL, "DELETE", `/goals/${GR.id}/hold`);
     const rel2 = await qa(QL, "DELETE", `/goals/${GR.id}/hold`);
     const relDirs = (await qDirs(DQM, relBefore)).directives.filter((d) => d.kind === "release");
     check(
-      "release: the sessions' owner -> 403 not_approver; the approver -> 200 held null, one release directive {goal, released_by, at} to every session the hold reached; again -> 200 and nothing new; audited goal.released; GET /holds is empty",
-      relBy.status === 403 && rel.status === 200 && rel.json.held === null && rel2.status === 200 && relDirs.length === 1 && JSON.stringify(relDirs[0].session_keys) === JSON.stringify([SM2.key, SM3.key].sort()) &&
+      "release: the sessions' owner -> 403 not_approver; the approver -> 200 held null, one release directive {goal, released_by, at} to every session the hold reached (one that has since left the goal included); again -> 200 and nothing new; audited goal.released; GET /holds is empty",
+      left.status === 200 && relBy.status === 403 && rel.status === 200 && rel.json.held === null && rel2.status === 200 && relDirs.length === 1 && JSON.stringify(relDirs[0].session_keys) === JSON.stringify([SM2.key, SM3.key].sort()) &&
         JSON.stringify(Object.keys(relDirs[0].hold).sort()) === JSON.stringify(["at", "goal", "released_by"]) && relDirs[0].hold.released_by.id === QL.id && qAudit("goal.released", GR.id).join() === QL.id && (await qa(QX, "GET", "/holds")).json?.holds?.length === 0,
       `${relBy.status} ${rel.text} ${JSON.stringify(relDirs)}`,
     );
+    const relRc = await Promise.all([qRec(relDirs[0]?.id, SM3.key, "received"), qRec(relDirs[0]?.id, SM3.key, "applied")]);
+    check("release: acknowledged with received then applied", relRc.every((r) => r.json?.fresh === true), relRc.map((r) => r.text).join(" "));
     await put(QL, {});
     const achBefore = (await qDirs(DQM)).next_cursor;
     const ach = await qa(QL, "POST", `/goals/${GR.id}/versions`, { version: GR.version, status: "achieved" });

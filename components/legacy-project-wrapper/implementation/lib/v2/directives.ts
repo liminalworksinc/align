@@ -151,7 +151,8 @@ export function parseCursor(v: string | null): number {
 export const RECEIPT_STATES = ["received", "applied", "enforced", "accepted", "declined"] as const;
 export type ReceiptState = (typeof RECEIPT_STATES)[number];
 
-/** A delivery receipt (idempotent): only for a directive that targets one of this user's sessions on this device.
+/** A delivery receipt (idempotent per directive, session, state and auto_accepted, so the developer's accept after the
+ *  agent's own is recorded too): only for a directive that targets one of this user's sessions on this device.
  *  received, applied and enforced report delivery; accepted and declined answer a request directive (the developer's
  *  answer, or, with `autoAccepted`, the agent doing a safe request on its own) and move that session's request state
  *  (lib/v2/requests.ts requestReceipt), whose result is returned as `request_state`. */
@@ -172,9 +173,18 @@ export async function recordReceipt(dev: DevicePrincipal, directiveId: string, s
   if (autoAccepted && state !== "accepted") throw badRequest("auto_accepted goes only with state accepted");
   const request = t.kind === "request" && t.request_json ? (JSON.parse(t.request_json) as RequestJson) : null;
   return tx(() => {
-    const n = run("INSERT OR IGNORE INTO v2_receipts (ws_id, directive_id, session_key, state, at, recorded_at) VALUES (?, ?, ?, ?, ?, ?)", t.ws_id, directiveId, sessionKey, state, at, nowIso());
+    const n = run(
+      "INSERT OR IGNORE INTO v2_receipts (ws_id, directive_id, session_key, state, at, recorded_at, auto_accepted) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      t.ws_id,
+      directiveId,
+      sessionKey,
+      state,
+      at,
+      nowIso(),
+      autoAccepted ? 1 : 0,
+    );
     if (!request) return { fresh: n > 0 };
-    return { fresh: n > 0, request_state: requestReceipt(t.ws_id, request.request_id, sessionKey, state, autoAccepted) };
+    return { fresh: n > 0, request_state: requestReceipt(t.ws_id, request.request_id, sessionKey, state, autoAccepted, dev.user.id) };
   });
 }
 

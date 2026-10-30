@@ -283,12 +283,12 @@ The server SHALL accept `POST /api/v2/directives/{id}/receipts` from a device ac
 
 ### Requirement: Request directives on the device wire
 
-The server SHALL serve a request, and its cancellation, to the targeted sessions as a directive of kind `request` with `goal` and `binding` null and a `request` field `{id, type, cancelled, goal: {id, title, version}, target_goal: {id, title, version} | null, sender: {id, name}, note, created_at}`, where `type` is `replan`, `checkpoint` or `switch_goal`, `goal.version` is the goal's version when the request was sent, `target_goal` is set only for `switch_goal`, `note` is the sender's quoted note or null, a goal's `title` is null for a person who can no longer read that goal, and `request` is null when the request no longer exists. Directives of the other kinds SHALL carry no `request` or `hold` field.
+The server SHALL serve a request, and its cancellation, to the targeted sessions as a directive of kind `request` with `goal` and `binding` null and a `request` field `{id, type, cancelled, goal: {id, title, version}, target_goal: {id, title, version} | null, sender: {id, name, role}, note, created_at}`, where `type` is `replan`, `checkpoint` or `switch_goal`, `goal.version` is the goal's version when the request was sent, `target_goal` is set only for `switch_goal`, `sender.role` is `approver` when the sender was in the goal's approval set when they sent it and `owner` for a workspace owner outside it, `note` is the sender's quoted note or null, a goal's `title` is null for a person who can no longer read that goal, and `request` is null when the request no longer exists. Directives of the other kinds SHALL carry no `request` or `hold` field.
 
 #### Scenario: Checkpoint reaches the device
 
 - **WHEN** a goal's approver sends a checkpoint with a note while two of a member's sessions on one device are bound to the goal
-- **THEN** that device's next fetch returns one `request` directive listing both keys, with `request.type` `checkpoint`, `request.cancelled` false, the goal's id, title and version, the sender's id and name and the note, and no `hold` field
+- **THEN** that device's next fetch returns one `request` directive listing both keys, with `request.type` `checkpoint`, `request.cancelled` false, the goal's id, title and version, the sender's id, name and role `approver` and the note, and no `hold` field
 
 #### Scenario: Cancelled request
 
@@ -297,12 +297,17 @@ The server SHALL serve a request, and its cancellation, to the targeted sessions
 
 ### Requirement: Request answers move a session's request state
 
-The server SHALL treat receipts `accepted` and `declined` on a `request` directive as the answer for that session (the developer's, or with `auto_accepted: true` the agent's own accept of a safe request: a `checkpoint`, or drafting a `replan`) and update `v2_request_targets` in the receipt's transaction: `received` moves `sent` to `received`; `accepted` moves a pending session (`sent` or `received`) to `accepted` and records `auto_accepted`; the developer's own `accepted` clears `auto_accepted` on an accepted session; `declined` moves a pending session, or one the agent accepted on its own, to `declined`; any other answer, and any answer for an `expired` session, leaves the state unchanged. The response SHALL add `request_state` (the session's state after the receipt). The server SHALL answer 400 for `accepted` or `declined` on a directive of another kind, for `auto_accepted` with a state other than `accepted` or not a boolean, and for `auto_accepted` on a `switch_goal` request, which takes effect only when the developer accepts; a refused receipt SHALL record nothing.
+The server SHALL treat receipts `accepted` and `declined` on a `request` directive as the answer for that session (the developer's, or with `auto_accepted: true` the agent's own accept of a safe request: a `checkpoint`, or drafting a `replan`) and update `v2_request_targets` in the receipt's transaction: `received` moves `sent` to `received`; `accepted` moves a pending session (`sent` or `received`) to `accepted` and records `auto_accepted`; the developer's own `accepted` clears `auto_accepted` on an accepted session; `declined` moves a pending session, or one the agent accepted on its own, to `declined`; any other answer, and any answer for an `expired` session, leaves the state unchanged. Receipts SHALL be idempotent per directive, session, state and `auto_accepted`, so the developer's `accepted` after the agent's own is recorded as a receipt of its own (`fresh: true`). Each answer that changes the state SHALL be audited with the session's person as actor and the request id as object: `request.accepted` (the developer's accept, including one that confirms the agent's own), `request.done_by_agent` (an `auto_accepted` accept) or `request.declined`. The response SHALL add `request_state` (the session's state after the receipt). The server SHALL answer 400 for `accepted` or `declined` on a directive of another kind, for `auto_accepted` with a state other than `accepted` or not a boolean, and for `auto_accepted` on a `switch_goal` request, which takes effect only when the developer accepts; a refused receipt SHALL record nothing.
 
 #### Scenario: The agent does a checkpoint, then the developer declines
 
 - **WHEN** the agent posts `accepted` with `auto_accepted: true` for a checkpoint and the developer later declines it
 - **THEN** the first response has `request_state` `accepted` and the request shows that session as done by the agent, and the second has `request_state` `declined`
+
+#### Scenario: The developer agrees after the agent drafted the plan
+
+- **WHEN** the agent posts `accepted` with `auto_accepted: true` for a replan and the developer later posts `accepted` without it
+- **THEN** both receipts are recorded (the second answers `fresh: true`), the session reads accepted by the developer (`auto_accepted` false), and the audit has `request.done_by_agent` then `request.accepted` by the session's person
 
 #### Scenario: Switch goal is never auto-accepted
 
@@ -316,7 +321,12 @@ The server SHALL treat receipts `accepted` and `declined` on a `request` directi
 
 ### Requirement: Hold and release directives
 
-The server SHALL serve a goal hold as a directive of kind `hold` with `goal` and `binding` null and a `hold` field `{goal: {id, title}, held_by: {id, name}, reason, at}`, and its release as kind `release` with `hold` `{goal: {id, title}, released_by: {id, name}, at}`, where the goal's `title` is null for a person who can no longer read it. A device acknowledges a hold with `received` and then `enforced`, as it does a `stop`; the hold and the per-session stop are independent.
+The server SHALL serve a goal hold as a directive of kind `hold` with `goal` and `binding` null and a `hold` field `{goal: {id, title}, held_by: {id, name}, reason, at}`, and its release as kind `release` with `hold` `{goal: {id, title}, released_by: {id, name}, at}`, where the goal's `title` is null for a person who can no longer read it. A device acknowledges a hold with `received` and then `enforced`, as it does a `stop`, and a release with `received` and then `applied`; the hold and the per-session stop are independent. A release SHALL reach every session the hold reached (the hold directive written when the goal was held and any written for a session that bound to it later) whether or not it is still on the goal, since such a session keeps the hold until a release reaches it, and every session on the goal at that time.
+
+#### Scenario: A session that left the held goal is released too
+
+- **WHEN** a session the hold reached moves to another goal and the goal is then released
+- **THEN** the `release` directive lists that session as well as the sessions still on the goal
 
 #### Scenario: Hold reaches a bound session
 

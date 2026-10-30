@@ -840,7 +840,8 @@ const MIGRATIONS: string[] = [
   DROP TABLE v2_directives;
   ALTER TABLE v2_directives_new RENAME TO v2_directives;
 
-  -- Receipts: accepted and declined answer a request (the developer's, or the agent's own for a safe one).
+  -- Receipts: accepted and declined answer a request (the developer's, or the agent's own for a safe one:
+  -- auto_accepted 1). The developer's accept after the agent's own is a receipt of its own, so it is part of the key.
   CREATE TABLE v2_receipts_new (
     ws_id TEXT NOT NULL,
     directive_id TEXT NOT NULL,
@@ -848,15 +849,17 @@ const MIGRATIONS: string[] = [
     state TEXT NOT NULL CHECK (state IN ('received','applied','enforced','accepted','declined')),
     at TEXT NOT NULL,
     recorded_at TEXT NOT NULL,
-    PRIMARY KEY (directive_id, session_key, state),
+    auto_accepted INTEGER NOT NULL DEFAULT 0 CHECK (auto_accepted IN (0, 1) AND (auto_accepted = 0 OR state = 'accepted')),
+    PRIMARY KEY (directive_id, session_key, state, auto_accepted),
     FOREIGN KEY (ws_id, directive_id, session_key) REFERENCES v2_directive_targets(ws_id, directive_id, session_key) ON DELETE CASCADE
   );
-  INSERT INTO v2_receipts_new SELECT ws_id, directive_id, session_key, state, at, recorded_at FROM v2_receipts;
+  INSERT INTO v2_receipts_new (ws_id, directive_id, session_key, state, at, recorded_at) SELECT ws_id, directive_id, session_key, state, at, recorded_at FROM v2_receipts;
   DROP TABLE v2_receipts;
   ALTER TABLE v2_receipts_new RENAME TO v2_receipts;
 
   -- A request: type, the goal (and its version when sent), the target goal of a switch_goal, an optional note shown
-  -- quoted to the developer and the agent, the sender, and the directive that carried it. Cancelling marks it.
+  -- quoted to the developer and the agent, the sender and in what role they sent it (approver: in the goal's approval
+  -- set; owner: a workspace owner outside it), and the directive that carried it. Cancelling marks it.
   CREATE TABLE v2_requests (
     id TEXT PRIMARY KEY,                       -- rq_<24 base32>
     ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
@@ -866,6 +869,7 @@ const MIGRATIONS: string[] = [
     goal_version INTEGER NOT NULL,
     note TEXT CHECK (note IS NULL OR length(note) <= 280),
     sender_id TEXT NOT NULL,
+    sender_role TEXT NOT NULL CHECK (sender_role IN ('approver','owner')),
     directive_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
     cancelled_at TEXT,

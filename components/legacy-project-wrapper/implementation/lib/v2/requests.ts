@@ -26,6 +26,8 @@ export const SWITCH_SESSIONS_MAX = 20;
 export const NOTE_MAX = 280;
 
 type TargetState = "sent" | "received" | "accepted" | "declined" | "expired";
+/** How the sender could send it: in the goal's approval set, or as a workspace owner outside it. Fixed at sending. */
+export type SenderRole = "approver" | "owner";
 
 interface RequestRow {
   id: string;
@@ -36,6 +38,7 @@ interface RequestRow {
   goal_version: number;
   note: string | null;
   sender_id: string;
+  sender_role: SenderRole;
   directive_id: string;
   created_at: string;
   cancelled_at: string | null;
@@ -64,6 +67,7 @@ export interface HoldJson {
 }
 
 const person = (id: string) => ({ id, name: memberName(id) });
+const sender = (r: RequestRow) => ({ ...person(r.sender_id), role: r.sender_role });
 const requestRow = (ws: string, id: string) => get<RequestRow>("SELECT * FROM v2_requests WHERE ws_id = ? AND id = ?", ws, id);
 export const holdRow = (ws: string, goalId: string) => get<HoldRow>("SELECT * FROM v2_goal_holds WHERE ws_id = ? AND goal_id = ?", ws, goalId);
 
@@ -149,10 +153,11 @@ export async function sendRequest(pp: PolicyPrincipal, goalId: string, b: Body) 
     const sent = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_requests WHERE sender_id = ? AND created_at > ?", pp.userId, new Date(Date.now() - 3600_000).toISOString())?.n ?? 0;
     if (sent >= REQUESTS_PER_HOUR) throw new V2Error(429, "rate_limited", "Too many requests sent in the last hour, try again later");
     const rid = newId("rq");
+    const role: SenderRole = approvalSet(live).includes(pp.userId) ? "approver" : "owner";
     const dir = writeDirective(pp.wsId, "request", targets, null, null, { goalId: g.id, request: { request_id: rid, cancelled: false } })!;
     run(
-      `INSERT INTO v2_requests (id, ws_id, goal_id, type, target_goal_id, goal_version, note, sender_id, directive_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO v2_requests (id, ws_id, goal_id, type, target_goal_id, goal_version, note, sender_id, sender_role, directive_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       rid,
       pp.wsId,
       g.id,
@@ -161,6 +166,7 @@ export async function sendRequest(pp: PolicyPrincipal, goalId: string, b: Body) 
       live.version,
       note,
       pp.userId,
+      role,
       dir,
       at,
     );
@@ -222,7 +228,7 @@ function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers =
     goal: { id: g.id, title: g.title, version: r.goal_version },
     target_goal: r.target_goal_id ? goalRef(pp, r.ws_id, r.target_goal_id) : null,
     note: r.note,
-    sender: person(r.sender_id),
+    sender: sender(r),
     created_at: r.created_at,
     cancelled_at: r.cancelled_at,
     cancelled_by: r.cancelled_by ? person(r.cancelled_by) : null,
@@ -278,7 +284,7 @@ export function requestWire(pp: PolicyPrincipal, j: RequestJson) {
     cancelled: j.cancelled,
     goal: { id: r.goal_id, title: title(r.goal_id).title, version: r.goal_version },
     target_goal: r.target_goal_id ? { id: r.target_goal_id, title: target!.title, version: target!.version } : null,
-    sender: person(r.sender_id),
+    sender: sender(r),
     note: r.note,
     created_at: r.created_at,
   };
@@ -286,9 +292,11 @@ export function requestWire(pp: PolicyPrincipal, j: RequestJson) {
 
 /** Move one session's request state on an answer or a delivery receipt (inside the receipt's tx). received after
  *  sent; accepted or declined while pending; a decline also overrides an accept the agent made on its own, and the
- *  developer's own accept confirms one. A cancelled (expired) or answered request keeps its state. auto_accepted on a
- *  switch_goal is refused (400): it changes direction, so only the developer accepts it. Returns the state. */
-export function requestReceipt(ws: string, requestId: string, sessionKey: string, state: ReceiptState, auto: boolean): TargetState | null {
+ *  developer's own accept confirms one (auto_accepted back to 0). A cancelled (expired) or answered request keeps its
+ *  state. auto_accepted on a switch_goal is refused (400): it changes direction, so only the developer accepts it.
+ *  Each answer that changes the state is audited, with the session's person (`actor`) as actor: request.accepted (the
+ *  developer's), request.done_by_agent (the agent's own) or request.declined. Returns the state. */
+export function requestReceipt(ws: string, requestId: string, sessionKey: string, state: ReceiptState, auto: boolean, actor: string): TargetState | null {
   const r = requestRow(ws, requestId);
   const t = get<{ state: TargetState; auto_accepted: number }>("SELECT state, auto_accepted FROM v2_request_targets WHERE request_id = ? AND session_key = ?", requestId, sessionKey);
   if (!r || !t) return null;
@@ -300,7 +308,12 @@ export function requestReceipt(ws: string, requestId: string, sessionKey: string
   else if (state === "accepted" && pending) [next, flag] = ["accepted", auto ? 1 : 0];
   else if (state === "accepted" && t.state === "accepted" && !auto) flag = 0;
   else if (state === "declined" && (pending || (t.state === "accepted" && t.auto_accepted))) [next, flag] = ["declined", 0];
-  if (next !== t.state || flag !== t.auto_accepted) run("UPDATE v2_request_targets SET state = ?, auto_accepted = ?, updated_at = ? WHERE request_id = ? AND session_key = ?", next, flag, nowIso(), requestId, sessionKey);
+  if (next !== t.state || flag !== t.auto_accepted) {
+    const at = nowIso();
+    run("UPDATE v2_request_targets SET state = ?, auto_accepted = ?, updated_at = ? WHERE request_id = ? AND session_key = ?", next, flag, at, requestId, sessionKey);
+    if (next === "accepted") audit(ws, actor, flag ? "request.done_by_agent" : "request.accepted", requestId, at);
+    else if (next === "declined") audit(ws, actor, "request.declined", requestId, at);
+  }
   return next;
 }
 
@@ -344,16 +357,16 @@ export async function holdGoal(pp: PolicyPrincipal, goalId: string, b: Body) {
   return { status: created ? 201 : 200, body: getHold(pp, goalId) };
 }
 
-/** Sessions a release reaches: the ones on the goal now, and every one a hold directive for this hold reached. */
+/** Every session a hold directive of this hold reached (the one written when it was held and those written for
+ *  sessions that bound to the goal later: each carries the hold's time), whether or not it is still on the goal. */
+const SQL_HOLD_REACHED = `SELECT DISTINCT t.session_key FROM v2_directives d JOIN v2_directive_targets t ON t.directive_id = d.id
+  WHERE d.ws_id = ? AND d.goal_id = ? AND d.kind = 'hold' AND json_extract(d.hold_json, '$.at') = ?`;
+
+/** Sessions a release reaches: every session the hold reached (a session that left the goal still carries the hold
+ *  until a release reaches it), and any session on the goal now. */
 function releaseTargets(ws: string, goalId: string, heldAt: string): string[] {
-  const held = all<{ session_key: string }>(
-    `SELECT DISTINCT t.session_key FROM v2_directives d JOIN v2_directive_targets t ON t.directive_id = d.id
-     WHERE d.ws_id = ? AND d.goal_id = ? AND d.kind = 'hold' AND d.created_at >= ?`,
-    ws,
-    goalId,
-    heldAt,
-  ).map((r) => r.session_key);
-  return [...new Set([...goalTargets(ws, goalId), ...held])].sort();
+  const held = all<{ session_key: string }>(SQL_HOLD_REACHED, ws, goalId, heldAt).map((r) => r.session_key);
+  return [...new Set([...held, ...goalTargets(ws, goalId)])].sort();
 }
 
 /** Release a held goal (inside the caller's tx): a `release` directive, the hold row deleted, audit goal.released.
@@ -381,14 +394,7 @@ export async function releaseGoal(pp: PolicyPrincipal, goalId: string) {
 export function holdNewlyBound(ws: string, goalId: string, sessionKey: string) {
   const h = holdRow(ws, goalId);
   if (!h) return;
-  const reached = get(
-    `SELECT 1 AS x FROM v2_directives d JOIN v2_directive_targets t ON t.directive_id = d.id
-     WHERE d.ws_id = ? AND d.goal_id = ? AND d.kind = 'hold' AND d.created_at >= ? AND t.session_key = ?`,
-    ws,
-    goalId,
-    h.held_at,
-    sessionKey,
-  );
+  const reached = get(`SELECT 1 AS x FROM (${SQL_HOLD_REACHED}) WHERE session_key = ?`, ws, goalId, h.held_at, sessionKey);
   if (!reached) writeDirective(ws, "hold", [sessionKey], null, null, { goalId, hold: { by: h.held_by, reason: h.reason, at: h.held_at } });
 }
 
