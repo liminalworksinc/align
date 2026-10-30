@@ -87,7 +87,7 @@ async function start(env) {
   rmSync(path.join(ROOT, "data/state.json"), { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
   const clean = { ...process.env };
-  for (const k of Object.keys(clean)) if (/^(ALIGN_|HOSTED$|AI_GATEWAY_API_KEY$)/.test(k)) delete clean[k];
+  for (const k of Object.keys(clean)) if (/^(ALIGN_|HOSTED$|AI_GATEWAY_API_KEY$|BETTER_AUTH_|GOOGLE_CLIENT_|GITHUB_CLIENT_)/.test(k)) delete clean[k];
   server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "ignore", "pipe"], detached: true });
   let err = "";
   server.stderr.on("data", (c) => (err += c));
@@ -539,6 +539,11 @@ try {
     ALIGN_PRODUCT_PASSCODE: "product-strong-pass-1",
     ALIGN_SECURITY_PASSCODE: "security-strong-pass-1",
     ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-1",
+    // v2 is always on: hosted also needs Better Auth's secret, the public origin and a way to sign in (lib/v2/config.ts).
+    BETTER_AUTH_SECRET: "b".repeat(40),
+    ALIGN_PUBLIC_ORIGIN: `https://${HOSTED_HOST}`,
+    GOOGLE_CLIENT_ID: "test-google-id",
+    GOOGLE_CLIENT_SECRET: "test-google-secret",
   };
   await phase("hosted", hosted, invites);
   await rotation(hosted, invites[2]);

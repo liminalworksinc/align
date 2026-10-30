@@ -30,7 +30,7 @@ data/*.tmp
 data/workspaces/
 data/.pid
 
-# Goal sessions database and its generated auth secret (ALIGN_GOAL_SESSIONS=1)
+# v2 database, its generated auth secret and the Mode L sign-in link
 data/v2/
 
 # Sparta local runtime (worlds, dashboard state)

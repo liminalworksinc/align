@@ -102,7 +102,7 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
   if (env.ALIGN_INTERVIEW === "1") p.push("ALIGN_INTERVIEW=1 is for Mode L only; hosted, set ALIGN_INTERVIEW_API_KEY");
   if (env.ALIGN_INTERVIEW_API_KEY && env.ALIGN_INTERVIEW_API_KEY.length < 20) p.push("ALIGN_INTERVIEW_API_KEY looks too short to be an API key");
   if (env.ALIGN_CAPTURE && env.ALIGN_CAPTURE !== "0") p.push("ALIGN_CAPTURE must be off when hosted");
-  p.push(...v2Problems(env)); // empty unless ALIGN_GOAL_SESSIONS=1
+  p.push(...v2Problems(env)); // Better Auth, the public origin and sign-in (lib/v2/config.ts)
   return p;
 }
 

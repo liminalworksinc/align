@@ -191,6 +191,12 @@ node scripts/test-flow.mjs http://localhost:3100   # two-session acceptance test
 
 `npm run build`, `npm run lint` and `npx tsc --noEmit` pass on a clean clone.
 
+**The web app (`/app`)** is always on. On a fresh data directory the server makes one local owner account
+(`ALIGN_LOCAL_OWNER_EMAIL`, default `owner@align.localhost`) and prints its sign-in link in the terminal
+(`Align sign-in for …`), also saved in `data/v2/sign-in.txt`. Open it, press **Sign in**, and you are in. Any address
+can sign in the same way: its code is printed, never emailed, on this machine. `npm run sign-in-link [email]` prints a
+fresh one. Google and GitHub sign-in appear when `GOOGLE_CLIENT_ID`/`_SECRET` or `GITHUB_CLIENT_ID`/`_SECRET` are set.
+
 Open two browser windows (or one normal and one private window) and sign in once in each:
 
 | Role | Passcode |

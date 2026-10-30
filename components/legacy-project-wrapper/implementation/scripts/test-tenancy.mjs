@@ -204,7 +204,7 @@ async function startServer(env) {
   rmSync(NS_STATE, { force: true });
   rmSync(path.join(ROOT, "data/.secret"), { force: true });
   const clean = { ...process.env };
-  for (const k of ["AI_GATEWAY_API_KEY", "ALIGN_CAPTURE", "ALIGN_SECRET", "ALIGN_URL", "ALIGN_MCP_URL", "ALIGN_ALLOW_OPEN_CREATE", "ALIGN_SIGNUP_CODE", "ALIGN_MAX_WORKSPACES", "ALIGN_CREATE_PER_HOUR", "ALIGN_DATA_DIR", "ALIGN_PUBLIC", "HOSTED", "ALIGN_HOSTS", "ALIGN_NORTHSTAR_PUBLIC", "ALIGN_PRODUCT_PASSCODE", "ALIGN_SECURITY_PASSCODE", "ALIGN_LEADERSHIP_PASSCODE"]) delete clean[k];
+  for (const k of ["AI_GATEWAY_API_KEY", "ALIGN_CAPTURE", "ALIGN_SECRET", "ALIGN_URL", "ALIGN_MCP_URL", "ALIGN_ALLOW_OPEN_CREATE", "ALIGN_SIGNUP_CODE", "ALIGN_MAX_WORKSPACES", "ALIGN_CREATE_PER_HOUR", "ALIGN_DATA_DIR", "ALIGN_PUBLIC", "HOSTED", "ALIGN_HOSTS", "ALIGN_NORTHSTAR_PUBLIC", "ALIGN_PRODUCT_PASSCODE", "ALIGN_SECURITY_PASSCODE", "ALIGN_LEADERSHIP_PASSCODE", "BETTER_AUTH_SECRET", "ALIGN_PUBLIC_ORIGIN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "ALIGN_EMAIL_API_URL", "ALIGN_EMAIL_API_KEY", "ALIGN_EMAIL_FROM", "ALIGN_TEST_IDP", "ALIGN_LOCAL_OWNER_EMAIL", "ALIGN_FIRST_OWNER_EMAIL"]) delete clean[k];
   // A production server (next start on the build made once below), as Fly runs it: no dev-only behaviour (hot
   // reload, on-demand compiles) in any gate, and hosted refusals are checked as they really happen.
   server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "ignore", "pipe"], detached: true });
@@ -1164,6 +1164,11 @@ try {
     ALIGN_PRODUCT_PASSCODE: "product-strong-pass-1",
     ALIGN_SECURITY_PASSCODE: "security-strong-pass-1",
     ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-1",
+    // v2 is always on: hosted also needs Better Auth's secret, the public origin and a way to sign in (lib/v2/config.ts).
+    BETTER_AUTH_SECRET: "b".repeat(40),
+    ALIGN_PUBLIC_ORIGIN: `https://${HOSTED_HOST}`,
+    GOOGLE_CLIENT_ID: "test-google-id",
+    GOOGLE_CLIENT_SECRET: "test-google-secret",
   };
   // H1 every startup refusal (lib/config.ts hostedProblems), each on its own production server.
   const refusals = [
@@ -1277,7 +1282,9 @@ try {
   })(path.join(ROOT, "app"), "");
   const TESTER = [/^\/new$/, /^\/w\/x$/, /^\/api\/workspaces$/, /^\/api\/workspaces\/config$/, /^\/api\/workspaces\/interview$/ /* intake interview, scripts/test-interview.mjs */, /^\/api\/workspaces\/x\/login-info$/, /^\/api\/session$/, /^\/api\/state$/, /^\/api\/timer$/, /^\/api\/reset$/, /^\/api\/proposals$/, /^\/api\/proposals\/x\/(?:accept|acknowledge|counter|launch|reject)$/,
     // Connected AI apps (proxy.ts, founder ruling 10-26): OAuth-only MCP, the OAuth server, the connected-apps list. scripts/test-oauth.mjs covers them.
-    /^\/api\/mcp$/, /^\/\.well-known\/oauth-protected-resource(?:\/api\/mcp)?$/, /^\/\.well-known\/oauth-authorization-server$/, /^\/oauth\/(?:authorize|token|register)$/, /^\/api\/oauth\/approve$/, /^\/api\/workspaces\/connections$/];
+    /^\/api\/mcp$/, /^\/\.well-known\/oauth-protected-resource(?:\/api\/mcp)?$/, /^\/\.well-known\/oauth-authorization-server$/, /^\/oauth\/(?:authorize|token|register)$/, /^\/api\/oauth\/approve$/, /^\/api\/workspaces\/connections$/,
+    // The v2 web app and its API, always on (proxy.ts). scripts/test-v2.mjs covers them when hosted.
+    /^\/(?:app|api\/v2)(?:\/|$)/];
   const shut = routes.filter((r) => !TESTER.some((t) => t.test(r)) && !["/", "/setup"].includes(r));
   const probes = await Promise.all(shut.flatMap((r) => [hosted("GET", r), hosted("POST", r, { body: {} })]).map((x) => x.then((y) => y.status)));
   const open = shut.filter((_, i) => probes[2 * i] !== 404 || probes[2 * i + 1] !== 404);
