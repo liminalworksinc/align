@@ -403,7 +403,7 @@ The authorization server SHALL show the consent form at `GET /oauth/authorize`, 
 #### Scenario: Old sign-in
 
 - **WHEN** a person signed in 40 minutes ago opens a valid `/oauth/authorize` link
-- **THEN** the page asks them to sign in again and offers no Allow button, and `POST /api/oauth/approve` with `decision: "approve"` from that session returns `401 {"error":"Sign in again to connect an app."}`
+- **THEN** the page asks them to sign in again and offers no Allow button, and `POST /api/oauth/approve` with `decision: "approve"` from that session returns `403 {"error":"Sign in again to connect an app.","code":"reauth_required"}`
 
 ### Requirement: App consent page content
 
@@ -436,14 +436,14 @@ Every response from `/oauth/authorize` SHALL carry `X-Frame-Options: DENY`, `Con
 
 ### Requirement: App approval endpoint
 
-The authorization server SHALL accept consent answers at `POST /api/oauth/approve` with the body `{params, decision, workspace?}`. The request must be `application/json` (otherwise `415`). In Mode L, if it sends an `Origin`, that Origin's host must equal the Host header. When hosted it must carry an `Origin` that is exactly `https://<host>`; a missing `Origin` is refused. Either failure returns `403`. A non-loopback Host (Mode L) or a host outside the allowed list (hosted) never reaches the endpoint, because the request edge answers `421`. The body must be at most 16 KB (otherwise `413`). The endpoint SHALL re-run the authorization request checks on `params`. Errors SHALL have the body `{"error": <message>}`. The outcomes are:
+The authorization server SHALL accept consent answers at `POST /api/oauth/approve` with the body `{params, decision, workspace_id?}`. The request must be `application/json` (otherwise `415`). In Mode L, if it sends an `Origin`, that Origin's host must equal the Host header. When hosted it must carry an `Origin` that is exactly `https://<host>`; a missing `Origin` is refused. Either failure returns `403`. A non-loopback Host (Mode L) or a host outside the allowed list (hosted) never reaches the endpoint, because the request edge answers `421`. The body must be at most 16 KB (otherwise `413`). The endpoint SHALL re-run the authorization request checks on `params`. Errors SHALL have the body `{"error": <message>}`, plus `code` where one is named below. The outcomes are:
 
 - A fatal check failure returns `400 {"error": <message>}`.
 - A non-fatal check failure returns `200 {"redirect": <error redirect>}`.
 - `decision: "deny"` returns `200 {"redirect": "<redirect_uri>?error=access_denied&error_description=The person declined&state=…&iss=…"}`, signed in or not.
 - Any decision other than `approve` or `deny` returns `400 "Choose Allow or Cancel"`.
-- `decision: "approve"` with no Better Auth session returns `401 "Sign in to Align first."`, and with a sign-in older than 15 minutes returns `401 "Sign in again to connect an app."`.
-- A missing `workspace` returns `400 "Choose a workspace"`. A `workspace` that is not a `ws_` id of a workspace the person is a member of returns `404 "Workspace not found"`. A workspace where the person is a viewer returns `403 "Viewers can't connect apps"`.
+- `decision: "approve"` with no Better Auth session returns `401 "Sign in to Align first."`, and with a sign-in older than 15 minutes returns `403 {"error":"Sign in again to connect an app.","code":"reauth_required"}`.
+- A missing `workspace_id` returns `400 "Choose a workspace"`. A `workspace_id` that is not a `ws_` id of a workspace the person is a member of returns `404 "Workspace not found"`. A workspace where the person is a viewer returns `403 "Viewers can't connect apps"`.
 - More than 10 approvals for one workspace within a minute returns `429 "Too many requests, try again later"`.
 
 On approval the endpoint SHALL write a v2 audit row in that workspace with the person as actor and action `oauth.app_approved`, naming the app and redirect host, and return `200 {"redirect": "<redirect_uri>?code=…&state=…&iss=<origin>"}`.
@@ -455,7 +455,7 @@ On approval the endpoint SHALL write a v2 audit row in that workspace with the p
 
 #### Scenario: Viewer tries to connect
 
-- **WHEN** a recently signed-in person posts `decision: "approve"` with a workspace where they are a viewer
+- **WHEN** a recently signed-in person posts `decision: "approve"` with the `workspace_id` of a workspace where they are a viewer
 - **THEN** the response is `403 {"error":"Viewers can't connect apps"}` and no code is issued
 
 ### Requirement: Authorization codes
@@ -544,7 +544,7 @@ A grant's `last_used_at` SHALL be set (asynchronously) by the first `/api/mcp` r
 
 ### Requirement: Leaving or removal revokes app grants
 
-When a member leaves a workspace or a workspace owner removes them, the server SHALL, in the same transaction that deletes the membership, revoke every OAuth grant of that person for that workspace, so that their `alm.` access tokens get `401` on the next call and their refresh tokens get `invalid_grant`. Their grants for other workspaces SHALL keep working.
+When a member leaves a workspace or a workspace owner removes them (`DELETE /api/v2/workspaces/{ws}/members/{user}`), the server SHALL, in the same transaction that deletes the membership, revoke every OAuth grant of that person for that workspace, so that their `alm.` access tokens get `401` on the next call and their refresh tokens get `invalid_grant`. Their grants for other workspaces SHALL keep working.
 
 #### Scenario: Member removed
 
@@ -561,13 +561,13 @@ When a member leaves a workspace or a workspace owner removes them, the server S
 The server SHALL list and revoke a workspace's connected apps through cookie-authenticated v2 routes, with the v2 error shape `{error, message}`:
 
 - `GET /api/v2/workspaces/{ws}/apps` returns `{url: "<origin>/api/mcp", apps: [{id, name, redirect_host, user: {id, name}, approved_at, last_used_at}]}` with live grants only. A workspace owner sees every grant in the workspace; any other member sees only their own. A non-member gets `404 not_found`.
-- `DELETE /api/v2/workspaces/{ws}/apps/{id}` revokes one grant and returns `204`. It is allowed for the grant's person and for a workspace owner. A grant the caller cannot see, or one that does not exist, gets `404 not_found`. The route requires the same-site check of cookie writes (`403 cross_site`) and refuses an `Authorization` header (`403 bearer_not_allowed`). It writes a v2 audit row with the caller as actor and action `oauth.app_revoked`.
+- `DELETE /api/v2/workspaces/{ws}/apps/{grant}` revokes one grant and returns `204`. It is allowed for the grant's person and for a workspace owner. A grant the caller cannot see, or one that does not exist, gets `404 not_found`. The route requires the same-site check of cookie writes (`403 cross_site`) and refuses an `Authorization` header (`403 bearer_not_allowed`). It writes a v2 audit row with the caller as actor and action `oauth.app_revoked`.
 
 The page `/app/w/{ws}/apps`, titled `Connected apps`, SHALL show the MCP URL with a `Copy` button and one row per listed grant with the app's name, redirect host, person, approval time, last use (`Never` when null) and a `Disconnect` button that calls the `DELETE` route. With no grants it SHALL say `No apps are connected.`
 
 #### Scenario: Owner disconnects another member's app
 
-- **WHEN** a workspace owner sends `DELETE /api/v2/workspaces/{ws}/apps/{id}` for a grant made by another member
+- **WHEN** a workspace owner sends `DELETE /api/v2/workspaces/{ws}/apps/{grant}` for a grant made by another member
 - **THEN** the response is `204`, the grant's access token gets `401` at `/api/mcp`, and the audit row names the owner as actor
 
 #### Scenario: Member tries another member's grant
@@ -652,7 +652,7 @@ An Align URL that fails the scheme rule at start SHALL make the script write `al
 - `app/oauth/token/route.ts`
 - `app/api/oauth/approve/route.ts`
 - `app/api/v2/workspaces/[ws]/apps/route.ts`
-- `app/api/v2/workspaces/[ws]/apps/[id]/route.ts`
+- `app/api/v2/workspaces/[ws]/apps/[grant]/route.ts`
 - `app/app/w/[ws]/apps/page.tsx`
 - `app/app/sign-in/page.tsx`, `app/app/_ui/server.ts` (`next` handling)
 - `lib/oauth/server.ts`
