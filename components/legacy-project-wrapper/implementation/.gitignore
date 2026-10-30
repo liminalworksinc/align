@@ -22,21 +22,9 @@ next-env.d.ts
 *.pem
 data/.secret
 
-# Align runtime state (regenerated from data/fixture.json)
-data/state.json
-data/*.tmp
-
-# Custom workspaces and the single-server guard
-data/workspaces/
-data/.pid
-
-# v2 database, its generated auth secret and the Mode L sign-in link
-data/v2/
-
-# Sparta local runtime (worlds, dashboard state)
-.worlds/
-.worlds-dashboard/
-sparta/walkthrough-lab/projects/*/.env
+# Align runtime data: the v2 database, its generated auth secret and the Mode L sign-in link, registered OAuth
+# clients, and the single-server guard
+data/
 
 # misc
 .DS_Store
@@ -47,6 +35,3 @@ yarn-error.log*
 .pnpm-debug.log*
 .vercel
 .claude/settings.local.json
-
-# Saved custom-scenario setup input (operator text; never committed)
-data/custom-scenario.json

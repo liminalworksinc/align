@@ -1,9 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(scripts/run-plan.sh accepted)",
-      "Bash(scripts/run-plan.sh accepted:*)",
-      "Bash(node scripts/verify-run.mjs:*)",
       "mcp__align",
       "Bash(cat:*)",
       "Bash(ls:*)",
@@ -14,72 +11,7 @@
       "Bash(wc:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",
-      "Bash(git diff:*)",
-      "mcp__alike__get_entity",
-      "mcp__alike__search_entities",
-      "mcp__alike__search_environment",
-      "mcp__alike__query_entities",
-      "mcp__alike__list_agent_sessions",
-      "Bash(~/.alike/bin/alike get:*)"
-    ]
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-watch.mjs",
-            "asyncRewake": true,
-            "timeout": 3600
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit|Bash|mcp__align__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-capture.mjs",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/align-watch.mjs",
-            "asyncRewake": true,
-            "timeout": 3600
-          }
-        ]
-      }
+      "Bash(git diff:*)"
     ]
   }
 }

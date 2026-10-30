@@ -1,13 +1,12 @@
-# DRAFT (LIM-2424, not applied): Align hosted tester mode (HOSTED=1) on one machine with a persistent volume.
-# See docs/HOSTING.md. Secrets come from the platform (fly secrets), never from this file or a file in the image.
-# The build context is an allowlist (.dockerignore): only the app's own source goes in. Northstar's fixture, the
-# Sparta evidence, the agent and test scripts, and any .env file never reach the image.
+# Align hosted mode (HOSTED=1) on one machine with a persistent volume. See docs/HOSTING.md.
+# Secrets come from the platform (fly secrets), never from this file or a file in the image.
+# The build context is an allowlist (.dockerignore): only the app's own source goes in. Scripts, tests, docs, the
+# local agent packages and any .env file never reach the image.
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY app ./app
-COPY components ./components
 COPY lib ./lib
 COPY public ./public
 COPY proxy.ts instrumentation.ts next.config.ts tsconfig.json ./
@@ -22,7 +21,6 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY next.config.ts ./
-COPY scripts/ws-admin.mjs ./scripts/ws-admin.mjs
 RUN mkdir -p /data && chown -R node:node /data /app/.next
 EXPOSE 8080
 # Fly mounts the volume over /data owned by root, so the container starts as root only to hand /data to the node

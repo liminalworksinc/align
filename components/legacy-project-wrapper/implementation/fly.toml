@@ -1,5 +1,6 @@
-# LIM-2437 hosted tester build. Founder go 2026-10-26 (final authority on code); deploy steps in docs/HOSTING.md.
-# One machine only: locks are in process memory and the volume attaches to a single machine (docs/HOSTING.md).
+# Align hosted mode (HOSTED=1); deploy steps in docs/HOSTING.md. Secrets (ALIGN_SECRET, BETTER_AUTH_SECRET,
+# ALIGN_EMAIL_API_KEY, any Google or GitHub client) are set with fly secrets, never here.
+# One machine only: limits are in process memory and the volume attaches to a single machine (docs/HOSTING.md).
 app = "align-pg-draft"
 primary_region = "sjc"
 
@@ -10,8 +11,13 @@ primary_region = "sjc"
   HOSTED = "1"
   ALIGN_DATA_DIR = "/data"
   ALIGN_HOSTS = "align-pg-draft.fly.dev"
-  ALIGN_MAX_WORKSPACES = "25"
+  ALIGN_PUBLIC_ORIGIN = "https://align-pg-draft.fly.dev"
   ALIGN_DELETE_BY = "2026-11-13"
+  # Sign-in codes by email (all three settings, or none and a Google or GitHub client; the key is a secret).
+  ALIGN_EMAIL_API_URL = "https://api.resend.com/emails"
+  ALIGN_EMAIL_FROM = "Align <signin@align-pg-draft.fly.dev>"
+  # The one address that may make the first account by email code. Set it before the first deploy.
+  # ALIGN_FIRST_OWNER_EMAIL = "owner@example.com"
 
 [http_service]
   internal_port = 8080
@@ -27,7 +33,7 @@ primary_region = "sjc"
     interval = "30s"
     timeout = "5s"
     method = "GET"
-    path = "/api/workspaces/config"
+    path = "/api/v2/auth/get-session"
     [http_service.checks.headers]
       Host = "align-pg-draft.fly.dev"
       X-Forwarded-Proto = "https"
@@ -36,7 +42,7 @@ primary_region = "sjc"
 [[mounts]]
   source = "align_data"
   destination = "/data"
-  # No automatic volume snapshots: they would keep tester data past ALIGN_DELETE_BY (go-C condition 4).
+  # No automatic volume snapshots: they would keep data past ALIGN_DELETE_BY.
   scheduled_snapshots = false
 
 [[vm]]
