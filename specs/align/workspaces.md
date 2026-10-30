@@ -1,475 +1,281 @@
 ---
-name: Workspaces and sessions
-summary: Creating isolated workspaces with single-use access codes, signing in by role passcode, the AI intake interview, agent tokens, connected apps, and consent-gated capture and goal mapping of coding-agent sessions.
+name: Identity and workspaces
+summary: How people sign in as themselves (Google, GitHub or an emailed one-time code, printed locally in Mode L), and how workspaces, roles, invites, teams, the audit trail, paired devices, shared sessions, usage and spend, activity, rate limits and the local and hosted edges work.
 kind: area
 ---
 
-# Workspaces and sessions
+# Identity and workspaces
 
-Align serves one organization's conflict per **workspace**. Besides the built-in Northstar demo (the default store
-under `data/`), a person can create a **custom workspace**: an isolated directory addressed by an id of the form
-`w_` plus 12 lowercase base32 characters (the `/w/<id>` slug). Each workspace has three **roles** (`leadership`,
-`product`, `security`), each with its own generated **passcode**. Creating a workspace is gated by an **access code**
-(a single-use invite from `ALIGN_SIGNUP_CODES`, Mode L's shared `ALIGN_SIGNUP_CODE`, or open create in Mode L). An
-optional **intake interview** lets Claude draft the setup form before the person presses Create.
+Everyone who uses Align is a **person** with their own Better Auth account (`ba_user`). Nothing is reached with a
+shared secret: there are no role passcodes, access codes or shared agent tokens. A person signs in with Google or
+GitHub (each only when configured) or with a one-time code sent to their email address. When hosted, the code is
+emailed; in **Mode L** (the default, loopback-only mode) it is printed to the server's terminal and written to a
+private file, and the server creates one local owner account on first start.
 
-The server runs in one of two modes. **Mode L** (default) answers only to loopback hosts. **Hosted** (`HOSTED=1`)
-serves custom workspaces only behind an HTTPS edge, refuses to start with an unsafe environment, and closes after
-`ALIGN_DELETE_BY`. A separate **goal sessions** surface (`/api/v2/*`, behind `ALIGN_GOAL_SESSIONS=1`) has its own
-user accounts (Better Auth), workspaces with owner/member/viewer roles and pods, goals with immutable versions,
-alignment requests, paired devices, shared sessions, spend and in-flight activity.
+Signed in, a person creates **workspaces** (`ws_…`) or joins one by an email-bound **invite**. Each member has one
+workspace **role**: `owner`, `member` or `viewer`. Members are grouped into flat **teams** with a `lead` or `member`
+team role. A person pairs a **device** (the `align` CLI on their machine) with a key-bound device-code flow, grants it
+some of their workspaces, and the device then shares chosen coding-agent **sessions**, opens binding **epochs**,
+uploads **usage** and posts **activity** signals. Members read **spend** reports and the workspace's people, teams
+and devices; owners also read the **audit** trail.
 
-**Workspace lifecycle.** Create (`POST /api/workspaces`, passcodes shown once) → sign in per role
-(`POST /api/session`) → work (proposals, goals, connected apps, agents) → optional Restart by leadership (rebuilds
-from the saved setup, revokes every agent token and connected app) → delete by the operator (`ws-admin`), after which
-its sign-in screen and store answer 404 `This workspace no longer exists` and its signed-in sessions get 401
-`Your session ended. Sign in again.`
+Goals, goal visibility, approval sets, alignments and change requests are specified in `goals-and-proposals`.
+Directives (including stop and resume) are in `directives`, the MCP endpoint and OAuth consent in `mcp`, the CLI in
+`local-agent`, and the screens under `/app` in `interface`.
 
-**Captured session lifecycle.** Leadership grants capture consent for one harness + repo basename (Northstar:
-`POST /api/sessions/consent`; custom workspace: minting an agent token) → local hooks post events to
-`POST /api/sessions/events` → the session is upserted (redacted, capped) → in Northstar only, and only when the
-external model is enabled, Jev classifies it against the goal registry → the goal's owner confirms or rejects the
-mapping → revoking consent purges the sessions and their mappings.
+## Vocabulary
 
-### Requirement: Workspace creation
+| Term | Meaning |
+| --- | --- |
+| Person | A Better Auth user (`ba_user`, id `u_…`). Signs in with Google, GitHub or an email one-time code |
+| Mode L | The default mode: `npm start` binds `127.0.0.1:3100`, and the server answers only loopback `Host` names |
+| Hosted | `HOSTED=1`: one public origin (`ALIGN_PUBLIC_ORIGIN`) behind an HTTPS edge, with a route allowlist |
+| Web route | An `/api/v2` route authenticated by the Better Auth session cookie (a browser) |
+| Device route | An `/api/v2` route authenticated by a device access token `Bearer alnd_…` (the `align` CLI) |
+| Workspace | `ws_…`: one organization's goals, people, teams, sessions and usage |
+| Workspace role | `owner`, `member` or `viewer`; viewers can read but never change anything |
+| Team | A named group of workspace members (stored as `pod`, id `pod_…`); team role `lead` or `member` |
+| Invite | A single-use, 7-day link for one email address, optionally naming a team |
+| Device | A paired machine (`dv_…`) with an Ed25519 key, workspace grants, a 1-hour access token and a rotating 30-day refresh token |
+| Shared session | A coding-agent session a device chose to share, addressed by a 43-character `session_key` |
+| Epoch | A period of a shared session bound to one goal (or none); usage counts under its epoch's goal |
+| Audit row | `{at, actor, action, object_id}` written by every change; `actor` is null only for system actions |
 
-The server SHALL create a custom workspace from a JSON setup body on `POST /api/workspaces`, return its id, name,
-path and the three role passcodes exactly once, and store only scrypt hashes of the passcodes.
+**Person lifecycle.** Sign in (provider or email code) → create a workspace or accept an invite → pair a device →
+share sessions → change role, leave or be removed (team memberships, device grants and OAuth grants for that
+workspace end; goals, sessions and history stay attributed to the person).
 
-#### Scenario: Successful create
+**Device lifecycle.** `POST /api/v2/device/authorize` → the person approves the user code at `/app/device` (with a
+recent sign-in) → the device polls `POST /api/v2/device/token` and receives tokens once → it refreshes with a
+signature → it is revoked by itself, by its owner, by refresh-token reuse, or loses a workspace when its owner leaves
+that workspace.
 
-- **WHEN** a client POSTs `application/json` to `/api/workspaces` with a valid setup body (the `/setup` schema without `confirm`) and an accepted `signup_code`
-- **THEN** the server responds 201 with `{workspace:{id,name,path:"/w/<id>"}, passcodes:{leadership,product,security}, shown_once:true}` and header `cache-control: no-store`, where `id` matches `^w_[a-z2-7]{12}$`, `name` is the setup's `company`, and each passcode is 16 base32 characters shown as `xxxx-xxxx-xxxx-xxxx`
+## Requirements
 
-#### Scenario: Invalid setup body
+### Requirement: Sign-in providers
 
-- **WHEN** the body contains `confirm`, a non-string `signup_code`, or fails the setup schema
-- **THEN** the server responds 400 with `{error, issues:[{path,message}]}` and creates nothing
+The server SHALL mount Better Auth at `/api/v2/auth/*`, offer Google sign-in only when `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` are both set, GitHub sign-in only when `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are both
+set, and email one-time-code sign-in always in Mode L and, when hosted, whenever the email settings are set.
 
-### Requirement: Creation request guards
+#### Scenario: Only configured providers
 
-The server SHALL accept workspace-creation requests only as JSON from an allowed host and same origin, with a body of
-at most 64 KB.
+- **WHEN** a Mode L server starts with GitHub's client id and secret set and no Google settings
+- **THEN** the sign-in page offers GitHub and email code, a Google sign-in request is refused by Better Auth, and no other sign-in method exists
 
-#### Scenario: Wrong content type or origin
+#### Scenario: Hosted without email settings
 
-- **WHEN** `POST /api/workspaces` is sent without `content-type: application/json`, or with an `Origin` whose `host:port` differs from `Host` (hosted: an `Origin` not exactly `https://<Host>`, or none)
-- **THEN** the server responds 415 `Send this as application/json` for the content type, and 403 `This request came from another site` for the origin; a `Host` outside the allowed hosts never reaches the route, because the request edge already answers 421 (see Local-only guards and Hosted mode gate)
+- **WHEN** a hosted server has Google configured and none of the email settings
+- **THEN** sign-in is Google only, and a request to send an email code is refused without sending anything
 
-#### Scenario: Oversized setup
+### Requirement: Email one-time codes
 
-- **WHEN** the body exceeds 64 KB (declared or streamed)
-- **THEN** the server responds 413 `This setup is too large. Keep it under 64 KB.`
+The server SHALL implement email sign-in with Better Auth `emailOtp` (type `sign-in`) using 6-digit codes that are
+stored hashed, are valid for 5 minutes and allow 3 attempts, and SHALL sign a person in only by a POST that presents
+the code.
 
-### Requirement: Access codes for creation
+#### Scenario: Requesting and using a code
 
-The server SHALL admit a creation (and an interview turn) only with an accepted code: no code when open create is on
-(Mode L `ALIGN_ALLOW_OPEN_CREATE=1`), otherwise an unspent invite from `ALIGN_SIGNUP_CODES` (case-sensitive,
-timing-safe compare) or, in Mode L only, the shared `ALIGN_SIGNUP_CODE`.
+- **WHEN** a client POSTs `{email, type:"sign-in"}` to `/api/v2/auth/email-otp/send-verification-otp` and then, within 5 minutes, POSTs `{email, otp}` with that code to `/api/v2/auth/sign-in/email-otp`
+- **THEN** the second request sets the Better Auth session cookie, the code is spent, and the database holds only a hash of the code, never the code itself
 
-#### Scenario: Wrong or spent invite
+#### Scenario: Wrong, expired or exhausted code
 
-- **WHEN** invites are configured and the given `signup_code` is unknown or already spent
-- **THEN** the server responds 403 `That invite code isn’t valid or was already used`, the same message for both cases
+- **WHEN** a wrong code is presented, or the code is older than 5 minutes, or a fourth attempt is made after 3 wrong ones
+- **THEN** Better Auth refuses with 400 `INVALID_OTP`, 400 `OTP_EXPIRED`, or 403 `TOO_MANY_ATTEMPTS` (the code is deleted after the third wrong attempt) and nobody is signed in
 
-#### Scenario: No code mechanism configured
+#### Scenario: Link in the message only fills the form
 
-- **WHEN** open create is off and neither invites nor a shared code are configured
-- **THEN** the server responds 403 `Workspace creation is closed`; a wrong shared code instead gets 403 `That signup code isn’t right`
+- **WHEN** a browser opens `/app/sign-in?email=<email>&code=<code>`
+- **THEN** the page shows the email and code filled in and a button to sign in; no session is created until the person submits the form, because no GET signs anyone in
 
-### Requirement: Single-use invites
+### Requirement: Email code send limits
 
-The server SHALL spend an invite only when the workspace is actually created, record spent invites as SHA-256 hashes
-in `<workspacesRoot>/_used_invites.json`, and give the invite back if creation fails after claiming it.
+The server SHALL send at most 3 sign-in codes per email address per 10 minutes and at most 10 per client per hour,
+refusing further sends with 429 and sending nothing.
 
-#### Scenario: Reusing an invite
+#### Scenario: Too many codes for one address
 
-- **WHEN** a second `POST /api/workspaces` presents an invite that already created a workspace
-- **THEN** the server responds 403 with the invite refusal and no workspace is created
+- **WHEN** a fourth code is requested for the same email address within 10 minutes, from any clients
+- **THEN** the server responds 429, sends and prints nothing, and the earlier codes stay as they were
 
-#### Scenario: Interview does not spend
+#### Scenario: Too many codes from one client
 
-- **WHEN** a client completes interview turns with an unspent invite
-- **THEN** the invite remains unspent and can still create one workspace
+- **WHEN** one client (hosted: its `Fly-Client-IP`, IPv6 keyed by its /64) requests an 11th code within an hour, for any addresses
+- **THEN** the server responds 429 and sends nothing
 
-### Requirement: Creation limits
+### Requirement: Email code delivery when hosted
 
-The server SHALL refuse creation beyond the workspace cap, beyond the global creation rate, and after repeated wrong
-codes from one client.
+The server SHALL, when hosted, deliver each sign-in code through `lib/v2/mail.ts` (called by Better Auth's
+`sendVerificationOTP`) as one HTTPS POST of JSON `{from, to, subject, text}` to `ALIGN_EMAIL_API_URL` with
+`Authorization: Bearer <ALIGN_EMAIL_API_KEY>` and `from` equal to `ALIGN_EMAIL_FROM`, never print or log the code, and
+answer the send request the same way whether or not an account exists for the address.
 
-#### Scenario: Cap reached
+#### Scenario: Code email
 
-- **WHEN** the number of live workspace directories is at or above `ALIGN_MAX_WORKSPACES` (default 25; zero, negative or non-numeric values fall back to 25)
-- **THEN** `POST /api/workspaces` responds 409 `The workspace limit for this server has been reached`, and `GET /api/workspaces/config` reports `max_reached: true`
+- **WHEN** a hosted client requests a code for an address
+- **THEN** the email API receives `to` equal to that address, the subject `Your Align sign-in code`, and a text holding the 6-digit code, the link `<ALIGN_PUBLIC_ORIGIN>/app/sign-in?email=<email>&code=<code>` and the 5-minute expiry
 
-#### Scenario: Rate limits
+#### Scenario: Unknown address
 
-- **WHEN** 5 workspaces were created in the last rolling hour (fixed at 5 when hosted; `ALIGN_CREATE_PER_HOUR` in Mode L), or a client sent 10 wrong codes in 10 minutes
-- **THEN** the server responds 429 `Too many workspaces created recently, try again later`, or 429 `Too many wrong codes, try again in a few minutes` respectively
+- **WHEN** a hosted client requests a code for an address with no account and no pending invite
+- **THEN** the response is the same success response as for an address with an account, so the send request never reveals whether an account exists
 
-### Requirement: Workspace storage on disk
+#### Scenario: Email API failure
 
-The server SHALL build a new workspace in `<ALIGN_DATA_DIR>/workspaces/.tmp-<id>/` and rename it into place, with
-directories mode 0700 and files mode 0600 (`state.json`, `scenario.json`, `auth.json`, `workspace.json`), so a
-workspace is visible only once complete, append a `created` row holding only the id to `_events.jsonl`, and run only
-one server per data directory (pid file `data/.pid` in Mode L, `<ALIGN_DATA_DIR>/.pid` when hosted).
+- **WHEN** the email API answers a non-2xx status, or does not answer within 10 seconds
+- **THEN** the send request fails with a server error, the code it made cannot be used, and the server log names only the HTTP status or error name, never the address, code or key
 
-#### Scenario: Startup sweep
+### Requirement: Email code delivery in Mode L
 
-- **WHEN** the server starts and finds `.tmp-<id>` or `.deleting-<id>` directories or `*.json.<hex>.tmp` files left by a crash
-- **THEN** it removes them before serving
+The server SHALL, in Mode L, email nothing and instead print each sign-in link to its standard output as
+`Align sign-in for <email>: <url>` and write the same line to `<data>/v2/sign-in.txt` with mode 0600, for any email
+address.
 
-#### Scenario: Second server
+#### Scenario: Printed link
 
-- **WHEN** a second process starts on the same data directory while the pid file names a live process
-- **THEN** it throws `Another Align server (pid <n>) is using <dir>. Stop it first.` and does not serve
+- **WHEN** a Mode L client requests a code for `ana@example.com`
+- **THEN** stdout shows `Align sign-in for ana@example.com: http://<this request's host>/app/sign-in?email=ana%40example.com&code=<6 digits>`, and `sign-in.txt` (replaced on every send, mode 0600 in the 0700 `v2` directory) holds that line
 
-### Requirement: Public workspace endpoints
+#### Scenario: Loopback is not a credential
 
-The server SHALL describe creation availability on `GET /api/workspaces/config`, and expose for a workspace's sign-in
-screen only its company name, optional company note and team names on `GET /api/workspaces/{id}/login-info`, both
-without a session.
+- **WHEN** a browser on the same machine calls any web route without a Better Auth session cookie
+- **THEN** the server responds 401 `unauthorized`; being on loopback never signs anyone in, and only someone who can read the server's terminal or `sign-in.txt` can use a printed code
 
-#### Scenario: Reading the config
+### Requirement: Accounts created by email code
 
-- **WHEN** a client calls `GET /api/workspaces/config`
-- **THEN** the response is `{signup_code_required, max_reached, interview}`, plus `test_server:{delete_by}` when hosted
+The server SHALL, on a valid email code, sign in the account whose verified email equals the code's address
+(compared case-insensitively), and create a new account only when none exists and the address has a pending invite
+or the server is in Mode L; a new account's email is marked verified.
 
-#### Scenario: Sign-in labels
+#### Scenario: New person with an invite
 
-- **WHEN** a client requests `GET /api/workspaces/w_xxxxxxxxxxxx/login-info`
-- **THEN** for an existing workspace the response is `{name, company_note?, roles:[{id:"leadership"|"product"|"security", team, blurb}]}` with no person names or constraints, and for a malformed id, `northstar` or a missing workspace it is 404 `This workspace no longer exists`
+- **WHEN** a hosted client signs in with a valid code for an address that has no account but a pending invite
+- **THEN** an account is created with that verified email and signed in, and the person can then accept the invite
 
-### Requirement: Role sign-in to a workspace
+#### Scenario: New person without an invite
 
-The server SHALL sign a person in to a custom workspace on `POST /api/session` with `{workspace, role, passcode}`,
-verifying the passcode with scrypt after normalizing it (trimmed, lowercased, spaces and hyphens removed), and answer
-every failure with the same 401.
+- **WHEN** a hosted client presents a valid code for an address with no account and no pending invite
+- **THEN** the sign-in fails with 403 and the message `This email can't sign in here yet. Ask a workspace owner to invite you.`, no account is created and nobody is signed in
 
-#### Scenario: Correct passcode
+#### Scenario: Unverified match
 
-- **WHEN** a same-origin JSON `POST /api/session` carries a valid workspace id, role and its passcode
-- **THEN** the response is `{actor, name, sid, workspace}` (where `name` is that role's team lead from setup) and a `Set-Cookie` session cookie
+- **WHEN** the only account holding the code's address has an unverified email
+- **THEN** the server refuses with 403 `email_unverified` and does not sign in or change that account
 
-#### Scenario: Any failure
+### Requirement: Mode L local owner account
 
-- **WHEN** the workspace id is invalid or unknown, the role is not one of the three, or the passcode is wrong
-- **THEN** the server responds 401 `Wrong passcode for this role`
+The server SHALL, on its first start in Mode L when no Better Auth user exists, create one account named
+`Local owner` with the email `ALIGN_LOCAL_OWNER_EMAIL` (default `owner@align.localhost`) and send it a sign-in code,
+printed as for any Mode L code.
 
-### Requirement: Sign-in throttling
+#### Scenario: First start
 
-The server SHALL throttle custom-workspace sign-ins per workspace, role and client, and bound concurrent passcode
-hashing globally.
+- **WHEN** a Mode L server starts on an empty data directory
+- **THEN** `ba_user` holds exactly one account, `Local owner` <`owner@align.localhost`>, belonging to no workspace, and stdout shows `Align sign-in for owner@align.localhost: http://127.0.0.1:<PORT or 3100>/app/sign-in?…`
 
-#### Scenario: Repeated wrong passcodes
+#### Scenario: Later starts
 
-- **WHEN** a client has 5 or more failed sign-ins for one workspace and role within 5 minutes and retries before the backoff delay (1 s doubling per further failure, at most 10 s) has passed since the last failure
-- **THEN** the server responds 429 `Too many attempts, try again shortly`; other clients and roles are unaffected, and a success clears the count
+- **WHEN** the server starts and at least one Better Auth user exists
+- **THEN** no account is created and no code is sent
 
-#### Scenario: Hashing pool full
+### Requirement: Sign-in link script
 
-- **WHEN** 2 passcode checks are running and 8 are waiting, or (hosted) one client already has 2 sign-ins in flight
-- **THEN** further sign-ins get 429 (`Too many sign-ins right now, try again in a moment` or `Too many sign-ins at once, try again in a moment`) before any hashing
+The command `npm run sign-in-link [email]` SHALL ask the running Mode L server at `http://127.0.0.1:<PORT or 3100>`
+to send a fresh sign-in code for the given email (default `ALIGN_LOCAL_OWNER_EMAIL` or `owner@align.localhost`)
+through the ordinary send request, so the server prints the link.
 
-### Requirement: Session cookie
+#### Scenario: Fresh link
 
-The server SHALL issue a signed (HMAC-SHA256 keyed with `ALIGN_SECRET`, or, when it is unset, a random key generated
-once into `data/.secret` with mode 0600) session cookie named `align_session` in Mode L and
-`__Host-align_session` when hosted, with `Path=/; HttpOnly; SameSite=Strict; Max-Age=43200` (plus `Secure` when
-hosted), whose custom-workspace token carries the workspace, the workspace epoch and a 12-hour expiry.
+- **WHEN** the owner's first code expired and they run `npm run sign-in-link`
+- **THEN** the server prints a new `Align sign-in for owner@align.localhost: …` line and rewrites `sign-in.txt`, and the script exits 0 telling them where the link was printed
 
-#### Scenario: Expired or revoked token
+#### Scenario: Server not running
 
-- **WHEN** a request presents a correctly signed custom-workspace token that is expired, whose workspace epoch changed, or whose workspace was deleted
-- **THEN** workspace-aware routes respond 401 `Your session ended. Sign in again.`
+- **WHEN** no server answers at that address, or it answers 429
+- **THEN** the script exits 1 with a message saying the server is not running or that too many codes were sent, and prints no code itself
 
-#### Scenario: Sign out
+### Requirement: Explicit account linking
 
-- **WHEN** a same-origin client calls `DELETE /api/session`
-- **THEN** the server responds `{ok:true}` with a cookie of the same name and `Max-Age=0`
+The server SHALL keep implicit account linking off and let a signed-in person link Google or GitHub to their own
+account only by an explicit request from `/app/account`.
 
-### Requirement: Northstar demo sign-in
+#### Scenario: Same email, no link
 
-The server SHALL sign in to the Northstar demo on `POST /api/session` with `{role, passcode}` (no `workspace` key)
-against the configured role passcodes, and refuse it when hosted.
+- **WHEN** a person who signed up with an email code later signs in with GitHub whose email is the same address, without linking first
+- **THEN** Better Auth does not attach the GitHub account to the existing account, and the person is not signed in to it through GitHub
 
-#### Scenario: Demo sign-in
+#### Scenario: Linking from the account page
 
-- **WHEN** Mode L receives `{role:"leadership", passcode:<ALIGN_LEADERSHIP_PASSCODE or its default>}`
-- **THEN** the response is `{actor, name, sid}` with a session cookie; an unknown role gets 400 `Unknown role` and a wrong passcode 401 `Wrong passcode for this role`
+- **WHEN** a signed-in person chooses Link GitHub on `/app/account` and completes GitHub's consent
+- **THEN** that GitHub account is linked to their account and can sign them in afterwards; a GitHub account already linked to another Align account is refused and stays where it was
 
-#### Scenario: Hosted refuses the demo
+### Requirement: Test identity provider
 
-- **WHEN** a hosted server receives a Northstar sign-in, or a request carrying a Northstar token
-- **THEN** the sign-in is 404 and the token is treated as anonymous
+The server SHALL offer Better Auth email-and-password sign-up and sign-in only when `ALIGN_TEST_IDP=1` and the server
+is not hosted, for tests.
 
-### Requirement: Leadership-only workspace actions
+#### Scenario: Off by default
 
-The server SHALL reserve Restart, agent connect/disconnect, disconnecting all AI apps, capture-consent grant/revoke,
-captured-session deletion and remapping (`POST /api/mappings {action:"remap"}`) for the `leadership` role, and rate-limit state-replacing workspace actions.
+- **WHEN** `ALIGN_TEST_IDP` is unset and a client POSTs to `/api/v2/auth/sign-up/email`
+- **THEN** Better Auth refuses the request and no account is created
 
-#### Scenario: Non-leadership restart
+#### Scenario: Never hosted
 
-- **WHEN** a `product` or `security` session of a custom workspace POSTs `{"confirm":"reset"}` to `/api/reset`
-- **THEN** the server responds 403 naming leadership's team (`Only <team> can restart this scenario`)
+- **WHEN** a hosted server's environment sets `ALIGN_TEST_IDP` to any value
+- **THEN** the server refuses to start and names `ALIGN_TEST_IDP is not allowed when hosted`
 
-#### Scenario: Action loop
+### Requirement: Recent sign-in for device and app approval
 
-- **WHEN** a workspace performs an 11th `restart`, `connect_agent`, `disconnect_agent` or `disconnect_apps` action of the same kind within one minute
-- **THEN** the server responds 429 `Too many of these in a row, try again in a minute`
+The server SHALL require a sign-in no older than 15 minutes to approve a device on `POST /api/v2/device/approve` and
+to approve an MCP app at `/oauth/authorize`, and otherwise ask the person to sign in again.
 
-### Requirement: Workspace restart
+#### Scenario: Old session approving a device
 
-The server SHALL, on a leadership Restart of a custom workspace, first revoke every agent token and connected app (by
-bumping the agent epoch in `auth.json`), then rebuild the state from the saved `scenario.json`, keeping the audit log
-and appending a `reset` row, while human sign-ins stay valid.
+- **WHEN** a person whose Better Auth session was created 20 minutes ago POSTs `/api/v2/device/approve`
+- **THEN** the server responds 403 `reauth_required` and approves nothing, and `/app/device` asks them to sign in again and then shows the same code
 
-#### Scenario: Restart drops capture
+#### Scenario: Fresh session
 
-- **WHEN** leadership restarts a workspace that had capture consents, captured sessions and an agent token
-- **THEN** the rebuilt state has no consents or captured sessions, and the old agent token is refused with 401
+- **WHEN** the same person signs in again and approves within 15 minutes
+- **THEN** the approval succeeds; looking up a code and denying it need no recent sign-in
 
-### Requirement: Intake interview availability
+### Requirement: Web and device credentials
 
-The server SHALL serve the intake interview on `POST /api/workspaces/interview` only when `ALIGN_INTERVIEW_API_KEY`
-is set (or, in Mode L only, `ALIGN_INTERVIEW=1`), and otherwise answer 404 after the same-site check.
+The server SHALL accept only the Better Auth session cookie `align_v2.session_token` (`__Secure-align_v2.session_token`
+when hosted) on web routes and only `Bearer alnd_…` device access tokens on device routes, with the pairing routes
+`device/authorize`, `device/token` and `device/refresh` taking no token but still refusing browsers.
 
-#### Scenario: Interview off
+#### Scenario: Wrong credential kind
 
-- **WHEN** a same-site JSON request reaches the route with the interview disabled
-- **THEN** the server responds 404 `Not found`, and `GET /api/workspaces/config` reports `interview: false`
+- **WHEN** a web route (including `/api/v2/auth/*`) receives an `Authorization` header, or a device route receives an `Origin` or `Cookie` header
+- **THEN** the server responds 403 `bearer_not_allowed`, `browser_not_allowed` or `cookies_not_allowed` respectively
 
-#### Scenario: Cross-site request
+#### Scenario: Missing credential or cross-site write
 
-- **WHEN** a request arrives with a foreign `Origin` or a non-JSON content type
-- **THEN** the server responds 403 or 415 regardless of whether the interview is enabled
+- **WHEN** a device route gets no valid `alnd_` token (missing, unknown, expired or revoked), a web route has no Better Auth session, or a cookie-authenticated write carries an `Origin` other than this server (hosted: not exactly `https://<Host>`, or no `Origin` at all) or a `Sec-Fetch-Site` other than `same-origin` or `none`
+- **THEN** the server responds 401 `invalid_token`, 401 `unauthorized`, or 403 `cross_site` (checked before the session is read) respectively
 
-### Requirement: Intake interview input rules
+### Requirement: v2 request bodies and error envelope
 
-The server SHALL accept an interview turn only as `{signup_code?, messages:[{role:"user"|"assistant", text}]}` (no
-other keys) with 1 to 30 messages, starting and ending with the user and alternating roles, user messages at most
-2,000 characters, assistant messages at most 1,500, 30,000 characters in all, and a body of at most 48 KB; the code is
-checked read-only with the creation rule before the conversation.
+The server SHALL answer every `/api/v2` error (outside Better Auth's own routes) as `{error:<code>, message}`, accept
+only JSON object bodies up to each route's size cap, and reject reserved keys anywhere in a body.
 
-#### Scenario: Malformed conversation
+#### Scenario: Body refusals
 
-- **WHEN** the body has an unknown key, zero or more than 30 messages, or roles that do not alternate or do not start and end with `user`
-- **THEN** the server responds 400 (`Send the conversation as {messages: [{role, text}]}`, `The conversation must start and end with your message`, or `The conversation must alternate`)
+- **WHEN** a non-empty body is not `application/json`, exceeds the route's cap (declared or streamed), is not a JSON object, or contains a `__proto__`, `constructor` or `prototype` key at any depth
+- **THEN** the server responds 415 `unsupported_media_type`, 413 `too_large`, 400 `bad_request`, or 400 `bad_request` respectively, and changes nothing
 
-#### Scenario: Too long
+#### Scenario: Unexpected failure
 
-- **WHEN** a message or the total exceeds its character cap, or the body exceeds 48 KB
-- **THEN** the server responds 413 before any model call
+- **WHEN** a route throws an unexpected error
+- **THEN** the response is 500 `{error:"server_error", message:"Server error"}`, and when hosted the log names only the error's name
 
-### Requirement: Intake interview limits
+### Requirement: Local edge in Mode L
 
-The server SHALL refuse an interview turn with 429 before any model call when 4 turns are in flight, a client has
-taken 40 turns in 30 minutes, the code's SHA-256 has taken 60 turns in 24 hours, or the server has taken 300 turns in
-the last hour or 1,500 in the last 24 hours; a call refused for being busy does not count as a turn.
-
-#### Scenario: Per-code ceiling
-
-- **WHEN** one invite code has been used for 60 turns in the past day, from any number of client addresses
-- **THEN** the next turn responds 429 `That's the interviewer's limit for today. Finish the form below by hand.`
-
-### Requirement: Intake interview model use
-
-The server SHALL make each interview turn as one call to `claude-opus-5-5` at `https://api.anthropic.com` (SDK logging
-off, 45 s timeout, 1 retry, `max_tokens` 4000, effort `low`, structured output, server-side refusal fallback beta),
-never send the access code to the model, store nothing, and return only cleaned text.
-
-#### Scenario: Successful turn
-
-- **WHEN** a valid turn is answered
-- **THEN** the response (with `cache-control: no-store`) is `{reply, draft, done}`, where `draft` has the 14 keys `company, company_goal, requirement, asking_team, asking_lead, asking_goal, owning_team, owning_lead, owning_goal, owning_measure, dependency, asking_work, owning_work, plan`, each stripped of control and bidi/zero-width characters, trimmed and capped (300 characters, `plan` 4,000)
-
-#### Scenario: Model refuses or fails
-
-- **WHEN** the model's stop reason is `refusal`, its output does not parse, or the call errors
-- **THEN** the server responds 502 (or 429 when the provider rate-limits) and logs only the error's name
-
-### Requirement: Agent tokens
-
-The server SHALL let leadership of a custom workspace in Mode L connect a coding agent with
-`POST /api/workspaces/agent-token {harness, repo}`, recording capture consent for that harness and repo and returning
-a token shown once that is valid for 7 days and only while the workspace's agent epoch is unchanged.
-
-#### Scenario: Minting a token
-
-- **WHEN** leadership sends `{harness:"claude-code"|"codex", repo:<folder name matching ^[\w.-]{1,120}$, not . or ..>}`
-- **THEN** the response is `{token:"agt.…", expires_at, workspace, harness, repo, shown_once:true}` with `cache-control: no-store`, and the audit records `agent_connected` with only `harness/repo`
-
-#### Scenario: Refused callers
-
-- **WHEN** the server is hosted, the caller is a Northstar session, or the caller is not leadership
-- **THEN** the server responds 404, 404, or 403 `Only leadership can connect or disconnect agents in this workspace` respectively; a bad harness or repo gets 400
-
-### Requirement: Disconnecting agents
-
-The server SHALL, on `DELETE /api/workspaces/agent-token`, revoke every agent token of the workspace (agent epoch
-bump) before removing consent and captured sessions, for one harness and repo when both are given or for all when
-the body is `{}`.
-
-#### Scenario: Disconnect one repo
-
-- **WHEN** leadership sends `{harness, repo}`
-- **THEN** the response is `{revoked:true, removed_consents, purged_sessions, agent_epoch}`, that repo's consent, sessions and mappings are gone, and every previously minted token returns 401 `This agent token is no longer valid`
-
-#### Scenario: Partial body
-
-- **WHEN** only one of `harness` or `repo` is sent, or either is invalid
-- **THEN** the server responds 400 `Send harness and repo to disconnect one agent, or {} for all`
-
-### Requirement: Connected AI apps
-
-The server SHALL list a custom workspace's connected AI apps to any of its signed-in roles on
-`GET /api/workspaces/connections` and let the approving team or leadership disconnect one, and leadership alone
-disconnect all, on `DELETE`.
-
-#### Scenario: Listing apps
-
-- **WHEN** a workspace session calls `GET /api/workspaces/connections`
-- **THEN** the response is `{url:"<origin>/api/mcp", plan:{changed_at}, apps:[{id,name,redirect_host,role,approved_at,last_used_at,on_current_plan}]}` listing only grants valid under the current agent epoch; a Northstar session gets 404
-
-#### Scenario: Disconnecting
-
-- **WHEN** a session sends `{id}` for an app approved by another team and is not leadership, or sends `{}` without being leadership
-- **THEN** the server responds 403; an unknown id gets 404 `That app isn’t connected`; leadership's `{}` bumps the agent epoch, clears all grants and returns `{disconnected:n}`
-
-### Requirement: Capture consent records
-
-The server SHALL keep one capture-consent record per harness (`claude-code` or `codex`) and repo folder basename in the
-Northstar store, listable by any signed-in Northstar role on `GET /api/sessions/consent` and granted or revoked only by
-leadership with a same-origin JSON request.
-
-#### Scenario: Grant
-
-- **WHEN** leadership POSTs `{harness, repo}` to `/api/sessions/consent`
-- **THEN** the response is `{ok:true, consent:{harness, repo, granted_by, granted_at}}` and an audit row `grant_capture_consent` holds only `harness/repo`
-
-#### Scenario: Refusals
-
-- **WHEN** the caller is signed out, is another role, sends a foreign `Origin`, or sends a repo that is not a plain folder name
-- **THEN** the server responds 401, 403, 403 or 400 respectively and writes nothing
-
-### Requirement: Consent revocation purges
-
-The server SHALL, on `DELETE /api/sessions/consent {harness, repo}`, delete the record and every captured session for
-that harness and repo together with their mappings, and audit `revoke_capture_consent` only when something changed.
-
-#### Scenario: Revoke
-
-- **WHEN** leadership revokes a granted consent with captured sessions
-- **THEN** the response is `{ok:true, revoked:true, purged_sessions:<n>}`, and later events for that harness and repo get 403
-
-### Requirement: Event ingestion origin and size
-
-The server SHALL accept capture events on `POST /api/sessions/events` only from scripts (no `Origin`) or this very
-server's own loopback origin (same host and port as `Host`), with a body of at most 16 KB.
-
-#### Scenario: Browser on another origin
-
-- **WHEN** an event arrives with an `Origin` that is not a loopback name with this server's exact host and port
-- **THEN** the server responds 403 `Capture events are accepted from this machine only`
-
-#### Scenario: Oversized or invalid body
-
-- **WHEN** the body exceeds 16 KB, is not JSON, or lacks a valid `harness` or `session_id` (`^[\w.:-]{1,128}$`)
-- **THEN** the server responds 413 `Event too large`, 400 `Body must be JSON`, or 400 naming the field
-
-### Requirement: Event ingestion consent
-
-The server SHALL write a captured event only when a consent record exists for its harness and repo (the basename of
-`repo`, else of `cwd`), checking again under the write lock, and otherwise answer 403 and write nothing.
-
-#### Scenario: No consent
-
-- **WHEN** an event arrives for a harness and repo without a consent record
-- **THEN** the server responds 403 `No capture consent for this harness and repo` and neither stores nor maps the session
-
-#### Scenario: Consented event
-
-- **WHEN** an event arrives for a consented harness and repo
-- **THEN** the server responds `{ok:true, id:"<harness>:<session_id>"}` and upserts that session
-
-### Requirement: Event ingestion with an agent token
-
-The server SHALL route an event carrying `Authorization: Bearer agt.…` to that token's workspace, and refuse it unless
-the token verifies, matches the event's harness and repo, the workspace still holds consent, and an existing session
-with that id belongs to the same repo.
-
-#### Scenario: Revoked or mismatched token
-
-- **WHEN** the token no longer verifies, or names another harness or repo than the event
-- **THEN** the server responds 401 `This agent token is no longer valid`, or 403 `This agent token is for <harness> in <repo>`, and never falls back to the Northstar store
-
-### Requirement: Event redaction and caps
-
-The server SHALL redact likely secrets from `prompt`, `command`, `last_message` and `file_path` (Bearer values, `sk-`,
-`vck_`, `gh[pousr]_`, `github_pat_`, `AKIA`, `xox?-` tokens, 32+ hex runs, and mixed-case alphanumeric runs of 32+
-characters containing digits) and cap what a session keeps.
-
-#### Scenario: Secret in a prompt
-
-- **WHEN** an event's `prompt` contains `Bearer abcdefgh12345678`
-- **THEN** the stored prompt reads `Bearer [redacted]`, and any text longer than 1,000 characters is cut with `…`
-
-#### Scenario: Stored session shape
-
-- **WHEN** events accumulate for a session
-- **THEN** it keeps at most 200 prompts (consecutive duplicates skipped, oldest dropped), at most 50 distinct repo-relative file paths of up to 300 characters (never an absolute home path), distinct tool names, `repo` and `cwd_name` as basenames, `ended_at` set on `Stop`/`SessionEnd` and cleared on `UserPromptSubmit`/`SessionStart`, and an `origin` of `align-push`, `linear`, `github`, `slack` or `ad-hoc` detected from prompts, commands and branch
-
-### Requirement: Captured session reading and deletion
-
-The server SHALL show captured Northstar sessions only to signed-in Northstar sessions and only from loopback
-origins, and let leadership delete one with its mappings.
-
-#### Scenario: Listing
-
-- **WHEN** a signed-in Northstar session calls `GET /api/sessions` with no `Origin` or a loopback one
-- **THEN** the response is `{sessions (newest last_at first), mappings, registry_version, listening, mapper}`; signed out is 401, a custom-workspace session 403, a foreign origin 403
-
-#### Scenario: Leadership delete
-
-- **WHEN** leadership calls `DELETE /api/sessions/<harness>:<id>`
-- **THEN** the session and its mappings are removed, the audit records `delete_session` with only the id, and the response is `{ok:true, id}`; another role gets 403, a malformed id 400, an unknown id 404
-
-### Requirement: Session-to-goal mapping
-
-The server SHALL classify consented Northstar sessions against the live goal registry (every current shared goal plus
-`none`; private goals never included) with Jev (`typesafe-ai/jev` via the AI Gateway) only when
-`ALIGN_MAPPER_EXTERNAL=1` and `AI_GATEWAY_API_KEY` are set and the server is not hosted, never for custom workspaces,
-and never substitute another model.
-
-#### Scenario: Mapper off
-
-- **WHEN** the external model is not enabled or has no key
-- **THEN** no session text leaves the machine, no mapping row is written, `GET /api/mappings` reports `mapper:{status:"off"|"no-key", message}`, and leadership's `POST /api/mappings {action:"remap"}` returns `{ok:true, attempted:false, reason, mapper}` (another role gets 403, another action 400 `Unknown action`)
-
-#### Scenario: Mapper result
-
-- **WHEN** Jev returns a goal with confidence of at least 0.6
-- **THEN** the mapping is `PROPOSED` (below 0.6 or `none`: `UNASSIGNED`), its conflict is flagged at a probability of at least 0.6, and a Jev failure after up to 3 attempts yields `MAPPER_UNAVAILABLE` with the reason
-
-### Requirement: Mapping decisions
-
-The server SHALL let only the owner of the goal a mapping chose confirm or reject it on
-`POST /api/mappings/{session_id}/confirm` or `/reject`, and only while the registry is unchanged.
-
-#### Scenario: Owner confirms
-
-- **WHEN** the role owning the chosen goal (`ceo`→leadership, `product`→product, `security`→security) confirms a mapping at the current `registry_version`
-- **THEN** the mapping becomes `CONFIRMED` with `confirmed_by` and `confirmed_at`, the audit records `confirm_mapping`, and the decision survives remaps while the registry and Jev's choice are unchanged
-
-#### Scenario: Refused decisions
-
-- **WHEN** no mapping exists, it has no goal or `none`, the goal is gone, the caller is not the owner, or the registry changed
-- **THEN** the server responds 404, 409, 409, 403 `Only the owner of this goal can decide this mapping`, or 409 respectively
-
-### Requirement: Local-only guards
-
-The server SHALL, in Mode L, answer only requests whose `Host` is a loopback name and refuse cross-origin browser
-writes, including writes from another localhost port.
+The server SHALL, in Mode L, bind `127.0.0.1` on `npm start`, answer only requests whose `Host` is a loopback name
+(`localhost`, `127.0.0.1` or `[::1]`, any port), let Better Auth trust only the origin the request was sent to, refuse
+cross-origin cookie writes including those from another localhost port, and refuse any browser `Origin` on `/api/mcp`.
 
 #### Scenario: DNS-rebound host
 
@@ -479,370 +285,484 @@ writes, including writes from another localhost port.
 #### Scenario: Another local port
 
 - **WHEN** a cookie-authenticated write arrives with `Origin: http://localhost:5555` while `Host` is `localhost:3100`
-- **THEN** the server responds 403 `This request came from another site`
+- **THEN** the server responds 403 `cross_site`, and Better Auth rejects the same origin on its own routes
 
-### Requirement: Current session probe
+#### Scenario: Browser calling the MCP endpoint
 
-The server SHALL answer `GET /api/session` without requiring a session: for a custom-workspace session cookie it SHALL return `{actor, name, sid, workspace}`, where `name` is the lead named for the actor's team at setup (falling back to the actor); otherwise it SHALL return `{actor, name, sid}` for a Northstar session, with all three `null` when the caller is signed out.
+- **WHEN** a request to `/api/mcp` carries any `Origin` header, in either mode
+- **THEN** the server responds 403 without reading its token
 
-#### Scenario: Signed out
+### Requirement: Served paths in both modes
 
-- **WHEN** a browser with no session cookie calls `GET /api/session`
-- **THEN** the response is `{"actor": null, "name": null, "sid": null}`
+The server SHALL redirect `/` to `/app`, serve every path under `/app`, and answer every path under `/api/v2`, in
+both modes and without any feature flag.
 
-#### Scenario: Custom workspace session
+#### Scenario: Root
 
-- **WHEN** a browser signed in to workspace `w_…` as `leadership` calls `GET /api/session`
-- **THEN** the response includes `workspace` equal to that id and `name` equal to the leadership lead named at setup
+- **WHEN** a browser requests `/` on a Mode L or hosted server
+- **THEN** the server responds 307 with `Location` ending in `/app`
 
-### Requirement: Hosted mode gate
+#### Scenario: Retired paths
 
-The server SHALL, when `HOSTED=1`, refuse to start with any problem from its environment check, and at the request
-edge answer 503 when misconfigured, 410 after `ALIGN_DELETE_BY` has ended (08:00 UTC the next day), 421 for a host not
-in `ALIGN_HOSTS`, 403 without `X-Forwarded-Proto: https` or `Fly-Client-IP`, 307 to `/new` for `/` and `/setup`, and 404
-for every path outside its tester allowlist (capture and agent tokens included). The allowlist is exactly `/new`, `/w/<id>`, `/api/workspaces`, `/api/workspaces/config`, `/api/workspaces/interview`, `/api/workspaces/{id}/login-info`, `/api/session`, `/api/state`, `/api/timer`, `/api/reset`, `/api/proposals`, `/api/proposals/{id}/accept|acknowledge|counter|launch|reject`, `/api/mcp`, `/.well-known/oauth-protected-resource` (also with `/api/mcp` appended), `/.well-known/oauth-authorization-server`, `/oauth/authorize|token|register`, `/api/oauth/approve` and `/api/workspaces/connections`, except `/app*` and `/api/v2/*`, which
-pass the same edge checks and are served when `ALIGN_GOAL_SESSIONS=1`.
+- **WHEN** a Mode L client requests `/setup`, `/new`, `/w/<id>`, `/api/session` or `/api/proposals`
+- **THEN** the server responds 404
 
-#### Scenario: Routes outside the allowlist when hosted
+### Requirement: Hosted edge and route allowlist
 
-- **WHEN** a hosted server receives `GET /api/directives/stream`, `POST /api/workspaces/agent-token` or `GET /api/policy/security`
+The server SHALL, when `HOSTED=1`, answer at the request edge 503 when misconfigured, 410 after `ALIGN_DELETE_BY` has
+ended (08:00 UTC the next day), 421 for a `Host` not in `ALIGN_HOSTS`, 403 without `X-Forwarded-Proto: https` or
+without `Fly-Client-IP`, and 404 `{"error":"Not found"}` for every path outside `/app*`, `/api/v2/*`, `/api/mcp`,
+`/oauth/*`, `/.well-known/*`, `/api/oauth/*` and the static assets.
+
+#### Scenario: Paths outside the allowlist
+
+- **WHEN** a hosted server receives `GET /api/state`, `POST /api/sessions/events` or `GET /setup`
 - **THEN** it responds 404 `{"error":"Not found"}`
 
-#### Scenario: Capture when hosted
+#### Scenario: Edge checks
 
-- **WHEN** a hosted server receives `POST /api/sessions/events`
-- **THEN** it responds 404
+- **WHEN** a hosted request has `Host: other.example`, or lacks `X-Forwarded-Proto: https`, or lacks `Fly-Client-IP`
+- **THEN** the server responds 421 `Misdirected request: this server answers to its own host name only`, 403 `{"error":"Use https"}`, or 403 `{"error":"Use the public address"}` respectively
 
-#### Scenario: Unsafe environment
+#### Scenario: Closed test server
 
-- **WHEN** a hosted server starts with, for example, `AI_GATEWAY_API_KEY`, any `ANTHROPIC_*` variable, `ALIGN_CAPTURE` other than `0`, a default role passcode, `ALIGN_SECRET` shorter than 32 characters, or an invite code shorter than 12 characters; or, with `ALIGN_GOAL_SESSIONS=1`, without a `BETTER_AUTH_SECRET` of 32+ characters, without all four of `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, without an `ALIGN_PUBLIC_ORIGIN` that is a bare `https://host` origin whose host is listed in `ALIGN_HOSTS`, or with `ALIGN_GOAL_SESSIONS_TEST_IDP` set
-- **THEN** it refuses to start and names each problem
+- **WHEN** a request reaches a hosted server after its `ALIGN_DELETE_BY` date has ended
+- **THEN** the server responds 410 `This test server closed on <date>.` whatever the path, `Host` or headers
 
-### Requirement: Workspace data isolation
+### Requirement: Hosted startup checks
 
-The server SHALL bind every state read and write to the workspace named in the caller's own session, never to a
-client-supplied id, and keep Northstar and each custom workspace in separate stores.
+The server SHALL refuse to start when hosted, naming each problem, unless `ALIGN_HOSTS` lists the public host names
+(no loopback names), `ALIGN_SECRET` and `BETTER_AUTH_SECRET` each have 32+ characters, `ALIGN_DATA_DIR` is an absolute
+path outside the app directory, `ALIGN_DELETE_BY` is a `YYYY-MM-DD` date, `ALIGN_PUBLIC_ORIGIN` is a bare `https://host`
+origin whose host is in `ALIGN_HOSTS`, and sign-in is possible: all three of `ALIGN_EMAIL_API_URL` (https),
+`ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM` are set, or Google's or GitHub's client id and secret are.
 
-#### Scenario: Tab for another workspace
+#### Scenario: No way to sign in
 
-- **WHEN** a request carries `x-align-workspace` naming a workspace other than the session's
-- **THEN** the server responds 409 with `code:"workspace_mismatch"` and changes nothing
+- **WHEN** a hosted server starts with none of the email settings and neither provider's id and secret
+- **THEN** it refuses to start and names that it needs the email settings or a Google or GitHub client
 
-#### Scenario: Custom session on a Northstar-only route
+#### Scenario: Partial or unsafe settings
 
-- **WHEN** a custom-workspace session calls a Northstar-only route such as `GET /api/sessions` or `POST /api/mappings/{id}/confirm`
-- **THEN** the server responds 403 `This isn’t available in a custom workspace`
+- **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, `ALIGN_TEST_IDP` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`
+- **THEN** it refuses to start and names each problem; any mode refuses `ALIGN_PUBLIC=1`
 
-### Requirement: Workspace storage bounds
+#### Scenario: Email only
 
-The server SHALL cap custom-workspace write bodies at 64 KB with strings of at most 300 characters (4,000 for `text`
-and `plan_text`, 1,000 for a counter's `conditions`), reject `__proto__`, `constructor` and `prototype` keys, refuse a state larger than 1 MB, and keep at
-most 1,000 audit rows in state with older rows in at most two archive files of 1 MB.
+- **WHEN** a hosted server starts with all three email settings and no Google or GitHub settings, and every other check passes
+- **THEN** it starts, and sign-in is by email code only
 
-#### Scenario: Full workspace
+### Requirement: Server data and single server
 
-- **WHEN** a write would make the workspace state (excluding audit) exceed 1 MB
-- **THEN** the server responds 413 `This workspace is full` and nothing changes on disk
+The server SHALL keep all data in one SQLite file (WAL) at `<ALIGN_DATA_DIR or ./data>/v2/align.sqlite` in a 0700
+directory with the file at 0600, generate Better Auth's secret into `.auth-secret` (0600) in that directory in Mode L
+when `BETTER_AUTH_SECRET` is unset, migrate the database before serving, and run only one server per data directory.
 
-#### Scenario: Deleted workspace
+#### Scenario: Second server
 
-- **WHEN** a request reaches the store or sign-in screen of a workspace whose directory has been renamed aside or removed (for example `GET /api/workspaces/{id}/login-info`, or a write racing the delete)
-- **THEN** the server responds 404 `This workspace no longer exists` and never recreates the directory, while a request carrying that workspace's session cookie gets 401 `Your session ended. Sign in again.` and its agent tokens get 401 `This agent token is no longer valid`
+- **WHEN** a second process starts on the same data directory while the pid file `<data>/.pid` names a live process
+- **THEN** it exits with `Another Align server (pid <n>) is using <dir>. Stop it first.` and does not serve
 
-### Requirement: Operator workspace deletion
+#### Scenario: First request during migration
 
-The operator tool `node scripts/ws-admin.mjs` SHALL, with an absolute `ALIGN_DATA_DIR`, list workspaces or delete them
-the way the server does (rename aside to `.deleting-<id>`, remove, append a `deleted` row with `by:"ws-admin"` to
-`_events.jsonl`), and is the only way a custom workspace is deleted.
+- **WHEN** a request reaches an `/api/v2` route before the database has been opened and migrated
+- **THEN** the route waits for the migration to finish and never runs against an unmigrated file
 
-#### Scenario: Listing and deleting
+### Requirement: Workspace creation by any signed-in person
 
-- **WHEN** the operator runs `list`, `delete <id>`, or `delete --all --yes`
-- **THEN** `list` prints each id with its created and last-change times and name followed by `<n> workspace(s)`; `delete <id>` prints `deleted <id>`; `delete --all --yes` deletes every workspace, removes `_oauth_clients.json` and any `.tmp-`/`.deleting-` leftovers, and works on a closed hosted server
+The server SHALL let any signed-in person, in either mode, create a workspace on `POST /api/v2/workspaces {name}`
+(1 to 100 characters) as its only owner.
 
-#### Scenario: Refused invocations
+#### Scenario: Create
 
-- **WHEN** `ALIGN_DATA_DIR` is unset or relative, the id is not `w_` plus 12 base32 characters, `delete --all` lacks `--yes`, or the command is unknown
-- **THEN** the tool exits 2 with a message (the usage line `usage: node scripts/ws-admin.mjs list | delete <id> | delete --all --yes` for an unknown command); a well-formed id with no workspace exits 1 `ws-admin: no workspace <id>`
+- **WHEN** a signed-in person POSTs `{name:"Acme"}`
+- **THEN** the response is 201 `{id:"ws_…", name:"Acme", role:"owner"}`, and the audit records `workspace.created` with them as actor
 
-### Requirement: Goal sessions credentials
+#### Scenario: Creation limits
 
-The server SHALL, when `ALIGN_GOAL_SESSIONS=1`, mount Better Auth at `/api/v2/auth/*` with the cookie
-`align_v2.session_token` (`__Secure-` prefixed when hosted), accept only that cookie on web routes and only
-`Bearer alnd_…` device tokens on authenticated device routes (the pairing routes `device/authorize`, `device/token`
-and `device/refresh` take no token but still refuse browsers); with the flag unset every `/app*` and `/api/v2/*` path
-is 404. Goal sessions data SHALL live in one SQLite file (WAL) at `<ALIGN_DATA_DIR or ./data>/v2/align.sqlite` in a 0700 directory with the file at 0600; in Mode L without `BETTER_AUTH_SECRET`, Better Auth's secret is generated into `.auth-secret` in that directory.
+- **WHEN** the person creates an 11th workspace within an hour, or already owns 50, counting workspaces made with `POST /api/v2/workspaces/sample`
+- **THEN** the server responds 429 `rate_limited`, or 409 `too_many_workspaces` respectively
 
-#### Scenario: Wrong credential kind
+### Requirement: Workspace rename and deletion
 
-- **WHEN** a web route (including `/api/v2/auth/*`) receives an `Authorization` header, or a device route receives an `Origin` or `Cookie` header
-- **THEN** the server responds 403 `bearer_not_allowed`, `browser_not_allowed` or `cookies_not_allowed` respectively
+The server SHALL let a workspace owner rename the workspace on `PATCH /api/v2/workspaces/{ws} {name}` and delete it on
+`DELETE /api/v2/workspaces/{ws}`, where deletion removes everything in the workspace and revokes every device grant and
+OAuth grant for it.
 
-#### Scenario: Missing credential or cross-site write
+#### Scenario: Rename
 
-- **WHEN** a device route gets no valid `alnd_` token (missing, unknown, expired or revoked), a web route has no Better Auth session, or a cookie-authenticated write carries an `Origin` other than this server (hosted: not exactly `https://<Host>`, or no `Origin` at all) or a `Sec-Fetch-Site` other than `same-origin`/`none`
-- **THEN** the server responds 401 `invalid_token`, 401 `unauthorized`, or 403 `cross_site` (checked before the session is read) respectively, every v2 error body being `{error:<code>, message}`; a non-empty body that is not `application/json` gets 415 `unsupported_media_type`, and one over the route's size cap 413 `too_large`
+- **WHEN** an owner PATCHes `{name:"Acme Robotics"}`
+- **THEN** the response is `{id, name:"Acme Robotics"}` and the audit records `workspace.renamed`; a member gets 403 `owner_only`, a viewer 403 `read_only`
 
-#### Scenario: Auth rate limits
+#### Scenario: Delete
 
-- **WHEN** a client exceeds 10 requests per minute to `/sign-in/email` or `/sign-up/email`, 20 to `/sign-in/social`, or 100 per minute elsewhere under `/api/v2/auth`
-- **THEN** Better Auth refuses the request; email and password sign-up exists only with `ALIGN_GOAL_SESSIONS_TEST_IDP=1` and never when hosted, and accounts are never linked by email
+- **WHEN** an owner DELETEs the workspace
+- **THEN** the server responds 204, the workspace's members, invites, teams, goals, alignments, change requests, sessions, epochs, usage, activity, directives and audit rows are gone, devices lose their grant for it, its OAuth grants stop working, and a later request for it is 404 `not_found`
 
-### Requirement: Goal sessions workspaces and membership
+### Requirement: Workspace visibility and roles
 
-The server SHALL let a signed-in user create a goal-sessions workspace on `POST /api/v2/workspaces {name}` (at most
-100 characters) as its owner, invite members by single-use link, and hide every workspace from non-members with 404.
+The server SHALL decide every workspace action from the caller's workspace role and team roles, answering 404
+`not_found` for a workspace the caller is not a member of (or a device was not granted) and 403 with a code for a
+visible action the role does not allow.
 
-#### Scenario: Create and limits
+#### Scenario: Hidden workspace
 
-- **WHEN** a user creates a workspace
-- **THEN** the response is 201 `{id:"ws_…", name, role:"owner"}`; an 11th create within an hour is 429 `rate_limited`, and owning 50 already is 409 `too_many_workspaces`
+- **WHEN** a non-member, or a device without a grant for that workspace, requests any route under `/api/v2/workspaces/{ws}`
+- **THEN** the server responds 404 `not_found`, the same as for a workspace that does not exist
 
-#### Scenario: Accepting an invite
+#### Scenario: Role refusals
 
-- **WHEN** a signed-in user POSTs `/api/v2/invites/{token}/accept` for an unexpired (7-day) invite
-- **THEN** they join with the invited role and the response is `{workspace_id, role}` if their email equals the invited one (else 403 `email_mismatch`; hosted also requires a provider-verified email, else 403 `email_unverified`; already a member is 409 `already_member`); an unknown, accepted or expired token is 404 `not_found`
+- **WHEN** a viewer attempts any change other than leaving, a member attempts an owner-only action (invites, creating teams, member roles and removal, renaming or deleting the workspace, reading the audit trail), or a member who is neither owner nor that team's lead changes a team's membership
+- **THEN** the server responds 403 `read_only`, `owner_only` or `not_team_lead` respectively
+
+### Requirement: Workspace and account read views
+
+The server SHALL serve, to a signed-in browser session, the caller's workspaces on `GET /api/v2/workspaces`, one
+workspace on `GET /api/v2/workspaces/{ws}`, and the caller's paired devices on `GET /api/v2/devices`, and to either
+credential the caller's identity on `GET /api/v2/me`.
+
+#### Scenario: Workspace views
+
+- **WHEN** a member calls `GET /api/v2/workspaces` and `GET /api/v2/workspaces/{ws}`
+- **THEN** the responses are `{workspaces:[{id, name, role, teams:[{id, name, role}]}]}` and `{workspace:{id, name, created_at}, role, me, members:[{id, name, email, role}], teams:[{id, name, my_role, members:[{id, name, role}]}]}`
 
 #### Scenario: Who am I
 
 - **WHEN** a device token or a browser session calls `GET /api/v2/me`
-- **THEN** the response is `{user:{id,name,email}, device, workspaces}`, where `device` is `{id,name}` only for a device token, and `workspaces` lists the caller's memberships with role and pods (for a device, only the workspaces granted to it while the user is still a member)
+- **THEN** the response is `{user:{id, name, email}, device, workspaces}`, where `device` is `{id, name}` only for a device token, and for a device `workspaces` lists only the workspaces granted to it while the person is still a member
 
-### Requirement: Device pairing and shared sessions
+#### Scenario: Devices list
 
-The server SHALL pair a device by a key-bound device-code flow and accept shared sessions and usage only from the
-device that shared them, within the workspaces granted to it.
+- **WHEN** a person calls `GET /api/v2/devices`
+- **THEN** the response is `{devices:[{id, name, created_at, last_seen_at, revoked_at, revoked_reason, workspaces:[{id, name}]}]}` listing only their own devices
 
-#### Scenario: Pairing limits
+### Requirement: Email-bound invites
 
-- **WHEN** a client calls `POST /api/v2/device/authorize` more than 10 times in an hour, or polls `POST /api/v2/device/token` faster than the interval
-- **THEN** the server responds 429 `rate_limited`, or 400 `slow_down` with 5 s added to the interval; an approved code returns tokens (`alnd_` 1 h, `alnr_` 30 days) exactly once and then 400 `expired_token`
+The server SHALL let workspace owners create invites on `POST /api/v2/workspaces/{ws}/invites {email, role}`, list them
+on `GET`, and withdraw an unaccepted one on `DELETE .../invites/{id}`, each invite being a single-use link valid for 7
+days that only the invited email address can accept.
+
+#### Scenario: Creating an invite
+
+- **WHEN** an owner invites a new email address
+- **THEN** the response is 201 `{id, email, role, team_id, team_role, path:"/app/invite/<token>", token}` with the email lowercased; an existing member's email is 409 `already_member`, an invalid address 400, and more than 50 invites per workspace per hour 429 `rate_limited`
+
+#### Scenario: Previewing an invite
+
+- **WHEN** a signed-in person calls `GET /api/v2/invites/{token}`
+- **THEN** the response is `{workspace:{id, name}, role, team, team_role, email_matches, invited_email}` (`team` is `{id, name}` or null), or 404 `not_found` for an unknown, accepted, withdrawn or expired token
+
+#### Scenario: Accepting an invite
+
+- **WHEN** a signed-in person POSTs `/api/v2/invites/{token}/accept`
+- **THEN** they join with the invited role and the response is `{workspace_id, role, team_id}`; another email is 403 `email_mismatch`, an unverified email when hosted 403 `email_unverified`, an existing member 409 `already_member`, and an unknown, accepted or expired token 404 `not_found`
+
+### Requirement: Invites that name a team
+
+The server SHALL accept an optional `team_id` and `team_role` (`lead` or `member`, default `member`) on an invite and,
+when the invite is accepted, add the person to that team with that role in the same transaction as the membership.
+
+#### Scenario: Team invite accepted
+
+- **WHEN** an owner invites `bo@example.com` with `{role:"member", team_id:<Product>}` and Bo accepts
+- **THEN** Bo is a workspace member and a `member` of the Product team, and the audit records `invite.accepted` with Bo as actor
+
+#### Scenario: Invalid team on an invite
+
+- **WHEN** the invite names a team that is not in this workspace, or a `team_role` other than `lead` or `member`, or a `team_role` without a `team_id`
+- **THEN** the server responds 404 `not_found`, 400 `bad_request` or 400 `bad_request` respectively and creates no invite
+
+### Requirement: Teams and team membership
+
+The server SHALL let workspace owners create teams on `POST /api/v2/workspaces/{ws}/teams {name}` (1 to 100
+characters), let an owner or the team's lead add, change or remove team members on `.../teams/{team}/members`, and
+allow a person in any number of teams, with no team inside another.
+
+#### Scenario: Create a team
+
+- **WHEN** an owner POSTs `{name:"Security"}`
+- **THEN** the response is 201 `{id:"pod_…", name:"Security"}` and the audit records `team.created`
+
+#### Scenario: Team members
+
+- **WHEN** an owner or the team's lead POSTs `{user_id, role:"member"}` to `.../teams/{team}/members` or DELETEs `.../teams/{team}/members/{user}`
+- **THEN** the member is set (`{team_id, user_id, role}`) or removed (204); a person who is not a workspace member, an unknown team or a missing team member is 404 `not_found`
+
+#### Scenario: Several teams
+
+- **WHEN** an owner adds the same person to the Product and Security teams
+- **THEN** both memberships exist, and `GET /api/v2/workspaces/{ws}` lists the person under both teams
+
+### Requirement: Team lead rules
+
+The server SHALL let only a workspace owner make someone a team lead, change a lead's team role, or remove another
+person who is a lead, while a lead may add and remove the team's members and remove themselves.
+
+#### Scenario: Lead promoting someone
+
+- **WHEN** a team lead who is not a workspace owner POSTs `{user_id, role:"lead"}`, or changes another lead to `member`, or removes another lead
+- **THEN** the server responds 403 `owner_only` and changes nothing
+
+#### Scenario: Lead leaving the team
+
+- **WHEN** a lead DELETEs their own team membership
+- **THEN** the server responds 204 and they are no longer in the team
+
+### Requirement: Team naming and pod aliases
+
+The server SHALL call a team "Team" in everything a person or agent sees (UI, API paths and JSON keys, MCP and CLI
+text), using JSON keys `team`, `team_id` and `teams`, while storage keeps its `pod` names and ids keep the `pod_`
+prefix, and SHALL answer the old `/api/v2/workspaces/{ws}/pods…` paths as aliases of `/teams…`.
+
+#### Scenario: Old path
+
+- **WHEN** a client POSTs `{user_id, role}` to `/api/v2/workspaces/{ws}/pods/{team}/members`
+- **THEN** the result and response are exactly those of `/teams/{team}/members`, including the `team_id` key
+
+#### Scenario: Visible words
+
+- **WHEN** a person reads any `/api/v2` response, error message or audit action about teams
+- **THEN** it says team (for example `not_team_lead`, `Only a workspace owner can make someone a team lead`, `team.member_set`), never pod; audit rows stored as `pod.*` are shown as `team.*`
+
+### Requirement: Member role changes and removal
+
+The server SHALL let a workspace owner change a member's role on `POST /api/v2/workspaces/{ws}/members/{user} {role}`
+and remove a member on `DELETE .../members/{user}`, let any member (viewers included) leave by deleting their own
+membership, and on removal or leaving delete the person's team memberships and revoke their device grants and OAuth
+grants for that workspace while keeping their goals, sessions and history attributed to them.
+
+#### Scenario: Change a role
+
+- **WHEN** an owner POSTs `{role:"viewer"}` for a member
+- **THEN** the response is `{user_id, role:"viewer"}` and the audit records `member.role_changed`; a non-owner gets 403 (`owner_only` or `read_only`) and an unknown person 404 `not_found`
+
+#### Scenario: Remove a member
+
+- **WHEN** an owner DELETEs another member who has a paired device granted this workspace and an approved MCP app for it
+- **THEN** the server responds 204, the person is in no team of the workspace, their device gets 404 for the workspace while keeping its other grants, their MCP app's tokens for the workspace stop working, their goals and shared sessions remain under their name, and the audit records `member.removed`
+
+#### Scenario: Leave
+
+- **WHEN** a member or viewer DELETEs `.../members/{their own id}`
+- **THEN** the server responds 204 with the same effects and the audit records `member.left`; a member removing someone else gets 403 `owner_only`
+
+### Requirement: Last owner protection
+
+The server SHALL refuse, with 409 `last_owner`, any role change, removal or leaving that would leave a workspace with no
+owner.
+
+#### Scenario: Only owner leaves
+
+- **WHEN** the workspace's only owner tries to leave, demote themselves, or be removed
+- **THEN** the server responds 409 `last_owner` and nothing changes
+
+#### Scenario: Second owner exists
+
+- **WHEN** a workspace has two owners and one of them demotes themselves to member
+- **THEN** the change succeeds
+
+### Requirement: Connected apps per workspace
+
+The server SHALL list a workspace's connected MCP apps (OAuth grants, each bound to one person and this workspace) on
+`GET /api/v2/workspaces/{ws}/apps` and revoke one on `DELETE /api/v2/workspaces/{ws}/apps/{grant}`, where workspace
+owners see and revoke every grant and other members only their own.
+
+#### Scenario: Member revokes their app
+
+- **WHEN** a member DELETEs one of their own grants
+- **THEN** the server responds 204, that app's access and refresh tokens stop working, and the audit records `app.revoked` with the member as actor
+
+#### Scenario: Someone else's grant
+
+- **WHEN** a member who is not an owner lists apps or DELETEs another person's grant
+- **THEN** the list holds only their own grants and the DELETE is 404 `not_found`; an owner's DELETE of any grant succeeds
+
+### Requirement: Workspace audit trail
+
+The server SHALL write an audit row naming its actor for every change in a workspace (actor null only for system
+actions), and serve the newest 200 rows to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`.
+
+#### Scenario: Reading the audit
+
+- **WHEN** an owner calls `GET /api/v2/workspaces/{ws}/audit`
+- **THEN** the response is `{audit:[{at, actor:{id, name}|null, action, object_id}]}`, newest first, at most 200 rows; a member gets 403 `owner_only`, a viewer 403 `read_only`
+
+#### Scenario: Attributed actions
+
+- **WHEN** an owner withdraws an invite, a lead changes a team member, or a person revokes their own device
+- **THEN** each writes a row (`invite.withdrawn`, `team.member_set`, `device.revoked`) whose actor is that person; only automatic events such as revocation for refresh-token reuse have a null actor
+
+### Requirement: Device pairing flow
+
+The server SHALL pair a device by a key-bound device-code flow: `POST /api/v2/device/authorize {device_name,
+public_key}` (a 32-byte base64url Ed25519 key, name at most 100 characters) returns a code for the person to approve,
+and `POST /api/v2/device/token` returns the tokens exactly once after approval.
+
+#### Scenario: Starting a pairing
+
+- **WHEN** the CLI POSTs `/api/v2/device/authorize`
+- **THEN** the response is `{device_code, user_code:"XXXX-XXXX", verification_uri:"<origin>/app/device", expires_in:600, interval:5}`, where the user code uses only the letters `BCDFGHJKLMNPQRSTVWXZ`; more than 10 requests per client per hour get 429 `rate_limited`
 
 #### Scenario: Polling before and after a decision
 
-- **WHEN** a device polls `POST /api/v2/device/token` with `grant_type` `urn:ietf:params:oauth:grant-type:device_code` and its `device_code`, at or after the interval
-- **THEN** a pending code answers 400 `authorization_pending`, a denied code 400 `access_denied`, an expired (10-minute) code 400 `expired_token`, an unknown device code 400 `invalid_grant`, and another `grant_type` 400 `unsupported_grant_type`; `POST /api/v2/device/authorize {device_name, public_key}` (a 32-byte base64url Ed25519 key) returns `{device_code, user_code:"XXXX-XXXX", verification_uri:"<origin>/app/device", expires_in:600, interval:5}`
+- **WHEN** a device polls with `grant_type` `urn:ietf:params:oauth:grant-type:device_code` and its `device_code`
+- **THEN** a pending code answers 400 `authorization_pending`, a denied code 400 `access_denied`, an expired (10-minute) code 400 `expired_token`, an unknown device code 400 `invalid_grant`, another `grant_type` 400 `unsupported_grant_type`, and a poll sooner than the interval 400 `slow_down` with 5 seconds added to the interval
 
-#### Scenario: Another device's session
+#### Scenario: Tokens once
 
-- **WHEN** a device sends `PUT /api/v2/workspaces/{ws}/sessions/{key}` for a key shared by another user or device, or for a workspace it was not granted
-- **THEN** the server responds 404; usage batches over 500 rows get 413 `too_many_rows`, and bodies over 256 KB get 413 `too_large`
+- **WHEN** a device polls an approved code
+- **THEN** the response is `{device_id, access_token:"alnd_…", expires_in:3600, refresh_token:"alnr_…", user:{id, name, email}}` with grants for the approved workspaces the person still belongs to, and the next poll gets 400 `expired_token`; only SHA-256 hashes of the tokens are stored
 
-### Requirement: Goal sessions device approval and revocation
+### Requirement: Device approval, refresh and revocation
 
-The server SHALL let a signed-in user look up a pending pairing by its user code on
-`GET /api/v2/device/requests/{code}`, approve it for workspaces they belong to on
-`POST /api/v2/device/approve {user_code, workspace_ids}` or deny it on `POST /api/v2/device/deny {user_code}`, rotate
-refresh tokens on `POST /api/v2/device/refresh` only with an Ed25519 signature from the paired key, and revoke a
-device on `DELETE /api/v2/devices/self` (its own token) or `DELETE /api/v2/devices/{id}` (the owner's browser session).
+The server SHALL let a signed-in person look up a pending code on `GET /api/v2/device/requests/{code}`, approve it for
+workspaces they belong to on `POST /api/v2/device/approve {user_code, workspace_ids}` or deny it on
+`POST /api/v2/device/deny {user_code}`, rotate refresh tokens on `POST /api/v2/device/refresh` only with an Ed25519
+signature from the paired key, and revoke a device on `DELETE /api/v2/devices/self` (its own token) or
+`DELETE /api/v2/devices/{id}` (its owner's browser session).
 
 #### Scenario: Approving a code
 
-- **WHEN** a signed-in user approves a pending, unexpired (10-minute) code
-- **THEN** the response is `{state:"approved"}` and the device's next token poll receives its tokens with grants for those workspaces; an empty `workspace_ids` is 400 `Choose at least one workspace for this device`, a workspace the user is not a member of or an unknown, expired or already decided code is 404, and more than 20 lookups or decisions per user in 10 minutes is 429 `rate_limited`
+- **WHEN** a person with a recent sign-in approves a pending, unexpired code (in any letter case, with or without the hyphen)
+- **THEN** the response is `{state:"approved"}`; an empty `workspace_ids` is 400 `Choose at least one workspace for this device`, a workspace they are not a member of or an unknown, expired or decided code 404, and more than 20 lookups or decisions per person in 10 minutes 429 `rate_limited`
 
 #### Scenario: Refresh token reuse
 
 - **WHEN** a device presents, with a valid signature, a refresh token that was already rotated
-- **THEN** the server responds 401 `invalid_grant` and revokes the whole device (all its tokens deleted); a bad signature, a timestamp more than 5 minutes off, an expired token or a revoked device also get 401 `invalid_grant`
+- **THEN** the server responds 401 `invalid_grant` and revokes the whole device; a bad signature, a timestamp more than 5 minutes off, an expired token or a revoked device also get 401 `invalid_grant`
 
 #### Scenario: Revoking a device
 
 - **WHEN** a device calls `DELETE /api/v2/devices/self`, or its owner calls `DELETE /api/v2/devices/{id}` from the browser
-- **THEN** the server responds 204 and every token of that device stops working; another user's device id is 404
+- **THEN** the server responds 204, every token of that device stops working, and the audit records `device.revoked` with the person as actor; another person's device id is 404
 
-### Requirement: Goal sessions access rules
+### Requirement: Shared session ownership
 
-The server SHALL decide every goal-sessions action from the caller's workspace role (`owner`, `member`, `viewer`) and
-pod role (`lead`, `member`), answering 404 for anything the caller may not see and 403 with a code for a visible
-action the role does not allow.
+The server SHALL accept a shared session on `PUT /api/v2/workspaces/{ws}/sessions/{key} {harness, repo_key,
+repo_alias?, started_at, title?}` only from a device granted that workspace (members and owners, never viewers), keep
+every session private to the device and person that shared it, let that person stop sharing on
+`POST .../sessions/{key}/stop-sharing` or hard-delete the history on `DELETE .../sessions/{key}`, and list sessions on
+`GET /api/v2/workspaces/{ws}/sessions` as `{mine, all}`.
 
-#### Scenario: Hidden versus refused
+#### Scenario: Sharing
 
-- **WHEN** a non-member (or a device without a grant) requests a workspace, or a member requests another person's `private` goal or a `pod` goal of a pod they are not in (workspace owners read pod goals but never another person's private goals)
-- **THEN** the server responds 404 `not_found`
+- **WHEN** a device PUTs a new session key with `harness` `claude-code` or `codex` and a 43-character base64url `repo_key`
+- **THEN** the response is `{session_key, state:"shared", current_epoch:null}`; the same key with another harness or repo is 409 `session_conflict`, a stopped session 409 `sharing_stopped`, and a key shared by another person or device 404
 
-#### Scenario: Role refusals
+#### Scenario: Stop sharing and delete
 
-- **WHEN** a viewer attempts any change, a member attempts an owner-only action (invites, pods), a non-owner edits a goal, or a member who is neither workspace owner nor pod lead changes pod membership
-- **THEN** the server responds 403 `read_only`, `owner_only`, `not_goal_owner` or `not_pod_lead` respectively
+- **WHEN** the session's person stops sharing, then deletes it
+- **THEN** stop-sharing returns `{session_key, state:"stopped"}`, ends the open epoch and refuses later uploads with 409 `sharing_stopped`; the delete returns 204 and removes the session, its epochs, usage, directive deliveries and receipts, so spend totals change
 
-### Requirement: Goal sessions invites and pods
+#### Scenario: Session list
 
-The server SHALL let workspace owners create invites on `POST /api/v2/workspaces/{ws}/invites {email, role}`, list
-them on `GET`, withdraw an unaccepted one on `DELETE .../invites/{id}`, and create pods on `POST .../pods {name}`, and
-let owners or the pod's lead add, change or remove pod members.
+- **WHEN** a member calls `GET .../sessions`
+- **THEN** `mine` lists their own sessions in full (state, current epoch and goal, governing goal, stop status, conflicts and token totals), and `all` is null except for workspace owners, for whom it lists every non-stopped session's alias, owner, harness, state and stop status, never its title or usage
 
-#### Scenario: Creating an invite
+### Requirement: Binding epochs
 
-- **WHEN** a workspace owner creates an invite for a new email
-- **THEN** the response is 201 `{id, email, role, path:"/app/invite/<token>", token}` (Align sends no email; the invite lasts 7 days), an existing member's email is 409 `already_member`, and more than 50 invites per workspace per hour is 429 `rate_limited`
+The server SHALL let the sharing device open a binding epoch on `POST .../sessions/{key}/epochs {epoch_id, goal_id,
+starts_at, root_turn?, cause}`, closing the previous epoch at `starts_at`, only toward a goal the person has authority
+to bind (as defined in `goals-and-proposals`).
 
-#### Scenario: Previewing an invite
+#### Scenario: Opening an epoch
 
-- **WHEN** a signed-in user calls `GET /api/v2/invites/{token}`
-- **THEN** the response is `{workspace:{id,name}, role, email_matches, invited_email}`, or 404 for an unknown, accepted or expired token
+- **WHEN** a device POSTs `{epoch_id:"ep_…", goal_id|null, starts_at, cause:"manual"|"directive:<dir id>"}`
+- **THEN** the response is `{epoch_id, goal_id, goal_version_at_start, starts_at, ends_at:null}` and the previous epoch ends at `starts_at`; the session becomes `shared` again if it was suspended
 
-#### Scenario: Pod members
+#### Scenario: Epoch refusals
 
-- **WHEN** an owner or the pod's lead POSTs `{user_id, role:"lead"|"member"}` to `.../pods/{pod}/members` or DELETEs `.../pods/{pod}/members/{user}`
-- **THEN** the member is set (`{pod_id, user_id, role}`) or removed (204); a user who is not a workspace member, an unknown pod or a missing pod member is 404
+- **WHEN** the epoch id is reused with other values, `starts_at` is before the open epoch's start or the last epoch's end, `starts_at` is more than 5 minutes ahead or before the session started, the goal cannot be bound, the goal is not active, `cause` names a directive not sent to this session, or sharing stopped
+- **THEN** the server responds 409 `epoch_conflict`, 409 `epoch_overlap`, 400, 403 `alignment_required`, 409 `goal_not_active`, 400, or 409 `sharing_stopped` respectively; the same epoch sent again returns it unchanged
 
-### Requirement: Goal sessions goals
+### Requirement: Usage upload
 
-The server SHALL serve the goals a caller may read on `GET /api/v2/workspaces/{ws}/goals` (device token or browser
-session) as `{version, goals}` with an `ETag`, create a goal at version 1 owned by the caller on `POST` (browser,
-members and owners), and record each change as a new immutable version on `POST .../goals/{goal}/versions` by the
-goal's owner only.
-
-#### Scenario: Conditional feed
-
-- **WHEN** a client sends `If-None-Match` equal to the current feed `ETag`
-- **THEN** the server responds 304 with no body
-
-#### Scenario: Creating a goal
-
-- **WHEN** a member POSTs `{title, measures?, visibility?, pod_id?, anchors?, depends_on?}`
-- **THEN** the response is 201 with the goal (`visibility` defaults to `workspace`); a `pod` goal without a pod is 400, a pod the caller is not in is 403 `not_in_pod`, and a workspace already holding 1,000 goals is 409 `too_many_goals`
-
-#### Scenario: New version
-
-- **WHEN** the owner POSTs a change to `.../versions`
-- **THEN** the response is 201 with the goal at the next version and `goal_version` directives are written for its sessions; a `version` other than the current one is 409 `stale_version`, and a body that changes nothing is 409 `no_change`
-
-### Requirement: Goal sessions goal tree and review
-
-The server SHALL return each goal with `depends_on` (only the goals the caller may read), `bindable` and
-`contributes_to` (the targets of its approved alignments that the caller may read, each `{id, title, version,
-reviewed_version, stale}`), mark a parent `stale` until the goal's owner has reviewed the goal against the parent's
-current version, serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as
-`{goal, versions, contributions, can_edit}`, and let only the goal's owner confirm it still fits a parent on
-`POST .../goals/{goal}/review {parent_id}`.
-
-#### Scenario: Parent changes
-
-- **WHEN** a goal's parent gets a new version
-- **THEN** the child's `contributes_to` entry shows `stale: true` (`reviewed_version` below the parent's `version`) until the child's owner POSTs `{parent_id}` to `.../review` or saves a new version of the child; approving an alignment with a `source_goal_id` records the source as reviewed against the target at approval
-
-#### Scenario: Review refused
-
-- **WHEN** `.../review` is called for a goal the caller cannot see, a `parent_id` that is not a current approved parent, or by someone other than the goal's owner
-- **THEN** the server responds 404, 404, or 403 `not_goal_owner` (viewers 403 `read_only`) respectively; on success the response is the goal
-
-### Requirement: Goal sessions alignments
-
-The server SHALL let a member or owner request an alignment toward a goal they can see on
-`POST /api/v2/workspaces/{ws}/alignments {target_goal_id, source_goal_id?, choice, session_keys, note?}` with
-`choice` `contribution` or `work_toward`, require the approval of the target goal's owner (and, for `work_toward`,
-of each listed session's owner and of the owner of any goal the work leaves when that is not the requester), approve
-it once every required approver of the current revision has, and accept `approve`, `counter`, `accept_counter`,
-`reject`, `withdraw` and `revoke` on `POST .../alignments/{id}/{action}` from the people involved.
-
-#### Scenario: Approving work toward a goal
-
-- **WHEN** the last required approver approves a `work_toward` request at its current `revision`
-- **THEN** the alignment becomes `approved`, each listed session whose sharing has not stopped gets the target as its governing goal and one `binding_changed` directive (stopped sessions are skipped); a stale `revision` is 409 `stale_revision`, a non-approver 403 `not_an_approver`, a request not `pending` 409 `wrong_state`, and a person not involved 404
-
-#### Scenario: Invalid request
-
-- **WHEN** a request lists another person's or an unknown session, a stopped session, an inactive target goal, no session for `work_toward`, or a session already governed through another alignment
-- **THEN** the server responds 404, 409 `sharing_stopped`, 409 `goal_not_active`, 400, or 409 `already_governed` respectively
-
-#### Scenario: Revoking
-
-- **WHEN** the requester or an approver revokes an approved `work_toward` alignment
-- **THEN** it becomes `revoked`, its sessions lose the governing goal, and sessions whose open binding existed only through it end that binding, become `suspended` and get a `binding_suspended` directive
-
-### Requirement: Goal sessions shared session lifecycle
-
-The server SHALL let the sharing device open binding epochs on `POST .../sessions/{key}/epochs`, let the session's
-owner stop sharing (`POST .../sessions/{key}/stop-sharing`) or hard-delete the shared history (`DELETE
-.../sessions/{key}`), and list sessions on `GET /api/v2/workspaces/{ws}/sessions` as `{mine, all}`, where `all`
-(every non-stopped session's alias, owner and state, never title or usage) is `null` except for workspace owners.
-
-#### Scenario: Sharing and binding
-
-- **WHEN** a device PUTs `{harness, repo_key, repo_alias?, started_at, title?}` and then POSTs an epoch `{epoch_id:"ep_…", goal_id|null, starts_at, root_turn?, cause:"manual"|"directive:<id>"}`
-- **THEN** the PUT returns `{session_key, state, current_epoch}` and the epoch closes the previous one at `starts_at`; the same key with another harness or repo is 409 `session_conflict`, a reused epoch id with other values 409 `epoch_conflict`, an overlapping start 409 `epoch_overlap`, a goal the caller has no authority to bind 403 `alignment_required`, and a stopped session 409 `sharing_stopped`
+The server SHALL accept usage from the sharing device on `POST .../sessions/{key}/usage {rows}` (at most 500 rows and
+256 KB), store each row once by its `request_key`, and never overwrite a stored row.
 
 #### Scenario: Usage batch
 
-- **WHEN** a device POSTs `{rows}` to `.../sessions/{key}/usage`
-- **THEN** the response is `{accepted, duplicates, conflicts}`, where a repeated `request_key` with identical values is a duplicate and one with other values, or a row for an unknown epoch, is a conflict and never overwrites
+- **WHEN** a device POSTs rows for its session
+- **THEN** the response is `{accepted, duplicates, conflicts}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for an epoch this session does not have is a conflict that is counted on the session and never stored
 
-### Requirement: Goal sessions spend
+#### Scenario: Oversized batch
+
+- **WHEN** a batch has 501 rows, or its body exceeds 256 KB
+- **THEN** the server responds 413 `too_many_rows`, or 413 `too_large`, and stores nothing
+
+### Requirement: Spend report
 
 The server SHALL report token usage and estimated list cost on
-`GET /api/v2/workspaces/{ws}/spend?by=goal|pod|session&from&to` to any workspace member (viewers included), counting each request under the goal of
-the epoch it was uploaded with and never naming a goal or session the caller may not see.
+`GET /api/v2/workspaces/{ws}/spend?by=goal|team|session&from&to` (browser session) to every workspace member, viewers
+included, counting each request under the goal of the epoch it was uploaded with and never naming a goal or session
+the caller may not see.
 
-#### Scenario: Spend report
+#### Scenario: Spend by goal
 
 - **WHEN** a member requests spend by goal
-- **THEN** the response is `{by, from, to, note, total, unallocated, unpriced_requests, rows}`, usage in epochs without a goal is `unallocated`, usage on goals the caller cannot read is one `Private goals` row, and `by=session` names only the caller's own sessions with everyone else's in one `Other people's sessions` row; another `by` or `from` not before `to` is 400
+- **THEN** the response is `{by, from, to, note, total, unallocated, unpriced_requests, rows}`, `note` says costs are list-price estimates, not a bill, usage in epochs without a goal is `unallocated`, and usage on goals the caller cannot read is one `Private goals` row
 
-### Requirement: Goal sessions activity signals
+#### Scenario: Spend by team and session
+
+- **WHEN** a member requests `by=team` or `by=session`
+- **THEN** team rows carry `team:{id, name}` with goals that have no team in one `Goals without a team` row, and session rows name only the caller's own sessions with everyone else's in one `Other people's sessions` row; `by=pod` is accepted as `by=team`, and another `by` or a `from` not before `to` is 400
+
+### Requirement: Activity signals
 
 The server SHALL accept in-flight work signals from a device on `POST /api/v2/workspaces/{ws}/activity {items}` (at
-most 200 items and 128 KB; kinds `edit`, `commit`, `task`, `claim`) and serve unexpired ones on
-`GET .../activity?after=<seq>` (at most 500, oldest first) only for goals the caller may read, and for unbound sessions
-only the caller's own.
+most 200 items and 128 KB; kinds `edit`, `commit`, `task`, `claim`) and serve unexpired ones to devices on
+`GET .../activity?after=<seq>` (at most 500, oldest first) only for goals the caller may read and, for unbound
+sessions, only the caller's own.
 
 #### Scenario: Posting activity
 
 - **WHEN** a device posts items for its own shared sessions
-- **THEN** the response is `{accepted}`; items for sessions it did not share or that are not `shared`, dated more than 5 minutes ahead or more than 24 hours back, are skipped; an invalid kind, `repo_id`, `path_hash` or absolute path is 400; items expire after 24 hours (claims after 1 hour)
+- **THEN** the response is `{accepted}`; items for sessions it did not share or that are not `shared`, or dated more than 5 minutes ahead or more than 24 hours back, are skipped; an invalid kind, `repo_id`, `path_hash` or a path that is absolute or climbs with `..` is 400; items expire after 24 hours (claims after 1 hour)
 
-### Requirement: Goal sessions read views
+#### Scenario: Reading activity
 
-The server SHALL serve, to a signed-in browser session only, the caller's workspaces on `GET /api/v2/workspaces`
-(`{workspaces:[{id, name, role, pods}]}`), one workspace on `GET /api/v2/workspaces/{ws}` (`{workspace:{id, name,
-created_at}, role, me, members:[{id, name, email, role}], pods:[{id, name, my_role, members}]}`, 404 to non-members),
-the caller's paired devices on `GET /api/v2/devices` (`{devices:[{id, name, created_at, last_seen_at, revoked_at,
-revoked_reason, workspaces}]}`), and the alignment requests the caller is part of on
-`GET /api/v2/workspaces/{ws}/alignments` and `GET .../alignments/{id}`.
+- **WHEN** a device calls `GET .../activity?after=<seq>`
+- **THEN** the response is `{cursor, items}`, each item with `seq, session_key, harness, user:{id, name}, mine, goal_id, repo_id, kind, path_hash, path, text, at, expires_at`, leaving out items on goals the caller cannot read and other people's unbound sessions
 
-#### Scenario: Alignment list
+### Requirement: Account and workspace rate limits
 
-- **WHEN** a member calls `GET /api/v2/workspaces/{ws}/alignments`
-- **THEN** the response is `{waiting_on_me, mine, others}`, holding only requests where the caller is the requester or a required approver of any revision, each with its `state`, `revision`, `choice`, `approvers` (with `approved`), `effects`, `sessions` (another person's session shows no `session_key`), goals the caller cannot read unnamed, and `can` flags for the actions the server would allow (all false for a viewer); `GET .../alignments/{id}` for a request the caller is not part of is 404
+The server SHALL limit requests with in-memory fixed windows (at most 10,000 keys, oldest evicted first), keying
+clients by `Fly-Client-IP` when hosted (IPv6 by its /64) and as one local client in Mode L, and answer a v2 limit with
+429 `rate_limited`.
+
+#### Scenario: Better Auth limits
+
+- **WHEN** a client exceeds 10 requests per minute to `/api/v2/auth/sign-in/email-otp`, `/sign-in/email` or `/sign-up/email`, 20 to `/sign-in/social`, or 100 per minute elsewhere under `/api/v2/auth`
+- **THEN** Better Auth refuses the request with 429
+
+#### Scenario: v2 limits
+
+- **WHEN** a person creates an 11th workspace in an hour, a workspace gets a 51st invite in an hour, a client starts an 11th device pairing in an hour, or a person makes a 21st device-code lookup or decision in 10 minutes
+- **THEN** the server responds 429 `rate_limited` and does nothing else
 
 ## Open questions
 
-- The interview's per-code bucket hashes the code as given; with open create (Mode L) every client shares the bucket for the empty code, and with Mode L's shared `ALIGN_SIGNUP_CODE` all holders share one 60-per-day ceiling. Is that intended?
-- A custom workspace sees its captured sessions, mappings and capture consents only through the signed-in `GET /api/state` view; `GET /api/sessions`, `GET /api/sessions/consent` and `DELETE /api/sessions/{id}` are Northstar-only, so only `DELETE /api/workspaces/agent-token` and Restart remove captured data. Is per-session deletion meant to exist for workspaces?
-- Capture consent is keyed by the repo folder basename, so any folder with that name shares one consent (documented in CAPTURE_CONSENT.md). Also, `POST /api/sessions/consent` trims `repo` but `POST /api/workspaces/agent-token` does not. Should both be normalized the same way?
-- `GET /api/sessions` accepts any loopback origin on any port (regex check), while `POST /api/sessions/events` requires this server's exact host and port. The server never reads `ALIGN_CAPTURE` in Mode L; only the hook script does. Are these differences intended?
-- The hosted close time is a fixed `ALIGN_DELETE_BY` + 32 h UTC: midnight Pacific in standard time but 1 AM during daylight time. The v2 client key does not collapse IPv6 to /64, unlike `clientOf` in `lib/ratelimit.ts`. Should either be aligned?
+- Who may create hosted workspaces (Owner decision 2026-10-30 keeps it open): today any signed-in account can create up to 10 per hour and own 50.
+- Retention periods are an open decision. The hosted server still closes after `ALIGN_DELETE_BY` with 410, but the operator purge tool (`ws-admin`) is retired with no v2 replacement; should a hosted server keep a fixed closing date, and how is its data purged?
+- Passkeys, SSO, SAML and SCIM are out of scope for now.
+- Unlinking a Google or GitHub account from `/app/account` is out of scope; should a person be able to unlink a provider while another sign-in method remains?
+- A hosted server configured with email settings only cannot gain its first person: an email code creates an account only for an address with a pending invite, and no workspace exists yet to invite from. Should hosted email-only setups allow a first account (for example an `ALIGN_FIRST_OWNER_EMAIL`), or require Google or GitHub?
+- Removing or leaving keeps a person's goals and sessions. Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.
 
 ## Sources
 
-- README.md
-- docs/CAPTURE_CONSENT.md
-- docs/HOSTING.md
-- docs/v2/WIRE.md
 - proxy.ts
-- lib/workspace.ts
-- lib/workspace-setup.ts
-- lib/interview.ts
-- lib/create-access.ts
-- lib/codes.ts
+- instrumentation.ts
+- package.json
 - lib/config.ts
-- lib/registry.ts
 - lib/startup.ts
-- lib/mapper.ts
-- lib/mapping-decision.ts
 - lib/local-guard.ts
 - lib/ratelimit.ts
-- lib/auth.ts
-- lib/agent-token.ts
-- lib/http.ts
-- lib/store.ts
-- lib/scenario.ts (setup schema limits only)
-- lib/oauth/grants.ts (liveGrants only)
-- lib/oauth/server.ts (MCP_PATH only)
+- lib/oauth/grants.ts
 - lib/v2/config.ts
 - lib/v2/auth.ts
+- lib/v2/mail.ts
+- lib/v2/local-owner.ts
 - lib/v2/http.ts
 - lib/v2/limits.ts
 - lib/v2/errors.ts
@@ -852,34 +772,34 @@ revoked_reason, workspaces}]}`), and the alignment requests the caller is part o
 - lib/v2/policy.ts
 - lib/v2/validate.ts
 - lib/v2/workspaces.ts
-- lib/v2/sessions.ts
 - lib/v2/devices.ts
+- lib/v2/sessions.ts
 - lib/v2/activity.ts
-- lib/v2/goals.ts
-- lib/v2/alignments.ts
 - lib/v2/spend.ts
-- lib/flow.ts (viewFor only)
-- scripts/ws-admin.mjs
-- app/api/workspaces/route.ts
-- app/api/workspaces/[id]/login-info/route.ts
-- app/api/workspaces/agent-token/route.ts
-- app/api/workspaces/config/route.ts
-- app/api/workspaces/connections/route.ts
-- app/api/workspaces/interview/route.ts
-- app/api/session/route.ts
-- app/api/sessions/route.ts
-- app/api/sessions/[id]/route.ts
-- app/api/sessions/consent/route.ts
-- app/api/sessions/events/route.ts
-- app/api/mappings/route.ts
-- app/api/mappings/[session_id]/confirm/route.ts
-- app/api/mappings/[session_id]/reject/route.ts
-- app/api/reset/route.ts
+- scripts/sign-in-link.mjs
+- docs/v2/WIRE.md
+- docs/HOSTING.md
+- app/page.tsx
+- app/app/sign-in/page.tsx
+- app/app/account/page.tsx
 - app/api/v2/auth/[...all]/route.ts
+- app/api/v2/me/route.ts
 - app/api/v2/workspaces/route.ts
-- app/api/v2/workspaces/[ws]/sessions/[key]/route.ts
-- app/api/v2/workspaces/[ws]/sessions/[key]/usage/route.ts
+- app/api/v2/workspaces/[ws]/route.ts
+- app/api/v2/workspaces/[ws]/audit/route.ts
+- app/api/v2/workspaces/[ws]/apps/route.ts
+- app/api/v2/workspaces/[ws]/apps/[grant]/route.ts
+- app/api/v2/workspaces/[ws]/members/[user]/route.ts
+- app/api/v2/workspaces/[ws]/invites/route.ts
+- app/api/v2/workspaces/[ws]/invites/[id]/route.ts
+- app/api/v2/invites/[token]/route.ts
 - app/api/v2/invites/[token]/accept/route.ts
+- app/api/v2/workspaces/[ws]/teams/route.ts
+- app/api/v2/workspaces/[ws]/teams/[team]/members/route.ts
+- app/api/v2/workspaces/[ws]/teams/[team]/members/[user]/route.ts
+- app/api/v2/workspaces/[ws]/pods/route.ts
+- app/api/v2/workspaces/[ws]/pods/[pod]/members/route.ts
+- app/api/v2/workspaces/[ws]/pods/[pod]/members/[user]/route.ts
 - app/api/v2/device/authorize/route.ts
 - app/api/v2/device/token/route.ts
 - app/api/v2/device/approve/route.ts
@@ -889,27 +809,10 @@ revoked_reason, workspaces}]}`), and the alignment requests the caller is part o
 - app/api/v2/devices/route.ts
 - app/api/v2/devices/self/route.ts
 - app/api/v2/devices/[id]/route.ts
-- app/api/v2/me/route.ts
-- app/api/v2/invites/[token]/route.ts
-- app/api/v2/workspaces/[ws]/route.ts
-- app/api/v2/workspaces/[ws]/invites/route.ts
-- app/api/v2/workspaces/[ws]/invites/[id]/route.ts
-- app/api/v2/workspaces/[ws]/pods/route.ts
-- app/api/v2/workspaces/[ws]/pods/[pod]/members/route.ts
-- app/api/v2/workspaces/[ws]/pods/[pod]/members/[user]/route.ts
-- app/api/v2/workspaces/[ws]/goals/route.ts
-- app/api/v2/workspaces/[ws]/goals/[goal]/versions/route.ts
-- app/api/v2/workspaces/[ws]/goals/[goal]/route.ts
-- app/api/v2/workspaces/[ws]/goals/[goal]/review/route.ts
-- app/api/v2/workspaces/[ws]/alignments/route.ts
-- app/api/v2/workspaces/[ws]/alignments/[id]/route.ts
-- app/api/v2/workspaces/[ws]/alignments/[id]/[action]/route.ts
 - app/api/v2/workspaces/[ws]/sessions/route.ts
+- app/api/v2/workspaces/[ws]/sessions/[key]/route.ts
 - app/api/v2/workspaces/[ws]/sessions/[key]/epochs/route.ts
+- app/api/v2/workspaces/[ws]/sessions/[key]/usage/route.ts
 - app/api/v2/workspaces/[ws]/sessions/[key]/stop-sharing/route.ts
 - app/api/v2/workspaces/[ws]/spend/route.ts
 - app/api/v2/workspaces/[ws]/activity/route.ts
-- app/new/page.tsx
-- app/new/NewWorkspace.tsx
-- app/setup/page.tsx
-- app/w/[slug]/page.tsx
