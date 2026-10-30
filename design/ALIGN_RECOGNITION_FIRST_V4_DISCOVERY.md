@@ -1,6 +1,6 @@
 # Align recognition-first entry — discovery-to-design v4
 
-**Status:** D2 experiment, not founder-approved and not a production feature.  
+**Status:** Founder **approved BOTH recognition-first entry paths** (Oct 29, 2026) as the intended product direction. This is a **scope/IA ruling only**: it does not approve final visual layouts, implementation, additional telemetry/AI capabilities, production deployment, or a particular auto-routing/default strategy.  
 **Clickable prototype:** [Recognition-first dual entry v4](./prototypes/lim-2449-recognition-first-v4.html).  
 **Prior D2 baseline:** [AI-native Intent Studio v3](./prototypes/lim-2449-intent-studio-v3.html) retains the approved-to-test source flow and prior Claude review history.  
 **Evidence basis:** founder-supplied interview synthesis and Friday, Oct 30, 2026 call plan. Direct interview transcripts and Friday outcomes have **not** been independently verified for this document. Do not treat reported pull as completed independent tests, connected telemetry, signed LOIs, or PMF.
@@ -55,9 +55,19 @@ For **every** call, capture, without exaggeration:
 - **Design consequence:** entry A vs B, evidence coverage, approval step, read/receipt semantics, or no change.
 - **Commitment:** no commitment / offered intro / agreed interview / explicitly agreed independent test / completed test / signed LOI. Never collapse categories.
 
+## Ruling recorded · 2026-10-29 · BOTH, one product
+
+**Founder answer: “Both.”** This explicitly resolves the earlier either/or question. Do not eliminate the agent-intensive operator path or the decision-owner path in subsequent design passes. Both must converge on the same governed plan, proposal, approval and independent leadership launch record.
+
+- **Work-first entry:** invite the operator to inspect the last approved plan, potentially affected work, and explicitly unobserved agent activity. No claims of live session capture or automatic mapping.
+- **Decision-first entry:** show the owner their pending authoritative goal review with actual server-supported approval/counter/accept-if/decline options in the appropriate role/state.
+- **One shared system:** no two divergent plan stores, approvals engines, role bypasses or fabricated goal-version reads.
+- **Still open:** best first-run presentation (two visible choices, context-sensitive routing or a combined home with two prominent routes), mobile hierarchy, accessibility, cold-user evidence and the precise integration roadmap. V4 currently demonstrates **two explicit choices**, not a founder-approved mandatory chooser implementation.
+- **Gates unchanged:** LIM-2449 v4 rendered QA and operator tests, separate LIM-2454 visual/technical rulings and a later LIM-2455 implementation approval. This ruling alone must not unblock merging or deployment.
+
 ## Founder review decision (LIM-2454)
 
-Compare variants **with the same scenario and real authority model**:
+Compare **the two retained entry paths** with the same scenario and real authority model; determine presentation and routing, **not which one to delete**:
 
 - **Recognition:** within the first 10–20 seconds, can the cold operator state what problem the view is solving?
 - **Truth:** can they distinguish stored goal, app read, inferred impact and unobserved running agent activity?
