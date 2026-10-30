@@ -28,7 +28,7 @@ current state.
 | `/setup` | Set up your own conflict | Leadership of the demo store (local only) | Replace the demo store with a custom two-team scenario |
 | `/new` | Create a workspace | Anyone (signup code if required) | Create a separate workspace and get its three passcodes |
 | `/oauth/authorize` | Connect <app> to Align | A person connecting an AI app | Grant an AI app read-only access to one workspace as one role |
-| `/app`, `/app/w/<ws>/…` | Goal sessions web app (only with `ALIGN_GOAL_SESSIONS=1`) | A person signed in as themselves | Workspaces, goals, alignments, people, shared sessions, usage and devices |
+| `/app`, `/app/w/<ws>/…`, `/app/invite/<token>`, `/app/device`, `/app/devices` | Goal sessions web app (only with `ALIGN_GOAL_SESSIONS=1`) | A person signed in as themselves | Workspaces, goals, alignments, people and invites, shared sessions, usage and devices |
 | (any) | Error page | Anyone | Plain error with Try again |
 
 Views inside the shell (client state, no URL change):
@@ -91,6 +91,11 @@ The workspace app at `/w/<id>` SHALL load the company and team names from
 
 - **WHEN** the login-info request returns 404, or fails in any other way
 - **THEN** a 404 shows "This workspace no longer exists."; any other failure shows a "Couldn’t reach this workspace…" message (a test-server wording when hosted) with a **Try again** button that repeats the request
+
+#### Scenario: What a signed-out visitor sees
+
+- **WHEN** someone who is not signed in to that workspace opens `/w/<id>`
+- **THEN** the page shows only what `login-info` returns (the company name, its note when set up with one, and each team's name and role blurb, never person names) and never polls `GET /api/state` until a sign-in succeeds; the id in the URL is a convenience, and the passcodes are the access control
 
 ### Requirement: One session per browser
 
@@ -301,8 +306,8 @@ current plan against the latest normal or outage-test run of the new plan) and n
 
 #### Scenario: No sandbox
 
-- **WHEN** a custom scenario without sandbox runs is open
-- **THEN** Scenario Studio is not in the nav (custom scenarios never list it), and if shown it states "No sandbox in this scenario" and "Not sandbox-tested"
+- **WHEN** a custom scenario is open
+- **THEN** Scenario Studio is not in the nav (custom scenarios never list it) and no control opens it; the shell renders the view only when the scenario has sandbox runs, and in a custom scenario the view then states "No sandbox in this scenario" and "Not sandbox-tested" instead of comparing runs
 
 ### Requirement: Plan test drawer
 
@@ -347,8 +352,13 @@ send it with `POST /api/proposals`.
 
 #### Scenario: Missing fields or tests
 
-- **WHEN** the new target or the commitment is empty, or (Northstar) no test results are attached
-- **THEN** the send button is disabled, with "▲ Say what <team> will do in return" and (custom only) "▲ Write the new target"; without attachments an amber "No test results added" card warns the proposal will show as not tested and offers **Test which plan follows the new priority**
+- **WHEN** the new target or the commitment is empty
+- **THEN** the send button is disabled, with "▲ Say what <team> will do in return" and (custom only) "▲ Write the new target"
+
+#### Scenario: No test results attached
+
+- **WHEN** a Northstar composer has no test results attached
+- **THEN** the send button stays enabled (missing attachments never block sending), and an amber "No test results added" card warns that the proposal will show as not tested and offers **Test which plan follows the new priority**, which opens the plan test drawer
 
 #### Scenario: Defaults
 
@@ -635,13 +645,18 @@ The app SHALL show a plain error page for any render error, without the error me
 
 ### Requirement: Honest status wording
 
-Every screen SHALL use the plain status labels and never present agreement or a sandbox pass as
-proof of success.
+Every screen of the Align app at `/` and `/w/<id>` SHALL use the plain status labels and never
+present agreement or a sandbox pass as proof of success.
 
 #### Scenario: Status labels
 
 - **WHEN** a code such as `PENDING_SECURITY`, `COUNTERED`, `RATIFIED`, `STALE` or `UNKNOWN` is shown
-- **THEN** it reads "Waiting for Security", "Security asked for changes", "Approved" (custom: "Agreed, launch pending", or "Agreed, launch approved" once leadership approves the launch), "Needs retest", "Unknown"; green is used only for passing sandbox results, and records state "Whether the beta launch succeeds isn't known yet" or "Agreement between two teams is not approval to launch."
+- **THEN** it reads "Waiting for Security", "Security asked for changes", "Approved" (custom: "Waiting for <owning>", "<owning> asked for changes", "Agreed, launch pending", or "Agreed, launch approved" once leadership approves the launch), "Needs retest", "Unknown"; status badges use green only for passing sandbox results (the connected-apps card separately marks an app on the latest plan in green), and records state "Whether the beta launch succeeds isn't known yet" or "Agreement between two teams is not approval to launch."
+
+#### Scenario: Goal sessions pages use their own pills
+
+- **WHEN** a page under `/app` shows a state
+- **THEN** it uses its own pills, not these labels: for example an approved alignment, an active device, a goal "you can bind sessions" to and a reviewed parent goal are green
 
 ### Requirement: Goal sessions web app
 
@@ -664,13 +679,27 @@ team passcode) manage goal-sessions workspaces, and SHALL send a signed-out visi
 - **WHEN** a member opens `/app/w/<ws>`
 - **THEN** the tabs Goals, People, Sessions, Alignments and Spend show: goals (with **Create goal** for any role but viewer), members, invites (owners only) and pods, the person's own shared sessions with **Stop agent** / **Resume agent**, **Stop sharing** and **Delete shared history** (owners also see everyone's sessions with stop and resume), alignments under "Waiting on you", "Your requests" and "Others you are part of" with only the actions the server allows (Approve, Suggest a change, Accept the change, Decline, Withdraw, Revoke), and usage by goal; `/app` lists the person's workspaces and creates one, and `/app/devices` lists devices with **Revoke**
 
+#### Scenario: Goal page
+
+- **WHEN** a member opens a goal from the Goals tab (`/app/w/<ws>/goals/<goal>`)
+- **THEN** the page shows its status, visibility, pod, version, owner, measures, anchors and every version; a person the server lets edit it (`can_edit`) gets a "New version" form (goal, measures, status Active / Achieved / Dropped, anchors and "Depends on" goals) that posts to `POST /api/v2/workspaces/<ws>/goals/<goal>/versions` with **Save version <n+1>**, and, when a goal it contributes to has changed, **Still fits version <n>**, which posts to `.../goals/<goal>/review`; a goal the server does not return shows "This goal does not exist or you can't see it."
+
+#### Scenario: Ask to align with someone else's goal
+
+- **WHEN** a member who is not a viewer opens an active goal owned by someone else
+- **THEN** an "Align with this goal" card offers **Recognize contribution only** (optionally naming one of the person's own bindable goals) or **Work toward this goal and count future usage here** (at least one shared session required), a note "never sent to agents" (up to 1000 characters), and **Send request**, which posts `target_goal_id`, `source_goal_id`, `choice`, `session_keys` and `note` to `POST /api/v2/workspaces/<ws>/alignments` and then points to Alignments
+
+#### Scenario: Accept a workspace invite
+
+- **WHEN** a signed-in person opens an invite link (`/app/invite/<token>`)
+- **THEN** the page reads `GET /api/v2/invites/<token>` and shows "You are invited to <workspace> as <role>." with **Join workspace**, which posts to `.../invites/<token>/accept` and opens the workspace; if the signed-in email is not the invited one it names both addresses and offers no button, and an unusable link shows "This invite link is not valid. It may have been used, withdrawn or expired."
+
 ## Open questions
 
 - `TodayView` ("Good to see you", "What needs you", "Time to agreement") is implemented but no view renders it: the `today` view id renders the decision view. Is it dead code or meant to return?
 - The team view (`TeamLens`, "Team view") is routed under the Goals nav item, but no control in the current code navigates to it. Is it reachable?
 - The Inspector and team view label the viewer's own goal "Your goal · you can edit", but no screen offers a way to edit one's own goal directly. Is that wording intended?
 - `docs/DEMO_SCRIPT.md` names labels the current code does not show, such as a "How the goals connect" screen heading (the view is titled "Goals"), a "Waiting for your decision" badge (present only in the unrendered `TodayView`), and "Test which plan follows the new priority" inside the brief, which now reads **Test in Scenario Studio**. Which labels should the spec treat as authoritative?
-- The `/w/<id>` slug is called "a convenience, not access control". Should the interface spec say anything about what an unauthenticated visitor to `/w/<id>` can see beyond the login-info names?
 
 ## Sources
 
@@ -734,3 +763,7 @@ team passcode) manage goal-sessions workspaces, and SHALL send a signed-out visi
 - `app/app/w/[ws]/sessions/view.tsx`
 - `app/app/w/[ws]/alignments/view.tsx`
 - `app/app/w/[ws]/spend/view.tsx`
+- `app/app/w/[ws]/goals/[goal]/view.tsx`
+- `app/app/_ui/goalform.tsx`
+- `app/app/invite/[token]/view.tsx`
+- `app/api/workspaces/[id]/login-info/route.ts`
