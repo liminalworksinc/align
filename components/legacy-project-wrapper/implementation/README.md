@@ -169,13 +169,18 @@ npx next typegen && npx tsc --noEmit
 node scripts/test-v2.mjs <port>       # the server: sign-in, workspaces, goals, change requests, devices, sessions,
                                       # directives, spend, the web UI (needs Chrome: CHROME_PATH), the edge, hosted mode
 node scripts/test-oauth.mjs <port>    # connected AI apps: the OAuth server, consent, grants, /api/mcp, align-connect
+node scripts/test-agent-live.mjs <port>
+                                      # the real align CLI and hooks against a real Mode L server: limits and accepted
+                                      # asks in the hook context, the asks feed (ETag), the drift notice, share --past
 cd packages/align-agent && npm test   # the align CLI and hooks
 scripts/test-all.sh <port>            # all of the above in order, one summary line each
 scripts/test-image.sh                 # the hosted Docker image (needs Docker)
 ```
 
-`test-v2` and `test-oauth` build the app and start their own production servers on `<port>` with temporary data
-directories (`test-v2` also uses `<port>+1`). They refuse port 3100 and a port that is already in use.
+`test-v2`, `test-oauth` and `test-agent-live` build the app (skip with `--no-build` on the last two) and start their own
+production servers on `<port>` with temporary data directories (`test-v2` also uses `<port>+1`); `test-agent-live` also
+builds the agent's `dist/` and gives the CLI an isolated `ALIGN_HOME`. They refuse port 3100 and a port that is already
+in use.
 `npm test` runs `scripts/test-all.sh` on port `$ALIGN_TEST_PORT` (default 3600) and ends with one node:test-style total
 (`ℹ tests`, `ℹ pass`, `ℹ fail`) over every step, which is what the literate-ai test receipt records. Running as root
 (for example in a container), point `CHROME_PATH` at a Chrome wrapper that adds `--no-sandbox`.
