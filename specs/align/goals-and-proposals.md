@@ -1,535 +1,516 @@
 ---
-name: Goals and proposals
-summary: Versioned team goals, the cross-team dependency a company-goal push exposes, and the propose, edit, acknowledge, approve, reject and launch flow that only the goal's owner can complete.
+name: Goals, alignments and change requests
+summary: Company and team goals with immutable versions, owners, teams, visibility and dependencies; approval sets; alignments that make goals and sessions contribute to a goal with every affected goal's consent; change requests that let a member propose a new version of someone else's goal; and the Northstar sample workspace.
 kind: area
 ---
 
-# Goals and proposals
+# Goals, alignments and change requests
 
-This part specifies Align's core domain: how goals are stored and versioned, how a
-leadership push exposes a cross-team dependency, and how the team that needs a change
-(the asking team, slot `product`) gets the team that owns the goal (the owning team,
-slot `security`) to approve a new goal version, with a plan and sandbox evidence pinned
-to the request. It also covers the decision record, the plan agents are authorized to
-run, evidence ingestion, the review timer, reset, and custom scenarios.
+This part specifies Align's core domain inside a workspace (`ws_…`): goals and their immutable versions, the
+goal tree (parents through approved alignments, dependencies through `depends_on`), the approval set that may
+consent on a goal's behalf, alignment requests, change requests, and the Northstar sample workspace that any
+signed-in person can create to see these flows.
 
-All state lives in one JSON document (`AppState`): the default store `data/state.json`
-(seeded from `data/fixture.json`, the "Northstar" demo, or replaced by a leadership
-`/setup` custom scenario), or one state file per custom workspace. Workspaces, sign-in,
-directives, MCP and captured agent sessions are specified in their own parts
-(`workspaces`, `directives`, `mcp`) and are only referenced here.
+Every route here is under `/api/v2/workspaces/{ws}` and follows the common rules of the `workspaces` part:
+a browser session cookie (or, where stated, a device token), same-origin writes, JSON bodies, error bodies
+`{error:<code>, message}`, 404 for anything the caller may not see, and 403 with a code for a visible action
+the caller's role does not allow (a viewer always gets 403 `read_only` for a change). Workspaces, members,
+roles, teams and invites are specified in `workspaces`; directives delivered to running agents in
+`directives`; the MCP tools that read goals and decision records in `mcp`; the pages under `/app` in
+`interface`. Storage keeps the name `pod` for teams (`pod_id`, visibility value `pod`); everything a person
+or agent sees says "team".
 
 ## Vocabulary
 
 | Term | Meaning in code |
 | --- | --- |
-| Owner slot | `ceo`, `product` or `security`: who owns a goal (`Goal.owner_id`) |
-| Actor | Signed-in role: `product`, `security` or `leadership`. `leadership` speaks for the `ceo` slot |
-| Goal version | An immutable `Goal` row. The current goal of an owner is the one no other goal names in `supersedes` |
-| Relation | `GoalRelation` between goals; the cross-team dependency is `r-product-security` (`depends_on`) |
-| Plan | `Plan` with `plan_id`, `plan_version`, executable `params` and a sha256 `hash` |
-| Simulation run | `SimulationRun` ingested from Sparta evidence, with `verdict` `PASS` or `FAIL` |
-| Proposal | A request from `product` to change `security`'s current goal, pinned to a `plan_ref` |
-| Counter version | An edit by the owner (`counter_versions[]`), versioned `vX.N` |
-| Acceptance | The decision record written when the owner approves (`acceptances[]`) |
-| Test status | `TESTED`, `STALE` or `UNTESTED` on a proposal and its acceptance |
-| Scenario | `northstar` (default, `scenario` key absent) or `custom` (`scenario: "custom"`) |
+| Goal | A row of `v2_goals` (`g_…`) with its current content; every version, including the first, is also a row of `v2_goal_versions` with a content hash |
+| Level | `company` or `team` (default `team`); fixed at creation |
+| Goal owner | The one accountable person, `owner_id` |
+| Owning team | The optional team of a goal, `team_id` on the wire, `pod_id` in storage; fixed at creation |
+| Visibility | `private`, `team` (stored `pod`) or `workspace`; fixed at creation |
+| Status | `active`, `achieved` or `dropped`. There is no separate archived status |
+| Parent | A goal this goal contributes to: the target of an approved alignment whose source is this goal (`contributes_to`) |
+| Dependency | A goal whose output this goal consumes (`depends_on`, at most 5) |
+| Approval set | The people any one of whom may approve on a goal's behalf: its owner, its owning team's leads, and for a company goal every workspace owner |
+| Alignment | A request (`al_…`) to link a source goal or chosen sessions to a target goal, with revisions, approval requirements and effects |
+| Approval requirement | `{for, set}` on an alignment revision: `for` is a goal id or `sessions:<user id>`, `set` the user ids any one of whom satisfies it |
+| Change request | A proposed new version (`cr_…`) of a goal the requester does not own, decided by the goal's approval set |
+| Decision record | A change request once it is `approved` or `rejected` |
+| Sample workspace | "Northstar (sample)", ordinary data created by `POST /api/v2/workspaces/sample` |
 
-## Proposal state model
-
-`ProposalState` also declares `DRAFT`, but no code path creates it.
+## Alignment state model
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING_SECURITY: POST /api/proposals (product)
-    PENDING_SECURITY --> COUNTERED: POST counter (security)
-    ACKNOWLEDGED_BY_PRODUCT --> COUNTERED: POST counter (security)
-    COUNTERED --> ACKNOWLEDGED_BY_PRODUCT: POST acknowledge (product)
-    PENDING_SECURITY --> RATIFIED: POST accept (security)
-    ACKNOWLEDGED_BY_PRODUCT --> RATIFIED: POST accept (security)
-    PENDING_SECURITY --> REJECTED: POST reject (security)
-    COUNTERED --> REJECTED: POST reject (security)
-    ACKNOWLEDGED_BY_PRODUCT --> REJECTED: POST reject (security)
-    RATIFIED --> [*]
-    REJECTED --> [*]
+    [*] --> pending: POST alignments (requester)
+    [*] --> approved: POST alignments, every requirement met by the requester
+    pending --> approved: approve (last requirement met)
+    pending --> countered: counter (approver)
+    countered --> pending: accept_counter (requester)
+    countered --> approved: accept_counter, every requirement met
+    pending --> rejected: reject (approver)
+    countered --> rejected: reject (approver)
+    pending --> withdrawn: withdraw (requester)
+    countered --> withdrawn: withdraw (requester)
+    approved --> revoked: revoke (requester or approver)
 ```
 
-In a custom scenario, a `RATIFIED` proposal additionally carries leadership's launch
-decision (`approved` or `not_yet`) on its acceptance record.
+## Change request state model
 
-### Requirement: Goal versions are append-only
+```mermaid
+stateDiagram-v2
+    [*] --> pending: POST change-requests (requester)
+    pending --> countered: counter (approver)
+    countered --> pending: accept_counter (requester)
+    pending --> pending: rebase (requester)
+    pending --> approved: approve (approver)
+    pending --> rejected: reject (approver)
+    countered --> rejected: reject (approver)
+    pending --> withdrawn: withdraw (requester)
+    countered --> withdrawn: withdraw (requester)
+    pending --> superseded: goal achieved or dropped
+    countered --> superseded: goal achieved or dropped
+```
 
-The server SHALL never edit an approved goal version's content (objective, measures, version) to change it: approving a change or pushing a company goal appends a new `Goal` whose `supersedes` names the previous version's `id`, and the current goal of an owner is the goal of that owner that no other goal supersedes. The only in-place goal edit is a company-goal push rewriting the `parent_ids` of current team goals to the new company goal; reset and custom scenario setup replace the whole goal list.
+### Requirement: Creating a company or team goal
 
-#### Scenario: Prior Security goal survives approval
+The server SHALL create a goal on `POST /api/v2/workspaces/{ws}/goals` (browser session; workspace owners and members, viewers 403 `read_only`) from `{title, level?, team_id?, visibility?, measures?, anchors?, depends_on?}`, owned by the caller, at version 1 with status `active`, responding 201 with the goal. `level` SHALL default to `team`; only a workspace owner may create a `company` goal (403 `owner_only` otherwise), and a company goal SHALL have no team (400 when `team_id` is sent) and visibility `workspace` (400 when another `visibility` is sent). A team goal's `visibility` SHALL default to `workspace`; a `team` goal SHALL name a team (400 otherwise), an unknown `team_id` SHALL be 404, and naming a team the caller is not in SHALL be 403 `not_in_team`. A workspace already holding 1,000 goals SHALL answer 409 `too_many_goals`. Creating a goal SHALL write audit action `goal.created` with the caller as actor. Level, owning team and visibility never change after creation.
 
-- **WHEN** Security approves a proposal against `g-security-v1` via `POST /api/proposals/{id}/accept`
-- **THEN** `GET /api/state` returns both `g-security-v1` (version `v1`) and a new Security goal whose `supersedes` is `g-security-v1`, and only the new one is treated as current
+#### Scenario: Owner creates a company goal
 
-#### Scenario: Company goal push keeps v1
+- **WHEN** a workspace owner POSTs `{title:"Expand to regulated customers", level:"company"}`
+- **THEN** the response is 201 with `level: "company"`, `team: null`, `visibility: "workspace"`, `version: 1`, `status: "active"` and `owner` naming the caller
 
-- **WHEN** leadership pushes the drafted company goal via `POST /api/org/push`
-- **THEN** `goals` contains `g-ceo-v1` and `g-ceo-v2` with `supersedes: "g-ceo-v1"`
+#### Scenario: Member cannot create a company goal
 
-### Requirement: Leadership pushes the company goal
+- **WHEN** a member POSTs `{title:"…", level:"company"}`
+- **THEN** the response is 403 `owner_only` and no goal is created
 
-The server SHALL let only the `leadership` actor approve and send the drafted company goal (`org_draft`) through `POST /api/org/push`, merging every body field whose value is neither absent nor the empty string over the draft (so a sent `null` objective or an empty `measures` list replaces the draft's and leads to HTTP 400; only `objective`, `success_criteria` and `measures` are used), creating goal `g-ceo-v{N+1}` (version `v{N+1}`, `approved_by: "ceo"`, `changed: true`, `supersedes` the previous company goal), re-parenting current team goals and relations from the previous company goal to the new one, recording a `pushes[]` entry (`pushed_to: ["product","security"]`), clearing `org_draft`, writing audit action `ratify_and_push_company_goal`, and responding with `goal_id`, `version`, `pushed_at`, `registry_version` and `event_id` (`push:<push id>`). After the write it SHALL emit an in-process authority event with that `event_id`, `kind: "push"` and `at` equal to `pushed_at` (delivery is specified in the `directives` part).
+#### Scenario: Company goal with a team
 
-#### Scenario: Non-leadership push is refused
+- **WHEN** a workspace owner POSTs `{title:"…", level:"company", team_id:"<team>"}` or `{title:"…", level:"company", visibility:"private"}`
+- **THEN** the response is 400 and no goal is created
 
-- **WHEN** a Product session calls `POST /api/org/push` with `{}`
-- **THEN** the response is HTTP 403 with an `error` message and nothing is written
+#### Scenario: Team goal in a team the caller is not in
 
-#### Scenario: Push without a draft or with an empty draft
+- **WHEN** a member POSTs `{title:"…", visibility:"team", team_id:"<a team they are not in>"}`
+- **THEN** the response is 403 `not_in_team`; the same body without `team_id` is 400
 
-- **WHEN** leadership calls `POST /api/org/push` after the draft was already sent (`org_draft` is null), or the merged draft has no objective or no measures
-- **THEN** the response is HTTP 409 (no draft, or `g-ceo-v{N+1}` already exists) or HTTP 400 (missing objective or measures) respectively
+### Requirement: Goal content validation
 
-### Requirement: Org push is a default-store, same-origin route
+The server SHALL validate goal content the same way on creation, on a new version and in a change request: `title` 1 to 300 characters after trimming; `measures` a list of at most 10 objects with `text` (1 to 300 characters) and optional `target` (at most 100), each keeping a sent `id` only when the previous version had a measure with that id (otherwise a new `m_…` id); `anchors` an object of `repos`, `branch_patterns` and `issues` lists of at most 20 strings of at most 200 characters each, trimmed and de-duplicated; `depends_on` a list of at most 5 goal ids, none equal to the goal itself; and `status` one of `active`, `achieved`, `dropped`. A violation SHALL be 400 naming the field, and a `depends_on` id that does not exist or that the caller may not read SHALL be 404.
 
-The server SHALL accept `POST /api/org/push` only from a default-store (Northstar) session cookie and only from the same origin: no session gives HTTP 401, a custom-workspace session gives HTTP 403, an `Origin` header whose host differs from `Host` gives HTTP 403, and a request body whose content type is not `application/json` gives HTTP 415.
+#### Scenario: Too many dependencies
 
-#### Scenario: Custom workspace session cannot push
+- **WHEN** a goal is created with six ids in `depends_on`
+- **THEN** the response is 400 `depends_on: at most 5`
 
-- **WHEN** a session signed in to a custom workspace calls `POST /api/org/push`
-- **THEN** the response is HTTP 403 and the default store is unchanged
+#### Scenario: Dependency on a hidden goal
 
-### Requirement: Push exposes the Product to Security dependency
+- **WHEN** `depends_on` names another person's `private` goal
+- **THEN** the response is 404 and nothing is written
 
-The server SHALL, on a successful company-goal push when current Product and Security goals exist and no relation `r-product-security` exists yet, add relation `r-product-security` of `type: "depends_on"` from the current Product goal to the current Security goal with `status: "UNKNOWN"`, and SHALL recompute `registry_version`. This relation (and, in custom scenarios, the one created at setup) is the only server-side record of a conflict or at-risk dependency.
+### Requirement: Who reads a goal
 
-#### Scenario: Dependency created as unknown
+The server SHALL let a goal's owner always read it, and otherwise decide by visibility: a `private` goal is read by its owner only (workspace owners do not read another person's private goals); a `team` goal by the members and leads of its owning team and by workspace owners; a `workspace` goal (every company goal) by every workspace member, viewers included. A goal the caller may not read SHALL be answered 404 `not_found` on every route, and SHALL be left out of, or unnamed in, every list and view that would otherwise mention it.
 
-- **WHEN** leadership pushes company goal `v2` in the Northstar fixture
-- **THEN** `GET /api/state` `relations` includes `{ id: "r-product-security", type: "depends_on", status: "UNKNOWN" }`
+#### Scenario: Team goal of another team
 
-### Requirement: Only the asking team proposes
+- **WHEN** a member who is not in team Security requests a `team` goal owned by team Security
+- **THEN** the server responds 404 `not_found`
 
-The server SHALL accept `POST /api/proposals` only from the `product` actor of the caller's store: no valid session gives HTTP 401, and any other actor gives HTTP 403.
+#### Scenario: Company goal read by a viewer
 
-#### Scenario: Security tries to propose
+- **WHEN** a viewer requests the goals feed
+- **THEN** every company goal of the workspace is in it
 
-- **WHEN** a Security session calls `POST /api/proposals` with a complete body
-- **THEN** the response is HTTP 403 with an `error` message
+### Requirement: Goals feed with ETag
 
-#### Scenario: Unauthenticated proposal
+The server SHALL serve the goals the caller may read on `GET /api/v2/workspaces/{ws}/goals` (device token with a grant for the workspace, or browser session) as `{version, goals}`, oldest first, where `version` is the first 16 hex characters of the sha256 of the serialized goals and is also sent as a quoted `ETag` with `cache-control: private, no-cache`, and SHALL answer 304 with no body when `If-None-Match` matches it (or is `*`). Each goal SHALL be `{id, version, title, measures, status, level, visibility, owner:{id,name}, team:{id,name}|null, anchors, depends_on, bindable, contributes_to}`, where `visibility` shows `team` for a stored `pod` and `depends_on` lists only goals the caller may read.
 
-- **WHEN** a request with no session cookie calls `POST /api/proposals`
-- **THEN** the response is HTTP 401
+#### Scenario: Conditional feed
 
-### Requirement: At most one open proposal
+- **WHEN** a client sends `If-None-Match` equal to the current feed `ETag`
+- **THEN** the server responds 304 with no body
 
-The server SHALL refuse to create a proposal while any existing proposal is in a state other than `RATIFIED` or `REJECTED`, responding HTTP 409.
+#### Scenario: Team naming on the wire
 
-#### Scenario: Second proposal while one is pending
+- **WHEN** a member reads a goal created with `visibility: "team"` for team Product
+- **THEN** the goal has `visibility: "team"` and `team: {id, name: "Product"}`, and has no `pod` key
 
-- **WHEN** Product calls `POST /api/proposals` while an earlier proposal is `PENDING_SECURITY`
-- **THEN** the response is HTTP 409 and `proposals` is unchanged
+### Requirement: Immutable goal versions
 
-### Requirement: Proposal input validation
+The server SHALL record each change to a goal as a new immutable version on `POST /api/v2/workspaces/{ws}/goals/{goal}/versions` (browser session) from `{version?, title?, measures?, anchors?, depends_on?, status?}`, accepted only from the goal's owner (403 `not_goal_owner` for another reader, 403 `read_only` for a viewer, 404 for a goal the caller may not read). A sent `version` other than the current one, or a concurrent write, SHALL be 409 `stale_version`, and a body whose resulting content (title, measures, anchors, status, sorted `depends_on`) hashes the same as the current version SHALL be 409 `no_change`. On success the server SHALL, in one transaction, raise the version by one, keep the previous versions unchanged, store the new version with its content hash and author, write audit action `goal.versioned`, record the goal as reviewed against its parents' current versions, and write one `goal_version` directive, carrying a snapshot of the goal with its `team` and `level`, for every non-stopped session whose open epoch is bound to the goal or that the goal governs; the response is 201 with the goal.
 
-The server SHALL resolve the plan from body fields `plan_id` and `plan_version` (falling back, in a custom scenario only, to `scenario_config.plan_id`/`plan_version`) and respond HTTP 400 when no matching plan exists; SHALL respond HTTP 400 when `proposed_measure_text` or `reciprocal_commitment` is empty after trimming; and SHALL silently drop `simulation_refs` entries that do not name an ingested simulation run.
+#### Scenario: New version
 
-#### Scenario: Unknown plan
+- **WHEN** the owner POSTs `{version: 2, title: "Pass the security review by March"}` to a goal at version 2
+- **THEN** the response is 201 with `version: 3`, version 2 is still listed unchanged on the goal's page, and every bound session gets a `goal_version` directive
 
-- **WHEN** Product calls `POST /api/proposals` in Northstar without `plan_id`, or with a `plan_id`/`plan_version` pair not in `plans`
-- **THEN** the response is HTTP 400 and no proposal is created
+#### Scenario: Stale or empty change
 
-#### Scenario: Missing reciprocal commitment
+- **WHEN** the owner POSTs `{version: 1, …}` to a goal at version 3, or POSTs the current content again
+- **THEN** the response is 409 `stale_version` or 409 `no_change` respectively, and no version or directive is written
 
-- **WHEN** Product calls `POST /api/proposals` with a valid plan and `proposed_measure_text` but an empty `reciprocal_commitment`
-- **THEN** the response is HTTP 400
+#### Scenario: Someone else edits
 
-### Requirement: Proposal is pinned to a goal version and plan hash
+- **WHEN** a member who can read the goal but does not own it POSTs a new version
+- **THEN** the response is 403 `not_goal_owner`; they can propose a change request instead
 
-The server SHALL create the proposal with `proposing_owner: "product"`, `recipient_owner: "security"`, `target_goal_id` and `target_goal_version` of Security's current goal, `plan_ref` `{ plan_id, plan_version, plan_hash }` copied from the stored plan's `hash`, the filtered `simulation_refs`, `source_refs` (Northstar: `g-ceo-v2#KR2`, `<target goal id>#S-M1`, and `alike:<decision_id>` or `alike:unavailable`), empty `counter_versions`, `state: "PENDING_SECURITY"`, a computed `test_status`, and `created_at`; SHALL append audit action `propose`; and SHALL return the proposal as the response body with HTTP 200.
+### Requirement: Dependency cycles are refused
 
-#### Scenario: Product proposes the beta plan
+The server SHALL refuse with 409 `cycle` any write that would make a goal depend on itself through `depends_on` (directly or through other goals, whether or not the caller can read them): a new goal version, and the creation, counter, rebase or approval of a change request whose `depends_on` would close a cycle. The refusal message SHALL NOT name goals the caller may not read, and nothing SHALL be written.
 
-- **WHEN** Product calls `POST /api/proposals` with `plan_id: "p-beta"`, `plan_version: 1`, `simulation_refs`, `proposed_measure_text`, `rationale` and `reciprocal_commitment`
-- **THEN** the response is HTTP 200 with `state: "PENDING_SECURITY"`, `target_goal_id` equal to Security's current goal id, and `plan_ref.plan_hash` equal to the `hash` of plan `p-beta@1` in `GET /api/state`
+#### Scenario: Two goals depending on each other
 
-### Requirement: Plan hashes identify executable plans
+- **WHEN** goal A depends on goal B and B's owner saves a version of B with `depends_on: ["<A>"]`
+- **THEN** the response is 409 `cycle` and B stays at its current version
 
-The server SHALL set each file-backed plan's `hash` to the sha256 of `agent/plans/<plan_id>@<plan_version>.md` when the state is seeded (empty string if the file is missing), and each inline custom plan's `hash` to the sha256 of its text with line endings normalized to `\n` and surrounding whitespace trimmed.
+### Requirement: One goal with its versions and contributions
 
-#### Scenario: Custom inline plan hash
+The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as `{goal, versions, contributions, can_edit}`: `goal` as in the feed, `versions` every version newest first as `{version, title, status, content_hash, created_at}`, `contributions` the readable source goals of approved alignments targeting this goal as `{goal:{id, title}}`, and `can_edit` true only for the goal's owner when not a viewer. A goal the caller may not read SHALL be 404.
 
-- **WHEN** leadership sets up a custom scenario with `plan.text` containing CRLF line endings
-- **THEN** plan `p-custom@1` has `goal_text_ref: "inline:p-custom@1"`, `source: "inline"`, and `hash` equal to the sha256 of the LF-normalized, trimmed text
+#### Scenario: Owner opens their goal
 
-### Requirement: Strict test status
+- **WHEN** the owner of a goal at version 3 opens it
+- **THEN** the response has three `versions` (3, 2, 1) and `can_edit: true`; a member reading the same goal gets `can_edit: false`
 
-The server SHALL set a proposal's `test_status` to `TESTED` only when its referenced runs include a `PASS` run whose `plan_id`, `plan_version` and `plan_hash` all equal the proposal's `plan_ref`, and also a `FAIL` run of a different `plan_id` with the same `mission_id`, `seed_version` and `checks_version` as that PASS run; otherwise it SHALL be `UNTESTED`.
+### Requirement: Parents come from approved alignments
 
-#### Scenario: PASS without a comparable baseline
+The server SHALL derive a goal's parents only from approved alignments whose source is that goal, and SHALL report each readable parent in `contributes_to` as `{id, title, version, reviewed_version, stale}`, where `reviewed_version` is the parent version the child's owner last reviewed the child against (null if never) and `stale` is true while `reviewed_version` is null or below the parent's current version. Approving an alignment with a source goal SHALL record the source as reviewed against the target's version at approval; saving a new version of the child SHALL record it as reviewed against every parent's current version. A parent that is revoked stops being a parent.
 
-- **WHEN** Product proposes `p-beta@1` with `simulation_refs` naming only a PASS run of `p-beta@1`
-- **THEN** the created proposal has `test_status: "UNTESTED"`
+#### Scenario: Parent changes
 
-#### Scenario: PASS plus failing baseline
+- **WHEN** a company goal gets a new version
+- **THEN** each child's `contributes_to` entry for it shows `stale: true` with `reviewed_version` below `version`, until the child's owner reviews it or saves a new version of the child
 
-- **WHEN** Product proposes `p-beta@1` with a PASS run of `p-beta@1` and a FAIL run of `p-throughput@1` on the same mission, seed and checks
-- **THEN** the created proposal has `test_status: "TESTED"`
+### Requirement: Stale-parent review
 
-### Requirement: Only the owner edits a proposal
+The server SHALL let only a goal's owner confirm the goal still fits a parent's current version on `POST /api/v2/workspaces/{ws}/goals/{goal}/review {parent_id}` (browser session, body at most 4 KB), record the review against the parent's current version, write audit action `goal.parent_reviewed`, and respond with the goal. A goal the caller may not read, or a `parent_id` that is not a current parent, SHALL be 404; another reader SHALL get 403 `not_goal_owner` and a viewer 403 `read_only`.
 
-The server SHALL accept `POST /api/proposals/{id}/counter` only from the proposal's `recipient_owner` (`security`), responding HTTP 404 for an unknown proposal id, HTTP 403 for any other actor, HTTP 409 unless the proposal is `PENDING_SECURITY` or `ACKNOWLEDGED_BY_PRODUCT`, and HTTP 400 when `proposed_measure_text` is empty. In a custom scenario only, an optional `conditions` field SHALL be text (HTTP 400 otherwise) of at most 1000 characters after trimming (HTTP 400 otherwise); in Northstar the field is ignored.
+#### Scenario: Owner confirms
 
-#### Scenario: Product cannot edit
+- **WHEN** the owner of a child whose parent moved to version 4 POSTs `{parent_id}`
+- **THEN** the response is the goal with that parent's `reviewed_version: 4` and `stale: false`
 
-- **WHEN** Product calls `POST /api/proposals/{id}/counter` with `proposed_measure_text`
-- **THEN** the response is HTTP 403
+#### Scenario: Review refused
 
-#### Scenario: Second edit before Product accepted the first
+- **WHEN** a member who does not own the child POSTs `{parent_id}`, or the owner names a goal that is not its parent
+- **THEN** the server responds 403 `not_goal_owner` or 404 respectively
 
-- **WHEN** Security calls `POST /api/proposals/{id}/counter` while the proposal is `COUNTERED`
-- **THEN** the response is HTTP 409 and no counter version is added
+### Requirement: Bindable goals
 
-### Requirement: Owner edits are versioned and can stale the evidence
+The server SHALL mark a goal `bindable` for the caller only when it is `active`, the caller is not a viewer, and the goal is the caller's own, belongs to a team the caller is in, or is the target of an approved `work_toward` alignment whose current revision lists one of the caller's sessions. Binding a session to a goal that is not bindable for its owner SHALL be refused with 403 `alignment_required` (the epoch route is specified in `workspaces`).
 
-The server SHALL append a counter version `{ version, by: "security", at, proposed_measure_text, rationale, changes_plan, plan_params?, conditions? }` whose `version` is the next goal version plus `.N` (`N` = counter count; Northstar `v2.1`, `v2.2`, ...), set `state: "COUNTERED"`, clear `product_ack_at`, and append audit action `counter`. `changes_plan` SHALL be true when the body sends `changes_plan: true` or sends `plan_params` whose normalized hash (keys sorted, list items sorted, scalar values trimmed and lower-cased) differs from the proposed plan's `params`. When `changes_plan` is true the server SHALL set `test_status` to `STALE`, except in a custom scenario where an `UNTESTED` proposal stays `UNTESTED`. No route writes a counter version's `plan_text` or `plan_hash`, so the custom policy agreement's `plan_text` is always the scenario plan's text.
+#### Scenario: Teammate's goal
 
-#### Scenario: Declared wording-only edit that changes parameters
+- **WHEN** a member of team Product reads an active goal owned by another member of team Product
+- **THEN** the goal has `bindable: true`; a company goal owned by someone else has `bindable: false` until an approved `work_toward` alignment covers one of the caller's sessions
 
-- **WHEN** Security calls `POST /api/proposals/{id}/counter` with `changes_plan: false` and `plan_params` whose `protected_set` has an extra entry compared with `p-beta@1`
-- **THEN** the response is HTTP 200 with `state: "COUNTERED"` and `test_status: "STALE"`
+### Requirement: Approval set of a goal
 
-#### Scenario: Edit carrying the tested parameters
+The server SHALL compute a goal's approval set, at the time it is needed, as the goal's owner, every lead of the goal's owning team, and for a company goal every workspace owner, keeping only people who are current workspace members with role `owner` or `member`. Viewers and people who left or were removed SHALL never be in an approval set.
 
-- **WHEN** Security counters with `changes_plan: false` and `plan_params` equal to the tested plan's `params` (in any key or list order)
-- **THEN** `test_status` is unchanged and the counter version has `changes_plan: false`
+#### Scenario: Team goal
 
-### Requirement: Asking team accepts the owner's edits
+- **WHEN** the goal "Pass the security review" is owned by Sam and team Security has leads Sam and Lee
+- **THEN** its approval set is Sam and Lee
 
-The server SHALL accept `POST /api/proposals/{id}/acknowledge` only from the proposal's `proposing_owner` (`product`), responding HTTP 404 for an unknown id, HTTP 403 for any other actor, and HTTP 409 unless the proposal is `COUNTERED`; on success it SHALL set `state: "ACKNOWLEDGED_BY_PRODUCT"` and `product_ack_at`, append audit action `acknowledge`, and return the proposal.
+#### Scenario: Owner who left
 
-#### Scenario: Security cannot acknowledge
+- **WHEN** the owner of a team goal has been removed from the workspace and the team has one lead
+- **THEN** the approval set is that lead only; the goal keeps naming its former owner
 
-- **WHEN** Security calls `POST /api/proposals/{id}/acknowledge` on a `COUNTERED` proposal
-- **THEN** the response is HTTP 403
+### Requirement: Requester rule and workspace-owner fallback
 
-#### Scenario: Product accepts the edits
+Wherever a goal's consent is needed (an alignment requirement or a change request), the server SHALL treat one approval from the goal's approval set as that goal's consent, SHALL count the requester toward the set only when the requester is the goal's owner, and, when the requester is not the goal's owner and the set holds no one other than the requester, SHALL use the workspace owners other than the requester as the set. If even that set is empty, the request SHALL stay open until someone eligible exists or the requester withdraws it.
 
-- **WHEN** Product calls `POST /api/proposals/{id}/acknowledge` on a `COUNTERED` proposal
-- **THEN** the response is HTTP 200 with `state: "ACKNOWLEDGED_BY_PRODUCT"`
+#### Scenario: Lead asks against their own team's goal
 
-### Requirement: Only the goal owner approves
+- **WHEN** Lee, a lead of team Security, requests an alignment targeting a goal owned by Sam in team Security
+- **THEN** Lee's request does not satisfy that goal's requirement; Sam (or another lead) must approve
 
-The server SHALL accept `POST /api/proposals/{id}/accept` only from the actor equal to the target goal's `owner_id` (`security`), responding HTTP 404 for an unknown proposal or a missing target goal, HTTP 403 for any other actor (including `leadership`), and HTTP 409 unless the proposal is `PENDING_SECURITY` or `ACKNOWLEDGED_BY_PRODUCT` (a `COUNTERED` proposal is refused with a message that the asking team must first accept the changes).
+#### Scenario: Nobody else in the set
 
-#### Scenario: Product tries to approve
+- **WHEN** the requester is the only remaining lead of a goal whose owner left
+- **THEN** the requirement's set is the workspace owners other than the requester, and one of them must approve
 
-- **WHEN** Product calls `POST /api/proposals/{id}/accept`
-- **THEN** the response is HTTP 403 and no goal version is added
+### Requirement: Requesting an alignment
 
-#### Scenario: Owner approves before edits are accepted
+The server SHALL let a workspace owner or member (viewers 403 `read_only`) request an alignment on `POST /api/v2/workspaces/{ws}/alignments {target_goal_id, source_goal_id?, choice, session_keys?, note?}` (browser session, body at most 16 KB), with `choice` `contribution` (effect `contributes_to`) or `work_toward` (effects `contributes_to`, `governing_goal` and `allocation_transfer`), and respond 201 with the alignment view. It SHALL answer 404 for a target or source goal the caller may not read and for a session key that is unknown or not the caller's own; 409 `goal_not_active` for a target that is not `active`; 400 when the source is the target, `choice` is invalid, `note` exceeds 1000 characters, `session_keys` exceeds 50, a `work_toward` request lists no session, or a `contribution` request has neither a source nor a session; 403 `source_not_yours` when the source goal is not bindable for the caller; 409 `sharing_stopped` for a stopped session; and 409 `already_governed` when a `work_toward` session already follows another goal through an alignment. Creating writes audit action `alignment.requested`.
 
-- **WHEN** Security calls `POST /api/proposals/{id}/accept` while the proposal is `COUNTERED`
-- **THEN** the response is HTTP 409
+#### Scenario: Contribution of my team's goal to a company goal
 
-### Requirement: Untested approval must be explicit
+- **WHEN** a member POSTs `{target_goal_id:"<company goal>", source_goal_id:"<their team goal>", choice:"contribution"}`
+- **THEN** the response is 201 with `state: "pending"`, `revision: 1` and one `contributes_to` effect
 
-The server SHALL refuse with HTTP 409 to approve a `STALE` proposal unless the body has `accept_untested: true`; in a custom scenario it SHALL also refuse any proposal whose `test_status` is not `TESTED` unless `accept_untested: true`. The server SHALL record audit action `ratify_untested` instead of `ratify` when it approves a `STALE` proposal (Northstar) or any proposal not `TESTED` (custom); a Northstar `UNTESTED` proposal needs no acknowledgement and records `ratify` even if `accept_untested: true` is sent. A `STALE` status SHALL become `UNTESTED` on the proposal and its acceptance.
+#### Scenario: Invalid request
 
-#### Scenario: Stale evidence
+- **WHEN** a request lists another person's session, a stopped session, an inactive target, no session for `work_toward`, or a session already governed through another alignment
+- **THEN** the server responds 404, 409 `sharing_stopped`, 409 `goal_not_active`, 400, or 409 `already_governed` respectively
 
-- **WHEN** Security calls `POST /api/proposals/{id}/accept` with `{ "rationale": "..." }` on an `ACKNOWLEDGED_BY_PRODUCT` proposal whose `test_status` is `STALE`
-- **THEN** the response is HTTP 409 and the proposal stays `ACKNOWLEDGED_BY_PRODUCT`
+### Requirement: Alignment approval requirements
 
-#### Scenario: Knowingly approved untested
+The server SHALL compute, for each alignment revision, a list of approval requirements `{for, set}`, one per distinct `for`: the target goal's approval set (`for` the target id); when there is a source goal, the source goal's approval set (`for` the source id); and for a revision with the `allocation_transfer` effect, for each listed session's owner a singleton set (`for` `sessions:<user id>`) and, for each listed session currently bound to a goal, that goal's approval set (`for` that goal id). Each goal set SHALL be the effective set after the requester rule and workspace-owner fallback. Each requirement needs one approval from its set.
 
-- **WHEN** Security repeats the call with `accept_untested: true`
-- **THEN** the response is HTTP 200 with `state: "RATIFIED"`, the acceptance has `test_status: "UNTESTED"`, and the audit log has a `ratify_untested` row targeting the proposal id
+#### Scenario: Work toward another team's goal
 
-### Requirement: Approval creates the owner's next goal version
+- **WHEN** Ana, whose session is bound to her own goal G1, requests `work_toward` the goal G2 owned by Sam in team Security
+- **THEN** the revision has requirements for G2 (Sam and team Security's leads), `sessions:<Ana>` (Ana) and G1 (Ana, as G1's owner)
 
-The server SHALL, on approval, append a copy of the target goal with `version` equal to the latest counter version's `version` (or, with no counter, Northstar `v2` / custom `v{major+1}`), `id` `g-security-<version with "." replaced by "_">`, `approved_at`, `approved_by: "security"`, `supersedes` the target goal id and `changed: false`, and set the proposal `state: "RATIFIED"`. In Northstar the new measures SHALL drop the old `S-M1`, add `S-M3` with the final measure text (latest counter text, else the proposal's) and `verifiable_by: "sparta"`, `inherited_from: "KR2"`, and re-add `S-M1` reworded to come after beta issues. In a custom scenario the configured owner measure SHALL be replaced in place by a new measure with the next free `S-M<n>` id (across all goal versions), `verifiable_by: "none"` and `inherited_from` the configured company measure; when the target goal no longer has that measure (for example after an earlier approval), the new measure is appended instead and no measure is replaced.
+### Requirement: Approval requirement storage
 
-#### Scenario: Approval after two edits
+The server SHALL store a revision's requirements in `approvers_json` as `[{for, set:[user ids]}]` and SHALL read an older row holding a plain array of user ids as one requirement per user id with that user as a singleton set and `for: null`. An approval by a user SHALL satisfy every requirement of that revision whose set contains them, and each requirement SHALL record the first person who satisfied it as `approved_by`.
 
-- **WHEN** Security approves a Northstar proposal that has two counter versions
-- **THEN** the current Security goal has `id: "g-security-v2_2"`, `version: "v2.2"`, `supersedes: "g-security-v1"`
+#### Scenario: Legacy row
 
-#### Scenario: Approval without edits
+- **WHEN** an alignment created before this change has `approvers_json` `["u1","u2"]`
+- **THEN** it reads as two requirements `{for:null, set:["u1"]}` and `{for:null, set:["u2"]}`, and approves once u1 and u2 have both approved
 
-- **WHEN** Security approves a Northstar proposal directly from `PENDING_SECURITY`
-- **THEN** the new Security goal has `id: "g-security-v2"` and `version: "v2"`
+#### Scenario: One person satisfies two goals
 
-### Requirement: Approval moves dependents to the new version
+- **WHEN** Lee leads both the target's and the source's owning teams and approves
+- **THEN** both requirements record `approved_by` Lee
 
-The server SHALL, on approval, set the dependency relation (`r-product-security`, or the custom `scenario_config.dependency_id`) to `status: "ACCEPTED"` with `target_goal` the new goal and an "Agreed" `label` and `provenance` naming the version, retarget every other relation and every work item that pointed at the old goal to the new goal, and apply scenario work-item updates (Northstar: `w-s3` gets `priority_rank: 0`, status `next up, approved in goal <version>` and a task saying beta customers' issues come first using the tested new plan, `w-p3` gets status `deferred (Product commitment)`). In a custom scenario the profile would update the work items named by `scenario_config.unblocks_work_item_id` and `deferred_work_item_id`, but scenario setup never writes those fields, so a custom approval changes no work item's priority or status beyond retargeting its goal.
+### Requirement: Alignment approval and its effects
 
-#### Scenario: Dependency becomes agreed
+The server SHALL approve an alignment, in the transaction of the action that completes it, when every requirement of its current revision is satisfied, and SHALL make creation instant only when the requester alone satisfies every requirement under the requester rule; the revision's author SHALL count as approving it for every requirement whose set contains them. On approval the server SHALL set `state: "approved"`, for `work_toward` set the target as the governing goal of each listed session whose sharing has not stopped and write one `binding_changed` directive per such session (stopped sessions are skipped; a listed session meanwhile governed through another alignment makes the action 409 `already_governed`), record the source goal (if any) as reviewed against the target's current version, and write audit action `alignment.approved` naming the person whose action completed it.
 
-- **WHEN** Security approves the open proposal
-- **THEN** `relations` entry `r-product-security` has `status: "ACCEPTED"` and `target_goal` equal to the new Security goal id
+#### Scenario: Never instant against others
 
-### Requirement: Approval writes a decision record
+- **WHEN** a member requests a `contribution` of their own goal to a company goal owned by a workspace owner
+- **THEN** the response is 201 with `state: "pending"`; it becomes `approved` only when someone in the company goal's approval set approves
 
-The server SHALL append an `acceptances[]` record with `proposal_id`, `accepted_version`, `new_goal_id`, `ratified_by: "security"`, `acknowledged_by: "product"`, `rationale` (from the body), `next_work`, `plan_ref`, `test_status`, `evidence_version` (the proposal's `simulation_refs`), `ratified_at`, `acknowledged_at` and `acknowledged_via` (`explicit` when Product acknowledged, else `authored_in_proposal` with `acknowledged_at` equal to the proposal's `created_at`); in a custom scenario it SHALL also record `replaced_measure_id` (when a measure was replaced), `new_measure_id`, `owning_work_item_ids` and `asking_work_item_ids`.
+#### Scenario: Instant when the requester owns both goals
 
-#### Scenario: Approval straight from pending
+- **WHEN** a workspace owner requests a `contribution` of their own team goal to their own company goal
+- **THEN** the response is 201 with `state: "approved"` and the team goal's `contributes_to` lists the company goal with `stale: false`
 
-- **WHEN** Security approves a proposal that was never countered
-- **THEN** the acceptance has `acknowledged_via: "authored_in_proposal"` and `acknowledged_at` equal to the proposal's `created_at`
+#### Scenario: Approving work toward a goal
 
-### Requirement: Approval notifies running agents
+- **WHEN** the last required approver approves a `work_toward` request at its current `revision`
+- **THEN** the alignment becomes `approved`, and each listed session whose sharing has not stopped gets the target as its governing goal and one `binding_changed` directive
 
-The server SHALL, after a successful `POST /api/proposals/{id}/accept`, emit an in-process authority event with `event_id: "accept:<proposal id>"`, `kind: "ratify"` and, for a custom workspace, its `ws` id; delivery to agent sessions is specified in the `directives` part.
+### Requirement: Alignment actions
 
-#### Scenario: Refused approval emits nothing
+The server SHALL accept `POST /api/v2/workspaces/{ws}/alignments/{id}/{action}` (browser session, body at most 16 KB) for `approve`, `counter`, `accept_counter`, `reject`, `withdraw` and `revoke`, from people involved in the alignment (the requester and everyone in any requirement set of any revision; others 404, viewers 403 `read_only`, an unknown action 404). An approver is someone in a requirement set of the current revision. `approve {revision}` SHALL need the current `revision` (409 `stale_revision`), state `pending` (409 `wrong_state`) and an approver (403 `not_an_approver`). `counter {revision?, choice?, keep?|session_keys?, note?}` SHALL come from an approver who is not the requester (403 `not_an_approver`) on a `pending` request, may only keep or drop sessions of the current revision (400 otherwise), SHALL write a new revision with recomputed requirements, void every earlier approval and set `countered`. `accept_counter` SHALL come only from the requester (403 `not_requester`) on a `countered` request and return it to `pending`. `reject` SHALL come from an approver who is not the requester on a `pending` or `countered` request; `withdraw` only from the requester on a `pending` or `countered` request. A request that changed since the caller read it SHALL be 409 `stale_revision`. Each action SHALL write an audit row (`alignment.countered`, `.rejected`, `.withdrawn`, `.revoked`, `.approved`) naming its actor and respond with the alignment view.
 
-- **WHEN** `POST /api/proposals/{id}/accept` fails with HTTP 403 or 409
-- **THEN** no authority event is emitted
+#### Scenario: Stale or wrong approval
 
-### Requirement: Owner may decline
+- **WHEN** an approver approves with an old `revision`, approves a request that is `countered`, or a person whose approval is not needed approves
+- **THEN** the server responds 409 `stale_revision`, 409 `wrong_state` or 403 `not_an_approver` respectively
 
-The server SHALL accept `POST /api/proposals/{id}/reject` only from the `recipient_owner` (`security`), responding HTTP 404 for an unknown id, HTTP 403 for any other actor, and HTTP 409 when the proposal is already `RATIFIED` or `REJECTED`; on success it SHALL set `state: "REJECTED"`, append audit action `reject`, and leave goals, relations and work items unchanged.
+#### Scenario: Counter and accept
 
-#### Scenario: Product cannot decline
+- **WHEN** the target's owner counters a `work_toward` request keeping one of two sessions, and the requester then calls `accept_counter`
+- **THEN** the alignment is at revision 2 with one session, back in `pending`, and approves once every requirement of revision 2 is satisfied (the counter's author already counts)
 
-- **WHEN** Product calls `POST /api/proposals/{id}/reject`
-- **THEN** the response is HTTP 403
+### Requirement: Alignment revocation
 
-#### Scenario: Declined proposal frees the slot
+The server SHALL let the requester or an approver revoke an `approved` alignment (409 `wrong_state` otherwise), set it `revoked`, and, for `work_toward`, remove the governing goal from its sessions and, for each session whose open epoch was bound only through this alignment, end that epoch now, set the session `suspended` and write a `binding_suspended` directive; past usage never moves. A revoked contribution SHALL stop making its source a child of its target.
 
-- **WHEN** Security rejects the open proposal and Product then calls `POST /api/proposals` with a valid body
-- **THEN** the reject returns `state: "REJECTED"` and the new proposal is created with HTTP 200
+#### Scenario: Revoking work toward
 
-### Requirement: Leadership launch decision in custom scenarios
+- **WHEN** the requester revokes an approved `work_toward` alignment
+- **THEN** it becomes `revoked`, its sessions lose the governing goal, and sessions whose open binding existed only through it become `suspended` and get a `binding_suspended` directive
 
-The server SHALL accept `POST /api/proposals/{id}/launch` only in a custom scenario (HTTP 404 otherwise) and only from `leadership` (HTTP 403 otherwise), responding HTTP 404 for an unknown proposal id, only for a `RATIFIED` proposal with an acceptance (HTTP 409 otherwise), with body `decision` exactly `approved` or `not_yet` (HTTP 400 otherwise) and an optional text `note` of at most 500 characters (HTTP 400 otherwise). Approving the launch of a proposal whose `test_status` is not `TESTED` SHALL require `accept_untested: true` (HTTP 409 otherwise). On success the server SHALL replace the acceptance's `launch_decision` with `{ decision, note?, untested?: true, by: "leadership", at }`, append audit action `launch_approved` or `launch_not_yet` (never the note text), and return the `launch_decision`.
+### Requirement: Contribution cycles are refused
 
-#### Scenario: Launch in Northstar
+The server SHALL refuse with 409 `cycle` an alignment with a source goal whose approval would make the contribution tree cyclic, that is, when the source is already reachable from the target by following approved parents: at creation (nothing is written) and at the `approve` or `accept_counter` that would complete it (the alignment stays as it was). The message SHALL NOT name goals the caller may not read.
 
-- **WHEN** leadership calls `POST /api/proposals/{id}/launch` with `{ "decision": "approved" }` in the Northstar scenario
-- **THEN** the response is HTTP 404
+#### Scenario: Child cannot become its parent's parent
 
-#### Scenario: Untested launch approval
+- **WHEN** goal A contributes to goal B through an approved alignment and someone requests that B contribute to A
+- **THEN** the response is 409 `cycle` and no alignment is created
 
-- **WHEN** leadership calls `POST /api/proposals/{id}/launch` with `{ "decision": "approved", "accept_untested": true }` on a ratified custom proposal whose `test_status` is `UNTESTED`
-- **THEN** the response is HTTP 200 with `decision: "approved"` and `untested: true`, and the acceptance's `launch_decision` holds that value with `by: "leadership"`
+### Requirement: Alignment read views
 
-### Requirement: Launch request hygiene and rate limit
+The server SHALL list the alignments the caller is involved in on `GET /api/v2/workspaces/{ws}/alignments` (browser session) as `{waiting_on_me, mine, others}`, newest change first, and serve one on `GET .../alignments/{id}` (404 when the caller is not involved). Each view SHALL hold `id`, `state`, `revision`, `choice`, `requester`, `target_goal`, `source_goal` (a goal the caller may not read shows `id` and `title` null), `sessions` (by `ref`; another person's session has no `session_key`), `effects` in plain words, `requirements` (each `{for, approvers:[{id,name}], approved_by}`, with `for` null for a goal the caller may not read), `approvers` (everyone in any current set, each with `approved`), `note`, `history` of revisions, `waiting_on_me`, `can` flags for exactly the actions the server would allow (all false for a viewer), `created_at` and `updated_at`.
 
-The server SHALL require the launch request to be same-origin JSON (HTTP 415 for another content type, HTTP 403 for a foreign origin; a non-loopback `Host`, or when hosted a host outside the allowed list, is answered HTTP 421 at the request edge before the route runs, see the `workspaces` part), cap its body at 4 KB (HTTP 413) and reject invalid JSON with HTTP 400, and SHALL count only decisions that would be written against a per-workspace limit of 10 per minute, responding HTTP 429 beyond it.
+#### Scenario: Alignment list
 
-#### Scenario: Eleventh decision in a minute
+- **WHEN** a member calls `GET /api/v2/workspaces/{ws}/alignments`
+- **THEN** requests where they can approve or accept a counter are under `waiting_on_me`, their other requests under `mine`, and other requests they are part of under `others`
 
-- **WHEN** leadership sends an eleventh valid launch decision for the same workspace within 60 seconds
-- **THEN** the response is HTTP 429 and `launch_decision` keeps the previous value
+### Requirement: Proposing a change request
 
-### Requirement: Authorized plan for Security's agents
+The server SHALL let a workspace owner or member who can read a goal but does not own it propose a change on `POST /api/v2/workspaces/{ws}/goals/{goal}/change-requests {base_version, changes, reason}` (browser session, body at most 32 KB) and respond 201 with the change request (`id` `cr_…`, `state: "pending"`, `revision: 1`). It SHALL answer 404 for a goal the caller may not read, 403 `read_only` for a viewer, 403 `own_goal` for the goal's owner (who publishes a version instead), 409 `goal_not_active` for a goal that is `achieved` or `dropped`, 409 `stale_version` when `base_version` is not the goal's current version, and 400 when `reason` is missing or not 1 to 2000 characters after trimming.
 
-The server SHALL answer `GET /api/policy/security` (no session required) from the default store with `team`, `goal_id`, `goal_version`, `plan`, `plan_hash`, `authority`, `ratified_at` and `test_status`. In Northstar, when the latest acceptance's `new_goal_id` is Security's current goal, `plan` SHALL be `<plan_id>@<plan_version>` and `plan_hash` the acceptance's `plan_ref`, with `authority` `ratified by <owner name>`; otherwise `plan` SHALL be `p-throughput@1` with that plan's hash, `authority: "current approved goal (no change ratified)"` and `test_status: null`.
+#### Scenario: Member proposes
 
-#### Scenario: Before any approval
+- **WHEN** a member of team Product POSTs `{base_version: 1, changes:{measures:[…]}, reason:"Onboarding needs a pen-test window in May"}` to the Security goal
+- **THEN** the response is 201 with `state: "pending"`, `base_version: 1`, `requester` naming the caller, and audit action `change_request.created`
 
-- **WHEN** a client calls `GET /api/policy/security` after a reset
-- **THEN** the response has `plan: "p-throughput@1"` and `test_status: null`
+#### Scenario: Owner proposes to their own goal
 
-#### Scenario: After approval
+- **WHEN** the goal's owner POSTs a change request to it
+- **THEN** the response is 403 `own_goal`
 
-- **WHEN** Security has approved a proposal for `p-beta@1` and a client calls `GET /api/policy/security`
-- **THEN** the response has `plan: "p-beta@1"`, `goal_id` equal to the new Security goal id, and `test_status` equal to the acceptance's
+### Requirement: Change request contents
 
-### Requirement: Custom agreement is shown only to signed-in callers
+The server SHALL accept in `changes` only the keys `title`, `measures`, `depends_on` and `status` (400 for any other key, an empty object or a non-object), validate each like a new goal version against the base version, answer 409 `no_change` when applying them to the base version changes nothing, and 409 `cycle` when the resulting `depends_on` would close a dependency cycle. The same rules SHALL apply to `changes` sent with `counter` and `rebase`.
 
-The server SHALL, in a custom scenario, report `plan: "none"` and `plan_hash: ""` until an acceptance targets the owning team's current goal, and SHALL include the `agreement` object (`status` `agreed`/`not_agreed`, `launch` `pending`/`approved`/`not_applicable`, plan title and text, owning measures, agreed measure, conditions, asking commitment) only when the request carries a valid default-store session cookie.
+#### Scenario: Anchors are not proposable
 
-#### Scenario: Anonymous read of a custom scenario
+- **WHEN** a change request sends `changes: {anchors:{repos:["x"]}}`
+- **THEN** the response is 400
 
-- **WHEN** a request without a session calls `GET /api/policy/security` while the default store holds a custom scenario
-- **THEN** the response has no `agreement` key
+### Requirement: One open change request per goal and requester
 
-### Requirement: Alike decision reference is recorded on the brief
+The server SHALL refuse a second change request from the same person on the same goal while their earlier one is `pending` or `countered`, with 409 `already_open`.
 
-The server SHALL accept `POST /api/alike` only from a default-store (Northstar) session of any role (HTTP 401 without a session, HTTP 403 for a custom-workspace session, which never reaches the default store) and a same-origin request (HTTP 403 for a foreign `Origin`, HTTP 415 for a non-JSON body; an unparseable JSON body is treated as `{}`), SHALL write to the default store, SHALL require non-blank `decision_id`, `summary`, `recorded_at`, `retrieved_in_session`, `plan_before` and `plan_after` (HTTP 400 `Missing <field>` otherwise, including a `null` value; a field that is present, not null and not a string fails with HTTP 500 `Server error`), and SHALL store them, trimmed and with `summary`, `plan_before` and `plan_after` cut to 600 characters, as `brief.alike_ref`, set `brief.alike_status` to `retrieved`, append audit action `alike_ref_recorded` with the decision id, and return the brief. It SHALL store only these fields, never a transcript.
+#### Scenario: Second request
 
-#### Scenario: Recording a retrieved decision
+- **WHEN** a member with a pending request on a goal POSTs another one to that goal
+- **THEN** the response is 409 `already_open`; once the first is withdrawn or decided, a new one is accepted
 
-- **WHEN** a Northstar session posts all six fields to `POST /api/alike` from the app's own origin
-- **THEN** the brief's `alike_status` becomes `retrieved`, `alike_ref.decision_id` equals the posted id, and a later Northstar proposal's `source_refs` include `alike:<decision_id>`
+### Requirement: Approving a change request
 
-#### Scenario: Custom workspace session cannot record a reference
+The server SHALL accept `POST .../change-requests/{id}/approve {revision, note?}` (`note` at most 2000 characters) only from a member of the goal's approval set under the requester rule (403 `not_an_approver`), only for a `pending` request (409 `wrong_state`) at its current `revision` (409 `stale_revision`), and only while the goal is still at `base_version` (409 `stale_version`; the requester must `rebase`). On success it SHALL, in one transaction, create the goal's next version with the requested changes applied, authored by the approver and written through the same path as an owner's new version (content hash, audit `goal.versioned`, parent review and `goal_version` directives to bound sessions), set the request `approved` with `approved_by`, `note`, `version` (the new goal version) and `decided_at`, write audit action `change_request.approved`, and respond with the request.
 
-- **WHEN** a session signed in to a custom workspace calls `POST /api/alike`
-- **THEN** the response is HTTP 403 and the default store is unchanged
+#### Scenario: Team lead approves
 
-#### Scenario: Missing field
+- **WHEN** a lead of the goal's owning team approves a pending request at its current revision on a goal still at its base version
+- **THEN** the goal moves to the next version with the requested changes, the request is `approved` with `approved_by` the lead and `version` the new goal version, and every session bound to the goal gets a `goal_version` directive
 
-- **WHEN** the request omits `plan_after`
-- **THEN** the response is HTTP 400 `Missing plan_after` and the brief is unchanged
+#### Scenario: Goal moved meanwhile
 
-### Requirement: Sparta evidence ingestion
+- **WHEN** the owner published a new version after the request was made and an approver approves it
+- **THEN** the response is 409 `stale_version` and the request stays `pending`
 
-The server SHALL ingest JSON files from `sparta/walkthrough-lab/evidence/` whose basename matches `<plan_id>@<version>-(normal|interruption)-<digits>`, skipping any file whose sha256 equals an ingested run's `report_sha256`, creating one run per file (or per element of a `runs` array) with `id` `sim-<first 10 hex of file sha256>[-<index>]`, `verdict: "PASS"` only when the evidence grade passed and the exit code is 0, `plan_hash` from the agent trace's `plan_sha256` (else the plan's hash), `seed_version` as the first 12 characters of the evidence `seedHash` and `checks_version` as the first 12 hex of the sha256 of the mission's canonicalized checks, and protected ticket `1` marked unchanged unless updated. In a custom scenario ingestion SHALL add nothing. `GET /api/simulations` SHALL run this ingestion against the default store without requiring a session (whatever the caller's workspace) and return `{ added, simulations }`, where `added` is the number of runs added by this call; unlike state polling, an ingestion error (for example an evidence file that is not valid JSON) fails this route with HTTP 500 `{ "error": "Server error" }`.
+### Requirement: Rejecting and countering a change request
 
-#### Scenario: Idempotent ingestion
+The server SHALL accept `reject {reason}` (reason 1 to 2000 characters, 400 otherwise) from an approver on a `pending` or `countered` request, setting `rejected` with `rejected_by`, `reason` and `decided_at`; and `counter {changes, note, revision?}` (note 1 to 2000 characters) from an approver on a `pending` request, replacing the proposed changes, raising `revision` and setting `countered`. Only the requester SHALL `accept_counter` (403 `not_requester`) a `countered` request, which returns it to `pending` with the countered changes. A caller outside the approval set SHALL get 403 `not_an_approver`, a request in another state 409 `wrong_state`, and a sent `revision` other than the current one 409 `stale_revision`.
 
-- **WHEN** a client calls `GET /api/simulations` twice with no new evidence files
-- **THEN** both responses are HTTP 200, the second has `added: 0`, and both `simulations` lists have the same length
+#### Scenario: Reject needs a reason
 
-### Requirement: Evidence lookup
+- **WHEN** an approver POSTs `reject {}`
+- **THEN** the response is 400 and the request is unchanged
 
-The server SHALL answer `GET /api/evidence/{id}` (no session required) with `{ run, report, trace }` for an ingested run of the default store, where `report` is the raw evidence JSON only if its path resolves inside the evidence directory (else null) and `trace` is the agent trace or null, and SHALL respond HTTP 404 with `error: "Evidence not found"` for an unknown id.
+#### Scenario: Counter then accept
 
-#### Scenario: Unknown run id
+- **WHEN** an approver counters with changed measures and the requester calls `accept_counter`
+- **THEN** the request is `pending` at revision 2 with the approver's changes, and an approver can then approve revision 2
 
-- **WHEN** a client calls `GET /api/evidence/does-not-exist`
-- **THEN** the response is HTTP 404
+### Requirement: Withdrawing and rebasing a change request
 
-### Requirement: State view is projected per role
+The server SHALL let only the requester (403 `not_requester`) `withdraw` a `pending` or `countered` request, setting `withdrawn`, and `rebase {base_version, changes?}` a `pending` request (409 `wrong_state` otherwise), where `base_version` must equal the goal's current version (409 `stale_version`); rebase SHALL move the request to that version, replace the changes when sent, re-validate them against it (409 `no_change` when they no longer change anything), and raise `revision`.
 
-The server SHALL answer `GET /api/state` for an anonymous caller with only `company`, `scenario` and `teams` when set, custom `company_note` when set, and `me: null`; and for a signed-in caller with an allowlisted projection plus `me`, in which goals that are not `shared` and belong to another owner slot are removed (with relations and work items that reference them), `private_constraints` contain only rows owned by the caller, `org_draft` is present only for `leadership`, and `ingest_errors` have absolute paths reduced to file names. A custom-workspace session SHALL also receive `workspace`. When hosted, an anonymous `GET /api/state` SHALL respond HTTP 404 `Not found`, and the default-store-only routes (`/api/policy/security`, `/api/simulations`, `/api/evidence/{id}`, `/api/alike`, `/api/org/push`, `/api/scenario`) SHALL respond HTTP 404 at the request edge because they are not on the hosted allowlist.
+#### Scenario: Rebase after the goal moved
 
-#### Scenario: Anonymous state read when hosted
+- **WHEN** the goal moved from version 2 to 3 and the requester POSTs `rebase {base_version: 3}`
+- **THEN** the request has `base_version: 3` and a higher `revision`, and an approver can approve it
 
-- **WHEN** a hosted server receives `GET /api/state` with no session cookie
-- **THEN** the response is HTTP 404 `Not found`
+### Requirement: Change requests are superseded when the goal is achieved or dropped
 
-#### Scenario: Private constraints stay private
+The server SHALL, in the transaction that gives a goal status `achieved` or `dropped` (an owner's version or an approved change request), set every other `pending` or `countered` change request on that goal to `superseded` and write audit action `change_request.superseded` for each, with the person whose action changed the goal's status as actor. A new version that leaves the goal `active` SHALL NOT change other open requests: they stay `pending` or `countered`, and approving one answers 409 `stale_version` until its requester rebases it.
 
-- **WHEN** Product and Security each call `GET /api/state`
-- **THEN** every `private_constraints` row in Product's response has `owner: "product"` and every row in Security's has `owner: "security"`
+#### Scenario: Owner drops the goal
 
-#### Scenario: Draft hidden from teams
+- **WHEN** the owner saves a version with `status: "dropped"` while two requests on the goal are pending
+- **THEN** both requests become `superseded` and accept no further action (409 `wrong_state`)
 
-- **WHEN** Product calls `GET /api/state` while `org_draft` is set
-- **THEN** the response has no `org_draft` key
+#### Scenario: Another request is approved
 
-### Requirement: State polling ingests evidence without failing
+- **WHEN** two requests on an active goal are pending and an approver approves one without changing the status
+- **THEN** the other stays `pending`, and approving it answers 409 `stale_version` until its requester rebases it
 
-The server SHALL, on each default-store `GET /api/state`, ingest new evidence, record each run's measured trace duration once in `timer.excluded_prep` as `Sparta sandbox run <label> (prep, excluded)`, and on an ingestion error store the error text in `ingest_errors` and still return HTTP 200; a successful ingestion SHALL reset `ingest_errors` to an empty list.
+### Requirement: Change request audit
 
-#### Scenario: Malformed evidence file
+The server SHALL write an audit row naming its actor for every change request action: `change_request.created`, `.approved`, `.rejected`, `.countered`, `.counter_accepted`, `.withdrawn`, `.rebased` and `.superseded`, with the request id as object.
 
-- **WHEN** a new `.json` file in the evidence directory does not parse as JSON and a signed-in default-store session calls `GET /api/state`
-- **THEN** the response is HTTP 200 and `ingest_errors` has one message (an anonymous caller also gets HTTP 200, but its view carries no `ingest_errors`)
+#### Scenario: Audited decision
 
-### Requirement: Audit log is attributed and survives resets
+- **WHEN** a lead rejects a request
+- **THEN** the workspace audit has a `change_request.rejected` row whose actor is the lead and whose object is the request id
 
-The server SHALL take the actor and session id for every flow action from the signed session (never the body) and append an audit row `{ id, actor, session_id, action, target, at }` for `propose`, `counter`, `acknowledge`, `ratify`/`ratify_untested`, `reject`, `launch_approved`/`launch_not_yet`, `ratify_and_push_company_goal`, `alike_ref_recorded`, timer review actions, `saw_accepted_version`, `scenario_setup` and `reset`; reset and scenario setup SHALL keep all prior audit rows. The default store's audit log is never trimmed; a custom workspace keeps its last 1000 rows in state and moves older rows to a bounded archive (see Serialized writes), so its oldest rows can eventually be dropped.
+### Requirement: Reading change requests and decision records
 
-#### Scenario: Actors match roles
+The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title}`, `state`, `revision`, `base_version`, `requester`, `changes`, `reason`, `revisions` (each `{revision, changes, note, author, created_at}`), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; after a decision, from the resulting version), `approvers` (the current approval set), `approved_by`, `rejected_by`, decision `note` or `reason`, `version`, `can` flags (all false for a viewer), `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read.
 
-- **WHEN** the full flow (propose, counter, acknowledge, approve) completes
-- **THEN** every `propose` and `acknowledge` audit row has `actor: "product"` and every `counter` and `ratify*` row has `actor: "security"`
+#### Scenario: Viewer reads but cannot act
 
-### Requirement: Review timer
+- **WHEN** a viewer opens a pending request on a workspace goal
+- **THEN** the response is 200 with every `can` flag false, and a viewer's `approve` is 403 `read_only`
 
-The server SHALL accept `POST /api/timer` from any signed-in session with `action` one of `ceo_change_viewed`, `brief_reviewed`, `scenario_reviewed`, `evidence_opened`, `saw_accepted_version` (HTTP 400 otherwise) and return `timer`. The timer SHALL start only on `ceo_change_viewed`; before it starts and after it ends touchpoints are not recorded; each review action SHALL be recorded at most once per actor; flow actions (`propose`, `counter`, `acknowledge`, `ratify`, `reject`, `push_company_goal`) add touchpoints while it runs. `saw_accepted_version` SHALL count only while the timer runs (started and not ended) and once an acceptance exists, records the actor once in `acked_by` (with a `saw_accepted_version` touchpoint and audit row), and SHALL set `ended_at` when both `product` and `security` have sent it; sent before `ceo_change_viewed` started the timer, it changes nothing, so the timer ends only if both teams send it again after the timer starts.
+#### Scenario: Waiting on me
 
-#### Scenario: Timer ends on the second viewer
+- **WHEN** a team lead calls `GET /api/v2/workspaces/{ws}/change-requests`
+- **THEN** pending requests on their team's goals are under `waiting_on_me`, their own requests under `mine`, and the rest they can read under `others`
 
-- **WHEN** the timer was started with `ceo_change_viewed` and, after an approval, Product and then Security call `POST /api/timer` with `saw_accepted_version`
-- **THEN** Product's response has `ended_at: null` and Security's has a non-null `ended_at`
+### Requirement: Change request controls in the app
 
-#### Scenario: Unknown action
+The goal page SHALL offer **Propose a change** to a reader who does not own the goal and is not a viewer, and a "Change requests" list whose approve, reject and counter controls appear only for people in the goal's approval set; the workspace SHALL have a "Requests" tab with the groups waiting on me, mine and others, each control appearing only when the server's `can` flag allows it.
 
-- **WHEN** a signed-in session calls `POST /api/timer` with `{ "action": "not_a_real_action" }`
-- **THEN** the response is HTTP 400
+#### Scenario: Non-owner proposes from the goal page
 
-### Requirement: Reset
+- **WHEN** a member opens a goal they do not own
+- **THEN** the page shows **Propose a change**, which posts to `.../goals/<goal>/change-requests` with the current version as `base_version`
 
-The server SHALL accept `POST /api/reset` only with body `{"confirm":"reset"}` (HTTP 400 otherwise). In Northstar any signed-in role SHALL reset the default store to the fixture while keeping ingested simulations, consented captured sessions (with directives cleared) and the audit log plus a `reset` row; when the default store holds a custom scenario only `leadership` may reset (HTTP 403 otherwise) and the reset also drops simulations; in a custom workspace only `leadership` may restart (HTTP 403 otherwise), restarts are limited to 10 per minute (HTTP 429), and the state is rebuilt from the saved setup input. Success returns `{ "ok": true }`.
+### Requirement: Creating the Northstar sample workspace
 
-#### Scenario: Demo reset keeps evidence
+The server SHALL let any signed-in person (browser session, in Mode L and hosted) call `POST /api/v2/workspaces/sample` and SHALL create, in one transaction, a new workspace named "Northstar (sample)" owned by the caller, responding 201 `{id:"ws_…", name:"Northstar (sample)", role:"owner"}`. It SHALL count toward the same limits as any workspace creation (429 `rate_limited`, 409 `too_many_workspaces`), and the result SHALL be ordinary data that can be renamed or deleted like any workspace.
 
-- **WHEN** Product calls `POST /api/reset` with `{"confirm":"reset"}` in Northstar after a ratification
-- **THEN** the response is `{ "ok": true }`, `proposals` and `acceptances` are empty, the current Security goal is `g-security-v1`, and `simulations` are unchanged
+#### Scenario: Creating the sample twice
 
-#### Scenario: Missing confirmation
+- **WHEN** a person calls `POST /api/v2/workspaces/sample` twice
+- **THEN** two separate workspaces named "Northstar (sample)" exist, each owned by them
 
-- **WHEN** a signed-in session calls `POST /api/reset` with `{}`
-- **THEN** the response is HTTP 400
+### Requirement: Northstar sample contents
 
-### Requirement: Custom scenario setup
+The sample workspace SHALL contain teams Product and Security with the caller as lead of both; a company goal "Expand to regulated customers"; two team goals with visibility `workspace`, "Ship self-serve onboarding" (team Product) and "Pass the security review" (team Security), each contributing to the company goal through an approved `contribution` alignment requested and approved by the caller; "Ship self-serve onboarding" `depends_on` "Pass the security review"; and one pending change request on "Pass the security review" from the caller whose reason explains why the sample shows it. Every goal is owned by the caller and every audit row names the caller. Because the caller owns the Security goal, the sample request is seeded directly rather than through the create route, and the caller can approve, counter, reject, withdraw or rebase it.
 
-The server SHALL accept `POST /api/scenario` only from a default-store `leadership` session (HTTP 401 without a session, HTTP 403 for other roles or a custom-workspace session), as JSON (HTTP 415) with no foreign `Origin` (HTTP 403 otherwise; a non-loopback `Host` is answered HTTP 421 at the request edge, and when hosted the route does not exist, so every call gets HTTP 404 at the request edge), of at most 64 KB (HTTP 413), parse it (HTTP 400 for invalid JSON or reserved keys `__proto__`, `constructor`, `prototype`), validate it strictly (`confirm: "replace"`, company, company goal, asking and owning teams, dependency, 2 to 6 work items with 1 to 3 per team, plan text of 20 to 4000 characters) responding HTTP 400 `{ error, issues: [{ path, message }] }` on failure, and refuse with HTTP 409 while a proposal is open. On success it SHALL replace the default store with goals `g-ceo-v1`, `g-product-v1`, `g-security-v1` (all `shared`), relation `r-product-security` (`UNKNOWN`), plan `p-custom@1`, `scenario: "custom"`, keeping capture consents, consented sessions and the audit log plus a `scenario_setup` row whose target is `sha256:<input hash>`.
+#### Scenario: Sample goal tree
 
-#### Scenario: Invalid setup
+- **WHEN** the caller reads the sample's goals feed
+- **THEN** both team goals list the company goal in `contributes_to` with `stale: false`, and "Ship self-serve onboarding" lists "Pass the security review" in `depends_on`
 
-- **WHEN** leadership posts a setup whose `owner_measure` index is outside `owning.measures`
-- **THEN** the response is HTTP 400 with `issues` containing path `owner_measure`
+#### Scenario: Acting on the sample request
 
-#### Scenario: Valid setup
+- **WHEN** the caller approves the pending sample change request at its current revision
+- **THEN** "Pass the security review" moves to version 2 and the request becomes `approved` with `approved_by` the caller
 
-- **WHEN** leadership posts a valid setup with no open proposal
-- **THEN** the response has `ok: true`, `scenario: "custom"`, `goal_ids` `["g-ceo-v1","g-product-v1","g-security-v1"]`, `dependency_id: "r-product-security"` and `plan.plan_id: "p-custom"`
+### Requirement: Sample offer for a person with no workspaces
 
-### Requirement: Serialized writes
+The `/app` page SHALL offer **Create the Northstar sample** when the signed-in person has no workspaces, calling `POST /api/v2/workspaces/sample` and opening the new workspace.
 
-The server SHALL serialize every read-modify-write of the default store through one in-process single-writer queue, and of each custom workspace through a per-workspace lock, write state by atomic temp-file rename with owner-only permissions, skip the write when the state is unchanged, and for a custom workspace refuse a write whose state (excluding audit) exceeds 1 MB with HTTP 413 while trimming the audit log to its last 1000 rows, appending older rows to `audit-archive.jsonl`; once that file would pass 1 MB it is renamed to `audit-archive.1.jsonl` (replacing any earlier one), so at most two archive files exist and the oldest archived rows are discarded.
+#### Scenario: First visit
 
-#### Scenario: Concurrent proposals
-
-- **WHEN** Product sends two valid `POST /api/proposals` requests concurrently to one server process with no open proposal
-- **THEN** exactly one returns HTTP 200 and the other HTTP 409
-
-### Requirement: Flow request bodies and workspace binding
-
-The server SHALL, for propose, counter, acknowledge, accept, reject, launch, timer and reset requests, bind the action to the session's own store and refuse with HTTP 409 and `code: "workspace_mismatch"` when an `x-align-workspace` header names another workspace. Apart from launch (whose body rules are in Launch request hygiene), for the default store it SHALL refuse a foreign `Origin` (HTTP 403) or a non-JSON body (HTTP 415) and treat an unparseable JSON body as `{}`; for a custom workspace it SHALL require JSON from an allowed host and a same-origin `Origin` (HTTP 403 when a sent `Origin`'s `host:port` differs from `Host`; when hosted, an `Origin` of exactly `https://<Host>` is required, so a missing one is also HTTP 403), cap the body at 64 KB (HTTP 413), reject invalid JSON or reserved keys (HTTP 400), and cap each string at 300 characters (fields named `text` or `plan_text` 4000, `conditions` 1000), responding HTTP 400 when exceeded. Error responses SHALL have the shape `{ "error": <message> }` (plus `code` when set), and unexpected failures HTTP 500 `{ "error": "Server error" }`.
-
-#### Scenario: Cross-port write to the default store
-
-- **WHEN** a request to `POST /api/proposals/{id}/accept` carries a Security cookie and `Origin: http://localhost:9999` while `Host` is `localhost:3100`
-- **THEN** the response is HTTP 403 and the proposal is unchanged
-
-### Requirement: Plan revision fingerprint
-
-The server SHALL compute a 16-hex plan revision from the goals (`id`, `version`, `approved_at`), proposals (`id`, `state`, counter count, `product_ack_at`) and acceptances (`proposal_id`, `accepted_version`, launch decision and time), so that every propose, counter, acknowledge, approve, reject or launch decision changes it, and SHALL report the latest of those timestamps as the plan's last change; both are exposed through the workspace connections and MCP grant features specified in the `workspaces` and `mcp` parts.
-
-#### Scenario: Counter changes the revision
-
-- **WHEN** Security counters an open proposal
-- **THEN** the plan revision computed for that state differs from the one computed before the counter
+- **WHEN** a person with no workspaces opens `/app`
+- **THEN** the page shows **Create the Northstar sample** alongside creating their own workspace
 
 ## Open questions
 
-- Northstar's next owner-goal version is the literal `v2` (`NORTHSTAR_PROFILE.nextVersion`). A second approved proposal in the same Northstar state would again produce `v2` or `v2.N`, which could duplicate an earlier goal id (for example `g-security-v2`); there is no guard. It is unclear whether repeated approvals in Northstar are meant to be supported.
-- `POST /api/proposals` in Northstar does not require leadership's company-goal push to have happened first, yet `source_refs` always names `g-ceo-v2#KR2`, which can reference a goal that does not exist yet.
-- The server never computes conflicts between team goals or at-risk work items. The only goal-conflict record is the `depends_on` relation `r-product-security` with status `UNKNOWN` (the per-session conflict probability the agent-session mapper computes, specified in the `workspaces` and `directives` parts, judges an agent session against goals, not one goal against another). The `conflicts_with` relation type and the `DRAFT` proposal state are declared but never produced, and conflict or "old plan" displays are computed in client components. Should any of this be a server guarantee?
-- `CounterVersion.plan_text` and `plan_hash` are declared in the type and the policy agreement reads `plan_text` from the latest counter, but no route writes either field. Custom plans have empty `params`, so any non-empty `plan_params` sent in a custom counter counts as a plan change. Is a counter that revises the plan text meant to exist?
-- Locking is per Node process (a global promise queue and lock map). Behavior with several server processes sharing one store is not defined.
-- `GET /api/simulations` and `GET /api/evidence/{id}` need no session, and `GET /api/simulations` writes state (it ingests evidence). Both always use the default store, even for a custom-workspace caller. Northstar `POST /api/reset` is allowed for any signed-in role, Product included, with no rate limit. These may be intentional demo conveniences.
+- Evidence (sandbox test results) attached to change requests is out of scope and remains an open product decision.
+- Whether directives may instruct agents, beyond delivering goal versions and bindings, remains open.
+- When the requester is the only person who could approve a goal's requirement and no other workspace owner exists, the request stays open indefinitely; should it instead be refused up front?
+- The sample's pending change request comes from the caller, who also owns the Security goal, although an owner may not propose a change to their own goal through the API; the sample seeds it directly. Should the sample instead show a request from a second (placeholder) person?
+- Whether the workspace "Requests" tab also shows alignments, or alignments keep their own tab, is not decided; this part specifies change requests only.
 
 ## Sources
 
-- `README.md`
-- `lib/flow.ts`
-- `lib/store.ts`
-- `lib/types.ts`
-- `lib/org.ts`
-- `lib/policy.ts`
-- `lib/plan-rev.ts`
-- `lib/evidence.ts`
-- `lib/scenario.ts`
-- `lib/scenario-profile.ts`
-- `lib/registry.ts`
-- `lib/locks.ts`
-- `lib/errors.ts`
-- `lib/labels.ts`
-- `lib/http.ts`
-- `lib/events.ts`
-- `lib/auth.ts` (session helpers `requireSession`, `requireWsSession`, `sessionFrom` only)
-- `lib/ratelimit.ts` (`takeWorkspaceAction` only)
-- `lib/workspace-setup.ts` (`resetWorkspace` only)
-- `data/fixture.json`
-- `app/api/proposals/route.ts`
-- `app/api/proposals/[id]/accept/route.ts`
-- `app/api/proposals/[id]/acknowledge/route.ts`
-- `app/api/proposals/[id]/counter/route.ts`
-- `app/api/proposals/[id]/launch/route.ts`
-- `app/api/proposals/[id]/reject/route.ts`
-- `app/api/state/route.ts`
-- `app/api/scenario/route.ts`
-- `app/api/simulations/route.ts`
-- `app/api/evidence/[id]/route.ts`
-- `app/api/timer/route.ts`
-- `app/api/reset/route.ts`
-- `app/api/org/push/route.ts`
-- `app/api/policy/security/route.ts`
-- `app/api/alike/route.ts`
-- `scripts/test-flow.mjs`
+- `lib/v2/goals.ts`
+- `lib/v2/alignments.ts`
+- `lib/v2/changes.ts` (new)
+- `lib/v2/policy.ts`
+- `lib/v2/validate.ts`
+- `lib/v2/directives.ts` (`goalTargets`, `goalVersionDirective` only)
+- `lib/v2/sessions.ts` (`sessionRow`, `openEpoch` only)
+- `lib/v2/workspaces.ts` (`need`, `memberName`, `createWorkspace` only)
+- `lib/v2/db.ts`
+- `lib/v2/errors.ts`
+- `lib/v2/http.ts`
+- `docs/v2/WIRE.md`
+- `app/api/v2/workspaces/sample/route.ts` (new)
+- `app/api/v2/workspaces/[ws]/goals/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/versions/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/review/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/route.ts` (new)
+- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/route.ts` (new)
+- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/[action]/route.ts` (new)
+- `app/api/v2/workspaces/[ws]/change-requests/route.ts` (new)
+- `app/api/v2/workspaces/[ws]/alignments/route.ts`
+- `app/api/v2/workspaces/[ws]/alignments/[id]/route.ts`
+- `app/api/v2/workspaces/[ws]/alignments/[id]/[action]/route.ts`
