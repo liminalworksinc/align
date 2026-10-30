@@ -668,9 +668,10 @@ the first pass, and never use them to hold an edit.
 ### Requirement: Pod activity upload with consent
 
 The `align sync` pass SHALL upload new lines of each shared session's activity file to `POST
-/api/v2/workspaces/:ws/activity` in batches of 200, advancing its offset only on success. Each item SHALL carry a
-`repo_id` (hash of the workspace and normalized git remote, or the local folder when there is none) and a
-`path_hash`; repo-relative `path`, commit subjects, task labels, claim reasons and a `branch <name>` task (except
+/api/v2/workspaces/:ws/activity` in batches of 200, advancing its offset only on success. Each item SHALL carry the
+session key, its kind (`edit`, `commit`, `task` or `claim`), a time and a `repo_id` (hash of the workspace and
+normalized git remote, or the local folder when there is none), and `edit` and `claim` items also a `path_hash`
+(file reads stay local); repo-relative `path`, commit subjects, task labels, claim reasons and a `branch <name>` task (except
 `main`, `master`, `trunk`, `develop`, `dev`) SHALL be sent only when work signals are on for that session (`--signals`
 on `align share`, else the folder rule's setting). The `align share` previews SHALL say `Work signals ON: ...` or
 `Work signals OFF: only keyed hashes of edited files are sent, ...`. The pass SHALL fetch `GET
@@ -708,7 +709,8 @@ uploads SHALL never be shown back as someone else's.
 ### Requirement: User-only hints for unshared sessions
 
 The `align` hook SHALL, for an unshared session, show only `systemMessage` text (never `additionalContext`): on
-`startup` in a git repo whose remote or branch matches a cached goal's anchors, once, `Align: this repo matches goal
+`startup` in a git repo that matches the anchors of a cached active, bindable goal (its repo anchors, its branch
+patterns, or both when the goal has both kinds), once, `Align: this repo matches goal
 "<title>" in <workspace>. Type \`::align share <title>\` to share this session toward it.`; and on `fork` or `clear`
 next to a session shared in the same folder in the last 24 hours, `Align: this forked session is private.` or
 `Align: this new session is private.` followed by ``Type `::align share` to share it.``
