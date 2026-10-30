@@ -94,7 +94,8 @@ export const field =
 
 export function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string[]; children: ReactNode }) {
   return (
-    <label className="mb-4 block">
+    // data-invalid marks a field with an error, so /new can scroll to and focus the first one after a failed Create.
+    <label className="mb-4 block" data-invalid={error?.length ? "" : undefined}>
       <span className="mb-1 block text-[16px] font-semibold text-zinc-900">{label}</span>
       {hint && <span className="mb-1.5 block text-[16px] text-zinc-600">{hint}</span>}
       {children}

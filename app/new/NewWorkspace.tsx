@@ -108,6 +108,17 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
     control?.focus({ preventScroll: true });
   }, [jump]);
 
+  // After a Create that failed validation: the first marked field (Field sets data-invalid), scrolled to and focused.
+  // Runs after the render that showed the marks and unfolded the form, so the field is laid out.
+  const [focusInvalid, setFocusInvalid] = useState(0);
+  useEffect(() => {
+    if (!focusInvalid) return;
+    const control = document.querySelector<HTMLInputElement | HTMLTextAreaElement>("[data-invalid] input, [data-invalid] textarea");
+    if (!control) return;
+    control.scrollIntoView({ behavior: smooth(), block: "center" });
+    control.focus({ preventScroll: true });
+  }, [focusInvalid]);
+
   const openForm = (to: FormTarget | "heading") => {
     setFormOpen(true);
     setJump((j) => ({ to, at: (j?.at ?? 0) + 1 })); // a new object each time, so the same target can be jumped to twice
@@ -153,7 +164,8 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
       if (res.status === 400 && Array.isArray(data.issues)) {
         setIssues(issuesFrom(data.issues));
         setFormOpen(true); // the marks are inside the form, so a folded form opens to show them
-        setProblem("Some fields need fixing. They are marked below.");
+        setProblem("Some fields need fixing. They are marked in red above.");
+        setFocusInvalid((n) => n + 1); // then scroll to and focus the first one
       } else if (res.status === 403 && cfg?.signup_code_required && isCodeRefusal(error)) {
         setIssues({ signup_code: [error] });
         setProblem("Check the signup code.");
