@@ -18,7 +18,7 @@ cd "$ROOT"
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/align-test-all.XXXXXX")"
 FAILS=0
 
-summary() { printf '%-5s %-14s %s\n' "$1" "$2" "$3"; [ "$1" = PASS ] || FAILS=$((FAILS + 1)); }
+summary() { printf '%-5s %-14s %s\n' "$1" "$2" "$3" | tee -a "$LOGDIR/summary"; [ "$1" = PASS ] || FAILS=$((FAILS + 1)); }
 step() { # step <name> <command...>: run, keep output in the log dir, one summary line
   local name="$1"; shift
   if "$@" >"$LOGDIR/$name.log" 2>&1; then summary PASS "$name" "$(tail -n 1 "$LOGDIR/$name.log")"
@@ -38,6 +38,28 @@ step test-oauth node scripts/test-oauth.mjs "$PORT" --no-build
 
 # ---- the local agent package ----
 step align-agent bash -c 'cd packages/align-agent && npm test'
+
+# ---- one node:test-style total (so `npm test` reports an exact count to tools that read it, e.g. litai) ----
+# Each static step counts as one test; test-v2, test-oauth and align-agent contribute their own counts from their logs.
+TOTAL_PASS=0; TOTAL_FAIL=0
+for s in lint typecheck syntax; do
+  if grep -q "^PASS  $s " "$LOGDIR/summary"; then TOTAL_PASS=$((TOTAL_PASS + 1)); else TOTAL_FAIL=$((TOTAL_FAIL + 1)); fi
+done
+count() { # count <log> <regex with two groups: passed, failed>
+  local line; line="$(grep -Eo "$2" "$1" 2>/dev/null | tail -n 1)"
+  if [ -z "$line" ]; then TOTAL_FAIL=$((TOTAL_FAIL + 1)); return; fi
+  TOTAL_PASS=$((TOTAL_PASS + $(sed -E "s/$2/\1/" <<<"$line"))); TOTAL_FAIL=$((TOTAL_FAIL + $(sed -E "s/$2/\2/" <<<"$line")))
+}
+count "$LOGDIR/test-v2.log" '^([0-9]+) passed, ([0-9]+) failed$'
+count "$LOGDIR/test-oauth.log" '^test-oauth: ([0-9]+) passed, ([0-9]+) failed$'
+AGENT_PASS="$(grep -Eo '^(#|ℹ) pass [0-9]+' "$LOGDIR/align-agent.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
+AGENT_FAIL="$(grep -Eo '^(#|ℹ) fail [0-9]+' "$LOGDIR/align-agent.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
+if [ "$AGENT_PASS" -eq 0 ]; then TOTAL_FAIL=$((TOTAL_FAIL + 1)); fi
+TOTAL_PASS=$((TOTAL_PASS + AGENT_PASS)); TOTAL_FAIL=$((TOTAL_FAIL + AGENT_FAIL))
+echo
+echo "ℹ tests $((TOTAL_PASS + TOTAL_FAIL))"
+echo "ℹ pass $TOTAL_PASS"
+echo "ℹ fail $TOTAL_FAIL"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "test-all: all steps passed (logs in $LOGDIR)"; else echo "test-all: $FAILS step(s) failed (logs in $LOGDIR)"; fi

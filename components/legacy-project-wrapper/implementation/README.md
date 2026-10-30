@@ -152,7 +152,9 @@ scripts/test-image.sh                 # the hosted Docker image (needs Docker)
 
 `test-v2` and `test-oauth` build the app and start their own production servers on `<port>` with temporary data
 directories (`test-v2` also uses `<port>+1`). They refuse port 3100 and a port that is already in use.
-`npm test` runs the lint and the agent package tests.
+`npm test` runs `scripts/test-all.sh` on port `$ALIGN_TEST_PORT` (default 3600) and ends with one node:test-style total
+(`ℹ tests`, `ℹ pass`, `ℹ fail`) over every step, which is what the literate-ai test receipt records. Running as root
+(for example in a container), point `CHROME_PATH` at a Chrome wrapper that adds `--no-sandbox`.
 
 ## Where things are
 
