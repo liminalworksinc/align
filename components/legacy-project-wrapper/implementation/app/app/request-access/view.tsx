@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { api, Btn, Err, Field, Input, Note, Select, TextArea, useAction } from "../_ui/kit";
+import { api, Btn, Err, Field, Input, Note, Select, TextArea, TrustLinks, useAction } from "../_ui/kit";
 import { useTurnstile } from "../_ui/turnstile";
 
 // The request-access form (POST /api/v2/access-requests). Requests are answered by hand. Nothing here is an agreement:
@@ -101,6 +101,13 @@ export default function RequestAccess({ captchaSiteKey, local }: { captchaSiteKe
               Sending this form only asks for access. It is not an agreement, and asking for a follow-up or a letter of intent doesn&apos;t commit you or your employer to anything. Nothing here asks
               you to sign for your organization.
             </p>
+            <p className="mb-4 text-[13px] text-zinc-500">
+              How we use and keep what you send:{" "}
+              <Link href="/privacy" className="underline">
+                privacy policy
+              </Link>
+              .
+            </p>
             {bot.widget}
             <Btn type="submit" disabled={act.busy || !bot.ready || !email.trim() || !name.trim() || !useCase.trim()}>
               Send request
@@ -114,6 +121,7 @@ export default function RequestAccess({ captchaSiteKey, local }: { captchaSiteKe
             </p>
           </form>
         )}
+        <TrustLinks />
       </div>
     </main>
   );

@@ -21,7 +21,7 @@ retention schedule in [RETENTION.md](RETENTION.md), which the server applies its
 
 | Area | HOSTED=1 behaviour |
 |---|---|
-| Routes | Only `/app*`, `/api/v2/*`, `/api/mcp`, `/oauth/*`, `/.well-known/*`, `/api/oauth/*` and Next's static assets. `/` redirects to `https://<host>/app`. **Every other path is 404** `{"error":"Not found"}`, so a route added later stays closed until it is added to `proxy.ts`. |
+| Routes | Only `/app*`, `/api/v2/*`, `/api/mcp`, `/oauth/*`, `/.well-known/*`, `/api/oauth/*`, exactly `/privacy` and `/trust` (the public trust pages, built from `docs/trust` and `docs/RETENTION.md`), and Next's static assets. `/` redirects to `https://<host>/app`. **Every other path is 404** `{"error":"Not found"}`, so a route added later stays closed until it is added to `proxy.ts`. |
 | Hosts | Only the host names in `ALIGN_HOSTS` are served. Every other Host gets 421, loopback included. |
 | Proxy | Without `X-Forwarded-Proto: https`, 403 `{"error":"Use https"}`. Without `Fly-Client-IP`, 403 `{"error":"Use the public address"}`. |
 | Sign-in | Email one-time codes through an HTTPS email API, and Google or GitHub when configured; passkeys (added from `/app/account`) with the `ALIGN_PUBLIC_ORIGIN` host as relying party. No account is made at startup. An email code creates an account only for a pending invite, an unused creation code bound to the address, or `ALIGN_FIRST_OWNER_EMAIL` while the server has no account. The test identity provider is refused. |
@@ -135,8 +135,12 @@ Then open `https://<host>/app`, sign in as `ALIGN_FIRST_OWNER_EMAIL`, create a w
 this first one) and invite people from its People tab. For Turnstile, add a widget for the host name in Cloudflare and
 set `ALIGN_TURNSTILE_SITE_KEY` in `fly.toml` and `ALIGN_TURNSTILE_SECRET_KEY` with `fly secrets set`.
 
+Before the first public deploy, fill in the legal entity, address and contact emails in `lib/trust/entity.ts` (the
+`/privacy` and `/trust` pages show them) once counsel has reviewed `docs/trust`.
+
 **The image** (`Dockerfile`):
-- The build context is an allowlist (`.dockerignore`): only the app's own source goes in.
+- The build context is an allowlist (`.dockerignore`): only the app's own source goes in, plus `docs/trust` and
+  `docs/RETENTION.md` for the build stage, which builds `/privacy` and `/trust` from them.
 - The runtime has production dependencies and the build output only, plus the operator script and `lib/v2/core.mts`:
   no other scripts, no tests, docs or `.env` file.
 - The container hands `/data` to the `node` user (`chown -R` as root on every start), then `setpriv` execs the server

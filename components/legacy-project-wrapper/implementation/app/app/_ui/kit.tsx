@@ -275,6 +275,21 @@ export function Pill({ children, tone = "neutral" }: { children: ReactNode; tone
   return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[12px] tracking-[0.04em] ${t}`}>{children}</span>;
 }
 
+/** The footer of the sign-in and request-access cards: the public privacy policy and trust page (PRESEED-008). */
+export function TrustLinks() {
+  return (
+    <p className="mt-5 text-[13px] text-zinc-500">
+      <Link href="/privacy" className="underline">
+        Privacy
+      </Link>
+      {" · "}
+      <Link href="/trust" className="underline">
+        Trust and security
+      </Link>
+    </p>
+  );
+}
+
 export const Loading = () => <p className="text-[15px] text-zinc-500">Loading…</p>;
 
 export const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : "");

@@ -26,6 +26,9 @@ const nextConfig: NextConfig = {
         loaders: ["@tailwindcss/turbopack"],
         as: "*.css",
       },
+      // The trust documents (docs/trust/*.md, docs/RETENTION.md) are imported as plain strings by lib/trust/docs.ts,
+      // so /privacy and /trust are built from them and the server never reads them at run time.
+      "*.md": { type: "raw" },
     },
   },
 };

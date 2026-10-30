@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Btn, Err, Field, Input, Note, go } from "../_ui/kit";
+import { Btn, Err, Field, Input, Note, TrustLinks, go } from "../_ui/kit";
 import { autofillAvailable, passkeySignInMessage, signInWithPasskey, usePasskeyPlace } from "../_ui/passkey";
 import type { SignInOptions } from "../_ui/server";
 import { useTurnstile } from "../_ui/turnstile";
@@ -265,6 +265,7 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
             </Link>
           </p>
         )}
+        <TrustLinks />
       </div>
     </main>
   );

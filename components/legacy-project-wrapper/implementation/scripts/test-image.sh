@@ -64,6 +64,9 @@ st() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 loc="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "${EDGE[@]}" "$B/")"
 [ "$loc" = "307 https://align.test/app" ]; ok $? "/ -> 307 to https://align.test/app" "$loc"
 [ "$(st "${EDGE[@]}" "$B/app/sign-in")" = 200 ]; ok $? "the sign-in page is served"
+# The trust pages are built from docs/trust in the build stage; the runtime image has no docs/ and still serves them.
+trust="$(st "${EDGE[@]}" "$B/privacy") $(st "${EDGE[@]}" "$B/trust") $(st "${EDGE[@]}" "$B/trust/security")"
+[ "$trust" = "200 200 404" ]; ok $? "/privacy and /trust are served from the build (nothing under /trust)" "$trust"
 closed="$(for p in /setup /new /w/x /api/state /api/session /api/sessions/events /api/workspaces/config /api/directives; do st "${EDGE[@]}" "$B$p"; echo; done | sort -u | tr '\n' ' ')"
 [ "$closed" = "404 " ]; ok $? "paths outside the allowlist (the retired v1 routes among them) -> 404" "$closed"
 # Connected AI apps: the MCP endpoint asks for Align's OAuth sign-in, and the OAuth metadata names this host.

@@ -85,7 +85,8 @@ hand against `ALIGN_DATA_DIR` (default `./data`); run it with the server's envir
 ## Hosted (HOSTED=1)
 
 One server behind an HTTPS edge (Fly.io), for one public origin. Only `/app*`, `/api/v2/*`, `/api/mcp`, `/oauth/*`,
-`/.well-known/*`, `/api/oauth/*` and static assets are served; `/` redirects to `/app` and everything else is 404.
+`/.well-known/*`, `/api/oauth/*`, the public trust pages `/privacy` and `/trust`, and static assets are served; `/`
+redirects to `/app` and everything else is 404.
 The server refuses to start unless these are set:
 
 | Setting | Value |
@@ -133,6 +134,16 @@ npm run admin -- retention run --dry-run        # the retention schedule: what i
 Disposable email domains (`lib/v2/disposable-domains.json`, the CC0 disposable-email-domains list) can't request access
 or create a workspace; they can still sign in when invited.
 
+## Trust pages and the security pack
+
+`docs/trust/` holds the security pack: the privacy policy, the DPA cover note (Common Paper DPA), the subprocessor
+list, the security overview and questionnaire answers; the retention schedule is `docs/RETENTION.md`, and
+vulnerability reporting is `SECURITY.md`. They describe the code, so change them with it. The app builds `/privacy` and
+`/trust` from those files (`lib/trust/`, `app/privacy`, `app/trust`), in both modes. The legal entity, address and
+contact emails are placeholders (`[LEGAL ENTITY]`, `[ADDRESS]`, `[PRIVACY CONTACT EMAIL]`, `[SECURITY CONTACT EMAIL]`):
+the pages fill them from `lib/trust/entity.ts`, the one place to set them. `test-v2` checks that the subprocessor
+list names every external host the server code can call.
+
 ## Tests
 
 ```sh
@@ -163,4 +174,5 @@ directories (`test-v2` also uses `<port>+1`). They refuse port 3100 and a port t
 | `scripts/align-admin.mjs`, `lib/v2/core.mts` | The operator script and the code it shares with the app |
 | `packages/align-agent/` | The `align` CLI and hooks |
 | `packages/align-connect/` | A stdio MCP bridge for clients without OAuth |
+| `docs/trust/`, `SECURITY.md`, `lib/trust/`, `app/privacy`, `app/trust` | The security pack and the public trust pages built from it |
 | `docs/archive/` | Pages about the retired v1 prototype |

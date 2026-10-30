@@ -444,12 +444,18 @@ both modes and without any feature flag.
 
 The server SHALL, when `HOSTED=1`, answer at the request edge 503 when misconfigured, 421 for a `Host` not in `ALIGN_HOSTS`, 403 without `X-Forwarded-Proto: https` or
 without `Fly-Client-IP`, and 404 `{"error":"Not found"}` for every path outside `/app*`, `/api/v2/*`, `/api/mcp`,
-`/oauth/*`, `/.well-known/*`, `/api/oauth/*` and the static assets.
+`/oauth/*`, `/.well-known/*`, `/api/oauth/*`, exactly `/privacy` and `/trust` (the public trust pages), and the
+static assets.
 
 #### Scenario: Paths outside the allowlist
 
-- **WHEN** a hosted server receives `GET /api/state`, `POST /api/sessions/events` or `GET /setup`
+- **WHEN** a hosted server receives `GET /api/state`, `POST /api/sessions/events`, `GET /setup`, `GET /trust/security`, `GET /privacy/x` or `GET /SECURITY.md`
 - **THEN** it responds 404 `{"error":"Not found"}`
+
+#### Scenario: Public trust pages when hosted
+
+- **WHEN** a hosted server receives `GET /privacy` or `GET /trust` through the edge checks
+- **THEN** it serves the page (200) without sign-in
 
 #### Scenario: Edge checks
 

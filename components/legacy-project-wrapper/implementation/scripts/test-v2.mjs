@@ -22,6 +22,11 @@
 //                                         creation gate: Turnstile through a fake HTTPS verify API, creation codes and
 //                                         access requests with the operator script (align-admin), disposable domains,
 //                                         the caps, durable limits across a restart, and ALIGN_CREATION closed and open
+//   trust   (no server; then local and hosted) -> the security pack (docs/trust): the subprocessor list names every
+//                                         external host the server code can call, no model provider is called, the
+//                                         Markdown reader drops HTML and unsafe links; /privacy and /trust are served in
+//                                         Mode L and hosted, linked from sign-in and request access, and nothing else new
+//                                         is open when hosted
 // Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port;
 //                                           also uses <port>+1 for the second-server check)
 
@@ -33,6 +38,7 @@ import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 
 const PORT = Number(process.argv[2]);
 if (!Number.isInteger(PORT) || PORT === 3100) {
@@ -331,6 +337,76 @@ if (build.status !== 0) {
   process.exit(1);
 }
 
+// ======== trust: the security pack's claims that the code can check (PRESEED-008) ========
+{
+  // Every https host in the server's source (comment lines aside), in fly.toml (its own host aside), and in Better Auth's
+  // code for each sign-in provider lib/v2/auth.ts turns on, must be named in docs/trust/subprocessors.md.
+  const sources = [path.join(ROOT, "proxy.ts"), path.join(ROOT, "instrumentation.ts")];
+  const walkSrc = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walkSrc(p);
+      else if (/\.(?:ts|tsx|mts)$/.test(e.name) && !e.name.endsWith(".d.ts")) sources.push(p);
+    }
+  };
+  walkSrc(path.join(ROOT, "app"));
+  walkSrc(path.join(ROOT, "lib"));
+  const code = (text, comment) => text.split("\n").filter((l) => !comment.test(l.trim())).join("\n");
+  const hostsIn = (text) => [...text.matchAll(/https:\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi)].map((m) => m[1].toLowerCase());
+  const found = new Map();
+  for (const f of sources) for (const h of hostsIn(code(readFileSync(f, "utf8"), /^(?:\/\/|\/\*|\*)/))) found.set(h, path.relative(ROOT, f));
+  const fly = readFileSync(path.join(ROOT, "fly.toml"), "utf8");
+  for (const h of hostsIn(code(fly, /^#/))) found.set(h, "fly.toml");
+  const authSrc = readFileSync(path.join(ROOT, "lib/v2/auth.ts"), "utf8");
+  const providers = [...authSrc.matchAll(/social\.(\w+) = /g)].map((m) => m[1]);
+  for (const prov of providers) {
+    for (const h of hostsIn(readFileSync(path.join(ROOT, "node_modules/@better-auth/core/dist/social-providers", `${prov}.mjs`), "utf8"))) found.set(h, `Better Auth ${prov}`);
+  }
+  for (const h of (/^\s*ALIGN_HOSTS\s*=\s*"([^"]*)"/m.exec(fly)?.[1] ?? "").split(",")) found.delete(h.trim().toLowerCase());
+  const subprocessors = readFileSync(path.join(ROOT, "docs/trust/subprocessors.md"), "utf8");
+  const missing = [...found].filter(([h]) => !subprocessors.includes(`\`${h}\``));
+  check(
+    `trust: docs/trust/subprocessors.md names every external host the server can call (${[...found.keys()].join(", ")})`,
+    providers.length === 2 && found.has("api.resend.com") && found.has("challenges.cloudflare.com") && found.size >= 7 && missing.length === 0,
+    `missing: ${missing.map(([h, w]) => `${h} (${w})`).join(", ")}; providers: ${providers.join(",")}`,
+  );
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  const modelHost = /api\.anthropic\.com|api\.openai\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.|ai-gateway\.vercel/i;
+  const callers = sources.filter((f) => modelHost.test(readFileSync(f, "utf8")) || /from "(?:@anthropic-ai\/|openai|@ai-sdk\/|ai")/.test(readFileSync(f, "utf8")));
+  const modelDeps = deps.filter((d) => /^(?:@anthropic-ai\/|openai$|@ai-sdk\/|ai$|@google\/generative-ai|@mistralai\/|cohere-ai)/.test(d));
+  check(
+    "trust: the server calls no AI model provider (no model API host or SDK in app/, lib/, proxy.ts or package.json), so the subprocessor list rightly has none",
+    callers.length === 0 && modelDeps.length === 0 && /calls no AI model/.test(subprocessors),
+    `${callers.map((f) => path.relative(ROOT, f)).join(" ")} ${modelDeps.join(" ")}`,
+  );
+  const legal = ["privacy-policy.md", "dpa.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8"));
+  const pack = ["privacy-policy.md", "dpa.md", "subprocessors.md", "security-overview.md", "questionnaire.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8")).join("\n");
+  check(
+    "trust: the privacy policy and DPA open with 'Draft for counsel review'; the pack uses the [LEGAL ENTITY], [ADDRESS] and [PRIVACY CONTACT EMAIL] placeholders and marks claims about PRESEED-006 and PRESEED-007",
+    legal.every((t) => t.split("\n").slice(0, 4).join(" ").includes("Draft for counsel review")) &&
+      ["[LEGAL ENTITY]", "[ADDRESS]", "[PRIVACY CONTACT EMAIL]"].every((t) => pack.includes(t)) &&
+      pack.includes("<!-- PRESEED-006 -->") &&
+      pack.includes("<!-- PRESEED-007 -->") &&
+      existsSync(path.join(ROOT, "SECURITY.md")),
+    "",
+  );
+  // The Markdown reader the pages use: HTML is text, comments go, only safe links keep their target.
+  const md = await import(pathToFileURL(path.join(ROOT, "lib/trust/markdown.mts")).href);
+  const opts = { prefix: "t", resolve: (p) => (p === "../RETENTION.md" ? { page: "/trust", prefix: "retention" } : null), fill: { "[PRIVACY CONTACT EMAIL]": "privacy@example.com" } };
+  const blocks = md.parseMarkdown("# Hi <b>x</b>\n<!-- secret note -->\nA <script>alert(1)</script> [js](javascript:alert) [d](data:text/html,x) [r](../RETENTION.md#the-schedule) [x](../../lib/v2/auth.ts) [w](https://example.com) at [PRIVACY CONTACT EMAIL]. <!-- PRESEED-006 -->\n", opts);
+  const flat = JSON.stringify(blocks);
+  const links = [];
+  const walkInl = (c) => c.forEach((x) => (x.t === "link" ? links.push(x.href) : x.c && walkInl(x.c)));
+  for (const b of blocks) if (b.c) walkInl(b.c);
+  check(
+    "trust: the Markdown reader keeps raw HTML as text, drops comments, drops javascript:/data:/unknown relative links, maps trust-document links to their page, and fills placeholders",
+    blocks[0].t === "heading" && blocks[0].id === "t-hi-bxb" && flat.includes("<script>alert(1)</script>") && !flat.includes("secret note") && !flat.includes("PRESEED") &&
+      JSON.stringify(links) === JSON.stringify(["/trust#retention-the-schedule", "https://example.com", "mailto:privacy@example.com"]),
+    `${flat.slice(0, 300)} links=${JSON.stringify(links)}`,
+  );
+}
+
 try {
   // ======== phase local: Mode L with no settings (v2 always on, the local owner, email codes) ========
   const localDir = path.join(tmpRoot, "local");
@@ -347,7 +423,24 @@ try {
   const retired = await Promise.all(["/setup", "/new", "/w/x", "/api/session", "/api/proposals", "/api/state", "/api/workspaces/config", "/api/directives"].map((p) => call("anon", "GET", p).then((r) => ({ p, r }))));
   const retiredPost = await Promise.all(["/api/sessions/events", "/api/proposals", "/api/workspaces"].map((p) => call("anon", "POST", p, { body: {} }).then((r) => ({ p, r }))));
   check("local: retired v1 paths answer 404 (/setup, /new, /w/<id>, /api/session, /api/proposals, /api/state, /api/workspaces*, /api/directives, /api/sessions/events)", [...retired, ...retiredPost].every((x) => x.r.status === 404), [...retired, ...retiredPost].map((x) => `${x.p}:${x.r.status}`).join(" "));
-  const rebound = await Promise.all(["/", "/app", "/api/v2/me", "/api/v2/auth/get-session"].map((p) => rawGet(p, { host: "evil.example" })));
+  // -- the public trust pages (PRESEED-008), built from docs/trust --
+  const lPrivacy = await call("anon", "GET", "/privacy");
+  const lTrust = await call("anon", "GET", "/trust");
+  const lSignIn = await call("anon", "GET", "/app/sign-in");
+  const lRequest = await call("anon", "GET", "/app/request-access");
+  check(
+    "local: /privacy and /trust are served signed out from docs/trust (privacy policy; security overview, subprocessors, retention, DPA, questionnaire, contact), with no source comments and no raw HTML from the documents",
+    lPrivacy.status === 200 && lPrivacy.text.includes("Privacy policy") && lPrivacy.text.includes("Our two roles") && lPrivacy.text.includes("Draft for counsel review") &&
+      lTrust.status === 200 && ["Security overview", "Subprocessors", "How long Align keeps data", "Data processing agreement", "Security questionnaire answers", 'id="contact"', 'href="/trust#retention"', 'href="/privacy"'].every((t) => lTrust.text.includes(t)) &&
+      ![lPrivacy, lTrust].some((r) => /PRESEED-00|lib\/v2\/auth\.ts|<!-- (?:fly|lib|Counsel)/.test(r.text)),
+    `${lPrivacy.status} ${lTrust.status}`,
+  );
+  check(
+    "local: the sign-in and request-access pages link to /privacy and /trust",
+    [lSignIn, lRequest].every((r) => r.status === 200 && r.text.includes('href="/privacy"') && r.text.includes('href="/trust"')),
+    `${lSignIn.status} ${lRequest.status}`,
+  );
+  const rebound = await Promise.all(["/", "/app", "/privacy", "/api/v2/me", "/api/v2/auth/get-session"].map((p) => rawGet(p, { host: "evil.example" })));
   const reboundPort = await rawGet("/app", { host: `evil.example:${PORT}` });
   const loopNames = await Promise.all(["localhost", "[::1]"].map((h) => rawGet("/api/v2/me", { host: `${h}:${PORT}` })));
   check(
@@ -2747,6 +2840,14 @@ try {
     ["GET", "/api/v2x"],
     ["GET", "/oauthx"],
     ["GET", "/file.svg"],
+    ["GET", "/privacy/x"],
+    ["GET", "/trust/security"],
+    ["GET", "/trustx"],
+    ["GET", "/privacy-policy"],
+    ["GET", "/security"],
+    ["GET", "/SECURITY.md"],
+    ["GET", "/docs/trust/privacy-policy.md"],
+    ["GET", "/_trust/doc"],
   ];
   const outsideR = await Promise.all(outside.map(([m, p]) => hosted(m, p, m === "POST" ? { body: {}, headers: { origin: `https://${HOSTED_HOST}` } } : {})));
   check(
@@ -2768,11 +2869,18 @@ try {
     inside.every((r) => r.status !== 404 || r.json?.error !== "Not found") && inside[1].status === 401 && inside[2].status === 200 && inside[3].status === 200 && inside[4].status === 400 && inside[6].status === 200,
     inside.map((r) => `${r.status}`).join(" "),
   );
+  const hTrustPages = await Promise.all([hosted("GET", "/privacy"), hosted("GET", "/trust")]);
+  check(
+    "hosted: /privacy and /trust are served (200, the privacy policy and the trust page); nothing under them is",
+    hTrustPages[0].status === 200 && hTrustPages[0].text.includes("Our two roles") && hTrustPages[1].status === 200 && hTrustPages[1].text.includes("Subprocessors"),
+    hTrustPages.map((r) => r.status).join(" "),
+  );
   const hMe = await hosted("GET", "/api/v2/me");
   const hSignIn = await hosted("GET", "/app/sign-in");
   const hSession = await hosted("GET", "/api/v2/auth/get-session");
   check("hosted: v2 routes are served (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
   check("hosted: the sign-in page offers Google and GitHub, never the test sign-in; without email settings, no email code", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in") && !hSignIn.text.includes("Send code"), "");
+  check("hosted: the sign-in page links to /privacy and /trust", hSignIn.text.includes('href="/privacy"') && hSignIn.text.includes('href="/trust"'), "");
   dbFile = path.join(hostedDir, "v2", "align.sqlite");
   const hNoEmail = await hosted("POST", SEND, { body: { email: "x@example.test", type: "sign-in" }, headers: { origin: `https://${HOSTED_HOST}` } });
   check("hosted: without the email settings a request to send a code is refused (404) and nothing is sent", hNoEmail.status === 404 && !existsSync(path.join(hostedDir, "v2", "sign-in.txt")), `${hNoEmail.status}`);
