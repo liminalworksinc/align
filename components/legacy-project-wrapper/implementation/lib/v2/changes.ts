@@ -6,6 +6,7 @@ import { contentOf, goalObj, goalRow, nextContent, sameContent, versionContentOf
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName } from "./workspaces";
 import { nonNegInt, optStr, str, type Body } from "./validate";
+import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evidenceView, recordSnapshot, snapshotView, type EvidenceSource } from "./evidence";
 
 // Change requests: a member proposes a new version of a goal they can read but don't own (owners just publish a
 // version). The goal's approval set decides, under the requester rule (lib/v2/approval.ts): one approval is enough.
@@ -19,6 +20,9 @@ import { nonNegInt, optStr, str, type Body } from "./validate";
 // A goal that becomes achieved or dropped supersedes every open request on it (writeGoalVersion does that).
 // Everyone who can read the goal can read its requests (viewers too); viewers can't act. A request is its own
 // decision record once approved or rejected.
+// Evidence (lib/v2/evidence.ts): each revision carries the snapshot Align recorded when it was written, and the
+// evidence links the requester or an approver added to it while it was current and the request open. Approving a
+// revision with no links is allowed, and recorded (approved_without_evidence, plus its own audit action).
 
 export const CHANGE_REQUEST_STATES = ["pending", "countered", "approved", "rejected", "withdrawn", "superseded"] as const;
 export type ChangeRequestState = (typeof CHANGE_REQUEST_STATES)[number];
@@ -49,6 +53,7 @@ interface ChangeRequestRow {
   created_at: string;
   updated_at: string;
   decided_at: string | null;
+  approved_without_evidence: number | null;
 }
 interface RevisionRow {
   revision: number;
@@ -57,6 +62,7 @@ interface RevisionRow {
   note: string | null;
   author_id: string;
   created_at: string;
+  snapshot_json: string | null;
 }
 
 const sortedIds = (ids: string[]) => [...ids].sort().join(",");
@@ -112,14 +118,15 @@ export function insertChangeRequest(pp: PolicyPrincipal, g: GoalRow, changes: Ch
     at,
     at,
   );
-  writeRevision(pp.wsId, id, 1, g.version, changes, null, pp.userId, at);
+  writeRevision(pp.wsId, g.id, id, 1, g.version, changes, null, pp.userId, at);
   audit(pp.wsId, pp.userId, "change_request.created", id, at);
   return id;
 }
 
-function writeRevision(ws: string, id: string, revision: number, baseVersion: number, changes: Changes, note: string | null, author: string, at: string) {
+/** A new revision, with the snapshot Align records for the goal now (in the caller's transaction). */
+function writeRevision(ws: string, goalId: string, id: string, revision: number, baseVersion: number, changes: Changes, note: string | null, author: string, at: string) {
   run(
-    "INSERT INTO v2_change_request_revisions (ws_id, change_request_id, revision, base_version, changes_json, note, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO v2_change_request_revisions (ws_id, change_request_id, revision, base_version, changes_json, note, author_id, created_at, snapshot_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ws,
     id,
     revision,
@@ -128,6 +135,7 @@ function writeRevision(ws: string, id: string, revision: number, baseVersion: nu
     note,
     author,
     at,
+    recordSnapshot(ws, goalId, at),
   );
 }
 
@@ -187,11 +195,22 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         }
         const next = applied(contentOf(g), changes);
         if (sameContent(next, contentOf(g))) throw conflict("no_change", "This request no longer changes anything");
+        // Advisory evidence: approving a revision with no links is allowed, and recorded on the decision and in the audit.
+        const without = evidenceCount(r.id, r.revision) === 0 ? 1 : 0;
         // Decided first, so the new version's supersede step (achieved or dropped) leaves this request alone.
-        run("UPDATE v2_change_requests SET state = 'approved', approved_by = ?, decision_note = ?, decided_at = ?, updated_at = ? WHERE id = ?", me, note, at, at, r.id);
+        run(
+          "UPDATE v2_change_requests SET state = 'approved', approved_by = ?, decision_note = ?, decided_at = ?, updated_at = ?, approved_without_evidence = ? WHERE id = ?",
+          me,
+          note,
+          at,
+          at,
+          without,
+          r.id,
+        );
         const written = writeGoalVersion(g, next, me, at);
         run("UPDATE v2_change_requests SET version = ? WHERE id = ?", written.version, r.id);
         audit(pp.wsId, me, "change_request.approved", r.id, at);
+        if (without) audit(pp.wsId, me, "change_request.approved_without_evidence", r.id, at);
         break;
       }
       case "reject": {
@@ -211,7 +230,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         const base = versionContentOf(pp.wsId, g.id, r.base_version)!;
         const countered = changesIn(pp, g.id, base, b.changes);
         const next = r.revision + 1;
-        writeRevision(pp.wsId, r.id, next, r.base_version, countered, note, me, at);
+        writeRevision(pp.wsId, g.id, r.id, next, r.base_version, countered, note, me, at);
         run("UPDATE v2_change_requests SET state = 'countered', revision = ?, changes_json = ?, updated_at = ? WHERE id = ?", next, JSON.stringify(countered), at, r.id);
         audit(pp.wsId, me, "change_request.countered", r.id, at);
         break;
@@ -241,12 +260,84 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         // The changes as sent, or the request's own, checked again against the goal as it is now.
         const rebased = changesIn(pp, g.id, contentOf(g), b.changes === undefined ? changes : b.changes);
         const next = r.revision + 1;
-        writeRevision(pp.wsId, r.id, next, g.version, rebased, null, me, at);
+        writeRevision(pp.wsId, g.id, r.id, next, g.version, rebased, null, me, at);
         run("UPDATE v2_change_requests SET revision = ?, base_version = ?, changes_json = ?, updated_at = ? WHERE id = ?", next, g.version, JSON.stringify(rebased), at, r.id);
         audit(pp.wsId, me, "change_request.rebased", r.id, at);
         break;
       }
     }
+  });
+  return requestView(pp, crRow(pp.wsId, id)!);
+}
+
+// ---- evidence links ----
+
+const isOpen = (r: ChangeRequestRow) => r.state === "pending" || r.state === "countered";
+
+/** The requester or an approver may add a link to the current revision of an open request. */
+const mayAddEvidence = (pp: PolicyPrincipal, r: ChangeRequestRow, approvers: string[]) =>
+  pp.wsRole !== "viewer" && isOpen(r) && (r.requester_id === pp.userId || approvers.includes(pp.userId));
+
+/** A link can still be removed, by its author, while its revision is current and the request open; then it is frozen. */
+const mayRemoveEvidence = (pp: PolicyPrincipal, r: ChangeRequestRow, e: { revision: number; added_by: string }) =>
+  pp.wsRole !== "viewer" && isOpen(r) && e.revision === r.revision && e.added_by === pp.userId;
+
+/** Add `{kind, url, label, revision?}` to the request's current revision as the caller, from `source` ("person" for a
+ *  web session, "agent" for MCP or a device token). `goalId` is the goal named in the path (MCP names none). */
+export async function addEvidence(pp: PolicyPrincipal, goalId: string | undefined, id: string, b: Body, source: EvidenceSource) {
+  visibleRequest(pp, id, goalId);
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  const input = evidenceInput(b);
+  const at = nowIso();
+  const evId = await tx(() => {
+    const r = crRow(pp.wsId, id)!; // read inside the transaction
+    const g = goalRow(pp.wsId, r.goal_id)!;
+    const approvers = effectiveSet(g, r.requester_id);
+    if (r.requester_id !== pp.userId && !approvers.includes(pp.userId)) {
+      throw forbidden("not_involved", "Only the person who asked or someone who can approve can add evidence");
+    }
+    if (!isOpen(r)) throw conflict("wrong_state", `This request is ${r.state}`);
+    if (b.revision !== undefined && b.revision !== r.revision) throw conflict("stale_revision", `This request is at revision ${r.revision}; reload and try again`);
+    if (get("SELECT 1 AS x FROM v2_change_request_evidence WHERE change_request_id = ? AND revision = ? AND url = ?", r.id, r.revision, input.url)) {
+      throw conflict("duplicate_evidence", "This link is already on this revision");
+    }
+    if (evidenceCount(r.id, r.revision) >= EVIDENCE_PER_REVISION) throw conflict("too_much_evidence", `A revision holds at most ${EVIDENCE_PER_REVISION} evidence links`);
+    const newEv = newId("ev");
+    run(
+      "INSERT INTO v2_change_request_evidence (id, ws_id, change_request_id, revision, kind, url, label, source, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      newEv,
+      pp.wsId,
+      r.id,
+      r.revision,
+      input.kind,
+      input.url,
+      input.label,
+      source,
+      pp.userId,
+      at,
+    );
+    run("UPDATE v2_change_requests SET updated_at = ? WHERE id = ?", at, r.id);
+    audit(pp.wsId, pp.userId, "change_request.evidence_added", r.id, at);
+    return newEv;
+  });
+  const view = requestView(pp, crRow(pp.wsId, id)!);
+  return { evidence: view.revisions.flatMap((v) => v.evidence).find((e) => e.id === evId)!, change_request: view };
+}
+
+/** Remove one of the caller's own links from the current revision of an open request (404 if it isn't there). */
+export async function removeEvidence(pp: PolicyPrincipal, goalId: string | undefined, id: string, evidenceId: string) {
+  visibleRequest(pp, id, goalId);
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  const at = nowIso();
+  await tx(() => {
+    const r = crRow(pp.wsId, id)!;
+    const e = get<{ revision: number; added_by: string }>("SELECT revision, added_by FROM v2_change_request_evidence WHERE id = ? AND change_request_id = ?", evidenceId, r.id);
+    if (!e) throw notFound();
+    if (e.added_by !== pp.userId) throw forbidden("not_evidence_author", "Only the person who added this link can remove it");
+    if (!mayRemoveEvidence(pp, r, e)) throw conflict("evidence_frozen", "This link is kept as it was: its revision was superseded or the request was decided");
+    run("DELETE FROM v2_change_request_evidence WHERE id = ?", evidenceId);
+    run("UPDATE v2_change_requests SET updated_at = ? WHERE id = ?", at, r.id);
+    audit(pp.wsId, pp.userId, "change_request.evidence_removed", r.id, at);
   });
   return requestView(pp, crRow(pp.wsId, id)!);
 }
@@ -271,7 +362,7 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
   const me = pp.userId;
   const isRequester = r.requester_id === me;
   const isApprover = approvers.includes(me);
-  const open = r.state === "pending" || r.state === "countered";
+  const open = isOpen(r);
   const can = {
     approve: r.state === "pending" && isApprover && r.base_version === g.version,
     reject: open && isApprover,
@@ -279,9 +370,11 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     accept_counter: r.state === "countered" && isRequester,
     withdraw: open && isRequester,
     rebase: r.state === "pending" && isRequester,
+    add_evidence: mayAddEvidence(pp, r, approvers),
   };
   if (pp.wsRole === "viewer") for (const k of Object.keys(can) as (keyof typeof can)[]) can[k] = false;
   const person = (id: string | null) => (id ? { id, name: memberName(id) } : null);
+  const evidence = evidenceRows(r.id);
   const revisions = all<RevisionRow>("SELECT * FROM v2_change_request_revisions WHERE change_request_id = ? ORDER BY revision", r.id).map((v) => ({
     revision: v.revision,
     base_version: v.base_version,
@@ -289,6 +382,10 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     note: v.note,
     author: person(v.author_id)!,
     created_at: v.created_at,
+    /** The links added while this revision was current (frozen once it is superseded or the request decided). */
+    evidence: evidence.filter((e) => e.revision === v.revision).map((e) => evidenceView(e, mayRemoveEvidence(pp, r, e))),
+    /** What Align recorded about the goal when this revision was written. */
+    snapshot: snapshotView(pp, v.snapshot_json, v.revision),
   }));
   return {
     id: r.id,
@@ -311,6 +408,10 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     note: r.state === "approved" ? r.decision_note : null,
     rejection_reason: r.state === "rejected" ? r.decision_note : null,
     version: r.version,
+    /** Links on the current revision (the one an approval decides). */
+    evidence_count: evidence.filter((e) => e.revision === r.revision).length,
+    /** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
+    approved_without_evidence: r.state === "approved" && r.approved_without_evidence !== null ? r.approved_without_evidence === 1 : null,
     can,
     waiting_on_me: can.approve || can.accept_counter,
     created_at: r.created_at,

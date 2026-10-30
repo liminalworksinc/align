@@ -1095,8 +1095,8 @@ where they were the only member, replace their identity with "Former member #n" 
 delete their devices, pairing requests, Better Auth sessions, linked accounts, passkeys (and when each was last used),
 their dismissal of the add-a-passkey prompt, codes, access requests, unused creation codes bound to their email, the
 durable rate-limit counters keyed by their email and the user row, clear their email and id from used creation codes,
-and keep the rows other people rely on (goals, change requests, alignments, sessions and their spend) without their name or
-email.
+and keep the rows other people rely on (goals, change requests with the evidence links they added, alignments,
+sessions and their spend) without their name or email.
 
 #### Scenario: Delete my account
 
@@ -1129,7 +1129,7 @@ step in its own transaction, logging counts only; it purges a workspace with the
 #### Scenario: Deleted workspaces
 
 - **WHEN** the job runs 30 days or more after a workspace was deleted
-- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members and devices' grants included, and pairing requests and the creation code that made it forget it), so no row anywhere mentions it and restoring it is 404
+- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members, change-request evidence and devices' grants included, and pairing requests and the creation code that made it forget it), so no row anywhere mentions it and restoring it is 404
 
 #### Scenario: Session roll-up
 
@@ -1139,7 +1139,7 @@ step in its own transaction, logging counts only; it purges a workspace with the
 #### Scenario: Former members
 
 - **WHEN** the job runs 30 days or more after a person left or was removed and they are not a member again
-- **THEN** in that workspace every row naming them (goals and goal versions, alignments, their revisions, approval requirements and approvals, sessions, activity, change requests and their revisions, invites they created, directive goal snapshots, the workspace's creator and its audit rows) names `fm_<n>` instead, numbered in the order people left and stable in that workspace, their sessions no longer point at a device, invites to or accepted by them are deleted, nothing records which person `fm_<n>` was, and their account itself is untouched
+- **THEN** in that workspace every row naming them (goals and goal versions, alignments, their revisions, approval requirements and approvals, sessions, activity, change requests, their revisions and the evidence links they added, invites they created, directive goal snapshots, the workspace's creator and its audit rows) names `fm_<n>` instead, numbered in the order people left and stable in that workspace, their sessions no longer point at a device, invites to or accepted by them are deleted, nothing records which person `fm_<n>` was, and their account itself is untouched
 
 #### Scenario: Audit log
 
@@ -1150,6 +1150,11 @@ step in its own transaction, logging counts only; it purges a workspace with the
 
 - **WHEN** the job runs
 - **THEN** expired Better Auth verification values (email codes), Better Auth sessions that have expired or are older than the absolute cap (`ALIGN_SESSION_MAX_DAYS`) and expired activity signals are deleted, and invites still pending 7 days after their expiry are deleted
+
+#### Scenario: Access requests
+
+- **WHEN** the job runs 13 months after an access request was approved or declined, or 13 months after a still-pending request was made
+- **THEN** that request is deleted (email, name, company, team size, use and interest); a request decided more recently stays, and a creation code made for it stays as it was
 
 #### Scenario: Operator run and dry run
 
@@ -1187,7 +1192,6 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 - Unlinking a Google or GitHub account from `/app/account` is out of scope; should a person be able to unlink a provider while another sign-in method remains?
 - Removing or leaving keeps a person's goals and sessions (as a former member after 30 days). Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.
 - The retention periods are fixed in code (`lib/v2/retention-core.mts`); a per-workspace setting (for example a shorter audit log or longer spend history) waits for a customer who needs it.
-- Access requests are kept until the operator deletes them (or the requester's account is deleted); whether the retention job should delete declined or old requests, and after how long, is not decided.
 
 ## Sources
 

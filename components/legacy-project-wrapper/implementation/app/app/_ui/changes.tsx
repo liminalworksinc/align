@@ -1,9 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { api, ApiError, Btn, Err, Field, Input, Loading, Note, Pill, Select, TextArea, useAction, useApi, when } from "./kit";
+import { api, ApiError, Btn, Err, Field, Input, Loading, Note, num, Pill, Select, TextArea, usd, useAction, useApi, when } from "./kit";
 import { MeasuresEditor, measuresDraft, measuresOut, type MeasureDraft } from "./goalform";
-import type { ChangeFields, ChangeRequest, Goal } from "./types";
+import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
 
 // Change requests in the web app: the proposal form (also used to suggest a change as an approver) and one request's
 // card with exactly the actions its `can` flags allow. Used by the goal page and the workspace Requests tab.
@@ -222,6 +222,121 @@ function CounterForm({ ws, cr, onDone }: { ws: string; cr: ChangeRequest; onDone
   );
 }
 
+// ---- evidence: links people or agents say support the change (never verified), and Align's own snapshot ----
+
+const KIND_WORD: Record<EvidenceKind, string> = { pr: "Pull request", ci_run: "CI run", incident: "Incident", dashboard: "Dashboard", doc: "Doc", other: "Link" };
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+};
+
+/** One link: kind, label (opens in a new tab, no referrer), its host, who added it and how it was reported. */
+function EvidenceItem({ e, me, busy, onRemove }: { e: Evidence; me: string; busy: boolean; onRemove: (id: string) => void }) {
+  return (
+    <li className="flex flex-wrap items-center gap-2 py-1 text-[14px]">
+      <Pill>{KIND_WORD[e.kind]}</Pill>
+      <a href={e.url} target="_blank" rel="noopener noreferrer" className="text-violet-700 underline">
+        {e.label}
+      </a>
+      <span className="text-zinc-500">({hostOf(e.url)})</span>
+      <Pill tone={e.source === "agent" ? "amber" : "neutral"}>{e.reported_as}</Pill>
+      <span className="text-zinc-500">
+        by {e.added_by.id === me ? "you" : e.added_by.name}, {when(e.added_at)}
+      </span>
+      {e.can_remove && (
+        <button type="button" className="text-[13px] text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => onRemove(e.id)}>
+          Remove
+        </button>
+      )}
+    </li>
+  );
+}
+
+/** "Recorded by Align at revision N": the goal's spend over 30 days, bound sessions and last activity. */
+function SnapshotBox({ s }: { s: AlignSnapshot }) {
+  const models = s.spend?.by_model ?? [];
+  return (
+    <div className="my-2 rounded-[10px] bg-zinc-50 p-2 text-[14px] text-zinc-700">
+      <p className="text-[12px] text-zinc-500">
+        Recorded by Align at revision {s.revision}, {when(s.recorded_at)}
+      </p>
+      <p>
+        {s.spend ? (
+          <>
+            Spend on this goal in the last {s.window.days} days: {usd(s.spend.total.est_list_usd_micros)} estimated at list price, {num(s.spend.total.requests)} requests
+            {models.length > 0 && <> ({models.map((m) => `${m.model} ${usd(m.est_list_usd_micros)}`).join(", ")})</>}.
+          </>
+        ) : (
+          <>Spend on this goal is hidden from you.</>
+        )}{" "}
+        Sessions bound to it: {num(s.bound_sessions)}. Last activity: {s.last_activity_at ? when(s.last_activity_at) : "none"}.
+      </p>
+    </div>
+  );
+}
+
+/** Add a link to the current revision (the requester, or someone who can approve, while the request is open). */
+function AddEvidence({ path, revision, onDone }: { path: string; revision: number; onDone: () => void }) {
+  const act = useAction();
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<EvidenceKind>("pr");
+  const [url, setUrl] = useState("");
+  const [label, setLabel] = useState("");
+  if (!open)
+    return (
+      <Btn kind="secondary" onClick={() => setOpen(true)}>
+        Add evidence
+      </Btn>
+    );
+  return (
+    <form
+      className="mt-2 rounded-[12px] border border-zinc-300 p-3"
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        void act.run(
+          () => api(`${path}/evidence`, { body: { kind, url: url.trim(), label: label.trim(), revision } }),
+          () => {
+            setOpen(false);
+            setUrl("");
+            setLabel("");
+            onDone();
+          },
+        );
+      }}
+    >
+      <p className="mb-2 text-[14px] text-zinc-600">A link that supports this change. It is shown as self-reported: Align does not check it.</p>
+      <Field label="Kind">
+        <Select value={kind} onChange={(e) => setKind(e.target.value as EvidenceKind)}>
+          {(Object.keys(KIND_WORD) as EvidenceKind[]).map((k) => (
+            <option key={k} value={k}>
+              {KIND_WORD[k]}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="Link (https)">
+        <Input type="url" value={url} onChange={(e) => setUrl(e.target.value)} maxLength={2048} placeholder="https://" required />
+      </Field>
+      <Field label="What it shows" hint="At most 120 characters.">
+        <Input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={120} required />
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <Btn type="submit" disabled={act.busy || !/^https:\/\//i.test(url.trim()) || !label.trim()}>
+          Add link
+        </Btn>
+        <Btn kind="secondary" onClick={() => setOpen(false)}>
+          Cancel
+        </Btn>
+      </div>
+      <Err>{act.error}</Err>
+    </form>
+  );
+}
+
 /** One change request: what it changes, its history and decision, and the actions the server allows this person. */
 export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws: string; cr: ChangeRequest; me: string; showGoal?: boolean; titles: Map<string, string>; onDone: () => void }) {
   const act = useAction();
@@ -244,6 +359,10 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
       setText("");
     }, onDone);
   const mine = cr.requester.id === me;
+  const current = cr.revisions.find((r) => r.revision === cr.revision);
+  const earlier = cr.revisions.filter((r) => r.revision !== cr.revision && r.evidence.length > 0);
+  const remove = (id: string) => void act.run(() => api(`${path}/evidence/${id}`, { method: "DELETE" }), onDone);
+  const noEvidence = cr.evidence_count === 0;
   return (
     <div className="mb-4 rounded-[12px] border border-zinc-200 p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -270,6 +389,8 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
         <p className="text-[14px] text-zinc-600">
           Approved by {cr.approved_by?.name}
           {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}. It became version {cr.version}.{cr.note ? ` Note: ${cr.note}` : ""}
+          {cr.approved_without_evidence === true && <> Approved without evidence.</>}
+          {cr.approved_without_evidence === false && <> Approved with {cr.evidence_count} evidence {cr.evidence_count === 1 ? "link" : "links"}, none verified.</>}
         </p>
       )}
       {cr.state === "rejected" && (
@@ -290,14 +411,41 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
           </Btn>
         </div>
       )}
+      <div className="mt-2">
+        <p className="text-[14px] font-medium text-zinc-800">Evidence for revision {cr.revision}</p>
+        {current?.snapshot && <SnapshotBox s={current.snapshot} />}
+        {current && current.evidence.length > 0 ? (
+          <ul>
+            {current.evidence.map((e) => (
+              <EvidenceItem key={e.id} e={e} me={me} busy={act.busy} onRemove={remove} />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-[14px] text-zinc-500">No evidence links on this revision.</p>
+        )}
+        {earlier.map((r) => (
+          <div key={r.revision} className="mt-1">
+            <p className="text-[13px] text-zinc-500">From revision {r.revision}</p>
+            <ul>
+              {r.evidence.map((e) => (
+                <EvidenceItem key={e.id} e={e} me={me} busy={act.busy} onRemove={remove} />
+              ))}
+            </ul>
+          </div>
+        ))}
+        {cr.can.add_evidence && <AddEvidence path={path} revision={cr.revision} onDone={onDone} />}
+      </div>
       {cr.revisions.length > 1 && (
         <details className="mt-1 text-[14px] text-zinc-500">
           <summary className="cursor-pointer">Revisions</summary>
           {cr.revisions.map((r) => (
-            <p key={r.revision}>
-              Revision {r.revision} by {r.author.name} against version {r.base_version}, {when(r.created_at)}
-              {r.note ? `: ${r.note}` : ""}
-            </p>
+            <div key={r.revision}>
+              <p>
+                Revision {r.revision} by {r.author.name} against version {r.base_version}, {when(r.created_at)}
+                {r.note ? `: ${r.note}` : ""}
+              </p>
+              {r.snapshot && r.revision !== cr.revision && <SnapshotBox s={r.snapshot} />}
+            </div>
           ))}
         </details>
       )}
@@ -330,11 +478,17 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
       </div>
       {mode === "approve" && (
         <div className="mt-3">
+          {noEvidence && (
+            <div className="mb-3 rounded-[10px] border border-amber-700 p-3 text-[14px] text-amber-800">
+              <p className="font-medium">Approve without evidence?</p>
+              <p>This revision has no evidence links. You can still approve it; the decision record and the audit log will say it was approved without evidence.</p>
+            </div>
+          )}
           <Field label="Note (optional, never sent to agents)">
             <TextArea rows={2} value={text} maxLength={2000} onChange={(e) => setText(e.target.value)} />
           </Field>
           <Btn disabled={act.busy} onClick={() => void doIt("approve", { revision: cr.revision, note: text.trim() || null })}>
-            Approve as version {cr.goal.version + 1}
+            {noEvidence ? `Approve without evidence as version ${cr.goal.version + 1}` : `Approve as version ${cr.goal.version + 1}`}
           </Btn>
         </div>
       )}

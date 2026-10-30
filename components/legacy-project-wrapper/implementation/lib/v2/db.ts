@@ -692,6 +692,32 @@ const MIGRATIONS: string[] = [
   CREATE INDEX v2_rate_hits_key ON v2_rate_hits(key, at);
   CREATE INDEX v2_rate_hits_at ON v2_rate_hits(at);
   `,
+  // PRESEED-006: evidence on change requests (lib/v2/evidence.ts). Each revision keeps the snapshot Align recorded when
+  // it was written (snapshot_json: the goal's 30-day spend, bound sessions and last activity; never from a client).
+  // Evidence links belong to one revision and are frozen once it is superseded or the request decided; `source` says
+  // whether a person (web session) or an agent (MCP or a device token) added it. An approval records whether its
+  // revision had any evidence. An OAuth grant records its scopes: goals:read, plus the opt-in changes:evidence that lets
+  // a connected app add evidence links (lib/oauth/server.ts).
+  `
+  ALTER TABLE v2_change_request_revisions ADD COLUMN snapshot_json TEXT;
+  ALTER TABLE v2_oauth_grants ADD COLUMN scope TEXT NOT NULL DEFAULT 'goals:read';
+  ALTER TABLE v2_change_requests ADD COLUMN approved_without_evidence INTEGER;
+  CREATE TABLE v2_change_request_evidence (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    change_request_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('pr','ci_run','incident','dashboard','doc','other')),
+    url TEXT NOT NULL,
+    label TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('person','agent')),
+    added_by TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    FOREIGN KEY (ws_id, change_request_id) REFERENCES v2_change_requests(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (change_request_id, revision) REFERENCES v2_change_request_revisions(change_request_id, revision) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_change_request_evidence_rev ON v2_change_request_evidence(change_request_id, revision);
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

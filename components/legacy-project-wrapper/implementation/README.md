@@ -11,8 +11,12 @@ it, and keeps the coding agents working toward that goal current with it.
 - **Agents that stay current.** The `align` CLI (`packages/align-agent`) pairs a machine, shares chosen Claude Code
   and Codex sessions toward a goal, meters their usage locally and delivers goal changes and stop directives at the
   next turn. Usage and estimated spend are reported per goal, team and session.
-- **Read-only MCP.** Connected AI apps read goals, change requests, decision records and directives through
-  `/api/mcp`, as the person who connected them (`docs/MCP.md`).
+- **Evidence on change requests.** Each revision carries a snapshot Align records itself (the goal's 30-day spend,
+  bound sessions, last activity). The requester and approvers attach typed links (PR, CI run, incident, dashboard,
+  doc), labelled self-reported or agent-reported and never verified. Approving without evidence is allowed and audited.
+- **Read-only MCP.** Connected AI apps read goals, change requests (with their evidence), decision records and
+  directives through `/api/mcp`, as the person who connected them. An app the person allows the opt-in scope
+  `changes:evidence` can also add agent-reported evidence links (`docs/MCP.md`).
 
 The contract is the specification in `specs/align/*.md` at the repository root. This folder is its implementation:
 a Next.js app (`app/`, `lib/`), the local agent package (`packages/align-agent`) and a stdio bridge for MCP clients
@@ -156,7 +160,7 @@ directories (`test-v2` also uses `<port>+1`). They refuse port 3100 and a port t
 | --- | --- |
 | `app/app/` | The web app (`/app`) |
 | `app/api/v2/` | The HTTP API; `docs/v2/WIRE.md` is the wire contract the CLI uses |
-| `app/api/mcp`, `lib/mcp/` | The read-only MCP endpoint |
+| `app/api/mcp`, `lib/mcp/` | The read-only MCP endpoint (plus the opt-in evidence tool) |
 | `app/oauth/`, `app/api/oauth/`, `app/.well-known/`, `lib/oauth/` | The OAuth authorization server for AI apps |
 | `lib/v2/` | Identity, workspaces, goals, change requests, sessions, directives, spend, the database |
 | `proxy.ts`, `lib/config.ts`, `lib/startup.ts` | The request edge, settings and startup checks |

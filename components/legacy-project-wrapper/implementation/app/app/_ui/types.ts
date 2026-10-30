@@ -86,6 +86,36 @@ export interface Alignment {
 
 export type ChangeFields = Partial<{ title: string; measures: Goal["measures"]; depends_on: string[]; status: Goal["status"] }>;
 
+export type EvidenceKind = "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other";
+
+/** An evidence link on one change-request revision. Never verified: a person or an agent says what it shows. */
+export interface Evidence {
+  id: string;
+  revision: number;
+  kind: EvidenceKind;
+  url: string;
+  label: string;
+  source: "person" | "agent";
+  reported_as: "self-reported" | "agent-reported";
+  added_by: { id: string; name: string };
+  added_at: string;
+  can_remove: boolean;
+}
+
+type SpendNums = { requests: number; est_list_usd_micros: number; unpriced_requests: number };
+
+/** What Align recorded about the goal when a revision was written. */
+export interface AlignSnapshot {
+  revision: number;
+  recorded_by: "align";
+  recorded_at: string;
+  window: { from: string; to: string; days: number };
+  spend: { total: SpendNums; by_model: (SpendNums & { model: string })[] } | null;
+  spend_hidden: boolean;
+  bound_sessions: number;
+  last_activity_at: string | null;
+}
+
 export interface ChangeRequest {
   id: string;
   goal: { id: string; title: string; version: number };
@@ -96,7 +126,16 @@ export interface ChangeRequest {
   requester: { id: string; name: string };
   changes: ChangeFields;
   reason: string;
-  revisions: { revision: number; base_version: number; changes: ChangeFields; note: string | null; author: { id: string; name: string }; created_at: string }[];
+  revisions: {
+    revision: number;
+    base_version: number;
+    changes: ChangeFields;
+    note: string | null;
+    author: { id: string; name: string };
+    created_at: string;
+    evidence: Evidence[];
+    snapshot: AlignSnapshot | null;
+  }[];
   diff: { before: ChangeFields; after: ChangeFields };
   approvers: { id: string; name: string }[];
   approved_by: { id: string; name: string } | null;
@@ -105,7 +144,9 @@ export interface ChangeRequest {
   note: string | null;
   rejection_reason: string | null;
   version: number | null;
-  can: Record<"approve" | "reject" | "counter" | "accept_counter" | "withdraw" | "rebase", boolean>;
+  evidence_count: number;
+  approved_without_evidence: boolean | null;
+  can: Record<"approve" | "reject" | "counter" | "accept_counter" | "withdraw" | "rebase" | "add_evidence", boolean>;
   waiting_on_me: boolean;
   created_at: string;
   updated_at: string;

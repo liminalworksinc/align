@@ -12,6 +12,8 @@ import { purgeWorkspace, RESTORE_DAYS, sessionMaxDays, testIdpEnabled, type Sql 
 //   5. Expired email codes (and other expired Better Auth verification values), expired sign-in sessions and those
 //      past the absolute cap (ALIGN_SESSION_MAX_DAYS after their sign-in: lib/v2/auth.ts), expired activity signals,
 //      and invites 7 days past their expiry are deleted.
+//   6. Access requests (PRESEED-002) are deleted 13 months after they were approved or declined, or, still pending,
+//      13 months after they were made.
 // Like lib/v2/core.mts, Node runs this file directly (type stripping): it imports only core.mts and takes its database
 // as an argument. Account deletion (lib/v2/account.ts) uses pseudonymise() at once instead of after 30 days.
 
@@ -20,6 +22,7 @@ export const FORMER_MEMBER_DAYS = 30;
 export const SESSION_MONTHS = 13;
 export const AUDIT_MONTHS = 12;
 export const INVITE_GRACE_DAYS = 7;
+export const ACCESS_REQUEST_MONTHS = 13;
 export const RETENTION_INTERVAL_MS = 24 * 3600 * 1000;
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -70,6 +73,7 @@ export const PERSON_COLUMNS: readonly (readonly [table: string, column: string])
   ["v2_change_requests", "approved_by"],
   ["v2_change_requests", "rejected_by"],
   ["v2_change_request_revisions", "author_id"],
+  ["v2_change_request_evidence", "added_by"],
 ];
 
 /** Every workspace whose rows name this person (or hold their pending departure). */
@@ -161,6 +165,7 @@ export interface RetentionCounts {
   sign_in_sessions_deleted: number;
   activity_deleted: number;
   invites_deleted: number;
+  access_requests_deleted: number;
 }
 
 const STEPS: ((db: Sql, now: Date, c: RetentionCounts, env: NodeJS.ProcessEnv) => void)[] = [
@@ -213,6 +218,15 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, env: NodeJS.ProcessEnv) =
     c.activity_deleted += db.run("DELETE FROM v2_activity WHERE expires_at < ?", at);
     c.invites_deleted += db.run("DELETE FROM v2_invites WHERE accepted_at IS NULL AND expires_at < ?", daysBefore(now, INVITE_GRACE_DAYS));
   },
+  // 6. Access requests: 13 months after the decision, or after the request while it is still pending.
+  (db, now, c) => {
+    const before = monthsBefore(now, ACCESS_REQUEST_MONTHS);
+    c.access_requests_deleted += db.run(
+      "DELETE FROM v2_access_requests WHERE (status = 'pending' AND created_at < ?) OR (status <> 'pending' AND COALESCE(decided_at, created_at) < ?)",
+      before,
+      before,
+    );
+  },
 ];
 
 const ROLLBACK = Symbol("dry run");
@@ -239,6 +253,7 @@ export async function runRetention(
     sign_in_sessions_deleted: 0,
     activity_deleted: 0,
     invites_deleted: 0,
+    access_requests_deleted: 0,
   };
   if (dryRun) {
     try {

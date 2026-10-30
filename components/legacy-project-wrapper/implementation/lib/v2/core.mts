@@ -19,7 +19,7 @@ export interface Sql {
 
 /** The PRAGMA user_version of a fully migrated database (lib/v2/db.ts MIGRATIONS.length; db.ts checks they agree).
  *  The operator script refuses any other, so it never writes to a schema it doesn't know. */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 // ---- settings shared with the operator script (lib/v2/config.ts re-exports these) ----
 
@@ -229,11 +229,12 @@ export function softDeleteWorkspace(db: Sql, wsId: string, actor: string | null,
 }
 
 /** Every row of a workspace, at once and for good (the retention job after the restore window, and `align-admin
- *  workspaces delete --purge`): its rows cascade from v2_workspaces; its connected AI apps, devices' grants and audit
- *  rows go too, and pairing requests and the creation code that made it forget it (the code stays used, so no row
- *  anywhere names the workspace). False when there is no such workspace. */
+ *  workspaces delete --purge`): its rows cascade from v2_workspaces; its connected AI apps, change-request evidence,
+ *  devices' grants and audit rows go too, and pairing requests and the creation code that made it forget it (the
+ *  code stays used, so no row anywhere names the workspace). False when there is no such workspace. */
 export function purgeWorkspace(db: Sql, wsId: string): boolean {
   db.run("DELETE FROM v2_oauth_grants WHERE ws_id = ?", wsId);
+  db.run("DELETE FROM v2_change_request_evidence WHERE ws_id = ?", wsId); // cascades too; said here for the record
   db.run("UPDATE v2_creation_codes SET ws_id = NULL WHERE ws_id = ?", wsId);
   db.run("DELETE FROM v2_device_grants WHERE ws_id = ?", wsId);
   db.run("DELETE FROM v2_audit WHERE ws_id = ?", wsId);

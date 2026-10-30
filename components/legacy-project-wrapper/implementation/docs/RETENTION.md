@@ -14,6 +14,7 @@ estimated cost. It sends no title.
 |---|---|---|
 | Prompt text, tool output, messages | Not stored on the server | Nothing to delete |
 | Shared sessions: harness, hashed repo key, repo alias, times, state, goal binding, binding periods, usage (model, tokens, estimated cost), the person who shared it | 13 months after the session ends: when sharing stopped, or else its last activity (its last upload, binding change or update) | Rolled up into totals per workspace, goal, UTC day, model and billing basis, with no person and no session. The raw rows (session, binding periods, usage, directive deliveries and receipts) are deleted |
+| Change-request evidence links (kind, URL, label, who added it, person or agent) and the snapshot Align records with each revision (the goal's 30-day spend, bound sessions, last activity) | The life of the change request | Deleted with the workspace. Whoever added a link becomes "Former member #n" like the rest of their rows |
 | Spend roll-ups (no person, no session) | The life of the workspace | Deleted with the workspace |
 | Activity signals (in-flight edits, commits, tasks, claims) | 24 hours (claims 1 hour) | Deleted by the daily job, or with their session |
 | Workspace audit log | 1 year | Deleted |
@@ -27,7 +28,7 @@ estimated cost. It sends no title.
 | Sign-in sessions (with the client IP address and user agent when hosted) | 7 days, extended while used, and never more than 30 days after the sign-in (`ALIGN_SESSION_MAX_DAYS`). Signing out everywhere ends them all at once | A session past the 30 days is deleted when it is next presented; the daily job deletes the rest once expired or past the 30 days |
 | Pending invites | 7 days | Deleted 7 days after they expire. An accepted invite is kept while the person is a member, and deleted when they become a former member or with the workspace |
 | Passkeys (name, public key, when added and last used) | Until the person deletes the passkey | Deleted at once, or with the account |
-| Access requests (`/app/request-access`: email, name, company, team size, what for, interest) | Until the operator deletes them; the job does not trim them | Deleted when that email's Align account is deleted |
+| Access requests (`/app/request-access`: email, name, company, team size, what for, interest) | 13 months after the operator approved or declined it, or, while still pending, 13 months after it was made | Deleted by the daily job, or at once when that email's Align account is deleted |
 | Creation codes (an HMAC of the code, the email it is bound to, dates, the workspace it created) | Kept as the record of who could create what | An unused code bound to an account's email is deleted with that account; a used one then keeps no email or redeemer. Purging a workspace clears the code's workspace |
 | Durable rate-limit counters (an HMAC of an email address or a client address, and a time) | 24 hours | Pruned as new calls are counted; the ones keyed by an account's email are deleted with the account |
 | Paired devices (name, public key, last seen) | Until the person revokes the device; a revoked device's row stays, without working tokens | Deleted with the account |

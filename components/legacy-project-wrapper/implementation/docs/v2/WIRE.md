@@ -126,12 +126,13 @@ binding exists only because of it get `binding_suspended`.
 
 ## Connected AI apps and MCP
 `GET /api/v2/workspaces/:ws/apps` (cookie, members) → `{ "url": "<origin>/api/mcp", "apps": [{ "id": "gr_…", "name",
-"redirect_host", "user": { "id", "name" }, "approved_at", "last_used_at" }] }`: every live grant for a workspace owner,
+"redirect_host", "user": { "id", "name" }, "approved_at", "last_used_at", "scopes": ["goals:read", "changes:evidence"?] }] }`: every live grant for a workspace owner,
 the caller's own for anyone else. `DELETE /api/v2/workspaces/:ws/apps/:grant` (cookie write) → 204 for the grant's
 person or a workspace owner, else `404 not_found`; audit `oauth.app_revoked`. Removing a member, leaving and deleting
 the workspace revoke the person's (or every) grant there. `/api/mcp` accepts a device access token
 (`alnd_`) as well as Align's OAuth tokens; a device names the workspace in each tool call (`workspace`) unless it can
-read exactly one (docs/MCP.md, specs/align/mcp.md).
+read exactly one (docs/MCP.md, specs/align/mcp.md). A device token is `goals:read` only there; an app holds
+`changes:evidence` too only when the person allowed it.
 
 ## Changes (server)
 Implemented in `lib/v2/**` and `app/api/v2/**` (tests: `scripts/test-v2.mjs`). Everything above holds; these are the
@@ -226,7 +227,13 @@ team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST ..
 (a new "Northstar (sample)" workspace owned by the caller, counted like any workspace creation), change requests
 (`GET`/`POST .../goals/:goal/change-requests` with `{ base_version, changes, reason }`, `GET .../change-requests/:id`,
 `POST .../change-requests/:id/{approve|reject|counter|accept_counter|withdraw|rebase}`, and the workspace-wide
-`GET .../change-requests?state=` as `{ waiting_on_me, mine, others }`; see `lib/v2/changes.ts`), `GET /api/v2/device/requests/:code`,
+`GET .../change-requests?state=` as `{ waiting_on_me, mine, others }`; see `lib/v2/changes.ts`), change request
+evidence (`POST .../change-requests/:id/evidence` `{ kind: "pr"|"ci_run"|"incident"|"dashboard"|"doc"|"other", url
+(https, ≤ 2048), label (≤ 120), revision? }` → 201 `{ evidence, change_request }`, cookie or device token, at most 10
+per revision; `DELETE .../change-requests/:id/evidence/:evidence` by its author while the revision is current and the
+request open, else `409 evidence_frozen`; each revision reads `evidence[]` with `source: "person"|"agent"` and
+`reported_as`, and the server-recorded `snapshot`; an approval sets `approved_without_evidence`; see
+`lib/v2/evidence.ts`), `GET /api/v2/device/requests/:code`,
 `POST /api/v2/device/approve` (`{ user_code, workspace_ids }`; needs a sign-in from the last 15 minutes, else
 `403 reauth_required`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,
 `DELETE /api/v2/devices/:id`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,

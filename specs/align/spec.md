@@ -43,9 +43,9 @@ agent hooks and screens), not the framework, hosting, or language choices.
 
 ## Parts
 
-- `goals-and-proposals` — goals and their versions, approval sets, alignments, change requests and the sample workspace
+- `goals-and-proposals` — goals and their versions, approval sets, alignments, change requests and their evidence, and the sample workspace
 - `directives` — directives to running agents, receipts, and stopping and resuming an agent
-- `mcp` — the read-only MCP server, its OAuth authorization server and the `align-connect` stdio relay
+- `mcp` — the read-only MCP server (with an opt-in scope for adding evidence links), its OAuth authorization server and the `align-connect` stdio relay
 - `workspaces` — identity and sign-in, workspaces, members, teams, invites, devices, shared sessions, usage and spend, activity, and hosted mode
 - `local-agent` — the `align` CLI, its Claude Code and Codex hooks, the one-pass sync and local metering
 - `interface` — the web app under `/app` and the OAuth consent page

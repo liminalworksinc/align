@@ -1,6 +1,7 @@
 import { get } from "./db";
 import { V2Error } from "./errors";
 import { getChangeRequest as requestView, listChangeRequests as requestViews, type ChangeRequestState as StoredState, type ChangeRequestView } from "./changes";
+import type { EvidenceKind, EvidenceSource, SnapshotView } from "./evidence";
 import type { GoalStatus, Measure } from "./goals";
 import type { PolicyPrincipal } from "./policy";
 
@@ -17,6 +18,19 @@ export type ChangeRequestState = (typeof CHANGE_REQUEST_STATES)[number];
 const sameStates: [ChangeRequestState, StoredState] extends [StoredState, ChangeRequestState] ? true : never = true;
 void sameStates;
 
+/** An evidence link as the MCP tools return it: who added it and whether a person or an agent did. */
+export interface EvidenceLink {
+  id: string;
+  revision: number;
+  kind: EvidenceKind;
+  url: string;
+  label: string;
+  source: EvidenceSource;
+  reported_as: "self-reported" | "agent-reported";
+  added_by: { id: string; name: string };
+  added_at: string;
+}
+
 export interface ChangeRequestSummary {
   id: string;
   goal: { id: string; title: string };
@@ -25,6 +39,11 @@ export interface ChangeRequestSummary {
   base_version: number;
   revision: number;
   reason: string;
+  /** Every evidence link, each with the revision it was added to (oldest revision first). */
+  evidence: EvidenceLink[];
+  /** What Align recorded about the goal when the current revision was written (spend null when the reader may not
+   *  read spend), or null for a revision written before snapshots existed. */
+  snapshot: SnapshotView | null;
   created_at: string;
   updated_at: string;
 }
@@ -45,6 +64,8 @@ export interface ChangeRequestDetail extends ChangeRequestSummary {
   diff: ChangeDiff;
   /** The goal version an approval created. */
   resulting_version: number | null;
+  /** Approved with no evidence link on the approved revision (null unless approved). */
+  approved_without_evidence: boolean | null;
   decided_at: string | null;
 }
 
@@ -58,6 +79,10 @@ const summary = (v: ChangeRequestView): ChangeRequestSummary => ({
   base_version: v.base_version,
   revision: v.revision,
   reason: v.reason,
+  evidence: v.revisions
+    .flatMap((r) => r.evidence)
+    .map((e) => ({ id: e.id, revision: e.revision, kind: e.kind, url: e.url, label: e.label, source: e.source, reported_as: e.reported_as, added_by: e.added_by, added_at: e.added_at })),
+  snapshot: v.revisions.find((r) => r.revision === v.revision)?.snapshot ?? null,
   created_at: v.created_at,
   updated_at: v.updated_at,
 });
@@ -76,6 +101,7 @@ function detail(v: ChangeRequestView): ChangeRequestDetail {
     decision_note: decided ? v.decision_note : null,
     diff,
     resulting_version: v.state === "approved" ? v.version : null,
+    approved_without_evidence: v.approved_without_evidence,
     decided_at: decided ? v.decided_at : null,
   };
 }

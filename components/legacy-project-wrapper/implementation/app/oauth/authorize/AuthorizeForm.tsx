@@ -3,7 +3,9 @@ import { useState } from "react";
 import { Btn, Card, Err, SignInAgain } from "@/app/app/_ui/kit";
 
 // The consent form. One choice: let this app read one workspace as this person, or cancel. Read-only is stated
-// plainly because it is enforced: the MCP server has no tool that writes (lib/mcp/register.ts). Approving needs a
+// plainly because it is enforced: without the changes:evidence scope the MCP server lists no tool that writes
+// (lib/mcp/register.ts). When the app asked for changes:evidence, one more line says it may attach agent-reported
+// evidence links, and the button says "Allow access" instead of "Allow read-only access". Approving needs a
 // sign-in from the last 15 minutes; an older one gets the sign-in-again prompt instead of the form.
 
 export interface Person {
@@ -24,8 +26,10 @@ export default function AuthorizeForm(props: {
   loopback: boolean;
   provider: string;
   person: Person | null;
+  /** The app asked for changes:evidence (adding evidence links), not only goals:read. */
+  evidence: boolean;
 }) {
-  const { params, here, clientName, selfNamed, redirectHost, loopback, provider, person } = props;
+  const { params, here, clientName, selfNamed, redirectHost, loopback, provider, person, evidence } = props;
   const [stale, setStale] = useState(!!person && !person.recent);
   const [ws, setWs] = useState(person?.workspaces.length === 1 ? person.workspaces[0].id : "");
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +107,7 @@ export default function AuthorizeForm(props: {
             <ul className="list-disc space-y-1 pl-5 text-[15px]">
               <li>It reads goals, change requests, decision records and directives in the workspace you choose, as you and with your role.</li>
               <li>It can’t propose, approve or change anything. Those stay with the people in the workspace.</li>
+              {evidence && <li>It may also attach links to change requests you can act on, as evidence. Align labels them agent-reported.</li>}
               <li>It never sees captured prompts.</li>
               <li>What it reads is sent to {provider}.</li>
               <li>You or a workspace owner can disconnect it on the workspace’s Apps tab, and it is disconnected if you leave the workspace.</li>
@@ -128,7 +133,7 @@ export default function AuthorizeForm(props: {
           <div className="flex flex-wrap gap-2">
             {person.workspaces.length > 0 && (
               <Btn onClick={() => void answer("approve")} disabled={busy || !ws}>
-                Allow read-only access
+                {evidence ? "Allow access" : "Allow read-only access"}
               </Btn>
             )}
             {cancel}
