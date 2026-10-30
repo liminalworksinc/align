@@ -1,45 +1,51 @@
 ---
 name: Align
-summary: Gets the right owner's approval when priorities change, and delivers the approved plan to coding agents that are already running.
+summary: Lets each person change a goal only with the approval of someone entitled to approve for it, and keeps the coding agents working toward that goal current with it.
 kind: product
 ---
 
 # Align
 
-Align is a web application, a read-only MCP server and a local agent package. When
-leadership changes a priority, Align re-parents the team goals onto the new company goal,
-marks the affected cross-team dependency as unconfirmed so the screens show it at risk, lets the affected team propose a change to the owning team's
-goal with sandbox-tested evidence attached, and lets only the goal's owner approve it.
-Approval creates a new goal version, records the decision, and notifies running coding
-agents, which read the newly approved plan from the MCP server before acting.
+Align is a web application, a read-only MCP server and a local agent package. People in an organization sign
+in as themselves, set goals that roll up from team goals to company goals, and change another team's goal
+only with the approval of someone entitled to approve for it. Coding agents (Claude Code and Codex) that
+people choose to share count toward a goal: they receive its current version and any change to it at the
+next turn, their usage is metered locally and reported per goal, and their owner or a workspace owner can
+stop them. Connected AI apps read the same goals and decision records through MCP, as the person who
+connected them.
 
 ## Scope
 
-This corpus specifies the behavior of the current retained implementation in
-`components/legacy-project-wrapper/implementation/`. It describes observable behavior
-(HTTP and MCP interfaces, authorization rules, state transitions, agent hooks and
-screens), not the framework, hosting, or language choices.
+This corpus specifies the target behavior of the implementation in
+`components/legacy-project-wrapper/implementation/` after the owner's decisions of 2026-10-30: every feature
+works for any organization, everyone signs in as a person (no shared passcodes), and the goal-sessions model
+(formerly "v2") is the only model. The earlier Northstar demo, custom `w_` workspaces and their passcode,
+proposal, directive and capture flows are retired; the corpus at commit `0933523` records that earlier
+behavior. It describes observable behavior (HTTP and MCP interfaces, authorization rules, state transitions,
+agent hooks and screens), not the framework, hosting, or language choices.
 
 ## Vocabulary
 
 | Term | Meaning |
 | --- | --- |
-| Workspace | One organization's isolated Align instance: the Northstar demo store, a custom workspace (`w_…`), or a goal-sessions workspace (`ws_…`) whose members sign in as themselves with role `owner`, `member` or `viewer` |
-| Goal | An objective with immutable versions, owned by a team slot (`ceo`, `product`, `security`) in the demo and custom workspaces, or by one person in goal sessions; changed only by its owner's approval |
-| Owner | In team workspaces, the team (and its leader) entitled to change a goal; in goal sessions, the person who owns the goal |
-| Proposal | A requested change to another team's goal, with evidence |
-| Directive | A message Align delivers to running agents: in local mode a hold (`push`) or replan (`ratify`); with goal sessions also `goal_version`, `binding_changed`, `binding_suspended`, `stop` and `resume` |
-| Mode L | The default local mode: the server answers only loopback requests |
-| Hosted | The internet-facing mode (`HOSTED=1`), limited to the tester routes (plus `/app*` and `/api/v2/*` when goal sessions are on) |
-| Goal sessions | The opt-in v2 surface (`ALIGN_GOAL_SESSIONS=1`): accounts, goals and alignments, paired devices and shared sessions |
-| Plan | A versioned, hashed agent plan such as `p-beta@1` |
-| Session | A coding-agent session (Claude Code or Codex): captured by the repo-local hooks (`<harness>:<id>`), or metered and shared by the local agent package (`session_key`) |
+| Person | A signed-in account (Google, GitHub or email one-time code). Nothing in Align is reached with a shared secret |
+| Workspace | One organization's isolated space (`ws_…`), whose members have the role `owner`, `member` or `viewer` |
+| Team | A named group of members inside a workspace (stored as a "pod"); each member of a team is a `lead` or a `member` |
+| Goal | An objective with immutable versions, owned by one person and optionally by one team; a `company` goal belongs to the workspace owners |
+| Approval set | The people any one of whom may approve on a goal's behalf: its owner, its team's leads, and for a company goal the workspace owners |
+| Alignment | A consented link that makes a goal contribute to another goal, or makes chosen sessions work toward a goal |
+| Change request | A proposed new version of someone else's goal, approved or rejected by the goal's approval set |
+| Session | A coding-agent session (Claude Code or Codex) that its owner shared toward a goal, identified by a keyed `session_key` |
+| Directive | A sequence-numbered message Align delivers to a person's running sessions: `goal_version`, `binding_changed`, `binding_suspended`, `stop` or `resume` |
+| Mode L | The default local mode: the server answers only loopback requests on one machine, with a local owner account |
+| Hosted | The internet-facing mode (`HOSTED=1`) |
+| Sample workspace | "Northstar (sample)", an ordinary workspace any person can create to see Align's flows |
 
 ## Parts
 
-- `goals-and-proposals` — goals, dependencies, proposals and the approval flow
-- `directives` — pushes from Align to running agents and their acknowledgement, running and verifying the accepted plan in Sparta, and v2 directives with the stop latch
-- `mcp` — the read-only MCP server, its OAuth authorization and the `align-connect` stdio relay
-- `workspaces` — workspace setup, onboarding interview, access, session capture, and the goal sessions (v2) API
-- `local-agent` — the `align` CLI, its hooks, the one-pass sync and local metering, plus the repo-local capture and watcher hooks
-- `interface` — the screens people use, including the goal sessions web app under `/app`
+- `goals-and-proposals` — goals and their versions, approval sets, alignments, change requests and the sample workspace
+- `directives` — directives to running agents, receipts, and stopping and resuming an agent
+- `mcp` — the read-only MCP server, its OAuth authorization server and the `align-connect` stdio relay
+- `workspaces` — identity and sign-in, workspaces, members, teams, invites, devices, shared sessions, usage and spend, activity, and hosted mode
+- `local-agent` — the `align` CLI, its Claude Code and Codex hooks, the one-pass sync and local metering
+- `interface` — the web app under `/app` and the OAuth consent page
