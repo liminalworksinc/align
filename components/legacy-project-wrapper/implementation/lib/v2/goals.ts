@@ -296,10 +296,92 @@ export function assertNoDependencyCycle(wsId: string, goalId: string, deps: stri
   if (dependencyCycle(wsId, goalId, deps)) throw conflict("cycle", DEPENDENCY_CYCLE);
 }
 
-const contentHash = (c: { title: string; measures: Measure[]; anchors: Anchors; status: GoalStatus; depends_on?: string[] }) =>
+/** The versioned content of a goal: what a new version, or a change request, can change (anchors only by its owner). */
+export interface GoalContent {
+  title: string;
+  measures: Measure[];
+  anchors: Anchors;
+  status: GoalStatus;
+  depends_on: string[];
+}
+
+const contentHash = (c: GoalContent) =>
   sha256hex(
     JSON.stringify({ title: c.title, measures: c.measures, anchors: c.anchors, status: c.status, ...(c.depends_on?.length ? { depends_on: [...c.depends_on].sort() } : {}) }),
   );
+export const sameContent = (a: GoalContent, b: GoalContent) => contentHash(a) === contentHash(b);
+
+/** A goal's (or one stored version's) content. */
+export function contentOf(r: { title: string; measures_json: string; anchors_json: string; status: string; depends_on_json: string }): GoalContent {
+  return { title: r.title, measures: JSON.parse(r.measures_json), anchors: JSON.parse(r.anchors_json), status: r.status as GoalStatus, depends_on: JSON.parse(r.depends_on_json || "[]") };
+}
+
+/** The content of one stored version of a goal. */
+export function versionContentOf(wsId: string, goalId: string, version: number): GoalContent | undefined {
+  const r = get<{ title: string; measures_json: string; anchors_json: string; status: string; depends_on_json: string }>(
+    "SELECT title, measures_json, anchors_json, status, depends_on_json FROM v2_goal_versions WHERE ws_id = ? AND goal_id = ? AND version = ?",
+    wsId,
+    goalId,
+    version,
+  );
+  return r ? contentOf(r) : undefined;
+}
+
+/** Validate a version body against `prev` (the same rules for a new version and a change request): the fields sent
+ *  replace prev's, then 409 cycle when depends_on would loop and 409 no_change when nothing changed. */
+export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalContent, b: Body): GoalContent {
+  const status = (b.status ?? prev.status) as GoalStatus;
+  if (!GOAL_STATUSES.includes(status)) throw badRequest("status must be active, achieved or dropped");
+  const next: GoalContent = {
+    title: b.title === undefined ? prev.title : str(b, "title", 300),
+    measures: measuresIn(b.measures, prev.measures),
+    anchors: anchorsIn(b.anchors, prev.anchors),
+    status,
+    depends_on: dependsIn(pp, b.depends_on, goalId, prev.depends_on),
+  };
+  assertNoDependencyCycle(pp.wsId, goalId, next.depends_on);
+  if (sameContent(next, prev)) throw conflict("no_change", "Nothing changed");
+  return next;
+}
+
+/** Insert a new goal at version 1 (inside the caller's tx). Used by createGoal and the sample workspace. */
+export function insertGoal(
+  pp: PolicyPrincipal,
+  f: { title: string; level: GoalLevel; podId: string | null; visibility: Visibility; measures: Measure[]; anchors: Anchors; dependsOn: string[] },
+  at: string,
+): string {
+  const id = newId("g");
+  run(
+    `INSERT INTO v2_goals (id, ws_id, owner_id, pod_id, visibility, level, version, title, measures_json, anchors_json, depends_on_json, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'active', ?, ?)`,
+    id,
+    pp.wsId,
+    pp.userId,
+    f.podId,
+    f.visibility,
+    f.level,
+    f.title,
+    JSON.stringify(f.measures),
+    JSON.stringify(f.anchors),
+    JSON.stringify(f.dependsOn),
+    at,
+    at,
+  );
+  run(
+    "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, status, content_hash, created_by, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, 'active', ?, ?, ?)",
+    pp.wsId,
+    id,
+    f.title,
+    JSON.stringify(f.measures),
+    JSON.stringify(f.anchors),
+    JSON.stringify(f.dependsOn),
+    contentHash({ title: f.title, measures: f.measures, anchors: f.anchors, status: "active", depends_on: f.dependsOn }),
+    pp.userId,
+    at,
+  );
+  audit(pp.wsId, pp.userId, "goal.created", id, at);
+  return id;
+}
 
 export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   const level = (b.level ?? "team") as GoalLevel;
@@ -321,98 +403,74 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   const anchors = anchorsIn(b.anchors ?? {});
   const dependsOn = dependsIn(pp, b.depends_on ?? [], null);
   const at = nowIso();
-  const id = newId("g");
   const count = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_goals WHERE ws_id = ?", pp.wsId)?.n ?? 0;
   if (count >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals");
-  await tx(() => {
-    run(
-      `INSERT INTO v2_goals (id, ws_id, owner_id, pod_id, visibility, level, version, title, measures_json, anchors_json, depends_on_json, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'active', ?, ?)`,
-      id,
-      pp.wsId,
-      pp.userId,
-      podId,
-      visibility,
-      level,
-      title,
-      JSON.stringify(measures),
-      JSON.stringify(anchors),
-      JSON.stringify(dependsOn),
-      at,
-      at,
-    );
-    run(
-      "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, status, content_hash, created_by, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, 'active', ?, ?, ?)",
-      pp.wsId,
-      id,
-      title,
-      JSON.stringify(measures),
-      JSON.stringify(anchors),
-      JSON.stringify(dependsOn),
-      contentHash({ title, measures, anchors, status: "active", depends_on: dependsOn }),
-      pp.userId,
-      at,
-    );
-    audit(pp.wsId, pp.userId, "goal.created", id, at);
-  });
+  const id = await tx(() => insertGoal(pp, { title, level, podId, visibility, measures, anchors, dependsOn }, at));
   return serializeGoal(pp, goalRow(pp.wsId, id)!);
 }
 
-/** A new immutable version (title, measures, anchors and/or status). Its goal_version directive rows are written
- *  in the same transaction, for every session bound to or governed by this goal. */
+/** Write the goal's next version, authored by `actorId` (inside the caller's tx). The one path every new version
+ *  takes, whether the owner saves it or an approver approves a change request: version row with its content hash,
+ *  audit goal.versioned, review against the parents as they are now, one goal_version directive for every session
+ *  bound to or governed by the goal, and, when the goal becomes achieved or dropped, every open change request on
+ *  it is superseded. 409 stale_version if the goal moved since `g` was read. */
+export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at: string): GoalRow {
+  if (c.depends_on.length) assertNoDependencyCycle(g.ws_id, g.id, c.depends_on); // again, inside the transaction
+  const v = g.version + 1;
+  const n = run(
+    "UPDATE v2_goals SET version = ?, title = ?, measures_json = ?, anchors_json = ?, depends_on_json = ?, status = ?, updated_at = ? WHERE ws_id = ? AND id = ? AND version = ?",
+    v,
+    c.title,
+    JSON.stringify(c.measures),
+    JSON.stringify(c.anchors),
+    JSON.stringify(c.depends_on),
+    c.status,
+    at,
+    g.ws_id,
+    g.id,
+    g.version,
+  );
+  if (!n) throw conflict("stale_version", "This goal changed meanwhile; reload and try again");
+  run(
+    "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, status, content_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    g.ws_id,
+    g.id,
+    v,
+    c.title,
+    JSON.stringify(c.measures),
+    JSON.stringify(c.anchors),
+    JSON.stringify(c.depends_on),
+    c.status,
+    contentHash(c),
+    actorId,
+    at,
+  );
+  audit(g.ws_id, actorId, "goal.versioned", g.id, at);
+  reviewParents(g.ws_id, g.id, at); // saving a version is a review against the parents as they are now
+  const next = goalRow(g.ws_id, g.id)!;
+  goalVersionDirective(g.ws_id, next);
+  if (c.status === "achieved" || c.status === "dropped") supersedeOpenRequests(g.ws_id, g.id, actorId, at);
+  return next;
+}
+
+/** A goal that is achieved or dropped takes no more change requests: every pending or countered one on it is
+ *  superseded (lib/v2/changes.ts reads the result), audited with the person whose action changed the status. */
+function supersedeOpenRequests(wsId: string, goalId: string, actorId: string, at: string) {
+  const open = all<{ id: string }>("SELECT id FROM v2_change_requests WHERE ws_id = ? AND goal_id = ? AND state IN ('pending','countered')", wsId, goalId);
+  for (const r of open) {
+    run("UPDATE v2_change_requests SET state = 'superseded', updated_at = ? WHERE id = ?", at, r.id);
+    audit(wsId, actorId, "change_request.superseded", r.id, at);
+  }
+}
+
+/** A new immutable version from the goal's owner (title, measures, anchors, depends_on and/or status). */
 export async function newGoalVersion(pp: PolicyPrincipal, goalId: string, b: Body): Promise<Goal> {
   const g = goalRow(pp.wsId, goalId);
   if (!g) throw notFound();
   need(pp, "goal.edit", goalObj(g));
   if (b.version !== undefined && b.version !== g.version) throw conflict("stale_version", `This goal is at version ${g.version}; reload and try again`);
-  const title = b.title === undefined ? g.title : str(b, "title", 300);
-  const measures = measuresIn(b.measures, JSON.parse(g.measures_json));
-  const anchors = anchorsIn(b.anchors, JSON.parse(g.anchors_json));
-  const status = (b.status ?? g.status) as GoalStatus;
-  if (!GOAL_STATUSES.includes(status)) throw badRequest("status must be active, achieved or dropped");
-  const prevDeps: string[] = JSON.parse(g.depends_on_json || "[]");
-  const dependsOn = dependsIn(pp, b.depends_on, g.id, prevDeps);
-  assertNoDependencyCycle(pp.wsId, g.id, dependsOn);
-  const hash = contentHash({ title, measures, anchors, status, depends_on: dependsOn });
-  if (hash === contentHash({ title: g.title, measures: JSON.parse(g.measures_json), anchors: JSON.parse(g.anchors_json), status: g.status, depends_on: prevDeps })) {
-    throw conflict("no_change", "Nothing changed");
-  }
-  const at = nowIso();
-  const v = g.version + 1;
-  await tx(() => {
-    if (dependsOn.length) assertNoDependencyCycle(pp.wsId, goalId, dependsOn); // again, inside the transaction
-    const n = run(
-      "UPDATE v2_goals SET version = ?, title = ?, measures_json = ?, anchors_json = ?, depends_on_json = ?, status = ?, updated_at = ? WHERE ws_id = ? AND id = ? AND version = ?",
-      v,
-      title,
-      JSON.stringify(measures),
-      JSON.stringify(anchors),
-      JSON.stringify(dependsOn),
-      status,
-      at,
-      pp.wsId,
-      goalId,
-      g.version,
-    );
-    if (!n) throw conflict("stale_version", "This goal changed meanwhile; reload and try again");
-    run(
-      "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, status, content_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      pp.wsId,
-      goalId,
-      v,
-      title,
-      JSON.stringify(measures),
-      JSON.stringify(anchors),
-      JSON.stringify(dependsOn),
-      status,
-      hash,
-      pp.userId,
-      at,
-    );
-    audit(pp.wsId, pp.userId, "goal.versioned", goalId, at);
-    reviewParents(pp.wsId, goalId, at); // saving a version is a review against the parents as they are now
-    goalVersionDirective(pp.wsId, goalRow(pp.wsId, goalId)!);
-  });
+  const next = nextContent(pp, g.id, contentOf(g), b);
+  await tx(() => writeGoalVersion(g, next, pp.userId, nowIso()));
   return serializeGoal(pp, goalRow(pp.wsId, goalId)!);
 }
 

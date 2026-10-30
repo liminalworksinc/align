@@ -633,13 +633,60 @@ async function local(env) {
   check("a device with two workspaces naming none -> 'Name a workspace: this device can read several'; naming one reads it", several.isError && several.text === "Name a workspace: this device can read several" && !several.sc && named.sc?.workspace.id === B, `${several.text} | ${named.text.slice(0, 80)}`);
   check("an app naming another workspace (even one its person is in) -> 'Workspace not found'; naming its own works; over 64 characters fails", appOther.isError && appOther.text === "Workspace not found" && !appOther.text.includes("Harbor Beta") && appSame.sc?.workspace.id === A && (tooLong.isError || !!tooLong.error), `${appOther.text} | ${tooLong.text}`);
 
-  // change requests and decision records (none exist yet: the change-requests part adds them)
+  // change requests and decision records: a pending one (U2 on the company goal), an approved one (U4 on U2's goal,
+  // with a note), a withdrawn one (U4 on the company goal) and a pending one on the team goal (U1, the workspace owner,
+  // who can read it; the viewer U3 can't)
+  const crBase = (g) => `/api/v2/workspaces/${A}/goals/${g}/change-requests`;
+  const crPending = await web(U2, "POST", crBase(GC.id), { base_version: 1, changes: { measures: [{ text: "Regulated logos", target: "5" }, { text: "EU data residency", target: "by Q3" }] }, reason: "Residency blocks every EU deal" });
+  const crApproved = await web(U4, "POST", crBase(GI.id), { base_version: 3, changes: { title: "Version four title" }, reason: "Clearer title" });
+  const crApprove = await web(U2, "POST", `${crBase(GI.id)}/${crApproved.json?.id}/approve`, { revision: 1, note: "Agreed, ship it" });
+  const crWithdrawn = await web(U4, "POST", crBase(GC.id), { base_version: 1, changes: { title: "Expand to regulated customers fast" }, reason: "Speed" });
+  const crWithdraw = await web(U4, "POST", `${crBase(GC.id)}/${crWithdrawn.json?.id}/withdraw`, {});
+  const crTeam = await web(U1, "POST", crBase(GT.id), { base_version: 1, changes: { title: "Ship self-serve onboarding to EU" }, reason: "Team goal change" });
+  check(
+    "setup: change requests: pending, approved (version 4 of the goal), withdrawn, and one on the team goal",
+    [crPending, crApproved, crWithdrawn, crTeam].every((r) => r.status === 201) && crApprove.json?.state === "approved" && crApprove.json.version === 4 && crWithdraw.json?.state === "withdrawn",
+    [crPending, crApproved, crApprove, crWithdrawn, crWithdraw, crTeam].map((r) => `${r.status} ${r.text.slice(0, 120)}`).join(" | "),
+  );
   const lcr = await tool(app, "align_list_change_requests");
   const lcrP = await tool(app, "align_list_change_requests", { state: "pending" });
   const lcrBad = await tool(app, "align_list_change_requests", { state: "open" });
-  check("align_list_change_requests: {workspace, state null, change_requests []}; state pending is echoed; any other state fails input validation", !lcr.isError && lcr.sc.workspace.id === A && lcr.sc.state === null && Array.isArray(lcr.sc.change_requests) && lcrP.sc?.state === "pending" && (lcrBad.isError || !!lcrBad.error), `${JSON.stringify(lcr.sc)} ${lcrBad.text}`);
+  check("align_list_change_requests: {workspace, state null, change_requests}; state pending is echoed; any other state fails input validation", !lcr.isError && lcr.sc.workspace.id === A && lcr.sc.state === null && Array.isArray(lcr.sc.change_requests) && lcrP.sc?.state === "pending" && (lcrBad.isError || !!lcrBad.error), `${JSON.stringify(lcr.sc)} ${lcrBad.text}`);
   const dr = await tool(app, "align_get_decision_record", { change_request_id: "cr_nosuchrequestnosuchreq" });
   check("align_get_decision_record for an unknown id: found false, decided false, record null, 'No change request <id>.'", !dr.isError && dr.sc.found === false && dr.sc.decided === false && dr.sc.record === null && dr.text === "No change request cr_nosuchrequestnosuchreq.", JSON.stringify(dr));
+  const lcrIds = (lcr.sc?.change_requests ?? []).map((c) => c.id);
+  const lcrPending = (lcr.sc?.change_requests ?? []).find((c) => c.id === crPending.json?.id);
+  check(
+    "align_list_change_requests: the real requests: the pending one (goal title, requester, base version, revision, reason as untrusted_text), the approved, the withdrawn and the team goal's",
+    lcrIds.length === 4 && [crPending, crApproved, crWithdrawn, crTeam].every((r) => lcrIds.includes(r.json?.id)) && lcrPending?.state === "pending" && lcrPending.goal.id === GC.id && JSON.stringify(lcrPending.goal.title) === JSON.stringify(ut(GC.title)) && JSON.stringify(lcrPending.requested_by) === JSON.stringify({ id: U2.id, name: ut("Mae Member") }) && lcrPending.base_version === 1 && lcrPending.revision === 1 && JSON.stringify(lcrPending.reason) === JSON.stringify(ut("Residency blocks every EU deal")) && lcr.text.startsWith("4 change requests."),
+    JSON.stringify(lcr.sc?.change_requests).slice(0, 600),
+  );
+  check(
+    "align_list_change_requests state pending: only the two pending ones",
+    JSON.stringify((lcrP.sc?.change_requests ?? []).map((c) => c.id).sort()) === JSON.stringify([crPending.json?.id, crTeam.json?.id].sort()) && lcrP.sc.change_requests.every((c) => c.state === "pending"),
+    JSON.stringify(lcrP.sc?.change_requests?.map((c) => [c.id, c.state])),
+  );
+  const drApproved = await tool(app, "align_get_decision_record", { change_request_id: crApproved.json?.id });
+  const rec = drApproved.sc?.record;
+  check(
+    "align_get_decision_record for an approved request: found, decided, decided_by the approver, decision_note, the title diff, resulting_version 4, decided_at",
+    drApproved.sc?.found === true && drApproved.sc.decided === true && rec?.state === "approved" && rec.goal.id === GI.id && JSON.stringify(rec.requested_by) === JSON.stringify({ id: U4.id, name: ut("Lou Lead") }) && JSON.stringify(rec.decided_by) === JSON.stringify({ id: U2.id, name: ut("Mae Member") }) && JSON.stringify(rec.decision_note) === JSON.stringify(ut("Agreed, ship it")) && JSON.stringify(rec.reason) === JSON.stringify(ut("Clearer title")) && rec.base_version === 3 && JSON.stringify(rec.diff) === JSON.stringify({ title: { before: ut(INJECTED), after: ut("Version four title") } }) && rec.resulting_version === 4 && typeof rec.decided_at === "string",
+    JSON.stringify(drApproved.sc).slice(0, 600),
+  );
+  const drPending = await tool(app, "align_get_decision_record", { change_request_id: crPending.json?.id });
+  const drWithdrawn = await tool(app, "align_get_decision_record", { change_request_id: crWithdrawn.json?.id });
+  check(
+    "align_get_decision_record: pending -> decided false, record null, 'Change request <id> is pending; it has no decision yet.'; withdrawn -> decided false, record null, 'Change request <id> was withdrawn without a decision.'",
+    drPending.sc?.found === true && drPending.sc.decided === false && drPending.sc.record === null && drPending.text === `Change request ${crPending.json?.id} is pending; it has no decision yet.` && drWithdrawn.sc?.found === true && drWithdrawn.sc.decided === false && drWithdrawn.sc.record === null && drWithdrawn.text === `Change request ${crWithdrawn.json?.id} was withdrawn without a decision.`,
+    `${drPending.text} | ${drWithdrawn.text}`,
+  );
+  const lcrViewer = await tool(D3.access, "align_list_change_requests");
+  const drViewer = await tool(D3.access, "align_get_decision_record", { change_request_id: crTeam.json?.id });
+  check(
+    "a viewer outside the team: the request on the team goal is absent from the list and its record is 'No change request <id>.'; the workspace goal's requests are listed",
+    !(lcrViewer.sc?.change_requests ?? []).some((c) => c.id === crTeam.json?.id) && (lcrViewer.sc?.change_requests ?? []).length === 3 && drViewer.sc?.found === false && drViewer.sc.record === null && drViewer.text === `No change request ${crTeam.json?.id}.`,
+    `${JSON.stringify(lcrViewer.sc?.change_requests?.map((c) => c.id))} ${drViewer.text}`,
+  );
 
   // directives: the person's own sessions only
   const SK1 = sessionKey(D1, A, "u1-session");

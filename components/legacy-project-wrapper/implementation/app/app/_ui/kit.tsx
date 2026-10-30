@@ -87,6 +87,7 @@ const WS_TABS = [
   { href: "/people", label: "People" },
   { href: "/sessions", label: "Sessions" },
   { href: "/alignments", label: "Alignments" },
+  { href: "/requests", label: "Requests" },
   { href: "/spend", label: "Spend" },
   { href: "/apps", label: "Apps" },
 ];

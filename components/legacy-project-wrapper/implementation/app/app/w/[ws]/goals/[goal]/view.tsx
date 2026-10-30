@@ -4,7 +4,8 @@ import { useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
 import { AnchorsEditor, MeasuresEditor, VISIBILITY_LABEL, anchorsDraft, anchorsOut, measuresDraft, measuresOut } from "../../../../_ui/goalform";
 import type { Me } from "../../../../_ui/server";
-import type { Goal, MySession } from "../../../../_ui/types";
+import { ChangeRequestCard, ProposeChange, useGoalTitles } from "../../../../_ui/changes";
+import type { ChangeRequest, Goal, MySession } from "../../../../_ui/types";
 
 interface Detail {
   goal: Goal;
@@ -183,6 +184,35 @@ function Tree({ ws, goal, canEdit, onDone }: { ws: string; goal: Goal; canEdit: 
   );
 }
 
+/** "Propose a change" (active goals, not the owner, not a viewer) and the goal's change requests (everyone who reads it). */
+function ChangeRequests({ ws, goal, me, role, onGoalChanged }: { ws: string; goal: Goal; me: Me; role: string | undefined; onGoalChanged: () => void }) {
+  const list = useApi<{ change_requests: ChangeRequest[] }>(`/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests`);
+  const titles = useGoalTitles(ws);
+  const canPropose = goal.status === "active" && goal.owner.id !== me.id && !!role && role !== "viewer";
+  if (!canPropose && !list.data?.change_requests.length) return null;
+  return (
+    <section id="change-requests">
+      <Card title="Change requests">
+        {canPropose && (
+          <div className="mb-4">
+            <ProposeChange ws={ws} goal={goal} onDone={list.reload} />
+          </div>
+        )}
+        {list.loading && <Loading />}
+        <Err>{list.error}</Err>
+        {list.data?.change_requests.length === 0 && <Note>No change requests yet.</Note>}
+        {list.data?.change_requests.map((cr) => (
+          <ChangeRequestCard key={`${cr.id}:${cr.revision}:${cr.state}:${cr.goal.version}`} ws={ws} cr={cr} me={me.id} titles={titles} onDone={() => {
+              list.reload();
+              onGoalChanged();
+            }}
+          />
+        ))}
+      </Card>
+    </section>
+  );
+}
+
 export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: string }) {
   const d = useApi<Detail>(`/api/v2/workspaces/${ws}/goals/${goal}`);
   const ws0 = useApi<{ role: string }>(`/api/v2/workspaces/${ws}`);
@@ -221,6 +251,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           </Card>
           <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={d.reload} />
           {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} onDone={d.reload} />}
+          {ws0.data && <ChangeRequests key={g.version} ws={ws} goal={g} me={me} role={ws0.data.role} onGoalChanged={d.reload} />}
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}
           <Card title="Versions">
             <ul className="text-[14px] text-zinc-600">

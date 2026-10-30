@@ -60,7 +60,8 @@ All five are annotated `readOnlyHint: true`, `idempotentHint: true`, `openWorldH
 | `align_get_decision_record` | `change_request_id` | A decided change request: who asked and decided, the reason, the diff, the resulting version |
 | `align_get_directives` | none | The newest 50 directives sent to the person's own sessions in the workspace |
 
-Change requests are read through `lib/v2/changes-read.ts`; until the change-requests tables exist the list is empty.
+Change requests are read through `lib/v2/changes-read.ts`, which reshapes the views of `lib/v2/changes.ts` (only requests
+on goals the person can read; the MCP layer checks that again).
 
 **People's text is data.** Every string a person wrote (names, titles, measures, reasons, notes) comes back as
 `{"untrusted_text": "…"}` in `structuredContent`, and between `<untrusted-text>` tags, with `<` and `>` escaped, in the

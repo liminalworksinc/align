@@ -8,13 +8,14 @@ export default function Home({ me }: { me: Me }) {
   const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
   const [name, setName] = useState("");
   const act = useAction();
+  const sample = useAction();
   return (
     <Shell me={me}>
       <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Your workspaces</h1>
       <Card>
         {list.loading && <Loading />}
         <Err>{list.error}</Err>
-        {list.data && list.data.workspaces.length === 0 && <Note>You are not in a workspace yet. Create one, or open an invite link someone sent you.</Note>}
+        {list.data && list.data.workspaces.length === 0 && <Note>You are not in a workspace yet. Create one, open an invite link someone sent you, or start from a sample.</Note>}
         <ul className="divide-y divide-zinc-200">
           {list.data?.workspaces.map((w) => (
             <li key={w.id} className="flex flex-wrap items-center gap-3 py-3">
@@ -32,6 +33,25 @@ export default function Home({ me }: { me: Me }) {
           ))}
         </ul>
       </Card>
+      {list.data && list.data.workspaces.length === 0 && (
+        <Card title="Try Align with a sample">
+          <p className="mb-3 text-[15px] text-zinc-600">
+            Northstar is a made-up company with a company goal, two team goals that contribute to it and a change request waiting for a decision. You own all of it, so you can try every step. It is an ordinary workspace you can rename or delete.
+          </p>
+          <Btn
+            disabled={sample.busy}
+            onClick={() =>
+              void sample.run(async () => {
+                const w = await api<{ id: string }>("/api/v2/workspaces/sample", { body: {} });
+                go(`/app/w/${w.id}`);
+              })
+            }
+          >
+            Create the Northstar sample
+          </Btn>
+          <Err>{sample.error}</Err>
+        </Card>
+      )}
       <Card title="Create a workspace">
         <form
           onSubmit={(e) => {

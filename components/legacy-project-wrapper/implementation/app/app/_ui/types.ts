@@ -83,3 +83,31 @@ export interface Alignment {
   created_at: string;
   updated_at: string;
 }
+
+export type ChangeFields = Partial<{ title: string; measures: Goal["measures"]; depends_on: string[]; status: Goal["status"] }>;
+
+export interface ChangeRequest {
+  id: string;
+  goal: { id: string; title: string; version: number };
+  state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded";
+  revision: number;
+  base_version: number;
+  behind: boolean;
+  requester: { id: string; name: string };
+  changes: ChangeFields;
+  reason: string;
+  revisions: { revision: number; base_version: number; changes: ChangeFields; note: string | null; author: { id: string; name: string }; created_at: string }[];
+  diff: { before: ChangeFields; after: ChangeFields };
+  approvers: { id: string; name: string }[];
+  approved_by: { id: string; name: string } | null;
+  rejected_by: { id: string; name: string } | null;
+  decision_note: string | null;
+  note: string | null;
+  rejection_reason: string | null;
+  version: number | null;
+  can: Record<"approve" | "reject" | "counter" | "accept_counter" | "withdraw" | "rebase", boolean>;
+  waiting_on_me: boolean;
+  created_at: string;
+  updated_at: string;
+  decided_at: string | null;
+}
