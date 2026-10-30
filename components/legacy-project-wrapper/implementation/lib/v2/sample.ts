@@ -4,11 +4,13 @@ import { insertAlignment } from "./alignments";
 import { insertChangeRequest } from "./changes";
 import { goalRow, insertGoal, type Measure } from "./goals";
 import type { PodRole, PolicyPrincipal } from "./policy";
+import type { WebPrincipal } from "./http";
 import { createWorkspace } from "./workspaces";
 
 // The Northstar sample: an ordinary workspace, owned by the person who asks for it, filled in the transaction that
 // creates it so every flow can be tried at once. The caller leads both teams and owns every goal, so they can act on
-// every part. It counts toward the same limits as any new workspace, and can be renamed or deleted like one.
+// every part. It counts toward the same limits as any new workspace and, hosted, passes the same creation gate (a
+// creation code included), and can be renamed or deleted like one.
 //   teams Product and Security (caller lead of both)
 //   company goal "Expand to regulated customers"
 //   "Ship self-serve onboarding" (Product) and "Pass the security review" (Security), visible to the workspace, each
@@ -24,8 +26,10 @@ export const SAMPLE_REASON =
 const measure = (text: string, target: string | null): Measure => ({ id: newId("m"), text, target });
 const NO_ANCHORS = { repos: [], branch_patterns: [], issues: [] };
 
-export async function createSampleWorkspace(userId: string) {
-  return createWorkspace(userId, SAMPLE_NAME, (wsId, at) => {
+/** The sample for the signed-in caller: an ordinary creation, so hosted it passes the same gate (`code` included). */
+export async function createSampleWorkspace(req: Request, p: WebPrincipal, code: string | null) {
+  const userId = p.user.id;
+  return createWorkspace(req, p, SAMPLE_NAME, code, (wsId, at) => {
     // Goals a millisecond apart, so the feed (oldest first) lists the company goal first.
     const tick = (n: number) => new Date(Date.parse(at) + n).toISOString();
     const pods = new Map<string, PodRole>();

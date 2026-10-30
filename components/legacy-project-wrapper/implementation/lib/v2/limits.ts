@@ -1,3 +1,4 @@
+import { get, run } from "./db";
 import { V2Error } from "./errors";
 
 // Fixed-window counters for v2 (in memory, on globalThis, capped at 10,000 keys; oldest evicted first).
@@ -23,5 +24,34 @@ export function takeAll(limits: { key: string; max: number; windowMs: number }[]
     while (hits.size >= MAX_KEYS) hits.delete(hits.keys().next().value!);
     hits.set(l.key, [...l.list, now]);
   }
+  return true;
+}
+
+// Durable sliding windows (v2_rate_hits: one row per counted call), for limits that must survive a restart: hosted
+// email-code sends per address, access requests, and new shared sessions per device. Call inside tx().
+export interface Limit {
+  key: string;
+  max: number;
+  windowMs: number;
+}
+
+/** The longest durable window; older rows are pruned as calls are counted. */
+const DURABLE_KEEP_MS = 24 * 3600 * 1000;
+
+/** True when every durable limit still has room (nothing is counted). */
+export function durableRoom(limits: Limit[], now = Date.now()): boolean {
+  return limits.every((l) => (get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_rate_hits WHERE key = ? AND at > ?", l.key, now - l.windowMs)?.n ?? 0) < l.max);
+}
+
+/** Count one call against every durable limit. */
+export function durableCount(limits: Limit[], now = Date.now()) {
+  run("DELETE FROM v2_rate_hits WHERE at <= ?", now - DURABLE_KEEP_MS);
+  for (const l of limits) run("INSERT INTO v2_rate_hits (key, at) VALUES (?, ?)", l.key, now);
+}
+
+/** durableRoom, then durableCount: false (nothing counted) when any limit is full. */
+export function takeDurable(limits: Limit[], now = Date.now()): boolean {
+  if (!durableRoom(limits, now)) return false;
+  durableCount(limits, now);
   return true;
 }

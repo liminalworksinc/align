@@ -7,10 +7,13 @@ import { getMigrations } from "better-auth/db/migration";
 import { emailOTP } from "better-auth/plugins";
 import { config, hostAllowed } from "../config";
 import { clientNet } from "../ratelimit";
+import { signPayload } from "../secret";
+import { captchaPlugin } from "./captcha";
 import { emailSignInEnabled, githubConfigured, googleConfigured, publicOrigin, testIdpEnabled } from "./config";
-import { authDb, dbDir, get } from "./db";
+import { liveCodeFor } from "./core.mts";
+import { authDb, dbDir, get, sql, tx } from "./db";
 import { rand32 } from "./ids";
-import { takeAll } from "./limits";
+import { durableCount, durableRoom, takeAll } from "./limits";
 import { sendSignInCode } from "./mail";
 
 // Authentication only (who you are): Better Auth, mounted at /api/v2/auth. Authorization (what you may do) is ours,
@@ -18,9 +21,12 @@ import { sendSignInCode } from "./mail";
 //   - Google and GitHub, each only when its client id and secret are set;
 //   - an emailed one-time code (emailOtp, type sign-in): always in Mode L (printed, lib/v2/mail.ts), hosted only with
 //     the email API settings. 6 digits, 5 minutes, 3 attempts, stored hashed. Sends are limited to 3 per email per
-//     10 minutes and 10 per client per hour. The send answer never says whether an account exists. A code signs in
-//     the account with that verified email; a new account is made only for a pending invite, in Mode L, or (hosted)
-//     for ALIGN_FIRST_OWNER_EMAIL while the server has no account;
+//     10 minutes and 10 per client per hour and, hosted, 5 per email per hour (durable, keyed by an HMAC of the
+//     address) and 3 per client per minute (Better Auth's limit, durable). The send answer never says whether an
+//     account exists. A code signs in the account with that verified email; a new account is made only for a pending
+//     invite, in Mode L, or (hosted) for an address with a usable creation code bound to it (lib/v2/creation.ts) or
+//     for ALIGN_FIRST_OWNER_EMAIL while the server has no account. When Turnstile is on (lib/v2/captcha.ts), sending
+//     and signing in with a code both need its token;
 //   - ALIGN_TEST_IDP=1 (never when hosted) adds email + password so the flow can be tested without OAuth apps.
 // Account linking is explicit only (/app/account); nothing is linked by a matching email.
 
@@ -61,6 +67,7 @@ function mayCreateByEmailCode(email: string): boolean {
   if (!config().hosted) return true;
   const now = new Date().toISOString();
   if (get("SELECT 1 AS x FROM v2_invites WHERE email = ? AND accepted_at IS NULL AND expires_at > ?", email, now)) return true;
+  if (liveCodeFor(sql, email)) return true; // an approved access request (lib/v2/core.mts)
   const first = (process.env.ALIGN_FIRST_OWNER_EMAIL || "").trim().toLowerCase();
   return !!first && first === email && !get("SELECT 1 AS x FROM ba_user LIMIT 1");
 }
@@ -90,7 +97,15 @@ const beforeHook = createAuthMiddleware(async (ctx) => {
       const client = config().hosted ? `ip:${clientNet(ctx.request.headers.get("fly-client-ip") ?? "unknown")}` : "local";
       limits.push({ key: `otp-client:${client}`, max: 10, windowMs: 60 * 60 * 1000 });
     }
-    if (!takeAll(limits)) throw tooMany();
+    // Hosted, also 5 per address per hour, stored so a restart doesn't reset it. Keyed by an HMAC of the address, so
+    // the table holds no email. All of these count only if all of them allow the send.
+    const durable = config().hosted ? [{ key: `otp-email-hour:${signPayload(`alo.${email}`)}`, max: 5, windowMs: 60 * 60 * 1000 }] : [];
+    const ok = await tx(() => {
+      if (!durableRoom(durable) || !takeAll(limits)) return false;
+      durableCount(durable);
+      return true;
+    });
+    if (!ok) throw tooMany();
     return;
   }
   if (ctx.path === OTP_SIGN_IN && email && typeof body.otp === "string") {
@@ -126,6 +141,8 @@ export function authOptions(): BetterAuthOptions {
   if (googleConfigured()) social.google = { clientId: process.env.GOOGLE_CLIENT_ID!, clientSecret: process.env.GOOGLE_CLIENT_SECRET! };
   if (githubConfigured()) social.github = { clientId: process.env.GITHUB_CLIENT_ID!, clientSecret: process.env.GITHUB_CLIENT_SECRET! };
   const plugins: BetterAuthPlugin[] = [];
+  const bot = captchaPlugin(); // Turnstile on the email-code routes, hosted with both keys set
+  if (bot) plugins.push(bot);
   if (emailSignInEnabled()) {
     plugins.push(
       emailOTP({
@@ -187,17 +204,20 @@ export function authOptions(): BetterAuthOptions {
     user: { modelName: "ba_user" },
     session: { modelName: "ba_session" },
     verification: { modelName: "ba_verification" },
+    // Hosted, the counters live in the database (ba_rate_limit), so a restart doesn't reset them. Mode L has no client
+    // address (IP tracking is off), so Better Auth applies none of these there.
     rateLimit: {
       enabled: true,
       window: 60,
       max: 100,
-      storage: "memory",
+      storage: hosted ? "database" : "memory",
+      modelName: "ba_rate_limit",
       customRules: {
         "/sign-in/email": { window: 60, max: 10 },
         "/sign-up/email": { window: 60, max: 10 },
         "/sign-in/social": { window: 60, max: 20 },
-        // The email-code limits that matter (per email, per client) are ours, in beforeHook.
-        [OTP_SEND]: { window: 60, max: 20 },
+        // 3 code sends per client per minute; the per-email and per-client-hour limits are ours, in beforeHook.
+        [OTP_SEND]: { window: 60, max: 3 },
         [OTP_SIGN_IN]: { window: 60, max: 10 },
       },
     },

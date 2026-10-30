@@ -1,7 +1,9 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
 import { Btn, Err, Field, Input, Note, go } from "../_ui/kit";
 import type { SignInOptions } from "../_ui/server";
+import { useTurnstile } from "../_ui/turnstile";
 
 class AuthError extends Error {
   constructor(
@@ -13,8 +15,8 @@ class AuthError extends Error {
   }
 }
 
-async function post(path: string, body: unknown) {
-  const res = await fetch(`/api/v2/auth${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), credentials: "same-origin" });
+async function post(path: string, body: unknown, headers: Record<string, string> = {}) {
+  const res = await fetch(`/api/v2/auth${path}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), credentials: "same-origin" });
   const data = (await res.json().catch(() => ({}))) as { url?: string; message?: string; code?: string };
   if (!res.ok) throw new AuthError(res.status, data.code ?? "", data.message || "Sign-in failed");
   return data;
@@ -29,7 +31,14 @@ function codeMessage(e: unknown): string {
   if (e.code === "OTP_EXPIRED") return "That code has expired. Send a new one.";
   if (e.code === "TOO_MANY_ATTEMPTS") return "Too many wrong tries. Send a new code.";
   if (e.status === 429) return "Too many tries. Wait a minute, then try again.";
-  return e.message;
+  return captchaMessage(e) ?? e.message;
+}
+
+/** The captcha plugin's refusals (lib/v2/captcha.ts), in the page's words. */
+function captchaMessage(e: AuthError): string | null {
+  if (e.code === "MISSING_RESPONSE") return "Complete the check that you are a person, then try again.";
+  if (e.code === "VERIFICATION_FAILED") return "The check that you are a person didn't pass. Try it again.";
+  return null;
 }
 
 export default function SignIn({ next, options, email: email0, code: code0 }: { next: string; options: SignInOptions; email: string; code: string }) {
@@ -40,6 +49,8 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
   const [code, setCode] = useState(code0);
   const [step, setStep] = useState<"email" | "code">(email0 && code0 ? "code" : "email");
   const [sent, setSent] = useState(false);
+  // The bot check (hosted with Turnstile keys): one token per send or sign-in, reset after each.
+  const bot = useTurnstile(options.email ? options.captchaSiteKey : null);
   // Test identity provider (ALIGN_TEST_IDP=1, Mode L only).
   const [mode, setMode] = useState<"in" | "up">("in");
   const [name, setName] = useState("");
@@ -55,6 +66,7 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
       setError(msg(e));
     } finally {
       setBusy(false);
+      bot.reset();
     }
   };
 
@@ -67,17 +79,17 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
   const sendCode = () =>
     run(
       async () => {
-        await post("/email-otp/send-verification-otp", { email: email.trim(), type: "sign-in" });
+        await post("/email-otp/send-verification-otp", { email: email.trim(), type: "sign-in" }, bot.headers);
         setSent(true);
         setCode("");
         setStep("code");
       },
-      (e) => (e instanceof AuthError && e.status === 429 ? TOO_MANY_SENDS : (e as Error).message),
+      (e) => (e instanceof AuthError && e.status === 429 ? TOO_MANY_SENDS : e instanceof AuthError ? (captchaMessage(e) ?? e.message) : (e as Error).message),
     );
 
   const signInWithCode = () =>
     run(async () => {
-      await post("/sign-in/email-otp", { email: email.trim(), otp: code });
+      await post("/sign-in/email-otp", { email: email.trim(), otp: code }, bot.headers);
       go(next);
     }, codeMessage);
 
@@ -120,7 +132,7 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
             <Field label="Email">
               <Input type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" maxLength={320} />
             </Field>
-            <Btn type="submit" disabled={busy || !email.trim()}>
+            <Btn type="submit" disabled={busy || !email.trim() || !bot.ready}>
               Send code
             </Btn>
           </form>
@@ -150,10 +162,10 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
               />
             </Field>
             <div className="flex flex-wrap gap-2">
-              <Btn type="submit" disabled={busy || !/^\d{6}$/.test(code)}>
+              <Btn type="submit" disabled={busy || !/^\d{6}$/.test(code) || !bot.ready}>
                 Sign in
               </Btn>
-              <Btn kind="secondary" disabled={busy} onClick={() => void sendCode()}>
+              <Btn kind="secondary" disabled={busy || !bot.ready} onClick={() => void sendCode()}>
                 Send a new code
               </Btn>
               <Btn
@@ -177,6 +189,8 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
             )}
           </form>
         )}
+        {/* One widget for both steps: it stays mounted while the person moves from Send code to Sign in. */}
+        {bot.widget && <div className="mt-4">{bot.widget}</div>}
         {options.testIdp && (
           <form id="test-idp" onSubmit={local} className="mt-6 border-t border-zinc-200 pt-5">
             <p className="al-lbl mb-2">Test sign-in (this machine only)</p>
@@ -205,6 +219,14 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
           </form>
         )}
         <Err>{error}</Err>
+        {options.requestAccess && (
+          <p className="mt-5 border-t border-zinc-200 pt-4 text-[15px] text-zinc-600">
+            New to Align? Creating a workspace here needs a creation code.{" "}
+            <Link href="/app/request-access" className="underline">
+              Request access
+            </Link>
+          </p>
+        )}
       </div>
     </main>
   );

@@ -1029,6 +1029,10 @@ try {
     GOOGLE_CLIENT_SECRET: "test-google-secret",
     GITHUB_CLIENT_ID: "test-github-id",
     GITHUB_CLIENT_SECRET: "test-github-secret",
+    // The local phase's people continue here and make one more workspace: creation is open to them (the creation gate
+    // and its caps are test-v2's subject).
+    ALIGN_CREATION: "open",
+    ALIGN_MAX_OWNED_WORKSPACES: "50",
   };
   await hosted(hostedEnv);
   await rotation(hostedEnv);

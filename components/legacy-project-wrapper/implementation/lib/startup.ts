@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, un
 import path from "node:path";
 import { assertStartupConfig, config } from "./config";
 import { dcrDir } from "./oauth/clients";
+import { v2Warnings } from "./v2/config";
 
 // Some state lives in this process's memory (locks, rate limits, authorization codes), so two servers on one data
 // directory would disagree. A pid file, <data>/.pid, records the live server; a second one refuses to start.
@@ -37,6 +38,7 @@ export function startup() {
   writeFileSync(PID_FILE, String(process.pid), { mode: 0o600 });
   chmodSync(PID_FILE, 0o600); // the mode above applies only when the file is new
   sweepLeftovers();
+  for (const w of v2Warnings()) console.warn(w); // hosted without Turnstile keys: allowed, said once
   process.once("exit", () => {
     try {
       if (readFileSync(PID_FILE, "utf8").trim() === String(process.pid)) unlinkSync(PID_FILE);

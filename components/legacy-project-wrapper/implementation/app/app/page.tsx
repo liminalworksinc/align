@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { requireUser } from "./_ui/server";
+import { creationOptions, requireUser } from "./_ui/server";
 import Home from "./view";
 
 export default function Page() {
@@ -12,5 +12,5 @@ export default function Page() {
 
 async function Inner() {
   const me = await requireUser("/app");
-  return <Home me={me} />;
+  return <Home me={me} creation={await creationOptions(me)} />;
 }

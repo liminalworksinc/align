@@ -5,13 +5,17 @@
 //                                         404; the loopback Host check (421); one server per data directory (a second
 //                                         server is started on <port>+1); the local owner and its printed code;
 //                                         email codes (hashed, 5 min, 3 tries, send limits, no account disclosure);
-//                                         sign-in-link; test IdP off
+//                                         sign-in-link; test IdP off; access requests and the operator script
 //   on      Mode L, ALIGN_TEST_IDP=1    -> identity, RBAC, devices (recent sign-in), sessions, usage, spend, directives,
-//                                         directive cursor, receipts, alignments, stop sharing, delete, web UI
+//                                         directive cursor, receipts, alignments, stop sharing, delete, web UI; the
+//                                         hosted gate settings are set and ignored; align-admin workspaces
 //   hosted  HOSTED=1                    -> startup refusals, then the hosted host/https/edge checks and the route
 //                                         allowlist (/ -> /app, everything else 404); no closing date (a leftover
 //                                         ALIGN_DELETE_BY in the past is ignored); then email codes through a fake HTTPS
-//                                         email API (first owner, invites, unknown addresses, API failure)
+//                                         email API (first owner, invites, unknown addresses, API failure); then the
+//                                         creation gate: Turnstile through a fake HTTPS verify API, creation codes and
+//                                         access requests with the operator script (align-admin), disposable domains,
+//                                         the caps, durable limits across a restart, and ALIGN_CREATION closed and open
 // Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port;
 //                                           also uses <port>+1 for the second-server check)
 
@@ -221,6 +225,35 @@ const withDb = (fn) => {
   }
 };
 
+/** Run the operator script (scripts/align-admin.mjs) with exactly these settings, the way a host admin would. */
+function admin(args, env) {
+  const clean = { ...process.env };
+  for (const k of Object.keys(clean)) if (SETTING.test(k)) delete clean[k];
+  const all = { ...clean, ...env };
+  for (const k of Object.keys(all)) if (all[k] === undefined) delete all[k];
+  const r = spawnSync(process.execPath, ["scripts/align-admin.mjs", ...args], { cwd: ROOT, encoding: "utf8", env: all });
+  return { status: r.status, out: r.stdout ?? "", err: r.stderr ?? "" };
+}
+/** admin(), without blocking this process: for commands that call a fake API this test itself serves. */
+function adminAsync(args, env) {
+  const clean = { ...process.env };
+  for (const k of Object.keys(clean)) if (SETTING.test(k)) delete clean[k];
+  const all = { ...clean, ...env };
+  for (const k of Object.keys(all)) if (all[k] === undefined) delete all[k];
+  return new Promise((resolve) => {
+    const c = spawn(process.execPath, ["scripts/align-admin.mjs", ...args], { cwd: ROOT, env: all, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    c.stdout.on("data", (d) => (out += d));
+    c.stderr.on("data", (d) => (err += d));
+    c.on("close", (status) => resolve({ status, out, err }));
+  });
+}
+/** Every creation code in a text (alc_ + 32 base32 characters). */
+const codesIn = (text) => text.match(/alc_[a-z2-7]{32}/g) ?? [];
+/** True when no file of this database (main, WAL) contains `needle` as plain bytes. */
+const dbFilesLack = (file, needle) => [file, `${file}-wal`].every((f) => !existsSync(f) || !readFileSync(f).includes(Buffer.from(needle)));
+
 /** A device keypair and its HMAC secret, as the agent would keep them. */
 function newDeviceKeys() {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -429,6 +462,87 @@ try {
   );
   const scriptLimited = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT) } });
   check("sign-in-link: when the server answers 429 it exits 1 saying too many codes were sent", scriptLimited.status === 1 && /Too many codes/.test(scriptLimited.stderr), `${scriptLimited.status} ${scriptLimited.stderr}`);
+  // -- access requests (PRESEED-002): a public form, stored for the operator; durable limits, 5 per client per hour and
+  //    3 per address per day; Mode L blocks no domain and shows no bot check --
+  const raPage = await call("anon", "GET", "/app/request-access");
+  check(
+    "access: /app/request-access is served signed out (no redirect to sign-in) with the form, both interest choices and copy that says it is not an agreement and commits nobody",
+    raPage.status === 200 && raPage.text.includes("Request access to Align") && raPage.text.includes('value="try"') && raPage.text.includes('value="evaluate"') && raPage.text.includes("non-binding letter of intent") && raPage.text.includes("It is not an agreement") && raPage.text.includes("commit you or your employer to anything") && !raPage.text.includes("data-turnstile-sitekey"),
+    `${raPage.status} ${redirectTarget(raPage)}`,
+  );
+  const ar = (body, headers = { origin: BASE }) => call("anon", "POST", "/api/v2/access-requests", { headers, body });
+  const arBody = { email: "Req@Example.test", name: "Rea Quest", company: "Acme", team_size: "2-10", use_case: "Keep our agents on the team's goals", interest: "evaluate" };
+  const ar1 = await ar(arBody);
+  const arRow = withDb((d) => d.prepare("SELECT * FROM v2_access_requests WHERE email = ?").get("req@example.test"));
+  check(
+    "access: POST /api/v2/access-requests (no sign-in) -> 201 {received:true}; stored with email (lowercased), name, company, team size, use, interest, status pending and created_at",
+    ar1.status === 201 && ar1.json?.received === true && /^ar_[a-z2-7]{24}$/.test(arRow?.id ?? "") && arRow.name === "Rea Quest" && arRow.company === "Acme" && arRow.team_size === "2-10" && arRow.use_case === arBody.use_case && arRow.interest === "evaluate" && arRow.status === "pending" && !Number.isNaN(Date.parse(arRow.created_at)) && arRow.decided_at === null,
+    `${ar1.status} ${ar1.text} ${JSON.stringify(arRow)}`,
+  );
+  const ar2 = await ar({ ...arBody, interest: "try" });
+  const arAll = withDb((d) => d.prepare("SELECT interest FROM v2_access_requests WHERE email = ?").all("req@example.test"));
+  check("access: sending again while a request is pending updates that one request, with the same answer", ar2.status === 201 && ar2.text === ar1.text && arAll.length === 1 && arAll[0].interest === "try", `${ar2.status} ${JSON.stringify(arAll)}`);
+  const arBad = await Promise.all([ar({ ...arBody, interest: "sign" }), ar({ ...arBody, email: "not-an-email" }), ar({ ...arBody, use_case: " " }), ar({ ...arBody, team_size: "9" }), ar({ ...arBody, use_case: "x".repeat(501) }), ar(arBody, { origin: "http://evil.example" })]);
+  check(
+    "access: an unknown interest, a bad email, an empty or 501-character use, an unknown team size -> 400; another site's Origin -> 403 cross_site",
+    arBad.slice(0, 5).every((r) => r.status === 400) && arBad[5].status === 403 && arBad[5].json?.error === "cross_site",
+    arBad.map((r) => r.status).join(","),
+  );
+  const ar3 = await ar(arBody);
+  const ar4 = await ar(arBody);
+  check("access: a 4th request for one address within a day -> 429 rate_limited (counted durably)", ar3.status === 201 && ar4.status === 429 && ar4.json?.error === "rate_limited", `${ar3.status} ${ar4.status}`);
+  const arDisposable = await ar({ ...arBody, email: "someone@mailinator.com" });
+  const ar5 = await ar({ ...arBody, email: "other@example.test" });
+  const ar6 = await ar({ ...arBody, email: "third@example.test" });
+  check(
+    "access: Mode L blocks no disposable domain (mailinator.com -> 201); the 6th request from one client within an hour -> 429",
+    arDisposable.status === 201 && ar5.status === 201 && ar6.status === 429 && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_rate_hits WHERE key LIKE 'access-email:%' AND key LIKE '%example.test%'").get().n) === 0,
+    `${arDisposable.status} ${ar5.status} ${ar6.status}`,
+  );
+  // -- the operator script on access requests and codes (Mode L: no email settings, so a code is printed) --
+  const opEnv = { ALIGN_DATA_DIR: localDir };
+  const reqList = admin(["requests", "list", "--status", "pending"], opEnv);
+  const otherId = withDb((d) => d.prepare("SELECT id FROM v2_access_requests WHERE email = ?").get("other@example.test").id);
+  check(
+    "align-admin: requests list --status pending lists each request (id, status, interest, name, email, company, team size, use)",
+    reqList.status === 0 && reqList.out.includes(arRow.id) && reqList.out.includes("Rea Quest <req@example.test>, Acme, team 2-10") && reqList.out.includes(arBody.use_case) && reqList.out.includes(otherId) && !/ExperimentalWarning/.test(reqList.err),
+    reqList.out + reqList.err,
+  );
+  const approved = admin(["requests", "approve", arRow.id], opEnv);
+  const approvedCode = codesIn(approved.out)[0] ?? "";
+  const arAfter = withDb((d) => d.prepare("SELECT status, decided_at, code_id FROM v2_access_requests WHERE id = ?").get(arRow.id));
+  const codeRow = withDb((d) => d.prepare("SELECT * FROM v2_creation_codes WHERE id = ?").get(arAfter.code_id ?? ""));
+  check(
+    "align-admin: requests approve, with no email settings, prints one email-bound code (alc_…) once; the request is approved and names the code; the code is bound to that address, expires in 14 days, and only its HMAC is stored",
+    approved.status === 0 && codesIn(approved.out).length === 1 && arAfter.status === "approved" && arAfter.decided_at && codeRow?.email === "req@example.test" && codeRow.request_id === arRow.id && Math.abs(Date.parse(codeRow.expires_at) - Date.now() - 14 * 864e5) < 6e4 && codeRow.code_hash !== approvedCode && dbFilesLack(dbFile, approvedCode),
+    approved.out + approved.err + JSON.stringify(codeRow),
+  );
+  const again = admin(["requests", "approve", arRow.id], opEnv);
+  const declined = admin(["requests", "decline", otherId], opEnv);
+  check(
+    "align-admin: approving a request that is no longer pending exits 1; requests decline marks one declined and sends nothing",
+    again.status === 1 && /No pending request/.test(again.err) && declined.status === 0 && withDb((d) => d.prepare("SELECT status FROM v2_access_requests WHERE id = ?").get(otherId).status) === "declined" && admin(["requests", "list", "--status", "declined"], opEnv).out.includes(otherId),
+    `${again.status} ${again.err} ${declined.status} ${declined.err}`,
+  );
+  const made = admin(["codes", "create", "--count", "2", "--days", "3"], opEnv);
+  const madeCodes = codesIn(made.out);
+  const listed = admin(["codes", "list"], opEnv);
+  const madeIds = [...made.out.matchAll(/\((cc_[a-z2-7]{24}), anyone, until/g)].map((m) => m[1]);
+  check(
+    "align-admin: codes create --count 2 --days 3 prints 2 distinct unbound codes once; codes list shows ids, states and bindings and never a code",
+    made.status === 0 && madeCodes.length === 2 && madeCodes[0] !== madeCodes[1] && madeIds.length === 2 && listed.status === 0 && madeIds.every((id) => listed.out.includes(id)) && listed.out.includes("req@example.test") && listed.out.includes("live") && codesIn(listed.out).length === 0 && madeCodes.every((c) => dbFilesLack(dbFile, c)),
+    made.out + made.err + listed.out,
+  );
+  const revoked = admin(["codes", "revoke", madeIds[0]], opEnv);
+  const revokedAgain = admin(["codes", "revoke", madeIds[0]], opEnv);
+  const badArgs = [admin(["codes", "create", "--count", "0"], opEnv), admin(["codes", "create", "--email", "nope"], opEnv), admin(["requests", "list", "--status", "maybe"], opEnv), admin(["nothing", "here"], opEnv)];
+  check(
+    "align-admin: codes revoke revokes an unused code (shown as revoked; a second revoke exits 1); bad arguments exit 2 with the usage",
+    revoked.status === 0 && revokedAgain.status === 1 && /revoked/.test(admin(["codes", "list"], opEnv).out) && badArgs.every((r) => r.status === 2),
+    `${revoked.status} ${revokedAgain.status} ${badArgs.map((r) => r.status).join(",")}`,
+  );
+  const noDb = admin(["codes", "list"], { ALIGN_DATA_DIR: path.join(tmpRoot, "nowhere") });
+  check("align-admin: with no database at ALIGN_DATA_DIR it exits 1 and says so", noDb.status === 1 && /No Align database/.test(noDb.err), noDb.err);
   const loopback = await call("anon", "GET", "/api/v2/me");
   check("local: loopback is not a credential (/api/v2/me without a cookie -> 401)", loopback.status === 401 && loopback.json?.error === "unauthorized", loopback.text);
   await stopServer();
@@ -442,12 +556,15 @@ try {
 
   // ======== phase on: Mode L with the test identity provider (ALIGN_TEST_IDP=1) ========
   const onDir = path.join(tmpRoot, "on");
-  await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1" });
+  // The hosted creation gate, caps and Turnstile keys are set here only to show that Mode L ignores every one of them:
+  // the whole phase below creates workspaces, invites members and shares sessions freely.
+  const ignoredInModeL = { ALIGN_CREATION: "closed", ALIGN_MAX_WORKSPACES: "1", ALIGN_MAX_OWNED_WORKSPACES: "1", ALIGN_MAX_MEMBERS: "1", ALIGN_MAX_SESSIONS_PER_DEVICE_DAY: "1", ALIGN_TURNSTILE_SITE_KEY: "site-key-mode-l", ALIGN_TURNSTILE_SECRET_KEY: "secret-mode-l" };
+  await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ...ignoredInModeL });
   dbFile = path.join(onDir, "v2", "align.sqlite");
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
-  check("storage: WAL, migrated (user_version 5), v2_ tables (connected-app grants and change requests included) and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 5 && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "ba_user"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
+  check("storage: WAL, migrated (user_version 6), v2_ tables (connected-app grants, change requests, creation codes, access requests and durable limits included) and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 6 && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "ba_user"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -1746,6 +1863,42 @@ try {
     }
   } else check("ui (Chrome) available", false, `no Chrome at ${CHROME}`);
 
+  // -- Mode L ignores ALIGN_CREATION=closed, every cap (1 here) and the Turnstile keys --
+  const U9 = await signUp("U9", "Una Nine", "u9@example.test");
+  const u9ws = [];
+  for (const n of ["Nine A", "Nine B"]) u9ws.push(await call("U9", "POST", "/api/v2/workspaces", { cookie: U9.cookie, body: { name: n } }));
+  const u9sample = await call("U9", "POST", "/api/v2/workspaces/sample", { cookie: U9.cookie, body: {} });
+  const u9inv = await Promise.all(["x1@example.test", "x2@example.test"].map((email) => call("U9", "POST", `/api/v2/workspaces/${u9ws[0].json?.id}/invites`, { cookie: U9.cookie, body: { email, role: "member" } })));
+  const u9home = await call("U9", "GET", "/app", { cookie: U9.cookie });
+  const u9signIn = await call("anon", "GET", "/app/sign-in");
+  check(
+    "local: Mode L ignores ALIGN_CREATION=closed, the caps and the Turnstile keys: one person creates 2 workspaces and the sample with no code or check, and invites past a cap of 1; no page shows a code field, a bot check or a request-access link",
+    u9ws.every((r) => r.status === 201) && u9sample.status === 201 && u9inv.every((r) => r.status === 201) && u9home.status === 200 && !u9home.text.includes('name="creation_code"') && !u9home.text.includes("data-turnstile-sitekey") && !u9signIn.text.includes("data-turnstile-sitekey") && !u9signIn.text.includes("/app/request-access"),
+    `${u9ws.map((r) => r.status)} ${u9sample.status} ${u9inv.map((r) => r.status)} ${u9sample.text}`,
+  );
+  // -- the operator script's workspace commands: list without people, and delete by the app's own deletion path --
+  const opOn = { ALIGN_DATA_DIR: onDir };
+  const delWs = u9ws[1].json.id;
+  const delInv = await call("U9", "POST", `/api/v2/workspaces/${delWs}/invites`, { cookie: U9.cookie, body: { email: U1.email, role: "member" } });
+  await call("U1", "POST", `/api/v2/invites/${delInv.json?.token}/accept`, { cookie: U1.cookie, body: {} });
+  const opWsList = admin(["workspaces", "list"], opOn);
+  const delLine = opWsList.out.split("\n").find((l) => l.startsWith(delWs)) ?? "";
+  check(
+    "align-admin: workspaces list shows each workspace's id, name, created date, member and owner counts, and no names or emails of people",
+    opWsList.status === 0 && /^id\s+name\s+created\s+members\s+owners/.test(opWsList.out) && /Nine B\s+\d{4}-\d{2}-\d{2}\s+2\s+1\s*$/.test(delLine) && !opWsList.out.includes("@") && !opWsList.out.includes("Una Nine"),
+    opWsList.out + opWsList.err,
+  );
+  const delNoYes = admin(["workspaces", "delete", delWs], opOn);
+  check("align-admin: workspaces delete without --yes deletes nothing and exits 1, asking for --yes", delNoYes.status === 1 && /--yes/.test(delNoYes.err) && withDb((d) => !!d.prepare("SELECT 1 FROM v2_workspaces WHERE id = ?").get(delWs)), delNoYes.err);
+  const delYes = admin(["workspaces", "delete", delWs, "--yes"], opOn);
+  const delGone = await call("U1", "GET", `/api/v2/workspaces/${delWs}`, { cookie: U1.cookie });
+  const delLeft = withDb((d) => ["v2_members", "v2_invites", "v2_audit"].map((t) => d.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ws_id = ?`).get(delWs).n));
+  check(
+    "align-admin: workspaces delete <id> --yes removes it by the app's deletion path (members, invites and audit rows gone; the running server answers 404 for it); an unknown id exits 1",
+    delYes.status === 0 && delGone.status === 404 && delLeft.every((n) => n === 0) && admin(["workspaces", "delete", delWs, "--yes"], opOn).status === 1,
+    `${delYes.status} ${delYes.err} ${delGone.status} ${delLeft}`,
+  );
+
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
   const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));
@@ -1787,6 +1940,10 @@ try {
     ["a Google id without its secret", { GOOGLE_CLIENT_SECRET: undefined }, "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together"],
     ["ALIGN_TEST_IDP", { ALIGN_TEST_IDP: "1" }, "ALIGN_TEST_IDP is not allowed when hosted"],
     ["ALIGN_LOCAL_OWNER_EMAIL", { ALIGN_LOCAL_OWNER_EMAIL: "me@example.test" }, "ALIGN_LOCAL_OWNER_EMAIL is not allowed when hosted"],
+    ["an unknown ALIGN_CREATION", { ALIGN_CREATION: "invite-only" }, "ALIGN_CREATION must be codes, open or closed"],
+    ["a cap that is not a positive whole number", { ALIGN_MAX_MEMBERS: "0" }, "ALIGN_MAX_MEMBERS must be a positive whole number"],
+    ["a Turnstile site key without its secret key", { ALIGN_TURNSTILE_SITE_KEY: "site" }, "ALIGN_TURNSTILE_SITE_KEY and ALIGN_TURNSTILE_SECRET_KEY must be set together"],
+    ["an http ALIGN_TURNSTILE_VERIFY_URL", { ALIGN_TURNSTILE_SITE_KEY: "site", ALIGN_TURNSTILE_SECRET_KEY: "secret", ALIGN_TURNSTILE_VERIFY_URL: "http://127.0.0.1:1/siteverify" }, "ALIGN_TURNSTILE_VERIFY_URL must be an https URL"],
   ];
   for (const [what, delta, needle] of refusals) {
     const env = { ...good, ...delta };
@@ -1802,7 +1959,10 @@ try {
   const v1Off = await Promise.all([hosted("GET", "/api/v2/me"), hosted("GET", "/api/mcp", { headers: { authorization: `Bearer ${v1Env.ALIGN_MCP_TOKEN}` } })]);
   check("hosted: with ALIGN_GOAL_SESSIONS=0 v2 is still on, and ALIGN_MCP_TOKEN is no credential (/api/mcp -> 401)", v1Off[0].status === 401 && v1Off[1].status === 401, v1Off.map((r) => r.status).join(","));
   await stopServer();
-  await mustStart(good);
+  const goodRun = await mustStart(good);
+  await sleep(300);
+  const turnstileWarnings = (goodRun.stderr() + goodRun.stdout()).split("\n").filter((l) => l.includes("ALIGN_TURNSTILE_SITE_KEY and ALIGN_TURNSTILE_SECRET_KEY are not set"));
+  check("hosted: without Turnstile keys the server starts and logs one warning that there is no bot check", turnstileWarnings.length === 1, (goodRun.stderr() + goodRun.stdout()).slice(-400));
   // -- the hosted route allowlist: / -> /app; /app*, /api/v2/*, /api/mcp, /oauth/*, /.well-known/*, /api/oauth/* and static assets; else 404 --
   const hRoot = await hosted("GET", "/");
   check("hosted: / redirects to https://<host>/app (307)", hRoot.status === 307 && hRoot.headers.location === `https://${HOSTED_HOST}/app`, `${hRoot.status} ${hRoot.headers.location}`);
@@ -1911,7 +2071,9 @@ try {
   check("hosted email: starts with only the three email settings (no Google, no GitHub)", eRun.started, eRun.stderr().slice(-400));
   dbFile = path.join(emailDir, "v2", "align.sqlite");
   const hOrigin = { origin: `https://${HOSTED_HOST}` };
-  const hSend = (email) => hosted("POST", SEND, { body: { email, type: "sign-in" }, headers: hOrigin });
+  // Each send from its own client address: hosted, Better Auth allows 3 sends per client per minute (durably).
+  let sendIp = 0;
+  const hSend = (email) => hosted("POST", SEND, { body: { email, type: "sign-in" }, headers: { ...hOrigin, "fly-client-ip": `203.0.113.${++sendIp}` } });
   const hCodeSignIn = (email, otp) => hosted("POST", OTP_SIGN_IN, { body: { email, otp }, headers: hOrigin });
   const hCookie = (r) => cookieOf([].concat(r.headers["set-cookie"] ?? []));
   const mailCode = (to) => /code is (\d{6})/.exec(mails.filter((m) => m.body?.to === to).pop()?.body?.text ?? "")?.[1] ?? "";
@@ -1959,6 +2121,252 @@ try {
   await hSend("late@example.test");
   const lateIn = await hCodeSignIn("late@example.test", mailCode("late@example.test"));
   check("hosted email: ALIGN_FIRST_OWNER_EMAIL gets no exception once any account exists (403)", lateRun.started && lateIn.status === 403 && !withDb((d) => d.prepare("SELECT 1 FROM ba_user WHERE email = ?").get("late@example.test")), `${lateIn.status} ${lateIn.text}`);
+  await stopServer();
+
+  // ======== hosted gate: creation codes, request access, Turnstile through a fake verify API, durable limits, caps ========
+  const verifies = [];
+  const verifyApi = https.createServer({ key: readFileSync(path.join(tmpRoot, "tls-key.pem")), cert: readFileSync(path.join(tmpRoot, "tls-cert.pem")) }, (req, res) => {
+    let t = "";
+    req.on("data", (c) => (t += c));
+    req.on("end", () => {
+      let body = null;
+      try {
+        body = JSON.parse(t);
+      } catch {}
+      verifies.push({ url: req.url, body });
+      const tok = String(body?.response ?? "");
+      if (tok === "down") {
+        res.writeHead(500, { "content-type": "application/json" });
+        return res.end("{}");
+      }
+      const ok = tok.startsWith("ok") && body?.secret === "turnstile-secret";
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(ok ? { success: true, hostname: tok === "ok-elsewhere" ? "elsewhere.example" : HOSTED_HOST, action: "" } : { success: false, "error-codes": ["invalid-input-response"] }));
+    });
+  });
+  await new Promise((r) => verifyApi.listen(0, "127.0.0.1", r));
+  const gateDir = path.join(tmpRoot, "hosted-gate");
+  const gateEnv = {
+    ...emailEnv,
+    ALIGN_DATA_DIR: gateDir,
+    ALIGN_FIRST_OWNER_EMAIL: "ops@example.test",
+    ALIGN_TURNSTILE_SITE_KEY: "turnstile-site",
+    ALIGN_TURNSTILE_SECRET_KEY: "turnstile-secret",
+    ALIGN_TURNSTILE_VERIFY_URL: `https://127.0.0.1:${verifyApi.address().port}/siteverify`,
+    ALIGN_MAX_WORKSPACES: "4",
+    ALIGN_MAX_MEMBERS: "3",
+    ALIGN_MAX_SESSIONS_PER_DEVICE_DAY: "2",
+  };
+  const gRun = await startServer(gateEnv);
+  dbFile = path.join(gateDir, "v2", "align.sqlite");
+  check("gate: a hosted server with Turnstile keys, an https verify URL and caps starts, with no bot-check warning", gRun.started && !(gRun.stderr() + gRun.stdout()).includes("no bot check"), gRun.stderr().slice(-300));
+  let gIp = 0;
+  const nextIp = () => `198.18.0.${++gIp}`;
+  const bot = (tok = "ok") => (tok === null ? {} : { "x-captcha-response": tok });
+  const gSend = (email, tok = "ok", ip = nextIp()) => hosted("POST", SEND, { body: { email, type: "sign-in" }, headers: { ...hOrigin, ...bot(tok), "fly-client-ip": ip } });
+  const gCodeIn = (email, otp, tok = "ok") => hosted("POST", OTP_SIGN_IN, { body: { email, otp }, headers: { ...hOrigin, ...bot(tok), "fly-client-ip": nextIp() } });
+  const gSignIn = async (email) => {
+    await gSend(email);
+    const r = await gCodeIn(email, mailCode(email));
+    return { status: r.status, text: r.text, cookie: hCookie(r), email };
+  };
+  const gPost = (p, body, who, tok = "ok") => hosted("POST", p, { body, cookie: who?.cookie, headers: { ...hOrigin, ...bot(tok) } });
+  const gCreate = (who, name, code, tok = "ok") => gPost("/api/v2/workspaces", code === undefined ? { name } : { name, creation_code: code }, who, tok);
+  const gAccess = (body, tok = "ok") => hosted("POST", "/api/v2/access-requests", { body, headers: { ...hOrigin, ...bot(tok), "fly-client-ip": nextIp() } });
+  const opGate = { HOSTED: "1", ALIGN_DATA_DIR: gateDir, ALIGN_SECRET: good.ALIGN_SECRET, ALIGN_PUBLIC_ORIGIN: good.ALIGN_PUBLIC_ORIGIN, ALIGN_EMAIL_API_URL: emailEnv.ALIGN_EMAIL_API_URL, ALIGN_EMAIL_API_KEY: MAIL_KEY, ALIGN_EMAIL_FROM: emailEnv.ALIGN_EMAIL_FROM, NODE_EXTRA_CA_CERTS: caFile };
+
+  // -- pages: the widget, and links to request access --
+  const gSignInPage = await hosted("GET", "/app/sign-in");
+  const gRaPage = await hosted("GET", "/app/request-access");
+  check(
+    "gate: the sign-in and request-access pages render the Turnstile widget with the site key, and sign-in links to /app/request-access while creation needs a code",
+    gSignInPage.status === 200 && gSignInPage.text.includes('data-turnstile-sitekey="turnstile-site"') && gSignInPage.text.includes('href="/app/request-access"') && gRaPage.status === 200 && gRaPage.text.includes('data-turnstile-sitekey="turnstile-site"') && !gRaPage.text.includes("without a code"),
+    `${gSignInPage.status} ${gRaPage.status}`,
+  );
+  // -- Turnstile on the email-code send and sign-in routes (Better Auth's captcha plugin) --
+  const mailsAt = mails.length;
+  const noTok = await gSend("ops@example.test", null);
+  const badTok = await gSend("ops@example.test", "bad");
+  const elsewhere = await gSend("ops@example.test", "ok-elsewhere");
+  check(
+    "gate: sending a code without a token -> 400 MISSING_RESPONSE, with a rejected token or one solved on another host -> 403 VERIFICATION_FAILED; nothing is sent",
+    noTok.status === 400 && noTok.json?.code === "MISSING_RESPONSE" && badTok.status === 403 && badTok.json?.code === "VERIFICATION_FAILED" && elsewhere.status === 403 && mails.length === mailsAt,
+    `${noTok.status} ${noTok.text} ${badTok.status} ${elsewhere.status}`,
+  );
+  const vAt = verifies.length;
+  const okSend = await gSend("ops@example.test", "ok", "198.18.9.9");
+  const v = verifies[vAt];
+  check(
+    "gate: with a passing token the code is sent; the server posted {secret, response, remoteip} to ALIGN_TURNSTILE_VERIFY_URL",
+    okSend.status === 200 && mails.length === mailsAt + 1 && v?.url === "/siteverify" && v.body.secret === "turnstile-secret" && v.body.response === "ok" && v.body.remoteip === "198.18.9.9",
+    `${okSend.status} ${JSON.stringify(v)}`,
+  );
+  const opsCodeG = mailCode("ops@example.test");
+  const inNoTok = await gCodeIn("ops@example.test", opsCodeG, null);
+  const opsInG = await gCodeIn("ops@example.test", opsCodeG);
+  const OPSG = { cookie: hCookie(opsInG) };
+  check("gate: signing in with a code needs a token too (400 without, and the code still works); with one, the first owner signs in", inNoTok.status === 400 && opsInG.status === 200 && !!OPSG.cookie, `${inNoTok.status} ${opsInG.status} ${opsInG.text}`);
+  // -- the first owner's first workspace needs no code; every create needs the token --
+  const opsHome = await hosted("GET", "/app", { cookie: OPSG.cookie });
+  check("gate: /app for the first owner on an empty server has the widget and no creation code field", opsHome.status === 200 && opsHome.text.includes('data-turnstile-sitekey="turnstile-site"') && !opsHome.text.includes('name="creation_code"'), `${opsHome.status}`);
+  const cNoTok = await gCreate(OPSG, "Ops One", undefined, null);
+  const cBadTok = await gCreate(OPSG, "Ops One", undefined, "bad");
+  const cDown = await gCreate(OPSG, "Ops One", undefined, "down");
+  const W1 = await gCreate(OPSG, "Ops One");
+  check(
+    "gate: creating needs the token (none -> 400 captcha_required, rejected -> 403 captcha_failed, verify API down -> 503 captcha_unavailable); ALIGN_FIRST_OWNER_EMAIL's first workspace on an empty server needs no code (201)",
+    cNoTok.status === 400 && cNoTok.json?.error === "captcha_required" && cBadTok.status === 403 && cBadTok.json?.error === "captcha_failed" && cDown.status === 503 && cDown.json?.error === "captcha_unavailable" && W1.status === 201,
+    `${cNoTok.status} ${cBadTok.status} ${cDown.status} ${W1.status} ${W1.text}`,
+  );
+  const opsSecond = await gCreate(OPSG, "Ops Two");
+  const opsSample = await gPost("/api/v2/workspaces/sample", {}, OPSG);
+  const opsHome2 = await hosted("GET", "/app", { cookie: OPSG.cookie });
+  check(
+    "gate: after that a create without a code -> 403 creation_code_required (the sample too); /app now asks for a creation code and links to /app/request-access",
+    opsSecond.status === 403 && opsSecond.json?.error === "creation_code_required" && /Request access/.test(opsSecond.json?.message) && opsSample.status === 403 && opsSample.json?.error === "creation_code_required" && opsHome2.text.includes('name="creation_code"') && opsHome2.text.includes('href="/app/request-access"'),
+    `${opsSecond.status} ${opsSecond.text} ${opsSample.status}`,
+  );
+  // -- request access (hosted: token required, disposable domains refused) --
+  const reqBody = { email: "alice@example.test", name: "Alice Able", company: "Able Co", team_size: "11-50", use_case: "Goals for our agent fleet", interest: "evaluate" };
+  const aNoTok = await gAccess(reqBody, null);
+  const aDisp = await gAccess({ ...reqBody, email: "temp@mailinator.com" });
+  const aDispSub = await gAccess({ ...reqBody, email: "temp@x.mailinator.com" });
+  const aOk = await gAccess(reqBody);
+  const aliceReq = withDb((d) => d.prepare("SELECT * FROM v2_access_requests WHERE email = ?").get("alice@example.test"));
+  check(
+    "gate: an access request needs the token (400 captcha_required); a disposable address or a subdomain of one -> 403 disposable_email; a good one -> 201, stored pending",
+    aNoTok.status === 400 && aNoTok.json?.error === "captcha_required" && aDisp.status === 403 && aDisp.json?.error === "disposable_email" && aDispSub.status === 403 && aOk.status === 201 && aliceReq?.status === "pending" && aliceReq.interest === "evaluate" && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_access_requests").get().n) === 1,
+    `${aNoTok.status} ${aDisp.status} ${aDispSub.status} ${aOk.status}`,
+  );
+  // -- the operator approves: an email-bound code, emailed, never printed --
+  const noSecret = admin(["requests", "approve", aliceReq.id], { ...opGate, ALIGN_SECRET: undefined });
+  const mailsBeforeApprove = mails.length;
+  const approveG = await adminAsync(["requests", "approve", aliceReq.id], opGate);
+  const aliceMail = mails.slice(mailsBeforeApprove).find((m) => m.body?.to === "alice@example.test");
+  const aliceCode = codesIn(aliceMail?.body?.text ?? "")[0] ?? "";
+  check(
+    "align-admin (hosted): requests approve refuses without ALIGN_SECRET; with it, emails the code through the email API (subject, sign-in link, the code, its address and expiry) and prints only the code's id, never the code",
+    noSecret.status === 1 && /ALIGN_SECRET/.test(noSecret.err) && approveG.status === 0 && /emailed a creation code \(cc_/.test(approveG.out) && aliceMail?.auth === `Bearer ${MAIL_KEY}` && aliceMail.body.subject === "Your Align workspace creation code" && aliceMail.body.text.includes(`https://${HOSTED_HOST}/app/sign-in?email=alice%40example.test`) && aliceCode && aliceMail.body.text.includes("only for alice@example.test") && codesIn(approveG.out + approveG.err).length === 0 && dbFilesLack(dbFile, aliceCode),
+    `${noSecret.status} ${noSecret.err} | ${approveG.status} ${approveG.out} ${approveG.err} ${JSON.stringify(aliceMail?.body)}`,
+  );
+  // -- the approved person can sign in by email code (no invite needed) and spends the code once --
+  const ALICE = await gSignIn("alice@example.test");
+  const aBadFormat = await gCreate(ALICE, "Alice One", "alc_nope");
+  const W2 = await gCreate(ALICE, "Alice One", aliceCode);
+  const aReuse = await gCreate(ALICE, "Alice Two", aliceCode);
+  const aliceCodeRow = withDb((d) => d.prepare("SELECT c.* FROM v2_creation_codes c JOIN v2_access_requests r ON r.code_id = c.id WHERE r.id = ?").get(aliceReq.id));
+  check(
+    "gate: an approved address signs in by email code with no invite; a malformed code -> 403 creation_code_invalid; its code creates one workspace (201) and is spent with it; using it again -> 403 creation_code_invalid",
+    ALICE.status === 200 && aBadFormat.status === 403 && aBadFormat.json?.error === "creation_code_invalid" && W2.status === 201 && aReuse.status === 403 && aReuse.json?.error === "creation_code_invalid" && aliceCodeRow?.ws_id === W2.json?.id && aliceCodeRow.redeemed_at && aliceCodeRow.redeemed_by,
+    `${ALICE.status} ${ALICE.text} ${aBadFormat.status} ${W2.status} ${W2.text} ${aReuse.status}`,
+  );
+  // -- codes made by the operator: revoked, expired and bound to someone else don't work; a disposable address can't create --
+  const gMade = admin(["codes", "create", "--count", "4"], opGate);
+  const [U1c, U2c, revC, expC] = codesIn(gMade.out);
+  const gIds = [...gMade.out.matchAll(/\((cc_[a-z2-7]{24}),/g)].map((m) => m[1]);
+  const bobMade = admin(["codes", "create", "--email", "Bob@Example.test"], opGate);
+  const bobC = codesIn(bobMade.out)[0];
+  admin(["codes", "revoke", gIds[2]], opGate);
+  withDb((d) => d.prepare("UPDATE v2_creation_codes SET expires_at = ? WHERE id = ?").run(new Date(Date.now() - 1000).toISOString(), gIds[3]));
+  const useRevoked = await gCreate(ALICE, "Alice Two", revC);
+  const useExpired = await gCreate(ALICE, "Alice Two", expC);
+  const useBobs = await gCreate(ALICE, "Alice Two", bobC);
+  check(
+    "gate: a revoked code, an expired code, and a code bound to another address -> 403 creation_code_invalid, and none of them is spent",
+    gMade.status === 0 && bobMade.status === 0 && [useRevoked, useExpired, useBobs].every((r) => r.status === 403 && r.json?.error === "creation_code_invalid") && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE redeemed_at IS NOT NULL").get().n) === 1,
+    `${useRevoked.status} ${useExpired.status} ${useBobs.status} ${gMade.err}`,
+  );
+  const tmpInv = await gPost(`/api/v2/workspaces/${W2.json?.id}/invites`, { email: "temp@mailinator.com", role: "member" }, ALICE);
+  const TEMP = await gSignIn("temp@mailinator.com");
+  const tempCreate = await gCreate(TEMP, "Temp", U2c);
+  check(
+    "gate: a disposable address is not blocked at sign-in (an invited one signs in), but can't create a workspace (403 disposable_email, code not spent)",
+    tmpInv.status === 201 && TEMP.status === 200 && tempCreate.status === 403 && tempCreate.json?.error === "disposable_email" && withDb((d) => d.prepare("SELECT redeemed_at FROM v2_creation_codes WHERE id = ?").get(gIds[1]).redeemed_at) === null,
+    `${tmpInv.status} ${TEMP.status} ${TEMP.text} ${tempCreate.status} ${tempCreate.text}`,
+  );
+  // -- members per workspace (3 here), pending invites counted --
+  const W1id = W1.json?.id;
+  const bobInv = await gPost(`/api/v2/workspaces/${W1id}/invites`, { email: "bob@example.test", role: "member" }, OPSG);
+  const carolInv = await gPost(`/api/v2/workspaces/${W1id}/invites`, { email: "carol@example.test", role: "member" }, OPSG);
+  const daveInv = await gPost(`/api/v2/workspaces/${W1id}/invites`, { email: "dave@example.test", role: "member" }, OPSG);
+  check(
+    "caps: members per workspace (ALIGN_MAX_MEMBERS=3) count open invites: owner + 2 invites fills it, a 3rd invite -> 403 member_cap with a message to contact the operator",
+    bobInv.status === 201 && carolInv.status === 201 && daveInv.status === 403 && daveInv.json?.error === "member_cap" && /Contact the operator/.test(daveInv.json?.message),
+    `${bobInv.status} ${carolInv.status} ${daveInv.status} ${daveInv.text}`,
+  );
+  const BOB = await gSignIn("bob@example.test");
+  const bobAccept = await gPost(`/api/v2/invites/${bobInv.json?.token}/accept`, {}, BOB);
+  check("caps: accepting an open invite within the cap works (it was already counted)", BOB.status === 200 && bobAccept.status === 200, `${BOB.status} ${bobAccept.status} ${bobAccept.text}`);
+  // -- workspaces per account (2 by default) and on the server (4 here) --
+  const W3 = await gCreate(OPSG, "Ops Two", U1c);
+  const opsThird = await gCreate(OPSG, "Ops Three", U2c);
+  const W4 = await gCreate(BOB, "Bob One", bobC);
+  const bobSecond = await gCreate(BOB, "Bob Two", U2c);
+  check(
+    "caps: an account owning 2 workspaces (the default ALIGN_MAX_OWNED_WORKSPACES) -> 403 owned_workspace_cap; at 4 on the server (ALIGN_MAX_WORKSPACES) -> 403 workspace_cap; both say to contact the operator and spend no code",
+    W3.status === 201 && opsThird.status === 403 && opsThird.json?.error === "owned_workspace_cap" && /Contact the operator/.test(opsThird.json?.message) && W4.status === 201 && bobSecond.status === 403 && bobSecond.json?.error === "workspace_cap" && /Contact the operator/.test(bobSecond.json?.message) && withDb((d) => d.prepare("SELECT redeemed_at FROM v2_creation_codes WHERE id = ?").get(gIds[1]).redeemed_at) === null,
+    `${W3.status} ${opsThird.status} ${opsThird.text} ${W4.status} ${W4.text} ${bobSecond.status} ${bobSecond.text}`,
+  );
+  // -- new shared sessions per device per day (2 here) --
+  const gKeys = newDeviceKeys();
+  const gAuth = await hosted("POST", "/api/v2/device/authorize", { body: { device_name: "ops laptop", public_key: gKeys.pub } });
+  const gAppr = await gPost("/api/v2/device/approve", { user_code: gAuth.json?.user_code, workspace_ids: [W1id] }, OPSG, null);
+  const gTok = await hosted("POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: gAuth.json?.device_code } });
+  const gDev = { ...gKeys };
+  const share = (n) =>
+    hosted("PUT", `/api/v2/workspaces/${W1id}/sessions/${sessionKey(gDev, W1id, "claude-code", n)}`, {
+      body: { harness: "claude-code", repo_key: repoKey(gDev, W1id, "repo"), started_at: new Date(Date.now() - 60_000).toISOString() },
+      headers: { authorization: `Bearer ${gTok.json?.access_token}` },
+    });
+  const shares = [await share("s1"), await share("s2"), await share("s3"), await share("s1")];
+  check(
+    "caps: a device shares at most ALIGN_MAX_SESSIONS_PER_DEVICE_DAY (2) new sessions in 24 hours: the 3rd -> 403 session_cap (contact the operator); updating a session it already shares still works",
+    gTok.status === 200 && gAppr.status === 200 && shares[0].status === 200 && shares[1].status === 200 && shares[2].status === 403 && shares[2].json?.error === "session_cap" && /Contact the operator/.test(shares[2].json?.message) && shares[3].status === 200,
+    `${gAppr.status} ${gTok.status} ${shares.map((r) => `${r.status} ${r.text.slice(0, 80)}`).join(" | ")}`,
+  );
+  // -- durable limits: per-address code sends (5 an hour, hosted) and Better Auth's per-client limit survive a restart --
+  const rl = [];
+  for (let i = 0; i < 4; i++) rl.push(await gSend("rl@example.test"));
+  const ipSends = [];
+  for (let i = 0; i < 4; i++) ipSends.push(await gSend(`ip${i}@example.test`, "ok", "198.18.200.1"));
+  const baRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_rate_limit").get().n);
+  check(
+    "limits: hosted, 3 sends per address in 10 minutes (then 429), and Better Auth allows 3 code sends per client per minute (the 4th -> 429), its counters in the ba_rate_limit table",
+    rl.slice(0, 3).every((r) => r.status === 200) && rl[3].status === 429 && ipSends.slice(0, 3).every((r) => r.status === 200) && ipSends[3].status === 429 && baRows > 0,
+    `${rl.map((r) => r.status)} ${ipSends.map((r) => r.status)} ${baRows}`,
+  );
+  await stopServer();
+  // ======== the kill switch (ALIGN_CREATION=closed), on a restart that keeps the durable limits ========
+  const closedRun = await startServer({ ...gateEnv, ALIGN_CREATION: "closed" });
+  const ipAfter = await gSend("ip9@example.test", "ok", "198.18.200.1");
+  const rlAfter = [await gSend("rl@example.test"), await gSend("rl@example.test"), await gSend("rl@example.test")];
+  const hitKeys = withDb((d) => d.prepare("SELECT key FROM v2_rate_hits").all().map((r) => r.key));
+  check(
+    "limits: after a restart Better Auth's per-client send limit still holds (429), and an address that had 3 sends gets 2 more and then 429 (5 per hour, durable); the stored keys hold no email address",
+    closedRun.started && ipAfter.status === 429 && rlAfter[0].status === 200 && rlAfter[1].status === 200 && rlAfter[2].status === 429 && hitKeys.some((k) => k.startsWith("otp-email-hour:")) && !hitKeys.some((k) => k.includes("@")),
+    `${ipAfter.status} ${rlAfter.map((r) => r.status)} ${hitKeys.slice(0, 3)}`,
+  );
+  const OPSC = await gSignIn("ops@example.test");
+  const closedCreate = await gCreate(OPSC, "Closed", U2c);
+  const closedHome = await hosted("GET", "/app", { cookie: OPSC.cookie });
+  check(
+    "gate: ALIGN_CREATION=closed refuses every create (403 creation_closed, code not spent) and /app says creation is closed",
+    closedCreate.status === 403 && closedCreate.json?.error === "creation_closed" && closedHome.text.includes("be created on this server right now") && !closedHome.text.includes('name="creation_code"') && withDb((d) => d.prepare("SELECT redeemed_at FROM v2_creation_codes WHERE id = ?").get(gIds[1]).redeemed_at) === null,
+    `${closedCreate.status} ${closedCreate.text}`,
+  );
+  await stopServer();
+  const openRun = await startServer({ ...gateEnv, ALIGN_CREATION: "open", ALIGN_MAX_WORKSPACES: "10" });
+  const CAROL = await gSignIn("carol@example.test");
+  const carolHome = await hosted("GET", "/app", { cookie: CAROL.cookie });
+  const carolCreate = await gCreate(CAROL, "Carol One");
+  const carolNoTok = await gCreate(CAROL, "Carol Two", undefined, null);
+  const noLinkSignIn = await hosted("GET", "/app/sign-in");
+  check(
+    "gate: ALIGN_CREATION=open lets any signed-in person create without a code (the token is still required), and no page asks for a code or links to request access",
+    openRun.started && CAROL.status === 200 && carolCreate.status === 201 && carolNoTok.status === 400 && !carolHome.text.includes('name="creation_code"') && !noLinkSignIn.text.includes("/app/request-access"),
+    `${CAROL.status} ${carolCreate.status} ${carolCreate.text} ${carolNoTok.status}`,
+  );
+  verifyApi.close();
   mailApi.close();
 } catch (e) {
   check("v2 run", false, e?.stack ?? e);

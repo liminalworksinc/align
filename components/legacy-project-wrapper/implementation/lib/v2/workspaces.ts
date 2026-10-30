@@ -1,11 +1,13 @@
-import { all, audit, get, run, tx } from "./db";
+import { all, audit, get, run, sql, tx } from "./db";
+import { removeWorkspace } from "./core.mts";
+import { admitCreation, checkMemberCap, precheckCreation } from "./creation";
 import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { authorize, type Action, type PodRole, type PolicyObject, type PolicyPrincipal, type WsRole } from "./policy";
-import type { Principal } from "./http";
+import type { Principal, WebPrincipal } from "./http";
 import { config } from "../config";
 import { take } from "./limits";
-import { onMemberRemoved, onWorkspaceDeleted } from "./lifecycle";
+import { onMemberRemoved } from "./lifecycle";
 
 // Workspaces, members, invites and teams. Teams are stored as pods (v2_pods, pod_ ids); every response, message and
 // audit action says "team". The /pods routes remain as aliases of /teams.
@@ -50,14 +52,18 @@ export function workspacesFor(p: Principal) {
   }));
 }
 
-/** A new workspace owned by `userId`. `seed`, when given, fills it in the same transaction (the sample workspace). */
-export async function createWorkspace(userId: string, name: string, seed?: (wsId: string, at: string) => void) {
+/** A new workspace owned by the caller. When hosted it must pass the creation gate (lib/v2/creation.ts): the mode,
+ *  the caps, the address, the captcha and, in `codes` mode, a creation code spent in the same transaction. `seed`,
+ *  when given, fills it in that transaction too (the sample workspace). */
+export async function createWorkspace(req: Request, p: WebPrincipal, name: string, code: string | null, seed?: (wsId: string, at: string) => void) {
+  const userId = p.user.id;
   take(`ws-create:${userId}`, 10, 60 * 60 * 1000);
-  const owned = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_members WHERE user_id = ? AND role = 'owner'", userId)?.n ?? 0;
-  if (owned >= 50) throw conflict("too_many_workspaces", "You own the maximum number of workspaces");
+  const creator = { id: userId, email: p.user.email, emailVerified: p.emailVerified };
+  await precheckCreation(req, creator, code);
   const id = newId("ws");
   const at = nowIso();
   await tx(() => {
+    admitCreation(creator, code, id);
     run("INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)", id, name, userId, at);
     run("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)", id, userId, at);
     audit(id, userId, "workspace.created", id, at);
@@ -94,13 +100,11 @@ export async function renameWorkspace(pp: PolicyPrincipal, name: string) {
   return { id: pp.wsId, name };
 }
 
-/** Everything in the workspace goes (rows cascade from v2_workspaces), including its audit rows and device grants. */
+/** Everything in the workspace goes (rows cascade from v2_workspaces), including its audit rows and device grants:
+ *  the one deletion path, shared with `align-admin workspaces delete` (lib/v2/core.mts). */
 export async function deleteWorkspace(pp: PolicyPrincipal) {
   need(pp, "workspace.manage");
-  await tx(() => {
-    onWorkspaceDeleted(pp.wsId);
-    run("DELETE FROM v2_workspaces WHERE id = ?", pp.wsId);
-  });
+  await tx(() => removeWorkspace(sql, pp.wsId));
 }
 
 // ---- members: role changes, removal, leaving ----
@@ -170,6 +174,7 @@ export async function createInvite(pp: PolicyPrincipal, email: string, role: WsR
   if (get("SELECT 1 AS x FROM v2_members m JOIN ba_user u ON u.id = m.user_id WHERE m.ws_id = ? AND lower(u.email) = ?", pp.wsId, e)) {
     throw conflict("already_member", "That person is already a member");
   }
+  checkMemberCap(pp.wsId, true);
   const token = secretToken(32);
   const id = newId("inv");
   const at = nowIso();
@@ -251,6 +256,7 @@ export async function acceptInvite(token: string, user: { id: string; email: str
   const at = nowIso();
   await tx(() => {
     if (get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", r.ws_id, user.id)) throw conflict("already_member", "You are already a member");
+    checkMemberCap(r.ws_id, false);
     run("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, ?, ?)", r.ws_id, user.id, r.role, at);
     // An invite that names a team joins that team too (a team removed meanwhile is simply skipped).
     if (r.team_id && get("SELECT 1 AS x FROM v2_pods WHERE ws_id = ? AND id = ?", r.ws_id, r.team_id)) {

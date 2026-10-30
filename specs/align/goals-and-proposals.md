@@ -450,7 +450,7 @@ The goal page SHALL offer **Propose a change** on any `active` goal the person c
 
 ### Requirement: Creating the Northstar sample workspace
 
-The server SHALL let any signed-in person (browser session, in Mode L and hosted) call `POST /api/v2/workspaces/sample` and SHALL create, in one transaction, a new workspace named "Northstar (sample)" owned by the caller, responding 201 `{id:"ws_…", name:"Northstar (sample)", role:"owner"}`. It SHALL count toward the same limits as any workspace creation (429 `rate_limited`, 409 `too_many_workspaces`), and the result SHALL be ordinary data that can be renamed or deleted like any workspace.
+The server SHALL let any signed-in person (browser session, in Mode L and hosted) call `POST /api/v2/workspaces/sample` and SHALL create, in one transaction, a new workspace named "Northstar (sample)" owned by the caller, responding 201 `{id:"ws_…", name:"Northstar (sample)", role:"owner"}`. It SHALL count toward the same limits as any workspace creation (429 `rate_limited`) and, when hosted, pass the same creation gate and caps (`creation_code` in the body, as `workspaces` specifies), and the result SHALL be ordinary data that can be renamed or deleted like any workspace.
 
 #### Scenario: Creating the sample twice
 

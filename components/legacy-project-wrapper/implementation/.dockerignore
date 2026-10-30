@@ -1,5 +1,6 @@
 # Allowlist: nothing goes into the build context unless it is listed below (Sean's PR #3 review, item 2).
-# Scripts, tests, docs, the local agent packages and every .env file stay out of the image.
+# Scripts, tests, docs, the local agent packages and every .env file stay out of the image. The one exception is the
+# operator script, scripts/align-admin.mjs (it imports only lib/v2/core.mts, which is under lib).
 *
 !package.json
 !package-lock.json
@@ -10,6 +11,7 @@
 !instrumentation.ts
 !next.config.ts
 !tsconfig.json
+!scripts/align-admin.mjs
 # Belt and braces inside the allowed folders.
 **/.env
 **/.env.*

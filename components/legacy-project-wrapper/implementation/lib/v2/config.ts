@@ -31,13 +31,84 @@ export const localOwnerEmail = (env: NodeJS.ProcessEnv = process.env) => (env.AL
 /** How old a sign-in may be to approve a device or an MCP app: 15 minutes. */
 export const RECENT_SIGN_IN_MS = 15 * 60 * 1000;
 
+// ---- hosted creation gate and abuse controls (PRESEED-002, PRESEED-003). Mode L ignores every one of these. ----
+
+export type CreationMode = "codes" | "open" | "closed";
+const CREATION_MODES: readonly CreationMode[] = ["codes", "open", "closed"];
+
+/** Who may create a hosted workspace: ALIGN_CREATION = codes (default: a creation code), open (any signed-in person)
+ *  or closed (nobody: the kill switch). Mode L is always open. */
+export function creationMode(env: NodeJS.ProcessEnv = process.env): CreationMode {
+  if (!hostedEnv(env)) return "open";
+  const v = (env.ALIGN_CREATION || "codes").trim().toLowerCase() as CreationMode;
+  return CREATION_MODES.includes(v) ? v : "closed"; // startup refuses an unknown value; fail closed regardless
+}
+
+/** The hosted caps, each a positive integer from its setting or the default; null (no cap) in Mode L. */
+export interface Caps {
+  /** ALIGN_MAX_WORKSPACES: workspaces on the server. */
+  workspaces: number;
+  /** ALIGN_MAX_OWNED_WORKSPACES: workspaces one person owns. */
+  owned: number;
+  /** ALIGN_MAX_MEMBERS: members of one workspace, pending invites included. */
+  members: number;
+  /** ALIGN_MAX_SESSIONS_PER_DEVICE_DAY: new shared sessions per device in any 24 hours. */
+  sessionsPerDeviceDay: number;
+}
+const CAP_KEYS: [keyof Caps, string, number][] = [
+  ["workspaces", "ALIGN_MAX_WORKSPACES", 100],
+  ["owned", "ALIGN_MAX_OWNED_WORKSPACES", 2],
+  ["members", "ALIGN_MAX_MEMBERS", 25],
+  ["sessionsPerDeviceDay", "ALIGN_MAX_SESSIONS_PER_DEVICE_DAY", 500],
+];
+const posInt = (v: string | undefined) => (v !== undefined && /^\s*[1-9]\d{0,8}\s*$/.test(v) ? Number(v) : null);
+
+export function caps(env: NodeJS.ProcessEnv = process.env): Caps | null {
+  if (!hostedEnv(env)) return null;
+  return Object.fromEntries(CAP_KEYS.map(([k, name, def]) => [k, posInt(env[name]) ?? def])) as unknown as Caps;
+}
+
+/** Cloudflare Turnstile, hosted only and only when both keys are set. `verifyUrl` is ALIGN_TURNSTILE_VERIFY_URL (for
+ *  tests; https, checked at startup) or Cloudflare's own. */
+export function turnstile(env: NodeJS.ProcessEnv = process.env): { siteKey: string; secretKey: string; verifyUrl: string } | null {
+  if (!hostedEnv(env) || !env.ALIGN_TURNSTILE_SITE_KEY || !env.ALIGN_TURNSTILE_SECRET_KEY) return null;
+  return {
+    siteKey: env.ALIGN_TURNSTILE_SITE_KEY,
+    secretKey: env.ALIGN_TURNSTILE_SECRET_KEY,
+    verifyUrl: env.ALIGN_TURNSTILE_VERIFY_URL || "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+  };
+}
+
+/** The hosted creation and abuse settings' own problems (part of v2Problems). */
+function gateProblems(env: NodeJS.ProcessEnv): string[] {
+  const p: string[] = [];
+  if (env.ALIGN_CREATION && !CREATION_MODES.includes(env.ALIGN_CREATION.trim().toLowerCase() as CreationMode)) p.push("ALIGN_CREATION must be codes, open or closed");
+  for (const [, name] of CAP_KEYS) if (env[name] !== undefined && env[name] !== "" && posInt(env[name]) === null) p.push(`${name} must be a positive whole number`);
+  if (!!env.ALIGN_TURNSTILE_SITE_KEY !== !!env.ALIGN_TURNSTILE_SECRET_KEY) p.push("ALIGN_TURNSTILE_SITE_KEY and ALIGN_TURNSTILE_SECRET_KEY must be set together");
+  if (env.ALIGN_TURNSTILE_VERIFY_URL) {
+    let u: URL | null = null;
+    try {
+      u = new URL(env.ALIGN_TURNSTILE_VERIFY_URL);
+    } catch {}
+    if (!u || u.protocol !== "https:") p.push("ALIGN_TURNSTILE_VERIFY_URL must be an https URL");
+  }
+  return p;
+}
+
+/** Hosted settings that are allowed but worth one line in the log at startup. */
+export function v2Warnings(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (!hostedEnv(env) || turnstile(env)) return [];
+  return ["Warning: ALIGN_TURNSTILE_SITE_KEY and ALIGN_TURNSTILE_SECRET_KEY are not set, so sign-in, access requests and workspace creation have no bot check."];
+}
+
 const list = (v: string | undefined) =>
   (v || "")
     .split(",")
     .map((h) => h.trim().toLowerCase())
     .filter(Boolean);
 
-/** The v2 part of hostedProblems(): Better Auth's secret, the public origin, and a way to sign in. */
+/** The v2 part of hostedProblems(): Better Auth's secret, the public origin, a way to sign in, and the creation and
+ *  abuse settings. */
 export function v2Problems(env: NodeJS.ProcessEnv = process.env): string[] {
   const p: string[] = [];
   if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.length < 32) p.push("BETTER_AUTH_SECRET must be set (32+ characters)");
@@ -72,6 +143,7 @@ export function v2Problems(env: NodeJS.ProcessEnv = process.env): string[] {
   }
   if (env.ALIGN_TEST_IDP) p.push("ALIGN_TEST_IDP is not allowed when hosted");
   if (env.ALIGN_LOCAL_OWNER_EMAIL) p.push("ALIGN_LOCAL_OWNER_EMAIL is not allowed when hosted (Mode L only)");
+  p.push(...gateProblems(env));
   return p;
 }
 

@@ -9,7 +9,7 @@ retention schedule in the spec.
 
 ## Why one machine
 
-- **One server per data directory.** Rate limits, authorization codes and some locks live in process memory, so a
+- **One server per data directory.** Most rate limits, authorization codes and some locks live in process memory, so a
   pid file on the volume (`/data/.pid`) refuses a second server. A Fly volume attaches to a single machine, and
   `min_machines_running = 1` with auto-stop off keeps that one process alive.
 - **HTTPS at the edge.** The Fly proxy terminates TLS (`force_https`) and sets `X-Forwarded-Proto` and
@@ -24,7 +24,9 @@ retention schedule in the spec.
 | Routes | Only `/app*`, `/api/v2/*`, `/api/mcp`, `/oauth/*`, `/.well-known/*`, `/api/oauth/*` and Next's static assets. `/` redirects to `https://<host>/app`. **Every other path is 404** `{"error":"Not found"}`, so a route added later stays closed until it is added to `proxy.ts`. |
 | Hosts | Only the host names in `ALIGN_HOSTS` are served. Every other Host gets 421, loopback included. |
 | Proxy | Without `X-Forwarded-Proto: https`, 403 `{"error":"Use https"}`. Without `Fly-Client-IP`, 403 `{"error":"Use the public address"}`. |
-| Sign-in | Email one-time codes through an HTTPS email API, and Google or GitHub when configured. No account is made at startup. An email code creates an account only for a pending invite, or for `ALIGN_FIRST_OWNER_EMAIL` while the server has no account. The test identity provider is refused. |
+| Sign-in | Email one-time codes through an HTTPS email API, and Google or GitHub when configured. No account is made at startup. An email code creates an account only for a pending invite, an unused creation code bound to the address, or `ALIGN_FIRST_OWNER_EMAIL` while the server has no account. The test identity provider is refused. |
+| Creating workspaces | `ALIGN_CREATION` (`codes` by default, `open`, `closed`): a single-use creation code per workspace, except `ALIGN_FIRST_OWNER_EMAIL`'s first one on an empty server. Caps: `ALIGN_MAX_WORKSPACES` (100), `ALIGN_MAX_OWNED_WORKSPACES` (2), `ALIGN_MAX_MEMBERS` (25, open invites included), `ALIGN_MAX_SESSIONS_PER_DEVICE_DAY` (500). Disposable email domains can't create or request access. |
+| Bot check | Cloudflare Turnstile on email-code send and sign-in, access requests and workspace creation, when `ALIGN_TURNSTILE_SITE_KEY` and `ALIGN_TURNSTILE_SECRET_KEY` are set. Without them the server starts and logs one warning. |
 | Cookies | `__Secure-align_v2.session_token`; every cookie-authenticated write must carry `Origin: https://<host>` exactly. |
 | Logs | Server errors log only the error's name, never a message, body or path. Sign-in codes are never logged. |
 
@@ -42,6 +44,8 @@ ever kept a refused process up, `proxy.ts` would still answer 503 to everything.
 - A way to sign in: all three of `ALIGN_EMAIL_API_URL` (https), `ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM`, or
   Google's or GitHub's client id and secret (each pair together).
 - These must be unset: `ALIGN_TEST_IDP`, `ALIGN_LOCAL_OWNER_EMAIL`. `ALIGN_PUBLIC=1` is refused in every mode.
+- When set: `ALIGN_CREATION` is `codes`, `open` or `closed`; each cap is a positive whole number; the two Turnstile keys
+  are set together; `ALIGN_TURNSTILE_VERIFY_URL` is https.
 
 `scripts/test-v2.mjs` checks every refusal on a production server, and `scripts/test-image.sh` checks one on the
 built image.
@@ -61,6 +65,10 @@ built image.
 | `ALIGN_SECRET` | `fly secrets` | `openssl rand -hex 32` |
 | `BETTER_AUTH_SECRET` | `fly secrets` | `openssl rand -hex 32` |
 | `GOOGLE_CLIENT_ID`/`_SECRET`, `GITHUB_CLIENT_ID`/`_SECRET` | `fly secrets` | optional, each pair together. The callback URLs are `https://<host>/api/v2/auth/callback/google` and `/github`. |
+| `ALIGN_CREATION` | `fly.toml` | optional: `codes` (default), `open`, or `closed` to stop new workspaces without a deploy (`fly secrets set ALIGN_CREATION=closed` restarts the machine with it) |
+| `ALIGN_MAX_WORKSPACES`, `ALIGN_MAX_OWNED_WORKSPACES`, `ALIGN_MAX_MEMBERS`, `ALIGN_MAX_SESSIONS_PER_DEVICE_DAY` | `fly.toml` | optional caps (defaults 100, 2, 25, 500) |
+| `ALIGN_TURNSTILE_SITE_KEY` | `fly.toml` | optional: the Turnstile widget's site key (set the secret key too) |
+| `ALIGN_TURNSTILE_SECRET_KEY` | `fly secrets` | optional: the Turnstile secret key |
 
 The three email settings go together: all three or none. With none, sign-in is Google or GitHub only.
 
@@ -77,9 +85,29 @@ volume; for an existing volume, set them on the volume too. Check the flags with
 relying on this.
 
 **Deleting data.** A workspace owner deletes a workspace from the app (`DELETE /api/v2/workspaces/<ws>`), which
-removes everything in it. The v1 operator tool (`ws-admin`) was retired with v1 and has no v2 replacement yet
-(an open question in the spec). Until there is one, removing all data means stopping the machine and destroying the
-volume (`fly volumes destroy`).
+removes everything in it. The operator can do the same with `align-admin workspaces delete <ws> --yes` (below).
+Removing all data means stopping the machine and destroying the volume (`fly volumes destroy`).
+
+## Operator script
+
+`scripts/align-admin.mjs` (the v2 replacement for v1's `ws-admin`) is in the image with its one import,
+`lib/v2/core.mts`. It works on the volume beside the running server and needs the machine's `ALIGN_SECRET`, so run it
+there:
+
+```sh
+fly ssh console -C "node scripts/align-admin.mjs requests list --status pending"
+fly ssh console -C "node scripts/align-admin.mjs requests approve ar_…"     # emails an email-bound creation code
+fly ssh console -C "node scripts/align-admin.mjs requests decline ar_…"
+fly ssh console -C "node scripts/align-admin.mjs codes create --email someone@example.com"   # printed once
+fly ssh console -C "node scripts/align-admin.mjs codes list"                # ids and states, never a code
+fly ssh console -C "node scripts/align-admin.mjs codes revoke cc_…"
+fly ssh console -C "node scripts/align-admin.mjs workspaces list"           # counts only, no people
+fly ssh console -C "node scripts/align-admin.mjs workspaces delete ws_… --yes"
+```
+
+It prints no secret except a code it has just made. `requests approve` emails the code through the email API when the
+email settings are set (add `--print` to show it instead); if the email fails, the code is revoked and the request
+stays pending.
 
 ## Deploy steps
 
@@ -91,12 +119,14 @@ fly deploy --ha=false     # one machine: in-memory limits, and the volume attach
 fly scale count 1
 ```
 
-Then open `https://<host>/app`, sign in as `ALIGN_FIRST_OWNER_EMAIL`, create a workspace and invite people from its
-People tab.
+Then open `https://<host>/app`, sign in as `ALIGN_FIRST_OWNER_EMAIL`, create a workspace (no creation code needed for
+this first one) and invite people from its People tab. For Turnstile, add a widget for the host name in Cloudflare and
+set `ALIGN_TURNSTILE_SITE_KEY` in `fly.toml` and `ALIGN_TURNSTILE_SECRET_KEY` with `fly secrets set`.
 
 **The image** (`Dockerfile`):
 - The build context is an allowlist (`.dockerignore`): only the app's own source goes in.
-- The runtime has production dependencies and the build output only: no scripts, tests, docs or `.env` file.
+- The runtime has production dependencies and the build output only, plus the operator script and `lib/v2/core.mts`:
+  no other scripts, no tests, docs or `.env` file.
 - The container hands `/data` to the `node` user (`chown -R` as root on every start), then `setpriv` execs the server
   as `node`, so the server itself is PID 1 with no shell, npx or root parent (`scripts/test-image.sh` checks this).
   The kernel gives PID 1 no default signal action: Fly's SIGINT/SIGTERM stop the server only because `next start`
@@ -120,7 +150,9 @@ People tab.
 
 - **Fly-Client-IP is only a presence check against other machines on Fly's private network.** Fly's edge sets it,
   but a machine inside the same Fly organization could forge it. Keep this app the only app in its organization.
-- **Rate limits live in process memory.** A restart clears them.
+- **Most rate limits live in process memory.** A restart clears them, except Better Auth's sign-in limits, the
+  per-address hourly email-code limit, access-request limits and the per-device session cap, which are counted in the
+  database.
 
 ## Local test
 
