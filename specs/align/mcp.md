@@ -245,7 +245,7 @@ The MCP server SHALL give the caller client id `agent:<ws>` and scope `goals:rea
 
 ### Requirement: Hosted mode restrictions
 
-When hosted (`HOSTED=1`), the MCP server SHALL accept only `alm.` OAuth access tokens, never `agt.` or static tokens. It SHALL refuse any `/api/mcp` request that carries an `Origin` header with `403` and body `{"error":"Browsers can't call this endpoint"}`, before authentication. Only the MCP, metadata, OAuth and connections routes, plus the other listed tester routes, and, when `ALIGN_GOAL_SESSIONS=1`, `/app*` and `/api/v2/*`, SHALL be reachable. Every other path SHALL get `404 {"error":"Not found"}`.
+When hosted (`HOSTED=1`), the MCP server SHALL accept only `alm.` OAuth access tokens, never `agt.` or static tokens. It SHALL refuse any `/api/mcp` request that carries an `Origin` header with `403` and body `{"error":"Browsers can't call this endpoint"}`, before authentication. Only the MCP, metadata, OAuth and connections routes, plus the other listed tester routes, and, when `ALIGN_GOAL_SESSIONS=1`, `/app*` and `/api/v2/*`, SHALL be reachable. `/` and `/setup` SHALL redirect (`307`) to `/new`. Every other path SHALL get `404 {"error":"Not found"}`. These path rules apply after the hosted host, `https` (`X-Forwarded-Proto`) and `Fly-Client-IP` checks in `proxy.ts`.
 
 #### Scenario: Browser call when hosted
 
@@ -291,7 +291,7 @@ The token SHALL be checked against the stored grant on every call, so revoking a
 
 ### Requirement: Protected resource metadata
 
-Align SHALL serve RFC 9728 metadata at both `GET /.well-known/oauth-protected-resource/api/mcp` and `GET /.well-known/oauth-protected-resource`, with identical bodies: `{resource: "<origin>/api/mcp", authorization_servers: ["<origin>"], scopes_supported: ["goals:read"], bearer_methods_supported: ["header"], resource_name: "Align"}`. Responses SHALL carry `access-control-allow-origin: *`, and `OPTIONS` SHALL be answered for CORS preflight.
+Align SHALL serve RFC 9728 metadata at both `GET /.well-known/oauth-protected-resource/api/mcp` and `GET /.well-known/oauth-protected-resource`, with identical bodies: `{resource: "<origin>/api/mcp", authorization_servers: ["<origin>"], scopes_supported: ["goals:read"], bearer_methods_supported: ["header"], resource_name: "Align"}`. Responses SHALL carry `access-control-allow-origin: *`. Both routes, and the authorization server metadata route, export `OPTIONS` from `mcp-handler`'s `metadataCorsOptionsRequestHandler()`, so the CORS preflight response is produced by `mcp-handler`, not Align code.
 
 #### Scenario: Discovery after 401
 
@@ -341,8 +341,8 @@ The authorization server SHALL accept as `client_id` an https URL that has a non
 
 - Addresses that resolve to private, loopback, link-local, CGNAT, multicast, documentation, reserved or IPv4-embedding IPv6 ranges are refused.
 - The whole fetch has a 3 s deadline and a 5 KB size limit.
-- One retry is allowed for a dropped connection.
-- At most 8 fetches run at once per pool. Anthropic/OpenAI hosts form one pool and all other hosts form the other.
+- One retry is allowed for a dropped connection or a 5xx answer, none after the 3 s deadline.
+- At most 8 fetches run at once per pool. Anthropic/OpenAI hosts form one pool and all other hosts form the other. While a pool is full, an app whose last good document is under a day old gets that document; any other app is told Align couldn't reach its host.
 
 The document is usable only if its `client_id` equals the URL and it lists 1 to 10 valid `redirect_uris`. Good documents SHALL be cached for 10 minutes and unusable ones for 1 minute. Unreachable ones (network error, timeout or 5xx) SHALL not be cached.
 
@@ -517,6 +517,25 @@ Approvals SHALL also go through the sign-in backoff (`429 "Too many attempts, tr
 - **WHEN** a client makes a 21st registration within one hour
 - **THEN** the response is `429` with `error: "slow_down"`
 
+### Requirement: Local stdio connector
+
+Align SHALL ship `packages/align-connect/align-connect.mjs`, a dependency-free Node script that runs as a local stdio MCP server and relays each JSON-RPC line from stdin to `POST <align url>/api/mcp`. Its rules are:
+
+- The URL comes from the first argument or `ALIGN_URL`; a trailing `/api/mcp` is stripped. Without an `http(s)://` URL it prints a usage line to stderr and exits with code `2`.
+- To sign in it reads the protected resource metadata and the authorization server metadata, starts a one-shot server on `127.0.0.1` with a random port, and registers a client named `Align connector (this computer)` through DCR with that `/callback` redirect. It then opens the browser on `/oauth/authorize` with PKCE S256, a random `state` and the `resource`, or, with `ALIGN_CONNECT_NO_BROWSER=1`, writes the URL to stderr. It accepts the callback only when `state` and `iss` match, and gives up after 5 minutes.
+- Tokens are kept in `<ALIGN_HOME or ~/.align>/connect/<host>.json` with mode `0600`. An access token within 30 seconds of expiry is refreshed. A failed refresh clears the file and starts a new sign-in. A `401` from `/api/mcp` forces one refresh or sign-in, then one retry.
+- stdout carries only JSON-RPC responses (from a JSON body or the first SSE `data:` event). Diagnostics go to stderr. A request that can't reach Align gets a JSON-RPC error `-32603` `Align is not reachable: <reason>`.
+
+#### Scenario: First start
+
+- **WHEN** a stdio MCP client starts `align-connect.mjs https://<host>` with no stored tokens and sends `initialize`
+- **THEN** the script opens the browser on Align's consent page, and after the person allows access it saves the tokens in `~/.align/connect/<host>.json` and writes Align's `initialize` response to stdout
+
+#### Scenario: Missing URL
+
+- **WHEN** the script starts with no argument and no `ALIGN_URL`
+- **THEN** it writes `usage: align-connect <align url>, for example https://align.example.com` to stderr and exits with code `2`
+
 ## Open questions
 
 - **No rate limit on `/api/mcp`.** The MCP endpoint has no request rate limit of its own. Only the OAuth endpoints are limited. Is that intended?
@@ -524,7 +543,7 @@ Approvals SHALL also go through the sign-in backoff (`429 "Too many attempts, tr
 - **Refresh lifetime is absolute.** Rotation keeps the grant's original `refresh_exp`, so a connected app must be re-approved 7 days after the first approval, however often it refreshes. The docs say "7 days, rotated on each use". Is the non-sliding lifetime intended?
 - **The static token never expires.** `ALIGN_MCP_TOKEN` has no expiry and no revocation other than changing the environment value and restarting. Is that acceptable for Mode L? Agent tokens in a custom workspace also see the Northstar-only `team` argument on `align_get_accepted_plan`, because only `alm.` tokens get the app schema. Should agent tokens get the app schema too?
 - **Some SDK-level behavior is unverified.** The exact error form for an unknown tool or invalid arguments (JSON-RPC error vs `isError` result), how `GET`/`DELETE` on `/api/mcp` behave (session handling), and the exact 401 body and `WWW-Authenticate` parameters, are decided by `mcp-handler` 2.3.0 and `@modelcontextprotocol/server` 2.3.1, not Align code. The test only asserts that `align_ratify` is "rejected".
-- **Bearer parsing edge cases.** The app-variant selector uses `/^bearer\s+alm\./i`, while `mcp-handler` splits the header on a single space. A header with extra whitespace may pick the app schema but fail token extraction (`401`).
+- **Bearer parsing edge cases.** The app-variant selector uses `/^bearer\s+alm\./i`, but the token itself is extracted by `mcp-handler`'s `withMcpAuth`, whose parsing is not in Align code (and could not be checked here). If the two disagree, for example on extra whitespace, a header could pick the app schema but fail token extraction (`401`).
 - **Several instances.** Codes, rate-limit counters and the CIMD cache live in process memory, so a code issued by one instance can't be exchanged at another and limits apply per instance. Is running more than one instance supported?
 
 ## Sources
@@ -558,3 +577,4 @@ Approvals SHALL also go through the sign-in backoff (`429 "Too many attempts, tr
 - `package.json`, `package-lock.json` (mcp-handler 2.3.0, @modelcontextprotocol/server 2.3.1)
 - `scripts/test-mcp.mjs`
 - `scripts/test-oauth.mjs`
+- `packages/align-connect/align-connect.mjs`, `packages/align-connect/README.md`
