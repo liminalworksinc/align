@@ -260,3 +260,35 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Evidence:**
   - [x] align-agent tests for each behaviour
   - [x] Spec requirements updated and validated
+
+### [ ] REQ-001 — Requests and goal holds: server, app and spec
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation (directives)
+- **Direction:** Owner decision 2026-10-30: between informing and instructing agents, add typed requests (replan, checkpoint, switch goal) from a goal's approvers and workspace owners, plus an enforced goal hold; safe requests run on their own, anything that changes direction asks the developer first.
+- **Conclusion:** New request, hold and release directives with per-session receipts (accepted, declined, auto-accepted), routes and UI on the goal page, audit, retention and MCP read-out; answers the instruct-or-inform open question.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Migration 12: directive kinds, requests, request targets, goal holds
+  - [ ] Routes, authorization, audit, events and retention
+  - [ ] Goal page card and hold banners; MCP directives output
+- **Evidence:**
+  - [ ] test-v2 and test-oauth checks for every route, rule and receipt
+  - [ ] Spec requirements updated and validated
+
+### [ ] REQ-002 — Requests and goal holds: local agent
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation/packages/align-agent
+- **Direction:** Owner decision 2026-10-30: between informing and instructing agents, add typed requests (replan, checkpoint, switch goal) from a goal's approvers and workspace owners, plus an enforced goal hold; safe requests run on their own, anything that changes direction asks the developer first.
+- **Conclusion:** The agent tells the developer about every request, does checkpoints and replan drafts on its own, waits for the developer on switch goal, records accept or decline, and enforces goal holds like the stop latch.
+- **Depends on:** REQ-001
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Request intake, notices and Align-written context
+  - [ ] ::align accept/decline and align requests
+  - [ ] Goal hold latch that fails closed
+- **Evidence:**
+  - [ ] align-agent tests for each behaviour; live agent-to-server checks
+  - [ ] Spec requirements updated and validated
