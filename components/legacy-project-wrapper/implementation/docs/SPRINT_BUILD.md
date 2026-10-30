@@ -11,7 +11,7 @@ Start here. This file points to the spec; it does not restate it.
 Rules
 - Minimum slice first (plan §7), one-shot, evaluate, fix. 6:00 PM Wed gate: minimum slice end to end + Sean's sign-off.
 - Every lane worktree gets a gitignored .claude/settings.local.json with {"disableAllHooks": true} before Claude starts there (verified: it stops align-capture and align-watch).
-- Ports 3200 (frozen baseline), 3201+ (lanes). Never 3100. Use npx next dev -H 127.0.0.1; never npm start for the demo (it binds all interfaces).
+- Ports 3200 (baseline), 3201+ (lanes). Never 3100. `npm run dev` and `npm start` both bind 127.0.0.1; the Docker image binds 0.0.0.0 explicitly.
 - Never git stash. Draft PRs only. Shruti approves every merge; Sean reviews the plan's §10 files.
 - Build B only after the 6:00 PM gate passes, B1 privacy gates first; otherwise it is Shruti's Thu 1:00–2:30 call.
 - Capture consent is granted by leadership through the API, per harness and repo: follow docs/CAPTURE_CONSENT.md before the first real capture.

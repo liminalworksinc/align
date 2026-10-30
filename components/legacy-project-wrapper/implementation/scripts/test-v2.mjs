@@ -271,6 +271,8 @@ try {
   check("auth: GET /me without credentials -> 401", noAuth.status === 401 && noAuth.json?.error === "unauthorized", noAuth.text);
   const evilSignIn = await call("anon", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: "http://evil.example" }, body: { email: "u1@example.test", password: "pw-U1-123456" } });
   check("auth: sign-in from a foreign Origin is refused", evilSignIn.status === 403, `${evilSignIn.status}`);
+  const otherPortSignIn = await call("anon", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: `http://127.0.0.1:${Number(PORT) + 1}` }, body: { email: "u1@example.test", password: "pw-U1-123456" } });
+  check("auth: sign-in from another localhost port is refused (only this server's own origin is trusted)", otherPortSignIn.status === 403, `${otherPortSignIn.status}`);
 
   // -- workspaces, invites, pods --
   const wsA = await call("U1", "POST", "/api/v2/workspaces", { cookie: U1.cookie, body: { name: "Workspace A" } });
@@ -302,6 +304,8 @@ try {
   const leadAdds = await call("U2", "POST", `/api/v2/workspaces/${A}/pods/${P1}/members`, { cookie: U2.cookie, body: { user_id: U3.id, role: "member" } });
   const memberAdds = await call("U3", "POST", `/api/v2/workspaces/${A}/pods/${P1}/members`, { cookie: U3.cookie, body: { user_id: U4.id, role: "member" } });
   check("pods: owner creates a pod and adds a lead; the lead adds a member; a pod member can't (403 not_pod_lead)", pod.status === 201 && addLead.status === 200 && leadAdds.status === 200 && memberAdds.status === 403 && memberAdds.json?.error === "not_pod_lead", `${pod.status} ${addLead.status} ${leadAdds.status} ${memberAdds.status} ${memberAdds.text}`);
+  const leadPromotes = await call("U2", "POST", `/api/v2/workspaces/${A}/pods/${P1}/members`, { cookie: U2.cookie, body: { user_id: U3.id, role: "lead" } });
+  check("pods: a lead can't make someone a lead (403 owner_only); only a workspace owner can", leadPromotes.status === 403 && leadPromotes.json?.error === "owner_only", `${leadPromotes.status} ${leadPromotes.text}`);
 
   // -- goals --
   const CANARY = `CANARY-PRIV-${randomBytes(6).toString("hex")}`;
@@ -681,6 +685,11 @@ try {
   check("tree: depends_on is a versioned field of the goal; itself -> 400, a goal you can't see -> 404, more than 5 -> 400", depOk.status === 201 && depOk.json.version === 2 && depOk.json.depends_on.join() === G1.id && depSelf.status === 400 && depPriv.status === 404 && depMany.status === 400, `${depOk.status} ${depSelf.status} ${depPriv.status} ${depMany.status}`);
   const depSeen = await childIn(U4, D4);
   check("tree: a reader who can't see a dependency doesn't learn its id", depSeen && Array.isArray(depSeen.depends_on) && depSeen.depends_on.every((id) => id === G1.id), JSON.stringify(depSeen?.depends_on));
+  // A pod member may name a pod-mate's goal as the source, but linking it under their own goal needs its owner's approval.
+  const podMateSource = await al(U3, { target_goal_id: G3.id, source_goal_id: G2.id, choice: "contribution", session_keys: [], note: null });
+  const podMateSeen = await getAl(U2, podMateSource.json?.id);
+  check("alignment: a pod-mate's goal as the source -> pending until its owner approves; the owner can see the request", podMateSource.status === 201 && podMateSource.json.state === "pending" && podMateSource.json.approvers.some((a) => a.id === U2.id) && podMateSeen.status === 200, `${podMateSource.text.slice(0, 300)} ${podMateSeen.status}`);
+  await act(U3, podMateSource.json.id, "withdraw", {});
 
   // -- activity: in-flight work signals between members, kept 24 hours --
   const actPost = (dev, items, extra = {}) => call(dev.who, "POST", `/api/v2/workspaces/${A}/activity`, { bearer: dev.access, body: { items }, ...extra });

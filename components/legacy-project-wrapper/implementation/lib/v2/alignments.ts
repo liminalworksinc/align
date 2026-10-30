@@ -52,6 +52,8 @@ const effectsOf = (choice: Choice): EffectKind[] => (choice === "contribution" ?
 
 function requiredApprovers(requester: string, target: GoalRow, source: GoalRow | undefined, choice: Choice, sessions: SessionRow[]): string[] {
   const set = new Set<string>([target.owner_id]);
+  // Linking a goal under another one changes the source goal's tree, so its owner must agree, whatever the effects.
+  if (source && source.owner_id !== requester) set.add(source.owner_id);
   if (effectsOf(choice).includes("allocation_transfer")) {
     for (const s of sessions) set.add(s.user_id);
     for (const s of sessions) {
@@ -59,7 +61,6 @@ function requiredApprovers(requester: string, target: GoalRow, source: GoalRow |
       const cur = e?.goal_id ? goalRow(s.ws_id, e.goal_id) : undefined;
       if (cur && cur.owner_id !== requester) set.add(cur.owner_id);
     }
-    if (source && source.owner_id !== requester) set.add(source.owner_id);
   }
   return [...set].sort();
 }
@@ -110,8 +111,9 @@ function involved(a: AlignmentRow): string[] {
   return [...set];
 }
 
-/** Approve, if every required approver of the current revision has. Applies the effects in this transaction. */
-function maybeApprove(a: AlignmentRow, at: string): boolean {
+/** Approve, if every required approver of the current revision has. Applies the effects in this transaction.
+ *  `actor` is whoever's action completed the approvals; the audit row names them. */
+function maybeApprove(a: AlignmentRow, at: string, actor: string): boolean {
   const rev = revisionOf(a.id, a.revision);
   const need = JSON.parse(rev.approvers_json) as string[];
   const got = approvalsOf(a.id, a.revision);
@@ -131,7 +133,7 @@ function maybeApprove(a: AlignmentRow, at: string): boolean {
   }
   run("UPDATE v2_alignments SET state = 'approved', decided_at = ?, updated_at = ? WHERE id = ?", at, at, a.id);
   if (a.source_goal_id) reviewParents(a.ws_id, a.source_goal_id, at, a.target_goal_id); // the child starts reviewed against the parent as approved
-  audit(a.ws_id, null, "alignment.approved", a.id, at);
+  audit(a.ws_id, actor, "alignment.approved", a.id, at);
   return true;
 }
 
@@ -166,7 +168,7 @@ export async function createAlignment(pp: PolicyPrincipal, b: Body) {
     );
     writeRevision({ id, ws: pp.wsId }, 1, choice, keys, approvers, note, pp.userId, at);
     audit(pp.wsId, pp.userId, "alignment.requested", id, at);
-    maybeApprove(alignmentRow(pp.wsId, id)!, at);
+    maybeApprove(alignmentRow(pp.wsId, id)!, at, pp.userId);
   });
   return alignmentView(pp, alignmentRow(pp.wsId, id)!);
 }
@@ -205,7 +207,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         if (!isApprover) throw forbidden("not_an_approver", "Your approval is not needed on this request");
         run("INSERT OR IGNORE INTO v2_alignment_approvals (ws_id, alignment_id, revision, user_id, at) VALUES (?, ?, ?, ?, ?)", a.ws_id, a.id, a.revision, me, at);
         run("UPDATE v2_alignments SET updated_at = ? WHERE id = ?", at, a.id);
-        maybeApprove(a, at);
+        maybeApprove(a, at, me);
         break;
       }
       case "counter": {
@@ -237,7 +239,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         if (!isRequester) throw forbidden("not_requester", "Only the person who asked can accept a counter");
         if (isApprover) run("INSERT OR IGNORE INTO v2_alignment_approvals (ws_id, alignment_id, revision, user_id, at) VALUES (?, ?, ?, ?, ?)", a.ws_id, a.id, a.revision, me, at);
         run("UPDATE v2_alignments SET state = 'pending', updated_at = ? WHERE id = ?", at, a.id);
-        maybeApprove({ ...a, state: "pending" }, at);
+        maybeApprove({ ...a, state: "pending" }, at, me);
         break;
       }
       case "reject": {

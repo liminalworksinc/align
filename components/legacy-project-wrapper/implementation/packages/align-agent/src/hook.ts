@@ -1,11 +1,12 @@
 // Hook entry point: `node <ALIGN_HOME>/bin/current/hook.js <claude|codex> <Event>`.
 // Contract: offline, local files only, internal 300 ms deadline, exit 0 silently on any failure, EXCEPT PreToolUse,
-// which denies when a stop latch exists for the session (or cannot be ruled out) and fails closed.
+// which denies when a stop latch exists for the session (or cannot be ruled out) and fails closed. Before the input is
+// read, any latch on the machine denies; after, only this session's.
 import fs from "node:fs";
 import { alignHomeForHook } from "./shared/layout.ts";
 import type { Harness } from "./shared/types.ts";
 import { kickSync } from "./hooks/autostart.ts";
-import { anyLatch, denyOutput, preToolUse, sessionStart, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
+import { denyOutput, latchedOnFailure, preToolUse, sessionStart, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
 
 const DEADLINE_MS = Number(process.env.ALIGN_HOOK_DEADLINE_MS || 300);
 const MAX_INPUT = 8 * 1024 * 1024;
@@ -15,6 +16,8 @@ const event = process.argv[3] || "";
 const harness: Harness | null = harnessArg === "claude" || harnessArg === "claude-code" ? "claude-code" : harnessArg === "codex" ? "codex" : null;
 const home = alignHomeForHook(process.argv[1] || "", process.env);
 let settled = false;
+/** The session this PreToolUse call is for, once its input has been read. */
+let sessionId: string | null = null;
 /** Output already decided; a later deadline or failure emits it rather than dropping it. */
 let decided: HookOutput | undefined;
 
@@ -36,7 +39,7 @@ function failure(): never {
   if (event === "PreToolUse" && !settled) {
     let latched = true;
     try {
-      latched = anyLatch(home);
+      latched = harness ? latchedOnFailure(home, harness, sessionId) : true;
     } catch {
       latched = true;
     }
@@ -89,6 +92,7 @@ async function main(): Promise<void> {
       return emit(null);
     }
     case "PreToolUse": {
+      sessionId = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
       const out = (decided = preToolUse(home, harness, input));
       await kickSync(home, process.argv[1] || "", process.env, event).catch(() => undefined);
       return emit(out);

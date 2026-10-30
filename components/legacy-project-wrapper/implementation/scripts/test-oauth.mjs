@@ -354,9 +354,9 @@ async function phase(name, env, invites = []) {
   check("a connected app sees no internal team ids: the accepted plan takes no team, and no tool calls a team 'security' (ids like g-security-v1 aside)", !!planTool && !planTool.inputSchema?.properties?.team && !/(?<![-\w])security(?![-\w])/i.test(said), JSON.stringify(planTool?.inputSchema) + " " + (said.match(/.{60}(?<![-\w])security(?![-\w]).{60}/i)?.[0] ?? ""));
   const otherHost = HOSTED ? { status: 421 } : await mcp(t2.access_token, "align_list_goals", { host: `localhost:${PORT}` });
   check("a token is bound to its resource: the same token at another origin -> 401 (hosted: other hosts are 421)", HOSTED || otherHost.status === 401, otherHost.status);
+  const withOrigin = await mcp(t2.access_token, "align_list_goals", { headers: { origin: origin() } });
+  check("MCP from a browser (any Origin, even this server's) -> 403, in every mode", withOrigin.status === 403, withOrigin.status);
   if (HOSTED) {
-    const withOrigin = await mcp(t2.access_token, "align_list_goals", { headers: { origin: origin() } });
-    check("hosted: MCP from a browser (any Origin) -> 403", withOrigin.status === 403, withOrigin.status);
     const agt = await mcp("agt.e30.AAAA");
     check("hosted: an agent token or a static token is never accepted (401)", agt.status === 401, agt.status);
   }

@@ -3,7 +3,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
-import { config } from "../config";
+import { config, hostAllowed } from "../config";
 import { publicOrigin, testIdpEnabled } from "./config";
 import { authDb, dbDir } from "./db";
 import { rand32 } from "./ids";
@@ -43,7 +43,9 @@ export function authOptions(): BetterAuthOptions {
     secret: secret(),
     // Hosted: the one public origin. Mode L: whatever loopback host and port this server answers on.
     baseURL: hosted && origin ? origin : { allowedHosts: loopback.flatMap((h) => [h, `${h}:*`]), protocol: "http" },
-    trustedOrigins: hosted && origin ? [origin] : loopback.map((h) => `http://${h}:*`),
+    // Mode L trusts only the origin this request was sent to (proxy.ts has already refused non-loopback hosts),
+    // not every port on localhost: another local web app must not pass Better Auth's origin checks.
+    trustedOrigins: hosted && origin ? [origin] : (request) => (request && hostAllowed(request.headers.get("host")) ? [`http://${request.headers.get("host")}`] : []),
     socialProviders: social,
     emailAndPassword: { enabled: testIdpEnabled() && !hosted, autoSignIn: true, minPasswordLength: 8, maxPasswordLength: 128 },
     account: { modelName: "ba_account", accountLinking: { enabled: false, disableImplicitLinking: true } },

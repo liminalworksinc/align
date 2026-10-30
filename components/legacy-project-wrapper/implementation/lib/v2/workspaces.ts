@@ -1,5 +1,5 @@
 import { all, audit, get, run, tx } from "./db";
-import { V2Error, badRequest, conflict, notFound } from "./errors";
+import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { authorize, type Action, type PodRole, type PolicyObject, type PolicyPrincipal, type WsRole } from "./policy";
 import type { Principal } from "./http";
@@ -178,6 +178,9 @@ function podInWs(wsId: string, podId: string) {
 export async function setPodMember(pp: PolicyPrincipal, podId: string, userId: string, role: PodRole) {
   podInWs(pp.wsId, podId);
   need(pp, "pod.manage_members", { kind: "pod", podId });
+  // A lead adds and removes members; only a workspace owner makes someone a lead (or changes a lead's role).
+  const current = get<{ role: PodRole }>("SELECT role FROM v2_pod_members WHERE pod_id = ? AND user_id = ?", podId, userId);
+  if ((role === "lead" || current?.role === "lead") && pp.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can make someone a pod lead");
   if (!get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", pp.wsId, userId)) throw notFound();
   const at = nowIso();
   await tx(() => {
@@ -197,6 +200,8 @@ export async function setPodMember(pp: PolicyPrincipal, podId: string, userId: s
 export async function removePodMember(pp: PolicyPrincipal, podId: string, userId: string) {
   podInWs(pp.wsId, podId);
   need(pp, "pod.manage_members", { kind: "pod", podId });
+  const current = get<{ role: PodRole }>("SELECT role FROM v2_pod_members WHERE pod_id = ? AND user_id = ?", podId, userId);
+  if (current?.role === "lead" && pp.wsRole !== "owner" && userId !== pp.userId) throw forbidden("owner_only", "Only a workspace owner can remove a pod lead");
   const n = await tx(() => run("DELETE FROM v2_pod_members WHERE ws_id = ? AND pod_id = ? AND user_id = ?", pp.wsId, podId, userId));
   if (!n) throw notFound();
 }

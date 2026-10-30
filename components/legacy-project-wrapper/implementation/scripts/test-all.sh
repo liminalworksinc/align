@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build A gate runner. Usage: scripts/test-all.sh <port>   (run from a lane or integration worktree)
-# Checks frozen files, lint and types, starts a fresh dev server on <port>, then runs in fixed order:
+# Checks lint and types, starts a fresh dev server on <port>, then runs in fixed order:
 # snapshot, test-flow, test-scenario (default fixture, then each scripts/fixtures/*.json), test-ui-loop, test-mcp (Northstar, then custom),
 # test-capture, test-mapper. Capture and mapper add sessions
 # that survive reset, so they run last. Then test-tenancy and test-v2 (goal sessions, ALIGN_GOAL_SESSIONS=1), which start their own
@@ -11,8 +11,6 @@ set -u
 
 PORT="${1:-}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BASELINE=850971e13a74eab20f8d8789cb78331517ef28da
-FROZEN=(data/fixture.json agent sparta scripts/verify-run.mjs scripts/run-plan.sh docs/LIVE_REPLAN.md docs/DEMO_SCRIPT.md)
 
 die() { echo "test-all: $*" >&2; exit 2; }
 [[ "$PORT" =~ ^[0-9]+$ ]] || die "usage: scripts/test-all.sh <port>"
@@ -43,11 +41,6 @@ stop_server() {
 trap stop_server EXIT
 
 # ---- static checks ----
-if git diff --quiet "$BASELINE" -- "${FROZEN[@]}" && [ -z "$(git status --porcelain -- "${FROZEN[@]}")" ]; then
-  summary PASS frozen "no changes to frozen files since ${BASELINE:0:7}"
-else
-  summary FAIL frozen "$(git diff --name-only "$BASELINE" -- "${FROZEN[@]}" | tr '\n' ' ')"
-fi
 step lint npm run lint
 step typecheck bash -c 'npx next typegen && npx tsc --noEmit'
 step syntax bash -c 'for f in scripts/*.mjs scripts/lib/*.mjs; do node --check "$f" || exit 1; done; echo "node --check clean"'

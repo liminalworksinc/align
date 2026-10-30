@@ -43,9 +43,9 @@ function verifyToken(req: Request, bearerToken?: string): AuthInfo | undefined {
 }
 
 async function route(req: Request): Promise<Response> {
-  // The MCP endpoint is for apps and CLIs, which send no Origin. A browser page always does, so when hosted any
-  // Origin is refused (the MCP transport spec's DNS-rebinding rule; the same rule as lib/v2/http.ts device routes).
-  if (config().hosted && req.headers.get("origin") !== null) return Response.json({ error: "Browsers can't call this endpoint" }, { status: 403 });
+  // The MCP endpoint is for apps and CLIs, which send no Origin. A browser page always does, so any Origin is refused
+  // in every mode (the MCP transport spec's DNS-rebinding rule; the same rule as lib/v2/http.ts device routes).
+  if (req.headers.get("origin") !== null) return Response.json({ error: "Browsers can't call this endpoint" }, { status: 403 });
   // The 401 challenge names this server's own metadata URL (RFC 9728), from the Host the request used.
   const isApp = /^bearer\s+alm\./i.test(req.headers.get("authorization") ?? "");
   const auth = withMcpAuth(isApp ? appHandler : handler, verifyToken, { required: true, requiredScopes: [SCOPE], resourceMetadataPath: PRM_PATH, resourceUrl: originOf(req) });

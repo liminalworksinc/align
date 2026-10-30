@@ -1,6 +1,6 @@
 // Approval profile: everything the propose / counter / approve flow says or writes that depends on the scenario.
-// NORTHSTAR_PROFILE holds the literals lib/flow.ts hardcoded at 850971e, byte for byte (curly apostrophes included),
-// so Northstar output does not move. customProfile(s) builds the same shape from state.teams and state.scenario_config.
+// NORTHSTAR_PROFILE holds the Northstar sample's literals (curly apostrophes included). customProfile(s) builds the
+// same shape from state.teams and state.scenario_config.
 // No node: imports and no import from ./flow, so there is no cycle.
 
 import { NORTHSTAR, companyMeasureId, conflictMeasureId, dependencyId, leadOf, poss, scenarioOf, teamOf } from "./labels";

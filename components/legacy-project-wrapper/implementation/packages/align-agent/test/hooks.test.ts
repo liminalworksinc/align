@@ -13,6 +13,7 @@ import { layout, listSpool, localId } from "../src/shared/layout.ts";
 import { writeJsonAtomic } from "../src/shared/fsx.ts";
 import type { GoalSnapshot, Harness } from "../src/shared/types.ts";
 import { ingestSpool } from "../src/sync.ts";
+import { latchedOnFailure } from "../src/hooks/handlers.ts";
 import { ctxFor, HOOK, makeEnv, PKG, runHook, type TestEnv } from "./helpers.ts";
 
 const BLOCK_NET = ["--import", path.join(PKG, "test", "fixtures", "block-net.mjs")];
@@ -262,6 +263,17 @@ describe("claude hooks", () => {
     // Garbage stdin while any latch exists also denies.
     const r = runHook(t, "claude", "PreToolUse", "not json" as unknown as object);
     assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, "deny");
+  });
+
+  test("after a crash, only the session's own latch denies; an unknown session denies on any latch", () => {
+    const { t, ctx } = setup();
+    const lid = shareSession(ctx, "claude-code", "sess-stopped");
+    ctx.db.prepare("INSERT INTO latches(local_id, stopped, directive_id, seq, at) VALUES(?,?,?,?,?)").run(lid, 1, "dir_stop", 3, nowIso());
+    renderHot(ctx, lid);
+    ctx.db.close();
+    assert.equal(latchedOnFailure(t.home, "claude-code", "sess-stopped"), true, "its own latch denies");
+    assert.equal(latchedOnFailure(t.home, "claude-code", "sess-other"), false, "another session's latch does not");
+    assert.equal(latchedOnFailure(t.home, "claude-code", null), true, "unknown session: any latch denies");
   });
 
   test("hooks exit 0 silently on a stalled stdin within the deadline", async () => {

@@ -177,6 +177,15 @@ describe("e2e", () => {
     assert.match(susp.hookSpecificOutput.additionalContext, /no longer bound/);
     await waitFor(() => fake.receipts.some((r) => r.id === d6.id && r.state === "applied"), 5000, "suspend applied");
 
+    // Rebinding a suspended session, as the notice says: the next root turn opens an epoch and the share is shared again.
+    const lid = localId("claude-code", SID);
+    const rebind = JSON.parse(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "x6", prompt: "::align bind Ship", cwd }).stdout);
+    assert.match(rebind.reason, /counts toward "Ship/);
+    await waitFor(() => !!readJson<HotState>(layout.hot(t.home, lid))?.pending_binding, 5000, "pending binding in hot state");
+    runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p6", prompt: "carry on", cwd });
+    await waitFor(() => [...fake.epochs.values()].some((e) => e.root_turn === "p6"), 5000, "epoch at p6 after rebind");
+    await waitFor(() => (ctx.db.prepare("SELECT state FROM shares WHERE local_id=?").get(lid) as { state: string }).state === "shared", 5000, "shared again");
+
     // Key-bound refresh ran with valid signatures (access TTL 122 s forces refresh after ~2 s).
     await new Promise((r) => setTimeout(r, Math.max(0, loginAt + 2500 - Date.now())));
     await runCli(t, ["sync"]);

@@ -16,7 +16,7 @@
 
 ## What HOSTED=1 changes
 
-Without `HOSTED`, nothing changes. The loopback rules, cookie and Northstar behaviour stay as they are, gated by `scripts/test-all.sh`.
+Without `HOSTED`, nothing changes. The loopback rules and cookie stay as they are, checked by `scripts/test-all.sh`.
 
 | Area | HOSTED=1 behaviour |
 |---|---|

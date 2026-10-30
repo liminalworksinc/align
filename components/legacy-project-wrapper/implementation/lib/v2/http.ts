@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { config, hostAllowed } from "../config";
 import { HttpError } from "../errors";
+import { clientNet } from "../ratelimit";
 import { getAuth } from "./auth";
 import { publicOrigin } from "./config";
 import { deviceFromAccessToken, userById, type DevicePrincipal, type UserRef } from "./devices";
@@ -168,7 +169,7 @@ export function originOf(req: Request): string {
   return `http://${req.headers.get("host") || "127.0.0.1"}`;
 }
 
-/** The client key for limits: Fly-Client-IP when hosted, else one local key (as lib/ratelimit.ts). */
+/** The client key for limits: Fly-Client-IP when hosted (IPv6 keyed by its /64), else one local key (as lib/ratelimit.ts). */
 export function clientKey(req: Request): string {
-  return config().hosted ? `ip:${req.headers.get("fly-client-ip") ?? "unknown"}` : "local";
+  return config().hosted ? `ip:${clientNet(req.headers.get("fly-client-ip") ?? "unknown")}` : "local";
 }

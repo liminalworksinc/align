@@ -287,7 +287,9 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   let goal: GoalSnapshot | null = hot.goal;
   const applied: (string | null)[] = [];
   const pending = hot.pending_binding;
-  if (hot.share.state === "shared" && pending) {
+  // A suspended share takes a new binding too: `::align bind <goal>` is how its user resumes uploading (sync turns
+  // the share back to shared when the epoch opens).
+  if ((hot.share.state === "shared" || hot.share.state === "suspended") && pending) {
     if (inj.consumed_binding !== pending.id) {
       spoolWrite(home, {
         type: "epoch_open",
@@ -475,6 +477,18 @@ function midTurnDelta(home: string, lid: string): HookOutput {
     return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: parts.join("\n") } };
   } finally {
     release();
+  }
+}
+
+/** After a crash or the deadline in PreToolUse: deny when this session's latch exists or can't be ruled out. With no
+ *  known session (unreadable input), any latch on the machine denies. Another session's latch never blocks this one. */
+export function latchedOnFailure(home: string, harness: Harness, sessionId: string | null): boolean {
+  if (!sessionId) return anyLatch(home);
+  try {
+    fs.accessSync(layout.latch(home, localId(harness, sessionId)));
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "ENOENT";
   }
 }
 

@@ -406,7 +406,7 @@ function directives(s: AppState, sessionId: string | undefined): z.infer<typeof 
 
 /**
  * `apps`: the tools as AI apps signed in through Align's OAuth see them (one custom workspace). The accepted plan
- * takes no `team` there: the argument is Northstar's (its schema is frozen in the Northstar snapshot) and a chat app
+ * takes no `team` there: the argument is Northstar's (its schema is pinned by the Northstar snapshot) and a chat app
  * showed it to the person as "Team: security", a name the workspace never uses.
  */
 export function registerAlign(server: McpServer, { apps = false }: { apps?: boolean } = {}) {

@@ -1,5 +1,5 @@
 // Scenario labels and ids, shared by client and server. No node: imports.
-// Northstar reads only the frozen literals below, so its output stays byte-identical.
+// Northstar reads only the literals below.
 // Custom scenarios read state.teams and state.scenario_config.
 
 import type { Acceptance, Actor, AppState, Owner, ScenarioKind, ScenarioTeam } from "./types";
