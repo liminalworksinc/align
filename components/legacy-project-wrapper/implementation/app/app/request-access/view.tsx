@@ -16,13 +16,23 @@ const SIZES: [string, string][] = [
   ["201+", "More than 200 people"],
 ];
 
-export default function RequestAccess({ captchaSiteKey, local }: { captchaSiteKey: string | null; local: boolean }) {
+export default function RequestAccess({
+  captchaSiteKey,
+  local,
+  interest: initialInterest = "try",
+  via = "form",
+}: {
+  captchaSiteKey: string | null;
+  local: boolean;
+  interest?: "try" | "evaluate";
+  via?: "form" | "value_card";
+}) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
   const [teamSize, setTeamSize] = useState("");
   const [useCase, setUseCase] = useState("");
-  const [interest, setInterest] = useState<"try" | "evaluate">("try");
+  const [interest, setInterest] = useState<"try" | "evaluate">(initialInterest);
   const [sent, setSent] = useState<string | null>(null);
   const act = useAction();
   const bot = useTurnstile(captchaSiteKey);
@@ -32,7 +42,7 @@ export default function RequestAccess({ captchaSiteKey, local }: { captchaSiteKe
     void act.run(async () => {
       try {
         await api("/api/v2/access-requests", {
-          body: { email: email.trim(), name, company: company || null, team_size: teamSize || null, use_case: useCase, interest },
+          body: { email: email.trim(), name, company: company || null, team_size: teamSize || null, use_case: useCase, interest, via },
           headers: bot.headers,
         });
         setSent(email.trim());

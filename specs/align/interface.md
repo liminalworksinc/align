@@ -308,6 +308,11 @@ an agreement, commits neither the person nor their employer, and asks nobody to 
 - **WHEN** the page is read
 - **THEN** it says "Sending this form only asks for access. It is not an agreement, and asking for a follow-up or a letter of intent doesn't commit you or your employer to anything. Nothing here asks you to sign for your organization."; in Mode L it also notes that anyone signed in on this machine can create a workspace without a code
 
+#### Scenario: Opened from the value card
+
+- **WHEN** the page is opened as `/app/request-access?interest=evaluate&via=value_card` (the decision value card's default follow-up link)
+- **THEN** **Evaluate Align on a real workflow** is preselected and the request is posted with `via: "value_card"`, which the server keeps only on the `access_requested` product event (`metrics`); without those parameters, or with any other value, **Try Align** is preselected and `via` is `form`
+
 ### Requirement: Public trust pages
 
 The server SHALL serve `/privacy` (the privacy policy, `docs/trust/privacy-policy.md`) and `/trust` (the security
@@ -553,6 +558,39 @@ The Requests tab at `/app/w/<ws>/requests` SHALL show the change requests the pe
 - **WHEN** a section has nothing
 - **THEN** it shows "Nothing is waiting on you.", "You have not proposed a change. Open someone else's goal to propose one." or "None." respectively
 
+### Requirement: Decision value card
+
+An approved change request's card, on the goal page and the Requests tab, SHALL show a "What this decision gave you"
+card for every reader of the request, from `GET /api/v2/workspaces/<ws>/goals/<goal>/change-requests/<id>/value`
+(`lib/v2/value.ts`; `409 not_approved` for any other state, `404` for a request the person can't read), with these
+rows: "Accepted change" (each changed field, and the version it became), "Who approved" (the approver and time, and
+"approved without evidence" when so), "Affected goals and teams" (the goal and its team, the readable goals it
+contributes to and the readable goals that depend on or contribute to it), "Agents on the new version" (of the bound
+sessions the approval's `goal_version` directive reached: how many have it in context, received but not used yet, and
+not reached; "No shared sessions work toward this goal yet." when none), "Measured in Align" (proposal to approval, and
+approval to the first `applied` receipt, from server timestamps only), one optional question with a note, the reports
+of others, and the follow-up link.
+
+#### Scenario: The optional question
+
+- **WHEN** a reader answers "Before Align, how long would getting this decision usually take?" with one of five answers (Same day, 2–3 days, About a week, Longer, It wouldn't get decided) and an optional note of at most 500 characters
+- **THEN** `POST .../value {action: "reported", estimate, note?}` saves their value report (`v2_value_reports`, one per person per request; control, bidi and zero-width characters removed from the note), records `value_reported` with the estimate only, and the card shows "Your estimate: … · Measured here: …" with the note; for 7 days after it was saved they may change it (**Change my answer**), after that the server answers `409 edit_closed`
+
+#### Scenario: Who sees the reports
+
+- **WHEN** the request's requester, a revision author, its approver or a member of its approval set, or a workspace owner opens the card
+- **THEN** "What others said" lists every other person's estimate and note; any other reader sees only their own report
+
+#### Scenario: Viewed once it is seen
+
+- **WHEN** the card loads below the fold and the person scrolls until at least half of it is on screen (or it fills half the screen)
+- **THEN** the page posts `{action: "viewed"}` once (the server keeps one `value_card_viewed` per person per workspace); a card nobody scrolled to records nothing
+
+#### Scenario: Follow-up link
+
+- **WHEN** a follow-up link is set (`ALIGN_FOLLOW_UP_URL`, shown only if it is an https URL without credentials or a non-default port, or a `mailto:` with one address and only a subject; when hosted and unset, `<public origin>/app/request-access?interest=evaluate&via=value_card`; in Mode L and unset, none)
+- **THEN** the card shows the pitch and "Want to evaluate Align on a real workflow? Ask for a follow-up; it can end with an optional, non-binding letter of intent." opening it in a new tab (`noopener noreferrer`), and a click posts `{action: "follow_up"}`; with no valid link the row is not shown
+
 ### Requirement: Workspace People tab members
 
 The People tab SHALL list the workspace's members from `GET /api/v2/workspaces/<ws>`, let a workspace owner change a
@@ -686,6 +724,16 @@ workspace owner sees everyone's.
 - **WHEN** a member who is not a viewer opens the tab
 - **THEN** a "Connect an AI app" card shows the MCP URL `<origin>/api/mcp` with **Copy** and says the app will send them to Align to sign in and choose this workspace; a viewer sees "Viewers can't connect apps to this workspace." instead
 
+#### Scenario: Terminal lines
+
+- **WHEN** a member who is not a viewer opens the tab
+- **THEN** under "Paste into a sh, bash or zsh terminal" it shows a **Claude Code** line, `claude mcp add --transport http --scope user align '<url>'; claude mcp login align`, and a **Codex** line, `codex mcp add align --url '<url>'`, each with its own **Copy**, built by `lib/paste-lines.ts` from the URL alone (single-quoted, never a workspace, team or company name, no hooks and no agent instruction file), and says "For goal context inside Claude Code and Codex sessions, install the align CLI (`align login`, `align install`)."
+
+#### Scenario: A URL Align couldn't have made
+
+- **WHEN** the URL is not `http(s)://` followed by a host name or bracketed IPv6 address, an optional numeric port and `/api/mcp`
+- **THEN** each line reads "This server's address can't be turned into a command. Copy the URL instead." and no command is shown
+
 ### Requirement: OAuth consent screen
 
 The `/oauth/authorize` page SHALL, in the same look as the web app, let a signed-in person with a recent sign-in grant
@@ -772,6 +820,9 @@ are not states (a team, a "company" goal, an active goal's status), neutral othe
 - `app/app/_ui/types.ts`
 - `app/app/_ui/goalform.tsx`
 - `app/app/_ui/changes.tsx`
+- `app/app/_ui/value.tsx`
+- `lib/v2/value-core.mts`
+- `lib/paste-lines.ts`
 - `app/app/_ui/words.ts`
 - `app/app/_ui/error-notice.tsx`
 - `app/app/page.tsx`

@@ -2511,6 +2511,272 @@ try {
   // ==== end port:activity ====
 
   // ==== port:value ====
+  // The decision value card (PORT-004): GET/POST .../change-requests/{id}/value, value reports (D6), the content-free
+  // value events, access requests from the card (via), the report's Decision value section, the follow-up link rules,
+  // and the strict-Host origin in Mode L. Its own workspace, people and device, so nothing earlier in the phase matters.
+  {
+    const vc = await import(pathToFileURL(path.join(ROOT, "lib/v2/value-core.mts")).href);
+    // -- the plain rules (lib/v2/value-core.mts), as v1's test-funnel.mjs checked them --
+    check("value rules: an https URL or a mailto: with one address and only a subject may be the follow-up link", vc.loiUrlOk("https://example.com/loi") && vc.loiUrlOk("mailto:founder@example.com?subject=LOI") && vc.safeFollowUpUrl("https://loi.example.org:443/x") === "https://loi.example.org/x");
+    const badLoi = ["http://example.com/loi", "javascript:alert(1)", "data:text/html,x", "https://u:p@example.com/", "https://user@example.com/loi", "https://example.com:8443/loi", "mailto:a@b.co,c@d.co", "mailto:nobody", "mailto:a@b.co?bcc=x@y.co", "mailto:a@b.co?body=hi", "mailto:a@b.co?subject=LOI&cc=x@y.co", "mailto:%E0%A4%A@example.com", ""];
+    let threw = "";
+    for (const u of badLoi)
+      try {
+        if (vc.loiUrlOk(u)) threw += ` allowed:${u}`;
+      } catch (e) {
+        threw += ` threw:${u}:${e?.name}`;
+      }
+    check("value rules: http, javascript:, data:, credentials, a non-default port, two addresses, a bad address, bcc/cc/body and a malformed percent-escape are hidden, and the check never throws", threw === "", threw);
+    check(
+      "value rules: the follow-up link is ALIGN_FOLLOW_UP_URL when safe (hidden, with a startup warning, when not); unset, hosted defaults to <public origin>/app/request-access?interest=evaluate&via=value_card and Mode L shows none",
+      vc.followUpUrl({}) === null &&
+        vc.followUpUrl({ HOSTED: "1", ALIGN_PUBLIC_ORIGIN: "https://align.test" }) === "https://align.test/app/request-access?interest=evaluate&via=value_card" &&
+        vc.followUpUrl({ ALIGN_FOLLOW_UP_URL: "mailto:hi@example.com?subject=Align" }) === "mailto:hi@example.com?subject=Align" &&
+        vc.followUpUrl({ HOSTED: "1", ALIGN_PUBLIC_ORIGIN: "https://align.test", ALIGN_FOLLOW_UP_URL: "javascript:alert(1)" }) === null &&
+        /ALIGN_FOLLOW_UP_URL/.test(vc.followUpProblem({ ALIGN_FOLLOW_UP_URL: "http://x.example" }) ?? "") &&
+        vc.followUpProblem({ ALIGN_FOLLOW_UP_URL: "https://x.example/f" }) === null,
+      "",
+    );
+    check(
+      "value rules: measured spans read 45 seconds, 14 minutes, 2 hours 5 minutes, 3 days 4 hours; a negative span is empty; the note loses control, bidi and zero-width characters; the five answers in order",
+      vc.spanWords(45_000) === "45 seconds" && vc.spanWords(14 * 60_000 + 10_000) === "14 minutes" && vc.spanWords(125 * 60_000) === "2 hours 5 minutes" && vc.spanWords((76 * 60) * 60_000) === "3 days 4 hours" && vc.spanWords(-1) === "" &&
+        vc.cleanValueText(" a\u0000b‮c​d \n\t e\u0085؜ ") === "abcd e" && vc.ESTIMATE_WORDS.map((e) => e.id).join() === "same_day,two_to_three_days,about_a_week,longer,would_not_be_decided",
+      JSON.stringify(vc.cleanValueText(" a\u0000b‮c​d \n\t e\u0085؜ ")),
+    );
+
+    // -- a workspace: owner V1, requester V2, team lead V3 (owns the goal), viewer V4, member V5 outside the team, V6 --
+    const Vs = [];
+    for (const [who, name] of [["V1", "Vera One"], ["V2", "Vic Two"], ["V3", "Val Three"], ["V4", "Vin Four"], ["V5", "Vee Five"], ["V6", "Vik Six"], ["V7", "Vo Outside"]]) Vs.push(await signUp(who, name, `${who.toLowerCase()}@value.test`));
+    const [V1, V2, V3, V4, V5, V6, V7] = Vs;
+    const W = (await call("V1", "POST", "/api/v2/workspaces", { cookie: V1.cookie, body: { name: "Value WS" } })).json?.id;
+    for (const [u, role] of [[V2, "member"], [V3, "member"], [V4, "viewer"], [V5, "member"], [V6, "member"]]) {
+      const iv = await call("V1", "POST", `/api/v2/workspaces/${W}/invites`, { cookie: V1.cookie, body: { email: u.email, role } });
+      await call(u.who, "POST", `/api/v2/invites/${iv.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const TV = (await call("V1", "POST", `/api/v2/workspaces/${W}/teams`, { cookie: V1.cookie, body: { name: "Value team" } })).json?.id;
+    await call("V1", "POST", `/api/v2/workspaces/${W}/teams/${TV}/members`, { cookie: V1.cookie, body: { user_id: V3.id, role: "lead" } });
+    const goalIn = (u, body) => call(u.who, "POST", `/api/v2/workspaces/${W}/goals`, { cookie: u.cookie, body });
+    const GPar = (await goalIn(V1, { title: "Win regulated customers", level: "company" })).json;
+    const GV = (await goalIn(V3, { title: "Pass the pen test", visibility: "workspace", team_id: TV, measures: [{ text: "Open findings", target: "0" }] })).json;
+    const GTeam = (await goalIn(V3, { title: "Rotate keys", visibility: "team", team_id: TV })).json;
+    const GDep = (await goalIn(V5, { title: "Launch in the EU", visibility: "workspace", depends_on: [GV.id] })).json;
+    const alV = await call("V3", "POST", `/api/v2/workspaces/${W}/alignments`, { cookie: V3.cookie, body: { target_goal_id: GPar.id, source_goal_id: GV.id, choice: "contribution", session_keys: [] } });
+    const alOk = await call("V1", "POST", `/api/v2/workspaces/${W}/alignments/${alV.json?.id}/approve`, { cookie: V1.cookie, body: { revision: 1 } });
+    // V3's device (written straight in: the pairing limit is spent by now), a session bound to the goal.
+    const DV = { ...insertDevice(V3.id, "Val's laptop"), who: "V3", secret: randomBytes(32) };
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DV.id, W));
+    const SV = sessionKey(DV, W, "claude-code", "value-session");
+    const svPut = await call("V3", "PUT", `/api/v2/workspaces/${W}/sessions/${SV}`, { bearer: DV.access, body: { harness: "claude-code", repo_key: repoKey(DV, W, "/src/v"), repo_alias: "v-repo", started_at: new Date(Date.now() - 3600_000).toISOString(), title: "value session" } });
+    const svBind = await call("V3", "POST", `/api/v2/workspaces/${W}/sessions/${SV}/epochs`, { bearer: DV.access, body: { epoch_id: epochId(), goal_id: GV.id, starts_at: new Date().toISOString(), root_turn: null, cause: "manual" } });
+    check("value setup: a workspace, a team, four goals, an approved contribution and a session bound to the goal", !!W && !!TV && [GPar, GV, GTeam, GDep].every((g) => /^g_/.test(g?.id)) && alOk.json?.state === "approved" && svPut.status === 200 && svBind.status === 200, `${alV.text} ${alOk.text} ${svPut.text} ${svBind.text}`);
+
+    const crBaseV = (g) => `/api/v2/workspaces/${W}/goals/${g}/change-requests`;
+    const valuePath = (g, id) => `${crBaseV(g)}/${id}/value`;
+    const vGet = (u, g, id) => call(u.who, "GET", valuePath(g, id), { cookie: u.cookie });
+    const vPost = (u, g, id, body) => call(u.who, "POST", valuePath(g, id), { cookie: u.cookie, body });
+    const eventsIn = (name) => withDb((d) => d.prepare("SELECT actor, props FROM v2_events WHERE name = ? AND ws_id = ?").all(name, W));
+    const NOTE_CANARY = `NOTE-CANARY-${randomBytes(4).toString("hex")}`;
+    const REASON = `Value reason ${randomBytes(4).toString("hex")}`;
+    const crP = await call("V2", "POST", crBaseV(GV.id), { cookie: V2.cookie, body: { base_version: 1, changes: { title: "Pass the pen test by June" }, reason: REASON } });
+    const pendGet = await vGet(V2, GV.id, crP.json?.id);
+    const pendPost = await vPost(V2, GV.id, crP.json?.id, { action: "viewed" });
+    check("value: a pending request -> GET and POST 409 not_approved, and no event is recorded", crP.status === 201 && pendGet.status === 409 && pendGet.json?.error === "not_approved" && pendPost.status === 409 && pendPost.json?.error === "not_approved" && eventsIn("value_card_viewed").length === 0, `${crP.status} ${pendGet.text} ${pendPost.text}`);
+    const apV = await call("V3", "POST", `${crBaseV(GV.id)}/${crP.json?.id}/approve`, { cookie: V3.cookie, body: { revision: 1 } });
+    const v1 = await vGet(V2, GV.id, crP.json?.id);
+    const vv = v1.json;
+    check(
+      "value: an approved request -> the card: the title diff, approver, the version it became and its team, the goal it contributes to and the goal depending on it, delivery {1 session, 0 received, 0 applied}, proposal to approval measured, no first context yet, no follow-up link in Mode L",
+      apV.json?.state === "approved" && v1.status === 200 && vv.change_request_id === crP.json?.id && vv.diff?.title?.after === "Pass the pen test by June" && vv.approved_by?.id === V3.id && vv.goal?.version === 2 && vv.goal.team?.id === TV &&
+        vv.affected.parents.some((g) => g.id === GPar.id) && vv.affected.dependents.some((g) => g.id === GDep.id) && JSON.stringify(vv.delivery) === JSON.stringify({ sessions: 1, received: 0, applied: 0 }) &&
+        /^\d+ seconds?$|minute/.test(vv.measured.proposal_to_decision) && vv.measured.decision_to_first_applied === null && vv.follow_up_url === null && vv.my_report === null && vv.sees_all_reports === true,
+      `${apV.status} ${v1.text.slice(0, 600)}`,
+    );
+    const dirV = withDb((d) => d.prepare("SELECT id FROM v2_directives WHERE ws_id = ? AND goal_id = ? AND kind = 'goal_version' ORDER BY seq DESC LIMIT 1").get(W, GV.id))?.id;
+    const rcv = (state) => call("V3", "POST", `/api/v2/directives/${dirV}/receipts`, { bearer: DV.access, body: { session_key: SV, state, at: new Date().toISOString() } });
+    await rcv("received");
+    const vRecv = (await vGet(V2, GV.id, crP.json?.id)).json;
+    await rcv("applied");
+    const vAppl = (await vGet(V2, GV.id, crP.json?.id)).json;
+    check(
+      "value: delivery follows the directive's receipts: {1, 1, 0} after received, {1, 1, 1} after applied, and approval to first agent context is then measured",
+      JSON.stringify(vRecv?.delivery) === JSON.stringify({ sessions: 1, received: 1, applied: 0 }) && JSON.stringify(vAppl?.delivery) === JSON.stringify({ sessions: 1, received: 1, applied: 1 }) && typeof vAppl.measured.decision_to_first_applied === "string" && vAppl.measured.decision_to_first_applied.length > 0,
+      `${JSON.stringify(vRecv?.delivery)} ${JSON.stringify(vAppl?.delivery)} ${JSON.stringify(vAppl?.measured)}`,
+    );
+
+    // -- events and reports --
+    const view1 = await vPost(V2, GV.id, crP.json?.id, { action: "viewed" });
+    const view2 = await vPost(V2, GV.id, crP.json?.id, { action: "viewed" });
+    check("value: viewed twice -> recorded true, then false; one value_card_viewed for the person, with no props", view1.json?.recorded === true && view2.json?.recorded === false && eventsIn("value_card_viewed").length === 1 && eventsIn("value_card_viewed")[0].props === "{}", `${view1.text} ${view2.text}`);
+    const badEst = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "forever" });
+    const longNote = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "same_day", note: "n".repeat(501) });
+    const badAction = await vPost(V2, GV.id, crP.json?.id, { action: "approved" });
+    const badNote = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "same_day", note: 7 });
+    check("value: an unknown estimate, a note over 500 characters, a note that isn't text, or an unknown action -> 400, and nothing is stored", [badEst, longNote, badAction, badNote].every((r) => r.status === 400) && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_value_reports WHERE ws_id = ?").get(W).n) === 0, [badEst, longNote, badAction, badNote].map((r) => `${r.status} ${r.json?.error}`).join(" "));
+    const rep1 = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "about_a_week", note: ` Saved us\u0000 a week​ ${NOTE_CANARY} ` });
+    const rep2 = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "same_day", note: `Changed my mind ${NOTE_CANARY}` });
+    const reportedEv = eventsIn("value_reported");
+    const vrRows = withDb((d) => d.prepare("SELECT * FROM v2_value_reports WHERE ws_id = ?").all(W));
+    check(
+      "value: a report is saved (note cleaned), records value_reported with the estimate only; reporting again within 7 days edits the same report (recorded false) and the event keeps the first estimate",
+      rep1.status === 200 && rep1.json.recorded === true && rep1.json.report?.estimate === "about_a_week" && rep1.json.report.note === `Saved us a week ${NOTE_CANARY}` && rep1.json.report.can_edit === true && /^vr_/.test(rep1.json.report.id) &&
+        rep2.json?.recorded === false && rep2.json.report?.estimate === "same_day" && rep2.json.report.id === rep1.json.report.id && vrRows.length === 1 && vrRows[0].person_id === V2.id && vrRows[0].change_request_id === crP.json?.id &&
+        reportedEv.length === 1 && reportedEv[0].props === JSON.stringify({ estimate: "about_a_week" }),
+      `${rep1.text} ${rep2.text} ${JSON.stringify(reportedEv)}`,
+    );
+    withDb((d) => d.prepare("UPDATE v2_value_reports SET created_at = ? WHERE id = ?").run(new Date(Date.now() - 8 * 24 * 3600_000).toISOString(), rep1.json?.report?.id));
+    const rep3 = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "longer" });
+    const mineOld = (await vGet(V2, GV.id, crP.json?.id)).json?.my_report;
+    check("value: 7 days after it was saved a report can't be changed (409 edit_closed, can_edit false) and stays as it was", rep3.status === 409 && rep3.json?.error === "edit_closed" && mineOld?.estimate === "same_day" && mineOld.can_edit === false, `${rep3.text} ${JSON.stringify(mineOld)}`);
+    const fu = await vPost(V2, GV.id, crP.json?.id, { action: "follow_up" });
+    const fu2 = await vPost(V2, GV.id, crP.json?.id, { action: "follow_up" });
+    check("value: follow_up -> follow_up_clicked recorded once per person", fu.json?.recorded === true && fu2.json?.recorded === false && eventsIn("follow_up_clicked").length === 1, `${fu.text} ${fu2.text}`);
+    const vView = await vGet(V4, GV.id, crP.json?.id);
+    const vViewed = await vPost(V4, GV.id, crP.json?.id, { action: "viewed" });
+    const vRep = await vPost(V4, GV.id, crP.json?.id, { action: "reported", estimate: "longer", note: "From a viewer" });
+    check("value: a viewer who reads the request sees the card, records viewed and may report (their own)", vView.status === 200 && vViewed.json?.recorded === true && vRep.json?.recorded === true && eventsIn("value_card_viewed").length === 2, `${vView.status} ${vViewed.text} ${vRep.text}`);
+    const seeV5 = (await vGet(V5, GV.id, crP.json?.id)).json;
+    const seeV1 = (await vGet(V1, GV.id, crP.json?.id)).json;
+    const seeV3 = (await vGet(V3, GV.id, crP.json?.id)).json;
+    const seeV4 = (await vGet(V4, GV.id, crP.json?.id)).json;
+    const people = (v) => (v?.reports ?? []).map((r) => r.person.id).sort().join();
+    check(
+      "value: every report is shown to the requester, the approver and a workspace owner; a reader outside them (a member, the viewer) sees only their own",
+      people((await vGet(V2, GV.id, crP.json?.id)).json) === [V2.id, V4.id].sort().join() && people(seeV3) === [V2.id, V4.id].sort().join() && people(seeV1) === [V2.id, V4.id].sort().join() && seeV1.sees_all_reports === true &&
+        seeV5?.reports?.length === 0 && seeV5.sees_all_reports === false && people(seeV4) === V4.id && seeV4.my_report?.note === "From a viewer",
+      `${people(seeV5)} | ${people(seeV4)} | ${people(seeV1)}`,
+    );
+    // An unreadable request, another goal's path, a non-member.
+    const crT = await call("V1", "POST", crBaseV(GTeam.id), { cookie: V1.cookie, body: { base_version: 1, changes: { title: "Rotate keys monthly" }, reason: "team" } });
+    await call("V3", "POST", `${crBaseV(GTeam.id)}/${crT.json?.id}/approve`, { cookie: V3.cookie, body: { revision: 1 } });
+    const hiddenV = await vGet(V5, GTeam.id, crT.json?.id);
+    const hiddenPost = await vPost(V5, GTeam.id, crT.json?.id, { action: "viewed" });
+    const wrongGoalV = await vGet(V2, GDep.id, crP.json?.id);
+    const outsiderV = await vGet(V7, GV.id, crP.json?.id);
+    const crossSiteV = await call("V2", "POST", valuePath(GV.id, crP.json?.id), { cookie: V2.cookie, headers: { origin: "http://evil.example" }, body: { action: "viewed" } });
+    check("value: a request on a goal the person can't read, another goal's path or a non-member -> 404; a cross-site POST -> 403", hiddenV.status === 404 && hiddenPost.status === 404 && wrongGoalV.status === 404 && outsiderV.status === 404 && crossSiteV.status === 403, `${hiddenV.status} ${hiddenPost.status} ${wrongGoalV.status} ${outsiderV.status} ${crossSiteV.status}`);
+    const eventRows = JSON.stringify(withDb((d) => d.prepare("SELECT * FROM v2_events WHERE ws_id = ?").all(W)));
+    check("value: no event row holds the note, the reason, a goal title, a change request id or a person's id", !eventRows.includes(NOTE_CANARY) && !eventRows.includes("From a viewer") && !eventRows.includes(REASON) && !eventRows.includes("Pass the pen test") && !eventRows.includes(crP.json?.id) && !Vs.some((u) => eventRows.includes(u.id)), eventRows.slice(0, 300));
+    // Account deletion: the person's events lose their actor, their report no longer names them, and another person may
+    // still report.
+    const v6rep = await vPost(V6, GV.id, crP.json?.id, { action: "reported", estimate: "two_to_three_days" });
+    const v6del = await call("V6", "DELETE", "/api/v2/me", { cookie: V6.cookie, headers: { origin: BASE }, body: { email: V6.email } });
+    const after6 = withDb((d) => ({
+      named: d.prepare("SELECT COUNT(*) AS n FROM v2_value_reports WHERE person_id = ?").get(V6.id).n,
+      reports: d.prepare("SELECT COUNT(*) AS n FROM v2_value_reports WHERE ws_id = ?").get(W).n,
+      nullActor: d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE ws_id = ? AND name = 'value_reported' AND actor IS NULL").get(W).n,
+    }));
+    const v5rep = await vPost(V5, GV.id, crP.json?.id, { action: "reported", estimate: "two_to_three_days" });
+    check(
+      "value: account deletion clears the person's actor on their value event and no value report names them (kept, pseudonymised); another person then reports the same estimate and it is recorded",
+      v6rep.json?.recorded === true && (v6del.status === 200 || v6del.status === 204) && after6.named === 0 && after6.reports === 3 && after6.nullActor === 1 && v5rep.json?.recorded === true && eventsIn("value_reported").length === 4,
+      `${v6rep.text} ${v6del.status} ${v6del.text} ${JSON.stringify(after6)} ${v5rep.text}`,
+    );
+
+    // -- access requests from the card: via value_card, the page preselects evaluate --
+    const arCard = await call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body: { email: "card@value.test", name: "Card Person", use_case: "Evaluate it", interest: "evaluate", via: "value_card" } });
+    const arForm = await call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body: { email: "form@value.test", name: "Form Person", use_case: "Try it", interest: "try" } });
+    const arBad = await call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body: { email: "bad@value.test", name: "Bad Via", use_case: "x", interest: "try", via: "email" } });
+    const arEvents = withDb((d) => d.prepare("SELECT props FROM v2_events WHERE name = 'access_requested' ORDER BY at").all()).map((r) => r.props);
+    check(
+      "access requests: via value_card is kept on access_requested (with the interest), the default is via form, and any other via -> 400",
+      arCard.status === 201 && arForm.status === 201 && arBad.status === 400 && arEvents.includes(JSON.stringify({ interest: "evaluate", via: "value_card" })) && arEvents.includes(JSON.stringify({ interest: "try", via: "form" })),
+      `${arCard.status} ${arForm.status} ${arBad.status} ${JSON.stringify(arEvents)}`,
+    );
+    const raEval = await call("anon", "GET", "/app/request-access?interest=evaluate&via=value_card");
+    const raPlain = await call("anon", "GET", "/app/request-access?interest=nonsense");
+    const checkedOf = (html) => (html.match(/<input[^>]*name="interest"[^>]*>/g) ?? []).filter((t) => /\bchecked=""/.test(t)).map((t) => /value="(\w+)"/.exec(t)?.[1]).join();
+    check("request access page: ?interest=evaluate preselects Evaluate; any other value preselects Try", raEval.status === 200 && checkedOf(raEval.text) === "evaluate" && checkedOf(raPlain.text) === "try", `${checkedOf(raEval.text)} ${checkedOf(raPlain.text)} ${(raEval.text.match(/<input[^>]*name="interest"[^>]*>/g) ?? []).join(" ")}`);
+
+    // -- the operator report's Decision value section --
+    const repV = admin(["report", "--json"], opOn);
+    let rv = null;
+    try {
+      rv = JSON.parse(repV.out).value;
+    } catch {}
+    const sampleWs = withDb((d) => d.prepare("SELECT ws_id FROM v2_events WHERE name = 'workspace_created' AND json_extract(props, '$.kind') = 'sample'").all().map((r) => r.ws_id));
+    const evCount = (name, extra = "") => withDb((d) => d.prepare(`SELECT COUNT(*) AS n FROM v2_events WHERE name = ? AND ws_id IS NOT NULL AND ws_id NOT IN (${sampleWs.map(() => "?").join(",") || "''"}) ${extra}`).get(name, ...sampleWs).n);
+    const repText = admin(["report"], opOn).out;
+    check(
+      "report: the value section matches the events (viewed people and workspaces, reported by estimate, follow-up clicks, access from the card by interest, first ask and first limit) and counts the workspace with an approved request; the text table reads Decision value",
+      repV.status === 0 && rv && rv.viewed.people === evCount("value_card_viewed") && rv.viewed.workspaces >= 1 && rv.reported.people === evCount("value_reported") && rv.reported.by_estimate.about_a_week >= 1 && rv.reported.by_estimate.two_to_three_days >= 2 &&
+        rv.follow_up_clicked === evCount("follow_up_clicked") && rv.access_from_value_card.evaluate === 1 && rv.access_from_value_card.try === 0 && rv.first_ask === evCount("first_ask") && rv.first_limit === evCount("first_limit") && rv.workspaces_with_approved_request >= 1 &&
+        repText.includes("Decision value") && !repText.includes("@") && !repText.includes(NOTE_CANARY),
+      `${repV.status} ${repV.err} ${JSON.stringify(rv)}`,
+    );
+
+    // -- strict Host (Mode L): a Host with more than a port passes the loopback-name edge, and gives no usable origin --
+    const hostOk = await rawGet(`/api/v2/workspaces/${W}/apps`, { host: `127.0.0.1:${PORT}`, cookie: V1.cookie });
+    const hostBad = await rawGet(`/api/v2/workspaces/${W}/apps`, { host: `127.0.0.1:${PORT};touch\${IFS}x`, cookie: V1.cookie });
+    const BAD_HOST = `127.0.0.1:${PORT};touch\${IFS}x`;
+    const metaBad = await rawGet("/.well-known/oauth-authorization-server", { host: BAD_HOST });
+    const prmBad = await rawGet("/.well-known/oauth-protected-resource/api/mcp", { host: BAD_HOST });
+    const mcpBad = await new Promise((resolve) => {
+      const r = http.request({ host: "127.0.0.1", port: PORT, method: "POST", path: "/api/mcp", headers: { host: BAD_HOST, "content-type": "application/json", accept: "application/json, text/event-stream" } }, (res) => {
+        res.resume();
+        resolve({ status: res.statusCode, challenge: res.headers["www-authenticate"] ?? "" });
+      });
+      r.on("error", () => resolve({ status: 0, challenge: "" }));
+      r.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+    });
+    let issuerBad = null;
+    let resourceBad = null;
+    try {
+      issuerBad = JSON.parse(metaBad.text).issuer;
+      resourceBad = JSON.parse(prmBad.text).resource;
+    } catch {}
+    check(
+      "strict Host (Mode L): Host 127.0.0.1:<port>;touch${IFS}x passes the loopback-name edge, but every origin from it is http://invalid.invalid (the OAuth issuer, the protected resource, the MCP 401 challenge) and the Apps route makes no URL from it (sign-in itself refuses that Host); Host 127.0.0.1:<port> gives the real URL",
+      JSON.parse(hostOk.text || "{}").url === `http://127.0.0.1:${PORT}/api/mcp` && metaBad.status === 200 && issuerBad === "http://invalid.invalid" && resourceBad === "http://invalid.invalid/api/mcp" &&
+        mcpBad.status === 401 && mcpBad.challenge.includes("http://invalid.invalid/.well-known/oauth-protected-resource/api/mcp") && !hostBad.text.includes("touch") && !metaBad.text.includes("touch") && !mcpBad.challenge.includes("touch"),
+      `${hostOk.status} ${hostOk.text.slice(0, 120)} | ${hostBad.status} ${hostBad.text.slice(0, 200)} | ${metaBad.text.slice(0, 120)} | ${prmBad.text.slice(0, 120)} | ${JSON.stringify(mcpBad)}`,
+    );
+
+    // -- the web UI (Chrome): the card on the goal page, viewed only once at least half of it is on screen; the Apps
+    //    tab's terminal lines --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await page.setViewport({ width: 1000, height: 420 });
+        const [name, ...v] = V1.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+        await page.setCookie({ name, value: v.join("="), url: BASE });
+        const before = eventsIn("value_card_viewed").length;
+        await page.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-value-card="${crP.json?.id}"]`, { timeout: 15000 });
+        const card = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => ({ top: el.getBoundingClientRect().top, vh: window.innerHeight, text: el.innerText }));
+        await sleep(1500);
+        const belowFold = eventsIn("value_card_viewed").length;
+        await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => el.scrollIntoView({ block: "start" }));
+        let seenAfter = belowFold;
+        for (let i = 0; i < 30 && seenAfter === belowFold; i++) {
+          await sleep(200);
+          seenAfter = eventsIn("value_card_viewed").length;
+        }
+        check(
+          "ui (Chrome): an approved request's card shows the accepted change, the approver, 1 of 1 shared session with the new version in context, the measured spans and the reports of others; below the fold it records nothing, scrolled into view it records value_card_viewed once",
+          card.top > card.vh && /What this decision gave you/i.test(card.text) && /Who approved/i.test(card.text) && /1 of 1 shared session has it in context/.test(card.text) && /Proposal to approval/.test(card.text) && /What others said/i.test(card.text) && /Vic Two/.test(card.text) &&
+            belowFold === before && seenAfter === before + 1 && errors.length === 0,
+          `${JSON.stringify({ top: card.top, vh: card.vh, before, belowFold, seenAfter })} ${card.text.slice(0, 300)} ${errors.join(" | ")}`,
+        );
+        await page.setViewport({ width: 1000, height: 900 });
+        await page.goto(`${BASE}/app/w/${W}/apps`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("claude mcp add"), { timeout: 15000 });
+        const lines = await page.$$eval("[data-paste-line] code", (els) => els.map((e) => e.textContent));
+        check(
+          "ui (Chrome): the Apps tab shows the Claude Code and Codex lines, single-quoted, each with Copy, and the sh/bash/zsh note",
+          lines[0] === `claude mcp add --transport http --scope user align 'http://127.0.0.1:${PORT}/api/mcp'; claude mcp login align` && lines[1] === `codex mcp add align --url 'http://127.0.0.1:${PORT}/api/mcp'` && (await page.evaluate(() => document.body.innerText.includes("sh, bash or zsh"))) && errors.length === 0,
+          `${JSON.stringify(lines)} ${errors.join(" | ")}`,
+        );
+      } catch (e) {
+        check("ui (Chrome) value card run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the value card", false, `no Chrome at ${CHROME}`);
+  }
   // ==== end port:value ====
 
   // -- the private-goal canary never reached anyone but its owner --
@@ -3198,9 +3464,10 @@ try {
     const rowsText = q("SELECT * FROM v2_events").map((r) => Object.values(r).join(" ")).join("\n");
     const found = fixtures.filter((f) => f && rowsText.toLowerCase().includes(String(f).toLowerCase()));
     const ALLOWED = {
-      access_requested: ["interest"], access_approved: [], access_declined: [], code_created: ["source"], code_redeemed: [], workspace_created: ["kind"], invite_sent: ["role"], invite_accepted: ["role"],
+      access_requested: ["interest", "via"], access_approved: [], access_declined: [], code_created: ["source"], code_redeemed: [], workspace_created: ["kind"], invite_sent: ["role"], invite_accepted: ["role"],
       device_paired: ["workspaces"], first_session_captured: ["harness"], member_first_session_captured: ["harness"], first_session_bound: ["harness", "authority"], second_member_joined: [],
       first_change_request: [], first_approval: [], first_directive: ["kind"], first_mcp_read: ["client"], loi_sent: ["note_ref"], loi_signed: ["note_ref", "verified_original"],
+      first_ask: [], first_limit: [], value_card_viewed: [], value_reported: ["estimate"], follow_up_clicked: [],
     };
     const offList = q("SELECT name, props FROM v2_events").filter((r) => !ALLOWED[r.name] || Object.keys(JSON.parse(r.props)).some((k) => !ALLOWED[r.name].includes(k)));
     check(

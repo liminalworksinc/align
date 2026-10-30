@@ -1,8 +1,9 @@
 # Align MCP server (read-only by default)
 
 Align runs a read-only MCP server so a coding agent or an AI app can read what people decided before it acts: the
-goals a person can read in a v2 workspace, change requests with their evidence and decision records, and the
-directives sent to that person's own sessions. No tool can create, change, propose or approve anything. An app that
+goals a person can read in a v2 workspace (with their limits), change requests with their evidence and decision
+records, the directives sent to that person's own sessions, the asks between teams, agent activity toward goals, and a
+short brief of all of it. No tool can create, change, propose or approve anything. An app that
 asks for the opt-in scope `changes:evidence`, and that the person allows, also gets
 `align_add_change_request_evidence`, which attaches an evidence link (labelled agent-reported) to a change request
 the person may act on. The contract is
@@ -41,8 +42,13 @@ Any MCP client with OAuth support connects with only the URL `<origin>/api/mcp` 
 3. The app exchanges the code at `/oauth/token` (PKCE S256) for an `alm.` access token (1 hour) and an
    `alr.<ws>.<grant>.<secret>` refresh token (rotated on each use, ending 7 days after approval).
 
-Claude Code: `claude mcp add --transport http --scope user align https://<host>/api/mcp; claude mcp login align`.
-Codex: `codex mcp add align --url https://<host>/api/mcp`. Claude Desktop or any stdio-only client:
+Claude Code: `claude mcp add --transport http --scope user align 'https://<host>/api/mcp'; claude mcp login align`.
+Codex: `codex mcp add align --url 'https://<host>/api/mcp'`. The Apps tab shows both lines, built from the URL alone by
+`lib/paste-lines.ts`: every value single-quoted, no workspace or company name, and no line at all for a URL Align
+couldn't have made. They only add the server: no hooks and no AGENTS.md rule (goal context inside sessions comes from
+the `align` CLI, `align install`). The URL's origin comes from the request's `Host`; a Host that is more than a DNS name
+or bracketed IPv6 address and a numeric port gives `http(s)://invalid.invalid` (`lib/oauth/server.ts`
+`originFromHost`), in Mode L too, where the edge checks only the name. Claude Desktop or any stdio-only client:
 `packages/align-connect/align-connect.mjs <align url>` (see its README).
 
 Grants live in the v2 database (`v2_oauth_grants`), one per app, person and workspace (at most 20 per person per
@@ -61,7 +67,7 @@ token. Device tokens hold `goals:read` only here (a device can still add an agen
 
 ## Tools
 
-All five read tools are annotated `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false`. The evidence
+All nine read tools are annotated `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false`. The evidence
 tool, listed only for a token holding `changes:evidence`, is `readOnlyHint: false`, `destructiveHint: false`,
 `idempotentHint: false`, `openWorldHint: false`; calling it with any other token gets `403` with
 `WWW-Authenticate: Bearer error="insufficient_scope", scope="goals:read changes:evidence"`. Every tool returns
@@ -75,6 +81,19 @@ tool, listed only for a token holding `changes:evidence`, is `readOnlyHint: fals
 | `align_get_decision_record` | `change_request_id` | A decided change request: who asked and decided, the reason, the diff, the resulting version, its evidence, `approved_without_evidence` |
 | `align_add_change_request_evidence` (only with `changes:evidence`) | `change_request_id`, `kind`, `url`, `label`, `revision?` | Adds an agent-reported link to the current revision of an open request the person asked for or can approve (`lib/v2/changes.ts` `addEvidence`) |
 | `align_get_directives` | none | The newest 50 directives sent to the person's own sessions in the workspace |
+| `align_get_limits` | `goal_id?` | The limits (must, must not, out of scope) of goals whose limits are shared with the caller, with their source and who saved the version; own and own teams' goals first |
+| `align_get_asks` | `state?`, `team_id?` | Asks between teams the person can read (their teams', the ones they recorded; all for a workspace owner), their teams' first, open → accepted → closed, newest; at most 100 |
+| `align_get_goal_activity` | `goal_id?` | For each readable goal, the last 14 days: sessions, active now, by harness, last activity; for the goal's owner, team and workspace owners also the top file paths and the person's own sessions; `unbound` (their shared sessions with no goal) |
+| `align_get_brief` | none | The person's goals (own and their teams'; company goals too for a workspace owner) with measures and limits, the change requests and alignments on them still waiting on someone (who, never the reason), and up to 5 open or accepted asks of their teams; summary at most 1,800 characters |
+
+**Read scoping of the four newer tools.** A token reads what its person reads in the web app, with one narrowing for
+limits (the founder's 2026-10-29 ruling, restated for v2): through MCP a workspace owner reads every readable goal's
+limits; anyone else reads the limits of goals owned by a team they are in (and of goals they own); a person in no team
+reads company goals' limits (and their own). Every other output that carries limits (`align_list_goals`,
+`align_get_goal`, a directive's goal) shows `limits: null` for a goal outside that rule. Asks follow the asked team
+(`lib/v2/asks.ts`) and activity detail the goal's owner, its team and workspace owners (`lib/v2/goal-activity.ts`);
+`lib/mcp/register.ts` checks both again. Activity is counts, times and repo-relative paths only: never prompts, replies,
+task labels, commit subjects or usage. Summaries are capped at 2,400 characters (1,800 for the brief).
 
 Change requests are read through `lib/v2/changes-read.ts`, which reshapes the views of `lib/v2/changes.ts` (only requests
 on goals the person can read; the MCP layer checks that again).

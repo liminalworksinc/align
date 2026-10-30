@@ -1,6 +1,6 @@
 ---
 name: Product events and metrics
-summary: The content-free product events Align records from an access request to a workspace's first MCP read, the operator-recorded LOI events, and the operator's report of the funnel, time to first value, weekly active workspaces, cohort retention, goal binding and LOIs.
+summary: The content-free product events Align records from an access request to a workspace's first MCP read and the decision value card, the operator-recorded LOI events, and the operator's report of the funnel, time to first value, weekly active workspaces, cohort retention, goal binding, decision value and LOIs.
 kind: area
 ---
 
@@ -24,6 +24,8 @@ Vocabulary:
 | Product event | A row of `v2_events`: `id`, `name`, `ws_id` (or none), `actor` (or none), `at` and `props` (a JSON object) |
 | Actor | HMAC-SHA256 of the person's user id under the server secret (`ALIGN_SECRET`, or Mode L's generated one), base64url, prefix `ale.`; none for operator events and access requests |
 | First-time event | An event recorded at most once per workspace (`first_…`, `workspace_created`, `code_redeemed`, `second_member_joined`, `loi_sent`, `loi_signed`) |
+| Once-per-person event | An event recorded at most once per person in a workspace (`member_first_session_captured`, `value_card_viewed`, `value_reported`, `follow_up_clicked`); a row whose actor was cleared no longer counts |
+| Value card | The "What this decision gave you" card on an approved change request (the `interface` part); its value reports are stored in `v2_value_reports`, never in an event |
 | Sample workspace | A workspace whose `workspace_created` event has `kind` `sample`; it is left out of every workspace count in the report |
 | Week | Monday 00:00 UTC to the next Monday 00:00 UTC |
 | Active workspace | A workspace that, in a given week, had a session shared to it, a binding epoch opened or usage uploaded (`v2_sessions.created_at`, `v2_epochs.created_at`, `v2_usage.received_at`), or an action by a person in its audit log (a `v2_audit` row of the workspace with an actor); operator actions, which have no actor, don't count |
@@ -34,7 +36,7 @@ The events, where they are recorded and what they may carry:
 
 | Event | Recorded when | Workspace, actor | props |
 | --- | --- | --- | --- |
-| `access_requested` | a new access request is stored (sending again for a pending one records nothing) | none, none | `interest`: `try` or `evaluate` |
+| `access_requested` | a new access request is stored (sending again for a pending one records nothing) | none, none | `interest`: `try` or `evaluate`; `via`: `form` or `value_card` |
 | `access_approved` | the operator approves a request | none, none | none |
 | `access_declined` | the operator declines a request | none, none | none |
 | `code_created` | a creation code is made | none, none | `source`: `request` or `operator` |
@@ -53,6 +55,11 @@ The events, where they are recorded and what they may carry:
 | `first_mcp_read` | the workspace's first MCP tool call | the workspace, the person | `client`: `app` or `device` |
 | `loi_sent` | the operator records it | the workspace, none | `note_ref` |
 | `loi_signed` | the operator records it with `--verified-original` | the workspace, none | `note_ref`, `verified_original`: `yes` |
+| `first_ask` | the workspace's first ask, recorded or imported (the `workspaces` part) | the workspace, the person | none |
+| `first_limit` | the workspace's first goal version saved with at least one limit (the `goals-and-proposals` part) | the workspace, the person | none |
+| `value_card_viewed` | a person's value card was at least half on screen, the first time in the workspace | the workspace, the person | none |
+| `value_reported` | a person's first value report in the workspace | the workspace, the person | `estimate`: `same_day`, `two_to_three_days`, `about_a_week`, `longer` or `would_not_be_decided` |
+| `follow_up_clicked` | a person's first click on the value card's follow-up link in the workspace | the workspace, the person | none |
 
 ## Requirements
 
@@ -61,8 +68,8 @@ The events, where they are recorded and what they may carry:
 The server SHALL append a product event to `v2_events` at each code point in the events table above, inside the
 transaction of the action it records (so an action that fails records nothing), except the first MCP read, which a
 read-only tool call records in its own short transaction without ever failing the read; it SHALL record a first-time
-event at most once per workspace and `member_first_session_captured` at most once per person in a workspace, enforced
-by unique partial indexes; it SHALL keep the table append-only (a trigger refuses changing an event's id, name, time or
+event at most once per workspace and a once-per-person event at most once per person in a workspace, enforced by unique
+partial indexes that ignore a row with no actor; it SHALL keep the table append-only (a trigger refuses changing an event's id, name, time or
 props); and it SHALL do the same in Mode L, where the events stay on the person's machine and nothing is sent anywhere.
 
 #### Scenario: First-time events once
@@ -75,6 +82,11 @@ props); and it SHALL do the same in Mode L, where the events stay on the person'
 - **WHEN** a person creates the sample workspace, which seeds goals, alignments and a change request
 - **THEN** it records `workspace_created` with `kind` `sample` and no `first_change_request`
 
+#### Scenario: Value events once per person
+
+- **WHEN** one person's value card is viewed twice, on two approved change requests, they report an estimate on both and click the follow-up link twice, and a second person views the card
+- **THEN** the workspace holds one `value_card_viewed`, one `value_reported` (with the first estimate) and one `follow_up_clicked` for the first person, and one `value_card_viewed` for the second; a second call answers `recorded: false`
+
 #### Scenario: Pairing for several workspaces
 
 - **WHEN** a device's pairing completes with grants for two workspaces
@@ -84,6 +96,23 @@ props); and it SHALL do the same in Mode L, where the events stay on the person'
 
 - **WHEN** the operator approves an access request and the email carrying its code fails
 - **THEN** the code is revoked, the request is pending again, and its `access_approved` and `code_created` events are removed
+
+### Requirement: Value events need an approved request
+
+`POST /api/v2/workspaces/{ws}/goals/{goal}/change-requests/{id}/value` (the `interface` part's value card) SHALL record
+nothing, and answer `409 not_approved`, for a change request that is not approved; `404` for one the person can't read;
+and SHALL record `value_card_viewed`, `follow_up_clicked` and `value_reported` only with the props in the events table,
+never the change request, the goal or a value report's note.
+
+#### Scenario: Pending request
+
+- **WHEN** a reader posts `{action: "viewed"}` for a pending change request
+- **THEN** the answer is `409 not_approved` and no event is added
+
+#### Scenario: The estimate only
+
+- **WHEN** a person reports `about_a_week` with a note on an approved change request
+- **THEN** the `value_reported` event holds only `estimate: about_a_week`; the note is stored in `v2_value_reports`
 
 ### Requirement: Event content allowlist
 
@@ -137,6 +166,7 @@ content:
 - week-1 and week-4 retention of each creation cohort in the period (the last 12 weeks without `--since`): the share active in the week after, and the fourth week after, their creation week, shown only once that week has ended;
 - the share of sessions shared in the period that were ever bound to a goal, and of requests and estimated spend (live usage and spend roll-ups) on goals;
 - LOIs sent and signed, with the workspace and dates;
+- decision value (JSON key `value`, text table "Decision value"), over non-sample workspaces in the period: the workspaces with at least one approved change request, `value_card_viewed` (person-workspace pairs and workspaces), `value_reported` by estimate, `follow_up_clicked`, access requests with `via` `value_card` by interest, and the workspaces with `first_ask` and `first_limit`;
 
 and SHALL exit 2 for a `--since` that is not a date.
 
@@ -149,6 +179,11 @@ and SHALL exit 2 for a `--since` that is not a date.
 
 - **WHEN** of three shared sessions two are bound to a goal, and two of three usage requests (and their estimated cost) are in a goal-bound epoch
 - **THEN** the report shows 2 of 3 sessions, 2 of 3 requests and two thirds of the estimated spend on goals
+
+#### Scenario: Decision value counts
+
+- **WHEN** in a workspace a change request is approved, two people view its value card, one reports `same_day` and clicks the follow-up link, and one access request is made from the card with interest `evaluate`
+- **THEN** `report --json` `value` shows at least that workspace with an approved request, 2 viewed, `same_day` 1, 1 follow-up click and 1 `evaluate` from the card, matching the rows of `v2_events`
 
 #### Scenario: Since
 
@@ -196,6 +231,7 @@ names the workspace while the report still counts it.
 - lib/v2/metrics-core.mts
 - lib/v2/db.ts
 - lib/v2/access.ts
+- lib/v2/value.ts
 - lib/v2/creation.ts
 - lib/v2/workspaces.ts
 - lib/v2/devices.ts

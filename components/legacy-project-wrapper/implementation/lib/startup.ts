@@ -38,7 +38,7 @@ export function startup() {
   writeFileSync(PID_FILE, String(process.pid), { mode: 0o600 });
   chmodSync(PID_FILE, 0o600); // the mode above applies only when the file is new
   sweepLeftovers();
-  for (const w of v2Warnings()) console.warn(w); // hosted without Turnstile keys: allowed, said once
+  for (const w of v2Warnings()) console.warn(w); // allowed settings worth one line (lib/v2/config.ts), said once
   process.once("exit", () => {
     try {
       if (readFileSync(PID_FILE, "utf8").trim() === String(process.pid)) unlinkSync(PID_FILE);

@@ -233,7 +233,13 @@ evidence (`POST .../change-requests/:id/evidence` `{ kind: "pr"|"ci_run"|"incide
 per revision; `DELETE .../change-requests/:id/evidence/:evidence` by its author while the revision is current and the
 request open, else `409 evidence_frozen`; each revision reads `evidence[]` with `source: "person"|"agent"` and
 `reported_as`, and the server-recorded `snapshot`; an approval sets `approved_without_evidence`; see
-`lib/v2/evidence.ts`), `GET /api/v2/device/requests/:code`,
+`lib/v2/evidence.ts`), the decision value card of an approved request (`GET .../change-requests/:id/value` →
+`{ change_request_id, goal, diff, approved_by, decided_at, created_at, approved_without_evidence, affected: { parents,
+dependents }, delivery: { sessions, received, applied } | null, measured: { proposal_to_decision,
+decision_to_first_applied }, my_report, reports, sees_all_reports, follow_up_url }`; `POST .../value` same-site `{ action:
+"viewed"|"follow_up"|"reported", estimate?, note? (≤ 500) }` → `{ recorded, report }`; 409 `not_approved` before
+approval, 409 `edit_closed` 7 days after a report was saved, 429 past 30 a minute per person; see `lib/v2/value.ts`),
+`GET /api/v2/device/requests/:code`,
 `POST /api/v2/device/approve` (`{ user_code, workspace_ids }`; needs a sign-in from the last 15 minutes, else
 `403 reauth_required`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,
 `DELETE /api/v2/devices/:id`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,
@@ -247,7 +253,7 @@ The workspace caps count live workspaces; `POST .../restore` past either is 409 
 `owned_workspace_cap`. Creating needs no recent sign-in.
 Invites and acceptance can be 403 `member_cap`; a device's new session `PUT` can be 403 `session_cap`.
 `POST /api/v2/access-requests` (no sign-in, same-site) `{ email, name, company?, team_size?: "1"|"2-10"|"11-50"|
-"51-200"|"201+", use_case, interest: "try"|"evaluate" }` → 201 `{ received: true }`; 429 past 5 per client per hour or
+"51-200"|"201+", use_case, interest: "try"|"evaluate", via?: "form"|"value_card" }` → 201 `{ received: true }`; 429 past 5 per client per hour or
 3 per address per day.
 
 Sign-in (Better Auth): Google and GitHub when configured; an email one-time code always in Mode L and, hosted, with

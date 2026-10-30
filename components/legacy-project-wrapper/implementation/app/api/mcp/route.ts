@@ -7,8 +7,8 @@ import { deviceFromAccessToken } from "@/lib/v2/devices";
 import { ready } from "@/lib/v2/init";
 
 // Read-only MCP server by default (specs/align/mcp.md): a connected AI app or a paired device reads, as one person, the
-// goals, change requests, decision records and directives of a v2 workspace. No tool can create, change, propose or
-// approve. An app the person allowed the opt-in scope changes:evidence gets one more tool,
+// goals (with their limits), change requests, decision records, directives, asks between teams and agent activity of a
+// v2 workspace. No tool can create, change, propose or approve. An app the person allowed the opt-in scope changes:evidence gets one more tool,
 // align_add_change_request_evidence (an agent-reported evidence link on a request the person may act on): it is
 // listed only for such a token, and a call to it from any other token gets 403 insufficient_scope.
 const serverInfo = { name: "align", version: "0.2.0" };

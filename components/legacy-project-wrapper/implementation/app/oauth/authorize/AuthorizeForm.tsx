@@ -105,7 +105,7 @@ export default function AuthorizeForm(props: {
           </p>
           <Card title="What it can do">
             <ul className="list-disc space-y-1 pl-5 text-[15px]">
-              <li>It reads goals, change requests, decision records and directives in the workspace you choose, as you and with your role.</li>
+              <li>It reads goals and their limits, change requests, decision records, directives, asks between teams and agent activity counts in the workspace you choose, as you and with your role.</li>
               <li>It can’t propose, approve or change anything. Those stay with the people in the workspace.</li>
               {evidence && <li>It may also attach links to change requests you can act on, as evidence. Align labels them agent-reported.</li>}
               <li>It never sees captured prompts.</li>

@@ -131,6 +131,11 @@ and the deploy steps.
 | `ALIGN_TURNSTILE_SITE_KEY`, `ALIGN_TURNSTILE_SECRET_KEY` | unset | Cloudflare Turnstile on email-code sign-in, access requests and workspace creation (both or neither; without them the server logs one warning) |
 | `ALIGN_TURNSTILE_VERIFY_URL` | Cloudflare's | The siteverify URL (https; tests point it at a stub) |
 
+`ALIGN_FOLLOW_UP_URL` (both modes, optional) is the decision value card's follow-up link on an approved change request:
+an https URL without credentials or a non-default port, or a `mailto:` with one address and only a subject. When it is
+unset, a hosted server links to its own `/app/request-access?interest=evaluate&via=value_card` and Mode L shows no link;
+when it is set but not one of those, the card shows no link and the server logs one warning at startup.
+
 People without a code ask for one at `/app/request-access`. The operator answers with the operator script, on the
 server (`fly ssh console -C "node scripts/align-admin.mjs …"`, which has the server's environment) or locally with the
 server's settings:

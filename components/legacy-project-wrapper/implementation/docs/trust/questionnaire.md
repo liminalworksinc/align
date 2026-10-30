@@ -64,7 +64,7 @@ the [subprocessor list](subprocessors.md), the [retention schedule](../RETENTION
 | 30 | Is there rate limiting and abuse protection? | Yes | Durable limits on sign-in codes, limits on creation, invites and pairing, caps, a disposable-domain block, and Cloudflare Turnstile when enabled. |
 | 31 | Are dependencies locked and tracked? | Partial | `package-lock.json`, with the sign-in library pinned exactly; no automated dependency scanning yet. |
 | 32 | Is code tested before release? | Partial | Integration tests start real servers and cover sign-in, authorization, the hosted edge and connected apps; they are run by developers, not yet in CI. |
-| 33 | Is the access of connected AI apps limited? | Yes | Read one workspace, as the person who connected them, through five read-only tools. With the separate `changes:evidence` scope an app may also add agent-reported evidence links. |
+| 33 | Is the access of connected AI apps limited? | Yes | Read one workspace, as the person who connected them, through nine read-only tools. With the separate `changes:evidence` scope an app may also add agent-reported evidence links. |
 | 34 | Are AI-agent prompt-injection risks addressed? | Partial | Text written by people is marked untrusted for AI apps; Align sends agents only facts and an enforced stop, and never wakes an idle agent. |
 
 ## Operations, logging and resilience

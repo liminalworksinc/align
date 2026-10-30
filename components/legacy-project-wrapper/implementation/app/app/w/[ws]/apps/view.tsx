@@ -2,9 +2,38 @@
 import { useState } from "react";
 import { api, Btn, Card, Err, Loading, Note, Shell, useAction, useApi, when } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
+import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 
 // The Apps tab: AI apps connected to this workspace through Align's OAuth server, and how to connect one. A person
-// sees and disconnects their own connections; a workspace owner sees and disconnects everyone's.
+// sees and disconnects their own connections; a workspace owner sees and disconnects everyone's. The Claude Code and
+// Codex lines are built from the URL alone by lib/paste-lines.ts, which quotes it and shows no line for a URL Align
+// could not have made; no workspace or company name goes into them.
+
+/** One terminal line with its own Copy button, or the reason there is none. */
+function PasteLine({ label, line }: { label: string; line: string | null }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mt-3" data-paste-line={label}>
+      <p className="text-[14px] font-medium text-zinc-900">{label}</p>
+      {line === null ? (
+        <p className="text-[14px] text-zinc-600">This server&apos;s address can&apos;t be turned into a command. Copy the URL instead.</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <code className="break-all rounded-[8px] bg-zinc-100 px-2 py-1 font-mono text-[14px] text-zinc-900">{line}</code>
+          <Btn
+            kind="secondary"
+            onClick={() => {
+              void navigator.clipboard?.writeText(line).catch(() => undefined);
+              setCopied(true);
+            }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </Btn>
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface App {
   id: string;
@@ -48,6 +77,12 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                 {copied ? "Copied" : "Copy"}
               </Btn>
             </div>
+            <p className="mt-4 text-[15px]">Or add it from a terminal. Paste into a sh, bash or zsh terminal:</p>
+            <PasteLine label="Claude Code" line={claudeCodeLine(apps.data.url)} />
+            <PasteLine label="Codex" line={codexLine(apps.data.url)} />
+            <p className="mt-4 text-[14px] text-zinc-600">
+              For goal context inside Claude Code and Codex sessions, install the align CLI (<code className="font-mono">align login</code>, <code className="font-mono">align install</code>).
+            </p>
           </>
         )}
       </Card>

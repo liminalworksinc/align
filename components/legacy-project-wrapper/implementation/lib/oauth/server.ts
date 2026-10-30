@@ -30,9 +30,20 @@ export function grantedScopes(asked: string | null | undefined): string[] {
 const ACCESS_TTL_S = 60 * 60;
 const CODE_TTL_MS = 60 * 1000;
 
-/** This server's public origin from the Host the request used (proxy.ts has already checked it): https when hosted. */
+// A Host header as an origin may carry it: a DNS name or a bracketed IPv6 address, then an optional numeric port.
+// Hosted, proxy.ts already refuses anything else (hostAllowed); in Mode L it checks only the name before ":", so
+// "127.0.0.1:3100;touch${IFS}x" reaches the routes. It is refused here in both modes: this origin becomes the MCP URL
+// the Apps tab shows and people paste into a terminal (lib/paste-lines.ts quotes it as well), and the token audience.
+const HOST_HEADER = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?$/;
+/** RFC 6761: never resolves, and matches no token audience. */
+const NO_ORIGIN = "invalid.invalid";
+
+/** This server's public origin from the Host the request used (proxy.ts has already checked its name): https when
+ *  hosted. A Host that is more than a plain name or bracketed IPv6 address and a numeric port gives
+ *  http(s)://invalid.invalid, which matches nothing. */
 export function originFromHost(host: string | null): string {
-  return `${config().hosted ? "https" : "http"}://${(host ?? "").toLowerCase()}`;
+  const h = (host ?? "").toLowerCase();
+  return `${config().hosted ? "https" : "http"}://${HOST_HEADER.test(h) ? h : NO_ORIGIN}`;
 }
 export const originOf = (req: Request) => originFromHost(req.headers.get("host"));
 export const resourceFor = (origin: string) => `${origin}${MCP_PATH}`;

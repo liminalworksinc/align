@@ -3,6 +3,7 @@
 // without opening anything. v2 (/app, /api/v2) is always on, in Mode L and hosted.
 
 import { sessionMaxDays, testIdpEnabled, validMaxDays } from "./core.mts";
+import { followUpProblem } from "./value-core.mts";
 
 export { sessionMaxDays, testIdpEnabled };
 
@@ -114,10 +115,14 @@ function gateProblems(env: NodeJS.ProcessEnv): string[] {
   return p;
 }
 
-/** Hosted settings that are allowed but worth one line in the log at startup. */
+/** Settings that are allowed but worth one line in the log at startup: hosted without Turnstile keys, and (in both
+ *  modes) an ALIGN_FOLLOW_UP_URL that the decision value card hides because it isn't safe to show. */
 export function v2Warnings(env: NodeJS.ProcessEnv = process.env): string[] {
-  if (!hostedEnv(env) || turnstile(env)) return [];
-  return ["Warning: ALIGN_TURNSTILE_SITE_KEY and ALIGN_TURNSTILE_SECRET_KEY are not set, so sign-in, access requests and workspace creation have no bot check."];
+  const w: string[] = [];
+  if (hostedEnv(env) && !turnstile(env)) w.push("Warning: ALIGN_TURNSTILE_SITE_KEY and ALIGN_TURNSTILE_SECRET_KEY are not set, so sign-in, access requests and workspace creation have no bot check.");
+  const followUp = followUpProblem(env);
+  if (followUp) w.push(followUp);
+  return w;
 }
 
 const list = (v: string | undefined) =>

@@ -74,6 +74,7 @@ built image.
 | `ALIGN_MAX_WORKSPACES`, `ALIGN_MAX_OWNED_WORKSPACES`, `ALIGN_MAX_MEMBERS`, `ALIGN_MAX_SESSIONS_PER_DEVICE_DAY` | `fly.toml` | optional caps (defaults 100, 2, 25, 500) |
 | `ALIGN_TURNSTILE_SITE_KEY` | `fly.toml` | optional: the Turnstile widget's site key (set the secret key too) |
 | `ALIGN_TURNSTILE_SECRET_KEY` | `fly secrets` | optional: the Turnstile secret key |
+| `ALIGN_FOLLOW_UP_URL` | `fly.toml` | optional: the decision value card's follow-up link, an https URL (no credentials, default port) or a `mailto:` with one address and only a subject. Unset, the card links to `<ALIGN_PUBLIC_ORIGIN>/app/request-access?interest=evaluate&via=value_card`; set but not one of those, the card shows no link and the server logs one warning at startup (it still starts) |
 
 The three email settings go together: all three or none. With none, sign-in is Google or GitHub only.
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Gate runner. Usage: scripts/test-all.sh <port>   (run from a worktree; test-v2 also uses <port>+1)
-# Runs in fixed order: lint, typecheck, syntax (node --check on every script), test-v2 and test-oauth (each starts its
-# own production servers on <port>; test-oauth reuses the build test-v2 made), then the align-agent package tests.
+# Runs in fixed order: lint, typecheck, syntax (node --check on every script), paste-lines (no server), test-v2 and
+# test-oauth (each starts its own production servers on <port>; test-oauth reuses the build test-v2 made), then the
+# align-agent package tests.
 # One summary line per step; exits non-zero if any step fails.
 set -u
 
@@ -30,6 +31,9 @@ step lint npm run lint
 step typecheck bash -c 'npx next typegen && npx tsc --noEmit && echo "tsc clean"'
 step syntax bash -c 'for f in scripts/*.mjs packages/align-connect/*.mjs; do node --check "$f" || exit 1; done; bash -n scripts/test-all.sh scripts/test-image.sh || exit 1; echo "node --check and bash -n clean"'
 
+# The Apps tab's terminal lines in sh, bash and zsh (no server).
+step paste-lines node scripts/test-paste-lines.mjs
+
 # ---- servers: each test starts its own production servers on <port> ----
 # The v2 server (docs/v2/WIRE.md): Mode L sign-in and local owner, the edge, Mode L with the test identity provider, hosted.
 step test-v2 node scripts/test-v2.mjs "$PORT"
@@ -52,6 +56,7 @@ count() { # count <log> <regex with two groups: passed, failed>
 }
 count "$LOGDIR/test-v2.log" '^([0-9]+) passed, ([0-9]+) failed$'
 count "$LOGDIR/test-oauth.log" '^test-oauth: ([0-9]+) passed, ([0-9]+) failed$'
+count "$LOGDIR/paste-lines.log" '^test-paste-lines: ([0-9]+) passed, ([0-9]+) failed$'
 AGENT_PASS="$(grep -Eo '^(#|ℹ) pass [0-9]+' "$LOGDIR/align-agent.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
 AGENT_FAIL="$(grep -Eo '^(#|ℹ) fail [0-9]+' "$LOGDIR/align-agent.log" 2>/dev/null | awk '{s+=$3} END {print s+0}')"
 if [ "$AGENT_PASS" -eq 0 ]; then TOTAL_FAIL=$((TOTAL_FAIL + 1)); fi

@@ -1,4 +1,4 @@
-import { NOTE_REF_RE, recordEvent, type Sql } from "./core.mts";
+import { ESTIMATES, NOTE_REF_RE, recordEvent, type Sql } from "./core.mts";
 
 // The operator's metrics (PRESEED-007): `node scripts/align-admin.mjs report [--since YYYY-MM-DD] [--json]` and the
 // operator-recorded LOI events (`events record loi_sent|loi_signed`). Like lib/v2/core.mts, Node runs this file
@@ -17,6 +17,9 @@ import { NOTE_REF_RE, recordEvent, type Sql } from "./core.mts";
 //   - Week-n retention of a creation cohort: the share of the workspaces created in week W that are active in week
 //     W+n; it is shown only once week W+n has ended.
 //   - Percentiles are nearest-rank.
+//   - Decision value (PORT-004): over the workspaces that are not samples, in the period. The value events are kept
+//     once per person per workspace, so "people" counts person-workspace pairs; the reported estimate is the one the
+//     person gave first in that workspace. Access requests from the value card are those with via value_card.
 
 const DAY_MS = 24 * 3600 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -107,6 +110,15 @@ export interface Report {
     spend_share: number | null;
   };
   lois: { sent: number; signed: number; workspaces: { ws_id: string; sent_at: string | null; signed_at: string | null }[] };
+  value: {
+    workspaces_with_approved_request: number;
+    viewed: { people: number; workspaces: number };
+    reported: { people: number; by_estimate: Record<(typeof ESTIMATES)[number], number> };
+    follow_up_clicked: number;
+    access_from_value_card: { try: number; evaluate: number };
+    first_ask: number;
+    first_limit: number;
+  };
 }
 
 const timing = (minutes: number[]): Timing => {
@@ -240,6 +252,27 @@ export function buildReport(db: Sql, { since = null, now = new Date() }: { since
     lois.set(r.ws_id, e);
   }
 
+  // ---- decision value (PORT-004) ----
+  const sampleList = [...sample];
+  const notSample = sampleList.length ? `AND ws_id NOT IN (${sampleList.map(() => "?").join(",")})` : "";
+  const wsEvents = (name: string, extra = "", ...p: string[]) =>
+    db.all<{ ws_id: string }>(`SELECT ws_id FROM v2_events WHERE name = ? AND at >= ? AND ws_id IS NOT NULL ${notSample} ${extra}`, name, from, ...sampleList, ...p);
+  const viewedRows = wsEvents("value_card_viewed");
+  const byEstimate = Object.fromEntries(ESTIMATES.map((e) => [e, wsEvents("value_reported", "AND json_extract(props, '$.estimate') = ?", e).length])) as Report["value"]["reported"]["by_estimate"];
+  const value: Report["value"] = {
+    workspaces_with_approved_request:
+      db.get<{ n: number }>(`SELECT COUNT(DISTINCT ws_id) AS n FROM v2_change_requests WHERE state = 'approved' AND decided_at >= ? ${notSample}`, from, ...sampleList)?.n ?? 0,
+    viewed: { people: viewedRows.length, workspaces: new Set(viewedRows.map((r) => r.ws_id)).size },
+    reported: { people: Object.values(byEstimate).reduce((a, b) => a + b, 0), by_estimate: byEstimate },
+    follow_up_clicked: wsEvents("follow_up_clicked").length,
+    access_from_value_card: {
+      try: count("access_requested", "AND json_extract(props, '$.via') = ? AND json_extract(props, '$.interest') = ?", "value_card", "try"),
+      evaluate: count("access_requested", "AND json_extract(props, '$.via') = ? AND json_extract(props, '$.interest') = ?", "value_card", "evaluate"),
+    },
+    first_ask: wsEvents("first_ask").length,
+    first_limit: wsEvents("first_limit").length,
+  };
+
   return {
     generated_at: now.toISOString(),
     since,
@@ -266,6 +299,7 @@ export function buildReport(db: Sql, { since = null, now = new Date() }: { since
       spend_share: share(boundUsd, usd),
     },
     lois: { sent: count("loi_sent"), signed: count("loi_signed"), workspaces: [...lois.values()] },
+    value,
   };
 }
 
@@ -353,6 +387,20 @@ export function formatReport(r: Report): string {
         ["people with a first shared session in a workspace", r.other.people_with_a_first_session],
       ],
       ["", "count"],
+    ),
+    "",
+    "Decision value (approved change requests and their value card; one per person per workspace)",
+    ...table(
+      [
+        ["workspaces with an approved request", r.value.workspaces_with_approved_request, ""],
+        ["value card viewed", r.value.viewed.people, `${r.value.viewed.workspaces} workspaces`],
+        ["value reported", r.value.reported.people, ESTIMATES.map((e) => `${r.value.reported.by_estimate[e]} ${e}`).join(", ")],
+        ["follow-up clicked", r.value.follow_up_clicked, ""],
+        ["access requested from the card", r.value.access_from_value_card.try + r.value.access_from_value_card.evaluate, `${r.value.access_from_value_card.try} try, ${r.value.access_from_value_card.evaluate} evaluate`],
+        ["workspaces with a first ask", r.value.first_ask, ""],
+        ["workspaces with a first limit", r.value.first_limit, ""],
+      ],
+      ["", "count", "detail"],
     ),
     "",
     `LOIs (operator-recorded): ${r.lois.sent} sent, ${r.lois.signed} signed (verified originals only)`,
