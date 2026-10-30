@@ -245,7 +245,7 @@ The MCP server SHALL give the caller client id `agent:<ws>` and scope `goals:rea
 
 ### Requirement: Hosted mode restrictions
 
-When hosted (`HOSTED=1`), the MCP server SHALL accept only `alm.` OAuth access tokens, never `agt.` or static tokens. It SHALL refuse any `/api/mcp` request that carries an `Origin` header with `403` and body `{"error":"Browsers can't call this endpoint"}`, before authentication. Only the MCP, metadata, OAuth and connections routes, plus the other listed tester routes, and, when `ALIGN_GOAL_SESSIONS=1`, `/app*` and `/api/v2/*`, SHALL be reachable. `/` and `/setup` SHALL redirect (`307`) to `/new`. Every other path SHALL get `404 {"error":"Not found"}`. These path rules apply after the hosted host, `https` (`X-Forwarded-Proto`) and `Fly-Client-IP` checks in `proxy.ts`.
+When hosted (`HOSTED=1`), the MCP server SHALL accept only `alm.` OAuth access tokens, never `agt.` or static tokens. It SHALL refuse any `/api/mcp` request that carries an `Origin` header with `403` and body `{"error":"Browsers can't call this endpoint"}`, before authentication. Only the MCP, metadata, OAuth and connections routes, plus the other tester routes listed under Hosted mode gate in the `workspaces` part, and, when `ALIGN_GOAL_SESSIONS=1`, `/app*` and `/api/v2/*`, SHALL be reachable. `/` and `/setup` SHALL redirect (`307`) to `/new`. Every other path SHALL get `404 {"error":"Not found"}`. These path rules apply after the hosted host, `https` (`X-Forwarded-Proto`) and `Fly-Client-IP` checks in `proxy.ts`.
 
 #### Scenario: Browser call when hosted
 

@@ -531,9 +531,10 @@ write without the 5m/1h split), `long_context_unmodeled` (OpenAI input above 272
 `auto_review_unpriced` or `invalid_counters`. Claude Haiku 5.5 SHALL switch to its second rate card above a
 100,000-token prompt. The basis SHALL be `api_usd` for Claude Code sessions started with `ANTHROPIC_API_KEY`,
 `ANTHROPIC_AUTH_TOKEN` or a Bedrock/Vertex/Foundry flag, otherwise `subscription_included` when `.claude.json` has
-`oauthAccount`, otherwise `api_usd`; for Codex `subscription_included` when `auth.json` has `auth_mode: "chatgpt"`
-(or, without `auth_mode` and without an `OPENAI_API_KEY` field, has `tokens`), `api_usd` when it has `auth_mode:
-"apikey"` or a non-empty `OPENAI_API_KEY` field, else `unknown`. Estimates SHALL be labelled as list-price estimates, never as money spent.
+`oauthAccount`, otherwise `api_usd`; for Codex `subscription_included` when `auth.json` has `auth_mode: "chatgpt"`,
+otherwise `api_usd` when it has `auth_mode: "apikey"` or a non-empty `OPENAI_API_KEY` string, otherwise
+`subscription_included` when it has `tokens` (so a ChatGPT login whose `OPENAI_API_KEY` is null or empty still counts
+as a subscription), else `unknown` (also when `auth.json` is missing or unreadable). Estimates SHALL be labelled as list-price estimates, never as money spent.
 
 #### Scenario: Cache-write tiers
 
@@ -641,7 +642,8 @@ another person's work overlaps this session's files, and 0 bytes when nothing is
 `SessionStart`). Before an edit it SHALL deny, once, an edit to a file another same-goal session on this
 machine changed in the last 20 minutes through a hook-seen edit, unless this session read or edited it since, with
 the reason `Align: <harness> session <id8>, working toward the same goal, edited <file> <n> min ago. Read the file
-again so you keep its changes, then retry this edit.`
+again so you keep its changes, then retry this edit.` (with `less than a minute ago` in place of `<n> min ago` when the
+edit is under a minute old).
 
 #### Scenario: Card, then hold once
 
