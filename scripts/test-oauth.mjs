@@ -456,12 +456,21 @@ async function phase(name, env, invites = []) {
     const longAgo = new Date(Date.now() - 10 * 86400000).toISOString();
     await capEv({ session_id: "bd-live", hook_event: "SessionStart", at: longAgo });
     await capEv({ session_id: "bd-import", hook_event: "SessionStart", at: longAgo, import: true });
+    // A session a live hook already reported on: a later "import" with a past `at` is recorded as now.
+    await capEv({ session_id: "bd-mixed", hook_event: "SessionStart" });
+    await capEv({ session_id: "bd-mixed", hook_event: "UserPromptSubmit", prompt: "BDMARK a late import", at: longAgo, import: true });
     const bdState = await req("GET", "/api/state", { cookie: await signIn(A, "leadership"), headers: { "x-align-workspace": A.id } });
     const started = (sid) => bdState.json?.sessions?.find((x) => x.session_id === sid)?.started_at ?? "";
     check(
       "L3 a past `at` is kept only with the import marker; a live event without it is recorded as now",
       Date.now() - Date.parse(started("bd-live")) < 120000 && started("bd-import") === longAgo,
       `${started("bd-live")} ${started("bd-import")}`,
+    );
+    const mixed = bdState.json?.sessions?.find((x) => x.session_id === "bd-mixed");
+    check(
+      "L3 once a live event has arrived for a session, an import's past `at` is ignored (its start and the prompt stay now)",
+      !!mixed && Date.now() - Date.parse(mixed.started_at) < 120000 && mixed.prompts?.[0]?.text === "BDMARK a late import" && Date.now() - Date.parse(mixed.prompts[0].at) < 120000,
+      JSON.stringify(mixed),
     );
     const spam = [
       "The warehouse migration must not drop the reporting tables.",

@@ -394,6 +394,7 @@ export interface AgentSession {
   last_at: string;
   ended_at?: string;
   directives?: DirectiveDelivery[]; // authority changes pushed into this session
+  live?: boolean; // a live hook (not an import) has reported on it: imports can no longer backdate its events
 }
 
 export interface DirectiveDelivery {

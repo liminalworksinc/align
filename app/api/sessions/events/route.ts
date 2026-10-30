@@ -169,11 +169,13 @@ export async function POST(req: Request) {
     if (agent && (harness !== agent.harness || consentRepo !== agent.repo))
       throw new HttpError(403, `This agent token is for ${agent.harness} in ${agent.repo}`);
 
-    // A past time is kept only for an explicit import (review L3): a live hook can't backdate what it reports.
-    const past = ev.import === true ? eventTime(ev.at) : null;
+    // A past time is kept only for an explicit import (review L3), and only while the session has had no live event
+    // (follow-up L3): once a live hook has reported on a session, an "import" can't rewrite its times.
+    const imported = ev.import === true;
+    const past = imported ? eventTime(ev.at) : null;
     const upsert = (s: AppState) => {
-      const at = past ?? now();
       let sess = s.sessions.find((x) => x.id === id);
+      const at = past && !sess?.live ? past : now();
       if (!sess) {
         sess = {
           id,
@@ -191,6 +193,7 @@ export async function POST(req: Request) {
         };
         s.sessions.push(sess);
       }
+      if (!imported) sess.live = true;
       if (repo) sess.repo = repo;
       if (branch) sess.branch = branch;
       if (cwdName) sess.cwd_name = cwdName;

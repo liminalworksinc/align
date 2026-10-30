@@ -202,7 +202,7 @@ Testers can point the AI they already use at their own workspace. The app gets r
 - **The URL people paste:** the connect URL is built from the Host header, which `proxy.ts` checks only up to its `:`. `originFromHost` (`lib/oauth/server.ts`) accepts only a host name or bracketed IPv6 address and a numeric port; anything else becomes `invalid.invalid`, which matches no token. The Claude Code and Codex lines (`lib/paste-lines.ts`) single-quote the URL, carry no workspace or company name (the rule Codex's line adds to the global `AGENTS.md` is fixed text, added once per machine), and show no command for a URL Align couldn't have made (`scripts/test-paste-lines.mjs` runs them in sh, bash and zsh with hostile names and URLs).
 - **What leaves Align:** what the app reads is sent to that app's AI provider (Anthropic or OpenAI). The consent page says so. Claude and ChatGPT call the URL from their own servers, so the machine has to stay up (a paid Fly org; the trial stops machines).
 - **Copy check:** the steps shown for ChatGPT and the Claude app come from their docs on 2026-10-26. Claude Code 2.1.311 was connected end to end against this code on a local server (add, sign in through the consent page, call the tools); the other apps, and any app against the Fly URL, are not checked yet (smoke test item 8 covers one app).
-- Tests: `node scripts/test-oauth.mjs <port>` (132 checks: local and hosted phases, then a restart with a new `ALIGN_SECRET`); `node scripts/test-paste-lines.mjs` (30 checks).
+- Tests: `node scripts/test-oauth.mjs <port>` (133 checks: local and hosted phases, then a restart with a new `ALIGN_SECRET`); `node scripts/test-paste-lines.mjs` (30 checks).
 
 ## Limits worth knowing
 
