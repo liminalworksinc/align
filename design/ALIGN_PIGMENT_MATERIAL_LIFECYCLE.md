@@ -14,17 +14,17 @@ A **register** identifies *what kind of evidence or authority* produced an eleme
 | **STAIN** | Canonical saturated edge and deep `-800` ink, intent-named 350 ms engage motion | Request sent to authorized owner, counter under review, requester acknowledgment, or user actively inspects AI sources | A sandbox ran or the agent executed the plan |
 | **DRY** | Low-chroma `-dry` accent, matte archival/paper record, 320 ms settle | A decision event has been recorded: approved, declined, held or launch-approved. Approval and launch are **separate decisions** | Success of the actual work. A declined change is also a valid, settled record |
 
-**The key axis separation:** After goal ratification the **goal-change artifact** dries, but Leadership's **launch** can independently remain queued (orchid), be recorded as not yet (held), or later be approved. A previously authorized v1 read remains valid until the goal owner approves v2.1. An AI answer can be actively inspected (diligence stain) while still unapproved.
+**The key axis separation:** After goal ratification the **goal-change artifact** dries, but Leadership's **launch** can independently remain queued (orchid), be recorded as not yet (held), or later be approved. An app's current-plan flag is computed from the **whole-plan hash**, which changes on proposal, counter, acknowledgement and launch events—not just goal ratification. The server does **not** store which goal version the app read. The prototype reports only whole-plan freshness and last-read metadata. An AI answer can be actively inspected (diligence stain) while still unapproved.
 
 ### Palette/job contract (all 12 canonical positions)
 
 | Pigment / base | Semantic job | Current Align usage / deliberate reservation |
 | --- | --- | --- |
 | Stability / `#ED214F` | Foundation factor, `--alarm` severity when an actual destructive error exists | **Reserved** for actual error/factor datum, not rejection as a legitimate owner decision |
-| Coral / `#FA552B` | `--surge` urgency with factual deadline/escalation | **Dormant** in default flow; priority change alone does not prove urgency. Atlas offers a hypothetical material example only |
+| Coral / `#FA552B` | `--surge` is deliberately unused in the canon | **Unbound** in Align. Urgency/attention is a possible future use, not an approved product state; atlas is exploratory only |
 | Vitality / `#FF9549` | Factor metric. **Retired from Brand 4** | Not used as a generic attention color |
 | Amber / `#FDC237` | `--watch` conscious caution | Explicit approval-without-sandbox-test acknowledgment, never generic pending |
-| Agency / `#FEF059` | Factor metric: measured autonomy | **Reserved** until sourced agency data exists; human approval itself is Judgment pink |
+| Agency / `#FEF059` | Historical factor hue; retired from Brand 4 and from agent-register roles | **Unbound** in Align. A future factor measurement or renewed product role requires an explicit founder ruling; human approval remains Judgment pink |
 | Lime / `#70F32F` | `--signal` truly live operation | **Reserved**: Fly v13 does not capture running agent sessions |
 | Connection / `#31E682` | `--outreach` register, `--ui-state-success` for verified successful event | A human goal authorization recorded, not connected-app read or model speculation |
 | Expression / `#1E9692` | `--ambient`/`--depth` recessive background | Quiet company context/wash |
