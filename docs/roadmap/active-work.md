@@ -183,3 +183,80 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Evidence:**
   - [x] test-v2 checks the pages are served hosted
   - [x] Every claim cross-checked against the code
+
+### [ ] PORT-001 — Port foundation: schema, stubs and test slots
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation (v2 schema)
+- **Direction:** Port the LIM-2437 and LIM-2445 / #30 features merged on main (PRs #32, #33, #35, #36) from the retired v1 app onto v2 without losing behaviour; owner decisions D1-D6 of 2026-10-30.
+- **Conclusion:** One additive migration (limits_json, asks, ask mentions, value reports, event indexes), stub modules and empty UI and test slots so the ports build in parallel.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Migration 11, SCHEMA_VERSION 11, EVENT_PROPS and PERSON_COLUMNS additions
+  - [ ] Stub modules and UI slots; test marker blocks
+- **Evidence:**
+  - [ ] Full npm test passes on the foundation commit
+
+### [ ] PORT-002 — Port limits as goal content and suggestions from notes
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation (goals)
+- **Direction:** Port the LIM-2437 and LIM-2445 / #30 features merged on main (PRs #32, #33, #35, #36) from the retired v1 app onto v2 without losing behaviour; owner decisions D1-D6 of 2026-10-30.
+- **Conclusion:** Limits (must / must not / out of scope, at most 5) are part of each goal version, confirmed by the approval set, delivered with goal versions; pasted notes return suggestions and store nothing.
+- **Depends on:** PORT-001
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Goal content, hash, change requests and directive snapshot carry limits
+  - [ ] Suggest route, Goals tab and goal page UI
+- **Evidence:**
+  - [ ] test-v2 port:limits checks
+  - [ ] Spec requirements updated and validated
+
+### [ ] PORT-003 — Port asks and goal activity
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation (asks, activity)
+- **Direction:** Port the LIM-2437 and LIM-2445 / #30 features merged on main (PRs #32, #33, #35, #36) from the retired v1 app onto v2 without losing behaviour; owner decisions D1-D6 of 2026-10-30.
+- **Conclusion:** Asks between teams with accept, decline, done, reopen, withdraw and mention; goal activity from bindings, usage and work signals, never prompts; retention for closed asks and value reports.
+- **Depends on:** PORT-001
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Asks routes, rules and Asks tab
+  - [ ] Goal activity data and card
+  - [ ] Retention rules
+- **Evidence:**
+  - [ ] test-v2 port:asks, port:activity and port:retention checks
+  - [ ] Spec requirements updated and validated
+
+### [ ] PORT-004 — Port MCP tools, paste lines and the decision value card
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation (MCP, app surface)
+- **Direction:** Port the LIM-2437 and LIM-2445 / #30 features merged on main (PRs #32, #33, #35, #36) from the retired v1 app onto v2 without losing behaviour; owner decisions D1-D6 of 2026-10-30.
+- **Conclusion:** align_get_asks, align_get_goal_activity, align_get_limits and align_get_brief under the founder's 2026-10-29 read scoping in v2 terms; quoted paste lines; strict Host; the value card with per-decision value reports and notes; funnel reconciliation.
+- **Depends on:** PORT-002, PORT-003
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Four MCP tools with scoping and instructions
+  - [ ] Paste lines and strict Host
+  - [ ] Value card, value reports, follow-up link, events and report section
+- **Evidence:**
+  - [ ] test-oauth port:mcp and test-v2 port:value checks; paste-line tests
+  - [ ] Spec requirements updated and validated
+
+### [ ] PORT-005 — Port agent context: limits, accepted asks, drift notice, past sessions
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation/packages/align-agent
+- **Direction:** Port the LIM-2437 and LIM-2445 / #30 features merged on main (PRs #32, #33, #35, #36) from the retired v1 app onto v2 without losing behaviour; owner decisions D1-D6 of 2026-10-30.
+- **Conclusion:** The hook envelope carries the bound goal's limits and accepted asks as quoted, attributed data; a local-only drift notice shown to the user; align asks; align share --dir --past replaces the import script.
+- **Depends on:** PORT-001
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Limits and accepted asks in the envelope and deltas
+  - [ ] Local drift notice with an off switch
+  - [ ] align asks and share --dir --past
+- **Evidence:**
+  - [ ] align-agent tests for each behaviour
+  - [ ] Spec requirements updated and validated
