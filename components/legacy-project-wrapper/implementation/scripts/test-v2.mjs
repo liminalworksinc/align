@@ -2502,6 +2502,263 @@ try {
   // Each port package fills its own block below (PORT-002 limits, PORT-003 asks and activity, PORT-004 value), so the
   // packages never edit the same lines. They run before the canary check, which covers their responses too.
   // ==== port:limits ====
+  // PORT-002: limits are goal content (versioned, hashed, approved by the goal's approval set, delivered in goal
+  // snapshots), and suggesting limits from pasted notes stores nothing.
+  {
+    // Sign-up allows 10 a minute from one client; this phase has spent some, so wait out the window when it answers 429.
+    const lmSignUp = async (who, name, email) => {
+      for (let i = 0; ; i++) {
+        const u = await signUp(who, name, email);
+        if (u.status !== 429 || i >= 2) return u;
+        await sleep(31_000);
+      }
+    };
+    const LA = await lmSignUp("LA", "Lara Owner", "lara.limits@example.test");
+    const LB = await lmSignUp("LB", "Leo Lead", "leo.limits@example.test");
+    const LC = await lmSignUp("LC", "Lia Beta", "lia.limits@example.test");
+    const LD = await lmSignUp("LD", "Lou Viewer", "lou.limits@example.test");
+    const LE = await lmSignUp("LE", "Lee Loner", "lee.limits@example.test");
+    const lw = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${LW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    const LW = (await call("LA", "POST", "/api/v2/workspaces", { cookie: LA.cookie, body: { name: "Limits workspace" } })).json?.id;
+    for (const [u, role] of [
+      [LB, "member"],
+      [LC, "member"],
+      [LD, "viewer"],
+      [LE, "member"],
+    ]) {
+      const t = (await lw(LA, "POST", "/invites", { email: u.email, role })).json?.token;
+      await call(u.who, "POST", `/api/v2/invites/${t}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const alpha = (await lw(LA, "POST", "/teams", { name: "Alpha" })).json?.id;
+    const beta = (await lw(LA, "POST", "/teams", { name: "Beta" })).json?.id;
+    await lw(LA, "POST", `/teams/${alpha}/members`, { user_id: LB.id, role: "lead" });
+    await lw(LA, "POST", `/teams/${alpha}/members`, { user_id: LA.id, role: "member" });
+    await lw(LA, "POST", `/teams/${beta}/members`, { user_id: LC.id, role: "lead" });
+    const L_SRC = { kind: "meeting", title: "Infra sync", date: "2026-10-20" };
+    const gA = await lw(LA, "POST", "/goals", {
+      title: "Ship the inference cluster",
+      team_id: alpha,
+      visibility: "workspace",
+      measures: [{ text: "GPU memory headroom per node" }, { text: "Latency budget per request" }],
+      limits: [{ type: "must_not", text: "All three models must not fit on one GPU", source: L_SRC }],
+    });
+    const GA = gA.json;
+    const gB = await lw(LC, "POST", "/goals", { title: "Launch the billing dashboard", team_id: beta, visibility: "workspace", measures: [{ text: "Invoices reconciled nightly" }, { text: "Latency budget per page" }] });
+    const GB = gB.json;
+    const GH = (await lw(LC, "POST", "/goals", { title: "Rotate the Zanzibar credentials", team_id: beta, visibility: "team", measures: [{ text: "Vault keys rotated" }] })).json;
+    check(
+      "limits: a goal created with limits -> 201 with limits [{id lim_…, type, text, source}]; a goal without them has limits []",
+      gA.status === 201 && GA.limits?.length === 1 && /^lim_[a-z2-7]{12}$/.test(GA.limits[0].id) && GA.limits[0].type === "must_not" && GA.limits[0].text === "All three models must not fit on one GPU" && JSON.stringify(GA.limits[0].source) === JSON.stringify(L_SRC) && gB.status === 201 && Array.isArray(GB.limits) && GB.limits.length === 0 && GH?.id,
+      `${gA.text.slice(0, 300)} ${gB.text.slice(0, 200)}`,
+    );
+    const lim = (text, type = "must") => ({ type, text });
+    const vA = (u, body) => lw(u, "POST", `/goals/${GA.id}/versions`, body);
+    const six = await vA(LA, { limits: [1, 2, 3, 4, 5, 6].map((i) => lim(`Limit number ${i} must hold`)) });
+    const long = await vA(LA, { limits: [lim("x".repeat(161))] });
+    const badType = await vA(LA, { limits: [{ type: "should", text: "Keep it small" }] });
+    const badDate = await vA(LA, { limits: [{ type: "must", text: "Keep it small", source: { kind: "meeting", title: "x", date: "2026-13-01" } }] });
+    const badKind = await vA(LA, { limits: [{ type: "must", text: "Keep it small", source: { kind: "prompt", title: "x", date: "2026-10-01" } }] });
+    const notList = await vA(LA, { limits: "Keep it small" });
+    check(
+      "limits: 6 limits -> 400 limits: at most 5; 161 characters -> 400; an unknown type, a bad date, a source kind other than meeting or manual, or a non-list -> 400 naming the field; the goal stays at version 1",
+      six.status === 400 && six.json?.message === "limits: at most 5" && long.status === 400 && /limits\[0\]\.text/.test(long.json?.message) && badType.status === 400 && /limits\[0\]\.type/.test(badType.json?.message) && badDate.status === 400 && /limits\[0\]\.source\.date/.test(badDate.json?.message) && badKind.status === 400 && /source\.kind/.test(badKind.json?.message) && notList.status === 400 && (await lw(LA, "GET", `/goals/${GA.id}`)).json?.goal?.version === 1,
+      `${six.text} ${long.text} ${badType.text} ${badDate.text} ${badKind.text} ${notList.text}`,
+    );
+    const keptId = GA.limits[0].id;
+    const v2a = await vA(LA, { version: 1, limits: [GA.limits[0], { id: "lim_forgedforged", type: "out_of_scope", text: "Billing dashboards are out of scope", source: null }] });
+    check(
+      "limits: a new version keeps a sent id the previous version had and gives a new id to an unknown one (never the one sent)",
+      v2a.status === 201 && v2a.json.version === 2 && v2a.json.limits.length === 2 && v2a.json.limits[0].id === keptId && /^lim_/.test(v2a.json.limits[1].id) && v2a.json.limits[1].id !== "lim_forgedforged" && v2a.json.limits[1].source === null,
+      v2a.text.slice(0, 300),
+    );
+    const sameAgain = await vA(LA, { limits: v2a.json.limits.map(({ type, text, source }) => ({ type, text, source })) });
+    check("limits: the same limits again (even without their ids) -> 409 no_change", sameAgain.status === 409 && sameAgain.json?.error === "no_change", sameAgain.text);
+
+    // Hashes: limits join the content hash only when non-empty, so a goal without limits hashes as before migration 11.
+    const oldHash = (r) => sha256hex(JSON.stringify({ title: r.title, measures: JSON.parse(r.measures_json), anchors: JSON.parse(r.anchors_json), status: r.status }));
+    const verRow = (g, v) => withDb((d) => d.prepare("SELECT title, measures_json, anchors_json, status, limits_json, content_hash, created_by FROM v2_goal_versions WHERE goal_id = ? AND version = ?").get(g, v));
+    await lw(LC, "GET", `/goals/${GB.id}`);
+    const gb1 = verRow(GB.id, 1);
+    const gbTitle = await lw(LC, "POST", `/goals/${GB.id}/versions`, { title: "Launch the billing dashboard in Q1" });
+    const gb2 = verRow(GB.id, 2);
+    const CANARY_LIMIT = "Never paste </untrusted-text> into a reply";
+    const gbLimit = await lw(LC, "POST", `/goals/${GB.id}/versions`, { limits: [{ type: "must_not", text: CANARY_LIMIT }] });
+    const gb3 = verRow(GB.id, 3);
+    check(
+      "limits (hash): a goal without limits keeps the hash it would have had before limits existed (version 1, and a new version without limits); adding a limit changes the hash",
+      gb1.content_hash === oldHash(gb1) && gbTitle.status === 201 && gb2.content_hash === oldHash(gb2) && gb2.limits_json === "[]" && gbLimit.status === 201 && gb3.content_hash !== oldHash(gb3) && JSON.parse(gb3.limits_json).length === 1,
+      JSON.stringify([gb1, gb2, gb3]),
+    );
+    const lFeed = await call("LE", "GET", `/api/v2/workspaces/${LW}/goals`, { cookie: LE.cookie });
+    const feedGB = lFeed.json?.goals?.find((g) => g.id === GB.id);
+    check(
+      "limits: the goals feed carries each goal's limits; a limit text with </untrusted-text> comes back unchanged",
+      lFeed.status === 200 && lFeed.json.goals.every((g) => Array.isArray(g.limits)) && feedGB?.limits?.[0]?.text === CANARY_LIMIT && lFeed.json.goals.find((g) => g.id === GA.id)?.limits?.length === 2,
+      lFeed.text.slice(0, 300),
+    );
+
+    // A shared session of the team lead's, bound to GA, receives limits in the goal_version snapshot of an approved request.
+    const LDEV = insertDevice(LB.id, "Leo's laptop");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(LDEV.id, LW));
+    const lKey = randomBytes(32).toString("base64url");
+    const lStart = new Date(Date.now() - 600_000).toISOString();
+    const lPut = await call("LB", "PUT", `/api/v2/workspaces/${LW}/sessions/${lKey}`, { bearer: LDEV.access, body: { harness: "claude-code", repo_key: randomBytes(32).toString("base64url"), repo_alias: "cluster", started_at: lStart, title: "Cluster work" } });
+    const lEp = await call("LB", "POST", `/api/v2/workspaces/${LW}/sessions/${lKey}/epochs`, { bearer: LDEV.access, body: { epoch_id: epochId(), goal_id: GA.id, starts_at: lStart, root_turn: null, cause: "manual" } });
+    const lDirs = async () => (await call("LB", "GET", "/api/v2/directives?cursor=0", { bearer: LDEV.access })).json?.directives ?? [];
+    const gvOf = (list) => list.filter((d) => d.kind === "goal_version" && d.goal?.id === GA.id);
+    const before = gvOf(await lDirs()).length;
+    const curA = (await lw(LE, "GET", `/goals/${GA.id}`)).json.goal;
+    const NEW_LIMIT = { type: "must", text: "Inference must stay inside the EU region", source: { kind: "manual", title: "", date: "2026-10-28" } };
+    const crBad = await lw(LE, "POST", `/goals/${GA.id}/change-requests`, { base_version: curA.version, changes: { limits: [lim("y".repeat(161))] }, reason: "x" });
+    const crL = await lw(LE, "POST", `/goals/${GA.id}/change-requests`, { base_version: curA.version, changes: { limits: [...curA.limits, NEW_LIMIT] }, reason: "Limits from the infra sync" });
+    const counterL = await lw(LB, "POST", `/goals/${GA.id}/change-requests/${crL.json?.id}/counter`, { revision: 1, changes: { limits: [...curA.limits, { ...NEW_LIMIT, text: "Inference must stay inside the EU regions" }] }, note: "Plural" });
+    const acceptL = await lw(LE, "POST", `/goals/${GA.id}/change-requests/${crL.json?.id}/accept_counter`, { revision: 2 });
+    const afterCounter = gvOf(await lDirs()).length;
+    const crRead = await lw(LD, "GET", `/goals/${GA.id}/change-requests/${crL.json?.id}`);
+    check(
+      "limits (change requests): a non-owner proposes changes.limits -> 201 with the limits in changes and the diff (before and after); an invalid limit -> 400; creating, countering and accepting the counter write no directive",
+      lPut.status === 200 && lEp.status < 300 && crL.status === 201 && crL.json.changes.limits?.length === 3 && crL.json.diff.before.limits?.length === 2 && crL.json.diff.after.limits?.length === 3 && crBad.status === 400 && counterL.status === 200 && acceptL.status === 200 && afterCounter === before && crRead.json?.diff?.after?.limits?.[2]?.text === "Inference must stay inside the EU regions",
+      `${lPut.status} ${lEp.status} ${crL.text.slice(0, 300)} ${crBad.text} ${counterL.text.slice(0, 200)} ${acceptL.status} ${before} ${afterCounter}`,
+    );
+    const approveL = await lw(LB, "POST", `/goals/${GA.id}/change-requests/${crL.json?.id}/approve`, { revision: 2 });
+    const gaV = verRow(GA.id, approveL.json?.version);
+    const gvAfter = gvOf(await lDirs());
+    const snap = gvAfter[gvAfter.length - 1]?.goal;
+    check(
+      "limits (change requests): the team lead approves -> a new version whose limits are the request's, created_by the lead; the bound session's goal_version directive snapshot carries limits [{id, type, text, source}] and no request reason",
+      approveL.status === 200 && approveL.json.state === "approved" && gaV?.created_by === LB.id && JSON.parse(gaV.limits_json).length === 3 && gvAfter.length === before + 1 && snap?.limits?.length === 3 && snap.limits[2].text === "Inference must stay inside the EU regions" && snap.limits[2].source?.kind === "manual" && snap.limits.every((l) => /^lim_/.test(l.id)) && !JSON.stringify(gvAfter).includes("Limits from the infra sync"),
+      `${approveL.text.slice(0, 200)} ${JSON.stringify(gaV)} ${JSON.stringify(snap)}`,
+    );
+    const firstLimit = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'first_limit' AND ws_id = ?").get(LW).n);
+    check("limits (events): first_limit is recorded once for the workspace (several versions carry limits)", firstLimit === 1, `${firstLimit}`);
+
+    // -- suggesting limits from notes (as LE: a member in no team, who reads GA and GB but not Beta's team goal GH) --
+    const suggest = (u, body) => lw(u, "POST", "/limits/suggest", body);
+    const day = "2026-10-29";
+    const NOTES = [
+      "I can't find the GPU node logs.",
+      "Ensure all three models don't fit on the GPU.",
+      "Is the inference cluster out of scope?",
+      "GPU must fit.",
+      `The GPU cluster must ${Array.from({ length: 41 }, () => "really").join(" ")} hold.`,
+      "Invoice exports are out of scope for the billing dashboard.",
+      "The Zanzibar credentials must never be logged.",
+    ].join("\n");
+    const tables = () => withDb((d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'v2_%'").all().map((t) => [t.name, d.prepare(`SELECT COUNT(*) AS n FROM ${t.name}`).get().n]));
+    const rowsBefore = JSON.stringify(tables());
+    const s1 = await suggest(LE, { notes: NOTES, source: { title: "Weekly sync", date: day } });
+    const rowsAfter = JSON.stringify(tables());
+    const forGoal = (r, id) => r.json?.suggestions?.find((s) => s.goal.id === id);
+    const s1A = forGoal(s1, GA.id);
+    const s1B = forGoal(s1, GB.id);
+    const gaLimits = (await lw(LE, "GET", `/goals/${GA.id}`)).json.goal.limits;
+    check(
+      "limits (suggest): of pasted notes only rule-shaped sentences count (\"I can't find it\", a question, 3 words and 46 words -> none); \"Ensure … don't fit on the GPU\" -> must on the GPU goal, marked already (a near-duplicate of its limit); \"out of scope\" -> out_of_scope on the billing goal",
+      s1.status === 200 && s1.json.suggestions.length === 2 && s1A?.limits.length === 1 && s1A.limits[0].type === "must" && s1A.limits[0].text === "Ensure all three models don't fit on the GPU." && s1A.limits[0].already === gaLimits[0].id && s1A.limits[0].source.kind === "meeting" && s1A.limits[0].source.title === "Weekly sync" && s1B?.limits.length === 1 && s1B.limits[0].type === "out_of_scope" && s1B.limits[0].already === null,
+      s1.text.slice(0, 600),
+    );
+    check(
+      "limits (suggest): a team goal the caller can't read is never named and its words never place a sentence (the Zanzibar sentence is dropped); a non-owner may propose, not edit",
+      !s1.text.includes(GH.id) && !/Rotate|Zanzibar/.test(JSON.stringify(s1.json.suggestions)) && s1.json.dropped >= 1 && s1A.can_propose === true && s1A.can_edit === false,
+      s1.text.slice(0, 400),
+    );
+    const audits = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ?").get(LW).n);
+    check("limits (suggest): nothing is stored (every v2 table has the same row count) and nothing audited", rowsBefore === rowsAfter, `${audits}`);
+    const TIE = "The latency budget must not grow this quarter.\nKeep notes short.";
+    const tieA = await suggest(LE, { notes: TIE, source: { title: "Weekly sync", date: day }, prefer_goal_id: GA.id });
+    const tieNone = await suggest(LE, { notes: TIE, source: { title: "Weekly sync", date: day } });
+    check(
+      "limits (suggest): a sentence whose goal words two goals share equally goes to prefer_goal_id when it is one of them; without it the sentence is dropped",
+      tieA.status === 200 && tieA.json.suggestions.length === 1 && tieA.json.suggestions[0].goal.id === GA.id && tieA.json.suggestions[0].limits[0].type === "must_not" && tieNone.status === 200 && tieNone.json.suggestions.length === 0 && tieNone.json.dropped === 1,
+      `${tieA.text.slice(0, 300)} ${tieNone.text}`,
+    );
+    const typed = await suggest(LE, { notes: "Deploys must never happen on Fridays.", source: { title: "", date: day }, prefer_goal_id: GB.id });
+    const unreadable = await suggest(LE, { notes: "Deploys must never happen on Fridays.", source: { date: day }, prefer_goal_id: GH.id });
+    check(
+      "limits (suggest): a single typed sentence that matches no goal goes to prefer_goal_id as kind manual; naming an unreadable goal -> 404",
+      typed.status === 200 && typed.json.suggestions.length === 1 && typed.json.suggestions[0].goal.id === GB.id && typed.json.suggestions[0].limits[0].source.kind === "manual" && typed.json.suggestions[0].limits[0].type === "must_not" && unreadable.status === 404,
+      `${typed.text.slice(0, 300)} ${unreadable.text}`,
+    );
+    const sView = await suggest(LD, { notes: "Ensure all three models don't fit on the GPU.", source: { date: day } });
+    const sLong = await suggest(LE, { notes: "a".repeat(20_001), source: { date: day } });
+    const sDate = await suggest(LE, { notes: "Ensure all three models don't fit on the GPU.", source: { date: "29/10/2026" } });
+    const sNone = await suggest(LE, { notes: "We talked about lunch and the weather today.", source: { date: day } });
+    check(
+      "limits (suggest): a viewer -> 403 read_only; notes of 20,001 characters or a bad date -> 400; notes with no rule -> no suggestions",
+      sView.status === 403 && sView.json?.error === "read_only" && sLong.status === 400 && sDate.status === 400 && sNone.status === 200 && sNone.json.suggestions.length === 0,
+      `${sView.text} ${sLong.status} ${sDate.text} ${sNone.text}`,
+    );
+    // The web app: chips on the Goals tab, then "Paste meeting notes" -> Propose these limits (a member) and
+    // Add to a new version (the goal's owner, through the goal page's form).
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const asUser = async (u) => {
+          const page = await browser.newPage();
+          await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return page;
+        };
+        const click = (page, text) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), text);
+        const pasteNotes = async (page, notes) => {
+          await page.goto(`${BASE}/app/w/${LW}`, { waitUntil: "networkidle0" });
+          await page.waitForFunction(() => document.body.innerText.includes("Ship the inference cluster"), { timeout: 15000 });
+          await click(page, "Paste meeting notes");
+          await page.waitForSelector("textarea");
+          await page.type("textarea", notes);
+          await click(page, "Suggest limits");
+        };
+        const pe = await asUser(LE);
+        await pasteNotes(pe, "Invoice exports are out of scope for the billing dashboard.\nKeep notes short.");
+        const chips = await pe.evaluate(() => document.querySelector('[aria-label="Limits of Ship the inference cluster"]')?.textContent ?? "");
+        await pe.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Propose these limits"), { timeout: 15000 });
+        await click(pe, "Propose these limits");
+        await pe.waitForFunction(() => document.body.innerText.includes("Proposed."), { timeout: 15000 });
+        const leCr = (await lw(LE, "GET", `/goals/${GB.id}/change-requests`)).json?.change_requests?.find((c) => c.requester.id === LE.id && c.state === "pending");
+        check(
+          "ui (Chrome): the Goals tab shows each goal's limit chips; a member's Paste meeting notes -> Propose these limits posts a change request with the goal's limits plus the suggestion and the reason \"Limits from pasted notes, <date>\"",
+          /Must not\s*All three models must not fit on one GPU/.test(chips) && leCr?.changes?.limits?.length === 2 && leCr.changes.limits[1].type === "out_of_scope" && /^Limits from pasted notes, \d{4}-\d{2}-\d{2}$/.test(leCr.reason),
+          `${chips} ${JSON.stringify(leCr?.changes)} ${leCr?.reason}`,
+        );
+        const pc = await asUser(LC);
+        await pasteNotes(pc, "Invoice exports are out of scope for the billing dashboard.\nKeep notes short.");
+        await pc.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Add to a new version"), { timeout: 15000 });
+        const gbVersion = (await lw(LC, "GET", `/goals/${GB.id}`)).json.goal.version;
+        await Promise.all([pc.waitForNavigation({ waitUntil: "networkidle0" }), click(pc, "Add to a new version")]);
+        await pc.waitForFunction(() => [...document.querySelectorAll("input")].some((i) => i.value === "Invoice exports are out of scope for the billing dashboard."), { timeout: 15000 });
+        const onGoalPage = new URL(pc.url()).pathname === `/app/w/${LW}/goals/${GB.id}`;
+        await click(pc, `Save version ${gbVersion + 1}`);
+        await pc.waitForFunction((v) => document.body.innerText.includes(`version ${v}`) && document.body.innerText.includes("Limits"), { timeout: 15000 }, gbVersion + 1);
+        const gbNow = (await lw(LC, "GET", `/goals/${GB.id}`)).json.goal;
+        const cardText = await pc.evaluate(() => document.body.innerText);
+        check(
+          "ui (Chrome): the owner's Add to a new version opens the goal page with the new-version form filled in (the goal's limits plus the suggestion); Save version keeps both and the Limits card shows them",
+          onGoalPage && gbNow.version === gbVersion + 1 && gbNow.limits.length === 2 && gbNow.limits[0].text === CANARY_LIMIT && gbNow.limits[1].text === "Invoice exports are out of scope for the billing dashboard." && cardText.includes("Out of scope") && cardText.includes(CANARY_LIMIT),
+          `${pc.url()} ${JSON.stringify(gbNow.limits)}`,
+        );
+      } catch (e) {
+        check("ui (Chrome): limits", false, e.message);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available", false, `no Chrome at ${CHROME}`);
+    const burst = [];
+    for (let i = 0; i < 21; i++) burst.push(await suggest(LA, { notes: "Ensure all three models don't fit on the GPU.", source: { date: day } }));
+    check(
+      "limits (suggest): the goal's owner gets can_edit; the 21st call in a minute from one person -> 429 rate_limited",
+      burst.slice(0, 20).every((r) => r.status === 200) && burst[0].json.suggestions[0]?.can_edit === true && burst[0].json.suggestions[0].can_propose === false && burst[20].status === 429 && burst[20].json?.error === "rate_limited",
+      burst.map((r) => r.status).join(","),
+    );
+
+    // The sample workspace's security goal carries one limit; seeding it records no first_limit.
+    const lSample = (await call("LA", "POST", "/api/v2/workspaces/sample", { cookie: LA.cookie, body: {} })).json?.id;
+    const lSampleSec = (await call("LA", "GET", `/api/v2/workspaces/${lSample}/goals`, { cookie: LA.cookie })).json?.goals?.find((g) => g.title === "Pass the security review");
+    check(
+      "limits (sample): \"Pass the security review\" has one must_not limit from a meeting, and the seeded sample records no first_limit",
+      lSampleSec?.limits?.length === 1 && lSampleSec.limits[0].type === "must_not" && lSampleSec.limits[0].source?.kind === "meeting" && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'first_limit' AND ws_id = ?").get(lSample).n) === 0,
+      JSON.stringify(lSampleSec?.limits),
+    );
+  }
   // ==== end port:limits ====
 
   // ==== port:asks ====

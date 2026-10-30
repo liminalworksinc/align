@@ -425,17 +425,43 @@ and SHALL give everyone but viewers a "New goal" form that posts to `POST /api/v
 #### Scenario: Goal list
 
 - **WHEN** a member opens the tab
-- **THEN** each goal links to its goal page and shows its status pill, a "company" pill for a company goal, its visibility ("Only me", "My team", "Everyone in the workspace"), its team, "you can bind sessions" (green) or "needs alignment to bind" (amber), its owner ("Yours" for the person's own) and version, and its measures; with none, "No goals you can see yet."
+- **THEN** each goal links to its goal page and shows its status pill, a "company" pill for a company goal, its visibility ("Only me", "My team", "Everyone in the workspace"), its team, "you can bind sessions" (green) or "needs alignment to bind" (amber), its owner ("Yours" for the person's own) and version, its measures, and one chip per limit ("Must", "Must not" or "Out of scope" and its text, at most 5); with none, "No goals you can see yet."
 
 #### Scenario: Create a team goal
 
 - **WHEN** a member fills Goal (up to 300 characters), measures (up to 10, each with an optional target), "Who can see it", Team ("No team" or one of the person's teams; hint "Members of the team can bind their sessions to it") and the optional anchors, and presses **Create goal**
-- **THEN** the page posts `{title, level:"team", visibility, team_id, measures, anchors}` and lists the new goal; "My team" is disabled for a person in no team, and **Create goal** stays disabled for "My team" without a team
+- **THEN** the page posts `{title, level:"team", visibility, team_id, measures, anchors, limits}` (limits from the limit editor, empty rows left out) and lists the new goal; "My team" is disabled for a person in no team, and **Create goal** stays disabled for "My team" without a team
 
 #### Scenario: Create a company goal
 
 - **WHEN** a workspace owner chooses Level "Company goal"
 - **THEN** the Team field is hidden, visibility is fixed to "Everyone in the workspace", and the page posts `{level:"company", visibility:"workspace", …}` with no `team_id`; members and viewers are not offered the Level choice
+
+### Requirement: Limits from pasted meeting notes
+
+The Goals tab and the goal page's "Limits" card SHALL give everyone but viewers **Paste meeting notes**, which sends
+`{notes, source:{title, date}, prefer_goal_id?}` to `POST /api/v2/workspaces/<ws>/limits/suggest` (`prefer_goal_id`
+is the goal page's goal) and shows the suggestions grouped by goal, each with a checkbox (ticked unless the goal
+already has a limit like it), its kind and text, and the sentence it came from. Nothing is saved until the person acts
+on a group: **Add to a new version** (only when the response says `can_edit`) opens that goal's page with the new-version
+form filled in with the goal's limits plus the ticked ones, and **Propose these limits** (when `can_propose`) posts a
+change request with `changes.limits` set to the goal's current limits plus the ticked ones and the reason
+"Limits from <meeting>, <date>".
+
+#### Scenario: Notes with no rule
+
+- **WHEN** a member pastes notes in which no sentence reads like a rule
+- **THEN** the page shows "No limits found. Write them as rules, like “The three models must not all fit on the GPU.”"
+
+#### Scenario: Proposing suggested limits
+
+- **WHEN** a member who does not own a suggested goal presses **Propose these limits**
+- **THEN** the page reads the goal again, posts `{base_version, changes:{limits}, reason:"Limits from <meeting>, <date>"}` to its change requests, and says the request was proposed with a link to the Requests tab; more than 5 limits in all shows "A goal keeps at most 5 limits …" and sends nothing
+
+#### Scenario: Owner adds suggested limits
+
+- **WHEN** the goal's owner presses **Add to a new version**
+- **THEN** the goal page opens at its "New version" form with the limit editor filled in with the goal's limits and the ticked suggestions, and nothing is saved until they press **Save version <n+1>**
 
 ### Requirement: Goal page details and new version
 
@@ -445,11 +471,11 @@ tree and every version, and SHALL give a person the server lets edit it (`can_ed
 #### Scenario: Reading a goal
 
 - **WHEN** a member opens a goal
-- **THEN** the page shows its title, status, level, visibility, team, version, owner ("you" for the person's own), measures with targets, anchors, contributing goals and every version (title, status, time and the first 12 characters of its content hash); a goal the server does not return shows "This goal does not exist or you can't see it."
+- **THEN** the page shows its title, status, level, visibility, team, version, owner ("you" for the person's own), measures with targets, anchors, contributing goals, a "Limits" card with the version's limits (kind, text, and where and when each was said) or "No limits on this version.", and every version (title, status, time and the first 12 characters of its content hash); a goal the server does not return shows "This goal does not exist or you can't see it."
 
 #### Scenario: Save a new version
 
-- **WHEN** the owner edits Goal, measures, Status (Active, Achieved, Dropped), anchors and "Depends on" (other active goals) and presses **Save version <n+1>**
+- **WHEN** the owner edits Goal, measures, limits (kind "Must", "Must not" or "Out of scope", text up to 160 characters, an optional meeting and date; at most 5), Status (Active, Achieved, Dropped), anchors and "Depends on" (other active goals) and presses **Save version <n+1>**
 - **THEN** the page posts them with `version` to `POST .../goals/<goal>/versions`; a 409 `cycle` shows "That would make these goals depend on each other in a loop." and other errors show the server's message
 
 #### Scenario: Goal tree
@@ -481,8 +507,13 @@ viewer and does not own it, and SHALL send the proposal with
 
 #### Scenario: Propose a change
 
-- **WHEN** a member presses **Propose a change**, edits the pre-filled Goal, measures, Status and "Depends on", writes "Why this change" (required, 1 to 2000 characters) and presses **Send for approval**
+- **WHEN** a member presses **Propose a change**, edits the pre-filled Goal, measures, limits, Status and "Depends on", writes "Why this change" (required, 1 to 2000 characters) and presses **Send for approval**
 - **THEN** the page posts `{base_version:<current version>, changes:<only the fields that differ>, reason}` and the new request appears in the goal's "Change requests" list as "waiting for approval"; **Send for approval** stays disabled while nothing differs or the reason is empty
+
+#### Scenario: Suggest a limit
+
+- **WHEN** a member who can propose a change presses **Suggest a limit** in the goal's "Limits" card, adds a limit to the editor (pre-filled with the goal's limits), writes "Why this limit" and presses **Send for approval**
+- **THEN** the page posts `{base_version, changes:{limits}, reason}` to the goal's change requests and the goal's "Change requests" list reloads with it; change request cards show a "Limits" row with the limits before and after
 
 #### Scenario: Stale or duplicate proposal
 
@@ -813,6 +844,7 @@ active goal), neutral otherwise.
 - `app/app/_ui/passkey.ts`
 - `app/app/_ui/types.ts`
 - `app/app/_ui/goalform.tsx`
+- `app/app/_ui/limits.tsx`
 - `app/app/_ui/changes.tsx`
 - `app/app/_ui/words.ts`
 - `app/app/_ui/error-notice.tsx`

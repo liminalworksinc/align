@@ -3,6 +3,8 @@ import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { newId, nowIso, sha256hex } from "./ids";
 import { canBind, canReadGoal, type GoalObject, type PolicyPrincipal, type Visibility } from "./policy";
 import { goalVersionDirective } from "./directives";
+import { event } from "./events";
+import { limitsIn, limitsOf, type Limit } from "./goal-limits";
 import { need } from "./workspaces";
 import { personName } from "./retention";
 import { optStr, str, type Body } from "./validate";
@@ -70,6 +72,8 @@ export interface GoalCore {
   anchors: Anchors;
   /** Goals whose output this goal consumes. */
   depends_on: string[];
+  /** What work toward this goal must do, must not do, or leaves out of scope (lib/v2/goal-limits.ts), at most 5. */
+  limits: Limit[];
 }
 /** A goal this one contributes to, and whether this goal was reviewed against its current version. */
 export interface ParentRef {
@@ -110,6 +114,7 @@ export function goalCore(g: GoalRow): GoalCore {
     team: pod ? { id: pod.id, name: pod.name } : null,
     anchors: JSON.parse(g.anchors_json),
     depends_on: JSON.parse(g.depends_on_json || "[]"),
+    limits: limitsOf(g),
   };
 }
 
@@ -306,23 +311,40 @@ export interface GoalContent {
   anchors: Anchors;
   status: GoalStatus;
   depends_on: string[];
+  limits: Limit[];
 }
 
+// depends_on and limits join the hash only when non-empty, so the hash of every version written before they existed
+// is unchanged.
 const contentHash = (c: GoalContent) =>
   sha256hex(
-    JSON.stringify({ title: c.title, measures: c.measures, anchors: c.anchors, status: c.status, ...(c.depends_on?.length ? { depends_on: [...c.depends_on].sort() } : {}) }),
+    JSON.stringify({
+      title: c.title,
+      measures: c.measures,
+      anchors: c.anchors,
+      status: c.status,
+      ...(c.depends_on?.length ? { depends_on: [...c.depends_on].sort() } : {}),
+      ...(c.limits?.length ? { limits: c.limits } : {}),
+    }),
   );
 export const sameContent = (a: GoalContent, b: GoalContent) => contentHash(a) === contentHash(b);
 
 /** A goal's (or one stored version's) content. */
-export function contentOf(r: { title: string; measures_json: string; anchors_json: string; status: string; depends_on_json: string }): GoalContent {
-  return { title: r.title, measures: JSON.parse(r.measures_json), anchors: JSON.parse(r.anchors_json), status: r.status as GoalStatus, depends_on: JSON.parse(r.depends_on_json || "[]") };
+export function contentOf(r: { title: string; measures_json: string; anchors_json: string; status: string; depends_on_json: string; limits_json: string }): GoalContent {
+  return {
+    title: r.title,
+    measures: JSON.parse(r.measures_json),
+    anchors: JSON.parse(r.anchors_json),
+    status: r.status as GoalStatus,
+    depends_on: JSON.parse(r.depends_on_json || "[]"),
+    limits: limitsOf(r),
+  };
 }
 
 /** The content of one stored version of a goal. */
 export function versionContentOf(wsId: string, goalId: string, version: number): GoalContent | undefined {
-  const r = get<{ title: string; measures_json: string; anchors_json: string; status: string; depends_on_json: string }>(
-    "SELECT title, measures_json, anchors_json, status, depends_on_json FROM v2_goal_versions WHERE ws_id = ? AND goal_id = ? AND version = ?",
+  const r = get<{ title: string; measures_json: string; anchors_json: string; status: string; depends_on_json: string; limits_json: string }>(
+    "SELECT title, measures_json, anchors_json, status, depends_on_json, limits_json FROM v2_goal_versions WHERE ws_id = ? AND goal_id = ? AND version = ?",
     wsId,
     goalId,
     version,
@@ -341,6 +363,7 @@ export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalConte
     anchors: anchorsIn(b.anchors, prev.anchors),
     status,
     depends_on: dependsIn(pp, b.depends_on, goalId, prev.depends_on),
+    limits: limitsIn(b.limits, prev.limits),
   };
   assertNoDependencyCycle(pp.wsId, goalId, next.depends_on);
   if (sameContent(next, prev)) throw conflict("no_change", "Nothing changed");
@@ -350,13 +373,14 @@ export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalConte
 /** Insert a new goal at version 1 (inside the caller's tx). Used by createGoal and the sample workspace. */
 export function insertGoal(
   pp: PolicyPrincipal,
-  f: { title: string; level: GoalLevel; podId: string | null; visibility: Visibility; measures: Measure[]; anchors: Anchors; dependsOn: string[] },
+  f: { title: string; level: GoalLevel; podId: string | null; visibility: Visibility; measures: Measure[]; anchors: Anchors; dependsOn: string[]; limits?: Limit[] },
   at: string,
 ): string {
   const id = newId("g");
+  const limits = f.limits ?? [];
   run(
-    `INSERT INTO v2_goals (id, ws_id, owner_id, pod_id, visibility, level, version, title, measures_json, anchors_json, depends_on_json, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'active', ?, ?)`,
+    `INSERT INTO v2_goals (id, ws_id, owner_id, pod_id, visibility, level, version, title, measures_json, anchors_json, depends_on_json, limits_json, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'active', ?, ?)`,
     id,
     pp.wsId,
     pp.userId,
@@ -367,18 +391,20 @@ export function insertGoal(
     JSON.stringify(f.measures),
     JSON.stringify(f.anchors),
     JSON.stringify(f.dependsOn),
+    JSON.stringify(limits),
     at,
     at,
   );
   run(
-    "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, status, content_hash, created_by, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, 'active', ?, ?, ?)",
+    "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, limits_json, status, content_hash, created_by, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?, 'active', ?, ?, ?)",
     pp.wsId,
     id,
     f.title,
     JSON.stringify(f.measures),
     JSON.stringify(f.anchors),
     JSON.stringify(f.dependsOn),
-    contentHash({ title: f.title, measures: f.measures, anchors: f.anchors, status: "active", depends_on: f.dependsOn }),
+    JSON.stringify(limits),
+    contentHash({ title: f.title, measures: f.measures, anchors: f.anchors, status: "active", depends_on: f.dependsOn, limits }),
     pp.userId,
     at,
   );
@@ -405,10 +431,16 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   const measures = measuresIn(b.measures ?? []);
   const anchors = anchorsIn(b.anchors ?? {});
   const dependsOn = dependsIn(pp, b.depends_on ?? [], null);
+  const limits = limitsIn(b.limits ?? [], []);
   const at = nowIso();
   const count = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_goals WHERE ws_id = ?", pp.wsId)?.n ?? 0;
   if (count >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals");
-  const id = await tx(() => insertGoal(pp, { title, level, podId, visibility, measures, anchors, dependsOn }, at));
+  const id = await tx(() => {
+    const created = insertGoal(pp, { title, level, podId, visibility, measures, anchors, dependsOn, limits }, at);
+    // Here, not in insertGoal: the sample workspace's seeded limit is nobody's first.
+    if (limits.length) event("first_limit", { ws: pp.wsId, user: pp.userId, at });
+    return created;
+  });
   return serializeGoal(pp, goalRow(pp.wsId, id)!);
 }
 
@@ -421,12 +453,13 @@ export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at
   if (c.depends_on.length) assertNoDependencyCycle(g.ws_id, g.id, c.depends_on); // again, inside the transaction
   const v = g.version + 1;
   const n = run(
-    "UPDATE v2_goals SET version = ?, title = ?, measures_json = ?, anchors_json = ?, depends_on_json = ?, status = ?, updated_at = ? WHERE ws_id = ? AND id = ? AND version = ?",
+    "UPDATE v2_goals SET version = ?, title = ?, measures_json = ?, anchors_json = ?, depends_on_json = ?, limits_json = ?, status = ?, updated_at = ? WHERE ws_id = ? AND id = ? AND version = ?",
     v,
     c.title,
     JSON.stringify(c.measures),
     JSON.stringify(c.anchors),
     JSON.stringify(c.depends_on),
+    JSON.stringify(c.limits),
     c.status,
     at,
     g.ws_id,
@@ -435,7 +468,7 @@ export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at
   );
   if (!n) throw conflict("stale_version", "This goal changed meanwhile; reload and try again");
   run(
-    "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, status, content_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, limits_json, status, content_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     g.ws_id,
     g.id,
     v,
@@ -443,12 +476,15 @@ export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at
     JSON.stringify(c.measures),
     JSON.stringify(c.anchors),
     JSON.stringify(c.depends_on),
+    JSON.stringify(c.limits),
     c.status,
     contentHash(c),
     actorId,
     at,
   );
   audit(g.ws_id, actorId, "goal.versioned", g.id, at);
+  // The workspace's first version that carries a limit, whether its owner saved it or an approver approved it.
+  if (c.limits.length) event("first_limit", { ws: g.ws_id, user: actorId, at });
   reviewParents(g.ws_id, g.id, at); // saving a version is a review against the parents as they are now
   const next = goalRow(g.ws_id, g.id)!;
   goalVersionDirective(g.ws_id, next);
@@ -466,7 +502,7 @@ function supersedeOpenRequests(wsId: string, goalId: string, actorId: string, at
   }
 }
 
-/** A new immutable version from the goal's owner (title, measures, anchors, depends_on and/or status). */
+/** A new immutable version from the goal's owner (title, measures, anchors, depends_on, limits and/or status). */
 export async function newGoalVersion(pp: PolicyPrincipal, goalId: string, b: Body): Promise<Goal> {
   const g = goalRow(pp.wsId, goalId);
   if (!g) throw notFound();

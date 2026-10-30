@@ -2,6 +2,7 @@ import { get } from "./db";
 import { V2Error } from "./errors";
 import { getChangeRequest as requestView, listChangeRequests as requestViews, type ChangeRequestState as StoredState, type ChangeRequestView } from "./changes";
 import type { EvidenceKind, EvidenceSource, SnapshotView } from "./evidence";
+import type { Limit } from "./goal-limits";
 import type { GoalStatus, Measure } from "./goals";
 import type { PolicyPrincipal } from "./policy";
 
@@ -54,6 +55,7 @@ export interface ChangeDiff {
   measures?: { before: Measure[]; after: Measure[] };
   depends_on?: { before: string[]; after: string[] };
   status?: { before: GoalStatus; after: GoalStatus };
+  limits?: { before: Limit[]; after: Limit[] };
 }
 
 export interface ChangeRequestDetail extends ChangeRequestSummary {
@@ -95,6 +97,7 @@ function detail(v: ChangeRequestView): ChangeRequestDetail {
   if (after.measures !== undefined) diff.measures = { before: before.measures!, after: after.measures };
   if (after.depends_on !== undefined) diff.depends_on = { before: before.depends_on!, after: after.depends_on };
   if (after.status !== undefined) diff.status = { before: before.status!, after: after.status };
+  if (after.limits !== undefined) diff.limits = { before: before.limits ?? [], after: after.limits };
   return {
     ...summary(v),
     decided_by: decided ? (v.approved_by ?? v.rejected_by) : null,

@@ -25,7 +25,7 @@ Vocabulary:
 | Directive | A row in `v2_directives` with an id `dir_<24 base32 chars>`, a workspace, a `kind`, a monotonically increasing `seq`, an optional goal snapshot and an optional binding, plus one target row per session key |
 | Kind | One of `goal_version`, `binding_changed`, `binding_suspended`, `stop`, `resume` |
 | Session key | The 43-character key of a shared session (`v2_sessions.session_key`), owned by one person on one device |
-| Goal snapshot | The goal's core fields as of the saved version that caused the directive: `id`, `version`, `title`, `measures`, `status`, `visibility`, `level`, `owner` `{id, name}`, `team` `{id, name}` or null, `anchors`, `depends_on` |
+| Goal snapshot | The goal's core fields as of the saved version that caused the directive: `id`, `version`, `title`, `measures`, `status`, `visibility`, `level`, `owner` `{id, name}`, `team` `{id, name}` or null, `anchors`, `depends_on`, `limits` (the version's limits, each `{id, type, text, source}`; `[]` for a snapshot stored before limits existed) |
 | Binding | `{ goal_id, effective, cause }`, where `effective` is `next_root_turn` and `cause` is `alignment:<alignment id>` |
 | Cursor | The highest `seq` a device has already taken; a fetch returns directives with a larger `seq` |
 | Receipt | A per-directive, per-session delivery report from the device: `received`, `applied` or `enforced` |
@@ -63,6 +63,20 @@ The server SHALL put into a directive only its kind, the goal snapshot of a save
 
 - **WHEN** an approver approves a change request with `note` "Agreed for Q3" and a bound session then fetches its directives
 - **THEN** the `goal_version` directive's `goal` holds the new version's fields and no field of the directive contains the request's `reason` or the approver's `note`
+
+### Requirement: Limit text reaches agents only in a saved version's snapshot
+
+The server SHALL put a limit's text into a directive only inside the goal snapshot of a saved goal version (the `limits` of a version its owner saved or an approver approved), and never from a limit suggestion, a change request that is pending or countered, or an ask.
+
+#### Scenario: Proposed limit waits for approval
+
+- **WHEN** a member proposes a change request adding a limit to a goal with a bound session, and an approver counters it
+- **THEN** no directive is written; once the approver approves it, the bound session's `goal_version` directive has the limit in `goal.limits` with its `id`, `type`, `text` and `source`, and no field holds the request's reason
+
+#### Scenario: Suggestions are not delivered
+
+- **WHEN** a member pastes notes into `POST /api/v2/workspaces/{ws}/limits/suggest` and gets suggestions for a goal with bound sessions
+- **THEN** no directive is written and the goal's limits are unchanged
 
 ### Requirement: Directives are written in the transaction of the change that caused them
 

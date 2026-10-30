@@ -54,6 +54,14 @@ version of the child reviews it against all parents; `POST /api/v2/workspaces/:w
 (cookie, the child's owner) confirms one. Because parents' versions are part of each child's entry, a parent edit
 changes the feed version, so agents refetch and give every session under a child goal the parent's new version.
 
+Limits (PORT-002, additive): `Goal` also carries `"limits": [ Limit ]` (the current version's, `[]` when none, at most 5),
+`Limit = { "id": "lim_<12 base32>", "type": "must"|"must_not"|"out_of_scope", "text": string (≤160), "source": { "kind":
+"meeting"|"manual", "title": string (≤120, "" when typed), "date": "YYYY-MM-DD" } | null }`. Limits are goal content:
+versioned and hashed with the goal (in the hash only when non-empty), set by the owner's new version or by an approved
+change request (`changes.limits`), and read by whoever reads the goal. A limit's `id` stays while the limit is kept, so
+an agent can tell an added or removed limit from an unchanged one. A limit names no person: who confirmed it is the
+version's author.
+
 ## Shared sessions
 `session_key = base64url(HMAC-SHA256(device_secret, ws + "\0" + harness + "\0" + native_session_id))` (43 chars).
 `repo_key = base64url(HMAC-SHA256(device_secret, ws + "\0repo\0" + realpath(git toplevel or cwd)))`.
@@ -82,7 +90,8 @@ usage, deliveries; rollups change (the UI says so).
 ## Directives
 Only structured content reaches agents: ratified goal fields and enumerated states. Never alignment notes or counters.
 `Directive = { "id": "dir_...", "seq": <int>, "ws", "kind": "goal_version"|"binding_changed"|"binding_suspended"|"stop"|"resume", "session_keys": [string], "goal": Goal|null, "binding": { "goal_id", "effective": "next_root_turn", "cause": "alignment:<al_id>"|"manual" } | null, "created_at" }`
-- `goal_version`: a goal bound/governing for these sessions got a new version or status.
+- `goal_version`: a goal bound/governing for these sessions got a new version or status. Its `goal` snapshot carries
+  that version's `limits` (a snapshot stored before limits existed reads `[]`); limit text reaches agents only this way.
 - `binding_changed`: open a new epoch at the next root turn with `binding.goal_id` (approved allocation transfer).
 - `binding_suspended`: the current binding lost its authority (revoked alignment): stop uploading usage for the session
   until the user picks a goal; the agent continues privately.
@@ -254,11 +263,15 @@ confirm, `409 last_owner` while the only owner of a workspace with other members
 newest 200 `{ at, actor: {id, name}|null, action, object_id }`), `GET/POST .../invites` (`{ email, role, team_id?,
 team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST .../accept`, `POST .../teams`,
 `POST .../teams/:team/members`, `DELETE .../teams/:team/members/:user` (the `/pods` paths are aliases), `POST .../goals`
-(`{ title, level?, visibility?, team_id?, measures?, anchors?, depends_on? }`), `GET .../goals/:goal`,
-`POST .../goals/:goal/versions` (`{ version, title?, measures?, anchors?, status? }`, `409 stale_version` /
-`no_change`), `GET .../sessions`, `GET .../alignments`, `GET .../alignments/:id`, `POST /api/v2/workspaces/sample`
+(`{ title, level?, visibility?, team_id?, measures?, anchors?, depends_on?, limits? }`), `GET .../goals/:goal`,
+`POST .../goals/:goal/versions` (`{ version, title?, measures?, anchors?, status?, limits? }`, `409 stale_version` /
+`no_change`), `POST .../limits/suggest` (`{ notes (≤20,000), source: { title?, date }, prefer_goal_id? }`, owners and
+members, 20 a minute per person and 120 an hour per workspace → `{ suggestions: [ { goal: { id, title, version },
+can_edit, can_propose, limits: [ { type, text, quote, source, already: lim id|null } ] } ], dropped }`; stores nothing;
+see `lib/v2/limit-suggest.ts`), `GET .../sessions`, `GET .../alignments`, `GET .../alignments/:id`, `POST /api/v2/workspaces/sample`
 (a new "Northstar (sample)" workspace owned by the caller, counted like any workspace creation), change requests
-(`GET`/`POST .../goals/:goal/change-requests` with `{ base_version, changes, reason }`, `GET .../change-requests/:id`,
+(`GET`/`POST .../goals/:goal/change-requests` with `{ base_version, changes, reason }`, `changes` any of `title`,
+`measures`, `depends_on`, `status`, `limits`, `GET .../change-requests/:id`,
 `POST .../change-requests/:id/{approve|reject|counter|accept_counter|withdraw|rebase}`, and the workspace-wide
 `GET .../change-requests?state=` as `{ waiting_on_me, mine, others }`; see `lib/v2/changes.ts`), change request
 evidence (`POST .../change-requests/:id/evidence` `{ kind: "pr"|"ci_run"|"incident"|"dashboard"|"doc"|"other", url
