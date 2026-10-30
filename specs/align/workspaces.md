@@ -39,7 +39,7 @@ Directives (including stop and resume) are in `directives`, the MCP endpoint and
 | Device | A paired machine (`dv_…`) with an Ed25519 key, workspace grants, a 1-hour access token and a rotating 30-day refresh token |
 | Shared session | A coding-agent session a device chose to share, addressed by a 43-character `session_key` |
 | Epoch | A period of a shared session bound to one goal (or none); usage counts under its epoch's goal |
-| Audit row | `{at, actor, action, object_id}` written by every change; `actor` is null only for system actions |
+| Audit row | `{at, actor, action, object_id}` written by each change a person makes (and by a few automatic events); `actor` is null only for system actions |
 
 **Person lifecycle.** Sign in (provider or email code) → create a workspace or accept an invite → pair a device →
 share sessions → change role, leave or be removed (team memberships, device grants and OAuth grants for that
@@ -66,7 +66,7 @@ set, and email one-time-code sign-in always in Mode L and, when hosted, whenever
 #### Scenario: Hosted without email settings
 
 - **WHEN** a hosted server has Google configured and none of the email settings
-- **THEN** sign-in is Google only, and a request to send an email code is refused without sending anything
+- **THEN** sign-in is Google only, and a request to send an email code is refused with 404 (the email-code routes are not mounted) without sending anything
 
 ### Requirement: Email one-time codes
 
@@ -280,7 +280,8 @@ only JSON object bodies up to each route's size cap, and reject reserved keys an
 ### Requirement: Local edge in Mode L
 
 The server SHALL, in Mode L, bind `127.0.0.1` on `npm start`, answer only requests whose `Host` is a loopback name
-(`localhost`, `127.0.0.1` or `[::1]`, any port), let Better Auth trust only the origin the request was sent to, refuse
+(`localhost`, `127.0.0.1` or `[::1]`, any port), let Better Auth trust only this server's own loopback origins (those three
+names on its own `PORT`, default 3100), refuse
 cross-origin cookie writes including those from another localhost port, and refuse any browser `Origin` on `/api/mcp`.
 
 #### Scenario: DNS-rebound host
@@ -350,7 +351,7 @@ origin whose host is in `ALIGN_HOSTS`, and sign-in is possible: all three of `AL
 
 #### Scenario: Partial or unsafe settings
 
-- **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, `ALIGN_TEST_IDP` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`
+- **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, a Google or GitHub client id without its secret (or the reverse), `ALIGN_TEST_IDP` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`
 - **THEN** it refuses to start and names each problem; any mode refuses `ALIGN_PUBLIC=1`
 
 #### Scenario: Email only
@@ -360,8 +361,8 @@ origin whose host is in `ALIGN_HOSTS`, and sign-in is possible: all three of `AL
 
 ### Requirement: Server data and single server
 
-The server SHALL keep all data in one SQLite file (WAL) at `<ALIGN_DATA_DIR or ./data>/v2/align.sqlite` in a 0700
-directory with the file at 0600, generate Better Auth's secret into `.auth-secret` (0600) in that directory in Mode L
+The server SHALL keep its database (people, sessions, workspaces and everything in them) in one SQLite file (WAL) at
+`<ALIGN_DATA_DIR or ./data>/v2/align.sqlite` in a 0700 directory with the file at 0600, generate Better Auth's secret into `.auth-secret` (0600) in that directory in Mode L
 when `BETTER_AUTH_SECRET` is unset, migrate the database before serving, and run only one server per data directory.
 
 #### Scenario: Second server
@@ -585,8 +586,12 @@ owners see and revoke every grant and other members only their own.
 
 ### Requirement: Workspace audit trail
 
-The server SHALL write an audit row naming its actor for every change in a workspace (actor null only for system
-actions), and serve the newest 200 rows to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`.
+The server SHALL write an audit row naming its actor for every change a person makes to a workspace's settings,
+members, invites, teams, goals, alignments, change requests, connected apps and session controls (stop sharing, history
+deletion, agent stop and resume), with actor null only for system actions, and serve the newest 200 rows of that
+workspace to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`. Device uploads (sharing a session, opening an
+epoch, usage and activity) write no audit row, and device pairing and revocation are recorded without a workspace, so
+they never appear in a workspace's audit.
 
 #### Scenario: Reading the audit
 
@@ -596,7 +601,7 @@ actions), and serve the newest 200 rows to workspace owners only on `GET /api/v2
 #### Scenario: Attributed actions
 
 - **WHEN** an owner withdraws an invite, a lead changes a team member, or a person revokes their own device
-- **THEN** each writes a row (`invite.withdrawn`, `team.member_set`, `device.revoked`) whose actor is that person; only automatic events such as revocation for refresh-token reuse have a null actor
+- **THEN** each writes a row (`invite.withdrawn` and `team.member_set` in the workspace's audit, `device.revoked` with no workspace) whose actor is that person; only automatic events such as revocation for refresh-token reuse have a null actor
 
 ### Requirement: Device pairing flow
 
@@ -630,7 +635,7 @@ signature from the paired key, and revoke a device on `DELETE /api/v2/devices/se
 #### Scenario: Approving a code
 
 - **WHEN** a person with a recent sign-in approves a pending, unexpired code (in any letter case, with or without the hyphen)
-- **THEN** the response is `{state:"approved"}`; an empty `workspace_ids` is 400 `Choose at least one workspace for this device`, a workspace they are not a member of or an unknown, expired or decided code 404, and more than 20 lookups or decisions per person in 10 minutes 429 `rate_limited`
+- **THEN** the response is `{state:"approved"}`; an empty `workspace_ids` is 400 `Choose at least one workspace for this device`, a workspace they are not a member of or an unknown, expired or decided code 404, and more than 20 lookups, or more than 20 decisions, per person in 10 minutes 429 `rate_limited`
 
 #### Scenario: Refresh token reuse
 
@@ -732,18 +737,19 @@ sessions, only the caller's own.
 
 ### Requirement: Account and workspace rate limits
 
-The server SHALL limit requests with in-memory fixed windows (at most 10,000 keys, oldest evicted first), keying
-clients by `Fly-Client-IP` when hosted (IPv6 by its /64) and as one local client in Mode L, and answer a v2 limit with
-429 `rate_limited`.
+The server SHALL limit v2 requests and email-code sends with in-memory sliding windows (at most 10,000 keys, oldest
+evicted first), keying clients by `Fly-Client-IP` when hosted (IPv6 by its /64) and as one local client in Mode L, and
+answer a v2 limit with 429 `rate_limited`; Better Auth's own per-path limits apply only when hosted, since Mode L turns
+off its IP tracking.
 
 #### Scenario: Better Auth limits
 
-- **WHEN** a client exceeds 10 requests per minute to `/api/v2/auth/sign-in/email-otp`, `/sign-in/email` or `/sign-up/email`, 20 to `/sign-in/social`, or 100 per minute elsewhere under `/api/v2/auth`
-- **THEN** Better Auth refuses the request with 429
+- **WHEN** a hosted client exceeds 10 requests per minute to `/api/v2/auth/sign-in/email-otp`, `/sign-in/email` or `/sign-up/email`, 20 to `/sign-in/social` or `/email-otp/send-verification-otp`, or 100 per minute elsewhere under `/api/v2/auth`
+- **THEN** Better Auth refuses the request with 429; a Mode L server applies none of these, only the email-code send limits and the v2 limits
 
 #### Scenario: v2 limits
 
-- **WHEN** a person creates an 11th workspace in an hour, a workspace gets a 51st invite in an hour, a client starts an 11th device pairing in an hour, or a person makes a 21st device-code lookup or decision in 10 minutes
+- **WHEN** a person creates an 11th workspace in an hour, a workspace gets a 51st invite in an hour, a client starts an 11th device pairing in an hour, or a person makes a 21st device-code lookup, or a 21st approve-or-deny decision, in 10 minutes (lookups and decisions are counted separately)
 - **THEN** the server responds 429 `rate_limited` and does nothing else
 
 ## Open questions
@@ -761,7 +767,8 @@ clients by `Fly-Client-IP` when hosted (IPv6 by its /64) and as one local client
 - package.json
 - lib/config.ts
 - lib/startup.ts
-- lib/local-guard.ts
+- lib/http.ts
+- lib/secret.ts
 - lib/ratelimit.ts
 - lib/oauth/grants.ts
 - lib/v2/config.ts
@@ -777,6 +784,7 @@ clients by `Fly-Client-IP` when hosted (IPv6 by its /64) and as one local client
 - lib/v2/policy.ts
 - lib/v2/validate.ts
 - lib/v2/workspaces.ts
+- lib/v2/lifecycle.ts
 - lib/v2/devices.ts
 - lib/v2/sessions.ts
 - lib/v2/activity.ts
