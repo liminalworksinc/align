@@ -587,7 +587,7 @@ owners see and revoke every grant and other members only their own.
 ### Requirement: Workspace audit trail
 
 The server SHALL write an audit row naming its actor for every change a person makes to a workspace's settings,
-members, invites, teams, goals, alignments, change requests, connected apps and session controls (stop sharing, history
+members, invites, teams, goals, alignments, change requests, connected-app revocations and session controls (stop sharing, history
 deletion, agent stop and resume), with actor null only for system actions, and serve the newest 200 rows of that
 workspace to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`. Device uploads (sharing a session, opening an
 epoch, usage and activity) write no audit row, and device pairing and revocation are recorded without a workspace, so
