@@ -427,6 +427,18 @@ export function YourTurnView(props: ViewProps) {
 /** Paste meeting notes, or type one limit: the sentences that state a limit become suggestions for the goal they are
  *  about, and that goal's owner confirms each one above. Folded away until opened. */
 function LimitNotes({ workspace }: { workspace?: string }) {
+  // The hosted test server keeps /api/workspaces/limits closed (proxy.ts), so the entry point isn't shown there at all
+  // rather than leading to a form that can't be sent. Hidden until the config answers, so it never flashes in.
+  const [closed, setClosed] = useState(true);
+  useEffect(() => {
+    let live = true;
+    api<{ test_server?: unknown }>("/api/workspaces/config", { method: "GET" })
+      .then((c) => live && setClosed(!!c.test_server))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
   const [openForm, setOpen] = useState(false);
   const [notes, setNotes] = useState("");
   const [title, setTitle] = useState("");
@@ -447,6 +459,7 @@ function LimitNotes({ workspace }: { workspace?: string }) {
       setBusy(false);
     }
   };
+  if (closed) return null;
   if (!openForm)
     return (
       <button type="button" onClick={() => setOpen(true)} className="self-start text-[14px] font-semibold text-violet-700 hover:underline">
