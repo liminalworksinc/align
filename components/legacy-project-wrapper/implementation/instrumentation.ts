@@ -6,10 +6,13 @@ export async function register() {
     const { startup } = await import("./lib/startup");
     try {
       startup();
-      // Goal sessions opens (and migrates) its database only when ALIGN_GOAL_SESSIONS=1, never during a build.
-      if (process.env.ALIGN_GOAL_SESSIONS === "1" && process.env.NEXT_PHASE !== "phase-production-build") {
+      // The v2 database is opened (and migrated) at every start, never during a build. Mode L then makes its local
+      // owner on a fresh data directory and prints that person a sign-in code.
+      if (process.env.NEXT_PHASE !== "phase-production-build") {
         const { ready } = await import("./lib/v2/init");
         await ready();
+        const { ensureLocalOwner } = await import("./lib/v2/local-owner");
+        await ensureLocalOwner();
       }
     } catch (e) {
       console.error((e as Error).message);

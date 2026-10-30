@@ -126,6 +126,9 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
           <Link href="/app/devices" className="hover:text-zinc-900">
             Devices
           </Link>
+          <Link href="/app/account" className="hover:text-zinc-900">
+            Account
+          </Link>
           <span className="text-zinc-500" title={me.email}>
             {me.name}
           </span>
@@ -153,6 +156,24 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
       )}
       <main className="mx-auto max-w-[1100px] p-6">{children}</main>
     </div>
+  );
+}
+
+/** The recent-sign-in prompt (device approval, app consent): sign out, then sign in again and come back to `next`. */
+export function SignInAgain({ me, next, children }: { me: { email: string }; next: string; children: ReactNode }) {
+  const [busy, setBusy] = useState(false);
+  const again = async () => {
+    setBusy(true);
+    await fetch("/api/v2/auth/sign-out", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
+    go(`/app/sign-in?${new URLSearchParams({ next, email: me.email })}`);
+  };
+  return (
+    <Card>
+      <p className="mb-3 text-[16px] text-zinc-800">{children}</p>
+      <Btn onClick={() => void again()} disabled={busy}>
+        Sign in again
+      </Btn>
+    </Card>
   );
 }
 

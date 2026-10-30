@@ -1,70 +1,184 @@
 "use client";
 import { useState } from "react";
 import { Btn, Err, Field, Input, Note, go } from "../_ui/kit";
+import type { SignInOptions } from "../_ui/server";
 
-type Options = { google: boolean; github: boolean; testIdp: boolean };
+class AuthError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 async function post(path: string, body: unknown) {
   const res = await fetch(`/api/v2/auth${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), credentials: "same-origin" });
-  const data = (await res.json().catch(() => ({}))) as { url?: string; message?: string };
-  if (!res.ok) throw new Error(data.message || "Sign-in failed");
+  const data = (await res.json().catch(() => ({}))) as { url?: string; message?: string; code?: string };
+  if (!res.ok) throw new AuthError(res.status, data.code ?? "", data.message || "Sign-in failed");
   return data;
 }
 
-export default function SignIn({ next, options }: { next: string; options: Options }) {
+const TOO_MANY_SENDS = "Too many codes were sent. Wait a few minutes, then try again.";
+
+/** What the person reads when a code is refused (Better Auth's emailOtp codes, and ours from lib/v2/auth.ts). */
+function codeMessage(e: unknown): string {
+  if (!(e instanceof AuthError)) return (e as Error).message;
+  if (e.code === "INVALID_OTP") return "That code didn't work. Check it and try again.";
+  if (e.code === "OTP_EXPIRED") return "That code has expired. Send a new one.";
+  if (e.code === "TOO_MANY_ATTEMPTS") return "Too many wrong tries. Send a new code.";
+  if (e.status === 429) return "Too many tries. Wait a minute, then try again.";
+  return e.message;
+}
+
+export default function SignIn({ next, options, email: email0, code: code0 }: { next: string; options: SignInOptions; email: string; code: string }) {
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Email code: a link from the message fills both fields and opens the code step; nothing signs in until Sign in.
+  const [email, setEmail] = useState(email0);
+  const [code, setCode] = useState(code0);
+  const [step, setStep] = useState<"email" | "code">(email0 && code0 ? "code" : "email");
+  const [sent, setSent] = useState(false);
+  // Test identity provider (ALIGN_TEST_IDP=1, Mode L only).
   const [mode, setMode] = useState<"in" | "up">("in");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [tEmail, setTEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
 
-  const social = async (provider: "google" | "github") => {
-    setError(null);
-    try {
-      const d = await post("/sign-in/social", { provider, callbackURL: next, errorCallbackURL: "/app/sign-in" });
-      if (d.url) window.location.href = d.url;
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  const local = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const run = async (fn: () => Promise<void>, msg: (e: unknown) => string = (e) => (e as Error).message) => {
     setBusy(true);
     setError(null);
     try {
-      if (mode === "up") await post("/sign-up/email", { name, email, password });
-      else await post("/sign-in/email", { email, password });
-      go(next);
-    } catch (err) {
-      setError((err as Error).message);
+      await fn();
+    } catch (e) {
+      setError(msg(e));
     } finally {
       setBusy(false);
     }
   };
 
-  const none = !options.google && !options.github && !options.testIdp;
+  const social = (provider: "google" | "github") =>
+    run(async () => {
+      const d = await post("/sign-in/social", { provider, callbackURL: next, errorCallbackURL: "/app/sign-in" });
+      if (d.url) window.location.href = d.url;
+    });
+
+  const sendCode = () =>
+    run(
+      async () => {
+        await post("/email-otp/send-verification-otp", { email: email.trim(), type: "sign-in" });
+        setSent(true);
+        setCode("");
+        setStep("code");
+      },
+      (e) => (e instanceof AuthError && e.status === 429 ? TOO_MANY_SENDS : (e as Error).message),
+    );
+
+  const signInWithCode = () =>
+    run(async () => {
+      await post("/sign-in/email-otp", { email: email.trim(), otp: code });
+      go(next);
+    }, codeMessage);
+
+  const local = (e: React.FormEvent) => {
+    e.preventDefault();
+    void run(async () => {
+      if (mode === "up") await post("/sign-up/email", { name, email: tEmail, password });
+      else await post("/sign-in/email", { email: tEmail, password });
+      go(next);
+    });
+  };
+
   return (
     <main className="grid min-h-screen place-items-center bg-[var(--al-bg)] p-6 text-zinc-800">
       <div className="al-in w-full max-w-[460px] rounded-[14px] border border-zinc-200 bg-white p-8">
         <h1 className="mb-1 font-display text-[34px] leading-none">Align</h1>
         <p className="mb-6 text-[16px] text-zinc-600">Sign in as yourself to see your workspaces, goals and shared sessions.</p>
-        <div className="flex flex-col gap-2">
-          {options.google && (
-            <Btn kind="secondary" onClick={() => social("google")}>
-              Continue with Google
+        {(options.google || options.github) && (
+          <div className="mb-5 flex flex-col gap-2">
+            {options.google && (
+              <Btn kind="secondary" onClick={() => void social("google")}>
+                Continue with Google
+              </Btn>
+            )}
+            {options.github && (
+              <Btn kind="secondary" onClick={() => void social("github")}>
+                Continue with GitHub
+              </Btn>
+            )}
+          </div>
+        )}
+        {options.email && step === "email" && (
+          <form
+            id="email-code"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void sendCode();
+            }}
+          >
+            <Field label="Email">
+              <Input type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" maxLength={320} />
+            </Field>
+            <Btn type="submit" disabled={busy || !email.trim()}>
+              Send code
             </Btn>
-          )}
-          {options.github && (
-            <Btn kind="secondary" onClick={() => social("github")}>
-              Continue with GitHub
-            </Btn>
-          )}
-        </div>
-        {none && <Note>No sign-in method is configured on this server.</Note>}
+          </form>
+        )}
+        {options.email && step === "code" && (
+          <form
+            id="email-code"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (/^\d{6}$/.test(code)) void signInWithCode();
+            }}
+          >
+            {sent && <Note>If this email can sign in to Align, a 6-digit code is on its way. It works for 5 minutes.</Note>}
+            <Field label="Email">
+              <Input type="email" name="email" value={email} readOnly autoComplete="email" />
+            </Field>
+            <Field label="Code">
+              <Input
+                name="code"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                maxLength={6}
+                required
+              />
+            </Field>
+            <div className="flex flex-wrap gap-2">
+              <Btn type="submit" disabled={busy || !/^\d{6}$/.test(code)}>
+                Sign in
+              </Btn>
+              <Btn kind="secondary" disabled={busy} onClick={() => void sendCode()}>
+                Send a new code
+              </Btn>
+              <Btn
+                kind="secondary"
+                disabled={busy}
+                onClick={() => {
+                  setStep("email");
+                  setSent(false);
+                  setCode("");
+                  setError(null);
+                }}
+              >
+                Use another email
+              </Btn>
+            </div>
+            {options.local && (
+              <Note>
+                On this machine the code is not emailed: it is printed in the terminal running Align and saved in <code>&lt;data&gt;/v2/sign-in.txt</code>. Run <code>npm run sign-in-link</code> to get
+                a new one.
+              </Note>
+            )}
+          </form>
+        )}
         {options.testIdp && (
-          <form onSubmit={local} className="mt-6 border-t border-zinc-200 pt-5">
+          <form id="test-idp" onSubmit={local} className="mt-6 border-t border-zinc-200 pt-5">
             <p className="al-lbl mb-2">Test sign-in (this machine only)</p>
             <div className="mb-3 flex gap-2 text-[14px]">
               <button type="button" className={mode === "in" ? "text-zinc-900 underline" : "text-zinc-500"} onClick={() => setMode("in")}>
@@ -80,7 +194,7 @@ export default function SignIn({ next, options }: { next: string; options: Optio
               </Field>
             )}
             <Field label="Email">
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+              <Input type="email" value={tEmail} onChange={(e) => setTEmail(e.target.value)} required autoComplete="username" />
             </Field>
             <Field label="Password" hint={mode === "up" ? "At least 8 characters" : undefined}>
               <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} autoComplete={mode === "up" ? "new-password" : "current-password"} />

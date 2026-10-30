@@ -3,7 +3,7 @@ import { config, hostAllowed } from "../config";
 import { HttpError } from "../errors";
 import { clientNet } from "../ratelimit";
 import { getAuth } from "./auth";
-import { publicOrigin } from "./config";
+import { publicOrigin, RECENT_SIGN_IN_MS } from "./config";
 import { deviceFromAccessToken, userById, type DevicePrincipal, type UserRef } from "./devices";
 import { V2Error, badRequest } from "./errors";
 import { ready } from "./init";
@@ -17,6 +17,8 @@ export interface WebPrincipal {
   kind: "web";
   user: UserRef;
   emailVerified: boolean;
+  /** When this Better Auth session was created, that is, when the person signed in. */
+  signedInAt: Date;
 }
 export type Principal = DevicePrincipal | WebPrincipal;
 
@@ -72,7 +74,21 @@ export async function webAuth(req: Request): Promise<WebPrincipal> {
   if (!s?.user) throw new V2Error(401, "unauthorized", "Sign in first");
   const u = userById(s.user.id);
   if (!u) throw new V2Error(401, "unauthorized", "Sign in first");
-  return { kind: "web", user: { id: u.id, name: u.name, email: u.email }, emailVerified: u.emailVerified };
+  return { kind: "web", user: { id: u.id, name: u.name, email: u.email }, emailVerified: u.emailVerified, signedInAt: new Date(s.session.createdAt) };
+}
+
+/** True when a sign-in at `signedInAt` is recent enough to approve a device or an MCP app (15 minutes). */
+export function isRecentSignIn(signedInAt: Date | string, now = Date.now()): boolean {
+  const t = new Date(signedInAt).getTime();
+  return Number.isFinite(t) && now - t <= RECENT_SIGN_IN_MS;
+}
+
+/** Approving a device (and an MCP app at /oauth/authorize) needs a recent sign-in: else 403 reauth_required, and the
+ *  page asks the person to sign in again. */
+export function requireRecentSignIn(p: WebPrincipal) {
+  if (!isRecentSignIn(p.signedInAt)) {
+    throw new V2Error(403, "reauth_required", "Sign in again to approve. Approving needs a sign-in from the last 15 minutes.");
+  }
 }
 
 /** Routes open to both: an Authorization header means the device path (with its refusals), else the cookie. */
