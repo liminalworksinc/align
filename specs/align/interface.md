@@ -28,6 +28,7 @@ current state.
 | `/setup` | Set up your own conflict | Leadership of the demo store (local only) | Replace the demo store with a custom two-team scenario |
 | `/new` | Create a workspace | Anyone (signup code if required) | Create a separate workspace and get its three passcodes |
 | `/oauth/authorize` | Connect <app> to Align | A person connecting an AI app | Grant an AI app read-only access to one workspace as one role |
+| `/app`, `/app/w/<ws>/…` | Goal sessions web app (only with `ALIGN_GOAL_SESSIONS=1`) | A person signed in as themselves | Workspaces, goals, alignments, people, shared sessions, usage and devices |
 | (any) | Error page | Anyone | Plain error with Try again |
 
 Views inside the shell (client state, no URL change):
@@ -40,7 +41,7 @@ Views inside the shell (client state, no URL change):
 | Scenario Studio | Scenario Studio | All (Northstar only in the nav) | Compare recorded baseline and candidate sandbox runs |
 | Evidence | (via Scenario Studio, Inspector, plan test) | All (sandbox scenarios) | Decision chain, Sparta runs, audit log, timer |
 | Decisions | Decisions | All | Open, accepted and declined proposals; opens the record |
-| Decision / Next decision | (via Decisions, Goals, Your turn) | All | Next decision, or the decision record once agreed |
+| Decision / Next decision | (via Decisions, Goals, Your turn or a ratified proposal; every one of these controls exists only once an agreement does) | All | The decision record once agreed; otherwise the next decision |
 | Work | Work | All | Work still on the old plan, goal cascade, AI-session lanes (Northstar) |
 | Proposals | (via Your turn, + New conflict, Goals) | All | Inbox, composer and review thread |
 | Inspector | Right rail | All | Details of the selected goal, dependency, work item, run or proposal |
@@ -57,7 +58,8 @@ the company and timeframe, a status badge, reset controls, the person, **Switch 
 **Sign out**. A nav item stays highlighted for its sub-views (Your turn for Proposals, Goals for the
 team view, Scenario Studio for Evidence, Decisions for the record). Opening any view closes an open
 drawer. On a hosted server (`HOSTED=1`), `/` and `/setup` redirect to `/new`, and only `/new`,
-`/w/<id>`, the OAuth pages and their APIs exist.
+`/w/<id>`, the OAuth pages and their APIs exist (plus the goal sessions pages under `/app` and
+`/api/v2` when `ALIGN_GOAL_SESSIONS=1`; with the flag unset those answer 404 in every mode).
 
 ### Requirement: Northstar sign-in
 
@@ -193,7 +195,8 @@ SHALL be hidden entirely in Northstar.
 ### Requirement: Switch team, sign out and reset
 
 The header SHALL let a person sign out, let a solo tester switch team in custom scenarios without
-bypassing passcodes, and let leadership restart a scenario after a confirming second click.
+bypassing passcodes, and offer a restart that needs a confirming second click: to a workspace's
+leadership always, and in the demo store only with `?ops` in the URL.
 
 #### Scenario: Switch team
 
@@ -203,7 +206,12 @@ bypassing passcodes, and let leadership restart a scenario after a confirming se
 #### Scenario: Restart
 
 - **WHEN** workspace leadership presses **Restart this scenario** and then "Click again to restart this scenario" within 4 seconds
-- **THEN** the app calls `POST /api/reset` with `{"confirm":"reset"}`, clears selection and attached test results and returns to Your turn; in Northstar the same control reads **Start the demo over** and appears only with `?ops` in the URL
+- **THEN** the app calls `POST /api/reset` with `{"confirm":"reset"}`, clears selection and attached test results and returns to Your turn
+
+#### Scenario: Demo store restart
+
+- **WHEN** the URL of `/` carries `?ops`
+- **THEN** in Northstar every signed-in role sees **Start the demo over** ("Click again to reset" on the first click), and in a `/setup` scenario at `/` only leadership sees **Back to the Northstar demo** ("Click again to go back to the Northstar demo"); without `?ops` neither control is shown
 
 ### Requirement: Your turn view
 
@@ -340,7 +348,7 @@ send it with `POST /api/proposals`.
 #### Scenario: Missing fields or tests
 
 - **WHEN** the new target or the commitment is empty, or (Northstar) no test results are attached
-- **THEN** the send button is disabled with "▲ Write the new target" / "▲ Say what <team> will do in return"; without attachments an amber "No test results added" card warns the proposal will show as not tested and offers **Test which plan follows the new priority**
+- **THEN** the send button is disabled, with "▲ Say what <team> will do in return" and (custom only) "▲ Write the new target"; without attachments an amber "No test results added" card warns the proposal will show as not tested and offers **Test which plan follows the new priority**
 
 #### Scenario: Defaults
 
@@ -417,7 +425,7 @@ with a one-click switch for a solo tester; Northstar shows neither.
 ### Requirement: Decisions list
 
 The Decisions view SHALL list open proposals, acceptances and declined proposals newest first, with
-All / Open / Accepted / Declined filters.
+All / Open / Accepted filters and a Declined filter once a declined proposal exists.
 
 #### Scenario: Open a decision
 
@@ -427,7 +435,9 @@ All / Open / Accepted / Declined filters.
 ### Requirement: Next decision view
 
 Before agreement, the decision view SHALL state the conflict and who owns it, and offer the asking
-team the step to propose.
+team the step to propose. No control opens the decision view before an agreement exists, so this
+content shows only when the view is already open and the agreement goes away (for example after a
+restart from another browser).
 
 #### Scenario: Northstar open decision
 
@@ -541,7 +551,7 @@ dialog backed by `GET /api/workspaces/connections`.
 
 #### Scenario: Disconnect
 
-- **WHEN** a person presses **Disconnect** on an app connected as their own team, or leadership presses **Disconnect all**
+- **WHEN** a person presses **Disconnect** on an app connected as their own team (leadership sees **Disconnect** on every app), or leadership presses **Disconnect all**
 - **THEN** the app calls `DELETE /api/workspaces/connections` (with the app id, or none for all); apps that have not read since the plan changed show "▲ Hasn’t read the plan since it changed…"
 
 ### Requirement: Setup page
@@ -592,7 +602,7 @@ When the server enables it, the `/new` page SHALL offer an AI interview that fil
 #### Scenario: Interviewer fails
 
 - **WHEN** the request fails
-- **THEN** the message is returned to the input and the panel shows "The interviewer didn't answer. Try again, or fill in the form below." (or "Enter your signup code above first, then try again." on 403)
+- **THEN** the message is returned to the input and the panel shows the server's error, or "The interviewer didn't answer. Try again, or fill in the form below." when there is none or the network failed ("Enter your signup code above first, then try again." on 403)
 
 ### Requirement: OAuth consent page
 
@@ -631,7 +641,28 @@ proof of success.
 #### Scenario: Status labels
 
 - **WHEN** a code such as `PENDING_SECURITY`, `COUNTERED`, `RATIFIED`, `STALE` or `UNKNOWN` is shown
-- **THEN** it reads "Waiting for Security", "Security asked for changes", "Approved" (custom: "Agreed, launch pending"), "Needs retest", "Unknown"; green is used only for passing sandbox results, and records state "Whether the beta launch succeeds isn't known yet" or "Agreement between two teams is not approval to launch."
+- **THEN** it reads "Waiting for Security", "Security asked for changes", "Approved" (custom: "Agreed, launch pending", or "Agreed, launch approved" once leadership approves the launch), "Needs retest", "Unknown"; green is used only for passing sandbox results, and records state "Whether the beta launch succeeds isn't known yet" or "Agreement between two teams is not approval to launch."
+
+### Requirement: Goal sessions web app
+
+When `ALIGN_GOAL_SESSIONS=1`, the pages under `/app` SHALL let a person signed in as themselves (not by
+team passcode) manage goal-sessions workspaces, and SHALL send a signed-out visitor to
+`/app/sign-in?next=<page>`, returning only to `/app` paths after sign-in.
+
+#### Scenario: Sign in
+
+- **WHEN** a signed-out person opens any `/app` page
+- **THEN** the sign-in page offers **Continue with Google** / **Continue with GitHub** where configured, an email "Test sign-in (this machine only)" with **Create a test account** only when the test identity provider is enabled, and "No sign-in method is configured on this server." when none is
+
+#### Scenario: Approve a device
+
+- **WHEN** a person enters the code that `align login` printed at `/app/device`, presses **Look up**, ticks at least one workspace and presses **Approve**
+- **THEN** the page calls `GET /api/v2/device/requests/<code>` and then `POST /api/v2/device/approve` with the code and `workspace_ids`, and says "<device> is connected. You can close this page."; an unknown code shows "No device is waiting for that code. Check it, or run align login again." and **Deny** calls `POST /api/v2/device/deny`
+
+#### Scenario: Workspace pages
+
+- **WHEN** a member opens `/app/w/<ws>`
+- **THEN** the tabs Goals, People, Sessions, Alignments and Spend show: goals (with **Create goal** for any role but viewer), members, invites (owners only) and pods, the person's own shared sessions with **Stop agent** / **Resume agent**, **Stop sharing** and **Delete shared history** (owners also see everyone's sessions with stop and resume), alignments under "Waiting on you", "Your requests" and "Others you are part of" with only the actions the server allows (Approve, Suggest a change, Accept the change, Decline, Withdraw, Revoke), and usage by goal; `/app` lists the person's workspaces and creates one, and `/app/devices` lists devices with **Revoke**
 
 ## Open questions
 
@@ -639,7 +670,6 @@ proof of success.
 - The team view (`TeamLens`, "Team view") is routed under the Goals nav item, but no control in the current code navigates to it. Is it reachable?
 - The Inspector and team view label the viewer's own goal "Your goal · you can edit", but no screen offers a way to edit one's own goal directly. Is that wording intended?
 - `docs/DEMO_SCRIPT.md` names labels the current code does not show, such as a "How the goals connect" screen heading (the view is titled "Goals"), a "Waiting for your decision" badge (present only in the unrendered `TodayView`), and "Test which plan follows the new priority" inside the brief, which now reads **Test in Scenario Studio**. Which labels should the spec treat as authoritative?
-- The goal-sessions web app under `/app` (enabled by `ALIGN_GOAL_SESSIONS=1`: sign-in, devices, invites, alignments, people, sessions, spend) is outside this part's file list and is not specified here. Which part should cover it?
 - The `/w/<id>` slug is called "a convenience, not access control". Should the interface spec say anything about what an unauthenticated visitor to `/w/<id>` can see beyond the login-info names?
 
 ## Sources
@@ -693,3 +723,14 @@ proof of success.
 - `components/v6/record.tsx`
 - `components/v6/kit.tsx`
 - `components/v6/thread.tsx`
+- `app/app/_ui/server.ts`
+- `app/app/_ui/kit.tsx`
+- `app/app/view.tsx`
+- `app/app/sign-in/view.tsx`
+- `app/app/device/view.tsx`
+- `app/app/devices/view.tsx`
+- `app/app/w/[ws]/view.tsx`
+- `app/app/w/[ws]/people/view.tsx`
+- `app/app/w/[ws]/sessions/view.tsx`
+- `app/app/w/[ws]/alignments/view.tsx`
+- `app/app/w/[ws]/spend/view.tsx`

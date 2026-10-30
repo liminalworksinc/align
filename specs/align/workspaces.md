@@ -16,12 +16,14 @@ optional **intake interview** lets Claude draft the setup form before the person
 The server runs in one of two modes. **Mode L** (default) answers only to loopback hosts. **Hosted** (`HOSTED=1`)
 serves custom workspaces only behind an HTTPS edge, refuses to start with an unsafe environment, and closes after
 `ALIGN_DELETE_BY`. A separate **goal sessions** surface (`/api/v2/*`, behind `ALIGN_GOAL_SESSIONS=1`) has its own
-user accounts (Better Auth), workspaces with owner/member/viewer roles, paired devices and shared sessions.
+user accounts (Better Auth), workspaces with owner/member/viewer roles and pods, goals with immutable versions,
+alignment requests, paired devices, shared sessions, spend and in-flight activity.
 
 **Workspace lifecycle.** Create (`POST /api/workspaces`, passcodes shown once) → sign in per role
 (`POST /api/session`) → work (proposals, goals, connected apps, agents) → optional Restart by leadership (rebuilds
 from the saved setup, revokes every agent token and connected app) → delete by the operator (`ws-admin`), after which
-every request for it is 404.
+its sign-in screen and store answer 404 `This workspace no longer exists` and its signed-in sessions get 401
+`Your session ended. Sign in again.`
 
 **Captured session lifecycle.** Leadership grants capture consent for one harness + repo basename (Northstar:
 `POST /api/sessions/consent`; custom workspace: minting an agent token) → local hooks post events to
@@ -51,8 +53,8 @@ at most 64 KB.
 
 #### Scenario: Wrong content type or origin
 
-- **WHEN** `POST /api/workspaces` is sent without `content-type: application/json`, or (Mode L) with a non-loopback `Host`, or with an `Origin` whose host differs from `Host` (hosted: an `Origin` not exactly `https://<Host>`, or none)
-- **THEN** the server responds 415 `Send this as application/json` for the content type, and 403 for the host or origin
+- **WHEN** `POST /api/workspaces` is sent without `content-type: application/json`, or with an `Origin` whose `host:port` differs from `Host` (hosted: an `Origin` not exactly `https://<Host>`, or none)
+- **THEN** the server responds 415 `Send this as application/json` for the content type, and 403 `This request came from another site` for the origin; a `Host` outside the allowed hosts never reaches the route, because the request edge already answers 421 (see Local-only guards and Hosted mode gate)
 
 #### Scenario: Oversized setup
 
@@ -478,12 +480,27 @@ writes, including writes from another localhost port.
 - **WHEN** a cookie-authenticated write arrives with `Origin: http://localhost:5555` while `Host` is `localhost:3100`
 - **THEN** the server responds 403 `This request came from another site`
 
+### Requirement: Current session probe
+
+The server SHALL answer `GET /api/session` without requiring a session: for a custom-workspace session cookie it SHALL return `{actor, name, sid, workspace}`, where `name` is the lead named for the actor's team at setup (falling back to the actor); otherwise it SHALL return `{actor, name, sid}` for a Northstar session, with all three `null` when the caller is signed out.
+
+#### Scenario: Signed out
+
+- **WHEN** a browser with no session cookie calls `GET /api/session`
+- **THEN** the response is `{"actor": null, "name": null, "sid": null}`
+
+#### Scenario: Custom workspace session
+
+- **WHEN** a browser signed in to workspace `w_…` as `leadership` calls `GET /api/session`
+- **THEN** the response includes `workspace` equal to that id and `name` equal to the leadership lead named at setup
+
 ### Requirement: Hosted mode gate
 
 The server SHALL, when `HOSTED=1`, refuse to start with any problem from its environment check, and at the request
 edge answer 503 when misconfigured, 410 after `ALIGN_DELETE_BY` has ended (08:00 UTC the next day), 421 for a host not
 in `ALIGN_HOSTS`, 403 without `X-Forwarded-Proto: https` or `Fly-Client-IP`, 307 to `/new` for `/` and `/setup`, and 404
-for every path outside its tester allowlist (capture and agent tokens included).
+for every path outside its tester allowlist (capture and agent tokens included), except `/app*` and `/api/v2/*`, which
+pass the same edge checks and are served when `ALIGN_GOAL_SESSIONS=1`.
 
 #### Scenario: Capture when hosted
 
@@ -513,7 +530,7 @@ client-supplied id, and keep Northstar and each custom workspace in separate sto
 ### Requirement: Workspace storage bounds
 
 The server SHALL cap custom-workspace write bodies at 64 KB with strings of at most 300 characters (4,000 for `text`
-and `plan_text`), reject `__proto__`, `constructor` and `prototype` keys, refuse a state larger than 1 MB, and keep at
+and `plan_text`, 1,000 for a counter's `conditions`), reject `__proto__`, `constructor` and `prototype` keys, refuse a state larger than 1 MB, and keep at
 most 1,000 audit rows in state with older rows in at most two archive files of 1 MB.
 
 #### Scenario: Full workspace
@@ -523,8 +540,24 @@ most 1,000 audit rows in state with older rows in at most two archive files of 1
 
 #### Scenario: Deleted workspace
 
-- **WHEN** any request targets a workspace whose directory has been renamed aside or removed
-- **THEN** the server responds 404 `This workspace no longer exists` and never recreates the directory
+- **WHEN** a request reaches the store or sign-in screen of a workspace whose directory has been renamed aside or removed (for example `GET /api/workspaces/{id}/login-info`, or a write racing the delete)
+- **THEN** the server responds 404 `This workspace no longer exists` and never recreates the directory, while a request carrying that workspace's session cookie gets 401 `Your session ended. Sign in again.` and its agent tokens get 401 `This agent token is no longer valid`
+
+### Requirement: Operator workspace deletion
+
+The operator tool `node scripts/ws-admin.mjs` SHALL, with an absolute `ALIGN_DATA_DIR`, list workspaces or delete them
+the way the server does (rename aside to `.deleting-<id>`, remove, append a `deleted` row with `by:"ws-admin"` to
+`_events.jsonl`), and is the only way a custom workspace is deleted.
+
+#### Scenario: Listing and deleting
+
+- **WHEN** the operator runs `list`, `delete <id>`, or `delete --all --yes`
+- **THEN** `list` prints each id with its created and last-change times and name followed by `<n> workspace(s)`; `delete <id>` prints `deleted <id>`; `delete --all --yes` deletes every workspace, removes `_oauth_clients.json` and any `.tmp-`/`.deleting-` leftovers, and works on a closed hosted server
+
+#### Scenario: Refused invocations
+
+- **WHEN** `ALIGN_DATA_DIR` is unset or relative, the id is not `w_` plus 12 base32 characters, `delete --all` lacks `--yes`, or the command is unknown
+- **THEN** the tool exits 2 with a message (the usage line `usage: node scripts/ws-admin.mjs list | delete <id> | delete --all --yes` for an unknown command); a well-formed id with no workspace exits 1 `ws-admin: no workspace <id>`
 
 ### Requirement: Goal sessions credentials
 
@@ -555,7 +588,12 @@ The server SHALL let a signed-in user create a goal-sessions workspace on `POST 
 #### Scenario: Accepting an invite
 
 - **WHEN** a signed-in user POSTs `/api/v2/invites/{token}/accept` for an unexpired (7-day) invite
-- **THEN** they join with the invited role if their email equals the invited one (else 403 `email_mismatch`; hosted also requires a provider-verified email, else 403 `email_unverified`; already a member is 409 `already_member`)
+- **THEN** they join with the invited role and the response is `{workspace_id, role}` if their email equals the invited one (else 403 `email_mismatch`; hosted also requires a provider-verified email, else 403 `email_unverified`; already a member is 409 `already_member`); an unknown, accepted or expired token is 404 `not_found`
+
+#### Scenario: Who am I
+
+- **WHEN** a device token or a browser session calls `GET /api/v2/me`
+- **THEN** the response is `{user:{id,name,email}, device, workspaces}`, where `device` is `{id,name}` only for a device token, and `workspaces` lists the caller's memberships with role and pods (for a device, only the workspaces granted to it while the user is still a member)
 
 ### Requirement: Device pairing and shared sessions
 
@@ -572,10 +610,156 @@ device that shared them, within the workspaces granted to it.
 - **WHEN** a device sends `PUT /api/v2/workspaces/{ws}/sessions/{key}` for a key shared by another user or device, or for a workspace it was not granted
 - **THEN** the server responds 404; usage batches over 500 rows get 413 `too_many_rows`, and bodies over 256 KB get 413 `too_large`
 
+### Requirement: Goal sessions device approval and revocation
+
+The server SHALL let a signed-in user look up a pending pairing by its user code on
+`GET /api/v2/device/requests/{code}`, approve it for workspaces they belong to on
+`POST /api/v2/device/approve {user_code, workspace_ids}` or deny it on `POST /api/v2/device/deny {user_code}`, rotate
+refresh tokens on `POST /api/v2/device/refresh` only with an Ed25519 signature from the paired key, and revoke a
+device on `DELETE /api/v2/devices/self` (its own token) or `DELETE /api/v2/devices/{id}` (the owner's browser session).
+
+#### Scenario: Approving a code
+
+- **WHEN** a signed-in user approves a pending, unexpired (10-minute) code
+- **THEN** the response is `{state:"approved"}` and the device's next token poll receives its tokens with grants for those workspaces; an empty `workspace_ids` is 400 `Choose at least one workspace for this device`, a workspace the user is not a member of or an unknown, expired or already decided code is 404, and more than 20 lookups or decisions per user in 10 minutes is 429 `rate_limited`
+
+#### Scenario: Refresh token reuse
+
+- **WHEN** a device presents, with a valid signature, a refresh token that was already rotated
+- **THEN** the server responds 401 `invalid_grant` and revokes the whole device (all its tokens deleted); a bad signature, a timestamp more than 5 minutes off, an expired token or a revoked device also get 401 `invalid_grant`
+
+#### Scenario: Revoking a device
+
+- **WHEN** a device calls `DELETE /api/v2/devices/self`, or its owner calls `DELETE /api/v2/devices/{id}` from the browser
+- **THEN** the server responds 204 and every token of that device stops working; another user's device id is 404
+
+### Requirement: Goal sessions access rules
+
+The server SHALL decide every goal-sessions action from the caller's workspace role (`owner`, `member`, `viewer`) and
+pod role (`lead`, `member`), answering 404 for anything the caller may not see and 403 with a code for a visible
+action the role does not allow.
+
+#### Scenario: Hidden versus refused
+
+- **WHEN** a non-member (or a device without a grant) requests a workspace, or a member requests another person's `private` goal or a `pod` goal of a pod they are not in (workspace owners read pod goals but never another person's private goals)
+- **THEN** the server responds 404 `not_found`
+
+#### Scenario: Role refusals
+
+- **WHEN** a viewer attempts any change, a member attempts an owner-only action (invites, pods), a non-owner edits a goal, or a member who is neither workspace owner nor pod lead changes pod membership
+- **THEN** the server responds 403 `read_only`, `owner_only`, `not_goal_owner` or `not_pod_lead` respectively
+
+### Requirement: Goal sessions invites and pods
+
+The server SHALL let workspace owners create invites on `POST /api/v2/workspaces/{ws}/invites {email, role}`, list
+them on `GET`, withdraw an unaccepted one on `DELETE .../invites/{id}`, and create pods on `POST .../pods {name}`, and
+let owners or the pod's lead add, change or remove pod members.
+
+#### Scenario: Creating an invite
+
+- **WHEN** a workspace owner creates an invite for a new email
+- **THEN** the response is 201 `{id, email, role, path:"/app/invite/<token>", token}` (Align sends no email; the invite lasts 7 days), an existing member's email is 409 `already_member`, and more than 50 invites per workspace per hour is 429 `rate_limited`
+
+#### Scenario: Previewing an invite
+
+- **WHEN** a signed-in user calls `GET /api/v2/invites/{token}`
+- **THEN** the response is `{workspace:{id,name}, role, email_matches, invited_email}`, or 404 for an unknown, accepted or expired token
+
+#### Scenario: Pod members
+
+- **WHEN** an owner or the pod's lead POSTs `{user_id, role:"lead"|"member"}` to `.../pods/{pod}/members` or DELETEs `.../pods/{pod}/members/{user}`
+- **THEN** the member is set (`{pod_id, user_id, role}`) or removed (204); a user who is not a workspace member, an unknown pod or a missing pod member is 404
+
+### Requirement: Goal sessions goals
+
+The server SHALL serve the goals a caller may read on `GET /api/v2/workspaces/{ws}/goals` (device token or browser
+session) as `{version, goals}` with an `ETag`, create a goal at version 1 owned by the caller on `POST` (browser,
+members and owners), and record each change as a new immutable version on `POST .../goals/{goal}/versions` by the
+goal's owner only.
+
+#### Scenario: Conditional feed
+
+- **WHEN** a client sends `If-None-Match` equal to the current feed `ETag`
+- **THEN** the server responds 304 with no body
+
+#### Scenario: Creating a goal
+
+- **WHEN** a member POSTs `{title, measures?, visibility?, pod_id?, anchors?, depends_on?}`
+- **THEN** the response is 201 with the goal (`visibility` defaults to `workspace`); a `pod` goal without a pod is 400, a pod the caller is not in is 403 `not_in_pod`, and a workspace already holding 1,000 goals is 409 `too_many_goals`
+
+#### Scenario: New version
+
+- **WHEN** the owner POSTs a change to `.../versions`
+- **THEN** the response is 201 with the goal at the next version and `goal_version` directives are written for its sessions; a `version` other than the current one is 409 `stale_version`, and a body that changes nothing is 409 `no_change`
+
+### Requirement: Goal sessions alignments
+
+The server SHALL let a member or owner request an alignment toward a goal they can see on
+`POST /api/v2/workspaces/{ws}/alignments {target_goal_id, source_goal_id?, choice, session_keys, note?}` with
+`choice` `contribution` or `work_toward`, require the approval of the target goal's owner (and, for `work_toward`,
+of each listed session's owner and of the owner of any goal the work leaves when that is not the requester), approve
+it once every required approver of the current revision has, and accept `approve`, `counter`, `accept_counter`,
+`reject`, `withdraw` and `revoke` on `POST .../alignments/{id}/{action}` from the people involved.
+
+#### Scenario: Approving work toward a goal
+
+- **WHEN** the last required approver approves a `work_toward` request at its current `revision`
+- **THEN** the alignment becomes `approved`, each listed session's governing goal becomes the target and each gets one `binding_changed` directive; a stale `revision` is 409 `stale_revision`, a non-approver 403 `not_an_approver`, a request not `pending` 409 `wrong_state`, and a person not involved 404
+
+#### Scenario: Invalid request
+
+- **WHEN** a request lists another person's or an unknown session, a stopped session, an inactive target goal, no session for `work_toward`, or a session already governed through another alignment
+- **THEN** the server responds 404, 409 `sharing_stopped`, 409 `goal_not_active`, 400, or 409 `already_governed` respectively
+
+#### Scenario: Revoking
+
+- **WHEN** the requester or an approver revokes an approved `work_toward` alignment
+- **THEN** it becomes `revoked`, its sessions lose the governing goal, and sessions whose open binding existed only through it end that binding, become `suspended` and get a `binding_suspended` directive
+
+### Requirement: Goal sessions shared session lifecycle
+
+The server SHALL let the sharing device open binding epochs on `POST .../sessions/{key}/epochs`, let the session's
+owner stop sharing (`POST .../sessions/{key}/stop-sharing`) or hard-delete the shared history (`DELETE
+.../sessions/{key}`), and list sessions on `GET /api/v2/workspaces/{ws}/sessions` as `{mine, all}`, where `all`
+(every non-stopped session's alias, owner and state, never title or usage) is `null` except for workspace owners.
+
+#### Scenario: Sharing and binding
+
+- **WHEN** a device PUTs `{harness, repo_key, repo_alias?, started_at, title?}` and then POSTs an epoch `{epoch_id:"ep_…", goal_id|null, starts_at, root_turn?, cause:"manual"|"directive:<id>"}`
+- **THEN** the PUT returns `{session_key, state, current_epoch}` and the epoch closes the previous one at `starts_at`; the same key with another harness or repo is 409 `session_conflict`, a reused epoch id with other values 409 `epoch_conflict`, an overlapping start 409 `epoch_overlap`, a goal the caller has no authority to bind 403 `alignment_required`, and a stopped session 409 `sharing_stopped`
+
+#### Scenario: Usage batch
+
+- **WHEN** a device POSTs `{rows}` to `.../sessions/{key}/usage`
+- **THEN** the response is `{accepted, duplicates, conflicts}`, where a repeated `request_key` with identical values is a duplicate and one with other values, or a row for an unknown epoch, is a conflict and never overwrites
+
+### Requirement: Goal sessions spend
+
+The server SHALL report token usage and estimated list cost on
+`GET /api/v2/workspaces/{ws}/spend?by=goal|pod|session&from&to` to any workspace member (viewers included), counting each request under the goal of
+the epoch it was uploaded with and never naming a goal or session the caller may not see.
+
+#### Scenario: Spend report
+
+- **WHEN** a member requests spend by goal
+- **THEN** the response is `{by, from, to, note, total, unallocated, unpriced_requests, rows}`, usage in epochs without a goal is `unallocated`, usage on goals the caller cannot read is one `Private goals` row, and `by=session` names only the caller's own sessions with everyone else's in one `Other people's sessions` row; another `by` or `from` not before `to` is 400
+
+### Requirement: Goal sessions activity signals
+
+The server SHALL accept in-flight work signals from a device on `POST /api/v2/workspaces/{ws}/activity {items}` (at
+most 200 items and 128 KB; kinds `edit`, `commit`, `task`, `claim`) and serve unexpired ones on
+`GET .../activity?after=<seq>` (at most 500, oldest first) only for goals the caller may read, and for unbound sessions
+only the caller's own.
+
+#### Scenario: Posting activity
+
+- **WHEN** a device posts items for its own shared sessions
+- **THEN** the response is `{accepted}`; items for sessions it did not share or that are not `shared`, dated more than 5 minutes ahead or more than 24 hours back, are skipped; an invalid kind, `repo_id`, `path_hash` or absolute path is 400; items expire after 24 hours (claims after 1 hour)
+
 ## Open questions
 
 - The interview's per-code bucket hashes the code as given; with open create (Mode L) every client shares the bucket for the empty code, and with Mode L's shared `ALIGN_SIGNUP_CODE` all holders share one 60-per-day ceiling. Is that intended?
-- Custom workspaces have no route to list their captured sessions or consents, or to delete one session. `GET /api/sessions`, `GET /api/sessions/consent` and `DELETE /api/sessions/{id}` are Northstar-only, so only `DELETE /api/workspaces/agent-token` and Restart remove captured data. Is per-session deletion meant to exist for workspaces?
+- A custom workspace sees its captured sessions, mappings and capture consents only through the signed-in `GET /api/state` view; `GET /api/sessions`, `GET /api/sessions/consent` and `DELETE /api/sessions/{id}` are Northstar-only, so only `DELETE /api/workspaces/agent-token` and Restart remove captured data. Is per-session deletion meant to exist for workspaces?
 - Capture consent is keyed by the repo folder basename, so any folder with that name shares one consent (documented in CAPTURE_CONSENT.md). Also, `POST /api/sessions/consent` trims `repo` but `POST /api/workspaces/agent-token` does not. Should both be normalized the same way?
 - `GET /api/sessions` accepts any loopback origin on any port (regex check), while `POST /api/sessions/events` requires this server's exact host and port. The server never reads `ALIGN_CAPTURE` in Mode L; only the hook script does. Are these differences intended?
 - The hosted close time is a fixed `ALIGN_DELETE_BY` + 32 h UTC: midnight Pacific in standard time but 1 AM during daylight time. The v2 client key does not collapse IPv6 to /64, unlike `clientOf` in `lib/ratelimit.ts`. Should either be aligned?
@@ -620,6 +804,11 @@ device that shared them, within the workspaces granted to it.
 - lib/v2/sessions.ts
 - lib/v2/devices.ts
 - lib/v2/activity.ts
+- lib/v2/goals.ts
+- lib/v2/alignments.ts
+- lib/v2/spend.ts
+- lib/flow.ts (viewFor only)
+- scripts/ws-admin.mjs
 - app/api/workspaces/route.ts
 - app/api/workspaces/[id]/login-info/route.ts
 - app/api/workspaces/agent-token/route.ts
@@ -642,6 +831,30 @@ device that shared them, within the workspaces granted to it.
 - app/api/v2/invites/[token]/accept/route.ts
 - app/api/v2/device/authorize/route.ts
 - app/api/v2/device/token/route.ts
+- app/api/v2/device/approve/route.ts
+- app/api/v2/device/deny/route.ts
+- app/api/v2/device/refresh/route.ts
+- app/api/v2/device/requests/[code]/route.ts
+- app/api/v2/devices/route.ts
+- app/api/v2/devices/self/route.ts
+- app/api/v2/devices/[id]/route.ts
+- app/api/v2/me/route.ts
+- app/api/v2/invites/[token]/route.ts
+- app/api/v2/workspaces/[ws]/route.ts
+- app/api/v2/workspaces/[ws]/invites/route.ts
+- app/api/v2/workspaces/[ws]/invites/[id]/route.ts
+- app/api/v2/workspaces/[ws]/pods/route.ts
+- app/api/v2/workspaces/[ws]/pods/[pod]/members/route.ts
+- app/api/v2/workspaces/[ws]/pods/[pod]/members/[user]/route.ts
+- app/api/v2/workspaces/[ws]/goals/route.ts
+- app/api/v2/workspaces/[ws]/goals/[goal]/versions/route.ts
+- app/api/v2/workspaces/[ws]/alignments/route.ts
+- app/api/v2/workspaces/[ws]/alignments/[id]/[action]/route.ts
+- app/api/v2/workspaces/[ws]/sessions/route.ts
+- app/api/v2/workspaces/[ws]/sessions/[key]/epochs/route.ts
+- app/api/v2/workspaces/[ws]/sessions/[key]/stop-sharing/route.ts
+- app/api/v2/workspaces/[ws]/spend/route.ts
+- app/api/v2/workspaces/[ws]/activity/route.ts
 - app/new/page.tsx
 - app/new/NewWorkspace.tsx
 - app/setup/page.tsx

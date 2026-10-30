@@ -40,7 +40,6 @@ screens), not the framework, hosting, or language choices.
 - `goals-and-proposals` — goals, dependencies, proposals and the approval flow
 - `directives` — pushes from Align to running agents and their acknowledgement
 - `mcp` — the read-only MCP server and its OAuth authorization
-- `workspaces` — workspace setup, onboarding interview, access and session capture
+- `workspaces` — workspace setup, onboarding interview, access, session capture, and the goal sessions (v2) API
 - `local-agent` — the `align` CLI, its hooks, the one-pass sync and local metering
-- `interface` — the screens people use
-- `goal-sessions` — the opt-in v2 server: accounts, goals and alignments, devices, shared sessions, usage and spend (`ALIGN_GOAL_SESSIONS=1`)
+- `interface` — the screens people use, including the goal sessions web app under `/app`
