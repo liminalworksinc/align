@@ -407,7 +407,7 @@ The person SHALL choose either the custom workspace this browser is signed in to
 
 ### Requirement: Approval endpoint
 
-The authorization server SHALL accept consent answers at `POST /api/oauth/approve`. The request must be `application/json` (otherwise `415`). In Mode L it must have a loopback Host and, if it sends an `Origin`, one whose host equals the Host header. When hosted it must have an allowed Host and an `Origin` that is exactly `https://<host>`; a missing `Origin` is refused. Either failure returns `403`. The body must be at most 16 KB (otherwise `413`). The endpoint SHALL re-run the authorization request checks on `params`. The outcomes are:
+The authorization server SHALL accept consent answers at `POST /api/oauth/approve`. The request must be `application/json` (otherwise `415`). In Mode L, if it sends an `Origin`, that Origin's host must equal the Host header. When hosted it must carry an `Origin` that is exactly `https://<host>`; a missing `Origin` is refused. Either failure returns `403`. A non-loopback Host (Mode L) or a host outside the allowed list (hosted) never reaches the endpoint, because the request edge answers `421`. The body must be at most 16 KB (otherwise `413`). The endpoint SHALL re-run the authorization request checks on `params`. The outcomes are:
 
 - A fatal check failure returns `400 {"error": <message>}`.
 - A non-fatal check failure returns `200 {"redirect": <error redirect>}`.

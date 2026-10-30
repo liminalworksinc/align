@@ -230,7 +230,7 @@ The server SHALL, when session capture records a tool name matching `align_get_a
 
 ### Requirement: Watcher wake contract
 
-The watcher hook SHALL run only when the hook input has a `session_id` and the repo opted in (`ALIGN_CAPTURE=1` or a `.claude/settings.json` within 8 parent directories mentioning `align-watch`), hold one lock per session, connect to the stream for `claude-code:<session_id>` and fall back to polling `GET /api/directives` every 2 seconds for up to 20 seconds before reconnecting, for a window of `ALIGN_WATCH_WINDOW_MS` (default 55 minutes); on the first `directive` it SHALL post the ack (3-second timeout, waking the agent even if the ack fails), write the directive `text` to stderr and exit with code 2 so Claude Code wakes the session with that text.
+The watcher hook SHALL run only when the hook input has a `session_id` and the repo opted in (`ALIGN_CAPTURE=1` or a `.claude/settings.json` mentioning `align-watch` in `cwd` or up to 7 parent folders), hold one lock per session, connect to the stream for `claude-code:<session_id>` and fall back to polling `GET /api/directives` every 2 seconds for up to 20 seconds before reconnecting, for a window of `ALIGN_WATCH_WINDOW_MS` (default 55 minutes); on the first `directive` it SHALL post the ack (3-second timeout, waking the agent even if the ack fails), write the directive `text` to stderr and exit with code 2 so Claude Code wakes the session with that text.
 
 #### Scenario: Directive wakes an idle agent
 

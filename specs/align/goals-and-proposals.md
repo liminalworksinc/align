@@ -313,7 +313,7 @@ The server SHALL accept `POST /api/proposals/{id}/launch` only in a custom scena
 
 ### Requirement: Launch request hygiene and rate limit
 
-The server SHALL require the launch request to be same-origin JSON (HTTP 415 for another content type, HTTP 403 for a foreign origin or, locally, a non-loopback `Host`), cap its body at 4 KB (HTTP 413) and reject invalid JSON with HTTP 400, and SHALL count only decisions that would be written against a per-workspace limit of 10 per minute, responding HTTP 429 beyond it.
+The server SHALL require the launch request to be same-origin JSON (HTTP 415 for another content type, HTTP 403 for a foreign origin; a non-loopback `Host`, or when hosted a host outside the allowed list, is answered HTTP 421 at the request edge before the route runs, see the `workspaces` part), cap its body at 4 KB (HTTP 413) and reject invalid JSON with HTTP 400, and SHALL count only decisions that would be written against a per-workspace limit of 10 per minute, responding HTTP 429 beyond it.
 
 #### Scenario: Eleventh decision in a minute
 
@@ -382,7 +382,12 @@ The server SHALL answer `GET /api/evidence/{id}` (no session required) with `{ r
 
 ### Requirement: State view is projected per role
 
-The server SHALL answer `GET /api/state` for an anonymous caller with only `company`, `scenario` and `teams` when set, custom `company_note` when set, and `me: null`; and for a signed-in caller with an allowlisted projection plus `me`, in which goals that are not `shared` and belong to another owner slot are removed (with relations and work items that reference them), `private_constraints` contain only rows owned by the caller, `org_draft` is present only for `leadership`, and `ingest_errors` have absolute paths reduced to file names. A custom-workspace session SHALL also receive `workspace`.
+The server SHALL answer `GET /api/state` for an anonymous caller with only `company`, `scenario` and `teams` when set, custom `company_note` when set, and `me: null`; and for a signed-in caller with an allowlisted projection plus `me`, in which goals that are not `shared` and belong to another owner slot are removed (with relations and work items that reference them), `private_constraints` contain only rows owned by the caller, `org_draft` is present only for `leadership`, and `ingest_errors` have absolute paths reduced to file names. A custom-workspace session SHALL also receive `workspace`. When hosted, an anonymous `GET /api/state` SHALL respond HTTP 404 `Not found`, and the default-store-only routes (`/api/policy/security`, `/api/simulations`, `/api/evidence/{id}`, `/api/alike`, `/api/org/push`, `/api/scenario`) SHALL respond HTTP 404 at the request edge because they are not on the hosted allowlist.
+
+#### Scenario: Anonymous state read when hosted
+
+- **WHEN** a hosted server receives `GET /api/state` with no session cookie
+- **THEN** the response is HTTP 404 `Not found`
 
 #### Scenario: Private constraints stay private
 
@@ -442,7 +447,7 @@ The server SHALL accept `POST /api/reset` only with body `{"confirm":"reset"}` (
 
 ### Requirement: Custom scenario setup
 
-The server SHALL accept `POST /api/scenario` only from a default-store `leadership` session (HTTP 401 without a session, HTTP 403 for other roles or a custom-workspace session), as JSON (HTTP 415) from a loopback `Host` with no foreign `Origin` (HTTP 403 otherwise; a hosted server never reaches this check because it honours no default-store session, so every hosted call gets HTTP 401 or 403), of at most 64 KB (HTTP 413), parse it (HTTP 400 for invalid JSON or reserved keys `__proto__`, `constructor`, `prototype`), validate it strictly (`confirm: "replace"`, company, company goal, asking and owning teams, dependency, 2 to 6 work items with 1 to 3 per team, plan text of 20 to 4000 characters) responding HTTP 400 `{ error, issues: [{ path, message }] }` on failure, and refuse with HTTP 409 while a proposal is open. On success it SHALL replace the default store with goals `g-ceo-v1`, `g-product-v1`, `g-security-v1` (all `shared`), relation `r-product-security` (`UNKNOWN`), plan `p-custom@1`, `scenario: "custom"`, keeping capture consents, consented sessions and the audit log plus a `scenario_setup` row whose target is `sha256:<input hash>`.
+The server SHALL accept `POST /api/scenario` only from a default-store `leadership` session (HTTP 401 without a session, HTTP 403 for other roles or a custom-workspace session), as JSON (HTTP 415) with no foreign `Origin` (HTTP 403 otherwise; a non-loopback `Host` is answered HTTP 421 at the request edge, and when hosted the route does not exist, so every call gets HTTP 404 at the request edge), of at most 64 KB (HTTP 413), parse it (HTTP 400 for invalid JSON or reserved keys `__proto__`, `constructor`, `prototype`), validate it strictly (`confirm: "replace"`, company, company goal, asking and owning teams, dependency, 2 to 6 work items with 1 to 3 per team, plan text of 20 to 4000 characters) responding HTTP 400 `{ error, issues: [{ path, message }] }` on failure, and refuse with HTTP 409 while a proposal is open. On success it SHALL replace the default store with goals `g-ceo-v1`, `g-product-v1`, `g-security-v1` (all `shared`), relation `r-product-security` (`UNKNOWN`), plan `p-custom@1`, `scenario: "custom"`, keeping capture consents, consented sessions and the audit log plus a `scenario_setup` row whose target is `sha256:<input hash>`.
 
 #### Scenario: Invalid setup
 
@@ -489,7 +494,6 @@ The server SHALL compute a 16-hex plan revision from the goals (`id`, `version`,
 - `CounterVersion.plan_text` and `plan_hash` are declared in the type and the policy agreement reads `plan_text` from the latest counter, but no route writes either field. Custom plans have empty `params`, so any non-empty `plan_params` sent in a custom counter counts as a plan change. Is a counter that revises the plan text meant to exist?
 - Locking is per Node process (a global promise queue and lock map). Behavior with several server processes sharing one store is not defined.
 - `GET /api/simulations` and `GET /api/evidence/{id}` need no session, and `GET /api/simulations` writes state (it ingests evidence). Both always use the default store, even for a custom-workspace caller. Northstar `POST /api/reset` is allowed for any signed-in role, Product included, with no rate limit. These may be intentional demo conveniences.
-- In hosted mode every default-store read returns HTTP 404 (`readState`), so the policy, simulations, evidence and anonymous state routes stop working. Their hosted behavior belongs to the `workspaces` part.
 
 ## Sources
 

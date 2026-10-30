@@ -509,7 +509,7 @@ pass the same edge checks and are served when `ALIGN_GOAL_SESSIONS=1`.
 
 #### Scenario: Unsafe environment
 
-- **WHEN** a hosted server starts with, for example, `AI_GATEWAY_API_KEY`, any `ANTHROPIC_*` variable, `ALIGN_CAPTURE` other than `0`, a default role passcode, `ALIGN_SECRET` shorter than 32 characters, or an invite code shorter than 12 characters
+- **WHEN** a hosted server starts with, for example, `AI_GATEWAY_API_KEY`, any `ANTHROPIC_*` variable, `ALIGN_CAPTURE` other than `0`, a default role passcode, `ALIGN_SECRET` shorter than 32 characters, or an invite code shorter than 12 characters; or, with `ALIGN_GOAL_SESSIONS=1`, without a `BETTER_AUTH_SECRET` of 32+ characters, without all four of `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, without an `ALIGN_PUBLIC_ORIGIN` that is a bare `https://host` origin whose host is listed in `ALIGN_HOSTS`, or with `ALIGN_GOAL_SESSIONS_TEST_IDP` set
 - **THEN** it refuses to start and names each problem
 
 ### Requirement: Workspace data isolation
@@ -569,6 +569,11 @@ The server SHALL, when `ALIGN_GOAL_SESSIONS=1`, mount Better Auth at `/api/v2/au
 
 - **WHEN** a web route (including `/api/v2/auth/*`) receives an `Authorization` header, or a device route receives an `Origin` or `Cookie` header
 - **THEN** the server responds 403 `bearer_not_allowed`, `browser_not_allowed` or `cookies_not_allowed` respectively
+
+#### Scenario: Missing credential or cross-site write
+
+- **WHEN** a device route gets no valid `alnd_` token (missing, unknown, expired or revoked), a web route has no Better Auth session, or a cookie-authenticated write carries an `Origin` other than this server (hosted: not exactly `https://<Host>`, or no `Origin` at all) or a `Sec-Fetch-Site` other than `same-origin`/`none`
+- **THEN** the server responds 401 `invalid_token`, 401 `unauthorized`, or 403 `cross_site` (checked before the session is read) respectively, every v2 error body being `{error:<code>, message}`; a non-empty body that is not `application/json` gets 415 `unsupported_media_type`, and one over the route's size cap 413 `too_large`
 
 #### Scenario: Auth rate limits
 
