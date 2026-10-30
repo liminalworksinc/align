@@ -145,8 +145,9 @@ address.
 ### Requirement: Accounts created by email code
 
 The server SHALL, on a valid email code, sign in the account whose verified email equals the code's address
-(compared case-insensitively), and create a new account only when none exists and the address has a pending invite
-or the server is in Mode L; a new account's email is marked verified.
+(compared case-insensitively), and create a new account only when none exists and the address has a pending invite,
+or the server is in Mode L, or the server is hosted with no account yet and the address equals `ALIGN_FIRST_OWNER_EMAIL`
+(the hosted server's first person); a new account's email is marked verified.
 
 #### Scenario: New person with an invite
 
@@ -157,6 +158,11 @@ or the server is in Mode L; a new account's email is marked verified.
 
 - **WHEN** a hosted client presents a valid code for an address with no account and no pending invite
 - **THEN** the sign-in fails with 403 and the message `This email can't sign in here yet. Ask a workspace owner to invite you.`, no account is created and nobody is signed in
+
+#### Scenario: First person on a hosted server
+
+- **WHEN** a hosted server with no accounts and `ALIGN_FIRST_OWNER_EMAIL=ops@example.com` receives a valid code for `ops@example.com`
+- **THEN** the account is created and signed in, and the same address gets no such exception once any account exists
 
 #### Scenario: Unverified match
 
@@ -746,7 +752,6 @@ clients by `Fly-Client-IP` when hosted (IPv6 by its /64) and as one local client
 - Retention periods are an open decision. The hosted server still closes after `ALIGN_DELETE_BY` with 410, but the operator purge tool (`ws-admin`) is retired with no v2 replacement; should a hosted server keep a fixed closing date, and how is its data purged?
 - Passkeys, SSO, SAML and SCIM are out of scope for now.
 - Unlinking a Google or GitHub account from `/app/account` is out of scope; should a person be able to unlink a provider while another sign-in method remains?
-- A hosted server configured with email settings only cannot gain its first person: an email code creates an account only for an address with a pending invite, and no workspace exists yet to invite from. Should hosted email-only setups allow a first account (for example an `ALIGN_FIRST_OWNER_EMAIL`), or require Google or GitHub?
 - Removing or leaving keeps a person's goals and sessions. Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.
 
 ## Sources
