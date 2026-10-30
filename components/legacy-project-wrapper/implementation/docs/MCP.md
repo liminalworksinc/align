@@ -1,8 +1,10 @@
-# Align MCP server (read-only)
+# Align MCP server
 
-Align runs a read-only MCP server so a coding agent or an AI app can read what people decided before it acts: the
-goals a person can read in a v2 workspace, change requests and their decision records, and the directives sent to
-that person's own sessions. No tool can create, change, propose or approve anything. The contract is
+Align runs an MCP server so a coding agent or an AI app can read what people decided before it acts: the goals a
+person can read in a v2 workspace, change requests with their evidence and decision records, and the directives sent
+to that person's own sessions. No tool can create, change, propose or approve anything. The one write,
+`align_add_change_request_evidence`, attaches an evidence link (labelled agent-reported) to a change request the
+person may act on. The contract is
 `specs/align/mcp.md`; this page is the how-to.
 
 - Endpoint: `<origin>/api/mcp` (Streamable HTTP, `mcp-handler`), server `align` 0.2.0.
@@ -32,7 +34,7 @@ Any MCP client with OAuth support connects with only the URL `<origin>/api/mcp` 
 1. The app gets 401 with a `resource_metadata` link, reads both metadata documents and identifies itself with a client
    metadata document (CIMD) or dynamic client registration.
 2. It sends the person to `/oauth/authorize`. They sign in to Align (a sign-in from the last 15 minutes), pick one of
-   their workspaces where they are an owner or member, and allow read-only access.
+   their workspaces where they are an owner or member, and allow access (reading, plus agent-reported evidence links).
 3. The app exchanges the code at `/oauth/token` (PKCE S256) for an `alm.` access token (1 hour) and an
    `alr.<ws>.<grant>.<secret>` refresh token (rotated on each use, ending 7 days after approval).
 
@@ -49,21 +51,24 @@ grant's foreign key to `v2_members` cascades too), when its refresh token or cod
 
 ## Tools
 
-All five are annotated `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false`, and return
+The five read tools are annotated `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false`; the evidence
+tool `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`. All return
 `structuredContent` (with an `outputSchema`) and a one-item text summary.
 
 | Tool | Input | Returns |
 | --- | --- | --- |
 | `align_list_goals` | none | The goals the person can read, at their current version: owner, team, level, visibility, parents, `depends_on`, `bindable` |
 | `align_get_goal` | `goal_id`, `version?` | One goal version with its measures, and every version (title, status, content hash) |
-| `align_list_change_requests` | `state?` | Change requests on goals the person can read |
-| `align_get_decision_record` | `change_request_id` | A decided change request: who asked and decided, the reason, the diff, the resulting version |
+| `align_list_change_requests` | `state?` | Change requests on goals the person can read, with every evidence link and the Align snapshot of the current revision |
+| `align_get_decision_record` | `change_request_id` | A decided change request: who asked and decided, the reason, the diff, the resulting version, its evidence, `approved_without_evidence` |
+| `align_add_change_request_evidence` | `change_request_id`, `kind`, `url`, `label`, `revision?` | Adds an agent-reported link to the current revision of an open request the person asked for or can approve (`lib/v2/changes.ts` `addEvidence`) |
 | `align_get_directives` | none | The newest 50 directives sent to the person's own sessions in the workspace |
 
 Change requests are read through `lib/v2/changes-read.ts`, which reshapes the views of `lib/v2/changes.ts` (only requests
 on goals the person can read; the MCP layer checks that again).
 
-**People's text is data.** Every string a person wrote (names, titles, measures, reasons, notes) comes back as
+**People's text is data.** Every string a person wrote (names, titles, measures, reasons, notes, evidence URLs and
+labels, and model names in snapshots) comes back as
 `{"untrusted_text": "…"}` in `structuredContent`, and between `<untrusted-text>` tags, with `<` and `>` escaped, in the
 text summary. The server instructions say so too.
 

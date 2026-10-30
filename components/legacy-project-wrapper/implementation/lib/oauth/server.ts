@@ -7,8 +7,8 @@ import { createGrant, liveGrant, newGrantId, parseRefresh, removeGrant, rotateGr
 // The OAuth 2.1 authorization server for Align's MCP endpoint (MCP authorization spec 2026-07-28): authorization code
 // with PKCE S256 only, public clients (CIMD or DCR, lib/oauth/clients.ts), refresh token rotation, RFC 8707 resource
 // binding and RFC 9207 iss. A person approves an app while recently signed in to Align (Better Auth) and picks one of
-// their v2 workspaces, so an app reads exactly one workspace, as that person. Everything it can read is read-only
-// (lib/mcp/register.ts). Access tokens are stateless, alm.<payload>.<HMAC>, 1 hour, checked against the grant and the
+// their v2 workspaces, so an app reads exactly one workspace, as that person. It only reads, except that it may add an
+// agent-reported evidence link to a change request the person may act on (lib/mcp/register.ts). Access tokens are stateless, alm.<payload>.<HMAC>, 1 hour, checked against the grant and the
 // membership on every call so that "Disconnect", leaving and removal work at once. Codes live in memory for 60 s: a
 // restart drops them and the app simply asks again.
 

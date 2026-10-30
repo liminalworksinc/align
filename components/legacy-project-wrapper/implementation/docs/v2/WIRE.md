@@ -217,7 +217,13 @@ team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST ..
 (a new "Northstar (sample)" workspace owned by the caller, counted like any workspace creation), change requests
 (`GET`/`POST .../goals/:goal/change-requests` with `{ base_version, changes, reason }`, `GET .../change-requests/:id`,
 `POST .../change-requests/:id/{approve|reject|counter|accept_counter|withdraw|rebase}`, and the workspace-wide
-`GET .../change-requests?state=` as `{ waiting_on_me, mine, others }`; see `lib/v2/changes.ts`), `GET /api/v2/device/requests/:code`,
+`GET .../change-requests?state=` as `{ waiting_on_me, mine, others }`; see `lib/v2/changes.ts`), change request
+evidence (`POST .../change-requests/:id/evidence` `{ kind: "pr"|"ci_run"|"incident"|"dashboard"|"doc"|"other", url
+(https, ≤ 2048), label (≤ 120), revision? }` → 201 `{ evidence, change_request }`, cookie or device token, at most 10
+per revision; `DELETE .../change-requests/:id/evidence/:evidence` by its author while the revision is current and the
+request open, else `409 evidence_frozen`; each revision reads `evidence[]` with `source: "person"|"agent"` and
+`reported_as`, and the server-recorded `snapshot`; an approval sets `approved_without_evidence`; see
+`lib/v2/evidence.ts`), `GET /api/v2/device/requests/:code`,
 `POST /api/v2/device/approve` (`{ user_code, workspace_ids }`; needs a sign-in from the last 15 minutes, else
 `403 reauth_required`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,
 `DELETE /api/v2/devices/:id`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,

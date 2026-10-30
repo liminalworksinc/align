@@ -1,6 +1,6 @@
 ---
 name: Goals, alignments and change requests
-summary: Company and team goals with immutable versions, owners, teams, visibility and dependencies; approval sets; alignments that make goals and sessions contribute to a goal with every affected goal's consent; change requests that let a member propose a new version of someone else's goal; and the Northstar sample workspace.
+summary: Company and team goals with immutable versions, owners, teams, visibility and dependencies; approval sets; alignments that make goals and sessions contribute to a goal with every affected goal's consent; change requests that let a member propose a new version of someone else's goal, with advisory evidence (typed links and an Align snapshot per revision); and the Northstar sample workspace.
 kind: area
 ---
 
@@ -10,6 +10,11 @@ This part specifies Align's core domain inside a workspace (`ws_…`): goals and
 goal tree (parents through approved alignments, dependencies through `depends_on`), the approval set that may
 consent on a goal's behalf, alignment requests, change requests, and the Northstar sample workspace that any
 signed-in person can create to see these flows.
+
+Evidence on change requests is advisory. Each revision carries a snapshot that Align records itself, and the
+requester and approvers can attach typed links, each labelled by who reported it. Approving without evidence is
+allowed and recorded. Align never marks a link verified; checking CI results against their source (for example
+GitHub check runs) is later work, not part of this contract.
 
 Every route here is under `/api/v2/workspaces/{ws}` and follows the common rules of the `workspaces` part:
 a browser session cookie (or, where stated, a device token), same-origin writes, JSON bodies, error bodies
@@ -37,6 +42,8 @@ or agent sees says "team".
 | Approval requirement | `{for, set}` on an alignment revision: `for` is a goal id or `sessions:<user id>`, `set` the user ids any one of whom satisfies it |
 | Change request | A proposed new version (`cr_…`) of a goal the requester does not own, decided by the goal's approval set |
 | Decision record | A change request once it is `approved` or `rejected` |
+| Evidence link | A typed link (`ev_…`: `pr`, `ci_run`, `incident`, `dashboard`, `doc` or `other`) on one change request revision, self-reported by a person or agent-reported by an agent; Align never marks one verified |
+| Align snapshot | What the server recorded about the goal when a change request revision was written: its 30-day spend, bound sessions and last activity |
 | Sample workspace | "Northstar (sample)", ordinary data created by `POST /api/v2/workspaces/sample` |
 
 ## Alignment state model
@@ -367,7 +374,7 @@ The server SHALL refuse a second change request from the same person on the same
 
 ### Requirement: Approving a change request
 
-The server SHALL accept `POST .../change-requests/{id}/approve {revision, note?}` (`note` at most 2000 characters) only from a member of the goal's approval set under the requester rule (403 `not_an_approver`), only for a `pending` request (409 `wrong_state`) at its current `revision` (409 `stale_revision`), and only while the goal is still at `base_version` (409 `stale_version`; the requester must `rebase`). On success it SHALL, in one transaction, create the goal's next version with the requested changes applied, authored by the approver and written through the same path as an owner's new version (content hash, audit `goal.versioned`, parent review and `goal_version` directives to bound sessions), set the request `approved` with `approved_by`, `note`, `version` (the new goal version) and `decided_at`, write audit action `change_request.approved`, and respond with the request.
+The server SHALL accept `POST .../change-requests/{id}/approve {revision, note?}` (`note` at most 2000 characters) only from a member of the goal's approval set under the requester rule (403 `not_an_approver`), only for a `pending` request (409 `wrong_state`) at its current `revision` (409 `stale_revision`), and only while the goal is still at `base_version` (409 `stale_version`; the requester must `rebase`). On success it SHALL, in one transaction, create the goal's next version with the requested changes applied, authored by the approver and written through the same path as an owner's new version (content hash, audit `goal.versioned`, parent review and `goal_version` directives to bound sessions), set the request `approved` with `approved_by`, `note`, `version` (the new goal version), `decided_at` and `approved_without_evidence` (see "Approving without evidence"), write audit action `change_request.approved`, and respond with the request.
 
 #### Scenario: Team lead approves
 
@@ -418,7 +425,7 @@ The server SHALL, in the transaction that gives a goal status `achieved` or `dro
 
 ### Requirement: Change request audit
 
-The server SHALL write an audit row naming its actor for every change request action: `change_request.created`, `.approved`, `.rejected`, `.countered`, `.counter_accepted`, `.withdrawn`, `.rebased` and `.superseded`, with the request id as object.
+The server SHALL write an audit row naming its actor for every change request action: `change_request.created`, `.approved`, `.approved_without_evidence`, `.rejected`, `.countered`, `.counter_accepted`, `.withdrawn`, `.rebased`, `.superseded`, `.evidence_added` and `.evidence_removed`, with the request id as object.
 
 #### Scenario: Audited decision
 
@@ -427,7 +434,7 @@ The server SHALL write an audit row naming its actor for every change request ac
 
 ### Requirement: Reading change requests and decision records
 
-The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, each list item being the same object as the single read below, with its `can` flags, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `waiting_on_me` holds the requests where the caller's `approve` or `accept_counter` flag is true, `mine` the caller's other requests, and `others` the rest. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title, version}`, `state`, `revision`, `base_version`, `behind` (true while the request is open and the goal has moved past `base_version`), `requester`, `changes`, `reason` (the requester's), `revisions` (each `{revision, base_version, changes, note, author, created_at}`), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; once approved, from the resulting version), `approvers` (the effective approval set after the requester rule), `approved_by`, `rejected_by`, `decision_note` (the approval note or the rejection reason) also shown as `note` when approved and `rejection_reason` when rejected, `version` (the goal version an approval created), `can` flags `{approve, reject, counter, accept_counter, withdraw, rebase}` that are true exactly when the server would accept that action from the caller (`approve` false while `behind`; all false for a viewer), `waiting_on_me`, `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read, or on a goal other than the one in the path, SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read.
+The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, each list item being the same object as the single read below, with its `can` flags, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `waiting_on_me` holds the requests where the caller's `approve` or `accept_counter` flag is true, `mine` the caller's other requests, and `others` the rest. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title, version}`, `state`, `revision`, `base_version`, `behind` (true while the request is open and the goal has moved past `base_version`), `requester`, `changes`, `reason` (the requester's), `revisions` (each `{revision, base_version, changes, note, author, created_at, evidence, snapshot}`, with `evidence` and `snapshot` as "Evidence links on change request revisions" and "Align snapshot on each change request revision" describe), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; once approved, from the resulting version), `approvers` (the effective approval set after the requester rule), `approved_by`, `rejected_by`, `decision_note` (the approval note or the rejection reason) also shown as `note` when approved and `rejection_reason` when rejected, `version` (the goal version an approval created), `evidence_count` (the links on the current revision), `approved_without_evidence` (`true` or `false` once approved, else `null`), `can` flags `{approve, reject, counter, accept_counter, withdraw, rebase, add_evidence}` that are true exactly when the server would accept that action from the caller (`approve` false while `behind`; all false for a viewer), `waiting_on_me`, `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read, or on a goal other than the one in the path, SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read.
 
 #### Scenario: Viewer reads but cannot act
 
@@ -438,6 +445,82 @@ The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goa
 
 - **WHEN** a team lead calls `GET /api/v2/workspaces/{ws}/change-requests`
 - **THEN** pending requests on their team's goals are under `waiting_on_me`, their own requests under `mine`, and the rest they can read under `others`
+
+### Requirement: Align snapshot on each change request revision
+
+The server SHALL, in the transaction that writes each change request revision (creation, `counter` and `rebase`), record a snapshot of the goal computed by the server alone and store it with that revision: `recorded_at` (the revision's time), `window` `{from, to, days: 30}` (the 30 days before it), `spend` `{total, by_model}` (the goal's usage in that window, summed exactly as the Spend tab sums a goal's row, `total` and one row per `model`, each with the same token, request and `est_list_usd_micros` sums and `by_basis`), `bound_sessions` (the number of sessions that a new goal version would reach: not stopped, and whose open epoch is bound to the goal or that the goal governs) and `last_activity_at` (the latest usage request, epoch start or work signal on the goal, or `null`). No field of a request body SHALL reach a snapshot, and a stored snapshot SHALL never change. Each revision SHALL be read with `snapshot` `{revision, recorded_by: "align", recorded_at, window, spend, spend_hidden, bound_sessions, last_activity_at}`, where `spend` is `null` and `spend_hidden` `true` for a reader whose role does not allow `spend.read`; a revision stored without a snapshot reads `snapshot: null`.
+
+#### Scenario: Snapshot at proposal
+
+- **WHEN** a session bound to a goal uploaded two requests in the last day (models A and B) and one 40 days ago, and a member proposes a change to that goal
+- **THEN** revision 1's snapshot holds the two recent requests in `spend.total`, one `by_model` row each for A and B, `bound_sessions: 1` and the latest of the epoch start and the requests as `last_activity_at`
+
+#### Scenario: A client cannot supply a snapshot
+
+- **WHEN** a proposal body carries a `snapshot` field
+- **THEN** the request is created with the snapshot the server computed
+
+#### Scenario: Counter records its own snapshot
+
+- **WHEN** an approver counters a request
+- **THEN** revision 2 carries a new snapshot with `revision: 2`, and revision 1 keeps its own
+
+### Requirement: Evidence links on change request revisions
+
+The server SHALL accept `POST /api/v2/workspaces/{ws}/goals/{goal}/change-requests/{id}/evidence {kind, url, label, revision?}` (browser session or device token, body at most 8 KB) and add the link to the request's current revision, responding 201 `{evidence, change_request}`. `kind` SHALL be one of `pr`, `ci_run`, `incident`, `dashboard`, `doc` and `other`; `url` an `https:` URL with a host and no user name or password, at most 2048 characters, stored as parsed; `label` 1 to 120 characters on one line after trimming; anything else 400. Each link SHALL store `id` (`ev_…`), `revision`, `kind`, `url`, `label`, `added_by` (the caller), `added_at` and `source`: `person` when added with a browser session, `agent` when added with a device token or through the MCP tool `align_add_change_request_evidence`. Each revision SHALL hold at most 10 links (409 `too_much_evidence`), and the same `url` twice on one revision SHALL be 409 `duplicate_evidence`. Every reader of the request SHALL get each revision's links as `evidence`, oldest first, each `{id, revision, kind, url, label, source, reported_as, added_by:{id, name}, added_at, can_remove}`, where `reported_as` is `self-reported` for `person` and `agent-reported` for `agent`. The server SHALL never mark a link verified, and SHALL never block an action because of evidence. Adding writes audit action `change_request.evidence_added`.
+
+#### Scenario: Requester adds a PR from the web
+
+- **WHEN** the requester POSTs `{kind:"pr", url:"https://github.com/acme/platform/pull/42", label:"Pen-test scope PR", revision:1}` to a pending request at revision 1
+- **THEN** the response is 201 with `evidence.source: "person"`, `reported_as: "self-reported"`, `added_by` the requester and `revision: 1`, and the audit has `change_request.evidence_added` by the requester
+
+#### Scenario: Added with a device token
+
+- **WHEN** the requester's paired device POSTs a link with its access token
+- **THEN** the link has `source: "agent"` and `reported_as: "agent-reported"`, wherever it is shown
+
+#### Scenario: Unsafe or oversized links
+
+- **WHEN** a link's `url` is `http:`, `javascript:`, carries a password or exceeds 2048 characters, or its `label` exceeds 120 characters, or its `kind` is not listed
+- **THEN** the response is 400 and nothing is stored
+
+#### Scenario: Eleventh link
+
+- **WHEN** a revision already holds 10 links and someone adds another
+- **THEN** the response is 409 `too_much_evidence`
+
+### Requirement: Who adds and removes evidence
+
+The server SHALL let only the requester and the members of the request's effective approval set add evidence (403 `not_involved` for anyone else who can read the request, 403 `read_only` for a viewer, 404 for a request on a goal the caller may not read or on another goal than the path's), only while the request is `pending` or `countered` (409 `wrong_state`, checked after who the caller is), and only to its current revision (a sent `revision` other than the current one is 409 `stale_revision`). Each link is its adder's own: an approver's link names the approver. The server SHALL let only a link's author remove it, on `DELETE .../change-requests/{id}/evidence/{evidence}` (browser session or device token), responding with the request and writing audit action `change_request.evidence_removed`; another person gets 403 `not_evidence_author`, a viewer 403 `read_only`, and an unknown link 404. A link SHALL be frozen, neither changed nor removed (409 `evidence_frozen`), once its revision is no longer current or the request is no longer open; there is no way to edit a link. A link's `can_remove` SHALL be true exactly when its reader could remove it.
+
+#### Scenario: Approver adds and removes their own
+
+- **WHEN** a team lead who may approve a pending request adds a dashboard link and later removes it
+- **THEN** both succeed; the lead's attempt to remove the requester's link is 403 `not_evidence_author`
+
+#### Scenario: Frozen after a counter
+
+- **WHEN** an approver counters a request whose revision 1 has links and the requester tries to remove one of them
+- **THEN** the response is 409 `evidence_frozen`, revision 1 keeps its links with `can_remove: false`, and revision 2 starts with none
+
+#### Scenario: Decided request
+
+- **WHEN** a request is approved and anyone adds or removes a link
+- **THEN** adding is 409 `wrong_state` and removing is 409 `evidence_frozen`
+
+### Requirement: Approving without evidence
+
+The server SHALL approve a revision that has no evidence links like any other, and SHALL record it: the request's `approved_without_evidence` SHALL be `true` (and `false` when the approved revision had at least one link), and the approval SHALL write audit action `change_request.approved_without_evidence`, with the approver as actor and the request as object, in addition to `change_request.approved`. Links on earlier revisions do not count for the approved revision.
+
+#### Scenario: No links on the approved revision
+
+- **WHEN** an approver approves revision 2 of a request whose links are all on revision 1
+- **THEN** the request is `approved` with `approved_without_evidence: true`, and the audit has both `change_request.approved` and `change_request.approved_without_evidence` by the approver
+
+#### Scenario: Approved with a link
+
+- **WHEN** an approver approves a revision that holds one link
+- **THEN** `approved_without_evidence` is `false` and no `change_request.approved_without_evidence` row is written
 
 ### Requirement: Change request controls in the app
 
@@ -482,7 +565,6 @@ The `/app` page SHALL offer **Create the Northstar sample** when the signed-in p
 
 ## Open questions
 
-- Evidence (sandbox test results) attached to change requests is out of scope and remains an open product decision.
 - Whether directives may instruct agents, beyond delivering goal versions and bindings, remains open.
 - When the requester is the only person who could approve a goal's requirement and no other workspace owner exists, the request stays open indefinitely; should it instead be refused up front?
 
@@ -493,6 +575,8 @@ The `/app` page SHALL offer **Create the Northstar sample** when the signed-in p
 - `lib/v2/alignments.ts`
 - `lib/v2/changes.ts`
 - `lib/v2/changes-read.ts`
+- `lib/v2/evidence.ts`
+- `lib/v2/spend.ts` (`goalSpend` only)
 - `lib/v2/sample.ts`
 - `lib/v2/policy.ts`
 - `lib/v2/lifecycle.ts`
@@ -512,6 +596,8 @@ The `/app` page SHALL offer **Create the Northstar sample** when the signed-in p
 - `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/[action]/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/evidence/route.ts`
+- `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/evidence/[evidence]/route.ts`
 - `app/api/v2/workspaces/[ws]/change-requests/route.ts`
 - `app/api/v2/workspaces/[ws]/alignments/route.ts`
 - `app/api/v2/workspaces/[ws]/alignments/[id]/route.ts`

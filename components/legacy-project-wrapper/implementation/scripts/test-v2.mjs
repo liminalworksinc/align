@@ -447,7 +447,7 @@ try {
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
-  check("storage: WAL, migrated (user_version 5), v2_ tables (connected-app grants and change requests included) and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 5 && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "ba_user"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
+  check("storage: WAL, migrated (user_version 6), v2_ tables (connected-app grants, change requests and their evidence included) and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 6 && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "ba_user"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -1192,7 +1192,11 @@ try {
   const GL = (await mkGoal(U3, { title: "Pen-test the platform", visibility: "workspace", team_id: P1, measures: [{ text: "Open findings", target: "0" }] })).json;
   const SC = sessionKey(D3, A, "claude-code", "native-cr");
   await put(D3, SC);
-  const scBind = await epoch(D3, SC, { epoch_id: epochId(), goal_id: GL.id, starts_at: new Date().toISOString() });
+  const SCe = epochId();
+  const scStart = new Date().toISOString();
+  const scBind = await epoch(D3, SC, { epoch_id: SCe, goal_id: GL.id, starts_at: scStart });
+  // Usage under GL for the snapshot: two models in the last 30 days, and one request 40 days ago (outside the window).
+  await upload(D3, SC, [usageRow(D3, "cr-a", SCe), usageRow(D3, "cr-b", SCe, { model: "claude-opus-4-1", est_list_usd_micros: 50_000 }), usageRow(D3, "cr-old", SCe, { ts: new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString() })]);
   const mPen = { text: "Pen-test window booked", target: "May" };
   const cr1 = await propose(U1, GL.id, { base_version: 1, changes: { measures: [...GL.measures, mPen] }, reason: "Onboarding needs a pen-test window in May" });
   check(
@@ -1247,7 +1251,7 @@ try {
   );
   check(
     "change requests: can flags match the actions: the lead may approve, reject and counter; the requester may withdraw and rebase",
-    JSON.stringify(u2Sees.json?.can) === JSON.stringify({ approve: true, reject: true, counter: true, accept_counter: false, withdraw: false, rebase: false }) && cr1.json.can.withdraw === true && cr1.json.can.rebase === true && cr1.json.can.approve === false,
+    JSON.stringify(u2Sees.json?.can) === JSON.stringify({ approve: true, reject: true, counter: true, accept_counter: false, withdraw: false, rebase: false, add_evidence: true }) && cr1.json.can.withdraw === true && cr1.json.can.rebase === true && cr1.json.can.approve === false && cr1.json.can.add_evidence === true,
     `${JSON.stringify(u2Sees.json?.can)} ${JSON.stringify(cr1.json.can)}`,
   );
   const crLists = {
@@ -1259,6 +1263,71 @@ try {
     "change requests: the workspace list splits waiting on me (the lead) / mine (the requester) / others (the viewer)",
     crLists.U2.json?.waiting_on_me.some((c) => c.id === cr1.json.id) && crLists.U1.json?.mine.some((c) => c.id === cr1.json.id) && !crLists.U1.json?.waiting_on_me.some((c) => c.id === cr1.json.id) && crLists.U4.json?.others.some((c) => c.id === cr1.json.id && !c.can.approve),
     JSON.stringify(Object.fromEntries(Object.entries(crLists).map(([k, v]) => [k, v.json && Object.fromEntries(Object.entries(v.json).map(([g, l]) => [g, l.length]))]))),
+  );
+  // -- evidence on change requests (PRESEED-006): the Align snapshot and typed links per revision --
+  const snap1 = cr1.json.revisions[0]?.snapshot;
+  check(
+    "evidence: revision 1 carries the snapshot Align recorded: the goal's spend over the last 30 days (total and by model, the old request left out), 1 bound session, last activity",
+    snap1?.revision === 1 && snap1.recorded_by === "align" && snap1.window.days === 30 && snap1.spend_hidden === false && snap1.spend.total.requests === 2 && snap1.spend.total.est_list_usd_micros === 62_345 && snap1.spend.by_model.map((m) => m.model).join() === "claude-opus-4-1,claude-sonnet-4-5" && snap1.spend.by_model[0].est_list_usd_micros === 50_000 && snap1.bound_sessions === 1 && snap1.last_activity_at === scStart && cr1.json.evidence_count === 0 && cr1.json.approved_without_evidence === null,
+    JSON.stringify(snap1),
+  );
+  const forged = await propose(U2, GL.id, { base_version: 1, changes: { title: "Forged snapshot" }, reason: "x", snapshot: { bound_sessions: 99 } });
+  check("evidence: a snapshot sent by a client is never stored (Align computes its own)", forged.status === 201 && forged.json.revisions[0].snapshot.bound_sessions === 1, forged.text.slice(0, 200));
+  await crAct(U2, GL.id, forged.json?.id, "withdraw");
+  const evPath = (g, id) => `${crPath(g)}/${id}/evidence`;
+  const addEv = (u, g, id, body) => call(u.who, "POST", evPath(g, id), { cookie: u.cookie, body });
+  const PR = "https://github.com/acme/platform/pull/42";
+  const ev1 = await addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: PR, label: "Pen-test scope PR", revision: 1 });
+  const evDev = await call("U1", "POST", evPath(GL.id, cr1.json.id), { bearer: D1.access, body: { kind: "ci_run", url: "https://ci.example.com/runs/7", label: "Scan run" } });
+  const evLead = await addEv(U2, GL.id, cr1.json.id, { kind: "dashboard", url: "https://grafana.example.com/d/pen", label: "Findings board" });
+  check(
+    "evidence: the requester adds a link from the web (201, source person, self-reported), from their device (source agent, agent-reported), and an approver adds their own; each names who added it; audit change_request.evidence_added",
+    ev1.status === 201 && ev1.json.evidence.kind === "pr" && ev1.json.evidence.url === PR && ev1.json.evidence.revision === 1 && ev1.json.evidence.source === "person" && ev1.json.evidence.reported_as === "self-reported" && ev1.json.evidence.added_by.id === U1.id && ev1.json.evidence.can_remove === true && evDev.status === 201 && evDev.json.evidence.source === "agent" && evDev.json.evidence.reported_as === "agent-reported" && evLead.status === 201 && evLead.json.evidence.added_by.id === U2.id && evLead.json.change_request.evidence_count === 3 && auditOf("change_request.evidence_added", cr1.json.id).sort().join() === [U1.id, U1.id, U2.id].sort().join(),
+    `${ev1.text.slice(0, 300)} ${evDev.text.slice(0, 200)} ${evLead.status}`,
+  );
+  const evBad = await Promise.all([
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "http://github.com/acme/platform/pull/1", label: "plain http" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "javascript:alert(1)", label: "script" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "https://user:secret@github.com/x", label: "with a password" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: `https://example.com/${"a".repeat(2040)}`, label: "too long" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "not a url", label: "nonsense" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "https://example.com/1", label: "l".repeat(121) }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "https://example.com/2", label: "  " }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "https://example.com/3" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "test_report", url: "https://example.com/4", label: "unknown kind" }),
+  ]);
+  const evViewer = await addEv(U4, GL.id, cr1.json.id, { kind: "doc", url: "https://example.com/v", label: "viewer" });
+  const evDup = await addEv(U2, GL.id, cr1.json.id, { kind: "pr", url: PR, label: "same PR again" });
+  const evStale = await addEv(U1, GL.id, cr1.json.id, { kind: "doc", url: "https://example.com/s", label: "stale", revision: 2 });
+  const evBig = await call("U1", "POST", evPath(GL.id, cr1.json.id), { cookie: U1.cookie, raw: JSON.stringify({ kind: "doc", url: "https://example.com/big", label: "big", pad: "x".repeat(9 * 1024) }) });
+  const evLabel120 = await addEv(U1, GL.id, cr1.json.id, { kind: "other", url: "https://example.com/120", label: "l".repeat(120) });
+  check(
+    "evidence: a non-https, javascript:, credentialed, over-2048 or unparsable url, a 121-character, blank or missing label, or an unknown kind -> 400; a viewer -> 403 read_only; the same url twice -> 409 duplicate_evidence; another revision -> 409 stale_revision; over 8 KB -> 413; a 120-character label is accepted",
+    evBad.every((r) => r.status === 400) && evViewer.status === 403 && evViewer.json?.error === "read_only" && evDup.status === 409 && evDup.json?.error === "duplicate_evidence" && evStale.status === 409 && evStale.json?.error === "stale_revision" && evBig.status === 413 && evLabel120.status === 201,
+    `${evBad.map((r) => r.status).join(",")} ${evViewer.status} ${evDup.text} ${evStale.text} ${evBig.status} ${evLabel120.status}`,
+  );
+  const fill = [];
+  for (let i = 0; i < 6; i++) fill.push(await addEv(U1, GL.id, cr1.json.id, { kind: "doc", url: `https://docs.example.com/${i}`, label: `Doc ${i}` }));
+  const evEleventh = await addEv(U2, GL.id, cr1.json.id, { kind: "doc", url: "https://docs.example.com/11", label: "eleventh" });
+  check("evidence: at most 10 links per revision (the 11th -> 409 too_much_evidence)", fill.every((r) => r.status === 201) && fill[5].json.change_request.evidence_count === 10 && evEleventh.status === 409 && evEleventh.json?.error === "too_much_evidence", `${fill.map((r) => r.status).join(",")} ${evEleventh.text}`);
+  const delEv = (u, g, id, evId) => call(u.who, "DELETE", `${evPath(g, id)}/${evId}`, { cookie: u.cookie });
+  const evDelOther = await delEv(U2, GL.id, cr1.json.id, ev1.json.evidence.id);
+  const evDelViewer = await delEv(U4, GL.id, cr1.json.id, ev1.json.evidence.id);
+  const evDelOwn = await delEv(U1, GL.id, cr1.json.id, fill[5].json?.evidence?.id);
+  const evDelGone = await delEv(U1, GL.id, cr1.json.id, fill[5].json?.evidence?.id);
+  const evDelWrongGoal = await delEv(U1, G1.id, cr1.json.id, ev1.json.evidence.id);
+  check(
+    "evidence: removing someone else's link -> 403 not_evidence_author, a viewer -> 403 read_only; the author removes their own (200, audit change_request.evidence_removed); a removed or mismatched one -> 404",
+    evDelOther.status === 403 && evDelOther.json?.error === "not_evidence_author" && evDelViewer.status === 403 && evDelOwn.status === 200 && evDelOwn.json.evidence_count === 9 && auditOf("change_request.evidence_removed", cr1.json.id).join() === U1.id && evDelGone.status === 404 && evDelWrongGoal.status === 404,
+    `${evDelOther.text} ${evDelViewer.status} ${evDelOwn.status} ${evDelGone.status} ${evDelWrongGoal.status}`,
+  );
+  const evViewerRead = await crGet(U4, GL.id, cr1.json.id);
+  const evU2Read = await crGet(U2, GL.id, cr1.json.id);
+  const rev1Ev = evViewerRead.json?.revisions?.[0]?.evidence ?? [];
+  check(
+    "evidence: everyone who reads the request sees each link with kind, url, label, who added it and how it was reported (never verified); a viewer can't add or remove; an approver can remove only their own",
+    evViewerRead.status === 200 && rev1Ev.length === 9 && rev1Ev.every((e) => ["self-reported", "agent-reported"].includes(e.reported_as) && e.added_by.name && !e.can_remove) && evViewerRead.json.can.add_evidence === false && !JSON.stringify(evViewerRead.json).includes('"verified"') && evU2Read.json.revisions[0].evidence.filter((e) => e.can_remove).map((e) => e.added_by.id).every((id) => id === U2.id) && evU2Read.json.revisions[0].evidence.some((e) => e.can_remove),
+    JSON.stringify(rev1Ev.slice(0, 2)),
   );
   const rejectEmpty = await crAct(U2, GL.id, cr1.json.id, "reject", {});
   const afterRejectEmpty = await crGet(U1, GL.id, cr1.json.id);
@@ -1278,6 +1347,13 @@ try {
     "change requests: a counter needs a note and proposable fields (400); a counter -> countered at revision 2 with the approver's changes; approving it -> 409 wrong_state; only the requester accepts (403 not_requester) -> pending at revision 2; approve naming revision 1 -> 409 stale_revision",
     counter1.status === 200 && counter1.json.state === "countered" && counter1.json.revision === 2 && counter1.json.changes.measures[1].target === "April" && counter1.json.revisions.length === 2 && counter1.json.revisions[1].note === "April works better for us" && counter1.json.revisions[1].author.id === U2.id && counterNoNote.status === 400 && counterAnchors.status === 400 && cr_approveCountered.status === 409 && cr_approveCountered.json?.error === "wrong_state" && acceptByLead.status === 403 && acceptByLead.json?.error === "not_requester" && accept1.json?.state === "pending" && accept1.json.revision === 2 && crApproveOld.status === 409 && crApproveOld.json?.error === "stale_revision",
     `${counter1.text.slice(0, 300)} ${counterNoNote.status} ${cr_approveCountered.text} ${acceptByLead.text} ${accept1.json?.state} ${crApproveOld.text}`,
+  );
+  const crCountered = await crGet(U1, GL.id, cr1.json.id);
+  const delFrozen = await delEv(U1, GL.id, cr1.json.id, ev1.json.evidence.id);
+  check(
+    "evidence: a counter writes revision 2 with its own snapshot; revision 1's links stay, frozen (can_remove false, removing -> 409 evidence_frozen), and revision 2 starts with none",
+    crCountered.json?.revision === 2 && crCountered.json.revisions[1].snapshot?.revision === 2 && crCountered.json.revisions[1].snapshot.bound_sessions === 1 && crCountered.json.revisions[0].evidence.length === 9 && crCountered.json.revisions[0].evidence.every((e) => !e.can_remove) && crCountered.json.revisions[1].evidence.length === 0 && crCountered.json.evidence_count === 0 && delFrozen.status === 409 && delFrozen.json?.error === "evidence_frozen",
+    `${crCountered.json?.revision} ${JSON.stringify(crCountered.json?.revisions?.[1]?.snapshot)} ${delFrozen.text}`,
   );
   const approve1 = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 2, note: "Agreed for Q3" });
   const dirsAfterApprove = await dirs(D3, cursor3);
@@ -1301,6 +1377,20 @@ try {
   );
   const afterDecided = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 2 });
   check("change requests: a decided request takes no more actions (409 wrong_state)", afterDecided.status === 409 && afterDecided.json?.error === "wrong_state", afterDecided.text);
+  const evDecided = await addEv(U1, GL.id, cr1.json.id, { kind: "doc", url: "https://example.com/late", label: "late" });
+  const delDecided = await delEv(U2, GL.id, cr1.json.id, evLead.json.evidence.id);
+  check(
+    "evidence: approving a revision with no links -> approved_without_evidence true on the decision record, audit change_request.approved and change_request.approved_without_evidence by the approver; then adding -> 409 wrong_state and removing -> 409 evidence_frozen",
+    approve1.json?.approved_without_evidence === true && record.json.approved_without_evidence === true && auditOf("change_request.approved", cr1.json.id).join() === U2.id && auditOf("change_request.approved_without_evidence", cr1.json.id).join() === U2.id && evDecided.status === 409 && evDecided.json?.error === "wrong_state" && delDecided.status === 409 && delDecided.json?.error === "evidence_frozen",
+    `${approve1.json?.approved_without_evidence} ${record.json.approved_without_evidence} ${evDecided.text} ${delDecided.text}`,
+  );
+  const mcpRecord = await mcpCall("U4", D4, "align_get_decision_record", { change_request_id: cr1.json.id, workspace: A });
+  const mrec = mcpRecord.sc?.record;
+  check(
+    "evidence (mcp): the decision record says approved without evidence, lists the frozen revision-1 links (agent-reported ones labelled so) and the snapshot Align recorded at revision 2",
+    mcpRecord.sc?.decided === true && mrec?.approved_without_evidence === true && mrec.evidence.length === 9 && mrec.evidence.some((e) => e.source === "agent" && e.reported_as === "agent-reported") && mrec.evidence.every((e) => e.revision === 1) && mrec.snapshot?.revision === 2 && /Approved without evidence\./.test(mcpRecord.text) && /agent-reported/.test(mcpRecord.text),
+    mcpRecord.text.slice(0, 400),
+  );
 
   // Reject, withdraw and rebase write no directive; stale requests need a rebase before approval.
   cursor3 = await drain(D3);
@@ -1318,6 +1408,26 @@ try {
   const crA = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the platform and the API" }, reason: "Both" });
   const crB = await propose(U2, GL.id, { base_version: 2, changes: { measures: [{ text: "Critical findings", target: "0" }] }, reason: "Track criticals" });
   const crBapprovers = crB.json?.approvers?.map((a) => a.id).join();
+  const evA = await addEv(U1, GL.id, crA.json?.id, { kind: "incident", url: "https://status.example.com/incidents/12", label: "API incident that motivates this" });
+  const evNotInvolved = await addEv(U1, GL.id, crB.json?.id, { kind: "doc", url: "https://example.com/n", label: "not mine" });
+  // Through MCP with U1's device: the same rules, source agent.
+  const mcpEv = await mcpCall("U1", D1, "align_add_change_request_evidence", { change_request_id: crA.json?.id, kind: "ci_run", url: "https://ci.example.com/runs/8", label: "Green run on main" });
+  const mcpEvViewer = await mcpCall("U4", D4, "align_add_change_request_evidence", { change_request_id: crA.json?.id, kind: "doc", url: "https://example.com/mv", label: "viewer", workspace: A });
+  const mcpEvOther = await mcpCall("U1", D1, "align_add_change_request_evidence", { change_request_id: crB.json?.id, kind: "doc", url: "https://example.com/mo", label: "not mine" });
+  const mcpEvBad = await mcpCall("U1", D1, "align_add_change_request_evidence", { change_request_id: crA.json?.id, kind: "doc", url: "http://example.com/plain", label: "http" });
+  const mcpEvHidden = await mcpCall("U4", D4, "align_add_change_request_evidence", { change_request_id: "cr_AAAAAAAAAAAAAAAAAAAAAAAA", kind: "doc", url: "https://example.com/h", label: "hidden", workspace: A });
+  const mcpList = await mcpCall("U1", D1, "align_list_change_requests", { state: "pending" });
+  const mcpA = mcpList.sc?.change_requests?.find((c) => c.id === crA.json?.id);
+  check(
+    "evidence: someone neither the requester nor an approver -> 403 not_involved; through MCP the requester's device adds an agent-reported link (url and label as untrusted_text), and the same refusals apply (viewer, not involved, not https, not found)",
+    evA.status === 201 && evNotInvolved.status === 403 && evNotInvolved.json?.error === "not_involved" && !mcpEv.isError && mcpEv.sc?.evidence?.source === "agent" && mcpEv.sc.evidence.reported_as === "agent-reported" && mcpEv.sc.evidence.url.untrusted_text === "https://ci.example.com/runs/8" && mcpEv.sc.evidence.label.untrusted_text === "Green run on main" && mcpEv.sc.change_request.evidence_count === 2 && /agent-reported/.test(mcpEv.text) && mcpEvViewer.isError && /Viewers/.test(mcpEvViewer.text) && mcpEvOther.isError && /add evidence/.test(mcpEvOther.text) && mcpEvBad.isError && /https/.test(mcpEvBad.text) && mcpEvHidden.isError && mcpEvHidden.text === "Change request not found",
+    `${evA.status} ${evNotInvolved.text} ${mcpEv.text.slice(0, 200)} | ${mcpEvViewer.text} | ${mcpEvOther.text} | ${mcpEvBad.text} | ${mcpEvHidden.text}`,
+  );
+  check(
+    "evidence (mcp): align_list_change_requests returns each request's links (with revision and how they were reported) and the snapshot Align recorded at its current revision",
+    mcpA?.evidence?.length === 2 && mcpA.evidence.map((e) => e.reported_as).sort().join() === "agent-reported,self-reported" && mcpA.evidence.every((e) => e.revision === 1 && typeof e.added_by.name.untrusted_text === "string") && mcpA.snapshot?.revision === 1 && mcpA.snapshot.recorded_by === "align" && typeof mcpA.snapshot.spend?.total?.est_list_usd_micros === "number" && /Recorded by Align at revision 1/.test(mcpList.text),
+    JSON.stringify(mcpA).slice(0, 400),
+  );
   const approveA = await crAct(U3, GL.id, crA.json?.id, "approve", { revision: 1 });
   const bNow = await crGet(U2, GL.id, crB.json?.id);
   const cr_approveB = await crAct(U3, GL.id, crB.json?.id, "approve", { revision: 1 });
@@ -1329,7 +1439,7 @@ try {
   const approveB2 = await crAct(U3, GL.id, crB.json?.id, "approve", { revision: 2 });
   check(
     "change requests: a lead's own request is decided by the rest of the set (the owner); after another request is approved it stays pending, behind, approve -> 409 stale_version",
-    crBapprovers === U3.id && approveA.json?.state === "approved" && approveA.json.version === 3 && bNow.json?.state === "pending" && bNow.json.behind === true && bNow.json.can.approve === false && bNow.json.can.rebase === true && cr_approveB.status === 409 && cr_approveB.json?.error === "stale_version",
+    crBapprovers === U3.id && approveA.json?.state === "approved" && approveA.json.approved_without_evidence === false && auditOf("change_request.approved_without_evidence", crA.json?.id).length === 0 && approveA.json.version === 3 && bNow.json?.state === "pending" && bNow.json.behind === true && bNow.json.can.approve === false && bNow.json.can.rebase === true && cr_approveB.status === 409 && cr_approveB.json?.error === "stale_version",
     `${crBapprovers} ${approveA.text.slice(0, 200)} ${bNow.json?.state} ${cr_approveB.text}`,
   );
   check(
@@ -1415,8 +1525,8 @@ try {
   const sCrs = (await call("U2", "GET", `/api/v2/workspaces/${SW}/change-requests`, { cookie: U2.cookie })).json;
   const sCr = sCrs?.waiting_on_me?.[0];
   check(
-    "sample: one pending change request on the security goal, from the caller, explaining why the sample shows it; the caller can approve, counter, reject, withdraw and rebase it",
-    sCrs?.waiting_on_me?.length === 1 && sCrs.mine.length === 0 && sCrs.others.length === 0 && sCr.goal.id === sSec.id && sCr.state === "pending" && sCr.requester.id === U2.id && /sample/i.test(sCr.reason) && sCr.diff.after.measures.length === sSec.measures.length + 1 && Object.values(sCr.can).filter(Boolean).length === 5 && !sCr.can.accept_counter,
+    "sample: one pending change request on the security goal, from the caller, explaining why the sample shows it; the caller can approve, counter, reject, withdraw and rebase it and add evidence; its revision carries an Align snapshot",
+    sCrs?.waiting_on_me?.length === 1 && sCrs.mine.length === 0 && sCrs.others.length === 0 && sCr.goal.id === sSec.id && sCr.state === "pending" && sCr.requester.id === U2.id && /sample/i.test(sCr.reason) && sCr.diff.after.measures.length === sSec.measures.length + 1 && Object.values(sCr.can).filter(Boolean).length === 6 && !sCr.can.accept_counter && sCr.can.add_evidence && sCr.revisions[0].snapshot?.recorded_by === "align" && sCr.revisions[0].snapshot.revision === 1,
     JSON.stringify(sCrs).slice(0, 400),
   );
   const sApprove = await call("U2", "POST", `/api/v2/workspaces/${SW}/goals/${sSec.id}/change-requests/${sCr?.id}/approve`, { cookie: U2.cookie, body: { revision: 1 } });
@@ -1702,10 +1812,30 @@ try {
       await page.goto(`${sampleUrl}/requests`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Waiting on you") && document.body.innerText.includes("waiting for approval") && document.body.innerText.includes("Pen test window booked"), { timeout: 15000 });
       const requestsText = await page.evaluate(() => document.body.innerText);
-      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve")?.click());
+      // With no evidence, Approve asks first ("Approve without evidence?"); then evidence is added and it approves plainly.
+      const clickButton = (label) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), label);
+      await clickButton("Approve");
+      await page.waitForFunction(() => document.body.innerText.includes("Approve without evidence?") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve without evidence as version 2"), { timeout: 15000 });
+      await clickButton("Approve");
+      await clickButton("Add evidence");
+      await page.waitForSelector('input[type="url"]');
+      await page.type('input[type="url"]', "https://github.com/northstar/security/pull/7");
+      await page.type('input[maxlength="120"]', "Pen-test vendor contract");
+      await clickButton("Add link");
+      await page.waitForFunction(() => [...document.querySelectorAll("a")].some((a) => a.textContent === "Pen-test vendor contract"), { timeout: 15000 });
+      const evLink = await page.evaluate(() => {
+        const a = [...document.querySelectorAll("a")].find((x) => x.textContent === "Pen-test vendor contract");
+        return { href: a?.getAttribute("href"), target: a?.getAttribute("target"), rel: a?.getAttribute("rel"), text: document.body.innerText };
+      });
+      check(
+        "ui (Chrome): approving a request with no evidence asks \"Approve without evidence?\"; an added link shows its kind, label, host, who added it and \"self-reported\", opens in a new tab with rel noopener noreferrer, beside \"Recorded by Align at revision 1\"",
+        evLink.href === "https://github.com/northstar/security/pull/7" && evLink.target === "_blank" && evLink.rel === "noopener noreferrer" && /self-reported/.test(evLink.text) && /Pull request/.test(evLink.text) && /github\.com/.test(evLink.text) && /by you/.test(evLink.text) && /Recorded by Align at revision 1/.test(evLink.text) && !/\bverified\b/.test(evLink.text),
+        JSON.stringify({ ...evLink, text: evLink.text.slice(0, 300) }),
+      );
+      await clickButton("Approve");
       await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve as version 2"), { timeout: 15000 });
-      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve as version 2")?.click());
-      await page.waitForFunction(() => document.body.innerText.includes("Approved by") && document.body.innerText.includes("It became version 2"), { timeout: 15000 });
+      await clickButton("Approve as version 2");
+      await page.waitForFunction(() => document.body.innerText.includes("Approved by") && document.body.innerText.includes("It became version 2") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
       const sampleGoal = await page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Pass the security review")?.getAttribute("href"));
       await page.goto(`${BASE}${sampleGoal}`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Change requests") && document.body.innerText.includes("approved") && document.body.innerText.includes("version 2"), { timeout: 15000 });

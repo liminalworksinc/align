@@ -37,15 +37,17 @@ function add(s: Sums, a: Agg) {
 
 export type SpendBy = "goal" | "team" | "session";
 
+/** The sums every spend query selects, per group (one usage row is one request). */
+const SUM_COLUMNS = `COUNT(*) AS requests, SUM(u.input) AS input, SUM(u.output) AS output, SUM(u.cache_read) AS cache_read,
+            SUM(u.cache_write_5m) AS cache_write_5m, SUM(u.cache_write_1h) AS cache_write_1h, SUM(u.cache_write_unsplit) AS cache_write_unsplit,
+            COALESCE(SUM(u.est_list_usd_micros), 0) AS est_list_usd_micros,
+            SUM(CASE WHEN u.est_list_usd_micros IS NULL THEN 1 ELSE 0 END) AS unpriced_requests`;
+
 export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to: string | null) {
   need(pp, "spend.read");
   if (from && to && from >= to) throw badRequest("from must be before to");
   const rows = all<Agg>(
-    `SELECT e.goal_id, u.session_key, s.user_id AS session_owner, u.basis,
-            COUNT(*) AS requests, SUM(u.input) AS input, SUM(u.output) AS output, SUM(u.cache_read) AS cache_read,
-            SUM(u.cache_write_5m) AS cache_write_5m, SUM(u.cache_write_1h) AS cache_write_1h, SUM(u.cache_write_unsplit) AS cache_write_unsplit,
-            COALESCE(SUM(u.est_list_usd_micros), 0) AS est_list_usd_micros,
-            SUM(CASE WHEN u.est_list_usd_micros IS NULL THEN 1 ELSE 0 END) AS unpriced_requests
+    `SELECT e.goal_id, u.session_key, s.user_id AS session_owner, u.basis, ${SUM_COLUMNS}
      FROM v2_usage u
      JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
      JOIN v2_sessions s ON s.ws_id = u.ws_id AND s.session_key = u.session_key
@@ -108,4 +110,33 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
     unpriced_requests: total.unpriced_requests,
     rows: out,
   };
+}
+
+/** One goal's usage in [from, to): the total and one row per model, summed exactly as spend() sums a goal's row (every
+ *  session's usage under the goal, by the epoch it was uploaded with). No visibility check: the caller decides who sees
+ *  it (the change-request snapshot, lib/v2/evidence.ts, stores it and shows it to readers who may read spend). */
+export function goalSpend(ws: string, goalId: string, from: string, to: string) {
+  const rows = all<Agg & { model: string }>(
+    `SELECT u.model, u.basis, ${SUM_COLUMNS}
+     FROM v2_usage u
+     JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id
+     WHERE u.ws_id = ? AND e.goal_id = ? AND u.ts >= ? AND u.ts < ?
+     GROUP BY u.model, u.basis`,
+    ws,
+    goalId,
+    from,
+    to,
+  );
+  const total = emptySums();
+  const models = new Map<string, Sums>();
+  for (const r of rows) {
+    add(total, r);
+    let m = models.get(r.model);
+    if (!m) models.set(r.model, (m = emptySums()));
+    add(m, r);
+  }
+  const by_model = [...models.entries()]
+    .map(([model, sums]) => ({ model, ...sums }))
+    .sort((a, b) => b.est_list_usd_micros - a.est_list_usd_micros || b.requests - a.requests || a.model.localeCompare(b.model));
+  return { total, by_model };
 }

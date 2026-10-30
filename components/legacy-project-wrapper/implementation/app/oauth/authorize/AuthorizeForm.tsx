@@ -2,8 +2,9 @@
 import { useState } from "react";
 import { Btn, Card, Err, SignInAgain } from "@/app/app/_ui/kit";
 
-// The consent form. One choice: let this app read one workspace as this person, or cancel. Read-only is stated
-// plainly because it is enforced: the MCP server has no tool that writes (lib/mcp/register.ts). Approving needs a
+// The consent form. One choice: let this app read one workspace as this person, or cancel. What it can't do is stated
+// plainly because it is enforced: the MCP server's only write is an agent-reported evidence link on a change request
+// the person may act on (lib/mcp/register.ts). Approving needs a
 // sign-in from the last 15 minutes; an older one gets the sign-in-again prompt instead of the form.
 
 export interface Person {
@@ -102,7 +103,8 @@ export default function AuthorizeForm(props: {
           <Card title="What it can do">
             <ul className="list-disc space-y-1 pl-5 text-[15px]">
               <li>It reads goals, change requests, decision records and directives in the workspace you choose, as you and with your role.</li>
-              <li>It can’t propose, approve or change anything. Those stay with the people in the workspace.</li>
+              <li>It can’t propose, approve or change goals or change requests. Those stay with the people in the workspace.</li>
+              <li>It can attach evidence links to change requests you can act on, and Align labels them agent-reported.</li>
               <li>It never sees captured prompts.</li>
               <li>What it reads is sent to {provider}.</li>
               <li>You or a workspace owner can disconnect it on the workspace’s Apps tab, and it is disconnected if you leave the workspace.</li>
@@ -128,7 +130,7 @@ export default function AuthorizeForm(props: {
           <div className="flex flex-wrap gap-2">
             {person.workspaces.length > 0 && (
               <Btn onClick={() => void answer("approve")} disabled={busy || !ws}>
-                Allow read-only access
+                Allow access
               </Btn>
             )}
             {cancel}

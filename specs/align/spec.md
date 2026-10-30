@@ -6,7 +6,7 @@ kind: product
 
 # Align
 
-Align is a web application, a read-only MCP server and a local agent package. People in an organization sign
+Align is a web application, an MCP server that reads (and can only add evidence links) and a local agent package. People in an organization sign
 in as themselves, set goals that roll up from team goals to company goals, and change another team's goal
 only with the approval of someone entitled to approve for it. Coding agents (Claude Code and Codex) that
 people choose to share count toward a goal: they receive its current version and any change to it at the
@@ -43,9 +43,9 @@ agent hooks and screens), not the framework, hosting, or language choices.
 
 ## Parts
 
-- `goals-and-proposals` — goals and their versions, approval sets, alignments, change requests and the sample workspace
+- `goals-and-proposals` — goals and their versions, approval sets, alignments, change requests and their evidence, and the sample workspace
 - `directives` — directives to running agents, receipts, and stopping and resuming an agent
-- `mcp` — the read-only MCP server, its OAuth authorization server and the `align-connect` stdio relay
+- `mcp` — the MCP server (reads, plus agent-reported evidence links), its OAuth authorization server and the `align-connect` stdio relay
 - `workspaces` — identity and sign-in, workspaces, members, teams, invites, devices, shared sessions, usage and spend, activity, and hosted mode
 - `local-agent` — the `align` CLI, its Claude Code and Codex hooks, the one-pass sync and local metering
 - `interface` — the web app under `/app` and the OAuth consent page

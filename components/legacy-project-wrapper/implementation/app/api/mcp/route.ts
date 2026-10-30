@@ -6,8 +6,9 @@ import { originOf, PRM_PATH, readMcpToken, resourceFor, SCOPE } from "@/lib/oaut
 import { deviceFromAccessToken } from "@/lib/v2/devices";
 import { ready } from "@/lib/v2/init";
 
-// Read-only MCP server (specs/align/mcp.md): a connected AI app or a paired device reads, as one person, the goals,
-// change requests, decision records and directives of a v2 workspace. No tool can create, change, propose or approve.
+// MCP server (specs/align/mcp.md): a connected AI app or a paired device reads, as one person, the goals, change
+// requests, decision records and directives of a v2 workspace. No tool can create, change, propose or approve; the one
+// write is align_add_change_request_evidence (an agent-reported evidence link on a request the person may act on).
 const handler = createMcpHandler(registerAlign, { serverInfo: { name: "align", version: "0.2.0" }, instructions: SERVER_INSTRUCTIONS });
 
 /**

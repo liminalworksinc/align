@@ -570,6 +570,30 @@ const MIGRATIONS: string[] = [
     FOREIGN KEY (ws_id, change_request_id) REFERENCES v2_change_requests(ws_id, id) ON DELETE CASCADE
   );
   `,
+  // PRESEED-006: evidence on change requests (lib/v2/evidence.ts). Each revision keeps the snapshot Align recorded when
+  // it was written (snapshot_json: the goal's 30-day spend, bound sessions and last activity; never from a client).
+  // Evidence links belong to one revision and are frozen once it is superseded or the request decided; `source` says
+  // whether a person (web session) or an agent (MCP or a device token) added it. An approval records whether its
+  // revision had any evidence.
+  `
+  ALTER TABLE v2_change_request_revisions ADD COLUMN snapshot_json TEXT;
+  ALTER TABLE v2_change_requests ADD COLUMN approved_without_evidence INTEGER;
+  CREATE TABLE v2_change_request_evidence (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL,
+    change_request_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('pr','ci_run','incident','dashboard','doc','other')),
+    url TEXT NOT NULL,
+    label TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('person','agent')),
+    added_by TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    FOREIGN KEY (ws_id, change_request_id) REFERENCES v2_change_requests(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (change_request_id, revision) REFERENCES v2_change_request_revisions(change_request_id, revision) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_change_request_evidence_rev ON v2_change_request_evidence(change_request_id, revision);
+  `,
 ];
 
 export function migrate() {
