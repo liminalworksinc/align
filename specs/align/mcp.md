@@ -328,7 +328,12 @@ The MCP server SHALL return from `align_get_directives` the fields `workspace` (
 
 ### Requirement: Limits through MCP follow the 2026-10-29 ruling
 
-Through MCP a goal's limits SHALL be read by the founder's 2026-10-29 ruling, restated for v2 people and teams, even though in the web app limits follow goal visibility: a workspace owner reads the limits of every goal they can read; any other person (member or viewer) reads the limits of goals owned by a team they are in and of goals they own; a person in no team reads the limits of company goals and of goals they own. `align_get_limits` and `align_get_brief` list only those, and every other output that carries limits (`align_list_goals`, `align_get_goal`, the goal of a directive) SHALL show `limits: null` for any other readable goal. A goal the person cannot read is absent as before.
+Through MCP a goal's limits SHALL be read by the founder's 2026-10-29 ruling, restated for v2 people and teams, even though in the web app limits follow goal visibility: a workspace owner reads the limits of every goal they can read; any other person (member or viewer) reads the limits of goals owned by a team they are in and of goals they own; a person in no team reads the limits of company goals and of goals they own. `align_get_limits` and `align_get_brief` list only those, and every other output that carries limits (`align_list_goals`, `align_get_goal`, the goal of a directive) SHALL show `limits: null` for any other readable goal. A goal the person cannot read is absent as before. The clause "and of goals they own" goes beyond the ruling's wording on purpose (an owner decision of 2026-10-30): a person's own goal, with or without a team, is never another team's, so their apps read its limits too.
+
+#### Scenario: Own goal outside the person's teams
+
+- **WHEN** a member in no team owns a workspace-visible goal with limits, and a lead of team Product owns a private goal with limits
+- **THEN** each reads their own goal's limits through `align_get_limits` and `align_get_brief`, and nobody else who is not a workspace owner reads them through MCP
 
 #### Scenario: Another team's workspace-visible goal
 

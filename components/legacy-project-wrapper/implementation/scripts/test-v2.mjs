@@ -4203,11 +4203,27 @@ try {
       `${loiSent.status} ${loiSent.err} | ${loiNoVerify.status} ${loiNoVerify.err} | ${loiBadRef.status} ${loiEmailRef.status} ${loiSentVerify.status} ${loiOther.status} ${loiUnknownWs.status} ${loiSigned.status} ${loiSigned.out} ${loiAgain.status}`,
     );
 
+    // -- the ported content (PORT-004): a limit, an ask with a mention, and a value report, each with its own words --
+    const gNow = (await ws(e1, "GET", W, `/goals/${G?.id}`)).json?.goal;
+    const limV = await ws(e1, "POST", W, `/goals/${G?.id}/versions`, { version: gNow?.version, limits: [{ type: "must_not", text: "Never touch the Bramblewick ledger", source: { kind: "meeting", title: "Featherstone sync", date: "2026-10-20" } }] });
+    const teamE = (await ws(e1, "POST", W, "/teams", { name: "Sassafras team" })).json?.id;
+    const askE = await ws(e1, "POST", W, "/asks", { team_id: teamE, text: "Ask the Cobblestone team for the export", from_label: "Larkspur Faculty", source: { kind: "meeting", title: "Juniper standup", date: "2026-10-21" } });
+    const mentionE = await ws(e1, "POST", W, `/asks/${askE.json?.id}/mention`, { date: "2026-10-22", text: "Huckleberry came up again", source_title: "Nutmeg review" });
+    const valueE = await ws(e2, "POST", W, `/goals/${G?.id}/change-requests/${cr1.json?.id}/value`, { action: "reported", estimate: "longer", note: "Saved the Pimpernel week" });
+    check(
+      "events setup (ported content): a goal version with a limit, an ask with a mention, and a value report with a note, through the routes",
+      limV.status === 201 && limV.json?.limits?.length === 1 && !!teamE && askE.status === 201 && mentionE.status === 200 && valueE.status === 200 && valueE.json?.recorded === true,
+      `${limV.status} ${limV.text.slice(0, 160)} ${askE.status} ${askE.text.slice(0, 160)} ${mentionE.status} ${valueE.status} ${valueE.text.slice(0, 160)}`,
+    );
+
     // -- no content in any event row --
     const fixtures = [
       ...Object.values(E).flatMap((u) => [u.email, u.name, u.id]),
       WS_NAME, "Quiet Kestrel", "Northstar", GOAL_TITLE, "Periwinkle", CR_REASON, "Tangerine", "Saffron", "pomegranate", "quince", "Gooseberry", "Marigold", "Thistle",
       "hopeful-applicant", "Horatio", "Wobblegong", "Kerensa", "Marmalade", "dormant-invitee", "@", "http", "alc_", "alnd_", "alnr_", DE1.access, DE1.id, "ba_", "cr_",
+      // the ported content: limit text and source title, team name, ask text, who asked, its source title, mention text
+      // and source title, a value report's note, and the ids of the ask and the change request
+      "Bramblewick", "Featherstone", "Sassafras", "Cobblestone", "Larkspur", "Juniper", "Huckleberry", "Nutmeg", "Pimpernel", "ask_", "lim_", "vr_",
     ];
     const rowsText = q("SELECT * FROM v2_events").map((r) => Object.values(r).join(" ")).join("\n");
     const found = fixtures.filter((f) => f && rowsText.toLowerCase().includes(String(f).toLowerCase()));
@@ -4219,7 +4235,7 @@ try {
     };
     const offList = q("SELECT name, props FROM v2_events").filter((r) => !ALLOWED[r.name] || Object.keys(JSON.parse(r.props)).some((k) => !ALLOWED[r.name].includes(k)));
     check(
-      "events: no event row holds an email, name, user id, workspace name, goal title, change request text, repo alias, session title, device name, URL, code or token from this phase, and every props key is on its event's allowlist",
+      "events: no event row holds an email, name, user id, workspace name, goal title, change request text, repo alias, session title, device name, URL, code or token from this phase, nor limit, ask, mention or value report text, and every props key is on its event's allowlist",
       q("SELECT COUNT(*) AS n FROM v2_events")[0].n > 20 && found.length === 0 && offList.length === 0,
       `${found.join(", ")} ${JSON.stringify(offList)}`,
     );

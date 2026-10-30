@@ -813,13 +813,9 @@ async function local(env) {
   // PORT-004 fills this block: the four read-only tools, their read scoping, injection, the brief and instructions.
   // ==== port:mcp ====
   // The four read-only tools of the v1 port (limits, asks, goal activity, brief), their read scoping, injection, the
-  // brief and the instructions. Limits are written straight into the database (goal content, as PORT-002 stores it), so
-  // these checks hold with or without its routes. Asks and goal activity come from PORT-003: until its routes are in
-  // this tree, the checks that need their data are reported as SKIP and not counted.
+  // brief and the instructions. Every limit, ask and work signal goes in through the v2 routes (goal versions, an
+  // approved change request, POST .../asks and its actions, device activity), so these checks cover the whole path.
   {
-    const P2_ASKS = existsSync(path.join(ROOT, "app/api/v2/workspaces/[ws]/asks/route.ts"));
-    const P2_ACTIVITY = existsSync(path.join(ROOT, "app/api/v2/workspaces/[ws]/goals/[goal]/activity/route.ts"));
-    const checkIf = (ready, name, ok, detail) => (ready ? check(name, ok, detail) : console.log(`SKIP  [${phaseName}] ${name}  (needs PORT-003's data)`));
     const NEW_TOOLS = ["align_get_asks", "align_get_brief", "align_get_goal_activity", "align_get_limits"];
     const nineNames = ["align_get_asks", "align_get_brief", "align_get_decision_record", "align_get_directives", "align_get_goal", "align_get_goal_activity", "align_get_limits", "align_list_change_requests", "align_list_goals"];
     check(
@@ -844,20 +840,12 @@ async function local(env) {
     await join(U1, A, NOT, "member");
     const ST = (await web(U1, "POST", `/api/v2/workspaces/${A}/teams`, { name: "Security" })).json?.id;
     await web(U1, "POST", `/api/v2/workspaces/${A}/teams/${ST}/members`, { user_id: SEC.id, role: "lead" });
-    const GSecT = await mkGoal(SEC, A, { title: "Harden the API", visibility: "team", team_id: ST });
-    const GSecW = await mkGoal(SEC, A, { title: "Pass the security review", visibility: "workspace", team_id: ST, measures: [{ text: "Open findings", target: "0" }] });
-    const GNo = await mkGoal(NOT, A, { title: "Write the onboarding guide", visibility: "workspace" });
-    const DS = await pairDevice(SEC, [A]);
-    const DN = await pairDevice(NOT, [A]);
-    // Limits as goal content: five long ones on three goals (the summaries must cap), an injected one on Security's
-    // workspace-visible goal, and one each on the team, private and no-team goals.
-    const lim = (type, text, src = true) => ({ id: `lim_${randomBytes(9).toString("base64url").replace(/[^a-z2-7]/gi, "a").toLowerCase().slice(0, 12)}`, type, text, source: src ? { kind: "meeting", title: "Planning sync", date: "2026-10-20" } : null });
+    // Limits as goal content (PORT-002): five long ones on three goals (the summaries must cap), an injected one on
+    // Security's workspace-visible goal, and one each on the team, private and no-team goals. New goals carry them from
+    // creation, existing ones get a new version from their owner, and Security's team goal gets its limit through a
+    // change request the workspace owner proposes and Security's lead approves.
+    const lim = (type, text, src = true) => ({ type, text, ...(src ? { source: { kind: "meeting", title: "Planning sync", date: "2026-10-20" } } : {}) });
     const long = (w) => `${w} ${"x".repeat(150 - w.length)}`.slice(0, 160);
-    const setLimits = (g, limits) =>
-      withDb((d) => {
-        d.prepare("UPDATE v2_goals SET limits_json = ? WHERE id = ?").run(JSON.stringify(limits), g.id);
-        d.prepare("UPDATE v2_goal_versions SET limits_json = ? WHERE goal_id = ? AND version = (SELECT version FROM v2_goals WHERE id = ?)").run(JSON.stringify(limits), g.id, g.id);
-      });
     const LIMIT = {
       GC: [0, 1, 2, 3, 4].map((i) => lim("must", long(`Company limit ${i}`))),
       GT: [0, 1, 2, 3, 4].map((i) => lim(i ? "must_not" : "out_of_scope", long(`Product limit ${i}`))),
@@ -866,8 +854,22 @@ async function local(env) {
       GPriv: [lim("must_not", "Lou's own private limit")],
       GNo: [lim("must", "Nia's own limit")],
     };
+    const GSecT = await mkGoal(SEC, A, { title: "Harden the API", visibility: "team", team_id: ST });
+    const GSecW = await mkGoal(SEC, A, { title: "Pass the security review", visibility: "workspace", team_id: ST, measures: [{ text: "Open findings", target: "0" }], limits: LIMIT.GSecW });
+    const GNo = await mkGoal(NOT, A, { title: "Write the onboarding guide", visibility: "workspace", limits: LIMIT.GNo });
+    const DS = await pairDevice(SEC, [A]);
+    const DN = await pairDevice(NOT, [A]);
+    const versionOf = async (u, g) => (await web(u, "GET", `/api/v2/workspaces/${A}/goals/${g.id}`)).json?.goal?.version;
+    const newVersion = async (u, g, body) => web(u, "POST", `/api/v2/workspaces/${A}/goals/${g.id}/versions`, { version: await versionOf(u, g), ...body });
+    const limVersions = [await newVersion(U1, GC, { limits: LIMIT.GC }), await newVersion(U4, GT, { limits: LIMIT.GT }), await newVersion(U4, GPriv, { limits: LIMIT.GPriv })];
+    const crLim = await web(U1, "POST", `/api/v2/workspaces/${A}/goals/${GSecT.id}/change-requests`, { base_version: 1, changes: { limits: LIMIT.GSecT }, reason: "Key rotation came up in planning" });
+    const crLimOk = await web(SEC, "POST", `/api/v2/workspaces/${A}/goals/${GSecT.id}/change-requests/${crLim.json?.id}/approve`, { revision: 1 });
+    check(
+      "setup: limits through the v2 routes: on new goals, in owners' new versions (lim_ ids) and through a change request approved by the team's lead (version 2)",
+      GSecW.limits?.length === 5 && GNo.limits?.length === 1 && limVersions.every((r) => r.status === 201 && r.json?.limits?.every((l) => /^lim_/.test(l.id))) && crLim.status === 201 && crLimOk.json?.state === "approved" && crLimOk.json.version === 2,
+      `${limVersions.map((r) => `${r.status} ${r.text.slice(0, 120)}`).join(" | ")} ${crLim.text.slice(0, 160)} ${crLimOk.text.slice(0, 160)}`,
+    );
     const G = { GC, GT, GSecW, GSecT, GPriv, GNo };
-    for (const [k, v] of Object.entries(LIMIT)) setLimits(G[k], v);
     const tU4app = (await connect(clientId, U4, A)).access_token;
     const limitIds = async (tok, args = {}) => ((await tool(tok, "align_get_limits", args)).sc?.goals ?? []).map((g) => g.id).sort();
     const want = (...ks) => ks.map((k) => G[k].id).sort();
@@ -898,40 +900,47 @@ async function local(env) {
     const ownerLimits = await tool(app, "align_get_limits");
     check("align_get_limits as a workspace owner over 16 limits: the summary is capped at 2,400 characters and says that the rest is in structuredContent", ownerLimits.text.length <= 2400 && /more lines not shown here/.test(ownerLimits.text) && ownerLimits.sc.goals.reduce((n, g) => n + g.limits.length, 0) === 17, `${ownerLimits.text.length}`);
     const dirsOwner = await tool(app, "align_get_directives");
-    check("align_get_directives: a directive's goal carries the snapshot's limits for a reader they are shared with (an array)", Array.isArray(dirsOwner.sc?.directives?.find((d) => d.goal)?.goal?.limits), JSON.stringify(dirsOwner.sc?.directives?.[0]?.goal).slice(0, 300));
+    const gcDir = dirsOwner.sc?.directives?.find((d) => d.kind === "goal_version" && d.goal?.id === GC.id);
+    check("align_get_directives: the company goal's new version reached the owner's bound session with its five limits in the snapshot", gcDir?.goal?.limits?.length === 5 && JSON.stringify(gcDir.goal.limits[0].text) === JSON.stringify(ut(LIMIT.GC[0].text)), JSON.stringify(dirsOwner.sc?.directives?.[0]?.goal).slice(0, 300));
+    const secTLimits = (await tool(DS.access, "align_get_limits", { goal_id: GSecT.id })).sc?.goals?.[0];
+    check("align_get_limits: a limit confirmed through an approved change request is on the new version, saved by the approver", secTLimits?.version === 2 && secTLimits.limits.length === 1 && secTLimits.limits[0].source === null && JSON.stringify(secTLimits.version_by) === JSON.stringify({ id: SEC.id, name: ut("Sam Security") }), JSON.stringify(secTLimits));
 
     // -- asks (stored as PORT-003 stores them) --
     const ASK_TEXT = `Faculty need SSO by June. ${INJECTED}`;
-    const insAsk = (team, by, text, state = "open", date = "2026-10-21") => {
-      const id = `ask_${randomBytes(15).toString("hex").slice(0, 24).replace(/[0189]/g, "a")}`;
-      const at = new Date().toISOString();
-      withDb((d) =>
-        d
-          .prepare("INSERT INTO v2_asks (id, ws_id, team_id, goal_id, text, from_label, created_by, source_kind, source_title, source_date, state, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?, ?, 'meeting', ?, ?, ?, ?, ?)")
-          .run(id, A, team, text, "Faculty", by.id, "Faculty sync", date, state, at, at),
-      );
-      return id;
+    const MENTION_TEXT = `It came up again ${INJECTED}`;
+    const made = [];
+    const newAsk = async (team, by, text, date = "2026-10-21") => {
+      const r = await web(by, "POST", `/api/v2/workspaces/${A}/asks`, { team_id: team, text, from_label: "Faculty", source: { kind: "meeting", title: "Faculty sync", date } });
+      made.push(r);
+      return r.json?.id;
     };
-    const askProd = insAsk(T, U1, ASK_TEXT, "open", "2026-10-22");
-    const prodMore = [1, 2, 3, 4, 5].map((i) => insAsk(T, U1, `Product ask ${i}`, "open", `2026-10-0${i}`));
-    const askAcc = insAsk(T, U1, "An accepted Product ask", "accepted", "2026-10-25");
-    const askSec = insAsk(ST, U2, "Security, review the vendor contract", "open");
-    const askNot = insAsk(ST, NOT, "Security, look at the onboarding guide", "open");
+    const askProd = await newAsk(T, U1, ASK_TEXT, "2026-10-22");
+    const prodMore = [];
+    for (const i of [1, 2, 3, 4, 5]) prodMore.push(await newAsk(T, U1, `Product ask ${i}`, `2026-10-0${i}`));
+    const askAcc = await newAsk(T, U1, "An accepted Product ask", "2026-10-25");
+    const askSec = await newAsk(ST, U2, "Security, review the vendor contract");
+    const askNot = await newAsk(ST, NOT, "Security, look at the onboarding guide");
+    const accepted = await web(U4, "POST", `/api/v2/workspaces/${A}/asks/${askAcc}/accept`, {});
+    const mentioned = await web(U1, "POST", `/api/v2/workspaces/${A}/asks/${askProd}/mention`, { date: "2026-10-28", text: MENTION_TEXT, source_title: "Steering" });
+    check(
+      "setup: asks recorded through POST .../asks (9, by the owner, a member and a member in no team), one accepted by Product's lead, one mentioned again",
+      made.every((r) => r.status === 201 && /^ask_/.test(r.json?.id ?? "")) && accepted.json?.state === "accepted" && mentioned.json?.mentions?.length === 1,
+      `${made.map((r) => r.status).join(",")} ${accepted.text.slice(0, 160)} ${mentioned.text.slice(0, 160)}`,
+    );
     const askIds = async (tok, args = {}) => ((await tool(tok, "align_get_asks", args)).sc?.asks ?? []).map((a) => a.id);
     const [aU4, aU4dev, aSec, aOwner, aNot] = await Promise.all([askIds(tU4app), askIds(D4.access), askIds(DS.access), askIds(app), askIds(DN.access)]);
     const has = (list, ...ids) => ids.every((id) => list.includes(id));
     const none = (list, ...ids) => ids.every((id) => !list.includes(id));
     const asksU4 = await tool(tU4app, "align_get_asks");
     check("align_get_asks answers with structuredContent {workspace, asks} and one text item, and fails input validation for an unknown state", !asksU4.isError && asksU4.sc?.workspace?.id === A && Array.isArray(asksU4.sc.asks) && asksU4.result.content.length === 1 && asksU4.text.length <= 2400 && !!((await tool(app, "align_get_asks", { state: "maybe" })).isError || (await tool(app, "align_get_asks", { state: "maybe" })).error), asksU4.text.slice(0, 200));
-    checkIf(
-      P2_ASKS,
+    check(
       "align_get_asks scoping: a Product lead's app reads Product's asks and not Security's; a Security lead reads Security's and not Product's; a workspace owner reads both teams'; a member in no team reads only the ask they recorded; app and device the same",
       has(aU4, askProd, askAcc, ...prodMore) && none(aU4, askSec, askNot) && has(aSec, askSec, askNot) && none(aSec, askProd) && has(aOwner, askProd, askSec, askNot) && JSON.stringify(aNot) === JSON.stringify([askNot]) && JSON.stringify(aU4) === JSON.stringify(aU4dev),
       JSON.stringify({ aU4, aSec, aOwner, aNot }),
     );
     const injAsk = asksU4.sc?.asks?.find((a) => a.id === askProd);
-    checkIf(P2_ASKS, "align_get_asks: an injected ask text comes back as untrusted_text (from_label and source title too) and escaped in the summary, which says open asks are not agreed", JSON.stringify(injAsk?.text) === JSON.stringify(ut(ASK_TEXT)) && JSON.stringify(injAsk?.from_label) === JSON.stringify(ut("Faculty")) && asksU4.text.includes("&lt;/untrusted-text&gt;") && !asksU4.text.includes(INJECTED) && asksU4.text.includes("not agreed"), asksU4.text.slice(0, 400));
-    checkIf(P2_ASKS, "align_get_asks: the caller's teams first, then open, accepted and closed, newest first", aU4.indexOf(askProd) === 0 && aU4.indexOf(askAcc) > aU4.indexOf(prodMore[0]), JSON.stringify(aU4));
+    check("align_get_asks: an injected ask text and mention text come back as untrusted_text (from_label and source title too) and escaped in the summary, which says open asks are not agreed", JSON.stringify(injAsk?.text) === JSON.stringify(ut(ASK_TEXT)) && JSON.stringify(injAsk?.from_label) === JSON.stringify(ut("Faculty")) && JSON.stringify(injAsk?.mentions?.[0]?.text) === JSON.stringify(ut(MENTION_TEXT)) && JSON.stringify(injAsk.mentions[0].added_by) === JSON.stringify({ id: U1.id, name: ut("Ola Owner") }) && asksU4.text.includes("&lt;/untrusted-text&gt;") && !asksU4.text.includes(INJECTED) && asksU4.text.includes("not agreed"), asksU4.text.slice(0, 400));
+    check("align_get_asks: the caller's teams first, then open, accepted and closed, newest first", aU4.indexOf(askProd) === 0 && aU4.indexOf(askAcc) > aU4.indexOf(prodMore[0]), JSON.stringify(aU4));
     const asksB = await tool(D2.access, "align_get_asks", { workspace: B });
     const asksOther = await tool(app, "align_get_asks", { workspace: B });
     check("workspaces stay isolated: an app for A naming B -> 'Workspace not found'; a device reading B gets none of A's asks", asksOther.isError && asksOther.text === "Workspace not found" && !asksB.isError && !(asksB.sc?.asks ?? []).some((a) => [askProd, askSec, askNot].includes(a.id)), `${asksOther.text} ${JSON.stringify(asksB.sc?.asks?.map((a) => a.id))}`);
@@ -965,8 +974,7 @@ async function local(env) {
       `${actU4.text.slice(0, 200)} | ${actHidden.text}`,
     );
     check("align_get_goal_activity: a Product member and a member in no team get no detail on Security's goal", a0(actU4)?.detail === null && a0(actNot)?.detail === null, JSON.stringify([a0(actU4), a0(actNot)]));
-    checkIf(
-      P2_ACTIVITY,
+    check(
       "align_get_goal_activity: Security's lead and a workspace owner get the detail (the repo-relative paths as untrusted_text, the hash-only item counted); every reader gets the counts (1 session, 1 Claude Code)",
       a0(actSec)?.detail?.files?.some((f) => JSON.stringify(f) === JSON.stringify(ut("api/auth.py"))) && a0(actSec).detail.files_hidden >= 1 && a0(actOwner)?.detail !== null && a0(actU4)?.sessions === 1 && a0(actU4).by_harness["claude-code"] === 1,
       JSON.stringify([a0(actSec), a0(actU4)]),
@@ -998,8 +1006,7 @@ async function local(env) {
       crSec.status === 201 && crItem?.kind === "change_request" && crItem.state === "pending" && crItem.goal.id === GSecW.id && JSON.stringify(crItem.waiting_on) === JSON.stringify([{ id: SEC.id, name: ut("Sam Security") }]) && !JSON.stringify(bSec).includes(BRIEF_REASON) && alItem?.kind === "alignment" && alItem.waiting_on.some((w) => w.id === SEC.id) && bSec.text.includes("NOT AGREED YET") && bSec.text.includes(crSec.json?.id),
       `${JSON.stringify(alItem?.waiting_on)} ${bSec.text.length} ${bSec.text.slice(-500)}`,
     );
-    checkIf(
-      P2_ASKS,
+    check(
       "align_get_brief: the open asks of the person's teams, at most 5, open first, with more_asks for the rest",
       bU4.sc?.asks?.length === 5 && bU4.sc.asks.every((a) => a.state === "open") && bU4.sc.more_asks >= 1 && !bU4.sc.asks.some((a) => a.id === askSec) && bU4.text.includes("ASKED OF YOUR TEAMS"),
       JSON.stringify(bU4.sc?.asks?.map((a) => [a.id, a.state])),

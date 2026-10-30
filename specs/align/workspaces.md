@@ -619,8 +619,10 @@ under `ALIGN_SECRET` and record which workspace the code created.
 ### Requirement: Access requests
 
 The server SHALL accept, without sign-in, a same-site `POST /api/v2/access-requests {email, name, company?,
-team_size?, use_case, interest}` where `team_size` is one of `1`, `2-10`, `11-50`, `51-200`, `201+`, `use_case` is 1 to
-500 characters and `interest` is `try` or `evaluate`, store it with `status` pending and `created_at`, answer 201
+team_size?, use_case, interest, via?}` where `team_size` is one of `1`, `2-10`, `11-50`, `51-200`, `201+`, `use_case` is 1 to
+500 characters, `interest` is `try` or `evaluate` and `via` is `form` (the default) or `value_card` (the form was opened
+from the decision value card's follow-up link, the `interface` part), store it with `status` pending and `created_at`
+(`via` is not stored on the request; it goes only on the `access_requested` product event, the `metrics` part), answer 201
 `{received:true}` whether or not that address already has a pending request (which it updates), and allow at most 5
 requests per client per hour and 3 per email address per day, counted in the database.
 
@@ -631,7 +633,7 @@ requests per client per hour and 3 per email address per day, counted in the dat
 
 #### Scenario: Invalid or cross-site request
 
-- **WHEN** the interest is unknown, the email is not an address, the use is empty or longer than 500 characters, the team size is unknown, or the Origin is another site
+- **WHEN** the interest or `via` is unknown, the email is not an address, the use is empty or longer than 500 characters, the team size is unknown, or the Origin is another site
 - **THEN** the server responds 400, or 403 `cross_site`, and stores nothing
 
 #### Scenario: Too many requests
