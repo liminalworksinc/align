@@ -88,18 +88,38 @@ Rows whose epoch is unknown or belongs to another session → rejected per row (
 usage, deliveries; rollups change (the UI says so).
 
 ## Directives
-Only structured content reaches agents: ratified goal fields and enumerated states. Never alignment notes or counters.
-`Directive = { "id": "dir_...", "seq": <int>, "ws", "kind": "goal_version"|"binding_changed"|"binding_suspended"|"stop"|"resume", "session_keys": [string], "goal": Goal|null, "binding": { "goal_id", "effective": "next_root_turn", "cause": "alignment:<al_id>"|"manual" } | null, "created_at" }`
+Only structured content reaches agents: ratified goal fields, enumerated states and Align's typed requests (REQ-001).
+Never alignment notes or counters; the only person-written text is a request's quoted `note` and a hold's `reason`.
+`Directive = { "id": "dir_...", "seq": <int>, "ws", "kind": "goal_version"|"binding_changed"|"binding_suspended"|"stop"|"resume"|"request"|"hold"|"release", "session_keys": [string], "goal": Goal|null, "binding": { "goal_id", "effective": "next_root_turn", "cause": "alignment:<al_id>"|"manual" } | null, "created_at" }`,
+plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absent on the other kinds).
 - `goal_version`: a goal bound/governing for these sessions got a new version or status. Its `goal` snapshot carries
   that version's `limits` (a snapshot stored before limits existed reads `[]`); limit text reaches agents only this way.
 - `binding_changed`: open a new epoch at the next root turn with `binding.goal_id` (approved allocation transfer).
 - `binding_suspended`: the current binding lost its authority (revoked alignment): stop uploading usage for the session
   until the user picks a goal; the agent continues privately.
 - `stop` / `resume`: set / clear the local stop latch.
+- `request` (`goal` and `binding` null): `"request": { "id": "rq_...", "type": "replan"|"checkpoint"|"switch_goal",
+  "cancelled": bool, "goal": { "id", "title"|null, "version" }, "target_goal": { "id", "title"|null, "version" }|null,
+  "sender": { "id", "name" }, "note": string|null, "created_at" }` (null if the request no longer exists). `goal.version`
+  is the goal's version when it was sent; `target_goal` only on `switch_goal`; a title is null for a goal the person
+  can no longer read. A cancellation is a second `request` directive with the same `request.id` and `cancelled: true`,
+  sent to the sessions that had not answered. checkpoint and drafting a replan are safe (the agent may accept them
+  itself, `auto_accepted`); a switch_goal takes effect only on the developer's accept, through the usual epoch path
+  (`cause: "directive:<this directive id>"`).
+- `hold` (`goal` and `binding` null): `"hold": { "goal": { "id", "title"|null }, "held_by": { "id", "name" }, "reason":
+  string|null, "at" }`: block every tool of sessions on that goal until a `release`. Acknowledge with `received`, then
+  `enforced`. A session that binds to a held goal later gets its own `hold` directive.
+- `release`: `"hold": { "goal": { "id", "title"|null }, "released_by": { "id", "name" }, "at" }`: lift that goal's hold.
 
 `GET /api/v2/directives?cursor=<seq>` (Bearer) → `{ "directives": [Directive], "next_cursor": "<seq>" }` (≤100, this device's sessions only).
 There is no push channel: the local agent has no daemon, and each hook-started sync pass fetches by cursor.
-`POST /api/v2/directives/:id/receipts` (Bearer) → req `{ "session_key", "state": "received"|"applied"|"enforced", "at" }` → 200 `{ "fresh": bool }` (idempotent, ≤2 KB).
+`POST /api/v2/directives/:id/receipts` (Bearer) → req `{ "session_key", "state": "received"|"applied"|"enforced"|"accepted"|"declined", "at", "auto_accepted"?: bool }` → 200 `{ "fresh": bool }`, plus `"request_state": "sent"|"received"|"accepted"|"declined"|"expired"` on a `request` directive (idempotent, ≤2 KB).
+`accepted`/`declined` only on a `request` directive (else 400); `auto_accepted: true` only with `accepted` and never on a
+`switch_goal` (400, nothing recorded). A later `declined` overrides an accept the agent made itself; an answer to a
+cancelled (`expired`) request changes nothing.
+Requests and holds are sent from the web (cookie): `GET`/`POST /api/v2/workspaces/:ws/goals/:goal/requests`
+(`{ type, note?, session_keys?, target_goal_id? }`), `DELETE .../requests/:id`, `GET`/`PUT`/`DELETE
+.../goals/:goal/hold` (`{ reason? }`, recent sign-in) and `GET /api/v2/workspaces/:ws/holds`; see `lib/v2/requests.ts`.
 
 ## Activity (v2.2)
 In-flight work signals for agents toward related goals. Deterministic metadata from the user's own hooks, never model

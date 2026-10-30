@@ -19,6 +19,9 @@ import { eventActor, purgeWorkspace, RESTORE_DAYS, sessionMaxDays, testIdpEnable
 //   8. Closed asks (done, declined or withdrawn: PORT-003) are deleted, with their mentions, 13 months after their last
 //      change; open and accepted ones stay.
 //   9. Value reports on approved change requests (PORT-004) are deleted 13 months after their last change.
+//  10. Requests to agents (REQ-001) are deleted 13 months after they were sent, with their per-session states and the
+//      directives that carried them (this step runs right after step 1). A goal hold has no expiry: it ends when it is
+//      released.
 // Asks, their mentions and value reports go with their workspace when it is purged (they cascade from v2_workspaces).
 // Like lib/v2/core.mts, Node runs this file directly (type stripping): it imports only core.mts and takes its database
 // as an argument. Account deletion (lib/v2/account.ts) uses pseudonymise() at once instead of after 30 days.
@@ -32,6 +35,7 @@ export const ACCESS_REQUEST_MONTHS = 13;
 export const EVENT_MONTHS = 13;
 export const CLOSED_ASK_MONTHS = 13;
 export const VALUE_REPORT_MONTHS = 13;
+export const REQUEST_MONTHS = 13;
 export const RETENTION_INTERVAL_MS = 24 * 3600 * 1000;
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -87,6 +91,9 @@ export const PERSON_COLUMNS: readonly (readonly [table: string, column: string])
   ["v2_asks", "decided_by"],
   ["v2_ask_mentions", "added_by"],
   ["v2_value_reports", "person_id"],
+  ["v2_requests", "sender_id"],
+  ["v2_requests", "cancelled_by"],
+  ["v2_goal_holds", "held_by"],
 ];
 
 /** Every workspace whose rows name this person (or hold their pending departure). */
@@ -96,6 +103,7 @@ export function workspacesNaming(db: Sql, userId: string): string[] {
   parts.push("SELECT ws_id FROM v2_former_members WHERE user_id = ?1");
   parts.push("SELECT ws_id FROM v2_alignment_revisions WHERE instr(approvers_json, ?1) > 0");
   parts.push("SELECT ws_id FROM v2_directives WHERE goal_json IS NOT NULL AND json_extract(goal_json, '$.owner.id') = ?1");
+  parts.push("SELECT ws_id FROM v2_directives WHERE hold_json IS NOT NULL AND json_extract(hold_json, '$.by') = ?1");
   parts.push("SELECT ws_id FROM v2_invites WHERE accepted_by = ?1");
   return db.all<{ ws_id: string }>(parts.join(" UNION "), userId).map((r) => r.ws_id);
 }
@@ -138,6 +146,8 @@ export function pseudonymise(db: Sql, wsId: string, userId: string, at: string, 
     wsId,
     userId,
   );
+  // A hold or release directive names who held or released the goal.
+  db.run("UPDATE v2_directives SET hold_json = json_set(hold_json, '$.by', ?) WHERE ws_id = ? AND hold_json IS NOT NULL AND json_extract(hold_json, '$.by') = ?", pid, wsId, userId);
   return pid;
 }
 
@@ -184,6 +194,7 @@ export interface RetentionCounts {
   events_deleted: number;
   asks_deleted: number;
   value_reports_deleted: number;
+  requests_deleted: number;
 }
 
 interface StepOptions {
@@ -198,6 +209,16 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, o: StepOptions) => void)[
     for (const w of db.all<{ id: string }>("SELECT id FROM v2_workspaces WHERE deleted_at IS NOT NULL AND deleted_at <= ?", daysBefore(now, RESTORE_DAYS))) {
       purgeWorkspace(db, w.id);
       c.workspaces_purged++;
+    }
+  },
+  // 10. Requests keep 13 months after they were sent; their targets and the directives that carried them (the request
+  //     and its cancellation) go with them. Run before the roll-up, which would otherwise take a request with the last
+  //     directive that reached a session.
+  (db, now, c) => {
+    const old = db.all<{ id: string }>("SELECT id FROM v2_requests WHERE created_at < ?", monthsBefore(now, REQUEST_MONTHS));
+    for (const r of old) {
+      c.requests_deleted += db.run("DELETE FROM v2_requests WHERE id = ?", r.id);
+      db.run("DELETE FROM v2_directives WHERE kind = 'request' AND json_extract(request_json, '$.request_id') = ?", r.id);
     }
   },
   // 2. Sessions whose end (stop, else last activity: the row, its last upload or epoch) is 13 months old.
@@ -297,6 +318,7 @@ export async function runRetention(
     events_deleted: 0,
     asks_deleted: 0,
     value_reports_deleted: 0,
+    requests_deleted: 0,
   };
   if (dryRun) {
     try {

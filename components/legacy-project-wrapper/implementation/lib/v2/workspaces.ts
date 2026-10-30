@@ -19,9 +19,14 @@ const DAY_MS = 24 * 3600 * 1000;
 
 /** The policy principal for this caller in this workspace. A device sees only the workspaces it was granted. */
 export function principalIn(p: Principal, wsId: string): PolicyPrincipal {
-  const userId = p.user.id;
   const granted = p.kind === "web" || p.grants.has(wsId);
-  const m = granted ? get<{ role: WsRole }>(`SELECT role FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, wsId, userId) : undefined;
+  return granted ? memberPrincipal(wsId, p.user.id) : { userId: p.user.id, wsId, wsRole: null, pods: new Map() };
+}
+
+/** The policy principal of a person in a workspace, as on the web (no device grant involved): what they may do there
+ *  now. Used to check what another person may do (lib/v2/requests.ts: whether a session's owner may bind a goal). */
+export function memberPrincipal(wsId: string, userId: string): PolicyPrincipal {
+  const m = get<{ role: WsRole }>(`SELECT role FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, wsId, userId);
   const pods = new Map<string, PodRole>();
   if (m) for (const r of all<{ pod_id: string; role: PodRole }>("SELECT pod_id, role FROM v2_pod_members WHERE ws_id = ? AND user_id = ?", wsId, userId)) pods.set(r.pod_id, r.role);
   return { userId, wsId, wsRole: m?.role ?? null, pods };

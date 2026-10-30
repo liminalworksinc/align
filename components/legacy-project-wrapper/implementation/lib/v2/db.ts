@@ -811,6 +811,106 @@ const MIGRATIONS: string[] = [
     WHERE ws_id IS NOT NULL AND actor IS NOT NULL AND name IN (
     'member_first_session_captured', 'value_card_viewed', 'value_reported', 'follow_up_clicked');
   `,
+  // REQ-001: requests and goal holds (lib/v2/requests.ts). A request is one of a fixed set of typed asks (replan,
+  // checkpoint, switch_goal) from someone who can approve for a goal, sent to the sessions on it as a `request`
+  // directive; a hold pauses every session on a goal until released (`hold` and `release` directives). v2_directives
+  // and v2_receipts are rebuilt for their wider CHECKs (rows, seq and the AUTOINCREMENT counter kept).
+  `
+  -- 12 (REQ-001): v2_directives gains the kinds request, hold and release, and two JSON columns: request_json
+  -- {request_id, cancelled} (the request itself is v2_requests) and hold_json {by, reason, at} (who held or released).
+  CREATE TABLE v2_directives_new (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('goal_version','binding_changed','binding_suspended','stop','resume','request','hold','release')),
+    goal_id TEXT,
+    goal_json TEXT,
+    binding_json TEXT,
+    created_at TEXT NOT NULL,
+    request_json TEXT,
+    hold_json TEXT,
+    UNIQUE (ws_id, id),
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id)
+  );
+  INSERT INTO v2_directives_new (seq, id, ws_id, kind, goal_id, goal_json, binding_json, created_at)
+    SELECT seq, id, ws_id, kind, goal_id, goal_json, binding_json, created_at FROM v2_directives;
+  -- Devices hold a cursor (the last seq they took): the counter never goes back, even past deleted rows.
+  DELETE FROM sqlite_sequence WHERE name = 'v2_directives_new';
+  INSERT INTO sqlite_sequence (name, seq) SELECT 'v2_directives_new', seq FROM sqlite_sequence WHERE name = 'v2_directives';
+  DROP TABLE v2_directives;
+  ALTER TABLE v2_directives_new RENAME TO v2_directives;
+
+  -- Receipts: accepted and declined answer a request (the developer's, or the agent's own for a safe one).
+  CREATE TABLE v2_receipts_new (
+    ws_id TEXT NOT NULL,
+    directive_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('received','applied','enforced','accepted','declined')),
+    at TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (directive_id, session_key, state),
+    FOREIGN KEY (ws_id, directive_id, session_key) REFERENCES v2_directive_targets(ws_id, directive_id, session_key) ON DELETE CASCADE
+  );
+  INSERT INTO v2_receipts_new SELECT ws_id, directive_id, session_key, state, at, recorded_at FROM v2_receipts;
+  DROP TABLE v2_receipts;
+  ALTER TABLE v2_receipts_new RENAME TO v2_receipts;
+
+  -- A request: type, the goal (and its version when sent), the target goal of a switch_goal, an optional note shown
+  -- quoted to the developer and the agent, the sender, and the directive that carried it. Cancelling marks it.
+  CREATE TABLE v2_requests (
+    id TEXT PRIMARY KEY,                       -- rq_<24 base32>
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    goal_id TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('replan','checkpoint','switch_goal')),
+    target_goal_id TEXT,                       -- switch_goal only
+    goal_version INTEGER NOT NULL,
+    note TEXT CHECK (note IS NULL OR length(note) <= 280),
+    sender_id TEXT NOT NULL,
+    directive_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    cancelled_at TEXT,
+    cancelled_by TEXT,
+    UNIQUE (ws_id, id),
+    CHECK ((type = 'switch_goal') = (target_goal_id IS NOT NULL)),
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id),
+    FOREIGN KEY (ws_id, target_goal_id) REFERENCES v2_goals(ws_id, id),
+    FOREIGN KEY (ws_id, directive_id) REFERENCES v2_directives(ws_id, id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_requests_goal ON v2_requests(ws_id, goal_id, created_at);
+  CREATE INDEX v2_requests_sender ON v2_requests(sender_id, created_at);
+  -- Each session a request reached, and where it stands there. auto_accepted: the agent did a safe request (a
+  -- checkpoint, or drafting a replan) without the developer's answer; a later decline still overrides it.
+  CREATE TABLE v2_request_targets (
+    ws_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    session_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('sent','received','accepted','declined','expired')),
+    auto_accepted INTEGER NOT NULL DEFAULT 0 CHECK (auto_accepted IN (0, 1)),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (request_id, session_key),
+    FOREIGN KEY (ws_id, request_id) REFERENCES v2_requests(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_request_targets_key ON v2_request_targets(ws_id, session_key);
+  -- A goal on hold: one row while held (release deletes it; the audit keeps the history). directive_id is the hold
+  -- directive written when it was held (not a foreign key: the hold outlives a directive left with no recipient).
+  CREATE TABLE v2_goal_holds (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    goal_id TEXT NOT NULL,
+    held_by TEXT NOT NULL,
+    reason TEXT CHECK (reason IS NULL OR length(reason) <= 280),
+    held_at TEXT NOT NULL,
+    directive_id TEXT,
+    PRIMARY KEY (ws_id, goal_id),
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id)
+  );
+
+  DROP INDEX v2_events_once_ws;
+  CREATE UNIQUE INDEX v2_events_once_ws ON v2_events(name, ws_id) WHERE ws_id IS NOT NULL AND name IN (
+    'workspace_created', 'code_redeemed', 'first_session_captured', 'first_session_bound', 'second_member_joined',
+    'first_change_request', 'first_approval', 'first_directive', 'first_mcp_read', 'loi_sent', 'loi_signed',
+    'first_ask', 'first_limit', 'first_request', 'first_hold');
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

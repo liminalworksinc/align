@@ -7,6 +7,7 @@ import type { Me } from "../../../../_ui/server";
 import { ChangeRequestCard, ProposeChange, useGoalTitles } from "../../../../_ui/changes";
 import { GoalLimits, useStashedLimits } from "../../../../_ui/limits";
 import { GoalActivityCard } from "../../../../_ui/activity";
+import { AgentsOnGoalCard, HoldBanner, type HoldState } from "../../../../_ui/requests";
 import type { ChangeRequest, Goal, MySession } from "../../../../_ui/types";
 
 interface Detail {
@@ -231,6 +232,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
     setProposed((n) => n + 1);
   }, [reloadDetail]);
   const ws0 = useApi<{ role: string }>(`/api/v2/workspaces/${ws}`);
+  const hold = useApi<HoldState>(`/api/v2/workspaces/${ws}/goals/${goal}/hold`);
   const g = d.data?.goal;
   return (
     <Shell me={me} ws={ws} tab="Goals">
@@ -238,6 +240,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
       {d.error && <Err>{d.error === "Not found" ? "This goal does not exist or you can't see it." : d.error}</Err>}
       {g && (
         <>
+          <HoldBanner hold={hold.data?.held ?? null} />
           <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">{g.title}</h1>
           <div className="mb-5 flex flex-wrap gap-2">
             <Pill tone="violet">{g.status}</Pill>
@@ -267,6 +270,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           <GoalLimits ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={limitsDone} />
           <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={d.reload} />
           <GoalActivityCard ws={ws} goal={g} me={me} />
+          <AgentsOnGoalCard key={g.version} ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
           {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} onDone={d.reload} />}
           {ws0.data && <ChangeRequests key={`${g.version}:${proposed}`} ws={ws} goal={g} me={me} role={ws0.data.role} onGoalChanged={d.reload} />}
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}

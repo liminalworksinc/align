@@ -12,6 +12,8 @@ const STATUS_TONE = { active: "violet", achieved: "green", dropped: "neutral" } 
 export default function Goals({ me, ws }: { me: Me; ws: string }) {
   const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
+  const holds = useApi<{ holds: { goal: { id: string } }[] }>(`/api/v2/workspaces/${ws}/holds`);
+  const held = new Set(holds.data?.holds.map((h) => h.goal.id) ?? []);
   const [title, setTitle] = useState("");
   const [level, setLevel] = useState<Goal["level"]>("team");
   const [visibility, setVisibility] = useState<Goal["visibility"]>("workspace");
@@ -44,6 +46,11 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
                 <Pill>{VISIBILITY_LABEL[g.visibility]}</Pill>
                 {g.team && <Pill tone="violet">{g.team.name}</Pill>}
                 {g.bindable ? <Pill tone="green">you can bind sessions</Pill> : <Pill tone="amber">needs alignment to bind</Pill>}
+                {held.has(g.id) && (
+                  <span data-held-goal={g.id}>
+                    <Pill tone="red">agents on hold</Pill>
+                  </span>
+                )}
               </div>
               <p className="text-[14px] text-zinc-500">
                 {g.owner.id === me.id ? "Yours" : g.owner.name}, version {g.version}
