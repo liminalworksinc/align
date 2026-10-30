@@ -32,6 +32,7 @@ screen says "team".
 | `/app/w/<ws>/sessions` | Sessions tab | Workspace members | Shared sessions, stop and resume |
 | `/app/w/<ws>/alignments` | Alignments tab | Workspace members | Alignment requests the person is part of |
 | `/app/w/<ws>/requests` | Requests tab | Workspace members | Change requests: waiting on me, mine, others |
+| `/app/w/<ws>/asks` | Asks tab | Workspace members | What teams were asked to do: waiting on me, my teams', mine, others; record and import asks |
 | `/app/w/<ws>/spend` | Spend tab | Workspace members | Usage and estimated cost by goal, team or session |
 | `/app/w/<ws>/apps` | Apps tab | Workspace members | Connected AI apps and how to connect one |
 | `/privacy` | Privacy policy | Anyone, signed in or not | Align's privacy policy (public, also when hosted) |
@@ -43,7 +44,7 @@ Navigation: every `/app` page except sign-in has a top bar with the **Align** ma
 switcher (shown once the person has a workspace), **Devices**, **Account**, the person's name (email on hover) and
 **Sign out**. Under it, a person with no passkey who has not dismissed the offer sees the add-a-passkey prompt. Inside
 a workspace a second bar shows the workspace name, the person's role and the tabs Goals,
-People, Sessions, Alignments, Requests, Spend and Apps, with the current tab highlighted.
+People, Sessions, Alignments, Requests, Asks, Spend and Apps, with the current tab highlighted.
 
 ### Requirement: Root path redirects to the web app
 
@@ -659,6 +660,46 @@ only the actions the server allows.
 - **WHEN** **Approve** gets 409 `cycle`
 - **THEN** the card shows "Approving this would make these goals contribute to each other in a loop." and the request stays pending
 
+### Requirement: Workspace Asks tab
+
+The Asks tab at `/app/w/<ws>/asks` SHALL show the asks the person reads, from `GET /api/v2/workspaces/<ws>/asks`, under
+"Waiting on you" (asks whose `waiting_on_me` is set), "Asked of your teams", "Your asks" and, for workspace owners,
+"Others", each card with only the buttons its `can` flags allow; it SHALL give owners and members a "Record an ask"
+form and workspace owners an import.
+
+#### Scenario: Ask card
+
+- **WHEN** a member opens the tab
+- **THEN** each card shows "<who asked> asked <team>" (the requester's name when nobody is named), the state pill (open amber, accepted violet, done green, declined and withdrawn neutral), the goal it concerns as a link when the person can read it, the text in quotes, "<meeting>, <date>" (just the date for an ask recorded by hand) followed by " · came up again <n> times, last on <date> (<where>)" when it has mentions, who recorded and who last decided it, the mentions under "When it came up again", and **Accept**, **Mark done**, **Decline**, **Reopen**, **Came up again** and **Withdraw**, which post to `.../asks/<id>/<action>`; with none in a section, "Nothing is waiting on you." or "No asks yet."
+
+#### Scenario: Came up again
+
+- **WHEN** a person presses **Came up again**
+- **THEN** a form with When (a date), What was said (up to 300 characters) and Where (up to 120) posts `{date, text, source_title}` to `.../asks/<id>/mention`
+
+#### Scenario: Record an ask
+
+- **WHEN** an owner or member fills Team asked, What they were asked (up to 400 characters), Who asked (optional, up to 80), Where it was asked ("In a meeting" with its title, or "Recorded by hand"), Date and the optional goal it concerns (the selected team's active goals) and presses **Record ask**
+- **THEN** the page posts `{team_id, text, from_label, goal_id, source:{kind, title, date}}` to `POST .../asks` and lists the new ask; viewers see no form, and a workspace with no teams says "This workspace has no teams yet. A workspace owner adds them on the People tab."
+
+#### Scenario: Import asks
+
+- **WHEN** a workspace owner opens "Import asks (JSON, at most 60)", pastes a list of asks (or `{"asks": [...]}`) and presses **Import**
+- **THEN** the page posts `{asks}` to `POST .../asks/import` and shows "Imported: <created> new, <merged> came up again, <unchanged> already recorded."
+
+### Requirement: Agent activity on the goal page
+
+The goal page SHALL show an "Agent activity" card from `GET /api/v2/workspaces/<ws>/goals/<goal>/activity`, saying
+"Sessions people shared toward this goal, last 14 days. Counts come from bindings, not from what agents wrote.", with
+Sessions (and how many per harness, as "<n> Claude Code, <n> Codex"), Active now and Last activity ("None yet" when
+there is none), and, when the response has `detail`, "Files agents are working on" (its paths, then "and <n> more whose
+paths aren't shared") and "Your sessions" (harness, a state pill and the last activity).
+
+#### Scenario: Activity card
+
+- **WHEN** a member of the goal's team opens a goal with two bound sessions, one active, and work signals with paths
+- **THEN** the card shows "Sessions 2 (1 Claude Code, 1 Codex)", "Active now 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card says "No shared sessions worked toward this goal in the last 14 days."
+
 ### Requirement: Workspace Spend tab
 
 The Spend tab SHALL show token usage and estimated list cost from
@@ -745,12 +786,13 @@ The app SHALL show a plain error page for any render error, without the error me
 
 Pages under `/app` SHALL mark states with plain-word pills whose colors follow one rule: green for a settled good
 state, amber for something waiting or needing attention, red for revoked or stopped, violet for names and labels that
-are not states (a team, a "company" goal, an active goal's status), neutral otherwise.
+are not states (a team, a "company" goal, an active goal's status) and for an accepted ask (agreed, under way, like an
+active goal), neutral otherwise.
 
 #### Scenario: Pill colors
 
 - **WHEN** a page shows a state
-- **THEN** an approved alignment, alignment requirement or change request, an active device, a linked sign-in method, a shared session, an achieved goal, a goal "you can bind sessions" to and a reviewed parent goal are green; a pending or countered alignment or change request, a requirement still waiting, a suspended session, "needs alignment to bind" and a parent not reviewed against its current version are amber; a revoked device and a stopped agent are red
+- **THEN** an approved alignment, alignment requirement or change request, an active device, a linked sign-in method, a shared session, an achieved goal, a goal "you can bind sessions" to and a reviewed parent goal are green; a pending or countered alignment or change request, a requirement still waiting, a suspended session, "needs alignment to bind" and a parent not reviewed against its current version are amber; a revoked device and a stopped agent are red; an open ask is amber, an accepted ask violet, a done ask green, and a declined or withdrawn ask neutral
 
 ## Open questions
 
@@ -804,6 +846,9 @@ are not states (a team, a "company" goal, an active goal's status), neutral othe
 - `app/app/w/[ws]/sessions/view.tsx`
 - `app/app/w/[ws]/alignments/view.tsx`
 - `app/app/w/[ws]/requests/view.tsx`
+- `app/app/w/[ws]/asks/page.tsx`
+- `app/app/w/[ws]/asks/view.tsx`
+- `app/app/_ui/activity.tsx`
 - `app/app/w/[ws]/spend/view.tsx`
 - `app/app/w/[ws]/apps/view.tsx`
 - `app/oauth/authorize/page.tsx`

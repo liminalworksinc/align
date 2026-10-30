@@ -2505,9 +2505,384 @@ try {
   // ==== end port:limits ====
 
   // ==== port:asks ====
+  // Asks (PORT-003): a workspace of its own, so every role is exact: KO owns it; Product has a lead (KL), a member (KM)
+  // and a viewer (KV); Security has the requester (KR) and another member (KX); KN is a member in no team.
+  const kUsers = {};
+  for (const [who, name] of [
+    ["KO", "Kit Owner"],
+    ["KL", "Kai Lead"],
+    ["KM", "Kim Member"],
+    ["KV", "Kay Viewer"],
+    ["KR", "Kat Requester"],
+    ["KX", "Kev Other"],
+    ["KN", "Kip Noteam"],
+  ])
+    kUsers[who] = await signUp(who, name, `${who.toLowerCase()}@asks.example.test`);
+  const { KO, KL, KM, KV, KR, KX, KN } = kUsers;
+  const AK = (await call("KO", "POST", "/api/v2/workspaces", { cookie: KO.cookie, body: { name: "Asks workspace" } })).json?.id;
+  const ka = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${AK}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+  for (const [u, role] of [
+    [KL, "member"],
+    [KM, "member"],
+    [KV, "viewer"],
+    [KR, "member"],
+    [KX, "member"],
+    [KN, "member"],
+  ]) {
+    const i = await ka(KO, "POST", "/invites", { email: u.email, role });
+    await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+  }
+  const TP = (await ka(KO, "POST", "/teams", { name: "Product" })).json?.id;
+  const TS = (await ka(KO, "POST", "/teams", { name: "Security" })).json?.id;
+  for (const [t, u, role] of [
+    [TP, KL, "lead"],
+    [TP, KM, "member"],
+    [TP, KV, "member"],
+    [TS, KR, "member"],
+    [TS, KX, "member"],
+  ])
+    await ka(KO, "POST", `/teams/${t}/members`, { user_id: u.id, role });
+  const GPd = (await ka(KL, "POST", "/goals", { title: "Product SSO", visibility: "team", team_id: TP })).json;
+  const GPriv = (await ka(KL, "POST", "/goals", { title: "Kai's private Product goal", visibility: "private", team_id: TP })).json;
+  const GSec = (await ka(KR, "POST", "/goals", { title: "Security review", visibility: "workspace", team_id: TS })).json;
+  check("asks setup: a workspace with a Product team (lead, member, viewer), a Security team (two members), a member in no team, and team goals", !!AK && !!TP && !!TS && !!GPd?.id && !!GPriv?.id && !!GSec?.id, `${AK} ${TP} ${TS} ${JSON.stringify([GPd, GPriv, GSec]).slice(0, 300)}`);
+
+  const ASK_CANARY = `ASK-CANARY-${randomBytes(4).toString("hex")}`;
+  const askBody = (extra = {}) => ({ team_id: TP, text: `Single sign-on for faculty by June ${ASK_CANARY}`, from_label: "Faculty", source: { kind: "meeting", title: "Faculty sync", date: "2026-10-20" }, ...extra });
+  const X1r = await ka(KR, "POST", "/asks", askBody());
+  const X1 = X1r.json;
+  check(
+    "asks: a member records an ask of another team -> 201 AskView (ask_ id, open, team, requester, source, no mentions, can flags; the requester can withdraw and mention, not accept)",
+    X1r.status === 201 && /^ask_[a-z2-7]{24}$/.test(X1?.id) && X1.state === "open" && X1.team.id === TP && X1.team.name === "Product" && X1.goal === null && X1.requester.id === KR.id && X1.requester.name === "Kat Requester" && X1.from_label === "Faculty" &&
+      X1.source.kind === "meeting" && X1.source.title === "Faculty sync" && X1.source.date === "2026-10-20" && X1.mentions.length === 0 && X1.decided_by === null && X1.waiting_on_me === false &&
+      X1.can.withdraw && X1.can.mention && !X1.can.accept && !X1.can.decline && !X1.can.done && !X1.can.reopen,
+    X1r.text,
+  );
+  const badAsks = await Promise.all([
+    ka(KR, "POST", "/asks", askBody({ goal_id: GSec.id })),
+    ka(KR, "POST", "/asks", askBody({ goal_id: GPd.id })),
+    ka(KR, "POST", "/asks", askBody({ team_id: "pod_aaaaaaaaaaaaaaaaaaaaaaaa" })),
+    ka(KR, "POST", "/asks", askBody({ text: "x".repeat(401) })),
+    ka(KR, "POST", "/asks", askBody({ from_label: "y".repeat(81) })),
+    ka(KR, "POST", "/asks", askBody({ source: { kind: "meeting", date: "2026-10-20" } })),
+    ka(KR, "POST", "/asks", askBody({ source: { kind: "meeting", title: "t", date: "2026-13-40" } })),
+    ka(KR, "POST", "/asks", askBody({ source: { kind: "chat", title: "t", date: "2026-10-20" } })),
+    ka(KV, "POST", "/asks", askBody()),
+  ]);
+  check(
+    "asks: goal_id of another team's goal -> 400; an unreadable goal -> 404; an unknown team -> 404; text over 400, who-asked over 80, a meeting without a title, a bad date or source kind -> 400; a viewer -> 403 read_only",
+    badAsks[0].status === 400 && badAsks[1].status === 404 && badAsks[2].status === 404 && badAsks.slice(3, 8).every((r) => r.status === 400) && badAsks[8].status === 403 && badAsks[8].json?.error === "read_only",
+    badAsks.map((r) => `${r.status}:${r.json?.error}`).join(" "),
+  );
+  const ctrl = await ka(KR, "POST", "/asks", askBody({ text: "Line one\u0007\nline two", source: { kind: "manual", date: "2026-10-21" } }));
+  check("asks: control characters in people's text become spaces; a manual source needs no title", ctrl.status === 201 && ctrl.json?.text === "Line one  line two" && ctrl.json.source.title === null, ctrl.text);
+  // A goal its reader can't see is shown as null: Kai's private Product goal, read by Kim.
+  const Xp = await ka(KL, "POST", "/asks", askBody({ text: "Tie this to the private plan", goal_id: GPriv.id }));
+  const XpKM = await ka(KM, "GET", `/asks/${Xp.json?.id}`);
+  const XpKL = await ka(KL, "GET", `/asks/${Xp.json?.id}`);
+  check("asks: the goal an ask concerns is shown to readers of that goal, and null to a reader of the ask who can't read the goal", Xp.status === 201 && XpKL.json?.goal?.id === GPriv.id && XpKM.status === 200 && XpKM.json?.goal === null, `${Xp.text} ${XpKM.text}`);
+
+  // Who reads it: the requester, the asked team (lead, member, viewer) and workspace owners; nobody else (404).
+  const readers = { KR: 200, KL: 200, KM: 200, KV: 200, KO: 200, KX: 404, KN: 404 };
+  const reads = {};
+  const askLists = {};
+  for (const who of Object.keys(readers)) {
+    reads[who] = (await ka(kUsers[who], "GET", `/asks/${X1.id}`)).status;
+    askLists[who] = ((await ka(kUsers[who], "GET", "/asks")).json?.asks ?? []).some((a) => a.id === X1.id);
+  }
+  check(
+    "asks: read by the requester, the asked team's lead, member and viewer, and the workspace owner (200, and in GET /asks); another member and a person in no team -> 404, and not listed",
+    Object.entries(readers).every(([w, s]) => reads[w] === s && askLists[w] === (s === 200)),
+    `${JSON.stringify(reads)} ${JSON.stringify(askLists)}`,
+  );
+  const askOutsider = await call("U1", "GET", `/api/v2/workspaces/${AK}/asks`, { cookie: U1.cookie });
+  check("asks: a non-member of the workspace -> 404 on GET /asks", askOutsider.status === 404, `${askOutsider.status}`);
+
+  // The role x action matrix on the open ask (refusals change nothing).
+  const askAct = (u, id, action, body = {}) => ka(u, "POST", `/asks/${id}/${action}`, body);
+  const codeOf = (r) => (r.status === 200 ? 200 : `${r.status} ${r.json?.error}`);
+  const M = { date: "2026-10-27", text: `It came up again ${ASK_CANARY}`, source_title: "Weekly leads" };
+  const matrix = [
+    [KR, "accept", "403 not_team_lead"],
+    [KM, "accept", "403 not_team_lead"],
+    [KX, "accept", "404 not_found"],
+    [KN, "accept", "404 not_found"],
+    [KV, "accept", "403 read_only"],
+    [KR, "decline", "403 not_team_lead"],
+    [KM, "decline", "403 not_team_lead"],
+    [KV, "decline", "403 read_only"],
+    [KR, "done", "403 not_in_team"],
+    [KM, "done", "409 wrong_state"],
+    [KL, "done", "409 wrong_state"],
+    [KO, "done", "409 wrong_state"],
+    [KL, "reopen", "409 wrong_state"],
+    [KM, "reopen", "403 not_team_lead"],
+    [KL, "withdraw", "403 not_requester"],
+    [KO, "withdraw", "403 not_requester"],
+    [KX, "withdraw", "404 not_found"],
+    [KV, "mention", "403 read_only"],
+    [KX, "mention", "404 not_found"],
+    [KR, "mention", 200],
+    [KM, "mention", 200],
+  ];
+  const got = [];
+  for (const [u, a, want] of matrix) got.push([u.who, a, want, codeOf(await askAct(u, X1.id, a, a === "mention" ? M : {}))]);
+  const wrongM = got.filter(([, , want, have]) => want !== have);
+  check(`asks: role x action matrix on an open ask (${got.length} cases: 200, 403 not_team_lead / not_in_team / not_requester / read_only, 404, 409 wrong_state)`, wrongM.length === 0, JSON.stringify(wrongM));
+  const kmView = (await ka(KM, "GET", `/asks/${X1.id}`)).json;
+  const klView = (await ka(KL, "GET", `/asks/${X1.id}`)).json;
+  const kvView = (await ka(KV, "GET", `/asks/${X1.id}`)).json;
+  const koView = (await ka(KO, "GET", `/asks/${X1.id}`)).json;
+  check(
+    "asks: can flags and waiting_on_me follow the rules: the lead may accept and decline and it waits on them; a team member may only mention; a viewer may do nothing; the workspace owner may accept but it doesn't wait on them while the team has a lead; mentions name who added them",
+    klView?.can.accept && klView.can.decline && klView.waiting_on_me && !kmView?.can.accept && kmView.can.mention && !kmView.waiting_on_me && Object.values(kvView?.can ?? { x: true }).every((v) => v === false) &&
+      koView?.can.accept && !koView.waiting_on_me && kmView.mentions.length === 2 && kmView.mentions[0].n === 1 && kmView.mentions[0].added_by.id === KR.id && kmView.mentions[1].added_by.name === "Kim Member",
+    `${JSON.stringify(klView?.can)} ${JSON.stringify(kmView?.can)} ${JSON.stringify(kvView?.can)} ${JSON.stringify(koView?.can)} ${JSON.stringify(kmView?.mentions)}`,
+  );
+
+  // The state machine: open -> accept -> done -> reopen -> decline; withdraw then refused; withdraw from open by the requester.
+  const ks1 = await askAct(KL, X1.id, "accept");
+  const kmAfterAccept = (await ka(KM, "GET", `/asks/${X1.id}`)).json;
+  const ks2 = await askAct(KM, X1.id, "done");
+  const ks3 = await askAct(KL, X1.id, "reopen");
+  const ks4 = await askAct(KO, X1.id, "decline");
+  const ks5 = await askAct(KR, X1.id, "withdraw");
+  const ks6 = await askAct(KR, X1.id, "mention", M);
+  check(
+    "asks: state machine: the lead accepts (then it waits on the team to finish: Mark done for a member), a member marks it done, the lead reopens it, the workspace owner declines it; withdraw and mention on a declined ask -> 409 wrong_state",
+    ks1.json?.state === "accepted" && ks1.json.decided_by?.id === KL.id && kmAfterAccept?.waiting_on_me && kmAfterAccept.can.done && ks2.json?.state === "done" && ks2.json.decided_by?.id === KM.id &&
+      ks3.json?.state === "open" && ks4.json?.state === "declined" && ks4.json.decided_by?.id === KO.id && !!ks4.json.decided_at && ks5.status === 409 && ks5.json?.error === "wrong_state" && ks6.status === 409,
+    [ks1, ks2, ks3, ks4, ks5, ks6].map((r) => `${r.status}:${r.json?.state ?? r.json?.error}`).join(" "),
+  );
+  const X3 = (await ka(KR, "POST", "/asks", askBody({ text: "Withdraw me" }))).json;
+  const w1 = await askAct(KR, X3?.id, "withdraw");
+  const w2 = await askAct(KL, X3?.id, "reopen");
+  check("asks: the requester withdraws an open ask (state withdrawn); a withdrawn ask can't be reopened (409)", w1.status === 200 && w1.json.state === "withdrawn" && w1.json.decided_by.id === KR.id && w2.status === 409, `${w1.text} ${w2.status}`);
+  const X5 = (await ka(KO, "POST", "/asks", askBody({ text: "Owner-recorded ask", from_label: null }))).json;
+  const unknownAction = await askAct(KL, X5?.id, "approve");
+  check("asks: an unknown action -> 404", unknownAction.status === 404, `${unknownAction.status}`);
+
+  // Mentions: at most 10 (409 too_many_mentions).
+  const X6 = (await ka(KO, "POST", "/asks", askBody({ text: "Mention me ten times" }))).json;
+  const mres = [];
+  for (let i = 1; i <= 11; i++) mres.push((await askAct(KO, X6?.id, "mention", { date: `2026-10-${String(i + 1).padStart(2, "0")}`, text: `Again ${i}`, source_title: "Standup" })).status);
+  const badMention = await askAct(KO, X6?.id, "mention", { date: "2026-10-01", text: "", source_title: "Standup" });
+  check("asks: the 11th mention -> 409 too_many_mentions; a mention without text -> 400", mres.slice(0, 10).every((s) => s === 200) && mres[10] === 409 && badMention.status === 400, `${mres} ${badMention.status}`);
+
+  // Import (workspace owners; at most 60; all or nothing; appends and merges, never replaces).
+  const askCount = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_asks WHERE ws_id = ?").get(AK).n);
+  const asksBefore = askCount();
+  const impItem = (i) => ({ team_id: TS, text: `Imported ask ${i}`, source: { kind: "meeting", title: "Board", date: "2026-10-01" } });
+  const impLead = await ka(KL, "POST", "/asks/import", { asks: [impItem(1)] });
+  const impViewer = await ka(KV, "POST", "/asks/import", { asks: [impItem(1)] });
+  const imp61 = await ka(KO, "POST", "/asks/import", { asks: Array.from({ length: 61 }, (_, i) => impItem(i)) });
+  const impBad = await ka(KO, "POST", "/asks/import", { asks: [impItem(1), { ...impItem(2), source: { kind: "meeting", title: "Board", date: "yesterday" } }] });
+  check(
+    "asks import: a member -> 403 owner_only, a viewer -> 403 read_only; 61 items -> 400; one bad item -> 400 naming it; nothing stored",
+    impLead.status === 403 && impLead.json?.error === "owner_only" && impViewer.status === 403 && impViewer.json?.error === "read_only" && imp61.status === 400 && impBad.status === 400 && /asks\[1\]/.test(impBad.json?.message) && askCount() === asksBefore,
+    `${impLead.status} ${impViewer.status} ${imp61.status} ${impBad.text} ${askCount()} ${asksBefore}`,
+  );
+  const X5text = X5.text;
+  const imp = await ka(KO, "POST", "/asks/import", {
+    asks: [
+      { team_id: TP, text: X5text.toUpperCase(), source: X5.source },
+      { team_id: TP, text: X5text, source: { kind: "meeting", title: "Board", date: "2026-10-28" } },
+      impItem(1),
+      { ...impItem(2), state: "accepted", mentions: [{ date: "2026-10-05", text: "Asked again", source_title: "Board follow-up" }] },
+      impItem(1),
+    ],
+  });
+  const x5After = (await ka(KO, "GET", `/asks/${X5.id}`)).json;
+  const imported2 = ((await ka(KO, "GET", `/asks?team_id=${TS}`)).json?.asks ?? []).find((a) => a.text === "Imported ask 2");
+  check(
+    "asks import: an exact duplicate (same team, text in any case, date) changes nothing; the same text on a new date is a mention (\"came up again\"); new ones are created (with their state and mentions) -> 201 {created, merged, unchanged}",
+    imp.status === 201 && imp.json.created === 2 && imp.json.merged === 1 && imp.json.unchanged === 2 && askCount() === asksBefore + 2 &&
+      x5After?.mentions.length === 1 && x5After.mentions[0].date === "2026-10-28" && x5After.mentions[0].source_title === "Board" && imported2?.state === "accepted" && imported2.decided_by?.id === KO.id && imported2.mentions.length === 1,
+    `${imp.text} ${JSON.stringify(x5After?.mentions)} ${JSON.stringify(imported2)}`,
+  );
+
+  // The feed: ETag / 304, for a device too, and the same set as the browser; filters.
+  const kDevice = (u) => {
+    const keys = newDeviceKeys();
+    const d = insertDevice(u.id, `${u.who}'s laptop`);
+    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, AK));
+    return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
+  };
+  const DKR = kDevice(KR);
+  const fb = await ka(KR, "GET", "/asks");
+  const fb304 = await call("KR", "GET", `/api/v2/workspaces/${AK}/asks`, { cookie: KR.cookie, headers: { "if-none-match": fb.headers.get("etag") } });
+  const fd = await call("KR", "GET", `/api/v2/workspaces/${AK}/asks`, { bearer: DKR.access });
+  const fd304 = await call("KR", "GET", `/api/v2/workspaces/${AK}/asks`, { bearer: DKR.access, headers: { "if-none-match": fd.headers.get("etag") } });
+  check(
+    "asks feed: GET /asks has an ETag matching its version; If-None-Match -> 304 with no body, for the browser and for a device token; the device gets exactly the browser's set for that person",
+    fb.status === 200 && fb.headers.get("etag") === `"${fb.json.version}"` && fb304.status === 304 && fb304.text === "" && fd.status === 200 && fd304.status === 304 && fd.json.version === fb.json.version && JSON.stringify(fd.json.asks) === JSON.stringify(fb.json.asks),
+    `${fb.status} ${fb.headers.get("etag")} ${fb304.status} ${fd.status} ${fd304.status} ${fd.json?.version} ${fb.json?.version}`,
+  );
+  const fAccepted = await call("KL", "GET", `/api/v2/workspaces/${AK}/asks?state=accepted&team_id=${TP}`, { cookie: KL.cookie });
+  const fOpenAcc = await ka(KL, "GET", "/asks?state=open,accepted");
+  const fBadState = await ka(KL, "GET", "/asks?state=pending");
+  const fBadTeam = await ka(KL, "GET", "/asks?team_id=nope");
+  await askAct(KL, X5.id, "accept");
+  const fAccepted2 = await ka(KL, "GET", `/asks?state=accepted&team_id=${TP}`);
+  const fTypes = await ka(KR, "GET", `/asks?state=accepted&team_id=${TP}`);
+  const koFeed = (await ka(KO, "GET", "/asks")).json?.asks ?? [];
+  check(
+    "asks feed: ?state=accepted&team_id=<team> gives only that team's accepted asks (a new acceptance changes the version); a comma list of states works; an unknown state or a malformed team_id -> 400; the caller's own teams come first",
+    fAccepted.status === 200 && fAccepted.json.asks.every((a) => a.state === "accepted" && a.team.id === TP) && fAccepted2.json?.asks.some((a) => a.id === X5.id) && fAccepted2.json.version !== fAccepted.json.version &&
+      fOpenAcc.json?.asks.every((a) => a.state === "open" || a.state === "accepted") && fBadState.status === 400 && fBadTeam.status === 400 && fTypes.json?.asks.every((a) => a.team.id === TP) &&
+      koFeed.findLastIndex((a) => a.requester.id === KO.id) < koFeed.findIndex((a) => a.requester.id !== KO.id),
+    `${fAccepted.text.slice(0, 200)} ${fBadState.status} ${fBadTeam.status}`,
+  );
+
+  // Caps: 500 open or accepted asks per workspace (409), 60 created an hour (429).
+  const openNow = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_asks WHERE ws_id = ? AND state IN ('open','accepted')").get(AK).n);
+  const bulk = (n, state, created) =>
+    withDb((d) => {
+      const ins = d.prepare("INSERT INTO v2_asks (id, ws_id, team_id, text, created_by, source_kind, source_date, state, created_at, updated_at) VALUES (?, ?, ?, 'bulk', ?, 'manual', '2026-10-01', ?, ?, ?)");
+      for (let i = 0; i < n; i++) ins.run(`ask_bulk${state}${String(i).padStart(4, "0")}aaaaaaaaaaaa`, AK, TS, KO.id, state, created, created);
+    });
+  bulk(500 - openNow, "open", new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString());
+  const tooManyAsks = await ka(KR, "POST", "/asks", askBody({ text: "One too many" }));
+  withDb((d) => d.prepare("DELETE FROM v2_asks WHERE id LIKE 'ask_bulk%'").run());
+  const hourNow = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_asks WHERE ws_id = ? AND created_at > ?").get(AK, new Date(Date.now() - 3600_000).toISOString()).n);
+  bulk(60 - hourNow, "done", new Date().toISOString());
+  const tooFast = await ka(KR, "POST", "/asks", askBody({ text: "Sixty-first this hour" }));
+  const tooFastImport = await ka(KO, "POST", "/asks/import", { asks: [impItem(99)] });
+  withDb((d) => d.prepare("DELETE FROM v2_asks WHERE id LIKE 'ask_bulk%'").run());
+  check(
+    "asks: the 501st open or accepted ask in a workspace -> 409 too_many_asks; the 61st ask recorded in an hour -> 429 rate_limited (an import counts too)",
+    tooManyAsks.status === 409 && tooManyAsks.json?.error === "too_many_asks" && tooFast.status === 429 && tooFast.json?.error === "rate_limited" && tooFastImport.status === 429,
+    `${tooManyAsks.text} ${tooFast.text} ${tooFastImport.status}`,
+  );
+
+  // Audit and the first_ask event.
+  const askAudit = withDb((d) => d.prepare("SELECT action, actor_id, object_id FROM v2_audit WHERE ws_id = ? AND action LIKE 'ask.%'").all(AK));
+  const auditHas = (action, actor, obj) => askAudit.some((r) => r.action === action && r.actor_id === actor && (obj === undefined || r.object_id === obj));
+  check(
+    "asks: every action is audited with its actor (ask.created, accepted, done, reopened, declined, withdrawn, mentioned, imported with its count); refused actions write nothing",
+    auditHas("ask.created", KR.id, X1.id) && auditHas("ask.accepted", KL.id, X1.id) && auditHas("ask.done", KM.id, X1.id) && auditHas("ask.reopened", KL.id, X1.id) && auditHas("ask.declined", KO.id, X1.id) &&
+      auditHas("ask.withdrawn", KR.id, X3.id) && auditHas("ask.mentioned", KM.id, X1.id) && auditHas("ask.imported", KO.id, "3") && !askAudit.some((r) => [KX.id, KN.id, KV.id].includes(r.actor_id)),
+    JSON.stringify(askAudit.slice(0, 12)),
+  );
+  const firstAsk = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'first_ask' AND ws_id = ?").get(AK).n);
+  check("asks: first_ask is recorded once for the workspace", firstAsk === 1, `${firstAsk}`);
+  const askPage = await call("KO", "GET", `/app/w/${AK}/asks`, { cookie: KO.cookie });
+  const askPageAnon = await call("anon", "GET", `/app/w/${AK}/asks`);
+  check(
+    "ui: the Asks tab renders for a member (200) and sends a signed-out visitor to sign-in",
+    askPage.status === 200 && !/Application error|Internal Server Error/.test(askPage.text) && ((askPageAnon.status === 307 && /\/app\/sign-in/.test(askPageAnon.headers.get("location") || "")) || askPageAnon.text.includes("/app/sign-in?next=")),
+    `${askPage.status} ${askPageAnon.status}`,
+  );
   // ==== end port:asks ====
 
   // ==== port:activity ====
+  // Goal activity (PORT-003) on the asks workspace: Kai (Product lead) and Kim (Product member) share sessions toward
+  // Kai's workspace-visible Product goal; one of Kai's sessions worked on it only 20 to 15 days ago.
+  const GW = (await ka(KL, "POST", "/goals", { title: "Faculty sign-on", visibility: "workspace", team_id: TP })).json;
+  const DKL = kDevice(KL);
+  const DKM = kDevice(KM);
+  const hAgo = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString();
+  const kShare = async (dev, harness, native, startedH, epochs, usage) => {
+    const key = sessionKey(dev, AK, harness, native);
+    await call(dev.who, "PUT", `/api/v2/workspaces/${AK}/sessions/${key}`, { bearer: dev.access, body: { harness, repo_key: repoKey(dev, AK, "/src/sso"), started_at: hAgo(startedH), title: `ACT-TITLE ${native}` } });
+    const ids = [];
+    for (const [goalId, h] of epochs) {
+      const id = epochId();
+      ids.push(id);
+      await call(dev.who, "POST", `/api/v2/workspaces/${AK}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: id, goal_id: goalId, starts_at: hAgo(h), root_turn: null, cause: "manual" } });
+    }
+    const up = await call(dev.who, "POST", `/api/v2/workspaces/${AK}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: usage.map(([i, h]) => usageRow(dev, `${native}-${i}`, ids[0], { ts: hAgo(h) })) } });
+    return { key, accepted: up.json?.accepted };
+  };
+  const kSA = await kShare(DKL, "claude-code", "act-a", 4, [[GW.id, 4]], [[1, 0.5]]);
+  const kSB = await kShare(DKM, "codex", "act-b", 4, [[GW.id, 4]], [[1, 3]]);
+  const kSC = await kShare(DKL, "claude-code", "act-c", 20 * 24, [[GW.id, 20 * 24], [null, 15 * 24]], [[1, 19 * 24]]);
+  const ACT_CANARY = `ACT-CANARY-${randomBytes(4).toString("hex")}`;
+  const sigAt = new Date().toISOString();
+  const sig = await call("KL", "POST", `/api/v2/workspaces/${AK}/activity`, {
+    bearer: DKL.access,
+    body: {
+      items: [
+        { session_key: kSA.key, kind: "edit", at: sigAt, repo_id: "a".repeat(32), path_hash: "2".repeat(32), path: "src/sso.ts" },
+        { session_key: kSA.key, kind: "edit", at: sigAt, repo_id: "a".repeat(32), path_hash: "2".repeat(32), path: "src/sso.ts" },
+        { session_key: kSA.key, kind: "claim", at: sigAt, repo_id: "a".repeat(32), path_hash: "2".repeat(32), path: "src/sso.ts", text: `claim ${ACT_CANARY}` },
+        { session_key: kSA.key, kind: "edit", at: sigAt, repo_id: "a".repeat(32), path_hash: "3".repeat(32), path: "src/login.ts" },
+        { session_key: kSA.key, kind: "edit", at: sigAt, repo_id: "a".repeat(32), path_hash: "4".repeat(32) },
+        { session_key: kSA.key, kind: "commit", at: sigAt, repo_id: "a".repeat(32), text: `Commit subject ${ACT_CANARY}` },
+        { session_key: kSA.key, kind: "task", at: sigAt, repo_id: "a".repeat(32), text: `Task label ${ACT_CANARY}` },
+      ],
+    },
+  });
+  check("activity setup: two sessions bound to the goal now (Claude Code with usage 30 minutes ago, Codex with usage 3 hours ago), one bound 20 to 15 days ago, and work signals", !!GW?.id && kSA.accepted === 1 && kSB.accepted === 1 && kSC.accepted === 1 && sig.json?.accepted === 7, `${kSA.accepted} ${kSB.accepted} ${kSC.accepted} ${sig.text}`);
+  const actOf = (u, g = GW.id) => ka(u, "GET", `/goals/${g}/activity`);
+  const av = {};
+  for (const u of [KL, KM, KR, KO, KN, KV]) av[u.who] = await actOf(u);
+  const a0 = av.KM.json;
+  check(
+    "goal activity: sessions 2 (the one outside 14 days is left out), active_now 1 (usage in the last 90 minutes), by_harness, and last_activity_at the latest usage, binding or work signal; window_days 14",
+    av.KM.status === 200 && a0.window_days === 14 && a0.sessions === 2 && a0.active_now === 1 && a0.by_harness["claude-code"] === 1 && a0.by_harness.codex === 1 && a0.last_activity_at === sigAt,
+    av.KM.text,
+  );
+  check(
+    "goal activity: the detail (top files from work signals, path-hash-only files counted as hidden, the reader's own sessions) is for the goal's team and workspace owners; a member of another team and a person in no team see counts only (detail null)",
+    JSON.stringify(a0.detail?.files) === JSON.stringify(["src/sso.ts", "src/login.ts"]) && a0.detail.files_hidden === 1 && a0.detail.mine.length === 1 && a0.detail.mine[0].session_key === kSB.key && a0.detail.mine[0].harness === "codex" &&
+      av.KL.json?.detail?.mine.length === 1 && av.KL.json.detail.mine[0].session_key === kSA.key && av.KO.json?.detail?.mine.length === 0 && av.KO.json.detail.files.length === 2 &&
+      av.KR.status === 200 && av.KR.json.sessions === 2 && av.KR.json.detail === null && av.KN.json?.detail === null && av.KV.json?.detail?.files?.length === 2,
+    `${JSON.stringify(a0.detail)} ${JSON.stringify(av.KL.json?.detail)} ${av.KR.text} ${av.KN.text}`,
+  );
+  const allAct = Object.values(av).map((r) => r.text).join("\n");
+  check(
+    "goal activity: no field holds a commit subject, task label, claim reason or session title posted through activity, or any token count",
+    !allAct.includes(ACT_CANARY) && !allAct.includes("ACT-TITLE") && !/"(input|output|tokens|usd|est_list_usd_micros|text)"/.test(allAct),
+    allAct.slice(0, 300),
+  );
+  const unreadAct = await actOf(KR, GPd.id);
+  const outsideAct = await call("U1", "GET", `/api/v2/workspaces/${AK}/goals/${GW.id}/activity`, { cookie: U1.cookie });
+  const bearerAct = await call("KL", "GET", `/api/v2/workspaces/${AK}/goals/${GW.id}/activity`, { bearer: DKL.access });
+  check("goal activity: a goal the reader can't read -> 404; a non-member -> 404; a device token -> 403 (browser only)", unreadAct.status === 404 && outsideAct.status === 404 && bearerAct.status === 403, `${unreadAct.status} ${outsideAct.status} ${bearerAct.status}`);
+  await ka(KO, "POST", `/sessions/${kSA.key}/stop`, {});
+  const stopped = (await actOf(KM)).json;
+  await ka(KO, "POST", `/sessions/${kSA.key}/resume`, {});
+  const resumed = (await actOf(KM)).json;
+  check("goal activity: a session whose agent was stopped is not active now (it counts again once resumed)", stopped?.sessions === 2 && stopped.active_now === 0 && resumed?.active_now === 1, `${JSON.stringify(stopped)} ${JSON.stringify(resumed)}`);
+
+  if (existsSync(CHROME)) {
+    const { default: puppeteer } = await import("puppeteer-core");
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    try {
+      const X7 = (await ka(KR, "POST", "/asks", askBody({ text: "Please review the SSO rollout plan" }))).json;
+      const page = await browser.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      for (const pair of KL.cookie.split("; ")) {
+        const i = pair.indexOf("=");
+        await page.setCookie({ name: pair.slice(0, i), value: pair.slice(i + 1), url: BASE });
+      }
+      await page.goto(`${BASE}/app/w/${AK}/asks`, { waitUntil: "networkidle0" });
+      await page.waitForFunction((id) => !!document.querySelector(`[data-ask="${id}"]`), { timeout: 15000 }, X7.id);
+      const tabText = await page.evaluate(() => document.body.innerText);
+      await page.evaluate((id) => [...document.querySelectorAll(`[data-ask="${id}"] button`)].find((b) => b.textContent === "Accept")?.click(), X7.id);
+      await page.waitForFunction((id) => [...document.querySelectorAll(`[data-ask="${id}"]`)].some((c) => c.textContent.includes("accepted")), { timeout: 15000 }, X7.id);
+      const x7Now = (await ka(KL, "GET", `/asks/${X7.id}`)).json;
+      check(
+        "ui (Chrome): the Asks tab shows the tab, \"Waiting on you\" with the ask quoted (\"<who> asked <team>\", meeting and date), and Accept accepts it",
+        tabText.includes("Asks") && tabText.includes("Waiting on you") && tabText.includes("Faculty asked Product") && tabText.includes("“Please review the SSO rollout plan”") && tabText.includes("Faculty sync, 2026-10-20") && x7Now?.state === "accepted" && errors.length === 0,
+        `${tabText.slice(0, 400)} ${x7Now?.state} ${errors.join(" | ")}`,
+      );
+      await page.goto(`${BASE}/app/w/${AK}/goals/${GW.id}`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.querySelector("#goal-activity")?.textContent.includes("src/sso.ts"), { timeout: 15000 });
+      const cardText = await page.evaluate(() => document.querySelector("#goal-activity")?.innerText ?? "");
+      check(
+        "ui (Chrome): the goal page's Agent activity card shows sessions by harness, active now, the files and the reader's own sessions, and says counts come from bindings",
+        cardText.includes("Counts come from bindings, not from what agents wrote") && /Sessions\s+2 \(1 Claude Code, 1 Codex\)/.test(cardText) && /Active now\s+1/.test(cardText) && cardText.includes("src/login.ts") && cardText.includes("Your sessions") && errors.length === 0,
+        `${cardText} ${errors.join(" | ")}`,
+      );
+    } catch (e) {
+      check("ui (Chrome) asks and activity run", false, e?.stack ?? e);
+    } finally {
+      await browser.close();
+    }
+  } else check("ui (Chrome) available", false, `no Chrome at ${CHROME}`);
   // ==== end port:activity ====
 
   // ==== port:value ====
@@ -2545,7 +2920,7 @@ try {
       try {
         counts = JSON.parse(r.stdout.trim().split("\n").pop());
       } catch {}
-      return { status: r.status, out: `${r.stdout}${r.stderr}`.slice(-600), counts: counts ?? {} };
+      return { status: r.status, out: `${r.stdout}${r.stderr}`.slice(-1200), counts: counts ?? {} };
     };
     const signIn = async (u) => {
       const r = await call(u.who, "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: u.email, password: `pw-${u.who}-123456` } });
@@ -2698,6 +3073,18 @@ try {
     // Evidence they added to their change request, from the web and from their device, stays as the former member's.
     const crEv = (body, auth) => call("R2", "POST", `/api/v2/workspaces/${W1}/goals/${G1.id}/change-requests/${cr.json?.id}/evidence`, { ...auth, body });
     const ev2 = [await crEv({ kind: "pr", url: "https://github.com/acme/r/pull/2", label: "Rob's PR" }, { cookie: r2.cookie }), await crEv({ kind: "ci_run", url: "https://ci.example.com/r/2", label: "Rob's CI run" }, { bearer: D2.access })];
+    // Asks (PORT-003) naming them: one they recorded, one they accepted and mentioned as their team's lead, and a value
+    // report (PORT-004) of theirs, so the "no row holds their id or email" check below covers those tables with rows in.
+    const teamR2 = (await ws(r1, "POST", W1, "/teams", { name: "Rob's team" })).json?.id;
+    await ws(r1, "POST", W1, `/teams/${teamR2}/members`, { user_id: r2.id, role: "lead" });
+    const askBy2 = await ws(r2, "POST", W1, "/asks", { team_id: teamR2, text: "Rob recorded this", source: { kind: "manual", date: "2026-10-01" } });
+    const askOf2 = await ws(r1, "POST", W1, "/asks", { team_id: teamR2, text: "Rita asked Rob's team", source: { kind: "meeting", title: "Planning", date: "2026-10-02" } });
+    const acc2 = await ws(r2, "POST", W1, `/asks/${askOf2.json?.id}/accept`, {});
+    const men2 = await ws(r2, "POST", W1, `/asks/${askOf2.json?.id}/mention`, { date: "2026-10-03", text: "Rob raised it again", source_title: "Standup" });
+    const vrAt2 = new Date().toISOString();
+    withDb((d) => d.prepare("INSERT INTO v2_value_reports (id, ws_id, change_request_id, person_id, estimate, note, created_at, updated_at) VALUES (?, ?, ?, ?, 'longer', 'Rob note', ?, ?)").run(`vr_${randomBytes(12).toString("hex").slice(0, 24)}`, W1, cr.json?.id, r2.id, vrAt2, vrAt2));
+    const named2 = () => [q1("SELECT COUNT(*) AS n FROM v2_asks WHERE created_by = ? OR decided_by = ?", r2.id, r2.id).n, q1("SELECT COUNT(*) AS n FROM v2_ask_mentions WHERE added_by = ?", r2.id).n, q1("SELECT COUNT(*) AS n FROM v2_value_reports WHERE person_id = ?", r2.id).n];
+    const named2Before = named2();
     const del2 = await call("R2", "DELETE", "/api/v2/me", { cookie: r2.cookie, body: { email: r2.email } });
     const d2Me = await call("R2", "GET", "/api/v2/me", { bearer: D2.access });
     const g2Seen = (await ws(r1, "GET", W1, `/goals/${G2.id}`)).json?.goal;
@@ -2717,6 +3104,15 @@ try {
       "account deletion: a member's goals, change requests and session spend stay for the others as \"Former member #1\" (no device on the session); their device is unpaired; no row anywhere holds their id or email; the workspace audit shows member.account_deleted by the former member",
       del2.status === 204 && d2Me.status === 401 && g2Seen?.owner?.id === "fm_1" && g2Seen.owner.name === "Former member #1" && crReq?.name === "Former member #1" && spend1?.total?.requests === 6 && s2Row?.user_id === "fm_1" && s2Row.device_id === null && Object.keys(r2Left).length === 0 && w1Audit.some((a) => a.action === "member.account_deleted" && a.actor?.name === "Former member #1"),
       `${del2.status} ${d2Me.status} ${JSON.stringify(g2Seen?.owner)} ${JSON.stringify(crReq)} ${spend1?.total?.requests} ${JSON.stringify(s2Row)} ${JSON.stringify(r2Left)}`,
+    );
+
+    const askOf2After = (await ws(r1, "GET", W1, `/asks/${askOf2.json?.id}`)).json;
+    const askBy2After = (await ws(r1, "GET", W1, `/asks/${askBy2.json?.id}`)).json;
+    check(
+      "account deletion: asks they recorded and decided, the mentions they added and their value report were there and stay, as \"Former member #1\" (person_id fm_1); none of those rows holds their id (the check above covers every table)",
+      askBy2.status === 201 && askOf2.status === 201 && acc2.status === 200 && men2.status === 200 && named2Before.join() === "2,1,1" && named2().join() === "0,0,0" &&
+        askBy2After?.requester?.name === "Former member #1" && askOf2After?.decided_by?.id === "fm_1" && askOf2After.mentions[0]?.added_by?.name === "Former member #1" && q1("SELECT person_id FROM v2_value_reports WHERE ws_id = ?", W1)?.person_id === "fm_1",
+      `${askBy2.status} ${askOf2.status} ${acc2.status} ${men2.status} ${named2Before} ${named2()} ${JSON.stringify(askBy2After?.requester)} ${JSON.stringify(askOf2After?.decided_by)}`,
     );
 
     // -- removal: "delete their sessions now", and the 30-day former-member rule --
@@ -3036,6 +3432,101 @@ try {
     // PORT-003 fills this block: asks, mentions and value reports under account deletion, former members, purge and
     // the 13-month rule for closed asks.
     // ==== port:retention ====
+    // Asks, their mentions and value reports (PORT-003) under account deletion, former members, purge and the 13-month
+    // rules. Quinn leads a team in WA; Quill records asks there and in WP, adds mentions, and has a value report in each.
+    await signIn(r1);
+    const QA = await signUp("QA", "Quinn Lead", "qa@example.test");
+    const QB = await signUp("QB", "Quill Asker", "qb@example.test");
+    const WA = await newWs(r1, "Retention asks");
+    const WP = await newWs(r1, "Retention asks purge");
+    for (const [w, u] of [
+      [WA, QA],
+      [WA, QB],
+      [WP, QB],
+    ])
+      await join(r1, w, u);
+    const qTeam = async (w, lead) => {
+      const t = (await ws(r1, "POST", w, "/teams", { name: "Quinn's team" })).json?.id;
+      await ws(r1, "POST", w, `/teams/${t}/members`, { user_id: lead.id, role: "lead" });
+      return t;
+    };
+    const TQ = await qTeam(WA, QA);
+    const TQP = await qTeam(WP, r1);
+    const qAsk = async (w, team, text) => (await ws(QB, "POST", w, "/asks", { team_id: team, text, source: { kind: "meeting", title: "Retro", date: "2026-10-01" } })).json?.id;
+    const qAct = (u, w, id, action, body = {}) => ws(u, "POST", w, `/asks/${id}/${action}`, body);
+    const qMention = { date: "2026-10-02", text: "Quill said it again", source_title: "Standup" };
+    const qIds = {};
+    for (const k of ["open", "accepted", "done", "declined", "withdrawn"]) qIds[k] = await qAsk(WA, TQ, `Ask that ends ${k}`);
+    await qAct(QB, WA, qIds.open, "mention", qMention);
+    await qAct(QB, WA, qIds.done, "mention", qMention);
+    for (const k of ["accepted", "done"]) await qAct(QA, WA, qIds[k], "accept");
+    await qAct(QA, WA, qIds.done, "done");
+    await qAct(QA, WA, qIds.declined, "decline");
+    await qAct(QB, WA, qIds.withdrawn, "withdraw");
+    const pAsk = await qAsk(WP, TQP, "Ask in a workspace that gets purged");
+    await qAct(QB, WP, pAsk, "mention", qMention);
+    // A value report each (PORT-004 writes them through its route; here the row is put in directly), on a change request
+    // Quill made.
+    const vReport = async (w) => {
+      const g = await goal(r1, w, "Rita's goal for value");
+      const c = await ws(QB, "POST", w, `/goals/${g.id}/change-requests`, { base_version: 1, changes: { title: "Sharper" }, reason: "clearer" });
+      const at = new Date().toISOString();
+      withDb((d) => d.prepare("INSERT INTO v2_value_reports (id, ws_id, change_request_id, person_id, estimate, note, created_at, updated_at) VALUES (?, ?, ?, ?, 'about_a_week', 'Quill note', ?, ?)").run(`vr_${randomBytes(12).toString("hex").slice(0, 24)}`, w, c.json?.id, QB.id, at, at));
+      return c.status;
+    };
+    const vrStatus = [await vReport(WA), await vReport(WP)];
+    const qStates = q(`SELECT state FROM v2_asks WHERE ws_id = ? ORDER BY text`, WA).map((r) => r.state).join();
+    check(
+      "retention setup (asks): asks in every state, mentions and a value report in a workspace, and an ask, mention and value report in a second one",
+      qStates === "accepted,declined,done,open,withdrawn" && vrStatus.every((s) => s === 201) && q1("SELECT COUNT(*) AS n FROM v2_ask_mentions WHERE ws_id = ?", WP).n === 1,
+      `${qStates} ${vrStatus}`,
+    );
+
+    // Account deletion of the lead who decided them: no row anywhere holds their id or email; the asks stay.
+    const delQA = await call("QA", "DELETE", "/api/v2/me", { cookie: QA.cookie, body: { email: QA.email } });
+    const qaLeft = { ...mentions(QA.id), ...mentions(QA.email) };
+    const decidedNow = (await ws(r1, "GET", WA, `/asks/${qIds.done}`)).json?.decided_by;
+    check(
+      "account deletion (asks): a team lead who accepted, declined and finished asks deletes their account: no row anywhere holds their id or email; the asks stay, decided by \"Former member #n\"",
+      delQA.status === 204 && Object.keys(qaLeft).length === 0 && /^fm_\d+$/.test(decidedNow?.id ?? "") && /^Former member #\d+$/.test(decidedNow?.name ?? "") && q1("SELECT COUNT(*) AS n FROM v2_asks WHERE ws_id = ?", WA).n === 5,
+      `${delQA.status} ${JSON.stringify(qaLeft)} ${JSON.stringify(decidedNow)}`,
+    );
+
+    // Quill is removed from WA (a former member 30 days on) and WP is deleted (purged 30 days on).
+    const rmQB = await call("R1", "DELETE", `/api/v2/workspaces/${WA}/members/${QB.id}`, { cookie: r1.cookie });
+    const delWP = await ws(r1, "DELETE", WP);
+    const wpRows = () => ["v2_asks", "v2_ask_mentions", "v2_value_reports"].map((t) => q1(`SELECT COUNT(*) AS n FROM ${t} WHERE ws_id = ?`, WP).n);
+    const dryQ = retention(later(31 * DAY), { dryRun: true });
+    const wpBefore = wpRows();
+    const runQ = retention(later(31 * DAY));
+    await signIn(r1);
+    const qbInWA = { ...mentions(QB.id, WA), ...mentions(QB.email, WA) };
+    const openNow = (await ws(r1, "GET", WA, `/asks/${qIds.open}`)).json;
+    const qbVr = q1("SELECT person_id FROM v2_value_reports WHERE ws_id = ?", WA)?.person_id;
+    check(
+      "retention (+31 days, asks): a removed member's asks, mentions and value report read \"Former member #n\" and no row of that workspace holds their id or email (their account stays); a purged workspace's asks, mentions and value reports are gone; the dry run changed nothing",
+      rmQB.status === 204 && delWP.status === 204 && dryQ.status === 0 && wpBefore.every((n) => n === 1) && runQ.status === 0 && wpRows().every((n) => n === 0) &&
+        Object.keys(qbInWA).length === 0 && /^Former member #\d+$/.test(openNow?.requester?.name ?? "") && /^Former member #\d+$/.test(openNow?.mentions?.[0]?.added_by?.name ?? "") && /^fm_\d+$/.test(qbVr ?? "") && !!q1("SELECT 1 AS x FROM ba_user WHERE id = ?", QB.id),
+      `${rmQB.status} ${delWP.status} ${wpBefore} ${wpRows()} ${JSON.stringify(qbInWA)} ${JSON.stringify(openNow?.requester)} ${qbVr} ${runQ.out}`,
+    );
+
+    // Closed asks and value reports keep 13 months after their last change.
+    const qLeft = () => q("SELECT state FROM v2_asks WHERE ws_id = ? ORDER BY state", WA).map((r) => r.state).join();
+    const vrN = () => q1("SELECT COUNT(*) AS n FROM v2_value_reports").n;
+    const vr0 = vrN();
+    const run12 = retention(monthsLater(12));
+    const dry13 = retention(monthsLater(13, 2), { dryRun: true });
+    const kept13 = { asks: qLeft(), mentions: q1("SELECT COUNT(*) AS n FROM v2_ask_mentions WHERE ws_id = ?", WA).n, vr: vrN() };
+    const run13 = retention(monthsLater(13, 2));
+    const run13b = retention(monthsLater(13, 2));
+    check(
+      "retention (asks): at 12 months nothing goes; at 13 months + 2 days done, declined and withdrawn asks go with their mentions (asks_deleted 3) and open and accepted ones stay, and value reports go (value_reports_deleted); the dry run reports the same and changes nothing; a second run changes nothing",
+      run12.status === 0 && run12.counts.asks_deleted === 0 && run12.counts.value_reports_deleted === 0 &&
+        dry13.status === 0 && dry13.counts.asks_deleted === 3 && dry13.counts.value_reports_deleted === vr0 && kept13.asks === "accepted,declined,done,open,withdrawn" && kept13.mentions === 2 && kept13.vr === vr0 &&
+        run13.status === 0 && run13.counts.asks_deleted === 3 && run13.counts.value_reports_deleted === vr0 && vr0 >= 1 && vrN() === 0 && qLeft() === "accepted,open" &&
+        q1("SELECT COUNT(*) AS n FROM v2_ask_mentions WHERE ws_id = ?", WA).n === 1 && run13b.counts.asks_deleted === 0,
+      `${run12.out} | ${dry13.out} | ${JSON.stringify(kept13)} | ${run13.out} | ${qLeft()} ${vr0}`,
+    );
     // ==== end port:retention ====
 
     // -- the server runs the job at startup --
@@ -3412,6 +3903,13 @@ try {
   const hMe = await hosted("GET", "/api/v2/me");
   const hSignIn = await hosted("GET", "/app/sign-in");
   const hSession = await hosted("GET", "/api/v2/auth/get-session");
+  const hAsks = await hosted("GET", "/api/v2/workspaces/ws_aaaaaaaaaaaaaaaaaaaaaaaa/asks");
+  const hSuggest = await hosted("POST", "/api/v2/workspaces/ws_aaaaaaaaaaaaaaaaaaaaaaaa/limits/suggest", { body: {}, headers: { origin: `https://${HOSTED_HOST}` } });
+  check(
+    "hosted: the port routes pass the hosted edge (GET .../asks reaches its route: 401; POST .../limits/suggest is not the edge's 404)",
+    hAsks.status === 401 && hAsks.json?.error === "unauthorized" && !(hSuggest.status === 404 && hSuggest.json?.error === "Not found"),
+    `${hAsks.status} ${hAsks.text.slice(0, 100)} ${hSuggest.status} ${hSuggest.text.slice(0, 100)}`,
+  );
   check("hosted: v2 routes are served (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
   check("hosted: the sign-in page offers Google and GitHub, never the test sign-in; without email settings, no email code", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in") && !hSignIn.text.includes("Send code"), "");
   check("hosted: the sign-in page links to /privacy and /trust", hSignIn.text.includes('href="/privacy"') && hSignIn.text.includes('href="/trust"'), "");

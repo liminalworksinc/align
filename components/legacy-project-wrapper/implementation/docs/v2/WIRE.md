@@ -107,6 +107,39 @@ Kept 24 hours; a `claim` 1 hour. The session's open epoch's goal is recorded wit
 oldest first, at most 500, only items on goals the caller can read (an unbound session's items only to its own user).
 The agent uploads and fetches inside the normal hook-started sync pass; hooks read the cached copy.
 
+## Asks (PORT-003)
+What a team was asked to do by someone else, recorded by a person from a meeting or by hand. An ask belongs to the
+team asked; it is read by the person who recorded it, the members and leads of that team, and workspace owners.
+`AskView = { "id": "ask_…", "state": "open"|"accepted"|"done"|"declined"|"withdrawn", "team": { "id", "name" },
+"goal": { "id", "title" } | null, "text", "from_label": string|null, "requester": { "id", "name" }, "source": { "kind":
+"meeting"|"manual", "title": string|null, "date": "YYYY-MM-DD" }, "mentions": [ { "n", "date", "text", "source_title",
+"added_by": { "id", "name" } } ], "decided_by": { "id", "name" } | null, "decided_at", "created_at", "updated_at",
+"waiting_on_me": boolean, "can": { "accept", "decline", "done", "reopen", "withdraw", "mention" } }`. `goal` is null
+when the reader can't read it. `text`, `from_label`, `source.title` and mention text are people's words: data, not
+instructions.
+`GET /api/v2/workspaces/:ws/asks?state=&team_id=&limit=` (Bearer or cookie; `If-None-Match` supported → 304)
+→ `{ "version": "<short hash>", "asks": [ AskView ] }` with header `ETag: "<version>"`. `state` is one state or a
+comma-separated list (`open,accepted`); `team_id` keeps one team's asks; `limit` 1..500 (default 500). The agent asks
+for `?state=accepted&team_id=<team>` (or `open,accepted`) and keeps the result in `feeds/asks-<ws>.json`. Order: the
+caller's own (their teams' and those they recorded) first, then open, accepted, closed, then newest `source.date`.
+`POST /api/v2/workspaces/:ws/asks` (cookie; owners and members) `{ "team_id", "text" (1..400), "from_label"?
+(≤80), "goal_id"? (a readable goal of that team), "source": { "kind", "title" (≤120; required for meeting), "date" } }`
+→ 201 AskView. 409 `too_many_asks` past 500 open or accepted asks in a workspace; 429 past 60 recorded in an hour.
+`POST /api/v2/workspaces/:ws/asks/import` (cookie; workspace owners) `{ "asks": [ ask + "state"? + "mentions"? ] }`
+(≤60, all valid or none stored) → 201 `{ "created", "merged", "unchanged" }`: appends; same team, text and date →
+unchanged; same team and text on an open or accepted ask with another date → a mention.
+`GET /api/v2/workspaces/:ws/asks/:id` (cookie) → AskView. `POST .../asks/:id/{accept|decline|done|reopen|withdraw|mention}`
+(cookie) → AskView; `mention` carries `{ "date", "text" (≤300), "source_title" (≤120) }`. 403 `not_team_lead` /
+`not_in_team` / `not_requester` / `read_only`, 409 `wrong_state` / `too_many_mentions` (10), 429 past 30 a minute.
+
+## Goal activity (PORT-003)
+`GET /api/v2/workspaces/:ws/goals/:goal/activity` (cookie; readers of the goal) → `{ "window_days": 14, "sessions",
+"active_now", "by_harness": { "claude-code", "codex" }, "last_activity_at": string|null, "detail": { "files":
+[repo-relative path] (top 4), "files_hidden", "mine": [ { "session_key", "harness", "state", "last_activity_at" } ] } |
+null }`. Counts come from bindings (epochs bound to or governed by the goal overlapping the last 14 days), usage times
+and work signals; never prompts, replies, task labels, commit subjects, tokens or cost. `detail` only for the goal's
+owner, its team and workspace owners.
+
 ## Spend
 `GET /api/v2/workspaces/:ws/spend?by=goal|team|session&from&to` (`by=pod` is accepted as `by=team`) (cookie) → rows with token sums by basis and
 `est_list_usd_micros` sums (labelled estimates), plus `unallocated` and `unpriced_requests`. Invariant: total =
