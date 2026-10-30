@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { signPayload } from "../auth";
+import { signPayload } from "../secret";
 import { config, testServerClosesAt } from "../config";
 import { all, audit, get, run, tx } from "../v2/db";
 import { notFound } from "../v2/errors";
@@ -36,7 +36,7 @@ export const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const USE_WRITE_MS = 5 * 60 * 1000;
 export const GRANT_ID = /^gr_[A-Za-z0-9_-]{16}$/;
 
-// Keyed with ALIGN_SECRET (domain-separated from session, agent and access tokens): a refresh token only works under
+// Keyed with ALIGN_SECRET (domain-separated from access tokens): a refresh token only works under
 // the secret it was issued with, so rotating ALIGN_SECRET ends every connected app (docs/HOSTING.md).
 const refreshHash = (v: string) => signPayload(`alr.${v}`);
 /** Names the current ALIGN_SECRET without revealing it. */

@@ -1,5 +1,5 @@
 "use client";
-import { ErrorNotice } from "@/components/ErrorNotice";
+import { ErrorNotice } from "./app/_ui/error-notice";
 import "./globals.css";
 
 // An error in the root layout itself, which app/error.tsx can't catch. It replaces the layout, so it brings its own html.

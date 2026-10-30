@@ -16,7 +16,7 @@ import { withLock } from "../locks";
 //   documents elsewhere can't block them. The cache holds 200 documents; an app with a live grant keeps its good one
 //   on top of that, so a flood of other documents can't push it out.
 // - DCR: POST /oauth/register stores {client_name, redirect_uris} under a random dcr_ id in
-//   <workspacesRoot>/_oauth_clients.json, so the end-of-test purge removes it with the workspaces.
+//   <data>/workspaces/_oauth_clients.json (0600).
 // A redirect URI is https, or http on a loopback host (Claude Code and Codex listen on a local port).
 
 export interface OAuthClient {
@@ -78,7 +78,10 @@ const cleanName = (v: unknown, fallback: string) => {
 
 // ---- DCR ----
 
-const dcrFile = () => path.join(config().workspacesRoot, "_oauth_clients.json");
+/** Registered DCR clients (names and redirect URIs only). The folder is the one the file lived in before v1 was retired,
+ *  so apps that registered earlier keep their client ids. */
+export const dcrDir = () => path.join(config().dataDir, "workspaces");
+const dcrFile = () => path.join(dcrDir(), "_oauth_clients.json");
 
 async function readDcr(): Promise<OAuthClient[]> {
   try {
@@ -107,7 +110,7 @@ export async function registerClient(meta: Record<string, unknown>): Promise<OAu
   };
   await withLock("_oauth_clients", async () => {
     const list = (await readDcr()).slice(-(MAX_DCR_CLIENTS - 1));
-    await fs.mkdir(config().workspacesRoot, { recursive: true, mode: 0o700 });
+    await fs.mkdir(dcrDir(), { recursive: true, mode: 0o700 });
     const tmp = `${dcrFile()}.${randomBytes(6).toString("hex")}.tmp`;
     await fs.writeFile(tmp, JSON.stringify([...list, client]), { mode: 0o600 });
     await fs.rename(tmp, dcrFile());

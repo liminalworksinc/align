@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Anton, Space_Grotesk, Space_Mono } from "next/font/google";
-import { NOSCRIPT } from "@/lib/labels";
+import { NOSCRIPT } from "./app/_ui/words";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({ variable: "--font-space-grotesk", subsets: ["latin"] });
@@ -9,7 +9,7 @@ const anton = Anton({ variable: "--font-anton", subsets: ["latin"], weight: "400
 
 export const metadata: Metadata = {
   title: "Align",
-  description: "Cross-team goal changes, decided by the people who own them, with tested evidence.",
+  description: "Goals that change only with their owners' approval, and the coding agents working on them kept current.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

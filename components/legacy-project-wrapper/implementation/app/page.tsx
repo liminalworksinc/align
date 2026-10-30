@@ -1,6 +1,6 @@
-import Home from "@/components/Home";
+import { redirect } from "next/navigation";
 
-// The Northstar demo (and any /setup scenario). Custom workspaces render the same app at /w/<id>.
+// `/` is not a page: the web app lives under /app. proxy.ts answers this redirect first; this is the fallback.
 export default function Page() {
-  return <Home />;
+  redirect("/app");
 }

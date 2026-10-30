@@ -1,6 +1,6 @@
 import { HttpError } from "../errors";
 
-// Per-client limits for the unauthenticated OAuth endpoints (in memory, like lib/ratelimit.ts): registrations 20 an
+// Per-client limits for the unauthenticated OAuth endpoints (in memory): registrations 20 an
 // hour, token calls 120 a minute, consent page views 30 a minute (each can fetch an app's client document). `client` is clientOf(req): Fly-Client-IP when hosted, "local" in Mode L.
 // approve_ws is keyed by workspace id instead: at most 10 app approvals a minute per workspace.
 const LIMITS = {

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { signPayload } from "../auth";
+import { signPayload } from "../secret";
 import { config } from "../config";
 import { ClientUnreachable, redirectAllowed, resolveClient, type OAuthClient } from "./clients";
 import { createGrant, liveGrant, newGrantId, parseRefresh, removeGrant, rotateGrant } from "./grants";
@@ -63,7 +63,7 @@ export interface McpGrant {
   exp: number; // seconds
 }
 
-const macOf = (payload: string) => signPayload(`alm.${payload}`); // domain-separated from session and agent tokens
+const macOf = (payload: string) => signPayload(`alm.${payload}`); // domain-separated from refresh-token hashes (alr.)
 const WS_ID = /^ws_[a-z2-7]{24}$/;
 
 function mintAccess(ws: string, uid: string, grant: string, clientId: string, aud: string) {

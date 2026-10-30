@@ -1,63 +1,39 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { config as alignConfig, hostAllowed, hostName, startupProblems, testServerClosed } from "@/lib/config";
-import { LOCAL_HOSTS } from "@/lib/local-guard";
+import { config as alignConfig, hostAllowed, hostName, LOOPBACK, startupProblems, testServerClosed } from "@/lib/config";
 
-// Runs before every page and API route.
-// Mode L (default): every route is for this machine only. A DNS-rebound page reaches the server under its own
-// name, so refuse any Host header whose hostname is not loopback (any port). requireJson keeps its own check.
-// HOSTED=1 (tester mode): the ALIGN_HOSTS allowlist replaces loopback; then HTTPS is required (X-Forwarded-Proto
-// from Fly's proxy is trusted only in this mode) and the request must come through that proxy (Fly-Client-IP).
-// Only the tester routes below exist: everything else, Northstar and capture included, is 404, so a route added
-// later is closed when hosted until it is listed here.
-const HOSTED_ROUTES = [
-  /^\/new$/,
-  /^\/w\/[^/]+$/,
-  /^\/api\/workspaces$/,
-  /^\/api\/workspaces\/config$/,
-  /^\/api\/workspaces\/interview$/, // the intake interview on /new (founder ruling 10-29, LIM-2424 9976b9e0)
-  /^\/api\/workspaces\/[^/]+\/login-info$/,
-  /^\/api\/session$/,
-  /^\/api\/state$/,
-  /^\/api\/timer$/,
-  /^\/api\/reset$/,
-  /^\/api\/proposals$/,
-  /^\/api\/proposals\/[^/]+\/(?:accept|acknowledge|counter|launch|reject)$/,
-  // Connected AI apps (founder ruling 10-27, amending go-C (LIM-2424 0ed9b310)): the read-only MCP endpoint, which takes only Align's own
-  // OAuth tokens when hosted (app/api/mcp/route.ts), the OAuth server that issues them after a passcode sign-in, and
-  // the workspace's list of connected apps. Capture, wake-ups and agent tokens stay closed.
-  /^\/api\/mcp$/,
-  /^\/\.well-known\/oauth-protected-resource(?:\/api\/mcp)?$/,
-  /^\/\.well-known\/oauth-authorization-server$/,
-  /^\/oauth\/(?:authorize|token|register)$/,
-  /^\/api\/oauth\/approve$/,
-  /^\/api\/workspaces\/connections$/,
-];
-// The web app and its API (v2), always on: served in Mode L, and when hosted they pass the same host, https and edge
-// checks as the tester routes and are allowed alongside them.
-const V2_ROUTES = /^\/(?:app|api\/v2)(?:\/|$)/;
-const TO_NEW = new Set(["/", "/setup"]); // Northstar's pages: a tester lands on workspace creation instead
+// Runs before every page and API route (static assets are matched out below).
+// `/` is not a page: it redirects to the web app, /app, in both modes.
+// Mode L (default): every route is for this machine only. A DNS-rebound page reaches the server under its own name, so
+// refuse any Host header whose hostname is not loopback (any port). Cross-origin cookie writes are refused by the
+// routes themselves (lib/v2/http.ts, lib/http.ts), which see the Origin and the body.
+// HOSTED=1: the ALIGN_HOSTS allowlist replaces loopback; then HTTPS is required (X-Forwarded-Proto from Fly's proxy is
+// trusted only in this mode) and the request must come through that proxy (Fly-Client-IP). Only the allowlisted paths
+// below are served: everything else is 404, so a route added later is closed when hosted until it is listed here.
+const HOSTED_ROUTES = /^\/(?:app|api\/v2|api\/mcp|oauth|\.well-known|api\/oauth)(?:\/|$)/;
 
 const text = (status: number, body: string) => new NextResponse(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
 export function proxy(request: NextRequest) {
   const cfg = alignConfig();
   const name = hostName(request.headers.get("host"));
+  const p = request.nextUrl.pathname;
   if (!cfg.hosted) {
-    if (!name || !LOCAL_HOSTS.has(name)) return text(421, "Misdirected request: this server answers to localhost only\n");
+    if (!name || !LOOPBACK.has(name)) return text(421, "Misdirected request: this server answers to localhost only\n");
+    // Relative, so the browser stays on the loopback name and port it used.
+    if (p === "/") return new NextResponse(null, { status: 307, headers: { location: "/app" } });
     return NextResponse.next();
   }
   // A misconfigured hosted server serves nothing, even if the platform kept the process up after startup refused.
-  if (startupProblems().length) return text(503, "This server is not configured to serve testers yet\n");
-  // Closed (the promised deletion date has ended): the server stays up for the operator's purge, and every request
-  // gets 410, whatever its Host or headers.
+  if (startupProblems().length) return text(503, "This server is not configured yet\n");
+  // Closed (the configured closing date has ended): the server stays up for the operator, and every request gets 410,
+  // whatever its Host or headers.
   if (testServerClosed(cfg.deleteBy)) return text(410, `This test server closed on ${cfg.deleteBy}.\n`);
   if (!hostAllowed(request.headers.get("host"))) return text(421, "Misdirected request: this server answers to its own host name only\n");
   if (request.headers.get("x-forwarded-proto") !== "https") return NextResponse.json({ error: "Use https" }, { status: 403 });
   // Fly's edge sets Fly-Client-IP; a request without it did not come through the public proxy.
   if (!request.headers.get("fly-client-ip")) return NextResponse.json({ error: "Use the public address" }, { status: 403 });
-  const p = request.nextUrl.pathname;
-  if (TO_NEW.has(p)) return NextResponse.redirect(new URL("/new", `https://${name}`), 307);
-  if (!V2_ROUTES.test(p) && !HOSTED_ROUTES.some((r) => r.test(p))) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (p === "/") return NextResponse.redirect(new URL("/app", `https://${name}`), 307);
+  if (!HOSTED_ROUTES.test(p)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.next();
 }
 
