@@ -692,6 +692,25 @@ goal's owner only.
 - **WHEN** the owner POSTs a change to `.../versions`
 - **THEN** the response is 201 with the goal at the next version and `goal_version` directives are written for its sessions; a `version` other than the current one is 409 `stale_version`, and a body that changes nothing is 409 `no_change`
 
+### Requirement: Goal sessions goal tree and review
+
+The server SHALL return each goal with `depends_on` (only the goals the caller may read), `bindable` and
+`contributes_to` (the targets of its approved alignments that the caller may read, each `{id, title, version,
+reviewed_version, stale}`), mark a parent `stale` until the goal's owner has reviewed the goal against the parent's
+current version, serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as
+`{goal, versions, contributions, can_edit}`, and let only the goal's owner confirm it still fits a parent on
+`POST .../goals/{goal}/review {parent_id}`.
+
+#### Scenario: Parent changes
+
+- **WHEN** a goal's parent gets a new version
+- **THEN** the child's `contributes_to` entry shows `stale: true` (`reviewed_version` below the parent's `version`) until the child's owner POSTs `{parent_id}` to `.../review` or saves a new version of the child; approving an alignment with a `source_goal_id` records the source as reviewed against the target at approval
+
+#### Scenario: Review refused
+
+- **WHEN** `.../review` is called for a goal the caller cannot see, a `parent_id` that is not a current approved parent, or by someone other than the goal's owner
+- **THEN** the server responds 404, 404, or 403 `not_goal_owner` (viewers 403 `read_only`) respectively; on success the response is the goal
+
 ### Requirement: Goal sessions alignments
 
 The server SHALL let a member or owner request an alignment toward a goal they can see on
@@ -704,7 +723,7 @@ it once every required approver of the current revision has, and accept `approve
 #### Scenario: Approving work toward a goal
 
 - **WHEN** the last required approver approves a `work_toward` request at its current `revision`
-- **THEN** the alignment becomes `approved`, each listed session's governing goal becomes the target and each gets one `binding_changed` directive; a stale `revision` is 409 `stale_revision`, a non-approver 403 `not_an_approver`, a request not `pending` 409 `wrong_state`, and a person not involved 404
+- **THEN** the alignment becomes `approved`, each listed session whose sharing has not stopped gets the target as its governing goal and one `binding_changed` directive (stopped sessions are skipped); a stale `revision` is 409 `stale_revision`, a non-approver 403 `not_an_approver`, a request not `pending` 409 `wrong_state`, and a person not involved 404
 
 #### Scenario: Invalid request
 
@@ -755,6 +774,20 @@ only the caller's own.
 
 - **WHEN** a device posts items for its own shared sessions
 - **THEN** the response is `{accepted}`; items for sessions it did not share or that are not `shared`, dated more than 5 minutes ahead or more than 24 hours back, are skipped; an invalid kind, `repo_id`, `path_hash` or absolute path is 400; items expire after 24 hours (claims after 1 hour)
+
+### Requirement: Goal sessions read views
+
+The server SHALL serve, to a signed-in browser session only, the caller's workspaces on `GET /api/v2/workspaces`
+(`{workspaces:[{id, name, role, pods}]}`), one workspace on `GET /api/v2/workspaces/{ws}` (`{workspace:{id, name,
+created_at}, role, me, members:[{id, name, email, role}], pods:[{id, name, my_role, members}]}`, 404 to non-members),
+the caller's paired devices on `GET /api/v2/devices` (`{devices:[{id, name, created_at, last_seen_at, revoked_at,
+revoked_reason, workspaces}]}`), and the alignment requests the caller is part of on
+`GET /api/v2/workspaces/{ws}/alignments` and `GET .../alignments/{id}`.
+
+#### Scenario: Alignment list
+
+- **WHEN** a member calls `GET /api/v2/workspaces/{ws}/alignments`
+- **THEN** the response is `{waiting_on_me, mine, others}`, holding only requests where the caller is the requester or a required approver of any revision, each with its `state`, `revision`, `choice`, `approvers` (with `approved`), `effects`, `sessions` (another person's session shows no `session_key`), goals the caller cannot read unnamed, and `can` flags for the actions the server would allow (all false for a viewer); `GET .../alignments/{id}` for a request the caller is not part of is 404
 
 ## Open questions
 
@@ -848,7 +881,10 @@ only the caller's own.
 - app/api/v2/workspaces/[ws]/pods/[pod]/members/[user]/route.ts
 - app/api/v2/workspaces/[ws]/goals/route.ts
 - app/api/v2/workspaces/[ws]/goals/[goal]/versions/route.ts
+- app/api/v2/workspaces/[ws]/goals/[goal]/route.ts
+- app/api/v2/workspaces/[ws]/goals/[goal]/review/route.ts
 - app/api/v2/workspaces/[ws]/alignments/route.ts
+- app/api/v2/workspaces/[ws]/alignments/[id]/route.ts
 - app/api/v2/workspaces/[ws]/alignments/[id]/[action]/route.ts
 - app/api/v2/workspaces/[ws]/sessions/route.ts
 - app/api/v2/workspaces/[ws]/sessions/[key]/epochs/route.ts
