@@ -1,53 +1,27 @@
-import { bindWs, loginWorkspace, wsSessionFrom, type WsSession } from "@/lib/auth";
-import { config } from "@/lib/config";
-import { audit } from "@/lib/flow";
+import { HttpError } from "@/lib/errors";
 import { cappedJson, handle, requireJson } from "@/lib/http";
-import { checkAuthorize, issueCode, originOf, redirectWith } from "@/lib/oauth/server";
 import { takeOAuthCall } from "@/lib/oauth/limits";
-import { checkLoginBackoff, clearLoginFailures, clientOf, recordLoginFailure, takeWorkspaceAction, withSigninSlot } from "@/lib/ratelimit";
-import { HttpError } from "@/lib/store";
-import { isRole, parseCustomWs, workspaceExists, type CustomWsId } from "@/lib/workspace";
+import { checkAuthorize, issueCode, originOf, redirectWith } from "@/lib/oauth/server";
+import { clientOf } from "@/lib/ratelimit";
+import { audit, get, tx } from "@/lib/v2/db";
+import { V2Error } from "@/lib/v2/errors";
+import { requireRecentSignIn, webAuth } from "@/lib/v2/http";
+import { nowIso } from "@/lib/v2/ids";
+import { ready } from "@/lib/v2/init";
 
-// The consent step of /oauth/authorize. The page posts the app's authorization request back with the person's
-// answer; everything is checked again here (the page is only a form). JSON only, with the exact https Origin when
-// hosted, so another site can't approve on someone's behalf (login CSRF). The person proves the workspace either
-// with the session this browser already has or with a role passcode, through the same backoff and scrypt slots as
-// sign-in. The answer is where to send the browser next: the app's redirect URI with a code, or with access_denied.
-
-const WS_IN = /w_[a-z2-7]{12}/;
+// The consent step of /oauth/authorize. The page posts the app's authorization request back with the person's answer
+// and the workspace they chose; everything is checked again here (the page is only a form). JSON only, with the exact
+// https Origin when hosted, so another site can't approve on someone's behalf. Approving needs a Better Auth session
+// from the last 15 minutes and a workspace where the person is an owner or member. The answer is where to send the
+// browser next: the app's redirect URI with a code, or with access_denied.
 
 interface Body {
-  params?: Record<string, string>;
-  decision?: string;
-  workspace?: string;
-  role?: string;
-  passcode?: string;
-  use_session?: boolean;
+  params?: Record<string, unknown>;
+  decision?: unknown;
+  workspace_id?: unknown;
 }
 
-/** The custom workspace session this browser holds, or null. */
-function currentSession(req: Request): (WsSession & { ws: CustomWsId }) | null {
-  try {
-    const s = wsSessionFrom(req);
-    return s && s.ws !== "northstar" ? (s as WsSession & { ws: CustomWsId }) : null;
-  } catch {
-    return null; // ended: treated as signed out
-  }
-}
-
-async function signIn(req: Request, b: Body): Promise<WsSession & { ws: CustomWsId }> {
-  const ws = parseCustomWs(WS_IN.exec(String(b.workspace ?? ""))?.[0]);
-  const client = clientOf(req);
-  const key = ws && workspaceExists(ws) && isRole(b.role) ? `ws:${ws}:${b.role}:${client}` : null;
-  if (key) {
-    checkLoginBackoff(key);
-    recordLoginFailure(key);
-  }
-  const go = () => loginWorkspace(ws, b.role, b.passcode);
-  const out = config().hosted ? await withSigninSlot(client, go) : await go();
-  if (key) clearLoginFailures(key);
-  return out.session as WsSession & { ws: CustomWsId };
-}
+const WS_ID = /^ws_[a-z2-7]{24}$/;
 
 export async function POST(req: Request) {
   return handle(async () => {
@@ -64,10 +38,24 @@ export async function POST(req: Request) {
     const r = check.request;
     if (b.decision === "deny") return { redirect: redirectWith(r.redirect_uri, { error: "access_denied", error_description: "The person declined", state: r.state }, origin) };
     if (b.decision !== "approve") throw new HttpError(400, "Choose Allow or Cancel");
-    const who = b.use_session ? currentSession(req) : await signIn(req, b);
-    if (!who) throw new HttpError(401, "Your session ended. Sign in with a passcode.");
-    takeWorkspaceAction(who.ws, "connect_app"); // an approve loop can't churn the audit archive
-    await bindWs(who).mutate((s) => audit(s, who, "ai_app_approved", `${r.client.client_name} (${new URL(r.redirect_uri).host})`));
-    return { redirect: redirectWith(r.redirect_uri, { code: issueCode(r, who.ws, who.actor), state: r.state }, origin) };
+    await ready();
+    let who;
+    try {
+      who = await webAuth(req);
+      requireRecentSignIn(who);
+    } catch (e) {
+      if (e instanceof V2Error && e.code === "reauth_required") throw new HttpError(403, "Sign in again to connect an app.", "reauth_required");
+      if (e instanceof V2Error) throw new HttpError(401, "Sign in to Align first.");
+      throw e;
+    }
+    if (b.workspace_id === undefined || b.workspace_id === null || b.workspace_id === "") throw new HttpError(400, "Choose a workspace");
+    const ws = typeof b.workspace_id === "string" && WS_ID.test(b.workspace_id) ? b.workspace_id : null;
+    const member = ws ? get<{ role: string }>("SELECT role FROM v2_members WHERE ws_id = ? AND user_id = ?", ws, who.user.id) : undefined;
+    if (!ws || !member) throw new HttpError(404, "Workspace not found");
+    if (member.role === "viewer") throw new HttpError(403, "Viewers can't connect apps");
+    takeOAuthCall(ws, "approve_ws"); // an approve loop can't churn the workspace's audit
+    const host = new URL(r.redirect_uri).host;
+    await tx(() => audit(ws, who.user.id, "oauth.app_approved", `${r.client.client_name} (${host})`, nowIso()));
+    return { redirect: redirectWith(r.redirect_uri, { code: issueCode(r, ws, who.user.id), state: r.state }, origin) };
   });
 }

@@ -121,6 +121,15 @@ Actions: `POST .../alignments/:id/{approve|counter|accept_counter|reject|withdra
 On approval with `allocation_transfer`: a `binding_changed` directive per session. Revoke is prospective; sessions whose
 binding exists only because of it get `binding_suspended`.
 
+## Connected AI apps and MCP
+`GET /api/v2/workspaces/:ws/apps` (cookie, members) → `{ "url": "<origin>/api/mcp", "apps": [{ "id": "gr_…", "name",
+"redirect_host", "user": { "id", "name" }, "approved_at", "last_used_at" }] }`: every live grant for a workspace owner,
+the caller's own for anyone else. `DELETE /api/v2/workspaces/:ws/apps/:grant` (cookie write) → 204 for the grant's
+person or a workspace owner, else `404 not_found`; audit `oauth.app_revoked`. Removing a member, leaving and deleting
+the workspace revoke the person's (or every) grant there. `/api/mcp` accepts a device access token
+(`alnd_`) as well as Align's OAuth tokens; a device names the workspace in each tool call (`workspace`) unless it can
+read exactly one (docs/MCP.md, specs/align/mcp.md).
+
 ## Changes (server)
 Implemented in `lib/v2/**` and `app/api/v2/**` (tests: `scripts/test-v2.mjs`). Everything above holds; these are the
 smallest additions and clarifications the server needed. Nothing here changes a field the agent already reads.

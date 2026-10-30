@@ -66,8 +66,8 @@ export function goalVersionDirective(ws: string, g: GoalRow): string | null {
 }
 
 /** A goal snapshot as the wire shows it now: snapshots stored before teams were called teams carry `pod` and
- *  visibility "pod" and no level. */
-function snapshot(json: string): GoalCore {
+ *  visibility "pod" and no level. The MCP server reads them the same way (lib/mcp/register.ts). */
+export function goalSnapshot(json: string): GoalCore {
   const { pod, visibility, ...rest } = JSON.parse(json) as Omit<GoalCore, "visibility"> & { pod?: { id: string; name: string } | null; visibility: string };
   return { ...rest, team: rest.team ?? pod ?? null, level: rest.level ?? "team", visibility: (visibility === "pod" ? "team" : visibility) as GoalCore["visibility"] };
 }
@@ -78,7 +78,7 @@ function serialize(dev: DevicePrincipal, d: DirectiveRow, keys: string[]) {
     // The goal as ratified when the directive was written; withheld if this user can no longer see it.
     const pp = principalIn(dev, d.ws_id);
     const live = d.goal_id ? goalRow(d.ws_id, d.goal_id) : undefined;
-    if (live && canReadGoal(pp, goalObj(live))) goal = { ...snapshot(d.goal_json), bindable: bindableFor(pp, live) };
+    if (live && canReadGoal(pp, goalObj(live))) goal = { ...goalSnapshot(d.goal_json), bindable: bindableFor(pp, live) };
   }
   return {
     id: d.id,

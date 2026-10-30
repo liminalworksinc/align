@@ -12,11 +12,17 @@ One file, no dependencies, Node 20+.
 }
 ```
 
-The first time the app starts it, it opens the browser on Align's sign-in page (`/oauth/authorize`): paste the
-workspace link, pick a team, enter that team's passcode, allow read-only access. It signs in the way Claude Code and
-Codex do (protected resource metadata, dynamic registration of a loopback redirect, PKCE S256) and keeps the tokens in
-`~/.align/connect/<host>.json` (0600), refreshing them when they expire. Restart or Disconnect in the workspace ends
-the sign-in; the next start asks again.
+The first time the app starts it, it opens the browser on Align's consent page (`/oauth/authorize`): sign in to
+Align if you aren't (a sign-in from the last 15 minutes), choose one of your workspaces, allow read-only access. The app
+then reads that workspace as you. It signs in the way Claude Code and Codex do (protected resource metadata, dynamic
+registration of a loopback redirect, PKCE S256) and keeps the tokens in `~/.align/connect/<host>.json` (0600),
+refreshing them when they expire. Disconnecting the app on the workspace's Apps tab, or leaving the workspace, ends the
+sign-in; the next start asks again.
+
+Before it signs in it checks that the Align URL and every OAuth endpoint use https (plain http only on `localhost`,
+`127.0.0.1` or `[::1]`) and that the authorization server's `issuer` is exactly the server Align's resource metadata
+names. A URL that fails the scheme rule exits with code 2; a metadata check that fails answers the pending request
+with JSON-RPC error `-32603` naming the check, and leaves the token file as it was.
 
 - `ALIGN_HOME` moves the token folder (default `~/.align`).
 - `ALIGN_CONNECT_NO_BROWSER=1` writes the sign-in URL to stderr (the app's MCP log) instead of opening a browser.

@@ -1,18 +1,16 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { signPayload } from "../auth";
 import { config } from "../config";
-import type { Actor } from "../types";
-import { agentEpochOf, parseCustomWs, readAuth, type CustomWsId } from "../workspace";
 import { ClientUnreachable, redirectAllowed, resolveClient, type OAuthClient } from "./clients";
-import { HttpError } from "../errors";
-import { createGrant, liveGrants, newGrantId, parseRefresh, removeGrant, rotateGrant } from "./grants";
+import { createGrant, liveGrant, newGrantId, parseRefresh, removeGrant, rotateGrant } from "./grants";
 
 // The OAuth 2.1 authorization server for Align's MCP endpoint (MCP authorization spec 2026-07-28): authorization code
 // with PKCE S256 only, public clients (CIMD or DCR, lib/oauth/clients.ts), refresh token rotation, RFC 8707 resource
-// binding and RFC 9207 iss. The person approving signs in with their workspace role passcode (or the session they
-// already have), so an app reads exactly one workspace. Everything it can read is read-only (lib/mcp/register.ts).
-// Access tokens are stateless, alm.<payload>.<HMAC>, 1 hour, checked against the grant on every call so that
-// "Disconnect" works at once. Codes live in memory for 60 s: a restart drops them and the app simply asks again.
+// binding and RFC 9207 iss. A person approves an app while recently signed in to Align (Better Auth) and picks one of
+// their v2 workspaces, so an app reads exactly one workspace, as that person. Everything it can read is read-only
+// (lib/mcp/register.ts). Access tokens are stateless, alm.<payload>.<HMAC>, 1 hour, checked against the grant and the
+// membership on every call so that "Disconnect", leaving and removal work at once. Codes live in memory for 60 s: a
+// restart drops them and the app simply asks again.
 
 export const MCP_PATH = "/api/mcp";
 export const PRM_PATH = "/.well-known/oauth-protected-resource/api/mcp";
@@ -58,41 +56,41 @@ export function protectedResourceMetadata(origin: string) {
 // ---- access tokens ----
 
 export interface McpGrant {
-  ws: CustomWsId;
+  ws: string;
+  uid: string;
   grant: string;
   client_id: string;
-  role: Actor;
   exp: number; // seconds
 }
 
 const macOf = (payload: string) => signPayload(`alm.${payload}`); // domain-separated from session and agent tokens
+const WS_ID = /^ws_[a-z2-7]{24}$/;
 
-function mintAccess(ws: CustomWsId, grant: string, clientId: string, role: Actor, aud: string, ep: number) {
+function mintAccess(ws: string, uid: string, grant: string, clientId: string, aud: string) {
   const exp = Math.floor(Date.now() / 1000) + ACCESS_TTL_S;
-  const payload = Buffer.from(JSON.stringify({ kind: "mcp", ws, gid: grant, cid: clientId, role, aud, ep, exp })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ kind: "mcp", ws, uid, gid: grant, cid: clientId, aud, exp })).toString("base64url");
   return `alm.${payload}.${macOf(payload)}`;
 }
 
-/** The grant behind `alm.` access token for this resource, or null (bad MAC, expired, other audience, revoked). */
+/** The grant behind an `alm.` access token for this resource, or null (bad MAC, expired, other audience, revoked,
+ *  or its person is no longer a member of the workspace). Needs the v2 database open (lib/v2/init.ts ready()). */
 export function readMcpToken(token: string | undefined, aud: string): McpGrant | null {
   if (!token?.startsWith("alm.")) return null;
   const [, payload, mac, extra] = token.split(".");
   if (!payload || !mac || extra !== undefined) return null;
   const good = macOf(payload);
   if (good.length !== mac.length || !timingSafeEqual(Buffer.from(good), Buffer.from(mac))) return null;
-  let p: { kind?: unknown; ws?: unknown; gid?: unknown; cid?: unknown; role?: unknown; aud?: unknown; ep?: unknown; exp?: unknown };
+  let p: { kind?: unknown; ws?: unknown; uid?: unknown; gid?: unknown; cid?: unknown; aud?: unknown; exp?: unknown };
   try {
     p = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   } catch {
     return null;
   }
-  const ws = parseCustomWs(p.ws);
-  if (p.kind !== "mcp" || !ws || p.aud !== aud || typeof p.exp !== "number" || p.exp <= Date.now() / 1000) return null;
-  const auth = readAuth(ws);
-  if (!auth || agentEpochOf(auth) !== p.ep) return null;
-  const grant = liveGrants(ws).find((x) => x.id === p.gid);
-  if (!grant || grant.client_id !== p.cid) return null;
-  return { ws, grant: grant.id, client_id: grant.client_id, role: grant.role, exp: p.exp };
+  if (p.kind !== "mcp" || typeof p.ws !== "string" || !WS_ID.test(p.ws) || typeof p.uid !== "string" || typeof p.gid !== "string") return null;
+  if (p.aud !== aud || typeof p.exp !== "number" || p.exp <= Date.now() / 1000) return null;
+  const grant = liveGrant(p.gid);
+  if (!grant || grant.client_id !== p.cid || grant.user_id !== p.uid || grant.ws_id !== p.ws) return null;
+  return { ws: grant.ws_id, uid: grant.user_id, grant: grant.id, client_id: grant.client_id, exp: p.exp };
 }
 
 // ---- authorization requests ----
@@ -147,17 +145,18 @@ interface CodeEntry {
   redirect_uri: string;
   challenge: string;
   resource: string;
-  ws: CustomWsId;
-  role: Actor;
+  ws: string;
+  user_id: string;
   exp: number;
-  used: { ws: CustomWsId; grant: string } | null;
+  used: { grant: string } | null;
 }
 
 const g = globalThis as unknown as { __alignOAuthCodes?: Map<string, CodeEntry> };
 const codes = (g.__alignOAuthCodes ??= new Map());
 
-/** After the person approves: a single-use code for the app, bound to its client, redirect, PKCE challenge and resource. */
-export function issueCode(r: AuthorizeRequest, ws: CustomWsId, role: Actor): string {
+/** After the person approves: a single-use code for the app, bound to its client, redirect, PKCE challenge, resource,
+ *  person and workspace. */
+export function issueCode(r: AuthorizeRequest, ws: string, userId: string): string {
   const now = Date.now();
   for (const [k, v] of codes) if (v.exp + CODE_TTL_MS < now) codes.delete(k); // kept a while past expiry to catch reuse
   while (codes.size >= 1000) codes.delete(codes.keys().next().value!);
@@ -169,7 +168,7 @@ export function issueCode(r: AuthorizeRequest, ws: CustomWsId, role: Actor): str
     challenge: r.code_challenge,
     resource: r.resource,
     ws,
-    role,
+    user_id: userId,
     exp: now + CODE_TTL_MS,
     used: null,
   });
@@ -207,7 +206,7 @@ export async function exchange(form: URLSearchParams, origin: string): Promise<T
     if (entry.used) {
       // A code presented twice was intercepted or replayed: revoke what the first use got (OAuth 2.1 section 4.1.3).
       codes.delete(code);
-      await removeGrant(entry.used.ws, entry.used.grant).catch(() => undefined);
+      await removeGrant(entry.used.grant).catch(() => undefined);
       throw new TokenError("invalid_grant", "This code was already used");
     }
     if (entry.exp <= Date.now()) throw new TokenError("invalid_grant", "Unknown or expired code");
@@ -217,19 +216,17 @@ export async function exchange(form: URLSearchParams, origin: string): Promise<T
     if (!CHALLENGE.test(verifier) || s256(verifier) !== entry.challenge) throw new TokenError("invalid_grant", "PKCE verification failed");
     if (entry.resource !== resource) throw new TokenError("invalid_target", "The code was issued for another resource");
     // The grant id is fixed before the await, so a replay that arrives while the grant is being written still
-    // revokes it (removeGrant queues behind createGrant on the same workspace lock).
-    entry.used = { ws: entry.ws, grant: newGrantId() };
-    let created: Awaited<ReturnType<typeof createGrant>>;
-    try {
-      created = await createGrant(entry.ws, { client_id: entry.client_id, client_name: entry.client_name, redirect_host: new URL(entry.redirect_uri).host, role: entry.role }, entry.used.grant);
-    } catch (e) {
-      // The workspace was deleted while the code was outstanding: the code is worth nothing now.
-      if (e instanceof HttpError && e.status === 404) throw new TokenError("invalid_grant", "This workspace no longer exists");
-      throw e;
-    }
+    // revokes it (removeGrant's transaction queues behind createGrant's).
+    entry.used = { grant: newGrantId() };
+    const created = await createGrant(
+      { ws: entry.ws, user_id: entry.user_id, client_id: entry.client_id, client_name: entry.client_name, redirect_host: new URL(entry.redirect_uri).host },
+      entry.used.grant,
+    );
+    // The workspace was deleted, or the person left or was removed, while the code was outstanding: it is worth nothing.
+    if (!created) throw new TokenError("invalid_grant", "You are no longer a member of this workspace");
     const { grant, refresh_token } = created;
     return {
-      access_token: mintAccess(entry.ws, grant.id, grant.client_id, grant.role, resource, grant.ep),
+      access_token: mintAccess(grant.ws_id, grant.user_id, grant.id, grant.client_id, resource),
       token_type: "Bearer",
       expires_in: ACCESS_TTL_S,
       refresh_token,
@@ -238,11 +235,10 @@ export async function exchange(form: URLSearchParams, origin: string): Promise<T
   }
   if (type === "refresh_token") {
     const r = parseRefresh(form.get("refresh_token"));
-    const ws = r ? parseCustomWs(r.ws) : null;
-    const out = r && ws ? await rotateGrant(ws, r.id, r.secret, clientId).catch(() => null) : null;
-    if (!out || !ws) throw new TokenError("invalid_grant", "This sign-in has ended. Connect Align again.");
+    const out = r ? await rotateGrant(r.ws, r.id, r.secret, clientId).catch(() => null) : null;
+    if (!out) throw new TokenError("invalid_grant", "This sign-in has ended. Connect Align again.");
     return {
-      access_token: mintAccess(ws, out.grant.id, out.grant.client_id, out.grant.role, resource, out.grant.ep),
+      access_token: mintAccess(out.grant.ws_id, out.grant.user_id, out.grant.id, out.grant.client_id, resource),
       token_type: "Bearer",
       expires_in: ACCESS_TTL_S,
       refresh_token: out.refresh_token,

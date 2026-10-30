@@ -2,6 +2,7 @@ import { config } from "@/lib/config";
 import { clientOf } from "@/lib/ratelimit";
 import { exchange, originOf, TokenError } from "@/lib/oauth/server";
 import { takeOAuthCall } from "@/lib/oauth/limits";
+import { ready } from "@/lib/v2/init";
 
 // OAuth token endpoint: authorization_code (PKCE) and refresh_token for public clients. Called by the app's servers
 // (Claude, ChatGPT) or its CLI (Claude Code, Codex), never by a page on this site, so there is no cookie and no CSRF.
@@ -20,6 +21,7 @@ export async function POST(req: Request) {
       const raw = JSON.parse(text || "{}");
       form = new URLSearchParams(Object.entries(raw && typeof raw === "object" ? raw : {}).map(([k, v]) => [k, String(v)]));
     } else throw new TokenError("invalid_request", "Send application/x-www-form-urlencoded");
+    await ready(); // grants live in the v2 database
     return Response.json(await exchange(form, originOf(req)), { headers });
   } catch (e) {
     if (e instanceof TokenError) return Response.json({ error: e.error, error_description: e.message }, { status: e.status, headers });

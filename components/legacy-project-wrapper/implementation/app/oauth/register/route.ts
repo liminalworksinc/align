@@ -5,7 +5,7 @@ import { registerClient, RegistrationError } from "@/lib/oauth/clients";
 import { takeOAuthCall } from "@/lib/oauth/limits";
 
 // RFC 7591 dynamic client registration, kept for apps that don't use a client metadata document yet. Public clients
-// only; a registration grants nothing by itself (a person still has to approve the app with a passcode).
+// only; a registration grants nothing by itself (a signed-in person still has to approve the app for one of their workspaces).
 const headers = { "cache-control": "no-store" };
 
 export async function POST(req: Request) {

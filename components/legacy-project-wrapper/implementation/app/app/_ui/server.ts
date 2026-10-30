@@ -43,11 +43,12 @@ export function signInOptions(): SignInOptions {
   return { google: googleConfigured(), github: githubConfigured(), email: emailSignInEnabled(), testIdp: testIdpEnabled(), local: !config().hosted };
 }
 
-/** Only an /app path or the OAuth consent page (/oauth/authorize?...) is followed after sign-in; anything else is /app. */
+/** Only an /app path or an AI app's consent request (/oauth/authorize?...) is followed after sign-in; anything else
+ *  (another origin, a backslash or whitespace trick) is /app. */
 export function safeNext(v: string | string[] | undefined): string {
   const s = Array.isArray(v) ? v[0] : v;
-  if (!s || s.includes("\\")) return "/app";
-  return /^\/app(?:[/?#]|$)/.test(s) || /^\/oauth\/authorize(?:[?#]|$)/.test(s) ? s : "/app";
+  if (!s || /[\\\s]/.test(s)) return "/app";
+  return /^\/(?:app(?:[/?#]|$)|oauth\/authorize\?)/.test(s) ? s : "/app";
 }
 
 /** The first value of a query parameter. */
