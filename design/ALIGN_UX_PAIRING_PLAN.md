@@ -56,7 +56,7 @@ Use **one primary operator journey**: *changed priority → impacted dependency 
 1. **No shared working tree.** Claude keeps its active session and dirty state intact; ChatGPT's PR #34 remains a separate design-only branch. If Claude publishes D0 files, use a separate branch or worktree **only after checking current changes**; don't rebase/push PR #34 or change its files without coordination.
 2. **No duplicate tickets.** D0 = LIM-2446, journeys = 2447, design system = 2448, decision prototype = 2449, approvals = 2454, implementation = 2455. Project P-LIM-99 is permanent UX ownership. LIM-2424 is deploy receipt, not a design task.
 3. **Each handoff contains:** \`source SHA | exact files/screens | observed vs inferred | artifacts/URLs | unresolved issue | next owner\`.
-4. **Do not assume receipt = UX proof.** Fly v13's interviewer smoke test, team-scoped read tools and security 404/401/421 checks are release facts, not cold-user task success. The visible UI remains unchanged by #32.
+4. **Do not assume receipt = UX proof.** Fly v13's interviewer smoke test, team-scoped read tools and security 404/401/421 checks are release facts, not cold-user task success. #32 changed visible UI in Your turn, Goals, Work, and Connected AI, including an Add a limit / paste meeting notes entry on hosted v13 that reaches a closed route. D0 found and documented this at exact SHA; an isolated, not-yet-merged fix is 9a304b6. Do not tell testers the screen was unchanged.
 5. **No unseen background coordination.** This document and Linear/GitHub comments are the communication channel. A live Claude session will not receive a message until the user points it here or the session explicitly reads the link.
 
 ## Exact initial request for the Claude Code session
