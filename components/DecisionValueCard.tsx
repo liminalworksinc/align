@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { recordFacts } from "@/components/launch";
 import type { ViewProps } from "@/components/props";
 import { accepted, currentGoal } from "@/components/select";
@@ -16,6 +16,10 @@ import { ESTIMATES, MAX_VALUE_TEXT, VALUE_QUESTION, estimateSaid, spanWords, typ
 // Funnel events go through POST /api/timer (no new route); the server keeps the first of each per role and proposal.
 
 const PITCH = "Liminal helps prevent wasted AI-agent work by giving teams one approved plan as priorities change.";
+// The LOI link's words say what opening it does. Default target: the waitlist form, whose last step is the optional LOI.
+// Opening the link signs nothing; an operator-set ALIGN_LOI_URL (a page or an email) gets the plain request wording.
+const LOI_IN_FORM = "Want to evaluate Align on a real workflow? The waitlist form ends with an optional, non-binding letter of intent.";
+const LOI_ELSEWHERE = "Want to evaluate Align on a real workflow? Ask about a non-binding letter of intent.";
 const sent = new Set<string>(); // value_card_viewed already sent from this page, per workspace, proposal and role
 
 function when(iso?: string | null) {
@@ -51,11 +55,27 @@ function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Pr
   const actor = me.actor;
   const mark = (action: FunnelAction) => void post(workspace, { action, proposal_id: p.id }).catch(() => undefined);
 
+  // value_card_viewed once the card is at least half on screen (or fills half the screen), once per workspace, proposal and role. No
+  // IntersectionObserver, no event: a card below the fold that nobody scrolled to was not viewed.
+  const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const key = `${workspace}:${p.id}:${actor}`;
-    if (sent.has(key)) return;
-    sent.add(key);
-    void post(workspace, { action: "value_card_viewed", proposal_id: p.id }).catch(() => sent.delete(key));
+    const el = ref.current;
+    if (sent.has(key) || !el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        // Half the card on screen, or (a card taller than two screens, as on a phone) half the screen filled by it.
+        const seen = (e: IntersectionObserverEntry) =>
+          e.isIntersecting && (e.intersectionRatio >= 0.5 || e.intersectionRect.height >= 0.5 * (e.rootBounds?.height ?? window.innerHeight));
+        if (!entries.some(seen) || sent.has(key)) return;
+        sent.add(key);
+        io.disconnect();
+        void post(workspace, { action: "value_card_viewed", proposal_id: p.id }).catch(() => sent.delete(key));
+      },
+      { threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1] },
+    );
+    io.observe(el);
+    return () => io.disconnect();
   }, [workspace, p.id, actor]);
 
   // The accepted change: the owning team's target before and after.
@@ -84,7 +104,7 @@ function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Pr
   const toLaunch = d ? spanWords(p.created_at, d.at) : null;
 
   return (
-    <section aria-label="What this decision gave you" className="flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-white p-[18px]">
+    <section ref={ref} aria-label="What this decision gave you" className="flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-white p-[18px]">
       <h2 className="text-[20px] font-semibold leading-snug text-zinc-900">What this decision gave you</h2>
 
       <Row label="Accepted change">
@@ -182,7 +202,7 @@ function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Pr
                 onClick={() => mark("loi_cta_clicked")}
                 className="text-[14px] text-zinc-700 underline underline-offset-2 hover:text-zinc-900"
               >
-                Want to evaluate Align on a real workflow? Ask about a non-binding letter of intent
+                {nextStep.loi === nextStep.waitlist ? LOI_IN_FORM : LOI_ELSEWHERE}
               </a>
             )}
           </div>

@@ -54,9 +54,14 @@ export const WAITLIST_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfxBjrDxvd
 /** The decision value card's next-step links, checked (lib/value.ts). null hides that link. ALIGN_LOI_URL (an https URL or a
  *  mailto:) replaces the LOI link's default, the waitlist form; an invalid value hides it. */
 export function nextStepLinks(env: NodeJS.ProcessEnv = process.env): { waitlist: string | null; loi: string | null } {
-  const waitlist = waitlistUrlOk(env.ALIGN_WAITLIST_URL || WAITLIST_URL);
-  const loi = env.ALIGN_LOI_URL ? loiUrlOk(env.ALIGN_LOI_URL) : waitlist;
-  return { waitlist, loi };
+  // Called on every /w/<id> render: a bad value must hide the links, never fail the page for every tester.
+  try {
+    const waitlist = waitlistUrlOk(env.ALIGN_WAITLIST_URL || WAITLIST_URL);
+    const loi = env.ALIGN_LOI_URL ? loiUrlOk(env.ALIGN_LOI_URL) : waitlist;
+    return { waitlist, loi };
+  } catch {
+    return { waitlist: null, loi: null };
+  }
 }
 
 /** Hostname of a Host header, without port ("[::1]" keeps its brackets). */

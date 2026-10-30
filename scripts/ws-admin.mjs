@@ -101,7 +101,9 @@ if (cmd === "list") {
     const rows = [];
     const created = meta(id).created_at;
     if (created) rows.push([created, "accepted (workspace created)", ""]);
-    const acts = [...(s.audit ?? []).map((a) => a.at), ...(s.timer?.touchpoints ?? []).map((t) => t.at), ...(s.funnel?.events ?? []).map((e) => e.at)].filter(Boolean).sort();
+    // System-written audit rows (creation, setup, Restart) are not a tester's action, so they never count as started.
+    const SYSTEM = new Set(["workspace_created", "scenario_setup", "reset"]);
+    const acts = [...(s.audit ?? []).filter((a) => !SYSTEM.has(a.action)).map((a) => a.at), ...(s.timer?.touchpoints ?? []).map((t) => t.at), ...(s.funnel?.events ?? []).map((e) => e.at)].filter(Boolean).sort();
     if (acts.length) {
       rows.push([acts[0], "started (first signed-in action)", ""]);
       totals.started++;

@@ -21,10 +21,10 @@ export const estimateSaid = (id: string) => ESTIMATES.find((e) => e.id === id)?.
 export const VALUE_QUESTION = "Before Align, how long would getting this decision usually take?";
 export const MAX_VALUE_TEXT = 500;
 
-/** Plain text: control, bidi and zero-width characters removed (as lib/interview.ts cleans), whitespace collapsed, trimmed. */
+/** Plain text: C0 and C1 control, bidi (including U+061C) and zero-width characters removed (as lib/interview.ts cleans), whitespace collapsed, trimmed. */
 export function cleanValueText(s: string): string {
   return s
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F​-‏‪-‮⁠-⁩﻿]/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F؜​-‏‪-‮⁠-⁩﻿]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -43,18 +43,19 @@ export function waitlistUrlOk(v: string | undefined | null): string | null {
   return u.toString();
 }
 
-/** The LOI link: any https URL (no credentials) or a mailto: with one plain address. Otherwise null (hidden). */
+/** The LOI link: an https URL on any host the operator chose (no credentials, no non-default port), or a mailto: with
+ *  one plain address and at most a subject. Otherwise null (hidden). Never throws. */
 export function loiUrlOk(v: string | undefined | null): string | null {
   if (!v) return null;
-  let u: URL;
   try {
-    u = new URL(v.trim());
+    const u = new URL(v.trim());
+    if (u.protocol === "https:") return u.username || u.password || u.port || !u.hostname ? null : u.toString();
+    if (u.protocol !== "mailto:") return null;
+    if ([...u.searchParams.keys()].some((k) => k.toLowerCase() !== "subject")) return null; // no bcc, cc, body, to
+    return /^[^@\s,;<>"?&]+@[^@\s,;<>"?&]+\.[^@\s,;<>"?&]+$/.test(decodeURIComponent(u.pathname)) ? u.toString() : null;
   } catch {
-    return null;
+    return null; // a malformed URL or percent-escape hides the link
   }
-  if (u.protocol === "https:") return u.username || u.password || !u.hostname ? null : u.toString();
-  if (u.protocol === "mailto:") return /^[^@\s,;<>"]+@[^@\s,;<>"]+\.[^@\s,;<>"]+$/.test(decodeURIComponent(u.pathname)) ? u.toString() : null;
-  return null;
 }
 
 /** What a measured span reads as: "14 minutes", "2 hours 5 minutes", "3 days 4 hours". From real timestamps only. */

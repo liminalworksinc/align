@@ -153,6 +153,17 @@ function phaseUnit() {
   check("LOI: an https URL or a mailto: with one address is allowed", V.loiUrlOk("https://example.com/loi") && V.loiUrlOk("mailto:founder@example.com?subject=LOI"), "");
   const badLoi = ["http://example.com/loi", "javascript:alert(1)", "mailto:a@b.co,c@d.co", "mailto:nobody", "https://u:p@example.com/", "data:text/html,x", ""];
   check("LOI: http, javascript:, data:, credentials, two addresses and a bad address are hidden (null)", badLoi.every((u) => V.loiUrlOk(u) === null), badLoi.filter((u) => V.loiUrlOk(u) !== null).join(" "));
+  const badLoi2 = ["mailto:%E0%A4%A@example.com", "mailto:a@b.co?bcc=x@y.co", "mailto:a@b.co?body=hi", "mailto:a@b.co?subject=LOI&cc=x@y.co", "https://example.com:8443/loi", "https://user@example.com/loi"];
+  let threw = "";
+  for (const u of badLoi2)
+    try {
+      if (V.loiUrlOk(u) !== null) threw += ` allowed:${u}`;
+    } catch (e) {
+      threw += ` threw:${u}:${e?.name}`;
+    }
+  check("LOI: a malformed percent-escape, a mailto query other than subject (bcc, body, cc), a non-default https port and credentials are hidden, never thrown", threw === "", threw);
+  check("LOI: a mailto with only a subject and an https URL on any host with the default port are allowed", V.loiUrlOk("mailto:a@b.co?subject=Align%20LOI") && V.loiUrlOk("https://loi.example.org:443/x") === "https://loi.example.org/x", "");
+  check("cleaning removes C1 controls (U+0080–U+009F) and U+061C", V.cleanValueText("a\u0085b\u009Fc\u061Cd\u0080") === "abcd", JSON.stringify(V.cleanValueText("a\u0085b\u009Fc\u061Cd\u0080")));
   check("cleaning removes control, bidi and zero-width characters and collapses whitespace", V.cleanValueText(" a\u0000b‮c​d \n\t e ") === "abcd e", JSON.stringify(V.cleanValueText(" a\u0000b‮c​d \n\t e ")));
   const t0 = "2026-10-29T10:00:00.000Z";
   check(
@@ -300,7 +311,7 @@ async function phaseLocal(dir) {
       const shown = await waitText(pg, /What this decision gave you/);
       const t = await bodyText(pg);
       shots[role] = t;
-      const want = [/Accepted change/i, /Who approved/i, /Affected goals and teams/i, /On the new plan/i, /Still on the old plan/i, /Join the Align waitlist/, /Ask about a non-binding letter of intent/];
+      const want = [/Accepted change/i, /Who approved/i, /Affected goals and teams/i, /On the new plan/i, /Still on the old plan/i, /Join the Align waitlist/, /The waitlist form ends with an optional, non-binding letter of intent\./];
       const card = t.slice(t.indexOf("What this decision gave you"));
       check(`browser ${role}: Your turn shows the card after RATIFIED, with the accepted change, approvers, goals and teams, work and links`, shown && want.every((re) => re.test(card)), `missing ${want.filter((re) => !re.test(card)).join(" ")} :: ${card.slice(0, 900)}`);
       check(`browser ${role}: measured time comes from the timestamps (Proposal to agreement: 14 minutes)`, /Proposal to agreement:\s*14 minutes/.test(t), (t.match(/Proposal to agreement:[^\n]*/) ?? [""])[0]);
@@ -356,6 +367,9 @@ async function phaseLocal(dir) {
     }
   }
 
+  // A workspace that is created but never signed in to: accepted, not started.
+  const idle = await req("POST", "/api/workspaces", { body: { ...FIXTURE, company: `${FIXTURE.company} FUNNELC` } });
+  const C = idle.json?.workspace?.id;
   // ws-admin funnel: per workspace events and totals; no names, passcodes or free text unless --with-feedback.
   const admin = (args) => spawnSync("node", ["scripts/ws-admin.mjs", ...args], { cwd: ROOT, encoding: "utf8", env: { ...process.env, ALIGN_DATA_DIR: dir } });
   const funnelOut = () => admin(["funnel"]);
@@ -366,7 +380,10 @@ async function phaseLocal(dir) {
     out.status === 0 && t.includes(A.ws) && t.includes(B.ws) && /accepted \(workspace created\)/.test(t) && /started \(first signed-in action\)/.test(t) && /finished \(proposal ratified\)/.test(t) && /value_card_viewed {2}leadership/.test(t) && /waitlist_clicked {2}product/.test(t) && /loi_cta_clicked {2}security/.test(t) && /launch_not_yet/.test(t) && /launch_approved/.test(t),
     t.slice(0, 600) + out.stderr,
   );
-  check("ws-admin funnel totals count events across workspaces", /accepted: 2 workspace\(s\)/.test(t) && /finished: 2/.test(t) && /value_card_viewed: 4 event\(s\) in 2 workspace\(s\)/.test(t) && /value_reported: 3 event\(s\) in 1 workspace\(s\)/.test(t), t.split("totals")[1]);
+  const cBlock = t.split(C ?? "none")[1]?.split(/\nw_|\ntotals/)[0] ?? "";
+  check("ws-admin funnel: a workspace nobody signed in to is accepted but not started (its creation row doesn't count)", !!C && /accepted \(workspace created\)/.test(cBlock) && !/started/.test(cBlock), cBlock);
+  check("ws-admin funnel: workspaces where people acted are started (positive case)", /started: 2\n/.test(t) && /accepted: 3 workspace\(s\)/.test(t), t.split("totals")[1]);
+  check("ws-admin funnel totals count events across workspaces", /finished: 2/.test(t) && /value_card_viewed: 4 event\(s\) in 2 workspace\(s\)/.test(t) && /value_reported: 3 event\(s\) in 1 workspace\(s\)/.test(t), t.split("totals")[1]);
   check("ws-admin funnel prints no workspace names, passcodes or free text by default", !t.includes("FUNNELA") && !Object.values(A.passcodes).some((pc) => t.includes(pc)) && !t.includes("LEADNOTE") && !t.includes("zzzz"), "");
   const withText = admin(["funnel", "--with-feedback"]).stdout;
   check("ws-admin funnel --with-feedback includes the free text", withText.includes("LEADNOTE private to leadership"), "");
@@ -375,6 +392,36 @@ async function phaseLocal(dir) {
   const before = JSON.stringify(stateOf(dir, A.ws).funnel);
   const reset = await req("POST", "/api/reset", { cookie: A.c.leadership, body: { confirm: "reset" } });
   check("Restart keeps the funnel events and answers, and ws-admin still reports A finished", reset.status === 200 && JSON.stringify(stateOf(dir, A.ws).funnel) === before && /finished: 2/.test(funnelOut().stdout), `${reset.status}`);
+
+  // value_card_viewed fires when the card is on screen, not on mount: B's product opens Your turn in a short window
+  // (the card below the fold), then scrolls to it.
+  {
+    const viewedBy = (role) => stateOf(dir, B.ws).funnel.events.filter((e) => e.action === "value_card_viewed" && e.role === role).length;
+    const { browser, page: pg } = await browserFor(B.c.product);
+    try {
+      await pg.setViewport({ width: 1440, height: 420 });
+      await pg.goto(`http://127.0.0.1:${PORT}/w/${B.ws}`, { waitUntil: "networkidle0" });
+      await waitText(pg, /What this decision gave you/);
+      await sleep(3000);
+      const offscreen = await pg.evaluate(() => {
+        const r = document.querySelector('section[aria-label="What this decision gave you"]').getBoundingClientRect();
+        return r.top >= window.innerHeight;
+      });
+      check("browser: a card below the fold records no value_card_viewed", offscreen && viewedBy("product") === 0, `offscreen=${offscreen} events=${viewedBy("product")}`);
+      await pg.evaluate(() => document.querySelector('section[aria-label="What this decision gave you"]').scrollIntoView({ block: "start" }));
+      let n = 0;
+      for (let i = 0; i < 20 && !n; i++) {
+        await sleep(300);
+        n = viewedBy("product");
+      }
+      await pg.evaluate(() => window.scrollTo(0, 0));
+      await pg.evaluate(() => document.querySelector('section[aria-label="What this decision gave you"]').scrollIntoView({ block: "start" }));
+      await sleep(1500);
+      check("browser: scrolling the card into view records value_card_viewed once (not again on a second scroll)", n === 1 && viewedBy("product") === 1, `${n} ${viewedBy("product")}`);
+    } finally {
+      await browser.close();
+    }
+  }
 
   await stop();
   // Deleting the workspace deletes its funnel.
@@ -406,7 +453,7 @@ async function phaseHosted(dir) {
     ALIGN_SECURITY_PASSCODE: "security-strong-pass-9",
     ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-9",
     ALIGN_WAITLIST_URL: "https://evil.example/forms/d/x/viewform",
-    ALIGN_LOI_URL: "javascript:alert(1)",
+    ALIGN_LOI_URL: "mailto:%E0%A4%A@example.com", // a malformed escape: hidden, and the page still renders
   });
   const w = await newWorkspace("FUNNELH", { signup_code: INVITE });
   const ag = await agree(w);
@@ -423,8 +470,8 @@ async function phaseHosted(dir) {
   check("hosted: no new route is reachable (funnel, value, waitlist, LOI, feedback paths -> 404)", closed.every((r) => r.status === 404), closed.map((r) => r.status).join(","));
   const pg = await req("GET", `/w/${w.ws}`);
   check(
-    "hosted: a bad ALIGN_WAITLIST_URL and ALIGN_LOI_URL are hidden (null in the page, never sent)",
-    pg.status === 200 && !pg.text.includes("evil.example") && !pg.text.includes("javascript:alert") && /waitlist\\?"\s*:\s*null/.test(pg.text) && /loi\\?"\s*:\s*null/.test(pg.text),
+    "hosted: a bad ALIGN_WAITLIST_URL and a malformed ALIGN_LOI_URL are hidden (null in the page), and the page still renders (200)",
+    pg.status === 200 && !pg.text.includes("evil.example") && !pg.text.includes("%E0%A4%A") && /waitlist\\?"\s*:\s*null/.test(pg.text) && /loi\\?"\s*:\s*null/.test(pg.text),
     `${pg.status} ${(pg.text.match(/nextStep.{0,80}/) ?? [""])[0]}`,
   );
   await stop();
