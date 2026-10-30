@@ -1166,7 +1166,7 @@ step in its own transaction, logging counts only; it purges a workspace with the
 #### Scenario: Former members
 
 - **WHEN** the job runs 30 days or more after a person left or was removed and they are not a member again
-- **THEN** in that workspace every row naming them (goals and goal versions, alignments, their revisions, approval requirements and approvals, sessions, activity, change requests, their revisions and the evidence links they added, invites they created, directive goal snapshots, the workspace's creator and its audit rows) names `fm_<n>` instead, numbered in the order people left and stable in that workspace, their sessions no longer point at a device, invites to or accepted by them are deleted, that workspace's product events no longer carry their actor hash (`metrics`), nothing records which person `fm_<n>` was, and their account itself is untouched
+- **THEN** in that workspace every row naming them (goals and goal versions, alignments, their revisions, approval requirements and approvals, sessions, activity, change requests, their revisions and the evidence links they added, asks they recorded or last decided and the mentions they added, their value reports, invites they created, directive goal snapshots, the workspace's creator and its audit rows) names `fm_<n>` instead, numbered in the order people left and stable in that workspace, their sessions no longer point at a device, invites to or accepted by them are deleted, that workspace's product events no longer carry their actor hash (`metrics`), nothing records which person `fm_<n>` was, and their account itself is untouched
 
 #### Scenario: Audit log
 

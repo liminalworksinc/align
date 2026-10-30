@@ -742,6 +742,75 @@ const MIGRATIONS: string[] = [
   CREATE TRIGGER v2_events_append_only BEFORE UPDATE OF id, name, at, props ON v2_events
     BEGIN SELECT RAISE(ABORT, 'v2_events is append-only'); END;
   `,
+  // PORT-001: the v1 features ported onto v2 (limits lib/v2/goal-limits.ts, asks lib/v2/asks.ts, value reports
+  // lib/v2/value.ts) and the new product events. It only adds; the SQL comments say what each part holds.
+  `
+  -- 11 (PORT-001): limits on goal versions, asks, value reports and once-per-person value events.
+  -- Limits are goal content (limits_json, a JSON list), so they are versioned, hashed, approved and delivered like
+  -- measures. Asks belong to the team asked; their history ("came up again") is v2_ask_mentions.
+  ALTER TABLE v2_goals ADD COLUMN limits_json TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE v2_goal_versions ADD COLUMN limits_json TEXT NOT NULL DEFAULT '[]';
+
+  CREATE TABLE v2_asks (
+    id TEXT PRIMARY KEY,                       -- ask_<24 base32>
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    team_id TEXT NOT NULL,                     -- the team asked (a pod)
+    goal_id TEXT,                              -- optional: the asked team's goal it concerns
+    text TEXT NOT NULL,                        -- 1..400
+    from_label TEXT,                           -- who asked, as people say it ("Faculty"), 1..80
+    created_by TEXT NOT NULL,                  -- the person who recorded it
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('meeting','manual')),
+    source_title TEXT,                         -- 1..120, required for meeting
+    source_date TEXT NOT NULL,                 -- YYYY-MM-DD
+    state TEXT NOT NULL CHECK (state IN ('open','accepted','done','declined','withdrawn')),
+    decided_by TEXT,                           -- last person who changed state
+    decided_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (ws_id, id),
+    FOREIGN KEY (ws_id, team_id) REFERENCES v2_pods(ws_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (ws_id, goal_id) REFERENCES v2_goals(ws_id, id)
+  );
+  CREATE INDEX v2_asks_team ON v2_asks(ws_id, team_id, state);
+  CREATE INDEX v2_asks_ws ON v2_asks(ws_id, updated_at);
+  CREATE TABLE v2_ask_mentions (
+    ws_id TEXT NOT NULL,
+    ask_id TEXT NOT NULL,
+    n INTEGER NOT NULL,                        -- 1..10
+    date TEXT NOT NULL,
+    text TEXT NOT NULL,                        -- 1..300
+    source_title TEXT NOT NULL,                -- 1..120
+    added_by TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (ask_id, n),
+    FOREIGN KEY (ws_id, ask_id) REFERENCES v2_asks(ws_id, id) ON DELETE CASCADE
+  );
+
+  -- A person's estimate of how long an approved change request's decision would have taken without Align, with an
+  -- optional note: one per person per request, editable by its author for 7 days, deleted with the request.
+  CREATE TABLE v2_value_reports (
+    id TEXT PRIMARY KEY,                       -- vr_<24 base32>
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    change_request_id TEXT NOT NULL,
+    person_id TEXT NOT NULL,
+    estimate TEXT NOT NULL CHECK (estimate IN ('same_day','two_to_three_days','about_a_week','longer','would_not_be_decided')),
+    note TEXT CHECK (note IS NULL OR length(note) <= 500),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (ws_id, change_request_id, person_id),
+    FOREIGN KEY (ws_id, change_request_id) REFERENCES v2_change_requests(ws_id, id) ON DELETE CASCADE
+  );
+
+  DROP INDEX v2_events_once_ws;
+  CREATE UNIQUE INDEX v2_events_once_ws ON v2_events(name, ws_id) WHERE ws_id IS NOT NULL AND name IN (
+    'workspace_created', 'code_redeemed', 'first_session_captured', 'first_session_bound', 'second_member_joined',
+    'first_change_request', 'first_approval', 'first_directive', 'first_mcp_read', 'loi_sent', 'loi_signed',
+    'first_ask', 'first_limit');
+  DROP INDEX v2_events_once_person;
+  CREATE UNIQUE INDEX v2_events_once_person ON v2_events(name, ws_id, actor)
+    WHERE ws_id IS NOT NULL AND actor IS NOT NULL AND name IN (
+    'member_first_session_captured', 'value_card_viewed', 'value_reported', 'follow_up_clicked');
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

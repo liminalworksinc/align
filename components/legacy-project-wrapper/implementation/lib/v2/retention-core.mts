@@ -77,6 +77,10 @@ export const PERSON_COLUMNS: readonly (readonly [table: string, column: string])
   ["v2_change_requests", "rejected_by"],
   ["v2_change_request_revisions", "author_id"],
   ["v2_change_request_evidence", "added_by"],
+  ["v2_asks", "created_by"],
+  ["v2_asks", "decided_by"],
+  ["v2_ask_mentions", "added_by"],
+  ["v2_value_reports", "person_id"],
 ];
 
 /** Every workspace whose rows name this person (or hold their pending departure). */

@@ -810,6 +810,10 @@ async function local(env) {
   const otherHost = await mcp(app, "tools/list", {}, { host: `localhost:${PORT}` });
   check("an alm. token is bound to its origin: presented with Host localhost:<port> -> 401", otherHost.status === 401, otherHost.status);
 
+  // PORT-004 fills this block: the four read-only tools, their read scoping, injection, the brief and instructions.
+  // ==== port:mcp ====
+  // ==== end port:mcp ====
+
   // -- the Apps API and grants --
   await sleep(500); // the first use is recorded off the request path
   const appsOwner = await web(U1, "GET", `/api/v2/workspaces/${A}/apps`);

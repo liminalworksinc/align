@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, useAction, useApi } from "../../_ui/kit";
 import { AnchorsEditor, MeasuresEditor, VISIBILITY_LABEL, anchorsDraft, anchorsOut, measuresDraft, measuresOut } from "../../_ui/goalform";
+import { LimitChips, NotesSuggest } from "../../_ui/limits";
 import type { Me } from "../../_ui/server";
 import type { Goal, WsDetail } from "../../_ui/types";
 
@@ -47,10 +48,12 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
                 {g.owner.id === me.id ? "Yours" : g.owner.name}, version {g.version}
                 {g.measures.length ? `. Measures: ${g.measures.map((m) => m.text + (m.target ? ` (target ${m.target})` : "")).join("; ")}` : ""}
               </p>
+              <LimitChips goal={g} />
             </li>
           ))}
         </ul>
       </Card>
+      {canCreate && <NotesSuggest ws={ws} onDone={feed.reload} />}
       {canCreate && (
         <Card title="New goal">
           <form

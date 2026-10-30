@@ -19,7 +19,7 @@ export interface Sql {
 
 /** The PRAGMA user_version of a fully migrated database (lib/v2/db.ts MIGRATIONS.length; db.ts checks they agree).
  *  The operator script refuses any other, so it never writes to a schema it doesn't know. */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 // ---- settings shared with the operator script (lib/v2/config.ts re-exports these) ----
 
@@ -87,10 +87,13 @@ const HARNESSES = ["claude-code", "codex"] as const;
  *  can't be an email address or a URL. */
 export const NOTE_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 type PropRule = readonly string[] | "count" | RegExp;
+/** How long a decision would have taken without Align, as the person who reports it estimates (one per person per
+ *  approved change request in v2_value_reports; the value_reported event carries only this). */
+export const ESTIMATES = ["same_day", "two_to_three_days", "about_a_week", "longer", "would_not_be_decided"] as const;
 
 /** Every event name and the props it may carry. */
 export const EVENT_PROPS = {
-  access_requested: { interest: ["try", "evaluate"] },
+  access_requested: { interest: ["try", "evaluate"], via: ["form", "value_card"] },
   access_approved: {},
   access_declined: {},
   code_created: { source: ["request", "operator"] },
@@ -109,6 +112,11 @@ export const EVENT_PROPS = {
   first_mcp_read: { client: ["app", "device"] },
   loi_sent: { note_ref: NOTE_REF_RE },
   loi_signed: { note_ref: NOTE_REF_RE, verified_original: ["yes"] },
+  first_ask: {},
+  first_limit: {},
+  value_card_viewed: {},
+  value_reported: { estimate: ESTIMATES },
+  follow_up_clicked: {},
 } as const satisfies Record<string, Record<string, PropRule>>;
 export type EventName = keyof typeof EVENT_PROPS;
 export type EventProps = Record<string, string | number>;
@@ -126,7 +134,13 @@ export const ONCE_PER_WORKSPACE: readonly EventName[] = [
   "first_mcp_read",
   "loi_sent",
   "loi_signed",
+  "first_ask",
+  "first_limit",
 ];
+
+/** Recorded at most once per person in a workspace (the unique index v2_events_once_person in lib/v2/db.ts lists the
+ *  same names; a row with no actor is never refused by it). */
+export const ONCE_PER_PERSON: readonly EventName[] = ["member_first_session_captured", "value_card_viewed", "value_reported", "follow_up_clicked"];
 
 /** The keyed hash that stands for a person in v2_events: HMAC of their user id under the server secret (`ale.`). It
  *  can't be reversed, and without the secret it can't be matched to an id. */
@@ -147,8 +161,8 @@ function checkProps(name: EventName, props: EventProps) {
   }
 }
 
-/** Append one event (inside the caller's transaction). A once-per-workspace event (ONCE_PER_WORKSPACE) or a person's
- *  member_first_session_captured that is already there is skipped. True when a row was added. */
+/** Append one event (inside the caller's transaction). A once-per-workspace event (ONCE_PER_WORKSPACE) or a
+ *  once-per-person event (ONCE_PER_PERSON) that is already there is skipped. True when a row was added. */
 export function recordEvent(db: Sql, name: EventName, o: { ws?: string | null; actor?: string | null; props?: EventProps; at?: string } = {}): boolean {
   const props = o.props ?? {};
   checkProps(name, props);

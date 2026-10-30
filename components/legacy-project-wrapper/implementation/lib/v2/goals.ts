@@ -48,6 +48,8 @@ export interface GoalRow {
   measures_json: string;
   anchors_json: string;
   depends_on_json: string;
+  /** The goal's limits (lib/v2/goal-limits.ts), a JSON list; '[]' when it has none. */
+  limits_json: string;
   status: GoalStatus;
   level: GoalLevel;
   created_at: string;

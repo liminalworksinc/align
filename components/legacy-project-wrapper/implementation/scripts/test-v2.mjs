@@ -712,7 +712,8 @@ try {
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 10, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits and product events included) and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 10 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
+  const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 11, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, and value reports included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 11 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -2498,6 +2499,20 @@ try {
     `${purgeNoYes.status} ${purgeNoYes.err} ${purged.status} ${purged.err} ${purgeLeft}`,
   );
 
+  // Each port package fills its own block below (PORT-002 limits, PORT-003 asks and activity, PORT-004 value), so the
+  // packages never edit the same lines. They run before the canary check, which covers their responses too.
+  // ==== port:limits ====
+  // ==== end port:limits ====
+
+  // ==== port:asks ====
+  // ==== end port:asks ====
+
+  // ==== port:activity ====
+  // ==== end port:activity ====
+
+  // ==== port:value ====
+  // ==== end port:value ====
+
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
   const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));
@@ -3017,6 +3032,11 @@ try {
         await browser.close();
       }
     } else check("ui (Chrome) available", false, `no Chrome at ${CHROME}`);
+
+    // PORT-003 fills this block: asks, mentions and value reports under account deletion, former members, purge and
+    // the 13-month rule for closed asks.
+    // ==== port:retention ====
+    // ==== end port:retention ====
 
     // -- the server runs the job at startup --
     await signIn(r1);

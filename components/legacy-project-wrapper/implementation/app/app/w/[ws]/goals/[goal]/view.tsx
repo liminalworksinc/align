@@ -5,6 +5,8 @@ import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, 
 import { AnchorsEditor, MeasuresEditor, VISIBILITY_LABEL, anchorsDraft, anchorsOut, measuresDraft, measuresOut } from "../../../../_ui/goalform";
 import type { Me } from "../../../../_ui/server";
 import { ChangeRequestCard, ProposeChange, useGoalTitles } from "../../../../_ui/changes";
+import { GoalLimits } from "../../../../_ui/limits";
+import { GoalActivityCard } from "../../../../_ui/activity";
 import type { ChangeRequest, Goal, MySession } from "../../../../_ui/types";
 
 interface Detail {
@@ -249,7 +251,9 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             )}
             {d.data!.contributions.length > 0 && <p className="mt-3 text-[14px] text-zinc-500">Contributing goals: {d.data!.contributions.map((c) => c.goal!.title).join(", ")}</p>}
           </Card>
+          <GoalLimits ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={d.reload} />
           <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={d.reload} />
+          <GoalActivityCard ws={ws} goal={g} me={me} />
           {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} onDone={d.reload} />}
           {ws0.data && <ChangeRequests key={g.version} ws={ws} goal={g} me={me} role={ws0.data.role} onGoalChanged={d.reload} />}
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}

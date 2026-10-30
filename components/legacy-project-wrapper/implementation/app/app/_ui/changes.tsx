@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api, ApiError, Btn, Err, Field, Input, Loading, Note, num, Pill, Select, TextArea, usd, useAction, useApi, when } from "./kit";
 import { MeasuresEditor, measuresDraft, measuresOut, type MeasureDraft } from "./goalform";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
+import { ValueCard } from "./value";
 
 // Change requests in the web app: the proposal form (also used to suggest a change as an approver) and one request's
 // card with exactly the actions its `can` flags allow. Used by the goal page and the workspace Requests tab.
@@ -393,6 +394,7 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
           {cr.approved_without_evidence === false && <> Approved with {cr.evidence_count} evidence {cr.evidence_count === 1 ? "link" : "links"}, none verified.</>}
         </p>
       )}
+      {cr.state === "approved" && <ValueCard ws={ws} cr={cr} me={me} />}
       {cr.state === "rejected" && (
         <p className="text-[14px] text-zinc-600">
           Rejected by {cr.rejected_by?.name}
