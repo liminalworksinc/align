@@ -75,7 +75,6 @@ The server refuses to start unless these are set:
 | `ALIGN_PUBLIC_ORIGIN` | `https://<host>`, a host in `ALIGN_HOSTS` |
 | `ALIGN_SECRET`, `BETTER_AUTH_SECRET` | 32+ characters each |
 | `ALIGN_DATA_DIR` | An absolute path outside the app directory (the volume) |
-| `ALIGN_DELETE_BY` | `YYYY-MM-DD`: after that day the server answers 410 to everything |
 | Sign-in | `ALIGN_EMAIL_API_URL` (https), `ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM`, or a Google or GitHub client |
 
 `ALIGN_FIRST_OWNER_EMAIL` lets one address make the first account by email code; after that, an email code signs in

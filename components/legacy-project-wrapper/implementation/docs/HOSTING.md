@@ -4,9 +4,8 @@ One Align server behind Fly.io's HTTPS edge, for one public origin. This page go
 `.dockerignore` and `fly.toml`. The contract is `specs/align/workspaces.md` ("Hosted edge and route allowlist",
 "Hosted startup checks", "Server data and single server") and `specs/align/mcp.md` for connected AI apps.
 
-Not deployed yet. Who may create hosted workspaces, and how long hosted data is kept, are open decisions
-(`specs/align/workspaces.md`, open questions): today any signed-in account can create a workspace, and the server
-closes after `ALIGN_DELETE_BY`.
+Not deployed yet. The server runs until it is stopped: there is no closing date. How long data is kept follows the
+retention schedule in the spec.
 
 ## Why one machine
 
@@ -28,7 +27,6 @@ closes after `ALIGN_DELETE_BY`.
 | Sign-in | Email one-time codes through an HTTPS email API, and Google or GitHub when configured. No account is made at startup. An email code creates an account only for a pending invite, or for `ALIGN_FIRST_OWNER_EMAIL` while the server has no account. The test identity provider is refused. |
 | Cookies | `__Secure-align_v2.session_token`; every cookie-authenticated write must carry `Origin: https://<host>` exactly. |
 | Logs | Server errors log only the error's name, never a message, body or path. Sign-in codes are never logged. |
-| Closing | After `ALIGN_DELETE_BY` has ended (08:00 UTC the next day), every request gets 410 `This test server closed on <date>.`, whatever its path or headers. The server still starts, so the volume stays reachable over `fly ssh`. |
 
 ## Startup refusals
 
@@ -40,7 +38,6 @@ ever kept a refused process up, `proxy.ts` would still answer 503 to everything.
   connected AI app.
 - `BETTER_AUTH_SECRET`: 32+ characters. Rotating it signs everyone out.
 - `ALIGN_DATA_DIR`: an absolute path outside the app directory (the volume, `/data`).
-- `ALIGN_DELETE_BY`: the closing date, `YYYY-MM-DD`.
 - `ALIGN_PUBLIC_ORIGIN`: a bare `https://<host>` origin whose host is in `ALIGN_HOSTS`.
 - A way to sign in: all three of `ALIGN_EMAIL_API_URL` (https), `ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM`, or
   Google's or GitHub's client id and secret (each pair together).
@@ -57,7 +54,6 @@ built image.
 | `ALIGN_DATA_DIR` | Dockerfile / `fly.toml` | `/data` (the volume) |
 | `ALIGN_HOSTS` | `fly.toml` | the app's host name, e.g. `align-pg-draft.fly.dev` |
 | `ALIGN_PUBLIC_ORIGIN` | `fly.toml` | `https://<the ALIGN_HOSTS name>` |
-| `ALIGN_DELETE_BY` | `fly.toml` | the closing date, e.g. `2026-11-13` |
 | `ALIGN_FIRST_OWNER_EMAIL` | `fly.toml` | optional: the one address an email code may make an account for while the server has none |
 | `ALIGN_EMAIL_FROM` | `fly.toml` | e.g. `Align <signin@example.com>` |
 | `ALIGN_EMAIL_API_URL` | `fly.toml` | a Resend-compatible email API, https (e.g. `https://api.resend.com/emails`) |
@@ -75,9 +71,10 @@ The three email settings go together: all three or none. With none, sign-in is G
 - `/data/workspaces/_oauth_clients.json`: AI apps that registered themselves (name and redirect URIs only).
 - `/data/.pid`: the running server's pid.
 
-**Volume snapshots.** Fly takes daily volume snapshots by default and keeps them for several days. `fly.toml` sets
-`scheduled_snapshots = false` on the mount, which applies when a deploy creates the volume; for an existing volume,
-turn them off on the volume too. Check the flags with `fly volumes update --help` before relying on this.
+**Volume snapshots.** `fly.toml` keeps daily volume snapshots for 7 days (`scheduled_snapshots = true`,
+`snapshot_retention = 7`), so deleted data is gone from snapshots within 7 days. These apply when a deploy creates the
+volume; for an existing volume, set them on the volume too. Check the flags with `fly volumes update --help` before
+relying on this.
 
 **Deleting data.** A workspace owner deletes a workspace from the app (`DELETE /api/v2/workspaces/<ws>`), which
 removes everything in it. The v1 operator tool (`ws-admin`) was retired with v1 and has no v2 replacement yet
@@ -106,9 +103,7 @@ People tab.
   installs its own handlers, so `NEXT_MANUAL_SIG_HANDLE` must stay unset.
 
 **The health check** (`fly.toml`) calls `/api/v2/auth/get-session` with the Host, `X-Forwarded-Proto` and
-`Fly-Client-IP` headers Fly's edge would send; without them the app answers 421 or 403. After the closing date it
-gets 410 and Fly marks the machine unhealthy, which is expected: Fly doesn't restart a machine for a failing
-`http_service` check.
+`Fly-Client-IP` headers Fly's edge would send; without them the app answers 421 or 403.
 
 ## Smoke test on the live URL
 

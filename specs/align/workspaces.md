@@ -316,8 +316,7 @@ both modes and without any feature flag.
 
 ### Requirement: Hosted edge and route allowlist
 
-The server SHALL, when `HOSTED=1`, answer at the request edge 503 when misconfigured, 410 after `ALIGN_DELETE_BY` has
-ended (08:00 UTC the next day), 421 for a `Host` not in `ALIGN_HOSTS`, 403 without `X-Forwarded-Proto: https` or
+The server SHALL, when `HOSTED=1`, answer at the request edge 503 when misconfigured, 421 for a `Host` not in `ALIGN_HOSTS`, 403 without `X-Forwarded-Proto: https` or
 without `Fly-Client-IP`, and 404 `{"error":"Not found"}` for every path outside `/app*`, `/api/v2/*`, `/api/mcp`,
 `/oauth/*`, `/.well-known/*`, `/api/oauth/*` and the static assets.
 
@@ -331,16 +330,16 @@ without `Fly-Client-IP`, and 404 `{"error":"Not found"}` for every path outside 
 - **WHEN** a hosted request has `Host: other.example`, or lacks `X-Forwarded-Proto: https`, or lacks `Fly-Client-IP`
 - **THEN** the server responds 421 `Misdirected request: this server answers to its own host name only`, 403 `{"error":"Use https"}`, or 403 `{"error":"Use the public address"}` respectively
 
-#### Scenario: Closed test server
+#### Scenario: No closing date
 
-- **WHEN** a request reaches a hosted server after its `ALIGN_DELETE_BY` date has ended
-- **THEN** the server responds 410 `This test server closed on <date>.` whatever the path, `Host` or headers
+- **WHEN** a hosted server starts with a past `ALIGN_DELETE_BY` left in its environment
+- **THEN** it ignores the setting and serves normally: a hosted server never shuts itself down, and how long data is kept follows the retention schedule
 
 ### Requirement: Hosted startup checks
 
 The server SHALL refuse to start when hosted, naming each problem, unless `ALIGN_HOSTS` lists the public host names
 (no loopback names), `ALIGN_SECRET` and `BETTER_AUTH_SECRET` each have 32+ characters, `ALIGN_DATA_DIR` is an absolute
-path outside the app directory, `ALIGN_DELETE_BY` is a `YYYY-MM-DD` date, `ALIGN_PUBLIC_ORIGIN` is a bare `https://host`
+path outside the app directory, `ALIGN_PUBLIC_ORIGIN` is a bare `https://host`
 origin whose host is in `ALIGN_HOSTS`, and sign-in is possible: all three of `ALIGN_EMAIL_API_URL` (https),
 `ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM` are set, or Google's or GitHub's client id and secret are.
 
@@ -755,7 +754,6 @@ off its IP tracking.
 ## Open questions
 
 - Who may create hosted workspaces (Owner decision 2026-10-30 keeps it open): today any signed-in account can create up to 10 per hour and own 50.
-- Retention periods are an open decision. The hosted server still closes after `ALIGN_DELETE_BY` with 410, but the operator purge tool (`ws-admin`) is retired with no v2 replacement; should a hosted server keep a fixed closing date, and how is its data purged?
 - Passkeys, SSO, SAML and SCIM are out of scope for now.
 - Unlinking a Google or GitHub account from `/app/account` is out of scope; should a person be able to unlink a provider while another sign-in method remains?
 - Removing or leaving keeps a person's goals and sessions. Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.

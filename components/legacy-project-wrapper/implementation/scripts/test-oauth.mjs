@@ -1022,7 +1022,6 @@ try {
     ...common,
     HOSTED: "1",
     ALIGN_HOSTS: HOSTED_HOST,
-    ALIGN_DELETE_BY: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().slice(0, 10),
     // Hosted also needs Better Auth's secret (in common), the public origin and a way to sign in
     // (lib/v2/config.ts). Google and GitHub are configured; the email code is not, so hosted sign-in offers no code.
     ALIGN_PUBLIC_ORIGIN: `https://${HOSTED_HOST}`,

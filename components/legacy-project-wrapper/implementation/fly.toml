@@ -12,7 +12,6 @@ primary_region = "sjc"
   ALIGN_DATA_DIR = "/data"
   ALIGN_HOSTS = "align-pg-draft.fly.dev"
   ALIGN_PUBLIC_ORIGIN = "https://align-pg-draft.fly.dev"
-  ALIGN_DELETE_BY = "2026-11-13"
   # Sign-in codes by email (all three settings, or none and a Google or GitHub client; the key is a secret).
   ALIGN_EMAIL_API_URL = "https://api.resend.com/emails"
   ALIGN_EMAIL_FROM = "Align <signin@align-pg-draft.fly.dev>"
@@ -42,8 +41,9 @@ primary_region = "sjc"
 [[mounts]]
   source = "align_data"
   destination = "/data"
-  # No automatic volume snapshots: they would keep data past ALIGN_DELETE_BY.
-  scheduled_snapshots = false
+  # Daily volume snapshots, kept 7 days (the retention schedule in docs/RETENTION.md counts on it).
+  scheduled_snapshots = true
+  snapshot_retention = 7
 
 [[vm]]
   memory = "1gb"

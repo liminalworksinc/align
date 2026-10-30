@@ -1,6 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { signPayload } from "../secret";
-import { config, testServerClosesAt } from "../config";
 import { all, audit, get, run, tx } from "../v2/db";
 import { notFound } from "../v2/errors";
 import { nowIso } from "../v2/ids";
@@ -51,11 +50,9 @@ export function liveGrant(id: string): Grant | null {
   return g;
 }
 
-/** The latest a refresh token may live: 7 days, and never past the end of the deletion date. */
+/** The latest a refresh token may live: 7 days. */
 function refreshExpiry(now: number): number {
-  const del = config().deleteBy;
-  const closes = del ? testServerClosesAt(del) : Infinity;
-  return Math.min(now + REFRESH_TTL_MS, closes);
+  return now + REFRESH_TTL_MS;
 }
 
 /** A refresh token names its workspace and grant so the token endpoint can find it: alr.<ws>.<grant>.<secret>. */

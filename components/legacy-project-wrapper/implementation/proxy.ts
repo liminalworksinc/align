@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { config as alignConfig, hostAllowed, hostName, LOOPBACK, startupProblems, testServerClosed } from "@/lib/config";
+import { config as alignConfig, hostAllowed, hostName, LOOPBACK, startupProblems } from "@/lib/config";
 
 // Runs before every page and API route (static assets are matched out below).
 // `/` is not a page: it redirects to the web app, /app, in both modes.
@@ -36,9 +36,6 @@ export function proxy(request: NextRequest) {
   }
   // A misconfigured hosted server serves nothing, even if the platform kept the process up after startup refused.
   if (startupProblems().length) return text(503, "This server is not configured yet\n");
-  // Closed (the configured closing date has ended): the server stays up for the operator, and every request gets 410,
-  // whatever its Host or headers.
-  if (testServerClosed(cfg.deleteBy)) return text(410, `This test server closed on ${cfg.deleteBy}.\n`);
   if (!hostAllowed(request.headers.get("host"))) return text(421, "Misdirected request: this server answers to its own host name only\n");
   if (request.headers.get("x-forwarded-proto") !== "https") return NextResponse.json({ error: "Use https" }, { status: 403 });
   // Fly's edge sets Fly-Client-IP; a request without it did not come through the public proxy.

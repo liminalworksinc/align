@@ -9,8 +9,8 @@
 //   on      Mode L, ALIGN_TEST_IDP=1    -> identity, RBAC, devices (recent sign-in), sessions, usage, spend, directives,
 //                                         directive cursor, receipts, alignments, stop sharing, delete, web UI
 //   hosted  HOSTED=1                    -> startup refusals, then the hosted host/https/edge checks and the route
-//                                         allowlist (/ -> /app, everything else 404); the closing date (served on the
-//                                         day, 410 for everything after it); then email codes through a fake HTTPS
+//                                         allowlist (/ -> /app, everything else 404); no closing date (a leftover
+//                                         ALIGN_DELETE_BY in the past is ignored); then email codes through a fake HTTPS
 //                                         email API (first owner, invites, unknown addresses, API failure)
 // Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port;
 //                                           also uses <port>+1 for the second-server check)
@@ -129,7 +129,6 @@ async function startServer(env) {
       last = r.status;
       if (r.status === 200) return { started: true, stderr: () => stderr, stdout: () => stdout, exited, last };
       if (r.status === 503) break; // up, but serving nothing (proxy.ts startupProblems)
-      if (r.status === 410) return { started: false, closed: true, stderr: () => stderr, stdout: () => stdout, exited, gone: () => exited, last }; // up, closed
     } catch {}
     await sleep(1000);
   }
@@ -1755,13 +1754,11 @@ try {
 
   // ======== phase hosted: v2 startup refusals, then v2 behind the hosted checks ========
   const hostedDir = path.join(tmpRoot, "hosted");
-  const deleteBy = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const good = {
     HOSTED: "1",
     ALIGN_HOSTS: HOSTED_HOST,
     ALIGN_SECRET: "t".repeat(48),
     ALIGN_DATA_DIR: hostedDir,
-    ALIGN_DELETE_BY: deleteBy,
     BETTER_AUTH_SECRET: "b".repeat(40),
     GOOGLE_CLIENT_ID: "test-google-id",
     GOOGLE_CLIENT_SECRET: "test-google-secret",
@@ -1778,8 +1775,6 @@ try {
     ["a short ALIGN_SECRET", { ALIGN_SECRET: "s".repeat(20) }, "ALIGN_SECRET must be set (32+ characters)"],
     ["a relative ALIGN_DATA_DIR", { ALIGN_DATA_DIR: "data/hosted" }, "ALIGN_DATA_DIR must be an absolute path"],
     ["an ALIGN_DATA_DIR inside the app", { ALIGN_DATA_DIR: path.join(ROOT, "data", "hosted-inside") }, "ALIGN_DATA_DIR must be outside the app directory"],
-    ["no ALIGN_DELETE_BY", { ALIGN_DELETE_BY: undefined }, "ALIGN_DELETE_BY must be a date (YYYY-MM-DD)"],
-    ["a bad ALIGN_DELETE_BY", { ALIGN_DELETE_BY: "Nov 6" }, "ALIGN_DELETE_BY must be a date (YYYY-MM-DD)"],
     ["ALIGN_PUBLIC=1", { ALIGN_PUBLIC: "1" }, "Public mode is not supported"],
     ["no BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: undefined }, "BETTER_AUTH_SECRET must be set"],
     ["a short BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: "short" }, "BETTER_AUTH_SECRET must be set"],
@@ -1877,27 +1872,13 @@ try {
   check("hosted: the device verification URI is the public origin", hDev.status === 200 && hDev.json.verification_uri === `https://${HOSTED_HOST}/app/device`, hDev.text);
   await stopServer();
 
-  // ======== the closing date (ALIGN_DELETE_BY): served through that whole day, then 410 for everything ========
-  const today = new Date().toISOString().slice(0, 10); // today's UTC date has never ended by the Pacific rule
-  const onTheDay = await startServer({ ...good, ALIGN_DELETE_BY: today });
-  check(`closing date: a hosted server with ALIGN_DELETE_BY = today (${today}) still serves`, onTheDay.started, `${onTheDay.last} ${onTheDay.stderr().slice(-200)}`);
-  await stopServer();
-  const shut = await startServer({ ...good, ALIGN_DELETE_BY: "2020-01-01" });
-  await sleep(3000); // a refused start would have exited by now
-  const shutProbes = await Promise.all([
-    hosted("GET", "/"),
-    hosted("GET", "/app"),
-    hosted("GET", "/api/v2/me"),
-    hosted("POST", "/api/v2/workspaces", { body: { name: "x" }, headers: { origin: `https://${HOSTED_HOST}` } }),
-    hosted("GET", "/api/mcp"),
-    hosted("GET", "/api/state"),
-    hosted("GET", "/api/v2/me", { headers: { "fly-client-ip": undefined, "x-forwarded-proto": undefined } }),
-    rawGet("/api/v2/me", { host: "evil.example" }),
-  ]);
+  // ======== no closing date: a hosted server never shuts itself down (a leftover ALIGN_DELETE_BY is ignored) ========
+  const leftover = await startServer({ ...good, ALIGN_DELETE_BY: "2020-01-01" });
+  const leftoverMe = leftover.started ? await hosted("GET", "/app") : { status: 0 };
   check(
-    "closing date: after ALIGN_DELETE_BY the server starts closed and stays up; every request, whatever its path, Host or headers, gets 410 'This test server closed on 2020-01-01.'",
-    shut.closed && !shut.gone?.() && shutProbes.every((r) => r.status === 410 && r.text.includes("This test server closed on 2020-01-01.")) && shut.stderr().includes("has passed: closed, every request gets 410"),
-    `closed=${shut.closed} ${shutProbes.map((r) => r.status).join(",")} ${shut.stderr().slice(-200)}`,
+    "no closing date: a hosted server with a past ALIGN_DELETE_BY still starts and serves (no 410)",
+    leftover.started && leftoverMe.status !== 410 && leftoverMe.status < 500,
+    `${leftover.last} ${leftoverMe.status} ${leftover.stderr().slice(-200)}`,
   );
   await stopServer();
 

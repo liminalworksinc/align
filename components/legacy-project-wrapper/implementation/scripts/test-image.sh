@@ -43,7 +43,7 @@ docker logs "$NAME-bad" 2>&1 | grep -q "HOSTED=1 refused to start"; refused=$?
 
 docker volume create "$VOL" >/dev/null
 docker run -d --name "$NAME" -p "127.0.0.1:$PORT:8080" -v "$VOL:/data" \
-  -e ALIGN_HOSTS=align.test -e ALIGN_PUBLIC_ORIGIN=https://align.test -e ALIGN_DELETE_BY="$(date -u -d '+30 days' +%F 2>/dev/null || date -u -v+30d +%F)" \
+  -e ALIGN_HOSTS=align.test -e ALIGN_PUBLIC_ORIGIN=https://align.test \
   -e ALIGN_SECRET="$(openssl rand -hex 24)" -e BETTER_AUTH_SECRET="$(openssl rand -hex 24)" \
   -e GITHUB_CLIENT_ID=image-test-id -e GITHUB_CLIENT_SECRET=image-test-secret \
   "$TAG" >/dev/null
