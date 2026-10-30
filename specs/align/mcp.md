@@ -13,7 +13,7 @@ records, and authority changes routed to agent sessions. No tool can create, cha
 ratify anything. Goals change only through people in the Align UI.
 
 **Transport.** One endpoint, `/api/mcp`, handles `GET`, `POST` and `DELETE` with MCP
-Streamable HTTP through `mcp-handler` (stateless mode). The server identifies itself as
+Streamable HTTP through `mcp-handler`, which decides session handling (see Open questions). The server identifies itself as
 `align` version `0.2.0` and sends instructions telling the client to call
 `align_get_directives` and `align_get_decision_record` at the start of each request and
 before acting on a plan.
@@ -206,7 +206,7 @@ When the caller holds an `agt.` agent token, the MCP server SHALL compute `align
 
 ### Requirement: Bearer authentication required
 
-The MCP server SHALL reject every request whose bearer token does not verify as an `alm.`, `agt.` or static token. The rejection SHALL be HTTP `401` with an OAuth error body `{"error":"invalid_token","error_description":"No authorization provided"}` and a `WWW-Authenticate: Bearer error="invalid_token", error_description="…", scope="goals:read", resource_metadata="<origin>/.well-known/oauth-protected-resource/api/mcp"` header, where `<origin>` comes from the request's `Host` header.
+The MCP server SHALL reject with HTTP `401` every request whose bearer token is missing or does not verify as an `alm.`, `agt.` or static token. Align wraps the handler in `mcp-handler`'s `withMcpAuth` with `required: true`, `requiredScopes: ["goals:read"]`, `resourceMetadataPath: "/.well-known/oauth-protected-resource/api/mcp"` and `resourceUrl: <origin>`, where `<origin>` comes from the request's `Host` header. The `WWW-Authenticate` challenge SHALL point at `<origin>/.well-known/oauth-protected-resource/api/mcp`. The exact error body and the other challenge parameters are produced by `mcp-handler`, not Align code.
 
 #### Scenario: No token
 
@@ -371,29 +371,29 @@ The authorization server SHALL accept a redirect URI only if all of the followin
 
 ### Requirement: Authorization request validation
 
-The authorization server SHALL validate requests at `/oauth/authorize` and again at `POST /api/oauth/approve`. Once the client and redirect URI are trusted, it SHALL return errors to the app by redirecting to `redirect_uri` with `error`, `error_description`, `state` and `iss`. The cases are:
+The authorization server SHALL validate requests at `/oauth/authorize` and again at `POST /api/oauth/approve`. Once the client and redirect URI are trusted, it SHALL build an error redirect to `redirect_uri` with `error`, `error_description`, `state` and `iss`. `GET /oauth/authorize` SHALL NOT redirect automatically: it renders a `Can’t connect this app` page saying `The app sent a request Align can’t accept. Go back to the app and try again.` with a `Return to the app` link to that error redirect. `POST /api/oauth/approve` SHALL return it as `200 {"redirect": <error redirect>}`. The cases are:
 
 - `response_type` other than `code` returns `unsupported_response_type`.
 - A missing or malformed `code_challenge` (must match `^[A-Za-z0-9._~-]{43,128}$`), or a `code_challenge_method` other than `S256`, returns `invalid_request` with `PKCE with S256 is required`.
-- A `resource` other than `<origin>/api/mcp` (a trailing slash is allowed) returns `invalid_target`.
+- A `resource`, when present, other than `<origin>/api/mcp` (a trailing slash is allowed) returns `invalid_target`. A missing `resource` is accepted and bound to `<origin>/api/mcp`.
 
 `state` SHALL be echoed only if it has at most 500 characters.
 
 #### Scenario: Plain PKCE
 
 - **WHEN** an app sends `code_challenge_method=plain`
-- **THEN** no code is issued, and the app is sent back with `error=invalid_request` and `iss=<origin>`
+- **THEN** no code is issued, and the page's `Return to the app` link (or the approve endpoint's `redirect`) carries `error=invalid_request` and `iss=<origin>`
 
 #### Scenario: Wrong resource
 
 - **WHEN** an app sends `resource=https://other.example/api/mcp`
-- **THEN** the app is sent back with `error=invalid_target`
+- **THEN** the error redirect carries `error=invalid_target`
 
 ### Requirement: Consent page
 
 The authorization server SHALL render a consent page at `GET /oauth/authorize` with the following content:
 
-- The app's self-asserted name, with a `This app named itself.` notice unless the client is a CIMD document hosted by a known AI provider (`claude.ai`, `*.anthropic.com`, `chatgpt.com`, `*.openai.com`).
+- The app's self-asserted name, with a `This app named itself.` notice unless the client is a CIMD document hosted by a known AI provider (`claude.ai`, `*.claude.ai`, `*.anthropic.com`, `chatgpt.com`, `*.chatgpt.com`, `*.openai.com`). A DCR client always gets the notice.
 - The redirect host.
 - Who receives the data.
 - A statement that the app cannot propose, approve or change anything.
@@ -407,7 +407,7 @@ The person SHALL choose either the custom workspace this browser is signed in to
 
 ### Requirement: Approval endpoint
 
-The authorization server SHALL accept consent answers at `POST /api/oauth/approve`. The request must be `application/json` (otherwise `415`), have a loopback Host in Mode L or an allowed host and an exact `https://<host>` Origin when hosted (otherwise `403`), and have a body of at most 16 KB. The endpoint SHALL re-run the authorization request checks on `params`. The outcomes are:
+The authorization server SHALL accept consent answers at `POST /api/oauth/approve`. The request must be `application/json` (otherwise `415`); have a loopback Host and, if it sends an `Origin`, one whose host equals the Host header in Mode L, or an allowed host and an exact `https://<host>` Origin when hosted (otherwise `403`); and have a body of at most 16 KB (otherwise `413`). The endpoint SHALL re-run the authorization request checks on `params`. The outcomes are:
 
 - A fatal check failure returns `400 {"error": <message>}`.
 - A non-fatal check failure returns `200 {"redirect": <error redirect>}`.
@@ -465,7 +465,7 @@ It SHALL then create a grant and return `200 {access_token: "alm.…", token_typ
 
 ### Requirement: Refresh token rotation
 
-The authorization server SHALL issue refresh tokens of the form `alr.<ws>.<grant id>.<secret>` and store only an HMAC of the secret, keyed with `ALIGN_SECRET`. For `grant_type=refresh_token`, it SHALL rotate the token: it returns a new `alm.` access token and a new refresh token, and keeps the previous hash so that reuse can be detected. A token presented by another `client_id`, under a stale agent epoch, past its expiry or under a rotated `ALIGN_SECRET` SHALL fail. Presenting the previous refresh token again SHALL delete the grant. Every refresh failure SHALL return `400 {"error":"invalid_grant","error_description":"This sign-in has ended. Connect Align again."}`. A grant's refresh expiry SHALL be set once, when the grant is created, to 7 days later or to the end of the configured deletion date if that is sooner.
+The authorization server SHALL issue refresh tokens of the form `alr.<ws>.<grant id>.<secret>` and store only an HMAC of the secret, keyed with `ALIGN_SECRET`. For `grant_type=refresh_token`, it SHALL rotate the token: it returns a new `alm.` access token and a new refresh token, and keeps the previous hash so that reuse can be detected. A token presented by another `client_id`, under a stale agent epoch, past its expiry or under a rotated `ALIGN_SECRET` SHALL fail. Presenting the previous refresh token again SHALL delete the grant. Every refresh failure SHALL return `400 {"error":"invalid_grant","error_description":"This sign-in has ended. Connect Align again."}`, except a wrong `resource`, which gets `invalid_target`. A grant's refresh expiry SHALL be set once, when the grant is created, to 7 days later or to the end of the configured deletion date if that is sooner.
 
 #### Scenario: Refresh token reuse
 
@@ -482,8 +482,10 @@ The authorization server SHALL issue refresh tokens of the form `alr.<ws>.<grant
 The authorization server SHALL keep at most 20 grants per workspace, in `<workspace>/oauth.json`. A new approval of the same `client_id` by the same role SHALL replace the earlier grant. Grants SHALL stop working, together with their access and refresh tokens, in each of these cases:
 
 - `DELETE /api/workspaces/connections` with `{"id"}`, by the approving team or leadership. Another team gets `403`.
-- `DELETE /api/workspaces/connections` with `{}`, by leadership only (otherwise `403`). This also bumps the agent epoch.
+- `DELETE /api/workspaces/connections` with `{}`, by leadership only (otherwise `403`). This also bumps the agent epoch, so it also revokes every agent token.
+- `DELETE /api/workspaces/agent-token` (Mode L, leadership), which bumps the agent epoch: disconnecting agents also disconnects every AI app.
 - A workspace Restart (agent epoch bump).
+- The grant's refresh expiry passing.
 - A rotation of `ALIGN_SECRET`.
 - Deletion of the workspace.
 
@@ -520,17 +522,15 @@ Approvals SHALL also go through the sign-in backoff (`429 "Too many attempts, tr
 - **No rate limit on `/api/mcp`.** The MCP endpoint has no request rate limit of its own. Only the OAuth endpoints are limited. Is that intended?
 - **Agent-token scoping in tools differs from the docs.** `docs/MCP.md` says another harness or repo's sessions are `403` for the work-map and directives tools. In the code, `scopeToGrant` silently filters those sessions out, so the tools report "No captured session matches". Only the poll, ack and stream routes use `assertSessionInGrant` (403). Which behavior is the contract?
 - **Refresh lifetime is absolute.** Rotation keeps the grant's original `refresh_exp`, so a connected app must be re-approved 7 days after the first approval, however often it refreshes. The docs say "7 days, rotated on each use". Is the non-sliding lifetime intended?
-- **The static token never expires.** `ALIGN_MCP_TOKEN` has no expiry and no revocation other than changing the environment value and restarting. Agent tokens in a custom workspace also see the Northstar-only `team` argument on `align_get_accepted_plan`, because only `alm.` tokens get the app schema.
-- **Some SDK-level behavior is unverified.** The exact error form for an unknown tool or invalid arguments (JSON-RPC error vs `isError` result), and how `GET`/`DELETE` on `/api/mcp` behave in stateless mode, are decided by `mcp-handler` 2.3.0 and `@modelcontextprotocol/server` 2.3.1, not Align code. The test only asserts that `align_ratify` is "rejected".
+- **The static token never expires.** `ALIGN_MCP_TOKEN` has no expiry and no revocation other than changing the environment value and restarting. Is that acceptable for Mode L? Agent tokens in a custom workspace also see the Northstar-only `team` argument on `align_get_accepted_plan`, because only `alm.` tokens get the app schema. Should agent tokens get the app schema too?
+- **Some SDK-level behavior is unverified.** The exact error form for an unknown tool or invalid arguments (JSON-RPC error vs `isError` result), how `GET`/`DELETE` on `/api/mcp` behave (session handling), and the exact 401 body and `WWW-Authenticate` parameters, are decided by `mcp-handler` 2.3.0 and `@modelcontextprotocol/server` 2.3.1, not Align code. The test only asserts that `align_ratify` is "rejected".
 - **Bearer parsing edge cases.** The app-variant selector uses `/^bearer\s+alm\./i`, while `mcp-handler` splits the header on a single space. A header with extra whitespace may pick the app schema but fail token extraction (`401`).
-- **In-memory state is per process.** Codes, rate-limit counters and the CIMD cache live in process memory, so a restart, or several instances, resets them.
-- **`/api/alike` is not part of the MCP surface.** `POST /api/alike` is a Northstar-only, session-authenticated write route that records a retrieved Alike decision reference (`brief.alike_ref`). It is listed here only because it was in scope to review.
+- **Several instances.** Codes, rate-limit counters and the CIMD cache live in process memory, so a code issued by one instance can't be exchanged at another and limits apply per instance. Is running more than one instance supported?
 
 ## Sources
 
 - `README.md`
 - `docs/MCP.md`
-- `docs/alike/session-b-retrieval.md`
 - `app/api/mcp/route.ts`
 - `app/.well-known/oauth-authorization-server/route.ts`
 - `app/.well-known/oauth-protected-resource/route.ts`
@@ -542,7 +542,6 @@ Approvals SHALL also go through the sign-in backoff (`429 "Too many attempts, tr
 - `app/api/oauth/approve/route.ts`
 - `app/api/workspaces/connections/route.ts`
 - `app/api/workspaces/agent-token/route.ts`
-- `app/api/alike/route.ts`
 - `lib/mcp/register.ts`
 - `lib/oauth/server.ts`
 - `lib/oauth/clients.ts`
