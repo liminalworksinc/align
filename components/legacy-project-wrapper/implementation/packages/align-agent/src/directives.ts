@@ -88,6 +88,10 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
         if (!cur || d.goal.version > cur.version || (d.goal.version === cur.version && d.goal.status !== cur.status)) {
           ctx.db.prepare("UPDATE shares SET goal_json=? WHERE local_id=?").run(JSON.stringify(snap), lid);
           touched = true;
+        } else if (d.goal.version === cur.version) {
+          // The goals feed already moved the snapshot to this version (the same sync pass polled directives before the
+          // server wrote this one): still pending, so the next injection at this version reports it applied.
+          touched = true;
         }
       }
       const pending = ctx.db.prepare("SELECT goal_id, goal_json FROM pending_bindings WHERE local_id=?").get(lid) as { goal_id: string | null; goal_json: string | null } | undefined;

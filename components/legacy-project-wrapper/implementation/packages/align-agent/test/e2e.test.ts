@@ -124,6 +124,18 @@ describe("e2e", () => {
     await waitFor(() => fake.receipts.some((r) => r.id === d1.id && r.state === "applied"), 5000, "applied d1");
     assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p2b", prompt: "quiet", cwd }).stdout, "");
 
+    // The race: the goals feed delivers v3 before its goal_version directive is polled. The directive must still count
+    // as received (not stale) and be reported applied once the context is at v3.
+    const gRace = fake.bumpGoal("ws_acme", "g_ship", { title: "Ship the v2 onboarding flow with SSO and SCIM" });
+    runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p3a", prompt: "go on", cwd });
+    await waitFor(() => hot(t, SID)?.goal?.version === 3, 5000, "feed delivers v3 first");
+    runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p3b", prompt: "go on", cwd });
+    const dRace = fake.pushDirective({ ws: "ws_acme", kind: "goal_version", session_keys: [skey], goal: gRace, binding: null });
+    await waitFor(() => fake.receipts.some((r) => r.id === dRace.id && r.state === "received"), 5000, "received dRace");
+    await waitFor(() => (hot(t, SID)?.pending_directives || []).includes(dRace.id), 5000, "race directive pending, not stale");
+    runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p3c", prompt: "next", cwd });
+    await waitFor(() => fake.receipts.some((r) => r.id === dRace.id && r.state === "applied"), 5000, "applied after the feed raced it");
+
     // binding_changed: new epoch opens at the next root turn; later usage carries it.
     const perf = fake.goals.get("ws_acme")!.find((g) => g.id === "g_perf")!;
     const d2 = fake.pushDirective({ ws: "ws_acme", kind: "binding_changed", session_keys: [skey], goal: perf, binding: { goal_id: "g_perf", effective: "next_root_turn", cause: "alignment:al_1" } });
