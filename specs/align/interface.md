@@ -6,635 +6,541 @@ kind: area
 
 # Interface
 
-Align's web interface is a single-page app that reads one filtered state document and polls it.
-It serves two kinds of scenario through the same components:
+Align's web interface is the web app under `/app`, plus the OAuth consent page that connected AI apps send people
+to. Everyone signs in as a person (Google, GitHub or an email one-time code); nothing is reached with a shared
+passcode. `/` redirects to `/app`. Every path under `/app` is served in Mode L and when hosted.
 
-- **Northstar**: the frozen demo company "Northstar Security", with fixed people (CEO / Leadership,
-  Product Director, Alex / Security Lead), Sparta sandbox runs, an Alike brief and a live agent pane.
-- **Custom**: a scenario that leadership set up at `/setup` (shown at `/`), or a separate workspace
-  created at `/new` (shown at `/w/<id>`). Team and person names come from the setup. Custom
-  scenarios have no generated options and no live agent. They have no sandbox unless runs exist, so
-  every screen labels the plan "Not sandbox-tested".
-
-Three roles sign in: `leadership` (owns the company goal), `product` (the asking team, which
-proposes) and `security` (the owning team, which edits, approves or declines changes to its own
-goal). Screens show only the controls the server accepts from the viewer's role in the proposal's
-current state.
+Each page reads the `/api/v2` endpoints it needs when it loads and reloads them after each of its own actions; pages
+do not poll. A page shows only the controls the server would accept from the signed-in person: their workspace role
+(`owner`, `member` or `viewer`), their team role (`lead` or `member`), whether they own a goal or are in its approval
+set, and the `can` flags the server returns on alignments and change requests. "Pod" is stored data only: every
+screen says "team".
 
 | Route | Screen | Who uses it | Purpose |
 | --- | --- | --- | --- |
-| `/` | Align app (sign-in, then the shell) | All three roles | The Northstar demo, or the scenario set up at `/setup` |
-| `/w/<id>` | Workspace app (sign-in, then the shell) | All three roles of that workspace | A custom workspace created at `/new` |
-| `/setup` | Set up your own conflict | Leadership of the demo store (local only) | Replace the demo store with a custom two-team scenario |
-| `/new` | Create a workspace | Anyone (signup code if required) | Create a separate workspace and get its three passcodes |
-| `/oauth/authorize` | Connect <app> to Align | A person connecting an AI app | Grant an AI app read-only access to one workspace as one role |
-| `/app`, `/app/w/<ws>/…`, `/app/invite/<token>`, `/app/device`, `/app/devices` | Goal sessions web app (only with `ALIGN_GOAL_SESSIONS=1`) | A person signed in as themselves | Workspaces, goals, alignments, people and invites, shared sessions, usage and devices |
+| `/` | (redirect) | Anyone | Redirects to `/app` |
+| `/app/sign-in` | Sign in | A signed-out person | Sign in with Google, GitHub or an email code |
+| `/app` | Your workspaces | A signed-in person | List and create workspaces; first run offers the Northstar sample |
+| `/app/account` | Your account | A signed-in person | See the account and link Google or GitHub |
+| `/app/device` | Connect a device | A signed-in person (recent sign-in) | Approve the code that `align login` printed |
+| `/app/devices` | Your devices | A signed-in person | List and revoke paired devices |
+| `/app/invite/<token>` | Workspace invite | The invited person | Join a workspace (and team) from an invite link |
+| `/app/w/<ws>` | Goals tab | Workspace members | Goals the person can read; create a goal |
+| `/app/w/<ws>/goals/<goal>` | Goal page | Workspace members | One goal: versions, tree, new version, alignment request, change requests |
+| `/app/w/<ws>/people` | People tab | Workspace members | Members, roles, invites, teams, leaving |
+| `/app/w/<ws>/sessions` | Sessions tab | Workspace members | Shared sessions, stop and resume |
+| `/app/w/<ws>/alignments` | Alignments tab | Workspace members | Alignment requests the person is part of |
+| `/app/w/<ws>/requests` | Requests tab | Workspace members | Change requests: waiting on me, mine, others |
+| `/app/w/<ws>/spend` | Spend tab | Workspace members | Usage and estimated cost by goal, team or session |
+| `/app/w/<ws>/apps` | Apps tab | Workspace members | Connected AI apps and how to connect one |
+| `/oauth/authorize` | Connect <app> to Align | A person connecting an AI app (recent sign-in) | Grant an AI app read-only access to one workspace as themselves |
 | (any) | Error page | Anyone | Plain error with Try again |
 
-Views inside the shell (client state, no URL change):
+Navigation: every `/app` page except sign-in has a top bar with the **Align** mark (a link to `/app`), a workspace
+switcher (shown once the person has a workspace), **Devices**, **Account**, the person's name (email on hover) and
+**Sign out**. Inside a workspace a second bar shows the workspace name, the person's role and the tabs Goals,
+People, Sessions, Alignments, Requests, Spend and Apps, with the current tab highlighted.
 
-| View | Nav label | Who | Purpose |
-| --- | --- | --- | --- |
-| Your turn | Your turn | All | Landing view: what waits on you, on others, and what changed |
-| Company goal | Company goal | Leadership only | Approve and send the company goal (Northstar); decide the launch (custom) |
-| Goals | Goals | All | Company goal, two team goals and the dependency between them |
-| Scenario Studio | Scenario Studio | All (Northstar only in the nav) | Compare recorded baseline and candidate sandbox runs |
-| Evidence | (via Scenario Studio, Inspector, plan test) | All (sandbox scenarios) | Decision chain, Sparta runs, audit log, timer |
-| Decisions | Decisions | All | Open, accepted and declined proposals; opens the record |
-| Decision / Next decision | (via Decisions, Goals, Your turn or a ratified proposal; every one of these controls exists only once an agreement does) | All | The decision record once agreed; otherwise the next decision |
-| Work | Work | All | Work still on the old plan, goal cascade, AI-session lanes (Northstar) |
-| Proposals | (via Your turn, + New conflict, Goals) | All | Inbox, composer and review thread |
-| Inspector | Right rail | All | Details of the selected goal, dependency, work item, run or proposal |
-| Agent pane | Right rail on the Northstar decision view | All | Live status of Security's AI agent |
-| Ways forward | Drawer (Northstar) | All | The brief: ranked options, disconfirmers, cited evidence |
-| Which plan follows the new priority? | Drawer (Northstar) | All | Side-by-side plan test; attach results to a proposal |
-| Agents on this plan / Connect an AI app | Sidebar card in `/w/<id>` | All | Connected AI apps and how to connect one |
+### Requirement: Root path redirects to the web app
 
-Navigation: the left sidebar holds the Align mark, the **+ New conflict** control (custom only), the
-main nav (Your turn, Company goal for leadership, Goals, Scenario Studio in Northstar only,
-Decisions, Work), a Northstar **Connected** card (Sparta run count, Alike status), the
-workspace's **Agents on this plan** card (`/w/<id>` only) and the signed-in person. The header shows
-the company and timeframe, a status badge, reset controls, the person, **Switch team ▾** (custom) and
-**Sign out**. A nav item stays highlighted for its sub-views (Your turn for Proposals, Goals for the
-team view, Scenario Studio for Evidence, Decisions for the record). Opening any view closes an open
-drawer. On a hosted server (`HOSTED=1`), `/` and `/setup` redirect to `/new`, and of the pages only `/new`,
-`/w/<id>` and the OAuth pages exist, together with the APIs on the hosted allowlist (see the `workspaces` part) (plus the goal sessions pages under `/app` and
-`/api/v2` when `ALIGN_GOAL_SESSIONS=1`; with the flag unset those answer 404 in every mode).
+The server SHALL answer `/` with a redirect to `/app`, and SHALL serve no other page outside `/app` and
+`/oauth/authorize`.
 
-### Requirement: Northstar sign-in
+#### Scenario: Opening the root
 
-The Align app at `/` SHALL show a sign-in form with three role cards and a passcode field when no
-one is signed in, and SHALL sign in with `POST /api/session` carrying the chosen role and passcode.
+- **WHEN** anyone opens `/` in Mode L or hosted
+- **THEN** the response redirects to `/app`, which shows the person's workspaces or sends a signed-out visitor to sign-in
 
-#### Scenario: Sign in to the demo
+#### Scenario: Retired pages
 
-- **WHEN** a signed-out person opens `/`, picks the "Alex / Security Lead" card under "I am", types a passcode and presses **Sign in**
-- **THEN** the app posts `{role, passcode}` to `POST /api/session`, shows "Signing in…" while busy, and on success loads the shell on the Your turn view
+- **WHEN** someone opens `/new`, `/setup` or `/w/<id>`
+- **THEN** the server answers 404; no page offers passcodes, role cards or **Switch team**
 
-#### Scenario: Wrong passcode
+### Requirement: Signed-out visitors are sent to sign-in
 
-- **WHEN** the passcode is rejected
-- **THEN** the form stays open and shows the server's error message in red; the **Sign in** button stays disabled while the passcode field is empty
+Every `/app` page other than `/app/sign-in`, and `/oauth/authorize`, SHALL send a signed-out visitor to
+`/app/sign-in?next=<page>`, and sign-in SHALL return only to an `/app` path or an `/oauth/authorize` URL, falling
+back to `/app` for anything else.
 
-### Requirement: Workspace sign-in
+#### Scenario: Deep link while signed out
 
-The workspace app at `/w/<id>` SHALL load the company and team names from
-`GET /api/workspaces/<id>/login-info`, show one card per team under "Sign in as", and sign in with
-`POST /api/session` carrying role, passcode and workspace.
+- **WHEN** a signed-out person opens `/app/w/<ws>/requests`
+- **THEN** they land on `/app/sign-in?next=%2Fapp%2Fw%2F<ws>%2Frequests` and, after signing in, on the Requests tab
 
-#### Scenario: Returning tester
+#### Scenario: Foreign next
 
-- **WHEN** a person who last signed in to this workspace as the security team in this browser opens `/w/<id>`
-- **THEN** that team's card is preselected (remembered per workspace in local storage), the passcode field has **Show**/**Hide**, the submit button reads "Sign in as <team>", and the hint "Testing alone? Sign in as any team, then use Switch team." is shown
+- **WHEN** `next` is `https://evil.example/`, `//evil.example` or any path outside `/app` and `/oauth/authorize`
+- **THEN** sign-in sends the person to `/app`
 
-#### Scenario: Workspace gone or unreachable
+#### Scenario: Session ends while a page is open
 
-- **WHEN** the login-info request returns 404, or fails in any other way
-- **THEN** a 404 shows "This workspace no longer exists."; any other failure shows a "Couldn’t reach this workspace…" message (a test-server wording when hosted) with a **Try again** button that repeats the request
+- **WHEN** an API call from an open page returns 401
+- **THEN** the page navigates to `/app/sign-in?next=<current path>`
 
-#### Scenario: What a signed-out visitor sees
+### Requirement: Sign-in screen
 
-- **WHEN** someone who is not signed in to that workspace opens `/w/<id>`
-- **THEN** the page shows only what `login-info` returns (the company name, its note when set up with one, and each team's name and role blurb, never person names) and never polls `GET /api/state` until a sign-in succeeds; the id in the URL is a convenience, and the passcodes are the access control
+The `/app/sign-in` page SHALL offer **Continue with Google** and **Continue with GitHub** only when that provider's
+client id and secret are configured, and SHALL always offer the email-code form; a person who is already signed in
+SHALL be sent straight to `next`.
 
-### Requirement: One session per browser
+#### Scenario: Social sign-in
 
-The app SHALL never render or write as a team or workspace other than the one the tab loaded with,
-and SHALL say so when the browser's session changes underneath it.
+- **WHEN** a person presses **Continue with Google**
+- **THEN** the page posts `{provider:"google", callbackURL:<next>, errorCallbackURL:"/app/sign-in"}` to `POST /api/v2/auth/sign-in/social` and follows the returned URL; an error is shown in red under the buttons
 
-#### Scenario: Signed in elsewhere
+#### Scenario: Neither provider configured
 
-- **WHEN** the browser holds a session for another workspace (or for the demo, on a `/w/<id>` page) and the person opens a sign-in screen
-- **THEN** the sign-in form shows "This browser is signed in to another workspace. Open that workspace. A browser holds one workspace session at a time." (or the demo wording) above the role cards
+- **WHEN** neither Google nor GitHub is configured
+- **THEN** the page shows only the email-code form; it never says that no sign-in method is configured
 
-#### Scenario: Another tab switched team
+#### Scenario: Test identity provider
 
-- **WHEN** another tab signs the same browser in as a different team of the same workspace
-- **THEN** this tab stops polling and shows "You signed in as <new> in another tab. This tab was <old>. Nothing was sent from this tab. A browser holds one session at a time." with a **Continue as <new>** button
+- **WHEN** the server runs with `ALIGN_TEST_IDP=1` (never when hosted)
+- **THEN** the page also shows "Test sign-in (this machine only)" with **Sign in** and **Create a test account** (name, email, password of at least 8 characters), posting to `POST /api/v2/auth/sign-in/email` or `POST /api/v2/auth/sign-up/email`; without the flag that section is absent
 
-#### Scenario: Session expired
+### Requirement: Email code sign-in form
 
-- **WHEN** any request returns 401 with "Your session ended. Sign in again."
-- **THEN** the view is cleared and the sign-in screen is shown; the workspace sign-in shows that sentence as its error
+The sign-in page SHALL sign a person in with a 6-digit email code in two steps, **Send code** and **Sign in**, and
+SHALL sign in only on a POST that the person submits; opening a sign-in link SHALL only fill the form.
 
-### Requirement: Loading and connection states
+#### Scenario: Send a code
 
-The app SHALL show plain loading and error states instead of an empty or stuck screen.
+- **WHEN** a person types their email and presses **Send code**
+- **THEN** the page posts `{email, type:"sign-in"}` to `POST /api/v2/auth/email-otp/send-verification-otp`, then shows "If this email can sign in to Align, a 6-digit code is on its way. It works for 5 minutes." (the same text whether or not an account exists), a 6-digit "Code" field, **Sign in**, **Send a new code** and **Use another email**
 
-#### Scenario: Server unreachable before sign-in is known
+#### Scenario: Enter the code
 
-- **WHEN** `GET /api/session` fails for a reason other than an ended session
-- **THEN** the page shows "Couldn’t reach Align: <message>" with **Try again**; while it is pending the page shows "Loading Align…"
+- **WHEN** the person types the 6 digits and presses **Sign in**
+- **THEN** the page posts `{email, otp}` to `POST /api/v2/auth/sign-in/email-otp` and on success navigates to `next`; **Sign in** is disabled until the field holds exactly 6 digits
 
-#### Scenario: Lost connection while signed in
+#### Scenario: Code refused
 
-- **WHEN** a later `GET /api/state` poll fails
-- **THEN** an amber banner shows "▲ Lost connection to the server (<message>). Showing the last update; reconnecting automatically." above the last state, which stays on screen
+- **WHEN** the code is wrong, expired, or has used up its 3 attempts
+- **THEN** the page shows "That code didn't work. Check it and try again.", "That code has expired. Send a new one." or "Too many wrong tries. Send a new code." respectively, and stays on the code step
 
-#### Scenario: Action error
+#### Scenario: Email that cannot sign in
 
-- **WHEN** a write returns an error
-- **THEN** a red banner shows the server's message (custom scenarios replace a bare "HTTP <status>" with "Something went wrong. Please try again.") and it clears itself after 6 seconds
+- **WHEN** the code's email has no account, no invite for it is pending, and the server is hosted
+- **THEN** sign-in fails and the page shows "This email can't sign in here yet. Ask a workspace owner to invite you."
 
-### Requirement: Live updates
+#### Scenario: Too many codes
 
-The app SHALL keep every screen current by polling `GET /api/state` every 1.5 seconds and whenever
-the tab becomes visible, and SHALL refresh state immediately after each successful write.
+- **WHEN** sending is refused with 429 (more than 3 sends for that email in 10 minutes, or more than 10 from this client in an hour)
+- **THEN** the page shows "Too many codes were sent. Wait a few minutes, then try again." and sends nothing
 
-#### Scenario: The other owner acts
+#### Scenario: Link from the email
 
-- **WHEN** Security approves a proposal in another browser
-- **THEN** within one poll the Product window's Your turn, Goals, Decisions and Proposals views show the new state without a reload
+- **WHEN** a person opens `/app/sign-in?email=<email>&code=<code>` (with or without `next`)
+- **THEN** the page shows the code step with both fields filled and does not sign in until the person presses **Sign in**; `email` alone fills only the email field
 
-#### Scenario: Guarded write
+#### Scenario: Mode L hint
 
-- **WHEN** a person presses an action button on one of the shell's views (propose, review, approve, launch, push, reset, confirm a session link)
-- **THEN** the app first re-reads `GET /api/session`, sends the write only if the same team and workspace are still signed in, attaches the `x-align-workspace` header, and on a `workspace_mismatch` 409 stops showing the workspace and explains which one the browser is signed in to; the Connect dialog's **Disconnect** skips the session re-read and only attaches the header
+- **WHEN** the page is served in Mode L
+- **THEN** the code step adds "On this machine the code is not emailed: it is printed in the terminal running Align and saved in `<data>/v2/sign-in.txt`. Run `npm run sign-in-link` to get a new one." Being on loopback never signs the person in
 
-### Requirement: Shell navigation and badges
+### Requirement: Account screen and provider linking
 
-The shell SHALL land each newly signed-in role on Your turn and SHALL show nav items and count
-badges according to role and scenario.
+The `/app/account` page SHALL show the signed-in person's name and email and the sign-in methods linked to the
+account, and SHALL let the person link Google or GitHub explicitly; accounts are never linked implicitly.
 
-#### Scenario: Leadership nav
+#### Scenario: Link GitHub
 
-- **WHEN** leadership signs in
-- **THEN** the nav shows Your turn, Company goal, Goals, Scenario Studio (Northstar only; custom scenarios leave it out), Decisions and Work; other roles do not see Company goal
+- **WHEN** GitHub is configured, not yet linked, and the person presses **Link GitHub**
+- **THEN** the page posts `{provider:"github", callbackURL:"/app/account"}` to `POST /api/v2/auth/link-social`, follows the returned URL, and on return lists GitHub under "Ways you can sign in"
 
-#### Scenario: Count badges
+#### Scenario: Linked methods
 
-- **WHEN** items are waiting on the viewer or the dependency is unresolved
-- **THEN** Your turn shows the number of waiting items (the same list the view renders) and Goals shows 1 while the dependency's status is `UNKNOWN`
+- **WHEN** the page loads
+- **THEN** it reads `GET /api/v2/auth/list-accounts` and lists "Email code" (always) and each linked provider; a provider that is not configured on this server has no **Link** button
 
-### Requirement: Header status and company goal strip
+#### Scenario: Provider account already in use
 
-The shell SHALL show, for product and security, a company goal strip with the company goal, the new
-requirement and the viewer's own goal, and a header badge that states whether the two teams have
-agreed.
+- **WHEN** linking fails because that Google or GitHub account belongs to another Align account
+- **THEN** the page shows the server's message and nothing is linked
 
-#### Scenario: Northstar conflict open
+### Requirement: Workspace list and first-run sample
 
-- **WHEN** the CEO's goal has been pushed and the dependency is `UNKNOWN`, and Product or Security is signed in
-- **THEN** the header shows the amber button "▲ New company goal from the CEO · Product and Security haven’t agreed yet", which records `ceo_change_viewed` via `POST /api/timer`, selects the CEO goal and opens Goals
+The `/app` page SHALL list the person's workspaces from `GET /api/v2/workspaces` with their role and teams, let them
+create a workspace, and offer **Create the Northstar sample** only when they have no workspaces.
 
-#### Scenario: Agreement reached
+#### Scenario: Workspaces listed
 
-- **WHEN** the dependency is `ACCEPTED`
-- **THEN** the header shows "Company goal <version> · Product and Security agreed" (Northstar) or "<asking> and <owning>: agreed, launch pending" / "agreed, launch approved" (custom), and the strip's status line reads the same
+- **WHEN** a person with workspaces opens `/app`
+- **THEN** each workspace is a link to `/app/w/<ws>` with a role pill and one pill per team (" (lead)" for a team they lead), followed by a "Create a workspace" card (Name, up to 100 characters, **Create**, posting `{name}` to `POST /api/v2/workspaces` and then opening the new workspace) and a "Connect a device" card pointing to `align login` and `/app/device`
 
-### Requirement: New conflict control
+#### Scenario: First run
 
-In custom scenarios the sidebar SHALL show **+ New conflict** with role-dependent behavior, and it
-SHALL be hidden entirely in Northstar.
+- **WHEN** a person in no workspace opens `/app`
+- **THEN** the page shows "You are not in a workspace yet. Create one, open an invite link someone sent you, or start from a sample." and a "Try Align with a sample" card with **Create the Northstar sample**, which posts to `POST /api/v2/workspaces/sample` and opens the new "Northstar (sample)" workspace; the button is not shown once the person has any workspace
 
-#### Scenario: Asking team with nothing open
+#### Scenario: Create refused
 
-- **WHEN** the product role presses **+ New conflict** and no proposal is open
-- **THEN** the Proposals view opens with the composer
+- **WHEN** creating a workspace or the sample returns an error (for example 429 `rate_limited` or 409 `too_many_workspaces`)
+- **THEN** the card shows the server's message in red and stays on `/app`
 
-#### Scenario: Not allowed
+### Requirement: Device approval screen
 
-- **WHEN** the owning team views the sidebar, or a proposal is already open
-- **THEN** the button is disabled with "Only <asking team> proposes a change. You review it here when it arrives." or "A proposal is already open. Finish it first."; for leadership it is a link to `/new` (workspace) or `/setup` (scenario at `/`)
+The `/app/device` page SHALL let a person with a recent sign-in look up the code that `align login` printed, choose
+which of their workspaces the device may use, and approve or deny it.
 
-### Requirement: Switch team, sign out and reset
+#### Scenario: Approve a device
 
-The header SHALL let a person sign out, let a solo tester switch team in custom scenarios without
-bypassing passcodes, and offer a restart that needs a confirming second click: to a workspace's
-leadership always, and in the demo store only with `?ops` in the URL.
+- **WHEN** a person enters the code, presses **Look up**, ticks at least one workspace and presses **Approve**
+- **THEN** the page calls `GET /api/v2/device/requests/<code>` (showing the device name and "Asked <n> seconds/minutes ago") and then `POST /api/v2/device/approve` with `{user_code, workspace_ids}`, and says "<device> is connected. You can close this page."; **Approve** stays disabled until a workspace is ticked
 
-#### Scenario: Switch team
+#### Scenario: Unknown code or deny
 
-- **WHEN** a person in a custom scenario chooses another team from **Switch team ▾**
-- **THEN** the app calls `DELETE /api/session` and opens the sign-in screen with that team preselected; its passcode is still required
+- **WHEN** the code is unknown or expired, or the person presses **Deny**
+- **THEN** the page shows "No device is waiting for that code. Check it, or run align login again.", or calls `POST /api/v2/device/deny {user_code}` and says "Denied. That device was not connected."
 
-#### Scenario: Restart
+#### Scenario: Nothing to grant
 
-- **WHEN** workspace leadership presses **Restart this scenario** and then "Click again to restart this scenario" within 4 seconds
-- **THEN** the app calls `POST /api/reset` with `{"confirm":"reset"}`, clears selection and attached test results and returns to Your turn
+- **WHEN** the person is in no workspace
+- **THEN** the looked-up device shows "You are not in any workspace yet, so there is nothing to grant." and **Approve** stays disabled
 
-#### Scenario: Demo store restart
+### Requirement: Recent sign-in prompt
 
-- **WHEN** the URL of `/` carries `?ops`
-- **THEN** in Northstar every signed-in role sees **Start the demo over** ("Click again to reset" on the first click), and in a `/setup` scenario at `/` only leadership sees **Back to the Northstar demo** ("Click again to go back to the Northstar demo"); without `?ops` neither control is shown
+The device approval page and the OAuth consent page SHALL ask a person whose sign-in is older than 15 minutes to
+sign in again before they can approve, and SHALL show the same prompt when the server refuses an approval with 403
+`reauth_required`.
 
-### Requirement: Your turn view
+#### Scenario: Stale sign-in on the device page
 
-The Your turn view SHALL list what waits on the signed-in role, each card quoting the exact measure
-text and offering one action, using the same next-actor rules the server enforces.
+- **WHEN** a person who signed in 40 minutes ago opens `/app/device`
+- **THEN** instead of the code form the page shows "Sign in again to approve a device. Approving needs a sign-in from the last 15 minutes." with **Sign in again**
 
-#### Scenario: Owner has a proposal to review
+#### Scenario: Signing in again
 
-- **WHEN** a proposal is `PENDING_SECURITY` and Security is signed in
-- **THEN** "Waiting on you" shows "<proposer> asks to change your goal" with the proposed text and **Review the proposal**, which opens Proposals; `COUNTERED` shows **Review the changes** to Product and `ACKNOWLEDGED_BY_PRODUCT` shows **Review and approve** to Security
+- **WHEN** the person presses **Sign in again**
+- **THEN** the app posts to `POST /api/v2/auth/sign-out` and opens `/app/sign-in?next=<this page, with its query>&email=<their email>`, so after a fresh sign-in they return to the same device code or consent request
 
-#### Scenario: Product can propose
+#### Scenario: Sign-in ages while the page is open
 
-- **WHEN** Product is signed in, the dependency is `UNKNOWN` and no proposal is open
-- **THEN** a card "The new company requirement needs <owning team> to change its goal" offers **Propose a change**, which opens the composer; after a decline its subtitle says "<owner> declined your last proposal."
+- **WHEN** the page was opened with a recent sign-in, but **Approve** or **Allow read-only access** gets 403 `reauth_required`
+- **THEN** the page replaces the form with the sign-in-again prompt and nothing is approved
 
-#### Scenario: Leadership items
+### Requirement: Devices screen
 
-- **WHEN** leadership is signed in
-- **THEN** Northstar shows "The next company goal is ready. Approve it and send it to every team" with **Review and send** while a draft exists, and custom shows "<asking> and <owning> agreed. The launch decision is yours" with **Decide the launch** until the launch is approved; both open Company goal
+The `/app/devices` page SHALL list the person's paired devices from `GET /api/v2/devices` and let them revoke an
+active one.
 
-### Requirement: Your turn context sections
+#### Scenario: Revoke a device
 
-The Your turn view SHALL also show what waits on others and what changed, and SHALL start the
-time-to-agreement clock when it is shown while the company change is unresolved.
+- **WHEN** a person presses **Revoke** on an active device
+- **THEN** the page calls `DELETE /api/v2/devices/<id>` and the device shows a red "revoked" pill instead of the green "active" one; each row shows when it was connected, when it was last seen and its workspaces
 
-#### Scenario: Waiting on others
+#### Scenario: No devices
 
-- **WHEN** an open proposal's next actor is someone else
-- **THEN** a "Waiting on others" card such as "<person> reviews the proposal" with **Open** is shown; with nothing waiting on the viewer the view says "Nothing is waiting on you."
+- **WHEN** the person has no paired device
+- **THEN** the page shows "No devices yet. Run align login on your machine to connect one."
 
-#### Scenario: Clock starts on landing
+### Requirement: Invite acceptance page
 
-- **WHEN** the view renders while the company requirement exists, the dependency is `UNKNOWN` and the timer has not started
-- **THEN** the app records `ceo_change_viewed` via `POST /api/timer`, and the "Changed today" (or "What changed") section shows the requirement with a status badge and **See goals**, plus a "See the decision" card once agreed
+The `/app/invite/<token>` page SHALL preview an invite with `GET /api/v2/invites/<token>` and let only the invited
+email join with **Join workspace**.
 
-### Requirement: Goals view
+#### Scenario: Accept an invite
 
-The Goals view SHALL show the company goal node, both team goal nodes with their measures and top
-work items, and the dependency node between them, with a lens and one next step for the selected
-node.
+- **WHEN** the signed-in person's email matches the invite and they press **Join workspace**
+- **THEN** the page shows "You are invited to <workspace> as <role>." (adding "and to the team <team> as <team role>." when the invite names a team), posts to `POST /api/v2/invites/<token>/accept` and opens `/app/w/<ws>`
 
-#### Scenario: Unresolved dependency
+#### Scenario: Wrong account or unusable link
 
-- **WHEN** no proposal exists and the dependency is `UNKNOWN`
-- **THEN** the dependency node is amber with "Unknown" and "select to see why", the owning team's conflicting measure carries "Clashes with the CEO's new requirement" (custom: "In conflict"), and the strip offers **See ways forward** (Northstar, opens the brief drawer) or **Open proposals** / **See proposals** (custom)
+- **WHEN** the signed-in email differs from the invited one, or the token is unknown, accepted, withdrawn or expired
+- **THEN** the page says "This invite is for <invited email>. You are signed in as <email>. Sign in with the invited address to join." with no button, or "This invite link is not valid. It may have been used, withdrawn or expired."
 
-#### Scenario: Lens
+#### Scenario: Invitee without an account
 
-- **WHEN** a person picks a team in the "Lens" control (Everything / <asking> / <owning>)
-- **THEN** the other team's node and connector dim and that team's goal is selected in the Inspector
+- **WHEN** a signed-out invitee opens the invite link
+- **THEN** sign-in opens with `next` set to the invite page; the email code for the invited address creates their account, because an invite for it is pending
 
-#### Scenario: Agreement reached
+### Requirement: Workspace Goals tab
 
-- **WHEN** an acceptance exists
-- **THEN** the dependency shows the agreed status, the strip offers **Open record** (Northstar), the summary ProofStrip appears below, and the app records `saw_accepted_version` once via `POST /api/timer`
+The Goals tab at `/app/w/<ws>` SHALL list the goals the person can read from `GET /api/v2/workspaces/<ws>/goals`,
+and SHALL give everyone but viewers a "New goal" form that posts to `POST /api/v2/workspaces/<ws>/goals`.
 
-### Requirement: Ways forward drawer
+#### Scenario: Goal list
 
-The Ways forward drawer (Northstar brief, opened from Goals, the Inspector or the decision view)
-SHALL present ranked options as suggestions and let only Product propose.
+- **WHEN** a member opens the tab
+- **THEN** each goal links to its goal page and shows its status pill, a "company" pill for a company goal, its visibility ("Only me", "My team", "Everyone in the workspace"), its team, "you can bind sessions" (green) or "needs alignment to bind" (amber), its owner ("Yours" for the person's own) and version, and its measures; with none, "No goals you can see yet."
 
-#### Scenario: Product proposes P0
+#### Scenario: Create a team goal
 
-- **WHEN** Product opens the drawer, keeps P0 selected and presses "Propose P0 to Alex / Security Lead"
-- **THEN** the drawer closes and Proposals opens; the propose button is disabled for P1 and P2, and other roles see a disabled "Only Product can propose"
+- **WHEN** a member fills Goal (up to 300 characters), measures (up to 10, each with an optional target), "Who can see it", Team ("No team" or one of the person's teams; hint "Members of the team can bind their sessions to it") and the optional anchors, and presses **Create goal**
+- **THEN** the page posts `{title, level:"team", visibility, team_id, measures, anchors}` and lists the new goal; "My team" is disabled for a person in no team, and **Create goal** stays disabled for "My team" without a team
 
-#### Scenario: Brief content
+#### Scenario: Create a company goal
 
-- **WHEN** the drawer opens
-- **THEN** it records `brief_reviewed` once, shows "Work completed ≠ Goal achieved", the ranked options with owner and "time available" chips, collapsible "What could prove this wrong" and "Cited evidence" (with the Alike decision, or "Pending"/"Not available"), a **Test in Scenario Studio** button, and closes on Escape or **Close** (**← Goals** when opened from Goals)
+- **WHEN** a workspace owner chooses Level "Company goal"
+- **THEN** the Team field is hidden, visibility is fixed to "Everyone in the workspace", and the page posts `{level:"company", visibility:"workspace", team_id:null, …}`; members and viewers are not offered the Level choice
 
-### Requirement: Scenario Studio
+### Requirement: Goal page details and new version
 
-Scenario Studio SHALL compare only sandbox runs already recorded in state (latest baseline of the
-current plan against the latest normal or outage-test run of the new plan) and never start a run.
+The goal page at `/app/w/<ws>/goals/<goal>` SHALL show the goal from `GET /api/v2/workspaces/<ws>/goals/<goal>`, its
+tree and every version, and SHALL give a person the server lets edit it (`can_edit`) a "New version" form.
 
-#### Scenario: Comparable runs exist
+#### Scenario: Reading a goal
 
-- **WHEN** the view opens with recorded baseline and candidate runs
-- **THEN** it records `scenario_reviewed`, loads run details from `GET /api/evidence/<id>`, shows one result card per run with verdict, checks passed and which tickets changed, and warns "These runs didn't use the same tickets and checks, so they can't be compared" if mission, seed or checks differ
+- **WHEN** a member opens a goal
+- **THEN** the page shows its title, status, level, visibility, team, version, owner ("you" for the person's own), measures with targets, anchors, contributing goals and every version (title, status, time and the first 12 characters of its content hash); a goal the server does not return shows "This goal does not exist or you can't see it."
 
-#### Scenario: Attach to proposal
+#### Scenario: Save a new version
 
-- **WHEN** Product presses **Attach to proposal** while no proposal is open
-- **THEN** the new plan and the baseline, candidate and outage-test run ids are attached and Proposals opens; the button is absent for other roles or while a proposal is open, and **Run details** opens Evidence on the chosen run
+- **WHEN** the owner edits Goal, measures, Status (Active, Achieved, Dropped), anchors and "Depends on" (other active goals) and presses **Save version <n+1>**
+- **THEN** the page posts them with `version` to `POST .../goals/<goal>/versions`; a 409 `cycle` shows "That would make these goals depend on each other in a loop." and other errors show the server's message
 
-#### Scenario: No sandbox
+#### Scenario: Goal tree
 
-- **WHEN** a custom scenario is open
-- **THEN** Scenario Studio is not in the nav (custom scenarios never list it) and no control opens it; the shell renders the view only when the scenario has sandbox runs, and in a custom scenario the view then states "No sandbox in this scenario" and "Not sandbox-tested" instead of comparing runs
+- **WHEN** the goal contributes to goals or depends on goals
+- **THEN** a "Goal tree" card links each parent with its version, a green "reviewed" or an amber "reviewed against version <n>" / "not reviewed yet" pill, and for an editor **Still fits version <n>**, which posts `{parent_id}` to `POST .../goals/<goal>/review`; dependencies are listed as links with their versions
 
-### Requirement: Plan test drawer
+### Requirement: Ask to align from the goal page
 
-The "Which plan follows the new priority?" drawer SHALL show the current and new plan side by side
-with their checks, the protected ticket and the agent's steps, and let only Product add the results
-to a proposal.
+The goal page SHALL offer an "Align with this goal" card on an active goal owned by someone else to every member who
+is not a viewer, and SHALL send the request with `POST /api/v2/workspaces/<ws>/alignments`.
 
-#### Scenario: Product adds passing results
+#### Scenario: Send an alignment request
 
-- **WHEN** Product presses **Add test results to the proposal** after the new plan passed
-- **THEN** the plan and the attached run ids are kept (surviving a reload in session storage), the drawer closes and Proposals opens: on the composer when no proposal is open, otherwise on the open proposal, with the attachment kept for the next composer
+- **WHEN** a member picks **Recognize contribution only** (optionally naming one of their own bindable goals) or **Work toward this goal and count future usage here**, ticks shared sessions (at least one for work toward), writes an optional note "never sent to agents" (up to 1000 characters) and presses **Send request**
+- **THEN** the page posts `{target_goal_id, source_goal_id, choice, session_keys, note}` and says "Sent. Follow it on Alignments." with a link to the Alignments tab
 
-#### Scenario: Results not ready
+#### Scenario: Refused request
 
-- **WHEN** a run is missing or the runs used different tickets or checks
-- **THEN** the drawer shows "Can't compare yet" or "Not a fair comparison"; a missing run's column shows "Not run yet"; a failing candidate's button reads "Add anyway (not tested: the new plan didn't pass)"; non-Product roles see the button disabled with "Only the Product Director can add test results to a proposal."
+- **WHEN** the server answers 409 `cycle`, `already_governed`, `sharing_stopped` or `goal_not_active`
+- **THEN** the card shows the server's message and nothing is sent again automatically
 
-### Requirement: Evidence view
+### Requirement: Propose a change from the goal page
 
-The Evidence view SHALL show the authority strip, the decision chain, every Sparta run, the audit
-log and the timer, keeping backend ids and commands inside closed "For engineers" sections.
+The goal page SHALL offer **Propose a change** to every member who can read the goal, is not a viewer and does not
+own it, and SHALL send the proposal with
+`POST /api/v2/workspaces/<ws>/goals/<goal>/change-requests`.
 
-#### Scenario: Open a run
+#### Scenario: Propose a change
 
-- **WHEN** a person opens Evidence from **See full results in Evidence**, **Run details** or the Inspector's **Open Evidence**
-- **THEN** the app records `evidence_opened`, expands and scrolls to the selected run, and loads its checks, changed and off-limits tickets and step-by-step agent trace from `GET /api/evidence/<id>`
+- **WHEN** a member presses **Propose a change**, edits the pre-filled Goal, measures, Status and "Depends on", writes "Why this change" (required, 1 to 2000 characters) and presses **Send for approval**
+- **THEN** the page posts `{base_version:<current version>, changes:<only the fields that differ>, reason}` and the new request appears in the goal's "Change requests" list as "waiting for approval"; **Send for approval** stays disabled while nothing differs or the reason is empty
 
-#### Scenario: No runs
+#### Scenario: Stale or duplicate proposal
 
-- **WHEN** no runs have been ingested
-- **THEN** the runs section shows "No test runs yet." with an explanation and the run commands under "For engineers"
+- **WHEN** the server answers 409 `stale_version` or 409 `already_open`
+- **THEN** the form shows "This goal changed while you were editing. Reload to start from version <n>." or "You already have an open change request on this goal." with a link to it
 
-### Requirement: Proposal composer
+#### Scenario: Who does not see it
 
-The Proposals view SHALL let only Product compose a proposal, only while no proposal is open, and
-send it with `POST /api/proposals`.
+- **WHEN** the goal's owner or a viewer opens the goal page
+- **THEN** there is no **Propose a change**; the owner uses the "New version" form instead
 
-#### Scenario: Send a tested proposal
+### Requirement: Change request controls on the goal page
 
-- **WHEN** Product fills "New target for <owning team>" (up to 300 characters), "Why" and "What <asking team> will do in return" and presses "Send proposal to <owner>"
-- **THEN** the app posts the measure text, rationale, reciprocal commitment, plan id, plan version and attached run ids to `POST /api/proposals`, clears the attachment and selects the new proposal
+The goal page SHALL list the goal's change requests from `GET .../goals/<goal>/change-requests` to everyone who can
+read the goal, and SHALL show on each request only the actions its `can` flags allow, posting them to
+`POST .../goals/<goal>/change-requests/<id>/<action>`.
 
-#### Scenario: Missing fields or tests
+#### Scenario: Reading a request
 
-- **WHEN** the new target or the commitment is empty
-- **THEN** the send button is disabled, with "▲ Say what <team> will do in return" and (custom only) "▲ Write the new target"
+- **WHEN** a member opens a request in "Change requests"
+- **THEN** the page reads `GET .../change-requests/<id>` and shows the requester, a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"), the base version, the revision, the reason, a before and after view of each changed field, every revision with its author and note, and once decided who approved or rejected it, their note or reason and the resulting version; a superseded request says "Closed because the goal was marked achieved or dropped."
 
-#### Scenario: No test results attached
+#### Scenario: Approver acts
 
-- **WHEN** a Northstar composer has no test results attached
-- **THEN** the send button stays enabled (missing attachments never block sending), and an amber "No test results added" card warns that the proposal will show as not tested and offers **Test which plan follows the new priority**, which opens the plan test drawer
+- **WHEN** a member of the goal's approval set (other than the requester, unless they own the goal) acts on a pending request
+- **THEN** **Approve** (with an optional note) posts `{revision, note}` to `approve`, **Reject** requires "Why you're rejecting" and posts `{reason}` to `reject`, and **Suggest a change** opens the pre-filled fields with a note and posts `{changes, note}` to `counter`
 
-#### Scenario: Defaults
+#### Scenario: Approval blocked by a newer version
 
-- **WHEN** the composer opens in Northstar
-- **THEN** the target, why and return fields are pre-filled with the demo text; in custom scenarios they start empty and "The plan" section shows the setup's plan with "Not sandbox-tested"
+- **WHEN** **Approve** gets 409 `stale_version`
+- **THEN** the request shows "The goal changed after this request was made. <requester> needs to update it before it can be approved." and stays pending; this also happens to other open requests on a goal after one of them is approved
 
-### Requirement: Proposal inbox and review thread
+#### Scenario: Requester acts
 
-The Proposals view SHALL list every proposal newest first with state and test badges, and show the
-selected proposal as a conversation: the proposal, each counter, Product's acknowledgment, and the
-approval or decline.
+- **WHEN** the requester views their own request
+- **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending); a pending or countered one offers **Withdraw** (`withdraw`); and a pending one whose base version is behind the goal shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{base_version:<n>}` to `rebase`
 
-#### Scenario: Reading a counter
+#### Scenario: Viewer
 
-- **WHEN** Security asked for changes that only appended text to the target
-- **THEN** the counter bubble shows only the added words highlighted; a counter that changes the plan carries "Changes how the agent works: needs a new test" (Northstar), and custom conditions show with "Not confirmed yet"
+- **WHEN** a viewer opens the goal page
+- **THEN** the change requests are listed with no action buttons
 
-#### Scenario: Empty inbox
+### Requirement: Workspace Requests tab
 
-- **WHEN** no proposals exist and the viewer is not Product
-- **THEN** the view shows "No proposals to your goal yet." with an explanation of where proposals appear
+The Requests tab at `/app/w/<ws>/requests` SHALL show the change requests the person can see, from
+`GET /api/v2/workspaces/<ws>/change-requests`, in three sections: "Waiting on you", "Your requests" and "Others".
 
-### Requirement: Owner decision on a proposal
+#### Scenario: Sections
 
-The review SHALL give only the owning team, and only in `PENDING_SECURITY` or
-`ACKNOWLEDGED_BY_PRODUCT`, a "Your decision" section with Accept, Accept if… (custom only), Counter
-and Decline.
+- **WHEN** a member opens the tab
+- **THEN** "Waiting on you" holds pending requests the person may approve, "Your requests" holds the person's own requests (including a countered one that waits on them), and "Others" holds every other request they can see; each card names the goal (a link to its goal page), the requester, the state pill, the reason and the changed fields, with the same actions as on the goal page
 
-#### Scenario: Approve
+#### Scenario: Empty sections
 
-- **WHEN** Security picks **Accept**, fills "Why you're approving" and presses **Approve the change to my goal**
-- **THEN** the app calls `POST /api/proposals/<id>/accept` with the rationale; the thread then shows the approval with the new goal version and the old version "kept as superseded"
+- **WHEN** a section has nothing
+- **THEN** it shows "Nothing is waiting on you.", "You have not proposed a change. Open someone else's goal to propose one." or "None." respectively
 
-#### Scenario: Approve untested or stale
+### Requirement: Workspace People tab members
 
-- **WHEN** the proposal is `STALE`, or a custom proposal is not `TESTED`
-- **THEN** the approve button stays disabled until the person ticks the acknowledgement ("…I'm approving it without a passing test" / "I'm approving this plan without a sandbox test"), and the request carries `accept_untested: true`
+The People tab SHALL list the workspace's members from `GET /api/v2/workspaces/<ws>`, let a workspace owner change a
+member's role or remove a member, and let any member leave.
 
-#### Scenario: Counter, accept if, decline
+#### Scenario: Change a role
 
-- **WHEN** Security sends **Ask for changes**, **Send my conditions to <asking team>** or **Decline this proposal**
-- **THEN** the app calls `POST /api/proposals/<id>/counter` (with revised text, why, and either `changes_plan` in Northstar or optional `conditions` in custom, up to 1000 characters) or `POST /api/proposals/<id>/reject`
+- **WHEN** an owner picks Owner, Member or Viewer next to a member
+- **THEN** the page posts `{role}` to `POST /api/v2/workspaces/<ws>/members/<user>` and the list shows the new role; members and viewers see roles as pills only
 
-### Requirement: Asking team's actions on a proposal
+#### Scenario: Remove a member
 
-The review SHALL let Product accept the owner's changes while `COUNTERED`, and otherwise show Product
-that it is waiting, with a harmless way to show that only the owner can approve.
+- **WHEN** an owner presses **Remove** next to another member and confirms "Remove <name> from <workspace>? Their team places, device access and connected apps for this workspace end. Their goals, sessions and history stay."
+- **THEN** the page calls `DELETE /api/v2/workspaces/<ws>/members/<user>` and the member disappears from the list
 
-#### Scenario: Accept the changes
+#### Scenario: Leave
 
-- **WHEN** Product presses "Accept Security's changes and confirm what Product will do" (custom: "Accept <owning>’s changes and confirm what <asking> will do")
-- **THEN** the app calls `POST /api/proposals/<id>/acknowledge` and the proposal moves to waiting for the owner's final approval
+- **WHEN** a member presses **Leave workspace** and confirms "Leave <workspace>? You lose access to it. Your goals, sessions and history stay."
+- **THEN** the page calls `DELETE /api/v2/workspaces/<ws>/members/<own id>` and opens `/app`
 
-#### Scenario: Try to approve as non-owner
+#### Scenario: Last owner
 
-- **WHEN** Product presses "Try to approve (only <owning team> can)" while waiting
-- **THEN** the app re-checks `GET /api/session`, calls `POST /api/proposals/<id>/accept` directly without refreshing state, and on 403 shows "Handed back: only <owning team> can approve this"; a stale tab shows "This tab is out of date…" and sends nothing
+- **WHEN** a role change, removal or leave gets 409 `last_owner`
+- **THEN** the page shows "A workspace needs at least one owner. Make someone else an owner first." and nothing changes
 
-### Requirement: Next-step guidance
+### Requirement: Workspace People tab invites
 
-In custom scenarios the app SHALL show where a proposal stands and, after a hand-off, who acts next,
-with a one-click switch for a solo tester; Northstar shows neither.
+The People tab SHALL give workspace owners an "Invite someone" card that creates an email-bound invite link,
+optionally naming a team, and lists and withdraws open invites.
 
-#### Scenario: Progress strip
+#### Scenario: Create an invite
 
-- **WHEN** a custom proposal is open in the review
-- **THEN** a strip shows Proposed, Reviews (or Asked for changes), Accepts the changes (only after a counter), Approves and Decides the launch, each marked done, NOW / YOU, NOW, NEXT or stopped (Declined)
+- **WHEN** an owner enters an email, picks a Role (Member, "Viewer (read only)", Owner), optionally a Team and a team role (Member by default, or Lead), and presses **Create invite link**
+- **THEN** the page posts `{email, role, team_id, team_role}` to `POST /api/v2/workspaces/<ws>/invites` and shows "Send this link to them yourself. It works once, for that email address, for 7 days: <link>"
 
-#### Scenario: Hand-off line
+#### Scenario: Open invites
 
-- **WHEN** Product has sent a proposal (`PENDING_SECURITY`), Security has countered (`COUNTERED`) or Product has acknowledged (`ACKNOWLEDGED_BY_PRODUCT`)
-- **THEN** the actor who just handed off sees "Next: <person> reviews this" / "reviews your changes" / "gives the final approval" with an **Act as <team> →** button that runs Switch team; the actor who acts next sees no such line
+- **WHEN** invites exist
+- **THEN** each shows its email, role, team, and "joined <time>" or "expires <time>"; an unaccepted one has **Withdraw**, which calls `DELETE .../invites/<id>`; members and viewers see no invite card
 
-### Requirement: Decisions list
+### Requirement: Workspace People tab teams
 
-The Decisions view SHALL list open proposals, acceptances and declined proposals newest first, with
-All / Open / Accepted filters and a Declined filter once a declined proposal exists.
+The People tab SHALL show a "Teams" card listing every team with its members and roles, let workspace owners create
+teams, and let owners and team leads manage team members, with lead changes reserved to workspace owners.
 
-#### Scenario: Open a decision
+#### Scenario: Create a team
 
-- **WHEN** a person presses an accepted row ("<owning>’s goal <version>", "Agreement reached" in Northstar or the agreement status in custom)
-- **THEN** the decision record opens; an open or declined row opens that proposal in Proposals, and an empty list shows "Nothing here yet."
+- **WHEN** an owner enters a name (up to 100 characters) under "New team" and presses **Create team**
+- **THEN** the page posts `{name}` to `POST /api/v2/workspaces/<ws>/teams` and lists the team; with no teams the card says "No teams yet." (owners also see "Teams group people; members can bind their sessions to the team's goals.")
 
-### Requirement: Next decision view
+#### Scenario: Add a team member
 
-Before agreement, the decision view SHALL state the conflict and who owns it, and offer the asking
-team the step to propose. No control opens the decision view before an agreement exists, so this
-content shows only when the view is already open and the agreement goes away (for example after a
-restart from another browser).
+- **WHEN** an owner or the team's lead picks a workspace member under "Add someone", a role and presses **Add**
+- **THEN** the page posts `{user_id, role}` to `POST .../teams/<team>/members`; a person can be in several teams, so "Add someone" lists every member not already in this team
 
-#### Scenario: Northstar open decision
+#### Scenario: Leads are owner-only
 
-- **WHEN** Product opens the decision view with the dependency unresolved and no proposal
-- **THEN** it shows "Your company's priorities changed. Your agent's plan didn't.", the "Current plan · running now" and "Tested alternative" cards with checks passed and the critical ticket outcome, **Review the conflict with Security**, and "Propose the tested change →" (attaches the runs and opens Proposals) or "Propose the change (not tested yet) →"; Security sees "Product hasn't proposed it yet. When they do, you decide here."
+- **WHEN** a team lead who is not a workspace owner manages the team
+- **THEN** the role choice offers only Member, and other leads have no **Remove** or role control; a workspace owner can make anyone a lead, change a lead's role (posting the new role to `.../teams/<team>/members`) and remove anyone with **Remove** (`DELETE .../teams/<team>/members/<user>`)
 
-#### Scenario: Proposal in progress
+### Requirement: Workspace Sessions tab
 
-- **WHEN** a proposal is open
-- **THEN** the view shows a role-specific title, both sides' text, the latest changes from the owner, and **Review and decide →** when it is the viewer's turn or "Nothing for you to do until <team> responds." otherwise
+The Sessions tab SHALL list the person's own shared sessions with their usage and controls, and for workspace owners
+everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<ws>/sessions`.
 
-### Requirement: Decision record
+#### Scenario: Own sessions
 
-Once the dependency is accepted, the decision view SHALL show the decision record with Summary,
-Activity and How to read this tabs.
+- **WHEN** a member opens the tab
+- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared"), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed"), the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
 
-#### Scenario: Summary tab
+#### Scenario: Confirmed actions
 
-- **WHEN** a person opens the record
-- **THEN** it shows one status pill ("Agreement reached" in Northstar; "Agreed, launch pending" or "Agreed, launch approved" in custom, amber while conditions exist), the columns Approved / Only proposed / Never tested, who decided, the measured time, **Copy text**, **← Decisions** and "See work still on the old plan (<n>)"
+- **WHEN** the person presses **Stop sharing** or **Delete shared history**
+- **THEN** the page asks "Stop sharing this session? Nothing more will be uploaded. What was already shared stays until you delete it." or "Delete this session's shared history? Its usage is removed from every total, so goal and team totals will change. This can't be undone." and on confirm posts to `.../sessions/<key>/stop-sharing` or calls `DELETE .../sessions/<key>`
 
-#### Scenario: Activity tab
+#### Scenario: Owners see everyone's sessions
 
-- **WHEN** a person picks **Activity**
-- **THEN** the record shows the audit log ("Names come from who was signed in, never from the request"), the sandbox runs (or "No sandbox runs in this scenario") and the coordination timer with its touchpoints
+- **WHEN** a workspace owner opens the tab
+- **THEN** an "Everyone's shared sessions (workspace owners)" card lists each session's owner, repo alias and harness with **Stop agent** or **Resume agent** (`POST .../sessions/<key>/stop` or `/resume`), never titles or usage; a suspended own session shows "The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads."
 
-### Requirement: Company goal screen
+### Requirement: Workspace Alignments tab
 
-The Company goal screen SHALL show the current company goal with new and changed measures marked, and
-in Northstar SHALL let only leadership approve and send a drafted next version.
+The Alignments tab SHALL show the alignment requests the person is part of, from
+`GET /api/v2/workspaces/<ws>/alignments`, under "Waiting on you", "Your requests" and "Others you are part of", with
+only the actions the server allows.
 
-#### Scenario: Approve and send
+#### Scenario: Alignment card
 
-- **WHEN** leadership edits the draft's goal text and presses **Approve and send to teams**
-- **THEN** the app calls `POST /api/org/push` with the objective, measures and success criteria, and the screen then shows "Last sent to teams" with **See where AI agent work is going** and **See how the goals connect**
+- **WHEN** a member opens the tab
+- **THEN** each card shows "<requester> asks to align with <goal>" (goals the person can't read show as "a goal you can't see"), the state, the choice, the revision, its effects, its sessions, each approval requirement with the people who can satisfy it and whether it is satisfied, the note and the history, and the buttons its `can` flags allow: **Approve**, **Suggest a change**, **Accept the change**, **Decline**, **Withdraw**, **Revoke**
 
-#### Scenario: Nothing to approve
+#### Scenario: Counter and revoke
 
-- **WHEN** no draft exists and a goal was already pushed
-- **THEN** the screen says "Nothing to approve: company goal <version> was already sent…" and points to `?ops` / **Start the demo over**
+- **WHEN** an approver presses **Suggest a change**, or someone involved presses **Revoke**
+- **THEN** a counter form (choice, sessions to keep, note) posts `{revision, choice, keep, note}` to `.../alignments/<id>/counter`, and revoking first confirms "Revoke this alignment? From now on it has no effect. Sessions that counted under the goal only because of it stop uploading until their owner picks a goal. Past usage does not move."
 
-### Requirement: Launch decision
+#### Scenario: Approval would make a loop
 
-In custom scenarios the Company goal screen SHALL show leadership the teams' decision record and let
-leadership approve the launch or say not yet; before agreement it SHALL say there is nothing to do.
+- **WHEN** **Approve** gets 409 `cycle`
+- **THEN** the card shows "Approving this would make these goals contribute to each other in a loop." and the request stays pending
 
-#### Scenario: Approve the launch
+### Requirement: Workspace Spend tab
 
-- **WHEN** leadership adds an optional note (up to 500 characters) and presses **Approve launch**
-- **THEN** the app calls `POST /api/proposals/<id>/launch` with `decision: "approved"`; if the plan is not tested the button stays disabled until "I'm launching a plan that was not sandbox-tested" is ticked and the request carries `accept_untested`
+The Spend tab SHALL show token usage and estimated list cost from
+`GET /api/v2/workspaces/<ws>/spend?by=goal|team|session` with a "Group by" choice of By goal, By team and By my
+sessions.
 
-#### Scenario: Change the decision
+#### Scenario: Usage table
 
-- **WHEN** a launch decision already exists
-- **THEN** only the other choice is offered (**Change to not yet** or **Approve launch**) under "Change the launch decision", and every agreement status in the app follows the result
+- **WHEN** a member (viewers included) opens the tab
+- **THEN** a table shows, per row, requests, input, output, cache read, cache write and estimated list cost, with the billing basis per row, then "Not bound to a goal" and "Total", the server's note, "Goals you can't see are grouped without names. There is no per-person view.", and a count of unpriced requests when there are any
 
-### Requirement: Work screen
+### Requirement: Workspace Apps tab
 
-The Work screen SHALL show work still on the old plan, the goal cascade and, in Northstar only, the
-AI coding sessions grouped by the goal each one seems to serve.
+The Apps tab at `/app/w/<ws>/apps` SHALL list the AI apps connected to the workspace from
+`GET /api/v2/workspaces/<ws>/apps` and explain how to connect one; a person sees their own connections, and a
+workspace owner sees everyone's.
 
-#### Scenario: Old-plan nudge
+#### Scenario: Connected apps
 
-- **WHEN** an approval exists and some linked work items were not re-planned
-- **THEN** each is marked "still on the old measure", "Keep, re-scope or stop, per item" is labelled as coming next, and **Copy a nudge for the owner** copies a summary (with a selectable fallback if copying is blocked); before any approval it says "No approved decision yet, so nothing to move."
+- **WHEN** a member opens the tab
+- **THEN** each connection shows the app's name, its redirect host, the person who connected it, when it was approved and when it last read the workspace, with **Disconnect** on the person's own connections (an owner sees **Disconnect** on every connection), which calls `DELETE /api/v2/workspaces/<ws>/apps/<id>`; with none, "No AI apps are connected to this workspace."
 
-#### Scenario: Confirm a session link
+#### Scenario: How to connect
 
-- **WHEN** a session's suggested link points at the signed-in role's own goal and the person presses **Confirm link** or **Not this goal**
-- **THEN** the app calls `POST /api/mappings/<session_id>/confirm` or `/reject`; the lanes poll `GET /api/mappings` every 3 seconds and show "Goals changed — re-checking which goal each session serves…" while re-matching
+- **WHEN** a member who is not a viewer opens the tab
+- **THEN** a "Connect an AI app" card shows the MCP URL `<origin>/api/mcp` with **Copy** and says the app will send them to Align to sign in and choose this workspace; a viewer sees "Viewers can't connect apps to this workspace." instead
 
-### Requirement: Inspector
+### Requirement: OAuth consent screen
 
-The right-rail Inspector SHALL show details of the current selection (goal, dependency, work item,
-run or proposal), defaulting to the dependency, with role-aware wording and actions.
+The `/oauth/authorize` page SHALL, in the same look as the web app, let a signed-in person with a recent sign-in grant
+an AI app read-only access to one workspace in which they are an owner or member, acting as themselves, and SHALL
+refuse requests it cannot trust without redirecting.
 
-#### Scenario: Peer goal selected
+#### Scenario: What the page shows
 
-- **WHEN** Product selects Security's goal
-- **THEN** the Inspector shows owner, version (earlier version "kept for the record"), "Who can edit" as "Security's goal · view only", the measures, unknowns Product cannot see, "Busy isn't the same as on-goal" and **Propose a change to Security's goal**
+- **WHEN** a signed-in person with a recent sign-in arrives with a valid request
+- **THEN** the page shows "Connect <app> to Align", "This app named itself." unless it is a known AI provider's client document, the redirect host, and "What it can do": it reads goals, change requests, decision records and directives in the workspace they choose, as them and with their role; it can't propose, approve or change anything; it never sees captured prompts; what it reads is sent to <provider>; they or a workspace owner can disconnect it on the workspace's Apps tab, and it is disconnected if they leave the workspace
 
-#### Scenario: Missing selection
+#### Scenario: Choose a workspace and allow
 
-- **WHEN** the selected item no longer exists or is filtered from the viewer
-- **THEN** the Inspector shows "Unknown" and "<This item> wasn't found, or you can't see it."
+- **WHEN** the person picks one workspace under "Which workspace" and presses **Allow read-only access**
+- **THEN** the page posts `{params, decision:"approve", workspace_id}` to `POST /api/oauth/approve` and follows the returned redirect; **Cancel** posts `decision:"deny"`; **Allow read-only access** stays disabled until a workspace is picked
 
-### Requirement: Live agent pane
+#### Scenario: Viewer workspaces
 
-In Northstar the right rail of the decision view SHALL show "Live · Security's AI agent", subscribed
-to `GET /api/directives/stream?session=*` over server-sent events.
+- **WHEN** the person is a viewer in some workspaces
+- **THEN** those workspaces are not offered; with no workspace they own or are a member of, the page shows "You have no workspace you can connect an app to. Viewers can't connect apps." and no **Allow** button
 
-#### Scenario: Agent woken by approval
+#### Scenario: Loopback redirect
 
-- **WHEN** an authority event is pushed and the captured agent session receives and acts on it
-- **THEN** the pane shows "Connected to Align's live feed", a timeline entry "Woken by: Security approved its goal <version>" with received and acted times, the following run's checks and critical-ticket status, and live feed lines such as "Align → … · pushed to 1 running agent"
+- **WHEN** the redirect URI is on `localhost`, `127.0.0.1` or `[::1]`
+- **THEN** the page shows an amber warning "This app runs on your computer (<host>). Allow it only if you just started it yourself."
 
-#### Scenario: No agent
+#### Scenario: Untrusted or rate-limited request
 
-- **WHEN** no matching Claude Code session was captured
-- **THEN** the pane shows "No agent connected" and "Start the agent to see it here"
+- **WHEN** the app or redirect fails the server check, or this network made too many requests
+- **THEN** the page shows "Can't connect this app" with the reason, or "Too many requests from this network. Wait a minute, then reload this page.", or for a redirectable error "Return to the app"; it offers no **Allow** button
 
-### Requirement: Connect AI apps
+#### Scenario: Server stops answering
 
-In a workspace (`/w/<id>`) the sidebar SHALL show "Agents on this plan" and a **Connect an AI app**
-dialog backed by `GET /api/workspaces/connections`.
+- **WHEN** the approve request gets no answer within 20 seconds
+- **THEN** the page shows "Align didn't answer. Reload this page and choose Allow again." and re-enables the buttons
 
-#### Scenario: Connect and see the app
-
-- **WHEN** a person opens the dialog, picks a tab (Claude Code, Codex, Claude app, ChatGPT) and follows its steps
-- **THEN** the dialog shows the MCP URL or command with **Copy**, polls every 3 seconds while open (15 seconds while closed), and once the app has read the workspace lists it as "<app> is connected as <team>" with a suggested first question
-
-#### Scenario: Disconnect
-
-- **WHEN** a person presses **Disconnect** on an app connected as their own team (leadership sees **Disconnect** on every app), or leadership presses **Disconnect all**
-- **THEN** the app calls `DELETE /api/workspaces/connections` (with the app id, or none for all); apps that have not read since the plan changed show "▲ Hasn’t read the plan since it changed…"
-
-### Requirement: Setup page
-
-The `/setup` page SHALL let only the demo store's leadership replace that store with a custom
-scenario, after an explicit confirmation, via `POST /api/scenario`.
-
-#### Scenario: Save a scenario
-
-- **WHEN** leadership fills the six steps (Company, The priority that changed, Who’s changing the priority, Whose plan has to change, Work already running on the old plan, The proposed plan) and presses **Save this scenario** then **Yes, replace and save**
-- **THEN** the app posts the form with `confirm: "replace"` to `POST /api/scenario` and shows "Scenario ready: <company>" with **Open the scenario**; a 400 marks fields and shows "Some fields need fixing. They are marked below."
-
-#### Scenario: Wrong session
-
-- **WHEN** the visitor is not leadership, or is signed in to a custom workspace
-- **THEN** the page shows "Only leadership can set up a new scenario…" or "This page sets up the demo workspace, and this browser is signed in to another workspace." with an **Open that workspace** link, and no form
-
-### Requirement: New workspace page
-
-The `/new` page SHALL create a separate workspace with `POST /api/workspaces` without signing anyone
-in, and show its link and three passcodes exactly once.
-
-#### Scenario: Create a workspace
-
-- **WHEN** a person fills the form (and a signup code when `GET /api/workspaces/config` requires one) and presses **Create the workspace**
-- **THEN** on 201 the page shows "Workspace ready: <name>", the workspace link with **Copy link**, one passcode per team with **Copy**, the warning "Save these passcodes now. They won’t be shown again.", and enables **Open the workspace in a new tab** only after "I’ve saved all three passcodes somewhere I can find them." is ticked
-
-#### Scenario: Refusals
-
-- **WHEN** the server is at its workspace limit, or creation fails
-- **THEN** the page shows "This server already has as many workspaces as it allows…", or field marks (400), "Check the signup code." (403), a too-long message (413), or "Open this page on the machine running Align…" (421)
-
-#### Scenario: Test server notice
-
-- **WHEN** the server runs hosted
-- **THEN** every form state shows the notice "Liminal Align is an early-testing product running on a test server." with the deletion date
-
-### Requirement: Intake interview
-
-When the server enables it, the `/new` page SHALL offer an AI interview that fills the form through
-`POST /api/workspaces/interview` and never overwrites a person's own edits.
-
-#### Scenario: Talk it through
-
-- **WHEN** a person presses **Start the interview** and sends an answer (typed, or by **Talk** where speech recognition exists)
-- **THEN** the app posts the conversation to `POST /api/workspaces/interview`, shows the reply, fills only empty fields or fields it filled itself, updates "Draft so far (<n> of 9)" and the one-sentence read-back, and folds the form into "Review & edit the form", which opens when the interview says it is done
-
-#### Scenario: Interviewer fails
-
-- **WHEN** the request fails
-- **THEN** the message is returned to the input and the panel shows the server's error, or "The interviewer didn't answer. Try again, or fill in the form below." when there is none or the network failed ("Enter your signup code above first, then try again." on 403)
-
-### Requirement: OAuth consent page
-
-The `/oauth/authorize` page SHALL let a person grant an AI app read-only access to one workspace as
-one role, and SHALL refuse requests it cannot trust without redirecting.
-
-#### Scenario: Allow with the browser's session
-
-- **WHEN** the browser is signed in to a workspace and the person keeps "<company>, as <person> (<team>). You’re signed in to it in this browser." (just "as <team>" when no person name is known) and presses **Allow read-only access**
-- **THEN** the page posts `{params, decision: "approve", use_session: true}` to `POST /api/oauth/approve` and follows the returned redirect to the app
-
-#### Scenario: Allow with a passcode
-
-- **WHEN** the person chooses "Another workspace or team", pastes a workspace link, picks a team under "Connect as" and enters "That team’s passcode"
-- **THEN** the page looks the workspace up with `GET /api/workspaces/<id>/login-info` and on Allow posts workspace, role and passcode; an unknown link shows "No workspace has that link…" and **Cancel** posts `decision: "deny"`
-
-#### Scenario: Untrusted request
-
-- **WHEN** the app or redirect fails the server check, or the network is rate limited
-- **THEN** the page shows "Can’t connect this app" with the reason, or "Return to the app" for a redirectable error, and offers no Allow button
-
-### Requirement: Error pages
+### Requirement: Render error page
 
 The app SHALL show a plain error page for any render error, without the error message or stack.
 
@@ -643,127 +549,66 @@ The app SHALL show a plain error page for any render error, without the error me
 - **WHEN** a page under the root layout throws while rendering
 - **THEN** the page shows "Something went wrong on this page." with **Try again** and, for a server error, "Reference: <digest>"; with JavaScript off the page shows "Align needs JavaScript. Turn it on and reload this page."
 
-### Requirement: Honest status wording
+#### Scenario: Loading
 
-Every screen of the Align app at `/` and `/w/<id>` SHALL use the plain status labels and never
-present agreement or a sandbox pass as proof of success.
+- **WHEN** an `/app` page or the consent page is waiting for the server
+- **THEN** it shows "Loading Align…" (whole page) or "Loading…" (one card) instead of an empty screen, and an API error shows the server's message in red
 
-#### Scenario: Status labels
+### Requirement: Web app status pills
 
-- **WHEN** a code such as `PENDING_SECURITY`, `COUNTERED`, `RATIFIED`, `STALE` or `UNKNOWN` is shown
-- **THEN** it reads "Waiting for Security", "Security asked for changes", "Approved" (custom: "Waiting for <owning>", "<owning> asked for changes", "Agreed, launch pending", or "Agreed, launch approved" once leadership approves the launch), "Needs retest", "Unknown"; status badges use green only for passing sandbox results (the connected-apps card separately marks an app on the latest plan in green), and records state "Whether the beta launch succeeds isn't known yet" or "Agreement between two teams is not approval to launch."
+Pages under `/app` SHALL mark states with plain-word pills whose colors follow one rule: green for a settled good
+state, amber for something waiting or needing attention, red for revoked or stopped, neutral otherwise.
 
-#### Scenario: Goal sessions pages use their own pills
+#### Scenario: Pill colors
 
-- **WHEN** a page under `/app` shows a state
-- **THEN** it uses its own pills, not these labels: for example an approved alignment, an active device, a goal "you can bind sessions" to and a reviewed parent goal are green
-
-### Requirement: Goal sessions web app
-
-When `ALIGN_GOAL_SESSIONS=1`, the pages under `/app` SHALL let a person signed in as themselves (not by
-team passcode) manage goal-sessions workspaces, and SHALL send a signed-out visitor to
-`/app/sign-in?next=<page>`, returning only to `/app` paths after sign-in.
-
-#### Scenario: Sign in
-
-- **WHEN** a signed-out person opens any `/app` page
-- **THEN** the sign-in page offers **Continue with Google** / **Continue with GitHub** where configured, an email "Test sign-in (this machine only)" with **Create a test account** only when the test identity provider is enabled, and "No sign-in method is configured on this server." when none is
-
-#### Scenario: Approve a device
-
-- **WHEN** a person enters the code that `align login` printed at `/app/device`, presses **Look up**, ticks at least one workspace and presses **Approve**
-- **THEN** the page calls `GET /api/v2/device/requests/<code>` and then `POST /api/v2/device/approve` with the code and `workspace_ids`, and says "<device> is connected. You can close this page."; an unknown code shows "No device is waiting for that code. Check it, or run align login again." and **Deny** calls `POST /api/v2/device/deny`
-
-#### Scenario: Workspace pages
-
-- **WHEN** a member opens `/app/w/<ws>`
-- **THEN** the tabs Goals, People, Sessions, Alignments and Spend show: goals (with **Create goal** for any role but viewer), members, invites (owners only) and pods, the person's own shared sessions with **Stop agent** / **Resume agent**, **Stop sharing** and **Delete shared history** (owners also see everyone's sessions with stop and resume), alignments under "Waiting on you", "Your requests" and "Others you are part of" with only the actions the server allows (Approve, Suggest a change, Accept the change, Decline, Withdraw, Revoke), and usage by goal; `/app` lists the person's workspaces and creates one, and `/app/devices` lists devices with **Revoke**
-
-#### Scenario: Goal page
-
-- **WHEN** a member opens a goal from the Goals tab (`/app/w/<ws>/goals/<goal>`)
-- **THEN** the page shows its status, visibility, pod, version, owner, measures, anchors and every version; a person the server lets edit it (`can_edit`) gets a "New version" form (goal, measures, status Active / Achieved / Dropped, anchors and "Depends on" goals) that posts to `POST /api/v2/workspaces/<ws>/goals/<goal>/versions` with **Save version <n+1>**, and, when a goal it contributes to has changed, **Still fits version <n>**, which posts to `.../goals/<goal>/review`; a goal the server does not return shows "This goal does not exist or you can't see it."
-
-#### Scenario: Ask to align with someone else's goal
-
-- **WHEN** a member who is not a viewer opens an active goal owned by someone else
-- **THEN** an "Align with this goal" card offers **Recognize contribution only** (optionally naming one of the person's own bindable goals) or **Work toward this goal and count future usage here** (at least one shared session required), a note "never sent to agents" (up to 1000 characters), and **Send request**, which posts `target_goal_id`, `source_goal_id`, `choice`, `session_keys` and `note` to `POST /api/v2/workspaces/<ws>/alignments` and then points to Alignments
-
-#### Scenario: Accept a workspace invite
-
-- **WHEN** a signed-in person opens an invite link (`/app/invite/<token>`)
-- **THEN** the page reads `GET /api/v2/invites/<token>` and shows "You are invited to <workspace> as <role>." with **Join workspace**, which posts to `.../invites/<token>/accept` and opens the workspace; if the signed-in email is not the invited one it names both addresses and offers no button, and an unusable link shows "This invite link is not valid. It may have been used, withdrawn or expired."
+- **WHEN** a page shows a state
+- **THEN** an approved alignment or change request, an active device, a goal "you can bind sessions" to and a reviewed parent goal are green; a pending or countered alignment or change request, "needs alignment to bind" and a parent not reviewed against its current version are amber; a revoked device and a stopped agent are red
 
 ## Open questions
 
-- `TodayView` ("Good to see you", "What needs you", "Time to agreement") is implemented but no view renders it: the `today` view id renders the decision view. Is it dead code or meant to return?
-- The team view (`TeamLens`, "Team view") is routed under the Goals nav item, but no control in the current code navigates to it, so it is unreachable. Is it meant to return, or should it be removed?
-- The Inspector and team view label the viewer's own goal "Your goal · you can edit", but no screen offers a way to edit one's own goal directly. Is that wording intended?
-- `docs/DEMO_SCRIPT.md` still names labels and steps the current code does not have: a "How the goals connect" screen heading (the view is titled "Goals"), a "Waiting for your decision" badge (present only in the unrendered `TodayView`), and a **Test which plan follows the new priority** step taken from the brief. In the code the brief's button reads **Test in Scenario Studio** and opens Scenario Studio; that label survives only on the composer's "No test results added" card, which opens the plan test drawer. This spec follows the code. Should the script be updated, or should the brief open the plan test drawer again?
+- Should **Propose a change** be offered on an achieved or dropped goal? This spec offers it on any goal the person
+  can read but does not own (so a request can propose reopening it); open requests are superseded only when a goal
+  becomes achieved or dropped.
+- The recent-sign-in refusal code (`reauth_required`), the member routes (`POST`/`DELETE
+  /api/v2/workspaces/{ws}/members/{user}`), the workspace-wide change-request list
+  (`GET /api/v2/workspaces/{ws}/change-requests` as `{waiting_on_me, mine, others}` with `can` flags), the apps
+  routes (`GET`/`DELETE /api/v2/workspaces/{ws}/apps…`) and `spend?by=team` are not named by the owner's decision;
+  this spec chose them and the `workspaces`, `goals-and-proposals` and `mcp` parts must name the same ones.
+- Should the account page also let a person unlink a provider? The owner's decision names only linking, so this
+  spec offers no unlink.
 
 ## Sources
 
-- `README.md`
-- `docs/DEMO_SCRIPT.md`
 - `proxy.ts`
-- `lib/labels.ts`
 - `app/page.tsx`
 - `app/layout.tsx`
 - `app/error.tsx`
 - `app/global-error.tsx`
-- `app/setup/page.tsx`
-- `app/new/page.tsx`
-- `app/new/NewWorkspace.tsx`
-- `app/w/[slug]/page.tsx`
-- `app/oauth/authorize/page.tsx`
-- `app/oauth/authorize/AuthorizeForm.tsx`
-- `components/Home.tsx`
-- `components/useAlign.ts`
-- `components/props.ts`
-- `components/select.ts`
-- `components/nextStep.ts`
-- `components/launch.ts`
-- `components/ui.tsx`
-- `components/ErrorNotice.tsx`
-- `components/YourTurnView.tsx`
-- `components/TodayView.tsx`
-- `components/GoalsView.tsx`
-- `components/TeamLens.tsx`
-- `components/DecisionsView.tsx`
-- `components/DecisionView.tsx`
-- `components/ProposalsView.tsx`
-- `components/Handoff.tsx`
-- `components/OrgView.tsx`
-- `components/WorkMap.tsx`
-- `components/Inspector.tsx`
-- `components/AgentPane.tsx`
-- `components/AuthorityStrip.tsx`
-- `components/ProofStrip.tsx`
-- `components/SpartaProof.tsx`
-- `components/BriefDrawer.tsx`
-- `components/ScenarioDrawer.tsx`
-- `components/EvidenceView.tsx`
-- `components/ConnectAI.tsx`
-- `components/ScenarioForm.tsx`
-- `components/InterviewPanel.tsx`
-- `components/v6/ScenarioStudio.tsx`
-- `components/v6/OldPlanWork.tsx`
-- `components/v6/ConflictSentence.tsx`
-- `components/v6/record.tsx`
-- `components/v6/kit.tsx`
-- `components/v6/thread.tsx`
 - `app/app/_ui/server.ts`
 - `app/app/_ui/kit.tsx`
+- `app/app/_ui/types.ts`
+- `app/app/_ui/goalform.tsx`
+- `app/app/page.tsx`
 - `app/app/view.tsx`
+- `app/app/sign-in/page.tsx`
 - `app/app/sign-in/view.tsx`
+- `app/app/account/view.tsx`
 - `app/app/device/view.tsx`
 - `app/app/devices/view.tsx`
+- `app/app/invite/[token]/view.tsx`
 - `app/app/w/[ws]/view.tsx`
+- `app/app/w/[ws]/goals/[goal]/view.tsx`
 - `app/app/w/[ws]/people/view.tsx`
 - `app/app/w/[ws]/sessions/view.tsx`
 - `app/app/w/[ws]/alignments/view.tsx`
+- `app/app/w/[ws]/requests/view.tsx`
 - `app/app/w/[ws]/spend/view.tsx`
-- `app/app/w/[ws]/goals/[goal]/view.tsx`
-- `app/app/_ui/goalform.tsx`
-- `app/app/invite/[token]/view.tsx`
-- `app/api/workspaces/[id]/login-info/route.ts`
+- `app/app/w/[ws]/apps/view.tsx`
+- `app/oauth/authorize/page.tsx`
+- `app/oauth/authorize/AuthorizeForm.tsx`
+- `app/api/oauth/approve/route.ts`
+- `lib/oauth/clients.ts`
+- `lib/oauth/server.ts`
+- `lib/v2/auth.ts`
+- `lib/v2/changes.ts`
+- `lib/v2/mail.ts`
