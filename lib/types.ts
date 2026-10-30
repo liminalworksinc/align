@@ -276,6 +276,35 @@ export interface AppState {
   scenario?: ScenarioKind;
   teams?: Record<Owner, ScenarioTeam>;
   scenario_config?: ScenarioConfig;
+  asks?: Ask[]; // custom only: what people asked of a team, mostly from meetings (lib/asks.ts)
+  limits?: Limit[]; // custom only: what a team's goal must, must not or need not cover (lib/limits.ts)
+}
+
+/** A bound on a team's goal. Suggested from what people said (meetings, prompts to agents) or typed by a person;
+ *  it is a rule for agents only once that goal's owner confirms it. */
+export interface Limit {
+  id: string;
+  team: Owner; // whose goal it bounds; that team confirms it
+  type: "must" | "must_not" | "out_of_scope";
+  text: string;
+  sources: { kind: "meeting" | "prompt" | "manual"; title: string; date: string; quote: string }[]; // first first
+  state: "suggested" | "confirmed" | "dismissed";
+  decided?: { by: Actor; at: string };
+  flags?: { session: string; sentence: string; at: string }[]; // agent reports that may cross it, found as they arrive
+  cleared?: string[]; // agent sessions the owner looked at and found within the limit
+  updated_at: string;
+}
+
+/** Something one person or group asked of a team, with where it was asked and every later time it came up. */
+export interface Ask {
+  id: string;
+  from: string; // who asked, as people say it: "Faculty", "A labmate", "Lab group"
+  to: Owner; // the team it is asked of
+  text: string;
+  source: { kind: "meeting" | "manual"; title: string; date: string }; // date: YYYY-MM-DD
+  status: "open" | "accepted" | "done" | "declined";
+  history: { date: string; text: string; source: string }[]; // later meetings that re-raised or changed it
+  updated_at: string;
 }
 
 export type ScenarioKind = "northstar" | "custom";
@@ -365,6 +394,7 @@ export interface AgentSession {
   last_at: string;
   ended_at?: string;
   directives?: DirectiveDelivery[]; // authority changes pushed into this session
+  live?: boolean; // a live hook (not an import) has reported on it: imports can no longer backdate its events
 }
 
 export interface DirectiveDelivery {

@@ -2,6 +2,7 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import { api } from "@/components/useAlign";
+import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 
 // "Your AI apps" in a custom workspace's sidebar: the one URL any AI app connects with (Align's read-only MCP
 // endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. An app shows as
@@ -48,7 +49,8 @@ function Copy({ value }: { value: string }) {
   );
 }
 
-function Command({ text }: { text: string }) {
+function Command({ text }: { text: string | null }) {
+  if (text === null) return <div className="my-2 text-zinc-600">This server’s address can’t be turned into a command. Copy the URL from the Claude or ChatGPT tab instead.</div>;
   return (
     <div className="my-2 flex flex-wrap items-center gap-2">
       <code className="break-all rounded-[8px] bg-zinc-100 px-3 py-2 font-mono text-[14px]">{text}</code>
@@ -66,16 +68,20 @@ function Step({ n, children }: { n: number; children: ReactNode }) {
   );
 }
 
-// One paste for the terminal apps: the command adds Align and starts the sign-in. The chat apps take the URL.
+// One paste for the terminal apps: the command adds Align and starts the sign-in. The chat apps take the URL. The lines
+// are built in lib/paste-lines.ts, which quotes every value; a URL Align could not have made shows no command.
 function Steps({ tab, url }: { tab: Tab; url: string }) {
   const allow = <Step n={2}>Your browser opens an Align page. Check the workspace and team, then choose Allow.</Step>;
   if (tab === "claude-code")
     return (
       <ol className="space-y-3">
         <Step n={1}>
-          Paste this in a terminal:
-          <Command text={`claude mcp add --transport http --scope user align ${url}; claude mcp login align`} />
-          <span className="text-zinc-600">It works in every folder. Already in Claude Code? Run the same line with ! in front, or type /mcp.</span>
+          Paste this into a sh, bash or zsh terminal, in the folder where you work on these goals:
+          <Command text={claudeCodeLine(url)} />
+          <span className="text-zinc-600">
+            Align works in every folder. In this one, Claude Code also gets a short brief (limits, what isn’t agreed, your goal, open asks) on its first prompt and
+            again after it compacts its context. Already in Claude Code? Run the same line with ! in front.
+          </span>
         </Step>
         {allow}
       </ol>
@@ -84,9 +90,9 @@ function Steps({ tab, url }: { tab: Tab; url: string }) {
     return (
       <ol className="space-y-3">
         <Step n={1}>
-          Paste this in a terminal:
-          <Command text={`codex mcp add align --url ${url}`} />
-          <span className="text-zinc-600">The Codex CLI, IDE extension and the ChatGPT desktop app’s Codex mode all use it.</span>
+          Paste this into a sh, bash or zsh terminal:
+          <Command text={codexLine(url)} />
+          <span className="text-zinc-600">It adds Align and one line to Codex’s instructions so Codex checks Align before planning your teams’ work. The Codex CLI, IDE extension and the ChatGPT desktop app’s Codex mode all use it.</span>
         </Step>
         {allow}
       </ol>
