@@ -1,3 +1,7 @@
+> **HISTORICAL R1 QA ONLY — R1 D2 NOT CLEARED.** The current revision is [R2, with its 35/35 reducer tests and unrun browser gates](./ALIGN_V2_E2E_R2_TEST_REPORT.md). R1's 23/23 results predate the founder's condition/launch/Home rulings. Do not present R1 verification semantics, tester protocol or its simulated verifier as the current target. No independent participant or real-v2 E2E test has occurred.
+
+---
+
 # Align v2 R1 — verification, D0 evidence, independent-user protocol
 
 **Oct 30, 2026.** Design study only. [Interactive R1 sample prototype](./prototypes/lim-2449-v2-sample-e2e-r1.html) · [R1 behavior contract](./ALIGN_V2_E2E_DESIGN_CONTRACT_R1.md). Not a live backend or hosted deployment.
