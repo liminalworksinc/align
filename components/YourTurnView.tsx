@@ -8,6 +8,7 @@ import { companyMeasureId, dependencyId, labelsFor, poss, slotOf, type Labels } 
 import { LIMIT_WORDS, limitDrift } from "@/lib/limits";
 import type { Actor, Ask, Limit, Proposal, StateView } from "@/lib/types";
 import { api } from "@/components/useAlign";
+import { DecisionValueCard } from "@/components/DecisionValueCard";
 
 // v6 "Your turn": the landing view for every role, built from state only. Waiting on you = proposals whose next action
 // is the signed-in actor's (the same rules the server enforces in lib/flow.ts), each quoting the exact measure text with
@@ -420,6 +421,8 @@ export function YourTurnView(props: ViewProps) {
           )}
         </section>
       )}
+
+      <DecisionValueCard {...props} />
     </div>
   );
 }

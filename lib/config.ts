@@ -1,5 +1,6 @@
 import path from "node:path";
 import { v2Problems } from "./v2/config";
+import { loiUrlOk, waitlistUrlOk } from "./value";
 
 // Every multi-workspace setting, read from the environment only (never from request headers).
 // Mode L (loopback) is the default. HOSTED=1 is the hosted tester mode (founder ruling 10-21 "go C"): one server
@@ -44,6 +45,18 @@ export function config(): Config {
     deleteBy: process.env.ALIGN_DELETE_BY || null,
     createPerHour: hosted ? 5 : Number(process.env.ALIGN_CREATE_PER_HOUR || 5),
   };
+}
+
+/** The Align waitlist (a Google Form). ALIGN_WAITLIST_URL overrides it; anything but an https docs.google.com/forms URL
+ *  hides the button. Its last section carries the optional non-binding letter of intent, so the LOI link defaults to it. */
+export const WAITLIST_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfxBjrDxvd3VmRhK_rwYU7-YCFSwV3cZLxDkyFLPYEUM5vU7g/viewform";
+
+/** The decision value card's next-step links, checked (lib/value.ts). null hides that link. ALIGN_LOI_URL (an https URL or a
+ *  mailto:) replaces the LOI link's default, the waitlist form; an invalid value hides it. */
+export function nextStepLinks(env: NodeJS.ProcessEnv = process.env): { waitlist: string | null; loi: string | null } {
+  const waitlist = waitlistUrlOk(env.ALIGN_WAITLIST_URL || WAITLIST_URL);
+  const loi = env.ALIGN_LOI_URL ? loiUrlOk(env.ALIGN_LOI_URL) : waitlist;
+  return { waitlist, loi };
 }
 
 /** Hostname of a Host header, without port ("[::1]" keeps its brackets). */
