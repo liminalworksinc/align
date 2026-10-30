@@ -54,7 +54,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   `components/legacy-project-wrapper/implementation`.
 - **Evidence:** Phase 1.2 lift-and-shift identity `sha256:316a4e6b641a46788febb1c21b004ad3c00b6d812c10006deb1d05a48207aa49`.
 
-### [ ] PRESEED-001 — Retire the hosted closing date
+### [x] PRESEED-001 — Retire the hosted closing date
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (hosted config)
@@ -63,13 +63,13 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** none
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Remove ALIGN_DELETE_BY from lib/config.ts, startup, proxy, Dockerfile, fly.toml and docs
-  - [ ] Update the hosted startup requirement in specs/align
+  - [x] Remove ALIGN_DELETE_BY from lib/config.ts, startup, proxy, Dockerfile, fly.toml and docs
+  - [x] Update the hosted startup requirement in specs/align
 - **Evidence:**
-  - [ ] test-v2 passes with no closing-date checks
-  - [ ] litai spec validate passes
+  - [x] test-v2 passes with no closing-date checks
+  - [x] litai spec validate passes
 
-### [ ] PRESEED-002 — Hosted workspace creation gate and request access
+### [x] PRESEED-002 — Hosted workspace creation gate and request access
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (workspaces)
@@ -78,14 +78,14 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PRESEED-001
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Creation codes: hashed, single-use, expiring; required to create a hosted workspace
-  - [ ] Request-access form under /app with a separate follow-up/LOI interest choice; operator script lists, approves and issues codes
-  - [ ] ALIGN_CREATION (codes|open|closed) and ALIGN_MAX_WORKSPACES
+  - [x] Creation codes: hashed, single-use, expiring; required to create a hosted workspace
+  - [x] Request-access form under /app with a separate follow-up/LOI interest choice; operator script lists, approves and issues codes
+  - [x] ALIGN_CREATION (codes|open|closed) and ALIGN_MAX_WORKSPACES
 - **Evidence:**
-  - [ ] test-v2 checks: creation refused without a code, code single-use, cap and kill switch, request stored
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 checks: creation refused without a code, code single-use, cap and kill switch, request stored
+  - [x] Spec requirements updated and validated
 
-### [ ] PRESEED-003 — Abuse controls for hosted sign-up
+### [x] PRESEED-003 — Abuse controls for hosted sign-up
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (auth)
@@ -94,15 +94,15 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PRESEED-002
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Captcha plugin with Turnstile on email-code send, sign-in, access requests and workspace creation
-  - [ ] Database-backed rate limits with per-IP and per-email rules for code sends
-  - [ ] Disposable-domain list and block
-  - [ ] Caps: owned workspaces per account, members per workspace, sessions per device per day
+  - [x] Captcha plugin with Turnstile on email-code send, sign-in, access requests and workspace creation
+  - [x] Database-backed rate limits with per-IP and per-email rules for code sends
+  - [x] Disposable-domain list and block
+  - [x] Caps: owned workspaces per account, members per workspace, sessions per device per day
 - **Evidence:**
-  - [ ] test-v2 checks with a local captcha verify stub, rate limits, block and caps
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 checks with a local captcha verify stub, rate limits, block and caps
+  - [x] Spec requirements updated and validated
 
-### [ ] PRESEED-004 — Account deletion and the retention schedule
+### [x] PRESEED-004 — Account deletion and the retention schedule
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (lifecycle)
@@ -111,15 +111,15 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PRESEED-001
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Account deletion with fresh sign-in and last-owner guard
-  - [ ] Workspace soft delete, restore and purge
-  - [ ] Daily retention job: session roll-up, audit trim, former-member pseudonymisation, purge
-  - [ ] Published retention schedule (docs and spec); fly.toml snapshot retention
+  - [x] Account deletion with fresh sign-in and last-owner guard
+  - [x] Workspace soft delete, restore and purge
+  - [x] Daily retention job: session roll-up, audit trim, former-member pseudonymisation, purge
+  - [x] Published retention schedule (docs and spec); fly.toml snapshot retention
 - **Evidence:**
-  - [ ] test-v2 checks with a controllable clock for every retention rule
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 checks with a controllable clock for every retention rule
+  - [x] Spec requirements updated and validated
 
-### [ ] PRESEED-005 — Passkeys, session cap and sign-out everywhere
+### [x] PRESEED-005 — Passkeys, session cap and sign-out everywhere
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (auth)
@@ -128,15 +128,15 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PRESEED-001
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Passkey add, list, delete and sign-in with autofill
-  - [ ] 30-day absolute session cap
-  - [ ] Sign out everywhere, optionally unpairing devices and disconnecting apps
-  - [ ] Fresh sign-in on device approval, MCP consent, role changes, removal, transfer and deletion
+  - [x] Passkey add, list, delete and sign-in with autofill
+  - [x] 30-day absolute session cap
+  - [x] Sign out everywhere, optionally unpairing devices and disconnecting apps
+  - [x] Fresh sign-in on device approval, MCP consent, role changes, removal, transfer and deletion
 - **Evidence:**
-  - [ ] test-v2 checks including a virtual authenticator passkey sign-in
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 checks including a virtual authenticator passkey sign-in
+  - [x] Spec requirements updated and validated
 
-### [ ] PRESEED-006 — Evidence on change requests
+### [x] PRESEED-006 — Evidence on change requests
 
 - **Priority:** P1
 - **Owner:** components/legacy-project-wrapper/implementation (change requests)
@@ -145,15 +145,15 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PRESEED-001
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Typed evidence links per revision (pr, ci_run, incident, dashboard, doc, other), https only
-  - [ ] Server-computed goal snapshot per revision
-  - [ ] Approved without evidence recorded in the decision and audit log
-  - [ ] Requests tab and MCP show evidence and its source
+  - [x] Typed evidence links per revision (pr, ci_run, incident, dashboard, doc, other), https only
+  - [x] Server-computed goal snapshot per revision
+  - [x] Approved without evidence recorded in the decision and audit log
+  - [x] Requests tab and MCP show evidence and its source
 - **Evidence:**
-  - [ ] test-v2 checks for links, freezing, snapshot and the audited approval
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 checks for links, freezing, snapshot and the audited approval
+  - [x] Spec requirements updated and validated
 
-### [ ] PRESEED-007 — Funnel events and operator report
+### [x] PRESEED-007 — Funnel events and operator report
 
 - **Priority:** P1
 - **Owner:** components/legacy-project-wrapper/implementation (metrics)
@@ -162,14 +162,14 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PRESEED-002, PRESEED-004, PRESEED-005, PRESEED-006
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Events table and recording points from access request to first MCP read
-  - [ ] Operator-recorded LOI sent and signed events; nothing self-asserted counts as signed
-  - [ ] Operator report script
+  - [x] Events table and recording points from access request to first MCP read
+  - [x] Operator-recorded LOI sent and signed events; nothing self-asserted counts as signed
+  - [x] Operator report script
 - **Evidence:**
-  - [ ] test-v2 checks that each event is recorded once and holds no content
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 checks that each event is recorded once and holds no content
+  - [x] Spec requirements updated and validated
 
-### [ ] PRESEED-008 — Security pack and public trust pages
+### [x] PRESEED-008 — Security pack and public trust pages
 
 - **Priority:** P1
 - **Owner:** documentation / components/legacy-project-wrapper/implementation (public pages)
@@ -178,8 +178,8 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** PRESEED-004, PRESEED-007
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] docs/trust: privacy policy, DPA note, subprocessors, retention, security overview, questionnaire answers
-  - [ ] Public /privacy and /trust pages and allowlist entries
+  - [x] docs/trust: privacy policy, DPA note, subprocessors, retention, security overview, questionnaire answers
+  - [x] Public /privacy and /trust pages and allowlist entries
 - **Evidence:**
-  - [ ] test-v2 checks the pages are served hosted
-  - [ ] Every claim cross-checked against the code
+  - [x] test-v2 checks the pages are served hosted
+  - [x] Every claim cross-checked against the code

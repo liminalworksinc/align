@@ -25,3 +25,6 @@ dist/
 .testmondata
 .testmondata-journal
 .testmondata.identity.json
+
+# literate-ai run locks (transient)
+/.litai-locks/
