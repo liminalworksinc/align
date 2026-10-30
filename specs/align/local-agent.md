@@ -13,7 +13,9 @@ dependencies). It has three jobs:
    ledger row per provider request, with token counts, a list-price estimate and a billing basis. This works
    offline and without signing in.
 2. **Share deliberately.** Every session is private until the user shares it, one session at a time or through
-   a folder rule. Only shared sessions ever reach the server, and only as counts and keyed hashes.
+   a folder rule. Only shared sessions ever reach the server, and only as counts, model names and keyed hashes,
+   plus repo-relative file paths, commit subjects, task labels and the branch name when the user turns on work
+   signals for that share.
 3. **Bring goal authority into running sessions.** Hooks put the bound goal into the agent's context, deliver
    later goal versions as short deltas, show the work in flight toward related goals, and block tools when the
    web app issues a stop.
@@ -64,7 +66,7 @@ sent), `align.db` (SQLite, WAL), `rules.json` (folder rules), `me.json`, `instal
 ### How it talks to the server
 
 All server traffic goes from the CLI or the sync pass, never from a hook, to the device API in
-`docs/v2/WIRE.md` (default server `http://127.0.0.1:3100`). Requests carry `Authorization: Bearer <access token>`,
+`docs/v2/WIRE.md` (default server `http://127.0.0.1:3100`). The server answers these `/api/v2/*` routes only when it runs with `ALIGN_GOAL_SESSIONS=1`; otherwise every one of them is HTTP 404 (see the directives part), so sign-in, sync and directives need goal sessions turned on. Requests carry `Authorization: Bearer <access token>`,
 never an `Origin` header, and time out after 15 s. Endpoints used: `POST /api/v2/device/authorize`,
 `POST /api/v2/device/token`, `POST /api/v2/device/refresh`, `DELETE /api/v2/devices/self`, `GET /api/v2/me`,
 `GET /api/v2/workspaces/:ws/goals`, `PUT /api/v2/workspaces/:ws/sessions/:session_key`,
@@ -382,8 +384,9 @@ The `align` hook SHALL, on `UserPromptSubmit`, spool a `root_turn` record (Claud
 else `ts:<time>`), and for a shared session add a delta of at most 300 characters only when something changed:
 `[Align] From this turn this session counts toward goal "<title>" (v<n>, <status>). ...` (bound), `[Align] Goal
 "<title>" is now v<n> (<status>). ...` (updated) or `[Align] This session is no longer bound to an Align goal.
-Continue the user's task as instructed.` (unbound). Each delta SHALL be delivered once; unchanged prompts and
-private sessions SHALL produce 0 bytes on every event.
+Continue the user's task as instructed.` (unbound). Each delta SHALL be delivered once; unchanged prompts SHALL
+produce 0 bytes, and private sessions SHALL produce 0 bytes on `SessionStart`, `UserPromptSubmit` and `PreToolUse`
+apart from the user-only hints and `::align` replies described in other requirements.
 
 #### Scenario: Fifty unchanged prompts
 
@@ -559,8 +562,8 @@ six token counters, `basis`, `est_list_usd_micros`, `price_table_version` and `s
 
 The `align` CLI and sync pass SHALL send every server effect of sharing, binding, receipts, stop-sharing and
 deletion through a per-session FIFO outbox in `align.db`, so it survives being offline. Network errors, HTTP 5xx and
-429 SHALL keep the item and retry it with exponential backoff (1 s doubling, capped at 60 s or
-`ALIGN_OUTBOX_MAX_BACKOFF_MS`, with ±25% jitter) while later items for that session wait; other refusals SHALL drop
+429 SHALL keep the item and retry it with exponential backoff (2 s after the first failure, doubling, capped at
+60 s or `ALIGN_OUTBOX_MAX_BACKOFF_MS`, with ±25% jitter) while later items for that session wait; other refusals SHALL drop
 the item and log it to `~/.align/logs/align.log`. A share whose `PUT` returns 403 or 404 SHALL become `error` and
 tell the user `Align: sharing failed (<code>). This session stays private.`; a 409 `sharing_stopped` SHALL mark it
 `stopped`.

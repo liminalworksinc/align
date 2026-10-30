@@ -267,7 +267,7 @@ The MCP server SHALL expose `align_get_directives` (pending directives for a `se
 
 ### Requirement: Accepted-plan resolution
 
-The server SHALL resolve the Security team's accepted plan (`GET /api/policy/security` and `align_get_accepted_plan`) as the plan reference `<plan_id>@<plan_version>` of the latest acceptance when that acceptance's `new_goal_id` is the current Security goal, and otherwise as `p-throughput@1` with `authority` `current approved goal (no change ratified)` and `test_status` null.
+The server SHALL resolve the Security team's accepted plan (`GET /api/policy/security` and `align_get_accepted_plan`) as the plan reference `<plan_id>@<plan_version>` of the latest acceptance when that acceptance's `new_goal_id` is the current Security goal, and otherwise, outside custom scenarios, as `p-throughput@1` with `authority` `current approved goal (no change ratified)` and `test_status` null; in a custom scenario the fallback is `plan` `none` with `authority` `no change agreed: <team>'s current goal stands`, and the result also carries an `agreement` object, which `GET /api/policy/security` includes only for a signed-in caller.
 
 #### Scenario: No change ratified yet
 
@@ -295,7 +295,7 @@ The goal-triage agent SHALL accept a plan reference only from `--plan` (or `ALIG
 #### Scenario: Invalid plan reference
 
 - **WHEN** the agent is started with `--plan ../secrets`
-- **THEN** it fails with "Pass --plan <plan_id>@<version>, e.g. --plan p-beta@1", prints `Align agent failed: ...` and exits 1
+- **THEN** it throws "Pass --plan <plan_id>@<version>, e.g. --plan p-beta@1" at startup, before the run begins, so Node reports it as an uncaught error (not as an `Align agent failed: ...` line), writes no trace, and exits 1
 
 ### Requirement: Triage agent budgets, retries and trace
 
@@ -313,7 +313,7 @@ The Sparta lab SHALL grade every run of mission `obs-beta-triage` with exactly 9
 #### Scenario: Throughput plan fails
 
 - **WHEN** `p-throughput@1` is run on `obs-beta-triage`
-- **THEN** the recorded evidence grades FAIL with 2 of 9 checks passed, failing `beta-priority`, `beta-tag`, `beta-comment-count`, `beta-private-note`, `beta-public-ack`, `protected-p0` and `scope`
+- **THEN** the recorded evidence grades FAIL, failing at least `beta-priority`, `beta-tag`, `beta-comment-count`, `beta-private-note`, `beta-public-ack`, `protected-p0` and `scope` (2 of 9 checks passed in most recorded runs; 1 of 9 in runs that also fail `beta-open`)
 
 #### Scenario: Beta plan passes
 
@@ -322,7 +322,7 @@ The Sparta lab SHALL grade every run of mission `obs-beta-triage` with exactly 9
 
 ### Requirement: Evidence verification
 
-`scripts/verify-run.mjs <evidence.json> [--expect PASS|FAIL] [--plan <id@v>] [--json]` SHALL report `PASS` only when the evidence has `grade.passed === true` and `execution.exitCode === 0` (otherwise `FAIL`), take the plan and scenario from the file name pattern `<plan>@<v>-<normal|interruption>-<digits>`, count passed checks with `assertion:` prefixes stripped, treat the protected ticket as unchanged from the `protected-p0` check (or, without it, from ticket `1` being absent from the updated-ticket diff), print `Verified by Sparta: <plan> · <verdict> · <passed>/<total> checks · protected security ticket <unchanged|CHANGED> · exit <code>` plus a `failed checks:` line, and exit 0 when it verifies and matches the options, 1 on a mismatch, 2 on missing or unreadable input.
+`scripts/verify-run.mjs <evidence.json> [--expect PASS|FAIL] [--plan <id@v>] [--json]` SHALL report `PASS` only when the evidence has `grade.passed === true` and `execution.exitCode === 0` (otherwise `FAIL`), take the plan and scenario from the file name pattern `<plan>@<v>-<normal|interruption>-<digits>`, count passed checks with `assertion:` prefixes stripped, treat the protected ticket as unchanged from the `protected-p0` check (or, without it, from ticket `1` being absent from the updated-ticket diff), print `Verified by Sparta: <plan> · <verdict> · <passed>/<total> checks · protected security ticket <unchanged|CHANGED> · exit <code>` plus a `failed checks:` line when any check failed, and exit 0 when it verifies and matches the options, 1 on a mismatch, 2 on missing or unreadable input.
 
 #### Scenario: Expectation mismatch
 
@@ -336,11 +336,11 @@ The Sparta lab SHALL grade every run of mission `obs-beta-triage` with exactly 9
 
 ### Requirement: v2 directive kinds and targets
 
-When goal sessions are enabled (`ALIGN_GOAL_SESSIONS=1`; otherwise `/api/v2/*` is HTTP 404), the server SHALL write v2 directives inside the transaction of the change that caused them, with a monotonically increasing `seq`, one of the kinds `goal_version` (a new goal version, to non-stopped sessions bound to or governed by the goal), `binding_changed` (an approved alignment, one per session, `effective` `next_root_turn`, `cause` `alignment:<id>`), `binding_suspended` (a revoked alignment), `stop` or `resume`, and SHALL write no directive when there are no target sessions.
+When goal sessions are enabled (`ALIGN_GOAL_SESSIONS=1`; otherwise `/api/v2/*` is HTTP 404), the server SHALL write v2 directives inside the transaction of the change that caused them, with a monotonically increasing `seq`, one of the kinds `goal_version` (a new goal version, to sessions whose sharing has not been stopped and that are bound to the goal by their open epoch or governed by it), `binding_changed` (an approved alignment, one per session, `effective` `next_root_turn`, `cause` `alignment:<id>`), `binding_suspended` (a revoked alignment), `stop` or `resume`, and SHALL write no directive when there are no target sessions.
 
 #### Scenario: New goal version with no bound sessions
 
-- **WHEN** a goal version is saved and no non-stopped session is bound to or governed by that goal
+- **WHEN** a goal version is saved and no session whose sharing is still on is bound to or governed by that goal
 - **THEN** no `goal_version` directive row is created
 
 ### Requirement: v2 stop and resume
@@ -368,7 +368,7 @@ The server SHALL serve `GET /api/v2/directives?cursor=<seq>` to a device bearer 
 
 ### Requirement: Agent intake of v2 directives
 
-The local agent package SHALL, during sync, page `GET /api/v2/directives` from its stored cursor (up to 20 pages, stopping on a non-200 or empty page), ignore a directive whose `id` it already stored or whose `seq` is not above its cursor, store each accepted directive durably and advance the cursor in one transaction, apply it only to session keys it owns in the directive's workspace, and enqueue a `received` receipt per owned session plus `enforced` for a `stop` and `applied` for a `resume`.
+The local agent package SHALL, during sync, page `GET /api/v2/directives` from its stored cursor (up to 20 pages, stopping on a non-200 or empty page), ignore a directive whose `id` it already stored or whose `seq` is not above its cursor, store each new directive durably and advance the cursor in one transaction, apply it only to session keys it owns in the directive's workspace, and enqueue a `received` receipt per owned session plus `enforced` for a `stop` and `applied` for a `resume`.
 
 #### Scenario: Replayed directive
 
@@ -377,7 +377,7 @@ The local agent package SHALL, during sync, page `GET /api/v2/directives` from i
 
 ### Requirement: Stop latch blocks tools
 
-The local agent package SHALL, while a session's stop latch is set (from a `stop` directive with a higher `seq` than the latch's), deny every tool call in its PreToolUse hook except read-only tools (`Read`, `Glob`, `Grep`, `LS` for Claude Code; `update_plan` for Codex) with the reason "Align: this session was stopped from its Align workspace. Tools are blocked until it is resumed there. Tell the user and wait for instructions.", SHALL deny when a latch file exists but cannot be read, and SHALL lift the block once a later `resume` directive clears the latch.
+The local agent package SHALL, while a session's stop latch is set (from a `stop` directive with a higher `seq` than the latch's), deny every tool call in its PreToolUse hook except read-only tools (`Read`, `Glob`, `Grep`, `LS` for Claude Code; `update_plan` for Codex) with the reason "Align: this session was stopped from its Align workspace. Tools are blocked until it is resumed there. Tell the user and wait for instructions.", SHALL deny when a latch file exists but cannot be read (and, for hook input without a `session_id`, whenever any latch file exists), and SHALL lift the block once a later `resume` directive clears the latch.
 
 #### Scenario: Stopped agent tries to edit
 

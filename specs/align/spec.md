@@ -28,7 +28,10 @@ screens), not the framework, hosting, or language choices.
 | Goal | A team-owned objective with versioned, approved plans |
 | Owner | The team (and its leader) entitled to change a goal |
 | Proposal | A requested change to another team's goal, with evidence |
-| Directive | A message Align pushes to running agents (hold, replan, resume) |
+| Directive | A message Align delivers to running agents: in local mode a hold (`push`) or replan (`ratify`); with goal sessions also `goal_version`, `binding_changed`, `binding_suspended`, `stop` and `resume` |
+| Mode L | The default local mode: the server answers only loopback requests |
+| Hosted | The internet-facing mode (`HOSTED=1`), limited to the tester routes |
+| Goal sessions | The opt-in v2 surface (`ALIGN_GOAL_SESSIONS=1`): accounts, goals and alignments, paired devices and shared sessions |
 | Plan | A versioned, hashed agent plan such as `p-beta@1` |
 | Session | A coding-agent session (Claude Code or Codex) observed by the local agent |
 
@@ -38,5 +41,6 @@ screens), not the framework, hosting, or language choices.
 - `directives` — pushes from Align to running agents and their acknowledgement
 - `mcp` — the read-only MCP server and its OAuth authorization
 - `workspaces` — workspace setup, onboarding interview, access and session capture
-- `local-agent` — the `align` CLI, daemon, hooks and local metering
+- `local-agent` — the `align` CLI, its hooks, the one-pass sync and local metering
 - `interface` — the screens people use
+- `goal-sessions` — the opt-in v2 server: accounts, goals and alignments, devices, shared sessions, usage and spend (`ALIGN_GOAL_SESSIONS=1`)

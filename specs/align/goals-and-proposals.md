@@ -73,7 +73,7 @@ The server SHALL never modify or delete an approved goal version to change it: a
 
 ### Requirement: Leadership pushes the company goal
 
-The server SHALL let only the `leadership` actor approve and send the drafted company goal (`org_draft`) through `POST /api/org/push`, merging non-empty body fields (`objective`, `success_criteria`, `measures`) over the draft, creating goal `g-ceo-v{N+1}` (version `v{N+1}`, `approved_by: "ceo"`, `changed: true`, `supersedes` the previous company goal), re-parenting current team goals and relations from the previous company goal to the new one, recording a `pushes[]` entry (`pushed_to: ["product","security"]`), clearing `org_draft`, writing audit action `ratify_and_push_company_goal`, and responding with `goal_id`, `version`, `pushed_at`, `registry_version` and `event_id` (`push:<push id>`).
+The server SHALL let only the `leadership` actor approve and send the drafted company goal (`org_draft`) through `POST /api/org/push`, merging non-empty body fields (`objective`, `success_criteria`, `measures`) over the draft, creating goal `g-ceo-v{N+1}` (version `v{N+1}`, `approved_by: "ceo"`, `changed: true`, `supersedes` the previous company goal), re-parenting current team goals and relations from the previous company goal to the new one, recording a `pushes[]` entry (`pushed_to: ["product","security"]`), clearing `org_draft`, writing audit action `ratify_and_push_company_goal`, and responding with `goal_id`, `version`, `pushed_at`, `registry_version` and `event_id` (`push:<push id>`). After the write it SHALL emit an in-process authority event with that `event_id`, `kind: "push"` and `at` equal to `pushed_at` (delivery is specified in the `directives` part).
 
 #### Scenario: Non-leadership push is refused
 
@@ -188,7 +188,7 @@ The server SHALL accept `POST /api/proposals/{id}/counter` only from the proposa
 
 ### Requirement: Owner edits are versioned and can stale the evidence
 
-The server SHALL append a counter version `{ version, by: "security", at, proposed_measure_text, rationale, changes_plan, plan_params?, conditions? }` whose `version` is the next goal version plus `.N` (`N` = counter count; Northstar `v2.1`, `v2.2`, ...), set `state: "COUNTERED"`, clear `product_ack_at`, and append audit action `counter`. `changes_plan` SHALL be true when the body sends `changes_plan: true` or sends `plan_params` whose normalized hash (keys sorted, list items sorted, scalar values trimmed and lower-cased) differs from the proposed plan's `params`. When `changes_plan` is true the server SHALL set `test_status` to `STALE`, except in a custom scenario where an `UNTESTED` proposal stays `UNTESTED`.
+The server SHALL append a counter version `{ version, by: "security", at, proposed_measure_text, rationale, changes_plan, plan_params?, conditions? }` whose `version` is the next goal version plus `.N` (`N` = counter count; Northstar `v2.1`, `v2.2`, ...), set `state: "COUNTERED"`, clear `product_ack_at`, and append audit action `counter`. `changes_plan` SHALL be true when the body sends `changes_plan: true` or sends `plan_params` whose normalized hash (keys sorted, list items sorted, scalar values trimmed and lower-cased) differs from the proposed plan's `params`. When `changes_plan` is true the server SHALL set `test_status` to `STALE`, except in a custom scenario where an `UNTESTED` proposal stays `UNTESTED`. No route writes a counter version's `plan_text` or `plan_hash`, so the custom policy agreement's `plan_text` is always the scenario plan's text.
 
 #### Scenario: Declared wording-only edit that changes parameters
 
@@ -230,7 +230,7 @@ The server SHALL accept `POST /api/proposals/{id}/accept` only from the actor eq
 
 ### Requirement: Untested approval must be explicit
 
-The server SHALL refuse with HTTP 409 to approve a `STALE` proposal unless the body has `accept_untested: true`; in a custom scenario it SHALL also refuse any proposal whose `test_status` is not `TESTED` unless `accept_untested: true`. An approval made under that acknowledgement SHALL record audit action `ratify_untested` instead of `ratify`, and a `STALE` status SHALL become `UNTESTED` on the proposal and its acceptance.
+The server SHALL refuse with HTTP 409 to approve a `STALE` proposal unless the body has `accept_untested: true`; in a custom scenario it SHALL also refuse any proposal whose `test_status` is not `TESTED` unless `accept_untested: true`. The server SHALL record audit action `ratify_untested` instead of `ratify` when it approves a `STALE` proposal (Northstar) or any proposal not `TESTED` (custom); a Northstar `UNTESTED` proposal needs no acknowledgement and records `ratify` even if `accept_untested: true` is sent. A `STALE` status SHALL become `UNTESTED` on the proposal and its acceptance.
 
 #### Scenario: Stale evidence
 
@@ -244,7 +244,7 @@ The server SHALL refuse with HTTP 409 to approve a `STALE` proposal unless the b
 
 ### Requirement: Approval creates the owner's next goal version
 
-The server SHALL, on approval, append a copy of the target goal with `version` equal to the latest counter version's `version` (or, with no counter, Northstar `v2` / custom `v{major+1}`), `id` `g-security-<version with "." replaced by "_">`, `approved_at`, `approved_by: "security"`, `supersedes` the target goal id and `changed: false`, and set the proposal `state: "RATIFIED"`. In Northstar the new measures SHALL drop the old `S-M1`, add `S-M3` with the final measure text (latest counter text, else the proposal's) and `verifiable_by: "sparta"`, `inherited_from: "KR2"`, and re-add `S-M1` reworded to come after beta issues. In a custom scenario the configured owner measure SHALL be replaced in place by a new measure with the next free `S-M<n>` id, `verifiable_by: "none"` and `inherited_from` the configured company measure.
+The server SHALL, on approval, append a copy of the target goal with `version` equal to the latest counter version's `version` (or, with no counter, Northstar `v2` / custom `v{major+1}`), `id` `g-security-<version with "." replaced by "_">`, `approved_at`, `approved_by: "security"`, `supersedes` the target goal id and `changed: false`, and set the proposal `state: "RATIFIED"`. In Northstar the new measures SHALL drop the old `S-M1`, add `S-M3` with the final measure text (latest counter text, else the proposal's) and `verifiable_by: "sparta"`, `inherited_from: "KR2"`, and re-add `S-M1` reworded to come after beta issues. In a custom scenario the configured owner measure SHALL be replaced in place by a new measure with the next free `S-M<n>` id (across all goal versions), `verifiable_by: "none"` and `inherited_from` the configured company measure; when the target goal no longer has that measure (for example after an earlier approval), the new measure is appended instead and no measure is replaced.
 
 #### Scenario: Approval after two edits
 
@@ -258,7 +258,7 @@ The server SHALL, on approval, append a copy of the target goal with `version` e
 
 ### Requirement: Approval moves dependents to the new version
 
-The server SHALL, on approval, set the dependency relation (`r-product-security`, or the custom `scenario_config.dependency_id`) to `status: "ACCEPTED"` with `target_goal` the new goal and an "Agreed" `label` and `provenance` naming the version, retarget every other relation and every work item that pointed at the old goal to the new goal, and apply scenario work-item updates (Northstar: `w-s3` gets `priority_rank: 0` and status `next up, approved in goal <version>`, `w-p3` gets status `deferred (Product commitment)`; custom: the configured unblocked and deferred work items likewise).
+The server SHALL, on approval, set the dependency relation (`r-product-security`, or the custom `scenario_config.dependency_id`) to `status: "ACCEPTED"` with `target_goal` the new goal and an "Agreed" `label` and `provenance` naming the version, retarget every other relation and every work item that pointed at the old goal to the new goal, and apply scenario work-item updates (Northstar: `w-s3` gets `priority_rank: 0`, status `next up, approved in goal <version>` and a task saying beta customers' issues come first using the tested new plan, `w-p3` gets status `deferred (Product commitment)`; custom: the configured unblocked and deferred work items likewise).
 
 #### Scenario: Dependency becomes agreed
 
@@ -299,7 +299,7 @@ The server SHALL accept `POST /api/proposals/{id}/reject` only from the `recipie
 
 ### Requirement: Leadership launch decision in custom scenarios
 
-The server SHALL accept `POST /api/proposals/{id}/launch` only in a custom scenario (HTTP 404 otherwise) and only from `leadership` (HTTP 403 otherwise), only for a `RATIFIED` proposal with an acceptance (HTTP 409 otherwise), with body `decision` exactly `approved` or `not_yet` (HTTP 400 otherwise) and an optional text `note` of at most 500 characters (HTTP 400 otherwise). Approving the launch of a proposal whose `test_status` is not `TESTED` SHALL require `accept_untested: true` (HTTP 409 otherwise). On success the server SHALL replace the acceptance's `launch_decision` with `{ decision, note?, untested?: true, by: "leadership", at }`, append audit action `launch_approved` or `launch_not_yet` (never the note text), and return the `launch_decision`.
+The server SHALL accept `POST /api/proposals/{id}/launch` only in a custom scenario (HTTP 404 otherwise) and only from `leadership` (HTTP 403 otherwise), responding HTTP 404 for an unknown proposal id, only for a `RATIFIED` proposal with an acceptance (HTTP 409 otherwise), with body `decision` exactly `approved` or `not_yet` (HTTP 400 otherwise) and an optional text `note` of at most 500 characters (HTTP 400 otherwise). Approving the launch of a proposal whose `test_status` is not `TESTED` SHALL require `accept_untested: true` (HTTP 409 otherwise). On success the server SHALL replace the acceptance's `launch_decision` with `{ decision, note?, untested?: true, by: "leadership", at }`, append audit action `launch_approved` or `launch_not_yet` (never the note text), and return the `launch_decision`.
 
 #### Scenario: Launch in Northstar
 
@@ -342,6 +342,20 @@ The server SHALL, in a custom scenario, report `plan: "none"` and `plan_hash: ""
 
 - **WHEN** a request without a session calls `GET /api/policy/security` while the default store holds a custom scenario
 - **THEN** the response has no `agreement` key
+
+### Requirement: Alike decision reference is recorded on the brief
+
+The server SHALL accept `POST /api/alike` only from a signed-in session and a same-origin request, SHALL require non-blank `decision_id`, `summary`, `recorded_at`, `retrieved_in_session`, `plan_before` and `plan_after` (HTTP 400 `Missing <field>` otherwise), and SHALL store them, trimmed and with `summary`, `plan_before` and `plan_after` cut to 600 characters, as `brief.alike_ref`, set `brief.alike_status` to `retrieved`, append audit action `alike_ref_recorded` with the decision id, and return the brief. It SHALL store only these fields, never a transcript.
+
+#### Scenario: Recording a retrieved decision
+
+- **WHEN** a signed-in user posts all six fields to `POST /api/alike` from the app's own origin
+- **THEN** the brief's `alike_status` becomes `retrieved`, `alike_ref.decision_id` equals the posted id, and a later proposal's `source_refs` include `alike:<decision_id>`
+
+#### Scenario: Missing field
+
+- **WHEN** the request omits `plan_after`
+- **THEN** the response is HTTP 400 `Missing plan_after` and the brief is unchanged
 
 ### Requirement: Sparta evidence ingestion
 
@@ -399,7 +413,7 @@ The server SHALL accept `POST /api/timer` from any signed-in session with `actio
 
 #### Scenario: Timer ends on the second viewer
 
-- **WHEN** after an approval Product and then Security call `POST /api/timer` with `saw_accepted_version`
+- **WHEN** the timer was started with `ceo_change_viewed` and, after an approval, Product and then Security call `POST /api/timer` with `saw_accepted_version`
 - **THEN** Product's response has `ended_at: null` and Security's has a non-null `ended_at`
 
 #### Scenario: Unknown action
@@ -423,7 +437,7 @@ The server SHALL accept `POST /api/reset` only with body `{"confirm":"reset"}` (
 
 ### Requirement: Custom scenario setup
 
-The server SHALL accept `POST /api/scenario` only from a default-store `leadership` session (HTTP 401 without a session, HTTP 403 for other roles or a custom-workspace session), as JSON (HTTP 415) of at most 64 KB (HTTP 413), parse it (HTTP 400 for invalid JSON or reserved keys `__proto__`, `constructor`, `prototype`), validate it strictly (`confirm: "replace"`, company, company goal, asking and owning teams, dependency, 2 to 6 work items with 1 to 3 per team, plan text of 20 to 4000 characters) responding HTTP 400 `{ error, issues: [{ path, message }] }` on failure, and refuse with HTTP 409 while a proposal is open. On success it SHALL replace the default store with goals `g-ceo-v1`, `g-product-v1`, `g-security-v1` (all `shared`), relation `r-product-security` (`UNKNOWN`), plan `p-custom@1`, `scenario: "custom"`, keeping capture consents, consented sessions and the audit log plus a `scenario_setup` row whose target is `sha256:<input hash>`.
+The server SHALL accept `POST /api/scenario` only from a default-store `leadership` session (HTTP 401 without a session, HTTP 403 for other roles or a custom-workspace session), as JSON (HTTP 415) from a loopback `Host` locally (or an allowed host when hosted) with no foreign `Origin` (HTTP 403 otherwise), of at most 64 KB (HTTP 413), parse it (HTTP 400 for invalid JSON or reserved keys `__proto__`, `constructor`, `prototype`), validate it strictly (`confirm: "replace"`, company, company goal, asking and owning teams, dependency, 2 to 6 work items with 1 to 3 per team, plan text of 20 to 4000 characters) responding HTTP 400 `{ error, issues: [{ path, message }] }` on failure, and refuse with HTTP 409 while a proposal is open. On success it SHALL replace the default store with goals `g-ceo-v1`, `g-product-v1`, `g-security-v1` (all `shared`), relation `r-product-security` (`UNKNOWN`), plan `p-custom@1`, `scenario: "custom"`, keeping capture consents, consented sessions and the audit log plus a `scenario_setup` row whose target is `sha256:<input hash>`.
 
 #### Scenario: Invalid setup
 
@@ -467,11 +481,10 @@ The server SHALL compute a 16-hex plan revision from the goals (`id`, `version`,
 - Northstar's next owner-goal version is the literal `v2` (`NORTHSTAR_PROFILE.nextVersion`). A second approved proposal in the same Northstar state would again produce `v2` or `v2.N`, which could duplicate an earlier goal id (for example `g-security-v2`); there is no guard. It is unclear whether repeated approvals in Northstar are meant to be supported.
 - `POST /api/proposals` in Northstar does not require leadership's company-goal push to have happened first, yet `source_refs` always names `g-ceo-v2#KR2`, which can reference a goal that does not exist yet.
 - The server never computes conflicts or at-risk work. The only conflict record is the `depends_on` relation `r-product-security` with status `UNKNOWN`. The `conflicts_with` relation type and the `DRAFT` proposal state are declared but never produced, and conflict or "old plan" displays are computed in client components. Should any of this be a server guarantee?
-- `CounterVersion.plan_text` and `plan_hash` exist in the type, but `POST /api/proposals/{id}/counter` never writes them. Custom plans have empty `params`, so any `plan_params` sent in a custom counter counts as a plan change (an `UNTESTED` proposal stays `UNTESTED`). The policy agreement reads `plan_text` from the latest counter. Whether another route (for example the v2 workspace alignments API) writes it was not verified here.
+- `CounterVersion.plan_text` and `plan_hash` are declared in the type and the policy agreement reads `plan_text` from the latest counter, but no route writes either field. Custom plans have empty `params`, so any `plan_params` sent in a custom counter counts as a plan change. Is a counter that revises the plan text meant to exist?
 - Locking is per Node process (a global promise queue and lock map). Behavior with several server processes sharing one store is not defined.
 - `GET /api/simulations` and `GET /api/evidence/{id}` need no session, and `GET /api/simulations` writes state (it ingests evidence). Both always use the default store, even for a custom-workspace caller. Northstar `POST /api/reset` is allowed for any signed-in role, Product included, with no rate limit. These may be intentional demo conveniences.
 - In hosted mode every default-store read returns HTTP 404 (`readState`), so the policy, simulations, evidence and anonymous state routes stop working. Their hosted behavior belongs to the `workspaces` part.
-- Flow touchpoints (`propose`, `counter` and so on) are silently dropped when the timer has not been started by `ceo_change_viewed`.
 
 ## Sources
 
@@ -509,4 +522,5 @@ The server SHALL compute a 16-hex plan revision from the goals (`id`, `version`,
 - `app/api/reset/route.ts`
 - `app/api/org/push/route.ts`
 - `app/api/policy/security/route.ts`
+- `app/api/alike/route.ts`
 - `scripts/test-flow.mjs`
