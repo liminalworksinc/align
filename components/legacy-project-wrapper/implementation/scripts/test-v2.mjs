@@ -252,7 +252,7 @@ try {
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
-  check("storage: WAL, migrated (user_version 2), v2_ tables and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 2 && pragmas.tables.includes("v2_usage") && pragmas.tables.includes("v2_activity") && pragmas.tables.includes("v2_goal_acks") && pragmas.tables.includes("ba_user"), JSON.stringify(pragmas));
+  check("storage: WAL, migrated (user_version 3), v2_ tables (connected-app grants included) and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 3 && pragmas.tables.includes("v2_usage") && pragmas.tables.includes("v2_activity") && pragmas.tables.includes("v2_goal_acks") && pragmas.tables.includes("v2_oauth_grants") && pragmas.tables.includes("ba_user"), JSON.stringify(pragmas));
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -495,6 +495,39 @@ try {
   const d4OnA = await call("U4", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D4.access });
   const d1OnB = await call("U1", "GET", `/api/v2/workspaces/${B}/goals`, { bearer: D1.access });
   check("device grants: a device sees granted workspaces only (B is 404 for U1's device)", d4OnA.status === 200 && d1OnB.status === 404, `${d4OnA.status} ${d1OnB.status}`);
+
+  // -- MCP with a device token (specs/align/mcp.md; scripts/test-oauth.mjs has the rest) --
+  const mcpCall = async (who, dev, name, args = {}) => {
+    const r = await call(who, "POST", "/api/mcp", { bearer: dev.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } } });
+    const line = r.text.includes("data:") ? r.text.split("\n").find((l) => l.startsWith("data:"))?.slice(5) : r.text;
+    let m = null;
+    try {
+      m = JSON.parse(line);
+    } catch {}
+    return { status: r.status, sc: m?.result?.structuredContent ?? null, text: m?.result?.content?.[0]?.text ?? "", isError: !!m?.result?.isError };
+  };
+  const mcpGoals = await mcpCall("U3", D3, "align_list_goals");
+  const feedGoals = (await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access })).json?.goals?.map((g) => g.id) ?? [];
+  check("mcp: a device token reads its one workspace's goals as its person (the same ids as the goals feed)", mcpGoals.status === 200 && mcpGoals.sc?.workspace?.id === A && JSON.stringify(mcpGoals.sc.goals.map((g) => g.id)) === JSON.stringify(feedGoals), `${mcpGoals.status} ${mcpGoals.text.slice(0, 200)}`);
+  const mcpOwner = await mcpCall("U1", D1, "align_list_goals");
+  check("mcp: the workspace owner's device doesn't get another member's private goal; titles are marked untrusted_text", mcpOwner.sc && !mcpOwner.sc.goals.some((g) => g.id === GP.id) && mcpOwner.sc.goals.every((g) => typeof g.title?.untrusted_text === "string"), mcpOwner.text.slice(0, 200));
+  const mcpTwo = await mcpCall("U4", D4, "align_list_goals");
+  const mcpTwoB = await mcpCall("U4", D4, "align_list_goals", { workspace: B });
+  check("mcp: a device with two workspaces must name one; naming B reads B", mcpTwo.isError && mcpTwo.text === "Name a workspace: this device can read several" && mcpTwoB.sc?.workspace?.id === B, `${mcpTwo.text} ${mcpTwoB.text.slice(0, 80)}`);
+  const mcpRefresh = await call("U1", "POST", "/api/mcp", { bearer: D1.refresh, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+  const mcpAgent = await call("U1", "POST", "/api/mcp", { bearer: "agt.e30.AAAA", headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+  check("mcp: a device refresh token and an agt. token -> 401", mcpRefresh.status === 401 && mcpAgent.status === 401, `${mcpRefresh.status} ${mcpAgent.status}`);
+
+  // -- connected apps (none yet: test-oauth.mjs connects some) --
+  const appsA = await call("U1", "GET", `/api/v2/workspaces/${A}/apps`, { cookie: U1.cookie });
+  const appsB = await call("U1", "GET", `/api/v2/workspaces/${B}/apps`, { cookie: U1.cookie });
+  const appsDel = await call("U2", "DELETE", `/api/v2/workspaces/${A}/apps/gr_AAAAAAAAAAAAAAAA`, { cookie: U2.cookie });
+  const appsBearer = await call("U1", "GET", `/api/v2/workspaces/${A}/apps`, { bearer: D1.access });
+  check(
+    "apps: GET /apps -> {url: <origin>/api/mcp, apps: []}; a non-member -> 404; DELETE an unknown grant -> 404; a device token -> 403",
+    appsA.status === 200 && appsA.json.url === `${BASE}/api/mcp` && Array.isArray(appsA.json.apps) && appsA.json.apps.length === 0 && appsB.status === 404 && appsDel.status === 404 && appsBearer.status === 403,
+    `${appsA.text} ${appsB.status} ${appsDel.status} ${appsBearer.status}`,
+  );
 
   // -- goals feed: ETag / 304 / bindable --
   const f1 = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access });
@@ -823,7 +856,7 @@ try {
   check("device: authorize is limited to 10 per hour per client (then 429)", limited > 0, `${limited}`);
 
   // -- the web UI renders: pages need a session, then load --
-  const pagePaths = ["/app", "/app/device", "/app/devices", `/app/w/${A}`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/spend`, `/app/invite/${"x".repeat(43)}`];
+  const pagePaths = ["/app", "/app/device", "/app/devices", `/app/w/${A}`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/spend`, `/app/w/${A}/apps`, `/app/invite/${"x".repeat(43)}`];
   const anonPages = await Promise.all(pagePaths.map((p) => call("anon", "GET", p)));
   check("ui: every /app page without a session sends you to /app/sign-in", anonPages.every((r) => (r.status === 307 && /\/app\/sign-in/.test(r.headers.get("location") || "")) || (r.status === 200 && r.text.includes("/app/sign-in?next="))), anonPages.map((r) => r.status).join(","));
   const userPages = await Promise.all(pagePaths.map((p) => call("U1", "GET", p, { cookie: U1.cookie })));
@@ -862,10 +895,12 @@ try {
         await page.goto(`${wsUrl}/${t}`, { waitUntil: "networkidle0" });
         await page.waitForFunction((x) => document.body.innerText.includes(x), { timeout: 15000 }, t === "sessions" ? "Shared sessions" : "Waiting on you");
       }
+      await page.goto(`${wsUrl}/apps`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("No AI apps are connected to this workspace.") && document.body.innerText.includes("/api/mcp"), { timeout: 15000 });
       await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Your devices"), { timeout: 15000 });
       const allText = spendText + (await page.evaluate(() => document.body.innerText));
-      check("ui (Chrome): test sign-up, create a workspace and a goal, then spend, people, sessions, alignments and devices render without page errors", errors.length === 0 && /estimate/i.test(spendText), errors.join(" | "));
+      check("ui (Chrome): test sign-up, create a workspace and a goal, then spend, people, sessions, alignments, apps and devices render without page errors", errors.length === 0 && /estimate/i.test(spendText), errors.join(" | "));
       check("ui (Chrome): no em dashes in rendered copy", !allText.includes("\u2014"), "em dash found");
     } catch (e) {
       check("ui (Chrome) run", false, e?.stack ?? e);

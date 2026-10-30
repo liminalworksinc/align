@@ -936,9 +936,10 @@ try {
       return { status: r.status, result: null };
     }
   };
+  // /api/mcp serves v2 workspaces only (specs/align/mcp.md): an agent token is refused there, valid or not.
   const wM = await mcpCall(wTok, "align_list_goals");
   const wMbad = await mcpCall(`${wTok.slice(0, -2)}xx`, "align_list_goals");
-  check("W3 MCP with B's agent token reads B (its company, no A, no Northstar); a tampered token -> 401", wM.status === 200 && /BMARK/.test(wM.result?.structuredContent?.org ?? "") && !JSON.stringify(wM.result).includes("AMARK") && !/Northstar/.test(JSON.stringify(wM.result)) && wMbad.status === 401, `${wM.status} ${wM.result?.structuredContent?.org} ${wMbad.status}`);
+  check("W3 MCP refuses B's agent token (agt. tokens are retired at /api/mcp) and a tampered one -> 401", wM.status === 401 && wMbad.status === 401, `${wM.status} ${wMbad.status}`);
   // Wake-up: B's approval reaches B's agent session, through the token, and nothing reaches the default store
   const dirW = (headers = bearer) => call("GET", "/api/directives?session=claude-code:w-agent-1", { headers }).then((r) => r.json?.pending ?? []);
   const wBefore = await dirW();
@@ -952,8 +953,6 @@ try {
     wBefore.length === 0 && wAcc.status === 200 && wAfter.length === 1 && wAfter[0].text.includes("«WMARK conditions»") && /no run command/.test(wAfter[0].text) && wNoTok.length === 0,
     `${wBefore.length} ${wAcc.status} ${JSON.stringify(wAfter).slice(0, 200)} ${wNoTok.length}`,
   );
-  const wPlan = await mcpCall(wTok, "align_get_accepted_plan");
-  check("W4 the agent reads B's agreement through MCP: agreed, with the conditions", wPlan.result?.structuredContent?.agreement?.status === "agreed" && wPlan.result?.structuredContent?.agreement?.conditions === "WMARK conditions", JSON.stringify(wPlan.result?.structuredContent ?? {}).slice(0, 200));
   const wAck = await call("POST", "/api/directives/ack", { body: { session: "claude-code:w-agent-1", event_id: wAfter[0]?.event_id }, headers: bearer });
   const delivered = (await call("GET", "/api/state", { cookie: sb.leadership })).json.sessions.find((x) => x.session_id === "w-agent-1")?.directives ?? [];
   check("W5 the watcher's ack marks delivery in B's state; the next poll is empty", wAck.status === 200 && delivered.length === 1 && (await dirW()).length === 0, `${wAck.status} ${JSON.stringify(delivered)}`);
@@ -978,12 +977,11 @@ try {
   check("W5 another repo's token can't capture onto this repo's session (-> 403, session unchanged)", oOnto.status === 403 && JSON.stringify(w1Post) === JSON.stringify(w1Pre), `${oOnto.status}`);
   const oPoll = await call("GET", "/api/directives?session=claude-code:w-agent-1", { headers: other });
   const oAck = await call("POST", "/api/directives/ack", { body: { session: "claude-code:w-agent-1", event_id: wAfter[0]?.event_id }, headers: other });
-  const [ownMap, oMap] = [await mcpCall(wTok, "align_get_work_map"), await mcpCall(oMint.json?.token, "align_get_work_map")];
   const badPoll = await call("GET", "/api/directives?session=claude-code:w-agent-1", { headers: { authorization: `Bearer ${wTok.slice(0, -2)}xx` } });
   check(
-    "M3 another harness/repo's token: poll 403, ack 403, its work map omits the session (its own token's shows it); a bad agent token on directives -> 401",
-    oMint.status === 200 && oPoll.status === 403 && oAck.status === 403 && JSON.stringify(ownMap.result ?? {}).includes("w-agent-1") && !JSON.stringify(oMap.result ?? {}).includes("w-agent-1") && badPoll.status === 401,
-    `${oMint.status} ${oPoll.status} ${oAck.status} own=${JSON.stringify(ownMap.result ?? {}).includes("w-agent-1")} other=${JSON.stringify(oMap.result ?? {}).includes("w-agent-1")} ${badPoll.status}`,
+    "M3 another harness/repo's token: poll 403, ack 403; a bad agent token on directives -> 401",
+    oMint.status === 200 && oPoll.status === 403 && oAck.status === 403 && badPoll.status === 401,
+    `${oMint.status} ${oPoll.status} ${oAck.status} ${badPoll.status}`,
   );
   // W6 / H1: leadership disconnects the agent in the product; every agent token stops and the repo's consent and
   // captured sessions go. Product can't disconnect.
@@ -992,7 +990,7 @@ try {
   const [rvCap, rvMcp, rvPoll, rvOther] = [await ev("w-agent-9", "Bash"), await mcpCall(wTok, "align_list_goals"), await call("GET", "/api/directives?session=claude-code:w-agent-1", { headers: bearer }), await call("GET", "/api/directives?session=codex:x", { headers: other })];
   const bAfterD = (await call("GET", "/api/state", { cookie: sb.leadership })).json;
   check(
-    "W6 leadership disconnects (product 403): capture, MCP and directives -> 401 for every agent token; the repo's consent and sessions are removed",
+    "W6 leadership disconnects (product 403): capture and directives (and MCP, which refuses agent tokens anyway) -> 401 for every agent token; the repo's consent and sessions are removed",
     dProduct.status === 403 && dLead.status === 200 && dLead.json?.removed_consents === 1 && dLead.json?.purged_sessions >= 1 && rvCap.status === 401 && rvMcp.status === 401 && rvPoll.status === 401 && rvOther.status === 401 && !bAfterD.sessions.some((x) => x.repo === W_REPO),
     `${dProduct.status} ${dLead.status} ${dLead.text} ${rvCap.status} ${rvMcp.status} ${rvPoll.status} ${rvOther.status}`,
   );
@@ -1032,11 +1030,11 @@ try {
     const eFail = await call("DELETE", "/api/workspaces/agent-token", { cookie: sa.leadership, body: {} });
     spawnSync("chflags", ["nouchg", authFile]);
     for (const f of readdirSync(path.join(wsRoot, a))) if (/^auth\.json\..+\.tmp$/.test(f)) rmSync(path.join(wsRoot, a, f), { force: true });
-    const [mcpAfterFail, capAfterFail] = [await mcpCall(eMint.json?.token, "align_list_goals"), await eCap("le-agent-1")];
+    const capAfterFail = await eCap("le-agent-1");
     check(
       "LE1 a disconnect whose revoke fails changes nothing: the token and its consent both still work (never a live token with its consent gone)",
-      eMint.status === 200 && eFail.status >= 500 && mcpAfterFail.status === 200 && capAfterFail.status === 200,
-      `mint=${eMint.status} delete=${eFail.status} mcp=${mcpAfterFail.status} capture=${capAfterFail.status}`,
+      eMint.status === 200 && eFail.status >= 500 && capAfterFail.status === 200,
+      `mint=${eMint.status} delete=${eFail.status} capture=${capAfterFail.status}`,
     );
     // Restart has the same two writes (rebuilt state drops consents; the epoch bump revokes tokens): a Restart whose
     // revoke fails must change nothing either.
@@ -1044,16 +1042,16 @@ try {
     const rFail = await call("POST", "/api/reset", { cookie: sa.leadership, body: { confirm: "reset" } });
     spawnSync("chflags", ["nouchg", authFile]);
     for (const f of readdirSync(path.join(wsRoot, a))) if (/^auth\.json\..+\.tmp$/.test(f)) rmSync(path.join(wsRoot, a, f), { force: true });
-    const [mcpAfterReset, capAfterReset] = [await mcpCall(eMint.json?.token, "align_list_goals"), await eCap("le-agent-3")];
+    const capAfterReset = await eCap("le-agent-3");
     check(
       "LE4 a Restart whose revoke fails changes nothing: the token and its consent both still work (never a live token with its consent gone)",
-      rFail.status >= 500 && mcpAfterReset.status === 200 && capAfterReset.status === 200,
-      `reset=${rFail.status} mcp=${mcpAfterReset.status} capture=${capAfterReset.status}`,
+      rFail.status >= 500 && capAfterReset.status === 200,
+      `reset=${rFail.status} capture=${capAfterReset.status}`,
     );
   } else check("LE1 and LE4 skipped: need chflags (macOS) to make the epoch bump fail", true);
   const eOk = await call("DELETE", "/api/workspaces/agent-token", { cookie: sa.leadership, body: {} });
-  const [mcpAfterOk, capAfterOk] = [await mcpCall(eMint.json?.token, "align_list_goals"), await eCap("le-agent-2")];
-  check("LE2 a successful disconnect revokes the token (MCP and capture -> 401)", eOk.status === 200 && mcpAfterOk.status === 401 && capAfterOk.status === 401, `${eOk.status} ${mcpAfterOk.status} ${capAfterOk.status}`);
+  const capAfterOk = await eCap("le-agent-2");
+  check("LE2 a successful disconnect revokes the token (capture -> 401)", eOk.status === 200 && capAfterOk.status === 401, `${eOk.status} ${capAfterOk.status}`);
   const eLoop = [];
   for (let i = 0; i < 11; i++) eLoop.push((await call("DELETE", "/api/workspaces/agent-token", { cookie: sa.leadership, body: {} })).status);
   check("LE3 a disconnect loop is limited: 429 within 11 more in a minute, never more than 10 accepted", eLoop.includes(429) && eLoop.filter((x) => x === 200).length <= 9 && eLoop.every((x) => x === 200 || x === 429), eLoop.join(","));

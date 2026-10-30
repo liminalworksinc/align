@@ -43,35 +43,6 @@ export async function stateViews(base, cookies, norm, fetchImpl = globalThis.fet
   return views;
 }
 
-export const MCP_CALLS = [
-  ["align_list_goals", {}],
-  ["align_get_accepted_plan", {}],
-  ["align_get_work_map", {}],
-  ["align_get_decision_record", {}],
-  ["align_get_directives", {}],
-];
-
-/** MCP tool listing plus every read tool's result, normalized. Needs the server's ALIGN_MCP_TOKEN. */
-export async function mcpListings(base, token, norm) {
-  const { Client, StreamableHTTPClientTransport } = await import("@modelcontextprotocol/client");
-  const client = new Client({ name: "align-snapshot", version: "0" });
-  const transport = new StreamableHTTPClientTransport(new URL(base + "/api/mcp"), {
-    requestInit: { headers: { Authorization: `Bearer ${token}` } },
-  });
-  await client.connect(transport);
-  try {
-    const { tools } = await client.listTools();
-    const results = {};
-    for (const [name, args] of MCP_CALLS) {
-      const r = await client.callTool({ name, arguments: args });
-      results[name] = { isError: r.isError ?? false, content: r.content, structuredContent: r.structuredContent };
-    }
-    return norm.value({ tools, results });
-  } finally {
-    await client.close();
-  }
-}
-
 const stepName = (n, label) => `${String(n).padStart(2, "0")}-${label.replace(/[^A-Za-z0-9#]+/g, "_").replace(/#/g, "").slice(0, 70)}.json`;
 
 async function installHook(outDir) {
@@ -82,14 +53,13 @@ async function installHook(outDir) {
   let step = 0;
   mkdirSync(outDir, { recursive: true });
 
-  const token = process.env.ALIGN_MCP_TOKEN;
-  let capturing = false; // the MCP client calls the global fetch; let it through unhooked
-  const record = async (label, withMcp = false) => {
+  let capturing = false; // the state reads call the global fetch; let them through unhooked
+  // /api/mcp serves v2 workspaces only (specs/align/mcp.md): the Northstar MCP listings are no longer recorded.
+  const record = async (label) => {
     step++;
     capturing = true;
     try {
       const views = await stateViews(base, cookies, norm, realFetch);
-      if (withMcp && token) views.mcp = await mcpListings(base, token, norm);
       writeFileSync(path.join(outDir, stepName(step, label)), JSON.stringify(views) + "\n"); // compact; snapshot-northstar.mjs hashes out simulations
     } finally {
       capturing = false;
@@ -98,7 +68,7 @@ async function installHook(outDir) {
 
   const ready = (async () => {
     for (const role of ["product", "security", "leadership"]) cookies[role] = await signIn(base, role, realFetch);
-    await record("initial", true);
+    await record("initial");
   })();
 
   globalThis.fetch = async (input, init = {}) => {
@@ -110,8 +80,7 @@ async function installHook(outDir) {
     if (method !== "GET" && url.startsWith(base)) {
       await res.clone().arrayBuffer(); // the route has finished its write once the body is complete
       const label = `${method}_${norm.text(url.slice(base.length))}_${res.status}`;
-      // MCP results after each successful ratify and after the final reset.
-      await record(label, res.ok && /\/(accept|reset)$/.test(url));
+      await record(label);
     }
     return res;
   };

@@ -8,8 +8,8 @@
 // simulations.json byte for byte, and re-hashes every baseline simulations entry, so no field is checked
 // less strictly than before.
 //
-// The server must start from a fresh state (stop it, rm data/state.json, start it) with ALIGN_MCP_TOKEN
-// set to the same value this script gets.
+// The server must start from a fresh state (stop it, rm data/state.json, start it). The MCP listings in the
+// baseline are no longer compared: /api/mcp serves v2 workspaces only.
 //
 //   Capture: ALIGN_MCP_TOKEN=<t> node scripts/snapshot-northstar.mjs http://127.0.0.1:3200 --out test/snapshots/northstar-850971e
 //   Check:   ALIGN_MCP_TOKEN=<t> node scripts/snapshot-northstar.mjs http://127.0.0.1:320N [--baseline <dir>]
@@ -33,10 +33,6 @@ const outArg = flag("--out");
 const outDir = outArg ? path.resolve(outArg) : mkdtempSync(path.join(tmpdir(), "align-snapshot-"));
 const BASELINE = path.resolve(flag("--baseline") ?? path.join(ROOT, "test/snapshots/northstar-850971e"));
 
-if (!process.env.ALIGN_MCP_TOKEN) {
-  console.error("ALIGN_MCP_TOKEN is not set. Start the server and this script with the same token.");
-  process.exit(2);
-}
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -115,8 +111,15 @@ const want = readdirSync(path.join(BASELINE, "steps")).sort();
 const diffs = [];
 const differing = [];
 if (JSON.stringify(want) !== JSON.stringify(steps)) diffs.push(`step list differs:\n  baseline ${want.join(" ")}\n  this run ${steps.join(" ")}`);
+// The baseline's `mcp` listings were Northstar's MCP tools; /api/mcp now serves v2 workspaces only, so they are
+// left out of the comparison (this run records none).
+const withoutMcp = (text) => {
+  const v = JSON.parse(text);
+  delete v.mcp;
+  return JSON.stringify(v) + "\n";
+};
 for (const name of want.filter((n) => steps.includes(n))) {
-  if (readFileSync(path.join(BASELINE, "steps", name), "utf8") !== readFileSync(path.join(outDir, "steps", name), "utf8")) {
+  if (withoutMcp(readFileSync(path.join(BASELINE, "steps", name), "utf8")) !== readFileSync(path.join(outDir, "steps", name), "utf8")) {
     diffs.push(`steps/${name}`);
     differing.push(`steps/${name}`);
   }
