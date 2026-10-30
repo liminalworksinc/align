@@ -165,7 +165,7 @@ and the device key were removed; local metering continues.` Local metering SHALL
 - **WHEN** the access token TTL forces refreshes during concurrent sync passes and CLI calls (test `e2e` "login, share, usage, ...")
 - **THEN** at least one signed refresh succeeds and the server never revokes the device for refresh-token reuse
 
-#### Scenario: Revoked device
+#### Scenario: Revoked device signs out
 
 - **WHEN** the server revokes the device and the user runs `align goals --refresh` (test `e2e` "stop-sharing and delete-history; revoked device ...")
 - **THEN** `credentials.json` has `signed_out: true`, `align sessions --json` still counts new transcript rows, and `align status` shows `Identity:   signed out (...); local metering only`
@@ -279,11 +279,13 @@ the session afterwards. `align delete-history <session>` SHALL require `--yes` (
 ### Requirement: Binding changes apply at the next root turn
 
 The `align bind <session> --goal <ref|none>` command and the in-session `::align bind <goal>` SHALL only record a
-pending binding for a session whose share is `shared` or `suspended`; the next `UserPromptSubmit` SHALL open a new
-epoch at that prompt (spooled as `epoch_open` with the prompt id as `root_turn`, cause `manual` or `directive:<id>`)
-and add a `bound` delta naming the new goal. When the share was `suspended`, the sync pass that applies the new epoch
-SHALL set the share back to `shared`, so usage from that epoch on uploads again, while usage between the suspension
-and the new epoch stays on this machine. Usage SHALL never move between goals inside a turn.
+pending binding for a session whose share is `shared`, `pending` or `suspended` (`align bind` on a stopped share fails
+with exit code 1); the next `UserPromptSubmit` of a `shared` or `suspended` share SHALL open a new epoch at that prompt
+(spooled as `epoch_open` with the prompt id as `root_turn`, cause `manual` or `directive:<id>`) and, for a `shared`
+share, add a `bound` delta naming the new goal. When the share was `suspended`, the sync pass that applies the new
+epoch SHALL set the share back to `shared`, so usage from that epoch on uploads again, while usage between the
+suspension and the new epoch stays on this machine; the `bound` delta then comes at the first prompt after that
+pass. Usage SHALL never move between goals inside a turn.
 
 #### Scenario: CLI bind waits for the prompt
 
@@ -607,7 +609,7 @@ after the session's `PUT` and the row's epoch have been accepted, in batches of 
 back to the row's timestamp); rows before the first epoch SHALL stay private, and rows in an epoch the server
 refused SHALL be withheld. Each row SHALL carry only `request_key`, `ts`, `epoch_id`, `model`, `query_source`, the
 six token counters, `basis`, `est_list_usd_micros`, `price_table_version` and `source`. A usage upload answered
-403, 404 or 409 SHALL stop that session's uploads for the pass and log it, and a 404 or an error `sharing_stopped`
+403, 404 or 409 SHALL stop that session's uploads for the pass and log it, and a 404 or an error `sharing_stopped` or `not_shared`
 SHALL mark the share `stopped`; a network error SHALL end the upload step until the next pass.
 
 #### Scenario: Root turn beats timestamp
@@ -746,8 +748,9 @@ normalized git remote, or the local folder when there is none), and `edit` and `
 (file reads stay local); repo-relative `path`, commit subjects, task labels, claim reasons and a `branch <name>` task (except
 `main`, `master`, `trunk`, `develop`, `dev`) SHALL be sent only when work signals are on for that session (`--signals`
 on `align share`, else the folder rule's setting). The `align share` previews SHALL say `Work signals ON: ...` or
-`Work signals OFF: only keyed hashes of edited files are sent, ...`, and the in-session `::align share` preview without
-`--signals` SHALL end `(Add --signals to share file paths and task labels with the team.)`. The pass SHALL fetch `GET
+`Work signals OFF: only keyed hashes of edited files are sent, ...`, and the in-session `::align share --dir` preview
+without `--signals` SHALL include `(Add --signals to share file paths and task labels with the team.)` (the
+single-session `::align share` preview does not mention work signals). The pass SHALL fetch `GET
 .../activity?after=<cursor>` into `~/.align/feeds/activity-<ws>.json`, keeping items from the last 6 hours (at most
 1,000).
 
@@ -824,6 +827,12 @@ next to a session shared in the same folder in the last 24 hours, `Align: this f
 - `docs/v2/WIRE.md`
 - `app/app/device/page.tsx`
 - `app/app/device/view.tsx`
+- `app/api/v2/device/authorize/route.ts`
+- `app/api/v2/device/token/route.ts`
+- `app/api/v2/device/refresh/route.ts`
+- `app/api/v2/device/approve/route.ts`
+- `app/api/v2/devices/self/route.ts`
+- `lib/v2/http.ts`
 - `lib/v2/devices.ts`
 - `lib/v2/workspaces.ts`
 - `packages/align-agent/README.md`

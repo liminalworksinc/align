@@ -246,7 +246,7 @@ export function previewInvite(token: string, user: { email: string }) {
 export async function acceptInvite(token: string, user: { id: string; email: string }, emailVerified: boolean) {
   const r = inviteByToken(token);
   if (r.email !== user.email.toLowerCase()) throw new V2Error(403, "email_mismatch", "This invite is for a different email address");
-  // Hosted sign-in is Google or GitHub only, and the provider must have verified the address.
+  // When hosted, the sign-in method (Google, GitHub or an email code) must have verified the address.
   if (config().hosted && !emailVerified) throw new V2Error(403, "email_unverified", "Your sign-in provider has not verified this email address");
   const at = nowIso();
   await tx(() => {
