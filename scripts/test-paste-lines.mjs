@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { BRIEF_HOOKS, claudeCodeLine, codexCompanyName, codexLine, CODEX_MARKER, safeMcpUrl } from "../lib/paste-lines.ts";
+import { BRIEF_HOOKS, claudeCodeLine, codexLine, CODEX_RULE, safeMcpUrl } from "../lib/paste-lines.ts";
 
 let passed = 0;
 let failed = 0;
@@ -67,7 +67,7 @@ const argsOf = (box, name) => {
 
 // ---- URLs ----
 for (const good of [URL, "https://align-test.fly.dev/api/mcp", "http://[::1]:3000/api/mcp", "http://localhost:3000/api/mcp"])
-  check(`a URL Align makes is accepted: ${good}`, safeMcpUrl(good) === good && codexLine(good, "Acme") !== null && claudeCodeLine(good) !== null);
+  check(`a URL Align makes is accepted: ${good}`, safeMcpUrl(good) === good && codexLine(good) !== null && claudeCodeLine(good) !== null);
 for (const bad of [
   "https://a.example/api/mcp'; touch PWNED; '",
   "https://a.example/api/mcp$(touch PWNED)",
@@ -78,36 +78,51 @@ for (const bad of [
   "javascript:alert(1)//api/mcp",
   "https://user:pw@a.example/api/mcp",
 ])
-  check(`a URL Align couldn't have made shows no command: ${JSON.stringify(bad)}`, safeMcpUrl(bad) === null && codexLine(bad, "Acme") === null && claudeCodeLine(bad) === null);
+  check(`a URL Align couldn't have made shows no command: ${JSON.stringify(bad)}`, safeMcpUrl(bad) === null && codexLine(bad) === null && claudeCodeLine(bad) === null);
 
 // ---- the hooks script is a constant with no single quote, so shq() leaves it whole ----
 check("the hooks script has no single quote and no workspace value", !BRIEF_HOOKS.includes("'") && claudeCodeLine(URL).endsWith(`node -e '${BRIEF_HOOKS}'`));
 
-// ---- Codex line: hostile company names, in every shell ----
+// ---- Codex line: a fixed rule, no workspace or company name, added once per machine, in every shell ----
+// follow-up review L1: no name reaches the global AGENTS.md. codexLine takes only the URL, and the dialog passes nothing
+// else; the hostile names are checked against the command and the file anyway.
+const dialog = readFileSync(path.join(process.cwd(), "components/ConnectAI.tsx"), "utf8");
+check(
+  "the Codex line takes only the URL (no company name parameter), and the dialog passes only the URL",
+  codexLine.length === 1 && /codexLine\(url\)/.test(dialog) && !/codexLine\([^)]*,/.test(dialog) && !/company/.test(dialog),
+  (dialog.match(/codexLine\([^)]*\)/g) ?? []).join(" "),
+);
+const OLD_RULE = "- For any work for Harbor's teams, check Align first: call the align MCP server's align_get_directives and align_get_accepted_plan before planning.";
 for (const shell of SHELLS) {
-  for (const company of HOSTILE) {
+  for (const prior of ["", "# my own rules\n- Be brief.\n", `${OLD_RULE}\n`]) {
     const box = sandbox();
     try {
-      const line = codexLine(URL, company);
+      const agentsFile = path.join(box.root, "codex", "AGENTS.md");
+      mkdirSync(path.dirname(agentsFile), { recursive: true });
+      if (prior) writeFileSync(agentsFile, prior);
+      const line = codexLine(URL);
       run(shell, line, box);
-      run(shell, line, box); // twice: the rule is added once
-      const agents = readFileSync(path.join(box.root, "codex", "AGENTS.md"), "utf8");
-      const name = codexCompanyName(company);
-      const want = `- For any work for ${name}'s teams, ${CODEX_MARKER}: call the align MCP server's align_get_directives and align_get_accepted_plan before planning. Its dates and commitments replace older documents.\n`;
+      run(shell, line, box); // twice, as if a second workspace ran it: the same fixed rule, added once
+      const agents = readFileSync(agentsFile, "utf8");
       const calls = argsOf(box, "codex");
       check(
-        `${path.basename(shell)} codex line, company ${JSON.stringify(company.slice(0, 40))}: nothing runs, the rule is written once, word for word, and codex gets only the URL`,
-        pwned(box).length === 0 && agents === want && calls.length === 2 && calls.every((c) => JSON.stringify(c) === JSON.stringify(["mcp", "add", "align", "--url", URL])),
-        `pwned=${pwned(box)} agents=${JSON.stringify(agents)} calls=${JSON.stringify(calls)}`,
+        `${path.basename(shell)} codex line, AGENTS.md ${prior ? JSON.stringify(prior.slice(0, 24)) : "absent"}: the fixed rule is added once, word for word, after what was there; codex gets only the URL`,
+        pwned(box).length === 0 && agents === `${prior}${CODEX_RULE}\n` && calls.length === 2 && calls.every((c) => JSON.stringify(c) === JSON.stringify(["mcp", "add", "align", "--url", URL])),
+        `agents=${JSON.stringify(agents)} calls=${JSON.stringify(calls)}`,
       );
     } catch (e) {
-      check(`${path.basename(shell)} codex line, company ${JSON.stringify(company.slice(0, 40))} ran`, false, e.stderr?.toString() || e.message);
+      check(`${path.basename(shell)} codex line ran`, false, e.stderr?.toString() || e.message);
     } finally {
       rmSync(box.root, { recursive: true, force: true });
     }
   }
 }
-check("a company name keeps only letters, digits, spaces and . & ' -, at most 60 characters", HOSTILE.every((c) => /^[\p{L}\p{N} .&'-]{1,60}$/u.test(codexCompanyName(c))) && codexCompanyName("") === "this company");
+const cmd = codexLine(URL);
+check(
+  "no hostile company name reaches the Codex command or the rule (the rule is fixed text naming no company)",
+  HOSTILE.every((c) => !c.trim() || !cmd.includes(c)) && !/PWNED|Robert|Acme|emaN/.test(cmd) && !/Harbor|company/i.test(CODEX_RULE),
+  cmd,
+);
 
 // ---- Claude Code line: the real node writes the hooks, once, and nothing else runs ----
 for (const shell of SHELLS) {

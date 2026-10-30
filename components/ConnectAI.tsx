@@ -70,13 +70,13 @@ function Step({ n, children }: { n: number; children: ReactNode }) {
 
 // One paste for the terminal apps: the command adds Align and starts the sign-in. The chat apps take the URL. The lines
 // are built in lib/paste-lines.ts, which quotes every value; a URL Align could not have made shows no command.
-function Steps({ tab, url, company }: { tab: Tab; url: string; company: string }) {
+function Steps({ tab, url }: { tab: Tab; url: string }) {
   const allow = <Step n={2}>Your browser opens an Align page. Check the workspace and team, then choose Allow.</Step>;
   if (tab === "claude-code")
     return (
       <ol className="space-y-3">
         <Step n={1}>
-          Paste this in a terminal, in the folder where you work on these goals:
+          Paste this into a sh, bash or zsh terminal, in the folder where you work on these goals:
           <Command text={claudeCodeLine(url)} />
           <span className="text-zinc-600">
             Align works in every folder. In this one, Claude Code also gets a short brief (limits, what isn’t agreed, your goal, open asks) on its first prompt and
@@ -90,8 +90,8 @@ function Steps({ tab, url, company }: { tab: Tab; url: string; company: string }
     return (
       <ol className="space-y-3">
         <Step n={1}>
-          Paste this in a terminal:
-          <Command text={codexLine(url, company)} />
+          Paste this into a sh, bash or zsh terminal:
+          <Command text={codexLine(url)} />
           <span className="text-zinc-600">It adds Align and one line to Codex’s instructions so Codex checks Align before planning your teams’ work. The Codex CLI, IDE extension and the ChatGPT desktop app’s Codex mode all use it.</span>
         </Step>
         {allow}
@@ -126,7 +126,7 @@ function Steps({ tab, url, company }: { tab: Tab; url: string; company: string }
 
 const when = (iso: string) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export default function ConnectAI({ workspace, company, teamOf, actor }: { workspace: string; company: string; teamOf: (role: string) => string; actor: string }) {
+export default function ConnectAI({ workspace, teamOf, actor }: { workspace: string; teamOf: (role: string) => string; actor: string }) {
   const [data, setData] = useState<{ url: string; apps: App[]; plan?: { changed_at: string | null }; at: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("claude-code");
@@ -211,7 +211,7 @@ export default function ConnectAI({ workspace, company, teamOf, actor }: { works
               ))}
             </div>
             <div role="tabpanel" className="mb-4">
-              <Steps tab={tab} url={data.url} company={company} />
+              <Steps tab={tab} url={data.url} />
             </div>
             {fresh.length > 0 ? (
               <div role="status" className="mb-5 rounded-[10px] border border-violet-700 bg-violet-50 p-3 text-[15px] text-zinc-900">

@@ -1,6 +1,6 @@
 // The terminal lines the Connect dialog shows (components/ConnectAI.tsx). A person pastes them into a shell, so nothing
-// that comes from a workspace (its company name) or from the request (the URL, built from the Host header) may reach
-// the shell or the `node -e` script as code: every value is checked, reduced to safe characters and single-quoted.
+// that comes from the request (the URL, built from the Host header) may reach the shell or the `node -e` script as
+// code: the URL is checked and single-quoted, and no workspace or company name goes into either line.
 // scripts/test-paste-lines.mjs runs the lines in sh, bash and zsh with hostile names and URLs.
 
 /** POSIX single quotes: nothing inside is expanded (no $, `, \, ! or newline handling) in sh, bash or zsh. */
@@ -16,30 +16,24 @@ export function safeMcpUrl(url: string): string | null {
   return /^https?:\/\/(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?\/api\/mcp$/.test(url) ? url : null;
 }
 
-/** A company name as the Codex line writes it: letters, digits, spaces and . & ' - only, at most 60 characters. */
-export function codexCompanyName(company: string): string {
-  const name = company
-    .replace(/[^\p{L}\p{N} .&'-]/gu, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const capped = Array.from(name).slice(0, 60).join("").trim(); // by code point, so no half of a pair is left
-  return capped || "this company";
-}
-
-/** The marker the Codex line looks for in AGENTS.md, so the rule is added once. */
-export const CODEX_MARKER = "check Align first";
+/**
+ * The one line the Codex command adds to Codex's global AGENTS.md. It is fixed text: no workspace, company or app name
+ * goes into a file that steers every Codex session on the machine (follow-up review L1).
+ */
+export const CODEX_RULE =
+  "- Before planning work for a team that uses Align, call the align MCP server's align_get_directives and align_get_accepted_plan. Its dates and commitments replace older documents.";
 
 /**
- * The Codex line also adds one instruction to Codex's global AGENTS.md: live (10-27), Codex asked for a cutover
- * runbook searched Drive and Linear and used a date the teams had moved; with this line it read Align first and used
- * the agreed one. Claude Code read Align unprompted. The line is added once. The rule is written with printf '%s\n',
- * so its text is never a format string, and every value is single-quoted.
+ * The Codex line also adds CODEX_RULE to Codex's global AGENTS.md: live (10-27), Codex asked for a cutover runbook
+ * searched Drive and Linear and used a date the teams had moved; with the rule it read Align first and used the agreed
+ * one. Claude Code read Align unprompted. The rule is the same every time, so `grep -qsxF -e` (the whole line, exactly; -e because the rule starts with "-")
+ * finds it and the line is added once per machine, whichever workspace runs the command. It is written with
+ * printf '%s\n', so its text is never a format string, and every value is single-quoted.
  */
-export function codexLine(url: string, company: string): string | null {
+export function codexLine(url: string): string | null {
   const u = safeMcpUrl(url);
   if (!u) return null;
-  const rule = `- For any work for ${codexCompanyName(company)}'s teams, ${CODEX_MARKER}: call the align MCP server's align_get_directives and align_get_accepted_plan before planning. Its dates and commitments replace older documents.`;
-  return `codex mcp add align --url ${shq(u)}; F="\${CODEX_HOME:-$HOME/.codex}/AGENTS.md"; grep -qsF ${shq(CODEX_MARKER)} "$F" || printf '%s\\n' ${shq(rule)} >> "$F"`;
+  return `codex mcp add align --url ${shq(u)}; F="\${CODEX_HOME:-$HOME/.codex}/AGENTS.md"; grep -qsxF -e ${shq(CODEX_RULE)} "$F" || printf '%s\\n' ${shq(CODEX_RULE)} >> "$F"`;
 }
 
 /**
