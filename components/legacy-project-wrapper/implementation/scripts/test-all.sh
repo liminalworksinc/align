@@ -37,7 +37,7 @@ step test-v2 node scripts/test-v2.mjs "$PORT"
 step test-oauth node scripts/test-oauth.mjs "$PORT" --no-build
 
 # ---- the local agent package ----
-step align-agent bash -c 'cd packages/align-agent && npm test'
+step align-agent bash -c 'cd packages/align-agent && { [ -d node_modules ] || npm ci; } && npm test' # a fresh copy has no node_modules
 
 # ---- one node:test-style total (so `npm test` reports an exact count to tools that read it, e.g. litai) ----
 # Each static step counts as one test; test-v2, test-oauth and align-agent contribute their own counts from their logs.
