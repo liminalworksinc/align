@@ -5,7 +5,7 @@ One Align server behind Fly.io's HTTPS edge, for one public origin. This page go
 "Hosted startup checks", "Server data and single server") and `specs/align/mcp.md` for connected AI apps.
 
 Not deployed yet. The server runs until it is stopped: there is no closing date. How long data is kept follows the
-retention schedule in the spec.
+retention schedule in [RETENTION.md](RETENTION.md), which the server applies itself at every start and every 24 hours.
 
 ## Why one machine
 
@@ -41,7 +41,8 @@ ever kept a refused process up, `proxy.ts` would still answer 503 to everything.
 - `ALIGN_PUBLIC_ORIGIN`: a bare `https://<host>` origin whose host is in `ALIGN_HOSTS`.
 - A way to sign in: all three of `ALIGN_EMAIL_API_URL` (https), `ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM`, or
   Google's or GitHub's client id and secret (each pair together).
-- These must be unset: `ALIGN_TEST_IDP`, `ALIGN_LOCAL_OWNER_EMAIL`. `ALIGN_PUBLIC=1` is refused in every mode.
+- These must be unset: `ALIGN_TEST_IDP`, `ALIGN_TEST_NOW`, `ALIGN_LOCAL_OWNER_EMAIL`. `ALIGN_PUBLIC=1` is refused in every
+  mode.
 
 `scripts/test-v2.mjs` checks every refusal on a production server, and `scripts/test-image.sh` checks one on the
 built image.
@@ -76,10 +77,12 @@ The three email settings go together: all three or none. With none, sign-in is G
 volume; for an existing volume, set them on the volume too. Check the flags with `fly volumes update --help` before
 relying on this.
 
-**Deleting data.** A workspace owner deletes a workspace from the app (`DELETE /api/v2/workspaces/<ws>`), which
-removes everything in it. The v1 operator tool (`ws-admin`) was retired with v1 and has no v2 replacement yet
-(an open question in the spec). Until there is one, removing all data means stopping the machine and destroying the
-volume (`fly volumes destroy`).
+**Deleting data.** A workspace owner deletes a workspace from the People tab (`DELETE /api/v2/workspaces/<ws>`): it is
+closed to everyone at once, its owners can restore it for 30 days, and then the retention job deletes every row. A
+person deletes their account from `/app/account`. The full schedule, and what each deletion keeps for the others, is in
+[RETENTION.md](RETENTION.md). The image has no `scripts/` folder, so the job runs only inside the server there;
+`node scripts/retention.mjs [--dry-run]` from a checkout runs it against a copy of the data directory. Removing all
+data at once means stopping the machine and destroying the volume (`fly volumes destroy`).
 
 ## Deploy steps
 

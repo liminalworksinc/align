@@ -41,7 +41,7 @@ async function personFrom(h: Headers): Promise<Person | null> {
   const s = await getAuth().api.getSession({ headers: h });
   if (!s?.user) return null;
   const workspaces = all<{ id: string; name: string; role: "owner" | "member" }>(
-    "SELECT w.id, w.name, m.role FROM v2_workspaces w JOIN v2_members m ON m.ws_id = w.id AND m.user_id = ? WHERE m.role IN ('owner','member') ORDER BY w.name, w.id",
+    "SELECT w.id, w.name, m.role FROM v2_workspaces w JOIN v2_members m ON m.ws_id = w.id AND m.user_id = ? WHERE m.role IN ('owner','member') AND w.deleted_at IS NULL ORDER BY w.name, w.id",
     s.user.id,
   ).map((w) => ({ id: w.id, name: w.name, role: w.role })); // plain objects: SQLite rows can't cross to a client component
   return { name: s.user.name, email: s.user.email, recent: isRecentSignIn(s.session.createdAt), workspaces };

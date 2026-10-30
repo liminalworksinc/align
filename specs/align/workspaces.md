@@ -1,6 +1,6 @@
 ---
 name: Identity and workspaces
-summary: How people sign in as themselves (Google, GitHub or an emailed one-time code, printed locally in Mode L), and how workspaces, roles, invites, teams, the audit trail, paired devices, shared sessions, usage and spend, activity, rate limits and the local and hosted edges work.
+summary: How people sign in as themselves (Google, GitHub or an emailed one-time code, printed locally in Mode L), and how workspaces, roles, invites, teams, the audit trail, paired devices, shared sessions, usage and spend, activity, account and workspace deletion, the data retention schedule, rate limits and the local and hosted edges work.
 kind: area
 ---
 
@@ -40,10 +40,14 @@ Directives (including stop and resume) are in `directives`, the MCP endpoint and
 | Shared session | A coding-agent session a device chose to share, addressed by a 43-character `session_key` |
 | Epoch | A period of a shared session bound to one goal (or none); usage counts under its epoch's goal |
 | Audit row | `{at, actor, action, object_id}` written by each change a person makes (and by a few automatic events); `actor` is null only for system actions |
+| Deleted workspace | A workspace its owner deleted: unreachable to everyone, restorable by its owners for 30 days, then purged |
+| Former member | A person who left, was removed or deleted their account, shown in a workspace's rows as "Former member #n" (id `fm_<n>`, numbered per workspace) once pseudonymised |
+| Retention job | `runRetention(now)` in `lib/v2/retention.ts`: applies the data retention schedule, at every start, every 24 hours and from `scripts/retention.mjs` |
 
 **Person lifecycle.** Sign in (provider or email code) → create a workspace or accept an invite → pair a device →
 share sessions → change role, leave or be removed (team memberships, device grants and OAuth grants for that
-workspace end; goals, sessions and history stay attributed to the person).
+workspace end; goals, sessions and history stay attributed to the person for 30 days, then to "Former member #n") →
+delete their account (every membership ends and their rows become "Former member #n" at once).
 
 **Device lifecycle.** `POST /api/v2/device/authorize` → the person approves the user code at `/app/device` (with a
 recent sign-in) → the device polls `POST /api/v2/device/token` and receives tokens once → it refreshes with a
@@ -350,7 +354,7 @@ origin whose host is in `ALIGN_HOSTS`, and sign-in is possible: all three of `AL
 
 #### Scenario: Partial or unsafe settings
 
-- **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, a Google or GitHub client id without its secret (or the reverse), `ALIGN_TEST_IDP` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`
+- **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, a Google or GitHub client id without its secret (or the reverse), `ALIGN_TEST_IDP`, `ALIGN_TEST_NOW` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`
 - **THEN** it refuses to start and names each problem; any mode refuses `ALIGN_PUBLIC=1`
 
 #### Scenario: Email only
@@ -392,8 +396,9 @@ The server SHALL let any signed-in person, in either mode, create a workspace on
 ### Requirement: Workspace rename and deletion
 
 The server SHALL let a workspace owner rename the workspace on `PATCH /api/v2/workspaces/{ws} {name}` and delete it on
-`DELETE /api/v2/workspaces/{ws}`, where deletion removes everything in the workspace and revokes every device grant and
-OAuth grant for it.
+`DELETE /api/v2/workspaces/{ws}`, where deletion marks the workspace deleted, makes it unreachable to everyone at once
+and revokes every OAuth grant for it, and SHALL let an owner of a deleted workspace with a sign-in from the last 15
+minutes restore it on `POST /api/v2/workspaces/{ws}/restore` within 30 days of its deletion.
 
 #### Scenario: Rename
 
@@ -403,7 +408,12 @@ OAuth grant for it.
 #### Scenario: Delete
 
 - **WHEN** an owner DELETEs the workspace
-- **THEN** the server responds 204, the workspace's members, invites, teams, goals, alignments, change requests, sessions, epochs, usage, activity, directives and audit rows are gone, devices lose their grant for it, its OAuth grants stop working, and a later request for it is 404 `not_found`
+- **THEN** the server responds 204, the audit records `workspace.deleted`, every later request for it (members, owners, devices granted it, invite links to it) is 404 `not_found` as if it did not exist, it leaves `GET /api/v2/workspaces` and `GET /api/v2/me`, devices keep their grant for it but reach nothing, its OAuth grants are deleted, and its rows stay until the retention job purges them 30 days later
+
+#### Scenario: Restore
+
+- **WHEN** an owner of a workspace deleted fewer than 30 days ago POSTs `.../restore` with a sign-in from the last 15 minutes
+- **THEN** the response is 200 `{id, name, role:"owner"}`, the audit records `workspace.restored`, and members and their granted devices reach it again as before (connected AI apps must be connected again); a member who is not an owner, anyone after 30 days, or a purged workspace gets 404 `not_found`, an older sign-in 403 `reauth_required`, and a workspace that is not deleted 409 `not_deleted`
 
 ### Requirement: Workspace visibility and roles
 
@@ -430,7 +440,7 @@ credential the caller's identity on `GET /api/v2/me`.
 #### Scenario: Workspace views
 
 - **WHEN** a member calls `GET /api/v2/workspaces` and `GET /api/v2/workspaces/{ws}`
-- **THEN** the responses are `{workspaces:[{id, name, role, teams:[{id, name, role}]}]}` and `{workspace:{id, name, created_at}, role, me, members:[{id, name, email, role}], teams:[{id, name, my_role, members:[{id, name, role}]}]}`
+- **THEN** the responses are `{workspaces:[{id, name, role, teams:[{id, name, role}]}], deleted:[{id, name, deleted_at, restore_until}]}` (`deleted` lists only workspaces the caller owns that can still be restored, newest first, with `restore_until` 30 days after `deleted_at`) and `{workspace:{id, name, created_at}, role, me, members:[{id, name, email, role}], teams:[{id, name, my_role, members:[{id, name, role}]}]}`
 
 #### Scenario: Who am I
 
@@ -535,7 +545,9 @@ prefix, and SHALL answer the old `/api/v2/workspaces/{ws}/pods…` paths as alia
 The server SHALL let a workspace owner change a member's role on `POST /api/v2/workspaces/{ws}/members/{user} {role}`
 and remove a member on `DELETE .../members/{user}`, let any member (viewers included) leave by deleting their own
 membership, and on removal or leaving delete the person's team memberships and revoke their device grants and OAuth
-grants for that workspace while keeping their goals, sessions and history attributed to them.
+grants for that workspace while keeping their goals, sessions and history attributed to them until the retention job
+makes them a former member 30 days later; `DELETE .../members/{user}?delete_sessions=1` also deletes the person's
+shared sessions in that workspace at once.
 
 #### Scenario: Change a role
 
@@ -546,6 +558,16 @@ grants for that workspace while keeping their goals, sessions and history attrib
 
 - **WHEN** an owner DELETEs another member who has a paired device granted this workspace and an approved MCP app for it
 - **THEN** the server responds 204, the person is in no team of the workspace, their device gets 404 for the workspace while keeping its other grants, their MCP app's tokens for the workspace stop working, their goals and shared sessions remain under their name, and the audit records `member.removed`
+
+#### Scenario: Remove and delete their sessions now
+
+- **WHEN** an owner DELETEs `.../members/{user}?delete_sessions=1`
+- **THEN** the removal happens as above, the person's shared sessions in this workspace (with their epochs, usage, directive deliveries and receipts) are deleted at once so spend totals drop by them, spend already rolled up stays, and the audit also records `member.sessions_deleted`
+
+#### Scenario: Back within 30 days
+
+- **WHEN** a removed person accepts a new invite to the workspace before 30 days have passed
+- **THEN** they are a member again under their own name, and the retention job does not make them a former member
 
 #### Scenario: Leave
 
@@ -587,7 +609,8 @@ owners see and revoke every grant and other members only their own.
 
 The server SHALL write an audit row naming its actor for every change a person makes to a workspace's settings,
 members, invites, teams, goals, alignments, change requests, connected-app revocations and session controls (stop sharing, history
-deletion, agent stop and resume), with actor null only for system actions, and serve the newest 200 rows of that
+deletion, agent stop and resume), with actor null only for system actions and the row that records an account
+deletion, show a former member as `{id:"fm_<n>", name:"Former member #<n>"}`, and serve the newest 200 rows of that
 workspace to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`. Device uploads (sharing a session, opening an
 epoch, usage and activity) write no audit row, and device pairing and revocation are recorded without a workspace, so
 they never appear in a workspace's audit.
@@ -717,6 +740,11 @@ the caller may not see.
 - **WHEN** a member requests `by=team` or `by=session`
 - **THEN** team rows carry `team:{id, name}` with goals that have no team in one `Goals without a team` row, and session rows name only the caller's own sessions with everyone else's in one `Other people's sessions` row; `by=pod` is accepted as `by=team`, and another `by` or a `from` not before `to` is 400
 
+#### Scenario: Rolled-up spend
+
+- **WHEN** the workspace has sessions the retention job rolled up
+- **THEN** their usage counts in `total`, `unallocated` and the goal, team and private rows exactly as before, filtered by `from` and `to` by its UTC day (a day counts when its start is at or after `from` and before `to`), and `by=session` shows it as one `{kind:"rolled_up", label:"Older sessions (rolled up)"}` row; the invariant `total = rows + unallocated` still holds
+
 ### Requirement: Activity signals
 
 The server SHALL accept in-flight work signals from a device on `POST /api/v2/workspaces/{ws}/activity {items}` (at
@@ -733,6 +761,77 @@ sessions, only the caller's own.
 
 - **WHEN** a device calls `GET .../activity?after=<seq>`
 - **THEN** the response is `{cursor, items}`, each item with `seq, session_key, harness, user:{id, name}, mine, goal_id, repo_id, kind, path_hash, path, text, at, expires_at`, leaving out items on goals the caller cannot read and other people's unbound sessions
+
+### Requirement: Account deletion
+
+The server SHALL let a signed-in person with a sign-in from the last 15 minutes delete their own account on
+`DELETE /api/v2/me {email}` (browser session, same-site), where `email` is the account's email in any case, and SHALL
+in one transaction end every membership the way member removal does, delete (as a workspace deletion) each workspace
+where they were the only member, replace their identity with "Former member #n" in every workspace's rows at once,
+delete their devices, pairing requests, Better Auth sessions, linked accounts, passkeys, codes and user row, and keep
+the rows other people rely on (goals, change requests, alignments, sessions and their spend) without their name or
+email.
+
+#### Scenario: Delete my account
+
+- **WHEN** a member with goals, a change request, a paired device and shared sessions with usage DELETEs `/api/v2/me` with their email
+- **THEN** the response is 204, their cookie and device tokens are refused with 401, their goals, change requests and sessions show `{id:"fm_<n>", name:"Former member #<n>"}`, their sessions keep their usage but no device, spend totals are unchanged, no row in any table holds their id or email, each workspace's audit records `member.account_deleted` by the former member, and one audit row with no workspace, actor or object records `account.deleted`
+
+#### Scenario: Only owner with other members
+
+- **WHEN** the person is the only owner of a workspace (not deleted) that has other members
+- **THEN** the server responds 409 `last_owner` naming the workspace, and nothing changes
+
+#### Scenario: Only member
+
+- **WHEN** the person is the only member of a workspace
+- **THEN** that workspace is deleted with the account (soft, as an owner's deletion), nobody can restore it, and the retention job purges it 30 days later
+
+#### Scenario: Refusals
+
+- **WHEN** the sign-in is older than 15 minutes, the typed `email` is not the account's, the request is cross-site, or it carries a device token
+- **THEN** the server responds 403 `reauth_required`, 400, 403 `cross_site`, or 403 `bearer_not_allowed` respectively, and nothing changes
+
+### Requirement: Data retention
+
+The server SHALL apply the retention schedule published in `docs/RETENTION.md` with an idempotent job, `runRetention(now)`
+in `lib/v2/retention.ts`, that runs at every server start and every 24 hours (never during a build) and from
+`node scripts/retention.mjs [--dry-run]`, each step in its own transaction, logging counts only.
+
+#### Scenario: Deleted workspaces
+
+- **WHEN** the job runs 30 days or more after a workspace was deleted
+- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members and devices' grants included, and pairing requests forget it), so no row anywhere mentions it and restoring it is 404
+
+#### Scenario: Session roll-up
+
+- **WHEN** the job runs more than 13 months after a shared session ended (its `stopped_at`, or else its last activity: its last update, usage upload or epoch)
+- **THEN** its usage is added to `v2_spend_rollups` per workspace, goal (none for unbound), UTC day of the request, model and basis, with request, token and estimated-cost sums and no person or session, and the session, its epochs, usage, alignment links, directive deliveries and receipts are deleted, as are directives left with no recipient; running the job again adds nothing
+
+#### Scenario: Former members
+
+- **WHEN** the job runs 30 days or more after a person left or was removed and they are not a member again
+- **THEN** in that workspace every row naming them (goals and goal versions, alignments, their revisions, approval requirements and approvals, sessions, activity, change requests and their revisions, invites they created, directive goal snapshots, the workspace's creator and its audit rows) names `fm_<n>` instead, numbered in the order people left and stable in that workspace, their sessions no longer point at a device, invites to or accepted by them are deleted, nothing records which person `fm_<n>` was, and their account itself is untouched
+
+#### Scenario: Audit log
+
+- **WHEN** the job runs
+- **THEN** audit rows older than one year are deleted, and younger ones are kept
+
+#### Scenario: Codes, sign-in sessions, activity and invites
+
+- **WHEN** the job runs
+- **THEN** expired Better Auth verification values (email codes), expired Better Auth sessions and expired activity signals are deleted, and invites still pending 7 days after their expiry are deleted
+
+#### Scenario: Operator run and dry run
+
+- **WHEN** an operator runs `node scripts/retention.mjs` (reading `ALIGN_DATA_DIR`, default `./data`) or adds `--dry-run`
+- **THEN** it prints `Did` or `Would` with the time it ran as and one count per rule, then the same as one JSON line; a dry run does every step in one transaction and rolls it back, so it changes nothing; a missing or unmigrated database is refused with exit status 2
+
+#### Scenario: Test clock
+
+- **WHEN** `ALIGN_TEST_NOW` holds an ISO time and `ALIGN_TEST_IDP=1` is set (never hosted)
+- **THEN** the job, in the server and in the script, runs as of that time; without `ALIGN_TEST_IDP=1` the setting is ignored, and a hosted server refuses to start with it
 
 ### Requirement: Account and workspace rate limits
 
@@ -756,7 +855,9 @@ off its IP tracking.
 - Who may create hosted workspaces (Owner decision 2026-10-30 keeps it open): today any signed-in account can create up to 10 per hour and own 50.
 - Passkeys, SSO, SAML and SCIM are out of scope for now.
 - Unlinking a Google or GitHub account from `/app/account` is out of scope; should a person be able to unlink a provider while another sign-in method remains?
-- Removing or leaving keeps a person's goals and sessions. Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.
+- Removing or leaving keeps a person's goals and sessions (as a former member after 30 days). Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.
+- The retention periods are fixed in code (`lib/v2/retention.ts`); a per-workspace setting (for example a shorter audit log or longer spend history) waits for a customer who needs it.
+- The hosted image carries no `scripts/` folder, so `scripts/retention.mjs` runs only from a checkout; whether the operator command should ship in the image (with the other operator commands) is not decided.
 
 ## Sources
 
@@ -783,6 +884,11 @@ off its IP tracking.
 - lib/v2/validate.ts
 - lib/v2/workspaces.ts
 - lib/v2/lifecycle.ts
+- lib/v2/retention.ts
+- lib/v2/account.ts
+- scripts/retention.mjs
+- docs/RETENTION.md
+- fly.toml
 - lib/v2/devices.ts
 - lib/v2/sessions.ts
 - lib/v2/activity.ts
@@ -797,6 +903,7 @@ off its IP tracking.
 - app/api/v2/me/route.ts
 - app/api/v2/workspaces/route.ts
 - app/api/v2/workspaces/[ws]/route.ts
+- app/api/v2/workspaces/[ws]/restore/route.ts
 - app/api/v2/workspaces/[ws]/audit/route.ts
 - app/api/v2/workspaces/[ws]/apps/route.ts
 - app/api/v2/workspaces/[ws]/apps/[grant]/route.ts

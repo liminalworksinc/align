@@ -570,7 +570,79 @@ const MIGRATIONS: string[] = [
     FOREIGN KEY (ws_id, change_request_id) REFERENCES v2_change_requests(ws_id, id) ON DELETE CASCADE
   );
   `,
+  // PRESEED-004: account deletion and the retention schedule (lib/v2/retention.ts, lib/v2/account.ts).
+  // - A deleted workspace is marked (deleted_at) and kept 30 days for restore, then purged.
+  // - A session no longer needs its device: deleting a device (account deletion) or pseudonymising a former member
+  //   clears device_id, so the row no longer leads back to the person (v2_sessions is rebuilt: device_id nullable,
+  //   ON DELETE SET NULL).
+  // - Spend roll-ups: per workspace, goal ('' = no goal), UTC day, model and basis; no person, no session.
+  // - Former members: who left or was removed when, and the "Former member #n" number once pseudonymised. user_id is
+  //   cleared at pseudonymisation, so nothing maps the number back to the person.
+  `
+  ALTER TABLE v2_workspaces ADD COLUMN deleted_at TEXT;
+
+  CREATE TABLE v2_sessions_new (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    session_key TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    device_id TEXT REFERENCES v2_devices(id) ON DELETE SET NULL,
+    harness TEXT NOT NULL CHECK (harness IN ('claude-code','codex')),
+    repo_key TEXT NOT NULL,
+    repo_alias TEXT,
+    title TEXT,
+    started_at TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('shared','suspended','stopped')),
+    stopped_at TEXT,
+    governing_goal_id TEXT,
+    governing_alignment_id TEXT,
+    agent_stopped INTEGER NOT NULL DEFAULT 0,
+    conflicts INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, session_key),
+    FOREIGN KEY (ws_id, governing_goal_id) REFERENCES v2_goals(ws_id, id),
+    FOREIGN KEY (ws_id, governing_alignment_id) REFERENCES v2_alignments(ws_id, id)
+  );
+  INSERT INTO v2_sessions_new SELECT ws_id, session_key, user_id, device_id, harness, repo_key, repo_alias, title, started_at, state, stopped_at, governing_goal_id, governing_alignment_id, agent_stopped, conflicts, created_at, updated_at FROM v2_sessions;
+  DROP TABLE v2_sessions;
+  ALTER TABLE v2_sessions_new RENAME TO v2_sessions;
+  CREATE INDEX v2_sessions_device ON v2_sessions(device_id);
+  CREATE INDEX v2_sessions_user ON v2_sessions(ws_id, user_id);
+
+  CREATE TABLE v2_spend_rollups (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    goal_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    model TEXT NOT NULL,
+    basis TEXT NOT NULL,
+    requests INTEGER NOT NULL,
+    input INTEGER NOT NULL,
+    output INTEGER NOT NULL,
+    cache_read INTEGER NOT NULL,
+    cache_write_5m INTEGER NOT NULL,
+    cache_write_1h INTEGER NOT NULL,
+    cache_write_unsplit INTEGER NOT NULL,
+    est_list_usd_micros INTEGER NOT NULL,
+    unpriced_requests INTEGER NOT NULL,
+    PRIMARY KEY (ws_id, goal_id, day, model, basis)
+  );
+
+  CREATE TABLE v2_former_members (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    user_id TEXT,
+    n INTEGER,
+    removed_at TEXT NOT NULL,
+    pseudonymised_at TEXT
+  );
+  CREATE UNIQUE INDEX v2_former_members_pending ON v2_former_members(ws_id, user_id) WHERE user_id IS NOT NULL;
+  CREATE UNIQUE INDEX v2_former_members_n ON v2_former_members(ws_id, n) WHERE n IS NOT NULL;
+  `,
 ];
+
+/** True when this database has every migration (scripts/retention.mjs refuses an older file: the server migrates). */
+export function schemaCurrent(): boolean {
+  return Number((openDb().domain.prepare("PRAGMA user_version").get() as { user_version: number }).user_version) === MIGRATIONS.length;
+}
 
 export function migrate() {
   const d = openDb().domain;
@@ -597,6 +669,10 @@ export function migrate() {
   }
   lockDown(openDb().file);
 }
+
+/** SQL: the workspace that `ws` (a column or a placeholder) names is not deleted. A deleted workspace, waiting out its
+ *  restore window, is unreachable to everyone, exactly like one that does not exist. */
+export const LIVE_WS = (ws: string) => `${ws} IN (SELECT id FROM v2_workspaces WHERE deleted_at IS NULL)`;
 
 export function audit(ws: string | null, actor: string | null, action: string, objectId: string | null, at: string) {
   run("INSERT INTO v2_audit (ws_id, actor_id, action, object_id, at) VALUES (?, ?, ?, ?, ?)", ws, actor, action, objectId, at);

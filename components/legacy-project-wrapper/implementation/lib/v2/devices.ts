@@ -1,6 +1,6 @@
 import { createPublicKey, verify } from "node:crypto";
 import { randomInt } from "node:crypto";
-import { all, audit, get, run, tx } from "./db";
+import { all, audit, get, LIVE_WS, run, tx } from "./db";
 import { V2Error, badRequest, notFound } from "./errors";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { take } from "./limits";
@@ -136,7 +136,7 @@ export async function token(deviceCode: string) {
     const deviceId = newId("dv");
     run("INSERT INTO v2_devices (id, user_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)", deviceId, user.id, r.device_name, r.public_key, at, at);
     for (const ws of JSON.parse(r.ws_ids_json || "[]") as string[]) {
-      if (get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", ws, user.id)) run("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)", deviceId, ws);
+      if (get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, user.id)) run("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)", deviceId, ws);
     }
     run("UPDATE v2_device_requests SET state = 'consumed', device_id = ? WHERE id = ?", deviceId, r.id);
     audit(null, user.id, "device.paired", deviceId, at);
@@ -215,9 +215,13 @@ export function deviceFromAccessToken(tokenValue: string): DevicePrincipal | nul
       run("UPDATE v2_devices SET last_seen_at = ? WHERE id = ?", nowIso(), row.device_id);
     } catch {}
   }
-  // A grant counts only while the user is still a member of that workspace.
+  // A grant counts only while the user is still a member of that workspace and it is not deleted.
   const grants = new Set(
-    all<{ ws_id: string }>("SELECT g.ws_id FROM v2_device_grants g JOIN v2_members m ON m.ws_id = g.ws_id AND m.user_id = ? WHERE g.device_id = ?", row.user_id, row.device_id).map((r) => r.ws_id),
+    all<{ ws_id: string }>(
+      `SELECT g.ws_id FROM v2_device_grants g JOIN v2_members m ON m.ws_id = g.ws_id AND m.user_id = ? WHERE g.device_id = ? AND ${LIVE_WS("g.ws_id")}`,
+      row.user_id,
+      row.device_id,
+    ).map((r) => r.ws_id),
   );
   return { kind: "device", user: { id: user.id, name: user.name, email: user.email }, deviceId: row.device_id, deviceName: row.name, grants };
 }
@@ -246,7 +250,7 @@ export async function decideRequest(userId: string, code: string, decision: "app
       return { state: "denied" as const };
     }
     if (!wsIds.length) throw badRequest("Choose at least one workspace for this device");
-    for (const ws of wsIds) if (!get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", ws, userId)) throw notFound();
+    for (const ws of wsIds) if (!get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, userId)) throw notFound();
     run("UPDATE v2_device_requests SET state = 'approved', user_id = ?, ws_ids_json = ? WHERE id = ?", userId, JSON.stringify(wsIds), r.id);
     return { state: "approved" as const };
   });
@@ -259,7 +263,7 @@ export function listDevices(userId: string) {
   );
   return rows.map((d) => ({
     ...d,
-    workspaces: all<{ id: string; name: string }>("SELECT w.id, w.name FROM v2_device_grants g JOIN v2_workspaces w ON w.id = g.ws_id WHERE g.device_id = ? ORDER BY w.name", d.id),
+    workspaces: all<{ id: string; name: string }>("SELECT w.id, w.name FROM v2_device_grants g JOIN v2_workspaces w ON w.id = g.ws_id WHERE g.device_id = ? AND w.deleted_at IS NULL ORDER BY w.name", d.id),
   }));
 }
 

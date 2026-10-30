@@ -7,6 +7,7 @@ import { stopStatus, writeDirective } from "./directives";
 import type { DevicePrincipal } from "./devices";
 import type { Principal } from "./http";
 import { need } from "./workspaces";
+import { personName } from "./retention";
 import { b64url, iso, nonNegInt, oneOf, optInt, optStr, str, type Body } from "./validate";
 
 // Shared sessions, binding epochs and usage. docs/v2/WIRE.md "Shared sessions".
@@ -18,7 +19,7 @@ export interface SessionRow {
   ws_id: string;
   session_key: string;
   user_id: string;
-  device_id: string;
+  device_id: string | null;
   harness: "claude-code" | "codex";
   repo_key: string;
   repo_alias: string | null;
@@ -337,12 +338,12 @@ export function listSessions(pp: PolicyPrincipal) {
   });
   const everyone =
     pp.wsRole === "owner"
-      ? all<SessionRow & { owner_name: string }>(
-          "SELECT s.*, u.name AS owner_name FROM v2_sessions s JOIN ba_user u ON u.id = s.user_id WHERE s.ws_id = ? AND s.state <> 'stopped' ORDER BY s.started_at DESC",
+      ? all<SessionRow & { owner_name: string | null }>(
+          "SELECT s.*, u.name AS owner_name FROM v2_sessions s LEFT JOIN ba_user u ON u.id = s.user_id WHERE s.ws_id = ? AND s.state <> 'stopped' ORDER BY s.started_at DESC",
           pp.wsId,
         ).map((s) => ({
           session_key: s.session_key,
-          owner: { id: s.user_id, name: s.owner_name },
+          owner: { id: s.user_id, name: personName(s.user_id, s.owner_name) },
           repo_alias: s.repo_alias,
           harness: s.harness,
           state: s.state,

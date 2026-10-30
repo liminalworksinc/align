@@ -61,7 +61,13 @@ generated Better Auth secret beside it. One server runs per data directory: a se
 
 **Mode L settings** (all optional): `ALIGN_DATA_DIR`, `ALIGN_LOCAL_OWNER_EMAIL`, `ALIGN_SECRET` (else generated into
 `data/.secret`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`.
-`ALIGN_TEST_IDP=1` turns on email-and-password sign-up for tests only.
+`ALIGN_TEST_IDP=1` turns on email-and-password sign-up for tests only; with it, `ALIGN_TEST_NOW` (an ISO time) is the
+retention job's clock, for tests only (both are refused when hosted).
+
+**Retention.** The server applies the retention schedule in [docs/RETENTION.md](docs/RETENTION.md) at every start and
+every 24 hours: deleted workspaces are purged after 30 days, people who left become "Former member #n" after 30 days,
+audit rows go after a year, and shared sessions are rolled up into per-goal daily totals after 13 months.
+`node scripts/retention.mjs [--dry-run]` runs it by hand (it reads `ALIGN_DATA_DIR`, default `./data`).
 
 ## Hosted (HOSTED=1)
 

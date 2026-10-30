@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { signPayload } from "../secret";
-import { all, audit, get, run, tx } from "../v2/db";
+import { all, audit, get, LIVE_WS, run, tx } from "../v2/db";
 import { notFound } from "../v2/errors";
 import { nowIso } from "../v2/ids";
 import type { PolicyPrincipal } from "../v2/policy";
@@ -41,7 +41,7 @@ const refreshHash = (v: string) => signPayload(`alr.${v}`);
 /** Names the current ALIGN_SECRET without revealing it. */
 const grantKid = () => signPayload("align-grant-kid").slice(0, 16);
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-const isMember = (ws: string, userId: string) => !!get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", ws, userId);
+const isMember = (ws: string, userId: string) => !!get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, userId);
 
 /** A grant that still works: under the current ALIGN_SECRET, before its refresh expiry, its person still a member. */
 export function liveGrant(id: string): Grant | null {

@@ -1,14 +1,23 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { api, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Shell, useAction, useApi, type WsSummary } from "./_ui/kit";
+import { api, ApiError, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "./_ui/kit";
 import type { Me } from "./_ui/server";
 
+interface DeletedWs {
+  id: string;
+  name: string;
+  deleted_at: string;
+  restore_until: string;
+}
+
 export default function Home({ me }: { me: Me }) {
-  const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
+  const list = useApi<{ workspaces: WsSummary[]; deleted: DeletedWs[] }>("/api/v2/workspaces");
   const [name, setName] = useState("");
   const act = useAction();
   const sample = useAction();
+  const restore = useAction();
+  const [reauth, setReauth] = useState(false);
   return (
     <Shell me={me}>
       <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Your workspaces</h1>
@@ -50,6 +59,44 @@ export default function Home({ me }: { me: Me }) {
             Create the Northstar sample
           </Btn>
           <Err>{sample.error}</Err>
+        </Card>
+      )}
+      {reauth && (
+        <SignInAgain me={me} next="/app">
+          Sign in again to restore a workspace. Restoring needs a sign-in from the last 15 minutes.
+        </SignInAgain>
+      )}
+      {!!list.data?.deleted.length && (
+        <Card title="Deleted workspaces">
+          <ul className="divide-y divide-zinc-200">
+            {list.data.deleted.map((w) => (
+              <li key={w.id} className="flex flex-wrap items-center gap-3 py-3">
+                <span className="text-[17px] text-zinc-900">{w.name}</span>
+                <span className="text-[14px] text-zinc-500">
+                  Deleted {when(w.deleted_at)}. You can restore it until {when(w.restore_until)}; then it is erased.
+                </span>
+                <span className="ml-auto">
+                  <Btn
+                    kind="secondary"
+                    disabled={restore.busy}
+                    onClick={() =>
+                      void restore.run(async () => {
+                        try {
+                          await api(`/api/v2/workspaces/${w.id}/restore`, { body: {} });
+                        } catch (e) {
+                          if (e instanceof ApiError && e.code === "reauth_required") setReauth(true);
+                          throw e;
+                        }
+                      }, list.reload)
+                    }
+                  >
+                    Restore
+                  </Btn>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <Err>{restore.error}</Err>
         </Card>
       )}
       <Card title="Create a workspace">

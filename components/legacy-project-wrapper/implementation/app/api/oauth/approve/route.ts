@@ -3,7 +3,7 @@ import { cappedJson, handle, requireJson } from "@/lib/http";
 import { takeOAuthCall } from "@/lib/oauth/limits";
 import { checkAuthorize, issueCode, originOf, redirectWith } from "@/lib/oauth/server";
 import { clientOf } from "@/lib/ratelimit";
-import { audit, get, tx } from "@/lib/v2/db";
+import { audit, get, LIVE_WS, tx } from "@/lib/v2/db";
 import { V2Error } from "@/lib/v2/errors";
 import { requireRecentSignIn, webAuth } from "@/lib/v2/http";
 import { nowIso } from "@/lib/v2/ids";
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     }
     if (b.workspace_id === undefined || b.workspace_id === null || b.workspace_id === "") throw new HttpError(400, "Choose a workspace");
     const ws = typeof b.workspace_id === "string" && WS_ID.test(b.workspace_id) ? b.workspace_id : null;
-    const member = ws ? get<{ role: string }>("SELECT role FROM v2_members WHERE ws_id = ? AND user_id = ?", ws, who.user.id) : undefined;
+    const member = ws ? get<{ role: string }>(`SELECT role FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, who.user.id) : undefined;
     if (!ws || !member) throw new HttpError(404, "Workspace not found");
     if (member.role === "viewer") throw new HttpError(403, "Viewers can't connect apps");
     takeOAuthCall(ws, "approve_ws"); // an approve loop can't churn the workspace's audit

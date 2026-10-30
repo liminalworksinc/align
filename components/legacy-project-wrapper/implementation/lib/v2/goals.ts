@@ -4,6 +4,7 @@ import { newId, nowIso, sha256hex } from "./ids";
 import { canBind, canReadGoal, type GoalObject, type PolicyPrincipal, type Visibility } from "./policy";
 import { goalVersionDirective } from "./directives";
 import { need } from "./workspaces";
+import { personName } from "./retention";
 import { optStr, str, type Body } from "./validate";
 
 // Goals and their immutable versions. A goal's current fields live on v2_goals; every version (including the
@@ -103,7 +104,7 @@ export function goalCore(g: GoalRow): GoalCore {
     status: g.status,
     level: g.level ?? "team",
     visibility: toWireVisibility(g.visibility),
-    owner: { id: g.owner_id, name: owner?.name ?? "" },
+    owner: { id: g.owner_id, name: personName(g.owner_id, owner?.name) },
     team: pod ? { id: pod.id, name: pod.name } : null,
     anchors: JSON.parse(g.anchors_json),
     depends_on: JSON.parse(g.depends_on_json || "[]"),

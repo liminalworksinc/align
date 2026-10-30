@@ -20,14 +20,14 @@ screen says "team".
 | --- | --- | --- | --- |
 | `/` | (redirect) | Anyone | Redirects to `/app` |
 | `/app/sign-in` | Sign in | A signed-out person | Sign in with Google, GitHub or an email code |
-| `/app` | Your workspaces | A signed-in person | List and create workspaces; first run offers the Northstar sample |
-| `/app/account` | Your account | A signed-in person | See the account and link Google or GitHub |
+| `/app` | Your workspaces | A signed-in person | List and create workspaces, restore a deleted one; first run offers the Northstar sample |
+| `/app/account` | Your account | A signed-in person | See the account, link Google or GitHub, delete the account |
 | `/app/device` | Connect a device | A signed-in person (recent sign-in) | Approve the code that `align login` printed |
 | `/app/devices` | Your devices | A signed-in person | List and revoke paired devices |
 | `/app/invite/<token>` | Workspace invite | The invited person | Join a workspace (and team) from an invite link |
 | `/app/w/<ws>` | Goals tab | Workspace members | Goals the person can read; create a goal |
 | `/app/w/<ws>/goals/<goal>` | Goal page | Workspace members | One goal: versions, tree, new version, alignment request, change requests |
-| `/app/w/<ws>/people` | People tab | Workspace members | Members, roles, invites, teams, leaving |
+| `/app/w/<ws>/people` | People tab | Workspace members | Members, roles, invites, teams, leaving, deleting the workspace |
 | `/app/w/<ws>/sessions` | Sessions tab | Workspace members | Shared sessions, stop and resume |
 | `/app/w/<ws>/alignments` | Alignments tab | Workspace members | Alignment requests the person is part of |
 | `/app/w/<ws>/requests` | Requests tab | Workspace members | Change requests: waiting on me, mine, others |
@@ -161,6 +161,22 @@ account, and SHALL let the person link Google or GitHub explicitly; accounts are
 - **WHEN** linking fails because that Google or GitHub account belongs to another Align account
 - **THEN** the provider sends the person back to `/app/account?error=<code>` and the page shows "That account is already linked to another Align account, so nothing was linked." (other link failures show "Linking didn't work (<code>). Nothing was linked."); nothing is linked
 
+### Requirement: Account deletion screen
+
+The `/app/account` page SHALL offer a "Delete your account" card that says what deletion does and keeps, enables
+**Delete my account** only once the person has typed their email, and asks for a fresh sign-in first when their
+sign-in is older than 15 minutes.
+
+#### Scenario: Delete the account
+
+- **WHEN** a person with a recent sign-in types their email into "Type <email> to confirm" and presses **Delete my account**
+- **THEN** the page calls `DELETE /api/v2/me` with `{email}` and, on 204, opens `/app/sign-in`; until the typed text equals their email (in any case) the button stays disabled
+
+#### Scenario: Old sign-in or refusal
+
+- **WHEN** the person's sign-in is older than 15 minutes, or the server answers 403 `reauth_required`
+- **THEN** the card is replaced by "Sign in again to delete your account. Deleting it needs a sign-in from the last 15 minutes." with **Sign in again** (coming back to `/app/account`); any other refusal, such as 409 `last_owner`, shows the server's message in red
+
 ### Requirement: Workspace list and first-run sample
 
 The `/app` page SHALL list the person's workspaces from `GET /api/v2/workspaces` with their role and teams, let them
@@ -175,6 +191,11 @@ create a workspace, and offer **Create the Northstar sample** only when they hav
 
 - **WHEN** a person in no workspace opens `/app`
 - **THEN** the page shows "You are not in a workspace yet. Create one, open an invite link someone sent you, or start from a sample." and a "Try Align with a sample" card with **Create the Northstar sample**, which posts to `POST /api/v2/workspaces/sample` and opens the new "Northstar (sample)" workspace; the button is not shown once the person has any workspace
+
+#### Scenario: Deleted workspaces
+
+- **WHEN** the person owns workspaces deleted in the last 30 days
+- **THEN** a "Deleted workspaces" card lists each with "Deleted <time>. You can restore it until <time>; then it is erased." and **Restore**, which posts to `POST /api/v2/workspaces/<ws>/restore` and reloads the list, where the workspace is back among the links; 403 `reauth_required` shows "Sign in again to restore a workspace. Restoring needs a sign-in from the last 15 minutes." with **Sign in again**; the card is absent when there is nothing to restore
 
 #### Scenario: Create refused
 
@@ -392,8 +413,13 @@ member's role or remove a member, and let any member leave.
 
 #### Scenario: Remove a member
 
-- **WHEN** an owner presses **Remove** next to another member and confirms "Remove <name> from <workspace>? Their team places, device access and connected apps for this workspace end. Their goals, sessions and history stay."
-- **THEN** the page calls `DELETE /api/v2/workspaces/<ws>/members/<user>` and the member disappears from the list
+- **WHEN** an owner presses **Remove** next to another member
+- **THEN** a panel under the member says "Remove <name> from <workspace>? Their team places, device access and connected apps for this workspace end. Their goals, sessions and history stay, under their name for 30 days and then as "Former member"." with an unticked "Also delete their shared sessions in this workspace now" box, **Remove <name>** and **Cancel**; **Remove <name>** calls `DELETE /api/v2/workspaces/<ws>/members/<user>` (with `?delete_sessions=1` when the box is ticked) and the member disappears from the list
+
+#### Scenario: Delete the workspace
+
+- **WHEN** an owner presses **Delete workspace** in the "Delete this workspace" card and confirms "Delete <workspace>? Everyone loses access now. Owners can restore it for 30 days, then it is erased."
+- **THEN** the page calls `DELETE /api/v2/workspaces/<ws>` and opens `/app`, where the workspace is under "Deleted workspaces"; members who are not owners see no such card
 
 #### Scenario: Leave
 
@@ -490,7 +516,7 @@ sessions.
 #### Scenario: Usage table
 
 - **WHEN** a member (viewers included) opens the tab
-- **THEN** a table shows, per row, requests, input, output, cache read, cache write and estimated list cost, with the billing basis per row, then "Not bound to a goal" and "Total", the server's note, "Goals you can't see are grouped without names. There is no per-person view.", and a count of unpriced requests when there are any
+- **THEN** a table shows, per row, requests, input, output, cache read, cache write and estimated list cost, with the billing basis per row, then "Not bound to a goal" and "Total", the server's note, "Goals you can't see are grouped without names. There is no per-person view.", and a count of unpriced requests when there are any; by my sessions, usage of rolled-up sessions older than 13 months is one "Older sessions (rolled up)" row
 
 ### Requirement: Workspace Apps tab
 

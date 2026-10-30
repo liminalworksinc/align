@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Btn, Card, Err, Loading, Note, Pill, Shell, useApi, when } from "../_ui/kit";
+import { api, ApiError, Btn, Card, Err, Field, go, Input, Loading, Note, Pill, Shell, SignInAgain, useAction, useApi, when } from "../_ui/kit";
 import type { Me, SignInOptions } from "../_ui/server";
 
 interface LinkedAccount {
@@ -90,6 +90,54 @@ export default function Account({ me, options, linkError }: { me: Me; options: S
         <Note>Linking lets that Google or GitHub account sign you in to this Align account. Align never links accounts on its own because their emails match.</Note>
         <Err>{error}</Err>
       </Card>
+      <DeleteAccount me={me} />
     </Shell>
+  );
+}
+
+const RECENT_MS = 15 * 60 * 1000;
+
+/** Delete the account: type the email to confirm; needs a sign-in from the last 15 minutes (DELETE /api/v2/me). */
+function DeleteAccount({ me }: { me: Me }) {
+  const [typed, setTyped] = useState("");
+  const [stale, setStale] = useState(() => Date.now() - Date.parse(me.signedInAt) > RECENT_MS);
+  const act = useAction();
+  const matches = typed.trim().toLowerCase() === me.email.toLowerCase();
+  if (stale) {
+    return (
+      <SignInAgain me={me} next="/app/account">
+        Sign in again to delete your account. Deleting it needs a sign-in from the last 15 minutes.
+      </SignInAgain>
+    );
+  }
+  return (
+    <Card title="Delete your account">
+      <p className="mb-3 text-[15px] text-zinc-600">
+        This signs you out everywhere, unpairs your devices, disconnects your apps and removes you from every workspace. A workspace where you are the only member is deleted too. Goals, change requests and session spend that others rely on stay, shown as
+        &quot;Former member&quot; with no name or email. If you are the only owner of a workspace with other members, make someone else an owner or delete it first.
+      </p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void act.run(async () => {
+            try {
+              await api("/api/v2/me", { method: "DELETE", body: { email: typed.trim() } });
+              go("/app/sign-in");
+            } catch (err) {
+              if (err instanceof ApiError && err.code === "reauth_required") setStale(true);
+              throw err;
+            }
+          });
+        }}
+      >
+        <Field label={`Type ${me.email} to confirm`}>
+          <Input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" aria-label="Your email, to confirm" />
+        </Field>
+        <Btn type="submit" kind="danger" disabled={act.busy || !matches}>
+          Delete my account
+        </Btn>
+        <Err>{act.error}</Err>
+      </form>
+    </Card>
   );
 }

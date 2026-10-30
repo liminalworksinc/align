@@ -111,6 +111,9 @@ The agent uploads and fetches inside the normal hook-started sync pass; hooks re
 `GET /api/v2/workspaces/:ws/spend?by=goal|team|session&from&to` (`by=pod` is accepted as `by=team`) (cookie) → rows with token sums by basis and
 `est_list_usd_micros` sums (labelled estimates), plus `unallocated` and `unpriced_requests`. Invariant: total =
 Σ goals + unallocated. Private-goal spend visible to its owner only; others see it inside an unnamed "private" bucket.
+Sessions older than 13 months are rolled up (docs/RETENTION.md): their usage still counts by goal and team, by its UTC
+day (a day counts when its start is in `[from, to)`), and `by=session` shows it as one `rolled_up` row,
+"Older sessions (rolled up)".
 
 ## Alignment (web, cookie)
 `POST /api/v2/workspaces/:ws/alignments` → req `{ "target_goal_id", "source_goal_id": string|null, "choice": "contribution"|"work_toward", "session_keys": [string], "note": string|null }`
@@ -205,9 +208,15 @@ Visibility
 - `team` goals (stored as `pod`): the team's members and workspace owners. Company goals: everyone (always `workspace`). `private`: the owner only (workspace owners included in "not").
 - Invite acceptance needs the signed-in email to equal the invited one; when hosted, the provider must have verified it.
 
-Web-only routes (cookie) added for the app: `GET/POST /api/v2/workspaces`, `GET /api/v2/workspaces/:ws`,
-`PATCH`/`DELETE /api/v2/workspaces/:ws` (owners: rename, delete), `POST .../members/:user { role }` (owners),
-`DELETE .../members/:user` (owners remove; anyone leaves with their own id; `409 last_owner`), `GET .../audit` (owners,
+Web-only routes (cookie) added for the app: `GET/POST /api/v2/workspaces` (`GET` → `{ workspaces, deleted: [{ id, name,
+deleted_at, restore_until }] }`, the deleted ones being those the caller owns that can still be restored),
+`GET /api/v2/workspaces/:ws`, `PATCH`/`DELETE /api/v2/workspaces/:ws` (owners: rename; delete, which is a soft delete:
+404 to everyone at once, restorable for 30 days, then purged), `POST /api/v2/workspaces/:ws/restore` (owners of the
+deleted workspace, a sign-in from the last 15 minutes, `403 reauth_required`, `409 not_deleted`; → `{ id, name, role }`),
+`DELETE /api/v2/me { email }` (delete my account: a sign-in from the last 15 minutes, the account's email typed to
+confirm, `409 last_owner` while the only owner of a workspace with other members; → 204), `POST .../members/:user { role }` (owners),
+`DELETE .../members/:user[?delete_sessions=1]` (owners remove; anyone leaves with their own id; `409 last_owner`;
+`delete_sessions=1` also deletes the person's shared sessions there now), `GET .../audit` (owners,
 newest 200 `{ at, actor: {id, name}|null, action, object_id }`), `GET/POST .../invites` (`{ email, role, team_id?,
 team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST .../accept`, `POST .../teams`,
 `POST .../teams/:team/members`, `DELETE .../teams/:team/members/:user` (the `/pods` paths are aliases), `POST .../goals`

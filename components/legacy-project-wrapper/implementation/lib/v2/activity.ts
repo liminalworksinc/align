@@ -6,6 +6,7 @@ import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { openEpoch, sessionRow } from "./sessions";
 import type { DevicePrincipal } from "./devices";
 import { need } from "./workspaces";
+import { personName } from "./retention";
 import { SESSION_KEY_RE, type Body } from "./validate";
 
 // In-flight work signals: what a shared session is editing, committing, working on or claiming, so agents toward
@@ -104,7 +105,7 @@ export function activityFor(pp: PolicyPrincipal, after: number) {
   need(pp, "workspace.read");
   const rows = all<ActivityRow>(
     `SELECT a.seq, a.session_key, a.user_id, a.goal_id, a.repo_id, a.kind, a.path_hash, a.path, a.text, a.at, a.expires_at, s.harness, u.name
-     FROM v2_activity a JOIN v2_sessions s ON s.ws_id = a.ws_id AND s.session_key = a.session_key JOIN ba_user u ON u.id = a.user_id
+     FROM v2_activity a JOIN v2_sessions s ON s.ws_id = a.ws_id AND s.session_key = a.session_key LEFT JOIN ba_user u ON u.id = a.user_id
      WHERE a.ws_id = ? AND a.seq > ? AND a.expires_at > ? ORDER BY a.seq LIMIT 500`,
     pp.wsId,
     after,
@@ -125,7 +126,7 @@ export function activityFor(pp: PolicyPrincipal, after: number) {
       seq: r.seq,
       session_key: r.session_key,
       harness: r.harness,
-      user: { id: r.user_id, name: r.name },
+      user: { id: r.user_id, name: personName(r.user_id, r.name) },
       mine: r.user_id === pp.userId,
       goal_id: r.goal_id,
       repo_id: r.repo_id,

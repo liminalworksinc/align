@@ -10,6 +10,9 @@ import { need } from "./workspaces";
 // Privacy: a goal the caller can't see (another person's private goal, another team's goal) is never named; its
 // usage sits in one unnamed "private" row. by=session names only the caller's own sessions; everyone else's are one
 // "other people's sessions" row. No per-person view exists.
+// Sessions older than 13 months are rolled up (lib/v2/retention.ts) into v2_spend_rollups: per goal, UTC day, model
+// and basis, with no person or session. Their totals still count by goal and team (a day counts when its start is in
+// [from, to)); by=session they are one "Older sessions (rolled up)" row.
 
 const BASES = ["api_usd", "subscription_included", "workspace_credits", "estimated_list_usd", "unknown"] as const;
 type Basis = (typeof BASES)[number];
@@ -57,6 +60,20 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
     to,
     to,
   );
+  const rolled = all<Agg>(
+    `SELECT NULLIF(goal_id, '') AS goal_id, '' AS session_key, '' AS session_owner, basis,
+            SUM(requests) AS requests, SUM(input) AS input, SUM(output) AS output, SUM(cache_read) AS cache_read,
+            SUM(cache_write_5m) AS cache_write_5m, SUM(cache_write_1h) AS cache_write_1h, SUM(cache_write_unsplit) AS cache_write_unsplit,
+            SUM(est_list_usd_micros) AS est_list_usd_micros, SUM(unpriced_requests) AS unpriced_requests
+     FROM v2_spend_rollups
+     WHERE ws_id = ? AND (? IS NULL OR day || 'T00:00:00.000Z' >= ?) AND (? IS NULL OR day || 'T00:00:00.000Z' < ?)
+     GROUP BY goal_id, basis`,
+    pp.wsId,
+    from,
+    from,
+    to,
+    to,
+  ).map((r) => ({ ...r, rolled: true }));
   const goals = new Map(all<GoalRow>("SELECT * FROM v2_goals WHERE ws_id = ?", pp.wsId).map((g) => [g.id, g]));
   const pods = new Map(all<{ id: string; name: string }>("SELECT id, name FROM v2_pods WHERE ws_id = ?", pp.wsId).map((p) => [p.id, p.name]));
   const sessions = new Map(
@@ -72,7 +89,7 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
     return b.sums;
   };
 
-  for (const r of rows) {
+  for (const r of [...rows, ...rolled] as (Agg & { rolled?: boolean })[]) {
     add(total, r);
     if (!r.goal_id) {
       add(unallocated, r);
@@ -81,6 +98,10 @@ export function spend(pp: PolicyPrincipal, by: SpendBy, from: string | null, to:
     const g = goals.get(r.goal_id);
     const visible = !!g && canReadGoal(pp, goalObj(g));
     if (by === "session") {
+      if (r.rolled) {
+        add(bucket("rolled_up", "rolled_up", "Older sessions (rolled up)"), r);
+        continue;
+      }
       const mine = r.session_owner === pp.userId ? sessions.get(r.session_key) : undefined;
       if (mine) add(bucket(`session:${r.session_key}`, "session", mine.title || mine.repo_alias || `${mine.harness} session`, { session_key: r.session_key }), r);
       else add(bucket("others", "others", "Other people's sessions"), r);

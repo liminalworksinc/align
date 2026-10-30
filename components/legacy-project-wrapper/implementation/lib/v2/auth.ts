@@ -8,7 +8,7 @@ import { emailOTP } from "better-auth/plugins";
 import { config, hostAllowed } from "../config";
 import { clientNet } from "../ratelimit";
 import { emailSignInEnabled, githubConfigured, googleConfigured, publicOrigin, testIdpEnabled } from "./config";
-import { authDb, dbDir, get } from "./db";
+import { authDb, dbDir, get, LIVE_WS } from "./db";
 import { rand32 } from "./ids";
 import { takeAll } from "./limits";
 import { sendSignInCode } from "./mail";
@@ -60,7 +60,7 @@ const DISABLED_OTP_PATHS = [
 function mayCreateByEmailCode(email: string): boolean {
   if (!config().hosted) return true;
   const now = new Date().toISOString();
-  if (get("SELECT 1 AS x FROM v2_invites WHERE email = ? AND accepted_at IS NULL AND expires_at > ?", email, now)) return true;
+  if (get(`SELECT 1 AS x FROM v2_invites WHERE email = ? AND accepted_at IS NULL AND expires_at > ? AND ${LIVE_WS("ws_id")}`, email, now)) return true;
   const first = (process.env.ALIGN_FIRST_OWNER_EMAIL || "").trim().toLowerCase();
   return !!first && first === email && !get("SELECT 1 AS x FROM ba_user LIMIT 1");
 }

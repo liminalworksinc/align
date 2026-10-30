@@ -7,6 +7,7 @@ import { goalSnapshot, type Binding, type DirectiveKind } from "../v2/directives
 import { goalObj, goalRow, serializeGoal, toWireVisibility, transferGoals, visibleGoals, bindableFor, type GoalRow, type Measure } from "../v2/goals";
 import { canReadGoal, type PolicyPrincipal } from "../v2/policy";
 import { principalIn } from "../v2/workspaces";
+import { personName } from "../v2/retention";
 
 // Read-only MCP surface for Align (specs/align/mcp.md). Every tool acts as one person in one v2 workspace, with their
 // role, team memberships and goal visibility (lib/v2/policy.ts), and only reads. Two token kinds reach it
@@ -76,7 +77,7 @@ const VisibilityOut = z.enum(["private", "team", "workspace"]);
 const StatusOut = z.enum(["active", "achieved", "dropped"]);
 const Parent = z.object({ id: z.string(), title: UT, version: z.number(), reviewed_version: z.number().nullable(), stale: z.boolean() });
 
-const userName = (id: string) => get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", id)?.name ?? "";
+const userName = (id: string) => personName(id, get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", id)?.name);
 const person = (id: string, name = userName(id)) => ({ id, name: ut(name) });
 const teamOf = (podId: string | null) => {
   const t = podId ? get<{ id: string; name: string }>("SELECT id, name FROM v2_pods WHERE id = ?", podId) : undefined;

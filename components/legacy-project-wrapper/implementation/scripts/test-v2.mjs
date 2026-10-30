@@ -8,6 +8,10 @@
 //                                         sign-in-link; test IdP off
 //   on      Mode L, ALIGN_TEST_IDP=1    -> identity, RBAC, devices (recent sign-in), sessions, usage, spend, directives,
 //                                         directive cursor, receipts, alignments, stop sharing, delete, web UI
+//   retention Mode L, ALIGN_TEST_IDP=1 -> account deletion, workspace soft delete and restore, removal with "delete
+//                                         their sessions now", and scripts/retention.mjs with ALIGN_TEST_NOW as its clock
+//                                         (codes, invites, former members, purge, audit, spend roll-ups), the web UI for
+//                                         them, and the job's run at server startup
 //   hosted  HOSTED=1                    -> startup refusals, then the hosted host/https/edge checks and the route
 //                                         allowlist (/ -> /app, everything else 404); no closing date (a leftover
 //                                         ALIGN_DELETE_BY in the past is ignored); then email codes through a fake HTTPS
@@ -447,7 +451,7 @@ try {
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
-  check("storage: WAL, migrated (user_version 5), v2_ tables (connected-app grants and change requests included) and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 5 && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "ba_user"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
+  check("storage: WAL, migrated (user_version 6), v2_ tables (connected-app grants, change requests, spend roll-ups and former members included) and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 6 && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_spend_rollups", "v2_former_members", "ba_user"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -1577,21 +1581,14 @@ try {
   const delA = await call("U3", "DELETE", `/api/v2/workspaces/${A}`, { cookie: U3.cookie });
   const delB = await call("U4", "DELETE", `/api/v2/workspaces/${B}`, { cookie: U4.cookie });
   const bGone = await call("U4", "GET", `/api/v2/workspaces/${B}`, { cookie: U4.cookie });
+  const d4OnB = await call("U4", "GET", `/api/v2/workspaces/${B}/goals`, { bearer: D4.access });
   const d4OnAStill = await call("U4", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D4.access });
-  const bLeft = withDb((d) => {
-    const out = {};
-    for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'v2_%'").all()) {
-      const cols = d.prepare(`PRAGMA table_info(${name})`).all().map((c) => c.name);
-      let n = 0;
-      for (const row of d.prepare(`SELECT * FROM ${name}`).all()) if (cols.some((c) => typeof row[c] === "string" && row[c].includes(B))) n++;
-      if (n) out[name] = n;
-    }
-    return out;
-  });
+  const u4List = (await call("U4", "GET", "/api/v2/workspaces", { cookie: U4.cookie })).json;
+  const bRow = withDb((d) => d.prepare("SELECT deleted_at FROM v2_workspaces WHERE id = ?").get(B));
   check(
-    "workspaces: only an owner deletes (a non-member -> 404, a member -> 403 owner_only); delete -> 204, then 404, and no v2 row anywhere mentions it; the device keeps its other workspace",
-    alB.json?.state === "approved" && upB.json?.accepted === 1 && delByOther.status === 404 && delA.status === 403 && delA.json?.error === "owner_only" && delB.status === 204 && bGone.status === 404 && d4OnAStill.status === 200 && Object.keys(bLeft).length === 0,
-    `${alB.status} ${upB.text} ${delByOther.status} ${delA.status} ${delB.status} ${bGone.status} ${d4OnAStill.status} ${JSON.stringify(bLeft)}`,
+    "workspaces: only an owner deletes (a non-member -> 404, a member -> 403 owner_only); delete -> 204, then 404 on the web and to its devices, gone from the list and kept as deleted (restorable, purged later by the retention job); the device keeps its other workspace",
+    alB.json?.state === "approved" && upB.json?.accepted === 1 && delByOther.status === 404 && delA.status === 403 && delA.json?.error === "owner_only" && delB.status === 204 && bGone.status === 404 && d4OnB.status === 404 && d4OnAStill.status === 200 && !u4List.workspaces.some((w) => w.id === B) && u4List.deleted.some((w) => w.id === B) && !!bRow?.deleted_at,
+    `${alB.status} ${upB.text} ${delByOther.status} ${delA.status} ${delB.status} ${bGone.status} ${d4OnB.status} ${d4OnAStill.status} ${JSON.stringify(u4List)} ${JSON.stringify(bRow)}`,
   );
 
   // -- stop sharing, then delete --
@@ -1752,6 +1749,341 @@ try {
   check(`canary: the private goal's text appears in none of ${seen.filter((s) => s.who !== "U2").length} responses to anyone but its owner (workspace owner included); its owner sees it`, leaks.length === 0 && ownerSaw, leaks.map((l) => `${l.who} ${l.p}`).join(" | "));
   await stopServer();
 
+  // ======== phase retention: account deletion, workspace soft delete and restore, and the retention job ========
+  // Mode L with the test IdP on a fresh data directory. The job runs as the operator runs it, node scripts/retention.mjs
+  // against the live database, with ALIGN_TEST_NOW (honoured only with ALIGN_TEST_IDP=1) as its clock.
+  const retDir = path.join(tmpRoot, "retention");
+  await mustStart({ ALIGN_DATA_DIR: retDir, ALIGN_TEST_IDP: "1" });
+  dbFile = path.join(retDir, "v2", "align.sqlite");
+  {
+    const DAY = 24 * 3600 * 1000;
+    const later = (ms) => new Date(Date.now() + ms).toISOString();
+    const monthsLater = (m, days = 0) => {
+      const d = new Date(Date.now() + days * DAY);
+      d.setUTCMonth(d.getUTCMonth() + m);
+      return d.toISOString();
+    };
+    const scriptEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !SETTING.test(k)));
+    const retention = (now, { dryRun = false, testIdp = true } = {}) => {
+      const r = spawnSync("node", ["scripts/retention.mjs", ...(dryRun ? ["--dry-run"] : [])], {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: { ...scriptEnv, ALIGN_DATA_DIR: retDir, ...(testIdp ? { ALIGN_TEST_IDP: "1" } : {}), ...(now ? { ALIGN_TEST_NOW: now } : {}) },
+      });
+      let counts = null;
+      try {
+        counts = JSON.parse(r.stdout.trim().split("\n").pop());
+      } catch {}
+      return { status: r.status, out: `${r.stdout}${r.stderr}`.slice(-600), counts: counts ?? {} };
+    };
+    const signIn = async (u) => {
+      const r = await call(u.who, "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: u.email, password: `pw-${u.who}-123456` } });
+      u.cookie = cookieOf(r.setCookies);
+      return r.status;
+    };
+    const ws = (u, method, w, p = "", body) => call(u.who, method, `/api/v2/workspaces/${w}${p}`, { cookie: u.cookie, ...(body ? { body } : {}) });
+    const newWs = async (u, name) => (await call(u.who, "POST", "/api/v2/workspaces", { cookie: u.cookie, body: { name } })).json.id;
+    const join = async (owner, w, u, role = "member") => {
+      const i = await ws(owner, "POST", w, "/invites", { email: u.email, role });
+      return call(u.who, "POST", `/api/v2/invites/${i.json.token}/accept`, { cookie: u.cookie, body: {} });
+    };
+    const goal = async (u, w, title) => (await ws(u, "POST", w, "/goals", { title, visibility: "workspace" })).json;
+    const share = async (dev, w, native, goalId, n) => {
+      const key = sessionKey(dev, w, "claude-code", native);
+      const start = new Date(Date.now() - 3600 * 1000).toISOString();
+      await call(dev.who, "PUT", `/api/v2/workspaces/${w}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, w, "/src/r"), started_at: start, title: null } });
+      const ep = epochId();
+      await call(dev.who, "POST", `/api/v2/workspaces/${w}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: ep, goal_id: goalId, starts_at: start, root_turn: null, cause: "manual" } });
+      const up = await call(dev.who, "POST", `/api/v2/workspaces/${w}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: Array.from({ length: n }, (_, i) => usageRow(dev, `${native}-${i}`, ep)) } });
+      return { key, accepted: up.json?.accepted };
+    };
+    /** Rows in every table (Better Auth's included) holding `needle` in any text column; `wsOnly` limits to one workspace's rows. */
+    const mentions = (needle, wsOnly = null) =>
+      withDb((d) => {
+        const out = {};
+        for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()) {
+          const cols = d.prepare(`PRAGMA table_info("${name}")`).all().map((c) => c.name);
+          if (wsOnly && !cols.includes("ws_id")) continue;
+          const rows = wsOnly ? d.prepare(`SELECT * FROM "${name}" WHERE ws_id = ?`).all(wsOnly) : d.prepare(`SELECT * FROM "${name}"`).all();
+          const n = rows.filter((row) => cols.some((c) => typeof row[c] === "string" && row[c].toLowerCase().includes(needle.toLowerCase()))).length;
+          if (n) out[name] = n;
+        }
+        return out;
+      });
+    const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));
+    const q1 = (sql, ...a) => withDb((d) => d.prepare(sql).get(...a));
+
+    const Rs = {};
+    for (const [who, name] of [
+      ["R1", "Rita One"],
+      ["R2", "Rob Two"],
+      ["R3", "Rae Three"],
+      ["R4", "Ron Four"],
+      ["R5", "Rex Five"],
+      ["R6", "Ria Six"],
+    ])
+      Rs[who] = await signUp(who, name, `${who.toLowerCase()}@example.test`);
+    const { R1: r1, R2: r2, R3: r3, R4: r4, R5: r5, R6: r6 } = Rs;
+    const W1 = await newWs(r1, "Retention A");
+    for (const u of [r2, r3, r5]) await join(r1, W1, u);
+    const D2 = await pairDevice("R2", r2, [W1]);
+    const D3 = await pairDevice("R3", r3, [W1]);
+    const D5 = await pairDevice("R5", r5, [W1]);
+    const G1 = await goal(r1, W1, "Rita's goal");
+    const G2 = await goal(r2, W1, "Rob's goal");
+    const G3 = await goal(r3, W1, "Rae's goal");
+    const G5 = await goal(r5, W1, "Rex's goal");
+    const S2 = await share(D2, W1, "r2", G2.id, 2);
+    const S3 = await share(D3, W1, "r3", G3.id, 3);
+    const S5 = await share(D5, W1, "r5", G5.id, 1);
+    const act3 = await call("R3", "POST", `/api/v2/workspaces/${W1}/activity`, { bearer: D3.access, body: { items: [{ session_key: S3.key, kind: "edit", at: new Date().toISOString(), repo_id: "f".repeat(32), path_hash: "e".repeat(32) }] } });
+    const cr = await ws(r2, "POST", W1, `/goals/${G1.id}/change-requests`, { base_version: 1, changes: { title: "Rita's goal, sharper" }, reason: "clearer" });
+    const W4 = await newWs(r4, "Solo");
+    const G4 = await goal(r4, W4, "Ron's goal");
+    const spend0 = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
+    check(
+      "retention setup: a workspace with three members' goals, shared sessions with usage (6 requests) and a change request; a one-person workspace",
+      G1?.id && G2?.id && G3?.id && G5?.id && G4?.id && S2.accepted === 2 && S3.accepted === 3 && S5.accepted === 1 && cr.status === 201 && spend0?.total?.requests === 6,
+      `${S2.accepted} ${S3.accepted} ${S5.accepted} ${cr.status} ${cr.text} ${spend0?.total?.requests}`,
+    );
+
+    // -- account deletion --
+    const lastOwner = await call("R1", "DELETE", "/api/v2/me", { cookie: r1.cookie, body: { email: r1.email } });
+    check(
+      "account deletion: the only owner of a workspace with other members -> 409 last_owner naming it, and nothing changes",
+      lastOwner.status === 409 && lastOwner.json?.error === "last_owner" && lastOwner.json.message.includes("Retention A") && !!q1("SELECT 1 AS x FROM ba_user WHERE id = ?", r1.id),
+      lastOwner.text,
+    );
+    ageSession(r4.cookie, 20);
+    const stale4 = await call("R4", "DELETE", "/api/v2/me", { cookie: r4.cookie, body: { email: r4.email } });
+    await signIn(r4);
+    const wrong4 = await call("R4", "DELETE", "/api/v2/me", { cookie: r4.cookie, body: { email: "someone@example.test" } });
+    const cross4 = await call("R4", "DELETE", "/api/v2/me", { cookie: r4.cookie, headers: { origin: "http://evil.example" }, body: { email: r4.email } });
+    const bearer4 = await call("R4", "DELETE", "/api/v2/me", { bearer: D2.access, body: { email: r4.email } });
+    check(
+      "account deletion: a sign-in older than 15 minutes -> 403 reauth_required; a mistyped email -> 400; a cross-site write -> 403; a device token -> 403",
+      stale4.status === 403 && stale4.json?.error === "reauth_required" && wrong4.status === 400 && cross4.status === 403 && bearer4.status === 403 && !!q1("SELECT 1 AS x FROM ba_user WHERE id = ?", r4.id),
+      `${stale4.text} ${wrong4.text} ${cross4.status} ${bearer4.status}`,
+    );
+    const del4 = await call("R4", "DELETE", "/api/v2/me", { cookie: r4.cookie, body: { email: r4.email.toUpperCase() } });
+    const me4 = await call("R4", "GET", "/api/v2/me", { cookie: r4.cookie });
+    const w4Row = q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W4);
+    const g4Owner = q1("SELECT owner_id FROM v2_goals WHERE id = ?", G4.id)?.owner_id;
+    const r4Left = { ...mentions(r4.email), ...mentions(r4.id) };
+    const accountAudit = q("SELECT ws_id, actor_id, object_id FROM v2_audit WHERE action = 'account.deleted'");
+    check(
+      "account deletion: the email typed in any case -> 204; signed out (401); their one-person workspace is deleted with it (restorable by nobody, purged later); no row anywhere holds their id or email; one audit row with no workspace, actor or email",
+      del4.status === 204 && me4.status === 401 && !!w4Row?.deleted_at && g4Owner === "fm_1" && Object.keys(r4Left).length === 0 && accountAudit.length === 1 && accountAudit.every((a) => a.ws_id === null && a.actor_id === null && a.object_id === null),
+      `${del4.status} ${del4.text} ${me4.status} ${JSON.stringify(w4Row)} ${g4Owner} ${JSON.stringify(r4Left)} ${JSON.stringify(accountAudit)}`,
+    );
+    const del2 = await call("R2", "DELETE", "/api/v2/me", { cookie: r2.cookie, body: { email: r2.email } });
+    const d2Me = await call("R2", "GET", "/api/v2/me", { bearer: D2.access });
+    const g2Seen = (await ws(r1, "GET", W1, `/goals/${G2.id}`)).json?.goal;
+    const crSeen = (await ws(r1, "GET", W1, `/goals/${G1.id}/change-requests/${cr.json?.id}`)).json;
+    const crReq = (crSeen?.change_request ?? crSeen)?.requester;
+    const spend1 = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
+    const s2Row = q1("SELECT user_id, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S2.key);
+    const r2Left = { ...mentions(r2.email), ...mentions(r2.id) };
+    const w1Audit = (await ws(r1, "GET", W1, "/audit")).json?.audit ?? [];
+    check(
+      "account deletion: a member's goals, change requests and session spend stay for the others as \"Former member #1\" (no device on the session); their device is unpaired; no row anywhere holds their id or email; the workspace audit shows member.account_deleted by the former member",
+      del2.status === 204 && d2Me.status === 401 && g2Seen?.owner?.id === "fm_1" && g2Seen.owner.name === "Former member #1" && crReq?.name === "Former member #1" && spend1?.total?.requests === 6 && s2Row?.user_id === "fm_1" && s2Row.device_id === null && Object.keys(r2Left).length === 0 && w1Audit.some((a) => a.action === "member.account_deleted" && a.actor?.name === "Former member #1"),
+      `${del2.status} ${d2Me.status} ${JSON.stringify(g2Seen?.owner)} ${JSON.stringify(crReq)} ${spend1?.total?.requests} ${JSON.stringify(s2Row)} ${JSON.stringify(r2Left)}`,
+    );
+
+    // -- removal: "delete their sessions now", and the 30-day former-member rule --
+    const rm5 = await call("R1", "DELETE", `/api/v2/workspaces/${W1}/members/${r5.id}?delete_sessions=1`, { cookie: r1.cookie });
+    const s5Left = q1("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S5.key).n;
+    const spend2 = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
+    const rm3 = await call("R1", "DELETE", `/api/v2/workspaces/${W1}/members/${r3.id}`, { cookie: r1.cookie });
+    const g3Now = (await ws(r1, "GET", W1, `/goals/${G3.id}`)).json?.goal;
+    check(
+      "removal: ?delete_sessions=1 deletes the person's shared sessions in the workspace at once (spend drops by theirs); without it their sessions and goals stay under their name",
+      rm5.status === 204 && s5Left === 0 && spend2?.total?.requests === 5 && invariantHolds(spend2) && rm3.status === 204 && g3Now?.owner?.name === "Rae Three" && q1("SELECT user_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S3.key)?.user_id === r3.id,
+      `${rm5.status} ${s5Left} ${spend2?.total?.requests} ${rm3.status} ${JSON.stringify(g3Now?.owner)}`,
+    );
+
+    // -- workspace soft delete and restore --
+    const W6 = await newWs(r1, "Retention B");
+    await join(r1, W6, r6);
+    const D1 = await pairDevice("R1", r1, [W1, W6]);
+    const del6 = await ws(r1, "DELETE", W6);
+    const r6Get = await ws(r6, "GET", W6);
+    const r1Get = await ws(r1, "GET", W6);
+    const d1Get = await call("R1", "GET", `/api/v2/workspaces/${W6}/goals`, { bearer: D1.access });
+    const d1Me = await call("R1", "GET", "/api/v2/me", { bearer: D1.access });
+    const r1List = (await call("R1", "GET", "/api/v2/workspaces", { cookie: r1.cookie })).json;
+    const r6List = (await call("R6", "GET", "/api/v2/workspaces", { cookie: r6.cookie })).json;
+    const listed = r1List?.deleted?.find((w) => w.id === W6);
+    check(
+      "soft delete: everyone gets 404 at once (owner, member, the owner's device); it leaves every list; its owner sees it under deleted with restore_until 30 days on; a member doesn't",
+      del6.status === 204 && r6Get.status === 404 && r1Get.status === 404 && d1Get.status === 404 && !d1Me.json.workspaces.some((w) => w.id === W6) && !r1List.workspaces.some((w) => w.id === W6) && !!listed && Math.abs(Date.parse(listed.restore_until) - Date.parse(listed.deleted_at) - 30 * DAY) < 1000 && listed.name === "Retention B" && r6List.deleted.length === 0,
+      `${del6.status} ${r6Get.status} ${r1Get.status} ${d1Get.status} ${JSON.stringify(r1List)} ${JSON.stringify(r6List)}`,
+    );
+    const r6Restore = await ws(r6, "POST", W6, "/restore", {});
+    ageSession(r1.cookie, 20);
+    const staleRestore = await ws(r1, "POST", W6, "/restore", {});
+    await signIn(r1);
+    const restored = await ws(r1, "POST", W6, "/restore", {});
+    const again = await ws(r1, "POST", W6, "/restore", {});
+    const r6Back = await ws(r6, "GET", W6);
+    const d1Back = await call("R1", "GET", `/api/v2/workspaces/${W6}/goals`, { bearer: D1.access });
+    const w6Audit = (await ws(r1, "GET", W6, "/audit")).json?.audit ?? [];
+    check(
+      "restore: a member -> 404; an owner with an old sign-in -> 403 reauth_required; with a fresh one -> 200 {id, name, role}; everyone and the device reach it again; restoring a live workspace -> 409 not_deleted; the audit has workspace.deleted and workspace.restored",
+      r6Restore.status === 404 && staleRestore.status === 403 && staleRestore.json?.error === "reauth_required" && restored.status === 200 && restored.json.id === W6 && restored.json.role === "owner" && again.status === 409 && again.json?.error === "not_deleted" && r6Back.status === 200 && d1Back.status === 200 && ["workspace.deleted", "workspace.restored"].every((a) => w6Audit.some((r) => r.action === a)),
+      `${r6Restore.status} ${staleRestore.text} ${restored.text} ${again.text} ${r6Back.status} ${d1Back.status}`,
+    );
+    await ws(r1, "DELETE", W6);
+
+    // -- the job: codes, invites, former members, purge, audit, roll-up --
+    await ws(r1, "POST", W1, "/invites", { email: "pending@example.test", role: "member" });
+    await sendCode("R1", r1.email);
+    const codes = () => q1("SELECT COUNT(*) AS n FROM ba_verification").n;
+    const pendingInv = () => q1("SELECT COUNT(*) AS n FROM v2_invites WHERE email = 'pending@example.test'").n;
+    const w6Exists = () => !!q1("SELECT 1 AS x FROM v2_workspaces WHERE id = ?", W6);
+    const codesBefore = codes();
+    const runA = retention(later(13 * DAY));
+    check(
+      "retention (+13 days): expired email codes, sign-in sessions and activity signals are deleted; an invite 6 days past its expiry stays; a workspace deleted 13 days ago stays restorable; a member removed 13 days ago keeps their name",
+      runA.status === 0 && codesBefore > 0 && codes() === 0 && runA.counts.codes_deleted >= 1 && runA.counts.sign_in_sessions_deleted >= 1 && act3.json?.accepted === 1 && runA.counts.activity_deleted === 1 && q1("SELECT COUNT(*) AS n FROM v2_activity").n === 0 && pendingInv() === 1 && w6Exists() && runA.counts.workspaces_purged === 0 && runA.counts.former_members_pseudonymised === 0,
+      `${runA.status} ${codesBefore} ${codes()} ${pendingInv()} ${runA.out}`,
+    );
+    const runB = retention(later(15 * DAY));
+    check("retention (+15 days): a pending invite 7 days past its expiry is deleted", runB.status === 0 && runB.counts.invites_deleted === 1 && pendingInv() === 0, runB.out);
+    const dry = retention(later(31 * DAY), { dryRun: true });
+    check(
+      "retention: --dry-run prints what it would do (purge 2 workspaces, pseudonymise 2 former members) and changes nothing",
+      dry.status === 0 && dry.counts.dry_run === true && /^Would \(as of /.test(dry.out) && dry.counts.workspaces_purged === 2 && dry.counts.former_members_pseudonymised === 2 && w6Exists() && q1("SELECT user_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S3.key)?.user_id === r3.id,
+      dry.out,
+    );
+    const noIdp = retention(later(31 * DAY), { testIdp: false });
+    check(
+      "retention: ALIGN_TEST_NOW is ignored without ALIGN_TEST_IDP=1 (the job runs at the real time, so nothing is due)",
+      noIdp.status === 0 && Math.abs(Date.parse(noIdp.counts.now) - Date.now()) < 60_000 && noIdp.counts.workspaces_purged === 0 && noIdp.counts.former_members_pseudonymised === 0 && w6Exists(),
+      noIdp.out,
+    );
+    const runE = retention(later(31 * DAY));
+    await signIn(r1);
+    const g3Later = (await ws(r1, "GET", W1, `/goals/${G3.id}`)).json?.goal;
+    const s3Row = q1("SELECT user_id, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S3.key);
+    const r3InW1 = { ...mentions(r3.id, W1), ...mentions(r3.email, W1) };
+    const w6Left = mentions(W6);
+    check(
+      "retention (+31 days): workspaces deleted 31 days ago (by their owner, or with an account) are purged (no row anywhere mentions them) and can't be restored",
+      runE.status === 0 && runE.counts.workspaces_purged === 2 && Object.keys(w6Left).length === 0 && Object.keys(mentions(W4)).length === 0 && (await ws(r1, "POST", W6, "/restore", {})).status === 404,
+      `${runE.out} ${JSON.stringify(w6Left)}`,
+    );
+    check(
+      "retention (+31 days): removed members become \"Former member #n\" in the order they left (numbers stable per workspace); their sessions lose the device; no row of that workspace holds their id or email; their account itself stays",
+      runE.counts.former_members_pseudonymised === 2 && g3Later?.owner?.id === "fm_3" && g3Later.owner.name === "Former member #3" && s3Row?.user_id === "fm_3" && s3Row.device_id === null && Object.keys(r3InW1).length === 0 && !!q1("SELECT 1 AS x FROM ba_user WHERE id = ?", r3.id) && q1("SELECT owner_id FROM v2_goals WHERE id = ?", G5.id)?.owner_id === "fm_2",
+      `${JSON.stringify(g3Later?.owner)} ${JSON.stringify(s3Row)} ${JSON.stringify(r3InW1)}`,
+    );
+    const runE2 = retention(later(31 * DAY));
+    check("retention: running it again with the same clock changes nothing (idempotent)", runE2.status === 0 && ["workspaces_purged", "sessions_rolled_up", "former_members_pseudonymised", "audit_rows_deleted", "invites_deleted"].every((k) => runE2.counts[k] === 0), runE2.out);
+    const auditN = () => q1("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ?", W1).n;
+    const runF = retention(monthsLater(11));
+    check("retention (+11 months): the audit log and raw session rows are kept", runF.status === 0 && runF.counts.audit_rows_deleted === 0 && runF.counts.sessions_rolled_up === 0 && auditN() > 0, runF.out);
+    const runG = retention(monthsLater(12, 2));
+    const rawSessions = () => q1("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ?", W1).n;
+    check("retention (1 year + 2 days): audit rows older than a year are deleted; session rows (13 months) are not yet", runG.status === 0 && runG.counts.audit_rows_deleted > 0 && auditN() === 0 && runG.counts.sessions_rolled_up === 0 && rawSessions() === 2, runG.out);
+    const runH = retention(monthsLater(13, 2));
+    await signIn(r1);
+    const spendH = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
+    const spendHs = (await ws(r1, "GET", W1, "/spend?by=session")).json;
+    const spendLaterFrom = (await ws(r1, "GET", W1, `/spend?by=goal&from=${encodeURIComponent(later(2 * DAY))}`)).json;
+    const rollCols = withDb((d) => d.prepare("PRAGMA table_info(v2_spend_rollups)").all().map((c) => c.name));
+    const usageLeft = q1("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ?", W1).n;
+    check(
+      "retention (13 months + 2 days): sessions are rolled up into per-goal, per-day, per-model totals with no person or session, and their raw rows (sessions, epochs, usage) are deleted",
+      runH.status === 0 && runH.counts.sessions_rolled_up === 2 && runH.counts.usage_rows_rolled_up === 5 && rawSessions() === 0 && usageLeft === 0 && q1("SELECT COUNT(*) AS n FROM v2_spend_rollups WHERE ws_id = ?", W1).n > 0 && !rollCols.some((c) => /user|session|owner|device/.test(c)),
+      `${runH.out} ${rawSessions()} ${usageLeft} ${rollCols}`,
+    );
+    const g2Row = spendH?.rows?.find((r) => r.goal?.id === G2.id);
+    check(
+      "spend: rolled-up totals still report by goal (the same totals as before, invariant holds); by=session they are one \"Older sessions (rolled up)\" row; a from after their day leaves them out",
+      spendH?.total?.requests === 5 && invariantHolds(spendH) && g2Row?.requests === 2 && g2Row.est_list_usd_micros === 2 * 12_345 && spendHs?.rows?.length === 1 && spendHs.rows[0].kind === "rolled_up" && spendHs.rows[0].label === "Older sessions (rolled up)" && spendHs.rows[0].requests === 5 && invariantHolds(spendHs) && spendLaterFrom?.total?.requests === 0,
+      `${JSON.stringify(spendH?.total?.requests)} ${JSON.stringify(spendHs?.rows)} ${spendLaterFrom?.total?.requests}`,
+    );
+    const runH2 = retention(monthsLater(13, 2));
+    await signIn(r1);
+    const spendH2 = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
+    check("retention: a second roll-up run adds nothing (totals unchanged)", runH2.status === 0 && runH2.counts.sessions_rolled_up === 0 && spendH2?.total?.requests === 5, runH2.out);
+
+    // -- the web UI: restore from /app, the remove panel's checkbox, and deleting an account --
+    await signIn(r1);
+    const W8 = await newWs(r1, "Retention UI");
+    const R7 = await signUp("R7", "Rhea Seven", "r7@example.test");
+    await join(r1, W8, R7);
+    const D7 = await pairDevice("R7", R7, [W8]);
+    const G7 = await goal(R7, W8, "Rhea's goal");
+    const S7 = await share(D7, W8, "r7", G7.id, 1);
+    await ws(r1, "DELETE", W8);
+    const R8 = await signUp("R8", "Rory Eight", "r8@example.test");
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const asUser = async (page, u) => {
+        await page.deleteCookie(...(await page.cookies(BASE)));
+        const [name, ...v] = u.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+        await page.setCookie({ name, value: v.join("="), url: BASE });
+      };
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        page.on("dialog", (d) => void d.accept());
+        await asUser(page, r1);
+        await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("Deleted workspaces") && document.body.innerText.includes("Retention UI"), { timeout: 15000 });
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Restore")?.click());
+        await page.waitForFunction((w) => !!document.querySelector(`a[href="/app/w/${w}"]`) && !document.body.innerText.includes("Deleted workspaces"), { timeout: 15000 }, W8);
+        check("ui (Chrome): /app lists deleted workspaces with Restore; restoring brings the workspace back into the list", true);
+        await page.goto(`${BASE}/app/w/${W8}/people`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("Delete this workspace") && document.body.innerText.includes("Rhea Seven"), { timeout: 15000 });
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Remove")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Also delete their shared sessions in this workspace now"), { timeout: 15000 });
+        await page.click('[role="group"] input[type="checkbox"]');
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Remove Rhea Seven")?.click());
+        await page.waitForFunction(() => !document.body.innerText.includes("Rhea Seven"), { timeout: 15000 });
+        const s7Left = q1("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W8, S7.key).n;
+        check("ui (Chrome): People's Remove opens a panel with \"Also delete their shared sessions in this workspace now\"; ticked, the member and their sessions go", s7Left === 0 && S7.accepted === 1, `${s7Left}`);
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete workspace")?.click());
+        await page.waitForFunction(() => location.pathname === "/app" && document.body.innerText.includes("Deleted workspaces"), { timeout: 15000 });
+        check("ui (Chrome): People's Delete workspace (confirmed) deletes it and the workspace shows under Deleted workspaces", !!q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W8)?.deleted_at);
+        await asUser(page, R8);
+        await page.goto(`${BASE}/app/account`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("Delete your account"), { timeout: 15000 });
+        const disabledBefore = await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete my account")?.disabled);
+        await page.type('input[aria-label="Your email, to confirm"]', R8.email);
+        await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete my account")?.click())]);
+        check(
+          "ui (Chrome): /app/account's Delete my account stays disabled until the email is typed, then deletes the account and opens sign-in",
+          disabledBefore === true && new URL(page.url()).pathname === "/app/sign-in" && !q1("SELECT 1 AS x FROM ba_user WHERE id = ?", R8.id) && errors.length === 0,
+          `${disabledBefore} ${page.url()} ${errors.join(" | ")}`,
+        );
+      } catch (e) {
+        check("ui (Chrome) retention run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available", false, `no Chrome at ${CHROME}`);
+
+    // -- the server runs the job at startup --
+    await signIn(r1);
+    const W9 = await newWs(r1, "Retention startup");
+    await ws(r1, "DELETE", W9);
+    await stopServer();
+    const boot = await mustStart({ ALIGN_DATA_DIR: retDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: later(31 * DAY) });
+    await sleep(500);
+    check(
+      "retention: the server runs the job at startup (it logs counts only) and purges a workspace deleted 31 days before its clock",
+      !q1("SELECT 1 AS x FROM v2_workspaces WHERE id = ?", W9) && /Align retention: workspaces purged [1-9]/.test(boot.stdout()) && !boot.stdout().includes("@example.test"),
+      boot.stdout().slice(-400),
+    );
+  }
+  await stopServer();
+
   // ======== phase hosted: v2 startup refusals, then v2 behind the hosted checks ========
   const hostedDir = path.join(tmpRoot, "hosted");
   const good = {
@@ -1786,6 +2118,7 @@ try {
     ["an http ALIGN_EMAIL_API_URL", { ALIGN_EMAIL_API_URL: "http://mail.example/emails", ALIGN_EMAIL_API_KEY: "k".repeat(20), ALIGN_EMAIL_FROM: "Align <a@mail.example>" }, "ALIGN_EMAIL_API_URL must be an https URL"],
     ["a Google id without its secret", { GOOGLE_CLIENT_SECRET: undefined }, "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together"],
     ["ALIGN_TEST_IDP", { ALIGN_TEST_IDP: "1" }, "ALIGN_TEST_IDP is not allowed when hosted"],
+    ["ALIGN_TEST_NOW (the retention job's test clock)", { ALIGN_TEST_NOW: "2030-01-01T00:00:00Z" }, "ALIGN_TEST_NOW is not allowed when hosted"],
     ["ALIGN_LOCAL_OWNER_EMAIL", { ALIGN_LOCAL_OWNER_EMAIL: "me@example.test" }, "ALIGN_LOCAL_OWNER_EMAIL is not allowed when hosted"],
   ];
   for (const [what, delta, needle] of refusals) {

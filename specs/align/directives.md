@@ -310,7 +310,6 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 - Whether directives may instruct agents (Owner decision 2026-10-30 keeps it open): today a directive carries only goal and binding state, and the agent decides what to do with it. A `stop` blocks tools locally but tells the agent nothing beyond the fixed stop reason.
 - Waking idle agents is out of scope (Owner decision 2026-10-30 keeps it open): a stop or a new goal version takes effect only when the session's next hook starts a sync, so an idle agent learns nothing until someone uses it again, and the Sessions tab shows "Stop sent, not yet received" until then.
 - A removed member's sessions stay recorded and keep their `shared` state, so goal versions and an owner's stop still write directives for them that no device can fetch any more. Whether removal should stop sharing for those sessions (and so write nothing) is not decided.
-- Retention: directive and receipt rows are kept until the session's history is deleted. How long they are kept otherwise is an open decision.
 
 ## Sources
 

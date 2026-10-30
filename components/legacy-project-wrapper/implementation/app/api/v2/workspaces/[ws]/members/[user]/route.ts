@@ -11,7 +11,9 @@ export const POST = route<{ ws: string; user: string }>(async (req, params) => {
 });
 
 // DELETE: an owner removes a member, or anyone leaves by naming their own id. 409 last_owner for the only owner.
+// ?delete_sessions=1 also deletes the person's shared sessions in this workspace now.
 export const DELETE = route<{ ws: string; user: string }>(async (req, params) => {
-  await removeMember(enter(await webWrite(req), idParam(params.ws, ID_RE)), idParam(params.user, ID_RE));
+  const deleteSessions = new URL(req.url).searchParams.get("delete_sessions") === "1";
+  await removeMember(enter(await webWrite(req), idParam(params.ws, ID_RE)), idParam(params.user, ID_RE), { deleteSessions });
   return noContent();
 });

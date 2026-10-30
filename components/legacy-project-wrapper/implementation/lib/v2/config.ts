@@ -71,6 +71,7 @@ export function v2Problems(env: NodeJS.ProcessEnv = process.env): string[] {
     p.push("Sign-in needs the email settings (ALIGN_EMAIL_API_URL, ALIGN_EMAIL_API_KEY, ALIGN_EMAIL_FROM) or a Google or GitHub client (id and secret)");
   }
   if (env.ALIGN_TEST_IDP) p.push("ALIGN_TEST_IDP is not allowed when hosted");
+  if (env.ALIGN_TEST_NOW) p.push("ALIGN_TEST_NOW is not allowed when hosted (tests only)");
   if (env.ALIGN_LOCAL_OWNER_EMAIL) p.push("ALIGN_LOCAL_OWNER_EMAIL is not allowed when hosted (Mode L only)");
   return p;
 }

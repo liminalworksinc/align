@@ -1,22 +1,24 @@
-import { all, audit, get, run, tx } from "./db";
+import { all, audit, get, LIVE_WS, run, tx } from "./db";
 import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { authorize, type Action, type PodRole, type PolicyObject, type PolicyPrincipal, type WsRole } from "./policy";
 import type { Principal } from "./http";
 import { config } from "../config";
 import { take } from "./limits";
-import { onMemberRemoved, onWorkspaceDeleted } from "./lifecycle";
+import { deleteMemberSessions, onMemberRemoved, onWorkspaceDeleted } from "./lifecycle";
+import { cancelDeparture, noteDeparture, personName, RESTORE_DAYS } from "./retention";
 
 // Workspaces, members, invites and teams. Teams are stored as pods (v2_pods, pod_ ids); every response, message and
 // audit action says "team". The /pods routes remain as aliases of /teams.
 
 const INVITE_TTL_MS = 7 * 24 * 3600 * 1000;
+const DAY_MS = 24 * 3600 * 1000;
 
 /** The policy principal for this caller in this workspace. A device sees only the workspaces it was granted. */
 export function principalIn(p: Principal, wsId: string): PolicyPrincipal {
   const userId = p.user.id;
   const granted = p.kind === "web" || p.grants.has(wsId);
-  const m = granted ? get<{ role: WsRole }>("SELECT role FROM v2_members WHERE ws_id = ? AND user_id = ?", wsId, userId) : undefined;
+  const m = granted ? get<{ role: WsRole }>(`SELECT role FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, wsId, userId) : undefined;
   const pods = new Map<string, PodRole>();
   if (m) for (const r of all<{ pod_id: string; role: PodRole }>("SELECT pod_id, role FROM v2_pod_members WHERE ws_id = ? AND user_id = ?", wsId, userId)) pods.set(r.pod_id, r.role);
   return { userId, wsId, wsRole: m?.role ?? null, pods };
@@ -37,7 +39,7 @@ export function enter(p: Principal, wsId: string): PolicyPrincipal {
 
 export function workspacesFor(p: Principal) {
   const rows = all<{ id: string; name: string; role: WsRole }>(
-    "SELECT w.id, w.name, m.role FROM v2_workspaces w JOIN v2_members m ON m.ws_id = w.id AND m.user_id = ? ORDER BY w.name, w.id",
+    "SELECT w.id, w.name, m.role FROM v2_workspaces w JOIN v2_members m ON m.ws_id = w.id AND m.user_id = ? WHERE w.deleted_at IS NULL ORDER BY w.name, w.id",
     p.user.id,
   ).filter((w) => p.kind === "web" || p.grants.has(w.id));
   return rows.map((w) => ({
@@ -94,13 +96,58 @@ export async function renameWorkspace(pp: PolicyPrincipal, name: string) {
   return { id: pp.wsId, name };
 }
 
-/** Everything in the workspace goes (rows cascade from v2_workspaces), including its audit rows and device grants. */
+/** Soft delete: the workspace is unreachable to everyone at once (404 everywhere, devices stop syncing it, its
+ *  connected AI apps are revoked). Its owners can restore it for 30 days; then the retention job purges every row
+ *  (lib/v2/retention.ts). */
 export async function deleteWorkspace(pp: PolicyPrincipal) {
   need(pp, "workspace.manage");
+  const at = nowIso();
+  await tx(() => softDeleteWorkspace(pp.wsId, pp.userId, at));
+}
+
+/** Mark a workspace deleted (inside the caller's tx). */
+export function softDeleteWorkspace(wsId: string, actor: string, at: string) {
+  onWorkspaceDeleted(wsId);
+  run("UPDATE v2_workspaces SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL", at, wsId);
+  audit(wsId, actor, "workspace.deleted", wsId, at);
+}
+
+const restoreUntil = (deletedAt: string) => new Date(Date.parse(deletedAt) + RESTORE_DAYS * DAY_MS).toISOString();
+
+/** Deleted workspaces this person owns that can still be restored, newest first. */
+export function deletedWorkspacesFor(userId: string) {
+  const since = new Date(Date.now() - RESTORE_DAYS * DAY_MS).toISOString();
+  return all<{ id: string; name: string; deleted_at: string }>(
+    "SELECT w.id, w.name, w.deleted_at FROM v2_workspaces w JOIN v2_members m ON m.ws_id = w.id AND m.user_id = ? AND m.role = 'owner' WHERE w.deleted_at IS NOT NULL AND w.deleted_at > ? ORDER BY w.deleted_at DESC",
+    userId,
+    since,
+  ).map((w) => ({ ...w, restore_until: restoreUntil(w.deleted_at) }));
+}
+
+/** A deleted workspace the caller owns and can still restore, else 404 (a live workspace is 409 not_deleted). */
+export function deletedWorkspaceOwnedBy(userId: string, wsId: string) {
+  const w = get<{ id: string; name: string; deleted_at: string | null }>(
+    "SELECT w.id, w.name, w.deleted_at FROM v2_workspaces w JOIN v2_members m ON m.ws_id = w.id AND m.user_id = ? AND m.role = 'owner' WHERE w.id = ?",
+    userId,
+    wsId,
+  );
+  if (!w) throw notFound();
+  if (!w.deleted_at) throw conflict("not_deleted", "This workspace is not deleted");
+  if (Date.parse(restoreUntil(w.deleted_at)) <= Date.now()) throw notFound();
+  return { id: w.id, name: w.name };
+}
+
+/** An owner restores a deleted workspace within its window: everything is as it was, except connected AI apps (revoked
+ *  at deletion), and members' devices sync it again. */
+export async function restoreWorkspace(userId: string, wsId: string) {
+  const w = deletedWorkspaceOwnedBy(userId, wsId);
+  const at = nowIso();
   await tx(() => {
-    onWorkspaceDeleted(pp.wsId);
-    run("DELETE FROM v2_workspaces WHERE id = ?", pp.wsId);
+    deletedWorkspaceOwnedBy(userId, wsId);
+    run("UPDATE v2_workspaces SET deleted_at = NULL WHERE id = ?", wsId);
+    audit(wsId, userId, "workspace.restored", wsId, at);
   });
+  return { id: w.id, name: w.name, role: "owner" as const };
 }
 
 // ---- members: role changes, removal, leaving ----
@@ -126,8 +173,10 @@ export async function setMemberRole(pp: PolicyPrincipal, userId: string, role: W
 }
 
 /** An owner removes a member, or anyone (viewers included) leaves by naming themselves. Their team memberships and
- *  device grants for this workspace end (lib/v2/lifecycle.ts); their goals, sessions and history stay. */
-export async function removeMember(pp: PolicyPrincipal, userId: string) {
+ *  device grants for this workspace end (lib/v2/lifecycle.ts); their goals, sessions and history stay, under their name
+ *  for 30 days and then as "Former member #n" (lib/v2/retention.ts). `deleteSessions` deletes their shared sessions in
+ *  this workspace now (spend already rolled up stays). */
+export async function removeMember(pp: PolicyPrincipal, userId: string, { deleteSessions = false }: { deleteSessions?: boolean } = {}) {
   const leaving = userId === pp.userId;
   if (!leaving) need(pp, "workspace.manage");
   if (!memberRole(pp.wsId, userId)) throw notFound();
@@ -138,7 +187,9 @@ export async function removeMember(pp: PolicyPrincipal, userId: string) {
     if (current === "owner" && ownerCount(pp.wsId) <= 1) throw conflict("last_owner", LAST_OWNER);
     onMemberRemoved(pp.wsId, userId);
     run("DELETE FROM v2_members WHERE ws_id = ? AND user_id = ?", pp.wsId, userId);
+    noteDeparture(pp.wsId, userId, at);
     audit(pp.wsId, pp.userId, leaving ? "member.left" : "member.removed", userId, at);
+    if (deleteSessions && deleteMemberSessions(pp.wsId, userId)) audit(pp.wsId, pp.userId, "member.sessions_deleted", userId, at);
   });
 }
 
@@ -153,7 +204,7 @@ export function auditTrail(pp: PolicyPrincipal) {
     `SELECT a.at, a.actor_id, u.name AS actor_name, a.action, a.object_id FROM v2_audit a LEFT JOIN ba_user u ON u.id = a.actor_id
      WHERE a.ws_id = ? ORDER BY a.seq DESC LIMIT 200`,
     pp.wsId,
-  ).map((r) => ({ at: r.at, actor: r.actor_id ? { id: r.actor_id, name: r.actor_name ?? "Someone" } : null, action: shownAction(r.action), object_id: r.object_id }));
+  ).map((r) => ({ at: r.at, actor: r.actor_id ? { id: r.actor_id, name: personName(r.actor_id, r.actor_name) } : null, action: shownAction(r.action), object_id: r.object_id }));
 }
 
 // ---- invites (shown as a link to copy; Align sends no email) ----
@@ -226,6 +277,7 @@ function inviteByToken(token: string): InviteRow {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw notFound();
   const r = get<InviteRow>("SELECT id, ws_id, email, role, team_id, team_role, expires_at, accepted_at FROM v2_invites WHERE token_hash = ?", sha256hex(token));
   if (!r || r.accepted_at || Date.parse(r.expires_at) <= Date.now()) throw notFound();
+  if (!get(`SELECT 1 AS x WHERE ${LIVE_WS("?")}`, r.ws_id)) throw notFound();
   return r;
 }
 
@@ -252,6 +304,7 @@ export async function acceptInvite(token: string, user: { id: string; email: str
   await tx(() => {
     if (get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", r.ws_id, user.id)) throw conflict("already_member", "You are already a member");
     run("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, ?, ?)", r.ws_id, user.id, r.role, at);
+    cancelDeparture(r.ws_id, user.id);
     // An invite that names a team joins that team too (a team removed meanwhile is simply skipped).
     if (r.team_id && get("SELECT 1 AS x FROM v2_pods WHERE ws_id = ? AND id = ?", r.ws_id, r.team_id)) {
       run("INSERT INTO v2_pod_members (ws_id, pod_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)", r.ws_id, r.team_id, user.id, r.team_role ?? "member", at);
@@ -314,6 +367,7 @@ export async function removeTeamMember(pp: PolicyPrincipal, podId: string, userI
   if (!n) throw notFound();
 }
 
+/** The name to show for a person id in a workspace's rows ("Former member #n" once pseudonymised). */
 export function memberName(userId: string): string {
-  return get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", userId)?.name ?? "Someone";
+  return personName(userId, get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", userId)?.name);
 }

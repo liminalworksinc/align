@@ -7,12 +7,15 @@ export async function register() {
     try {
       startup();
       // The v2 database is opened (and migrated) at every start, never during a build. Mode L then makes its local
-      // owner on a fresh data directory and prints that person a sign-in code.
+      // owner on a fresh data directory and prints that person a sign-in code. The retention job (docs/RETENTION.md)
+      // runs once now and then every 24 hours.
       if (process.env.NEXT_PHASE !== "phase-production-build") {
         const { ready } = await import("./lib/v2/init");
         await ready();
         const { ensureLocalOwner } = await import("./lib/v2/local-owner");
         await ensureLocalOwner();
+        const { startRetention } = await import("./lib/v2/retention");
+        await startRetention(process.env.HOSTED === "1");
       }
     } catch (e) {
       console.error((e as Error).message);

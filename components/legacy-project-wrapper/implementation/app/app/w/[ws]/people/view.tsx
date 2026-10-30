@@ -102,6 +102,8 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
   const [inviteTeamRole, setInviteTeamRole] = useState<TeamRole>("member");
   const [link, setLink] = useState<string | null>(null);
   const [teamName, setTeamName] = useState("");
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [dropSessions, setDropSessions] = useState(false);
   const act = useAction();
   const wsName = d.data?.workspace.name ?? "this workspace";
   const teamsOf = (userId: string) => d.data?.teams.filter((t) => t.members.some((m) => m.id === userId)) ?? [];
@@ -153,18 +155,45 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
                     </Pill>
                   ))}
                   {m.id === me.id && <span className="text-zinc-500">(you)</span>}
-                  {owner && m.id !== me.id && (
+                  {owner && m.id !== me.id && removing !== m.id && (
                     <button
                       type="button"
                       className="ml-auto text-[14px] text-red-700"
                       onClick={() => {
-                        if (window.confirm(`Remove ${m.name} from ${wsName}? Their team places, device access and connected apps for this workspace end. Their goals, sessions and history stay.`)) {
-                          void act.run(() => api(`/api/v2/workspaces/${ws}/members/${m.id}`, { method: "DELETE" }), d.reload);
-                        }
+                        setRemoving(m.id);
+                        setDropSessions(false);
                       }}
                     >
                       Remove
                     </button>
+                  )}
+                  {removing === m.id && (
+                    <div className="mt-2 w-full rounded-[10px] border border-red-200 bg-red-50 p-3" role="group" aria-label={`Remove ${m.name}`}>
+                      <p className="mb-2 text-[15px] text-zinc-800">
+                        Remove {m.name} from {wsName}? Their team places, device access and connected apps for this workspace end. Their goals, sessions and history stay, under their name for 30 days and then as &quot;Former member&quot;.
+                      </p>
+                      <label className="mb-3 flex items-center gap-2 text-[15px] text-zinc-800">
+                        <input type="checkbox" checked={dropSessions} onChange={(e) => setDropSessions(e.target.checked)} />
+                        Also delete their shared sessions in this workspace now
+                      </label>
+                      <div className="flex gap-2">
+                        <Btn
+                          kind="danger"
+                          disabled={act.busy}
+                          onClick={() =>
+                            void act.run(() => api(`/api/v2/workspaces/${ws}/members/${m.id}${dropSessions ? "?delete_sessions=1" : ""}`, { method: "DELETE" }), () => {
+                              setRemoving(null);
+                              d.reload();
+                            })
+                          }
+                        >
+                          Remove {m.name}
+                        </Btn>
+                        <Btn kind="secondary" onClick={() => setRemoving(null)}>
+                          Cancel
+                        </Btn>
+                      </div>
+                    </div>
                   )}
                 </li>
               ))}
@@ -278,6 +307,24 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
               </form>
             )}
           </Card>
+          {owner && (
+            <Card title="Delete this workspace">
+              <p className="mb-3 text-[15px] text-zinc-600">
+                Deleting {wsName} closes it for everyone at once: members lose access, devices stop syncing it and connected apps are disconnected. Owners can restore it from Your workspaces for 30 days; after that everything in it is erased.
+              </p>
+              <Btn
+                kind="danger"
+                disabled={act.busy}
+                onClick={() => {
+                  if (window.confirm(`Delete ${wsName}? Everyone loses access now. Owners can restore it for 30 days, then it is erased.`)) {
+                    void act.run(() => api(`/api/v2/workspaces/${ws}`, { method: "DELETE" }), () => go("/app"));
+                  }
+                }}
+              >
+                Delete workspace
+              </Btn>
+            </Card>
+          )}
         </>
       )}
     </Shell>
