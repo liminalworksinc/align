@@ -88,6 +88,7 @@ const WS_TABS = [
   { href: "/sessions", label: "Sessions" },
   { href: "/alignments", label: "Alignments" },
   { href: "/spend", label: "Spend" },
+  { href: "/apps", label: "Apps" },
 ];
 
 async function signOut() {

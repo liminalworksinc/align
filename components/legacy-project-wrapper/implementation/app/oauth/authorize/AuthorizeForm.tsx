@@ -1,190 +1,149 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui";
+import { useState } from "react";
+import { Btn, Card, Err, go } from "@/app/app/_ui/kit";
 
-// The consent form. One choice: allow this app to read one workspace, as one role, or cancel. Read-only is stated
-// plainly because it is enforced: the MCP server has no tool that writes (lib/mcp/register.ts).
+// The consent form. One choice: let this app read one workspace as this person, or cancel. Read-only is stated
+// plainly because it is enforced: the MCP server has no tool that writes (lib/mcp/register.ts). Approving needs a
+// sign-in from the last 15 minutes; an older one gets the sign-in-again prompt instead of the form.
 
-export interface SignedIn {
-  workspace: string;
-  company: string;
-  team: string;
+export interface Person {
   name: string;
+  email: string;
+  recent: boolean;
+  /** Workspaces where the person is an owner or member (viewers can't connect apps). */
+  workspaces: { id: string; name: string; role: "owner" | "member" }[];
 }
-
-interface Role {
-  id: string;
-  team: string;
-  blurb: string;
-}
-
-const WS_IN = /w_[a-z2-7]{12}/;
 
 export default function AuthorizeForm(props: {
   params: Record<string, string>;
+  /** This consent request's own URL, for coming back after signing in. */
+  here: string;
   clientName: string;
   selfNamed: boolean;
   redirectHost: string;
+  loopback: boolean;
   provider: string;
-  signedIn: SignedIn | null;
+  person: Person | null;
 }) {
-  const { params, clientName, selfNamed, redirectHost, provider } = props;
-  const [signedIn, setSignedIn] = useState<SignedIn | null>(props.signedIn);
-  const [useSession, setUseSession] = useState(Boolean(props.signedIn));
-  const [link, setLink] = useState("");
-  const [roles, setRoles] = useState<Role[] | null>(null);
-  const [company, setCompany] = useState("");
-  const [role, setRole] = useState("");
-  const [passcode, setPasscode] = useState("");
+  const { params, here, clientName, selfNamed, redirectHost, loopback, provider, person } = props;
+  const [stale, setStale] = useState(!!person && !person.recent);
+  const [ws, setWs] = useState(person?.workspaces.length === 1 ? person.workspaces[0].id : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const typed = useRef(false); // the person started on the passcode form: don't switch it away under them
-
-  // The session cookie is SameSite=Strict, so when Claude or ChatGPT sends the person here from their own site the
-  // server render can't see it. A request from this page is same-site and carries it: ask, and offer the workspace
-  // this browser is signed in to instead of the passcode form. Approving still goes through /api/oauth/approve.
-  useEffect(() => {
-    if (props.signedIn) return;
-    let live = true;
-    void (async () => {
-      const s = await fetch("/api/session").then((r) => (r.ok ? r.json() : null), () => null);
-      if (!s?.workspace || !s.actor) return;
-      const info = await fetch(`/api/workspaces/${s.workspace}/login-info`).then((r) => (r.ok ? r.json() : null), () => null);
-      if (!live || !info) return;
-      const team = (info.roles as Role[] | undefined)?.find((r) => r.id === s.actor)?.team || s.actor;
-      setSignedIn({ workspace: s.workspace, company: info.name ?? "", team, name: s.name && s.name !== s.actor ? s.name : "" });
-      if (!typed.current) setUseSession(true);
-    })();
-    return () => {
-      live = false;
-    };
-  }, [props.signedIn]);
-
-  async function lookUp(value: string) {
-    typed.current = true;
-    setLink(value);
-    setRoles(null);
-    setRole("");
-    const ws = WS_IN.exec(value)?.[0];
-    if (!ws) return;
-    const res = await fetch(`/api/workspaces/${ws}/login-info`).catch(() => null);
-    const data = res?.ok ? await res.json() : null;
-    if (!data) {
-      setError("No workspace has that link. Copy it from your browser’s address bar while the workspace is open.");
-      return;
-    }
-    setError(null);
-    setCompany(data.name ?? "");
-    setRoles(data.roles ?? []);
-  }
+  const signIn = `/app/sign-in?next=${encodeURIComponent(here)}`;
 
   async function answer(decision: "approve" | "deny") {
     setBusy(true);
     setError(null);
     try {
-      const body = useSession ? { params, decision, use_session: true } : { params, decision, workspace: link, role, passcode };
       // A server that stopped answering (a paused machine) must not leave the buttons disabled forever.
-      const res = await fetch("/api/oauth/approve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
+      const res = await fetch("/api/oauth/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(decision === "approve" ? { params, decision, workspace_id: ws } : { params, decision }),
+        signal: AbortSignal.timeout(20000),
+      });
       const data = await res.json().catch(() => ({}));
       if (res.ok && typeof data.redirect === "string") {
         window.location.assign(data.redirect);
         return;
       }
-      setError(data.error ?? "That didn’t work. Try again.");
+      if (res.status === 403 && data.code === "reauth_required") setStale(true);
+      else setError(data.error ?? "That didn’t work. Try again.");
     } catch {
       setError("Align didn’t answer. Reload this page and choose Allow again.");
     }
     setBusy(false);
   }
 
-  const ready = useSession || (roles && role && passcode.trim());
+  async function signInAgain() {
+    setBusy(true);
+    await fetch("/api/v2/auth/sign-out", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
+    go(`${signIn}&email=${encodeURIComponent(person?.email ?? "")}`);
+  }
+
+  const cancel = (
+    <Btn kind="secondary" onClick={() => void answer("deny")} disabled={busy}>
+      Cancel
+    </Btn>
+  );
+
   return (
-    <main className="mx-auto max-w-[560px] p-6 text-[16px] text-zinc-900">
-      <h1 className="mb-1 text-[24px] font-semibold">Connect {clientName} to Align</h1>
-      <p className="mb-5 text-zinc-700">
+    <main className="mx-auto min-h-screen max-w-[600px] bg-[var(--al-bg)] p-6 text-[16px] text-zinc-800">
+      <p className="font-display mb-4 text-[26px] leading-none text-zinc-900">Align</p>
+      <h1 className="mb-1 text-[24px] font-semibold text-zinc-900">Connect {clientName} to Align</h1>
+      <p className="mb-5 text-zinc-600">
         {selfNamed ? "This app named itself. " : ""}After you allow it, Align sends you back to <span className="font-mono">{redirectHost}</span>.
       </p>
+      {loopback && (
+        <p role="alert" className="mb-5 rounded-[10px] border border-amber-300 bg-amber-50 p-3 text-amber-900">
+          This app sends you back to a program on this computer ({redirectHost}). Allow it only if you started it yourself just now.
+        </p>
+      )}
 
-      <section className="mb-5 rounded-[14px] border border-zinc-200 bg-white p-5">
-        <h2 className="mb-2 text-[18px] font-semibold">What it can do</h2>
-        <ul className="list-disc space-y-1 pl-5">
-          <li>Read the goals in one workspace, the agreed plan, decisions, and what changed.</li>
-          <li>It can’t propose, approve or change anything. Those stay with the people in the workspace.</li>
-          <li>What it reads is sent to {provider}.</li>
-          <li>You can disconnect it any time from the workspace. Restarting the workspace disconnects every app.</li>
-        </ul>
-      </section>
-
-      <section className="mb-5 rounded-[14px] border border-zinc-200 bg-white p-5">
-        <h2 className="mb-3 text-[18px] font-semibold">Which workspace</h2>
-        {signedIn && (
-          <label className="mb-3 flex items-start gap-2">
-            <input type="radio" name="who" className="mt-1 size-4 accent-violet-700" checked={useSession} onChange={() => setUseSession(true)} />
-            <span>
-              {signedIn.company || "Your workspace"}, as {signedIn.name ? `${signedIn.name} (${signedIn.team})` : signedIn.team}. You’re signed in to it in this browser.
-            </span>
-          </label>
-        )}
-        {signedIn && (
-          <label className="mb-3 flex items-start gap-2">
-            <input type="radio" name="who" className="mt-1 size-4 accent-violet-700" checked={!useSession} onChange={() => setUseSession(false)} />
-            <span>Another workspace or team</span>
-          </label>
-        )}
-        {!useSession && (
-          <div className="space-y-3">
-            <label className="block">
-              <span className="mb-1 block font-semibold">Workspace link</span>
-              <input
-                className="w-full rounded-[10px] border border-zinc-300 px-3 py-2"
-                placeholder="https://…/w/w_…"
-                value={link}
-                onChange={(e) => void lookUp(e.target.value)}
-                autoComplete="off"
-              />
-            </label>
-            {roles && (
-              <fieldset>
-                <legend className="mb-1 font-semibold">Connect as{company ? ` (${company})` : ""}</legend>
-                {roles.map((r) => (
-                  <label key={r.id} className="flex items-start gap-2">
-                    <input type="radio" name="role" className="mt-1 size-4 accent-violet-700" checked={role === r.id} onChange={() => setRole(r.id)} />
+      {!person ? (
+        <Card>
+          <p className="mb-4">Sign in to Align to connect {clientName}.</p>
+          <div className="flex flex-wrap gap-2">
+            <a href={signIn} className="rounded-[10px] border border-violet-700 bg-violet-700 px-3.5 py-2 text-[15px] font-medium text-[var(--al-bg)] hover:opacity-90">
+              Sign in
+            </a>
+            {cancel}
+          </div>
+          <Err>{error}</Err>
+        </Card>
+      ) : stale ? (
+        <Card>
+          <p className="mb-4">Sign in again to connect an app. Connecting needs a sign-in from the last 15 minutes.</p>
+          <div className="flex flex-wrap gap-2">
+            <Btn onClick={() => void signInAgain()} disabled={busy}>
+              Sign in again
+            </Btn>
+            {cancel}
+          </div>
+          <Err>{error}</Err>
+        </Card>
+      ) : (
+        <>
+          <p className="mb-5 text-zinc-600">
+            Signed in as {person.name} ({person.email}).
+          </p>
+          <Card title="What it can do">
+            <ul className="list-disc space-y-1 pl-5 text-[15px]">
+              <li>It reads goals, change requests, decision records and directives in the workspace you choose, as you and with your role.</li>
+              <li>It can’t propose, approve or change anything. Those stay with the people in the workspace.</li>
+              <li>It never sees captured prompts.</li>
+              <li>What it reads is sent to {provider}.</li>
+              <li>You or a workspace owner can disconnect it on the workspace’s Apps tab, and it is disconnected if you leave the workspace.</li>
+            </ul>
+          </Card>
+          <Card title="Which workspace">
+            {person.workspaces.length === 0 ? (
+              <p className="text-[15px]">You have no workspace where you can connect an app. Viewers can&apos;t connect apps.</p>
+            ) : (
+              <div className="space-y-2">
+                {person.workspaces.map((w) => (
+                  <label key={w.id} className="flex items-start gap-2 text-[15px]">
+                    <input type="radio" name="workspace" className="mt-1 size-4 accent-violet-700" checked={ws === w.id} onChange={() => setWs(w.id)} />
                     <span>
-                      {r.team || r.id}, {r.blurb}
+                      {w.name} <span className="al-lbl ml-1">{w.role}</span>
                     </span>
                   </label>
                 ))}
-              </fieldset>
+              </div>
             )}
-            {roles && (
-              <label className="block">
-                <span className="mb-1 block font-semibold">That team’s passcode</span>
-                <input
-                  className="w-full rounded-[10px] border border-zinc-300 px-3 py-2 font-mono"
-                  value={passcode}
-                  onChange={(e) => setPasscode(e.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </label>
+          </Card>
+          <Err>{error}</Err>
+          <div className="flex flex-wrap gap-2">
+            {person.workspaces.length > 0 && (
+              <Btn onClick={() => void answer("approve")} disabled={busy || !ws}>
+                Allow read-only access
+              </Btn>
             )}
+            {cancel}
           </div>
-        )}
-      </section>
-
-      {error && (
-        <p role="alert" className="mb-4 rounded-[10px] border border-red-300 bg-red-50 p-3 text-red-800">
-          {error}
-        </p>
+        </>
       )}
-      <div className="flex flex-wrap gap-2">
-        <Button onClick={() => void answer("approve")} disabled={busy || !ready}>
-          Allow read-only access
-        </Button>
-        <Button kind="secondary" onClick={() => void answer("deny")} disabled={busy}>
-          Cancel
-        </Button>
-      </div>
     </main>
   );
 }

@@ -35,8 +35,8 @@ export function signInOptions() {
   };
 }
 
-/** Only same-app paths are followed after sign-in. */
+/** Only same-app paths, and an AI app's consent request (/oauth/authorize?...), are followed after sign-in. */
 export function safeNext(v: string | string[] | undefined): string {
   const s = Array.isArray(v) ? v[0] : v;
-  return s && /^\/app(?:[/?#]|$)/.test(s) && !s.startsWith("//") ? s : "/app";
+  return s && /^\/(?:app(?:[/?#]|$)|oauth\/authorize\?)/.test(s) && !s.startsWith("//") && !/[\\\s]/.test(s) ? s : "/app";
 }

@@ -429,6 +429,26 @@ const MIGRATIONS: string[] = [
   CREATE INDEX v2_activity_ws ON v2_activity(ws_id, seq);
   CREATE INDEX v2_activity_expiry ON v2_activity(ws_id, expires_at);
   `,
+  // 3: connected AI apps (lib/oauth/grants.ts). A grant belongs to one person in one workspace: removing the
+  // membership (leaving, being removed) or deleting the workspace deletes it in the same statement.
+  `
+  CREATE TABLE v2_oauth_grants (
+    id TEXT PRIMARY KEY,
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    client_name TEXT NOT NULL,
+    redirect_host TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    refresh_hash TEXT NOT NULL,
+    prev_refresh_hash TEXT,
+    refresh_exp INTEGER NOT NULL,
+    kid TEXT NOT NULL,
+    FOREIGN KEY (ws_id, user_id) REFERENCES v2_members(ws_id, user_id) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_oauth_grants_member ON v2_oauth_grants(ws_id, user_id, created_at);
+  `,
 ];
 
 export function migrate() {

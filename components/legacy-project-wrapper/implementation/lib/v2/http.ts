@@ -75,6 +75,21 @@ export async function webAuth(req: Request): Promise<WebPrincipal> {
   return { kind: "web", user: { id: u.id, name: u.name, email: u.email }, emailVerified: u.emailVerified };
 }
 
+/** Approving a device or an AI app needs a sign-in no older than this. */
+export const RECENT_SIGN_IN_MS = 15 * 60 * 1000;
+export const signedInRecently = (createdAt: Date | string | number, now = Date.now()) => now - new Date(createdAt).getTime() <= RECENT_SIGN_IN_MS;
+
+/** The browser credential, with a sign-in from the last 15 minutes (the session's creation time; refreshing a
+ *  session doesn't renew it). 403 reauth_required otherwise. */
+export async function requireRecentSignIn(req: Request): Promise<WebPrincipal> {
+  if (req.headers.get("authorization") !== null) throw new V2Error(403, "bearer_not_allowed", "Web routes do not accept device tokens");
+  const s = await getAuth().api.getSession({ headers: req.headers });
+  const u = s?.user ? userById(s.user.id) : undefined;
+  if (!s || !u) throw new V2Error(401, "unauthorized", "Sign in first");
+  if (!signedInRecently(s.session.createdAt)) throw new V2Error(403, "reauth_required", "Sign in again: this needs a sign-in from the last 15 minutes");
+  return { kind: "web", user: { id: u.id, name: u.name, email: u.email }, emailVerified: u.emailVerified };
+}
+
 /** Routes open to both: an Authorization header means the device path (with its refusals), else the cookie. */
 export async function eitherAuth(req: Request): Promise<Principal> {
   return req.headers.get("authorization") !== null ? deviceAuth(req) : webAuth(req);
