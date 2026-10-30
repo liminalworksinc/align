@@ -115,7 +115,8 @@ device name and public key, print `To connect this device, open <verification_ur
 <user_code>`, poll `POST /api/v2/device/token` every `interval` seconds (adding 5 s on `slow_down`), and on success
 save `credentials.json`, persist `--server` as `server_url` in `config.json`, fetch `GET /api/v2/me`, print
 `Signed in as <name> <<email>> on device <device name>.` plus one `workspace <name> (<id>), role <role>` line per
-workspace, and cache each workspace's goal feed. The device name defaults to `<username>'s <hostname>`. On macOS
+workspace, and cache each workspace's goal feed. The device name is `--name`, else `device_name` from
+`config.json`, else `<username>'s <hostname>` (without a `.local` suffix). On macOS
 it opens the verification URL in the browser unless `ALIGN_NO_BROWSER` is set.
 
 #### Scenario: Successful pairing
@@ -151,8 +152,8 @@ and the device key were removed; local metering continues.` Local metering SHALL
 ### Requirement: Status, latch and doctor diagnostics
 
 The `align status` command SHALL print, offline, `Align 0.2.0  home <ALIGN_HOME>` followed by `Identity:`,
-`Last sync:`, `Hooks:` (Claude Code and Codex `installed`, `partial (n/m)` or `not installed`, and the hook file
-hash state `ok`, `missing`, `modified since install` or `not installed`), `Outbox:`, `Shares:`, `Unpriced:` and,
+`Last sync:`, `Hooks:` (Claude Code `installed`, Codex `installed (trust them in Codex /hooks)`, either one
+`partial (n/m)` or `not installed`, and the hook file hash state `ok`, `missing`, `modified since install` or `not installed`), `Outbox:`, `Shares:`, `Unpriced:` and,
 when any session is stopped, `Stop latch:` lines. `align latch status` SHALL list each latch as `<lid8> <harness>
 STOPPED (tools blocked)` or `resumed`, and reject any other subcommand with `usage: align latch status (stop and
 resume come from the web)`. `align doctor` SHALL print one `OK`, `WARN` or `FAIL` line per check (node >= 24,
@@ -421,7 +422,9 @@ tool calls fire their hooks together only the hook that creates `~/.align/inject
 The `align` hook SHALL answer any prompt that starts with `::align` (case-insensitive) with `{"decision": "block",
 "reason": <text>}` and no `additionalContext`, so the text is shown to the user and never reaches the model.
 `::align share` and `::align share --dir` SHALL only preview until repeated with `confirm` (or `--yes`/`-y`); the
-confirmed command SHALL be spooled for the next sync, and `--dir` SHALL also write the folder rule. `::align bind`
+confirmed command SHALL be spooled for the next sync, and `--dir` SHALL also write the folder rule. `--signals` takes
+effect only together with `--dir` (it sets the rule's work-signals choice); a single-session `::align share
+--signals` is accepted but records no work-signals consent. `::align bind`
 SHALL refuse goals that are not bindable. `::align unshare` (alias `::align stop`) SHALL spool a stop-sharing that the
 next sync applies like `align stop-sharing`, and `::align unshare --dir` SHALL remove the folder rule covering the
 session's folder at once. `::align task <label>` and `::align claim <file> [why]` SHALL record
@@ -529,8 +532,8 @@ write without the 5m/1h split), `long_context_unmodeled` (OpenAI input above 272
 100,000-token prompt. The basis SHALL be `api_usd` for Claude Code sessions started with `ANTHROPIC_API_KEY`,
 `ANTHROPIC_AUTH_TOKEN` or a Bedrock/Vertex/Foundry flag, otherwise `subscription_included` when `.claude.json` has
 `oauthAccount`, otherwise `api_usd`; for Codex `subscription_included` when `auth.json` has `auth_mode: "chatgpt"`
-(or, without `auth_mode`, has `tokens`), `api_usd` when it has `auth_mode: "apikey"` or a non-empty `OPENAI_API_KEY`,
-else `unknown`. Estimates SHALL be labelled as list-price estimates, never as money spent.
+(or, without `auth_mode` and without an `OPENAI_API_KEY` field, has `tokens`), `api_usd` when it has `auth_mode:
+"apikey"` or a non-empty `OPENAI_API_KEY` field, else `unknown`. Estimates SHALL be labelled as list-price estimates, never as money spent.
 
 #### Scenario: Cache-write tiers
 
@@ -744,8 +747,8 @@ directive acknowledge it with `POST /api/directives/ack`, print its text to stde
 
 #### Scenario: Unreachable or no change
 
-- **WHEN** Align is unreachable or no directive arrives within `ALIGN_WATCH_WINDOW_MS` (default 55 minutes)
-- **THEN** the watcher exits 0 silently and the capture hook, if it ran, also exited 0 with no stdout
+- **WHEN** Align stays unreachable, or no directive arrives, for the whole `ALIGN_WATCH_WINDOW_MS` (default 55 minutes)
+- **THEN** the watcher keeps retrying quietly (the stream, then polling every 2 s for up to 20 s before reconnecting) and exits 0 silently when the window ends, and the capture hook, if it ran, also exited 0 with no stdout
 
 ## Open questions
 
