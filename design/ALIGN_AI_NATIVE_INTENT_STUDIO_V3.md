@@ -11,7 +11,7 @@ The earlier v1/v2 PR #34 concepts positioned **human approvals** as the product 
 1. **State intent in language.** An operator asks a question about the current organizational priority. Align should connect that intent to relevant current goals and available evidence, not merely open a blank form.
 2. **Generate an inspectable structured candidate.** Chat and a living change artifact coexist. The artifact shows the currently approved target, proposed target, owner, reasoning inputs and provenance. Suggestions are **not** authorizations.
 3. **Propose and authorize with the right actor.** Separate requester proposal, owner ratification and leadership launch decision. When the owner counters, the requester acknowledges; the owner still ratifies. Never infer authority from a conversational response.
-4. **Observe only what evidence establishes.** Read receipts from OAuth/MCP apps can indicate which authorized goal version an app last read. They are not live execution telemetry, verified task completion or proof an agent complied.
+4. **Observe only what evidence establishes.** Whole-plan freshness metadata can indicate whether an app has read the **current plan hash**, but the server does not store the particular goal version the app read. They are not live execution telemetry, verified task completion or proof an agent complied.
 5. **Record the actual outcome.** Agreement, leadership's `not_yet`, no sandbox test, unverified conditions and unchanged objective are separate axes. An approval can be a valid decision with no evidence of execution.
 
 ## What the actual v3 prototype demonstrates
@@ -20,7 +20,7 @@ The earlier v1/v2 PR #34 concepts positioned **human approvals** as the product 
 - **Living right artifact**: the company priority, approved goal measure v1, proposed enterprise-pilot measure, source inspection, actual human approval authority and example read-freshness states.
 - **Role-authored stages**: `draft → PENDING_SECURITY → COUNTERED → ACKNOWLEDGED_BY_PRODUCT → RATIFIED → not_yet/approved` (local-only), plus direct approval and decline.
 - **Dedicated compact decision record**: verified human authorization vs launch decision vs evidence; original objective unchanged since v1. Conditions are never automatically marked confirmed.
-- **Connected AI read view**: sample Claude Code latest-read goal v1 (current before v2.1 is ratified, older after), Codex no read. No fabricated session capture.
+- **Connected AI read view**: fictional Claude Code last read time and whole-plan flag (current until the plan changes; older after any proposal/counter/acknowledgement/approval/launch change), Codex no read. No fabricated session capture.
 - **Responsive views**: wide two-pane, stacked tablet/phone. A mobile owner's decision shortcut jumps to the real controls, with no duplicate approval buttons.
 - **Fictional test data only**; no sensitive customer screenshots or real passcodes pushed.
 
@@ -34,7 +34,7 @@ The earlier v1/v2 PR #34 concepts positioned **human approvals** as the product 
 | One-person / me-with-my-agents approval mode | **Not available.** Requester, owner and leadership are separate actor slots. | Separate product model/identity/auth design and founder ruling; never fake it by auto-switching roles. |
 | Human approval and independent leadership launch | **Available** through v13's human-authorized flow. | Keep backend routes, passcodes, security boundaries and explicit untested acknowledgments; redesign presentation only after approval. |
 | Goal objective editing and source before/after company goal | **Not available** in custom scenario model. | Explicit schema/versioning work if the founder decides this belongs in product scope. |
-| Connected app read freshness | **Limited metadata available.** Connection and read events exist, not execution proof. | Verify exact fields, versions, permission scoping and cases with no read; show only grounded state. |
+| Connected app read freshness | **Limited metadata available.** Last-read time and whole-plan fingerprint comparison exist, not an event log of every read, a goal-version read record, or execution proof. | Use only last-read time and whole-plan freshness with correct team scope; goal-version claims require a separate backend data-model change. |
 
 ## Minimum AI contract if the design direction is chosen
 
@@ -60,7 +60,7 @@ Maya proposes → Dev counters → Maya accepts changes → Dev ratifies with ex
 1. **North star:** does Align fundamentally become an *intent and evidence workspace* rather than a goal approvals dashboard?
 2. **AI boundary:** should conversations only explain/read first, or also propose structured candidate goal changes (still never auto-approve)?
 3. **Primary work surface:** approve split conversation + living change artifact as one workspace; note phone layout preference.
-4. **Agent truth:** show last scoped read/goal version now, and design actual execution instrumentation as a different capability later.
+4. **Agent truth:** show last scoped read and whole-plan freshness now (not a claimed goal version), and design actual execution instrumentation as a different capability later.
 5. **Audience/model:** keep two distinct human decision roles for P0 or separately prioritize a real me+agents architecture.
 6. **Visual register:** restrained graphite/magenta editorial UI, no generic analytics charts or invented confidence/risk scores.
 7. **Approval gating:** existing [LIM-2454](https://linear.app/liminal-space-io/issue/LIM-2454) still controls any eventual implementation. Do not merge PR #34.
