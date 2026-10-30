@@ -59,7 +59,7 @@ decision (`approved` or `not_yet`) on its acceptance record.
 
 ### Requirement: Goal versions are append-only
 
-The server SHALL never modify or delete an approved goal version to change it: approving a change appends a new `Goal` whose `supersedes` names the previous version's `id`, and the current goal of an owner is the goal of that owner that no other goal supersedes.
+The server SHALL never edit an approved goal version's content (objective, measures, version) to change it: approving a change or pushing a company goal appends a new `Goal` whose `supersedes` names the previous version's `id`, and the current goal of an owner is the goal of that owner that no other goal supersedes. The only in-place goal edit is a company-goal push rewriting the `parent_ids` of current team goals to the new company goal; reset and custom scenario setup replace the whole goal list.
 
 #### Scenario: Prior Security goal survives approval
 
@@ -400,12 +400,12 @@ The server SHALL, on each default-store `GET /api/state`, ingest new evidence, r
 
 #### Scenario: Malformed evidence file
 
-- **WHEN** a new `.json` file in the evidence directory does not parse as JSON and a client calls `GET /api/state` on the default store
-- **THEN** the response is HTTP 200 and `ingest_errors` has one message
+- **WHEN** a new `.json` file in the evidence directory does not parse as JSON and a signed-in default-store session calls `GET /api/state`
+- **THEN** the response is HTTP 200 and `ingest_errors` has one message (an anonymous caller also gets HTTP 200, but its view carries no `ingest_errors`)
 
-### Requirement: Audit log is attributed and never erased
+### Requirement: Audit log is attributed and survives resets
 
-The server SHALL take the actor and session id for every flow action from the signed session (never the body) and append an audit row `{ id, actor, session_id, action, target, at }` for `propose`, `counter`, `acknowledge`, `ratify`/`ratify_untested`, `reject`, `launch_approved`/`launch_not_yet`, `ratify_and_push_company_goal`, timer review actions, `saw_accepted_version`, `scenario_setup` and `reset`; reset and scenario setup SHALL keep all prior audit rows.
+The server SHALL take the actor and session id for every flow action from the signed session (never the body) and append an audit row `{ id, actor, session_id, action, target, at }` for `propose`, `counter`, `acknowledge`, `ratify`/`ratify_untested`, `reject`, `launch_approved`/`launch_not_yet`, `ratify_and_push_company_goal`, `alike_ref_recorded`, timer review actions, `saw_accepted_version`, `scenario_setup` and `reset`; reset and scenario setup SHALL keep all prior audit rows. The default store's audit log is never trimmed; a custom workspace keeps its last 1000 rows in state and moves older rows to a bounded archive (see Serialized writes), so its oldest rows can eventually be dropped.
 
 #### Scenario: Actors match roles
 
@@ -456,7 +456,7 @@ The server SHALL accept `POST /api/scenario` only from a default-store `leadersh
 
 ### Requirement: Serialized writes
 
-The server SHALL serialize every read-modify-write of the default store through one in-process single-writer queue, and of each custom workspace through a per-workspace lock, write state by atomic temp-file rename with owner-only permissions, skip the write when the state is unchanged, and for a custom workspace refuse a write whose state (excluding audit) exceeds 1 MB with HTTP 413 while trimming the audit log to its last 1000 rows into an archive file.
+The server SHALL serialize every read-modify-write of the default store through one in-process single-writer queue, and of each custom workspace through a per-workspace lock, write state by atomic temp-file rename with owner-only permissions, skip the write when the state is unchanged, and for a custom workspace refuse a write whose state (excluding audit) exceeds 1 MB with HTTP 413 while trimming the audit log to its last 1000 rows, appending older rows to `audit-archive.jsonl`; once that file would pass 1 MB it is renamed to `audit-archive.1.jsonl` (replacing any earlier one), so at most two archive files exist and the oldest archived rows are discarded.
 
 #### Scenario: Concurrent proposals
 
@@ -465,7 +465,7 @@ The server SHALL serialize every read-modify-write of the default store through 
 
 ### Requirement: Flow request bodies and workspace binding
 
-The server SHALL, for propose, counter, acknowledge, accept, reject, timer and reset requests, bind the action to the session's own store and refuse with HTTP 409 and `code: "workspace_mismatch"` when an `x-align-workspace` header names another workspace. For the default store it SHALL refuse a foreign `Origin` (HTTP 403) or a non-JSON body (HTTP 415) and treat an unparseable JSON body as `{}`; for a custom workspace it SHALL require JSON from an allowed host, cap the body at 64 KB (HTTP 413), reject invalid JSON or reserved keys (HTTP 400), and cap each string at 300 characters (fields named `text` or `plan_text` 4000, `conditions` 1000), responding HTTP 400 when exceeded. Error responses SHALL have the shape `{ "error": <message> }` (plus `code` when set), and unexpected failures HTTP 500 `{ "error": "Server error" }`.
+The server SHALL, for propose, counter, acknowledge, accept, reject, launch, timer and reset requests, bind the action to the session's own store and refuse with HTTP 409 and `code: "workspace_mismatch"` when an `x-align-workspace` header names another workspace. Apart from launch (whose body rules are in Launch request hygiene), for the default store it SHALL refuse a foreign `Origin` (HTTP 403) or a non-JSON body (HTTP 415) and treat an unparseable JSON body as `{}`; for a custom workspace it SHALL require JSON from an allowed host, cap the body at 64 KB (HTTP 413), reject invalid JSON or reserved keys (HTTP 400), and cap each string at 300 characters (fields named `text` or `plan_text` 4000, `conditions` 1000), responding HTTP 400 when exceeded. Error responses SHALL have the shape `{ "error": <message> }` (plus `code` when set), and unexpected failures HTTP 500 `{ "error": "Server error" }`.
 
 #### Scenario: Cross-port write to the default store
 

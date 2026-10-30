@@ -155,7 +155,7 @@ For requests whose `Authorization` header matches `^bearer\s+alm\.` (case-insens
 
 ### Requirement: align_get_work_map output
 
-The MCP server SHALL return from `align_get_work_map` the fields `registry_version`, `query` (the trimmed `session_id` or `null`), `total_sessions` and `groups[{key,label,team,sessions}]`. Sessions SHALL be grouped by their latest mapping's `choice`, or under `unmapped` ("Not mapped to a goal yet", team "Unassigned"), and sorted newest `last_at` first. Each session SHALL carry `id`, `harness`, `repo`, `branch`, `origin`, `last_prompt` (whitespace-collapsed, clipped to 200 characters with an ellipsis), `files_count`, `last_at`, `ended` and `mapping`. `mapping` SHALL be `{state, choice, choice_label, confidence, conflict_flagged, registry_version, stale, mapped_at}` or `null`. `session_id` is optional, at most 200 characters, and matches a session's `id` or raw `session_id` exactly, or else by suffix of the raw `session_id`. With `session_id`, the result SHALL contain at most one session, include `mapping.probabilities`, and drop empty groups.
+The MCP server SHALL return from `align_get_work_map` the fields `registry_version`, `query` (the trimmed `session_id` or `null`), `total_sessions` and `groups[{key,label,team,sessions}]`. Sessions SHALL be grouped by their latest mapping's `choice`, or under `unmapped` ("Not mapped to a goal yet", team "Unassigned"), and sorted newest `last_at` first. Without `session_id`, every visible registry entry has a group, even an empty one. A mapping whose `choice` is not in the visible registry is grouped under that key with label `(not in the current registry)` and team `Unknown`. Each session SHALL carry `id`, `harness`, `repo`, `branch`, `origin`, `last_prompt` (whitespace-collapsed, clipped to 200 characters with an ellipsis), `files_count`, `last_at`, `ended` and `mapping`. `mapping` SHALL be `{state, choice, choice_label, confidence, conflict_flagged, registry_version, stale, mapped_at}` or `null`. `session_id` is optional, at most 200 characters, and matches a session's `id` or raw `session_id` exactly, or else by suffix of the raw `session_id`. With `session_id`, the result SHALL contain at most one session, include `mapping.probabilities`, and drop empty groups.
 
 #### Scenario: Single session lookup
 
@@ -206,12 +206,12 @@ When the caller holds an `agt.` agent token, the MCP server SHALL compute `align
 
 ### Requirement: Bearer authentication required
 
-The MCP server SHALL reject with HTTP `401` every request whose bearer token is missing or does not verify as an `alm.`, `agt.` or static token. Align wraps the handler in `mcp-handler`'s `withMcpAuth` with `required: true`, `requiredScopes: ["goals:read"]`, `resourceMetadataPath: "/.well-known/oauth-protected-resource/api/mcp"` and `resourceUrl: <origin>`, where `<origin>` comes from the request's `Host` header. The `WWW-Authenticate` challenge SHALL point at `<origin>/.well-known/oauth-protected-resource/api/mcp`. The exact error body and the other challenge parameters are produced by `mcp-handler`, not Align code.
+The MCP server SHALL reject with HTTP `401` every request whose bearer token is missing or does not verify as an `alm.`, `agt.` or static token. Align wraps the handler in `mcp-handler`'s `withMcpAuth` with `required: true`, `requiredScopes: ["goals:read"]`, `resourceMetadataPath: "/.well-known/oauth-protected-resource/api/mcp"` and `resourceUrl: <origin>`, where `<origin>` comes from the request's `Host` header. The `WWW-Authenticate` challenge SHALL point at `<origin>/.well-known/oauth-protected-resource/api/mcp` (Align supplies the two parts; `mcp-handler` joins them into the header). The exact error body, the header's form and the other challenge parameters are produced by `mcp-handler`, not Align code.
 
 #### Scenario: No token
 
 - **WHEN** a client sends `POST /api/mcp` with no `Authorization` header
-- **THEN** the response is `401` and `WWW-Authenticate` contains `resource_metadata="<origin>/.well-known/oauth-protected-resource/api/mcp"`
+- **THEN** the response is `401` and its `WWW-Authenticate` header contains `<origin>/.well-known/oauth-protected-resource/api/mcp` (the header is built by `mcp-handler` from `resourceUrl` and `resourceMetadataPath`; its parameter name and exact form are `mcp-handler`'s)
 
 #### Scenario: Forged or wrong token
 
@@ -341,10 +341,10 @@ The authorization server SHALL accept as `client_id` an https URL that has a non
 
 - Addresses that resolve to private, loopback, link-local, CGNAT, multicast, documentation, reserved or IPv4-embedding IPv6 ranges are refused.
 - The whole fetch has a 3 s deadline and a 5 KB size limit.
-- One retry is allowed for a dropped connection or a 5xx answer, none after the 3 s deadline.
+- Any failure other than a refused address or a non-5xx HTTP status (a dropped connection, a 5xx answer, a body over 5 KB or a body that is not JSON) gets one retry, none after the 3 s deadline. If the retry fails too, the document is treated as unreachable.
 - At most 8 fetches run at once per pool. Anthropic/OpenAI hosts form one pool and all other hosts form the other. While a pool is full, an app whose last good document is under a day old gets that document; any other app is told Align couldn't reach its host.
 
-The document is usable only if its `client_id` equals the URL and it lists 1 to 10 valid `redirect_uris`. Good documents SHALL be cached for 10 minutes and unusable ones for 1 minute. Unreachable ones (network error, timeout or 5xx) SHALL not be cached.
+The document is usable only if its `client_id` equals the URL and it lists 1 to 10 valid `redirect_uris`. Good documents SHALL be cached for 10 minutes. Unusable ones SHALL be cached for 1 minute: a document that fails these checks, a non-200 answer below 500, or a refused address. Unreachable ones SHALL not be cached: a network error, the timeout, a 5xx, an oversized body or a body that is not JSON.
 
 #### Scenario: Unreachable document
 
@@ -407,7 +407,7 @@ The person SHALL choose either the custom workspace this browser is signed in to
 
 ### Requirement: Approval endpoint
 
-The authorization server SHALL accept consent answers at `POST /api/oauth/approve`. The request must be `application/json` (otherwise `415`); have a loopback Host and, if it sends an `Origin`, one whose host equals the Host header in Mode L, or an allowed host and an exact `https://<host>` Origin when hosted (otherwise `403`); and have a body of at most 16 KB (otherwise `413`). The endpoint SHALL re-run the authorization request checks on `params`. The outcomes are:
+The authorization server SHALL accept consent answers at `POST /api/oauth/approve`. The request must be `application/json` (otherwise `415`). In Mode L it must have a loopback Host and, if it sends an `Origin`, one whose host equals the Host header. When hosted it must have an allowed Host and an `Origin` that is exactly `https://<host>`; a missing `Origin` is refused. Either failure returns `403`. The body must be at most 16 KB (otherwise `413`). The endpoint SHALL re-run the authorization request checks on `params`. The outcomes are:
 
 - A fatal check failure returns `400 {"error": <message>}`.
 - A non-fatal check failure returns `200 {"redirect": <error redirect>}`.
@@ -465,7 +465,7 @@ It SHALL then create a grant and return `200 {access_token: "alm.…", token_typ
 
 ### Requirement: Refresh token rotation
 
-The authorization server SHALL issue refresh tokens of the form `alr.<ws>.<grant id>.<secret>` and store only an HMAC of the secret, keyed with `ALIGN_SECRET`. For `grant_type=refresh_token`, it SHALL rotate the token: it returns a new `alm.` access token and a new refresh token, and keeps the previous hash so that reuse can be detected. A token presented by another `client_id`, under a stale agent epoch, past its expiry or under a rotated `ALIGN_SECRET` SHALL fail. Presenting the previous refresh token again SHALL delete the grant. Every refresh failure SHALL return `400 {"error":"invalid_grant","error_description":"This sign-in has ended. Connect Align again."}`, except a wrong `resource`, which gets `invalid_target`. A grant's refresh expiry SHALL be set once, when the grant is created, to 7 days later or to the end of the configured deletion date if that is sooner.
+The authorization server SHALL issue refresh tokens of the form `alr.<ws>.<grant id>.<secret>` and store only an HMAC of the secret, keyed with `ALIGN_SECRET` (or, when it is unset, the generated `data/.secret`). For `grant_type=refresh_token`, it SHALL rotate the token: it returns a new `alm.` access token and a new refresh token, and keeps the previous hash so that reuse can be detected. A token presented by another `client_id`, under a stale agent epoch, past its expiry or under a rotated `ALIGN_SECRET` SHALL fail. Presenting the previous refresh token again SHALL delete the grant. Every refresh failure SHALL return `400 {"error":"invalid_grant","error_description":"This sign-in has ended. Connect Align again."}`, except a wrong `resource`, which gets `invalid_target`. A grant's refresh expiry SHALL be set once, when the grant is created, to 7 days later or to the end of the configured deletion date if that is sooner.
 
 #### Scenario: Refresh token reuse
 
@@ -479,7 +479,7 @@ The authorization server SHALL issue refresh tokens of the form `alr.<ws>.<grant
 
 ### Requirement: Grant lifecycle and revocation
 
-The authorization server SHALL keep at most 20 grants per workspace, in `<workspace>/oauth.json`. A new approval of the same `client_id` by the same role SHALL replace the earlier grant. Grants SHALL stop working, together with their access and refresh tokens, in each of these cases:
+The authorization server SHALL keep at most 20 grants per workspace, in `<workspace>/oauth.json`. A grant is created when a code is exchanged at `/oauth/token`, not at approval. A new grant for the same `client_id` and role SHALL replace the earlier grant. Grants SHALL stop working, together with their access and refresh tokens, in each of these cases:
 
 - `DELETE /api/workspaces/connections` with `{"id"}`, by the approving team or leadership. Another team gets `403`.
 - `DELETE /api/workspaces/connections` with `{}`, by leadership only (otherwise `403`). This also bumps the agent epoch, so it also revokes every agent token.
@@ -489,7 +489,7 @@ The authorization server SHALL keep at most 20 grants per workspace, in `<worksp
 - A rotation of `ALIGN_SECRET`.
 - Deletion of the workspace.
 
-A grant's `last_used_at` SHALL be set by its first successful MCP call, then at most every 5 minutes, or at once when the plan fingerprint has changed. `GET /api/workspaces/connections` SHALL list live grants as `{id,name,redirect_host,role,approved_at,last_used_at,on_current_plan}`, together with the `url` to connect.
+A grant's `last_used_at` SHALL be set (asynchronously) by the first `/api/mcp` request whose access token verifies, then at most every 5 minutes, or at once when the plan fingerprint has changed. `GET /api/workspaces/connections` SHALL list live grants as `{id,name,redirect_host,role,approved_at,last_used_at,on_current_plan}`, together with the `url` to connect.
 
 #### Scenario: Same app connected twice
 
@@ -523,8 +523,8 @@ Align SHALL ship `packages/align-connect/align-connect.mjs`, a dependency-free N
 
 - The URL comes from the first argument or `ALIGN_URL`; a trailing `/api/mcp` is stripped. Without an `http(s)://` URL it prints a usage line to stderr and exits with code `2`.
 - To sign in it reads the protected resource metadata and the authorization server metadata, starts a one-shot server on `127.0.0.1` with a random port, and registers a client named `Align connector (this computer)` through DCR with that `/callback` redirect. It then opens the browser on `/oauth/authorize` with PKCE S256, a random `state` and the `resource`, or, with `ALIGN_CONNECT_NO_BROWSER=1`, writes the URL to stderr. It accepts the callback only when `state` and `iss` match, and gives up after 5 minutes.
-- Tokens are kept in `<ALIGN_HOME or ~/.align>/connect/<host>.json` with mode `0600`. An access token within 30 seconds of expiry is refreshed. A failed refresh clears the file and starts a new sign-in. A `401` from `/api/mcp` forces one refresh or sign-in, then one retry.
-- stdout carries only JSON-RPC responses (from a JSON body or the first SSE `data:` event). Diagnostics go to stderr. A request that can't reach Align gets a JSON-RPC error `-32603` `Align is not reachable: <reason>`.
+- Tokens are kept in `<ALIGN_HOME or ~/.align>/connect/<host>.json` with mode `0600`, where `<host>` is the URL's host with every character other than letters, digits, `.` and `-` replaced by `_` (so `127.0.0.1:3100` becomes `127.0.0.1_3100`). An access token within 30 seconds of expiry is refreshed. A failed refresh clears the file and starts a new sign-in. A `401` from `/api/mcp` forces one refresh or sign-in, then one retry.
+- stdout carries only JSON-RPC responses (from a JSON body or the first SSE `data:` event). Diagnostics go to stderr. A request that can't reach Align gets a JSON-RPC error `-32603` `Align is not reachable: <reason>`. A reply that is not JSON gets `-32603` `Align answered <status>`. Notifications (no `id`) and `202` answers write nothing.
 
 #### Scenario: First start
 
