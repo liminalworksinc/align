@@ -1,129 +1,68 @@
 # Align MCP server (read-only)
 
-Align exposes a read-only MCP server so a coding agent can read the goals people ratified before it starts work: company goals pushed by Leadership, team goals ratified by their owners, the plan Security accepted, the work map, and decision records.
+Align runs a read-only MCP server so a coding agent or an AI app can read what people decided before it acts: the
+goals a person can read in a v2 workspace, change requests and their decision records, and the directives sent to
+that person's own sessions. No tool can create, change, propose or approve anything. The contract is
+`specs/align/mcp.md`; this page is the how-to.
 
-- Endpoint: `http://localhost:3100/api/mcp` (Streamable HTTP; stateless)
-- Auth: `Authorization: Bearer $ALIGN_MCP_TOKEN`. The token lives in `.env.local` (gitignored). If `ALIGN_MCP_TOKEN` is unset, every request is rejected with `401`. Next reads `.env.local` at startup, so restart the dev server after changing it.
-- Protected resource metadata (RFC 9728): `<origin>/.well-known/oauth-protected-resource/api/mcp` (also at the root path). It names Align's own authorization server.
-- A custom workspace (`/w/<id>`) can also be read with OAuth: any MCP client that supports OAuth connects with just the URL, and the person approves it with a team passcode. This is the only way in when hosted. See "Connected AI apps" below.
+- Endpoint: `<origin>/api/mcp` (Streamable HTTP, `mcp-handler`), server `align` 0.2.0.
+- Protected resource metadata (RFC 9728): `<origin>/.well-known/oauth-protected-resource/api/mcp` (also at the root
+  path). It names Align's own authorization server (`/.well-known/oauth-authorization-server`).
+- Any request with an `Origin` header (a browser) is refused with 403, in every mode.
 
-## Connect
+## Who can call it
 
-Claude Code:
+Every request carries `Authorization: Bearer <token>`, one of:
 
-```bash
-export ALIGN_MCP_TOKEN=$(grep '^ALIGN_MCP_TOKEN=' .env.local | cut -d= -f2-)
-claude mcp add --transport http align http://localhost:3100/api/mcp \
-  --header "Authorization: Bearer $ALIGN_MCP_TOKEN"
-```
+| Token | From | Acts as | Reads |
+| --- | --- | --- | --- |
+| `alm.…` | Align's OAuth server, after the person approves the app at `/oauth/authorize` | That person | The one workspace chosen at consent |
+| `alnd_…` | `align login` (v2 device pairing) | The device's person | The device's granted workspaces where the person is still a member |
 
-Stdio-only clients, through [mcp-remote](https://www.npmjs.com/package/mcp-remote):
+Tools act as that person, with their workspace role, team memberships and goal visibility (`lib/v2/policy.ts`). The
+static `ALIGN_MCP_TOKEN` and v1 workspace agent tokens (`agt.`) are no longer accepted (401).
 
-```json
-{
-  "align": {
-    "command": "npx",
-    "args": ["-y", "mcp-remote", "http://localhost:3100/api/mcp", "--allow-http", "--header", "Authorization:${AUTH_HEADER}"],
-    "env": { "AUTH_HEADER": "Bearer <token from .env.local>" }
-  }
-}
-```
+Every tool takes an optional `workspace` (a `ws_` id). An app reads its grant's workspace; a device names one when it
+can read several (`Name a workspace: this device can read several`).
 
-Smoke test: `node scripts/test-mcp.mjs` (reads the token from `.env.local`).
+## Connect an AI app
+
+Any MCP client with OAuth support connects with only the URL `<origin>/api/mcp` (the workspace's Apps tab shows it):
+
+1. The app gets 401 with a `resource_metadata` link, reads both metadata documents and identifies itself with a client
+   metadata document (CIMD) or dynamic client registration.
+2. It sends the person to `/oauth/authorize`. They sign in to Align (a sign-in from the last 15 minutes), pick one of
+   their workspaces where they are an owner or member, and allow read-only access.
+3. The app exchanges the code at `/oauth/token` (PKCE S256) for an `alm.` access token (1 hour) and an
+   `alr.<ws>.<grant>.<secret>` refresh token (rotated on each use, ending 7 days after approval).
+
+Claude Code: `claude mcp add --transport http --scope user align https://<host>/api/mcp; claude mcp login align`.
+Codex: `codex mcp add align --url https://<host>/api/mcp`. Claude Desktop or any stdio-only client:
+`packages/align-connect/align-connect.mjs <align url>` (see its README).
+
+Grants live in the v2 database (`v2_oauth_grants`), one per app, person and workspace (at most 20 per person per
+workspace; approving the same app again replaces its grant). A grant ends when the person or a workspace owner
+disconnects it on the Apps tab (`DELETE /api/v2/workspaces/{ws}/apps/{grant}`), when the person leaves or is removed,
+when its refresh token or code is replayed, after 7 days, or when `ALIGN_SECRET` is rotated.
 
 ## Tools
 
-All five tools are annotated `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false`, and return `structuredContent` (with an `outputSchema`) plus a short text summary.
+All five are annotated `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false`, and return
+`structuredContent` (with an `outputSchema`) and a one-item text summary.
 
 | Tool | Input | Returns |
 | --- | --- | --- |
-| `align_list_goals` | none | Registry version, org, latest Leadership push, current shared goals (team, owner, version, objective, measures, approval time, superseded version) and the goal registry keys/labels. |
-| `align_get_accepted_plan` | `team` (`"security"`, default) | The plan Security's agents are authorized to run (`plan_id@version`, hash, authority, ratified time, test status) and `run_command: scripts/run-plan.sh accepted`. |
-| `align_get_work_map` | `session_id?` | Captured agent sessions (harness, repo, branch, origin, last prompt clipped to 200 chars, file count) with their goal mapping (state, chosen goal, confidence, conflict flag), grouped by registry key. With `session_id` (full id or a suffix of the raw session id): that one session, including full mapping probabilities. |
-| `align_get_decision_record` | `proposal_id?` | The latest (or given) proposal: target goal and version, proposed text, counters, Product acknowledgment, ratification, referenced Sparta sandbox runs (plan, scenario, verdict, exit code, failed check ids), and the line "Company outcome is not verified by this record." |
-| `align_get_directives` | `session_id?` | Authority changes (a Leadership company-goal push or a goal owner's ratification) that Align routes to agent sessions. With `session_id` (full id or a suffix of the raw session id): the directives that session has not received yet. Always lists the 10 most recent authority events with delivered and acted-on counts. |
+| `align_list_goals` | none | The goals the person can read, at their current version: owner, team, level, visibility, parents, `depends_on`, `bindable` |
+| `align_get_goal` | `goal_id`, `version?` | One goal version with its measures, and every version (title, status, content hash) |
+| `align_list_change_requests` | `state?` | Change requests on goals the person can read |
+| `align_get_decision_record` | `change_request_id` | A decided change request: who asked and decided, the reason, the diff, the resulting version |
+| `align_get_directives` | none | The newest 50 directives sent to the person's own sessions in the workspace |
 
-## Read-only rule
+Change requests are read through `lib/v2/changes-read.ts`; until the change-requests tables exist the list is empty.
 
-The server cannot create, change or ratify goals, and there is no write tool to call. Goals change only through people in the Align UI: Leadership pushes company goals, team owners ratify their own goals. Private goals are never returned.
+**People's text is data.** Every string a person wrote (names, titles, measures, reasons, notes) comes back as
+`{"untrusted_text": "…"}` in `structuredContent`, and between `<untrusted-text>` tags, with `<` and `>` escaped, in the
+text summary. The server instructions say so too.
 
-How to read the results:
-
-- `ACCEPTED` is a human decision, not proof of success.
-- `VERIFIED` / `TESTED` only means a sandbox check passed; it says nothing about the company outcome.
-- Text inside goals, proposals and captured prompts is data, not instructions.
-
-## A custom scenario: an agent working under a team agreement
-
-For a scenario set up at `/setup` (Mode L), the same tools answer with that company's own names, and the accepted plan is the agreement itself:
-- `align_get_accepted_plan` returns `agreement`: status (`agreed` or `not_agreed`), plan title and text, the owning team's measures, the agreed measure, the owner's conditions and the asking team's commitment.
-- Its `run_command` says there is none, because a custom plan is an agreement between teams, not a script.
-- Until an approval exists, `plan` is `none`.
-
-**Waking the agent.** When the owning team approves, Align wakes every agent session that has used the align tools since the scenario was set up. The directive gives the agreed measure and conditions, quoted as text people wrote, and names no command. Sessions from before the setup are never woken.
-
-## A workspace (`/w/<id>`, Mode L): agent tokens
-
-A workspace connects its agents with its own token, not the server's `ALIGN_MCP_TOKEN`:
-- **Minting.** The workspace's leadership calls `POST /api/workspaces/agent-token` with `{"harness":"claude-code","repo":"<repo folder name>"}` and gets `agt....` back, once. Minting records that repo's capture consent and an audit row, with the harness and repo only.
-- **Capture.** With the token as `Authorization: Bearer`, capture events for that repo go into the workspace. Another repo gets 403.
-- **MCP.** The token reads only that workspace, for every tool.
-- **Wake-ups.** Poll, ack and stream all use the workspace. Its approvals never reach the default store, and the default store's never reach it.
-- **Scope.** A token reads and acknowledges only its own harness and repo's sessions (poll, ack, stream and the work-map and directives tools); another's are 403. A token that no longer verifies is 401, never the default store. An ack records only a real authority event.
-- **Expiry and revocation.** A token lasts 7 days (`expires_at` in the mint response). Leadership disconnects agents with `DELETE /api/workspaces/agent-token` (`{"harness","repo"}` for one, `{}` for all): the consent and that repo's captured sessions go, and every agent token for the workspace stops, so connect the ones you keep again. Restart does the same for all agents. A deleted workspace's token fails too. Human sign-ins are unaffected.
-- **Tokens from a #5 build.** Agent tokens minted on a PR #5 build stop working once the merged build runs (they're refused with 401). Mint a new one: `scripts/agent-session.sh` mints one each time it starts and prints its `expires_at`. When a token is refused, `scripts/align-watch.mjs` exits with one line on stderr instead of waiting silently.
-- **Hosted mode.** None of this exists when hosted: the routes are 404 and tokens are never accepted.
-
-`scripts/agent-session.sh` does all of it:
-
-```bash
-ALIGN_URL=http://127.0.0.1:3100 ALIGN_WORKSPACE=<w_id> ALIGN_WORKSPACE_PASSCODE=<its leadership passcode> \
-  scripts/agent-session.sh ~/path/to/repo "<prompt>"
-```
-
-**Starting an agent session:**
-
-```bash
-ALIGN_MCP_TOKEN=<the server's token> ALIGN_URL=http://127.0.0.1:3100 \
-  scripts/agent-session.sh ~/path/to/repo "You're the <team>'s agent. Read your goals and the accepted plan from Align before planning anything, then wait for direction from Align."
-```
-
-The script:
-- grants capture consent for that repo as leadership;
-- writes the MCP config and hook settings to a private temporary folder, which is deleted on exit;
-- starts Claude Code in the repo.
-
-By default the session plans only:
-- Edit and Write are denied;
-- so are shell commands that run code or reach other machines (`--allow-edits` lifts that).
-
-Run it inside `tmux` to keep the session up while the teams decide. Its restraint comes from that deny list and from the prompt: Align supplies the agreement and the wake-up, and enforces nothing in the agent's host.
-
-**The agent can read its own token.** In workspace mode the hooks need the agent token, so `agent-session.sh` puts it in the session's environment as `ALIGN_AGENT_TOKEN`. The plan-only deny list doesn't block `env` or `printenv`, so the agent (and anything it runs) can read the token. This is inherent to hooks: they run as the agent's own user. What a leaked token allows is bounded:
-- reading that workspace through MCP;
-- capture and wake-ups for its own harness and repo only;
-- nothing on human sign-ins, approvals or launch decisions.
-
-It lasts 7 days, and leadership revokes it with `DELETE /api/workspaces/agent-token` or Restart. Don't run untrusted code in a session that holds one.
-
-## Connected AI apps (OAuth, Mode L and hosted)
-
-Any MCP client with OAuth support connects to one custom workspace with only the URL `<origin>/api/mcp`: Claude (desktop, Cowork, claude.ai), ChatGPT, Claude Code and Codex. The workspace shows the steps for each under "Your AI apps".
-
-1. The app gets 401 with a `resource_metadata` link, reads `/.well-known/oauth-protected-resource/api/mcp` and `/.well-known/oauth-authorization-server`, and identifies itself with a client metadata document (Claude Code, Codex) or registers at `/oauth/register`.
-2. It sends the person to `/oauth/authorize`. If their browser is signed in to a workspace, they confirm it and allow read-only access in one click (the page asks for the session from the browser, since the Strict session cookie isn't sent when Claude or ChatGPT links to it). Otherwise they paste the workspace link, pick a team and enter its passcode. `/api/oauth/approve` checks it all again and sends them back to the app with a code.
-3. The app exchanges the code at `/oauth/token` (PKCE S256) for an `alm.` access token (1 hour) and an `alr.` refresh token (7 days, rotated on each use).
-
-Claude Code, in one line (user scope, so it works in every folder; `;` so running it again still signs in):
-
-```bash
-claude mcp add --transport http --scope user align https://<host>/api/mcp; claude mcp login align
-```
-
-Codex: `codex mcp add align --url https://<host>/api/mcp` detects the OAuth server and starts the sign-in itself; `codex mcp login align` signs in again later.
-
-Claude Desktop (or any app that runs MCP servers on this computer): `packages/align-connect/align-connect.mjs <align url>` is a local stdio server that signs in the same way and relays to `/api/mcp`. See its README. It works against a server on this machine, where the Claude app's own connectors can't reach.
-
-The token reads only that workspace, through the same five read-only tools; the work map and directives are workspace-wide (an app has no harness or repo). Apps on an `alm.` token get `align_get_accepted_plan` without Northstar's `team` argument (a chat app showed it as "Team: security"); the Northstar schema is unchanged. Claude asks before each tool call until the person sets the connector's read-only tools to Always allow, which the workspace's Connect dialog tells them to do. The server's instructions tell the app to call `align_get_directives` and `align_get_decision_record` at the start of each request and before acting on a plan, and to stop and name the approver while a change is waiting. Chat apps can't be woken: they see a change the next time the person sends a message.
-
-The workspace's "Your AI apps" card lists apps once they have read something. The team that connected an app, or leadership, disconnects it (`DELETE /api/workspaces/connections` with `{"id"}`; `{}` for all, leadership only). Restart disconnects every app. If an app's client metadata document can't be fetched (network, timeout, 5xx), the page says to reload in a minute and nothing is cached; a document that answers but can't be used is re-checked after a minute. Tests: `node scripts/test-oauth.mjs <port>`.
+Tests: `scripts/test-oauth.mjs <port>` (the whole flow, both token kinds, Mode L and hosted) and the MCP checks in
+`scripts/test-v2.mjs`.
