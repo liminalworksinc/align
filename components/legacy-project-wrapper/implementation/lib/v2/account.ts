@@ -1,11 +1,12 @@
 import { revokeGrantsOfPerson } from "../oauth/grants";
-import { all, audit, get, LIVE_WS, run, tx } from "./db";
+import { softDeleteWorkspace } from "./core.mts";
+import { all, audit, get, LIVE_WS, run, sql, tx } from "./db";
 import { revokeDevicesOf } from "./devices";
 import { badRequest, conflict, notFound } from "./errors";
 import { nowIso } from "./ids";
 import { onMemberRemoved } from "./lifecycle";
+import { accessEmailKey, otpEmailKey } from "./limits";
 import { noteDeparture, pseudonymise, workspacesNaming } from "./retention";
-import { softDeleteWorkspace } from "./workspaces";
 import type { WebPrincipal } from "./http";
 
 // A person's own account (/app/account): their passkeys, the prompt to add one, and signing out everywhere.
@@ -85,6 +86,9 @@ export async function signOutEverywhere(userId: string, also: { devices: boolean
 //   - their devices, pairing requests, Better Auth sessions, linked accounts, passkeys (any ba_ table with a userId)
 //     with their "last used" times, their dismissal of the passkey prompt, codes for their email and the user row
 //     are deleted; audit rows without a workspace (devices, passkeys, signing out everywhere) lose their actor;
+//   - hosted access (PRESEED-002/003): their access requests are deleted; creation codes bound to their email are
+//     deleted if unused, and a used one (the operator's record of what created a workspace) keeps no email or
+//     redeemer; the durable rate-limit counters keyed by their email (an HMAC of it) are deleted;
 //   - one audit row without a workspace, actor or email records that an account was deleted.
 
 /** Live workspaces where this person is the only owner and someone else is a member. */
@@ -128,7 +132,7 @@ export async function deleteAccount(p: WebPrincipal, confirmEmail: string) {
       userId,
     );
     for (const m of memberships) {
-      if (m.live && !m.others) softDeleteWorkspace(m.ws_id, userId, at);
+      if (m.live && !m.others) softDeleteWorkspace(sql, m.ws_id, userId, at);
       onMemberRemoved(m.ws_id, userId);
       run("DELETE FROM v2_members WHERE ws_id = ? AND user_id = ?", m.ws_id, userId);
       noteDeparture(m.ws_id, userId, at);
@@ -144,6 +148,12 @@ export async function deleteAccount(p: WebPrincipal, confirmEmail: string) {
     run("DELETE FROM v2_oauth_grants WHERE user_id = ?", userId);
     // Codes for their email (Better Auth names them <purpose>-otp-<email>).
     run("DELETE FROM ba_verification WHERE length(identifier) > length(?1) AND substr(identifier, -length(?1) - 1) = '-' || ?1", email);
+    // Hosted access: requests, codes bound to their email, and email-keyed rate-limit counters.
+    run("DELETE FROM v2_access_requests WHERE lower(email) = ?", email);
+    run("DELETE FROM v2_creation_codes WHERE lower(email) = ? AND redeemed_at IS NULL", email);
+    run("UPDATE v2_creation_codes SET email = NULL WHERE lower(email) = ?", email);
+    run("UPDATE v2_creation_codes SET redeemed_by = NULL WHERE redeemed_by = ?", userId);
+    run("DELETE FROM v2_rate_hits WHERE key IN (?, ?)", otpEmailKey(email), accessEmailKey(email));
     // Passkeys' "last used" times and the prompt dismissal (PRESEED-005). They also cascade from ba_passkey and ba_user;
     // deleting them by name keeps this list the complete record of what names the person.
     run("DELETE FROM v2_passkey_use WHERE passkey_id IN (SELECT id FROM ba_passkey WHERE userId = ?)", userId);

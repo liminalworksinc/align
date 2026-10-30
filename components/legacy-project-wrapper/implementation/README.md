@@ -78,7 +78,9 @@ retention job's clock, for tests only (both are refused when hosted).
 every 24 hours: deleted workspaces are purged after 30 days, people who left become "Former member #n" after 30 days,
 audit rows go after a year, shared sessions are rolled up into per-goal daily totals after 13 months, and expired
 sign-in sessions (including any past `ALIGN_SESSION_MAX_DAYS`) are deleted.
-`node scripts/retention.mjs [--dry-run]` runs it by hand (it reads `ALIGN_DATA_DIR`, default `./data`).
+`npm run admin -- retention run [--dry-run]` (or `node scripts/retention.mjs [--dry-run]`, the same command) runs it by
+hand against `ALIGN_DATA_DIR` (default `./data`); run it with the server's environment, since it reads
+`ALIGN_SESSION_MAX_DAYS` as the server does.
 
 ## Hosted (HOSTED=1)
 
@@ -94,11 +96,42 @@ The server refuses to start unless these are set:
 | `ALIGN_DATA_DIR` | An absolute path outside the app directory (the volume) |
 | Sign-in | `ALIGN_EMAIL_API_URL` (https), `ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM`, or a Google or GitHub client |
 
-`ALIGN_FIRST_OWNER_EMAIL` lets one address make the first account by email code; after that, an email code signs in
-only an existing account or someone with a pending invite. `ALIGN_SESSION_MAX_DAYS` (optional, 1 to 365, default 30)
-caps how long a sign-in lasts; hosted startup refuses any other value. Passkeys use the public host as their relying
-party, so changing `ALIGN_PUBLIC_ORIGIN`'s host makes existing passkeys unusable. `docs/HOSTING.md` has the image, the volume and the deploy
-steps.
+`ALIGN_FIRST_OWNER_EMAIL` lets one address make the first account by email code, and its first workspace needs no
+creation code; after that, an email code signs in only an existing account, someone with a pending invite, or someone
+with an unused creation code bound to their address. `ALIGN_SESSION_MAX_DAYS` (optional, 1 to 365, default 30) caps
+how long a sign-in lasts; hosted startup refuses any other value. Passkeys use the public host as their relying party,
+so changing `ALIGN_PUBLIC_ORIGIN`'s host makes existing passkeys unusable. `docs/HOSTING.md` has the image, the volume
+and the deploy steps.
+
+**Who may create a workspace, and abuse controls** (hosted only; Mode L ignores all of these):
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `ALIGN_CREATION` | `codes` | `codes`: creating a workspace needs a single-use creation code; `open`: any signed-in person; `closed`: nobody (the kill switch) |
+| `ALIGN_MAX_WORKSPACES` | 100 | Live workspaces on the server (`workspace_cap`); a deleted one waiting out its restore window doesn't count, and restoring it must fit again (409) |
+| `ALIGN_MAX_OWNED_WORKSPACES` | 2 | Live workspaces one person owns (`owned_workspace_cap`; the same for a restore, 409) |
+| `ALIGN_MAX_MEMBERS` | 25 | Members of one workspace, open invites included (`member_cap`) |
+| `ALIGN_MAX_SESSIONS_PER_DEVICE_DAY` | 500 | New shared sessions per device in any 24 hours (`session_cap`) |
+| `ALIGN_TURNSTILE_SITE_KEY`, `ALIGN_TURNSTILE_SECRET_KEY` | unset | Cloudflare Turnstile on email-code sign-in, access requests and workspace creation (both or neither; without them the server logs one warning) |
+| `ALIGN_TURNSTILE_VERIFY_URL` | Cloudflare's | The siteverify URL (https; tests point it at a stub) |
+
+People without a code ask for one at `/app/request-access`. The operator answers with the operator script, on the
+server (`fly ssh console -C "node scripts/align-admin.mjs …"`, which has the server's environment) or locally with the
+server's settings:
+
+```sh
+npm run admin -- requests list --status pending
+npm run admin -- requests approve ar_…          # an email-bound code, emailed when the email settings are set
+npm run admin -- codes create --email someone@example.com --days 14
+npm run admin -- codes list                     # never shows a code
+npm run admin -- workspaces list                # counts only, no people; deleted ones show when
+npm run admin -- workspaces delete ws_… --yes   # the app's own (soft) deletion: its owners can restore it for 30 days
+npm run admin -- workspaces delete ws_… --purge --yes   # every row, now and for good
+npm run admin -- retention run --dry-run        # the retention schedule: what it would do now
+```
+
+Disposable email domains (`lib/v2/disposable-domains.json`, the CC0 disposable-email-domains list) can't request access
+or create a workspace; they can still sign in when invited.
 
 ## Tests
 
@@ -127,6 +160,7 @@ directories (`test-v2` also uses `<port>+1`). They refuse port 3100 and a port t
 | `app/oauth/`, `app/api/oauth/`, `app/.well-known/`, `lib/oauth/` | The OAuth authorization server for AI apps |
 | `lib/v2/` | Identity, workspaces, goals, change requests, sessions, directives, spend, the database |
 | `proxy.ts`, `lib/config.ts`, `lib/startup.ts` | The request edge, settings and startup checks |
+| `scripts/align-admin.mjs`, `lib/v2/core.mts` | The operator script and the code it shares with the app |
 | `packages/align-agent/` | The `align` CLI and hooks |
 | `packages/align-connect/` | A stdio MCP bridge for clients without OAuth |
 | `docs/archive/` | Pages about the retired v1 prototype |

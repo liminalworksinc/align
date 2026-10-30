@@ -1,6 +1,6 @@
 # Align hosted mode (HOSTED=1); deploy steps in docs/HOSTING.md. Secrets (ALIGN_SECRET, BETTER_AUTH_SECRET,
 # ALIGN_EMAIL_API_KEY, any Google or GitHub client) are set with fly secrets, never here.
-# One machine only: limits are in process memory and the volume attaches to a single machine (docs/HOSTING.md).
+# One machine only: most limits are in process memory and the volume attaches to a single machine (docs/HOSTING.md).
 app = "align-pg-draft"
 primary_region = "sjc"
 
@@ -17,6 +17,14 @@ primary_region = "sjc"
   ALIGN_EMAIL_FROM = "Align <signin@align-pg-draft.fly.dev>"
   # The one address that may make the first account by email code. Set it before the first deploy.
   # ALIGN_FIRST_OWNER_EMAIL = "owner@example.com"
+  # Who may create workspaces: codes (default; issue them with scripts/align-admin.mjs), open, or closed. Caps
+  # (defaults shown) and the Turnstile site key (its secret key is a secret) are optional.
+  # ALIGN_CREATION = "codes"
+  # ALIGN_MAX_WORKSPACES = "100"
+  # ALIGN_MAX_OWNED_WORKSPACES = "2"
+  # ALIGN_MAX_MEMBERS = "25"
+  # ALIGN_MAX_SESSIONS_PER_DEVICE_DAY = "500"
+  # ALIGN_TURNSTILE_SITE_KEY = "0x…"
 
 [http_service]
   internal_port = 8080

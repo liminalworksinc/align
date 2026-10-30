@@ -14,7 +14,11 @@ private file, and the server creates one local owner account on first start. Onc
 **passkeys** and then sign in with one. A browser sign-in lasts 7 days from its last use and never more than 30 days;
 sensitive actions need a **recent sign-in** (15 minutes), and **sign out everywhere** ends every sign-in at once.
 
-Signed in, a person creates **workspaces** (`ws_…`) or joins one by an email-bound **invite**. Each member has one
+Signed in, a person creates **workspaces** (`ws_…`) or joins one by an email-bound **invite**. In Mode L anyone
+signed in may create one; a hosted server gates creation (by default a single-use **creation code**, which the
+operator issues with `scripts/align-admin.mjs`, usually in answer to an **access request**), checks for bots with
+Cloudflare Turnstile when configured, refuses disposable email domains where it costs something, and caps workspaces,
+members and new shared sessions. Each member has one
 workspace **role**: `owner`, `member` or `viewer`. Members are grouped into flat **teams** with a `lead` or `member`
 team role. A person pairs a **device** (the `align` CLI on their machine) with a key-bound device-code flow, grants it
 some of their workspaces, and the device then shares chosen coding-agent **sessions**, opens binding **epochs**,
@@ -41,10 +45,13 @@ Directives (including stop and resume) are in `directives`, the MCP endpoint and
 | Device | A paired machine (`dv_…`) with an Ed25519 key, workspace grants, a 1-hour access token and a rotating 30-day refresh token |
 | Shared session | A coding-agent session a device chose to share, addressed by a 43-character `session_key` |
 | Epoch | A period of a shared session bound to one goal (or none); usage counts under its epoch's goal |
+| Creation code | `alc_…`: a single-use, expiring code that lets one hosted workspace be created, optionally bound to one email address; only its HMAC is stored |
+| Access request | `ar_…`: someone's request, from the public `/app/request-access` form, for a creation code; pending, approved or declined by the operator |
+| Operator | Whoever runs the hosted server; `scripts/align-admin.mjs` is their tool for codes, requests and workspaces |
 | Audit row | `{at, actor, action, object_id}` written by each change a person makes (and by a few automatic events); `actor` is null only for system actions |
 | Deleted workspace | A workspace its owner deleted: unreachable to everyone, restorable by its owners for 30 days, then purged |
 | Former member | A person who left, was removed or deleted their account, shown in a workspace's rows as "Former member #n" (id `fm_<n>`, numbered per workspace) once pseudonymised |
-| Retention job | `runRetention(now)` in `lib/v2/retention.ts`: applies the data retention schedule, at every start, every 24 hours and from `scripts/retention.mjs` |
+| Retention job | `runRetention` in `lib/v2/retention-core.mts`: applies the data retention schedule, at every start, every 24 hours and from `align-admin retention run` (alias `scripts/retention.mjs`) |
 | Passkey | A WebAuthn credential (Better Auth's `ba_passkey`) that signs one person in; its relying party is the public host when hosted and `localhost` in Mode L |
 | Recent sign-in | A Better Auth session created within the last 15 minutes; a passkey sign-in makes one like any other sign-in |
 
@@ -100,8 +107,9 @@ the code.
 
 ### Requirement: Email code send limits
 
-The server SHALL send at most 3 sign-in codes per email address per 10 minutes and at most 10 per client per hour,
-refusing further sends with 429 and sending nothing.
+The server SHALL send at most 3 sign-in codes per email address per 10 minutes and at most 10 per client per hour
+and, when hosted, at most 5 per email address per hour, counted in the database (keyed by an HMAC of the address, never
+the address) so that a restart does not reset it, refusing further sends with 429 and sending nothing.
 
 #### Scenario: Too many codes for one address
 
@@ -112,6 +120,11 @@ refusing further sends with 429 and sending nothing.
 
 - **WHEN** one client (hosted: its `Fly-Client-IP`, IPv6 keyed by its /64) requests an 11th code within an hour, for any addresses
 - **THEN** the server responds 429 and sends nothing
+
+#### Scenario: Hourly limit across a restart
+
+- **WHEN** a hosted server sent 3 codes to one address, restarts within the hour, and is then asked for 3 more for that address
+- **THEN** the first two are sent and the third is refused with 429, and the stored counter keys hold no email address
 
 ### Requirement: Email code delivery when hosted
 
@@ -155,8 +168,9 @@ address.
 
 The server SHALL, on a valid email code, sign in the account whose verified email equals the code's address
 (compared case-insensitively), and create a new account only when none exists and the address has a pending invite,
-or the server is in Mode L, or the server is hosted with no account yet and the address equals `ALIGN_FIRST_OWNER_EMAIL`
-(the hosted server's first person); a new account's email is marked verified.
+or the server is in Mode L, or the address has a usable creation code bound to it (an approved access request), or the
+server is hosted with no account yet and the address equals `ALIGN_FIRST_OWNER_EMAIL` (the hosted server's first
+person); a new account's email is marked verified.
 
 #### Scenario: New person with an invite
 
@@ -167,6 +181,11 @@ or the server is in Mode L, or the server is hosted with no account yet and the 
 
 - **WHEN** a hosted client presents a valid code for an address with no account and no pending invite
 - **THEN** the sign-in fails with 403 and the message `This email can't sign in here yet. Ask a workspace owner to invite you.`, no account is created and nobody is signed in
+
+#### Scenario: Approved access request
+
+- **WHEN** a hosted client presents a valid code for an address with no account and no invite, but with an unused, unrevoked, unexpired creation code bound to it
+- **THEN** the account is created with that verified email and signed in, so the person can create their workspace
 
 #### Scenario: First person on a hosted server
 
@@ -263,7 +282,7 @@ fresh-session age SHALL be the same 15 minutes.
 #### Scenario: Old session on an owner action
 
 - **WHEN** a workspace owner whose session was created 20 minutes ago changes a role, makes someone an owner, removes a member, invites someone as an owner, deletes the workspace or restores a deleted one
-- **THEN** the server responds 403 `{error:"reauth_required", message:"Sign in again to <action>. This needs a sign-in from the last 15 minutes."}` and nothing changes; a member or viewer attempting the same still gets `owner_only` or `read_only`, and leaving a workspace, inviting a member or viewer, renaming a workspace and revoking one's own device or app need no recent sign-in
+- **THEN** the server responds 403 `{error:"reauth_required", message:"Sign in again to <action>. This needs a sign-in from the last 15 minutes."}` and nothing changes; a member or viewer attempting the same still gets `owner_only` or `read_only`, and leaving a workspace, inviting a member or viewer, renaming a workspace, creating one (with or without a creation code) and revoking one's own device or app need no recent sign-in
 
 #### Scenario: Old session on account actions
 
@@ -447,9 +466,13 @@ without `Fly-Client-IP`, and 404 `{"error":"Not found"}` for every path outside 
 The server SHALL refuse to start when hosted, naming each problem, unless `ALIGN_HOSTS` lists the public host names
 (no loopback names), `ALIGN_SECRET` and `BETTER_AUTH_SECRET` each have 32+ characters, `ALIGN_DATA_DIR` is an absolute
 path outside the app directory, `ALIGN_PUBLIC_ORIGIN` is a bare `https://host`
-origin whose host is in `ALIGN_HOSTS`, and sign-in is possible: all three of `ALIGN_EMAIL_API_URL` (https),
-`ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM` are set, or Google's or GitHub's client id and secret are, and
-`ALIGN_SESSION_MAX_DAYS`, when set, is a whole number from 1 to 365.
+origin whose host is in `ALIGN_HOSTS`, sign-in is possible (all three of `ALIGN_EMAIL_API_URL` (https),
+`ALIGN_EMAIL_API_KEY` and `ALIGN_EMAIL_FROM` are set, or Google's or GitHub's client id and secret are),
+`ALIGN_SESSION_MAX_DAYS`, when set, is a whole number from 1 to 365, `ALIGN_CREATION` is unset or one of `codes`,
+`open` and `closed`, each cap that is set (`ALIGN_MAX_WORKSPACES`, `ALIGN_MAX_OWNED_WORKSPACES`, `ALIGN_MAX_MEMBERS`,
+`ALIGN_MAX_SESSIONS_PER_DEVICE_DAY`) is a positive whole number, `ALIGN_TURNSTILE_SITE_KEY` and
+`ALIGN_TURNSTILE_SECRET_KEY` are set together or not at all, and `ALIGN_TURNSTILE_VERIFY_URL`, when set, is an https
+URL; and SHALL log one warning when it starts hosted without the Turnstile keys.
 
 #### Scenario: No way to sign in
 
@@ -460,6 +483,16 @@ origin whose host is in `ALIGN_HOSTS`, and sign-in is possible: all three of `AL
 
 - **WHEN** a hosted server starts with only some of the three email settings, an `http:` `ALIGN_EMAIL_API_URL`, a Google or GitHub client id without its secret (or the reverse), an `ALIGN_SESSION_MAX_DAYS` that is not a whole number from 1 to 365, `ALIGN_TEST_IDP`, `ALIGN_TEST_NOW` or `ALIGN_LOCAL_OWNER_EMAIL` set, or `ALIGN_PUBLIC=1`
 - **THEN** it refuses to start and names each problem; any mode refuses `ALIGN_PUBLIC=1`
+
+#### Scenario: Creation and bot-check settings
+
+- **WHEN** a hosted server starts with `ALIGN_CREATION=invite-only`, `ALIGN_MAX_MEMBERS=0`, only `ALIGN_TURNSTILE_SITE_KEY`, or an `http:` `ALIGN_TURNSTILE_VERIFY_URL`
+- **THEN** it refuses to start and names each problem
+
+#### Scenario: No Turnstile keys
+
+- **WHEN** a hosted server starts with every required setting and neither Turnstile key
+- **THEN** it starts and logs exactly one warning that sign-in, access requests and workspace creation have no bot check
 
 #### Scenario: Email only
 
@@ -482,20 +515,207 @@ when `BETTER_AUTH_SECRET` is unset, migrate the database before serving, and run
 - **WHEN** a request reaches an `/api/v2` route before the database has been opened and migrated
 - **THEN** the route waits for the migration to finish and never runs against an unmigrated file
 
-### Requirement: Workspace creation by any signed-in person
+### Requirement: Workspace creation
 
-The server SHALL let any signed-in person, in either mode, create a workspace on `POST /api/v2/workspaces {name}`
-(1 to 100 characters) as its only owner.
+The server SHALL let a signed-in person create a workspace on `POST /api/v2/workspaces {name, creation_code?}` (name
+1 to 100 characters) as its only owner: in Mode L always, and when hosted only through the hosted creation gate.
 
 #### Scenario: Create
 
-- **WHEN** a signed-in person POSTs `{name:"Acme"}`
+- **WHEN** a signed-in person on a Mode L server POSTs `{name:"Acme"}`
 - **THEN** the response is 201 `{id:"ws_…", name:"Acme", role:"owner"}`, and the audit records `workspace.created` with them as actor
 
-#### Scenario: Creation limits
+#### Scenario: Creation rate
 
-- **WHEN** the person creates an 11th workspace within an hour, or already owns 50, counting workspaces made with `POST /api/v2/workspaces/sample`
-- **THEN** the server responds 429 `rate_limited`, or 409 `too_many_workspaces` respectively
+- **WHEN** the person creates an 11th workspace within an hour, counting workspaces made with `POST /api/v2/workspaces/sample`
+- **THEN** the server responds 429 `rate_limited`
+
+#### Scenario: Mode L ignores the hosted settings
+
+- **WHEN** a Mode L server runs with `ALIGN_CREATION=closed`, every cap set to 1 and both Turnstile keys set
+- **THEN** a signed-in person still creates several workspaces and the sample with no code or token, invites past the member cap and shares sessions freely; no page shows a code field, a bot check or a request-access link
+
+### Requirement: Hosted creation gate
+
+The server SHALL, when hosted, decide who may create a workspace (including the sample) by `ALIGN_CREATION`: `codes`
+(the default) requires a valid creation code in `creation_code`, except for the first workspace on a server that has
+none when the caller's email equals `ALIGN_FIRST_OWNER_EMAIL`; `open` admits any signed-in person; `closed` refuses
+everyone with 403 `creation_closed`. Before redeeming a code it SHALL check, in this order, the mode, the global and
+per-account caps, the caller's email domain, the code's presence and the Turnstile token, and it SHALL redeem the code in
+the same transaction that creates the workspace.
+
+#### Scenario: Code required
+
+- **WHEN** a hosted person in `codes` mode creates a workspace without `creation_code`
+- **THEN** the server responds 403 `creation_code_required` with a message that says to request access, and creates nothing
+
+#### Scenario: First owner
+
+- **WHEN** `ALIGN_FIRST_OWNER_EMAIL` signs in on a hosted server that has no workspace and creates one without a code
+- **THEN** the response is 201; their next create without a code is 403 `creation_code_required`
+
+#### Scenario: Kill switch
+
+- **WHEN** the operator restarts a hosted server with `ALIGN_CREATION=closed`
+- **THEN** every create, with or without a valid code, is 403 `creation_closed`, no code is spent, and `/app` says new workspaces can't be created right now
+
+#### Scenario: Open creation
+
+- **WHEN** a hosted server runs with `ALIGN_CREATION=open`
+- **THEN** any signed-in person creates a workspace without a code (the caps, the domain check and the Turnstile token still apply), and no page asks for a code or links to request access
+
+### Requirement: Creation codes
+
+The server SHALL accept a creation code (`alc_` and 32 base32 characters) only once, only before it expires (14 days
+after it was made unless the operator chose otherwise), only if it was not revoked and, for a code bound to an email
+address, only from a signed-in person whose verified email is that address; it SHALL store only an HMAC of the code
+under `ALIGN_SECRET` and record which workspace the code created.
+
+#### Scenario: Code spent
+
+- **WHEN** a person creates a workspace with a valid code and then tries to create another with the same code
+- **THEN** the first create is 201 and the code records that workspace; the second is 403 `creation_code_invalid`
+
+#### Scenario: Unusable codes
+
+- **WHEN** a create names a malformed code, a revoked code, an expired code, or a code bound to another address
+- **THEN** the server responds 403 `creation_code_invalid` and spends no code
+
+#### Scenario: Nothing in clear
+
+- **WHEN** the database files are searched for a code that was issued
+- **THEN** the code is not found in them
+
+### Requirement: Access requests
+
+The server SHALL accept, without sign-in, a same-site `POST /api/v2/access-requests {email, name, company?,
+team_size?, use_case, interest}` where `team_size` is one of `1`, `2-10`, `11-50`, `51-200`, `201+`, `use_case` is 1 to
+500 characters and `interest` is `try` or `evaluate`, store it with `status` pending and `created_at`, answer 201
+`{received:true}` whether or not that address already has a pending request (which it updates), and allow at most 5
+requests per client per hour and 3 per email address per day, counted in the database.
+
+#### Scenario: Request stored
+
+- **WHEN** someone signed out submits the form at `/app/request-access`
+- **THEN** the request is stored as `ar_…` with the lowercased email, name, company, team size, use, interest, status `pending` and `created_at`, and the answer is 201 `{received:true}`
+
+#### Scenario: Invalid or cross-site request
+
+- **WHEN** the interest is unknown, the email is not an address, the use is empty or longer than 500 characters, the team size is unknown, or the Origin is another site
+- **THEN** the server responds 400, or 403 `cross_site`, and stores nothing
+
+#### Scenario: Too many requests
+
+- **WHEN** a fourth request for one address arrives within a day, or a sixth from one client within an hour
+- **THEN** the server responds 429 `rate_limited` and stores nothing
+
+### Requirement: Operator script
+
+The repository SHALL provide `scripts/align-admin.mjs` (`npm run admin -- …`), shipped in the hosted image, which runs
+against `ALIGN_DATA_DIR` beside the running server and offers `codes create [--email] [--days] [--count]` (each new code
+printed once), `codes list` and `codes revoke <id>`, `requests list [--status]`, `requests approve <id> [--days]
+[--print]` and `requests decline <id>`, `workspaces list`, `workspaces delete <id> --yes` and `workspaces delete <id>
+--purge --yes`, and `retention run [--dry-run]` (`scripts/retention.mjs [--dry-run]` is the same command); it SHALL
+never print a secret other than a code it has just made, SHALL delete a workspace through the same (soft) deletion
+path as the app and purge one through the same purge as the retention job, SHALL run the retention job with the same
+code as the server, reading `ALIGN_SESSION_MAX_DAYS` from its environment as the server does, and SHALL refuse a
+database whose schema version is not the one it was written for.
+
+#### Scenario: Approving a request
+
+- **WHEN** the operator approves a pending request on a server with the email settings
+- **THEN** the script makes a code bound to the request's address, marks the request approved with that code's id, emails the code with a sign-in link through the email API, and prints only the code's id; without the email settings, or with `--print`, it prints the code instead; if the email fails, the code is revoked and the request stays pending
+
+#### Scenario: Listing without secrets or people
+
+- **WHEN** the operator runs `codes list` or `workspaces list`
+- **THEN** codes show id, state (live, used, revoked or expired), binding and dates but never a code; workspaces show id, name, created date, when it was deleted (`-` for a live one, a deleted one included until it is purged) and member and owner counts but no person's name or email
+
+#### Scenario: Deleting a workspace
+
+- **WHEN** the operator runs `workspaces delete <id>` without `--yes`, then with it
+- **THEN** the first deletes nothing and exits 1; the second deletes the workspace exactly as `DELETE /api/v2/workspaces/{ws}` does (soft: the running server answers 404 for it at once, its connected AI apps are revoked, its owners can restore it for 30 days, and the audit records `workspace.deleted` with no actor); deleting a deleted workspace again exits 1 and points at `--purge`
+
+#### Scenario: Purging a workspace
+
+- **WHEN** the operator runs `workspaces delete <id> --purge`, then `--purge --yes`
+- **THEN** the first changes nothing and exits 1; the second deletes every row of the workspace at once, live or deleted, through the retention job's own purge, so it can no longer be restored; an unknown id exits 1
+
+#### Scenario: Retention by hand
+
+- **WHEN** the operator runs `retention run` or `retention run --dry-run` on the server's machine with its environment
+- **THEN** the script applies, or reports without changing anything, the same schedule the server runs (see Data retention), with the same `ALIGN_SESSION_MAX_DAYS`
+
+#### Scenario: Hosted secret
+
+- **WHEN** the script runs with `HOSTED=1` but without `ALIGN_SECRET`
+- **THEN** it refuses to make or approve codes, since codes made under another key could not be checked by the server
+
+### Requirement: Bot check
+
+The server SHALL, when hosted with both `ALIGN_TURNSTILE_SITE_KEY` and `ALIGN_TURNSTILE_SECRET_KEY` set (never in Mode
+L), require a Cloudflare Turnstile token in the `x-captcha-response` header on the email-code send and sign-in routes
+(Better Auth's captcha plugin), on `POST /api/v2/access-requests` and on workspace creation, verify each token
+server-side with the secret key at Cloudflare's siteverify URL (or `ALIGN_TURNSTILE_VERIFY_URL`), and accept only a
+token solved on a host in `ALIGN_HOSTS`; the sign-in, request-access and create-workspace pages SHALL render the widget.
+
+#### Scenario: Email-code routes
+
+- **WHEN** a code is requested, or a code presented, without a token, with a rejected token, or with a token solved on another host
+- **THEN** Better Auth responds 400 `MISSING_RESPONSE` or 403 `VERIFICATION_FAILED`, sends nothing and does not count the attempt against the code
+
+#### Scenario: Access requests and creation
+
+- **WHEN** an access request or a create arrives without a token, with a rejected one, or while the verify API is failing
+- **THEN** the server responds 400 `captcha_required`, 403 `captcha_failed` or 503 `captcha_unavailable`, and stores or creates nothing
+
+### Requirement: Disposable email domains
+
+The server SHALL, when hosted, refuse workspace creation and access requests from an address whose domain, or any
+parent domain of it, is on the vendored CC0 `disposable-email-domains` list (`lib/v2/disposable-domains.json`, which
+names its source commit) with 403 `disposable_email`, and SHALL NOT check the list at sign-in or in Mode L.
+
+#### Scenario: Disposable address
+
+- **WHEN** a hosted access request names `temp@mailinator.com` or `temp@x.mailinator.com`, or a person signed in as `temp@mailinator.com` creates a workspace with a valid code
+- **THEN** the server responds 403 `disposable_email` and spends no code
+
+#### Scenario: Not at sign-in
+
+- **WHEN** someone invited as `temp@mailinator.com` signs in with an email code
+- **THEN** they sign in and can accept the invite
+
+### Requirement: Hosted caps
+
+The server SHALL, when hosted, refuse with 403 and a message that says to contact the operator to raise the limit: a
+create once the server holds `ALIGN_MAX_WORKSPACES` live workspaces (default 100) with `workspace_cap`; a create by a
+person who already owns `ALIGN_MAX_OWNED_WORKSPACES` (default 2) live workspaces with `owned_workspace_cap`; a new invite once a workspace's
+members plus open invites reach `ALIGN_MAX_MEMBERS` (default 25), and accepting an invite once its members reach it,
+with `member_cap`; and a new shared session once a device has shared `ALIGN_MAX_SESSIONS_PER_DEVICE_DAY` (default 500)
+new sessions in the last 24 hours (counted in the database, so deleting a session gives no slot back) with
+`session_cap`. A deleted workspace waiting out its restore window does not count toward the workspace caps, and
+restoring one that would pass either cap (for the person restoring it) SHALL be refused with 409 and the same code.
+Mode L has none of these caps.
+
+#### Scenario: Workspace caps
+
+- **WHEN** a person who owns 2 workspaces creates another with a valid code, or anyone creates one on a server at its `ALIGN_MAX_WORKSPACES`
+- **THEN** the server responds 403 `owned_workspace_cap` or 403 `workspace_cap` respectively, and the code is not spent
+
+#### Scenario: Deleted workspaces and restoring
+
+- **WHEN** an owner at both workspace caps deletes one of their workspaces, creates another with a code, and then restores the deleted one
+- **THEN** the create succeeds (the deleted one no longer counts), and the restore is refused with 409 `workspace_cap` while the server is at its cap, or 409 `owned_workspace_cap` while they own the maximum, and succeeds once there is room under both
+
+#### Scenario: Member cap
+
+- **WHEN** a workspace with `ALIGN_MAX_MEMBERS=3` has its owner and 2 open invites and the owner invites a third person
+- **THEN** the server responds 403 `member_cap`; accepting one of the open invites still works
+
+#### Scenario: Session cap
+
+- **WHEN** a device with `ALIGN_MAX_SESSIONS_PER_DEVICE_DAY=2` shares a third new session within 24 hours
+- **THEN** the server responds 403 `session_cap`, and updating a session the device already shares still works
 
 ### Requirement: Workspace rename and deletion
 
@@ -517,7 +737,7 @@ minutes restore it on `POST /api/v2/workspaces/{ws}/restore` within 30 days of i
 #### Scenario: Restore
 
 - **WHEN** an owner of a workspace deleted fewer than 30 days ago POSTs `.../restore` with a sign-in from the last 15 minutes
-- **THEN** the response is 200 `{id, name, role:"owner"}`, the audit records `workspace.restored`, and members and their granted devices reach it again as before (connected AI apps must be connected again); a member who is not an owner, anyone after 30 days, or a purged workspace gets 404 `not_found`, an older sign-in 403 `reauth_required`, and a workspace that is not deleted 409 `not_deleted`
+- **THEN** the response is 200 `{id, name, role:"owner"}`, the audit records `workspace.restored`, and members and their granted devices reach it again as before (connected AI apps must be connected again); a member who is not an owner, anyone after 30 days, or a purged workspace gets 404 `not_found`, an older sign-in 403 `reauth_required`, a workspace that is not deleted 409 `not_deleted`, and, hosted, a restore that would pass a workspace cap 409 `workspace_cap` or `owned_workspace_cap` (see Hosted caps)
 
 ### Requirement: Workspace visibility and roles
 
@@ -873,14 +1093,15 @@ The server SHALL let a signed-in person with a sign-in from the last 15 minutes 
 in one transaction end every membership the way member removal does, delete (as a workspace deletion) each workspace
 where they were the only member, replace their identity with "Former member #n" in every workspace's rows at once,
 delete their devices, pairing requests, Better Auth sessions, linked accounts, passkeys (and when each was last used),
-their dismissal of the add-a-passkey prompt, codes and user row, and keep
-the rows other people rely on (goals, change requests, alignments, sessions and their spend) without their name or
+their dismissal of the add-a-passkey prompt, codes, access requests, unused creation codes bound to their email, the
+durable rate-limit counters keyed by their email and the user row, clear their email and id from used creation codes,
+and keep the rows other people rely on (goals, change requests, alignments, sessions and their spend) without their name or
 email.
 
 #### Scenario: Delete my account
 
-- **WHEN** a member with goals, a change request, a paired device, shared sessions with usage and a passkey, who once signed out everywhere and dismissed the passkey prompt, DELETEs `/api/v2/me` with their email
-- **THEN** the response is 204, their cookie and device tokens are refused with 401, their goals, change requests and sessions show `{id:"fm_<n>", name:"Former member #<n>"}`, their sessions keep their usage but no device, spend totals are unchanged, no row in any table holds their id or email, each workspace's audit records `member.account_deleted` by the former member, and one audit row with no workspace, actor or object records `account.deleted`
+- **WHEN** a member with goals, a change request, a paired device, shared sessions with usage and a passkey, who once signed out everywhere and dismissed the passkey prompt, and who has an access request and creation codes bound to their email, DELETEs `/api/v2/me` with their email
+- **THEN** the response is 204, their cookie and device tokens are refused with 401, their goals, change requests and sessions show `{id:"fm_<n>", name:"Former member #<n>"}`, their sessions keep their usage but no device, spend totals are unchanged, no row in any table holds their id or email (a used creation code stays, with neither), no rate-limit counter is keyed by their email, each workspace's audit records `member.account_deleted` by the former member, and one audit row with no workspace, actor or object records `account.deleted`
 
 #### Scenario: Only owner with other members
 
@@ -899,14 +1120,16 @@ email.
 
 ### Requirement: Data retention
 
-The server SHALL apply the retention schedule published in `docs/RETENTION.md` with an idempotent job, `runRetention(now)`
-in `lib/v2/retention.ts`, that runs at every server start and every 24 hours (never during a build) and from
-`node scripts/retention.mjs [--dry-run]`, each step in its own transaction, logging counts only.
+The server SHALL apply the retention schedule published in `docs/RETENTION.md` with an idempotent job, `runRetention`
+in `lib/v2/retention-core.mts`, that runs at every server start and every 24 hours (never during a build) and from
+`node scripts/align-admin.mjs retention run [--dry-run]` (or its alias `node scripts/retention.mjs [--dry-run]`), each
+step in its own transaction, logging counts only; it purges a workspace with the same function as the operator's
+`workspaces delete --purge`.
 
 #### Scenario: Deleted workspaces
 
 - **WHEN** the job runs 30 days or more after a workspace was deleted
-- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members and devices' grants included, and pairing requests forget it), so no row anywhere mentions it and restoring it is 404
+- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members and devices' grants included, and pairing requests and the creation code that made it forget it), so no row anywhere mentions it and restoring it is 404
 
 #### Scenario: Session roll-up
 
@@ -930,8 +1153,8 @@ in `lib/v2/retention.ts`, that runs at every server start and every 24 hours (ne
 
 #### Scenario: Operator run and dry run
 
-- **WHEN** an operator runs `node scripts/retention.mjs` (reading `ALIGN_DATA_DIR`, default `./data`) or adds `--dry-run`
-- **THEN** it prints `Did` or `Would` with the time it ran as and one count per rule, then the same as one JSON line; a dry run does every step in one transaction and rolls it back, so it changes nothing; a missing or unmigrated database is refused with exit status 2
+- **WHEN** an operator runs `node scripts/align-admin.mjs retention run` or `node scripts/retention.mjs` (reading `ALIGN_DATA_DIR`, default `./data`, and `ALIGN_SESSION_MAX_DAYS` from the server's environment) or adds `--dry-run`
+- **THEN** it prints `Did` or `Would` with the time it ran as and one count per rule, then the same as one JSON line; a dry run does every step in one transaction and rolls it back, so it changes nothing; a missing database, or one whose schema version is not this version's, is refused with exit status 1
 
 #### Scenario: Test clock
 
@@ -941,13 +1164,15 @@ in `lib/v2/retention.ts`, that runs at every server start and every 24 hours (ne
 ### Requirement: Account and workspace rate limits
 
 The server SHALL limit v2 requests and email-code sends with in-memory sliding windows (at most 10,000 keys, oldest
-evicted first), keying clients by `Fly-Client-IP` when hosted (IPv6 by its /64) and as one local client in Mode L, and
-answer a v2 limit with 429 `rate_limited`; Better Auth's own per-path limits apply only when hosted, since Mode L turns
-off its IP tracking.
+evicted first) and, where a limit must survive a restart (hosted email-code sends per address, access requests, new
+shared sessions per device), with windows counted in the database; it SHALL key clients by `Fly-Client-IP` when hosted
+(IPv6 by its /64) and as one local client in Mode L, and answer a v2 limit with 429 `rate_limited`; Better Auth's own
+per-path limits apply only when hosted, since Mode L turns off its IP tracking, and are then counted in the database
+(`ba_rate_limit`).
 
 #### Scenario: Better Auth limits
 
-- **WHEN** a hosted client exceeds 10 requests per minute to `/api/v2/auth/sign-in/email-otp`, `/sign-in/email` or `/sign-up/email`, 20 to `/sign-in/social` or `/email-otp/send-verification-otp`, or 100 per minute elsewhere under `/api/v2/auth`
+- **WHEN** a hosted client exceeds 3 requests per minute to `/api/v2/auth/email-otp/send-verification-otp`, 10 to `/sign-in/email-otp`, `/sign-in/email` or `/sign-up/email`, 20 to `/sign-in/social`, or 100 per minute elsewhere under `/api/v2/auth`, including across a server restart
 - **THEN** Better Auth refuses the request with 429; a Mode L server applies none of these, only the email-code send limits and the v2 limits
 
 #### Scenario: v2 limits
@@ -957,13 +1182,12 @@ off its IP tracking.
 
 ## Open questions
 
-- Who may create hosted workspaces (Owner decision 2026-10-30 keeps it open): today any signed-in account can create up to 10 per hour and own 50.
 - SSO (OIDC or SAML) and SCIM are out of scope and offered on request: which comes first, and whether to build it
   on Better Auth or buy it, waits for the first deal that names it.
 - Unlinking a Google or GitHub account from `/app/account` is out of scope; should a person be able to unlink a provider while another sign-in method remains?
 - Removing or leaving keeps a person's goals and sessions (as a former member after 30 days). Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.
-- The retention periods are fixed in code (`lib/v2/retention.ts`); a per-workspace setting (for example a shorter audit log or longer spend history) waits for a customer who needs it.
-- The hosted image carries no `scripts/` folder, so `scripts/retention.mjs` runs only from a checkout; whether the operator command should ship in the image (with the other operator commands) is not decided.
+- The retention periods are fixed in code (`lib/v2/retention-core.mts`); a per-workspace setting (for example a shorter audit log or longer spend history) waits for a customer who needs it.
+- Access requests are kept until the operator deletes them (or the requester's account is deleted); whether the retention job should delete declined or old requests, and after how long, is not decided.
 
 ## Sources
 
@@ -990,8 +1214,19 @@ off its IP tracking.
 - lib/v2/validate.ts
 - lib/v2/workspaces.ts
 - lib/v2/account.ts
+- lib/v2/core.mts
+- lib/v2/creation.ts
+- lib/v2/access.ts
+- lib/v2/captcha.ts
+- lib/v2/disposable.ts
+- lib/v2/disposable-domains.json
+- scripts/align-admin.mjs
+- Dockerfile
+- app/api/v2/access-requests/route.ts
+- app/api/v2/workspaces/sample/route.ts
 - lib/v2/lifecycle.ts
 - lib/v2/retention.ts
+- lib/v2/retention-core.mts
 - scripts/retention.mjs
 - docs/RETENTION.md
 - fly.toml

@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { passkeyPromptDue } from "@/lib/v2/account";
 import { getAuth, passkeyParty } from "@/lib/v2/auth";
 import { config } from "@/lib/config";
-import { emailSignInEnabled, githubConfigured, googleConfigured, testIdpEnabled } from "@/lib/v2/config";
+import { creationMode, emailSignInEnabled, githubConfigured, googleConfigured, testIdpEnabled, turnstile } from "@/lib/v2/config";
+import { needsCode } from "@/lib/v2/creation";
 import { ready } from "@/lib/v2/init";
 
 // Server-side session reads for /app pages. Call only inside a <Suspense> boundary (cacheComponents): headers()
@@ -45,11 +46,38 @@ export interface SignInOptions {
   passkeyHost: string;
   /** Where passkeys work, for the hint shown on any other host (Mode L at 127.0.0.1). */
   passkeyOrigin: string;
+  /** The Turnstile site key when the bot check is on (hosted, both keys set), else null. */
+  captchaSiteKey: string | null;
+  /** Hosted with ALIGN_CREATION=codes: link to /app/request-access. */
+  requestAccess: boolean;
 }
 
 export function signInOptions(): SignInOptions {
   const party = passkeyParty();
-  return { google: googleConfigured(), github: githubConfigured(), email: emailSignInEnabled(), testIdp: testIdpEnabled(), local: !config().hosted, passkeyHost: party.rpID, passkeyOrigin: party.origin };
+  return {
+    google: googleConfigured(),
+    github: githubConfigured(),
+    email: emailSignInEnabled(),
+    testIdp: testIdpEnabled(),
+    local: !config().hosted,
+    passkeyHost: party.rpID,
+    passkeyOrigin: party.origin,
+    captchaSiteKey: turnstile()?.siteKey ?? null,
+    requestAccess: creationMode() === "codes",
+  };
+}
+
+/** What the create-workspace forms on /app need (lib/v2/creation.ts). Mode L: no code, never closed, no captcha. */
+export interface CreationOptions {
+  /** This person must enter a creation code (hosted, codes mode, not the first owner's first workspace). */
+  needsCode: boolean;
+  closed: boolean;
+  captchaSiteKey: string | null;
+}
+
+export async function creationOptions(me: Me): Promise<CreationOptions> {
+  await ready();
+  return { needsCode: needsCode(me.email), closed: creationMode() === "closed", captchaSiteKey: turnstile()?.siteKey ?? null };
 }
 
 /** Only an /app path or an AI app's consent request (/oauth/authorize?...) is followed after sign-in; anything else

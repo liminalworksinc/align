@@ -232,9 +232,22 @@ team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST ..
 `DELETE /api/v2/devices/:id`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,
 `__Secure-` prefixed when hosted).
 
+Hosted creation gate (`specs/align/workspaces.md`; Mode L skips it): `POST /api/v2/workspaces` and `.../sample` take
+`creation_code` (`alc_…`) when `ALIGN_CREATION=codes`, and the Turnstile token in `x-captcha-response` when Turnstile is
+on. Refusals are 403 `creation_code_required`, `creation_code_invalid`, `creation_closed`, `workspace_cap`,
+`owned_workspace_cap`, `disposable_email`; 400 `captcha_required`, 403 `captcha_failed`, 503 `captcha_unavailable`.
+The workspace caps count live workspaces; `POST .../restore` past either is 409 `workspace_cap` or
+`owned_workspace_cap`. Creating needs no recent sign-in.
+Invites and acceptance can be 403 `member_cap`; a device's new session `PUT` can be 403 `session_cap`.
+`POST /api/v2/access-requests` (no sign-in, same-site) `{ email, name, company?, team_size?: "1"|"2-10"|"11-50"|
+"51-200"|"201+", use_case, interest: "try"|"evaluate" }` → 201 `{ received: true }`; 429 past 5 per client per hour or
+3 per address per day.
+
 Sign-in (Better Auth): Google and GitHub when configured; an email one-time code always in Mode L and, hosted, with
 `ALIGN_EMAIL_API_URL`/`ALIGN_EMAIL_API_KEY`/`ALIGN_EMAIL_FROM`: `POST /api/v2/auth/email-otp/send-verification-otp`
-`{ email, type: "sign-in" }` (always `{ success: true }`; 429 past 3 per email per 10 min or 10 per client per hour),
+`{ email, type: "sign-in" }` (always `{ success: true }`; 429 past 3 per email per 10 min or 10 per client per hour,
+and hosted past 5 per email per hour or 3 per client per minute; with Turnstile on, both code routes need
+`x-captcha-response`: 400 `MISSING_RESPONSE`, 403 `VERIFICATION_FAILED`),
 then `POST /api/v2/auth/sign-in/email-otp` `{ email, otp }` (6 digits, 5 min, 3 attempts; Better Auth errors
 `INVALID_OTP`, `OTP_EXPIRED`, `TOO_MANY_ATTEMPTS`; ours `cannot_sign_in`, `email_unverified`). Mode L prints the link and
 writes `<data>/v2/sign-in.txt`; `npm run sign-in-link [email]` asks for a fresh one. Linking Google or GitHub is

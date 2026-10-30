@@ -1,4 +1,7 @@
+import { caps } from "./config";
+import { sessionCapError } from "./creation";
 import { all, audit, get, run, tx } from "./db";
+import { takeDurable } from "./limits";
 import { V2Error, badRequest, conflict, notFound } from "./errors";
 import { nowIso } from "./ids";
 import { goalObj, goalRow, transferFor } from "./goals";
@@ -84,6 +87,10 @@ export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key:
       if (s.harness !== harness || s.repo_key !== repoKey) throw conflict("session_conflict", "This session key was shared with a different harness or repo");
       run("UPDATE v2_sessions SET repo_alias = ?, title = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?", alias, title, at, pp.wsId, key);
     } else {
+      // Hosted: at most ALIGN_MAX_SESSIONS_PER_DEVICE_DAY new sessions per device in any 24 hours (counted durably, so
+      // deleting a session doesn't give the slot back).
+      const c = caps();
+      if (c && !takeDurable([{ key: `sessions-device:${dev.deviceId}`, max: c.sessionsPerDeviceDay, windowMs: 24 * 3600 * 1000 }])) throw sessionCapError(c.sessionsPerDeviceDay);
       run(
         `INSERT INTO v2_sessions (ws_id, session_key, user_id, device_id, harness, repo_key, repo_alias, title, started_at, state, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'shared', ?, ?)`,

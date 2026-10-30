@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3100",
     "sign-in-link": "node scripts/sign-in-link.mjs",
+    "admin": "node scripts/align-admin.mjs",
     "lint": "eslint",
     "test": "npm run lint && npm --prefix packages/align-agent ci && npm --prefix packages/align-agent test"
   },

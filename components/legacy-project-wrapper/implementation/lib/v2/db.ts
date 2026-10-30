@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { config } from "../config";
+import { SCHEMA_VERSION, type Sql } from "./core.mts";
 
 // Goal sessions storage: one SQLite file (WAL) at <ALIGN_DATA_DIR or ./data>/v2/align.sqlite, directory 0700, file 0600.
 // Two connections to the same file:
@@ -75,6 +76,9 @@ export function get<T = Row>(sql: string, ...params: SQLInputValue[]): T | undef
 export function run(sql: string, ...params: SQLInputValue[]): number {
   return Number(stmt(sql).run(...params).changes);
 }
+/** The statement helpers as one value, for lib/v2/core.mts. */
+export const sql: Sql = { run, get, all };
+
 export function exec(sql: string) {
   openDb().domain.exec(sql);
 }
@@ -570,7 +574,7 @@ const MIGRATIONS: string[] = [
     FOREIGN KEY (ws_id, change_request_id) REFERENCES v2_change_requests(ws_id, id) ON DELETE CASCADE
   );
   `,
-  // PRESEED-004: account deletion and the retention schedule (lib/v2/retention.ts, lib/v2/account.ts).
+  // PRESEED-004: account deletion and the retention schedule (lib/v2/retention-core.mts, lib/v2/account.ts).
   // - A deleted workspace is marked (deleted_at) and kept 30 days for restore, then purged.
   // - A session no longer needs its device: deleting a device (account deletion) or pseudonymising a former member
   //   clears device_id, so the row no longer leads back to the person (v2_sessions is rebuilt: device_id nullable,
@@ -649,12 +653,49 @@ const MIGRATIONS: string[] = [
     dismissed_at TEXT NOT NULL
   );
   `,
+  // PRESEED-002/003: hosted creation codes (only an HMAC of each code is stored; ws_id is the workspace a code created
+  // and is not a foreign key: deleting that workspace keeps the record that the code was used, and purging it clears
+  // ws_id), access requests, and durable rate-limit hits (lib/v2/limits.ts).
+  `
+  CREATE TABLE v2_creation_codes (
+    id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL UNIQUE,
+    email TEXT,
+    request_id TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    redeemed_at TEXT,
+    redeemed_by TEXT,
+    ws_id TEXT
+  );
+  CREATE INDEX v2_creation_codes_email ON v2_creation_codes(email);
+  CREATE TABLE v2_access_requests (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    name TEXT NOT NULL,
+    company TEXT,
+    team_size TEXT,
+    use_case TEXT NOT NULL,
+    interest TEXT NOT NULL CHECK (interest IN ('try','evaluate')),
+    status TEXT NOT NULL CHECK (status IN ('pending','approved','declined')),
+    created_at TEXT NOT NULL,
+    decided_at TEXT,
+    code_id TEXT
+  );
+  CREATE INDEX v2_access_requests_status ON v2_access_requests(status, created_at);
+  CREATE INDEX v2_access_requests_email ON v2_access_requests(email);
+  CREATE TABLE v2_rate_hits (
+    key TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX v2_rate_hits_key ON v2_rate_hits(key, at);
+  CREATE INDEX v2_rate_hits_at ON v2_rate_hits(at);
+  `,
 ];
 
-/** True when this database has every migration (scripts/retention.mjs refuses an older file: the server migrates). */
-export function schemaCurrent(): boolean {
-  return Number((openDb().domain.prepare("PRAGMA user_version").get() as { user_version: number }).user_version) === MIGRATIONS.length;
-}
+// The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
+if (MIGRATIONS.length !== SCHEMA_VERSION) throw new Error(`lib/v2/core.mts SCHEMA_VERSION is ${SCHEMA_VERSION}, but there are ${MIGRATIONS.length} migrations`);
 
 export function migrate() {
   const d = openDb().domain;

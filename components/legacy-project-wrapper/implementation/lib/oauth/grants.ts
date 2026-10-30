@@ -8,7 +8,8 @@ import { pinClient } from "./clients";
 
 // Connected AI apps, one grant per app sign-in, in the v2 database (v2_oauth_grants). A grant belongs to one person in
 // one workspace: it reads as that person (lib/mcp/register.ts) and ends when their membership does (lib/v2/lifecycle.ts
-// revokes it when they leave or are removed, or the workspace is deleted; the foreign key cascades as a backstop).
+// revokes it when they leave or are removed, and softDeleteWorkspace in lib/v2/core.mts when the workspace is
+// deleted; the foreign key cascades as a backstop).
 // A grant holds the app's name and redirect host as it introduced itself, the hash of its current refresh token (and
 // the one before, to catch reuse) keyed with ALIGN_SECRET, and which ALIGN_SECRET it was made under (kid): after a
 // rotation its tokens can never work again, so it is treated as gone and dropped on that person's next grant. The
@@ -163,11 +164,6 @@ export function revokeGrantsOfPerson(userId: string, at: string): number {
     live++;
   }
   return live;
-}
-
-/** Revoke every grant in this workspace, inside workspace deletion's tx() (lib/v2/lifecycle.ts). */
-export function revokeWorkspaceGrants(wsId: string): number {
-  return run("DELETE FROM v2_oauth_grants WHERE ws_id = ?", wsId);
 }
 
 // ---- the workspace's Apps tab (GET/DELETE /api/v2/workspaces/{ws}/apps) ----

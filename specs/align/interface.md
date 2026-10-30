@@ -20,6 +20,7 @@ screen says "team".
 | --- | --- | --- | --- |
 | `/` | (redirect) | Anyone | Redirects to `/app` |
 | `/app/sign-in` | Sign in | A signed-out person | Sign in with Google, GitHub, an email code or a passkey |
+| `/app/request-access` | Request access | Anyone, signed in or not | Ask the operator for a creation code (hosted) |
 | `/app` | Your workspaces | A signed-in person | List and create workspaces, restore a deleted one; first run offers the Northstar sample |
 | `/app/account` | Your account | A signed-in person | See the account, link Google or GitHub, manage passkeys, sign out everywhere, delete the account |
 | `/app/device` | Connect a device | A signed-in person (recent sign-in) | Approve the code that `align login` printed |
@@ -59,7 +60,8 @@ The server SHALL answer `/` with a redirect to `/app`, and SHALL serve no other 
 
 ### Requirement: Signed-out visitors are sent to sign-in
 
-Every `/app` page other than `/app/sign-in` SHALL send a signed-out visitor to `/app/sign-in?next=<page>`, and
+Every `/app` page other than `/app/sign-in` and `/app/request-access` SHALL send a signed-out visitor to
+`/app/sign-in?next=<page>`, and
 `/oauth/authorize`, once the request itself is valid, SHALL show a signed-out visitor a **Sign in** link to
 `/app/sign-in?next=<this /oauth/authorize URL>` (as the `mcp` part specifies); sign-in SHALL return only to an `/app`
 path or an `/oauth/authorize` URL, falling back to `/app` for anything else.
@@ -85,6 +87,9 @@ The `/app/sign-in` page SHALL offer **Continue with Google** and **Continue with
 client id and secret are configured, and SHALL offer the email-code form whenever email sign-in is available (always
 in Mode L; when hosted, whenever the email settings are set, as the `workspaces` part specifies); a person who is
 already signed in SHALL be sent straight to `next`, unless the URL carries `reauth=1`, which shows the form anyway.
+When hosted with `ALIGN_CREATION=codes` it SHALL link to `/app/request-access`, and when the bot check is on it SHALL
+render one Turnstile widget for the email-code form, sending its token with each send and sign-in and asking for a new
+one after each try.
 
 #### Scenario: Social sign-in
 
@@ -95,6 +100,11 @@ already signed in SHALL be sent straight to `next`, unless the URL carries `reau
 
 - **WHEN** neither Google nor GitHub is configured (in Mode L, or hosted with the email settings set)
 - **THEN** the page shows only the email-code form; it never says that no sign-in method is configured
+
+#### Scenario: Request access link and bot check
+
+- **WHEN** a hosted server with `ALIGN_CREATION=codes` and both Turnstile keys serves `/app/sign-in`
+- **THEN** the card ends with "New to Align? Creating a workspace here needs a creation code. **Request access**" (a link to `/app/request-access`), and the email-code form shows the Turnstile widget; **Send code** and **Sign in** stay disabled until it gives a token, and a refused check shows "Complete the check that you are a person, then try again." or "The check that you are a person didn't pass. Try it again."; Mode L shows neither
 
 #### Scenario: Test identity provider
 
@@ -244,7 +254,9 @@ sign-in is older than 15 minutes.
 ### Requirement: Workspace list and first-run sample
 
 The `/app` page SHALL list the person's workspaces from `GET /api/v2/workspaces` with their role and teams, let them
-create a workspace, and offer **Create the Northstar sample** only when they have no workspaces.
+create a workspace (with a "Creation code" field and a **Request access** link when the hosted creation gate needs a
+code from them, the Turnstile widget when the bot check is on, and only a note when creation is closed), and offer
+**Create the Northstar sample** only when they have no workspaces and need no code.
 
 #### Scenario: Workspaces listed
 
@@ -259,12 +271,40 @@ create a workspace, and offer **Create the Northstar sample** only when they hav
 #### Scenario: Deleted workspaces
 
 - **WHEN** the person owns workspaces deleted in the last 30 days
-- **THEN** a "Deleted workspaces" card lists each with "Deleted <time>. You can restore it until <time>; then it is erased." and **Restore**, which posts to `POST /api/v2/workspaces/<ws>/restore` and reloads the list, where the workspace is back among the links; 403 `reauth_required` shows the server's "Sign in again to restore a workspace. This needs a sign-in from the last 15 minutes." with **Sign in again** (coming back to `/app`); the card is absent when there is nothing to restore
+- **THEN** a "Deleted workspaces" card lists each with "Deleted <time>. You can restore it until <time>; then it is erased." and **Restore**, which posts to `POST /api/v2/workspaces/<ws>/restore` and reloads the list, where the workspace is back among the links; 403 `reauth_required` shows the server's "Sign in again to restore a workspace. This needs a sign-in from the last 15 minutes." with **Sign in again** (coming back to `/app`); a hosted restore that would pass a workspace cap (409 `workspace_cap` or `owned_workspace_cap`) shows the server's message in red; the card is absent when there is nothing to restore
 
 #### Scenario: Create refused
 
-- **WHEN** creating a workspace or the sample returns an error (for example 429 `rate_limited` or 409 `too_many_workspaces`)
+- **WHEN** creating a workspace or the sample returns an error (for example 429 `rate_limited`, 403 `creation_code_invalid` or 403 `owned_workspace_cap`)
 - **THEN** the card shows the server's message in red and stays on `/app`
+
+#### Scenario: Creation code
+
+- **WHEN** a hosted person who needs a code opens `/app`
+- **THEN** "Create a workspace" has Name, "Creation code" (hint: each code creates one workspace and came in the email that answered the access request), "No code yet? **Request access**", the widget when the bot check is on, and **Create**, disabled until the name, the code and the check are filled, posting `{name, creation_code}`; the sample card is not shown
+
+#### Scenario: Creation closed
+
+- **WHEN** a hosted server runs with `ALIGN_CREATION=closed`
+- **THEN** "Create a workspace" shows only "New workspaces can't be created on this server right now. Contact its operator."
+
+### Requirement: Request access page
+
+The `/app/request-access` page SHALL, without sign-in, collect email, name, company (optional), team size (optional),
+what the person wants to use Align for, and one interest, **Try Align** or **Evaluate Align on a real workflow** (a
+follow-up about an evaluation and, if it fits, a non-binding letter of intent), post them to
+`POST /api/v2/access-requests` with the Turnstile token when the bot check is on, and say plainly that the form is not
+an agreement, commits neither the person nor their employer, and asks nobody to sign for their organization.
+
+#### Scenario: Send a request
+
+- **WHEN** someone fills the form and presses **Send request**
+- **THEN** the page posts the fields and shows "Thanks. We got your request and will answer it by email at <email>, usually within a day." with a link back to sign-in; an error is shown in red under the form
+
+#### Scenario: No agreement implied
+
+- **WHEN** the page is read
+- **THEN** it says "Sending this form only asks for access. It is not an agreement, and asking for a follow-up or a letter of intent doesn't commit you or your employer to anything. Nothing here asks you to sign for your organization."; in Mode L it also notes that anyone signed in on this machine can create a workspace without a code
 
 ### Requirement: Device approval screen
 
@@ -691,6 +731,9 @@ are not states (a team, a "company" goal, an active goal's status), neutral othe
 - `app/app/view.tsx`
 - `app/app/sign-in/page.tsx`
 - `app/app/sign-in/view.tsx`
+- `app/app/request-access/page.tsx`
+- `app/app/request-access/view.tsx`
+- `app/app/_ui/turnstile.tsx`
 - `app/app/account/page.tsx`
 - `app/app/device/page.tsx`
 - `app/app/account/view.tsx`

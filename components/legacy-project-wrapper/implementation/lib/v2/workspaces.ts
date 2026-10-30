@@ -1,11 +1,13 @@
-import { all, audit, get, LIVE_WS, run, tx } from "./db";
+import { all, audit, get, LIVE_WS, run, sql, tx } from "./db";
+import { softDeleteWorkspace } from "./core.mts";
+import { admitCreation, checkMemberCap, checkRestoreCaps, precheckCreation } from "./creation";
 import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { authorize, type Action, type PodRole, type PolicyObject, type PolicyPrincipal, type WsRole } from "./policy";
-import type { Principal } from "./http";
+import type { Principal, WebPrincipal } from "./http";
 import { config } from "../config";
 import { take } from "./limits";
-import { deleteMemberSessions, onMemberRemoved, onWorkspaceDeleted } from "./lifecycle";
+import { deleteMemberSessions, onMemberRemoved } from "./lifecycle";
 import { cancelDeparture, noteDeparture, personName, RESTORE_DAYS } from "./retention";
 
 // Workspaces, members, invites and teams. Teams are stored as pods (v2_pods, pod_ ids); every response, message and
@@ -52,14 +54,18 @@ export function workspacesFor(p: Principal) {
   }));
 }
 
-/** A new workspace owned by `userId`. `seed`, when given, fills it in the same transaction (the sample workspace). */
-export async function createWorkspace(userId: string, name: string, seed?: (wsId: string, at: string) => void) {
+/** A new workspace owned by the caller. When hosted it must pass the creation gate (lib/v2/creation.ts): the mode,
+ *  the caps, the address, the captcha and, in `codes` mode, a creation code spent in the same transaction. `seed`,
+ *  when given, fills it in that transaction too (the sample workspace). */
+export async function createWorkspace(req: Request, p: WebPrincipal, name: string, code: string | null, seed?: (wsId: string, at: string) => void) {
+  const userId = p.user.id;
   take(`ws-create:${userId}`, 10, 60 * 60 * 1000);
-  const owned = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_members WHERE user_id = ? AND role = 'owner'", userId)?.n ?? 0;
-  if (owned >= 50) throw conflict("too_many_workspaces", "You own the maximum number of workspaces");
+  const creator = { id: userId, email: p.user.email, emailVerified: p.emailVerified };
+  await precheckCreation(req, creator, code);
   const id = newId("ws");
   const at = nowIso();
   await tx(() => {
+    admitCreation(creator, code, id);
     run("INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)", id, name, userId, at);
     run("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)", id, userId, at);
     audit(id, userId, "workspace.created", id, at);
@@ -96,20 +102,14 @@ export async function renameWorkspace(pp: PolicyPrincipal, name: string) {
   return { id: pp.wsId, name };
 }
 
-/** Soft delete: the workspace is unreachable to everyone at once (404 everywhere, devices stop syncing it, its
- *  connected AI apps are revoked). Its owners can restore it for 30 days; then the retention job purges every row
- *  (lib/v2/retention.ts). */
+/** Soft delete (softDeleteWorkspace in lib/v2/core.mts, the one deletion path, shared with account deletion and
+ *  `align-admin workspaces delete`): the workspace is unreachable to everyone at once (404 everywhere, devices stop
+ *  syncing it, its connected AI apps are revoked). Its owners can restore it for 30 days; then the retention job
+ *  purges every row (purgeWorkspace in lib/v2/core.mts). */
 export async function deleteWorkspace(pp: PolicyPrincipal) {
   need(pp, "workspace.manage");
   const at = nowIso();
-  await tx(() => softDeleteWorkspace(pp.wsId, pp.userId, at));
-}
-
-/** Mark a workspace deleted (inside the caller's tx). */
-export function softDeleteWorkspace(wsId: string, actor: string, at: string) {
-  onWorkspaceDeleted(wsId);
-  run("UPDATE v2_workspaces SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL", at, wsId);
-  audit(wsId, actor, "workspace.deleted", wsId, at);
+  await tx(() => softDeleteWorkspace(sql, pp.wsId, pp.userId, at));
 }
 
 const restoreUntil = (deletedAt: string) => new Date(Date.parse(deletedAt) + RESTORE_DAYS * DAY_MS).toISOString();
@@ -138,12 +138,16 @@ export function deletedWorkspaceOwnedBy(userId: string, wsId: string) {
 }
 
 /** An owner restores a deleted workspace within its window: everything is as it was, except connected AI apps (revoked
- *  at deletion), and members' devices sync it again. */
+ *  at deletion), and members' devices sync it again. Hosted, it counts toward the caps again, so a restore that would
+ *  pass ALIGN_MAX_WORKSPACES or the restorer's ALIGN_MAX_OWNED_WORKSPACES is refused (409 workspace_cap or
+ *  owned_workspace_cap). */
 export async function restoreWorkspace(userId: string, wsId: string) {
   const w = deletedWorkspaceOwnedBy(userId, wsId);
+  checkRestoreCaps(userId);
   const at = nowIso();
   await tx(() => {
     deletedWorkspaceOwnedBy(userId, wsId);
+    checkRestoreCaps(userId);
     run("UPDATE v2_workspaces SET deleted_at = NULL WHERE id = ?", wsId);
     audit(wsId, userId, "workspace.restored", wsId, at);
   });
@@ -221,6 +225,7 @@ export async function createInvite(pp: PolicyPrincipal, email: string, role: WsR
   if (get("SELECT 1 AS x FROM v2_members m JOIN ba_user u ON u.id = m.user_id WHERE m.ws_id = ? AND lower(u.email) = ?", pp.wsId, e)) {
     throw conflict("already_member", "That person is already a member");
   }
+  checkMemberCap(pp.wsId, true);
   const token = secretToken(32);
   const id = newId("inv");
   const at = nowIso();
@@ -303,6 +308,7 @@ export async function acceptInvite(token: string, user: { id: string; email: str
   const at = nowIso();
   await tx(() => {
     if (get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", r.ws_id, user.id)) throw conflict("already_member", "You are already a member");
+    checkMemberCap(r.ws_id, false);
     run("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, ?, ?)", r.ws_id, user.id, r.role, at);
     cancelDeparture(r.ws_id, user.id);
     // An invite that names a team joins that team too (a team removed meanwhile is simply skipped).
