@@ -13,6 +13,7 @@ import { pollDirectives } from "./directives.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { tailAll, type TailResult } from "./tailer.ts";
 import { detectGitEdits, fetchPod, uploadActivity } from "./activity.ts";
+import { fetchAsks } from "./asks.ts";
 import { layout, listSpool, localId } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
 import type { SpoolRecord } from "./shared/types.ts";
@@ -397,7 +398,7 @@ export interface SyncResult {
 
 /**
  * One sync pass, then return: hook spool, transcript tail (bounded), outbox, directives by cursor, usage upload, goal
- * feeds (conditional GET). A lock file keeps concurrent passes (several sessions' hooks) from overlapping.
+ * and asks feeds (conditional GETs), team activity. A lock file keeps concurrent passes (several sessions' hooks) from overlapping.
  */
 export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFeeds?: boolean; waitForLockMs?: number }): Promise<SyncResult> {
   const res: SyncResult = { skipped: false, spooled: 0, tail: { files: 0, bytes: 0, rewrites: 0, events: 0 }, sent: 0, uploaded: 0, directives: 0 };
@@ -444,6 +445,8 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     }
     for (const w of me?.workspaces || []) refresh.add(w.id);
     for (const ws of refresh) await refreshFeed(ctx, ws).catch(() => undefined);
+    // Asks between teams (a 304 when nothing changed): read by `align asks`, `align team` and the envelope.
+    for (const ws of refresh) await fetchAsks(ctx, ws).catch(() => false);
     // Team activity: this machine's in-flight work up, other machines' down (a few hundred bytes when quiet).
     try {
       detectGitEdits(ctx);

@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Ctx } from "./context.ts";
-import { bumpGap, nowIso, type Db } from "./db.ts";
+import { bumpGap, kvGet, kvSet, nowIso, type Db } from "./db.ts";
 import { requestKey } from "./keys.ts";
 import { localId } from "./shared/layout.ts";
 import type { Harness } from "./shared/types.ts";
@@ -35,7 +35,26 @@ export function ensureSession(db: Db, harness: Harness, nativeId: string, info: 
        started_at = CASE WHEN excluded.started_at IS NOT NULL AND (sessions.started_at IS NULL OR excluded.started_at < sessions.started_at) THEN excluded.started_at ELSE sessions.started_at END,
        last_active = CASE WHEN excluded.last_active IS NOT NULL AND (sessions.last_active IS NULL OR excluded.last_active > sessions.last_active) THEN excluded.last_active ELSE sessions.last_active END`,
   ).run(lid, harness, nativeId, info.cwd || null, ts, ts, nowIso());
+  if (info.cwd) noteCwd(db, lid, info.cwd);
   return lid;
+}
+
+/**
+ * The session's first folder is `sessions.cwd`; any other folder it later reported is kept in kv `cwds:<lid>` (at most
+ * 8), so `align share --dir --past` can require every folder a session worked in to be inside the shared one.
+ */
+function noteCwd(db: Db, lid: string, cwd: string): void {
+  const first = (db.prepare("SELECT cwd FROM sessions WHERE local_id=?").get(lid) as { cwd: string | null } | undefined)?.cwd;
+  if (!first || first === cwd) return;
+  const key = `cwds:${lid}`;
+  const list = JSON.parse(kvGet(db, key) || "[]") as string[];
+  if (list.includes(cwd) || list.length >= 8) return;
+  kvSet(db, key, JSON.stringify([...list, cwd]));
+}
+
+/** Every folder a session reported: its first, then any others. */
+export function sessionCwds(db: Db, lid: string, first: string | null): string[] {
+  return [...(first ? [first] : []), ...(JSON.parse(kvGet(db, `cwds:${lid}`) || "[]") as string[])];
 }
 
 export function getSession(db: Db, lid: string): SessionRow | null {

@@ -13,6 +13,8 @@ export interface ClaudeFileState {
   prompt_id: string | null;
   subagent: boolean;
   cwd: string | null;
+  /** Other working folders later lines named (at most 8), so a session that left its folder is known to have. */
+  other_cwds?: string[];
 }
 
 export function initClaudeState(file: string): ClaudeFileState {
@@ -74,6 +76,9 @@ export function parseClaudeLine(line: string, st: ClaudeFileState): ParsedEvent[
     const cwd = str(row.cwd);
     if (cwd && !st.cwd) {
       st.cwd = cwd;
+      if (st.session_id) out.push({ kind: "session", harness: "claude-code", native_session_id: st.session_id, cwd, ts: isoOrNull(row.timestamp) });
+    } else if (cwd && cwd !== st.cwd && !(st.other_cwds || []).includes(cwd) && (st.other_cwds || []).length < 8) {
+      st.other_cwds = [...(st.other_cwds || []), cwd];
       if (st.session_id) out.push({ kind: "session", harness: "claude-code", native_session_id: st.session_id, cwd, ts: isoOrNull(row.timestamp) });
     }
   }

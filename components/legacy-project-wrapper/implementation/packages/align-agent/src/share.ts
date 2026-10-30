@@ -5,7 +5,8 @@ import fs from "node:fs";
 import type { Ctx } from "./context.ts";
 import { nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
-import { getSession, type SessionRow } from "./ledger.ts";
+import path from "node:path";
+import { getSession, sessionCwds, type SessionRow } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { randomId } from "./shared/fsx.ts";
@@ -180,4 +181,45 @@ export function forgetShare(ctx: Ctx, lid: string): void {
 export function notify(ctx: Ctx, lid: string, id: string, text: string): void {
   addNotice(ctx, lid, id, text);
   renderHot(ctx, lid);
+}
+
+// ---------- past sessions of a folder (`align share --dir <folder> --past <days>`) ----------
+/** The days `--past` may reach back: within the transcript tail window. */
+export const PAST_MAX_DAYS = 14;
+
+function real(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/** `cwd` is the folder or inside it. A sibling that only shares a prefix (`/work/app-secret`, `/work/app.v2`) is not. */
+export function insideDir(cwd: string, dir: string): boolean {
+  const c = real(cwd);
+  return c === dir || c.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
+}
+
+/**
+ * Already-metered local sessions active in the last `days` days whose own recorded folders (the first one and every
+ * one they reported later) are all `dir` (a realpath) or inside it. A session with no folder is left out. One that was
+ * ever shared (shared, pending, suspended, stopped or failed) or has epochs is skipped: sharing it from its start
+ * could backdate history a live hook already reported, which the server refuses anyway (`epoch_overlap`).
+ */
+export function pastSessions(ctx: Ctx, dir: string, days: number, now = Date.now()): { take: SessionRow[]; already: number } {
+  const since = new Date(now - days * 86_400_000).toISOString();
+  const rows = ctx.db
+    .prepare("SELECT * FROM sessions WHERE COALESCE(last_active, started_at, created_at) >= ? ORDER BY COALESCE(started_at, created_at), local_id")
+    .all(since) as unknown as SessionRow[];
+  const take: SessionRow[] = [];
+  let already = 0;
+  for (const s of rows) {
+    if (!s.cwd) continue;
+    if (!sessionCwds(ctx.db, s.local_id, s.cwd).every((c) => insideDir(c, dir))) continue;
+    const shared = ctx.db.prepare("SELECT 1 FROM shares WHERE local_id=?").get(s.local_id) || ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=?").get(s.local_id);
+    if (shared) already++;
+    else take.push(s);
+  }
+  return { take, already };
 }

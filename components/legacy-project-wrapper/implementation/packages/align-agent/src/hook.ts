@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { alignHomeForHook } from "./shared/layout.ts";
 import type { Harness } from "./shared/types.ts";
 import { kickSync } from "./hooks/autostart.ts";
-import { denyOutput, latchedOnFailure, preToolUse, sessionStart, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
+import { denyOutput, latchedOnFailure, preToolUse, sessionStart, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
 
 const DEADLINE_MS = Number(process.env.ALIGN_HOOK_DEADLINE_MS || 300);
 const MAX_INPUT = 8 * 1024 * 1024;
@@ -88,6 +88,13 @@ async function main(): Promise<void> {
     case "Stop":
     case "StopFailure": {
       decided = null; // the turn is over: add nothing to context and never continue it
+      if (event === "Stop") {
+        try {
+          stop(home, harness, input); // local drift check: leaves a user-only notice for the next prompt
+        } catch {
+          /* never affects the turn */
+        }
+      }
       await kickSync(home, process.argv[1] || "", process.env, event).catch(() => undefined);
       return emit(null);
     }
