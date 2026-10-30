@@ -20,8 +20,9 @@ trap cleanup EXIT
 forbidden() { # forbidden <ls -A /app listing> <find output>: exit 0 if anything forbidden is present
   printf '%s\n' "$1" | grep -qxE 'data|packages|test|docs|\.env(\..*)?' || printf '%s\n' "$2" | grep -qE '(^|/)\.env(\.[^/]*)?$'
 }
-# scripts/ and lib/ hold only the operator script and its two imports (lib/v2/core.mts, lib/v2/retention-core.mts).
-OPERATOR_FILES=$'/app/lib/v2/core.mts\n/app/lib/v2/retention-core.mts\n/app/scripts/align-admin.mjs'
+# scripts/ and lib/ hold only the operator script and its three imports (lib/v2/core.mts, lib/v2/metrics-core.mts,
+# lib/v2/retention-core.mts).
+OPERATOR_FILES=$'/app/lib/v2/core.mts\n/app/lib/v2/metrics-core.mts\n/app/lib/v2/retention-core.mts\n/app/scripts/align-admin.mjs'
 # The matcher itself, without Docker: a nested .env must be caught, a clean image must not be.
 forbidden "package.json" "/app/lib/.env.local"; ok $? "matcher: a nested /app/lib/.env.local is caught"
 forbidden "package.json" "/srv/x/.env"; ok $? "matcher: a nested /srv/x/.env is caught"
@@ -39,7 +40,7 @@ forbidden "$listing" "$envs"; nobad=$?
 printf '%s\n' "$listing" | grep -qx 'package.json' && [ "$nobad" -ne 0 ]; ok $? "the image has no data/, packages/, test/, docs/ or .env at any depth" "$(echo "$listing $envs" | tr '\n' ' ')"
 
 extra="$(docker run --rm --entrypoint sh "$TAG" -c 'find /app/scripts /app/lib -type f 2>/dev/null | sort')"
-[ "$extra" = "$OPERATOR_FILES" ]; ok $? "scripts/ and lib/ hold only the operator script, lib/v2/core.mts and lib/v2/retention-core.mts" "$(echo "$extra" | tr '\n' ' ')"
+[ "$extra" = "$OPERATOR_FILES" ]; ok $? "scripts/ and lib/ hold only the operator script, lib/v2/core.mts, lib/v2/metrics-core.mts and lib/v2/retention-core.mts" "$(echo "$extra" | tr '\n' ' ')"
 
 docker run --name "$NAME-bad" "$TAG" >/dev/null 2>&1
 code="$(docker inspect -f '{{.State.ExitCode}}' "$NAME-bad")"
@@ -83,6 +84,8 @@ admin="$(docker exec -u node "$NAME" node scripts/align-admin.mjs workspaces lis
 [ "$admin" = "(none)" ]; ok $? "the operator script runs in the container (workspaces list on the empty volume)" "$admin"
 ret="$(docker exec -u node "$NAME" node scripts/align-admin.mjs retention run --dry-run 2>&1)"
 echo "$ret" | head -1 | grep -q '^Would (as of '; ok $? "the operator script's retention run --dry-run runs in the container" "$ret"
+rep="$(docker exec -u node "$NAME" node scripts/align-admin.mjs report --json 2>&1)"
+echo "$rep" | grep -q '"funnel"'; ok $? "the operator script's report runs in the container" "$rep"
 
 echo
 [ $fails = 0 ] && echo "test-image: all checks passed" || echo "test-image: $fails check(s) failed"

@@ -2,6 +2,7 @@ import { config } from "../config";
 import { requireCaptcha } from "./captcha";
 import { get, run, tx } from "./db";
 import { refuseDisposable } from "./disposable";
+import { event } from "./events";
 import { V2Error, badRequest } from "./errors";
 import { newId, nowIso } from "./ids";
 import { accessEmailKey, durableCount, durableRoom } from "./limits";
@@ -53,6 +54,7 @@ export async function createAccessRequest(req: Request, client: string, b: Body)
         interest,
         nowIso(),
       );
+      event("access_requested", { props: { interest } });
     }
   });
   return { received: true };

@@ -15,6 +15,10 @@
 //                                         its alias scripts/retention.mjs) with ALIGN_TEST_NOW as its clock (codes,
 //                                         invites, former members, purge, audit, spend roll-ups), the web UI for them,
 //                                         and the job's run at server startup
+//   events  Mode L, ALIGN_TEST_IDP=1    -> product events (PRESEED-007): each recorded once where it is a first, no
+//                                         content in any row, the operator report's counts against this phase's
+//                                         actions, LOIs (loi_signed needs --verified-original), and events under
+//                                         account deletion, purging and the retention job
 //   hosted  HOSTED=1                    -> startup refusals, then the hosted host/https/edge checks and the route
 //                                         allowlist (/ -> /app, everything else 404); no closing date (a leftover
 //                                         ALIGN_DELETE_BY in the past is ignored); then email codes through a fake HTTPS
@@ -55,6 +59,8 @@ if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
   console.error(`test-v2: port ${PORT} is already in use`);
   process.exit(2);
 }
+/** The schema version the code expects (lib/v2/core.mts), which lib/v2/db.ts checks against its migrations. */
+const SCHEMA_VERSION = Number(/export const SCHEMA_VERSION = (\d+);/.exec(readFileSync(path.join(ROOT, "lib/v2/core.mts"), "utf8"))?.[1]);
 const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -266,6 +272,9 @@ const codesIn = (text) => text.match(/alc_[a-z2-7]{32}/g) ?? [];
 /** True when no file of this database (main, WAL) contains `needle` as plain bytes. */
 const dbFilesLack = (file, needle) => [file, `${file}-wal`].every((f) => !existsSync(f) || !readFileSync(f).includes(Buffer.from(needle)));
 
+/** The keyed hash that stands for a person in v2_events (lib/v2/core.mts eventActor). */
+const eventActor = (secret, userId) => createHmac("sha256", secret).update(`ale.${userId}`).digest("base64url");
+
 /** A device keypair and its HMAC secret, as the agent would keep them. */
 function newDeviceKeys() {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -383,11 +392,10 @@ if (build.status !== 0) {
   const legal = ["privacy-policy.md", "dpa.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8"));
   const pack = ["privacy-policy.md", "dpa.md", "subprocessors.md", "security-overview.md", "questionnaire.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8")).join("\n");
   check(
-    "trust: the privacy policy and DPA open with 'Draft for counsel review'; the pack uses the [LEGAL ENTITY], [ADDRESS] and [PRIVACY CONTACT EMAIL] placeholders, marks claims about PRESEED-007 (not merged yet), and has no PRESEED-006 marker left (evidence is merged and its claims checked)",
+    "trust: the privacy policy and DPA open with 'Draft for counsel review'; the pack uses the [LEGAL ENTITY], [ADDRESS] and [PRIVACY CONTACT EMAIL] placeholders, and no PRESEED marker is left in docs/trust or SECURITY.md (every package is merged and its claims checked)",
     legal.every((t) => t.split("\n").slice(0, 4).join(" ").includes("Draft for counsel review")) &&
       ["[LEGAL ENTITY]", "[ADDRESS]", "[PRIVACY CONTACT EMAIL]"].every((t) => pack.includes(t)) &&
-      !pack.includes("PRESEED-006") &&
-      pack.includes("<!-- PRESEED-007 -->") &&
+      !/PRESEED-\d/.test(readdirSync(path.join(ROOT, "docs/trust")).map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8")).join("\n") + readFileSync(path.join(ROOT, "SECURITY.md"), "utf8")) &&
       existsSync(path.join(ROOT, "SECURITY.md")),
     "",
   );
@@ -704,7 +712,7 @@ try {
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
-  check("storage: WAL, migrated (user_version 9), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests and durable limits included) and Better Auth tables (passkeys included)", pragmas.jm === "wal" && pragmas.uv === 9 && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 10, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits and product events included) and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 10 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -1684,6 +1692,13 @@ try {
     mcpA?.evidence?.length === 2 && mcpA.evidence.map((e) => e.reported_as).sort().join() === "agent-reported,self-reported" && mcpA.evidence.every((e) => e.revision === 1 && typeof e.added_by.name.untrusted_text === "string") && mcpA.snapshot?.revision === 1 && mcpA.snapshot.recorded_by === "align" && typeof mcpA.snapshot.spend?.total?.est_list_usd_micros === "number" && /Recorded by Align at revision 1/.test(mcpList.text),
     JSON.stringify(mcpA).slice(0, 400),
   );
+  const evEventText = withDb((d) => d.prepare("SELECT * FROM v2_events").all()).map((r) => Object.values(r).join(" ")).join("\n");
+  const evRowsAll = withDb((d) => d.prepare("SELECT url, label FROM v2_change_request_evidence").all());
+  check(
+    "evidence and product events: no product event holds an evidence link's url or label (events stay content-free)",
+    evRowsAll.length > 0 && evRowsAll.every((e) => !evEventText.includes(e.url) && !evEventText.includes(e.label)) && !evEventText.includes("https://"),
+    `${evRowsAll.length}`,
+  );
   const approveA = await crAct(U3, GL.id, crA.json?.id, "approve", { revision: 1 });
   const bNow = await crGet(U2, GL.id, crB.json?.id);
   const cr_approveB = await crAct(U3, GL.id, crB.json?.id, "approve", { revision: 1 });
@@ -2049,13 +2064,29 @@ try {
   const oaCookie = cookieOf(oaIn.cb?.setCookies ?? []);
   const oaMe = await call("OA", "GET", "/api/v2/me", { cookie: oaCookie });
   const oaRow = withDb((d) => d.prepare("SELECT a.id, a.accessToken, a.refreshToken FROM ba_account a JOIN ba_user u ON u.id = a.userId WHERE a.providerId = 'align-test' AND u.email = ?").get(oauthUser.email));
-  const oaRead = await call("OA", "POST", "/api/v2/auth/get-access-token", { cookie: oaCookie, headers: { origin: BASE }, body: { accountId: oaRow?.id ?? "" } });
+  // Decrypted with Better Auth's own helper and this server's key (Mode L: <data>/v2/.auth-secret), no app route needed.
+  const { symmetricDecrypt } = await import("better-auth/crypto");
+  const authKey = readFileSync(path.join(onDir, "v2", ".auth-secret"), "utf8").trim();
+  const opened = async (t) => (typeof t === "string" ? await symmetricDecrypt({ key: authKey, data: t }).catch(() => null) : null);
+  const oaPlain = [await opened(oaRow?.accessToken), await opened(oaRow?.refreshToken)];
   const sealed = (t, plain) => typeof t === "string" && t.length > plain.length && !t.includes(plain) && (t.startsWith("$ba$") || /^[0-9a-f]+$/i.test(t));
+  // Better Auth's routes that would hand out, refresh or describe provider tokens, or unlink a provider, are off.
+  const oaOff = await Promise.all([
+    call("OA", "POST", "/api/v2/auth/get-access-token", { cookie: oaCookie, headers: { origin: BASE }, body: { accountId: oaRow?.id ?? "" } }),
+    call("OA", "POST", "/api/v2/auth/refresh-token", { cookie: oaCookie, headers: { origin: BASE }, body: { accountId: oaRow?.id ?? "" } }),
+    call("OA", "GET", `/api/v2/auth/account-info?accountId=${oaRow?.id ?? ""}`, { cookie: oaCookie }),
+    call("OA", "POST", "/api/v2/auth/unlink-account", { cookie: oaCookie, headers: { origin: BASE }, body: { providerId: "align-test" } }),
+  ]);
   check(
-    "provider tokens: a sign-in through an OAuth provider works (session, /api/v2/me) and its access and refresh tokens are stored encrypted in ba_account, never as issued (not in the database file either); Better Auth still reads the access token back",
+    "provider tokens: a sign-in through an OAuth provider works (session, /api/v2/me) and its access and refresh tokens are stored encrypted in ba_account, never as issued (not in the database file either); Better Auth's decrypt helper with the server's key opens them",
     oaIn.cb?.status === 302 && oaIn.target.endsWith("/app") && oaMe.status === 200 && oaMe.json?.user?.email === oauthUser.email &&
-      sealed(oaRow?.accessToken, OAUTH_AT) && sealed(oaRow?.refreshToken, OAUTH_RT) && dbFilesLack(dbFile, OAUTH_AT) && dbFilesLack(dbFile, OAUTH_RT) && oaRead.status === 200 && oaRead.json?.accessToken === OAUTH_AT,
-    `${oaIn.start.status} ${oaIn.start.text.slice(0, 160)} ${oaIn.cb?.status} ${oaIn.target} ${oaMe.status} ${JSON.stringify(oaRow)} ${oaRead.status} ${oaRead.text.slice(0, 160)}`,
+      sealed(oaRow?.accessToken, OAUTH_AT) && sealed(oaRow?.refreshToken, OAUTH_RT) && dbFilesLack(dbFile, OAUTH_AT) && dbFilesLack(dbFile, OAUTH_RT) && oaPlain[0] === OAUTH_AT && oaPlain[1] === OAUTH_RT,
+    `${oaIn.start.status} ${oaIn.start.text.slice(0, 160)} ${oaIn.cb?.status} ${oaIn.target} ${oaMe.status} ${JSON.stringify(oaRow)} ${JSON.stringify(oaPlain)}`,
+  );
+  check(
+    "provider tokens: Better Auth's get-access-token, refresh-token, account-info and unlink-account routes are off (404) for a signed-in person, and the provider stays linked",
+    oaOff.every((r) => r.status === 404) && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_account WHERE id = ?").get(oaRow?.id ?? "").n) === 1,
+    oaOff.map((r) => `${r.status} ${r.text.slice(0, 80)}`).join(" | "),
   );
   // Linking stays explicit: the same provider with an existing account's email doesn't sign in or link on its own,
   // and linking it from that (recently signed-in) account works, its tokens encrypted too.
@@ -2564,6 +2595,8 @@ try {
     const act3 = await call("R3", "POST", `/api/v2/workspaces/${W1}/activity`, { bearer: D3.access, body: { items: [{ session_key: S3.key, kind: "edit", at: new Date().toISOString(), repo_id: "f".repeat(32), path_hash: "e".repeat(32) }] } });
     const cr = await ws(r2, "POST", W1, `/goals/${G1.id}/change-requests`, { base_version: 1, changes: { title: "Rita's goal, sharper" }, reason: "clearer" });
     const W4 = await newWs(r4, "Solo");
+    // Rae also has a workspace of her own, so her events there show that only W1's lose her actor hash later.
+    const W3x = await newWs(r3, "Rae's own");
     const G4 = await goal(r4, W4, "Ron's goal");
     const spend0 = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
     check(
@@ -2755,7 +2788,16 @@ try {
       noIdp.status === 0 && Math.abs(Date.parse(noIdp.counts.now) - Date.now()) < 60_000 && noIdp.counts.workspaces_purged === 0 && noIdp.counts.former_members_pseudonymised === 0 && w6Exists(),
       noIdp.out,
     );
+    const actor3 = eventActor(readFileSync(path.join(retDir, ".secret"), "utf8").trim(), r3.id);
+    const ev3 = (w) => q1("SELECT COUNT(*) AS n FROM v2_events WHERE ws_id = ? AND actor = ?", w, actor3).n;
+    const ev3Before = { w1: ev3(W1), own: ev3(W3x), total: q1("SELECT COUNT(*) AS n FROM v2_events").n };
     const runE = retention(later(31 * DAY));
+    const ev3After = { w1: ev3(W1), own: ev3(W3x), total: q1("SELECT COUNT(*) AS n FROM v2_events").n };
+    check(
+      "retention (+31 days): making someone \"Former member #n\" in a workspace clears their actor hash from that workspace's product events (the events stay); their events in a workspace they are still in keep it",
+      ev3Before.w1 > 0 && ev3Before.own > 0 && ev3After.w1 === 0 && ev3After.own === ev3Before.own && ev3After.total === ev3Before.total,
+      `${JSON.stringify(ev3Before)} ${JSON.stringify(ev3After)}`,
+    );
     await signIn(r1);
     const g3Later = (await ws(r1, "GET", W1, `/goals/${G3.id}`)).json?.goal;
     const s3Row = q1("SELECT user_id, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S3.key);
@@ -2987,6 +3029,250 @@ try {
       "retention: the server runs the job at startup (it logs counts only) and purges a workspace deleted 31 days before its clock",
       !q1("SELECT 1 AS x FROM v2_workspaces WHERE id = ?", W9) && /Align retention: workspaces purged [1-9]/.test(boot.stdout()) && !boot.stdout().includes("@example.test"),
       boot.stdout().slice(-400),
+    );
+  }
+  await stopServer();
+
+  // ======== phase events: product events (PRESEED-007) and the operator's report ========
+  // Mode L with the test IdP on a fresh data directory: a scripted set of actions, so every funnel count is known.
+  const evDir = path.join(tmpRoot, "events");
+  await mustStart({ ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" });
+  dbFile = path.join(evDir, "v2", "align.sqlite");
+  {
+    const evEnv = { ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" };
+    const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));
+    const ev = (name, w = null) => (w ? q("SELECT * FROM v2_events WHERE name = ? AND ws_id = ?", name, w) : q("SELECT * FROM v2_events WHERE name = ?", name));
+    const ws = (u, method, w, p = "", body) => call(u.who, method, `/api/v2/workspaces/${w}${p}`, { cookie: u.cookie, ...(body ? { body } : {}) });
+    const E = {};
+    for (const [who, name] of [
+      ["E1", "Evelyn Funnelton"],
+      ["E2", "Edgar Quillfeather"],
+      ["E3", "Esme Lonelyworth"],
+    ])
+      E[who] = await signUp(who, name, `${who.toLowerCase()}-funnel@example.test`);
+    const { E1: e1, E2: e2, E3: e3 } = E;
+    const WS_NAME = "Zanzibar Secret Project";
+    const W = (await call("E1", "POST", "/api/v2/workspaces", { cookie: e1.cookie, body: { name: WS_NAME } })).json?.id;
+    const WQ = (await call("E3", "POST", "/api/v2/workspaces", { cookie: e3.cookie, body: { name: "Quiet Kestrel Workspace" } })).json?.id;
+    const WS_SAMPLE = (await call("E1", "POST", "/api/v2/workspaces/sample", { cookie: e1.cookie, body: {} })).json?.id;
+    const inv = await ws(e1, "POST", W, "/invites", { email: e2.email, role: "member" });
+    await ws(e1, "POST", W, "/invites", { email: "dormant-invitee@example.test", role: "viewer" });
+    const acc = await call("E2", "POST", `/api/v2/invites/${inv.json?.token}/accept`, { cookie: e2.cookie, body: {} });
+    const DE1 = await pairDevice("E1", e1, [W], "Evelyn's Marigold laptop");
+    const DE2 = await pairDevice("E2", e2, [W], "Edgar's Thistle laptop");
+    const GOAL_TITLE = "Launch the Periwinkle initiative";
+    const G = (await ws(e1, "POST", W, "/goals", { title: GOAL_TITLE, visibility: "workspace" })).json;
+    const shareS = async (dev, native, goalId, n, alias) => {
+      const key = sessionKey(dev, W, "claude-code", native);
+      const start = new Date(Date.now() - 3600 * 1000).toISOString();
+      const put = await call(dev.who, "PUT", `/api/v2/workspaces/${W}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, W, "/src/r"), repo_alias: alias, started_at: start, title: "Refactor the Gooseberry module" } });
+      const ep = epochId();
+      const epoch = await call(dev.who, "POST", `/api/v2/workspaces/${W}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: ep, goal_id: goalId, starts_at: start, root_turn: null, cause: "manual" } });
+      const up = n ? await call(dev.who, "POST", `/api/v2/workspaces/${W}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: Array.from({ length: n }, (_, i) => usageRow(dev, `${native}-${i}`, ep)) } }) : null;
+      return { key, ok: put.status === 200 && epoch.status < 300 && (!up || up.json?.accepted === n) };
+    };
+    const S1 = await shareS(DE1, "e1-a", G?.id, 2, "pomegranate-repo");
+    const S2 = await shareS(DE1, "e1-b", null, 0, "pomegranate-repo");
+    const S3 = await shareS(DE2, "e2-a", null, 1, "quince-repo");
+    const ep2 = await call("E1", "POST", `/api/v2/workspaces/${W}/sessions/${S2.key}/epochs`, { bearer: DE1.access, body: { epoch_id: epochId(), goal_id: G?.id, starts_at: new Date(Date.now() - 1000).toISOString(), root_turn: null, cause: "manual" } });
+    const CR_REASON = "Because the Tangerine audit asked for it";
+    const cr1 = await ws(e2, "POST", W, `/goals/${G?.id}/change-requests`, { base_version: 1, changes: { title: "Launch the Periwinkle initiative sooner" }, reason: CR_REASON });
+    const crOk = await ws(e1, "POST", W, `/goals/${G?.id}/change-requests/${cr1.json?.id}/approve`, { revision: 1, note: "Approved after the Saffron review" });
+    const cr2 = await ws(e2, "POST", W, `/goals/${G?.id}/change-requests`, { base_version: 2, changes: { title: "Launch the Periwinkle initiative later" }, reason: "second thoughts" });
+    const stopS3 = await ws(e1, "POST", W, `/sessions/${S3.key}/stop`, {});
+    const mcp1 = await mcpCall("E1", DE1, "align_list_goals");
+    const mcp2 = await mcpCall("E2", DE2, "align_list_goals");
+    await sleep(200);
+    check(
+      "events setup: two workspaces and a sample; an invite accepted and one pending; two paired devices; three sessions (one bound to a goal at once, one later, one never); a change request approved and another made; an agent stopped; two MCP reads",
+      W && WQ && WS_SAMPLE && acc.status === 200 && G?.id && S1.ok && S2.ok && S3.ok && ep2.status < 300 && cr1.status === 201 && crOk.status === 200 && cr2.status === 201 && stopS3.status === 200 && mcp1.status === 200 && !mcp1.isError && mcp2.status === 200 && !mcp2.isError,
+      `${acc.status} ${S1.ok} ${S2.ok} ${S3.ok} ${ep2.status} ${cr1.status} ${crOk.status} ${crOk.text} ${cr2.status} ${cr2.text} ${stopS3.status} ${mcp1.status} ${mcp2.status}`,
+    );
+
+    // -- each event once where it is a first, by the right code point --
+    const once = (name, w = W) => ev(name, w).length === 1;
+    const props = (name, w = W) => JSON.parse(ev(name, w)[0]?.props ?? "null");
+    check(
+      "events: workspace_created once per workspace (kind blank, or sample for the sample); invite_sent per invite with its role; invite_accepted and second_member_joined once; device_paired per device for its workspace",
+      once("workspace_created") && once("workspace_created", WQ) && props("workspace_created").kind === "blank" && props("workspace_created", WS_SAMPLE)?.kind === "sample" &&
+        ev("invite_sent", W).length === 2 && ev("invite_sent", W).map((e) => JSON.parse(e.props).role).sort().join() === "member,viewer" && once("invite_accepted") && once("second_member_joined") &&
+        ev("device_paired", W).length === 2 && JSON.parse(ev("device_paired", W)[0].props).workspaces === 1 && ev("code_redeemed").length === 0,
+      JSON.stringify(q("SELECT name, ws_id, props FROM v2_events")),
+    );
+    check(
+      "events: three sessions shared -> first_session_captured once for the workspace and member_first_session_captured once per person (2), with the harness only; first_session_bound once (two sessions bound), harness and authority own",
+      once("first_session_captured") && props("first_session_captured").harness === "claude-code" && ev("member_first_session_captured", W).length === 2 && new Set(ev("member_first_session_captured", W).map((e) => e.actor)).size === 2 &&
+        once("first_session_bound") && props("first_session_bound").authority === "own" && props("first_session_bound").harness === "claude-code",
+      JSON.stringify([ev("first_session_captured"), ev("member_first_session_captured"), ev("first_session_bound")]),
+    );
+    check(
+      "events: first_change_request once (two requests), first_approval once, first_directive once (the approval's goal_version reached the bound sessions; the stop came later), first_mcp_read once (two reads) with the client kind; the sample's seeded request records nothing",
+      once("first_change_request") && once("first_approval") && once("first_directive") && props("first_directive").kind === "goal_version" && once("first_mcp_read") && props("first_mcp_read").client === "device" &&
+        ev("first_change_request", WS_SAMPLE).length === 0 && q("SELECT COUNT(*) AS n FROM v2_directives WHERE ws_id = ?", W)[0].n >= 2,
+      JSON.stringify(q("SELECT name, ws_id, props FROM v2_events WHERE name LIKE 'first_%'")),
+    );
+    const dupes = q("SELECT name, ws_id, COUNT(*) AS n FROM v2_events WHERE ws_id IS NOT NULL AND (name LIKE 'first_%' OR name IN ('workspace_created', 'code_redeemed', 'second_member_joined')) GROUP BY name, ws_id HAVING n > 1");
+    let dupInsert = "";
+    let appendOnly = "";
+    withDb((d) => {
+      try {
+        d.prepare("INSERT INTO v2_events (name, ws_id, at, props) VALUES ('first_approval', ?, ?, '{}')").run(W, new Date().toISOString());
+      } catch (e) {
+        dupInsert = String(e.message);
+      }
+      try {
+        d.prepare("UPDATE v2_events SET props = '{\"x\":1}' WHERE name = 'workspace_created'").run();
+      } catch (e) {
+        appendOnly = String(e.message);
+      }
+    });
+    check(
+      "events: no first-time event appears twice for a workspace, a second one is refused by the database's unique index, and the table is append-only (changing an event's props is refused)",
+      dupes.length === 0 && /UNIQUE/.test(dupInsert) && /append-only/.test(appendOnly),
+      `${JSON.stringify(dupes)} ${dupInsert} ${appendOnly}`,
+    );
+
+    // -- access requests and codes through the operator script --
+    const arE = (body) => call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body });
+    const ar1 = await arE({ email: "hopeful-applicant@example.test", name: "Horatio Hopeful", company: "Wobblegong Ltd", use_case: "Steer the Wobblegong agents", interest: "try" });
+    const ar1b = await arE({ email: "hopeful-applicant@example.test", name: "Horatio Hopeful", company: "Wobblegong Ltd", use_case: "Steer the Wobblegong agents, again", interest: "try" });
+    const ar2 = await arE({ email: "keen-evaluator@example.test", name: "Kerensa Keen", use_case: "Evaluate for the Marmalade team", interest: "evaluate" });
+    const reqIds = q("SELECT id, email FROM v2_access_requests ORDER BY created_at");
+    const apr = admin(["requests", "approve", reqIds.find((r) => r.email.startsWith("hopeful"))?.id ?? "", "--print"], evEnv);
+    const dec = admin(["requests", "decline", reqIds.find((r) => r.email.startsWith("keen"))?.id ?? ""], evEnv);
+    const opCodes = admin(["codes", "create", "--count", "2"], evEnv);
+    check(
+      "events: access_requested once per request (sending again updates it and records nothing), with its interest; approving records access_approved and code_created (source request), declining access_declined, codes create code_created (source operator) per code; none has a workspace or actor",
+      ar1.status === 201 && ar1b.status === 201 && ar2.status === 201 && apr.status === 0 && dec.status === 0 && opCodes.status === 0 &&
+        ev("access_requested").length === 2 && ev("access_requested").map((e) => JSON.parse(e.props).interest).sort().join() === "evaluate,try" && ev("access_approved").length === 1 && ev("access_declined").length === 1 &&
+        ev("code_created").map((e) => JSON.parse(e.props).source).sort().join() === "operator,operator,request" &&
+        [...ev("access_requested"), ...ev("access_approved"), ...ev("access_declined"), ...ev("code_created")].every((e) => e.ws_id === null && e.actor === null),
+      `${ar1.status} ${ar2.status} ${apr.status} ${apr.err} ${dec.status} ${JSON.stringify(q("SELECT name, props FROM v2_events WHERE ws_id IS NULL"))}`,
+    );
+
+    // -- LOIs: operator-recorded only; signed needs --verified-original --
+    const loiSent = admin(["events", "record", "loi_sent", "--workspace", W, "--note-ref", "LOI-2026-007"], evEnv);
+    const loiNoVerify = admin(["events", "record", "loi_signed", "--workspace", W], evEnv);
+    const afterNoVerify = ev("loi_signed").length;
+    const loiBadRef = admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original", "--note-ref", "https://docs.example.test/loi"], evEnv);
+    const loiEmailRef = admin(["events", "record", "loi_sent", "--workspace", WQ, "--note-ref", "someone@example.test"], evEnv);
+    const loiSentVerify = admin(["events", "record", "loi_sent", "--workspace", WQ, "--verified-original"], evEnv);
+    const loiUnknownWs = admin(["events", "record", "loi_sent", "--workspace", "ws_aaaaaaaaaaaaaaaaaaaaaaaa"], evEnv);
+    const loiOther = admin(["events", "record", "first_approval", "--workspace", W], evEnv);
+    const loiSigned = admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original", "--note-ref", "LOI-2026-007"], evEnv);
+    const loiAgain = admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original"], evEnv);
+    check(
+      "align-admin events record: loi_sent records once with the note ref; loi_signed without --verified-original exits 2, says a form or claim is not a signature, and records nothing; a ref that is a URL or email, --verified-original on loi_sent or any other event name exits 2; an unknown workspace exits 1; with --verified-original it records (verified_original yes), and a second time exits 1",
+      loiSent.status === 0 && loiNoVerify.status === 2 && /--verified-original/.test(loiNoVerify.err) && /not a signature/.test(loiNoVerify.err) && afterNoVerify === 0 &&
+        loiBadRef.status === 2 && loiEmailRef.status === 2 && loiSentVerify.status === 2 && loiOther.status === 2 && loiUnknownWs.status === 1 &&
+        loiSigned.status === 0 && /verified original/.test(loiSigned.out) && loiAgain.status === 1 && ev("loi_sent").length === 1 && props("loi_sent").note_ref === "LOI-2026-007" && ev("loi_signed").length === 1 && props("loi_signed").verified_original === "yes" && ev("loi_signed")[0].actor === null,
+      `${loiSent.status} ${loiSent.err} | ${loiNoVerify.status} ${loiNoVerify.err} | ${loiBadRef.status} ${loiEmailRef.status} ${loiSentVerify.status} ${loiOther.status} ${loiUnknownWs.status} ${loiSigned.status} ${loiSigned.out} ${loiAgain.status}`,
+    );
+
+    // -- no content in any event row --
+    const fixtures = [
+      ...Object.values(E).flatMap((u) => [u.email, u.name, u.id]),
+      WS_NAME, "Quiet Kestrel", "Northstar", GOAL_TITLE, "Periwinkle", CR_REASON, "Tangerine", "Saffron", "pomegranate", "quince", "Gooseberry", "Marigold", "Thistle",
+      "hopeful-applicant", "Horatio", "Wobblegong", "Kerensa", "Marmalade", "dormant-invitee", "@", "http", "alc_", "alnd_", "alnr_", DE1.access, DE1.id, "ba_", "cr_",
+    ];
+    const rowsText = q("SELECT * FROM v2_events").map((r) => Object.values(r).join(" ")).join("\n");
+    const found = fixtures.filter((f) => f && rowsText.toLowerCase().includes(String(f).toLowerCase()));
+    const ALLOWED = {
+      access_requested: ["interest"], access_approved: [], access_declined: [], code_created: ["source"], code_redeemed: [], workspace_created: ["kind"], invite_sent: ["role"], invite_accepted: ["role"],
+      device_paired: ["workspaces"], first_session_captured: ["harness"], member_first_session_captured: ["harness"], first_session_bound: ["harness", "authority"], second_member_joined: [],
+      first_change_request: [], first_approval: [], first_directive: ["kind"], first_mcp_read: ["client"], loi_sent: ["note_ref"], loi_signed: ["note_ref", "verified_original"],
+    };
+    const offList = q("SELECT name, props FROM v2_events").filter((r) => !ALLOWED[r.name] || Object.keys(JSON.parse(r.props)).some((k) => !ALLOWED[r.name].includes(k)));
+    check(
+      "events: no event row holds an email, name, user id, workspace name, goal title, change request text, repo alias, session title, device name, URL, code or token from this phase, and every props key is on its event's allowlist",
+      q("SELECT COUNT(*) AS n FROM v2_events")[0].n > 20 && found.length === 0 && offList.length === 0,
+      `${found.join(", ")} ${JSON.stringify(offList)}`,
+    );
+
+    // -- the report --
+    const repJ = admin(["report", "--json"], evEnv);
+    let rep = null;
+    try {
+      rep = JSON.parse(repJ.out);
+    } catch {}
+    const step = (s) => rep?.funnel?.find((f) => f.step === s)?.workspaces;
+    check(
+      "align-admin report --json: access 2 requested (1 try, 1 evaluate), 1 approved, 1 declined, 3 codes (1 from requests), 0 redeemed; the funnel over the 2 non-sample workspaces: created 2, device paired 1, first session 1, bound 1, second member 1, change request 1, approval or directive 1, MCP read 1 (of previous 50%); 1 sample, 2 invites sent, 1 accepted, 2 people with a first session",
+      repJ.status === 0 && rep && rep.access.requested === 2 && rep.access.requested_try === 1 && rep.access.requested_evaluate === 1 && rep.access.approved === 1 && rep.access.declined === 1 && rep.access.codes_created === 3 && rep.access.codes_from_requests === 1 && rep.access.codes_redeemed === 0 &&
+        step("workspace created") === 2 && step("device paired") === 1 && step("first session captured") === 1 && step("first session bound to a goal") === 1 && step("second member joined") === 1 &&
+        step("first change request") === 1 && step("first approval or directive") === 1 && step("first MCP read") === 1 && rep.funnel[1].of_previous === 0.5 &&
+        rep.other.sample_workspaces_created === 1 && rep.other.invites_sent === 2 && rep.other.invites_accepted === 1 && rep.other.people_with_a_first_session === 2,
+      `${repJ.status} ${repJ.err} ${JSON.stringify(rep?.access)} ${JSON.stringify(rep?.funnel)} ${JSON.stringify(rep?.other)}`,
+    );
+    const ttfv = rep?.time_to_first_value;
+    const waw = rep?.weekly_active_workspaces ?? [];
+    check(
+      "align-admin report --json: time to first value from workspace created over 1 workspace (median = p75, a few minutes at most), none from a code; 8 weeks of active workspaces ending with this week's 2 (the sample left out); this week's cohort of 2 with week 1 and week 4 not yet known",
+      ttfv?.from_workspace_created.workspaces === 1 && ttfv.from_workspace_created.median_minutes !== null && ttfv.from_workspace_created.median_minutes === ttfv.from_workspace_created.p75_minutes && ttfv.from_workspace_created.median_minutes < 10 &&
+        ttfv.from_code_redeemed.workspaces === 0 && ttfv.from_code_redeemed.median_minutes === null &&
+        waw.length === 8 && waw[7].active === 2 && waw[7].complete === false && waw.slice(0, 7).every((w) => w.active === 0) && rep.retention.length === 1 && rep.retention[0].workspaces === 2 && rep.retention[0].week1 === null && rep.retention[0].week4 === null,
+      `${JSON.stringify(ttfv)} ${JSON.stringify(waw)} ${JSON.stringify(rep?.retention)}`,
+    );
+    const gb = rep?.goal_binding;
+    check(
+      "align-admin report --json: goal binding from the session and usage tables: 2 of 3 sessions bound, 2 of 3 requests and 24,690 of 37,035 estimated micro-dollars on goals; LOIs 1 sent and 1 signed for the workspace",
+      gb?.sessions === 3 && gb.bound_sessions === 2 && gb.requests === 3 && gb.bound_requests === 2 && gb.est_list_usd_micros === 37035 && gb.bound_est_list_usd_micros === 24690 && gb.spend_share === 0.6667 &&
+        rep.lois.sent === 1 && rep.lois.signed === 1 && rep.lois.workspaces.length === 1 && rep.lois.workspaces[0].ws_id === W && rep.lois.workspaces[0].signed_at,
+      `${JSON.stringify(gb)} ${JSON.stringify(rep?.lois)}`,
+    );
+    const repT = admin(["report"], evEnv);
+    const repFuture = admin(["report", "--since", "2999-01-01", "--json"], evEnv);
+    const repBad = admin(["report", "--since", "last week"], evEnv);
+    let future = null;
+    try {
+      future = JSON.parse(repFuture.out);
+    } catch {}
+    check(
+      "align-admin report: plain text tables (access, workspace funnel, time to first value, weekly active workspaces, retention, bound to goals, LOIs) with no name or email; --since filters (a future date counts nothing); a bad --since exits 2",
+      repT.status === 0 && ["Access", "Workspace funnel", "Time to first value", "Weekly active workspaces", "Retention by creation week", "Bound to goals", "LOIs (operator-recorded): 1 sent, 1 signed"].every((h) => repT.out.includes(h)) &&
+        /first session bound to a goal\s+1\s+100%\s+50%/.test(repT.out) && !repT.out.includes("@") && !repT.out.includes("Evelyn") && !repT.out.includes(WS_NAME) &&
+        repFuture.status === 0 && future?.access.requested === 0 && future.funnel[0].workspaces === 0 && future.lois.sent === 0 && repBad.status === 2,
+      `${repT.status} ${repT.out.slice(0, 1500)} ${repT.err} | ${repFuture.status} ${repBad.status}`,
+    );
+
+    // -- account deletion clears the person's actor; purging re-keys the workspace; retention keeps 13 months --
+    const secretE = readFileSync(path.join(evDir, ".secret"), "utf8").trim();
+    const e2Actor = eventActor(secretE, e2.id);
+    const e2Before = q("SELECT COUNT(*) AS n FROM v2_events WHERE actor = ?", e2Actor)[0].n;
+    const totalBefore = q("SELECT COUNT(*) AS n FROM v2_events")[0].n;
+    const delE2 = await call("E2", "DELETE", "/api/v2/me", { cookie: e2.cookie, body: { email: e2.email } });
+    check(
+      "events and account deletion: a person's events carry the keyed hash of their id (HMAC under the server secret); deleting their account clears it from every event, keeps the events (the funnel is unchanged), and their account is gone",
+      e2Before >= 4 && delE2.status === 204 && q("SELECT COUNT(*) AS n FROM v2_events WHERE actor = ?", e2Actor)[0].n === 0 && q("SELECT COUNT(*) AS n FROM v2_events")[0].n === totalBefore &&
+        q("SELECT COUNT(*) AS n FROM v2_events WHERE actor = ?", eventActor(secretE, e1.id))[0].n > 0 && !q("SELECT 1 AS x FROM ba_user WHERE id = ?", e2.id).length,
+      `${e2Before} ${delE2.status} ${delE2.text} ${totalBefore}`,
+    );
+    const purge = admin(["workspaces", "delete", WQ, "--purge", "--yes"], evEnv);
+    const rekeyed = q("SELECT ws_id FROM v2_events WHERE name = 'workspace_created' AND ws_id LIKE 'wsx_%'");
+    const repAfter = JSON.parse(admin(["report", "--json"], evEnv).out || "null");
+    check(
+      "events and purging: a purged workspace's events stay under a random wsx_ id, so no row names it and the report still counts it as created",
+      purge.status === 0 && ev("workspace_created", WQ).length === 0 && q("SELECT COUNT(*) AS n FROM v2_events WHERE ws_id = ?", WQ)[0].n === 0 && rekeyed.length === 1 && /^wsx_[a-z2-7]{24}$/.test(rekeyed[0].ws_id) && repAfter?.funnel[0].workspaces === 2,
+      `${purge.status} ${purge.err} ${JSON.stringify(rekeyed)} ${JSON.stringify(repAfter?.funnel?.[0])}`,
+    );
+    const monthsAgo = (m) => {
+      const d = new Date();
+      d.setUTCMonth(d.getUTCMonth() - m);
+      return d.toISOString();
+    };
+    withDb((d) => {
+      d.prepare("INSERT INTO v2_events (name, ws_id, at, props) VALUES ('invite_sent', ?, ?, '{\"role\":\"member\"}')").run(W, monthsAgo(14));
+      d.prepare("INSERT INTO v2_events (name, ws_id, at, props) VALUES ('invite_sent', ?, ?, '{\"role\":\"viewer\"}')").run(W, monthsAgo(12));
+    });
+    const retE = admin(["retention", "run"], evEnv);
+    let retCounts = {};
+    try {
+      retCounts = JSON.parse(retE.out.trim().split("\n").pop());
+    } catch {}
+    check(
+      "events and retention: the job deletes events older than 13 months (events_deleted 1) and keeps a 12-month-old one",
+      retE.status === 0 && retCounts.events_deleted === 1 && q("SELECT COUNT(*) AS n FROM v2_events WHERE at < ?", monthsAgo(13))[0].n === 0 && q("SELECT COUNT(*) AS n FROM v2_events WHERE at < ?", monthsAgo(11))[0].n === 1,
+      `${retE.status} ${retE.out} ${retE.err}`,
     );
   }
   await stopServer();
@@ -3370,6 +3656,28 @@ try {
     "gate: an approved address signs in by email code with no invite; a malformed code -> 403 creation_code_invalid; its code creates one workspace (201) and is spent with it; using it again -> 403 creation_code_invalid",
     ALICE.status === 200 && aBadFormat.status === 403 && aBadFormat.json?.error === "creation_code_invalid" && W2.status === 201 && aReuse.status === 403 && aReuse.json?.error === "creation_code_invalid" && aliceCodeRow?.ws_id === W2.json?.id && aliceCodeRow.redeemed_at && aliceCodeRow.redeemed_by,
     `${ALICE.status} ${ALICE.text} ${aBadFormat.status} ${W2.status} ${W2.text} ${aReuse.status}`,
+  );
+  // -- product events (PRESEED-007) on the hosted path: the request, its approval and code, the redemption --
+  const gEv = (name, ws = null) => withDb((d) => (ws ? d.prepare("SELECT * FROM v2_events WHERE name = ? AND ws_id = ?").all(name, ws) : d.prepare("SELECT * FROM v2_events WHERE name = ?").all(name)));
+  const evApproved0 = gEv("access_approved").length;
+  const evCodes0 = gEv("code_created").length;
+  const failReq = await gAccess({ ...reqBody, email: "fail@example.test", interest: "try" });
+  const failReqRow = withDb((d) => d.prepare("SELECT * FROM v2_access_requests WHERE email = ?").get("fail@example.test"));
+  const failApprove = await adminAsync(["requests", "approve", failReqRow?.id ?? "ar_none"], opGate);
+  const failAfter = withDb((d) => d.prepare("SELECT status, code_id FROM v2_access_requests WHERE id = ?").get(failReqRow?.id ?? ""));
+  check(
+    "events (hosted): each access request records access_requested with its interest only; an approval records access_approved and code_created (source request); when the approval's email fails, the request stays pending and both events are taken back",
+    failReq.status === 201 && gEv("access_requested").length === 2 && gEv("access_requested").map((e) => JSON.parse(e.props).interest).sort().join() === "evaluate,try" &&
+      evApproved0 === 1 && evCodes0 === 1 && JSON.parse(gEv("code_created")[0].props).source === "request" && gEv("access_requested").every((e) => e.ws_id === null && e.actor === null) &&
+      failApprove.status === 1 && failAfter?.status === "pending" && failAfter.code_id === null && gEv("access_approved").length === 1 && gEv("code_created").length === 1,
+    `${failReq.status} ${JSON.stringify(gEv("access_requested"))} ${evApproved0} ${evCodes0} ${failApprove.status} ${failApprove.err} ${JSON.stringify(failAfter)} ${gEv("access_approved").length} ${gEv("code_created").length}`,
+  );
+  const redeemedEv = gEv("code_redeemed");
+  check(
+    "events (hosted): spending a creation code records code_redeemed for the workspace it made, by a keyed hash of the person (not their id); the first owner's code-free workspace records workspace_created and no code_redeemed",
+    redeemedEv.length === 1 && redeemedEv[0].ws_id === W2.json?.id && redeemedEv[0].actor === eventActor(good.ALIGN_SECRET, withDb((d) => d.prepare("SELECT id FROM ba_user WHERE email = ?").get("alice@example.test")?.id)) &&
+      gEv("workspace_created", W1.json?.id).length === 1 && gEv("code_redeemed", W1.json?.id).length === 0 && gEv("workspace_created", W2.json?.id).length === 1,
+    JSON.stringify(redeemedEv),
   );
   // -- codes made by the operator: revoked, expired and bound to someone else don't work; a disposable address can't create --
   const gMade = admin(["codes", "create", "--count", "4"], opGate);

@@ -718,6 +718,30 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX v2_change_request_evidence_rev ON v2_change_request_evidence(change_request_id, revision);
   `,
+  // PRESEED-007: content-free product events (lib/v2/core.mts recordEvent, lib/v2/events.ts; the operator's report is
+  // lib/v2/metrics-core.mts). Append-only: name, at and props never change; actor is cleared by account deletion and
+  // ws_id replaced by purging a workspace. The first-time events are once per workspace (and the per-person session
+  // event once per person in a workspace) by unique partial indexes; recordEvent inserts with ON CONFLICT DO NOTHING.
+  `
+  CREATE TABLE v2_events (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    ws_id TEXT,
+    actor TEXT,
+    at TEXT NOT NULL,
+    props TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(props) AND json_type(props) = 'object')
+  );
+  CREATE INDEX v2_events_name_at ON v2_events(name, at);
+  CREATE INDEX v2_events_ws ON v2_events(ws_id, name);
+  CREATE INDEX v2_events_actor ON v2_events(actor) WHERE actor IS NOT NULL;
+  CREATE UNIQUE INDEX v2_events_once_ws ON v2_events(name, ws_id) WHERE ws_id IS NOT NULL AND name IN (
+    'workspace_created', 'code_redeemed', 'first_session_captured', 'first_session_bound', 'second_member_joined',
+    'first_change_request', 'first_approval', 'first_directive', 'first_mcp_read', 'loi_sent', 'loi_signed');
+  CREATE UNIQUE INDEX v2_events_once_person ON v2_events(name, ws_id, actor)
+    WHERE name = 'member_first_session_captured' AND ws_id IS NOT NULL AND actor IS NOT NULL;
+  CREATE TRIGGER v2_events_append_only BEFORE UPDATE OF id, name, at, props ON v2_events
+    BEGIN SELECT RAISE(ABORT, 'v2_events is append-only'); END;
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

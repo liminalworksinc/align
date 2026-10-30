@@ -1,5 +1,6 @@
 import { all, get, run, tx } from "./db";
 import { badRequest, notFound } from "./errors";
+import { event } from "./events";
 import { newId, nowIso } from "./ids";
 import { goalCore, goalObj, bindableFor, goalRow, type GoalCore, type GoalRow } from "./goals";
 import { canReadGoal } from "./policy";
@@ -44,6 +45,8 @@ export function writeDirective(ws: string, kind: DirectiveKind, sessionKeys: str
     nowIso(),
   );
   for (const k of keys) run("INSERT INTO v2_directive_targets (ws_id, directive_id, session_key) VALUES (?, ?, ?)", ws, id, k);
+  // The workspace's first directive that reached a session (no actor: several actions write directives).
+  event("first_directive", { ws, props: { kind } });
   return id;
 }
 

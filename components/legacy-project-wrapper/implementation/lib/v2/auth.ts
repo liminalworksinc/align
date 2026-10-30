@@ -67,8 +67,13 @@ const otpHash = (code: string) => createHash("sha256").update(code).digest("base
 
 /** The email plugin's other routes (password reset, email change, code checks) are not part of Align. Nor are Better
  *  Auth's own session revocation and passkey management routes: Align's are /api/v2/account/* (a recent sign-in where
- *  it matters, and audited). */
+ *  it matters, and audited). Nor are the routes that hand out, refresh or describe a provider's tokens, or unlink a
+ *  provider: Align never uses provider tokens after sign-in, and unlinking is not offered. */
 const DISABLED_PATHS = [
+  "/get-access-token",
+  "/refresh-token",
+  "/account-info",
+  "/unlink-account",
   "/revoke-session",
   "/revoke-sessions",
   "/revoke-other-sessions",

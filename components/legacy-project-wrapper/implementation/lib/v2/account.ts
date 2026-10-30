@@ -2,6 +2,7 @@ import { revokeGrantsOfPerson } from "../oauth/grants";
 import { softDeleteWorkspace } from "./core.mts";
 import { all, audit, get, LIVE_WS, run, sql, tx } from "./db";
 import { revokeDevicesOf } from "./devices";
+import { actorOf } from "./events";
 import { badRequest, conflict, notFound } from "./errors";
 import { nowIso } from "./ids";
 import { onMemberRemoved } from "./lifecycle";
@@ -89,6 +90,7 @@ export async function signOutEverywhere(userId: string, also: { devices: boolean
 //   - hosted access (PRESEED-002/003): their access requests are deleted; creation codes bound to their email are
 //     deleted if unused, and a used one (the operator's record of what created a workspace) keeps no email or
 //     redeemer; the durable rate-limit counters keyed by their email (an HMAC of it) are deleted;
+//   - their product events (v2_events) lose their actor, the keyed hash of their id, so none can be tied to them;
 //   - one audit row without a workspace, actor or email records that an account was deleted.
 
 /** Live workspaces where this person is the only owner and someone else is a member. */
@@ -154,6 +156,8 @@ export async function deleteAccount(p: WebPrincipal, confirmEmail: string) {
     run("UPDATE v2_creation_codes SET email = NULL WHERE lower(email) = ?", email);
     run("UPDATE v2_creation_codes SET redeemed_by = NULL WHERE redeemed_by = ?", userId);
     run("DELETE FROM v2_rate_hits WHERE key IN (?, ?)", otpEmailKey(email), accessEmailKey(email));
+    // Product events (PRESEED-007) keep what happened but no longer whose: their keyed hash of the person is cleared.
+    run("UPDATE v2_events SET actor = NULL WHERE actor = ?", actorOf(userId));
     // Passkeys' "last used" times and the prompt dismissal (PRESEED-005). They also cascade from ba_passkey and ba_user;
     // deleting them by name keeps this list the complete record of what names the person.
     run("DELETE FROM v2_passkey_use WHERE passkey_id IN (SELECT id FROM ba_passkey WHERE userId = ?)", userId);

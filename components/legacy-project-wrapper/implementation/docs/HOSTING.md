@@ -98,8 +98,8 @@ volume (`fly volumes destroy`).
 
 ## Operator script
 
-`scripts/align-admin.mjs` (the v2 replacement for v1's `ws-admin`) is in the image with its two imports,
-`lib/v2/core.mts` and `lib/v2/retention-core.mts`. It works on the volume beside the running server and reads the
+`scripts/align-admin.mjs` (the v2 replacement for v1's `ws-admin`) is in the image with its three imports,
+`lib/v2/core.mts`, `lib/v2/retention-core.mts` and `lib/v2/metrics-core.mts`. It works on the volume beside the running server and reads the
 server's settings (`ALIGN_SECRET` for codes, `ALIGN_SESSION_MAX_DAYS` for the retention job) from its environment, so
 run it on the machine, where `fly ssh console` has that environment:
 
@@ -114,6 +114,9 @@ fly ssh console -C "node scripts/align-admin.mjs workspaces list"           # co
 fly ssh console -C "node scripts/align-admin.mjs workspaces delete ws_… --yes"          # soft: restorable 30 days
 fly ssh console -C "node scripts/align-admin.mjs workspaces delete ws_… --purge --yes"  # erased now
 fly ssh console -C "node scripts/align-admin.mjs retention run --dry-run"   # what the retention job would do now
+fly ssh console -C "node scripts/align-admin.mjs report"                    # the metrics report (--json, --since)
+fly ssh console -C "node scripts/align-admin.mjs events record loi_sent --workspace ws_… --note-ref LOI-7"
+fly ssh console -C "node scripts/align-admin.mjs events record loi_signed --workspace ws_… --verified-original"
 ```
 
 It prints no secret except a code it has just made. `requests approve` emails the code through the email API when the
@@ -121,6 +124,10 @@ email settings are set (add `--print` to show it instead); if the email fails, t
 stays pending. It refuses a database that this version of Align has not migrated (or a newer one). The server runs the
 retention job itself at every start and every 24 hours; `retention run` (or `node scripts/retention.mjs`, the same
 command, from a checkout) is for seeing or forcing it.
+
+The report reads the server's content-free product events (`v2_events`) and its session and usage tables, and prints
+counts, durations and workspace ids only. LOIs count only when the operator records them; `loi_signed` needs
+`--verified-original` (the countersigned original in hand), so a form or a claim never counts as signed.
 
 ## Deploy steps
 

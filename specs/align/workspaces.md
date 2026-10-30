@@ -248,12 +248,19 @@ account only by an explicit request from `/app/account`.
 
 The server SHALL store the access and refresh tokens a sign-in provider (Google, GitHub) issues at sign-in or linking
 only encrypted (Better Auth's `account.encryptOAuthTokens`: XChaCha20-Poly1305 under `BETTER_AUTH_SECRET`), never as
-issued; an ID token and browser session tokens are stored as issued. Align does not use provider tokens after sign-in.
+issued; an ID token and browser session tokens are stored as issued. Align does not use provider tokens after sign-in,
+and SHALL keep Better Auth's routes that would return, refresh or describe them or unlink a provider
+(`/api/v2/auth/get-access-token`, `/refresh-token`, `/account-info`, `/unlink-account`) off.
 
 #### Scenario: Provider sign-in
 
 - **WHEN** a person signs in through a provider, or links one, and the provider issues an access token and a refresh token
-- **THEN** `ba_account` holds neither as issued (the database file does not contain them), the sign-in or link works as before, and Better Auth can still decrypt them
+- **THEN** `ba_account` holds neither as issued (the database file does not contain them), the sign-in or link works as before, and Better Auth's decrypt helper with the server's key opens them
+
+#### Scenario: No route returns them
+
+- **WHEN** a signed-in person calls `/api/v2/auth/get-access-token`, `/refresh-token`, `/account-info` or `/unlink-account`
+- **THEN** each answers 404 and nothing changes: no provider token leaves the server, and the provider stays linked
 
 ### Requirement: Test identity provider
 
@@ -634,7 +641,8 @@ The repository SHALL provide `scripts/align-admin.mjs` (`npm run admin -- …`),
 against `ALIGN_DATA_DIR` beside the running server and offers `codes create [--email] [--days] [--count]` (each new code
 printed once), `codes list` and `codes revoke <id>`, `requests list [--status]`, `requests approve <id> [--days]
 [--print]` and `requests decline <id>`, `workspaces list`, `workspaces delete <id> --yes` and `workspaces delete <id>
---purge --yes`, and `retention run [--dry-run]` (`scripts/retention.mjs [--dry-run]` is the same command); it SHALL
+--purge --yes`, `retention run [--dry-run]` (`scripts/retention.mjs [--dry-run]` is the same command), and the metrics
+commands `report [--since] [--json]` and `events record loi_sent|loi_signed` (specified in `metrics`); it SHALL
 never print a secret other than a code it has just made, SHALL delete a workspace through the same (soft) deletion
 path as the app and purge one through the same purge as the retention job, SHALL run the retention job with the same
 code as the server, reading `ALIGN_SESSION_MAX_DAYS` from its environment as the server does, and SHALL refuse a
@@ -1113,9 +1121,9 @@ in one transaction end every membership the way member removal does, delete (as 
 where they were the only member, replace their identity with "Former member #n" in every workspace's rows at once,
 delete their devices, pairing requests, Better Auth sessions, linked accounts, passkeys (and when each was last used),
 their dismissal of the add-a-passkey prompt, codes, access requests, unused creation codes bound to their email, the
-durable rate-limit counters keyed by their email and the user row, clear their email and id from used creation codes,
-and keep the rows other people rely on (goals, change requests with the evidence links they added, alignments,
-sessions and their spend) without their name or email.
+durable rate-limit counters keyed by their email and the user row, clear their email and id from used creation codes
+and their actor hash from product events (`metrics`), and keep the rows other people rely on (goals, change requests
+with the evidence links they added, alignments, sessions and their spend) without their name or email.
 
 #### Scenario: Delete my account
 
@@ -1143,12 +1151,12 @@ The server SHALL apply the retention schedule published in `docs/RETENTION.md` w
 in `lib/v2/retention-core.mts`, that runs at every server start and every 24 hours (never during a build) and from
 `node scripts/align-admin.mjs retention run [--dry-run]` (or its alias `node scripts/retention.mjs [--dry-run]`), each
 step in its own transaction, logging counts only; it purges a workspace with the same function as the operator's
-`workspaces delete --purge`.
+`workspaces delete --purge`, and deletes product events (`v2_events`, specified in `metrics`) after 13 months.
 
 #### Scenario: Deleted workspaces
 
 - **WHEN** the job runs 30 days or more after a workspace was deleted
-- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members, change-request evidence and devices' grants included, and pairing requests and the creation code that made it forget it), so no row anywhere mentions it and restoring it is 404
+- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members, change-request evidence and devices' grants included, and pairing requests and the creation code that made it forget it, and its content-free product events carry a random `wsx_` id instead of its id), so no row anywhere mentions it and restoring it is 404
 
 #### Scenario: Session roll-up
 
@@ -1158,7 +1166,7 @@ step in its own transaction, logging counts only; it purges a workspace with the
 #### Scenario: Former members
 
 - **WHEN** the job runs 30 days or more after a person left or was removed and they are not a member again
-- **THEN** in that workspace every row naming them (goals and goal versions, alignments, their revisions, approval requirements and approvals, sessions, activity, change requests, their revisions and the evidence links they added, invites they created, directive goal snapshots, the workspace's creator and its audit rows) names `fm_<n>` instead, numbered in the order people left and stable in that workspace, their sessions no longer point at a device, invites to or accepted by them are deleted, nothing records which person `fm_<n>` was, and their account itself is untouched
+- **THEN** in that workspace every row naming them (goals and goal versions, alignments, their revisions, approval requirements and approvals, sessions, activity, change requests, their revisions and the evidence links they added, invites they created, directive goal snapshots, the workspace's creator and its audit rows) names `fm_<n>` instead, numbered in the order people left and stable in that workspace, their sessions no longer point at a device, invites to or accepted by them are deleted, that workspace's product events no longer carry their actor hash (`metrics`), nothing records which person `fm_<n>` was, and their account itself is untouched
 
 #### Scenario: Audit log
 
@@ -1174,6 +1182,11 @@ step in its own transaction, logging counts only; it purges a workspace with the
 
 - **WHEN** the job runs 13 months after an access request was approved or declined, or 13 months after a still-pending request was made
 - **THEN** that request is deleted (email, name, company, team size, use and interest); a request decided more recently stays, and a creation code made for it stays as it was
+
+#### Scenario: Product events
+
+- **WHEN** the job runs
+- **THEN** product events older than 13 months are deleted and younger ones are kept
 
 #### Scenario: Operator run and dry run
 
@@ -1208,7 +1221,7 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 
 - SSO (OIDC or SAML) and SCIM are out of scope and offered on request: which comes first, and whether to build it
   on Better Auth or buy it, waits for the first deal that names it.
-- Unlinking a Google or GitHub account from `/app/account` is out of scope; should a person be able to unlink a provider while another sign-in method remains?
+- Unlinking a Google or GitHub account is out of scope (there is no control on `/app/account`, and Better Auth's `/unlink-account` is off); should a person be able to unlink a provider while another sign-in method remains?
 - Removing or leaving keeps a person's goals and sessions (as a former member after 30 days). Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.
 - The retention periods are fixed in code (`lib/v2/retention-core.mts`); a per-workspace setting (for example a shorter audit log or longer spend history) waits for a customer who needs it.
 

@@ -3,9 +3,9 @@
 // server's own machine against ALIGN_DATA_DIR (else ./data), beside the running server:
 //   fly ssh console -C "node scripts/align-admin.mjs requests list"      (hosted)
 //   npm run admin -- codes create --email someone@example.com            (Mode L, or any checkout)
-// It imports only lib/v2/core.mts and lib/v2/retention-core.mts (Node built-ins only), the same code the app runs for
-// creation codes, access requests, workspace deletion and purging, and the retention schedule. It never prints a
-// secret except a creation code it has just made. Run it with the server's environment (fly ssh console has it): the
+// It imports only lib/v2/core.mts, lib/v2/retention-core.mts and lib/v2/metrics-core.mts (Node built-ins only), the
+// same code the app runs for creation codes, access requests, workspace deletion and purging, product events and the
+// retention schedule. It never prints a secret except a creation code it has just made. Run it with the server's environment (fly ssh console has it): the
 // retention job reads ALIGN_SESSION_MAX_DAYS as the server does, and hosted the codes need ALIGN_SECRET.
 //
 //   codes create [--email <address>] [--days <n>] [--count <n>]   new creation codes, each printed once
@@ -20,6 +20,12 @@
 //   workspaces delete <id> --purge --yes                          every row of it, now and for good
 //   retention run [--dry-run]                                     the retention schedule now (docs/RETENTION.md), or
 //                                                                 what it would do (scripts/retention.mjs is the same)
+//   report [--since YYYY-MM-DD] [--json]                          funnel, time to first value, weekly active
+//                                                                 workspaces, retention, goal binding, LOIs (no content)
+//   events record loi_sent --workspace <id> [--note-ref <ref>]    an LOI sent to that workspace's organisation
+//   events record loi_signed --workspace <id> --verified-original [--note-ref <ref>]
+//                                                                 a signed LOI, only with the countersigned original in
+//                                                                 hand; never inferred from a form or a claim
 
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -38,10 +44,12 @@ import {
   purgeWorkspace,
   revokeCreationCode,
   serverSecret,
+  undoApproval,
   softDeleteWorkspace,
   workspaceSummaries,
 } from "../lib/v2/core.mts";
 import { describeCounts, retentionNow, runRetention } from "../lib/v2/retention-core.mts";
+import { buildReport, formatReport, LOI_EVENTS, recordLoi } from "../lib/v2/metrics-core.mts";
 
 const USAGE = `Usage: node scripts/align-admin.mjs <command>   (or npm run admin -- <command>)
   codes create [--email <address>] [--days <n>] [--count <n>]
@@ -54,6 +62,9 @@ const USAGE = `Usage: node scripts/align-admin.mjs <command>   (or npm run admin
   workspaces delete <id> --yes            (soft: its owners can restore it for ${RESTORE_DAYS} days)
   workspaces delete <id> --purge --yes    (every row, now and for good)
   retention run [--dry-run]
+  report [--since YYYY-MM-DD] [--json]
+  events record loi_sent --workspace <id> [--note-ref <ref>]
+  events record loi_signed --workspace <id> --verified-original [--note-ref <ref>]
 Runs against ALIGN_DATA_DIR (else ./data), with the server's environment.`;
 
 function fail(msg, code = 1) {
@@ -62,7 +73,7 @@ function fail(msg, code = 1) {
 }
 
 // ---- arguments: positionals, then --flag value / --switch ----
-const SWITCHES = new Set(["print", "yes", "purge", "dry-run", "help"]);
+const SWITCHES = new Set(["print", "yes", "purge", "dry-run", "help", "json", "verified-original"]);
 const pos = [];
 const opt = {};
 const argv = process.argv.slice(2);
@@ -77,7 +88,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (i + 1 < argv.length && !argv[i + 1].startsWith("--")) opt[k] = argv[++i];
   else fail(`--${k} needs a value\n\n${USAGE}`, 2);
 }
-if (opt.help || pos.length < 2) fail(USAGE, opt.help ? 0 : 2);
+if (opt.help || pos.length < (pos[0] === "report" ? 1 : 2)) fail(USAGE, opt.help ? 0 : 2);
 const [group, cmd, arg] = pos;
 const intOpt = (k, def, max) => {
   if (opt[k] === undefined) return def;
@@ -223,10 +234,7 @@ async function main() {
       await postEmail(api, { to: request.email, ...codeEmail(origin(), request.name, code) }, "Access email");
     } catch {
       // Nothing half-done: the code is revoked and the request is pending again.
-      tx(() => {
-        revokeCreationCode(db, code.id);
-        db.run("UPDATE v2_access_requests SET status = 'pending', decided_at = NULL, code_id = NULL WHERE id = ?", request.id);
-      });
+      tx(() => undoApproval(db, request.id, code.id));
       fail(`The email to ${request.email} could not be sent, so ${request.id} is still pending. Try again, or add --print to show the code instead.`);
     }
     console.log(`Approved ${request.id}: emailed a creation code (${code.id}, until ${day(code.expires_at)}) to ${request.email}.`);
@@ -270,9 +278,33 @@ async function main() {
     // transaction, safe beside the running server. A dry run does it all in one transaction and rolls it back.
     const dryRun = !!opt["dry-run"];
     const now = retentionNow();
-    const counts = await runRetention(db, txAsync, now, { dryRun });
+    // ALIGN_SECRET keys the product events' actor hash, cleared for anyone the job makes a former member.
+    const counts = await runRetention(db, txAsync, now, { dryRun, secret: secret() });
     console.log(`${dryRun ? "Would" : "Did"} (as of ${now.toISOString()}): ${describeCounts(counts)}`);
     console.log(JSON.stringify({ now: now.toISOString(), dry_run: dryRun, ...counts }));
+    return;
+  }
+  if (group === "report" && cmd === undefined) {
+    const since = opt.since;
+    if (since !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(since) && !Number.isNaN(Date.parse(`${since}T00:00:00Z`)))) fail("--since must be a date, YYYY-MM-DD", 2);
+    const report = buildReport(db, { since: since ?? null, now: retentionNow() });
+    console.log(opt.json ? JSON.stringify(report, null, 2) : formatReport(report));
+    return;
+  }
+  if (key === "events record") {
+    if (!LOI_EVENTS.includes(arg)) fail(`events record takes ${LOI_EVENTS.join(" or ")}: every other event is recorded by the app itself\n\n${USAGE}`, 2);
+    if (!opt.workspace) fail(`--workspace <id> is required\n\n${USAGE}`, 2);
+    if (arg === "loi_sent" && opt["verified-original"]) fail("--verified-original is only for loi_signed", 2);
+    const out = tx(() => recordLoi(db, arg, opt.workspace, { noteRef: opt["note-ref"] ?? null, verifiedOriginal: !!opt["verified-original"] }));
+    if (!out.ok) {
+      if (out.reason === "verified_original_required") {
+        fail("loi_signed needs --verified-original: record a signed LOI only when you hold the countersigned original. A form, an email or a claim is not a signature, so nothing was recorded.", 2);
+      }
+      if (out.reason === "bad_note_ref") fail("--note-ref must be your own short reference (letters, digits and . _ : -, up to 64), never an email address, a URL or the document", 2);
+      if (out.reason === "no_workspace") fail(`No workspace ${opt.workspace}.`);
+      fail(`${arg} was already recorded for ${opt.workspace} at ${out.at}.`);
+    }
+    console.log(`Recorded ${arg} for ${opt.workspace} at ${out.at}${arg === "loi_signed" ? " (verified original)" : ""}.`);
     return;
   }
   fail(`Unknown command: ${key}\n\n${USAGE}`, 2);

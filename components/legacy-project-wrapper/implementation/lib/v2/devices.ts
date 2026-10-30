@@ -2,6 +2,7 @@ import { createPublicKey, verify } from "node:crypto";
 import { randomInt } from "node:crypto";
 import { all, audit, get, LIVE_WS, run, tx } from "./db";
 import { V2Error, badRequest, notFound } from "./errors";
+import { event } from "./events";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { take } from "./limits";
 
@@ -135,11 +136,17 @@ export async function token(deviceCode: string) {
     if (!user) return { error: "access_denied" };
     const deviceId = newId("dv");
     run("INSERT INTO v2_devices (id, user_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)", deviceId, user.id, r.device_name, r.public_key, at, at);
+    const granted: string[] = [];
     for (const ws of JSON.parse(r.ws_ids_json || "[]") as string[]) {
-      if (get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, user.id)) run("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)", deviceId, ws);
+      if (get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, user.id)) {
+        run("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)", deviceId, ws);
+        granted.push(ws);
+      }
     }
     run("UPDATE v2_device_requests SET state = 'consumed', device_id = ? WHERE id = ?", deviceId, r.id);
     audit(null, user.id, "device.paired", deviceId, at);
+    // One event per workspace the device was granted, so the funnel counts workspaces with a paired device.
+    for (const ws of granted) event("device_paired", { ws, user: user.id, props: { workspaces: granted.length }, at });
     const t = issueTokens(deviceId, nowMs);
     return { ok: { device_id: deviceId, access_token: t.access, expires_in: ACCESS_TTL_S, refresh_token: t.refresh, user: { id: user.id, name: user.name, email: user.email } } };
   });

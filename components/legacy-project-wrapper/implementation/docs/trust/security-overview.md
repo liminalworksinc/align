@@ -44,7 +44,7 @@ what people say to their agents: the server stores no prompt text, tool output, 
 | Shared sessions: harness, a hashed repository key, an optional repository alias, times, state, goal binding, token usage and estimated cost | A session title: the `align` agent sends none <!-- docs/RETENTION.md --> |
 | Work signals for 24 hours: keyed hashes of files touched; file paths and short text only if the person turns on "share work signals" | Anything from a session the person did not choose to share |
 | Change request evidence: typed links (pull request, CI run, incident, dashboard, document or other) labelled self-reported or agent-reported, and a goal snapshot Align computes itself | Any claim that evidence is verified: Align labels it, it does not check it |
-| Product events: an event name, the workspace, a keyed hash of the person, the time and a few allowlisted properties <!-- PRESEED-007 --> | Emails, names, titles, URLs or tokens in those events <!-- PRESEED-007 --> |
+| Product events: an event name, the workspace, a keyed hash of the person, the time and a few allowlisted properties | Emails, names, titles, URLs or tokens in those events |
 | Audit log: who did what to which object, and when | The content of goals or requests in the audit log |
 
 ## Signing in
@@ -93,7 +93,7 @@ Email codes alone are a single factor (NIST AAL1). People who want a phishing-re
 | What an app may do | Read only, through five tools: goals, a goal, change requests, decision records and directives. An app may add agent-reported evidence links to change requests through a sixth tool only if the person grants the separate `changes:evidence` scope, and each grant records the scopes it was given. <!-- lib/mcp/register.ts --> |
 | Invite links, device pairing secrets, creation codes | Stored only as hashes (creation codes as an HMAC under `ALIGN_SECRET`). <!-- lib/v2/db.ts token_hash, device_code_hash, code_hash --> |
 | Server secrets | Rotating `ALIGN_SECRET` ends every connected app and unused creation code; rotating `BETTER_AUTH_SECRET` signs everyone out. <!-- lib/secret.ts; docs/HOSTING.md --> |
-| Google and GitHub tokens | Better Auth keeps the access and refresh tokens the provider issued at sign-in or linking in the database, encrypted (XChaCha20-Poly1305 under the server's `BETTER_AUTH_SECRET`). An ID token (Google issues one: a signed, short-lived statement of who signed in) is stored as issued. Align does not use these tokens after sign-in. <!-- lib/v2/auth.ts account.encryptOAuthTokens --> |
+| Google and GitHub tokens | Better Auth keeps the access and refresh tokens the provider issued at sign-in or linking in the database, encrypted (XChaCha20-Poly1305 under the server's `BETTER_AUTH_SECRET`). An ID token (Google issues one: a signed, short-lived statement of who signed in) is stored as issued. Align does not use these tokens after sign-in, and no route returns them: Better Auth's routes that would hand out, refresh or describe them (and the one that unlinks a provider) are turned off. <!-- lib/v2/auth.ts account.encryptOAuthTokens, DISABLED_PATHS --> |
 
 ## Requests from browsers and AI apps
 
@@ -129,7 +129,7 @@ Email codes alone are a single factor (NIST AAL1). People who want a phishing-re
   goal versions, change requests and alignments and their decisions, devices, connected apps, passkeys, stopped
   agents, deletions and restores. Owners can read it. It is kept 1 year. A change request approved without evidence
   is recorded as such. <!-- lib/v2/db.ts v2_audit; docs/RETENTION.md -->
-- Content-free product events are kept 13 months and are visible to the operator only. <!-- PRESEED-007 -->
+- Content-free product events are kept 13 months and are visible to the operator only.
 
 ## Backups and recovery
 
@@ -146,7 +146,6 @@ after 13 months; the audit log is kept 1 year; removed members are shown as "For
 workspace can be restored for 30 days and is then purged, and is gone from every snapshot within 38 days; an account
 deleted in the app is deleted at once. Approved and declined access requests are deleted 13 months after the
 decision, pending ones 13 months after they were made. Product events are kept 13 months.
-<!-- PRESEED-007 -->
 
 ## Local mode
 

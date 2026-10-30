@@ -36,13 +36,13 @@ choices and rights you have. "Align", "we" and "us" mean [LEGAL ENTITY], [ADDRES
 | Access requests | Email, name, company, team size, what you want to use Align for, and your interest (try or evaluate) | You, on the request-access form <!-- app/app/request-access/view.tsx --> |
 | Creation codes | A keyed hash of each code, the email it is for, its dates, and the workspace it created | Us <!-- lib/v2/db.ts v2_creation_codes --> |
 | Abuse prevention | Rate-limit counters keyed by a keyed hash of an email address or network address; when the bot check is on, what Cloudflare Turnstile collects in your browser and your IP address | Your browser <!-- lib/v2/limits.ts; lib/v2/captcha.ts --> |
-| Product events | An event name (such as "workspace created" or "first session shared"), the workspace, a keyed hash that stands for the person, the time, and a few allowlisted properties such as the interest chosen on the request form. Never an email, name, title, address or token <!-- PRESEED-007 --> | Our server <!-- PRESEED-007 --> |
+| Product events | An event name (such as "workspace created" or "first session shared"), the workspace, a keyed hash that stands for the person, the time, and a few allowlisted properties such as the interest chosen on the request form. Never an email, name, title, address or token | Our server |
 | Messages we send | Sign-in codes and creation codes, sent to your email address | Us |
 
 **What we never collect on our servers:** the prompts you or your colleagues write to coding agents, the agents'
 replies and tool output, your code and file contents, or a session's title. **Cookies:** only the ones needed to
 sign in: your session cookie and short-lived cookies set during a Google, GitHub or passkey sign-in. We use no
-analytics, advertising or tracking cookies and no third-party analytics. <!-- PRESEED-007 -->
+analytics, advertising or tracking cookies and no third-party analytics.
 
 ## Why we use it, and our legal bases
 
@@ -52,7 +52,7 @@ analytics, advertising or tracking cookies and no third-party analytics. <!-- PR
 | Provide workspaces to our customers | Workspace data, shared sessions, work signals, connected apps | Contract with our customer (as processor, on their instructions) |
 | Answer a request for access and send a creation code | Access requests, creation codes | Steps before a contract, at your request; legitimate interests in choosing whom to onboard |
 | Keep Align secure and stop abuse | Sessions (IP address, user agent), rate-limit counters, the bot check, the audit log | Legitimate interests in security, and the customer's interest in an audit trail |
-| Understand whether people get value from Align, in aggregate | Product events, which hold no content and no direct identifiers <!-- PRESEED-007 --> | Legitimate interests in improving the product |
+| Understand whether people get value from Align, in aggregate | Product events, which hold no content and no direct identifiers | Legitimate interests in improving the product |
 | Meet legal obligations | Any of the above, as required | Legal obligation |
 
 We do not sell personal data, share it for advertising, or use it to train AI models. Align's server sends no data to
@@ -80,7 +80,7 @@ Our full retention schedule is published at [RETENTION.md](../RETENTION.md) and 
 - A deleted workspace: restorable for 30 days, then deleted, and gone from our backups within 38 days.
 - Access requests: deleted 13 months after we approve or decline them, or 13 months after they were made if still
   pending.
-- Product events: 13 months. <!-- PRESEED-007 -->
+- Product events: 13 months.
 - Your account: until you delete it.
 - Backups: daily snapshots of our database, each kept 7 days.
 

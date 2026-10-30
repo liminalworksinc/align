@@ -41,7 +41,7 @@ provider's account id. It reads no other data from either service.
 - **Font hosting.** Align's fonts are downloaded when the app is built and served from Align's own address, so a
   page view sends nothing to a font service. <!-- app/layout.tsx next/font/google self-hosts at build -->
 - **Analytics.** Align uses no third-party analytics, tracking or advertising service. Its product funnel events are
-  counted in its own database. <!-- PRESEED-007 -->
+  counted in its own database.
 
 ## Every external host the hosted server can call
 

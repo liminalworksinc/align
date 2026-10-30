@@ -5,6 +5,7 @@ import { CHANGE_REQUEST_STATES, getChangeRequest, listChangeRequests, type Chang
 import { EVIDENCE_SCOPE } from "../oauth/server";
 import { all, get } from "../v2/db";
 import type { DevicePrincipal } from "../v2/devices";
+import { noteFirstMcpRead } from "../v2/events";
 import { goalSnapshot, type Binding, type DirectiveKind } from "../v2/directives";
 import { V2Error } from "../v2/errors";
 import { EVIDENCE_KINDS, type SnapshotView } from "../v2/evidence";
@@ -42,8 +43,9 @@ function callerOf(ctx: ServerContext): Caller {
   return { uid: e.uid, workspaces: e.workspaces.filter((w): w is string => typeof w === "string"), kind: e.kind };
 }
 
-/** The one workspace this call reads, as a policy principal (the person's current role and teams). */
-function enter(ctx: ServerContext, workspace: string | undefined): PolicyPrincipal {
+/** The one workspace this call reads, as a policy principal (the person's current role and teams). A read tool's call
+ *  notes the workspace's first MCP read (a product event); the evidence tool, a write, passes `read: false`. */
+function enter(ctx: ServerContext, workspace: string | undefined, { read = true }: { read?: boolean } = {}): PolicyPrincipal {
   const c = callerOf(ctx);
   let ws: string;
   if (workspace !== undefined) {
@@ -57,6 +59,7 @@ function enter(ctx: ServerContext, workspace: string | undefined): PolicyPrincip
   const who: DevicePrincipal = { kind: "device", user: { id: c.uid, name: "", email: "" }, deviceId: "", deviceName: "", grants: new Set([ws]) };
   const pp = principalIn(who, ws);
   if (!pp.wsRole) throw new Error("Workspace not found");
+  if (read) noteFirstMcpRead(ws, c.uid, c.kind);
   return pp;
 }
 
@@ -519,7 +522,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
       async ({ change_request_id, kind, url, label, revision, workspace }, ctx) => {
         // Defense in depth: route.ts registers this tool only for such a token, and refuses calls without the scope.
         if (!ctx.http?.authInfo?.scopes.includes(EVIDENCE_SCOPE)) throw new Error("Not authorized to add evidence to Align change requests");
-        const pp = enter(ctx, workspace);
+        const pp = enter(ctx, workspace, { read: false });
         let added: Awaited<ReturnType<typeof addEvidence>>;
         try {
           added = await addEvidence(pp, undefined, change_request_id, { kind, url, label, revision }, "agent");

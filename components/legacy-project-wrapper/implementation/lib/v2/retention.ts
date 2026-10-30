@@ -1,3 +1,4 @@
+import { secret } from "../secret";
 import { sql, tx } from "./db";
 import * as core from "./retention-core.mts";
 
@@ -8,6 +9,7 @@ import * as core from "./retention-core.mts";
 export {
   AUDIT_MONTHS,
   describeCounts,
+  EVENT_MONTHS,
   FORMER_MEMBER_DAYS,
   formerMemberId,
   INVITE_GRACE_DAYS,
@@ -27,11 +29,11 @@ export const noteDeparture = (wsId: string, userId: string, at: string) => core.
 /** A person joined again before being pseudonymised: their pending departure is dropped. */
 export const cancelDeparture = (wsId: string, userId: string) => core.cancelDeparture(sql, wsId, userId);
 /** "Former member #n" in one workspace's rows, at once (inside a tx, after the membership is gone). */
-export const pseudonymise = (wsId: string, userId: string, at: string) => core.pseudonymise(sql, wsId, userId, at);
+export const pseudonymise = (wsId: string, userId: string, at: string) => core.pseudonymise(sql, wsId, userId, at, secret());
 /** Directives left with no recipient. */
 export const deleteOrphanDirectives = () => core.deleteOrphanDirectives(sql);
 /** The schedule as of `now` on the app's database (each step in its own tx(); a dry run rolls back). */
-export const runRetention = (now: Date, o: { dryRun?: boolean } = {}) => core.runRetention(sql, tx, now, o);
+export const runRetention = (now: Date, o: { dryRun?: boolean } = {}) => core.runRetention(sql, tx, now, { ...o, secret: secret() });
 
 const g = globalThis as unknown as { __alignRetention?: ReturnType<typeof setInterval> };
 

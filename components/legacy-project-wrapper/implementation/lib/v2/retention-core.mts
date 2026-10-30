@@ -1,4 +1,4 @@
-import { purgeWorkspace, RESTORE_DAYS, sessionMaxDays, testIdpEnabled, type Sql } from "./core.mts";
+import { eventActor, purgeWorkspace, RESTORE_DAYS, sessionMaxDays, testIdpEnabled, type Sql } from "./core.mts";
 
 // The retention schedule (docs/RETENTION.md): one idempotent job, runRetention(db, tx, now), run by the server at every
 // start and every 24 hours (lib/v2/retention.ts, instrumentation.ts), and by the operator with
@@ -7,13 +7,15 @@ import { purgeWorkspace, RESTORE_DAYS, sessionMaxDays, testIdpEnabled, type Sql 
 //      included.
 //   2. A shared session whose end (stop, else its last activity) is more than 13 months old is rolled up into
 //      v2_spend_rollups (workspace, goal, UTC day, model, basis: no person, no session) and its rows are deleted.
-//   3. A person who left or was removed more than 30 days ago becomes "Former member #n" in that workspace's rows.
+//   3. A person who left or was removed more than 30 days ago becomes "Former member #n" in that workspace's rows, and
+//      their actor hash leaves that workspace's product events.
 //   4. Audit rows older than 1 year are deleted.
 //   5. Expired email codes (and other expired Better Auth verification values), expired sign-in sessions and those
 //      past the absolute cap (ALIGN_SESSION_MAX_DAYS after their sign-in: lib/v2/auth.ts), expired activity signals,
 //      and invites 7 days past their expiry are deleted.
 //   6. Access requests (PRESEED-002) are deleted 13 months after they were approved or declined, or, still pending,
 //      13 months after they were made.
+//   7. Product events (v2_events, PRESEED-007) older than 13 months are deleted.
 // Like lib/v2/core.mts, Node runs this file directly (type stripping): it imports only core.mts and takes its database
 // as an argument. Account deletion (lib/v2/account.ts) uses pseudonymise() at once instead of after 30 days.
 
@@ -23,6 +25,7 @@ export const SESSION_MONTHS = 13;
 export const AUDIT_MONTHS = 12;
 export const INVITE_GRACE_DAYS = 7;
 export const ACCESS_REQUEST_MONTHS = 13;
+export const EVENT_MONTHS = 13;
 export const RETENTION_INTERVAL_MS = 24 * 3600 * 1000;
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -99,9 +102,10 @@ export function cancelDeparture(db: Sql, wsId: string, userId: string) {
 }
 
 /** Replace a person's identity in one workspace's rows with "Former member #n" (n stable in that workspace), clear
- *  their sessions' device, and drop their email from the workspace (invites to or accepted by them). Call inside a
- *  tx, after the person's membership is gone. Returns the pseudonym. */
-export function pseudonymise(db: Sql, wsId: string, userId: string, at: string): string {
+ *  their sessions' device, drop their email from the workspace (invites to or accepted by them), and clear their
+ *  actor (the keyed hash of their id, under `secret`, ALIGN_SECRET) from that workspace's product events. Call inside
+ *  a tx, after the person's membership is gone. Returns the pseudonym. */
+export function pseudonymise(db: Sql, wsId: string, userId: string, at: string, secret: string): string {
   const n = (db.get<{ n: number | null }>("SELECT MAX(n) AS n FROM v2_former_members WHERE ws_id = ?", wsId)?.n ?? 0) + 1;
   const pending = db.get<{ id: number; removed_at: string }>("SELECT rowid AS id, removed_at FROM v2_former_members WHERE ws_id = ? AND user_id = ?", wsId, userId);
   if (pending) db.run("UPDATE v2_former_members SET user_id = NULL, n = ?, pseudonymised_at = ? WHERE rowid = ?", n, at, pending.id);
@@ -110,6 +114,7 @@ export function pseudonymise(db: Sql, wsId: string, userId: string, at: string):
   const email = db.get<{ email: string }>("SELECT lower(email) AS email FROM ba_user WHERE id = ?", userId)?.email ?? null;
   db.run("DELETE FROM v2_invites WHERE ws_id = ? AND (accepted_by = ? OR (? IS NOT NULL AND lower(email) = ?))", wsId, userId, email, email);
   db.run("UPDATE v2_sessions SET device_id = NULL WHERE ws_id = ? AND user_id = ?", wsId, userId);
+  db.run("UPDATE v2_events SET actor = NULL WHERE ws_id = ? AND actor = ?", wsId, eventActor(secret, userId));
   for (const [t, c] of PERSON_COLUMNS) db.run(`UPDATE ${t} SET ${c} = ? WHERE ws_id = ? AND ${c} = ?`, pid, wsId, userId);
   db.run("UPDATE v2_workspaces SET created_by = ? WHERE id = ? AND created_by = ?", pid, wsId, userId);
   // Approval requirements (sets, approved_by, "sessions:<user id>") hold ids inside JSON; ids are 24 random
@@ -166,9 +171,16 @@ export interface RetentionCounts {
   activity_deleted: number;
   invites_deleted: number;
   access_requests_deleted: number;
+  events_deleted: number;
 }
 
-const STEPS: ((db: Sql, now: Date, c: RetentionCounts, env: NodeJS.ProcessEnv) => void)[] = [
+interface StepOptions {
+  env: NodeJS.ProcessEnv;
+  /** ALIGN_SECRET: the key of the product events' actor hash (lib/v2/core.mts eventActor). */
+  secret: string;
+}
+
+const STEPS: ((db: Sql, now: Date, c: RetentionCounts, o: StepOptions) => void)[] = [
   // 1. Deleted workspaces past the restore window.
   (db, now, c) => {
     for (const w of db.all<{ id: string }>("SELECT id FROM v2_workspaces WHERE deleted_at IS NOT NULL AND deleted_at <= ?", daysBefore(now, RESTORE_DAYS))) {
@@ -192,7 +204,7 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, env: NodeJS.ProcessEnv) =
     if (old.length) deleteOrphanDirectives(db);
   },
   // 3. People who left or were removed 30 days ago (unless they are members again).
-  (db, now, c) => {
+  (db, now, c, o) => {
     const at = now.toISOString();
     for (const f of db.all<{ ws_id: string; user_id: string }>(
       "SELECT ws_id, user_id FROM v2_former_members WHERE user_id IS NOT NULL AND n IS NULL AND removed_at <= ? ORDER BY removed_at, rowid",
@@ -200,7 +212,7 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, env: NodeJS.ProcessEnv) =
     )) {
       if (db.get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", f.ws_id, f.user_id)) cancelDeparture(db, f.ws_id, f.user_id);
       else {
-        pseudonymise(db, f.ws_id, f.user_id, at);
+        pseudonymise(db, f.ws_id, f.user_id, at, o.secret);
         c.former_members_pseudonymised++;
       }
     }
@@ -211,7 +223,7 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, env: NodeJS.ProcessEnv) =
   },
   // 5. Expired codes, sign-in sessions (expired, or past the absolute cap) and activity signals; invites 7 days after
   //    they expire.
-  (db, now, c, env) => {
+  (db, now, c, { env }) => {
     const at = now.toISOString();
     if (tableExists(db, "ba_verification")) c.codes_deleted += db.run("DELETE FROM ba_verification WHERE expiresAt < ?", at);
     if (tableExists(db, "ba_session")) c.sign_in_sessions_deleted += db.run("DELETE FROM ba_session WHERE expiresAt < ? OR createdAt < ?", at, daysBefore(now, sessionMaxDays(env)));
@@ -227,6 +239,10 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, env: NodeJS.ProcessEnv) =
       before,
     );
   },
+  // 7. Product events keep 13 months.
+  (db, now, c) => {
+    c.events_deleted += db.run("DELETE FROM v2_events WHERE at < ?", monthsBefore(now, EVENT_MONTHS));
+  },
 ];
 
 const ROLLBACK = Symbol("dry run");
@@ -236,12 +252,13 @@ export type Tx = <T>(fn: () => T) => T | Promise<T>;
 
 /** Apply the schedule as of `now`. Each step is one transaction; a dry run does every step in one transaction and
  *  rolls it back, so its counts are exactly what a real run would do. Running it again changes nothing. `env` gives
- *  ALIGN_SESSION_MAX_DAYS, read as the server reads it. */
+ *  ALIGN_SESSION_MAX_DAYS, read as the server reads it; `secret` is ALIGN_SECRET, which keys the product events'
+ *  actor hash (cleared for a person who becomes a former member). */
 export async function runRetention(
   db: Sql,
   tx: Tx,
   now: Date,
-  { dryRun = false, env = process.env }: { dryRun?: boolean; env?: NodeJS.ProcessEnv } = {},
+  { dryRun = false, env = process.env, secret }: { dryRun?: boolean; env?: NodeJS.ProcessEnv; secret: string },
 ): Promise<RetentionCounts> {
   const c: RetentionCounts = {
     workspaces_purged: 0,
@@ -254,11 +271,12 @@ export async function runRetention(
     activity_deleted: 0,
     invites_deleted: 0,
     access_requests_deleted: 0,
+    events_deleted: 0,
   };
   if (dryRun) {
     try {
       await tx(() => {
-        for (const s of STEPS) s(db, now, c, env);
+        for (const s of STEPS) s(db, now, c, { env, secret });
         throw ROLLBACK;
       });
     } catch (e) {
@@ -266,7 +284,7 @@ export async function runRetention(
     }
     return c;
   }
-  for (const s of STEPS) await tx(() => s(db, now, c, env));
+  for (const s of STEPS) await tx(() => s(db, now, c, { env, secret }));
   return c;
 }
 

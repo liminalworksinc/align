@@ -84,5 +84,5 @@ the [subprocessor list](subprocessors.md), the [retention schedule](../RETENTION
 | 40 | Do you notify customers of a personal data breach? | Yes | Within 72 hours of becoming aware, under the DPA. No written incident runbook yet. |
 | 41 | Do you publish your subprocessors and give notice of changes? | Yes | [Subprocessors](subprocessors.md); 30 days' notice with a right to object. |
 | 42 | Do you offer a DPA with Standard Contractual Clauses? | Yes | The Common Paper DPA with the 2021 EU SCCs and the UK Addendum. [DPA note](dpa.md). |
-| 43 | Do you use third-party analytics or advertising trackers? | No | Product events are content-free and kept in Align's own database for 13 months, for the operator only. <!-- PRESEED-007 --> |
+| 43 | Do you use third-party analytics or advertising trackers? | No | Product events are content-free and kept in Align's own database for 13 months, for the operator only. |
 | 44 | Can the product run without sending data to you? | Yes | Local mode keeps everything on the person's own machine. |
