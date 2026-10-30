@@ -198,6 +198,13 @@ export async function revokeDevice(deviceId: string, reason: string, actor: stri
   await tx(() => revokeInTx(deviceId, reason, actor));
 }
 
+/** Revoke every unrevoked device of this person, inside the caller's tx() (signing out everywhere). How many. */
+export function revokeDevicesOf(userId: string, reason: string, actor: string): number {
+  const ids = all<{ id: string }>("SELECT id FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL", userId);
+  for (const { id } of ids) revokeInTx(id, reason, actor);
+  return ids.length;
+}
+
 /** The device behind a Bearer access token, or null (unknown, expired, revoked). */
 export function deviceFromAccessToken(tokenValue: string): DevicePrincipal | null {
   if (!/^alnd_[A-Za-z0-9_-]{20,100}$/.test(tokenValue)) return null;

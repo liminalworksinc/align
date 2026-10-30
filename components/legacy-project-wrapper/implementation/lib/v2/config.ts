@@ -28,8 +28,19 @@ export const emailSignInEnabled = (env: NodeJS.ProcessEnv = process.env) => !hos
 /** The Mode L local owner's email (lib/v2/local-owner.ts). */
 export const localOwnerEmail = (env: NodeJS.ProcessEnv = process.env) => (env.ALIGN_LOCAL_OWNER_EMAIL || "owner@align.localhost").trim().toLowerCase();
 
-/** How old a sign-in may be to approve a device or an MCP app: 15 minutes. */
+/** How old a sign-in may be for a sensitive action (approving a device or an MCP app, role changes, removal,
+ *  workspace deletion, passkeys, linking, signing out everywhere): 15 minutes. */
 export const RECENT_SIGN_IN_MS = 15 * 60 * 1000;
+
+const SESSION_MAX_DAYS = 30;
+const validMaxDays = (v: string) => /^\d{1,3}$/.test(v) && Number(v) >= 1 && Number(v) <= 365;
+
+/** The absolute session cap in days: ALIGN_SESSION_MAX_DAYS, a whole number from 1 to 365, default 30. A web session
+ *  older than this is invalid however recently it was used. Hosted refuses a bad value at startup; Mode L ignores it. */
+export function sessionMaxDays(env: NodeJS.ProcessEnv = process.env): number {
+  const v = (env.ALIGN_SESSION_MAX_DAYS ?? "").trim();
+  return v && validMaxDays(v) ? Number(v) : SESSION_MAX_DAYS;
+}
 
 const list = (v: string | undefined) =>
   (v || "")
@@ -70,6 +81,8 @@ export function v2Problems(env: NodeJS.ProcessEnv = process.env): string[] {
   if (!emailSet.length && !googleConfigured(env) && !githubConfigured(env)) {
     p.push("Sign-in needs the email settings (ALIGN_EMAIL_API_URL, ALIGN_EMAIL_API_KEY, ALIGN_EMAIL_FROM) or a Google or GitHub client (id and secret)");
   }
+  const maxDays = (env.ALIGN_SESSION_MAX_DAYS ?? "").trim();
+  if (maxDays && !validMaxDays(maxDays)) p.push("ALIGN_SESSION_MAX_DAYS must be a whole number of days from 1 to 365");
   if (env.ALIGN_TEST_IDP) p.push("ALIGN_TEST_IDP is not allowed when hosted");
   if (env.ALIGN_TEST_NOW) p.push("ALIGN_TEST_NOW is not allowed when hosted (tests only)");
   if (env.ALIGN_LOCAL_OWNER_EMAIL) p.push("ALIGN_LOCAL_OWNER_EMAIL is not allowed when hosted (Mode L only)");

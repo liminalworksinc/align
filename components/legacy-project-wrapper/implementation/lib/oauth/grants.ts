@@ -150,6 +150,21 @@ export function revokeGrantsFor(wsId: string, userId: string): number {
   return run("DELETE FROM v2_oauth_grants WHERE ws_id = ? AND user_id = ?", wsId, userId);
 }
 
+/** Disconnect every app this person connected, in every workspace, inside the caller's tx() (signing out everywhere).
+ *  Each is audited as oauth.app_revoked in its workspace, with the person as actor. How many. */
+export function revokeGrantsOfPerson(userId: string, at: string): number {
+  const kid = grantKid();
+  const now = Date.now();
+  let live = 0;
+  for (const g of all<Grant>("SELECT * FROM v2_oauth_grants WHERE user_id = ?", userId)) {
+    run("DELETE FROM v2_oauth_grants WHERE id = ?", g.id);
+    if (g.kid !== kid || g.refresh_exp <= now) continue; // already dead: nothing to disconnect
+    audit(g.ws_id, userId, "oauth.app_revoked", g.id, at);
+    live++;
+  }
+  return live;
+}
+
 /** Revoke every grant in this workspace, inside workspace deletion's tx() (lib/v2/lifecycle.ts). */
 export function revokeWorkspaceGrants(wsId: string): number {
   return run("DELETE FROM v2_oauth_grants WHERE ws_id = ?", wsId);

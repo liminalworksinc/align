@@ -11,6 +11,7 @@
     "test": "npm run lint && npm --prefix packages/align-agent ci && npm --prefix packages/align-agent test"
   },
   "dependencies": {
+    "@better-auth/passkey": "1.7.10",
     "@modelcontextprotocol/server": "^2.3.1",
     "better-auth": "1.7.10",
     "mcp-handler": "^2.3.0",
@@ -29,5 +30,19 @@
     "puppeteer-core": "^25.13.0",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "@better-auth/core": "1.7.10",
+    "@peculiar/asn1-android": "2.11.0",
+    "@peculiar/asn1-cms": "2.11.0",
+    "@peculiar/asn1-csr": "2.11.0",
+    "@peculiar/asn1-ecc": "2.11.0",
+    "@peculiar/asn1-pfx": "2.11.0",
+    "@peculiar/asn1-pkcs8": "2.11.0",
+    "@peculiar/asn1-pkcs9": "2.11.0",
+    "@peculiar/asn1-rsa": "2.11.0",
+    "@peculiar/asn1-schema": "2.11.0",
+    "@peculiar/asn1-x509": "2.11.0",
+    "@peculiar/asn1-x509-attr": "2.11.0"
   }
 }

@@ -8,6 +8,6 @@ export const POST = route<{ ws: string }>(async (req, params) => {
   const p = await webWrite(req);
   const ws = idParam(params.ws, ID_RE);
   deletedWorkspaceOwnedBy(p.user.id, ws);
-  requireRecentSignIn(p);
+  requireRecentSignIn(p, "restore a workspace");
   return restoreWorkspace(p.user.id, ws);
 });

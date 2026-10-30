@@ -1,10 +1,80 @@
+import { revokeGrantsOfPerson } from "../oauth/grants";
 import { all, audit, get, LIVE_WS, run, tx } from "./db";
-import { badRequest, conflict } from "./errors";
+import { revokeDevicesOf } from "./devices";
+import { badRequest, conflict, notFound } from "./errors";
 import { nowIso } from "./ids";
 import { onMemberRemoved } from "./lifecycle";
 import { noteDeparture, pseudonymise, workspacesNaming } from "./retention";
 import { softDeleteWorkspace } from "./workspaces";
 import type { WebPrincipal } from "./http";
+
+// A person's own account (/app/account): their passkeys, the prompt to add one, and signing out everywhere.
+// Passkeys live in Better Auth's ba_passkey and are added through its routes (/api/v2/auth/passkey/*, which need a
+// recent sign-in: lib/v2/auth.ts). Listing, renaming and deleting are ours, so they answer in the v2 error envelope and
+// deleting is audited. Passkey and account rows in the audit have no workspace, like device pairing.
+
+export interface PasskeyRow {
+  id: string;
+  name: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+/** The person's passkeys, oldest first, with when each last signed them in (null: never). */
+export function listPasskeys(userId: string): PasskeyRow[] {
+  return all<PasskeyRow>(
+    `SELECT p.id, p.name, p.createdAt AS created_at, u.last_used_at FROM ba_passkey p LEFT JOIN v2_passkey_use u ON u.passkey_id = p.id
+     WHERE p.userId = ? ORDER BY p.createdAt, p.id`,
+    userId,
+  ).map((p) => ({ id: p.id, name: p.name || null, created_at: p.created_at, last_used_at: p.last_used_at }));
+}
+
+/** Show the "add a passkey" prompt: the person has no passkey and has not dismissed it. */
+export function passkeyPromptDue(userId: string): boolean {
+  return !get("SELECT 1 AS x FROM ba_passkey WHERE userId = ? LIMIT 1", userId) && !get("SELECT 1 AS x FROM v2_passkey_prompt_dismissed WHERE user_id = ?", userId);
+}
+
+/** "Not now" on the prompt: never shown to this person again (adding a passkey later is still on /app/account). */
+export async function dismissPasskeyPrompt(userId: string) {
+  await tx(() => run("INSERT INTO v2_passkey_prompt_dismissed (user_id, dismissed_at) VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING", userId, nowIso()));
+}
+
+const ownPasskey = (userId: string, id: string) => !!get("SELECT 1 AS x FROM ba_passkey WHERE id = ? AND userId = ?", id, userId);
+
+/** Rename one of the person's passkeys; someone else's (or an unknown id) is not found. */
+export async function renamePasskey(userId: string, id: string, name: string) {
+  const n = await tx(() => run("UPDATE ba_passkey SET name = ? WHERE id = ? AND userId = ?", name, id, userId));
+  if (!n) throw notFound();
+  return { id, name };
+}
+
+/** Delete one of the person's passkeys (the caller has checked the recent sign-in). Audited as passkey.deleted. */
+export async function deletePasskey(userId: string, id: string) {
+  const n = await tx(() => {
+    if (!ownPasskey(userId, id)) return 0;
+    run("DELETE FROM ba_passkey WHERE id = ?", id);
+    audit(null, userId, "passkey.deleted", id, nowIso());
+    return 1;
+  });
+  if (!n) throw notFound();
+}
+
+/** Sign out everywhere: every web session of the person ends (the caller's included). Optionally every paired device is
+ *  revoked (device.revoked, reason signed_out_everywhere) and every connected AI app in every workspace is
+ *  disconnected (oauth.app_revoked in that workspace). One transaction; the audit records
+ *  account.signed_out_everywhere. Returns how many of each ended. */
+export async function signOutEverywhere(userId: string, also: { devices: boolean; apps: boolean }) {
+  const at = nowIso();
+  return tx(() => {
+    const sessions = run("DELETE FROM ba_session WHERE userId = ?", userId);
+    const devices = also.devices ? revokeDevicesOf(userId, "signed_out_everywhere", userId) : 0;
+    const apps = also.apps ? revokeGrantsOfPerson(userId, at) : 0;
+    audit(null, userId, "account.signed_out_everywhere", userId, at);
+    return { sessions, devices, apps };
+  });
+}
+
+// ---- deleting the account ----
 
 // Deleting your own account (DELETE /api/v2/me, recent sign-in, the email typed to confirm). One transaction:
 //   - refused (409 last_owner) while the person is the only owner of a workspace that has other members;
@@ -12,8 +82,9 @@ import type { WebPrincipal } from "./http";
 //   - every membership ends the way member removal does (team places, device grants, connected AI apps);
 //   - in every workspace whose rows name them, they become "Former member #n" at once (lib/v2/retention.ts), so goals,
 //     change requests, alignments, sessions and spend stay for the others with no name or email;
-//   - their devices, pairing requests, Better Auth sessions, linked accounts, passkeys (any ba_ table with a userId),
-//     codes for their email and the user row are deleted; device-level audit rows lose their actor;
+//   - their devices, pairing requests, Better Auth sessions, linked accounts, passkeys (any ba_ table with a userId)
+//     with their "last used" times, their dismissal of the passkey prompt, codes for their email and the user row
+//     are deleted; audit rows without a workspace (devices, passkeys, signing out everywhere) lose their actor;
 //   - one audit row without a workspace, actor or email records that an account was deleted.
 
 /** Live workspaces where this person is the only owner and someone else is a member. */
@@ -73,6 +144,10 @@ export async function deleteAccount(p: WebPrincipal, confirmEmail: string) {
     run("DELETE FROM v2_oauth_grants WHERE user_id = ?", userId);
     // Codes for their email (Better Auth names them <purpose>-otp-<email>).
     run("DELETE FROM ba_verification WHERE length(identifier) > length(?1) AND substr(identifier, -length(?1) - 1) = '-' || ?1", email);
+    // Passkeys' "last used" times and the prompt dismissal (PRESEED-005). They also cascade from ba_passkey and ba_user;
+    // deleting them by name keeps this list the complete record of what names the person.
+    run("DELETE FROM v2_passkey_use WHERE passkey_id IN (SELECT id FROM ba_passkey WHERE userId = ?)", userId);
+    run("DELETE FROM v2_passkey_prompt_dismissed WHERE user_id = ?", userId);
     for (const t of userTables()) run(`DELETE FROM ${t.name} WHERE userId = ?`, userId);
     run("DELETE FROM ba_user WHERE id = ?", userId);
     if (get("SELECT 1 AS x FROM ba_user WHERE id = ?", userId)) throw new Error("account not deleted");

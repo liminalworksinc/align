@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { api, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, useAction, useApi, when } from "../../../_ui/kit";
+import { api, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
 import type { WsDetail } from "../../../_ui/types";
 
@@ -105,12 +105,21 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
   const [removing, setRemoving] = useState<string | null>(null);
   const [dropSessions, setDropSessions] = useState(false);
   const act = useAction();
+  // Deleting the workspace has its own action, so its "Sign in again" shows next to the card, at the foot of the page.
+  const del = useAction();
   const wsName = d.data?.workspace.name ?? "this workspace";
   const teamsOf = (userId: string) => d.data?.teams.filter((t) => t.members.some((m) => m.id === userId)) ?? [];
 
   return (
     <Shell me={me} ws={ws} tab="People">
       <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">People</h1>
+      {/* Role changes, removing someone (the remove panel stays open) and owner invites need a sign-in from the last 15
+          minutes. */}
+      {act.reauth && (
+        <SignInAgain me={me} next={`/app/w/${ws}/people`}>
+          {act.reauth}
+        </SignInAgain>
+      )}
       {d.loading && <Loading />}
       <Err>{d.error}</Err>
       {d.data && (
@@ -307,6 +316,11 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
               </form>
             )}
           </Card>
+          {owner && del.reauth && (
+            <SignInAgain me={me} next={`/app/w/${ws}/people`}>
+              {del.reauth}
+            </SignInAgain>
+          )}
           {owner && (
             <Card title="Delete this workspace">
               <p className="mb-3 text-[15px] text-zinc-600">
@@ -314,15 +328,16 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
               </p>
               <Btn
                 kind="danger"
-                disabled={act.busy}
+                disabled={del.busy}
                 onClick={() => {
                   if (window.confirm(`Delete ${wsName}? Everyone loses access now. Owners can restore it for 30 days, then it is erased.`)) {
-                    void act.run(() => api(`/api/v2/workspaces/${ws}`, { method: "DELETE" }), () => go("/app"));
+                    void del.run(() => api(`/api/v2/workspaces/${ws}`, { method: "DELETE" }), () => go("/app"));
                   }
                 }}
               >
                 Delete workspace
               </Btn>
+              <Err>{del.error}</Err>
             </Card>
           )}
         </>

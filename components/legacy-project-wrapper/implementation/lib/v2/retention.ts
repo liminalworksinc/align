@@ -1,5 +1,5 @@
 import { all, get, run, tx } from "./db";
-import { testIdpEnabled } from "./config";
+import { sessionMaxDays, testIdpEnabled } from "./config";
 
 // The retention schedule (docs/RETENTION.md): one idempotent job, runRetention(now), run at every server start and
 // every 24 hours (instrumentation.ts), and by the operator with `node scripts/retention.mjs [--dry-run]`.
@@ -8,8 +8,9 @@ import { testIdpEnabled } from "./config";
 //      v2_spend_rollups (workspace, goal, UTC day, model, basis: no person, no session) and its rows are deleted.
 //   3. A person who left or was removed more than 30 days ago becomes "Former member #n" in that workspace's rows.
 //   4. Audit rows older than 1 year are deleted.
-//   5. Expired email codes (and other expired Better Auth verification values), expired sign-in sessions, expired
-//      activity signals, and invites 7 days past their expiry are deleted.
+//   5. Expired email codes (and other expired Better Auth verification values), expired sign-in sessions and those
+//      past the absolute cap (ALIGN_SESSION_MAX_DAYS after their sign-in: lib/v2/auth.ts), expired activity signals,
+//      and invites 7 days past their expiry are deleted.
 // This module imports only the database helpers, so scripts/retention.mjs can load it outside Next (Node strips the
 // types). Account deletion (lib/v2/account.ts) uses pseudonymise() at once instead of after 30 days.
 
@@ -213,11 +214,12 @@ const STEPS: ((now: Date, c: RetentionCounts) => void)[] = [
   (now, c) => {
     c.audit_rows_deleted += run("DELETE FROM v2_audit WHERE at < ?", monthsBefore(now, AUDIT_MONTHS));
   },
-  // 5. Expired codes, sign-in sessions and activity signals; invites 7 days after they expire.
+  // 5. Expired codes, sign-in sessions (expired, or past the absolute cap) and activity signals; invites 7 days after
+  //    they expire.
   (now, c) => {
     const at = now.toISOString();
     if (tableExists("ba_verification")) c.codes_deleted += run("DELETE FROM ba_verification WHERE expiresAt < ?", at);
-    if (tableExists("ba_session")) c.sign_in_sessions_deleted += run("DELETE FROM ba_session WHERE expiresAt < ?", at);
+    if (tableExists("ba_session")) c.sign_in_sessions_deleted += run("DELETE FROM ba_session WHERE expiresAt < ? OR createdAt < ?", at, daysBefore(now, sessionMaxDays()));
     c.activity_deleted += run("DELETE FROM v2_activity WHERE expires_at < ?", at);
     c.invites_deleted += run("DELETE FROM v2_invites WHERE accepted_at IS NULL AND expires_at < ?", daysBefore(now, INVITE_GRACE_DAYS));
   },

@@ -7,8 +7,8 @@ kind: area
 # Interface
 
 Align's web interface is the web app under `/app`, plus the OAuth consent page that connected AI apps send people
-to. Everyone signs in as a person (Google, GitHub or an email one-time code); nothing is reached with a shared
-passcode. `/` redirects to `/app`. Every path under `/app` is served in Mode L and when hosted.
+to. Everyone signs in as a person (Google, GitHub, an email one-time code or a passkey); nothing is reached with a
+shared passcode. `/` redirects to `/app`. Every path under `/app` is served in Mode L and when hosted.
 
 Each page reads the `/api/v2` endpoints it needs when it loads and reloads them after each of its own actions; pages
 do not poll. A page shows only the controls the server would accept from the signed-in person: their workspace role
@@ -19,9 +19,9 @@ screen says "team".
 | Route | Screen | Who uses it | Purpose |
 | --- | --- | --- | --- |
 | `/` | (redirect) | Anyone | Redirects to `/app` |
-| `/app/sign-in` | Sign in | A signed-out person | Sign in with Google, GitHub or an email code |
+| `/app/sign-in` | Sign in | A signed-out person | Sign in with Google, GitHub, an email code or a passkey |
 | `/app` | Your workspaces | A signed-in person | List and create workspaces, restore a deleted one; first run offers the Northstar sample |
-| `/app/account` | Your account | A signed-in person | See the account, link Google or GitHub, delete the account |
+| `/app/account` | Your account | A signed-in person | See the account, link Google or GitHub, manage passkeys, sign out everywhere, delete the account |
 | `/app/device` | Connect a device | A signed-in person (recent sign-in) | Approve the code that `align login` printed |
 | `/app/devices` | Your devices | A signed-in person | List and revoke paired devices |
 | `/app/invite/<token>` | Workspace invite | The invited person | Join a workspace (and team) from an invite link |
@@ -38,7 +38,8 @@ screen says "team".
 
 Navigation: every `/app` page except sign-in has a top bar with the **Align** mark (a link to `/app`), a workspace
 switcher (shown once the person has a workspace), **Devices**, **Account**, the person's name (email on hover) and
-**Sign out**. Inside a workspace a second bar shows the workspace name, the person's role and the tabs Goals,
+**Sign out**. Under it, a person with no passkey who has not dismissed the offer sees the add-a-passkey prompt. Inside
+a workspace a second bar shows the workspace name, the person's role and the tabs Goals,
 People, Sessions, Alignments, Requests, Spend and Apps, with the current tab highlighted.
 
 ### Requirement: Root path redirects to the web app
@@ -99,6 +100,27 @@ already signed in SHALL be sent straight to `next`, unless the URL carries `reau
 
 - **WHEN** the server runs with `ALIGN_TEST_IDP=1` (never when hosted)
 - **THEN** the page also shows "Test sign-in (this machine only)" with **Sign in** and **Create a test account** (name, email, password of at least 8 characters), posting to `POST /api/v2/auth/sign-in/email` or `POST /api/v2/auth/sign-up/email`; without the flag that section is absent
+
+### Requirement: Passkey sign-in
+
+The sign-in page SHALL offer **Sign in with a passkey** and passkey suggestions in the email field (WebAuthn
+conditional mediation, `autocomplete="email webauthn"`) whenever the page is served from the passkey relying party's
+host, and on any other host SHALL say where passkeys work instead.
+
+#### Scenario: Button
+
+- **WHEN** a person presses **Sign in with a passkey** and picks a registered passkey
+- **THEN** the page gets `/api/v2/auth/passkey/generate-authenticate-options`, asks the browser for the passkey, posts the answer to `/api/v2/auth/passkey/verify-authentication` and on success navigates to `next`; a cancelled request shows "Passkey sign-in was cancelled.", a passkey Align doesn't know shows "That passkey isn't registered with Align. Sign in another way, then add it from your account page."
+
+#### Scenario: Autofill
+
+- **WHEN** the email step is shown in a browser that supports conditional mediation and the person picks a passkey from the email field's suggestions
+- **THEN** the page signs them in the same way and navigates to `next`; nothing happens until they pick one
+
+#### Scenario: Mode L at 127.0.0.1
+
+- **WHEN** the sign-in page is opened at `http://127.0.0.1:<port>` in Mode L
+- **THEN** it has no passkey button and says "Passkeys work only at http://localhost:<port> (a passkey needs a domain name, and this address is a number)."
 
 ### Requirement: Email code sign-in form
 
@@ -161,6 +183,48 @@ account, and SHALL let the person link Google or GitHub explicitly; accounts are
 - **WHEN** linking fails because that Google or GitHub account belongs to another Align account
 - **THEN** the provider sends the person back to `/app/account?error=<code>` and the page shows "That account is already linked to another Align account, so nothing was linked." (other link failures show "Linking didn't work (<code>). Nothing was linked."); nothing is linked
 
+### Requirement: Account passkeys
+
+The `/app/account` page SHALL list the person's passkeys under "Passkeys" with each one's name ("Unnamed passkey"
+when it has none), when it was added and when it was last used ("not used yet" before its first sign-in), and SHALL
+let the person add, rename and delete passkeys.
+
+#### Scenario: Add a passkey
+
+- **WHEN** the person, on the relying party's host, optionally types a name and presses **Add a passkey**
+- **THEN** the page runs Better Auth's passkey registration (`/api/v2/auth/passkey/generate-register-options`, the browser's passkey dialog, `/verify-registration`), then names the new passkey with `PATCH /api/v2/account/passkeys/<id>` if a name was given, and lists it; a cancelled dialog shows "Adding a passkey was cancelled. Nothing was added."
+
+#### Scenario: Rename and delete
+
+- **WHEN** the person presses **Rename**, edits the name and presses **Save**, or presses **Delete** and confirms "Delete the passkey "<name>"? It will no longer sign you in to Align."
+- **THEN** the page calls `PATCH /api/v2/account/passkeys/<id> {name}` or `DELETE /api/v2/account/passkeys/<id>` and reloads the list
+
+#### Scenario: Another host
+
+- **WHEN** the page is opened at `http://127.0.0.1:<port>` in Mode L, or in a browser without WebAuthn
+- **THEN** instead of the add form it says "Passkeys work only at http://localhost:<port>, because a passkey needs a domain name and this address is a number. Open Align there and sign in to add or use one." or "This browser can't use passkeys."
+
+### Requirement: Add-a-passkey prompt
+
+Every `/app` page with the top bar, except `/app/account`, SHALL show under it, to a person the server reports as due
+for the prompt, "Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code. A passkey
+can't be phished." with an **Add a passkey** link to `/app/account#passkeys` and **Not now**.
+
+#### Scenario: Not now
+
+- **WHEN** the person presses **Not now**
+- **THEN** the prompt disappears and the page calls `DELETE /api/v2/account/passkey-prompt`, so no page shows it to them again
+
+### Requirement: Sign out everywhere button
+
+The `/app/account` page SHALL offer **Sign out everywhere** with two unticked options, "Also unpair all my devices"
+and "Also disconnect all my AI apps, in every workspace".
+
+#### Scenario: Sign out everywhere
+
+- **WHEN** the person ticks any options, presses **Sign out everywhere** and confirms "Sign out of Align on every browser, this one included[, and unpair all your devices][ and disconnect all your AI apps]?"
+- **THEN** the page posts `{devices, apps}` to `POST /api/v2/account/sign-out-everywhere` and opens `/app/sign-in`
+
 ### Requirement: Account deletion screen
 
 The `/app/account` page SHALL offer a "Delete your account" card that says what deletion does and keeps, enables
@@ -175,7 +239,7 @@ sign-in is older than 15 minutes.
 #### Scenario: Old sign-in or refusal
 
 - **WHEN** the person's sign-in is older than 15 minutes, or the server answers 403 `reauth_required`
-- **THEN** the card is replaced by "Sign in again to delete your account. Deleting it needs a sign-in from the last 15 minutes." with **Sign in again** (coming back to `/app/account`); any other refusal, such as 409 `last_owner`, shows the server's message in red
+- **THEN** the card is replaced by "Sign in again to delete your account. This needs a sign-in from the last 15 minutes." with **Sign in again** (coming back to `/app/account`); any other refusal, such as 409 `last_owner`, shows the server's message in red
 
 ### Requirement: Workspace list and first-run sample
 
@@ -195,7 +259,7 @@ create a workspace, and offer **Create the Northstar sample** only when they hav
 #### Scenario: Deleted workspaces
 
 - **WHEN** the person owns workspaces deleted in the last 30 days
-- **THEN** a "Deleted workspaces" card lists each with "Deleted <time>. You can restore it until <time>; then it is erased." and **Restore**, which posts to `POST /api/v2/workspaces/<ws>/restore` and reloads the list, where the workspace is back among the links; 403 `reauth_required` shows "Sign in again to restore a workspace. Restoring needs a sign-in from the last 15 minutes." with **Sign in again**; the card is absent when there is nothing to restore
+- **THEN** a "Deleted workspaces" card lists each with "Deleted <time>. You can restore it until <time>; then it is erased." and **Restore**, which posts to `POST /api/v2/workspaces/<ws>/restore` and reloads the list, where the workspace is back among the links; 403 `reauth_required` shows the server's "Sign in again to restore a workspace. This needs a sign-in from the last 15 minutes." with **Sign in again** (coming back to `/app`); the card is absent when there is nothing to restore
 
 #### Scenario: Create refused
 
@@ -226,7 +290,8 @@ which of their workspaces the device may use, and approve or deny it.
 
 The device approval page and the OAuth consent page SHALL ask a person whose sign-in is older than 15 minutes to
 sign in again before they can approve, and SHALL show the same prompt when the server refuses an approval with 403
-`reauth_required`.
+`reauth_required`; the account page, the workspace list and the People tab SHALL show it, with the server's message,
+when an action there is refused with 403 `reauth_required`.
 
 #### Scenario: Stale sign-in on the device page
 
@@ -242,6 +307,11 @@ sign in again before they can approve, and SHALL show the same prompt when the s
 
 - **WHEN** the page was opened with a recent sign-in, but **Approve** or **Allow read-only access** gets 403 `reauth_required`
 - **THEN** the page replaces the form with the sign-in-again prompt and nothing is approved
+
+#### Scenario: Account page, workspace list and People tab
+
+- **WHEN** adding or deleting a passkey, linking a provider, signing out everywhere or deleting the account on `/app/account`, restoring a deleted workspace on `/app`, or changing a role, removing a member, inviting an owner or deleting the workspace on the People tab, gets 403 `reauth_required`
+- **THEN** the page shows the server's message (for example "Sign in again to invite an owner. This needs a sign-in from the last 15 minutes.") with **Sign in again**, which signs out and opens `/app/sign-in?next=<that page>&email=<their email>`; nothing changed; on the People tab the remove panel stays open as it was, and the prompt for deleting the workspace shows just above the "Delete this workspace" card
 
 ### Requirement: Devices screen
 
@@ -611,6 +681,7 @@ are not states (a team, a "company" goal, an active goal's status), neutral othe
 - `app/global-error.tsx`
 - `app/app/_ui/server.ts`
 - `app/app/_ui/kit.tsx`
+- `app/app/_ui/passkey.ts`
 - `app/app/_ui/types.ts`
 - `app/app/_ui/goalform.tsx`
 - `app/app/_ui/changes.tsx`

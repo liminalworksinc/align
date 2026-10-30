@@ -17,7 +17,7 @@ export const GET = route(async (req) => {
 // 400 when the typed email doesn't match, 403 reauth_required, 409 last_owner.
 export const DELETE = route(async (req) => {
   const p = await webWrite(req);
-  requireRecentSignIn(p);
+  requireRecentSignIn(p, "delete your account");
   const b = await readJson(req, 4096);
   await deleteAccount(p, str(b, "email", 320));
   return noContent();

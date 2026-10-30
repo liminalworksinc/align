@@ -239,3 +239,16 @@ then `POST /api/v2/auth/sign-in/email-otp` `{ email, otp }` (6 digits, 5 min, 3 
 `INVALID_OTP`, `OTP_EXPIRED`, `TOO_MANY_ATTEMPTS`; ours `cannot_sign_in`, `email_unverified`). Mode L prints the link and
 writes `<data>/v2/sign-in.txt`; `npm run sign-in-link [email]` asks for a fresh one. Linking Google or GitHub is
 explicit (`POST /api/v2/auth/link-social` from `/app/account`). `ALIGN_TEST_IDP=1` (never hosted) adds email + password.
+Passkeys (`@better-auth/passkey`; relying party the public host, or `localhost` in Mode L): add with
+`GET /api/v2/auth/passkey/generate-register-options` then `POST .../passkey/verify-registration`; sign in with
+`GET .../passkey/generate-authenticate-options` then `POST .../passkey/verify-authentication`. Align's own:
+`GET /api/v2/account/passkeys` (`{ passkeys: [{ id, name, created_at, last_used_at }], prompt }`),
+`PATCH /api/v2/account/passkeys/:id` (`{ name }`), `DELETE /api/v2/account/passkeys/:id`,
+`DELETE /api/v2/account/passkey-prompt` (dismiss the add-a-passkey prompt), and
+`POST /api/v2/account/sign-out-everywhere` (`{ devices?, apps? }` → `{ sessions, devices, apps }`).
+
+Sessions last 7 days from last use and never more than `ALIGN_SESSION_MAX_DAYS` (30) after sign-in. A sign-in from
+the last 15 minutes is needed (else `403 reauth_required`) to approve a device or an MCP app, for an owner to change a
+role, remove another member, invite an owner, delete a workspace or restore a deleted one, to delete one's account, to
+add or delete a passkey, to link a provider and to sign out everywhere. Account deletion also deletes the person's
+passkeys and their dismissal of the passkey prompt.

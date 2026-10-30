@@ -114,8 +114,8 @@ export async function tx<T>(fn: () => T): Promise<T> {
 
 // ---- migrations (PRAGMA user_version; every table prefixed v2_) ----
 // Composite foreign keys (ws_id, id) everywhere a row points at a workspace-scoped row, so a reference across
-// workspaces cannot be stored. Better Auth's tables (ba_user, ba_session, ba_account, ba_verification) are created
-// first by its own migrations (lib/v2/auth.ts).
+// workspaces cannot be stored. Better Auth's tables (ba_user, ba_session, ba_account, ba_verification, ba_passkey) are
+// created first by its own migrations (lib/v2/auth.ts).
 const MIGRATIONS: string[] = [
   `
   CREATE TABLE v2_workspaces (
@@ -636,6 +636,18 @@ const MIGRATIONS: string[] = [
   );
   CREATE UNIQUE INDEX v2_former_members_pending ON v2_former_members(ws_id, user_id) WHERE user_id IS NOT NULL;
   CREATE UNIQUE INDEX v2_former_members_n ON v2_former_members(ws_id, n) WHERE n IS NOT NULL;
+  `,
+  // PRESEED-005: when each passkey last signed someone in (Better Auth's ba_passkey has no such column), and the
+  // people who dismissed the "add a passkey" prompt.
+  `
+  CREATE TABLE v2_passkey_use (
+    passkey_id TEXT PRIMARY KEY REFERENCES ba_passkey(id) ON DELETE CASCADE,
+    last_used_at TEXT NOT NULL
+  );
+  CREATE TABLE v2_passkey_prompt_dismissed (
+    user_id TEXT PRIMARY KEY REFERENCES ba_user(id) ON DELETE CASCADE,
+    dismissed_at TEXT NOT NULL
+  );
   `,
 ];
 

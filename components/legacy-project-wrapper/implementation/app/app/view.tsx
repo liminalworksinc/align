@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { api, ApiError, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "./_ui/kit";
+import { api, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "./_ui/kit";
 import type { Me } from "./_ui/server";
 
 interface DeletedWs {
@@ -16,8 +16,8 @@ export default function Home({ me }: { me: Me }) {
   const [name, setName] = useState("");
   const act = useAction();
   const sample = useAction();
+  // Restoring needs a sign-in from the last 15 minutes: a 403 reauth_required shows Sign in again (useAction keeps it).
   const restore = useAction();
-  const [reauth, setReauth] = useState(false);
   return (
     <Shell me={me}>
       <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Your workspaces</h1>
@@ -61,9 +61,9 @@ export default function Home({ me }: { me: Me }) {
           <Err>{sample.error}</Err>
         </Card>
       )}
-      {reauth && (
+      {restore.reauth && (
         <SignInAgain me={me} next="/app">
-          Sign in again to restore a workspace. Restoring needs a sign-in from the last 15 minutes.
+          {restore.reauth}
         </SignInAgain>
       )}
       {!!list.data?.deleted.length && (
@@ -79,16 +79,7 @@ export default function Home({ me }: { me: Me }) {
                   <Btn
                     kind="secondary"
                     disabled={restore.busy}
-                    onClick={() =>
-                      void restore.run(async () => {
-                        try {
-                          await api(`/api/v2/workspaces/${w.id}/restore`, { body: {} });
-                        } catch (e) {
-                          if (e instanceof ApiError && e.code === "reauth_required") setReauth(true);
-                          throw e;
-                        }
-                      }, list.reload)
-                    }
+                    onClick={() => void restore.run(() => api(`/api/v2/workspaces/${w.id}/restore`, { body: {} }), list.reload)}
                   >
                     Restore
                   </Btn>

@@ -252,6 +252,19 @@ async function pairDevice(who, user, wsIds, name = `${who}'s laptop`) {
   return { ...keys, who, user, id: t.json.device_id, access: t.json.access_token, refresh: t.json.refresh_token };
 }
 
+/** A paired device written straight into the database, with a live access token (the device-pairing limit, 10 per
+ *  client per hour, is spent by the time the account tests run). */
+function insertDevice(userId, name) {
+  const id = `dv_${randomBytes(15).toString("hex").slice(0, 24).replace(/[01089]/g, "a")}`;
+  const access = `alnd_${randomBytes(32).toString("base64url")}`;
+  const at = new Date().toISOString();
+  withDb((d) => {
+    d.prepare("INSERT INTO v2_devices (id, user_id, name, public_key, created_at) VALUES (?, ?, ?, ?, ?)").run(id, userId, name, newDeviceKeys().pub, at);
+    d.prepare("INSERT INTO v2_device_tokens (token_hash, device_id, kind, created_at, expires_at) VALUES (?, ?, 'access', ?, ?)").run(sha256hex(access), id, at, new Date(Date.now() + 3_600_000).toISOString());
+  });
+  return { id, access };
+}
+
 const usageRow = (dev, id, epoch, extra = {}) => ({
   request_key: reqKey(dev, id),
   ts: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
@@ -451,7 +464,7 @@ try {
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
-  check("storage: WAL, migrated (user_version 6), v2_ tables (connected-app grants, change requests, spend roll-ups and former members included) and Better Auth tables", pragmas.jm === "wal" && pragmas.uv === 6 && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_spend_rollups", "v2_former_members", "ba_user"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
+  check("storage: WAL, migrated (user_version 7), v2_ tables (connected-app grants, change requests, spend roll-ups, former members and passkey use included) and Better Auth tables (passkeys included)", pragmas.jm === "wal" && pragmas.uv === 7 && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)), JSON.stringify(pragmas));
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -1479,6 +1492,29 @@ try {
   await act(U3, setBefore.json.id, "withdraw");
 
   const mem = (u, target, body) => call(u.who, body ? "POST" : "DELETE", `/api/v2/workspaces/${A}/members/${target}`, { cookie: u.cookie, ...(body ? { body } : {}) });
+  // Recent sign-in: an owner's sensitive member and workspace actions need a sign-in from the last 15 minutes.
+  const staleOf = async (u) => {
+    const c = cookieOf((await call(u.who, "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: u.email, password: `pw-${u.who}-123456` } })).setCookies);
+    ageSession(c, 20);
+    return { ...u, cookie: c };
+  };
+  const U1stale = await staleOf(U1);
+  const U3stale = await staleOf(U3);
+  const staleRole = await mem(U1stale, U5.id, { role: "viewer" });
+  const staleOwner = await mem(U1stale, U3.id, { role: "owner" });
+  const staleRemove = await mem(U1stale, U5.id);
+  const staleOwnerInvite = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1stale.cookie, body: { email: "new-owner@example.test", role: "owner" } });
+  const staleDeleteWs = await call("U1", "DELETE", `/api/v2/workspaces/${A}`, { cookie: U1stale.cookie });
+  const staleByMember = await mem(U3stale, U5.id, { role: "viewer" });
+  const staleRoles = withDb((d) => d.prepare("SELECT user_id, role FROM v2_members WHERE ws_id = ? AND user_id IN (?, ?)").all(A, U3.id, U5.id).map((r) => `${r.user_id === U3.id ? "U3" : "U5"}:${r.role}`).sort().join());
+  const staleOwnerInviteRow = withDb((d) => d.prepare("SELECT 1 AS x FROM v2_invites WHERE ws_id = ? AND email = ?").get(A, "new-owner@example.test"));
+  check(
+    "recent sign-in: with a 20-minute-old session an owner's role change, ownership grant, member removal, owner invite and workspace deletion -> 403 reauth_required (\"Sign in again to ...\"), nothing changes; a member's old session still gets owner_only",
+    [staleRole, staleOwner, staleRemove, staleOwnerInvite, staleDeleteWs].every((r) => r.status === 403 && r.json?.error === "reauth_required" && /^Sign in again to .+ This needs a sign-in from the last 15 minutes\.$/.test(r.json?.message)) &&
+      staleByMember.status === 403 && staleByMember.json?.error === "owner_only" && staleRoles === "U3:member,U5:member" && !staleOwnerInviteRow &&
+      (await call("U1", "GET", `/api/v2/workspaces/${A}`, { cookie: U1.cookie })).status === 200,
+    `${[staleRole, staleOwner, staleRemove, staleOwnerInvite, staleDeleteWs, staleByMember].map((r) => `${r.status} ${r.json?.error}`).join(" | ")} ${staleRoles}`,
+  );
   const roleByMember = await mem(U3, U5.id, { role: "viewer" });
   const roleByViewer = await mem(U4, U5.id, { role: "viewer" });
   const roleUnknown = await mem(U1, "u_aaaaaaaaaaaaaaaaaaaaaaaa", { role: "viewer" });
@@ -1650,6 +1686,105 @@ try {
   );
   const reauthPage = await call("U1", "GET", "/app/sign-in?reauth=1&next=%2Fapp%2Fdevice", { cookie: U1.cookie });
   check("sign-in: reauth=1 shows the form even to someone signed in", reauthPage.status === 200 && reauthPage.text.includes("Send code"), `${reauthPage.status}`);
+  // -- sessions: 7 days rolling, a 30-day absolute cap (ALIGN_SESSION_MAX_DAYS) --
+  const S9 = await signUp("U9", "Sol Nine", "u9@example.test");
+  const signIn9 = async () => cookieOf((await call("U9", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: S9.email, password: "pw-U9-123456" } })).setCookies);
+  const tokenOf = (cookie) => decodeURIComponent(/align_v2\.session_token=([^;]+)/.exec(cookie)?.[1] ?? "").split(".")[0];
+  const old31 = await signIn9();
+  ageSession(old31, 31 * 24 * 60);
+  const capGet = await call("U9", "GET", "/api/v2/auth/get-session", { cookie: old31 });
+  const capMe = await call("U9", "GET", "/api/v2/me", { cookie: old31 });
+  const capPage = await call("U9", "GET", "/app/account", { cookie: old31 });
+  const capRow = withDb((d) => d.prepare("SELECT 1 AS x FROM ba_session WHERE token = ?").get(tokenOf(old31)));
+  check(
+    "sessions: a session signed in 31 days ago is invalid everywhere (get-session null, /api/v2/me 401, /app pages send to sign-in) and its row is deleted, however recently it was used",
+    capGet.status === 200 && capGet.json === null && capMe.status === 401 && (redirectTarget(capPage) ?? "").startsWith("/app/sign-in") && !capRow,
+    `${capGet.text} ${capMe.status} ${redirectTarget(capPage)} ${!!capRow}`,
+  );
+  const old29 = await signIn9();
+  const t29 = tokenOf(old29);
+  withDb((d) => d.prepare("UPDATE ba_session SET createdAt = ?, expiresAt = ? WHERE token = ?").run(new Date(Date.now() - 29 * 86_400_000).toISOString(), new Date(Date.now() + 5 * 86_400_000).toISOString(), t29));
+  const get29 = await call("U9", "GET", "/api/v2/auth/get-session", { cookie: old29 });
+  const row29 = withDb((d) => d.prepare("SELECT createdAt, expiresAt FROM ba_session WHERE token = ?").get(t29));
+  const fresh9 = withDb((d) => d.prepare("SELECT createdAt, expiresAt FROM ba_session WHERE userId = ? ORDER BY createdAt DESC LIMIT 1").get(S9.id));
+  check(
+    "sessions: a 29-day-old session still works and is extended on use, but only to 30 days after its sign-in; a new one lasts 7 days",
+    get29.json?.user?.id === S9.id && Date.parse(row29.expiresAt) === Date.parse(row29.createdAt) + 30 * 86_400_000 && Math.abs(Date.parse(fresh9.expiresAt) - Date.parse(fresh9.createdAt) - 7 * 86_400_000) < 5000,
+    `${get29.status} ${JSON.stringify(row29)} ${JSON.stringify(fresh9)}`,
+  );
+
+  // -- passkeys (API): list, prompt, recent sign-in for adding and deleting, Better Auth's own management routes off --
+  const S9stale = { ...S9, cookie: await signIn9() };
+  ageSession(S9stale.cookie, 20);
+  const pkList = await call("U9", "GET", "/api/v2/account/passkeys", { cookie: S9.cookie });
+  const promptPage = await call("U9", "GET", "/app", { cookie: S9.cookie });
+  const dismiss = await call("U9", "DELETE", "/api/v2/account/passkey-prompt", { cookie: S9.cookie });
+  const pkList2 = await call("U9", "GET", "/api/v2/account/passkeys", { cookie: S9.cookie });
+  const promptPage2 = await call("U9", "GET", "/app", { cookie: S9.cookie });
+  check(
+    "passkeys: GET /api/v2/account/passkeys -> {passkeys: [], prompt: true} and /app shows the add-a-passkey prompt; Not now (DELETE /api/v2/account/passkey-prompt -> 204) is remembered: prompt false, no prompt on /app",
+    pkList.status === 200 && JSON.stringify(pkList.json) === '{"passkeys":[],"prompt":true}' && promptPage.text.includes("Add a passkey to sign in with your fingerprint") && dismiss.status === 204 && pkList2.json?.prompt === false && !promptPage2.text.includes("Add a passkey to sign in with your fingerprint"),
+    `${pkList.text} ${dismiss.status} ${pkList2.text}`,
+  );
+  const regStale = await call("U9", "GET", "/api/v2/auth/passkey/generate-register-options", { cookie: S9stale.cookie });
+  const regFresh = await call("U9", "GET", "/api/v2/auth/passkey/generate-register-options", { cookie: S9.cookie });
+  const linkStale = await call("U9", "POST", "/api/v2/auth/link-social", { cookie: S9stale.cookie, headers: { origin: BASE }, body: { provider: "github", callbackURL: "/app/account" } });
+  const PK_FAKE = "a".repeat(32);
+  const delStale = await call("U9", "DELETE", `/api/v2/account/passkeys/${PK_FAKE}`, { cookie: S9stale.cookie });
+  const delUnknown = await call("U9", "DELETE", `/api/v2/account/passkeys/${PK_FAKE}`, { cookie: S9.cookie });
+  const renUnknown = await call("U9", "PATCH", `/api/v2/account/passkeys/${PK_FAKE}`, { cookie: S9.cookie, body: { name: "x" } });
+  const delBadId = await call("U9", "DELETE", "/api/v2/account/passkeys/not-an-id", { cookie: S9.cookie });
+  check(
+    "passkeys: adding (generate-register-options) and linking an account with a 20-minute-old session -> 403 reauth_required; a fresh one gets options for rp localhost (resident key required); deleting with an old session -> 403 reauth_required, an unknown or malformed id -> 404",
+    regStale.status === 403 && regStale.json?.code === "reauth_required" && regStale.json?.message === "Sign in again to add a passkey. This needs a sign-in from the last 15 minutes." &&
+      regFresh.status === 200 && regFresh.json?.rp?.id === "localhost" && regFresh.json?.rp?.name === "Align" && regFresh.json?.authenticatorSelection?.residentKey === "required" &&
+      linkStale.status === 403 && linkStale.json?.code === "reauth_required" &&
+      delStale.status === 403 && delStale.json?.error === "reauth_required" && delUnknown.status === 404 && renUnknown.status === 404 && delBadId.status === 404,
+    `${regStale.status} ${regStale.text} ${regFresh.status} ${linkStale.status} ${linkStale.text} ${delStale.status} ${delUnknown.status} ${renUnknown.status} ${delBadId.status}`,
+  );
+  const offPaths = await Promise.all([
+    call("U9", "POST", "/api/v2/auth/revoke-sessions", { cookie: S9.cookie, headers: { origin: BASE }, body: {} }),
+    call("U9", "POST", "/api/v2/auth/revoke-other-sessions", { cookie: S9.cookie, headers: { origin: BASE }, body: {} }),
+    call("U9", "POST", "/api/v2/auth/revoke-session", { cookie: S9.cookie, headers: { origin: BASE }, body: { token: "x" } }),
+    call("U9", "GET", "/api/v2/auth/passkey/list-user-passkeys", { cookie: S9.cookie }),
+    call("U9", "POST", "/api/v2/auth/passkey/delete-passkey", { cookie: S9.cookie, headers: { origin: BASE }, body: { id: PK_FAKE } }),
+    call("U9", "POST", "/api/v2/auth/passkey/update-passkey", { cookie: S9.cookie, headers: { origin: BASE }, body: { id: PK_FAKE, name: "x" } }),
+  ]);
+  check("passkeys: Better Auth's own session-revocation and passkey list, rename and delete routes are off (404); Align's are under /api/v2/account", offPaths.every((r) => r.status === 404), offPaths.map((r) => r.status).join(","));
+
+  // -- sign out everywhere --
+  const W9 = await call("U9", "POST", "/api/v2/workspaces", { cookie: S9.cookie, body: { name: "Sol's workspace" } });
+  const D9 = insertDevice(S9.id, "Sol's laptop");
+  const S9b = await signIn9();
+  withDb((d) =>
+    d.prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, 'c', 'Old app', 'x.example', ?, 'h', ?, 'old-kid')").run("gr_AAAAAAAAAAAAAAA9", W9.json.id, S9.id, new Date().toISOString(), Date.now() + 86_400_000),
+  );
+  const soeStale = await call("U9", "POST", "/api/v2/account/sign-out-everywhere", { cookie: S9stale.cookie, body: { devices: true, apps: true } });
+  const soeBad = await call("U9", "POST", "/api/v2/account/sign-out-everywhere", { cookie: S9.cookie, body: { devices: "yes" } });
+  const stillIn = await call("U9", "GET", "/api/v2/me", { cookie: S9b });
+  const soe = await call("U9", "POST", "/api/v2/account/sign-out-everywhere", { cookie: S9.cookie, body: { devices: true, apps: true } });
+  const afterSoe = await Promise.all([S9.cookie, S9b, S9stale.cookie].map((c) => call("U9", "GET", "/api/v2/me", { cookie: c })));
+  const devAfter = await call("U9", "GET", "/api/v2/me", { bearer: D9.access });
+  const soeDb = withDb((d) => ({
+    sessions: d.prepare("SELECT COUNT(*) AS n FROM ba_session WHERE userId = ?").get(S9.id).n,
+    reason: d.prepare("SELECT revoked_reason FROM v2_devices WHERE id = ?").get(D9.id)?.revoked_reason,
+    grants: d.prepare("SELECT COUNT(*) AS n FROM v2_oauth_grants WHERE user_id = ?").get(S9.id).n,
+    audit: d.prepare("SELECT ws_id, actor_id, action, object_id FROM v2_audit WHERE actor_id = ? AND action IN ('account.signed_out_everywhere', 'device.revoked')").all(S9.id),
+  }));
+  check(
+    "sign out everywhere: an old session -> 403 reauth_required and nothing ends; a non-boolean option -> 400; with devices and apps -> 200 {sessions, devices: 1, apps} and a cleared cookie: every session of the person (this one included) is gone, the device is revoked (reason signed_out_everywhere), every app grant is deleted, and the audit (no workspace) records account.signed_out_everywhere and device.revoked with the person as actor",
+    soeStale.status === 403 && soeStale.json?.error === "reauth_required" && soeBad.status === 400 && stillIn.status === 200 &&
+      soe.status === 200 && soe.json?.sessions >= 3 && soe.json?.devices === 1 && soe.json?.apps === 0 && /align_v2\.session_token=;.*Max-Age=0/i.test(soe.headers.get("set-cookie") ?? "") &&
+      afterSoe.every((r) => r.status === 401) && devAfter.status === 401 && soeDb.sessions === 0 && soeDb.reason === "signed_out_everywhere" && soeDb.grants === 0 &&
+      soeDb.audit.some((r) => r.action === "account.signed_out_everywhere" && r.ws_id === null && r.object_id === S9.id) && soeDb.audit.some((r) => r.action === "device.revoked" && r.object_id === D9.id && r.ws_id === null),
+    `${soeStale.status} ${soeBad.status} ${stillIn.status} ${soe.status} ${soe.text} ${afterSoe.map((r) => r.status)} ${devAfter.status} ${JSON.stringify(soeDb)}`,
+  );
+  const S9c = await signIn9();
+  const D9b = insertDevice(S9.id, "Sol's desktop");
+  const soePlain = await call("U9", "POST", "/api/v2/account/sign-out-everywhere", { cookie: S9c, body: {} });
+  const dev9b = await call("U9", "GET", "/api/v2/me", { bearer: D9b.access });
+  check("sign out everywhere: without the options only web sessions end; paired devices keep working", soePlain.status === 200 && soePlain.json?.devices === 0 && soePlain.json?.apps === 0 && dev9b.status === 200, `${soePlain.text} ${dev9b.status}`);
+
   if (existsSync(CHROME)) {
     const { default: puppeteer } = await import("puppeteer-core");
     const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
@@ -1736,6 +1871,134 @@ try {
       check("ui (Chrome): test sign-up, create a workspace and a goal (an owner is offered the Level choice), then spend, people (teams, leave), sessions, alignments, apps and devices render without page errors", errors.length === 0 && /estimate/i.test(spendText), errors.join(" | "));
       check("ui (Chrome): the People and Spend tabs say team, never pod", !/\bpods?\b/i.test(peopleText + spendText), "pod found");
       check("ui (Chrome): no em dashes in rendered copy", !allText.includes("\u2014"), "em dash found");
+
+      // -- passkeys in Chrome, on localhost (WebAuthn needs a domain name), with a virtual authenticator --
+      const LB = `http://localhost:${PORT}`;
+      const pctx = await browser.createBrowserContext();
+      const pk = await pctx.newPage();
+      const pkErrors = [];
+      pk.on("pageerror", (e) => pkErrors.push(e.message));
+      pk.on("dialog", (d) => void d.accept());
+      const pkNavs = [];
+      pk.on("framenavigated", (f) => f === pk.mainFrame() && pkNavs.push(f.url()));
+      const cdp = await pk.createCDPSession();
+      await cdp.send("WebAuthn.enable");
+      const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
+        options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+      });
+      const pkText = () => pk.evaluate(() => document.body.innerText);
+      const pkClick = (label, root = "button") => pk.evaluate((l, r) => [...document.querySelectorAll(r)].find((b) => b.textContent?.trim() === l)?.click(), label, root);
+      const pkCookie = async () => `align_v2.session_token=${(await pk.cookies()).find((c) => c.name === "align_v2.session_token")?.value ?? ""}`;
+      const pkUser = () => withDb((d) => d.prepare("SELECT id FROM ba_user WHERE email = ?").get("pk@example.test")?.id);
+      await pk.goto(`${BASE}/app/sign-in?next=/app`, { waitUntil: "networkidle0" });
+      const loopText = await pkText();
+      await pk.goto(`${LB}/app/sign-in?next=/app`, { waitUntil: "networkidle0" });
+      const lhHasButton = (await pkText()).includes("Sign in with a passkey");
+      const emailAuto = await pk.evaluate(() => document.querySelector('#email-code input[type="email"]')?.getAttribute("autocomplete"));
+      check(
+        "ui (Chrome): at 127.0.0.1 the sign-in page says passkeys work only at http://localhost:<port> and has no passkey button; at localhost it has Sign in with a passkey and the email field offers passkeys (autocomplete \"email webauthn\")",
+        loopText.includes(`Passkeys work only at http://localhost:${PORT}`) && !loopText.includes("Sign in with a passkey") && lhHasButton && emailAuto === "email webauthn",
+        `${loopText.slice(0, 300)} | ${lhHasButton} ${emailAuto}`,
+      );
+      await pk.evaluate(() => [...document.querySelectorAll("#test-idp button")].find((b) => b.textContent?.includes("Create a test account"))?.click());
+      await pk.waitForSelector('#test-idp input[autocomplete="name"]');
+      await pk.type('#test-idp input[autocomplete="name"]', "Pat Key");
+      await pk.type('#test-idp input[type="email"]', "pk@example.test");
+      await pk.type('#test-idp input[type="password"]', "browser-pass-2");
+      await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pk.evaluate(() => document.querySelector("#test-idp button[type=submit]")?.click())]);
+      await pk.waitForFunction(() => document.body.innerText.includes("Your workspaces"), { timeout: 15000 });
+      const promptText = await pkText();
+      await pkClick("Add a passkey", "#passkey-prompt a");
+      await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet.") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Add a passkey"), { timeout: 15000 });
+      const accountNoPrompt = !(await pkText()).includes("A passkey can't be phished");
+      await pk.type('main input[maxlength="100"]:not([aria-label])', "MacBook passkey");
+      await pkClick("Add a passkey");
+      await pk.waitForFunction(() => document.body.innerText.includes("MacBook passkey") && document.body.innerText.includes("not used yet"), { timeout: 15000 });
+      const creds = (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials;
+      const pkRow = withDb((d) => d.prepare("SELECT id, name FROM ba_passkey WHERE userId = ?").all(pkUser()));
+      const pkAdded = withDb((d) => d.prepare("SELECT ws_id, actor_id FROM v2_audit WHERE action = 'passkey.added' AND object_id = ?").get(pkRow[0]?.id));
+      check(
+        "ui (Chrome): after sign-in without a passkey /app shows the add-a-passkey prompt; it leads to /app/account (no prompt there), where Add a passkey registers a discoverable credential for rp localhost labelled with the email, lists it by name (\"not used yet\") and audits passkey.added with no workspace",
+        promptText.includes("Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code.") && accountNoPrompt &&
+          creds.length === 1 && creds[0].rpId === "localhost" && creds[0].isResidentCredential && creds[0].userName === "pk@example.test" &&
+          pkRow.length === 1 && pkRow[0].name === "MacBook passkey" && pkAdded?.ws_id === null && pkAdded?.actor_id === pkUser(),
+        `${accountNoPrompt} ${JSON.stringify(creds.map((c) => [c.rpId, c.userName]))} ${JSON.stringify(pkRow)} ${JSON.stringify(pkAdded)}`,
+      );
+      ageSession(await pkCookie(), 20);
+      await pkClick("Add a passkey");
+      await pk.waitForFunction(() => document.body.innerText.includes("Sign in again to add a passkey. This needs a sign-in from the last 15 minutes."), { timeout: 15000 });
+      const credsStale = (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials.length;
+      const navsBefore = pkNavs.length;
+      await pkClick("Sign in again");
+      // The email field's autofill (conditional mediation): the virtual authenticator answers it, so the page signs in.
+      for (let i = 0; i < 150 && !pkNavs.slice(navsBefore).some((u) => u.startsWith(`${LB}/app/sign-in`)); i++) await sleep(100);
+      for (let i = 0; i < 150 && !(pkNavs.at(-1) ?? "").startsWith(`${LB}/app/account`); i++) await sleep(100);
+      await pk.waitForFunction(() => document.body.innerText.includes("last used"), { timeout: 15000 });
+      const pkUse = withDb((d) => d.prepare("SELECT last_used_at FROM v2_passkey_use WHERE passkey_id = ?").get(pkRow[0]?.id));
+      check(
+        "ui (Chrome): with an old sign-in Add a passkey shows Sign in again (nothing registered), which signs out to /app/sign-in?next=/app/account; there the email field's passkey autofill signs in and returns to /app/account, and the passkey shows when it was last used",
+        credsStale === 1 && pkNavs.slice(navsBefore).some((u) => { const x = new URL(u); return x.pathname === "/app/sign-in" && x.searchParams.get("next") === "/app/account" && x.searchParams.get("email") === "pk@example.test"; }) && !!pkUse?.last_used_at,
+        `${credsStale} ${pkNavs.slice(navsBefore).join(" ")} ${JSON.stringify(pkUse)}`,
+      );
+      // A passkey sign-in is a fresh sign-in: this session passes the recent-sign-in checks at once.
+      const pkWs = await call("PK", "POST", "/api/v2/workspaces", { cookie: await pkCookie(), body: { name: "Passkey workspace" } });
+      const pkFresh = await Promise.all([
+        call("PK", "GET", "/api/v2/auth/passkey/generate-register-options", { cookie: await pkCookie() }),
+        call("PK", "DELETE", `/api/v2/account/passkeys/${"b".repeat(32)}`, { cookie: await pkCookie() }),
+        call("PK", "POST", `/api/v2/workspaces/${pkWs.json?.id}/invites`, { cookie: await pkCookie(), body: { email: "owner2@example.test", role: "owner" } }),
+      ]);
+      check(
+        "recent sign-in: a passkey sign-in counts as a fresh sign-in (adding a passkey, deleting one (unknown: 404) and an owner invite pass the check)",
+        pkWs.status === 201 && pkFresh[0].status === 200 && pkFresh[1].status === 404 && pkFresh[2].status === 201,
+        pkFresh.map((r) => `${r.status} ${r.text.slice(0, 80)}`).join(" | "),
+      );
+      insertDevice(pkUser(), "Pat's laptop");
+      // The button, on the code step (where no autofill runs). Cookies are cleared rather than signing out, so the
+      // sign-in page's autofill can't sign straight back in first.
+      await cdp.send("Network.clearBrowserCookies");
+      await pk.goto(`${LB}/app/sign-in?next=/app/devices&email=pk%40example.test&code=123456`, { waitUntil: "networkidle0" });
+      await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pkClick("Sign in with a passkey")]);
+      await pk.waitForFunction(() => document.body.innerText.includes("Your devices"), { timeout: 15000 });
+      check("ui (Chrome): Sign in with a passkey signs in and lands on next (/app/devices)", new URL(pk.url()).pathname === "/app/devices", pk.url());
+      // People tab: an owner invite with an old sign-in gets Sign in again, which comes back to the People tab.
+      ageSession(await pkCookie(), 20);
+      await pk.goto(`${LB}/app/w/${pkWs.json?.id}/people`, { waitUntil: "networkidle0" });
+      await pk.waitForFunction(() => document.body.innerText.includes("Invite someone"), { timeout: 15000 });
+      await pk.type('main input[type="email"]', "second-owner@example.test");
+      await pk.evaluate(() => [...document.querySelectorAll("select")].find((x) => [...x.options].some((o) => o.textContent === "Viewer (read only)"))?.setAttribute("id", "invite-role"));
+      await pk.select("#invite-role", "owner");
+      await pkClick("Create invite link");
+      await pk.waitForFunction(() => document.body.innerText.includes("Sign in again to invite an owner. This needs a sign-in from the last 15 minutes."), { timeout: 15000 });
+      await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pkClick("Sign in again")]);
+      await pk.waitForFunction((w) => location.pathname === `/app/w/${w}/people`, { timeout: 15000 }, pkWs.json?.id);
+      check("ui (Chrome): People tab: an owner invite with an old sign-in shows \"Sign in again to invite an owner.\"; Sign in again (here by passkey autofill) returns to the People tab", new URL(pk.url()).pathname === `/app/w/${pkWs.json?.id}/people`, pk.url());
+      // Rename and delete.
+      await pk.goto(`${LB}/app/account`, { waitUntil: "networkidle0" });
+      await pk.waitForFunction(() => document.body.innerText.includes("MacBook passkey"), { timeout: 15000 });
+      await pkClick("Rename");
+      await pk.waitForSelector('input[aria-label="Passkey name"]');
+      await pk.click('input[aria-label="Passkey name"]', { clickCount: 3 });
+      await pk.type('input[aria-label="Passkey name"]', "Work laptop");
+      await pkClick("Save");
+      await pk.waitForFunction(() => document.body.innerText.includes("Work laptop") && !document.body.innerText.includes("MacBook passkey"), { timeout: 15000 });
+      await pkClick("Delete");
+      await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet."), { timeout: 15000 });
+      const pkGone = withDb((d) => ({
+        rows: d.prepare("SELECT COUNT(*) AS n FROM ba_passkey WHERE userId = ?").get(pkUser()).n,
+        use: d.prepare("SELECT COUNT(*) AS n FROM v2_passkey_use WHERE passkey_id = ?").get(pkRow[0]?.id).n,
+        audit: d.prepare("SELECT actor_id FROM v2_audit WHERE action = 'passkey.deleted' AND object_id = ?").get(pkRow[0]?.id)?.actor_id,
+      }));
+      check("ui (Chrome): Rename names the passkey; Delete (confirmed) removes it and its use record, and audits passkey.deleted", pkGone.rows === 0 && pkGone.use === 0 && pkGone.audit === pkUser(), JSON.stringify(pkGone));
+      // Sign out everywhere, also unpairing devices.
+      await pk.evaluate(() => document.querySelector('input[name="devices"]')?.click());
+      await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pkClick("Sign out everywhere")]);
+      const soeUi = withDb((d) => ({
+        sessions: d.prepare("SELECT COUNT(*) AS n FROM ba_session WHERE userId = ?").get(pkUser()).n,
+        devices: d.prepare("SELECT COUNT(*) AS n FROM v2_devices WHERE user_id = ? AND revoked_reason = 'signed_out_everywhere'").get(pkUser()).n,
+      }));
+      check("ui (Chrome): Sign out everywhere (with Also unpair all my devices) ends every session, revokes the device and lands on /app/sign-in", new URL(pk.url()).pathname === "/app/sign-in" && soeUi.sessions === 0 && soeUi.devices === 1, `${pk.url()} ${JSON.stringify(soeUi)}`);
+      check("ui (Chrome): the passkey, account and People pages render without page errors", pkErrors.length === 0, pkErrors.join(" | "));
+      await pctx.close();
     } catch (e) {
       check("ui (Chrome) run", false, e?.stack ?? e);
     } finally {
@@ -1865,6 +2128,17 @@ try {
       stale4.status === 403 && stale4.json?.error === "reauth_required" && wrong4.status === 400 && cross4.status === 403 && bearer4.status === 403 && !!q1("SELECT 1 AS x FROM ba_user WHERE id = ?", r4.id),
       `${stale4.text} ${wrong4.text} ${cross4.status} ${bearer4.status}`,
     );
+    // Before deleting: they signed out everywhere once (audited with their id), and they have a passkey with a last use
+    // (inserted here: the web UI test below registers a real one) and said "Not now" to the passkey prompt.
+    const soe4 = await call("R4", "POST", "/api/v2/account/sign-out-everywhere", { cookie: r4.cookie, body: { devices: true, apps: true } });
+    await signIn(r4);
+    const pk4 = `pk4${randomBytes(8).toString("hex")}`;
+    withDb((d) => {
+      d.prepare("INSERT INTO ba_passkey (id, name, publicKey, userId, credentialID, counter, deviceType, backedUp, transports, createdAt) VALUES (?, ?, ?, ?, ?, 0, 'singleDevice', 0, 'internal', ?)").run(pk4, "Ron's key", "cHVibGljLWtleQ", r4.id, `cred-${pk4}`, new Date().toISOString());
+      d.prepare("INSERT INTO v2_passkey_use (passkey_id, last_used_at) VALUES (?, ?)").run(pk4, new Date().toISOString());
+    });
+    const dismiss4 = await call("R4", "DELETE", "/api/v2/account/passkey-prompt", { cookie: r4.cookie });
+    const pkList4 = (await call("R4", "GET", "/api/v2/account/passkeys", { cookie: r4.cookie })).json;
     const del4 = await call("R4", "DELETE", "/api/v2/me", { cookie: r4.cookie, body: { email: r4.email.toUpperCase() } });
     const me4 = await call("R4", "GET", "/api/v2/me", { cookie: r4.cookie });
     const w4Row = q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W4);
@@ -1875,6 +2149,18 @@ try {
       "account deletion: the email typed in any case -> 204; signed out (401); their one-person workspace is deleted with it (restorable by nobody, purged later); no row anywhere holds their id or email; one audit row with no workspace, actor or email",
       del4.status === 204 && me4.status === 401 && !!w4Row?.deleted_at && g4Owner === "fm_1" && Object.keys(r4Left).length === 0 && accountAudit.length === 1 && accountAudit.every((a) => a.ws_id === null && a.actor_id === null && a.object_id === null),
       `${del4.status} ${del4.text} ${me4.status} ${JSON.stringify(w4Row)} ${g4Owner} ${JSON.stringify(r4Left)} ${JSON.stringify(accountAudit)}`,
+    );
+    const pkLeft4 = {
+      passkeys: q1("SELECT COUNT(*) AS n FROM ba_passkey WHERE userId = ? OR id = ?", r4.id, pk4).n,
+      use: q1("SELECT COUNT(*) AS n FROM v2_passkey_use WHERE passkey_id = ?", pk4).n,
+      dismissed: q1("SELECT COUNT(*) AS n FROM v2_passkey_prompt_dismissed WHERE user_id = ?", r4.id).n,
+      soeAudit: q("SELECT actor_id, object_id FROM v2_audit WHERE action = 'account.signed_out_everywhere'"),
+    };
+    check(
+      "account deletion after signing out everywhere, with a passkey: their passkey, its last use and their \"Not now\" on the passkey prompt are deleted too, and the sign-out-everywhere audit row keeps no actor or object",
+      soe4.status === 200 && dismiss4.status === 204 && pkList4?.passkeys?.length === 1 && !!pkList4.passkeys[0].last_used_at && pkList4.prompt === false &&
+        pkLeft4.passkeys === 0 && pkLeft4.use === 0 && pkLeft4.dismissed === 0 && pkLeft4.soeAudit.length === 1 && pkLeft4.soeAudit.every((a) => a.actor_id === null && a.object_id === null),
+      `${soe4.status} ${soe4.text} ${dismiss4.status} ${JSON.stringify(pkList4)} ${JSON.stringify(pkLeft4)}`,
     );
     const del2 = await call("R2", "DELETE", "/api/v2/me", { cookie: r2.cookie, body: { email: r2.email } });
     const d2Me = await call("R2", "GET", "/api/v2/me", { bearer: D2.access });
@@ -2036,10 +2322,39 @@ try {
         await asUser(page, r1);
         await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
         await page.waitForFunction(() => document.body.innerText.includes("Deleted workspaces") && document.body.innerText.includes("Retention UI"), { timeout: 15000 });
+        // Each of restore, removal, workspace deletion and account deletion first with a sign-in older than 15 minutes:
+        // Sign in again shows, nothing changes, and it signs out to sign-in with next= back to the page.
+        const signInAgainTo = async (u, nextPath) => {
+          await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Sign in again")?.click())]);
+          const at = new URL(page.url());
+          const ok = at.pathname === "/app/sign-in" && at.searchParams.get("next") === nextPath && at.searchParams.get("email") === u.email;
+          await signIn(u);
+          await asUser(page, u);
+          await page.goto(`${BASE}${nextPath}`, { waitUntil: "networkidle0" });
+          return ok;
+        };
+        ageSession(r1.cookie, 20);
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Restore")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Sign in again to restore a workspace. This needs a sign-in from the last 15 minutes."), { timeout: 15000 });
+        const staleRestoreUi = !!q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W8)?.deleted_at;
+        const restoreBack = await signInAgainTo(r1, "/app");
+        check("ui (Chrome): Restore with an old sign-in shows \"Sign in again to restore a workspace.\" and restores nothing; Sign in again signs out to /app/sign-in?next=/app", staleRestoreUi && restoreBack, page.url());
+        await page.waitForFunction(() => document.body.innerText.includes("Deleted workspaces") && document.body.innerText.includes("Retention UI"), { timeout: 15000 });
         await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Restore")?.click());
         await page.waitForFunction((w) => !!document.querySelector(`a[href="/app/w/${w}"]`) && !document.body.innerText.includes("Deleted workspaces"), { timeout: 15000 }, W8);
         check("ui (Chrome): /app lists deleted workspaces with Restore; restoring brings the workspace back into the list", true);
         await page.goto(`${BASE}/app/w/${W8}/people`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("Delete this workspace") && document.body.innerText.includes("Rhea Seven"), { timeout: 15000 });
+        ageSession(r1.cookie, 20);
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Remove")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Also delete their shared sessions in this workspace now"), { timeout: 15000 });
+        await page.click('[role="group"] input[type="checkbox"]');
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Remove Rhea Seven")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Sign in again to remove a member. This needs a sign-in from the last 15 minutes."), { timeout: 15000 });
+        const panelStays = await page.evaluate(() => !!document.querySelector('[role="group"] input[type="checkbox"]')?.checked);
+        const staleRemoveUi = !!q1("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", W8, R7.id) && q1("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W8, S7.key).n === 1;
+        const removeBack = await signInAgainTo(r1, `/app/w/${W8}/people`);
+        check("ui (Chrome): the remove panel with an old sign-in shows \"Sign in again to remove a member.\" (the panel stays open, ticked; nobody is removed, no session deleted); Sign in again comes back to People", panelStays && staleRemoveUi && removeBack, page.url());
         await page.waitForFunction(() => document.body.innerText.includes("Delete this workspace") && document.body.innerText.includes("Rhea Seven"), { timeout: 15000 });
         await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Remove")?.click());
         await page.waitForFunction(() => document.body.innerText.includes("Also delete their shared sessions in this workspace now"), { timeout: 15000 });
@@ -2048,20 +2363,77 @@ try {
         await page.waitForFunction(() => !document.body.innerText.includes("Rhea Seven"), { timeout: 15000 });
         const s7Left = q1("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W8, S7.key).n;
         check("ui (Chrome): People's Remove opens a panel with \"Also delete their shared sessions in this workspace now\"; ticked, the member and their sessions go", s7Left === 0 && S7.accepted === 1, `${s7Left}`);
+        ageSession(r1.cookie, 20);
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete workspace")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Sign in again to delete this workspace. This needs a sign-in from the last 15 minutes."), { timeout: 15000 });
+        const staleDeleteUi = !q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W8)?.deleted_at;
+        const deleteBack = await signInAgainTo(r1, `/app/w/${W8}/people`);
+        check("ui (Chrome): Delete workspace with an old sign-in shows \"Sign in again to delete this workspace.\" and deletes nothing; Sign in again comes back to People", staleDeleteUi && deleteBack, page.url());
+        await page.waitForFunction(() => document.body.innerText.includes("Delete this workspace"), { timeout: 15000 });
         await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete workspace")?.click());
         await page.waitForFunction(() => location.pathname === "/app" && document.body.innerText.includes("Deleted workspaces"), { timeout: 15000 });
         check("ui (Chrome): People's Delete workspace (confirmed) deletes it and the workspace shows under Deleted workspaces", !!q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W8)?.deleted_at);
-        await asUser(page, R8);
-        await page.goto(`${BASE}/app/account`, { waitUntil: "networkidle0" });
-        await page.waitForFunction(() => document.body.innerText.includes("Delete your account"), { timeout: 15000 });
-        const disabledBefore = await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete my account")?.disabled);
-        await page.type('input[aria-label="Your email, to confirm"]', R8.email);
-        await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete my account")?.click())]);
+        // Account deletion, on localhost (passkeys need a domain name) with a virtual authenticator: R8 adds a passkey,
+        // says "Not now" to the prompt, comes back with an old sign-in (Sign in again; the passkey autofill signs in),
+        // then deletes the account. Nothing that names them is left, passkey tables included.
+        const LB = `http://localhost:${PORT}`;
+        const pctx = await browser.createBrowserContext();
+        const pk = await pctx.newPage();
+        pk.on("pageerror", (e) => errors.push(e.message));
+        pk.on("dialog", (d) => void d.accept());
+        const cdp = await pk.createCDPSession();
+        await cdp.send("WebAuthn.enable");
+        await cdp.send("WebAuthn.addVirtualAuthenticator", {
+          options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+        });
+        const pkText = () => pk.evaluate(() => document.body.innerText);
+        const pkClick = (label) => pk.evaluate((l) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === l)?.click(), label);
+        const pkCookie = async () => `align_v2.session_token=${(await pk.cookies()).find((c) => c.name === "align_v2.session_token")?.value ?? ""}`;
+        {
+          const [name, ...v] = R8.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+          await pk.setCookie({ name, value: v.join("="), url: LB });
+        }
+        await pk.goto(`${LB}/app/account`, { waitUntil: "networkidle0" });
+        await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet.") && document.body.innerText.includes("Delete your account"), { timeout: 15000 });
+        await pk.type('main input[maxlength="100"]:not([aria-label])', "Rory's passkey");
+        await pkClick("Add a passkey");
+        await pk.waitForFunction(() => document.body.innerText.includes("Rory's passkey"), { timeout: 15000 });
+        await pk.evaluate(() => fetch("/api/v2/account/passkey-prompt", { method: "DELETE", credentials: "same-origin" }));
+        const pk8 = q1("SELECT id FROM ba_passkey WHERE userId = ?", R8.id)?.id;
+        ageSession(await pkCookie(), 20);
+        await pk.goto(`${LB}/app/account`, { waitUntil: "networkidle0" });
+        await pk.waitForFunction(() => document.body.innerText.includes("Sign in again to delete your account."), { timeout: 15000 });
+        const staleForm = (await pkText()).includes("Delete my account");
+        await pkClick("Sign in again");
+        // The sign-in page's passkey autofill answers at once and comes back to /app/account.
+        await pk.waitForFunction(() => location.pathname === "/app/account" && document.body.innerText.includes("last used"), { timeout: 20000 });
+        const before8 = {
+          passkeys: q1("SELECT COUNT(*) AS n FROM ba_passkey WHERE userId = ?", R8.id).n,
+          use: q1("SELECT COUNT(*) AS n FROM v2_passkey_use WHERE passkey_id = ?", pk8 ?? "").n,
+          dismissed: q1("SELECT COUNT(*) AS n FROM v2_passkey_prompt_dismissed WHERE user_id = ?", R8.id).n,
+        };
+        await pk.waitForFunction(() => document.body.innerText.includes("Delete your account"), { timeout: 15000 });
+        const disabledBefore = await pk.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete my account")?.disabled);
+        await pk.type('input[aria-label="Your email, to confirm"]', R8.email);
+        await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pkClick("Delete my account")]);
+        const after8 = {
+          passkeys: q1("SELECT COUNT(*) AS n FROM ba_passkey WHERE userId = ? OR id = ?", R8.id, pk8 ?? "").n,
+          use: q1("SELECT COUNT(*) AS n FROM v2_passkey_use WHERE passkey_id = ?", pk8 ?? "").n,
+          dismissed: q1("SELECT COUNT(*) AS n FROM v2_passkey_prompt_dismissed WHERE user_id = ?", R8.id).n,
+          left: { ...mentions(R8.id), ...mentions(R8.email) },
+        };
         check(
-          "ui (Chrome): /app/account's Delete my account stays disabled until the email is typed, then deletes the account and opens sign-in",
-          disabledBefore === true && new URL(page.url()).pathname === "/app/sign-in" && !q1("SELECT 1 AS x FROM ba_user WHERE id = ?", R8.id) && errors.length === 0,
-          `${disabledBefore} ${page.url()} ${errors.join(" | ")}`,
+          "ui (Chrome): /app/account with an old sign-in shows \"Sign in again to delete your account.\" instead of the form; Sign in again (here by passkey) comes back to it",
+          !staleForm && before8.passkeys === 1 && before8.use === 1 && before8.dismissed === 1,
+          `${staleForm} ${JSON.stringify(before8)}`,
         );
+        check(
+          "ui (Chrome): /app/account's Delete my account stays disabled until the email is typed, then deletes the account and opens sign-in; their passkey, its last use and their \"Not now\" are gone and no row anywhere holds their id or email",
+          disabledBefore === true && new URL(pk.url()).pathname === "/app/sign-in" && !q1("SELECT 1 AS x FROM ba_user WHERE id = ?", R8.id) &&
+            after8.passkeys === 0 && after8.use === 0 && after8.dismissed === 0 && Object.keys(after8.left).length === 0 && errors.length === 0,
+          `${disabledBefore} ${pk.url()} ${JSON.stringify(after8)} ${errors.join(" | ")}`,
+        );
+        await pctx.close();
       } catch (e) {
         check("ui (Chrome) retention run", false, e?.stack ?? e);
       } finally {
@@ -2120,6 +2492,7 @@ try {
     ["ALIGN_TEST_IDP", { ALIGN_TEST_IDP: "1" }, "ALIGN_TEST_IDP is not allowed when hosted"],
     ["ALIGN_TEST_NOW (the retention job's test clock)", { ALIGN_TEST_NOW: "2030-01-01T00:00:00Z" }, "ALIGN_TEST_NOW is not allowed when hosted"],
     ["ALIGN_LOCAL_OWNER_EMAIL", { ALIGN_LOCAL_OWNER_EMAIL: "me@example.test" }, "ALIGN_LOCAL_OWNER_EMAIL is not allowed when hosted"],
+    ["a bad ALIGN_SESSION_MAX_DAYS", { ALIGN_SESSION_MAX_DAYS: "0" }, "ALIGN_SESSION_MAX_DAYS must be a whole number of days from 1 to 365"],
   ];
   for (const [what, delta, needle] of refusals) {
     const env = { ...good, ...delta };
@@ -2238,7 +2611,7 @@ try {
   await new Promise((r) => mailApi.listen(0, "127.0.0.1", r));
   const MAIL_KEY = `re_${randomBytes(12).toString("hex")}`;
   const emailDir = path.join(tmpRoot, "hosted-email");
-  const emailEnv = { ...good, ...noProviders, ALIGN_DATA_DIR: emailDir, ALIGN_EMAIL_API_URL: `https://127.0.0.1:${mailApi.address().port}/emails`, ALIGN_EMAIL_API_KEY: MAIL_KEY, ALIGN_EMAIL_FROM: "Align <signin@align.test>", ALIGN_FIRST_OWNER_EMAIL: "Ops@Example.test", NODE_EXTRA_CA_CERTS: caFile };
+  const emailEnv = { ...good, ...noProviders, ALIGN_DATA_DIR: emailDir, ALIGN_EMAIL_API_URL: `https://127.0.0.1:${mailApi.address().port}/emails`, ALIGN_EMAIL_API_KEY: MAIL_KEY, ALIGN_EMAIL_FROM: "Align <signin@align.test>", ALIGN_FIRST_OWNER_EMAIL: "Ops@Example.test", NODE_EXTRA_CA_CERTS: caFile, ALIGN_SESSION_MAX_DAYS: "3" };
   for (const k of Object.keys(emailEnv)) if (emailEnv[k] === undefined) delete emailEnv[k];
   const eRun = await startServer(emailEnv);
   check("hosted email: starts with only the three email settings (no Google, no GitHub)", eRun.started, eRun.stderr().slice(-400));
@@ -2270,6 +2643,13 @@ try {
   const OPS = { cookie: hCookie(opsIn) };
   const opsRow = withDb((d) => d.prepare("SELECT emailVerified FROM ba_user WHERE email = ?").get("ops@example.test"));
   check("hosted email: ALIGN_FIRST_OWNER_EMAIL (any case) is the first account: its code creates it (verified) and signs in with the __Secure- cookie", opsIn.status === 200 && OPS.cookie.includes("__Secure-align_v2.session_token") && opsRow?.emailVerified === 1, `${opsIn.status} ${opsIn.text}`);
+  const opsSession = withDb((d) => d.prepare("SELECT s.createdAt, s.expiresAt FROM ba_session s JOIN ba_user u ON u.id = s.userId WHERE u.email = ?").get("ops@example.test"));
+  const hReg = await hosted("GET", "/api/v2/auth/passkey/generate-register-options", { cookie: OPS.cookie });
+  check(
+    "hosted: ALIGN_SESSION_MAX_DAYS=3 caps a new session at 3 days after sign-in (under the 7-day rolling expiry); passkeys use the public host as relying party",
+    Date.parse(opsSession?.expiresAt) === Date.parse(opsSession?.createdAt) + 3 * 86_400_000 && hReg.status === 200 && hReg.json?.rp?.id === HOSTED_HOST,
+    `${JSON.stringify(opsSession)} ${hReg.status} ${hReg.text.slice(0, 200)}`,
+  );
   const eWs = await hosted("POST", "/api/v2/workspaces", { body: { name: "Hosted email" }, cookie: OPS.cookie, headers: hOrigin });
   const eInv = await hosted("POST", `/api/v2/workspaces/${eWs.json?.id}/invites`, { body: { email: "Invitee@Example.test", role: "member" }, cookie: OPS.cookie, headers: hOrigin });
   await hSend("invitee@example.test");

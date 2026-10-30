@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Btn, Err, Field, Input, Note, go } from "../_ui/kit";
+import { autofillAvailable, passkeySignInMessage, signInWithPasskey, usePasskeyPlace } from "../_ui/passkey";
 import type { SignInOptions } from "../_ui/server";
 
 class AuthError extends Error {
@@ -45,6 +46,23 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
   const [name, setName] = useState("");
   const [tEmail, setTEmail] = useState("");
   const [password, setPassword] = useState("");
+  // Passkeys: a button, and the email field's autofill where the browser offers it. Only on the passkey host.
+  const place = usePasskeyPlace(options.passkeyHost);
+  const passkeys = place === "here";
+
+  useEffect(() => {
+    if (!passkeys || step !== "email") return;
+    let live = true;
+    void (async () => {
+      if (!(await autofillAvailable()) || !live) return;
+      // Waits until the person picks a passkey from the email field's suggestions; aborted by the button or unmount.
+      const e = await signInWithPasskey(true);
+      if (live && !e) go(next);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [passkeys, step, next]);
 
   const run = async (fn: () => Promise<void>, msg: (e: unknown) => string = (e) => (e as Error).message) => {
     setBusy(true);
@@ -62,6 +80,13 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
     run(async () => {
       const d = await post("/sign-in/social", { provider, callbackURL: next, errorCallbackURL: "/app/sign-in" });
       if (d.url) window.location.href = d.url;
+    });
+
+  const passkey = () =>
+    run(async () => {
+      const e = await signInWithPasskey(false);
+      if (e) throw new Error(passkeySignInMessage(e));
+      go(next);
     });
 
   const sendCode = () =>
@@ -109,6 +134,19 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
             )}
           </div>
         )}
+        {passkeys && (
+          <div className="mb-5">
+            <Btn kind="secondary" disabled={busy} onClick={() => void passkey()}>
+              Sign in with a passkey
+            </Btn>
+          </div>
+        )}
+        {place === "elsewhere" && (
+          <Note>
+            Passkeys work only at <a className="text-violet-700 underline" href={`${options.passkeyOrigin}/app/sign-in`}>{options.passkeyOrigin}</a>
+            {options.local ? " (a passkey needs a domain name, and this address is a number)." : "."}
+          </Note>
+        )}
         {options.email && step === "email" && (
           <form
             id="email-code"
@@ -118,7 +156,7 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
             }}
           >
             <Field label="Email">
-              <Input type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" maxLength={320} />
+              <Input type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete={passkeys ? "email webauthn" : "email"} maxLength={320} />
             </Field>
             <Btn type="submit" disabled={busy || !email.trim()}>
               Send code

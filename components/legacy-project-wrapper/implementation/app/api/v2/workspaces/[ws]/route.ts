@@ -1,4 +1,4 @@
-import { idParam, noContent, readJson, route, webAuth, webWrite } from "@/lib/v2/http";
+import { idParam, noContent, readJson, requireRecentSignIn, route, webAuth, webWrite } from "@/lib/v2/http";
 import { ID_RE, str } from "@/lib/v2/validate";
 import { deleteWorkspace, enter, renameWorkspace, workspaceDetail } from "@/lib/v2/workspaces";
 
@@ -12,8 +12,12 @@ export const PATCH = route<{ ws: string }>(async (req, params) => {
   return renameWorkspace(pp, str(b, "name", 100));
 });
 
-// DELETE (owners): delete the workspace and everything in it.
+// DELETE (owners): delete the workspace and everything in it. An owner needs a sign-in from the last 15 minutes (403
+// reauth_required).
 export const DELETE = route<{ ws: string }>(async (req, params) => {
-  await deleteWorkspace(enter(await webWrite(req), idParam(params.ws, ID_RE)));
+  const p = await webWrite(req);
+  const pp = enter(p, idParam(params.ws, ID_RE));
+  if (pp.wsRole === "owner") requireRecentSignIn(p, "delete this workspace");
+  await deleteWorkspace(pp);
   return noContent();
 });

@@ -2,8 +2,8 @@ import { connection } from "next/server";
 import { config, hostAllowed } from "../config";
 import { HttpError } from "../errors";
 import { clientNet } from "../ratelimit";
-import { getAuth } from "./auth";
-import { publicOrigin, RECENT_SIGN_IN_MS } from "./config";
+import { getAuth, isRecentSignIn, reauthMessage } from "./auth";
+import { publicOrigin } from "./config";
 import { deviceFromAccessToken, userById, type DevicePrincipal, type UserRef } from "./devices";
 import { V2Error, badRequest } from "./errors";
 import { ready } from "./init";
@@ -77,17 +77,16 @@ export async function webAuth(req: Request): Promise<WebPrincipal> {
   return { kind: "web", user: { id: u.id, name: u.name, email: u.email }, emailVerified: u.emailVerified, signedInAt: new Date(s.session.createdAt) };
 }
 
-/** True when a sign-in at `signedInAt` is recent enough to approve a device or an MCP app (15 minutes). */
-export function isRecentSignIn(signedInAt: Date | string, now = Date.now()): boolean {
-  const t = new Date(signedInAt).getTime();
-  return Number.isFinite(t) && now - t <= RECENT_SIGN_IN_MS;
-}
+export { isRecentSignIn };
 
-/** Approving a device (and an MCP app at /oauth/authorize) needs a recent sign-in: else 403 reauth_required, and the
- *  page asks the person to sign in again. */
-export function requireRecentSignIn(p: WebPrincipal) {
+/** A sensitive action needs a sign-in from the last 15 minutes: else 403 reauth_required, and the page asks the
+ *  person to sign in again and brings them back. Guarded: approving a device and an MCP app (/oauth/authorize),
+ *  member role changes (ownership included), owner invites, removing another member, deleting and restoring a
+ *  workspace, deleting your account, deleting a passkey and signing out everywhere here; adding a passkey and linking an account in lib/v2/auth.ts. `what`
+ *  names the action ("change a role"); without it the message is about approving. */
+export function requireRecentSignIn(p: WebPrincipal, what?: string) {
   if (!isRecentSignIn(p.signedInAt)) {
-    throw new V2Error(403, "reauth_required", "Sign in again to approve. Approving needs a sign-in from the last 15 minutes.");
+    throw new V2Error(403, "reauth_required", what ? reauthMessage(what) : "Sign in again to approve. Approving needs a sign-in from the last 15 minutes.");
   }
 }
 
