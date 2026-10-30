@@ -33,7 +33,7 @@ screen says "team".
 | `/app/w/<ws>/requests` | Requests tab | Workspace members | Change requests: waiting on me, mine, others |
 | `/app/w/<ws>/spend` | Spend tab | Workspace members | Usage and estimated cost by goal, team or session |
 | `/app/w/<ws>/apps` | Apps tab | Workspace members | Connected AI apps and how to connect one |
-| `/oauth/authorize` | Connect <app> to Align | A person connecting an AI app (recent sign-in) | Grant an AI app access to one workspace as themselves: reading, plus agent-reported evidence links |
+| `/oauth/authorize` | Connect <app> to Align | A person connecting an AI app (recent sign-in) | Grant an AI app read-only access to one workspace as themselves (or, when the app asks, read access plus agent-reported evidence links) |
 | (any) | Error page | Anyone | Plain error with Try again |
 
 Navigation: every `/app` page except sign-in has a top bar with the **Align** mark (a link to `/app`), a workspace
@@ -219,7 +219,7 @@ sign in again before they can approve, and SHALL show the same prompt when the s
 
 #### Scenario: Sign-in ages while the page is open
 
-- **WHEN** the page was opened with a recent sign-in, but **Approve** or **Allow access** gets 403 `reauth_required`
+- **WHEN** the page was opened with a recent sign-in, but **Approve**, **Allow read-only access** or **Allow access** gets 403 `reauth_required`
 - **THEN** the page replaces the form with the sign-in-again prompt and nothing is approved
 
 ### Requirement: Devices screen
@@ -515,7 +515,7 @@ workspace owner sees everyone's.
 #### Scenario: Connected apps
 
 - **WHEN** a member opens the tab
-- **THEN** each connection shows the app's name, its redirect host, the person who connected it, when it was approved and when it last read the workspace, with **Disconnect** on the person's own connections (an owner sees **Disconnect** on every connection), which calls `DELETE /api/v2/workspaces/<ws>/apps/<id>`; with none, "No AI apps are connected to this workspace."
+- **THEN** each connection shows the app's name with "Reads only" or, for a grant holding `changes:evidence`, "Reads, and adds evidence links", its redirect host, the person who connected it, when it was approved and when it last read the workspace, with **Disconnect** on the person's own connections (an owner sees **Disconnect** on every connection), which calls `DELETE /api/v2/workspaces/<ws>/apps/<id>`; with none, "No AI apps are connected to this workspace."
 
 #### Scenario: How to connect
 
@@ -525,18 +525,23 @@ workspace owner sees everyone's.
 ### Requirement: OAuth consent screen
 
 The `/oauth/authorize` page SHALL, in the same look as the web app, let a signed-in person with a recent sign-in grant
-an AI app access to one workspace in which they are an owner or member, acting as themselves (it reads, and can only add agent-reported evidence links to change requests), and SHALL
+an AI app read-only access to one workspace in which they are an owner or member, acting as themselves (and, only when the app asks for the scope `changes:evidence`, also let it add agent-reported evidence links to change requests), and SHALL
 refuse requests it cannot trust without redirecting.
 
 #### Scenario: What the page shows
 
 - **WHEN** a signed-in person with a recent sign-in arrives with a valid request
-- **THEN** the page shows "Connect <app> to Align", "This app named itself." unless it is a known AI provider's client document, "After you allow it, Align sends you back to <redirect host>.", "Signed in as <name> (<email>).", and "What it can do": it reads goals, change requests, decision records and directives in the workspace they choose, as them and with their role; it can’t propose, approve or change goals or change requests; it can attach evidence links to change requests they can act on, and Align labels them agent-reported; it never sees captured prompts; what it reads is sent to <provider>; they or a workspace owner can disconnect it on the workspace’s Apps tab, and it is disconnected if they leave the workspace
+- **THEN** the page shows "Connect <app> to Align", "This app named itself." unless it is a known AI provider's client document, "After you allow it, Align sends you back to <redirect host>.", "Signed in as <name> (<email>).", and "What it can do": it reads goals, change requests, decision records and directives in the workspace they choose, as them and with their role; it can’t propose, approve or change anything; it never sees captured prompts; what it reads is sent to <provider>; they or a workspace owner can disconnect it on the workspace’s Apps tab, and it is disconnected if they leave the workspace
+
+#### Scenario: App asks to add evidence
+
+- **WHEN** the request's `scope` names `changes:evidence`
+- **THEN** "What it can do" has the same lines plus "It may also attach links to change requests you can act on, as evidence. Align labels them agent-reported.", and the button reads **Allow access** instead of **Allow read-only access**
 
 #### Scenario: Choose a workspace and allow
 
-- **WHEN** the person picks one workspace under "Which workspace" and presses **Allow access**
-- **THEN** the page posts `{params, decision:"approve", workspace_id}` to `POST /api/oauth/approve` and follows the returned redirect; **Cancel** posts `decision:"deny"`; **Allow access** stays disabled until a workspace is picked (a person with exactly one such workspace has it picked already)
+- **WHEN** the person picks one workspace under "Which workspace" and presses **Allow read-only access**
+- **THEN** the page posts `{params, decision:"approve", workspace_id}` to `POST /api/oauth/approve` and follows the returned redirect; **Cancel** posts `decision:"deny"`; **Allow read-only access** stays disabled until a workspace is picked (a person with exactly one such workspace has it picked already)
 
 #### Scenario: Viewer workspaces
 

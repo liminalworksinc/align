@@ -2,19 +2,31 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { signPayload } from "../secret";
 import { config } from "../config";
 import { ClientUnreachable, redirectAllowed, resolveClient, type OAuthClient } from "./clients";
-import { createGrant, liveGrant, newGrantId, parseRefresh, removeGrant, rotateGrant } from "./grants";
+import { createGrant, grantScope, liveGrant, newGrantId, parseRefresh, removeGrant, rotateGrant } from "./grants";
 
 // The OAuth 2.1 authorization server for Align's MCP endpoint (MCP authorization spec 2026-07-28): authorization code
 // with PKCE S256 only, public clients (CIMD or DCR, lib/oauth/clients.ts), refresh token rotation, RFC 8707 resource
 // binding and RFC 9207 iss. A person approves an app while recently signed in to Align (Better Auth) and picks one of
-// their v2 workspaces, so an app reads exactly one workspace, as that person. It only reads, except that it may add an
-// agent-reported evidence link to a change request the person may act on (lib/mcp/register.ts). Access tokens are stateless, alm.<payload>.<HMAC>, 1 hour, checked against the grant and the
-// membership on every call so that "Disconnect", leaving and removal work at once. Codes live in memory for 60 s: a
+// their v2 workspaces, so an app reads exactly one workspace, as that person. Scopes: goals:read (always granted, the
+// default: the app only reads) and changes:evidence (opt-in: granted only when the authorization request asks for it,
+// and named on the consent page; it lets the app add agent-reported evidence links, lib/mcp/register.ts). A grant
+// records its scopes and a refresh never widens them. Access tokens are stateless, alm.<payload>.<HMAC>, 1 hour,
+// checked against the grant and the membership on every call so that "Disconnect", leaving and removal work at once. Codes live in memory for 60 s: a
 // restart drops them and the app simply asks again.
 
 export const MCP_PATH = "/api/mcp";
 export const PRM_PATH = "/.well-known/oauth-protected-resource/api/mcp";
 export const SCOPE = "goals:read";
+/** Opt-in: add evidence links to change requests through MCP (align_add_change_request_evidence). */
+export const EVIDENCE_SCOPE = "changes:evidence";
+export const SCOPES: readonly string[] = [SCOPE, EVIDENCE_SCOPE];
+
+/** The scopes an authorization request asks for, as Align grants them: goals:read always, changes:evidence only when
+ *  named. Unknown scopes are ignored (RFC 6749 section 3.3 lets a server grant less than asked). */
+export function grantedScopes(asked: string | null | undefined): string[] {
+  const names = (asked ?? "").split(" ").filter(Boolean);
+  return SCOPES.filter((s) => s === SCOPE || names.includes(s));
+}
 const ACCESS_TTL_S = 60 * 60;
 const CODE_TTL_MS = 60 * 1000;
 
@@ -37,7 +49,7 @@ export function authServerMetadata(origin: string) {
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: [SCOPE],
+    scopes_supported: [...SCOPES],
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
   };
@@ -47,7 +59,7 @@ export function protectedResourceMetadata(origin: string) {
   return {
     resource: resourceFor(origin),
     authorization_servers: [origin],
-    scopes_supported: [SCOPE],
+    scopes_supported: [...SCOPES],
     bearer_methods_supported: ["header"],
     resource_name: "Align",
   };
@@ -61,14 +73,16 @@ export interface McpGrant {
   grant: string;
   client_id: string;
   exp: number; // seconds
+  /** This token's scopes: the ones it was minted with, never more than its grant holds. */
+  scopes: string[];
 }
 
 const macOf = (payload: string) => signPayload(`alm.${payload}`); // domain-separated from refresh-token hashes (alr.)
 const WS_ID = /^ws_[a-z2-7]{24}$/;
 
-function mintAccess(ws: string, uid: string, grant: string, clientId: string, aud: string) {
+function mintAccess(ws: string, uid: string, grant: string, clientId: string, aud: string, scopes: string[]) {
   const exp = Math.floor(Date.now() / 1000) + ACCESS_TTL_S;
-  const payload = Buffer.from(JSON.stringify({ kind: "mcp", ws, uid, gid: grant, cid: clientId, aud, exp })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ kind: "mcp", ws, uid, gid: grant, cid: clientId, aud, exp, scp: scopes.join(" ") })).toString("base64url");
   return `alm.${payload}.${macOf(payload)}`;
 }
 
@@ -80,7 +94,7 @@ export function readMcpToken(token: string | undefined, aud: string): McpGrant |
   if (!payload || !mac || extra !== undefined) return null;
   const good = macOf(payload);
   if (good.length !== mac.length || !timingSafeEqual(Buffer.from(good), Buffer.from(mac))) return null;
-  let p: { kind?: unknown; ws?: unknown; uid?: unknown; gid?: unknown; cid?: unknown; aud?: unknown; exp?: unknown };
+  let p: { kind?: unknown; ws?: unknown; uid?: unknown; gid?: unknown; cid?: unknown; aud?: unknown; exp?: unknown; scp?: unknown };
   try {
     p = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   } catch {
@@ -90,7 +104,10 @@ export function readMcpToken(token: string | undefined, aud: string): McpGrant |
   if (p.aud !== aud || typeof p.exp !== "number" || p.exp <= Date.now() / 1000) return null;
   const grant = liveGrant(p.gid);
   if (!grant || grant.client_id !== p.cid || grant.user_id !== p.uid || grant.ws_id !== p.ws) return null;
-  return { ws: grant.ws_id, uid: grant.user_id, grant: grant.id, client_id: grant.client_id, exp: p.exp };
+  // The grant is the authority: a token can only narrow it.
+  const held = grantedScopes(grant.scope);
+  const minted = typeof p.scp === "string" ? p.scp.split(" ") : [SCOPE];
+  return { ws: grant.ws_id, uid: grant.user_id, grant: grant.id, client_id: grant.client_id, exp: p.exp, scopes: held.filter((x) => minted.includes(x)) };
 }
 
 // ---- authorization requests ----
@@ -101,6 +118,8 @@ export interface AuthorizeRequest {
   state: string | null;
   code_challenge: string;
   resource: string;
+  /** What the person is asked to allow: goals:read, plus changes:evidence when the app asked for it. */
+  scopes: string[];
 }
 
 export type AuthorizeCheck =
@@ -134,7 +153,7 @@ export async function checkAuthorize(q: Record<string, string | undefined>, orig
   if (!q.code_challenge || !CHALLENGE.test(q.code_challenge) || q.code_challenge_method !== "S256") return fail("invalid_request", "PKCE with S256 is required");
   const resource = resourceFor(origin);
   if (q.resource && !isResource(q.resource, origin)) return fail("invalid_target", `The only resource here is ${resource}`);
-  return { ok: true, request: { client, redirect_uri: redirect, state, code_challenge: q.code_challenge, resource } };
+  return { ok: true, request: { client, redirect_uri: redirect, state, code_challenge: q.code_challenge, resource, scopes: grantedScopes(q.scope) } };
 }
 
 // ---- codes ----
@@ -147,6 +166,7 @@ interface CodeEntry {
   resource: string;
   ws: string;
   user_id: string;
+  scopes: string[];
   exp: number;
   used: { grant: string } | null;
 }
@@ -169,6 +189,7 @@ export function issueCode(r: AuthorizeRequest, ws: string, userId: string): stri
     resource: r.resource,
     ws,
     user_id: userId,
+    scopes: r.scopes,
     exp: now + CODE_TTL_MS,
     used: null,
   });
@@ -219,30 +240,42 @@ export async function exchange(form: URLSearchParams, origin: string): Promise<T
     // revokes it (removeGrant's transaction queues behind createGrant's).
     entry.used = { grant: newGrantId() };
     const created = await createGrant(
-      { ws: entry.ws, user_id: entry.user_id, client_id: entry.client_id, client_name: entry.client_name, redirect_host: new URL(entry.redirect_uri).host },
+      { ws: entry.ws, user_id: entry.user_id, client_id: entry.client_id, client_name: entry.client_name, redirect_host: new URL(entry.redirect_uri).host, scopes: entry.scopes },
       entry.used.grant,
     );
     // The workspace was deleted, or the person left or was removed, while the code was outstanding: it is worth nothing.
     if (!created) throw new TokenError("invalid_grant", "You are no longer a member of this workspace");
     const { grant, refresh_token } = created;
+    const scopes = grantedScopes(grant.scope);
     return {
-      access_token: mintAccess(grant.ws_id, grant.user_id, grant.id, grant.client_id, resource),
+      access_token: mintAccess(grant.ws_id, grant.user_id, grant.id, grant.client_id, resource, scopes),
       token_type: "Bearer",
       expires_in: ACCESS_TTL_S,
       refresh_token,
-      scope: SCOPE,
+      scope: scopes.join(" "),
     };
   }
   if (type === "refresh_token") {
     const r = parseRefresh(form.get("refresh_token"));
+    // A refresh keeps the grant's scopes. It may ask for fewer (RFC 6749 section 6), never for more; a refused ask
+    // is checked before rotating, so it doesn't spend the refresh token.
+    const stored = r ? grantScope(r.ws, r.id) : null;
+    const asked = form.get("scope");
+    const names = (asked ?? "").split(" ").filter(Boolean);
+    if (stored !== null) {
+      const had = grantedScopes(stored);
+      if (names.some((x) => !had.includes(x))) throw new TokenError("invalid_scope", `This app was allowed ${had.join(" ")} only. Connect Align again to allow more.`);
+    }
     const out = r ? await rotateGrant(r.ws, r.id, r.secret, clientId).catch(() => null) : null;
     if (!out) throw new TokenError("invalid_grant", "This sign-in has ended. Connect Align again.");
+    const held = grantedScopes(out.grant.scope);
+    const scopes = asked === null ? held : held.filter((x) => x === SCOPE || names.includes(x));
     return {
-      access_token: mintAccess(out.grant.ws_id, out.grant.user_id, out.grant.id, out.grant.client_id, resource),
+      access_token: mintAccess(out.grant.ws_id, out.grant.user_id, out.grant.id, out.grant.client_id, resource, scopes),
       token_type: "Bearer",
       expires_in: ACCESS_TTL_S,
       refresh_token: out.refresh_token,
-      scope: SCOPE,
+      scope: scopes.join(" "),
     };
   }
   throw new TokenError("unsupported_grant_type", "Use authorization_code or refresh_token");

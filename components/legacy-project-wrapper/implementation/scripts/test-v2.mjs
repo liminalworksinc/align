@@ -1410,18 +1410,17 @@ try {
   const crBapprovers = crB.json?.approvers?.map((a) => a.id).join();
   const evA = await addEv(U1, GL.id, crA.json?.id, { kind: "incident", url: "https://status.example.com/incidents/12", label: "API incident that motivates this" });
   const evNotInvolved = await addEv(U1, GL.id, crB.json?.id, { kind: "doc", url: "https://example.com/n", label: "not mine" });
-  // Through MCP with U1's device: the same rules, source agent.
-  const mcpEv = await mcpCall("U1", D1, "align_add_change_request_evidence", { change_request_id: crA.json?.id, kind: "ci_run", url: "https://ci.example.com/runs/8", label: "Green run on main" });
-  const mcpEvViewer = await mcpCall("U4", D4, "align_add_change_request_evidence", { change_request_id: crA.json?.id, kind: "doc", url: "https://example.com/mv", label: "viewer", workspace: A });
-  const mcpEvOther = await mcpCall("U1", D1, "align_add_change_request_evidence", { change_request_id: crB.json?.id, kind: "doc", url: "https://example.com/mo", label: "not mine" });
-  const mcpEvBad = await mcpCall("U1", D1, "align_add_change_request_evidence", { change_request_id: crA.json?.id, kind: "doc", url: "http://example.com/plain", label: "http" });
-  const mcpEvHidden = await mcpCall("U4", D4, "align_add_change_request_evidence", { change_request_id: "cr_AAAAAAAAAAAAAAAAAAAAAAAA", kind: "doc", url: "https://example.com/h", label: "hidden", workspace: A });
+  // A device token on MCP reads only (no changes:evidence scope): the evidence tool isn't listed, and calling it gets
+  // 403 insufficient_scope. The device adds an agent-reported link through the v2 route instead.
+  const devTools = await call("U1", "POST", "/api/mcp", { bearer: D1.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+  const mcpEv = await call("U1", "POST", "/api/mcp", { bearer: D1.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "align_add_change_request_evidence", arguments: { change_request_id: crA.json?.id, kind: "doc", url: "https://example.com/mcp", label: "via mcp" } } } });
+  const devEv = await call("U1", "POST", evPath(GL.id, crA.json?.id), { bearer: D1.access, body: { kind: "ci_run", url: "https://ci.example.com/runs/8", label: "Green run on main" } });
   const mcpList = await mcpCall("U1", D1, "align_list_change_requests", { state: "pending" });
   const mcpA = mcpList.sc?.change_requests?.find((c) => c.id === crA.json?.id);
   check(
-    "evidence: someone neither the requester nor an approver -> 403 not_involved; through MCP the requester's device adds an agent-reported link (url and label as untrusted_text), and the same refusals apply (viewer, not involved, not https, not found)",
-    evA.status === 201 && evNotInvolved.status === 403 && evNotInvolved.json?.error === "not_involved" && !mcpEv.isError && mcpEv.sc?.evidence?.source === "agent" && mcpEv.sc.evidence.reported_as === "agent-reported" && mcpEv.sc.evidence.url.untrusted_text === "https://ci.example.com/runs/8" && mcpEv.sc.evidence.label.untrusted_text === "Green run on main" && mcpEv.sc.change_request.evidence_count === 2 && /agent-reported/.test(mcpEv.text) && mcpEvViewer.isError && /Viewers/.test(mcpEvViewer.text) && mcpEvOther.isError && /add evidence/.test(mcpEvOther.text) && mcpEvBad.isError && /https/.test(mcpEvBad.text) && mcpEvHidden.isError && mcpEvHidden.text === "Change request not found",
-    `${evA.status} ${evNotInvolved.text} ${mcpEv.text.slice(0, 200)} | ${mcpEvViewer.text} | ${mcpEvOther.text} | ${mcpEvBad.text} | ${mcpEvHidden.text}`,
+    "evidence: someone neither the requester nor an approver -> 403 not_involved; a device token's MCP tools/list has no align_add_change_request_evidence and calling it -> 403 insufficient_scope (nothing added); the device adds an agent-reported link through the v2 route",
+    evA.status === 201 && evNotInvolved.status === 403 && evNotInvolved.json?.error === "not_involved" && devTools.status === 200 && !devTools.text.includes("align_add_change_request_evidence") && devTools.text.includes("align_list_change_requests") && mcpEv.status === 403 && /insufficient_scope/.test(mcpEv.headers.get("www-authenticate") ?? "") && /changes:evidence/.test(mcpEv.headers.get("www-authenticate") ?? "") && devEv.status === 201 && devEv.json.evidence.source === "agent" && devEv.json.evidence.reported_as === "agent-reported" && devEv.json.change_request.evidence_count === 2,
+    `${evA.status} ${evNotInvolved.text} ${mcpEv.status} ${mcpEv.headers.get("www-authenticate")} ${devEv.text.slice(0, 200)}`,
   );
   check(
     "evidence (mcp): align_list_change_requests returns each request's links (with revision and how they were reported) and the snapshot Align recorded at its current revision",

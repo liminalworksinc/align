@@ -3,7 +3,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { takeOAuthCall } from "@/lib/oauth/limits";
 import { knownProvider } from "@/lib/oauth/clients";
-import { checkAuthorize, originFromHost } from "@/lib/oauth/server";
+import { checkAuthorize, EVIDENCE_SCOPE, originFromHost } from "@/lib/oauth/server";
 import { clientOf } from "@/lib/ratelimit";
 import { getAuth } from "@/lib/v2/auth";
 import { all } from "@/lib/v2/db";
@@ -103,6 +103,7 @@ async function Authorize({ searchParams }: { searchParams: PageProps<"/oauth/aut
       loopback={loopback}
       provider={providerOf(redirect.host)}
       person={await personFrom(h)}
+      evidence={check.request.scopes.includes(EVIDENCE_SCOPE)}
     />
   );
 }

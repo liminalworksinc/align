@@ -574,9 +574,11 @@ const MIGRATIONS: string[] = [
   // it was written (snapshot_json: the goal's 30-day spend, bound sessions and last activity; never from a client).
   // Evidence links belong to one revision and are frozen once it is superseded or the request decided; `source` says
   // whether a person (web session) or an agent (MCP or a device token) added it. An approval records whether its
-  // revision had any evidence.
+  // revision had any evidence. An OAuth grant records its scopes: goals:read, plus the opt-in changes:evidence that lets
+  // a connected app add evidence links (lib/oauth/server.ts).
   `
   ALTER TABLE v2_change_request_revisions ADD COLUMN snapshot_json TEXT;
+  ALTER TABLE v2_oauth_grants ADD COLUMN scope TEXT NOT NULL DEFAULT 'goals:read';
   ALTER TABLE v2_change_requests ADD COLUMN approved_without_evidence INTEGER;
   CREATE TABLE v2_change_request_evidence (
     id TEXT PRIMARY KEY,

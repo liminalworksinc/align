@@ -12,8 +12,9 @@ import { pinClient } from "./clients";
 // A grant holds the app's name and redirect host as it introduced itself, the hash of its current refresh token (and
 // the one before, to catch reuse) keyed with ALIGN_SECRET, and which ALIGN_SECRET it was made under (kid): after a
 // rotation its tokens can never work again, so it is treated as gone and dropped on that person's next grant. The
-// refresh expiry is set once, at creation, and rotation never extends it. last_used_at is set by MCP calls, at most
-// every 5 minutes.
+// refresh expiry is set once, at creation, and rotation never extends it. A grant records the scopes the person
+// allowed (`scope`, space-separated; lib/oauth/server.ts) and rotation never changes them. last_used_at is set by MCP
+// calls, at most every 5 minutes.
 
 export interface Grant {
   id: string;
@@ -28,6 +29,8 @@ export interface Grant {
   prev_refresh_hash: string | null;
   refresh_exp: number;
   kid: string;
+  /** The allowed scopes, space-separated: "goals:read", or "goals:read changes:evidence". */
+  scope: string;
 }
 
 const MAX_GRANTS = 20; // per person per workspace
@@ -67,9 +70,12 @@ export function parseRefresh(token: unknown): { ws: string; id: string; secret: 
 /** A new grant id: the token endpoint takes one before creating the grant, so a replayed code can name it at once. */
 export const newGrantId = () => `gr_${randomBytes(12).toString("base64url")}`;
 
+/** The scopes a grant holds, or null if there is no such grant. */
+export const grantScope = (ws: string, id: string) => get<{ scope: string }>("SELECT scope FROM v2_oauth_grants WHERE id = ? AND ws_id = ?", id, ws)?.scope ?? null;
+
 /** Create the grant when a code is exchanged. Null when the person is no longer a member (or the workspace is gone). */
 export async function createGrant(
-  a: { ws: string; user_id: string; client_id: string; client_name: string; redirect_host: string },
+  a: { ws: string; user_id: string; client_id: string; client_name: string; redirect_host: string; scopes: string[] },
   id = newGrantId(),
 ): Promise<{ grant: Grant; refresh_token: string } | null> {
   const secret = randomBytes(32).toString("base64url");
@@ -87,6 +93,7 @@ export async function createGrant(
     prev_refresh_hash: null,
     refresh_exp: refreshExpiry(now),
     kid: grantKid(),
+    scope: a.scopes.join(" "),
   };
   const ok = await tx(() => {
     if (!isMember(a.ws, a.user_id)) return false;
@@ -96,8 +103,8 @@ export async function createGrant(
     const keep = all<{ id: string }>("SELECT id FROM v2_oauth_grants WHERE ws_id = ? AND user_id = ? ORDER BY created_at DESC, id DESC", a.ws, a.user_id);
     for (const old of keep.slice(MAX_GRANTS - 1)) run("DELETE FROM v2_oauth_grants WHERE id = ?", old.id);
     run(
-      `INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, refresh_hash, prev_refresh_hash, refresh_exp, kid)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)`,
+      `INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, refresh_hash, prev_refresh_hash, refresh_exp, kid, scope)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?)`,
       grant.id,
       grant.ws_id,
       grant.user_id,
@@ -108,6 +115,7 @@ export async function createGrant(
       grant.refresh_hash,
       grant.refresh_exp,
       grant.kid,
+      grant.scope,
     );
     return true;
   });
@@ -168,7 +176,7 @@ export function listGrants(pp: PolicyPrincipal) {
     pp.wsId,
   )
     .filter((g) => g.kid === kid && g.refresh_exp > now && visibleTo(pp, g))
-    .map((g) => ({ id: g.id, name: g.client_name, redirect_host: g.redirect_host, user: { id: g.user_id, name: g.user_name }, approved_at: g.created_at, last_used_at: g.last_used_at }));
+    .map((g) => ({ id: g.id, name: g.client_name, redirect_host: g.redirect_host, user: { id: g.user_id, name: g.user_name }, approved_at: g.created_at, last_used_at: g.last_used_at, scopes: g.scope.split(" ") }));
 }
 
 /** Disconnect one app: its person or a workspace owner. Anything else is not found. */

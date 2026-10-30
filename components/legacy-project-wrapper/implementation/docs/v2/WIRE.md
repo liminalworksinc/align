@@ -123,12 +123,13 @@ binding exists only because of it get `binding_suspended`.
 
 ## Connected AI apps and MCP
 `GET /api/v2/workspaces/:ws/apps` (cookie, members) → `{ "url": "<origin>/api/mcp", "apps": [{ "id": "gr_…", "name",
-"redirect_host", "user": { "id", "name" }, "approved_at", "last_used_at" }] }`: every live grant for a workspace owner,
+"redirect_host", "user": { "id", "name" }, "approved_at", "last_used_at", "scopes": ["goals:read", "changes:evidence"?] }] }`: every live grant for a workspace owner,
 the caller's own for anyone else. `DELETE /api/v2/workspaces/:ws/apps/:grant` (cookie write) → 204 for the grant's
 person or a workspace owner, else `404 not_found`; audit `oauth.app_revoked`. Removing a member, leaving and deleting
 the workspace revoke the person's (or every) grant there. `/api/mcp` accepts a device access token
 (`alnd_`) as well as Align's OAuth tokens; a device names the workspace in each tool call (`workspace`) unless it can
-read exactly one (docs/MCP.md, specs/align/mcp.md).
+read exactly one (docs/MCP.md, specs/align/mcp.md). A device token is `goals:read` only there; an app holds
+`changes:evidence` too only when the person allowed it.
 
 ## Changes (server)
 Implemented in `lib/v2/**` and `app/api/v2/**` (tests: `scripts/test-v2.mjs`). Everything above holds; these are the

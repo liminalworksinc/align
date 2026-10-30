@@ -13,6 +13,8 @@ interface App {
   user: { id: string; name: string };
   approved_at: string;
   last_used_at: string | null;
+  /** "goals:read", plus "changes:evidence" when the person let it add evidence links. */
+  scopes: string[];
 }
 
 export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
@@ -69,7 +71,10 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
               <tbody>
                 {apps.data.apps.map((a) => (
                   <tr key={a.id} className="border-t border-zinc-200 align-top">
-                    <td className="py-2 pr-3 text-zinc-900">{a.name}</td>
+                    <td className="py-2 pr-3 text-zinc-900">
+                      {a.name}
+                      <div className="text-[13px] text-zinc-500">{a.scopes.includes("changes:evidence") ? "Reads, and adds evidence links" : "Reads only"}</div>
+                    </td>
                     <td className="py-2 pr-3 font-mono text-[14px]">{a.redirect_host}</td>
                     <td className="py-2 pr-3">{a.user.name}</td>
                     <td className="py-2 pr-3">{when(a.approved_at)}</td>
