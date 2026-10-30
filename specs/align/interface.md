@@ -83,12 +83,12 @@ path or an `/oauth/authorize` URL, falling back to `/app` for anything else.
 The `/app/sign-in` page SHALL offer **Continue with Google** and **Continue with GitHub** only when that provider's
 client id and secret are configured, and SHALL offer the email-code form whenever email sign-in is available (always
 in Mode L; when hosted, whenever the email settings are set, as the `workspaces` part specifies); a person who is
-already signed in SHALL be sent straight to `next`.
+already signed in SHALL be sent straight to `next`, unless the URL carries `reauth=1`, which shows the form anyway.
 
 #### Scenario: Social sign-in
 
 - **WHEN** a person presses **Continue with Google**
-- **THEN** the page posts `{provider:"google", callbackURL:<next>, errorCallbackURL:"/app/sign-in"}` to `POST /api/v2/auth/sign-in/social` and follows the returned URL; an error is shown in red under the buttons
+- **THEN** the page posts `{provider:"google", callbackURL:<next>, errorCallbackURL:"/app/sign-in"}` to `POST /api/v2/auth/sign-in/social` and follows the returned URL; an error is shown in red at the bottom of the sign-in card
 
 #### Scenario: Neither provider configured
 
@@ -122,7 +122,8 @@ SHALL sign in only on a POST that the person submits; opening a sign-in link SHA
 
 #### Scenario: Email that cannot sign in
 
-- **WHEN** the code's email has no account, no invite for it is pending, and the server is hosted
+- **WHEN** the server is hosted, the code's email has no account, no invite for it is pending, and it is not the
+  `ALIGN_FIRST_OWNER_EMAIL` address while the server has no account yet
 - **THEN** sign-in fails and the page shows "This email can't sign in here yet. Ask a workspace owner to invite you."
 
 #### Scenario: Too many codes
@@ -148,17 +149,17 @@ account, and SHALL let the person link Google or GitHub explicitly; accounts are
 #### Scenario: Link GitHub
 
 - **WHEN** GitHub is configured, not yet linked, and the person presses **Link GitHub**
-- **THEN** the page posts `{provider:"github", callbackURL:"/app/account"}` to `POST /api/v2/auth/link-social`, follows the returned URL, and on return lists GitHub under "Ways you can sign in"
+- **THEN** the page posts `{provider:"github", callbackURL:"/app/account", errorCallbackURL:"/app/account"}` to `POST /api/v2/auth/link-social`, follows the returned URL, and on return lists GitHub with a green "linked" pill under "Ways you can sign in"
 
 #### Scenario: Linked methods
 
 - **WHEN** the page loads
-- **THEN** it reads `GET /api/v2/auth/list-accounts` and lists "Email code" (always) and each linked provider; a provider that is not configured on this server has no **Link** button
+- **THEN** it reads `GET /api/v2/auth/list-accounts` and lists "Email code" (whenever email sign-in is available), each linked provider and, for a test account, "Test password (this machine only)"; a provider that is not configured on this server, or is already linked, has no **Link** button
 
 #### Scenario: Provider account already in use
 
 - **WHEN** linking fails because that Google or GitHub account belongs to another Align account
-- **THEN** the page shows the server's message and nothing is linked
+- **THEN** the provider sends the person back to `/app/account?error=<code>` and the page shows "That account is already linked to another Align account, so nothing was linked." (other link failures show "Linking didn't work (<code>). Nothing was linked."); nothing is linked
 
 ### Requirement: Workspace list and first-run sample
 
@@ -209,7 +210,7 @@ sign in again before they can approve, and SHALL show the same prompt when the s
 #### Scenario: Stale sign-in on the device page
 
 - **WHEN** a person who signed in 40 minutes ago opens `/app/device`
-- **THEN** instead of the code form the page shows "Sign in again to approve a device. Approving needs a sign-in from the last 15 minutes." with **Sign in again**
+- **THEN** instead of the code form the page shows "Sign in again to approve a device. Approving needs a sign-in from the last 15 minutes." with **Sign in again**; the consent page shows "Sign in again to connect an app. Connecting needs a sign-in from the last 15 minutes." with **Sign in again** and **Cancel**
 
 #### Scenario: Signing in again
 
@@ -294,7 +295,8 @@ tree and every version, and SHALL give a person the server lets edit it (`can_ed
 #### Scenario: Goal tree
 
 - **WHEN** the goal contributes to goals or depends on goals
-- **THEN** a "Goal tree" card links each parent with its version, a green "reviewed" or an amber "reviewed against version <n>" / "not reviewed yet" pill, and for an editor **Still fits version <n>**, which posts `{parent_id}` to `POST .../goals/<goal>/review`; dependencies are listed as links with their versions
+- **THEN** a "Goal tree" card links each parent with its version, a green "reviewed" or an amber "reviewed against version <n>" / "not reviewed yet" pill, and for an editor, on a parent not reviewed against
+  its current version, **Still fits version <n>**, which posts `{parent_id}` to `POST .../goals/<goal>/review`; dependencies are listed as links with their versions
 
 ### Requirement: Ask to align from the goal page
 
@@ -304,7 +306,7 @@ is not a viewer, and SHALL send the request with `POST /api/v2/workspaces/<ws>/a
 #### Scenario: Send an alignment request
 
 - **WHEN** a member picks **Recognize contribution only** (optionally naming one of their own bindable goals) or **Work toward this goal and count future usage here**, ticks shared sessions (at least one for work toward), writes an optional note "never sent to agents" (up to 1000 characters) and presses **Send request**
-- **THEN** the page posts `{target_goal_id, source_goal_id, choice, session_keys, note}` and says "Sent. Follow it on Alignments." with a link to the Alignments tab
+- **THEN** the page posts `{target_goal_id, source_goal_id, choice, session_keys, note}` and says "Sent. Follow it on Alignments." with a link to the Alignments tab; **Send request** stays disabled until at least one session is ticked (for work toward) or a session or contributing goal is chosen (for contribution only)
 
 #### Scenario: Refused request
 
@@ -325,7 +327,7 @@ viewer and does not own it, and SHALL send the proposal with
 #### Scenario: Stale or duplicate proposal
 
 - **WHEN** the server answers 409 `stale_version` or 409 `already_open`
-- **THEN** the form shows "This goal changed while you were editing. Reload to start from version <n>." or "You already have an open change request on this goal." with a link to it
+- **THEN** the form shows "This goal changed while you were editing. Reload to start from version <n>." or "You already have an open change request on this goal. See it below." with a link to the goal's "Change requests" list
 
 #### Scenario: Who does not see it
 
@@ -341,12 +343,12 @@ read the goal, and SHALL show on each request only the actions its `can` flags a
 #### Scenario: Reading a request
 
 - **WHEN** a member opens a request in "Change requests"
-- **THEN** the page reads `GET .../change-requests/<id>` and shows the requester, a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"), the base version, the revision, the reason, a before and after view of each changed field, every revision with its author and note, and once decided who approved or rejected it, their note or reason and the resulting version; a superseded request says "Closed because the goal was marked achieved or dropped."
+- **THEN** the card, built from the list response, shows the requester, a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"), the base version, the revision, the reason, a before and after view of each changed field, who can approve it while it is open, every revision with its author and note (under "Revisions" once there is more than one), and once decided who approved or rejected it, their note or reason and the resulting version; a superseded request says "Closed because the goal was marked achieved or dropped."
 
 #### Scenario: Approver acts
 
 - **WHEN** a member of the goal's approval set (other than the requester, unless they own the goal) acts on a pending request
-- **THEN** **Approve** (with an optional note) posts `{revision, note}` to `approve`, **Reject** requires "Why you're rejecting" and posts `{reason}` to `reject`, and **Suggest a change** opens the pre-filled fields with a note and posts `{changes, note}` to `counter`
+- **THEN** **Approve** opens an optional note and **Approve as version <n+1>**, which posts `{revision, note}` to `approve`; **Reject** requires "Why you're rejecting" and posts `{reason}` to `reject`; and **Suggest a change** opens the pre-filled fields with a required note and **Send suggestion**, which posts `{revision, changes, note}` to `counter`
 
 #### Scenario: Approval blocked by a newer version
 
@@ -356,7 +358,7 @@ read the goal, and SHALL show on each request only the actions its `can` flags a
 #### Scenario: Requester acts
 
 - **WHEN** the requester views their own request
-- **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending); a pending or countered one offers **Withdraw** (`withdraw`); and a pending one whose base version is behind the goal shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{base_version:<n>}` to `rebase`
+- **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending); a pending or countered one offers **Withdraw** (`withdraw`), both posting `{revision}`; and one whose base version is behind the goal and whose `can.rebase` flag is set shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{revision, base_version:<n>}` to `rebase`
 
 #### Scenario: Viewer
 
@@ -515,12 +517,12 @@ refuse requests it cannot trust without redirecting.
 #### Scenario: What the page shows
 
 - **WHEN** a signed-in person with a recent sign-in arrives with a valid request
-- **THEN** the page shows "Connect <app> to Align", "This app named itself." unless it is a known AI provider's client document, the redirect host, and "What it can do": it reads goals, change requests, decision records and directives in the workspace they choose, as them and with their role; it can't propose, approve or change anything; it never sees captured prompts; what it reads is sent to <provider>; they or a workspace owner can disconnect it on the workspace's Apps tab, and it is disconnected if they leave the workspace
+- **THEN** the page shows "Connect <app> to Align", "This app named itself." unless it is a known AI provider's client document, "After you allow it, Align sends you back to <redirect host>.", "Signed in as <name> (<email>).", and "What it can do": it reads goals, change requests, decision records and directives in the workspace they choose, as them and with their role; it can’t propose, approve or change anything; it never sees captured prompts; what it reads is sent to <provider>; they or a workspace owner can disconnect it on the workspace’s Apps tab, and it is disconnected if they leave the workspace
 
 #### Scenario: Choose a workspace and allow
 
 - **WHEN** the person picks one workspace under "Which workspace" and presses **Allow read-only access**
-- **THEN** the page posts `{params, decision:"approve", workspace_id}` to `POST /api/oauth/approve` and follows the returned redirect; **Cancel** posts `decision:"deny"`; **Allow read-only access** stays disabled until a workspace is picked
+- **THEN** the page posts `{params, decision:"approve", workspace_id}` to `POST /api/oauth/approve` and follows the returned redirect; **Cancel** posts `decision:"deny"`; **Allow read-only access** stays disabled until a workspace is picked (a person with exactly one such workspace has it picked already)
 
 #### Scenario: Viewer workspaces
 
@@ -535,12 +537,12 @@ refuse requests it cannot trust without redirecting.
 #### Scenario: Untrusted or rate-limited request
 
 - **WHEN** the app or redirect fails the server check, or this network made too many requests
-- **THEN** the page shows "Can't connect this app" with the reason, or "Too many requests from this network. Wait a minute, then reload this page.", or for a redirectable error "Return to the app"; it offers no **Allow** button
+- **THEN** the page shows "Can’t connect this app" with the reason, or with "Too many requests from this network. Wait a minute, then reload this page.", or for a redirectable error with "The app sent a request Align can’t accept. Go back to the app and try again." and a **Return to the app** link; it offers no **Allow** button
 
 #### Scenario: Server stops answering
 
 - **WHEN** the approve request gets no answer within 20 seconds
-- **THEN** the page shows "Align didn't answer. Reload this page and choose Allow again." and re-enables the buttons
+- **THEN** the page shows "Align didn’t answer. Reload this page and choose Allow again." and re-enables the buttons
 
 ### Requirement: Render error page
 
@@ -559,12 +561,13 @@ The app SHALL show a plain error page for any render error, without the error me
 ### Requirement: Web app status pills
 
 Pages under `/app` SHALL mark states with plain-word pills whose colors follow one rule: green for a settled good
-state, amber for something waiting or needing attention, red for revoked or stopped, neutral otherwise.
+state, amber for something waiting or needing attention, red for revoked or stopped, violet for names and labels that
+are not states (a team, a "company" goal, an active goal's status), neutral otherwise.
 
 #### Scenario: Pill colors
 
 - **WHEN** a page shows a state
-- **THEN** an approved alignment or change request, an active device, a goal "you can bind sessions" to and a reviewed parent goal are green; a pending or countered alignment or change request, "needs alignment to bind" and a parent not reviewed against its current version are amber; a revoked device and a stopped agent are red
+- **THEN** an approved alignment, alignment requirement or change request, an active device, a linked sign-in method, a shared session, an achieved goal, a goal "you can bind sessions" to and a reviewed parent goal are green; a pending or countered alignment or change request, a requirement still waiting, a suspended session, "needs alignment to bind" and a parent not reviewed against its current version are amber; a revoked device and a stopped agent are red
 
 ## Open questions
 
@@ -584,10 +587,15 @@ state, amber for something waiting or needing attention, red for revoked or stop
 - `app/app/_ui/kit.tsx`
 - `app/app/_ui/types.ts`
 - `app/app/_ui/goalform.tsx`
+- `app/app/_ui/changes.tsx`
+- `app/app/_ui/words.ts`
+- `app/app/_ui/error-notice.tsx`
 - `app/app/page.tsx`
 - `app/app/view.tsx`
 - `app/app/sign-in/page.tsx`
 - `app/app/sign-in/view.tsx`
+- `app/app/account/page.tsx`
+- `app/app/device/page.tsx`
 - `app/app/account/view.tsx`
 - `app/app/device/view.tsx`
 - `app/app/devices/view.tsx`
@@ -604,7 +612,9 @@ state, amber for something waiting or needing attention, red for revoked or stop
 - `app/oauth/authorize/AuthorizeForm.tsx`
 - `app/api/oauth/approve/route.ts`
 - `lib/oauth/clients.ts`
+- `lib/oauth/limits.ts`
 - `lib/oauth/server.ts`
 - `lib/v2/auth.ts`
+- `lib/v2/config.ts`
 - `lib/v2/changes.ts`
 - `lib/v2/mail.ts`
