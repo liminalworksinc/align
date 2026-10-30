@@ -40,8 +40,22 @@ const TO_NEW = new Set(["/", "/setup"]); // Northstar's pages: a tester lands on
 
 const text = (status: number, body: string) => new NextResponse(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
+// Every page and route, refusals included: never framed (clickjacking; the consent page's fuller set stays in
+// next.config.ts). HSTS only when hosted: on Mode L it would pin 127.0.0.1 to https in the browser.
+const HSTS = "max-age=31536000";
+function secured(res: NextResponse, hosted: boolean): NextResponse {
+  res.headers.set("X-Frame-Options", "DENY");
+  res.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+  if (hosted) res.headers.set("Strict-Transport-Security", HSTS);
+  return res;
+}
+
 export function proxy(request: NextRequest) {
   const cfg = alignConfig();
+  return secured(route(request, cfg), cfg.hosted);
+}
+
+function route(request: NextRequest, cfg: ReturnType<typeof alignConfig>): NextResponse {
   const name = hostName(request.headers.get("host"));
   if (!cfg.hosted) {
     if (!name || !LOCAL_HOSTS.has(name)) return text(421, "Misdirected request: this server answers to localhost only\n");

@@ -162,6 +162,8 @@ fly scale count 1
 
 **The health check** (`fly.toml`) calls `/api/workspaces/config` with the Host, `X-Forwarded-Proto` and `Fly-Client-IP` headers Fly's edge would send. Without them the app answers 421 or 403.
 
+**Response headers** (`proxy.ts`): every page and route, refusals included, sends `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`, so no page can be framed. When hosted, every response also sends `Strict-Transport-Security: max-age=31536000` (no `preload`); Mode L never does, because it would pin `127.0.0.1` to https. There is no fuller CSP yet. The consent page keeps its own set too (`next.config.ts`: no-referrer, no-store).
+
 ## Smoke test on the live URL (go-C condition 6)
 
 Run this before the first tester gets a link, and post the results on LIM-2424:

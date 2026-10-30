@@ -72,7 +72,7 @@ async function call(method, p, { body, cookie, headers = {}, raw } = {}) {
   try {
     json = JSON.parse(text);
   } catch {}
-  return { status: res.status, json, text, cookie: (res.headers.get("set-cookie") || "").split(";")[0] };
+  return { status: res.status, headers: res.headers, json, text, cookie: (res.headers.get("set-cookie") || "").split(";")[0] };
 }
 
 /** fetch() won't send a forged Host; node:http will. */
@@ -122,6 +122,11 @@ function hosted(method, p, { body, cookie, headers = {} } = {}) {
   });
 }
 const HOSTED_HOST = "align.test";
+/** A response header from call() (fetch Headers) or hosted() (node's lowercase object); repeated values joined. */
+const header = (r, k) => (typeof r.headers?.get === "function" ? r.headers.get(k) : [r.headers?.[k.toLowerCase()]].flat().filter(Boolean).join(", ") || null);
+/** Never framed: exactly one X-Frame-Options DENY and a CSP frame-ancestors 'none' (LIM-2437 hosted security headers). */
+const unframed = (r) => header(r, "x-frame-options") === "DENY" && header(r, "content-security-policy") === "frame-ancestors 'none'";
+const framing = (r) => `${r.status} xfo=${header(r, "x-frame-options")} csp=${header(r, "content-security-policy")} hsts=${header(r, "strict-transport-security")}`;
 /** The page's server HTML carries the noscript notice once, inside <noscript> (the RSC payload's <script>s, which
  *  repeat the text, are left out, as in LD1). */
 function noscriptIn(html) {
@@ -350,6 +355,12 @@ try {
   const stB = await call("GET", "/api/state", { cookie: sb.product });
   check("A1 A's state has A's markers and none of B's", stA.text.includes("AMARK") && !stA.text.includes("BMARK"), stA.text.slice(0, 200));
   check("A1 B's state has B's markers and none of A's", stB.text.includes("BMARK") && !stB.text.includes("AMARK"), stB.text.slice(0, 200));
+  // SH1 Mode L: every page and route refuses framing, and nothing sends HSTS (it would pin 127.0.0.1 to https).
+  const shL = [await call("GET", "/new"), await call("GET", `/w/${a}`), stA, await call("GET", "/api/workspaces/config"), await call("GET", "/api/nope")];
+  check("SH1 Mode L: /new, /w/<id>, API routes and a 404 send X-Frame-Options DENY and frame-ancestors 'none'", shL.every(unframed), shL.map(framing).join(" | "));
+  check("SH1 Mode L: no Strict-Transport-Security on any response", shL.every((r) => !header(r, "strict-transport-security")), shL.map(framing).join(" | "));
+  const shConsent = await call("GET", "/oauth/authorize");
+  check("SH1 Mode L: the consent page keeps its set (no-referrer, no-store) with one framing value each", unframed(shConsent) && header(shConsent, "referrer-policy") === "no-referrer" && header(shConsent, "cache-control") === "no-store", `${framing(shConsent)} ref=${header(shConsent, "referrer-policy")} cc=${header(shConsent, "cache-control")}`);
   check("A11 new workspace has no Northstar capture marker (state and files)", !stA.text.includes("NSMARKER") && !allText(path.join(wsRoot, a)).includes("NSMARKER"), "NSMARKER leaked");
   check("A11 new workspace starts with empty sessions, mappings, simulations", stA.json.sessions.length === 0 && stA.json.mappings.length === 0 && stA.json.simulations.length === 0, "not empty");
 
@@ -1291,6 +1302,10 @@ try {
   check("H3 hosted create with an invite code and same-site Origin -> 201", hA.status === 201 && hB.status === 201, `${hA.status} ${hB.status} ${hA.text.slice(0, 200)}`);
   const hPages = [hNew, await hosted("GET", `/w/${hA.json?.workspace?.id}`)];
   check("NS1 hosted: server HTML for /new and /w/<id> carries the noscript notice", hPages.every((r) => r.status === 200 && noscriptIn(r.text)), hPages.map((r) => `${r.status} ${noscriptIn(r.text)}`).join(" "));
+  // SH2 hosted: the same framing headers, plus HSTS (one year, no preload) on pages, API routes, refusals and the consent page.
+  const shH = [...hPages, hCfg, hA, await hosted("GET", "/api/nope"), hHttp, await hosted("GET", "/oauth/authorize")];
+  check("SH2 hosted: /new, /w/<id>, API routes, a 404, a refusal and the consent page send X-Frame-Options DENY and frame-ancestors 'none'", shH.every(unframed), shH.map(framing).join(" | "));
+  check("SH2 hosted: every one sends Strict-Transport-Security max-age=31536000", shH.every((r) => header(r, "strict-transport-security") === "max-age=31536000"), shH.map(framing).join(" | "));
   const reuse = await hosted("POST", "/api/workspaces", { body: { ...FIXTURE, signup_code: INVITES[0] } });
   check("H3 an invite code works once (reuse -> 403 already used)", reuse.status === 403 && /already used/.test(reuse.text), `${reuse.status} ${reuse.text}`);
   const usedFileText = readFileSync(path.join(hostedDir, "workspaces", "_used_invites.json"), "utf8");
