@@ -13,8 +13,8 @@ dependencies). It has three jobs:
    ledger row per provider request, with token counts, a list-price estimate and a billing basis. This works
    offline and without signing in.
 2. **Share deliberately.** Every session is private until the user shares it, one session at a time or through
-   a folder rule. Only shared sessions ever reach the server, and only as counts, model names and keyed hashes,
-   plus repo-relative file paths, commit subjects, task labels and the branch name when the user turns on work
+   a folder rule. Only shared sessions ever reach the server, and only as counts, model names and hashes (plus an
+   optional user-chosen repo alias), plus repo-relative file paths, commit subjects, task labels and the branch name when the user turns on work
    signals for that share.
 3. **Bring goal authority into running sessions.** Hooks put the bound goal into the agent's context, deliver
    later goal versions as short deltas, show the work in flight toward related goals, and block tools when the
@@ -422,7 +422,9 @@ The `align` hook SHALL answer any prompt that starts with `::align` (case-insens
 "reason": <text>}` and no `additionalContext`, so the text is shown to the user and never reaches the model.
 `::align share` and `::align share --dir` SHALL only preview until repeated with `confirm` (or `--yes`/`-y`); the
 confirmed command SHALL be spooled for the next sync, and `--dir` SHALL also write the folder rule. `::align bind`
-SHALL refuse goals that are not bindable. `::align task <label>` and `::align claim <file> [why]` SHALL record
+SHALL refuse goals that are not bindable. `::align unshare` (alias `::align stop`) SHALL spool a stop-sharing that the
+next sync applies like `align stop-sharing`, and `::align unshare --dir` SHALL remove the folder rule covering the
+session's folder at once. `::align task <label>` and `::align claim <file> [why]` SHALL record
 activity (claims last 60 minutes) only for sessions that are shared or covered by a folder rule. A bare `::align`
 SHALL show `::align status`.
 
@@ -526,8 +528,9 @@ write without the 5m/1h split), `long_context_unmodeled` (OpenAI input above 272
 `auto_review_unpriced` or `invalid_counters`. Claude Haiku 5.5 SHALL switch to its second rate card above a
 100,000-token prompt. The basis SHALL be `api_usd` for Claude Code sessions started with `ANTHROPIC_API_KEY`,
 `ANTHROPIC_AUTH_TOKEN` or a Bedrock/Vertex/Foundry flag, otherwise `subscription_included` when `.claude.json` has
-`oauthAccount`, otherwise `api_usd`; for Codex `subscription_included` when `auth.json` has `auth_mode: "chatgpt"`,
-`api_usd` for `apikey`, else `unknown`. Estimates SHALL be labelled as list-price estimates, never as money spent.
+`oauthAccount`, otherwise `api_usd`; for Codex `subscription_included` when `auth.json` has `auth_mode: "chatgpt"`
+(or, without `auth_mode`, has `tokens`), `api_usd` when it has `auth_mode: "apikey"` or a non-empty `OPENAI_API_KEY`,
+else `unknown`. Estimates SHALL be labelled as list-price estimates, never as money spent.
 
 #### Scenario: Cache-write tiers
 
@@ -546,7 +549,9 @@ after the session's `PUT` and the row's epoch have been accepted, in batches of 
 `POST .../sessions/<session_key>/usage`. Each row SHALL be assigned to the epoch active at its root turn (falling
 back to the row's timestamp); rows before the first epoch SHALL stay private, and rows in an epoch the server
 refused SHALL be withheld. Each row SHALL carry only `request_key`, `ts`, `epoch_id`, `model`, `query_source`, the
-six token counters, `basis`, `est_list_usd_micros`, `price_table_version` and `source`.
+six token counters, `basis`, `est_list_usd_micros`, `price_table_version` and `source`. A usage upload answered
+403, 404 or 409 SHALL stop that session's uploads for the pass and log it, and a 404 or an error `sharing_stopped` or
+`not_shared` SHALL mark the share `stopped`; a network error SHALL end the upload step until the next pass.
 
 #### Scenario: Root turn beats timestamp
 
@@ -576,9 +581,11 @@ tell the user `Align: sharing failed (<code>). This session stays private.`; a 4
 ### Requirement: Nothing private leaves the machine
 
 The `align` CLI, hooks and sync pass SHALL never upload or store prompts, responses, tool input or output, file
-contents or transcript text; SHALL send repos only as keyed `repo_key` hashes and session titles as null; SHALL
-keep folder rules, repo paths and branch names local unless work signals are on; and SHALL never send an `Origin`
-header. Sessions that are not shared SHALL cause zero server requests about them.
+contents or transcript text; SHALL identify repos to the session API only by the keyed `repo_key` hash (plus a
+`repo_alias` only when the user chose one) and send session titles as null; SHALL identify repos in pod activity
+only by `repo_id`, an unkeyed hash of the workspace and the normalized git remote (or local folder) that is the same on
+every member's machine; SHALL keep folder rules, repo paths and branch names local unless work signals are on; and
+SHALL never send an `Origin` header. Sessions that are not shared SHALL cause zero server requests about them.
 
 #### Scenario: Canary text
 
@@ -590,8 +597,10 @@ header. Sessions that are not shared SHALL cause zero server requests about them
 The `align` CLI SHALL create `~/.align/device_secret` (32 random bytes, 0600) exactly once and never regenerate it;
 a secret of the wrong length or an unreadable file SHALL fail closed with an error naming the file and SHALL be left
 in place for recovery. It SHALL derive `session_key` = base64url HMAC-SHA256(secret, `ws\0harness\0native_id`),
-`repo_key` = base64url HMAC-SHA256(secret, `ws\0repo\0<realpath of git toplevel or cwd>`) and `request_key` from
-the provider request id, each 43 characters and different per workspace. Logout SHALL keep the device secret.
+`repo_key` = base64url HMAC-SHA256(secret, `ws\0repo\0<realpath of git toplevel or cwd>`) and `request_key` =
+base64url HMAC-SHA256(secret, `req\0<provider>\0<provider request id>`), each 43 characters; `session_key` and
+`repo_key` differ per workspace, while `request_key` does not include the workspace. Logout SHALL keep the device
+secret.
 
 #### Scenario: Damaged secret
 
@@ -621,8 +630,9 @@ added authority.` Each version SHALL be noted once, at the next prompt or tool c
 The `align` hook SHALL record each shared session's edits, reads, commit subjects, task labels and claims in
 `~/.align/activity/<lid>.jsonl` (trimmed to the last 300 lines above 128 KB; nothing for private sessions). At a
 prompt it SHALL add one card of at most 300 characters, `[Align] Also working toward this goal on this machine:
-...`, about other local sessions bound to the same goal (at most once per 10 minutes unless files overlap, and 0
-bytes when nothing is new). Before an edit it SHALL deny, once, an edit to a file another same-goal session on this
+...`, about other local sessions bound to the same goal (at most once per 10 minutes per session, sooner only when
+another person's work overlaps this session's files, and 0 bytes when nothing is new; the same card is also added at
+`SessionStart`). Before an edit it SHALL deny, once, an edit to a file another same-goal session on this
 machine changed in the last 20 minutes through a hook-seen edit, unless this session read or edited it since, with
 the reason `Align: <harness> session <id8>, working toward the same goal, edited <file> <n> min ago. Read the file
 again so you keep its changes, then retry this edit.`
@@ -712,9 +722,13 @@ The implementation repo's own `.claude/settings.json` SHALL run `node "$CLAUDE_P
 and `Stop`, and `scripts/align-watch.mjs` with `asyncRewake: true` (timeout 3600) on `SessionStart` and `Stop`. The
 capture hook SHALL act only when the project opted in (a `.claude/settings.json` mentioning `align-capture` between
 `cwd` and the git toplevel, never `$HOME`) or `ALIGN_CAPTURE=1`, redact tokens and long secrets, truncate text to
-1,000 characters, make file paths repo-relative, `POST` the event to `<ALIGN_URL>/api/sessions/events` (default
+1,000 characters, make file paths repo-relative (a path outside the repo keeps only its file name), `POST` an event
+holding harness, session id, hook event, the absolute `cwd`, the redacted prompt, shell command and last assistant
+message, tool name, file path, reason, branch and repo folder name to `<ALIGN_URL>/api/sessions/events` (default
 `http://localhost:3100`, Bearer `ALIGN_AGENT_TOKEN` when set) with an 800 ms timeout, never write stdout, never send
-tool output, and exit 0 within 1.3 s. The watcher SHALL keep one live watcher per session, wait on
+tool output, and exit 0 within 1.3 s. It also accepts Codex `notify` payloads with `--codex`. The watcher SHALL run only
+when `ALIGN_CAPTURE=1` or a `.claude/settings.json` mentioning `align-watch` is found in `cwd` or up to 7 parent
+folders, keep one live watcher per session (a pid file in the temp folder), wait on
 `/api/directives/stream?session=claude-code:<id>` with a polling fallback on `/api/directives?session=...`, and on a
 directive acknowledge it with `POST /api/directives/ack`, print its text to stderr and exit 2 to wake the session.
 
@@ -730,10 +744,9 @@ directive acknowledge it with `POST /api/directives/ack`, print its text to stde
 
 ## Open questions
 
-1. **"Daemon".** The package has no daemon or login item: the only background work is the one-pass `align sync`
-   that hooks start. Yet `package.json` still describes "CLI, daemon, Claude Code and Codex hooks", and `paths.ts`
-   resolves an unused `launchAgents` path (`ALIGN_LAUNCH_AGENTS_DIR`). Should the spec treat the daemon as removed
-   (as written here)?
+1. **Stale "daemon" leftovers.** The code has no daemon or login item (the only background work is the one-pass
+   `align sync` that hooks start), yet `package.json` still describes "CLI, daemon, Claude Code and Codex hooks", and
+   `paths.ts` resolves an unused `launchAgents` path (`ALIGN_LAUNCH_AGENTS_DIR`). Should these leftovers be removed?
 2. **Two capture systems with opposite privacy rules.** The packaged hooks never send prompts or paths. The
    repo-local `align-capture.mjs` sends redacted prompts, shell commands, the last assistant message, the branch and
    an absolute `cwd` to the v1 `/api/sessions/events`, despite its comment that no home-directory paths leave the
@@ -745,7 +758,14 @@ directive acknowledge it with `POST /api/directives/ack`, print its text to stde
 4. **Re-login and keys.** `align login` replaces `device_key` before the device flow starts, even when the device
    is already signed in. Logout keeps `device_secret`, so session keys stay the same after signing in again. Please
    confirm both are intended.
-5. **Latency budget.** The harness `timeout` is 5 s, the internal deadline is 300 ms, and `align doctor` and the
+5. **Rebinding a suspended session.** After `binding_suspended` the user is told to run `::align bind <goal>` or
+   `align bind`, and both record a pending binding for a `suspended` share, but `UserPromptSubmit` opens the new epoch
+   only when the share is `shared`, so the binding never takes effect and usage stays paused. Is a suspended session
+   meant to be rebindable locally?
+6. **Preview wording with work signals.** The single-session `align share` preview always prints `Never sent: ...
+   file paths, repo path, branch names ...`, even with `--signals`, where the next lines say repo-relative paths and
+   the branch name are sent. Should the preview line depend on `--signals`, as the `--dir` preview's does?
+7. **Latency budget.** The harness `timeout` is 5 s, the internal deadline is 300 ms, and `align doctor` and the
    tests use p95 < 150 ms as the bar. Which number is the requirement?
 
 ## Sources
