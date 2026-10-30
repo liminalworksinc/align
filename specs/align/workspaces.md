@@ -564,7 +564,9 @@ the way the server does (rename aside to `.deleting-<id>`, remove, append a `del
 
 The server SHALL, when `ALIGN_GOAL_SESSIONS=1`, mount Better Auth at `/api/v2/auth/*` with the cookie
 `align_v2.session_token` (`__Secure-` prefixed when hosted), accept only that cookie on web routes and only
-`Bearer alnd_…` device tokens on device routes; with the flag unset every `/app*` and `/api/v2/*` path is 404.
+`Bearer alnd_…` device tokens on authenticated device routes (the pairing routes `device/authorize`, `device/token`
+and `device/refresh` take no token but still refuse browsers); with the flag unset every `/app*` and `/api/v2/*` path
+is 404. Goal sessions data SHALL live in one SQLite file (WAL) at `<ALIGN_DATA_DIR or ./data>/v2/align.sqlite` in a 0700 directory with the file at 0600; in Mode L without `BETTER_AUTH_SECRET`, Better Auth's secret is generated into `.auth-secret` in that directory.
 
 #### Scenario: Wrong credential kind
 
@@ -610,6 +612,11 @@ device that shared them, within the workspaces granted to it.
 
 - **WHEN** a client calls `POST /api/v2/device/authorize` more than 10 times in an hour, or polls `POST /api/v2/device/token` faster than the interval
 - **THEN** the server responds 429 `rate_limited`, or 400 `slow_down` with 5 s added to the interval; an approved code returns tokens (`alnd_` 1 h, `alnr_` 30 days) exactly once and then 400 `expired_token`
+
+#### Scenario: Polling before and after a decision
+
+- **WHEN** a device polls `POST /api/v2/device/token` with `grant_type` `urn:ietf:params:oauth:grant-type:device_code` and its `device_code`, at or after the interval
+- **THEN** a pending code answers 400 `authorization_pending`, a denied code 400 `access_denied`, an expired (10-minute) code 400 `expired_token`, an unknown device code 400 `invalid_grant`, and another `grant_type` 400 `unsupported_grant_type`; `POST /api/v2/device/authorize {device_name, public_key}` (a 32-byte base64url Ed25519 key) returns `{device_code, user_code:"XXXX-XXXX", verification_uri:"<origin>/app/device", expires_in:600, interval:5}`
 
 #### Scenario: Another device's session
 

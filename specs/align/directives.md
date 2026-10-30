@@ -73,8 +73,8 @@ The server SHALL allow a company-goal push only from the `leadership` actor and 
 
 #### Scenario: Non-leadership push is refused
 
-- **WHEN** a session whose actor is not `leadership` calls `POST /api/org/push`
-- **THEN** the response is HTTP 403 with error "Only leadership can approve and send the company goal" and no authority event is emitted
+- **WHEN** a Northstar session whose actor is not `leadership` calls `POST /api/org/push`
+- **THEN** the response is HTTP 403 with error "Only leadership can approve and send the company goal" and no authority event is emitted (a custom-workspace session is refused earlier with HTTP 403 "This isn’t available in a custom workspace")
 
 #### Scenario: Wrong team ratifies
 
