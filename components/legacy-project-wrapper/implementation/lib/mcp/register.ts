@@ -3,6 +3,7 @@ import { z } from "zod";
 import { CHANGE_REQUEST_STATES, getChangeRequest, listChangeRequests, type ChangeDiff, type ChangeRequestSummary } from "../v2/changes-read";
 import { all, get } from "../v2/db";
 import type { DevicePrincipal } from "../v2/devices";
+import { noteFirstMcpRead } from "../v2/events";
 import { goalSnapshot, type Binding, type DirectiveKind } from "../v2/directives";
 import { goalObj, goalRow, serializeGoal, toWireVisibility, transferGoals, visibleGoals, bindableFor, type GoalRow, type Measure } from "../v2/goals";
 import { canReadGoal, type PolicyPrincipal } from "../v2/policy";
@@ -49,6 +50,7 @@ function enter(ctx: ServerContext, workspace: string | undefined): PolicyPrincip
   const who: DevicePrincipal = { kind: "device", user: { id: c.uid, name: "", email: "" }, deviceId: "", deviceName: "", grants: new Set([ws]) };
   const pp = principalIn(who, ws);
   if (!pp.wsRole) throw new Error("Workspace not found");
+  noteFirstMcpRead(ws, c.uid, c.kind);
   return pp;
 }
 

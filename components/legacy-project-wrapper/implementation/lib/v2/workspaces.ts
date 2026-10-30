@@ -6,6 +6,7 @@ import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { authorize, type Action, type PodRole, type PolicyObject, type PolicyPrincipal, type WsRole } from "./policy";
 import type { Principal, WebPrincipal } from "./http";
 import { config } from "../config";
+import { event } from "./events";
 import { take } from "./limits";
 import { deleteMemberSessions, onMemberRemoved } from "./lifecycle";
 import { cancelDeparture, noteDeparture, personName, RESTORE_DAYS } from "./retention";
@@ -65,10 +66,12 @@ export async function createWorkspace(req: Request, p: WebPrincipal, name: strin
   const id = newId("ws");
   const at = nowIso();
   await tx(() => {
-    admitCreation(creator, code, id);
+    const redeemed = admitCreation(creator, code, id);
     run("INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)", id, name, userId, at);
     run("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)", id, userId, at);
     audit(id, userId, "workspace.created", id, at);
+    if (redeemed) event("code_redeemed", { ws: id, user: userId, at });
+    event("workspace_created", { ws: id, user: userId, props: { kind: seed ? "sample" : "blank" }, at });
     seed?.(id, at);
   });
   return { id, name, role: "owner" as const };
@@ -244,6 +247,7 @@ export async function createInvite(pp: PolicyPrincipal, email: string, role: WsR
       new Date(Date.now() + INVITE_TTL_MS).toISOString(),
     );
     audit(pp.wsId, pp.userId, "invite.created", id, at);
+    event("invite_sent", { ws: pp.wsId, user: pp.userId, props: { role }, at });
   });
   return { id, email: e, role, team_id: teamId, team_role: teamRole, path: `/app/invite/${token}`, token };
 }
@@ -317,6 +321,9 @@ export async function acceptInvite(token: string, user: { id: string; email: str
     } else r.team_id = null;
     run("UPDATE v2_invites SET accepted_at = ?, accepted_by = ? WHERE id = ?", at, user.id, r.id);
     audit(r.ws_id, user.id, "invite.accepted", r.id, at);
+    event("invite_accepted", { ws: r.ws_id, user: user.id, props: { role: r.role }, at });
+    // The workspace's second member (once, however many join or leave later).
+    if ((get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_members WHERE ws_id = ?", r.ws_id)?.n ?? 0) >= 2) event("second_member_joined", { ws: r.ws_id, user: user.id, at });
   });
   return { workspace_id: r.ws_id, role: r.role, team_id: r.team_id };
 }

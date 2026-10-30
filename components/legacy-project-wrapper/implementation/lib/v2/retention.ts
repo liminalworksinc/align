@@ -8,6 +8,7 @@ import * as core from "./retention-core.mts";
 export {
   AUDIT_MONTHS,
   describeCounts,
+  EVENT_MONTHS,
   FORMER_MEMBER_DAYS,
   formerMemberId,
   INVITE_GRACE_DAYS,

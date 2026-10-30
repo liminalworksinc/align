@@ -1,5 +1,6 @@
 import { all, audit, get, run, tx } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./errors";
+import { event } from "./events";
 import { newId, nowIso } from "./ids";
 import { effectiveSet } from "./approval";
 import { contentOf, goalObj, goalRow, nextContent, sameContent, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
@@ -148,7 +149,10 @@ export async function createChangeRequest(pp: PolicyPrincipal, goalId: string, b
     if (now.version !== g.version) throw conflict("stale_version", `This goal changed while you were editing. Reload to start from version ${now.version}.`);
     if (now.status !== "active") throw conflict("goal_not_active", "This goal is achieved or dropped, so it takes no change requests");
     if (openRequestOf(pp.wsId, g.id, pp.userId)) throw conflict("already_open", "You already have an open change request on this goal.");
-    return insertChangeRequest(pp, now, changes, reason, at);
+    const created = insertChangeRequest(pp, now, changes, reason, at);
+    // Here, not in insertChangeRequest: the sample workspace's seeded request is nobody's first.
+    event("first_change_request", { ws: pp.wsId, user: pp.userId, at });
+    return created;
   });
   return requestView(pp, crRow(pp.wsId, id)!);
 }
@@ -192,6 +196,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         const written = writeGoalVersion(g, next, me, at);
         run("UPDATE v2_change_requests SET version = ? WHERE id = ?", written.version, r.id);
         audit(pp.wsId, me, "change_request.approved", r.id, at);
+        event("first_approval", { ws: pp.wsId, user: me, at });
         break;
       }
       case "reject": {

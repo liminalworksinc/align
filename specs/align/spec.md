@@ -47,5 +47,6 @@ agent hooks and screens), not the framework, hosting, or language choices.
 - `directives` — directives to running agents, receipts, and stopping and resuming an agent
 - `mcp` — the read-only MCP server, its OAuth authorization server and the `align-connect` stdio relay
 - `workspaces` — identity and sign-in, workspaces, members, teams, invites, devices, shared sessions, usage and spend, activity, and hosted mode
+- `metrics` — content-free product events, operator-recorded LOIs and the operator's metrics report
 - `local-agent` — the `align` CLI, its Claude Code and Codex hooks, the one-pass sync and local metering
 - `interface` — the web app under `/app` and the OAuth consent page

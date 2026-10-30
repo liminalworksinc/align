@@ -615,7 +615,8 @@ The repository SHALL provide `scripts/align-admin.mjs` (`npm run admin -- …`),
 against `ALIGN_DATA_DIR` beside the running server and offers `codes create [--email] [--days] [--count]` (each new code
 printed once), `codes list` and `codes revoke <id>`, `requests list [--status]`, `requests approve <id> [--days]
 [--print]` and `requests decline <id>`, `workspaces list`, `workspaces delete <id> --yes` and `workspaces delete <id>
---purge --yes`, and `retention run [--dry-run]` (`scripts/retention.mjs [--dry-run]` is the same command); it SHALL
+--purge --yes`, `retention run [--dry-run]` (`scripts/retention.mjs [--dry-run]` is the same command), and the metrics
+commands `report [--since] [--json]` and `events record loi_sent|loi_signed` (specified in `metrics`); it SHALL
 never print a secret other than a code it has just made, SHALL delete a workspace through the same (soft) deletion
 path as the app and purge one through the same purge as the retention job, SHALL run the retention job with the same
 code as the server, reading `ALIGN_SESSION_MAX_DAYS` from its environment as the server does, and SHALL refuse a
@@ -1094,8 +1095,8 @@ in one transaction end every membership the way member removal does, delete (as 
 where they were the only member, replace their identity with "Former member #n" in every workspace's rows at once,
 delete their devices, pairing requests, Better Auth sessions, linked accounts, passkeys (and when each was last used),
 their dismissal of the add-a-passkey prompt, codes, access requests, unused creation codes bound to their email, the
-durable rate-limit counters keyed by their email and the user row, clear their email and id from used creation codes,
-and keep the rows other people rely on (goals, change requests, alignments, sessions and their spend) without their name or
+durable rate-limit counters keyed by their email and the user row, clear their email and id from used creation codes
+and their actor hash from product events (`metrics`), and keep the rows other people rely on (goals, change requests, alignments, sessions and their spend) without their name or
 email.
 
 #### Scenario: Delete my account
@@ -1124,12 +1125,12 @@ The server SHALL apply the retention schedule published in `docs/RETENTION.md` w
 in `lib/v2/retention-core.mts`, that runs at every server start and every 24 hours (never during a build) and from
 `node scripts/align-admin.mjs retention run [--dry-run]` (or its alias `node scripts/retention.mjs [--dry-run]`), each
 step in its own transaction, logging counts only; it purges a workspace with the same function as the operator's
-`workspaces delete --purge`.
+`workspaces delete --purge`, and deletes product events (`v2_events`, specified in `metrics`) after 13 months.
 
 #### Scenario: Deleted workspaces
 
 - **WHEN** the job runs 30 days or more after a workspace was deleted
-- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members and devices' grants included, and pairing requests and the creation code that made it forget it), so no row anywhere mentions it and restoring it is 404
+- **THEN** every row of the workspace is deleted (its audit rows, roll-ups, former members and devices' grants included, and pairing requests and the creation code that made it forget it, and its content-free product events carry a random `wsx_` id instead of its id), so no row anywhere mentions it and restoring it is 404
 
 #### Scenario: Session roll-up
 
@@ -1150,6 +1151,11 @@ step in its own transaction, logging counts only; it purges a workspace with the
 
 - **WHEN** the job runs
 - **THEN** expired Better Auth verification values (email codes), Better Auth sessions that have expired or are older than the absolute cap (`ALIGN_SESSION_MAX_DAYS`) and expired activity signals are deleted, and invites still pending 7 days after their expiry are deleted
+
+#### Scenario: Product events
+
+- **WHEN** the job runs
+- **THEN** product events older than 13 months are deleted and younger ones are kept
 
 #### Scenario: Operator run and dry run
 

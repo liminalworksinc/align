@@ -64,12 +64,14 @@ export async function precheckCreation(req: Request, user: Creator, code: string
   await requireCaptcha(req);
 }
 
-/** Inside the creating transaction: the checks again, then the code is spent for `wsId` (if this person needs one). */
-export function admitCreation(user: Creator, code: string | null, wsId: string) {
+/** Inside the creating transaction: the checks again, then the code is spent for `wsId` (if this person needs one).
+ *  True when a code was spent. */
+export function admitCreation(user: Creator, code: string | null, wsId: string): boolean {
   check(user, code);
-  if (!config().hosted || !needsCode(user.email)) return;
+  if (!config().hosted || !needsCode(user.email)) return false;
   // A code bound to an email address is only for that address, verified by its sign-in method.
   if (!redeemCreationCode(sql, secret(), code!, user.emailVerified ? user.email : "", user.id, wsId)) throw invalid();
+  return true;
 }
 
 /** Restoring a deleted workspace (hosted) makes it count toward the workspace caps again: 409 workspace_cap or

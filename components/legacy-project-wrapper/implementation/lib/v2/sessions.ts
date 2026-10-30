@@ -3,6 +3,7 @@ import { sessionCapError } from "./creation";
 import { all, audit, get, run, tx } from "./db";
 import { takeDurable } from "./limits";
 import { V2Error, badRequest, conflict, notFound } from "./errors";
+import { event } from "./events";
 import { nowIso } from "./ids";
 import { goalObj, goalRow, transferFor } from "./goals";
 import { authorize, canReadGoal, type PolicyPrincipal } from "./policy";
@@ -106,6 +107,9 @@ export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key:
         at,
         at,
       );
+      // The workspace's first shared session, and each person's first in it.
+      event("first_session_captured", { ws: pp.wsId, user: dev.user.id, props: { harness }, at });
+      event("member_first_session_captured", { ws: pp.wsId, user: dev.user.id, props: { harness }, at });
     }
     return shareOut(sessionRow(pp.wsId, key)!);
   });
@@ -188,6 +192,8 @@ export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal
       pp.wsId,
       key,
     );
+    // First value: the first time a session in this workspace is bound to a goal.
+    if (goalId && authority !== "none") event("first_session_bound", { ws: pp.wsId, user: pp.userId, props: { harness: cur.harness, authority }, at });
     return epochOut(get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epochId)!);
   });
   return out;

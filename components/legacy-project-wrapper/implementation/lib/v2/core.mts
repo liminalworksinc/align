@@ -19,7 +19,7 @@ export interface Sql {
 
 /** The PRAGMA user_version of a fully migrated database (lib/v2/db.ts MIGRATIONS.length; db.ts checks they agree).
  *  The operator script refuses any other, so it never writes to a schema it doesn't know. */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 // ---- settings shared with the operator script (lib/v2/config.ts re-exports these) ----
 
@@ -75,6 +75,95 @@ export function serverSecret(dataDir: string, env: NodeJS.ProcessEnv = process.e
 /** HMAC-SHA256 of `payload` under `secret`, base64url. Callers domain-separate with a prefix (`alm.`, `alr.`, `alc.`). */
 export const hmac = (secret: string, payload: string) => createHmac("sha256", secret).update(payload).digest("base64url");
 
+// ---- product events (v2_events, PRESEED-007) ----
+// Content-free funnel events: what happened, in which workspace, when, and a keyed hash of who (so the operator's
+// report can count distinct people without identifying anyone). props hold only the allowlisted keys below, each a
+// fixed choice, a count or an opaque operator reference: never an email, name, title, goal text, URL, repository,
+// code or token. The table is append-only (a trigger refuses changing name, at or props); the retention job deletes
+// rows after 13 months, account deletion clears that person's actor, and purging a workspace replaces its id in them.
+
+const HARNESSES = ["claude-code", "codex"] as const;
+/** An operator's own reference for an LOI (a file or CRM id): letters, digits and . _ : -, up to 64; no @ or /, so it
+ *  can't be an email address or a URL. */
+export const NOTE_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+type PropRule = readonly string[] | "count" | RegExp;
+
+/** Every event name and the props it may carry. */
+export const EVENT_PROPS = {
+  access_requested: { interest: ["try", "evaluate"] },
+  access_approved: {},
+  access_declined: {},
+  code_created: { source: ["request", "operator"] },
+  code_redeemed: {},
+  workspace_created: { kind: ["blank", "sample"] },
+  invite_sent: { role: ["owner", "member", "viewer"] },
+  invite_accepted: { role: ["owner", "member", "viewer"] },
+  device_paired: { workspaces: "count" },
+  first_session_captured: { harness: HARNESSES },
+  member_first_session_captured: { harness: HARNESSES },
+  first_session_bound: { harness: HARNESSES, authority: ["own", "pod", "alignment"] },
+  second_member_joined: {},
+  first_change_request: {},
+  first_approval: {},
+  first_directive: { kind: ["goal_version", "binding_changed", "binding_suspended", "stop", "resume"] },
+  first_mcp_read: { client: ["app", "device"] },
+  loi_sent: { note_ref: NOTE_REF_RE },
+  loi_signed: { note_ref: NOTE_REF_RE, verified_original: ["yes"] },
+} as const satisfies Record<string, Record<string, PropRule>>;
+export type EventName = keyof typeof EVENT_PROPS;
+export type EventProps = Record<string, string | number>;
+
+/** Recorded at most once per workspace (the unique index v2_events_once_ws in lib/v2/db.ts lists the same names). */
+export const ONCE_PER_WORKSPACE: readonly EventName[] = [
+  "workspace_created",
+  "code_redeemed",
+  "first_session_captured",
+  "first_session_bound",
+  "second_member_joined",
+  "first_change_request",
+  "first_approval",
+  "first_directive",
+  "first_mcp_read",
+  "loi_sent",
+  "loi_signed",
+];
+
+/** The keyed hash that stands for a person in v2_events: HMAC of their user id under the server secret (`ale.`). It
+ *  can't be reversed, and without the secret it can't be matched to an id. */
+export const eventActor = (secret: string, userId: string) => hmac(secret, `ale.${userId}`);
+
+function checkProps(name: EventName, props: EventProps) {
+  const rules = EVENT_PROPS[name] as Record<string, PropRule>;
+  if (!rules) throw new Error(`Unknown event ${name}`);
+  for (const [k, v] of Object.entries(props)) {
+    const rule = rules[k];
+    const ok =
+      rule === "count"
+        ? Number.isInteger(v) && (v as number) >= 0
+        : rule instanceof RegExp
+          ? typeof v === "string" && rule.test(v)
+          : Array.isArray(rule) && rule.includes(v as string);
+    if (!ok) throw new Error(`Event ${name} can't carry ${k}`);
+  }
+}
+
+/** Append one event (inside the caller's transaction). A once-per-workspace event (ONCE_PER_WORKSPACE) or a person's
+ *  member_first_session_captured that is already there is skipped. True when a row was added. */
+export function recordEvent(db: Sql, name: EventName, o: { ws?: string | null; actor?: string | null; props?: EventProps; at?: string } = {}): boolean {
+  const props = o.props ?? {};
+  checkProps(name, props);
+  return (
+    db.run(
+      "INSERT INTO v2_events (name, ws_id, actor, at, props) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+      name,
+      o.ws ?? null,
+      o.actor ?? null,
+      o.at ?? new Date().toISOString(),
+      JSON.stringify(props),
+    ) === 1
+  );
+}
+
 // ---- creation codes (v2_creation_codes) ----
 // A creation code lets one hosted workspace be created (lib/v2/creation.ts). It is shown once, when it is made; only
 // its HMAC is stored. Single use, it expires (14 days by default), and it can be bound to one email address, which
@@ -109,6 +198,7 @@ export function insertCreationCode(db: Sql, secret: string, o: { email?: string 
     new Date(now).toISOString(),
     expires,
   );
+  recordEvent(db, "code_created", { props: { source: o.requestId ? "request" : "operator" }, at: new Date(now).toISOString() });
   return { id, code, email, expires_at: expires };
 }
 
@@ -193,12 +283,29 @@ export function approveAccessRequest(db: Sql, secret: string, id: string, days =
   if (!r || r.status !== "pending") return null;
   const code = insertCreationCode(db, secret, { email: r.email, days, requestId: r.id }, now);
   db.run("UPDATE v2_access_requests SET status = 'approved', decided_at = ?, code_id = ? WHERE id = ?", new Date(now).toISOString(), code.id, id);
+  recordEvent(db, "access_approved", { at: new Date(now).toISOString() });
   return { request: r, code };
 }
 
 /** Decline a pending request. False when it is not pending. */
 export function declineAccessRequest(db: Sql, id: string, now = Date.now()): boolean {
-  return db.run("UPDATE v2_access_requests SET status = 'declined', decided_at = ? WHERE id = ? AND status = 'pending'", new Date(now).toISOString(), id) === 1;
+  const at = new Date(now).toISOString();
+  if (db.run("UPDATE v2_access_requests SET status = 'declined', decided_at = ? WHERE id = ? AND status = 'pending'", at, id) !== 1) return false;
+  recordEvent(db, "access_declined", { at });
+  return true;
+}
+
+/** Undo an approval whose email could not be sent (scripts/align-admin.mjs): the code is revoked, the request is
+ *  pending again, and the approval's two events (the code made, the approval, both at its decided_at) are taken back,
+ *  so nothing half-done counts. Inside the caller's transaction. */
+export function undoApproval(db: Sql, requestId: string, codeId: string) {
+  const at = accessRequest(db, requestId)?.decided_at;
+  revokeCreationCode(db, codeId);
+  db.run("UPDATE v2_access_requests SET status = 'pending', decided_at = NULL, code_id = NULL WHERE id = ?", requestId);
+  if (!at) return;
+  for (const name of ["access_approved", "code_created"]) {
+    db.run("DELETE FROM v2_events WHERE id = (SELECT id FROM v2_events WHERE name = ? AND at = ? ORDER BY id DESC LIMIT 1)", name, at);
+  }
 }
 
 // ---- workspaces ----
@@ -231,12 +338,14 @@ export function softDeleteWorkspace(db: Sql, wsId: string, actor: string | null,
 /** Every row of a workspace, at once and for good (the retention job after the restore window, and `align-admin
  *  workspaces delete --purge`): its rows cascade from v2_workspaces; its connected AI apps, devices' grants and audit
  *  rows go too, and pairing requests and the creation code that made it forget it (the code stays used, so no row
- *  anywhere names the workspace). False when there is no such workspace. */
+ *  anywhere names the workspace); its product events stay under a fresh random id (wsx_…). False when there is no such workspace. */
 export function purgeWorkspace(db: Sql, wsId: string): boolean {
   db.run("DELETE FROM v2_oauth_grants WHERE ws_id = ?", wsId);
   db.run("UPDATE v2_creation_codes SET ws_id = NULL WHERE ws_id = ?", wsId);
   db.run("DELETE FROM v2_device_grants WHERE ws_id = ?", wsId);
   db.run("DELETE FROM v2_audit WHERE ws_id = ?", wsId);
+  // Its product events stay for the metrics (they hold no content), under a random id that names nothing.
+  db.run("UPDATE v2_events SET ws_id = ? WHERE ws_id = ?", `wsx_${rand32(15)}`, wsId);
   for (const r of db.all<{ id: string; ws_ids_json: string }>("SELECT id, ws_ids_json FROM v2_device_requests WHERE ws_ids_json IS NOT NULL")) {
     const ids = JSON.parse(r.ws_ids_json) as string[];
     if (ids.includes(wsId)) db.run("UPDATE v2_device_requests SET ws_ids_json = ? WHERE id = ?", JSON.stringify(ids.filter((w) => w !== wsId)), r.id);

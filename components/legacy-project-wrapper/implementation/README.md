@@ -77,10 +77,19 @@ retention job's clock, for tests only (both are refused when hosted).
 **Retention.** The server applies the retention schedule in [docs/RETENTION.md](docs/RETENTION.md) at every start and
 every 24 hours: deleted workspaces are purged after 30 days, people who left become "Former member #n" after 30 days,
 audit rows go after a year, shared sessions are rolled up into per-goal daily totals after 13 months, and expired
-sign-in sessions (including any past `ALIGN_SESSION_MAX_DAYS`) are deleted.
+sign-in sessions (including any past `ALIGN_SESSION_MAX_DAYS`) are deleted, as are product events after 13 months.
 `npm run admin -- retention run [--dry-run]` (or `node scripts/retention.mjs [--dry-run]`, the same command) runs it by
 hand against `ALIGN_DATA_DIR` (default `./data`); run it with the server's environment, since it reads
 `ALIGN_SESSION_MAX_DAYS` as the server does.
+
+**Product events and the report.** The server records content-free funnel events in its own database (`v2_events`:
+an event name, the workspace, a keyed hash of the person, the time and a few allowlisted counts or kinds; never an
+email, name, title, goal text, URL, repository, code or token) from an access request to a workspace's first MCP read.
+Nothing is sent anywhere; Mode L records them on its own machine. `npm run admin -- report [--since YYYY-MM-DD]
+[--json]` prints the funnel, time to first value, weekly active workspaces, cohort retention, the share of sessions and
+spend bound to goals, and LOIs. LOIs are only ever recorded by the operator: `npm run admin -- events record loi_sent
+--workspace ws_… [--note-ref <ref>]`, and `loi_signed` only with `--verified-original`. The definitions are in
+`specs/align/metrics.md`. There are no settings.
 
 ## Hosted (HOSTED=1)
 
@@ -128,6 +137,8 @@ npm run admin -- workspaces list                # counts only, no people; delete
 npm run admin -- workspaces delete ws_… --yes   # the app's own (soft) deletion: its owners can restore it for 30 days
 npm run admin -- workspaces delete ws_… --purge --yes   # every row, now and for good
 npm run admin -- retention run --dry-run        # the retention schedule: what it would do now
+npm run admin -- report                         # funnel, time to first value, active workspaces, retention (no content)
+npm run admin -- events record loi_signed --workspace ws_… --verified-original   # only with the signed original
 ```
 
 Disposable email domains (`lib/v2/disposable-domains.json`, the CC0 disposable-email-domains list) can't request access
@@ -160,7 +171,7 @@ directories (`test-v2` also uses `<port>+1`). They refuse port 3100 and a port t
 | `app/oauth/`, `app/api/oauth/`, `app/.well-known/`, `lib/oauth/` | The OAuth authorization server for AI apps |
 | `lib/v2/` | Identity, workspaces, goals, change requests, sessions, directives, spend, the database |
 | `proxy.ts`, `lib/config.ts`, `lib/startup.ts` | The request edge, settings and startup checks |
-| `scripts/align-admin.mjs`, `lib/v2/core.mts` | The operator script and the code it shares with the app |
+| `scripts/align-admin.mjs`, `lib/v2/core.mts`, `lib/v2/retention-core.mts`, `lib/v2/metrics-core.mts` | The operator script and the code it shares with the app (the retention schedule, the metrics report) |
 | `packages/align-agent/` | The `align` CLI and hooks |
 | `packages/align-connect/` | A stdio MCP bridge for clients without OAuth |
 | `docs/archive/` | Pages about the retired v1 prototype |
