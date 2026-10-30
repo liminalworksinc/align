@@ -19,8 +19,26 @@ import path from "node:path";
 import readline from "node:readline";
 
 const base = (process.argv[2] || process.env.ALIGN_URL || "").replace(/\/+$/, "").replace(/\/api\/mcp$/, "");
-if (!/^https?:\/\//.test(base)) {
+let baseUrl = null;
+try {
+  baseUrl = /^https?:\/\//i.test(base) ? new URL(base) : null;
+} catch {}
+if (!baseUrl) {
   process.stderr.write("usage: align-connect <align url>, for example https://align.example.com\n");
+  process.exit(2);
+}
+/** https anywhere, or plain http only to this computer: tokens and codes never cross a network unencrypted. */
+function safeScheme(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  return u.protocol === "https:" || (u.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname));
+}
+if (!safeScheme(base)) {
+  process.stderr.write("align-connect: use https, or http only on localhost, 127.0.0.1 or [::1]\n");
   process.exit(2);
 }
 const MCP = `${base}/api/mcp`;
@@ -51,11 +69,19 @@ async function json(url, init) {
   return body;
 }
 
+/** Both metadata documents, checked before anything is registered, opened or sent: every endpoint https (or http on
+ *  this computer), and the authorization server's issuer exactly the server the resource named. */
 async function metadata() {
   const prm = await json(`${base}/.well-known/oauth-protected-resource/api/mcp`);
   const issuer = prm.authorization_servers?.[0];
-  if (!issuer) throw new Error("Align did not name an authorization server");
-  return { resource: prm.resource, as: await json(`${issuer}/.well-known/oauth-authorization-server`) };
+  if (typeof issuer !== "string" || !issuer) throw new Error("Align did not name an authorization server");
+  if (!safeScheme(issuer)) throw new Error(`the authorization server ${issuer} is not https`);
+  const as = await json(`${issuer}/.well-known/oauth-authorization-server`);
+  if (as.issuer !== issuer) throw new Error(`issuer mismatch: the authorization server says ${JSON.stringify(as.issuer)}, Align named ${issuer}`);
+  for (const k of ["authorization_endpoint", "token_endpoint", "registration_endpoint"]) {
+    if (typeof as[k] !== "string" || !safeScheme(as[k])) throw new Error(`the ${k} ${JSON.stringify(as[k])} is not https`);
+  }
+  return { resource: prm.resource, as };
 }
 
 function openBrowser(url) {
