@@ -148,8 +148,8 @@ the tab becomes visible, and SHALL refresh state immediately after each successf
 
 #### Scenario: Guarded write
 
-- **WHEN** a person presses any action button
-- **THEN** the app first re-reads `GET /api/session`, sends the write only if the same team and workspace are still signed in, attaches the `x-align-workspace` header, and on a `workspace_mismatch` 409 stops showing the workspace and explains which one the browser is signed in to
+- **WHEN** a person presses an action button on one of the shell's views (propose, review, approve, launch, push, reset, confirm a session link)
+- **THEN** the app first re-reads `GET /api/session`, sends the write only if the same team and workspace are still signed in, attaches the `x-align-workspace` header, and on a `workspace_mismatch` 409 stops showing the workspace and explains which one the browser is signed in to; the Connect dialog's **Disconnect** skips the session re-read and only attaches the header
 
 ### Requirement: Shell navigation and badges
 
@@ -697,7 +697,7 @@ team passcode) manage goal-sessions workspaces, and SHALL send a signed-out visi
 ## Open questions
 
 - `TodayView` ("Good to see you", "What needs you", "Time to agreement") is implemented but no view renders it: the `today` view id renders the decision view. Is it dead code or meant to return?
-- The team view (`TeamLens`, "Team view") is routed under the Goals nav item, but no control in the current code navigates to it. Is it reachable?
+- The team view (`TeamLens`, "Team view") is routed under the Goals nav item, but no control in the current code navigates to it, so it is unreachable. Is it meant to return, or should it be removed?
 - The Inspector and team view label the viewer's own goal "Your goal · you can edit", but no screen offers a way to edit one's own goal directly. Is that wording intended?
 - `docs/DEMO_SCRIPT.md` names labels the current code does not show, such as a "How the goals connect" screen heading (the view is titled "Goals"), a "Waiting for your decision" badge (present only in the unrendered `TodayView`), and "Test which plan follows the new priority" inside the brief, which now reads **Test in Scenario Studio**. Which labels should the spec treat as authoritative?
 
