@@ -69,10 +69,18 @@ export function goalVersionDirective(ws: string, g: GoalRow): string | null {
 }
 
 /** A goal snapshot as the wire shows it now: snapshots stored before teams were called teams carry `pod` and
- *  visibility "pod" and no level. The MCP server reads them the same way (lib/mcp/register.ts). */
+ *  visibility "pod" and no level, and those stored before limits existed carry no `limits` (read as none). The MCP
+ *  server reads them the same way (lib/mcp/register.ts). A snapshot's limits are those of the saved version it
+ *  carries: limit text reaches agents only that way. */
 export function goalSnapshot(json: string): GoalCore {
-  const { pod, visibility, ...rest } = JSON.parse(json) as Omit<GoalCore, "visibility"> & { pod?: { id: string; name: string } | null; visibility: string };
-  return { ...rest, team: rest.team ?? pod ?? null, level: rest.level ?? "team", visibility: (visibility === "pod" ? "team" : visibility) as GoalCore["visibility"] };
+  const { pod, visibility, ...rest } = JSON.parse(json) as Omit<GoalCore, "visibility" | "limits"> & { pod?: { id: string; name: string } | null; visibility: string; limits?: GoalCore["limits"] };
+  return {
+    ...rest,
+    team: rest.team ?? pod ?? null,
+    level: rest.level ?? "team",
+    visibility: (visibility === "pod" ? "team" : visibility) as GoalCore["visibility"],
+    limits: rest.limits ?? [],
+  };
 }
 
 function serialize(dev: DevicePrincipal, d: DirectiveRow, keys: string[]) {

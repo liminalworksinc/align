@@ -37,6 +37,8 @@ or agent sees says "team".
 | Status | `active`, `achieved` or `dropped`. There is no separate archived status |
 | Parent | A goal this goal contributes to: the target of an approved alignment whose source is this goal (`contributes_to`) |
 | Dependency | A goal whose output this goal consumes (`depends_on`, at most 5) |
+| Limit | Goal content (`limits`, at most 5 per version): `{id: "lim_…", type: must\|must_not\|out_of_scope, text, source:{kind: meeting\|manual, title, date}\|null}`, what work toward the goal must do, must not do, or leaves out of scope. It names no person: who confirmed it is the author of the version that carries it |
+| Limit suggestion | A rule-shaped sentence of pasted notes matched to a goal by `POST …/limits/suggest`; stored nowhere until it becomes part of a version |
 | Approval set | The people any one of whom may approve on a goal's behalf: its owner, its owning team's leads, and for a company goal every workspace owner |
 | Alignment | A request (`al_…`) to link a source goal or chosen sessions to a target goal, with revisions, approval requirements and effects |
 | Approval requirement | `{for, set}` on an alignment revision: `for` is a goal id or `sessions:<user id>`, `set` the user ids any one of whom satisfies it |
@@ -106,7 +108,7 @@ The server SHALL create a goal on `POST /api/v2/workspaces/{ws}/goals` (browser 
 
 ### Requirement: Goal content validation
 
-The server SHALL validate goal content the same way on creation, on a new version and in a change request: `title` 1 to 300 characters after trimming; `measures` a list of at most 10 objects with `text` (1 to 300 characters) and optional `target` (at most 100), each keeping a sent `id` only when the previous version had a measure with that id (otherwise a new `m_…` id); `anchors` an object of `repos`, `branch_patterns` and `issues` lists of at most 20 strings of at most 200 characters each, trimmed and de-duplicated; `depends_on` a list of at most 5 goal ids, none equal to the goal itself; and `status` one of `active`, `achieved`, `dropped`. A violation SHALL be 400 naming the field, and a `depends_on` id that does not exist or that the caller may not read SHALL be 404.
+The server SHALL validate goal content the same way on creation, on a new version and in a change request: `title` 1 to 300 characters after trimming; `measures` a list of at most 10 objects with `text` (1 to 300 characters) and optional `target` (at most 100), each keeping a sent `id` only when the previous version had a measure with that id (otherwise a new `m_…` id); `anchors` an object of `repos`, `branch_patterns` and `issues` lists of at most 20 strings of at most 200 characters each, trimmed and de-duplicated; `depends_on` a list of at most 5 goal ids, none equal to the goal itself; `status` one of `active`, `achieved`, `dropped`; and `limits` a list of at most 5 objects with `type` one of `must`, `must_not`, `out_of_scope`, `text` (1 to 160 characters after control characters become spaces and runs of spaces one), and optional `source` (null, or `{kind: meeting|manual, title: at most 120 characters, date: YYYY-MM-DD}`), each keeping a sent `id` only when the previous version had a limit with that id, else reusing the id of a previous limit it repeats word for word (type, text and source), else a new `lim_<12 base32>` id. A violation SHALL be 400 naming the field (`limits: at most 5`, `limits[i].text`, `limits[i].type`, `limits[i].source.date`), and a `depends_on` id that does not exist or that the caller may not read SHALL be 404.
 
 #### Scenario: Too many dependencies
 
@@ -117,6 +119,11 @@ The server SHALL validate goal content the same way on creation, on a new versio
 
 - **WHEN** `depends_on` names another person's `private` goal
 - **THEN** the response is 404 and nothing is written
+
+#### Scenario: Limit ids
+
+- **WHEN** the owner saves a version sending the previous version's limit with its id and a new limit with an id the goal never had
+- **THEN** the first keeps its id and the second gets a new `lim_…` id; six limits, a 161-character text, an unknown type or a date like `2026-13-01` are 400
 
 ### Requirement: Who reads a goal
 
@@ -134,7 +141,7 @@ The server SHALL let a goal's owner always read it, and otherwise decide by visi
 
 ### Requirement: Goals feed with ETag
 
-The server SHALL serve the goals the caller may read on `GET /api/v2/workspaces/{ws}/goals` (device token with a grant for the workspace, or browser session) as `{version, goals}`, oldest first, where `version` is the first 16 hex characters of the sha256 of the serialized goals and is also sent as a quoted `ETag` with `cache-control: private, no-cache`, and SHALL answer 304 with no body when `If-None-Match` matches it (or is `*`). Each goal SHALL be `{id, version, title, measures, status, level, visibility, owner:{id,name}, team:{id,name}|null, anchors, depends_on, bindable, contributes_to}`, where `visibility` shows `team` for a stored `pod` and `depends_on` lists only goals the caller may read.
+The server SHALL serve the goals the caller may read on `GET /api/v2/workspaces/{ws}/goals` (device token with a grant for the workspace, or browser session) as `{version, goals}`, oldest first, where `version` is the first 16 hex characters of the sha256 of the serialized goals and is also sent as a quoted `ETag` with `cache-control: private, no-cache`, and SHALL answer 304 with no body when `If-None-Match` matches it (or is `*`). Each goal SHALL be `{id, version, title, measures, status, level, visibility, owner:{id,name}, team:{id,name}|null, anchors, depends_on, limits, bindable, contributes_to}`, where `limits` is the current version's limits (`[]` when it has none) and is read by whoever reads the goal, where `visibility` shows `team` for a stored `pod` and `depends_on` lists only goals the caller may read.
 
 #### Scenario: Conditional feed
 
@@ -148,7 +155,7 @@ The server SHALL serve the goals the caller may read on `GET /api/v2/workspaces/
 
 ### Requirement: Immutable goal versions
 
-The server SHALL record each change to a goal as a new immutable version on `POST /api/v2/workspaces/{ws}/goals/{goal}/versions` (browser session) from `{version?, title?, measures?, anchors?, depends_on?, status?}`, accepted only from the goal's owner (403 `not_goal_owner` for another reader, 403 `read_only` for a viewer, 404 for a goal the caller may not read). A sent `version` other than the current one, or a concurrent write, SHALL be 409 `stale_version`, and a body whose resulting content (title, measures, anchors, status, sorted `depends_on`) hashes the same as the current version SHALL be 409 `no_change`. On success the server SHALL, in one transaction, raise the version by one, keep the previous versions unchanged, store the new version with its content hash and author, write audit action `goal.versioned`, record the goal as reviewed against its parents' current versions, and write one `goal_version` directive, carrying a snapshot of the goal with its `team` and `level`, for every non-stopped session whose open epoch is bound to the goal or that the goal governs; the response is 201 with the goal.
+The server SHALL record each change to a goal as a new immutable version on `POST /api/v2/workspaces/{ws}/goals/{goal}/versions` (browser session) from `{version?, title?, measures?, anchors?, depends_on?, status?, limits?}`, accepted only from the goal's owner (403 `not_goal_owner` for another reader, 403 `read_only` for a viewer, 404 for a goal the caller may not read). A sent `version` other than the current one, or a concurrent write, SHALL be 409 `stale_version`, and a body whose resulting content (title, measures, anchors, status, sorted `depends_on`, limits) hashes the same as the current version SHALL be 409 `no_change`; `depends_on` and `limits` SHALL join the hash only when non-empty, so a version without them hashes as it did before they existed. On success the server SHALL, in one transaction, raise the version by one, keep the previous versions unchanged, store the new version with its content hash and author, write audit action `goal.versioned`, record the goal as reviewed against its parents' current versions, and write one `goal_version` directive, carrying a snapshot of the goal with its `team`, `level` and `limits`, for every non-stopped session whose open epoch is bound to the goal or that the goal governs; the response is 201 with the goal.
 
 #### Scenario: New version
 
@@ -159,6 +166,11 @@ The server SHALL record each change to a goal as a new immutable version on `POS
 
 - **WHEN** the owner POSTs `{version: 1, …}` to a goal at version 3, or POSTs the current content again
 - **THEN** the response is 409 `stale_version` or 409 `no_change` respectively, and no version or directive is written
+
+#### Scenario: Adding a limit changes the hash
+
+- **WHEN** a goal without limits gets a version that changes only its title, then one that adds a limit, then the same limits again without their ids
+- **THEN** the first version's hash equals the hash of its title, measures, anchors and status alone, the second's differs, and the third is 409 `no_change`
 
 #### Scenario: Someone else edits
 
@@ -173,6 +185,43 @@ The server SHALL refuse with 409 `cycle` any write that would make a goal depend
 
 - **WHEN** goal A depends on goal B and B's owner saves a version of B with `depends_on: ["<A>"]`
 - **THEN** the response is 409 `cycle` and B stays at its current version
+
+### Requirement: Limits are confirmed only by a goal's approval set
+
+The server SHALL make a limit part of a goal only through a saved goal version: one its owner saves (on creation or `POST …/versions`) or one written when a member of its approval set approves a change request whose `changes` include `limits`. A limit SHALL reach agents only inside that version's snapshot (the `directives` part), and nothing else (a suggestion, a pending or countered request) SHALL change a goal's limits. A request with `limits` is dismissed by rejecting or withdrawing it.
+
+#### Scenario: Proposed by a member, approved by the team lead
+
+- **WHEN** a member in no team proposes `changes:{limits:[…current, {type:"must", text:"Inference must stay inside the EU region"}]}` on a workspace goal of team Alpha and Alpha's lead approves it
+- **THEN** the goal's next version carries the three limits, authored by the lead, and the bound sessions' `goal_version` directive snapshot has them in `limits`
+
+### Requirement: First limit event
+
+The server SHALL record the product event `first_limit` (no props, actor the version's author) for a workspace in the transaction of the first goal version with at least one limit, whether created, saved by the owner or written by an approval; a limit seeded in the sample workspace SHALL record nothing.
+
+#### Scenario: Several versions with limits
+
+- **WHEN** a goal is created with a limit and later versions keep or add limits
+- **THEN** the workspace has exactly one `first_limit` event
+
+### Requirement: Suggesting limits from notes
+
+The server SHALL accept `POST /api/v2/workspaces/{ws}/limits/suggest {notes, source:{title?, date}, prefer_goal_id?}` (browser session, same-origin, body at most 32 KB) from workspace owners and members (403 `read_only` for a viewer), with `notes` 1 to 20,000 characters, `source.title` at most 120 characters and `source.date` a real `YYYY-MM-DD` day (400 otherwise), and a `prefer_goal_id` the caller can read (404 otherwise). It SHALL split the notes into at most 200 sentences, keep only rule-shaped ones (4 to 45 words, not a question; "out of scope" phrasing is `out_of_scope`, "ensure", "make sure", "target" and "aim for" are `must`, then `must_not` and `must` wording; a plain "can't" does not count), and place each on the active goal the caller can read whose own words (title and measures, each word weighted by one over the number of goals using it) it uses most, with a score of at least 1; a tie goes to `prefer_goal_id` when it is one of the tied goals and is otherwise dropped, and when the notes are one sentence that matches no goal it goes to `prefer_goal_id` with source kind `manual`. It SHALL respond 200 `{suggestions:[{goal:{id,title,version}, can_edit, can_propose, limits:[{type, text, quote, source:{kind,title,date}, already}]}], dropped}`, where `text` is the sentence without a short heading ("Goal: …"), capitalised and at most 160 characters, `quote` the sentence at most 200, `already` the id of the goal's current limit sharing at least 0.6 of its key words (or null), `can_edit` true for the goal's owner and `can_propose` for anyone else, and `dropped` the rule-shaped sentences placed on no goal or repeating one already suggested. It SHALL store nothing, write no audit row and record no event, SHALL never name a goal the caller cannot read nor use its words, and SHALL allow 20 calls a minute per person and 120 an hour per workspace (429 `rate_limited`).
+
+#### Scenario: Rule-shaped sentences only
+
+- **WHEN** a member pastes "I can't find the GPU node logs.", "Ensure all three models don't fit on the GPU.", a question, a three-word and a 46-word sentence
+- **THEN** only "Ensure all three models don't fit on the GPU." is suggested, as `must`, on the goal whose words include "GPU", with `already` naming that goal's limit "All three models must not fit on one GPU"
+
+#### Scenario: Unreadable goal
+
+- **WHEN** a sentence uses a word only another team's `team`-visible goal has
+- **THEN** the sentence is dropped and the response names no part of that goal; nothing is stored
+
+#### Scenario: Too many calls
+
+- **WHEN** one person calls it 21 times within a minute
+- **THEN** the 21st call is 429 `rate_limited`
 
 ### Requirement: One goal with its versions and contributions
 
@@ -356,7 +405,7 @@ The server SHALL let a workspace owner or member who can read a goal but does no
 
 ### Requirement: Change request contents
 
-The server SHALL accept in `changes` only the keys `title`, `measures`, `depends_on` and `status` (400 for any other key, an empty object or a non-object), validate each like a new goal version against the base version, answer 409 `no_change` when applying them to the base version changes nothing, and 409 `cycle` when the resulting `depends_on` would close a dependency cycle. The same rules SHALL apply to `changes` sent with `counter` and `rebase`.
+The server SHALL accept in `changes` only the keys `title`, `measures`, `depends_on`, `status` and `limits` (400 for any other key, an empty object or a non-object), validate each like a new goal version against the base version, answer 409 `no_change` when applying them to the base version changes nothing, and 409 `cycle` when the resulting `depends_on` would close a dependency cycle. The same rules SHALL apply to `changes` sent with `counter` and `rebase`, and a request's read view SHALL show `limits` in its `changes` and in `diff.before` / `diff.after` when it changes them.
 
 #### Scenario: Anchors are not proposable
 
@@ -542,7 +591,7 @@ The server SHALL let any signed-in person (browser session, in Mode L and hosted
 
 ### Requirement: Northstar sample contents
 
-The sample workspace SHALL contain teams Product and Security with the caller as lead of both; a company goal "Expand to regulated customers"; two team goals with visibility `workspace`, "Ship self-serve onboarding" (team Product) and "Pass the security review" (team Security), each contributing to the company goal through an approved `contribution` alignment requested and approved by the caller; "Ship self-serve onboarding" `depends_on` "Pass the security review"; and one pending change request on "Pass the security review" from the caller whose reason explains why the sample shows it. Every goal is owned by the caller and every audit row names the caller. Because the caller owns the Security goal, the sample request is seeded directly rather than through the create route, and the caller can approve, counter, reject, withdraw or rebase it.
+The sample workspace SHALL contain teams Product and Security with the caller as lead of both; a company goal "Expand to regulated customers"; two team goals with visibility `workspace`, "Ship self-serve onboarding" (team Product) and "Pass the security review" (team Security, with one `must_not` limit "Push the pen-test window past May" from a meeting), each contributing to the company goal through an approved `contribution` alignment requested and approved by the caller; "Ship self-serve onboarding" `depends_on` "Pass the security review"; and one pending change request on "Pass the security review" from the caller whose reason explains why the sample shows it. Every goal is owned by the caller and every audit row names the caller. Because the caller owns the Security goal, the sample request is seeded directly rather than through the create route, and the caller can approve, counter, reject, withdraw or rebase it.
 
 #### Scenario: Sample goal tree
 
@@ -578,6 +627,10 @@ The `/app` page SHALL offer **Create the Northstar sample** when the signed-in p
 - `lib/v2/evidence.ts`
 - `lib/v2/spend.ts` (`goalSpend` only)
 - `lib/v2/sample.ts`
+- `lib/v2/goal-limits.ts`
+- `lib/v2/limit-suggest.ts`
+- `lib/v2/limits.ts` (`takeAll` only)
+- `lib/v2/events.ts`
 - `lib/v2/policy.ts`
 - `lib/v2/lifecycle.ts`
 - `lib/v2/validate.ts`
@@ -599,12 +652,14 @@ The `/app` page SHALL offer **Create the Northstar sample** when the signed-in p
 - `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/evidence/route.ts`
 - `app/api/v2/workspaces/[ws]/goals/[goal]/change-requests/[id]/evidence/[evidence]/route.ts`
 - `app/api/v2/workspaces/[ws]/change-requests/route.ts`
+- `app/api/v2/workspaces/[ws]/limits/suggest/route.ts`
 - `app/api/v2/workspaces/[ws]/alignments/route.ts`
 - `app/api/v2/workspaces/[ws]/alignments/[id]/route.ts`
 - `app/api/v2/workspaces/[ws]/alignments/[id]/[action]/route.ts`
 - `app/app/view.tsx`
 - `app/app/_ui/kit.tsx`
 - `app/app/_ui/changes.tsx`
+- `app/app/_ui/limits.tsx`
 - `app/app/w/[ws]/goals/[goal]/view.tsx`
 - `app/app/w/[ws]/requests/view.tsx`
 - `app/app/w/[ws]/alignments/view.tsx`

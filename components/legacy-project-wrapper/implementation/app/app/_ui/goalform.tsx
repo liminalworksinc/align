@@ -4,7 +4,7 @@ import type { Goal } from "./types";
 
 // Measures and anchors editors, shared by "new goal" and "new version". The limits editor lives in limits.tsx and is
 // re-exported here with them.
-export { LimitEditor, type LimitDraft } from "./limits";
+export { LimitEditor, limitsDraft, limitsOut, sameLimits, type LimitDraft } from "./limits";
 
 export type MeasureDraft = { id?: string; text: string; target: string };
 export type AnchorDraft = { repos: string; branch_patterns: string; issues: string };

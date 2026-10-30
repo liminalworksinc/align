@@ -30,8 +30,10 @@ export type ChangeRequestState = (typeof CHANGE_REQUEST_STATES)[number];
 export const CHANGE_REQUEST_ACTIONS = ["approve", "reject", "counter", "accept_counter", "withdraw", "rebase"] as const;
 export type ChangeRequestAction = (typeof CHANGE_REQUEST_ACTIONS)[number];
 
-/** The fields a change request may change (anchors are the owner's: they describe where the owner's work happens). */
-const CHANGE_KEYS = ["title", "measures", "depends_on", "status"] as const;
+/** The fields a change request may change (anchors are the owner's: they describe where the owner's work happens).
+ *  Limits are goal content too: a change request is how anyone but the owner proposes them, and an approval by the
+ *  goal's approval set is what confirms them. */
+const CHANGE_KEYS = ["title", "measures", "depends_on", "status", "limits"] as const;
 type ChangeKey = (typeof CHANGE_KEYS)[number];
 export type Changes = Partial<Pick<GoalContent, ChangeKey>>;
 
@@ -68,22 +70,23 @@ interface RevisionRow {
 
 const sortedIds = (ids: string[]) => [...ids].sort().join(",");
 
-/** Validate `changes` against the content it would change (the base version): only title, measures, depends_on
- *  and status, each checked like a new goal version (400, 404 for a dependency the caller can't read, 409 cycle,
+/** Validate `changes` against the content it would change (the base version): only title, measures, depends_on,
+ *  status and limits, each checked like a new goal version (400, 404 for a dependency the caller can't read, 409 cycle,
  *  409 no_change). Keeps only the fields that differ from the base. */
 function changesIn(pp: PolicyPrincipal, goalId: string, base: GoalContent, v: unknown): Changes {
-  if (!v || typeof v !== "object" || Array.isArray(v)) throw badRequest("changes must be an object with title, measures, depends_on or status");
+  if (!v || typeof v !== "object" || Array.isArray(v)) throw badRequest("changes must be an object with title, measures, depends_on, status or limits");
   const b = v as Body;
   const keys = Object.keys(b);
-  if (!keys.length) throw badRequest("changes must name at least one of title, measures, depends_on or status");
+  if (!keys.length) throw badRequest("changes must name at least one of title, measures, depends_on, status or limits");
   const other = keys.find((k) => !(CHANGE_KEYS as readonly string[]).includes(k));
-  if (other) throw badRequest(`changes: ${other} can't be proposed (only title, measures, depends_on and status)`);
+  if (other) throw badRequest(`changes: ${other} can't be proposed (only title, measures, depends_on, status and limits)`);
   const next = nextContent(pp, goalId, base, b);
   const out: Changes = {};
   if (next.title !== base.title) out.title = next.title;
   if (JSON.stringify(next.measures) !== JSON.stringify(base.measures)) out.measures = next.measures;
   if (sortedIds(next.depends_on) !== sortedIds(base.depends_on)) out.depends_on = next.depends_on;
   if (next.status !== base.status) out.status = next.status;
+  if (JSON.stringify(next.limits) !== JSON.stringify(base.limits)) out.limits = next.limits;
   return out;
 }
 

@@ -3,6 +3,7 @@ import { newId } from "./ids";
 import { insertAlignment } from "./alignments";
 import { insertChangeRequest } from "./changes";
 import { goalRow, insertGoal, type Measure } from "./goals";
+import { newLimitId, type Limit } from "./goal-limits";
 import type { PodRole, PolicyPrincipal } from "./policy";
 import type { WebPrincipal } from "./http";
 import { createWorkspace } from "./workspaces";
@@ -14,7 +15,8 @@ import { createWorkspace } from "./workspaces";
 //   teams Product and Security (caller lead of both)
 //   company goal "Expand to regulated customers"
 //   "Ship self-serve onboarding" (Product) and "Pass the security review" (Security), visible to the workspace, each
-//   contributing to the company goal through an approved contribution; onboarding depends on the security review
+//   contributing to the company goal through an approved contribution; onboarding depends on the security review;
+//   the security goal carries one limit (must not), as if it came out of a kickoff meeting
 //   one pending change request on the security goal. The caller owns that goal, and an owner can't propose a change
 //   to their own goal through the API, so it is seeded directly; its reason says why it is there.
 
@@ -25,6 +27,10 @@ export const SAMPLE_REASON =
 
 const measure = (text: string, target: string | null): Measure => ({ id: newId("m"), text, target });
 const NO_ANCHORS = { repos: [], branch_patterns: [], issues: [] };
+
+/** The sample's one limit, on "Pass the security review". */
+export const SAMPLE_LIMIT_TEXT = "Push the pen-test window past May";
+const sampleLimit = (date: string): Limit => ({ id: newLimitId(), type: "must_not", text: SAMPLE_LIMIT_TEXT, source: { kind: "meeting", title: "Security review kickoff", date } });
 
 /** The sample for the signed-in caller: an ordinary creation, so hosted it passes the same gate (`code` included). */
 export async function createSampleWorkspace(req: Request, p: WebPrincipal, code: string | null) {
@@ -60,6 +66,7 @@ export async function createSampleWorkspace(req: Request, p: WebPrincipal, code:
         measures: [measure("Open high-severity findings", "0"), measure("Review signed off", "end of quarter")],
         anchors: NO_ANCHORS,
         dependsOn: [],
+        limits: [sampleLimit(at.slice(0, 10))],
       },
       tick(2),
     );

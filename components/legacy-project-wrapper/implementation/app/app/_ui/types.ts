@@ -1,5 +1,13 @@
 // Response shapes the web app reads (see lib/v2/*). Kept here so client components import no server code.
 
+/** One limit of a goal version (lib/v2/goal-limits.ts). */
+export interface Limit {
+  id: string;
+  type: "must" | "must_not" | "out_of_scope";
+  text: string;
+  source: { kind: "meeting" | "manual"; title: string; date: string } | null;
+}
+
 export interface Goal {
   id: string;
   version: number;
@@ -13,6 +21,7 @@ export interface Goal {
   anchors: { repos: string[]; branch_patterns: string[]; issues: string[] };
   bindable: boolean;
   depends_on: string[];
+  limits: Limit[];
   contributes_to: { id: string; title: string; version: number; reviewed_version: number | null; stale: boolean }[];
 }
 
@@ -84,7 +93,7 @@ export interface Alignment {
   updated_at: string;
 }
 
-export type ChangeFields = Partial<{ title: string; measures: Goal["measures"]; depends_on: string[]; status: Goal["status"] }>;
+export type ChangeFields = Partial<{ title: string; measures: Goal["measures"]; depends_on: string[]; status: Goal["status"]; limits: Limit[] }>;
 
 export type EvidenceKind = "pr" | "ci_run" | "incident" | "dashboard" | "doc" | "other";
 
