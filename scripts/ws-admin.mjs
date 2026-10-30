@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Operator tool for custom workspaces (go-C condition 4). Run on the server, e.g. inside `fly ssh console`:
 //   node scripts/ws-admin.mjs list
+//   node scripts/ws-admin.mjs funnel [--with-feedback]   (funnel events per workspace and totals; free text only with the flag)
 //   node scripts/ws-admin.mjs delete <workspace id>
 //   node scripts/ws-admin.mjs delete --all --yes      (every workspace: the end-of-test purge)
 // Reads ALIGN_DATA_DIR (workspaces live in <ALIGN_DATA_DIR>/workspaces). Deletes the way the app does: rename the
@@ -75,7 +76,69 @@ if (cmd === "list") {
     process.exit(1);
   }
   remove(arg);
+} else if (cmd === "funnel") {
+  // Issue #30 item 5: per workspace, the funnel from existing data plus the decision value card's events (state.funnel,
+  // role and time only). Never prints names, passcodes or codes; free text only with --with-feedback.
+  // invited = invite codes issued (outside the app); accepted = workspace created; started = first signed-in action
+  // (a sign-in itself isn't logged); finished = a proposal RATIFIED.
+  const withFeedback = process.argv.slice(3).includes("--with-feedback");
+  const all = ids();
+  const totals = { workspaces: all.length, started: 0, finished: 0 };
+  const counts = {}; // event name -> { events, workspaces }
+  const bump = (name, n = 1) => {
+    counts[name] ??= { events: 0, workspaces: 0 };
+    counts[name].events += n;
+    counts[name].workspaces += 1;
+  };
+  for (const id of all) {
+    let s = {};
+    try {
+      s = JSON.parse(readFileSync(path.join(root, id, "state.json"), "utf8"));
+    } catch {
+      console.log(`${id}  state unreadable`);
+      continue;
+    }
+    const rows = [];
+    const created = meta(id).created_at;
+    if (created) rows.push([created, "accepted (workspace created)", ""]);
+    // System-written audit rows (creation, setup, Restart) are not a tester's action, so they never count as started.
+    const SYSTEM = new Set(["workspace_created", "scenario_setup", "reset"]);
+    const acts = [...(s.audit ?? []).filter((a) => !SYSTEM.has(a.action)).map((a) => a.at), ...(s.timer?.touchpoints ?? []).map((t) => t.at), ...(s.funnel?.events ?? []).map((e) => e.at)].filter(Boolean).sort();
+    if (acts.length) {
+      rows.push([acts[0], "started (first signed-in action)", ""]);
+      totals.started++;
+    }
+    // From the audit log, which Restart keeps (the acceptances themselves are rebuilt away).
+    const audit = s.audit ?? [];
+    const ratified = [...audit.filter((a) => /^ratify/.test(a.action)).map((a) => a.at), ...(s.acceptances ?? []).map((a) => a.ratified_at)].filter(Boolean).sort();
+    if (ratified.length) {
+      rows.push([ratified[0], "finished (proposal ratified)", ""]);
+      totals.finished++;
+    }
+    for (const a of audit) if (a.action === "launch_approved" || a.action === "launch_not_yet") rows.push([a.at, a.action, "leadership"]);
+    const seen = new Set();
+    for (const e of s.funnel?.events ?? []) {
+      rows.push([e.at, e.action, e.role]);
+      if (!seen.has(e.action)) {
+        seen.add(e.action);
+        bump(e.action, (s.funnel.events ?? []).filter((x) => x.action === e.action).length);
+      }
+    }
+    for (const r of s.funnel?.reports ?? []) rows.push([r.at, `  estimate: ${r.estimate}`, r.role, withFeedback && r.text ? `  text: ${JSON.stringify(r.text)}` : ""]);
+    console.log(id);
+    for (const [at, name, role, extra] of rows.sort((x, y) => String(x[0]).localeCompare(String(y[0])))) console.log(`  ${at}  ${name}${role ? `  ${role}` : ""}${extra ?? ""}`);
+  }
+  console.log("totals");
+  console.log(`  invited: outside the app (invite codes issued)`);
+  console.log(`  accepted: ${totals.workspaces} workspace(s)`);
+  console.log(`  started: ${totals.started}`);
+  console.log(`  finished: ${totals.finished}`);
+  for (const name of ["value_card_viewed", "value_reported", "waitlist_clicked", "loi_cta_clicked"]) {
+    const c = counts[name] ?? { events: 0, workspaces: 0 };
+    console.log(`  ${name}: ${c.events} event(s) in ${c.workspaces} workspace(s)`);
+  }
+  console.log("  not recorded here: waitlist submitted, LOI requested, LOI sent, signed LOI (the founder verifies these at the source)");
 } else {
-  console.error("usage: node scripts/ws-admin.mjs list | delete <id> | delete --all --yes");
+  console.error("usage: node scripts/ws-admin.mjs list | funnel [--with-feedback] | delete <id> | delete --all --yes");
   process.exit(2);
 }

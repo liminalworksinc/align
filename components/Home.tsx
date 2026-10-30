@@ -359,7 +359,7 @@ function NorthstarLogin({ onDone, L, elsewhere, initialRole }: { onDone: () => v
 
 /** The app. `workspace` is the /w/<id> slug for a custom workspace; omitted for Northstar at /. `hosted` comes from
  *  the server render (HOSTED=1), so the sign-in screen can word a failed fetch for testers. */
-export default function Home({ workspace, hosted }: { workspace?: string; hosted?: boolean }) {
+export default function Home({ workspace, hosted, nextStep }: { workspace?: string; hosted?: boolean; nextStep?: ViewProps["nextStep"] }) {
   const { state, me, error, setError, loadError, meError, loadMe, act, mark, refresh, ended, elsewhere, switched, continueAs } = useAlign(workspace);
   const [nextRole, setNextRole] = useState<Role | null>(null); // the team chosen in Switch team, until it signs in
   const [view, setView] = useState<View>("turn");
@@ -484,6 +484,7 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
     compose,
     setCompose,
     switchTeam: custom ? (r) => void switchTo(r) : undefined,
+    nextStep,
   };
   const turnCount = waitingOnMe(state, me.actor, () => undefined).length;
   const rel = state.relations.find((r) => r.id === dependencyId(state));
