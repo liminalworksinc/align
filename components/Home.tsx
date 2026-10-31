@@ -66,18 +66,21 @@ const teamInitials = (team: string) => {
 // Phones: the shell's max-md: variants key on the VIEWPORT, below 768px (md); 768px and up is exactly as before. One
 // column: the sidebar becomes a stacked bar above the header (its nav in a row), so the main column gets the full width.
 // Layout only: the sidebar stays mounted at every width, so its state (the composer, Switch team) survives a resize.
-// ConnectAI is the exception: on a phone it mounts at the top of Work instead (usePhone), never twice. Inside the main column, components use @max-md: instead, a CONTAINER query on CUSTOM_MAIN (the
+// ConnectAI is the exception: on a phone it mounts in the main column instead (usePhone), never twice. Inside the main
+// column, components use @max-md: instead, a CONTAINER query on CUSTOM_MAIN (the
 // only @container they sit in): it applies when that column is under 28rem (about 420-448px), which on a phone it is.
 const CUSTOM_SHELL =
   "grid min-h-screen grid-cols-[236px_minmax(0,1fr)] grid-rows-[auto_auto_auto] min-[1100px]:h-screen min-[1100px]:grid-cols-[236px_minmax(0,1fr)_360px] min-[1100px]:grid-rows-[auto_minmax(0,1fr)] min-[1100px]:overflow-hidden max-md:grid-cols-1 max-md:grid-rows-none";
 const CUSTOM_SIDEBAR =
   "sticky top-0 row-span-3 flex h-screen flex-col self-start border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5 min-[1100px]:static min-[1100px]:row-span-2 min-[1100px]:h-auto min-[1100px]:self-stretch max-md:static max-md:row-span-1 max-md:grid max-md:h-auto max-md:min-w-0 max-md:grid-cols-[1fr_auto] max-md:items-center max-md:gap-x-2 max-md:self-auto max-md:border-r-0 max-md:border-b max-md:pb-2";
-// Below md: the logo and + New conflict share one row, the nav runs as a wrapping row under them, and the sidebar's
-// footer (the same person and team as the header) is hidden. ConnectAI moves to the top of Work (usePhone).
+// Below md: the logo and + New conflict share one row, the nav runs as a row under them (tighter items, so all four fit
+// at 390px), and the sidebar's footer (the same person and team as the header) is hidden. ConnectAI moves to the main
+// column (usePhone). Sidebar and header controls are 44px tall there: they sit in no @container, so they use the
+// viewport variant (Button `shell`), not Button's @max-md: container one. The root font is 15px, so min-h-11 is 41.25px.
 const CUSTOM_LOGO = "flex h-16 items-center gap-2.5 px-2.5 max-md:h-14 max-md:min-w-0";
-const CUSTOM_NEW = "max-md:my-0";
+const CUSTOM_NEW = "max-md:my-0 max-md:min-h-[44px]";
 const CUSTOM_NAV = "max-md:col-span-full max-md:flex-row max-md:flex-wrap max-md:gap-1";
-const CUSTOM_NAV_ITEM = "max-md:w-auto max-md:min-h-11";
+const CUSTOM_NAV_ITEM = "max-md:w-auto max-md:min-h-[44px] max-md:gap-1.5 max-md:px-2.5";
 const CUSTOM_SIDEBAR_FOOTER = "max-md:hidden";
 const CUSTOM_HEADER = "flex min-h-16 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-200 px-6 py-2.5 min-[1100px]:col-span-2 max-md:min-h-0 max-md:gap-y-1.5 max-md:px-4 max-md:py-2";
 const CUSTOM_MAIN = "@container relative min-w-0 p-6 text-[16px] min-[1100px]:overflow-y-auto max-md:p-4";
@@ -99,7 +102,8 @@ interface LoginInfo {
 const WS_ID = /^w_[a-z2-7]{12}$/;
 
 // Phones (the same edge as Tailwind's max-md:, a viewport under 48rem). Decides where a workspace's ConnectAI mounts:
-// one copy only (its fetch and poll loop runs once), in the rail at md and up and at the top of Work on a phone. The
+// one copy only (its fetch and poll loop runs once), in the rail at md and up and in the main column on a phone (its
+// row shows at the top of Work; on every view it renders the first-run card into Home's slot). The
 // server can't know the viewport, so it and the first client render say "not a phone" (the rail); the phone value
 // follows right after hydration with no mismatch (useSyncExternalStore's server snapshot).
 const PHONE = "(width < 48rem)";
@@ -123,6 +127,7 @@ function SwitchTeam({ L, current, onPick }: { L: Labels; current: string; onPick
     <div className="relative" ref={box}>
       <Button
         kind="secondary"
+        shell
         onClick={() => {
           const r = box.current?.getBoundingClientRect();
           if (r) setLeftAnchor(r.right - 220 < 16);
@@ -421,6 +426,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
     else window.sessionStorage.removeItem("align.attached");
   }, []);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [firstRunSlot, setFirstRunSlot] = useState<HTMLDivElement | null>(null); // where ConnectAI renders the first-run card
   const phone = usePhone();
 
   const closeDrawer = useCallback(() => setDrawer(null), []);
@@ -601,7 +607,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
           </a>
         ) : (
           <div className={`mb-3.5 mt-1 ${CUSTOM_NEW} flex flex-col gap-1`}>
-            <Button disabled={!newConflict.go} onClick={() => { if (!newConflict.go) return; props.go(newConflict.go); setCompose(true); }}>
+            <Button shell disabled={!newConflict.go} onClick={() => { if (!newConflict.go) return; props.go(newConflict.go); setCompose(true); }}>
               + New conflict
             </Button>
             {newConflict.why && <span className="px-1 text-[12.5px] leading-snug text-zinc-500">{newConflict.why}</span>}
@@ -651,7 +657,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
           </div>
         </div>
         )}
-        {workspace && !phone && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} />}
+        {workspace && !phone && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} hosted={!!hosted} slot={firstRunSlot} />}
         <div className={`${custom ? (workspace ? "mt-3" : "mt-auto") : "mt-3"} ${custom ? CUSTOM_SIDEBAR_FOOTER : ""} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
           <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
             {custom ? teamInitials(L.role[me.actor]) : initials(me.name ?? "")}
@@ -709,12 +715,12 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
             </Button>
           )}
           {workspace && me.actor === "leadership" && (
-            <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
+            <Button shell kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
               {confirmReset ? "Click again to restart this scenario" : "Restart this scenario"}
             </Button>
           )}
           {ops && custom && !workspace && me.actor === "leadership" && (
-            <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
+            <Button shell kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
               {confirmReset ? "Click again to go back to the Northstar demo" : "Back to the Northstar demo"}
             </Button>
           )}
@@ -732,7 +738,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
             )}
           </div>
           {custom && <SwitchTeam L={L} current={me.actor} onPick={(r) => void switchTo(r)} />}
-          <Button kind="ghost" onClick={signOut}>
+          <Button shell={custom} kind="ghost" onClick={signOut}>
             Sign&nbsp;out
           </Button>
         </div>
@@ -755,6 +761,8 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
             {custom ? plainError(error) : error}
           </div>
         )}
+        {/* The first-run card (components/FirstRun.tsx), rendered here by ConnectAI so it shares that one poll. */}
+        {workspace && <div ref={setFirstRunSlot} />}
         {me.actor !== "leadership" && ceo && (
           <div className={custom ? CUSTOM_STRIP : "mb-4 grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-6 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5"}>
             <div className="flex min-w-0 items-center gap-4">
@@ -789,15 +797,17 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
             </div>
           </div>
         )}
+        {/* Phones: the one ConnectAI lives here (not in the rail), so the first-run card keeps its poll on every view; its
+            collapsed row shows only at the top of Work. */}
+        {workspace && phone && (
+          <ConnectAI variant="row" show={view === "work"} workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} hosted={!!hosted} slot={firstRunSlot} />
+        )}
         {/* v6 routes: nav id → view. "decision" is the record route; "proposals" is the review a Your turn card opens. */}
         {view === "turn" && <YourTurnView {...props} />}
         {view === "goals" && <GoalsView {...props} />}
         {view === "studio" && L.sandbox && <ScenarioStudio {...props} />}
         {view === "evidence" && L.sandbox && <EvidenceView {...props} />}
         {view === "decisions" && <DecisionsView {...props} />}
-        {view === "work" && workspace && phone && (
-          <ConnectAI variant="row" workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} />
-        )}
         {view === "work" && <WorkMap {...props} />}
         {view === "decision" && <DecisionView {...props} />}
         {view === "today" && <DecisionView {...props} />}

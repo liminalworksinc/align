@@ -24,6 +24,8 @@ import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
 import { kvSet } from "./db.ts";
 import { podReport } from "./hooks/siblings.ts";
+import { computeUnsharedDigest } from "./allocation.ts";
+import { listSteering, weekKey } from "./shared/steering.ts";
 
 const out = (s = ""): void => {
   process.stdout.write(s + "\n");
@@ -49,6 +51,8 @@ const HELP = `align ${VERSION}: Align local agent
   align delete-history <session> [--yes]
   align bind <session> --goal <ref|none>
   align latch status
+  align allocation [--workspace <name|id>] [--week YYYY-MM-DD] [--refresh] [--json]   agent time per goal against its target
+  align steering status [--workspace <name|id>]
   align install [--claude] [--codex] [--dry-run]
   align uninstall [--purge]
   align sync                   (hooks also run this in the background, one pass each)
@@ -604,6 +608,83 @@ async function cmdDoctor(ctx: Ctx): Promise<void> {
   if (checks.some((c) => c[1] === "FAIL")) process.exitCode = 1;
 }
 
+// ---------- allocation ----------
+function allocationTargets(ctx: Ctx, ref: string | undefined): { id: string; name: string }[] {
+  const me = loadMe(ctx.home);
+  if (!me) throw new UsageError("no cached workspaces; run `align login`");
+  const list = ref ? [resolveWorkspace(ctx.home, ref)].filter((w): w is { id: string; name: string } => !!w) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
+  if (!list.length) throw new UsageError(`unknown workspace "${ref}"`);
+  return list;
+}
+
+const gapWords = (gap: number | null) => (gap === null ? "" : Math.abs(gap) < 1 ? "on target" : gap > 0 ? `${gap} over` : `${-gap} under`);
+
+async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
+  const { values } = parseArgs({ args: argv, options: { workspace: { type: "string" }, week: { type: "string" }, refresh: { type: "boolean" }, json: { type: "boolean" } } });
+  const targets = allocationTargets(ctx, values.workspace);
+  prepare(ctx);
+  const digest = computeUnsharedDigest(ctx, Date.now(), true);
+  if (values.week) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(values.week) || Number.isNaN(Date.parse(`${values.week}T00:00:00Z`))) throw new UsageError("--week must be a date, YYYY-MM-DD");
+    await needLogin(ctx);
+    const from = new Date(`${weekKey(Date.parse(`${values.week}T00:00:00Z`))}T00:00:00.000Z`);
+    const to = new Date(from.getTime() + 7 * 86_400_000);
+    const all = [];
+    for (const w of targets) {
+      const r = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(w.id)}/allocation?from=${from.toISOString()}&to=${to.toISOString()}&weeks=1`);
+      if (r.status !== 200) throw new Error(r.json?.message ?? `allocation failed (${r.status})`);
+      all.push({ workspace: w.name, ...r.json });
+    }
+    if (values.json) return out(JSON.stringify(all, null, 2));
+    for (const a of all as { workspace: string; window: { rows: { kind: string; goal: { title: string } | null; share: number; target_share: number | null; gap: number | null }[] }; steering: { steering: string; total: number } }[]) {
+      out(`${a.workspace}, week of ${from.toISOString().slice(0, 10)} (steering ${a.steering.steering}, ${a.steering.total} lines shown)`);
+      for (const r of a.window.rows) {
+        const label = r.kind === "goal" ? r.goal!.title : r.kind === "private" ? "Goals you can't see" : "Not bound to a goal";
+        out(`  ${pad(`${r.share}%`, 7)} ${pad(r.target_share === null ? "-" : `${r.target_share}%`, 6)} ${pad(gapWords(r.gap === null ? null : Math.round(r.gap)), 10)} ${label}`);
+      }
+    }
+    return;
+  }
+  if (values.refresh) {
+    await needLogin(ctx);
+    for (const w of targets) await refreshFeed(ctx, w.id);
+  }
+  const feeds = targets.map((w) => ({ workspace: w.name, feed: loadFeed(ctx.home, w.id) }));
+  if (values.json) return out(JSON.stringify({ workspaces: feeds.map((f) => ({ workspace: f.workspace, steering: f.feed?.steering ?? "off", fetched_at: f.feed?.fetched_at ?? null, goals: (f.feed?.goals ?? []).map((g) => ({ id: g.id, title: g.title, ...(g.allocation ?? {}) })) })), unshared: digest }, null, 2));
+  for (const f of feeds) {
+    out(`${f.workspace}, last 7 days${f.feed ? ` (cached ${shortTime(f.feed.fetched_at)}, steering ${f.feed.steering ?? "off"})` : " (not fetched yet; use --refresh)"}`);
+    out(`  ${pad("SHARE", 7)} ${pad("TARGET", 6)} ${pad("GAP", 10)} GOAL`);
+    const goals = [...(f.feed?.goals ?? [])].filter((g) => g.status === "active").sort((a, b) => (b.allocation?.share_7d ?? 0) - (a.allocation?.share_7d ?? 0));
+    for (const g of goals) {
+      const a = g.allocation;
+      out(`  ${pad(a ? `${a.share_7d}%` : "-", 7)} ${pad(a?.target_share === null || a?.target_share === undefined ? "-" : `${a.target_share}%`, 6)} ${pad(gapWords(a?.gap_7d ?? null), 10)} ${g.title}`);
+    }
+  }
+  if (digest && digest.total_tokens) {
+    out(`This machine: ${digest.share}% of agent time in the last 7 days was in sessions not shared toward a goal.`);
+    for (const t of digest.top.slice(0, 3)) out(`  ${pad(fmtTokens(t.tokens), 8)} ${t.dir}`);
+    out("This part stays on this machine. Shares above are of shared agent time in each workspace.");
+  }
+}
+
+async function cmdSteering(ctx: Ctx, argv: string[]): Promise<void> {
+  const [sub, ...rest] = argv;
+  if (sub !== "status") throw new UsageError("usage: align steering status [--workspace <name|id>]");
+  const { values } = parseArgs({ args: rest, options: { workspace: { type: "string" } } });
+  const queued = listSteering(ctx.home).length;
+  for (const w of allocationTargets(ctx, values.workspace)) {
+    const feed = loadFeed(ctx.home, w.id);
+    let shown = "";
+    if (signedIn(ctx.home)) {
+      const from = `${weekKey(Date.now())}T00:00:00.000Z`;
+      const r = await api(ctx, "GET", `/api/v2/workspaces/${encodeURIComponent(w.id)}/allocation?from=${from}&weeks=1`).catch(() => null);
+      if (r?.status === 200) shown = `, ${r.json.steering.total} ${r.json.steering.total === 1 ? "line" : "lines"} shown this week`;
+    }
+    out(`${w.name}: steering ${feed?.steering ?? "off"}${shown}`);
+  }
+  out(`${queued} ${queued === 1 ? "line" : "lines"} waiting to be reported by the next sync.`);
+}
+
 // ---------- main ----------
 export async function main(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv;
@@ -637,6 +718,10 @@ export async function main(argv: string[]): Promise<void> {
         return await cmdPod(ctx, rest);
       case "latch":
         return await cmdLatch(ctx, rest);
+      case "allocation":
+        return await cmdAllocation(ctx, rest);
+      case "steering":
+        return await cmdSteering(ctx, rest);
       case "install":
         return await cmdInstall(ctx, rest);
       case "uninstall":

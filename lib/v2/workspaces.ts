@@ -63,7 +63,7 @@ export async function createWorkspace(userId: string, name: string) {
 }
 
 export function workspaceDetail(pp: PolicyPrincipal) {
-  const ws = get<{ id: string; name: string; created_at: string }>("SELECT id, name, created_at FROM v2_workspaces WHERE id = ?", pp.wsId);
+  const ws = get<{ id: string; name: string; created_at: string; steering: "off" | "on" }>("SELECT id, name, created_at, steering FROM v2_workspaces WHERE id = ?", pp.wsId);
   if (!ws) throw notFound();
   const members = all<{ id: string; name: string; email: string; role: WsRole }>(
     "SELECT u.id, u.name, u.email, m.role FROM v2_members m JOIN ba_user u ON u.id = m.user_id WHERE m.ws_id = ? ORDER BY u.name, u.id",

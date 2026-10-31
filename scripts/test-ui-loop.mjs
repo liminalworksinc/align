@@ -186,10 +186,13 @@ async function crossTab(name, { X, Y, xPass, yPass, yRole, at = "/", prepare, wr
     for (const pg of [A, B]) await pg.setViewport({ width: 1440, height: 900 });
     const signedX = await signInUi(A, X, xPass, at);
     await prepare(A);
-    const before = audit();
     // Tab B (already showing X: one cookie) signs in as Y, as a quick sign-out/sign-in or a background tab A allows;
     // the moment its sign-in lands, tab A, still showing X, clicks the write.
     await B.goto(BASE + at, { waitUntil: "networkidle2", timeout: 60000 });
+    // Tab B's own page load can log a timer touchpoint as X (e.g. Your turn's ceo_change_viewed); let it land before
+    // the baseline, so only what happens after the switch counts.
+    await sleep(1000);
+    const before = audit();
     const signedY = await B.evaluate(
       async (role, passcode) => (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role, passcode }) })).status === 200,
       yRole,
@@ -288,18 +291,31 @@ async function main() {
     await openProposals(O);
     await waitText(O, "Your decision");
     await narrow(O, "N2 the owning team's review of the proposal");
-    await click(O, "Counter"); // v6: pick the Counter answer, which shows the ask-for-changes form
-    await fill(O, "Ask for changes: your version of the target", COUNTER);
-    await fill(O, "Why you want these changes", "UILOOP two fixed nights are easier to plan around.");
-    await fill(O, "Conditions (optional)", CONDITIONS);
-    await click(O, "Ask for changes");
+    // Lane C: choose Counter, write the one required input (the revised target), open the optional extras, then
+    // review and confirm. Nothing is sent before the confirmation.
+    await click(O, "Counter");
+    await fill(O, "Your revised target", COUNTER);
+    await click(O, "Add a reason or conditions");
+    await fill(O, "Your reason (optional)", "UILOOP two fixed nights are easier to plan around.");
+    await fill(O, "Conditions (optional", CONDITIONS);
+    await click(O, "Review this decision");
+    check("U4 the confirmation names the revised target and that the asking team must accept it", (await waitText(O, "Confirm: Counter")) && (await text(O)).includes(`${ASKING} must accept your changes`), (await text(O)).slice(-800));
+    await click(O, "Confirm: Counter");
     check("U4 the owning team asks for changes and waits on the asking team", await waitText(O, `Waiting for ${ASKING}`), (await text(O)).slice(0, 300));
+    {
+      // While countered the owner may still decline (flow.ts rejectProposal), and nothing else. Not exercised here.
+      const t = await text(O);
+      check("U4b while waiting, the owner is offered Decline only, with the hand-off to the asking team", t.includes("You can still decline instead of waiting") && t.includes("Decline") && !t.includes("Approve this exact revision") && t.includes(`Act as`), t.slice(-800));
+    }
 
     // The asking team sees the conditions and accepts
     await openProposals(A);
     check("U5 the asking team sees the conditions before accepting, marked not confirmed yet", (await waitText(A, CONDITIONS.slice(0, 40))) && /not confirmed yet/i.test(await text(A)), (await text(A)).slice(0, 500));
+    check("U5 the asking team is not offered the owner's decline line", !(await text(A)).includes("You can still decline"), (await text(A)).slice(-600));
     await narrow(A, "N3 the asking team's review of the changes, with its long accept button");
     await click(A, `Accept ${OWNING}`);
+    await click(A, "Review this decision");
+    await click(A, "Confirm: Accept");
     check("U5 the asking team accepts the changes", await waitText(A, "accepted"), (await text(A)).slice(0, 300));
 
     // U5b The refusal demo, while the proposal waits on the owner. The owner never sees the button; the asking team's
@@ -406,8 +422,11 @@ async function main() {
     // The owning team approves, ticking "without a sandbox test"
     await openProposals(O);
     await waitText(O, "Your decision");
+    await click(O, "Approve this exact revision");
     await click(O, "without a sandbox test", "label");
-    await click(O, "Approve the change to my goal");
+    await click(O, "Review this decision");
+    check("U7 the confirmation says approval is not launch", (await waitText(O, "Approval is not launch")), (await text(O)).slice(-800));
+    await click(O, "Confirm: Approve this exact revision");
     check("U7 the owning team approves: the page says \"Agreed, launch pending\"", await waitText(O, "Agreed, launch pending"), (await text(O)).slice(0, 300));
     await click(O, "See the decision");
     await sleep(800);
@@ -468,9 +487,17 @@ async function main() {
     await fill(A, `What ${ASKING} will do in return`, "UILOOP nothing extra.");
     await click(A, "Send proposal to");
     await waitText(A, "Waiting");
-    const owner = await signIn(BASE, "security");
-    const pend = (await api(lead, "GET", "/api/state")).json?.proposals?.find((x) => x.state === "PENDING_SECURITY");
-    const rj = await api(owner, "POST", `/api/proposals/${pend?.id}/reject`, {});
+    // The owner declines on screen: the notice stays on the declined request (it leaves activeProposal()).
+    await O.reload({ waitUntil: "networkidle2" });
+    await openProposals(O);
+    await waitText(O, "Your decision");
+    await click(O, "Decline");
+    await click(O, "Review this decision");
+    await click(O, "Confirm: decline this request");
+    const recorded = await waitText(O, "Recorded: you declined this request");
+    check("U14 the owner declines on screen and stays on that request with the recorded notice", recorded, (await text(O)).slice(-800));
+    const pend = (await api(lead, "GET", "/api/state")).json?.proposals?.find((x) => x.state === "PENDING_SECURITY" || x.state === "REJECTED");
+    const rj = pend?.state === "REJECTED" ? { status: 200, text: "declined on screen" } : await api(await signIn(BASE, "security"), "POST", `/api/proposals/${pend?.id}/reject`, {});
     await A.reload({ waitUntil: "networkidle2" });
     await click(A, "Your turn");
     const yt = await waitText(A, "declined your last proposal");

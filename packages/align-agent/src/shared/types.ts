@@ -23,6 +23,10 @@ export interface Goal {
   depends_on?: string[];
   /** Goals this goal contributes to, and whether its owner reviewed it against their current versions. */
   contributes_to?: { id: string; title: string; version: number; reviewed_version: number | null; stale: boolean }[];
+  /** Share of the workspace's agent time this goal should get, 0 to 100, set by its owner (wire v2.3). */
+  target_share?: number | null;
+  /** Trailing 7 days, whole percents (goals feed, wire v2.3). */
+  allocation?: { target_share: number | null; share_7d: number; gap_7d: number | null } | null;
 }
 
 /** A goal related to the bound one that its agent should also know: a parent it contributes to, or a dependency. */
@@ -88,6 +92,8 @@ export interface InjectedState {
   context_seen?: Record<string, number>;
   /** Related goal id -> its measures (as compared) at that version, so a change note can say what changed. */
   context_measures?: Record<string, string[]>;
+  /** When this session was shown its one steering line, if ever. */
+  steering_at?: string;
   at: string;
 }
 
@@ -106,6 +112,8 @@ export interface FeedFile {
   etag: string | null;
   fetched_at: string;
   goals: Goal[];
+  /** The workspace's steering switch (wire v2.3; absent from older servers, which means off). */
+  steering?: "off" | "on";
 }
 
 export interface MeFile {

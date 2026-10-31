@@ -8,7 +8,7 @@
 //   phase "hosted": HOSTED=1 as Fly runs it -> no new route, HOSTED_ROUTES unchanged, a bad waitlist/LOI URL is hidden
 //   phase "layout": LIM-2452 cycle 2 on a custom workspace: the phone layout (Propose a change above the fold, one
 //                   ConnectAI), the Goals map at every width, the asker's review at 768, 44px tap targets at 390,
-//                   the Switch team menu at 700, and the AI apps copy (Read the current plan / Last read an older plan, never follow or work from)
+//                   the Switch team menu at 700, and the AI apps copy (Seen on the current plan / Last seen on an older plan, never reads, follows or works from)
 // Usage: node scripts/test-funnel.mjs <port> [--no-build] [--only local|layout|hosted]   (from a worktree root; refuses 3100 and the main checkout)
 
 import { spawn, spawnSync } from "node:child_process";
@@ -651,19 +651,36 @@ async function phaseLayout(dir) {
         propose: [...document.querySelectorAll("main button span")].find((x) => x.textContent.trim() === "Propose a change")?.getBoundingClientRect().top ?? null,
       }));
       check("(a) 390x844: the phone chrome is compact; the first screen's heading starts above y=560", m.heading !== null && m.heading < 560, JSON.stringify(m));
+      // (e) shell: the sidebar and header controls sit in no @container, so they need the viewport variant to be 44px.
+      // (c, nav) the four nav items fit on one row at 390.
+      const shell = await page.evaluate(() => {
+        const nav = [...document.querySelectorAll('nav[aria-label="Main"] button')];
+        const ctl = [...nav, ...document.querySelectorAll("aside > a, aside > div > button, header button")].filter((b) => b.getBoundingClientRect().height > 0);
+        return {
+          short: ctl.filter((b) => b.getBoundingClientRect().height < 44).map((b) => `${b.textContent.trim().slice(0, 20)} ${Math.round(b.getBoundingClientRect().height * 100) / 100}px`),
+          n: ctl.length,
+          rows: new Set(nav.map((b) => Math.round(b.getBoundingClientRect().top))).size,
+        };
+      });
+      check("(c) 390: the four nav items fit on one row", shell.rows === 1, JSON.stringify(shell));
+      check("(e) 390: the sidebar and header controls (nav, + New conflict, Switch team, Sign out) are at least 44px tall", shell.n >= 7 && shell.short.length === 0, JSON.stringify(shell));
       const turn = await connectCopies(page);
       await nav(page, "Work");
       const work = await connectCopies(page);
       const row = await page.evaluate(() => document.querySelector("main")?.innerText.match(/Connected AI apps[^\n]*/i)?.[0] ?? "");
       check(
-        "(b) 390: no ConnectAI on Your turn; on Work exactly one, at the top of Work, as the row 'Connected AI apps · None connected'",
-        turn.total === 0 && work.total === 1 && work.main === 1 && /^Connected AI apps · None connected$/.test(row),
+        "(b) 390: no ConnectAI card on Your turn; on Work exactly one, at the top of Work, as the row 'Connected AI apps · No AI app has connected yet'",
+        turn.total === 0 && work.total === 1 && work.main === 1 && /^Connected AI apps · No AI app has connected yet$/.test(row),
         `turn=${JSON.stringify(turn)} work=${JSON.stringify(work)} row=${row}`,
       );
-      // The row's button opens the setup steps inline (no dialog).
+      // The row's button opens the setup steps inline (no dialog), under one "Connected AI apps" landmark.
       await clickMain(page, /^Connect an AI app$/);
-      const inline = await page.evaluate(() => ({ region: !!document.querySelector('main [role="region"][aria-label="Connect an AI app"] [role="tablist"]'), dialog: !!document.querySelector('[role="dialog"]') }));
-      check("(b) 390: Connect an AI app on the row opens the setup steps inline, not a dialog", inline.region && !inline.dialog, JSON.stringify(inline));
+      const inline = await page.evaluate(() => ({
+        steps: !!document.querySelector('main [data-connect-ai="row"] [role="tablist"]'),
+        dialog: !!document.querySelector('[role="dialog"]'),
+        landmarks: document.querySelectorAll('main [aria-label="Connected AI apps"]').length,
+      }));
+      check("(b) 390: Connect an AI app on the row opens the setup steps inline, not a dialog, in one landmark", inline.steps && !inline.dialog && inline.landmarks === 1, JSON.stringify(inline));
       check("(b) 390: no hydration error on the phone layout", hydration(logs).length === 0, hydration(logs).join(" | "));
       await ctx.close();
     }
@@ -709,9 +726,9 @@ async function phaseLayout(dir) {
       await waitText(page, /LAYOUT keep the audit trail/);
       const t = await bodyText(page);
       check(
-        "(g) custom: 'Connect your AI apps and they can read this one plan.' and 'Agents can read it once you confirm.'; the old lines are gone",
-        t.includes("None connected. Connect your AI apps and they can read this one plan.") && t.includes("Agents can read it once you confirm.") && !/works from this one plan|Agents follow it/.test(t),
-        (t.match(/None connected[^\n]*/) ?? [""])[0] + " :: " + (t.match(/[^\n]*once you confirm[^\n]*/) ?? [""])[0],
+        "(g) custom: 'No AI app has connected yet.' in the rail and 'Agents can read it once you confirm.'; no 'works from', 'follow' or 'Read the current plan'",
+        t.includes("No AI app has connected yet.") && t.includes("Agents can read it once you confirm.") && !/works from this one plan|Agents follow it|Read the current plan|None connected/.test(t),
+        (t.match(/[^\n]*connected yet[^\n]*/) ?? [""])[0] + " :: " + (t.match(/[^\n]*once you confirm[^\n]*/) ?? [""])[0],
       );
       await ctx.close();
     }
@@ -772,7 +789,7 @@ async function phaseLayout(dir) {
       `seen ${[...labels].join(", ")}; accept=${acc.status}; short: ${short.join(" | ")}`,
     );
     // (g) part 2: two connected apps, one that read before the plan changed and one after. The rail says "Read the
-    // current plan" / "Last read an older plan" (the server's on_current_plan); the phone row counts them.
+    // "Seen on the current plan" / "Last seen on an older plan" (the server's on_current_plan); the phone row counts them.
     {
       const { createHash, randomBytes } = await import("node:crypto");
       const REDIRECT = "http://127.0.0.1:33418/callback";
@@ -810,15 +827,22 @@ async function phaseLayout(dir) {
         return !!ul && !ul.innerHTML.includes("emerald") && marks.some(([t, c]) => t === "✓" && c.includes("text-violet-700")) && marks.some(([t, c]) => t === "▲" && c.includes("text-amber-700"));
       });
       check(
-        "(g) rail: 'Layout New App Read the current plan' (violet ✓), 'Layout Old App Last read an older plan' (the server's on_current_plan); no 'on the latest plan' or 'still on an older plan'",
-        apps.filter((a) => a.on_current_plan).length === 1 && /Layout New App Read the current plan/.test(rail) && /Layout Old App Last read an older plan/.test(rail) && !/on the latest plan|still on an older plan|has read the latest/.test(rail) && railTone,
+        "(g) rail: 'Layout New App Seen on the current plan' (violet ✓), 'Layout Old App Last seen on an older plan' (the server's on_current_plan); no 'read', 'latest plan' or 'still on'",
+        apps.filter((a) => a.on_current_plan).length === 1 && /Layout New App Seen on the current plan/.test(rail) && /Layout Old App Last seen on an older plan/.test(rail) && !/read|latest plan|still on/i.test(rail) && railTone,
         `${JSON.stringify(apps.map((a) => [a.name, a.on_current_plan]))} :: ${rail}`,
       );
       await ctx.close();
       const ph = await open("security", 390, 844);
       await nav(ph.page, "Work");
       const row = await ph.page.evaluate(() => document.querySelector("main")?.innerText.match(/Connected AI apps[^\n]*/i)?.[0] ?? "");
-      check("(g) 390 row: 'Connected AI apps · 2 connected · 1 read the current plan'", row === "Connected AI apps · 2 connected · 1 read the current plan", row);
+      check("(g) 390 row: 'Connected AI apps · 2 connected · 1 seen on the current plan'", row === "Connected AI apps · 2 connected · 1 seen on the current plan", row);
+      // Open, the row lists each app once (the Connected list), under one landmark.
+      await clickMain(ph.page, /^Connect an AI app$/);
+      const once = await ph.page.evaluate(() => {
+        const sec = document.querySelector('main [data-connect-ai="row"]');
+        return { names: (sec?.innerText.match(/Layout New App/g) ?? []).length, landmarks: document.querySelectorAll('main [aria-label="Connected AI apps"]').length };
+      });
+      check("(g) 390 open row: each app listed once, one 'Connected AI apps' landmark", once.names === 1 && once.landmarks === 1, JSON.stringify(once));
       await ph.ctx.close();
     }
   } finally {

@@ -1,8 +1,9 @@
 "use client";
 import { useState } from "react";
 import { api, Btn, Card, Err, Field, Loading, Note, Pill, Shell, TextArea, useAction, useApi, when } from "../../../_ui/kit";
+import { ProposalsCard } from "../../../_ui/reallocations";
 import type { Me } from "../../../_ui/server";
-import type { Alignment } from "../../../_ui/types";
+import type { Alignment, WsDetail } from "../../../_ui/types";
 
 const STATE_WORDS: Record<Alignment["state"], string> = {
   pending: "waiting for approval",
@@ -131,6 +132,7 @@ function AlignmentCard({ ws, a, onDone }: { ws: string; a: Alignment; onDone: ()
 
 export default function Alignments({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<{ waiting_on_me: Alignment[]; mine: Alignment[]; others: Alignment[] }>(`/api/v2/workspaces/${ws}/alignments`);
+  const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   const section = (title: string, list: Alignment[] | undefined, empty: string) => (
     <Card title={title}>
       {list?.length === 0 && <Note>{empty}</Note>}
@@ -149,6 +151,7 @@ export default function Alignments({ me, ws }: { me: Me; ws: string }) {
           {section("Waiting on you", d.data.waiting_on_me, "Nothing is waiting on you.")}
           {section("Your requests", d.data.mine, "You have not asked to align with anyone's goal. Open a goal to ask.")}
           {section("Others you are part of", d.data.others, "None.")}
+          <ProposalsCard ws={ws} me={me} detail={detail.data} />
         </>
       )}
     </Shell>

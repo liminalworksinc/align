@@ -14,7 +14,7 @@ export const GET = route<{ ws: string }>(async (req, params) => {
   return Response.json(feed, { headers });
 });
 
-// POST (cookie) { title, measures, visibility, pod_id, anchors }: a new goal owned by me.
+// POST (cookie) { title, measures, visibility, pod_id, anchors, target_share }: a new goal owned by me.
 export const POST = route<{ ws: string }>(async (req, params) => {
   const pp = enter(await webWrite(req), idParam(params.ws, ID_RE));
   return Response.json(await createGoal(pp, await readJson(req, 32 * 1024)), { status: 201 });
