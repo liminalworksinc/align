@@ -1,22 +1,24 @@
 # Align
 
-**Align is a command center for parallel AI work: one place to see what needs your decision and which connected AI apps are on the current plan. Underneath, only a goal's owner can approve a change, both versions are kept, and AI agents read the approved plan.**
+**Align is a command center for parallel AI work: one place to understand and direct it, starting with what needs your decision and when Align last saw each connected AI app. Underneath, only a goal's owner can approve a change, both versions are kept, launch is a separate decision, and the plan AI agents can read is the approved one.**
 
 Align is Liminal's wedge product, a working prototype. We built the first version in one day at SpeedHacks (Oct 11, 2026), where it won Best Use of Sparta, and rebuilt it during the Proving Ground founder sprint (Oct 21 to 23, 2026) so a team can set up its own two-team case without us. Built by Shayaun Nejad and Shruti Rajagopal Nejad.
 
 ## What it does today
 
+- **Home shows what needs you.** What is waiting on you and on others, the active goals, and when Align last saw each connected AI app and whether that was on the current plan. Align sees when an app last contacted it, not what it read or does.
+- **Understand, then decide.** On an open request in a custom workspace, the goal's owner sees the approved version and the proposed one side by side, then what would change (labelled as the request's own text, not evidence) next to any sandbox evidence. They pick one decision, enter only what it needs, and confirm on a summary of exactly what will be recorded before anything is sent. If the request changed in the meantime, nothing is recorded.
+- **Only the owner decides.** Only the goal's owning team can counter, reject or approve. Anyone else is refused by the server (HTTP 403). "Accept if…" is a counter that keeps the target and adds conditions; the asking team accepts the counter before the owner approves, and that acceptance is shown as their statement, not a check. While a counter waits on the asking team, the owner can still decline.
+- **Approval is not launch.** Approval creates a new goal version and keeps the old one, with an acceptance entry and an audit row. A plan with no sandbox test needs an explicit "accept untested". Leadership makes a separate launch decision.
+- **Agents can read only the approved plan.** A read-only MCP server (9 tools, no write tools) serves the current approved plan. Claude Code (tested end to end) or another MCP client, such as Codex, the Claude app or ChatGPT, connects to a workspace with its MCP URL and a team passcode (OAuth), and reads only that team's data. Claude Code sessions connected to a workspace are notified when a plan is approved (local setup; see docs/MCP.md).
 - **Set up your own case.** One team (the asking team) proposes a change to another team's goal. Leadership sees it. On `/new`, an AI interviewer can fill in the setup form from a conversation, typed or spoken (the browser's own speech recognition); you review every field and press Create.
-- **Only the owner decides.** Only the goal's owning team can counter, reject or approve. Anyone else is refused by the server (HTTP 403). "Accept if…" is a counter that keeps the target and adds conditions; the asking team accepts the counter before the owner approves.
-- **Nothing is overwritten.** Approval creates a new goal version and keeps the old one, with an acceptance entry and an audit row. A plan with no sandbox test needs an explicit "accept untested". Leadership makes a separate launch decision.
-- **Agents read the approved plan.** A read-only MCP server (9 tools, no write tools) serves the current approved plan. Claude Code (tested end to end) or another MCP client, such as Codex, the Claude app or ChatGPT, connects to a workspace with its MCP URL and a team passcode (OAuth), and reads only that team's data. Claude Code sessions connected to a workspace are notified when a plan is approved (local setup; see docs/MCP.md).
 - **Limits from meeting notes.** Paste notes and Align suggests limits for the goal they name; agents can read a limit only once that goal's owner confirms it. No model is called for this.
 - **What the decision gave you.** After approval, a value card shows the measured time from proposal to decision, with a tester's own estimate shown separately. Its follow-up is a waitlist form that ends with an optional, non-binding letter of intent.
-- **Home shows what needs you.** What is waiting on you and on others, the active goals, and which connected AI apps have connected since the current plan was approved. Align sees when an app last connected, not what it does.
 
 ## What it does not do yet
 
 - It does not stop an agent that ignores the approved plan. (A manual Stop is in testing behind a flag.)
+- It does not know whether a connected app read the plan. Any request from an app counts as contact; counting only plan reads is a planned server change.
 - It does not sign records. Liminal's desktop app keeps signed, offline-verifiable decision records; connecting it to Align is next.
 - It runs hosted for invited testers only, and no outside team has yet completed an evaluation on its own.
 
@@ -135,7 +137,7 @@ Align is that layer: an **owner-approved goal contract** with an authorized exec
 
 - **Agents ask before they act.** `GET /api/policy/security` and the MCP tool `align_get_accepted_plan` return the plan Security's agents are authorized to run, with who approved it and its test status. `scripts/run-plan.sh accepted` asks Align first and refuses to guess if Align is unreachable.
 - **Running sessions hear about changes.** Only authority events reach agents: a Leadership push or an owner's approval, never drafts. Align queues a directive for each relevant captured Claude Code session, streams it over SSE with a polling fallback, and a watcher hook wakes an idle session. Delivered and acted-on receipts show on the work map and in the decision record. Details: [`docs/LIVE_REPLAN.md`](docs/LIVE_REPLAN.md#how-it-works).
-- **Read-only.** No agent can create, change or approve a goal. The [MCP server](docs/MCP.md) has five read tools and no write tools.
+- **Read-only.** No agent can create, change or approve a goal. The [MCP server](docs/MCP.md) has nine read tools and no write tools.
 
 Operator screens show no backend IDs or hashes. The Evidence page keeps them in closed **For engineers** sections so every result can be reproduced.
 
