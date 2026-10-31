@@ -623,39 +623,51 @@ async function phaseLayout(dir) {
     });
   const fits = (o) => o.doc <= o.W && o.main <= o.mainW;
   const hydration = (logs) => logs.filter((l) => /hydrat|Minified React error #(418|423|425)/i.test(l));
-  // Primary actions at 390: every Button with one of these labels, wherever it shows.
-  const PRIMARY = /^(Send proposal to |Approve the change to my goal$|Send my conditions to |Ask for changes$|Decline this proposal$|Not yet$|Approve launch$|Try to approve )/;
+  // Actions at 390: every Button (components/ui.tsx, its px-[18px] signature) in the main column, wherever it shows.
   const short = [];
   const labels = new Set();
   const measure = async (page, where) => {
-    const hs = await page.evaluate(
-      (src) =>
-        [...document.querySelectorAll("main button")]
-          .filter((b) => new RegExp(src).test(b.textContent.trim()))
-          .map((b) => ({ t: b.textContent.trim().slice(0, 40), h: Math.round(b.getBoundingClientRect().height * 100) / 100 })),
-      PRIMARY.source,
+    const hs = await page.evaluate(() =>
+      [...document.querySelectorAll("main button")]
+        .filter((b) => b.className.includes("px-[18px]") && b.getBoundingClientRect().height > 0)
+        .map((b) => ({ t: b.textContent.trim().slice(0, 40), h: Math.round(b.getBoundingClientRect().height * 100) / 100 })),
     );
     for (const x of hs) {
-      labels.add(x.t.split(" ").slice(0, 3).join(" "));
+      labels.add(x.t.split(/[\s:]/)[0] + (x.t.startsWith("Confirm") ? ":" : x.t.startsWith("Not yet") ? " yet" : ""));
       if (x.h < 44) short.push(`${where}: ${x.t} ${x.h}px`);
     }
+  };
+  // The review (components/ReviewDecide.tsx): each answer, its "Review this decision", the confirmation, then Back.
+  const walkReview = async (page, where) => {
+    const answers = await page.evaluate(() => [...document.querySelectorAll('main [role="group"][aria-label="Your answer"] button')].map((b) => b.textContent.trim()));
+    for (const a of answers) {
+      await page.evaluate((a) => [...document.querySelectorAll('main [role="group"][aria-label="Your answer"] button')].find((b) => b.textContent.trim() === a)?.click(), a);
+      await sleep(400);
+      await measure(page, `${where}/${a.slice(0, 20)}`);
+      if (await clickMain(page, /^Review this decision$/)) {
+        await measure(page, `${where}/${a.slice(0, 20)}/confirm`);
+        await clickMain(page, /^Back$/);
+      }
+    }
+    return answers.length;
   };
   try {
     // (a) + (b) 390x844, the asking team's first screen: "Propose a change" above the fold, no ConnectAI in the rail.
     {
       const { page, ctx, logs } = await open("product", 390, 844);
-      // The shell's share (sidebar, header, goal strip) of the first screen: the view's heading starts by y=560 (87f1866:
-      // ~1010). Where Propose a change lands below that depends on the Your turn view's own order (lane A's file).
+      // The shell's share of the first screen: the sidebar and header above the main column end by y=400 (87f1866: about
+      // 630). What the main column puts first (the first-run card, Your turn's order) is those views' own.
       const m = await page.evaluate(() => ({
-        heading: document.querySelector("main h1")?.getBoundingClientRect().top ?? null,
+        main: Math.round(document.querySelector("main").getBoundingClientRect().top),
         propose: [...document.querySelectorAll("main button span")].find((x) => x.textContent.trim() === "Propose a change")?.getBoundingClientRect().top ?? null,
       }));
-      check("(a) 390x844: the phone chrome is compact; the first screen's heading starts above y=560", m.heading !== null && m.heading < 560, JSON.stringify(m));
+      check("(a) 390x844: the phone chrome is compact; the main column starts above y=400", m.main < 400, JSON.stringify(m));
       // (e) shell: the sidebar and header controls sit in no @container, so they need the viewport variant to be 44px.
       // (c, nav) the four nav items fit on one row at 390.
       const shell = await page.evaluate(() => {
         const nav = [...document.querySelectorAll('nav[aria-label="Main"] button')];
-        const ctl = [...nav, ...document.querySelectorAll("aside > a, aside > div > button, header button")].filter((b) => b.getBoundingClientRect().height > 0);
+        const side = "aside:not([aria-label])"; // the sidebar (the Inspector rail is labelled)
+        const ctl = [...nav, ...document.querySelectorAll(`${side} > a, ${side} > div > button, header button`)].filter((b) => b.getBoundingClientRect().height > 0);
         return {
           short: ctl.filter((b) => b.getBoundingClientRect().height < 44).map((b) => `${b.textContent.trim().slice(0, 20)} ${Math.round(b.getBoundingClientRect().height * 100) / 100}px`),
           n: ctl.length,
@@ -741,38 +753,44 @@ async function phaseLayout(dir) {
     }
     const prop = await req("POST", "/api/proposals", { cookie: W.c.product, body: { proposed_measure_text: "LAYOUT retention first for two weeks", rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
     const pid = prop.json?.id;
+    let answers = 0;
     {
       const { page, ctx } = await open("security", 390, 844);
       await clickMain(page, /Review the proposal/);
-      for (const opt of ["Accept", "Accept if…", "Counter", "Decline"]) {
-        await page.evaluate((opt) => [...document.querySelectorAll("main button[aria-pressed]")].find((b) => b.querySelector("b")?.textContent === opt)?.click(), opt);
-        await sleep(400);
-        await measure(page, `review/${opt}`);
-      }
-      await ctx.close();
-    }
-    {
-      const { page, ctx } = await open("product", 390, 844);
-      await clickMain(page, /reviews the proposal/);
-      await measure(page, "asker waiting");
+      answers = await walkReview(page, "owner review");
       await ctx.close();
     }
     const ctr = await req("POST", `/api/proposals/${pid}/counter`, { cookie: W.c.security, body: { proposed_measure_text: "LAYOUT retention first for two weeks, reviewed weekly", rationale: "Needs a review cadence", conditions: "Post before each use." } });
     {
+      // At 768 the asker opens the counter, picks "Accept … changes", reviews it and sees the confirmation: nothing
+      // runs past the page or the main column at any step.
       const { page, ctx } = await open("product", 768, 1000);
       const opened = await clickMain(page, /Review the changes/);
-      const o = await overflow(page);
-      const b = await page.evaluate(() => {
-        const x = [...document.querySelectorAll("main button")].find((y) => /^Accept .* changes and confirm what /.test(y.textContent.trim()));
-        const r = x?.getBoundingClientRect();
-        const box = x?.parentElement?.getBoundingClientRect();
-        return r ? { right: Math.round(r.right * 100) / 100, parentRight: Math.round(box.right * 100) / 100 } : null;
+      const steps = [];
+      const look = async (name) => {
+        const o = await overflow(page);
+        const past = await page.evaluate(() => {
+          const m = document.querySelector("main").getBoundingClientRect().right;
+          return [...document.querySelectorAll("main button")].filter((b) => b.getBoundingClientRect().right > m + 0.5).map((b) => b.textContent.trim().slice(0, 40));
+        });
+        steps.push({ name, ok: fits(o) && past.length === 0, o, past });
+      };
+      await look("review");
+      const picked = await page.evaluate(() => {
+        const b = [...document.querySelectorAll('main [role="group"][aria-label="Your answer"] button')].find((x) => /^Accept .*changes/.test(x.textContent.trim()));
+        b?.click();
+        return !!b;
       });
+      await sleep(400);
+      await look("accept picked");
+      const reviewed = await clickMain(page, /^Review this decision$/);
+      await look("confirm");
       check(
-        "(d) 768: the asker's review of a counter does not overflow (page, main column, and the Accept … changes button inside its row)",
-        ctr.status === 200 && opened && fits(o) && !!b && b.right <= b.parentRight,
-        `${ctr.status} ${ctr.text.slice(0, 120)} ${JSON.stringify(o)} ${JSON.stringify(b)}`,
+        "(d) 768: the asker's review of a counter (accept the changes, review, confirm) does not overflow the page or the main column",
+        ctr.status === 200 && opened && picked && reviewed && steps.every((x) => x.ok),
+        `${ctr.status} picked=${picked} reviewed=${reviewed} ${JSON.stringify(steps.filter((x) => !x.ok))}`,
       );
+      await walkReview(page, "asker review");
       await ctx.close();
     }
     await req("POST", `/api/proposals/${pid}/acknowledge`, { cookie: W.c.product, body: {} });
@@ -783,10 +801,11 @@ async function phaseLayout(dir) {
       await measure(page, "launch");
       await ctx.close();
     }
+    const want = ["Send", "Review", "Confirm:", "Back", "Approve", "Not yet"];
     check(
-      "(e) 390: every primary action (Send proposal, Approve the change, Send my conditions, Ask for changes, Decline, Try to approve, Approve launch, Not yet) is at least 44px tall",
-      acc.status === 200 && labels.size >= 8 && short.length === 0,
-      `seen ${[...labels].join(", ")}; accept=${acc.status}; short: ${short.join(" | ")}`,
+      "(e) 390: every action Button in the main column (Send proposal, each review answer's Review this decision, Confirm, Back, Approve launch, Not yet) is at least 44px tall",
+      acc.status === 200 && answers >= 4 && want.every((w) => labels.has(w)) && short.length === 0,
+      `answers=${answers} seen ${[...labels].join(", ")}; accept=${acc.status}; short: ${short.join(" | ")}`,
     );
     // (g) part 2: two connected apps, one that read before the plan changed and one after. The rail says "Read the
     // "Seen on the current plan" / "Last seen on an older plan" (the server's on_current_plan); the phone row counts them.
@@ -840,7 +859,7 @@ async function phaseLayout(dir) {
       await clickMain(ph.page, /^Connect an AI app$/);
       const once = await ph.page.evaluate(() => {
         const sec = document.querySelector('main [data-connect-ai="row"]');
-        return { names: (sec?.innerText.match(/Layout New App/g) ?? []).length, landmarks: document.querySelectorAll('main [aria-label="Connected AI apps"]').length };
+        return { names: [...(sec?.querySelectorAll("li") ?? [])].filter((li) => li.textContent.includes("Layout New App")).length, landmarks: document.querySelectorAll('main [aria-label="Connected AI apps"]').length };
       });
       check("(g) 390 open row: each app listed once, one 'Connected AI apps' landmark", once.names === 1 && once.landmarks === 1, JSON.stringify(once));
       await ph.ctx.close();
