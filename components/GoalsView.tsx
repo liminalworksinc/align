@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { companyMeasureId, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
-import type { StateView } from "@/lib/types";
+import { LIMIT_WORDS, limitsFor } from "@/lib/limits";
+import type { Goal, StateView } from "@/lib/types";
 import { agreementStatus } from "./launch";
 import type { ViewProps } from "./props";
 import { ProofStrip } from "./ProofStrip";
@@ -29,6 +30,22 @@ function depPill(s: StateView, L: Labels): { tone: PillTone; text: string } {
   if (st === "accepted") return { tone: "white", text: L.northstar ? STATE_LABEL.ACCEPTED : agreementStatus(s.acceptances.at(-1)) };
   if (st === "pending") return { tone: "violet", text: STATE_LABEL.PROPOSED };
   return { tone: "amber", text: STATE_LABEL[depRelation(s)?.status ?? "UNKNOWN"] ?? STATE_LABEL.UNKNOWN };
+}
+
+/** The limits this goal's owner confirmed, under its measures: what agents read word for word. */
+function Limits({ s, g }: { s: StateView; g: Goal }) {
+  const ls = limitsFor(s, g);
+  if (!ls.length) return null;
+  return (
+    <ul aria-label="Limits" className="flex flex-col gap-1 text-left">
+      {ls.map((l) => (
+        <li key={l.id} className="flex items-baseline gap-2 text-[13.5px] text-zinc-700">
+          <span className="shrink-0 text-[11.5px] font-bold uppercase tracking-[0.04em] text-zinc-500">{LIMIT_WORDS[l.type]}</span>
+          <span className="min-w-0 flex-1">{l.text}</span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function TeamNode({ props, L, owner, sel, dim, onPick }: { props: ViewProps; L: Labels; owner: "product" | "security"; sel: boolean; dim: boolean; onPick: () => void }) {
@@ -65,6 +82,7 @@ function TeamNode({ props, L, owner, sel, dim, onPick }: { props: ViewProps; L: 
           </li>
         ))}
       </ul>
+      <Limits s={s} g={g} />
       <div className="border-t border-zinc-200 pt-2">
         {work.length ? (
           work.map((w, i) => (
@@ -220,6 +238,7 @@ export function GoalsView(props: ViewProps) {
               )}
             </div>
             <span className="text-[18px] font-semibold leading-[1.3]">{ceo.objective}</span>
+            <Limits s={s} g={ceo} />
             <div className="flex flex-wrap gap-1.5">
               {ceo.measures.map((m) => {
                 const to = inheritor(m.id);
@@ -238,8 +257,9 @@ export function GoalsView(props: ViewProps) {
         )}
       </div>
 
-      {/* Connectors: from the company node down to both teams; each leg dims with its team. */}
-      <div className="grid h-7 grid-cols-[1fr_200px_1fr]" aria-hidden>
+      {/* Connectors: from the company node down to both teams; each leg dims with its team. In a narrow container (a custom
+          workspace on a phone) the map stacks into one column and the connectors are hidden. */}
+      <div className="grid h-7 grid-cols-[1fr_200px_1fr] @max-md:hidden" aria-hidden>
         <div className={`relative transition-opacity ${dimP ? "opacity-30" : ""}`}>
           <div className="absolute left-1/2 right-0 top-0 border-t-2 border-zinc-300" />
           <div className="absolute bottom-0 left-1/2 top-0 border-l-2 border-zinc-300" />
@@ -254,17 +274,17 @@ export function GoalsView(props: ViewProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_200px_1fr] items-stretch">
+      <div className="grid grid-cols-[1fr_200px_1fr] items-stretch @max-md:grid-cols-1 @max-md:gap-3">
         <TeamNode props={props} L={L} owner="product" sel={sel === "product"} dim={dimP} onPick={() => pick("product")} />
-        <div className="relative flex justify-center pt-[18px]">
-          <div className={`absolute inset-x-0 top-[46px] border-t-2 ${line}`} aria-hidden />
+        <div className="relative flex justify-center pt-[18px] @max-md:pt-0">
+          <div className={`absolute inset-x-0 top-[46px] border-t-2 ${line} @max-md:hidden`} aria-hidden />
           {rel ? (
             <button
               type="button"
               onClick={() => pick("dep")}
               aria-pressed={sel === "dep"}
               aria-label={`${L.team.product} depends on ${L.team.security}: ${rel.label}. Status: ${pill.text}`}
-              className={`${NODE} relative z-10 h-fit w-[176px] items-center px-3 py-3.5 text-center ${depBorder} ${nodeState(sel === "dep", false)}`}
+              className={`${NODE} relative z-10 h-fit w-[176px] items-center px-3 py-3.5 text-center @max-md:w-full ${depBorder} ${nodeState(sel === "dep", false)}`}
             >
               <Lbl>
                 {L.team.product} → {L.team.security}

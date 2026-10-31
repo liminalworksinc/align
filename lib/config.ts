@@ -1,9 +1,11 @@
 import path from "node:path";
 import { v2Problems } from "./v2/config";
+import { loiUrlOk, waitlistUrlOk } from "./value";
 
 // Every multi-workspace setting, read from the environment only (never from request headers).
 // Mode L (loopback) is the default. HOSTED=1 is the hosted tester mode (founder ruling 10-21 "go C"): one server
-// behind Fly's HTTPS proxy, an explicit hostname allowlist, strong secrets, no capture, no AI key, and no Northstar
+// behind Fly's HTTPS proxy, an explicit hostname allowlist, strong secrets, no capture, no AI key except the intake
+// interview's own (ALIGN_INTERVIEW_API_KEY, founder ruling 10-29), and no Northstar
 // at all (the demo, its fixture and Sparta evidence are never served or read). ALIGN_PUBLIC=1 (full Mode P) is refused.
 
 export interface Config {
@@ -45,6 +47,23 @@ export function config(): Config {
   };
 }
 
+/** The Align waitlist (a Google Form). ALIGN_WAITLIST_URL overrides it; anything but an https docs.google.com/forms URL
+ *  hides the button. Its last section carries the optional non-binding letter of intent, so the LOI link defaults to it. */
+export const WAITLIST_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfxBjrDxvd3VmRhK_rwYU7-YCFSwV3cZLxDkyFLPYEUM5vU7g/viewform";
+
+/** The decision value card's next-step links, checked (lib/value.ts). null hides that link. ALIGN_LOI_URL (an https URL or a
+ *  mailto:) replaces the LOI link's default, the waitlist form; an invalid value hides it. */
+export function nextStepLinks(env: NodeJS.ProcessEnv = process.env): { waitlist: string | null; loi: string | null } {
+  // Called on every /w/<id> render: a bad value must hide the links, never fail the page for every tester.
+  try {
+    const waitlist = waitlistUrlOk(env.ALIGN_WAITLIST_URL || WAITLIST_URL);
+    const loi = env.ALIGN_LOI_URL ? loiUrlOk(env.ALIGN_LOI_URL) : waitlist;
+    return { waitlist, loi };
+  } catch {
+    return { waitlist: null, loi: null };
+  }
+}
+
 /** Hostname of a Host header, without port ("[::1]" keeps its brackets). */
 export function hostName(host: string | null): string {
   const h = (host || "").toLowerCase();
@@ -54,7 +73,9 @@ export function hostName(host: string | null): string {
 /** The one host rule: the Host header names an allowed host (ALIGN_HOSTS when hosted, else loopback). */
 export function hostAllowed(host: string | null): boolean {
   const name = hostName(host);
-  return !!name && config().allowedHosts.has(name);
+  // Anything after the name may only be a numeric port: the Host header is echoed into connect URLs and paste lines.
+  const rest = (host || "").toLowerCase().slice(name.length);
+  return !!name && /^(?::\d{1,5})?$/.test(rest) && config().allowedHosts.has(name);
 }
 
 const DEFAULT_PASSCODES: Record<string, string> = {
@@ -91,6 +112,13 @@ export function hostedProblems(env: NodeJS.ProcessEnv = process.env, cwd = proce
     else if (v.length < 12) p.push(`${k} must be 12+ characters`);
   }
   if (env.AI_GATEWAY_API_KEY) p.push("AI_GATEWAY_API_KEY must not be set when hosted (no AI key)");
+  // The intake interview (founder ruling 10-29, LIM-2424 9976b9e0) uses ALIGN_INTERVIEW_API_KEY and nothing else, so the
+  // Anthropic SDK's own environment settings must not be set: credentials, but also ANTHROPIC_BASE_URL, custom headers,
+  // logging and telemetry, which the SDK picks up silently and which could send the key and testers' text elsewhere.
+  const sdkEnv = Object.keys(env).filter((k) => k.startsWith("ANTHROPIC_") && env[k]);
+  if (sdkEnv.length) p.push(`${sdkEnv.join(", ")} must not be set when hosted (the interview uses ALIGN_INTERVIEW_API_KEY only)`);
+  if (env.ALIGN_INTERVIEW === "1") p.push("ALIGN_INTERVIEW=1 is for Mode L only; hosted, set ALIGN_INTERVIEW_API_KEY");
+  if (env.ALIGN_INTERVIEW_API_KEY && env.ALIGN_INTERVIEW_API_KEY.length < 20) p.push("ALIGN_INTERVIEW_API_KEY looks too short to be an API key");
   if (env.ALIGN_CAPTURE && env.ALIGN_CAPTURE !== "0") p.push("ALIGN_CAPTURE must be off when hosted");
   p.push(...v2Problems(env)); // empty unless ALIGN_GOAL_SESSIONS=1
   return p;

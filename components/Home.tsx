@@ -14,12 +14,13 @@ import { DecisionsView } from "@/components/DecisionsView";
 import { YourTurnView, waitingOnMe } from "@/components/YourTurnView";
 import { OrgView } from "@/components/OrgView";
 import { WorkMap } from "@/components/WorkMap";
+import ConnectAI from "@/components/ConnectAI";
 import { ScenarioStudio } from "@/components/v6/ScenarioStudio";
 import { agreementStatus } from "@/components/launch";
 import { accepted, changedToday, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
 import { api, SESSION_ENDED, useAlign, type Selection } from "@/components/useAlign";
-import { NO_ANSWER_HOSTED, NO_ANSWER_WORKSPACE_LOCAL, ROLE_SWITCH, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
+import { NO_ANSWER_HOSTED, NO_ANSWER_WORKSPACE_LOCAL, roleSwitch, companyMeasureId, conflictMeasureId, decisionMeasureId, dependencyId, labelsFor, poss, type Labels } from "@/lib/labels";
 
 // v6 rail (LIM-2424). One nav for teams and leadership; leadership also keeps its Company goal entry (OrgView).
 // `also` lists the views a nav item stays highlighted for (the record under Decisions, a review under Your turn).
@@ -62,13 +63,22 @@ const teamInitials = (team: string) => {
 // "<Team> lead", except when the team name already says it (a leadership team, or a name ending in "Lead").
 // Custom shell: below 1100px the page scrolls as a whole and the Inspector rail stacks under the main column, so
 // independent testers on 900–1024px laptops never scroll sideways. The header wraps at every width.
+// Phones: the shell's max-md: variants key on the VIEWPORT, below 768px (md); 768px and up is exactly as before. One
+// column: the sidebar becomes a stacked bar above the header (its nav in a row), so the main column gets the full width.
+// Layout only: the sidebar stays mounted at every width, so its state (ConnectAI's dialog, the composer, Switch team)
+// survives a resize. Inside the main column, components use @max-md: instead, a CONTAINER query on CUSTOM_MAIN (the
+// only @container they sit in): it applies when that column is under 28rem (about 420-448px), which on a phone it is.
 const CUSTOM_SHELL =
-  "grid min-h-screen grid-cols-[236px_minmax(0,1fr)] grid-rows-[auto_auto_auto] min-[1100px]:h-screen min-[1100px]:grid-cols-[236px_minmax(0,1fr)_360px] min-[1100px]:grid-rows-[auto_minmax(0,1fr)] min-[1100px]:overflow-hidden";
+  "grid min-h-screen grid-cols-[236px_minmax(0,1fr)] grid-rows-[auto_auto_auto] min-[1100px]:h-screen min-[1100px]:grid-cols-[236px_minmax(0,1fr)_360px] min-[1100px]:grid-rows-[auto_minmax(0,1fr)] min-[1100px]:overflow-hidden max-md:grid-cols-1 max-md:grid-rows-none";
 const CUSTOM_SIDEBAR =
-  "sticky top-0 row-span-3 flex h-screen flex-col self-start border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5 min-[1100px]:static min-[1100px]:row-span-2 min-[1100px]:h-auto min-[1100px]:self-stretch";
-const CUSTOM_HEADER = "flex min-h-16 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-200 px-6 py-2.5 min-[1100px]:col-span-2";
-const CUSTOM_MAIN = "@container relative min-w-0 p-6 text-[16px] min-[1100px]:overflow-y-auto";
-const CUSTOM_RAIL = "min-w-0 border-t border-zinc-200 bg-zinc-50 p-[22px] min-[1100px]:overflow-y-auto min-[1100px]:border-t-0 min-[1100px]:border-l";
+  "sticky top-0 row-span-3 flex h-screen flex-col self-start border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5 min-[1100px]:static min-[1100px]:row-span-2 min-[1100px]:h-auto min-[1100px]:self-stretch max-md:static max-md:row-span-1 max-md:h-auto max-md:min-w-0 max-md:self-auto max-md:border-r-0 max-md:border-b";
+// Below md: the nav runs as a wrapping row, and the sidebar's footer (the same person and team as the header) is hidden.
+const CUSTOM_NAV = "max-md:flex-row max-md:flex-wrap max-md:gap-1";
+const CUSTOM_NAV_ITEM = "max-md:w-auto max-md:min-h-11";
+const CUSTOM_SIDEBAR_FOOTER = "max-md:hidden";
+const CUSTOM_HEADER = "flex min-h-16 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-200 px-6 py-2.5 min-[1100px]:col-span-2 max-md:px-4";
+const CUSTOM_MAIN = "@container relative min-w-0 p-6 text-[16px] min-[1100px]:overflow-y-auto max-md:p-4";
+const CUSTOM_RAIL = "min-w-0 border-t border-zinc-200 bg-zinc-50 p-[22px] min-[1100px]:overflow-y-auto min-[1100px]:border-t-0 min-[1100px]:border-l max-md:p-4";
 // The company-goal strip stacks its three parts when the main column is narrow.
 const CUSTOM_STRIP =
   "mb-4 grid grid-cols-1 items-center gap-4 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5 @[60rem]:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] @[60rem]:gap-6";
@@ -94,7 +104,8 @@ function SwitchTeam({ L, current, onPick }: { L: Labels; current: string; onPick
         Switch team ▾
       </Button>
       {open && (
-        <div role="menu" aria-label="Switch team" className="absolute right-0 top-full z-20 mt-1 flex min-w-[220px] flex-col rounded-[10px] border border-zinc-300 bg-white p-1 shadow-lg">
+        // Phones (viewport below 768px): the wrapped header puts this button at the left, so the menu opens rightward.
+        <div role="menu" aria-label="Switch team" className="absolute right-0 top-full z-20 mt-1 flex min-w-[220px] flex-col rounded-[10px] border border-zinc-300 bg-white p-1 shadow-lg max-md:left-0 max-md:right-auto">
           {others.map((r) => (
             <button
               key={r}
@@ -255,7 +266,7 @@ function WorkspaceLogin({ workspace, hosted, onDone, ended, elsewhere, initialRo
         >
           {busy ? "Signing in…" : `Sign in as ${team}`}
         </button>
-        <p className="mt-3 text-center text-[13px] text-zinc-500">Testing alone? Sign in as any team, then use Switch team.</p>
+        <p className="mt-3 text-center text-[13px] text-zinc-500">{roleSwitch(info.roles.find((r) => r.id === "product")?.team ?? "the team asking for the change")}</p>
       </form>
     </main>
   );
@@ -308,7 +319,7 @@ function NorthstarLogin({ onDone, L, elsewhere, initialRole }: { onDone: () => v
           <>
             <p className="mb-2 text-[16px] text-zinc-600">{L.company}. Choose who you are; each person signs in separately.</p>
             {L.companyNote && <p className="mb-2 text-[14px] text-zinc-500">{L.companyNote}</p>}
-            <p className="mb-6 text-[14px] text-zinc-500">{ROLE_SWITCH}</p>
+            <p className="mb-6 text-[14px] text-zinc-500">{roleSwitch(L.team.product)}</p>
           </>
         ) : (
           <p className="mb-6 text-[16px] text-zinc-600">Northstar Security, a made-up company for this demo. Choose who you are; each person signs in separately.</p>
@@ -358,7 +369,7 @@ function NorthstarLogin({ onDone, L, elsewhere, initialRole }: { onDone: () => v
 
 /** The app. `workspace` is the /w/<id> slug for a custom workspace; omitted for Northstar at /. `hosted` comes from
  *  the server render (HOSTED=1), so the sign-in screen can word a failed fetch for testers. */
-export default function Home({ workspace, hosted }: { workspace?: string; hosted?: boolean }) {
+export default function Home({ workspace, hosted, nextStep }: { workspace?: string; hosted?: boolean; nextStep?: ViewProps["nextStep"] }) {
   const { state, me, error, setError, loadError, meError, loadMe, act, mark, refresh, ended, elsewhere, switched, continueAs } = useAlign(workspace);
   const [nextRole, setNextRole] = useState<Role | null>(null); // the team chosen in Switch team, until it signs in
   const [view, setView] = useState<View>("turn");
@@ -483,6 +494,7 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
     compose,
     setCompose,
     switchTeam: custom ? (r) => void switchTo(r) : undefined,
+    nextStep,
   };
   const turnCount = waitingOnMe(state, me.actor, () => undefined).length;
   const rel = state.relations.find((r) => r.id === dependencyId(state));
@@ -565,7 +577,7 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
             {newConflict.why && <span className="px-1 text-[12.5px] leading-snug text-zinc-500">{newConflict.why}</span>}
           </div>
         )}
-        <nav className="flex flex-col gap-0.5" aria-label="Main">
+        <nav className={`flex flex-col gap-0.5 ${custom ? CUSTOM_NAV : ""}`} aria-label="Main">
           {nav.map((n) => {
             const on = view === n.id || !!n.also?.includes(view);
             const count = counts[n.id] ?? 0;
@@ -574,7 +586,7 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
                 key={n.id}
                 onClick={() => props.go(n.id)}
                 aria-current={on ? "page" : undefined}
-                className={`flex min-h-12 w-full items-center gap-3 rounded-[10px] px-3.5 text-left text-[15px] font-semibold transition ${on ? "bg-violet-50 text-zinc-900 shadow-[inset_2px_0_0_var(--color-violet-700)]" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"} disabled:cursor-not-allowed disabled:hover:bg-transparent`}
+                className={`flex min-h-12 w-full items-center gap-3 rounded-[10px] px-3.5 text-left text-[15px] font-semibold transition ${custom ? CUSTOM_NAV_ITEM : ""} ${on ? "bg-violet-50 text-zinc-900 shadow-[inset_2px_0_0_var(--color-violet-700)]" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"} disabled:cursor-not-allowed disabled:hover:bg-transparent`}
               >
                 <span className="flex min-w-0 flex-col">
                   <span>{n.label}</span>
@@ -609,7 +621,8 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
           </div>
         </div>
         )}
-        <div className={`${custom ? "mt-auto" : "mt-3"} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
+        {workspace && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} />}
+        <div className={`${custom ? (workspace ? "mt-3" : "mt-auto") : "mt-3"} ${custom ? CUSTOM_SIDEBAR_FOOTER : ""} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
           <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
             {custom ? teamInitials(L.role[me.actor]) : initials(me.name ?? "")}
           </span>
@@ -622,7 +635,7 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
 
       {/* Top bar */}
       <header className={custom ? CUSTOM_HEADER : "col-span-2 flex items-center gap-4 border-b border-zinc-200 px-6"}>
-        <div className="shrink-0 whitespace-nowrap text-[15px] text-zinc-500">
+        <div className={custom ? "shrink-0 whitespace-nowrap text-[15px] text-zinc-500 max-md:min-w-0 max-md:shrink max-md:whitespace-normal" : "shrink-0 whitespace-nowrap text-[15px] text-zinc-500"}>
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
           {custom && state.scenario_config?.company_note && (
             <div className="whitespace-normal text-[13px] text-zinc-500">{state.scenario_config.company_note}</div>
@@ -635,7 +648,7 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
         )}
         {custom ? (
           rel?.status === "ACCEPTED" ? (
-            <Badge tone="neutral">
+            <Badge tone="neutral" wrap>
               {L.team.product} and {L.team.security}: {agreementStatus(accepted(state)).toLowerCase()}
             </Badge>
           ) : unresolved && me.actor !== "leadership" ? (
@@ -659,7 +672,7 @@ export default function Home({ workspace, hosted }: { workspace?: string; hosted
         ) : lastPush ? (
           <Badge tone="neutral">Company goal {lastPush.version} sent {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Badge>
         ) : null}
-        <div className={custom ? "ml-auto flex min-w-0 items-center gap-3" : "ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap"}>
+        <div className={custom ? "ml-auto flex min-w-0 flex-wrap items-center gap-3" : "ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap"}>
           {ops && !custom && (
             <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
               {confirmReset ? "Click again to reset" : "Start the demo over"}

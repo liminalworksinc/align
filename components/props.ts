@@ -27,4 +27,6 @@ export interface ViewProps {
   setCompose?: (on: boolean) => void;
   /** Custom only: the header's Switch team, so a hand-off can offer "Act as <team> →" in place (still needs that passcode). */
   switchTeam?: (role: Actor) => void;
+  /** Custom workspaces: the decision value card's checked next-step links (lib/config.ts nextStepLinks); null hides one. */
+  nextStep?: { waitlist: string | null; loi: string | null };
 }

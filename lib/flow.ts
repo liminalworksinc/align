@@ -338,6 +338,8 @@ const SIGNED_IN: Partial<Record<keyof AppState | "capture_consents", Project>> =
   private_constraints: (_v, s, c) => s.private_constraints.filter((x) => x.owner === c.me),
   org_draft: (v, _s, c) => (c.me === "leadership" ? v : OMIT), // Leadership's unpublished next company goal
   pushes: keep,
+  limits: keep, // custom only: suggested and confirmed limits (every signed-in role sees them, as with goals)
+  asks: keep, // custom only: what was asked of each team (every signed-in role sees all of them)
   sessions: keep, // captured sessions and their mappings: signed-in roles only (AgentPane, WorkMap, AuthorityStrip)
   mappings: keep,
   capture_consents: keep,
@@ -346,6 +348,9 @@ const SIGNED_IN: Partial<Record<keyof AppState | "capture_consents", Project>> =
   scenario: keep,
   teams: keep,
   scenario_config: keep,
+  // Custom only: the viewer's own value reports (its estimate and note). Funnel events and other roles' answers stay on
+  // the server (scripts/ws-admin.mjs funnel reads them on the host).
+  funnel: (_v, s, c) => (s.funnel ? { reports: s.funnel.reports.filter((r) => r.role === c.me) } : OMIT),
 };
 
 /** Goals the viewer may not see: private goals of another owner (Owner mapped to Actor, so ceo is leadership). */

@@ -1,10 +1,11 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
+import { InterviewPanel, type FormTarget } from "@/components/InterviewPanel";
 import { EMPTY, Field, field, issuesFrom, ScenarioFields, toBody, type Form, type Issues } from "@/components/ScenarioForm";
 import { isCodeRefusal } from "@/lib/codes";
-import { NO_ANSWER_HOSTED, NO_ANSWER_LOCAL, ROLE_SWITCH } from "@/lib/labels";
+import { NO_ANSWER_HOSTED, NO_ANSWER_LOCAL, roleSwitch } from "@/lib/labels";
 
 // Create a new custom workspace from the same form as /setup. No sign-in is needed and creating does not sign anyone in.
 // POSTs to /api/workspaces; the three passcodes come back once and are shown once on the success card.
@@ -35,6 +36,25 @@ function TestServerNotice({ deleteBy }: { deleteBy: string | null }) {
   );
 }
 
+/** Step n of the form inside `root`. ScenarioForm.tsx gives its step sections no ids, so each is found by its heading:
+ *  a Step renders <section><h2><span>n.</span> title</h2>…</section>. If that markup changes, fall back to the nth
+ *  <section> that has its own <h2> (the one-sentence read-back above the steps has none). */
+function findStep(root: HTMLElement, n: number): HTMLElement | null {
+  const sections = Array.from(root.querySelectorAll<HTMLElement>("section"));
+  const byNumber = sections.find((s) => s.querySelector(":scope > h2 > span")?.textContent?.trim() === `${n}.`);
+  return byNumber ?? sections.filter((s) => s.querySelector(":scope > h2"))[n - 1] ?? null;
+}
+
+const smooth = (): ScrollBehavior => (window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg aria-hidden="true" focusable="false" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={open ? "rotate-180" : ""}>
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
@@ -55,7 +75,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 
 /** `testServer` comes from the server render (page.tsx), so the notice shows even if the config fetch fails (review M9). */
 export default function NewWorkspace({ testServer }: { testServer: { delete_by: string | null } | null }) {
-  const [cfg, setCfg] = useState<{ signup_code_required: boolean; max_reached: boolean; test_server?: { delete_by: string | null } } | null | undefined>(undefined);
+  const [cfg, setCfg] = useState<{ signup_code_required: boolean; max_reached: boolean; interview?: boolean; test_server?: { delete_by: string | null } } | null | undefined>(undefined);
   const [form, setForm] = useState<Form>(EMPTY);
   const [code, setCode] = useState("");
   const [issues, setIssues] = useState<Issues>({});
@@ -64,6 +84,45 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
   const [more, setMore] = useState(false);
   const [created, setCreated] = useState<Created | null>(null);
   const [saved, setSaved] = useState(false); // the tester confirmed the passcodes are saved before leaving the card
+  // Interview-first: once the interview starts, the form folds into "Review & edit the form" so the chat isn't competing
+  // with six steps. It opens when the interview says it's done, from the "Draft so far" list, or by hand.
+  const [interviewing, setInterviewing] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [jump, setJump] = useState<{ to: FormTarget | "heading"; at: number } | null>(null);
+  const formSection = useRef<HTMLElement | null>(null);
+  const formHeading = useRef<HTMLHeadingElement | null>(null);
+
+  // Runs after the render that un-hid the form, so the target is laid out. Block body: an effect returns nothing here.
+  useEffect(() => {
+    if (!jump || !formSection.current) return;
+    if (jump.to === "heading") {
+      formSection.current.scrollIntoView({ behavior: smooth(), block: "start" });
+      formHeading.current?.focus({ preventScroll: true });
+      return;
+    }
+    const step = findStep(formSection.current, jump.to.step);
+    if (!step) return;
+    const controls = Array.from(step.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(jump.to.control ?? "input, textarea"));
+    const control = controls.find((c) => c.value.trim() === "") ?? controls[0];
+    (control ?? step).scrollIntoView({ behavior: smooth(), block: "center" });
+    control?.focus({ preventScroll: true });
+  }, [jump]);
+
+  // After a Create that failed validation: the first marked field (Field sets data-invalid), scrolled to and focused.
+  // Runs after the render that showed the marks and unfolded the form, so the field is laid out.
+  const [focusInvalid, setFocusInvalid] = useState(0);
+  useEffect(() => {
+    if (!focusInvalid) return;
+    const control = document.querySelector<HTMLInputElement | HTMLTextAreaElement>("[data-invalid] input, [data-invalid] textarea");
+    if (!control) return;
+    control.scrollIntoView({ behavior: smooth(), block: "center" });
+    control.focus({ preventScroll: true });
+  }, [focusInvalid]);
+
+  const openForm = (to: FormTarget | "heading") => {
+    setFormOpen(true);
+    setJump((j) => ({ to, at: (j?.at ?? 0) + 1 })); // a new object each time, so the same target can be jumped to twice
+  };
 
   useEffect(() => {
     fetch("/api/workspaces/config", { cache: "no-store" })
@@ -104,7 +163,9 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
       const error = typeof data.error === "string" ? data.error : null;
       if (res.status === 400 && Array.isArray(data.issues)) {
         setIssues(issuesFrom(data.issues));
-        setProblem("Some fields need fixing. They are marked below.");
+        setFormOpen(true); // the marks are inside the form, so a folded form opens to show them
+        setProblem("Some fields need fixing. They are marked in red above.");
+        setFocusInvalid((n) => n + 1); // then scroll to and focus the first one
       } else if (res.status === 403 && cfg?.signup_code_required && isCodeRefusal(error)) {
         setIssues({ signup_code: [error] });
         setProblem("Check the signup code.");
@@ -168,7 +229,7 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
         </p>
         <p className="mb-5 text-[16px] text-zinc-700">
           A browser holds one workspace session at a time. Signing in here signs that browser out of any other workspace, including the demo.
-          {" "}{ROLE_SWITCH}
+          {" "}{roleSwitch(created.people.find((p) => p.role === "product")?.team ?? "the team asking for the change")}
         </p>
         <label className="mb-4 flex items-start gap-2 rounded-[10px] bg-amber-50 p-3 text-[16px] ring-1 ring-amber-300">
           <input type="checkbox" className="mt-1 size-4 accent-violet-700" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
@@ -206,7 +267,8 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
     <>
       <h1 className="mb-2 text-[28px] font-semibold">Create a workspace</h1>
       <p className="mb-6 text-[16px] text-zinc-700">
-        Describe one real disagreement between two teams. This makes a new, separate workspace with its own passcodes. Nothing in any other workspace changes.
+        Describe one recent priority change that hit work already in flight: yours, your team’s, or your AI agents’. This makes a new, separate workspace with
+        its own passcodes. Nothing in any other workspace changes.
       </p>
       {cfg === null && (
         <p role="alert" className="mb-4 rounded-[10px] border border-amber-300 bg-amber-50 p-4 text-[16px]">
@@ -222,7 +284,44 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
         </section>
       )}
 
-      <ScenarioFields form={form} set={set} issues={issues} more={more} setMore={setMore} />
+      {cfg?.interview && (
+        <InterviewPanel
+          code={code}
+          form={form}
+          set={set}
+          open={interviewing}
+          onStart={() => setInterviewing(true)}
+          onDone={() => openForm("heading")}
+          onJump={openForm}
+        />
+      )}
+
+      {interviewing ? (
+        <section ref={formSection} aria-labelledby="form-review-heading" className="mb-6 scroll-mt-4">
+          <h2 id="form-review-heading" ref={formHeading} tabIndex={-1} className="mb-3 rounded-[14px] focus:outline-2 focus:outline-offset-2 focus:outline-[var(--al-focus)]">
+            <button
+              type="button"
+              aria-expanded={formOpen}
+              aria-controls="form-review-body"
+              onClick={() => setFormOpen((o) => !o)}
+              className="flex min-h-11 w-full items-center justify-between gap-3 rounded-[14px] border border-zinc-300 bg-white px-5 py-4 text-left text-[20px] font-semibold text-zinc-900 hover:bg-zinc-100 focus:outline-2 focus:outline-offset-1 focus:outline-[var(--al-focus)]"
+            >
+              <span>Review &amp; edit the form</span>
+              <span className="flex items-center gap-1.5 text-[16px] font-normal text-zinc-700">
+                {formOpen ? "Hide" : "Show"}
+                <Chevron open={formOpen} />
+              </span>
+            </button>
+          </h2>
+          {!formOpen && <p className="text-[16px] text-zinc-600">The interview fills this in as you talk. Open it any time to check or change a field.</p>}
+          {/* Kept mounted while hidden so "Draft so far" can jump straight to a step when it opens. */}
+          <div id="form-review-body" hidden={!formOpen}>
+            <ScenarioFields form={form} set={set} issues={issues} more={more} setMore={setMore} />
+          </div>
+        </section>
+      ) : (
+        <ScenarioFields form={form} set={set} issues={issues} more={more} setMore={setMore} />
+      )}
 
       {problem && (
         <div role="alert" className="mb-4 rounded-[10px] border border-red-300 bg-red-50 p-4 text-[16px] text-red-800">

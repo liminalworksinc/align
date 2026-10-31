@@ -117,8 +117,10 @@ export const conditionsUnconfirmedNote = (n: number) =>
   n > 1 ? "Nobody has confirmed these are met. Align records them; it doesn't check them." : "Nobody has confirmed this is met. Align records it; it doesn't check it.";
 
 /** The one role-switch instruction for a tester playing every team: the in-app Switch team control (founder ruling
- *  10-22, LIM-2437 bd53f6f6; it replaced every browser-window wording). */
-export const ROLE_SWITCH = "Testing on your own? Use Switch team (top right) to act as the next team. Your work is saved.";
+ *  10-22, LIM-2437 bd53f6f6; it replaced every browser-window wording). Custom workspaces only (Northstar never shows it):
+ *  it names the asking team, which makes the first proposal, and says Switch team asks for the next team’s passcode. */
+export const roleSwitch = (asking: string) =>
+  `Testing on your own? Start as ${asking}: they make the first proposal. Use the Switch team button in the header and enter that team’s passcode. Your work is saved.`;
 /** The waiting screen's version, naming the team whose move it is. */
 export const switchHint = (team: string) => `Testing on your own? Use Switch team to act as ${team} next.`;
 // When a request gets no answer at all. Local: the person runs Align themselves. Hosted: a tester can't, so the
