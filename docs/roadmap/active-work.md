@@ -27,17 +27,6 @@ queue item or let `docs/roadmap/` become a plan archive.
 
 ## P0
 
-### [ ] ONBOARD-001 — Replace this starter item with the first project outcome
-
-- **Owner:** project core
-- **Direction:** Record the user's desired outcome without copying conversation noise.
-- **Conclusion:** State the evidence-backed implementation boundary.
-- **Depends on:** none
-- **Implementation:**
-  - [ ] Name the next concrete change.
-- **Evidence:**
-  - [ ] Name the build, test, execution, or review proof required for completion.
-
 Check the parent only after every required subtask and evidence item passes. Add the
 release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 
@@ -387,3 +376,22 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] test-v2 checks for each fix
   - [x] Audit table committed
   - [x] Spec requirements updated and validated
+
+### [ ] DEPLOY-001 — Merge #37 and deploy Align v2 hosted
+
+- **Priority:** P0
+- **Owner:** project core / hosting
+- **Direction:** Founder ruling on #37 (2026-10-30): hold off main until after the Mon/Thu tester round on v1; then v2 replaces v1 on the hosted server. Target merge 2026-11-06, deploy the week of 2026-11-09.
+- **Conclusion:** Merge #37 once the tester round and LIM-2454 review are done, tag v2.0.0 through litai release, and deploy only after the legal pages, secrets, image test and a backup and rollback rehearsal pass; v1 workspaces do not carry over.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Tester round on v1 done (Mon/Thu) and LIM-2454 questions answered
+  - [ ] lib/trust/entity.ts and the [CONFIRM] answers filled in; counsel reviewed the privacy policy and DPA
+  - [ ] Fly secrets set: ALIGN_SECRET, BETTER_AUTH_SECRET, ALIGN_EMAIL_API_KEY, Turnstile keys
+  - [ ] main merged in again, fresh retained receipt, #37 merged
+  - [ ] v2.0.0 planned, prepared, checked and published with litai release
+- **Evidence:**
+  - [ ] scripts/test-image.sh passes on a machine with Docker
+  - [ ] Backup and rollback rehearsed on the hosted volume
+  - [ ] Hosted smoke test after deploy, and fly ssh console shows the secrets set
