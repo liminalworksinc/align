@@ -339,3 +339,51 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Evidence:**
   - [x] test-v2 checks for the queue, evidence classes and phone width
   - [x] Spec requirements updated and validated
+
+### [ ] PORT3-001 — Port main's #29: targets, allocation, steering, reallocation
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation (allocation, agent)
+- **Direction:** main merged #29 (7099ee1) on its old v2 layout; merged at db2be8c keeping the v2 tree, so its behaviour must be rebuilt on v2 without loss.
+- **Conclusion:** Rebuild per-goal targets, the allocation view, steering and reallocations on v2's approval sets, directive path, launch and holds; agent-side allocation and steering in align-agent.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Server: targets, allocation, steering, reallocations with migration
+  - [ ] Agent: allocation and steering in hooks, sync and CLI
+  - [ ] UI: allocation on Spend, reallocations
+- **Evidence:**
+  - [ ] test-v2 and align-agent tests for each behaviour
+  - [ ] Spec requirements updated and validated
+
+### [ ] PORT3-002 — Port Shruti's Lanes B and C: first run, understand then decide (#43, #47, #49)
+
+- **Priority:** P0
+- **Owner:** components/legacy-project-wrapper/implementation (app surface)
+- **Direction:** main merged #43, #47 and #49 (v1 UI); v2 must keep their behaviour on its change-request page and Home.
+- **Conclusion:** Change-request review: compare, what would change, one decision from the server's can flags, confirm before sending, freshness check; decline while a counter waits; a first-run card on Home until an app is seen.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] Change-request review and decide flow
+  - [ ] Decline while a counter waits
+  - [ ] First-run card on Home
+- **Evidence:**
+  - [ ] test-v2 checks including 390px and focus
+  - [ ] Spec requirements updated and validated
+
+### [ ] PORT3-003 — Port #44 cycle-2 layout fixes and audit the LIM-2455 checklist (#39)
+
+- **Priority:** P1
+- **Owner:** components/legacy-project-wrapper/implementation (app surface) / design/acceptance
+- **Direction:** Shruti's draft #44 fixes phone chrome, Goals map stacking, tap targets and app copy on v1; her draft #39 is the founder's v2 acceptance checklist.
+- **Conclusion:** Apply #44's intent where v2 has an equivalent; audit every #39 item to pass, fixed or open with a reason in design/acceptance/LIM-2455.v2-audit.md.
+- **Depends on:** none
+- **Completion prerequisites:** none
+- **Implementation:**
+  - [ ] #44 fixes on v2
+  - [ ] LIM-2455 audit with fixes
+- **Evidence:**
+  - [ ] test-v2 checks for each fix
+  - [ ] Audit table committed
+  - [ ] Spec requirements updated and validated
