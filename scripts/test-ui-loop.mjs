@@ -305,12 +305,13 @@ async function main() {
     {
       // While countered the owner may still decline (flow.ts rejectProposal), and nothing else. Not exercised here.
       const t = await text(O);
-      check("U4b while waiting, the owner is offered Decline only", t.includes("You can still decline instead of waiting") && t.includes("Decline") && !t.includes("Approve this exact revision"), t.slice(-800));
+      check("U4b while waiting, the owner is offered Decline only, with the hand-off to the asking team", t.includes("You can still decline instead of waiting") && t.includes("Decline") && !t.includes("Approve this exact revision") && t.includes(`Act as`), t.slice(-800));
     }
 
     // The asking team sees the conditions and accepts
     await openProposals(A);
     check("U5 the asking team sees the conditions before accepting, marked not confirmed yet", (await waitText(A, CONDITIONS.slice(0, 40))) && /not confirmed yet/i.test(await text(A)), (await text(A)).slice(0, 500));
+    check("U5 the asking team is not offered the owner's decline line", !(await text(A)).includes("You can still decline"), (await text(A)).slice(-600));
     await narrow(A, "N3 the asking team's review of the changes, with its long accept button");
     await click(A, `Accept ${OWNING}`);
     await click(A, "Review this decision");
@@ -494,7 +495,7 @@ async function main() {
     await click(O, "Review this decision");
     await click(O, "Confirm: decline this request");
     const recorded = await waitText(O, "Recorded: you declined this request");
-    check("U14 the owner declines on screen and stays on that request with the recorded notice", recorded, (await text(O)).slice(0, 500));
+    check("U14 the owner declines on screen and stays on that request with the recorded notice", recorded, (await text(O)).slice(-800));
     const pend = (await api(lead, "GET", "/api/state")).json?.proposals?.find((x) => x.state === "PENDING_SECURITY" || x.state === "REJECTED");
     const rj = pend?.state === "REJECTED" ? { status: 200, text: "declined on screen" } : await api(await signIn(BASE, "security"), "POST", `/api/proposals/${pend?.id}/reject`, {});
     await A.reload({ waitUntil: "networkidle2" });

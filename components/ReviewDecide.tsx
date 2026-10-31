@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { AGREED_STATUS, CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, conflictMeasureId, customStateLabel, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { Actor, Proposal, ProposalState, StateView } from "@/lib/types";
 import { NextStepAction, ProgressStrip } from "./Handoff";
@@ -315,18 +315,7 @@ export function ReviewDecide(
         <ProgressStrip p={p} acc={null} L={L} viewer={me.actor ?? ""} />
       </header>
 
-      {notice && (
-        <div
-          ref={noticeRef}
-          tabIndex={-1}
-          role={notice.kind === "done" ? "status" : "alert"}
-          className={`rounded-[10px] px-4 py-2.5 text-[15px] text-zinc-900 ${focusRing} ${
-            notice.kind === "done" ? "border border-zinc-300 bg-zinc-50" : "border border-red-700 bg-red-50"
-          }`}
-        >
-          {notice.text}
-        </div>
-      )}
+      {notice && <NoticeBox notice={notice} ref={noticeRef} />}
 
       {/* 1. Understand: approved vs proposed, with the facts a reviewer needs. */}
       <CompareBaseline
@@ -382,14 +371,17 @@ export function ReviewDecide(
           {step === "input" && (
             <>
               {me.actor === p.recipient_owner && p.state === "COUNTERED" && (
-                <Badge tone="amber" wrap>
-                  Waiting for {ask} to accept your changes
-                </Badge>
+                <>
+                  <Badge tone="amber" wrap>
+                    Waiting for {ask} to accept your changes
+                  </Badge>
+                  <NextStepAction p={p} viewer={me.actor ?? ""} L={L} onSwitch={props.switchTeam} />
+                </>
               )}
               <p className="text-[15px] text-zinc-700">
                 {decisions.length > 1
                   ? "Choose what should happen. Nothing is sent until you confirm."
-                  : p.state === "COUNTERED"
+                  : me.actor === p.recipient_owner && p.state === "COUNTERED"
                     ? `You can still decline instead of waiting for ${ask}. Nothing is sent until you confirm.`
                     : "Nothing is sent until you confirm."}
               </p>
@@ -766,5 +758,21 @@ function History({ p, L }: { p: Proposal; L: Labels }) {
         )}
       </ol>
     </Collapsible>
+  );
+}
+
+/** A decision's outcome (recorded, refused, stale). Also shown on the decided record, which a decline lands on. */
+export function NoticeBox({ notice, ref }: { notice: NonNullable<ReviewNotice>; ref?: Ref<HTMLDivElement> }) {
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      role={notice.kind === "done" ? "status" : "alert"}
+      className={`rounded-[10px] px-4 py-2.5 text-[15px] text-zinc-900 ${focusRing} ${
+        notice.kind === "done" ? "border border-zinc-300 bg-zinc-50" : "border border-red-700 bg-red-50"
+      }`}
+    >
+      {notice.text}
+    </div>
   );
 }

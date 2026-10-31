@@ -11,7 +11,7 @@ import { ProofStrip } from "./ProofStrip";
 import { SpartaProof } from "./SpartaProof";
 import { STALE_APPROVAL_NOTE, agreementStatus, approvedStale, launchLine } from "./launch";
 import { Chip, Collapsible, InkPill, Lbl, Msg, NumberedLines, Old, Option, conditionLines } from "./v6/thread";
-import { ReviewDecide, type ReviewNotice } from "./ReviewDecide";
+import { NoticeBox, ReviewDecide, type ReviewNotice } from "./ReviewDecide";
 
 /** Mirrors lib/flow.ts MAX_CONDITIONS (the server refuses longer conditions). */
 const MAX_CONDITIONS = 1000;
@@ -552,6 +552,8 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run; notic
         </p>
         <ProgressStrip p={p} acc={acc} L={L} viewer={me.actor ?? ""} />
       </header>
+
+      {props.notice && <NoticeBox notice={props.notice} />}
 
       <ol className="space-y-3.5" aria-label="Conversation about this proposal">
         <Msg name={who(p.proposing_owner)} tag={<Chip>proposal · {p.target_goal_version}</Chip>} at={fmtTime(p.created_at)} me={me.actor === p.proposing_owner}>
