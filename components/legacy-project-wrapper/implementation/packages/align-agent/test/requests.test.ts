@@ -62,7 +62,7 @@ function request(type: WireRequest["type"], extra: Partial<WireRequest> = {}): W
     cancelled: false,
     goal: { id: GOAL.id, title: GOAL.title, version: GOAL.version },
     target_goal: type === "switch_goal" ? { id: "g_perf", title: "Cut hook latency", version: 1 } : null,
-    sender: { id: "u_dana", name: "Dana Lee" },
+    sender: { id: "u_dana", name: "Dana Lee", role: "approver" },
     note: "Board moved the date",
     created_at: nowIso(),
     ...extra,
@@ -212,6 +212,37 @@ describe("requests", () => {
     handleDirective(ctx, directive("request", sid, { request: { ...cp, cancelled: true } }));
     assert.equal(prompt(t, sid).stdout, "");
     assert.equal(receipts(ctx).filter((r) => r.body.state === "accepted").length, 1);
+  });
+
+  test("a request from a workspace owner outside the goal's approval set names them as workspace owner", () => {
+    const { t, ctx } = setup();
+    const sid = "sess-req-owner";
+    shareSession(ctx, sid);
+    runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup" });
+    const rp = request("replan", { note: null, sender: { id: "u_olga", name: "Olga Owner", role: "owner" } });
+    handleDirective(ctx, directive("request", sid, { request: rp }));
+    const out = json(prompt(t, sid).stdout);
+    assert.match(out.systemMessage, /^Align: Olga Owner \(workspace owner\) asks: re-read goal "Ship the v2 onboarding flow" \(v3\) and update the plan\./);
+    assert.match(out.hookSpecificOutput.additionalContext, /^\[Align\] A request from Olga Owner, a workspace owner, about goal "Ship the v2 onboarding flow": re-read goal v3/);
+  });
+
+  test("a hold and its release that reach two sessions on this device: each session is held, and each gets the release notice once", () => {
+    const { t, ctx } = setup();
+    const sids = ["sess-two-a", "sess-two-b"];
+    for (const sid of sids) {
+      shareSession(ctx, sid);
+      runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup" });
+    }
+    const keys = sids.map((sid) => `key-${sid}`);
+    const goal = { id: GOAL.id, title: GOAL.title };
+    handleDirective(ctx, directive("hold", sids[0], { session_keys: keys, hold: { goal, held_by: { id: "u_dana", name: "Dana Lee" }, reason: null, at: nowIso() } }));
+    for (const sid of sids) assert.equal(json(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: "Bash" }).stdout).hookSpecificOutput.permissionDecision, "deny", sid);
+    handleDirective(ctx, directive("release", sids[0], { session_keys: keys, hold: { goal, released_by: { id: "u_dana", name: "Dana Lee" }, at: nowIso() } }));
+    for (const sid of sids) {
+      assert.equal(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: "Bash" }).stdout, "", sid);
+      assert.equal(json(prompt(t, sid).stdout)?.systemMessage, `Align: Dana Lee released the hold on "Ship the v2 onboarding flow".`, sid);
+      assert.equal(prompt(t, sid).stdout, "", `${sid}: once`);
+    }
   });
 
   test("a goal hold blocks every tool and fails closed; release lifts it with one notice; hold and stop are independent latches", () => {

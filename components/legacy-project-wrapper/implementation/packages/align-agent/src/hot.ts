@@ -113,6 +113,8 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   return hot;
 }
 
+/** A user notice for one session, once per `id` and session: one directive that reaches several sessions (a release,
+ *  a suspension) leaves each its own notice, so the stored id is scoped to the session. */
 export function addNotice(ctx: Ctx, lid: string, id: string, text: string): void {
-  ctx.db.prepare("INSERT OR IGNORE INTO notices(id, local_id, text, created_at) VALUES(?,?,?,?)").run(id, lid, text, new Date().toISOString());
+  ctx.db.prepare("INSERT OR IGNORE INTO notices(id, local_id, text, created_at) VALUES(?,?,?,?)").run(`${lid}/${id}`, lid, text, new Date().toISOString());
 }

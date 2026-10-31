@@ -40,7 +40,7 @@ step test-v2 node scripts/test-v2.mjs "$PORT"
 # Connected AI apps: the OAuth server and the MCP endpoint, Mode L and hosted (reuses the build test-v2 made).
 step test-oauth node scripts/test-oauth.mjs "$PORT" --no-build
 # The real align CLI and hooks (packages/align-agent) against a real Mode L server: limits, accepted asks, the asks feed,
-# the drift notice and share --past (reuses the build test-v2 made; builds the agent's dist/).
+# the drift notice, share --past, requests and goal holds (reuses the build test-v2 made; builds the agent's dist/).
 step test-agent-live node scripts/test-agent-live.mjs "$PORT" --no-build
 
 # ---- the local agent package ----

@@ -97,8 +97,9 @@ export interface WireRequest {
   cancelled: boolean;
   goal: { id: string; title: string; version: number };
   target_goal: { id: string; title: string; version: number } | null;
-  /** `role` is optional: "owner" when a workspace owner outside the goal's approval set sent it. */
-  sender: { id: string; name: string; role?: string };
+  /** How the sender could send it: `approver` (in the goal's approval set when sent) or `owner` (a workspace owner
+   *  outside it). Anything else is read as approver. */
+  sender: { id: string; name: string; role: "approver" | "owner" };
   note: string | null;
   created_at: string;
 }

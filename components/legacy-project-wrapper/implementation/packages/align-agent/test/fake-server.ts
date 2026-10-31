@@ -48,7 +48,7 @@ export interface FakeRequestWire {
   cancelled: boolean;
   goal: { id: string; title: string; version: number };
   target_goal: { id: string; title: string; version: number } | null;
-  sender: { id: string; name: string };
+  sender: { id: string; name: string; role: "approver" | "owner" };
   note: string | null;
   created_at: string;
 }
@@ -209,7 +209,7 @@ export class FakeServer {
   /** POST …/goals/{goal}/requests: one `request` directive to the target sessions. */
   sendRequest(
     ws: string,
-    o: { type: FakeRequestWire["type"]; goal_id: string; session_keys: string[]; target_goal_id?: string; note?: string | null; sender?: { id: string; name: string } },
+    o: { type: FakeRequestWire["type"]; goal_id: string; session_keys: string[]; target_goal_id?: string; note?: string | null; sender?: FakeRequestWire["sender"] },
   ): FakeRequest {
     const wire: FakeRequestWire = {
       id: `rq_${Array.from(crypto.randomBytes(24), (b) => "abcdefghijklmnopqrstuvwxyz234567"[b % 32]).join("")}`,
@@ -217,7 +217,7 @@ export class FakeServer {
       cancelled: false,
       goal: this.goalRef(ws, o.goal_id),
       target_goal: o.target_goal_id ? this.goalRef(ws, o.target_goal_id) : null,
-      sender: o.sender || { id: "u_dana", name: "Dana Lee" },
+      sender: o.sender || { id: "u_dana", name: "Dana Lee", role: "approver" },
       note: o.note ?? null,
       created_at: new Date().toISOString(),
     };
@@ -496,7 +496,7 @@ export class FakeServer {
           else if (body.state === "accepted" && !auto && t.state === "accepted" && t.auto_accepted) t.auto_accepted = false;
           else if (body.state === "declined" && (t.state !== "accepted" || t.auto_accepted)) Object.assign(t, { state: "declined", auto_accepted: false });
         }
-        return send(200, { fresh });
+        return send(200, { fresh, ...(t ? { request_state: t.state } : {}) });
       }
       return send(404, { error: "not_found" });
     } catch (e) {

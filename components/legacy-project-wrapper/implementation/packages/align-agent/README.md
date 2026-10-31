@@ -70,7 +70,8 @@ call.
   model. After a compact, requests still waiting are put back into context.
 - **Goal holds.** A `hold` directive writes `latch/<lid>.hold.json`; while it exists, every tool (read-only ones too)
   is denied with who paused the goal and why, without needing a sync, and an unreadable file denies too. `release`
-  removes it and tells you once. Holds and the stop latch are independent: a tool runs only when neither blocks it.
+  removes it and tells you once. A session that moves to another goal stays held until that goal's release reaches it.
+  Holds and the stop latch are independent: a tool runs only when neither blocks it.
   Stopping sharing lifts both.
 
 ## Goal tree and pod awareness
