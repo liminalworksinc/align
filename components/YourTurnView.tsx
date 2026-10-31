@@ -190,8 +190,8 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
   const waiting = agents?.apps.filter((a) => !a.last_used_at) ?? [];
   const older = reading.filter((a) => !a.on_current_plan);
   return (
-    <section id="agents" aria-label="Agents on this plan" className="flex scroll-mt-4 flex-col gap-2.5">
-      <h2 className="al-lbl">Agents on this plan</h2>
+    <section id="agents" aria-label="Connected AI apps" className="flex scroll-mt-4 flex-col gap-2.5">
+      <h2 className="al-lbl">Connected AI apps · what they last read</h2>
       {read === "unknown" ? (
         <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Couldn’t check connected apps just now, so their read state is unknown. Align retries every 15 seconds.</div>
       ) : !agents ? (
@@ -204,12 +204,12 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
         <div className="flex flex-col divide-y divide-zinc-200 rounded-[14px] border border-zinc-200 bg-white">
           {reading.map((a) => (
             <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-[18px] py-3">
-              <span aria-hidden className={a.on_current_plan ? "text-emerald-700" : "text-amber-700"}>
+              <span aria-hidden className={a.on_current_plan ? "text-violet-700" : "text-amber-700"}>
                 {a.on_current_plan ? "✓" : "▲"}
               </span>
               <span className="min-w-0 font-semibold text-zinc-900">{a.name}</span>
               <span className="text-[14px] text-zinc-500">as {teamOf(a.role)}</span>
-              <span className={`ml-auto text-[14px] ${a.on_current_plan ? "text-emerald-800" : "text-amber-800"} @max-md:ml-6 @max-md:basis-full`}>
+              <span className={`ml-auto text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"} @max-md:ml-6 @max-md:basis-full`}>
                 {a.on_current_plan ? "Read the current plan" : "Last read an older plan"} · read seen by Align {ago(a.last_used_at!)}
               </span>
             </div>
@@ -512,7 +512,15 @@ export function YourTurnView(props: ViewProps) {
         {!L.northstar && (
           <Tile
             n={agentsRead === "unknown" ? "?" : !agents ? "–" : reading.length ? `${onCurrent}/${reading.length}` : 0}
-            label={agentsRead === "unknown" ? "Apps: unknown" : agents && reading.length ? "Apps on the current plan" : "Apps connected"}
+            label={
+              agentsRead === "unknown"
+                ? "Apps: unknown"
+                : agents && reading.length
+                  ? "Apps that read the current plan"
+                  : agents && agents.apps.length
+                    ? `Apps have read the plan · ${agents.apps.length} approved`
+                    : "Apps connected"
+            }
             href="#agents"
           />
         )}
