@@ -392,6 +392,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
     else window.sessionStorage.removeItem("align.attached");
   }, []);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [firstRunSlot, setFirstRunSlot] = useState<HTMLDivElement | null>(null); // where ConnectAI renders the first-run card
 
   const closeDrawer = useCallback(() => setDrawer(null), []);
   useEffect(() => {
@@ -621,7 +622,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
           </div>
         </div>
         )}
-        {workspace && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} />}
+        {workspace && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} hosted={!!hosted} slot={firstRunSlot} waiting={turnCount} />}
         <div className={`${custom ? (workspace ? "mt-3" : "mt-auto") : "mt-3"} ${custom ? CUSTOM_SIDEBAR_FOOTER : ""} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
           <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
             {custom ? teamInitials(L.role[me.actor]) : initials(me.name ?? "")}
@@ -725,6 +726,8 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
             {custom ? plainError(error) : error}
           </div>
         )}
+        {/* The first-run card (components/FirstRun.tsx), rendered here by ConnectAI so it shares that one poll. */}
+        {workspace && <div ref={setFirstRunSlot} />}
         {me.actor !== "leadership" && ceo && (
           <div className={custom ? CUSTOM_STRIP : "mb-4 grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-6 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5"}>
             <div className="flex min-w-0 items-center gap-4">

@@ -1,5 +1,7 @@
 "use client";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import FirstRun from "@/components/FirstRun";
 import { Button } from "@/components/ui";
 import { api } from "@/components/useAlign";
 import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
@@ -126,17 +128,40 @@ function Steps({ tab, url }: { tab: Tab; url: string }) {
 
 const when = (iso: string) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export default function ConnectAI({ workspace, teamOf, actor }: { workspace: string; teamOf: (role: string) => string; actor: string }) {
+// `slot` is where Home wants the first-run card (components/FirstRun.tsx). It is rendered from here, so the card and this
+// sidebar share the one poll below.
+export default function ConnectAI({
+  workspace,
+  teamOf,
+  actor,
+  hosted = false,
+  slot = null,
+  waiting = 0,
+}: {
+  workspace: string;
+  teamOf: (role: string) => string;
+  actor: string;
+  hosted?: boolean;
+  slot?: HTMLElement | null;
+  waiting?: number;
+}) {
   const [data, setData] = useState<{ url: string; apps: App[]; plan?: { changed_at: string | null }; at: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("claude-code");
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(
     () =>
       api<{ url: string; apps: App[]; plan?: { changed_at: string | null } }>("/api/workspaces/connections", { workspace }).then(
-        (d) => setData({ ...d, at: Date.now() }),
-        () => setData(null),
+        (d) => {
+          setData({ ...d, at: Date.now() });
+          setFailed(false);
+        },
+        () => {
+          setData(null);
+          setFailed(true);
+        },
       ),
     [workspace],
   );
@@ -169,29 +194,54 @@ export default function ConnectAI({ workspace, teamOf, actor }: { workspace: str
   const fresh = reading.filter((a) => data && data.at - Date.parse(a.approved_at) < 15 * 60 * 1000);
   return (
     <div className="mt-auto flex flex-col gap-2 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
-      <span className="al-lbl !text-violet-700">Agents on this plan</span>
+      <span className="al-lbl !text-violet-700">Connected AI apps</span>
       {!data ? (
         <div className="text-[13px] text-zinc-600">{"\u00a0"}</div>
-      ) : reading.length === 0 ? (
-        <div className="text-[13px] text-zinc-600">None connected. Connect your AI agents and every session works from this one plan.</div>
+      ) : data.apps.length === 0 ? (
+        <div className="text-[13px] text-zinc-600">None connected. A connected AI agent can read this plan.</div>
       ) : (
-        <ul aria-label="Connected agents" className="space-y-1">
+        <ul aria-label="Connected AI apps" className="space-y-1">
           {reading.map((a) => (
             <li key={a.id} className="flex items-start gap-1.5 text-[13px] leading-snug">
-              <span aria-hidden className={a.on_current_plan ? "text-emerald-700" : "text-amber-700"}>
+              <span aria-hidden className={a.on_current_plan ? "text-violet-700" : "text-amber-700"}>
                 {a.on_current_plan ? "✓" : "▲"}
               </span>
               <span className="min-w-0">
                 <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
-                <span className={a.on_current_plan ? "text-emerald-800" : "text-amber-800"}>{a.on_current_plan ? "on the latest plan" : "still on an older plan"}</span>
+                <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Read the current plan" : "Last read an older plan"}</span>
               </span>
             </li>
           ))}
+          {data.apps
+            .filter((a) => !a.last_used_at)
+            .map((a) => (
+              <li key={a.id} className="flex items-start gap-1.5 text-[13px] leading-snug text-zinc-500">
+                <span aria-hidden>○</span>
+                <span className="min-w-0">
+                  <span className="font-semibold text-zinc-700">{a.name}</span> Approved, hasn’t read the plan yet
+                </span>
+              </li>
+            ))}
         </ul>
       )}
       <Button kind="secondary" onClick={() => setOpen(true)}>
         Connect an AI app
       </Button>
+      {slot &&
+        createPortal(
+          <FirstRun
+            workspace={workspace}
+            hosted={hosted}
+            url={data?.url ?? null}
+            apps={data?.apps ?? null}
+            planChangedAt={data?.plan?.changed_at ?? null}
+            failed={failed}
+            waiting={waiting}
+            command={(text) => <Command text={text} />}
+            openConnect={() => setOpen(true)}
+          />,
+          slot,
+        )}
       {open && data && (
         <div role="dialog" aria-modal="true" aria-label="Connect an AI app" className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4" onClick={() => setOpen(false)}>
           <div className="max-h-[90vh] w-full max-w-[640px] overflow-y-auto rounded-[14px] bg-white p-6 text-[16px] text-zinc-900" onClick={(e) => e.stopPropagation()}>
@@ -239,13 +289,13 @@ export default function ConnectAI({ workspace, teamOf, actor }: { workspace: str
                         {a.name} <span className="font-normal text-zinc-500">({a.redirect_host})</span>
                       </div>
                       <div className="text-[14px] text-zinc-600">
-                        As {teamOf(a.role)} · {a.last_used_at ? `last read ${when(a.last_used_at)}` : "approved, hasn’t read anything yet"}
+                        As {teamOf(a.role)} · {a.last_used_at ? `last read ${when(a.last_used_at)}` : "approved, hasn’t read the plan yet"}
                       </div>
                       {a.last_used_at && (
-                        <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-emerald-800" : "text-amber-800"}`}>
+                        <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"}`}>
                           {a.on_current_plan
-                            ? "✓ On the latest plan."
-                            : `▲ Hasn’t read the plan since it changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}. It may still be working on the old plan. Send it a message to catch it up.`}
+                            ? "✓ Read the current plan."
+                            : `▲ Last read an older plan: it hasn’t read the plan since it changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}. Send it a message and it reads the new one.`}
                         </div>
                       )}
                     </div>

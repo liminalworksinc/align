@@ -1,0 +1,454 @@
+#!/usr/bin/env node
+// The first-run card of a custom workspace (components/FirstRun.tsx, rendered by ConnectAI into Home's canvas).
+// Builds once (skip with --no-build), then runs production servers on <port> with workspaces in a temp ALIGN_DATA_DIR:
+//   phase "static": the card fetches nothing itself; ConnectAI is mounted once; Home is the only place that mounts it
+//   phase "local":  Mode L, open create -> a fresh workspace with no connected agent shows both paths, the sample link
+//                   resolves (200) and is labelled fictional, what the agent can read matches the server's tools, Hide
+//                   persists, and the status follows the server: approved only, has read the latest plan, last read an
+//                   older plan, and a failed check; the card adds no request to the connections poll
+//   phase "hosted": HOSTED=1 as Fly runs it -> no sample link (Northstar is not served), "/" still goes to /new, and an
+//                   OAuth connection plus one MCP read flips the card to "has read the latest plan"
+// Screenshots of each state at 390, 768 and 1440 px go to $FIRST_RUN_SHOTS (default: a temp folder, printed at the end).
+// Usage: node scripts/test-first-run.mjs <port> [--no-build]   (from a worktree root; refuses 3100 and the main checkout)
+
+import { spawn, spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import puppeteer from "puppeteer-core";
+
+const PORT = Number(process.argv[2]);
+const BUILD = !process.argv.includes("--no-build");
+if (!Number.isInteger(PORT) || PORT === 3100) {
+  console.error("usage: node scripts/test-first-run.mjs <port> [--no-build] (not 3100)");
+  process.exit(2);
+}
+const ROOT = process.cwd();
+if (path.resolve(ROOT) === path.join(os.homedir(), "liminal/align")) {
+  console.error(`test-first-run: refusing the main checkout ${ROOT}; run from a worktree`);
+  process.exit(2);
+}
+if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
+  console.error(`test-first-run: port ${PORT} is already in use`);
+  process.exit(2);
+}
+const FIXTURE = JSON.parse(readFileSync(path.join(ROOT, "data/scenarios/example-custom.json"), "utf8"));
+const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const HOSTED_HOST = "align.test";
+const REDIRECT = "http://127.0.0.1:33418/callback";
+const SHOTS = process.env.FIRST_RUN_SHOTS || mkdtempSync(path.join(os.tmpdir(), "align-first-run-shots-"));
+mkdirSync(SHOTS, { recursive: true });
+const WIDTHS = [390, 768, 1440];
+
+let pass = 0;
+let fail = 0;
+let phaseName = "";
+function check(name, ok, detail = "") {
+  if (ok) pass++;
+  else fail++;
+  console.log(`${ok ? "PASS" : "FAIL"}  [${phaseName}] ${name}${ok ? "" : `  ${String(detail).slice(0, 300)}`}`);
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---- HTTP (node:http, so Host and Origin are exactly what we say) ----
+let HOSTED = false;
+const origin = () => (HOSTED ? `https://${HOSTED_HOST}` : `http://127.0.0.1:${PORT}`);
+function req(method, p, { body, form, cookie, headers = {}, raw = false } = {}) {
+  return new Promise((resolve, reject) => {
+    const write = !["GET", "HEAD"].includes(method);
+    const h = HOSTED
+      ? { host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": "198.51.100.11", ...(write ? { origin: origin() } : {}) }
+      : { host: `127.0.0.1:${PORT}`, ...(write ? { origin: origin() } : {}) };
+    let data;
+    if (body !== undefined) {
+      data = JSON.stringify(body);
+      h["content-type"] = "application/json";
+    } else if (form !== undefined) {
+      data = new URLSearchParams(form).toString();
+      h["content-type"] = "application/x-www-form-urlencoded";
+    }
+    if (data !== undefined) h["content-length"] = Buffer.byteLength(data);
+    if (cookie) h.cookie = cookie;
+    Object.assign(h, headers);
+    for (const k of Object.keys(h)) if (h[k] === undefined) delete h[k];
+    const r = http.request({ host: "127.0.0.1", port: PORT, method, path: p, headers: h }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        const buf = Buffer.concat(chunks);
+        const t = raw ? "" : buf.toString("utf8");
+        let json = null;
+        try {
+          json = JSON.parse(t);
+        } catch {}
+        resolve({ status: res.statusCode, headers: res.headers, text: t, buf, json, cookie: ((res.headers["set-cookie"] ?? [])[0] || "").split(";")[0] });
+      });
+    });
+    r.on("error", reject);
+    if (data !== undefined) r.write(data);
+    r.end();
+  });
+}
+
+// ---- server ----
+let server = null;
+async function start(env) {
+  rmSync(path.join(ROOT, "data/state.json"), { force: true });
+  rmSync(path.join(ROOT, "data/.secret"), { force: true });
+  const clean = { ...process.env };
+  for (const k of Object.keys(clean)) if (/^(ALIGN_|HOSTED$|AI_GATEWAY_API_KEY$|ANTHROPIC_)/.test(k)) delete clean[k];
+  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "ignore", "pipe"], detached: true });
+  let err = "";
+  server.stderr.on("data", (c) => (err += c));
+  for (let i = 0; i < 90; i++) {
+    try {
+      if ((await req("GET", "/api/workspaces/config")).status === 200) return;
+    } catch {}
+    await sleep(1000);
+  }
+  throw new Error(`server did not start: ${err.slice(-400)}`);
+}
+async function stop() {
+  if (!server) return;
+  try {
+    process.kill(-server.pid, "SIGTERM");
+  } catch {}
+  spawnSync("pkill", ["-f", `next start -H 127.0.0.1 -p ${PORT}`]);
+  server = null;
+  await sleep(2500);
+  rmSync(path.join(ROOT, "data/state.json"), { force: true });
+  rmSync(path.join(ROOT, "data/.secret"), { force: true });
+}
+process.on("exit", () => {
+  if (server)
+    try {
+      process.kill(-server.pid, "SIGTERM");
+    } catch {}
+});
+
+// ---- workspaces and OAuth (the same flow as scripts/test-oauth.mjs: DCR client, PKCE, approve, token, one read) ----
+async function newWorkspace(marker, extra = {}) {
+  const r = await req("POST", "/api/workspaces", { body: { ...FIXTURE, company: `${FIXTURE.company} ${marker}`, ...extra } });
+  if (r.status !== 201) throw new Error(`create ${marker}: ${r.status} ${r.text}`);
+  const w = { id: r.json.workspace.id, passcodes: r.json.passcodes, c: {} };
+  for (const role of ["leadership", "product", "security"]) {
+    const s = await req("POST", "/api/session", { body: { workspace: w.id, role, passcode: w.passcodes[role] } });
+    if (s.status !== 200) throw new Error(`sign in ${role}: ${s.status} ${s.text}`);
+    w.c[role] = s.cookie;
+  }
+  return w;
+}
+const pkce = () => {
+  const verifier = randomBytes(32).toString("base64url");
+  return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
+};
+async function newClient(name) {
+  const r = await req("POST", "/oauth/register", { body: { client_name: name, redirect_uris: [REDIRECT], token_endpoint_auth_method: "none" } });
+  if (r.status !== 201) throw new Error(`register ${name}: ${r.status} ${r.text}`);
+  return r.json.client_id;
+}
+/** Approve as `role` and exchange the code: the app is approved, and has read nothing yet. */
+async function connect(w, clientId, role) {
+  const { verifier, challenge } = pkce();
+  const params = { response_type: "code", client_id: clientId, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: "S256", state: "st-1", resource: `${origin()}/api/mcp` };
+  const a = await req("POST", "/api/oauth/approve", { body: { params, decision: "approve", workspace: w.id, role, passcode: w.passcodes[role] } });
+  const code = a.json?.redirect ? new URL(a.json.redirect).searchParams.get("code") : null;
+  if (!code) throw new Error(`approve: ${a.status} ${a.text.slice(0, 200)}`);
+  const t = await req("POST", "/oauth/token", { form: { grant_type: "authorization_code", code, redirect_uri: REDIRECT, client_id: clientId, code_verifier: verifier, resource: `${origin()}/api/mcp` } });
+  if (!t.json?.access_token) throw new Error(`token: ${t.status} ${t.text.slice(0, 200)}`);
+  return t.json.access_token;
+}
+const rpc = (tok, method, params) =>
+  req("POST", "/api/mcp", { body: { jsonrpc: "2.0", id: 1, method, params }, headers: { accept: "application/json, text/event-stream", authorization: `Bearer ${tok}` } });
+function rpcResult(r) {
+  const text = r.text.includes("data:") ? r.text.split("\n").find((l) => l.startsWith("data:"))?.slice(5) : r.text;
+  try {
+    return JSON.parse(text).result ?? null;
+  } catch {
+    return null;
+  }
+}
+const connections = (w) => req("GET", "/api/workspaces/connections", { cookie: w.c.leadership });
+async function untilApi(w, pred, ms = 8000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    const r = await connections(w);
+    if (pred(r.json)) return true;
+    await sleep(250);
+  }
+  return false;
+}
+
+// ---- browser ----
+// Mode L: a real page on 127.0.0.1. Hosted: https://align.test, every request answered by forwarding it to the server
+// with Fly's headers and the session cookie (Chrome never opens a connection), so the page is exactly what Fly serves.
+async function browserFor(cookie) {
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1440, height: 1000 });
+  page.blockConnections = false;
+  if (HOSTED) {
+    await page.setRequestInterception(true);
+    page.on("request", async (rq) => {
+      const u = new URL(rq.url());
+      if (u.host !== HOSTED_HOST) return rq.abort();
+      if (page.blockConnections && u.pathname === "/api/workspaces/connections") return rq.abort();
+      const h = { ...rq.headers() };
+      delete h["accept-encoding"];
+      delete h.host;
+      try {
+        const body = rq.postData();
+        const r = await new Promise((resolve, reject) => {
+          const hh = { ...h, host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": "198.51.100.11", cookie };
+          if (body !== undefined) hh["content-length"] = Buffer.byteLength(body);
+          const x = http.request({ host: "127.0.0.1", port: PORT, method: rq.method(), path: u.pathname + u.search, headers: hh }, (res) => {
+            const chunks = [];
+            res.on("data", (c) => chunks.push(c));
+            res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+          });
+          x.on("error", reject);
+          if (body !== undefined) x.write(body);
+          x.end();
+        });
+        const headers = {};
+        for (const [k, v] of Object.entries(r.headers)) if (!["set-cookie", "content-length", "transfer-encoding", "connection"].includes(k)) headers[k] = Array.isArray(v) ? v.join(", ") : String(v);
+        await rq.respond({ status: r.status, headers, body: r.body });
+      } catch {
+        await rq.abort().catch(() => {});
+      }
+    });
+  } else {
+    await page.setRequestInterception(true);
+    page.on("request", (rq) => (page.blockConnections && new URL(rq.url()).pathname === "/api/workspaces/connections" ? rq.abort() : rq.continue()));
+    const [name, ...v] = cookie.split("=");
+    await page.setCookie({ name, value: v.join("="), domain: "127.0.0.1", path: "/", httpOnly: true });
+  }
+  return { browser, page };
+}
+const bodyText = (page) => page.evaluate(() => document.body.innerText);
+async function waitFor(page, fn, ms = 25000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (await fn()) return true;
+    await sleep(300);
+  }
+  return false;
+}
+const card = (page) => page.evaluate(() => {
+  const s = document.querySelector('section[aria-label="Get started"], section[aria-label="Agent status"]');
+  return s ? { label: s.getAttribute("aria-label"), state: s.getAttribute("data-state"), text: s.innerText } : null;
+});
+async function shots(page, name) {
+  for (const width of WIDTHS) {
+    await page.setViewport({ width, height: 1000 });
+    await sleep(400);
+    await page.screenshot({ path: path.join(SHOTS, `${phaseName}-${name}-${width}.png`), fullPage: true });
+  }
+  await page.setViewport({ width: 1440, height: 1000 });
+}
+/** Requests to the connections route in the first `ms` after a reload. */
+async function pollsOnLoad(page, ms = 3000) {
+  let n = 0;
+  const on = (rq) => {
+    if (new URL(rq.url()).pathname === "/api/workspaces/connections") n++;
+  };
+  page.on("request", on);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await sleep(ms);
+  page.off("request", on);
+  return n;
+}
+
+// ---- phase static ----
+function phaseStatic() {
+  phaseName = "static";
+  const src = (f) => readFileSync(path.join(ROOT, f), "utf8");
+  const firstRun = src("components/FirstRun.tsx");
+  check("FirstRun.tsx makes no request and runs no timer loop of its own (no fetch, api(), setInterval)", !/\bfetch\(|\bapi\(|setInterval/.test(firstRun), "");
+  const mounts = readdirSync(path.join(ROOT, "components"))
+    .filter((f) => f.endsWith(".tsx"))
+    .flatMap((f) => (src(`components/${f}`).match(/<ConnectAI\b/g) ?? []).map(() => f));
+  check("ConnectAI (the connections poll) is mounted exactly once, in Home.tsx", mounts.length === 1 && mounts[0] === "Home.tsx", mounts.join(","));
+  check("FirstRun is rendered only by ConnectAI", (src("components/Home.tsx").match(/<FirstRun\b/g) ?? []).length === 0 && (src("components/ConnectAI.tsx").match(/<FirstRun\b/g) ?? []).length === 1, "");
+}
+
+// ---- phase local ----
+async function phaseLocal(dir) {
+  phaseName = "local";
+  HOSTED = false;
+  await start({ ALIGN_DATA_DIR: dir, ALIGN_ALLOW_OPEN_CREATE: "1", ALIGN_CREATE_PER_HOUR: "50" });
+  const w = await newWorkspace("FIRSTRUN");
+  const { browser, page } = await browserFor(w.c.leadership);
+  try {
+    await page.goto(`${origin()}/w/${w.id}`, { waitUntil: "networkidle2" });
+    const shown = await waitFor(page, async () => (await card(page))?.label === "Get started");
+    const c0 = await card(page);
+    check("a fresh workspace with no connected agent shows the first-run card", shown, c0 ? JSON.stringify(c0).slice(0, 200) : "no card");
+    check(
+      "the card offers both paths: Explore a sample (Sample (fictional)) and Connect one agent (Claude Code)",
+      !!c0 && /Explore a sample/.test(c0.text) && /Sample \(fictional\)/.test(c0.text) && /Connect one agent/.test(c0.text) && /Claude Code/.test(c0.text),
+      c0?.text,
+    );
+    check("Connect one agent shows the Claude Code setup line and status 'Not connected yet.'", !!c0 && /claude mcp add/.test(c0.text) && /Not connected yet\./.test(c0.text) && c0.state === "none", c0?.text);
+    check("it says what the agent can't do: propose, approve or change anything", !!c0 && /It can’t propose, approve or change anything here/.test(c0.text.replace(/\s+/g, " ")), "");
+    await shots(page, "none");
+
+    // The sample link: a fictional label, and the page it opens answers 200 on this server.
+    const link = await page.evaluate(() => {
+      const a = document.querySelector('section[aria-label="Get started"] a[aria-label*="sample" i]');
+      return a ? { href: a.getAttribute("href"), label: a.getAttribute("aria-label") } : null;
+    });
+    const target = link ? await req("GET", link.href) : null;
+    check("the Explore link is labelled fictional and resolves (200)", !!link && /fictional/i.test(link.label) && target?.status === 200, `${JSON.stringify(link)} ${target?.status}`);
+
+    // What it can read: one line per MCP tool the server lists for a workspace app.
+    const reads = await page.evaluate(() => [...document.querySelectorAll('ul[aria-label="What the agent can read"] li')].map((li) => li.textContent));
+    const client = await newClient("Claude Code");
+    const tok = await connect(w, client, "leadership");
+    const tools = rpcResult(await rpc(tok, "tools/list", {}))?.tools ?? [];
+    check("'It can read' has one line per tool the MCP server lists, and every tool only reads", reads.length > 0 && reads.length === tools.length && tools.every((t) => t.annotations?.readOnlyHint === true), `${reads.length} lines, ${tools.length} tools`);
+
+    // Approved, nothing read yet: the grant exists with no last_used_at (tools/list is not a read of the workspace).
+    const approvedApi = await untilApi(w, (j) => j?.apps?.length === 1 && j.apps[0].last_used_at === null, 3000);
+    if (approvedApi) {
+      await page.reload({ waitUntil: "networkidle2" });
+      const ok = await waitFor(page, async () => (await card(page))?.state === "approved");
+      const c1 = await card(page);
+      check("approved but no read yet: the card says Claude Code is approved but hasn't read anything yet", ok && /Claude Code is approved but hasn’t read anything yet\./.test(c1?.text ?? ""), c1?.text);
+      await shots(page, "approved");
+    } else check("approved but no read yet: the server reports the grant with no read", false, (await connections(w)).text);
+
+    // One MCP read: the server marks the app as on the current plan, and the card flips.
+    const read = await rpc(tok, "tools/call", { name: "align_list_goals", arguments: {} });
+    const onPlan = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === true);
+    check("after one MCP read the server reports the app on the current plan", read.status === 200 && onPlan, `${read.status} ${(await connections(w)).text}`);
+    await page.reload({ waitUntil: "networkidle2" });
+    const latest = await waitFor(page, async () => (await card(page))?.state === "latest");
+    const c2 = await card(page);
+    check(
+      "the card then says 'Connected. Claude Code has read the latest plan.' and that Align only sees what the agent reads",
+      latest && /Connected\. Claude Code has read the latest plan\./.test(c2?.text ?? "") && /Align only sees what your agent reads here\./.test(c2?.text ?? ""),
+      c2?.text,
+    );
+    check("nothing is waiting on leadership, so it says nothing needs review yet", /Nothing here needs your review yet\./.test(c2?.text ?? ""), c2?.text);
+    check("the connected card makes no claim about work: no 'working', 'follows', 'stuck', 'blocked' or 'progress'", !/working|follows|works from|stuck|blocked|progress/i.test(c2?.text ?? ""), c2?.text);
+    await shots(page, "latest");
+
+    // The plan changes (a proposal): the app last read an older plan.
+    const p = await req("POST", "/api/proposals", { cookie: w.c.product, body: { proposed_measure_text: "Retention first for two weeks", rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
+    const stale = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === false);
+    await page.reload({ waitUntil: "networkidle2" });
+    const older = await waitFor(page, async () => (await card(page))?.state === "older");
+    const c3 = await card(page);
+    check("after the plan changes the card says Claude Code last read an older plan", p.status === 200 && stale && older && /Claude Code last read an older plan/.test(c3?.text ?? ""), `${p.status} ${c3?.text}`);
+    await shots(page, "older");
+
+    // The card adds no request: the load-time polls are the same with the card shown and hidden.
+    const withCard = await pollsOnLoad(page);
+
+    // A failed check: the card says so, and claims nothing about the agents.
+    page.blockConnections = true;
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const errored = await waitFor(page, async () => (await card(page))?.state === "error", 10000);
+    const c4 = await card(page);
+    check("when the connections check fails the card says it couldn't check, and names no agent", errored && /Couldn’t check for connected agents/.test(c4?.text ?? "") && !/Claude Code/.test(c4?.text ?? ""), c4?.text);
+    await shots(page, "error");
+    page.blockConnections = false;
+
+    // Hide: gone, and still gone after a reload (localStorage); the sidebar still lists the agent.
+    await page.reload({ waitUntil: "networkidle2" });
+    await waitFor(page, async () => !!(await card(page)));
+    await page.evaluate(() => [...document.querySelectorAll('section[aria-label="Agent status"] button')].find((b) => b.textContent === "Hide")?.click());
+    await sleep(300);
+    const goneNow = !(await card(page));
+    const withoutCard = await pollsOnLoad(page);
+    await waitFor(page, async () => /Claude Code/.test(await bodyText(page)), 10000);
+    const goneAfter = !(await card(page));
+    check("Hide removes the card and it stays hidden after a reload; the sidebar still lists the agent", goneNow && goneAfter && /Agents on this plan[\s\S]*Claude Code/.test(await bodyText(page)), `${goneNow} ${goneAfter}`);
+    check("the card adds no connections request (same count on load with it shown and hidden)", withCard === withoutCard && withCard >= 1, `${withCard} vs ${withoutCard}`);
+
+    // Blocked storage: the card still renders (try/catch around every access).
+    const w2 = await newWorkspace("FIRSTRUN2");
+    const { browser: b2, page: p2 } = await browserFor(w2.c.product);
+    try {
+      await p2.evaluateOnNewDocument(() => {
+        Object.defineProperty(window, "localStorage", { get() { throw new Error("blocked"); } });
+      });
+      await p2.goto(`${origin()}/w/${w2.id}`, { waitUntil: "networkidle2" });
+      check("with storage blocked the card still shows (each access is guarded)", await waitFor(p2, async () => (await card(p2))?.label === "Get started"), "");
+    } finally {
+      await b2.close();
+    }
+  } finally {
+    await browser.close();
+  }
+  await stop();
+}
+
+// ---- phase hosted ----
+async function phaseHosted(dir) {
+  phaseName = "hosted";
+  HOSTED = true;
+  const INVITE = "first-run-invite-01";
+  await start({
+    HOSTED: "1",
+    ALIGN_HOSTS: HOSTED_HOST,
+    ALIGN_SECRET: "r".repeat(48),
+    ALIGN_DATA_DIR: dir,
+    ALIGN_SIGNUP_CODES: `${INVITE},first-run-invite-02`,
+    ALIGN_DELETE_BY: "2026-11-13",
+    ALIGN_PRODUCT_PASSCODE: "product-strong-pass-7",
+    ALIGN_SECURITY_PASSCODE: "security-strong-pass-7",
+    ALIGN_LEADERSHIP_PASSCODE: "leadership-strong-pass-7",
+  });
+  const root = await req("GET", "/");
+  check("hosted: '/' (Northstar) still redirects to /new, so there is no sample to link", root.status === 307 && /\/new$/.test(root.headers.location ?? ""), `${root.status} ${root.headers.location}`);
+  const w = await newWorkspace("FIRSTRUNH", { signup_code: INVITE });
+  const { browser, page } = await browserFor(w.c.leadership);
+  try {
+    await page.goto(`${origin()}/w/${w.id}`, { waitUntil: "networkidle2" });
+    const shown = await waitFor(page, async () => (await card(page))?.label === "Get started");
+    const c0 = await card(page);
+    const link = await page.evaluate(() => !!document.querySelector('section[aria-label="Get started"] a[href="/"]'));
+    check("hosted: the card shows both paths; Explore says there's no sample here and has no link", shown && /Explore a sample/.test(c0?.text ?? "") && /There’s no sample on this test server\./.test(c0?.text ?? "") && !link && /Connect one agent/.test(c0?.text ?? ""), c0?.text);
+    check("hosted: the setup line names this server's https MCP URL", /claude mcp add/.test(c0?.text ?? "") && c0.text.includes(`https://${HOSTED_HOST}/api/mcp`), c0?.text);
+    await shots(page, "none");
+    const tok = await connect(w, await newClient("Claude Code"), "leadership");
+    const read = await rpc(tok, "tools/call", { name: "align_list_goals", arguments: {} });
+    const onPlan = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === true);
+    await page.reload({ waitUntil: "networkidle2" });
+    const latest = await waitFor(page, async () => (await card(page))?.state === "latest");
+    const c1 = await card(page);
+    check("hosted: after an OAuth connection and one MCP read the card says Claude Code has read the latest plan", read.status === 200 && onPlan && latest && /Claude Code has read the latest plan\./.test(c1?.text ?? ""), `${read.status} ${c1?.text}`);
+    await shots(page, "latest");
+  } finally {
+    await browser.close();
+  }
+  await stop();
+}
+
+// ---- run ----
+phaseStatic();
+if (BUILD) {
+  const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "" } });
+  if (build.status !== 0) {
+    console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
+    process.exit(1);
+  }
+}
+const tmp = mkdtempSync(path.join(os.tmpdir(), "align-first-run-"));
+try {
+  await phaseLocal(path.join(tmp, "local"));
+  await phaseHosted(path.join(tmp, "hosted"));
+} catch (e) {
+  fail++;
+  console.log(`FAIL  [${phaseName}] ${e?.stack ?? e}`);
+} finally {
+  await stop();
+  rmSync(tmp, { recursive: true, force: true });
+}
+console.log(`screenshots: ${SHOTS}`);
+console.log(`test-first-run: ${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);
