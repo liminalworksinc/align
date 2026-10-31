@@ -261,7 +261,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] align-agent tests for each behaviour
   - [x] Spec requirements updated and validated
 
-### [ ] REQ-001 — Requests and goal holds: server, app and spec
+### [x] REQ-001 — Requests and goal holds: server, app and spec
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (directives)
@@ -270,14 +270,14 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** none
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Migration 12: directive kinds, requests, request targets, goal holds
-  - [ ] Routes, authorization, audit, events and retention
-  - [ ] Goal page card and hold banners; MCP directives output
+  - [x] Migration 12: directive kinds, requests, request targets, goal holds
+  - [x] Routes, authorization, audit, events and retention
+  - [x] Goal page card and hold banners; MCP directives output
 - **Evidence:**
-  - [ ] test-v2 and test-oauth checks for every route, rule and receipt
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 and test-oauth checks for every route, rule and receipt
+  - [x] Spec requirements updated and validated
 
-### [ ] REQ-002 — Requests and goal holds: local agent
+### [x] REQ-002 — Requests and goal holds: local agent
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation/packages/align-agent
@@ -286,9 +286,9 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** REQ-001
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Request intake, notices and Align-written context
-  - [ ] ::align accept/decline and align requests
-  - [ ] Goal hold latch that fails closed
+  - [x] Request intake, notices and Align-written context
+  - [x] ::align accept/decline and align requests
+  - [x] Goal hold latch that fails closed
 - **Evidence:**
-  - [ ] align-agent tests for each behaviour; live agent-to-server checks
-  - [ ] Spec requirements updated and validated
+  - [x] align-agent tests for each behaviour; live agent-to-server checks
+  - [x] Spec requirements updated and validated

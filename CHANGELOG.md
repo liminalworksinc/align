@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Requests and goal holds (REQ-001, REQ-002), the middle level between informing and instructing agents (owner
+  decision 2026-10-30):
+  - A goal's approvers and workspace owners can send running agents typed requests (replan, checkpoint, switch goal),
+    worded by Align and naming the sender. Checkpoints and replan drafts run on their own; switching goal waits for
+    the developer; the developer is always told and can decline any request; every answer is a receipt and audited.
+  - A goal hold pauses every agent on a goal by blocking its tools, including sessions that bind later, until it is
+    released (or the goal is achieved or dropped); it fails closed like the stop latch.
+  - Requests expire when their goal is achieved or dropped. The goal page has an "Agents on this goal" card.
+- Fixed: a release or binding-suspended notice reached only one of two sessions on the same device.
 - Ported main's v1 work (PRs #32, #33, #35, #36: LIM-2437 and LIM-2445 / #30) onto v2 (PORT-001 … 005):
   - Limits (must / must not / out of scope, at most 5) are goal content, confirmed by the goal's approval set and
     delivered with goal versions; pasting meeting notes suggests limits and stores nothing.
