@@ -186,10 +186,13 @@ async function crossTab(name, { X, Y, xPass, yPass, yRole, at = "/", prepare, wr
     for (const pg of [A, B]) await pg.setViewport({ width: 1440, height: 900 });
     const signedX = await signInUi(A, X, xPass, at);
     await prepare(A);
-    const before = audit();
     // Tab B (already showing X: one cookie) signs in as Y, as a quick sign-out/sign-in or a background tab A allows;
     // the moment its sign-in lands, tab A, still showing X, clicks the write.
     await B.goto(BASE + at, { waitUntil: "networkidle2", timeout: 60000 });
+    // Tab B's own page load can log a timer touchpoint as X (e.g. Your turn's ceo_change_viewed); let it land before
+    // the baseline, so only what happens after the switch counts.
+    await sleep(1000);
+    const before = audit();
     const signedY = await B.evaluate(
       async (role, passcode) => (await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role, passcode }) })).status === 200,
       yRole,
