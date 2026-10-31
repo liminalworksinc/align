@@ -63,9 +63,11 @@ const teamInitials = (team: string) => {
 // "<Team> lead", except when the team name already says it (a leadership team, or a name ending in "Lead").
 // Custom shell: below 1100px the page scrolls as a whole and the Inspector rail stacks under the main column, so
 // independent testers on 900–1024px laptops never scroll sideways. The header wraps at every width.
-// Phones (below md, 768px; max-md: variants only, so 768px and up is exactly as before): one column. The sidebar becomes
-// a stacked bar above the header (its nav in a row), so the main column gets the full width. Layout only: the sidebar
-// stays mounted at every width, so its state (ConnectAI's dialog, the composer, Switch team) survives a resize.
+// Phones: the shell's max-md: variants key on the VIEWPORT, below 768px (md); 768px and up is exactly as before. One
+// column: the sidebar becomes a stacked bar above the header (its nav in a row), so the main column gets the full width.
+// Layout only: the sidebar stays mounted at every width, so its state (ConnectAI's dialog, the composer, Switch team)
+// survives a resize. Inside the main column, components use @max-md: instead, a CONTAINER query on CUSTOM_MAIN (the
+// only @container they sit in): it applies when that column is under 28rem (about 420-448px), which on a phone it is.
 const CUSTOM_SHELL =
   "grid min-h-screen grid-cols-[236px_minmax(0,1fr)] grid-rows-[auto_auto_auto] min-[1100px]:h-screen min-[1100px]:grid-cols-[236px_minmax(0,1fr)_360px] min-[1100px]:grid-rows-[auto_minmax(0,1fr)] min-[1100px]:overflow-hidden max-md:grid-cols-1 max-md:grid-rows-none";
 const CUSTOM_SIDEBAR =
@@ -102,7 +104,8 @@ function SwitchTeam({ L, current, onPick }: { L: Labels; current: string; onPick
         Switch team ▾
       </Button>
       {open && (
-        <div role="menu" aria-label="Switch team" className="absolute right-0 top-full z-20 mt-1 flex min-w-[220px] flex-col rounded-[10px] border border-zinc-300 bg-white p-1 shadow-lg">
+        // Phones (viewport below 768px): the wrapped header puts this button at the left, so the menu opens rightward.
+        <div role="menu" aria-label="Switch team" className="absolute right-0 top-full z-20 mt-1 flex min-w-[220px] flex-col rounded-[10px] border border-zinc-300 bg-white p-1 shadow-lg max-md:left-0 max-md:right-auto">
           {others.map((r) => (
             <button
               key={r}
@@ -669,7 +672,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
         ) : lastPush ? (
           <Badge tone="neutral">Company goal {lastPush.version} sent {new Date(lastPush.pushed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Badge>
         ) : null}
-        <div className={custom ? "ml-auto flex min-w-0 items-center gap-3 max-md:flex-wrap" : "ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap"}>
+        <div className={custom ? "ml-auto flex min-w-0 flex-wrap items-center gap-3" : "ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap"}>
           {ops && !custom && (
             <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
               {confirmReset ? "Click again to reset" : "Start the demo over"}

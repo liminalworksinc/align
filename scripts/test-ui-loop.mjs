@@ -125,10 +125,10 @@ async function openProposals(page) {
   if (await waitText(page, MEASURE.slice(0, 30))) await click(page, MEASURE.slice(0, 30)).catch(() => {}); // open it from the inbox
 }
 
-// LIM-2452: a phone (390 wide). The page must not scroll sideways, and `needle` (a button's exact label), when given,
-// must sit inside the width. Resizing keeps the page's state; it goes back to 1440 afterwards.
-async function narrow(page, label, needle) {
-  await page.setViewport({ width: 390, height: 844 });
+// LIM-2452: a phone (390 wide, or `width`). The page must not scroll sideways, and `needle` (a button's exact label),
+// when given, must sit inside the width. Resizing keeps the page's state; it goes back to 1440 afterwards.
+async function narrow(page, label, needle, width = 390) {
+  await page.setViewport({ width, height: 844 });
   await sleep(600);
   const r = await page.evaluate((needle) => {
     const W = window.innerWidth;
@@ -146,7 +146,20 @@ async function narrow(page, label, needle) {
   }, needle ?? null);
   await page.setViewport({ width: 1440, height: 900 });
   await sleep(300);
-  check(`${label}: no sideways scroll at 390${needle ? `, and "${needle}" fits the width` : ""}`, r.scrollWidth <= r.W && (!needle || (r.found && r.left >= 0 && r.right <= r.W)), JSON.stringify(r));
+  check(`${label}: no sideways scroll at ${width}${needle ? `, and "${needle}" fits the width` : ""}`, r.scrollWidth <= r.W && (!needle || (r.found && r.left >= 0 && r.right <= r.W)), JSON.stringify(r));
+}
+
+// LIM-2452 review: at 390 the Switch team menu opens inside the screen (every item within [0, width]), then closes.
+async function narrowMenu(page, label) {
+  await page.setViewport({ width: 390, height: 844 });
+  await sleep(600);
+  await click(page, "Switch team");
+  await page.waitForSelector("[role=menuitem]", { timeout: 10000 });
+  const r = await page.evaluate(() => ({ W: window.innerWidth, items: [...document.querySelectorAll("[role=menuitem]")].map((m) => { const b = m.getBoundingClientRect(); return { text: m.innerText.trim(), left: Math.round(b.left), right: Math.round(b.right) }; }) }));
+  await click(page, "Switch team"); // close it again
+  await page.setViewport({ width: 1440, height: 900 });
+  await sleep(300);
+  check(`${label}: at 390 every Switch team menu item is inside the screen`, r.items.length > 0 && r.items.every((i) => i.left >= 0 && i.right <= r.W), JSON.stringify(r));
 }
 
 // One click, no waiting: false when no visible enabled button carries the text (the page already stopped).
@@ -260,6 +273,7 @@ async function main() {
     }
 
     await narrow(A, "N1 the asking team's first signed-in screen", "Propose a change");
+    await narrowMenu(A, "N6 the asking team's header");
 
     // Propose (with no proposal yet, + New conflict opens the composer directly)
     await click(A, "New conflict");
@@ -425,6 +439,7 @@ async function main() {
     const leadIn = await signInUi(LP, fixture.leadership?.team ?? "Leadership", PASSCODES.leadership);
     await sleep(800);
     const lt = await text(LP);
+    await narrow(LP, "N7 leadership’s first signed-in screen", null, 768);
     check(
       "U12 after \"not yet\" leadership's Your turn still shows the launch decision, and counts it",
       ny.status === 200 && leadIn && lt.includes("Decide the launch") && /1 thing waiting on you/.test(lt),
