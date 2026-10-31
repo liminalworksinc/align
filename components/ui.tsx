@@ -1,5 +1,5 @@
 "use client";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { customStateLabel, type Labels } from "@/lib/labels";
 
 export type Tone = "violet" | "amber" | "neutral" | "red" | "green" | "blue";
@@ -75,12 +75,17 @@ export function Button({
   kind = "primary",
   disabled,
   type = "button",
+  wrap = false,
+  ref,
 }: {
   children: ReactNode;
   onClick?: () => void;
   kind?: "primary" | "secondary" | "danger" | "ghost";
   disabled?: boolean;
   type?: "button" | "submit";
+  /** A long label wraps inside the button at any width (not only in a narrow custom main column). */
+  wrap?: boolean;
+  ref?: Ref<HTMLButtonElement>;
 }) {
   const k = {
     // v6 .btn.p: Liminal magenta fill, near-black text.
@@ -98,8 +103,9 @@ export function Button({
   // 28rem (about 420-448px). The only one a Button sits in is a custom workspace's main column (CUSTOM_MAIN), which is
   // that narrow on a phone; there a long label wraps instead of running off the screen. Northstar's main is not a
   // container, so it is unchanged.
+  const fit = wrap ? "max-w-full whitespace-normal py-2 text-left" : "whitespace-nowrap";
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-[18px] @max-md:max-w-full @max-md:whitespace-normal @max-md:py-2 @max-md:text-left text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed ${off} disabled:hover:brightness-100`}>
+    <button ref={ref} type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 ${fit} rounded-[10px] border px-[18px] @max-md:max-w-full @max-md:whitespace-normal @max-md:py-2 @max-md:text-left text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed ${off} disabled:hover:brightness-100`}>
       {children}
     </button>
   );
