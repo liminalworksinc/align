@@ -299,6 +299,11 @@ async function main() {
     check("U4 the confirmation names the revised target and that the asking team must accept it", (await waitText(O, "Confirm: Counter")) && (await text(O)).includes(`${ASKING} must accept your changes`), (await text(O)).slice(-800));
     await click(O, "Confirm: Counter");
     check("U4 the owning team asks for changes and waits on the asking team", await waitText(O, `Waiting for ${ASKING}`), (await text(O)).slice(0, 300));
+    {
+      // While countered the owner may still decline (flow.ts rejectProposal), and nothing else. Not exercised here.
+      const t = await text(O);
+      check("U4b while waiting, the owner is offered Decline only", t.includes("You can still decline instead of waiting") && t.includes("Decline") && !t.includes("Approve this exact revision"), t.slice(-800));
+    }
 
     // The asking team sees the conditions and accepts
     await openProposals(A);

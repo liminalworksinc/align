@@ -31,13 +31,14 @@ const focusRing = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-
 /**
  * What lib/flow.ts lets this role do to this proposal in this state, for the custom scenario.
  * recipient (owning team): PENDING_SECURITY | ACKNOWLEDGED_BY_PRODUCT -> approve (ratify), accept if (counter, same
- * target + conditions), counter, decline (reject). proposer (asking team): COUNTERED -> acknowledge. Everyone else, and
- * every other state: nothing (the screen says whose move it is). flow.ts also lets the owner reject while COUNTERED;
- * the screen has never offered that, and this lane keeps it that way.
+ * target + conditions), counter, decline (reject); COUNTERED -> decline only, while the asking team still has to accept
+ * the counter (flow.ts rejectProposal allows it; founder ruling 10/30 "a) yes"). proposer (asking team): COUNTERED ->
+ * acknowledge. Everyone else, and every other state: nothing (the screen says whose move it is).
  */
 export function allowedDecisions(p: Proposal, actor: Actor | null | undefined): Decision[] {
   if (actor === p.recipient_owner && (p.state === "PENDING_SECURITY" || p.state === "ACKNOWLEDGED_BY_PRODUCT"))
     return ["approve", "acceptIf", "counter", "decline"];
+  if (actor === p.recipient_owner && p.state === "COUNTERED") return ["decline"];
   if (actor === p.proposing_owner && p.state === "COUNTERED") return ["acknowledge"];
   return [];
 }
@@ -380,8 +381,17 @@ export function ReviewDecide(
           </h2>
           {step === "input" && (
             <>
+              {me.actor === p.recipient_owner && p.state === "COUNTERED" && (
+                <Badge tone="amber" wrap>
+                  Waiting for {ask} to accept your changes
+                </Badge>
+              )}
               <p className="text-[15px] text-zinc-700">
-                {decisions.length > 1 ? "Choose what should happen. Nothing is sent until you confirm." : "Nothing is sent until you confirm."}
+                {decisions.length > 1
+                  ? "Choose what should happen. Nothing is sent until you confirm."
+                  : p.state === "COUNTERED"
+                    ? `You can still decline instead of waiting for ${ask}. Nothing is sent until you confirm.`
+                    : "Nothing is sent until you confirm."}
               </p>
               <div role="group" aria-label="Your answer" className="flex flex-wrap gap-2.5">
                 {decisions.map((d) => (
@@ -552,11 +562,7 @@ export function ReviewDecide(
         </section>
       ) : (
         <div className="flex flex-wrap items-center gap-3 border-t border-zinc-200 pt-4">
-          {me.actor === p.recipient_owner && p.state === "COUNTERED" ? (
-            <Badge tone="amber" wrap>
-              Waiting for {ask} to accept your changes
-            </Badge>
-          ) : me.actor === p.proposing_owner ? (
+          {me.actor === p.proposing_owner ? (
             <Badge tone="amber" wrap>
               {p.state === "PENDING_SECURITY" ? `Waiting for ${who("security")}` : `You accepted the changes · waiting for ${who("security")} to approve`}
             </Badge>
