@@ -9,7 +9,7 @@ import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 // connected only after its first successful read (last_used_at), never just because someone approved it. Each app
 // also shows whether it has read the plan as it stands now (on_current_plan, lib/plan-rev.ts): one that last read an
 // older plan may still be working on it. Align sees only what an app last read, never what it does, so the copy says
-// "has read", never that an agent follows or works from the plan.
+// "Read the current plan" / "Last read an older plan" (as Your turn does), never that an agent follows or works from it.
 // variant "rail" (md and up) is the sidebar card with the setup steps in a dialog; "row" (phones, the top of Work) is
 // one collapsed summary line whose button opens the same steps inline. Home mounts exactly one of them.
 
@@ -217,13 +217,17 @@ export default function ConnectAI({ workspace, teamOf, actor, variant = "rail" }
                   {a.name} <span className="font-normal text-zinc-500">({a.redirect_host})</span>
                 </div>
                 <div className="text-[14px] text-zinc-600">
-                  As {teamOf(a.role)} · {a.last_used_at ? `last read ${when(a.last_used_at)}` : "approved, hasn’t read anything yet"}
+                  As {teamOf(a.role)} · {a.last_used_at ? `last read ${when(a.last_used_at)}` : "○ Approved, hasn’t read the plan yet"}
                 </div>
                 {a.last_used_at && (
-                  <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-emerald-800" : "text-amber-800"}`}>
-                    {a.on_current_plan
-                      ? "✓ Has read the latest plan."
-                      : `▲ Hasn’t read the plan since it changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}. It may still be working on the old plan. Send it a message to catch it up.`}
+                  <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"}`}>
+                    {a.on_current_plan ? (
+                      <>
+                        <span aria-hidden className="text-violet-700">✓</span> Read the current plan.
+                      </>
+                    ) : (
+                      `▲ Last read an older plan${data.plan?.changed_at ? ` (the plan changed at ${when(data.plan.changed_at)})` : ""}. It may still be working on the old plan. Send it a message to catch it up.`
+                    )}
                   </div>
                 )}
               </div>
@@ -252,30 +256,30 @@ export default function ConnectAI({ workspace, teamOf, actor, variant = "rail" }
     </>
   );
   const summary = (
-    <ul aria-label="Connected agents" className="space-y-1">
+    <ul aria-label="Connected AI apps" className="space-y-1">
       {reading.map((a) => (
         <li key={a.id} className="flex items-start gap-1.5 text-[13px] leading-snug">
-          <span aria-hidden className={a.on_current_plan ? "text-emerald-700" : "text-amber-700"}>
+          <span aria-hidden className={a.on_current_plan ? "text-violet-700" : "text-amber-700"}>
             {a.on_current_plan ? "✓" : "▲"}
           </span>
           <span className="min-w-0">
             <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
-            <span className={a.on_current_plan ? "text-emerald-800" : "text-amber-800"}>{a.on_current_plan ? "has read the latest plan" : "last read an older plan"}</span>
+            <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Read the current plan" : "Last read an older plan"}</span>
           </span>
         </li>
       ))}
     </ul>
   );
   if (variant === "row") {
-    // Phones: one line at the top of Work. Connected counts only apps that have read once; "have read the current
-    // plan" counts only the server's on_current_plan (the plan fingerprint the app last read equals today's).
+    // Phones: one line at the top of Work. Connected counts only apps that have read once; "read the current plan"
+    // counts only the server's on_current_plan (the plan fingerprint the app last read equals today's).
     const current = reading.filter((a) => a.on_current_plan).length;
     return (
-      <section data-connect-ai="row" aria-label="Agents on this plan" className="mb-4 flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
+      <section data-connect-ai="row" aria-label="Connected AI apps" className="mb-4 flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <p className="min-w-0 flex-[1_1_12rem] text-[14px] leading-snug text-zinc-700">
-            <span className="font-semibold text-violet-700">Agents on this plan</span>
-            {data && (reading.length === 0 ? " · None connected" : ` · ${reading.length} connected · ${current} ${current === 1 ? "has" : "have"} read the current plan`)}
+            <span className="font-semibold text-violet-700">Connected AI apps</span>
+            {data && (reading.length === 0 ? " · None connected" : ` · ${reading.length} connected · ${current} read the current plan`)}
           </p>
           <Button kind="secondary" onClick={() => setOpen((o) => !o)}>
             Connect an AI app
@@ -292,11 +296,11 @@ export default function ConnectAI({ workspace, teamOf, actor, variant = "rail" }
   }
   return (
     <div data-connect-ai="rail" className="mt-auto flex flex-col gap-2 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
-      <span className="al-lbl !text-violet-700">Agents on this plan</span>
+      <span className="al-lbl !text-violet-700">Connected AI apps</span>
       {!data ? (
         <div className="text-[13px] text-zinc-600">{"\u00a0"}</div>
       ) : reading.length === 0 ? (
-        <div className="text-[13px] text-zinc-600">None connected. Connect your AI agents and they can read this one plan.</div>
+        <div className="text-[13px] text-zinc-600">None connected. Connect your AI apps and they can read this one plan.</div>
       ) : (
         summary
       )}

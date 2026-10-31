@@ -8,7 +8,7 @@
 //   phase "hosted": HOSTED=1 as Fly runs it -> no new route, HOSTED_ROUTES unchanged, a bad waitlist/LOI URL is hidden
 //   phase "layout": LIM-2452 cycle 2 on a custom workspace: the phone layout (Propose a change above the fold, one
 //                   ConnectAI), the Goals map at every width, the asker's review at 768, 44px tap targets at 390,
-//                   the Switch team menu at 700, and the agents copy (has read / last read, never follow or work from)
+//                   the Switch team menu at 700, and the AI apps copy (Read the current plan / Last read an older plan, never follow or work from)
 // Usage: node scripts/test-funnel.mjs <port> [--no-build] [--only local|layout|hosted]   (from a worktree root; refuses 3100 and the main checkout)
 
 import { spawn, spawnSync } from "node:child_process";
@@ -649,10 +649,10 @@ async function phaseLayout(dir) {
       const turn = await connectCopies(page);
       await nav(page, "Work");
       const work = await connectCopies(page);
-      const row = await page.evaluate(() => document.querySelector("main")?.innerText.match(/Agents on this plan[^\n]*/i)?.[0] ?? "");
+      const row = await page.evaluate(() => document.querySelector("main")?.innerText.match(/Connected AI apps[^\n]*/i)?.[0] ?? "");
       check(
-        "(b) 390: no ConnectAI on Your turn; on Work exactly one, at the top of Work, as the row 'Agents on this plan · None connected'",
-        turn.total === 0 && work.total === 1 && work.main === 1 && /^Agents on this plan · None connected$/.test(row),
+        "(b) 390: no ConnectAI on Your turn; on Work exactly one, at the top of Work, as the row 'Connected AI apps · None connected'",
+        turn.total === 0 && work.total === 1 && work.main === 1 && /^Connected AI apps · None connected$/.test(row),
         `turn=${JSON.stringify(turn)} work=${JSON.stringify(work)} row=${row}`,
       );
       // The row's button opens the setup steps inline (no dialog).
@@ -704,8 +704,8 @@ async function phaseLayout(dir) {
       await waitText(page, /LAYOUT keep the audit trail/);
       const t = await bodyText(page);
       check(
-        "(g) custom: 'Connect your AI agents and they can read this one plan.' and 'Agents can read it once you confirm.'; the old lines are gone",
-        t.includes("None connected. Connect your AI agents and they can read this one plan.") && t.includes("Agents can read it once you confirm.") && !/works from this one plan|Agents follow it/.test(t),
+        "(g) custom: 'Connect your AI apps and they can read this one plan.' and 'Agents can read it once you confirm.'; the old lines are gone",
+        t.includes("None connected. Connect your AI apps and they can read this one plan.") && t.includes("Agents can read it once you confirm.") && !/works from this one plan|Agents follow it/.test(t),
         (t.match(/None connected[^\n]*/) ?? [""])[0] + " :: " + (t.match(/[^\n]*once you confirm[^\n]*/) ?? [""])[0],
       );
       await ctx.close();
@@ -766,8 +766,8 @@ async function phaseLayout(dir) {
       acc.status === 200 && labels.size >= 8 && short.length === 0,
       `seen ${[...labels].join(", ")}; accept=${acc.status}; short: ${short.join(" | ")}`,
     );
-    // (g) part 2: two connected apps, one that read before the plan changed and one after. The rail says "has read the
-    // latest plan" / "last read an older plan" (the server's on_current_plan); the phone row counts them.
+    // (g) part 2: two connected apps, one that read before the plan changed and one after. The rail says "Read the
+    // current plan" / "Last read an older plan" (the server's on_current_plan); the phone row counts them.
     {
       const { createHash, randomBytes } = await import("node:crypto");
       const REDIRECT = "http://127.0.0.1:33418/callback";
@@ -797,17 +797,23 @@ async function phaseLayout(dir) {
       const apps = (await req("GET", "/api/workspaces/connections", { cookie: W.c.security })).json?.apps ?? [];
       const { page, ctx } = await open("security", 1440, 1000);
       await waitText(page, /Layout New App/);
-      const rail = await page.evaluate(() => document.querySelector('ul[aria-label="Connected agents"]')?.innerText ?? "");
+      const rail = await page.evaluate(() => document.querySelector('ul[aria-label="Connected AI apps"]')?.innerText ?? "");
+      // ✓ in violet for the current plan, ▲ in amber for an older one; no emerald anywhere in the list.
+      const railTone = await page.evaluate(() => {
+        const ul = document.querySelector('ul[aria-label="Connected AI apps"]');
+        const marks = [...(ul?.querySelectorAll("span[aria-hidden]") ?? [])].map((s) => [s.textContent, s.className]);
+        return !!ul && !ul.innerHTML.includes("emerald") && marks.some(([t, c]) => t === "✓" && c.includes("text-violet-700")) && marks.some(([t, c]) => t === "▲" && c.includes("text-amber-700"));
+      });
       check(
-        "(g) rail: 'Layout New App has read the latest plan', 'Layout Old App last read an older plan' (the server's on_current_plan); no 'on the latest plan' or 'still on an older plan'",
-        apps.filter((a) => a.on_current_plan).length === 1 && /Layout New App has read the latest plan/.test(rail) && /Layout Old App last read an older plan/.test(rail) && !/on the latest plan|still on an older plan/.test(rail),
+        "(g) rail: 'Layout New App Read the current plan' (violet ✓), 'Layout Old App Last read an older plan' (the server's on_current_plan); no 'on the latest plan' or 'still on an older plan'",
+        apps.filter((a) => a.on_current_plan).length === 1 && /Layout New App Read the current plan/.test(rail) && /Layout Old App Last read an older plan/.test(rail) && !/on the latest plan|still on an older plan|has read the latest/.test(rail) && railTone,
         `${JSON.stringify(apps.map((a) => [a.name, a.on_current_plan]))} :: ${rail}`,
       );
       await ctx.close();
       const ph = await open("security", 390, 844);
       await nav(ph.page, "Work");
-      const row = await ph.page.evaluate(() => document.querySelector("main")?.innerText.match(/Agents on this plan[^\n]*/i)?.[0] ?? "");
-      check("(g) 390 row: 'Agents on this plan · 2 connected · 1 has read the current plan'", row === "Agents on this plan · 2 connected · 1 has read the current plan", row);
+      const row = await ph.page.evaluate(() => document.querySelector("main")?.innerText.match(/Connected AI apps[^\n]*/i)?.[0] ?? "");
+      check("(g) 390 row: 'Connected AI apps · 2 connected · 1 read the current plan'", row === "Connected AI apps · 2 connected · 1 read the current plan", row);
       await ph.ctx.close();
     }
   } finally {
