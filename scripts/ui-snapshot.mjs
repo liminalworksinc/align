@@ -154,7 +154,12 @@ async function shoot(stage, roles) {
     // run's details (Scenario Studio -> Run details).
     for (const [name, nav, within, match] of DEEP) {
       if (!(await openDeep(page, nav, within, match))) continue;
+      // Opening a deep screen can itself write (Run details marks evidence_opened), and the audit list shows it only
+      // after the next /api/state poll (1.5 s). Let the writes settle, then wait one full poll, so the capture never
+      // depends on which side of a poll it lands.
       await new Promise((r) => setTimeout(r, 800));
+      await page.waitForNetworkIdle({ idleTime: 300, timeout: 5000 }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 1700));
       await capture(page, `${stage}-${role}-${name}`);
     }
     await ctx.close();
