@@ -207,7 +207,7 @@ export default function ConnectAI({
               </span>
               <span className="min-w-0">
                 <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
-                <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Seen on the current plan" : "Last seen on an older plan"}</span>
+                <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"}</span>
               </span>
             </li>
           ))}
@@ -291,8 +291,8 @@ export default function ConnectAI({
                       {a.last_used_at && (
                         <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"}`}>
                           {a.on_current_plan
-                            ? "✓ Seen on the current plan."
-                            : `▲ Last seen on an older plan: Align hasn’t seen it since the plan changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}.`}
+                            ? "✓ Seen since the latest change."
+                            : `▲ Last seen before the latest change: Align hasn’t seen it since the workspace changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}.`}
                         </div>
                       )}
                     </div>
@@ -311,7 +311,7 @@ export default function ConnectAI({
               </p>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => setOpen(false)}>Done</Button>
+              <Button kind="secondary" onClick={() => setOpen(false)}>Done</Button>
               {actor === "leadership" && data.apps.length > 0 && (
                 <Button kind="danger" onClick={() => void disconnect()}>
                   Disconnect all

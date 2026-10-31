@@ -212,7 +212,7 @@ function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Pr
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => mark("waitlist_clicked")}
-                className="inline-flex min-h-11 items-center justify-center rounded-[10px] border border-transparent bg-violet-700 px-[18px] text-[15px] font-semibold text-black hover:brightness-112 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
+                className="inline-flex min-h-11 items-center justify-center rounded-[10px] border border-zinc-300 bg-transparent px-[18px] text-[15px] font-semibold text-zinc-900 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
               >
                 Join the Align waitlist
               </a>
