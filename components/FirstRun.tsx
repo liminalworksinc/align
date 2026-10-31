@@ -17,18 +17,20 @@ interface FirstRunApp {
 }
 
 /** What an agent connected to a workspace can read: one line per tool in lib/mcp/register.ts, by its workspace title,
- *  except align_get_goal_activity. That tool summarises what Claude Code and Codex sessions reported through the capture
- *  hooks (agent-reported, not seen by Align), and capture is off when hosted, so its line says so.
+ *  except align_get_work_map and align_get_goal_activity. Both come from what Claude Code and Codex sessions reported
+ *  through the capture hooks (agent-reported, not seen by Align), and capture is off when hosted, so their lines say so.
  *  scripts/test-first-run.mjs checks the count against the server's tools/list. */
-const REPORTED = "What connected sessions reported on each goal";
+const WORK_MAP = "Sessions that reported in, grouped by goal (the work map)";
+const ACTIVITY = "What connected sessions reported on each goal";
+const REPORTED = new Set([WORK_MAP, ACTIVITY]);
 const AGENT_READS = [
   "The teams’ goals",
   "The agreed plan",
-  "The work map",
+  WORK_MAP,
   "The latest request between teams",
   "What changed and what is waiting",
   "What’s asked of its team",
-  REPORTED,
+  ACTIVITY,
   "The goals’ limits",
   "A short brief for its team",
 ];
@@ -53,7 +55,7 @@ export default function FirstRun({
   url,
   apps,
   failed,
-  command,
+  copy,
   openConnect,
 }: {
   workspace: string;
@@ -61,7 +63,7 @@ export default function FirstRun({
   url: string | null;
   apps: FirstRunApp[] | null;
   failed: boolean;
-  command: (text: string | null) => ReactNode;
+  copy: (text: string) => ReactNode;
   openConnect: () => void;
 }) {
   // Read after mount, so the server render and the first client render agree; blocked storage keeps the card shown.
@@ -99,59 +101,75 @@ export default function FirstRun({
   // state from here on.
   if (seen.length > 0) return null;
 
+  const line = url ? claudeCodeLine(url) : null;
+  const connect = (
+    <>
+      <p className="text-zinc-700">Paste this into a terminal in the folder where you work, then choose Allow on the Align page that opens:</p>
+      {line === null ? (
+        url && <p className="text-zinc-600">This server’s address can’t be turned into a command. Use the Connect dialog below instead.</p>
+      ) : (
+        <>
+          {/* Copy sits above the clamped line: the line is about 1.5 KB, so a button after it would scroll out of view. */}
+          <div>{copy(line)}</div>
+          <code className="block max-h-36 overflow-y-auto break-all rounded-[8px] bg-zinc-100 px-3 py-2 font-mono text-[14px]">{line}</code>
+          <p className="text-[14px] text-zinc-600">
+            It adds Align to Claude Code for your user account (every folder), and writes two brief hooks to .claude/settings.local.json in this folder.
+          </p>
+        </>
+      )}
+      <div>
+        <div className="font-semibold">It can read</div>
+        <ul aria-label="What the agent can read" className="ml-5 list-disc text-zinc-700">
+          {AGENT_READS.map((r) => (
+            <li key={r}>{REPORTED.has(r) && hosted ? `${r} (off on the test server)` : r}</li>
+          ))}
+        </ul>
+      </div>
+      <p className="text-zinc-700">
+        <span className="font-semibold text-zinc-900">It can’t</span> propose, approve or change anything here, or decide a launch.
+      </p>
+      <p role="status" className={failed ? "text-amber-800" : "text-zinc-700"}>
+        {failed
+          ? "▲ Couldn’t check connected AI apps just now. Align tries again in a few seconds."
+          : approved.length
+            ? `○ ${approved.map((a) => `${a.name}: Approved, not seen by Align yet`).join(". ")}.`
+            : "No AI app has connected yet."}
+      </p>
+      <button onClick={openConnect} className="w-fit text-[14px] font-semibold text-violet-700 underline">
+        Using Codex, the Claude app or ChatGPT?
+      </button>
+    </>
+  );
+  // Hosted has no sample (Northstar is not served), so the card is the one path, titled for it.
   return (
     <section aria-label="Get started" data-state={failed ? "error" : approved.length ? "approved" : "none"} className="mb-4 rounded-[14px] border border-violet-700 bg-white p-5 text-[15px] text-zinc-900">
       <div className="mb-3 flex flex-wrap items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h2 className="text-[20px] font-semibold">Two ways to start</h2>
-          <p className="text-zinc-600">Look around a made-up company first, or connect one AI agent to this workspace.</p>
+          <h2 className="text-[20px] font-semibold">{hosted ? "Connect one agent" : "Two ways to start"}</h2>
+          <p className="text-zinc-600">{hosted ? "Connect Claude Code to this workspace. It can read the plan; it can’t change it." : "Look around a made-up company first, or connect one AI agent to this workspace."}</p>
         </div>
         <Button kind="ghost" onClick={hide}>
           Hide
         </Button>
       </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        <Path title="Explore a sample" tag="Sample (fictional)">
-          {hosted ? (
-            <p className="text-zinc-700">There’s no sample on this test server. Everything in this workspace comes from your own setup.</p>
-          ) : (
-            <>
-              <p className="text-zinc-700">
-                Northstar Security, a made-up company where two teams need each other to change a goal. It opens in a new tab and asks for the demo passcode. Signing in there signs this
-                browser out of this workspace.
-              </p>
-              <a href="/" target="_blank" rel="noopener" aria-label="Open the sample (fictional)" className="inline-flex min-h-11 w-fit items-center rounded-[10px] border border-zinc-300 px-4 text-[15px] font-semibold text-zinc-900 hover:bg-zinc-100">
-                Open the sample
-              </a>
-            </>
-          )}
-        </Path>
-        <Path title="Connect one agent" tag="Claude Code">
-          <p className="text-zinc-700">Paste this into a terminal in the folder where you work, then choose Allow on the Align page that opens:</p>
-          {url ? <div className="max-h-36 overflow-y-auto">{command(claudeCodeLine(url))}</div> : null}
-          <div>
-            <div className="font-semibold">It can read</div>
-            <ul aria-label="What the agent can read" className="ml-5 list-disc text-zinc-700">
-              {AGENT_READS.map((r) => (
-                <li key={r}>{r === REPORTED && hosted ? `${r} (off on the test server)` : r}</li>
-              ))}
-            </ul>
-          </div>
-          <p className="text-zinc-700">
-            <span className="font-semibold text-zinc-900">It can’t</span> propose, approve or change anything here, or decide a launch.
-          </p>
-          <p role="status" className={failed ? "text-amber-800" : "text-zinc-700"}>
-            {failed
-              ? "▲ Couldn’t check connected AI apps just now. Align tries again in a few seconds."
-              : approved.length
-                ? `○ ${approved.map((a) => `${a.name}: Approved, not seen by Align yet`).join(". ")}.`
-                : "No AI app has connected yet."}
-          </p>
-          <button onClick={openConnect} className="w-fit text-[14px] font-semibold text-violet-700 underline">
-            Using Codex, the Claude app or ChatGPT?
-          </button>
-        </Path>
-      </div>
+      {hosted ? (
+        <div className="flex min-w-0 flex-col gap-2">{connect}</div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2">
+          <Path title="Explore a sample" tag="Sample (fictional)">
+            <p className="text-zinc-700">
+              Northstar Security, a made-up company where two teams need each other to change a goal. It opens in a new tab and asks for the demo passcode. Signing in there signs this
+              browser out of this workspace.
+            </p>
+            <a href="/" target="_blank" rel="noopener" aria-label="Open the sample (fictional)" className="inline-flex min-h-11 w-fit items-center rounded-[10px] border border-zinc-300 px-4 text-[15px] font-semibold text-zinc-900 hover:bg-zinc-100">
+              Open the sample
+            </a>
+          </Path>
+          <Path title="Connect one agent" tag="Claude Code">
+            {connect}
+          </Path>
+        </div>
+      )}
     </section>
   );
 }

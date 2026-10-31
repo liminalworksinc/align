@@ -240,6 +240,32 @@ const card = (page) => page.evaluate(() => {
   const s = document.querySelector('section[aria-label="Get started"]');
   return s ? { label: s.getAttribute("aria-label"), state: s.getAttribute("data-state"), text: s.innerText } : null;
 });
+/** The card's Copy button is shown without scrolling anything inside the card: no clipping ancestor hides it. */
+const copyVisible = (page) => page.evaluate(() => {
+  const sec = document.querySelector('section[aria-label="Get started"]');
+  const b = sec && [...sec.querySelectorAll("button")].find((x) => x.textContent === "Copy");
+  if (!b) return "no Copy button";
+  const r = b.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return "zero size";
+  for (let el = b.parentElement; el && el !== sec; el = el.parentElement) {
+    const st = getComputedStyle(el);
+    if (/(auto|scroll|hidden|clip)/.test(st.overflowY + st.overflowX)) {
+      const c = el.getBoundingClientRect();
+      if (r.top < c.top || r.bottom > c.bottom || r.left < c.left || r.right > c.right) return `clipped by ${el.tagName}.${el.className}`;
+    }
+  }
+  return "ok";
+});
+async function copyVisibleAt(page) {
+  const out = [];
+  for (const width of [390, 1440]) {
+    await page.setViewport({ width, height: 1000 });
+    await sleep(400);
+    out.push(`${width}:${await copyVisible(page)}`);
+  }
+  await page.setViewport({ width: 1440, height: 1000 });
+  return out;
+}
 async function shots(page, name) {
   for (const width of WIDTHS) {
     await page.setViewport({ width, height: 1000 });
@@ -293,6 +319,9 @@ async function phaseLocal(dir) {
       c0?.text,
     );
     check("Connect one agent shows the Claude Code setup line and status 'No AI app has connected yet.'", !!c0 && /claude mcp add/.test(c0.text) && /No AI app has connected yet\./.test(c0.text) && c0.state === "none", c0?.text);
+    check("the card says the line adds Align for the user account and writes hooks to .claude/settings.local.json", /for your user account/.test(c0?.text ?? "") && /\.claude\/settings\.local\.json/.test(c0?.text ?? ""), c0?.text);
+    const cv = await copyVisibleAt(page);
+    check("Copy is visible without scrolling the setup line, at 390 and 1440", cv.every((x) => x.endsWith(":ok")), cv.join(" "));
     check("it says what the agent can't do: propose, approve or change anything", !!c0 && /It can’t propose, approve or change anything here/.test(c0.text.replace(/\s+/g, " ")), "");
     await shots(page, "none");
 
@@ -322,8 +351,12 @@ async function phaseLocal(dir) {
     const tools = rpcResult(await rpc(tok, "tools/list", {}))?.tools ?? [];
     check("'It can read' has one line per tool the MCP server lists, and every tool only reads", reads.length > 0 && reads.length === tools.length && tools.every((t) => t.annotations?.readOnlyHint === true), `${reads.length} lines, ${tools.length} tools`);
     check(
-      "the goal-activity line says it is what sessions reported (not what Align saw), with no hosted suffix in Mode L",
-      tools.some((t) => t.name === "align_get_goal_activity") && reads.includes("What connected sessions reported on each goal") && !reads.some((r) => /What agents did/.test(r)),
+      "the work-map and goal-activity lines say they are what sessions reported (not what Align saw), with no hosted suffix in Mode L",
+      tools.some((t) => t.name === "align_get_goal_activity") &&
+        tools.some((t) => t.name === "align_get_work_map") &&
+        reads.includes("What connected sessions reported on each goal") &&
+        reads.includes("Sessions that reported in, grouped by goal (the work map)") &&
+        !reads.some((r) => /What agents did|off on the test server|^The work map$/.test(r)),
       reads.join(" | "),
     );
 
@@ -348,7 +381,7 @@ async function phaseLocal(dir) {
     const flipped = await waitFor(page, async () => /Claude Code\s*Seen on the current plan/.test(await sidebar()));
     const yielded = await waitFor(page, async () => !(await card(page)), 5000);
     check("once seen, the sidebar says 'Claude Code Seen on the current plan'", flipped, await sidebar());
-    check("once seen, the first-run card yields (gone), and Home's section lists Claude Code", yielded && /Claude Code/.test(await home()), `${yielded} ${await home()}`);
+    check("once seen, the first-run card yields (gone), and Home's section says Claude Code was seen on the current plan", yielded && /Claude Code[\s\S]*Seen on the current plan/.test(await home()), `${yielded} ${await home()}`);
     const sideNow = await sidebar();
     check("the sidebar claims no read or work: no 'read', 'working', 'follows', 'stuck', 'blocked' or 'progress'", !/\bread\b|working|follows|works from|stuck|blocked|progress/i.test(sideNow), sideNow);
     await shots(page, "yielded");
@@ -359,6 +392,7 @@ async function phaseLocal(dir) {
     await page.reload({ waitUntil: "networkidle2" });
     const older = await waitFor(page, async () => /Claude Code\s*Last seen on an older plan/.test(await sidebar()));
     check("after the plan changes the sidebar says Claude Code was last seen on an older plan, and no card comes back", p.status === 200 && stale && older && !(await card(page)), `${p.status} ${await sidebar()}`);
+    check("Home's section says the same: Last seen on an older plan", /Claude Code[\s\S]*Last seen on an older plan/.test(await home()), await home());
     await shots(page, "older");
 
     // Hide, on a fresh workspace: gone, and still gone after a reload (localStorage). The card adds no request: the
@@ -425,9 +459,16 @@ async function phaseHosted(dir) {
     const shown = await waitFor(page, async () => (await card(page))?.label === "Get started");
     const c0 = await card(page);
     const link = await page.evaluate(() => !!document.querySelector('section[aria-label="Get started"] a[href="/"]'));
-    check("hosted: the card shows both paths; Explore says there's no sample here and has no link", shown && /Explore a sample/.test(c0?.text ?? "") && /There’s no sample on this test server\./.test(c0?.text ?? "") && !link && /Connect one agent/.test(c0?.text ?? ""), c0?.text);
+    const title = await page.evaluate(() => document.querySelector('section[aria-label="Get started"] h2')?.textContent);
+    check("hosted: the card is the one path, titled 'Connect one agent': no sample path, no 'Two ways', no sample link", shown && title === "Connect one agent" && !/Explore a sample|Two ways|made-up company|Sample \(fictional\)/.test(c0?.text ?? "") && !link, `${title} | ${c0?.text}`);
+    const hcv = await copyVisibleAt(page);
+    check("hosted: Copy is visible without scrolling the setup line, at 390 and 1440", hcv.every((x) => x.endsWith(":ok")), hcv.join(" "));
     const hReads = await page.evaluate(() => [...document.querySelectorAll('ul[aria-label="What the agent can read"] li')].map((li) => li.textContent));
-    check("hosted: the goal-activity line says it is reported and off on the test server", hReads.includes("What connected sessions reported on each goal (off on the test server)"), hReads.join(" | "));
+    check(
+      "hosted: the work-map and goal-activity lines say they are reported and off on the test server",
+      hReads.includes("What connected sessions reported on each goal (off on the test server)") && hReads.includes("Sessions that reported in, grouped by goal (the work map) (off on the test server)"),
+      hReads.join(" | "),
+    );
     check("hosted: the setup line names this server's https MCP URL", /claude mcp add/.test(c0?.text ?? "") && c0.text.includes(`https://${HOSTED_HOST}/api/mcp`), c0?.text);
     await shots(page, "none");
     const tok = await connect(w, await newClient("Claude Code"), "leadership");

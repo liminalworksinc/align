@@ -234,7 +234,7 @@ export default function ConnectAI({
             url={data?.url ?? null}
             apps={data?.apps ?? null}
             failed={failed}
-            command={(text) => <Command text={text} />}
+            copy={(text) => <Copy value={text} />}
             openConnect={() => setOpen(true)}
           />,
           slot,
