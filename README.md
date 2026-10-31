@@ -6,10 +6,12 @@ Align is Liminal's wedge product, a working prototype. We built the first versio
 
 ## What it does today
 
-- **Set up your own case.** One team (the asking team) proposes a change to another team's goal. Leadership sees it.
-- **Only the owner decides.** Only the goal's owning team can counter, reject or approve. Anyone else is refused by the server (HTTP 403).
+- **Set up your own case.** One team (the asking team) proposes a change to another team's goal. Leadership sees it. On `/new`, an AI interviewer can fill in the setup form from a conversation, typed or spoken (the browser's own speech recognition); you review every field and press Create.
+- **Only the owner decides.** Only the goal's owning team can counter, reject or approve. Anyone else is refused by the server (HTTP 403). "Accept if…" is a counter that keeps the target and adds conditions; the asking team accepts the counter before the owner approves.
 - **Nothing is overwritten.** Approval creates a new goal version and keeps the old one, with an acceptance entry and an audit row. A plan with no sandbox test needs an explicit "accept untested". Leadership makes a separate launch decision.
-- **Agents read the approved plan.** A read-only MCP server (9 tools, no write tools) serves the current approved plan. Claude Code (tested end to end) or another MCP client, such as Codex, the Claude app or ChatGPT, connects to a workspace with its MCP URL and a team passcode (OAuth). Claude Code sessions connected to a workspace are notified when a plan is approved (local setup; see docs/MCP.md).
+- **Agents read the approved plan.** A read-only MCP server (9 tools, no write tools) serves the current approved plan. Claude Code (tested end to end) or another MCP client, such as Codex, the Claude app or ChatGPT, connects to a workspace with its MCP URL and a team passcode (OAuth), and reads only that team's data. Claude Code sessions connected to a workspace are notified when a plan is approved (local setup; see docs/MCP.md).
+- **Limits from meeting notes.** Paste notes and Align suggests limits for the goal they name; agents can read a limit only once that goal's owner confirms it. No model is called for this.
+- **What the decision gave you.** After approval, a value card shows the measured time from proposal to decision, with a tester's own estimate shown separately. Its follow-up is a waitlist form that ends with an optional, non-binding letter of intent.
 - **Home shows what needs you.** What is waiting on you and on others, the active goals, and which connected AI apps have read the current plan. Align sees what an app last read, not what it does.
 
 ## What it does not do yet
