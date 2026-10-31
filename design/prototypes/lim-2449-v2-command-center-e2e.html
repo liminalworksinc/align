@@ -1,0 +1,283 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Align v2 · complete command center journey · design R4</title><style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+:root{--bg:#0c0d10;--panel:#18191e;--elev:#25262e;--stroke:#666a75;--hair:#393b44;--white:#f4f2ee;--muted:#c8c9d1;--pink:#e90095;--blue:#9ec8ff;--violet:#ab94ff;--paper:#f3f0e9}
+*{box-sizing:border-box}html,body{margin:0;min-width:0;max-width:100%}
+body{font:14px/1.6 'Space Grotesk',sans-serif;background:var(--bg);color:var(--white);overflow-wrap:anywhere}
+button,input,select{font:inherit}button{cursor:pointer;color:inherit}button:focus-visible,input:focus-visible{outline:3px solid var(--violet);outline-offset:3px}
+h1,h2,h3,p{margin:0}h1{font-size:clamp(29px,3.5vw,45px);line-height:1.12;letter-spacing:-1px;margin:8px 0 13px}h2{font-size:21px;line-height:1.3}h3{font-size:15px}
+.mono,.tag,.source,.eyebrow{font-family:'Space Mono',monospace;font-size:10px}.tag,.eyebrow{letter-spacing:2px;text-transform:uppercase}.eyebrow{color:#d8c4fa;font-weight:700}.source{color:var(--muted);line-height:1.7;margin-top:10px}.tag{border:1px solid var(--stroke);padding:5px 8px;border-radius:4px;display:inline-flex;color:var(--muted);max-width:100%}.sub{color:var(--muted);font-size:13px}.small{color:var(--muted);font-size:11px}
+.shell{max-width:1280px;margin:0 auto;display:grid;grid-template-columns:195px minmax(0,1fr);min-height:100vh}.rail{padding:23px 13px;border-right:1px solid var(--hair);min-width:0}.logo{font-size:23px;font-weight:700;letter-spacing:-1px}.logo b{color:var(--violet)}.nav{display:grid;gap:6px;margin-top:24px}.nav button{background:transparent;border:1px solid transparent;text-align:left;padding:9px;color:var(--muted);border-radius:5px;font-size:12px;white-space:normal}.nav button[aria-current=page]{background:var(--elev);color:var(--white);border-color:var(--stroke);box-shadow:inset 3px 0 var(--violet)}
+.main{min-width:0}.top{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:14px 23px;border-bottom:1px solid var(--hair)}.content{max-width:1060px;margin:auto;padding:27px 24px 45px;min-width:0}.footer{padding:15px 23px;border-top:1px solid var(--hair);font-size:11px;color:var(--muted)}
+.panel{border:1px solid var(--hair);background:var(--panel);border-radius:6px;min-width:0}.pad{padding:19px}.columns{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:15px;margin-top:20px}.home-entries{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;margin-top:15px}.home-entry{border:1px solid var(--stroke);background:var(--panel);border-radius:5px;padding:13px;min-width:0}.home-entry h3{margin:7px 0 4px}.home-entry p{font-size:12px;color:var(--muted)}.home-entry.decision{border-left:3px solid var(--violet)}.home-entry.work{border-left:3px solid var(--blue)}.cells{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.cell{padding:15px;background:var(--elev);border:1px solid var(--stroke);border-radius:5px;min-width:0}.cell strong{display:block;font-size:15px;margin:10px 0}
+.line{display:flex;justify-content:space-between;align-items:start;gap:14px;padding:10px 0;border-bottom:1px solid var(--hair);font-size:12px}.line strong{max-width:60%;text-align:right}.btn{background:var(--elev);border:1px solid var(--stroke);border-radius:5px;min-height:44px;padding:10px 14px;font-size:12px;font-weight:700}.btn.primary{background:var(--pink);border-color:var(--pink);color:#160714}.btn.restart{background:transparent;border-color:var(--hair);font-weight:500}.btn:disabled{opacity:.45;cursor:not-allowed}.action{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}.action .btn{max-width:100%}
+.notice{margin-top:15px;padding:11px 13px;border-left:3px solid var(--blue);background:#1d2d43;font-size:12px}.unknown{margin-top:15px;padding:11px 13px;border-left:3px solid var(--violet);background:#282335;font-size:12px}.mismatch{margin-top:16px;padding:17px;background:#30291b;border:1px solid #b38b42;border-left:4px solid #fdc237;border-radius:5px}.mismatch .eyebrow{color:#ffdc90}.mismatch h2{margin:6px 0 9px}.code{font:11px/1.65 'Space Mono',monospace;background:#111216;padding:12px;border:1px solid var(--hair);border-radius:4px;display:block;margin:13px 0;overflow-wrap:anywhere}.pick{display:flex;flex-wrap:wrap;gap:9px;margin:17px 0}.pick label{border:1px solid var(--stroke);background:var(--elev);border-radius:5px;padding:10px 12px;display:inline-flex;gap:8px;align-items:center;min-height:44px}.pick input{accent-color:var(--violet)}.paper{background:var(--paper);color:#17141a;padding:17px;border-radius:4px;border-left:4px solid #774c79}.paper .eyebrow{color:#623a5b}.paper .sub,.paper .small{color:#55505b}
+#message{min-height:22px;color:#ffbecb;font-size:12px;margin-top:12px}
+@media(max-width:800px){.shell{grid-template-columns:minmax(0,1fr)}.rail{padding:12px;border-right:0;border-bottom:1px solid var(--hair)}.logo{font-size:19px}.nav{display:flex;gap:3px;overflow-x:auto;max-width:100%;margin-top:8px}.nav button{flex:0 0 auto;white-space:nowrap}.content{padding:19px 14px 27px}.top{padding:11px 14px}.columns,.cells,.home-entries{grid-template-columns:1fr}.pad{padding:15px}.footer{padding:12px}}
+@media(max-width:390px){.line{display:block}.line strong{display:block;max-width:100%;text-align:left;margin-top:5px}.action{display:grid;grid-template-columns:1fr}.btn{width:100%}.top .btn.restart{width:auto;min-height:34px;padding:5px 10px}.pick label{width:100%}}
+
+/* Connected R4 screens share the R3 shell, palette and phone floor. */
+:root{--amber:#fdc237;--green:#86e8ac}
+.paper{border:1px solid #bfb7bf;min-width:0;overflow-wrap:anywhere}
+.paper .line{border-color:#d0cbd0;color:#201920}
+.paper .line strong{color:#181218}
+.paper .eyebrow{color:#603552}
+.roi{border-top:3px solid var(--green)}
+.form-field{margin:13px 0}
+.form-field label{display:block;margin-bottom:5px;font-size:12px;color:var(--muted)}
+.form-field textarea{width:100%;max-width:100%;min-height:64px;resize:vertical;border:1px solid var(--stroke);background:var(--elev);color:var(--white);border-radius:5px;padding:10px;font:inherit}
+.rule{height:1px;background:var(--hair);margin:17px 0}
+.mismatch{background:#30291b;border:1px solid #b38b42;border-left:4px solid var(--amber)}
+.mismatch .eyebrow{color:#ffdc90}
+.pattern-link{color:var(--blue)}
+.btn[aria-pressed=true]{border:2px solid var(--violet);box-shadow:inset 0 -4px var(--violet)}
+@media(max-width:390px){.paper{padding:14px}.form-field textarea{min-width:0}}
+</style></head><body><div class="shell"><aside class="rail"><div class="logo">liminal <b>align</b></div><nav id="nav" class="nav" aria-label="R4 journey screens"></nav><p class="small" style="margin-top:32px">R4 · connected journey<br>v2 source 02f0e1f<br>All values fictional. <a class="pattern-link" href="./align-patterns-v2.html" target="_blank" rel="noopener noreferrer">Align Patterns</a></p></aside><div class="main"><header class="top"><strong>Fictional demo workspace / simulated one-agent path</strong><button data-act="reset" class="btn restart">Restart</button></header><main id="screen" class="content" tabindex="-1"></main><footer class="footer">Complete v2 design study · no production data, app access, server decisions, ROI or funnel events. R2/R3 independently D2 cleared.</footer></div></div><div id="announce" aria-live="polite" role="status" style="position:absolute;left:-9999px"></div><script>
+"use strict";
+const stages=["start","apps","device","sessions","home","review","launch","record","work","value","options"];
+const names={start:"First run",apps:"Apps",device:"Devices",sessions:"Sessions",home:"Home",review:"Change request",launch:"Launch",record:"Decision record",work:"Work & evidence",value:"Value / ROI",options:"Options"};
+function newState(){return {step:"start",path:"sample",sampleAllowed:true,existingWorkspace:false,app:false,device:false,hooks:false,shared:false,bound:false,priorReceipt:false,phase:"pending",person:"approver",revision:1,draftTarget:"Prioritize SSO and audit logs for enterprise pilots; defer self-serve",draftNote:"",draftCondition:"",draftReason:"",field:"",target:"Prioritize SSO and audit logs for enterprise pilots; defer self-serve",counterNote:"",condition:"",conditionAck:"",conditionAt:"",approvedBy:"",approvalAt:"",declineReason:"",launch:"undecided",launchAt:"",v2Receipt:"none",estimate:"",valueText:"",ctaPreview:"",events:[["Proposed","Maya created fictional goal change request"]],requestType:"checkpoint",request:"none",answer:"none",hold:"none",message:""}}
+let S=newState();
+function escapeText(t){return String(t).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function button(t,a,primary,disabled){return '<button data-act="'+a+'" class="btn '+(primary?'primary':'')+'" '+(disabled?'disabled':'')+'>'+escapeText(t)+'</button>'}
+function hero(k,t,p){return '<span class="eyebrow">'+k+'</span><h1>'+t+'</h1><p class="sub">'+p+'</p>'}
+function line(k,v){return '<div class="line"><span>'+escapeText(k)+'</span><strong>'+escapeText(v)+'</strong></div>'}
+function cell(k,v,source){return '<div class="cell"><span class="eyebrow">'+k+'</span><strong>'+escapeText(v)+'</strong><div class="source">Source: '+escapeText(source)+'</div></div>'}
+function notice(s,unknown){return '<div class="'+(unknown?'unknown':'notice')+'">'+s+'</div>'}
+function ruled(s){return '<p class="small" style="margin-top:12px"><span class="tag">Ruled · not yet in v2</span> '+s+'</p>'}
+function when(iso){const d=new Date(iso);return Number.isNaN(d.getTime())?"Time not recorded":d.toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",timeZoneName:"short"})}
+const oldGoal="Ship self-serve signup for individual users";
+function src(){const sample=S.path==="sample";return {newGoal:sample||S.bound,oldDirective:sample||S.priorReceipt,bound:sample||S.bound,oldSource:sample?"Demo workspace fictional prior v1 applied directive":"Paired-device directive and applied receipt (simulated)",newSource:sample?"Demo workspace fictional goal version":"Current workspace goal version (simulated)",approver:sample?"Dev Patel · fictional goal approval set":"V2 server approval set · exact names not loaded"}}
+function canMismatch(){const x=src();return x.newGoal&&x.oldDirective&&x.bound}
+/* A mismatch needs an approved v2 that the last applied receipt does not yet carry. */
+function mismatch(){return canMismatch()&&S.phase==="approved"&&S.v2Receipt!=="applied"}
+function action(a,value){S.message="";S.field="";
+if(a==="reset"){S=newState();return true}
+if(a==="path"){S=newState();S.path=value==="own"?"own":"sample";S.step="start";return true}
+if(a==="gate"){S.sampleAllowed=!S.sampleAllowed;return true}
+if(a==="existing"){S.existingWorkspace=!S.existingWorkspace;return true}
+if(a==="route"){if(!stages.includes(value)){S.message="Unknown page";return false}S.step=value;return true}
+if(a==="begin"){if(S.path==="sample"&&(!S.sampleAllowed||S.existingWorkspace)){S.message="The demo requires zero existing workspaces and no creation code.";return false}S.step=S.path==="sample"?"home":"apps";return true}
+if(a==="grant"){S.app=true;S.step="device";return true}
+if(a==="skipGrant"){S.step="device";return true}
+if(a==="pair"){S.device=true;S.step="sessions";return true}
+if(a==="install"){if(!S.device)return false;S.hooks=true;return true}
+if(a==="share"){if(!S.device||!S.hooks){S.message="Device and hooks are required before sharing.";return false}S.shared=true;S.bound=true;S.step="home";return true}
+if(a==="receipt"){if(!S.bound){S.message="No bound session for the receipt.";return false}S.priorReceipt=true;return true}
+if(a==="work"){S.step="work";return true}
+if(a==="options"){S.step="options";return true}
+if(a==="type"){S.requestType=["checkpoint","replan","switch_goal"].includes(value)?value:"checkpoint";return true}
+if(a==="request"){if(S.path!=="sample"){S.message="Requires a real eligible sender and shared session; demo does not send.";return false}S.request=S.requestType;S.answer="none";return true}
+if(a==="report"){if(S.request==="none")return false;if(value==="auto_accepted"&&S.request==="switch_goal"){S.message="Switch goal cannot be auto-accepted by an agent; developer acceptance is required.";return false}S.answer=value;return true}
+if(a==="hold"){if(S.path!=="sample")return false;S.hold="held";return true}
+if(a==="release"){if(S.hold!=="held")return false;S.hold="released";return true}
+if(a==="review"){S.step="review";return true}
+if(a==="person"){if(!["requester","approver"].includes(value))return false;S.person=value;return true}
+if(["counter","acceptIf"].includes(a)){
+if(S.person!=="approver"||S.phase!=="pending")return fail("Only an eligible approver can counter a pending change request");
+S.draftTarget=String(value?.target||"");S.draftNote=String(value?.note||"");S.draftCondition=String(value?.condition||"");
+const target=S.draftTarget.trim(), note=S.draftNote.trim(), condition=S.draftCondition.trim();
+if(!target){S.field="rev-target";return fail("Revised target is required")}
+if(note.length<1||note.length>2000){S.field="counter-note";return fail("Counter note must contain 1–2000 characters")}
+if(a==="acceptIf"&&!condition){S.field="condition";return fail("Accept if… requires a separate condition")}
+S.target=target;S.counterNote=note;S.condition=a==="acceptIf"?condition:"";S.phase="countered";S.revision=2;S.events.push(["Countered","Dev proposed exact revision 2"]);return true}
+if(a==="acceptCounter"){if(S.phase!=="countered"||S.person!=="requester")return fail("Only the requester may accept a counter");S.phase="pending";S.events.push(["Requester accepted counter","Maya acknowledged exact counter revision; final approval outstanding"]);return true}
+if(a==="approve"){if(S.phase!=="pending"||S.person!=="approver")return fail("Only eligible approver can approve pending accepted revision");S.phase="approved";S.approvedBy="Dev Patel";S.approvalAt=new Date().toISOString();S.events.push(["Approved","Goal v2 recorded; no new executable directive issued"]);S.step="launch";return true}
+if(a==="decline"){if(!["pending","countered"].includes(S.phase)||S.person!=="approver")return fail("Only eligible approver may decline");S.draftReason=String(value||"");const reason=S.draftReason.trim();if(reason.length<1||reason.length>2000){S.field="decline-reason";return fail("Decline reason must be 1–2000 characters")}S.phase="declined";S.declineReason=reason;S.events.push(["Declined","Dev declined with stated reason; no launch"]);S.step="record";return true}
+if(a==="ack"){if(S.phase!=="approved"||S.person!=="requester"||!S.condition||S.conditionAck)return fail("Only requester can acknowledge their condition once");S.conditionAck="Maya Ortiz";S.conditionAt=new Date().toISOString();S.events.push(["Condition acknowledged","Requester attested, not independently verified"]);return true}
+if(a==="launchHold"){if(S.phase!=="approved")return fail("Approval required");if(S.launch==="approved")return fail("Released launch is final in this preview");S.launch="not_yet";S.events.push(["Not yet","Launch held · simulated, authority unresolved"]);return true}
+if(a==="launchRelease"){if(S.phase!=="approved")return fail("Approval required");if(S.launch==="approved")return fail("Launch already released");S.launch="approved";S.launchAt=new Date().toISOString();S.events.push(["Released","Fictional v2 executable directive issued; receipt not observed"]);return true}
+if(a==="directiveReceipt"){if(S.launch!=="approved")return fail("A v2 directive was not released");S.v2Receipt=value==="received"?"received":"applied";S.events.push(["Directive "+S.v2Receipt,"Device-reported protocol receipt, not observed work"]);return true}
+if(a==="record"){S.step="record";return true}
+if(a==="value"){S.step="value";return true}
+if(a==="estimate"){S.estimate=value;return true}
+if(a==="cta"){S.ctaPreview=value;return true}
+return false}
+function fail(message){S.message=message;return false}
+function start(){return hero("01 / FIRST RUN","Get one useful answer first.","Choose a fictional demo workspace, or inspect the steps to connect one agent in v2. This preview never touches a real user account.")+
+'<section class="panel pad" style="margin-top:19px"><h2>How would you start?</h2><div class="pick"><label><input type="radio" name="path" value="sample" '+(S.path==="sample"?'checked':'')+'> Fictional demo workspace</label><label><input type="radio" name="path" value="own" '+(S.path==="own"?'checked':'')+'> One connected agent</label></div>'+
+(S.path==="sample"?line("Demo eligibility",S.existingWorkspace?"Existing workspace · demo unavailable":S.sampleAllowed?"No workspaces, no creation code required":"Creation code required · demo unavailable")+
+'<label class="small"><input type="checkbox" id="gate" '+(!S.sampleAllowed?'checked':'')+'> Preview hosted creation gate</label> <label class="small" style="margin-left:12px"><input type="checkbox" id="existing" '+(S.existingWorkspace?'checked':'')+'> Preview existing workspace</label>':
+notice("Real route: sign in → enter authorized workspace → Apps/Devices. This prototype simulates the connection; it cannot connect to your agent.",false))+
+'<div class="action">'+button(S.path==="sample"?"Open demo workspace":"Enter workspace preview","begin",true,S.path==="sample"&&(!S.sampleAllowed||S.existingWorkspace))+'</div></section>'+
+notice("The demo cannot establish what happens in your actual project. It is not the v2 Northstar sample, which holds only the caller, two team goals and one pending request, with no sessions or receipts. When the creation gate is enabled, the real product offers Request access, not a sample.",true)}
+function apps(){return hero("02 / APPS","An app grant is not a session.","OAuth lets an AI app read a workspace as a particular person. It does not install hooks or produce a session receipt.")+
+'<div class="columns"><section class="panel pad"><h2>Connect an AI app</h2><p class="sub">In v2, copy the MCP URL from Apps, use it in Claude Code or Codex, then authorize the workspace through the OAuth flow.</p><code class="code">Apps → MCP server URL → AI app → OAuth workspace consent</code>'+
+line("AI app access",S.app?"Authorized (fictional)":"Not connected")+line("Agent session",S.shared?"Shared separately (fictional)":"Not known")+
+'<div class="action">'+button("Simulate app grant and continue","grant",true)+'</div></section><aside class="panel pad"><h3>Separate permissions</h3>'+
+notice("Connected apps may read goals using the granted scope; the local device and CLI session-sharing flow is separate. An app read cannot prove execution.",false)+
+'<div class="action">'+button("Continue without app OAuth","skipGrant")+'</div></aside></div>'}
+function device(){return hero("03 / DEVICES","Pair the machine running the agent.","A local CLI device-code grant is required for reported shared sessions. It is not an OAuth app grant.")+
+'<div class="columns"><section class="panel pad"><h2>Pair one device</h2><code class="code">align login</code><p class="sub">The CLI prints a code and verification URL. Sign in recently at /app/device and approve that code.</p>'+
+line("Device pairing",S.device?"Paired (fictional)":"Not paired")+'<div class="action">'+button("Simulate paired device","pair",true)+'</div></section>'+
+'<aside class="panel pad"><h3>Truth boundary</h3>'+notice("Pairing does not share a session. No prompt, task output, or agent success is observable from pairing alone.",true)+'</aside></div>'}
+function sessions(){return hero("04 / SESSIONS","Share one session toward a goal.","Choose the workspace and an eligible goal. The developer explicitly shares the session from the local machine.")+
+'<div class="columns"><section class="panel pad"><h2>Install hooks and share</h2><code class="code">align install</code><div class="action">'+button(S.hooks?"Hooks marked installed":"Simulate hook installation","install",!S.hooks,S.hooks)+'</div>'+
+'<code class="code">align share --dir . --workspace W --goal G</code><p class="small">Example command shape: “.” is the current folder; replace W and G with your authorized workspace and goal references. The documented form is <code>align share --dir [folder] --workspace W --goal &lt;ref|none&gt;</code>; brackets indicate an optional folder argument, not characters to paste. A folder rule shares new sessions in that folder.</p>'+
+line("Shared",S.shared?"Yes (fictional)":"Not yet")+line("Bound goal",S.bound?"Enterprise onboarding (fictional)":"Not known")+
+'<div class="action">'+button("Simulate share and inspect Home","share",true,!S.hooks)+'</div></section>'+
+'<aside class="panel pad"><h3>What enters Align?</h3><p class="sub">Shared session metadata, usage, epoch or governing goal, directives and device receipts. Not prompts or full transcripts.</p>'+
+notice("An idle agent may not receive a directive until a hook starts the next sync. Connecting is not evidence of a last applied version.",false)+'</aside></div>'}
+/* Whose turn on the demo change request, derived from its state so the card matches what Review opens. */
+function decisionTurn(){
+if(S.phase==="pending")return ["Waiting on Dev Patel","Fictional change request: move the goal from v1 “"+oldGoal+"” to “"+S.target+"”. Pending the fictional eligible approver."];
+if(S.phase==="countered")return ["Waiting on Maya Ortiz","Dev countered with revision 2. The requester must accept the exact revision before final approval."];
+if(S.phase==="approved")return S.launch==="approved"?["No decision waiting","v2 approved and released in this simulation."]:["Launch decision · authority unresolved","v2 approved and recorded. Agents keep v1 until a separate launch; who may launch is unresolved."];
+return ["No decision waiting","The change request was declined with a reason. v1 stays in effect."]}
+function home(){const x=src(),known=mismatch(),comparable=canMismatch(),approved=S.phase==="approved",appliedV2=S.v2Receipt==="applied",turn=decisionTurn();return hero("05 / COMMAND CENTER","Understand and direct all AI work.","See which AI work shares a goal, where recorded context diverges, and what needs your judgment. Governance protects the work beneath the surface.")+
+'<div class="home-entries" aria-label="Work and decisions"><section class="home-entry work"><span class="eyebrow">WORK · AFFECTED CONTEXT</span><h3>'+(known?'Potential version mismatch':comparable?'No recorded version mismatch':'Agent context not yet known')+'</h3><p>'+(known?'One source-linked session may need review.':comparable?'The last applied receipt carries the current approved goal version.':'An applied goal-version receipt is not recorded.')+'</p></section><section class="home-entry decision"><span class="eyebrow">DECISIONS · WHOSE TURN</span><h3>'+escapeText(S.path==="sample"?turn[0]:'Waiting on you: Not known')+'</h3><p>'+(S.path==="sample"?escapeText(turn[1]):'No change-request queue was loaded for this simulated workspace. Ask the v2 server for the effective approval set and waiting_on_me before naming the next actor.')+'</p><div class="source">Source: '+(S.path==="sample"?'fictional demo workspace change request':'no live change-request data')+'</div></section></div>'+
+'<div class="columns"><section class="panel pad"><h2>'+(known?'An observable mismatch':comparable?'Approved and applied goals match':'Not known yet')+'</h2>'+
+(known?'<div class="mismatch"><span class="eyebrow">MISMATCH · NEEDS JUDGMENT</span><h2>Agents are told to do ≠ now required</h2><p>A stored approved goal and an older applied context differ. This does NOT show what the agent actually did next.</p></div>':
+comparable?notice("The current approved goal and the last device-reported applied goal are the same version. This does NOT show what the agent actually did next.",false):
+notice("Without a previous applied goal-version receipt, the agent-effective target is Not known. A workspace connection alone cannot establish a mismatch.",true))+
+'<div class="cells" style="margin:15px 0">'+cell("NOW REQUIRED",x.newGoal?(approved?"v2 · "+S.target:"v1 · "+oldGoal):"Not known",x.newGoal?x.newSource+(approved?" · approved v2":" · approved v1"):"No readable current goal")+
+cell("LAST APPLIED AGENT GOAL",appliedV2?"v2 · "+S.target:x.oldDirective?"v1 · "+oldGoal:"Not known",appliedV2?"Device-reported v2 applied receipt (simulated)":x.oldDirective?x.oldSource:"No applied receipt recorded")+'</div>'+
+line("Who can approve the goal change?",x.approver)+line("Who can launch?", "Unresolved in v2")+
+'<div class="action">'+button("Review change request","review",true)+button("Inspect affected work","work",false)+'</div></section>'+
+'<aside class="panel pad"><h3>What is the agent doing?</h3>'+notice("Not observed. Applied means the device reported application of a directive, not completed work, actual code quality, or an independently verified switch.",true)+
+'<h3 style="margin-top:16px">What about an approved-but-held goal?</h3><p class="sub">Agreement and launch are separate. A goal Hold pauses tools; it does not itself authorize a new version. After approval, the Launch screen previews held and released outcomes as a simulation.</p>'+
+(S.path==="own"&&S.bound&&!S.priorReceipt?'<div class="action">'+button("Simulate an earlier applied receipt","receipt")+'</div>':'')+'</aside></div>'}
+function work(){
+const x=src();const applied=S.v2Receipt==="applied";const delivered=S.v2Receipt==="received"||applied;
+return hero("09 / WORK AND EVIDENCE","What can we actually prove?","The goal/version record and bounded session receipts are source claims. They never establish what an agent completed.")+
+'<div class="columns"><section class="panel pad"><h2>Goal → agent evidence</h2>'+
+line("Latest authorized goal",S.phase==="approved"?"v2 · "+S.target:"v1 · Enterprise onboarding")+
+'<div class="source">Source: '+(S.phase==="approved"?"fictional approved change request":"fictional prior approved goal")+'</div>'+
+line("Session binding",x.bound?"One shared agent session on onboarding":"Not known")+
+'<div class="source">Source: '+(x.bound?"demo workspace / simulated v2 Sessions":"no shared session-goal binding")+'</div>'+
+line("Previous agent-effective context",x.oldDirective?"v1 · device reported applied":"Not known")+
+line("New executable goal",S.launch==="approved"?"v2 issued to bound agents (simulation)":"Not released · agents still on v1")+
+line("v2 receipt",S.v2Receipt==="none"?"Not observed":S.v2Receipt+" · device reported")+
+line("Has agent switched?",applied?"Device reported applying v2; actual execution Not observed":delivered?"Received; applied Not known":"Not known")+
+line("Agent task output","Not observed")+
+line("Task completion / ROI","Not observed")+
+'<div class="action">'+button("Simulate v2 received receipt","received",false,S.launch!=="approved")+
+button("Simulate v2 applied receipt","applied",false,S.launch!=="approved")+'</div>'+
+(mismatch()?'<div class="mismatch"><span class="eyebrow">NEEDS JUDGMENT · LAST APPLIED CONTEXT</span><p>Last recorded v1 context may differ from current v2 priority. It is not proof of continued work on the old goal.</p></div>':canMismatch()?notice(applied?"Device reported applying v2: no recorded version mismatch. Execution is Not observed.":"No approved v2 yet: the approved and last applied goal are both v1.",false):notice("No old applied receipt: mismatch is Not known.",true))+
+'<div class="action">'+button("See decision value / ROI","value",true)+button("Explore agent Options","options")+'</div></section>'+
+'<aside class="panel pad"><h3>Truth legend</h3>'+
+notice("<b>Receipt</b> — device-reported received/applied/enforced protocol state, not work output.",false)+
+notice("<b>Agent reported</b> — accepted/declined request answer, not observed execution.",false)+
+notice("<b>Not observed</b> — task success, correctness, downstream output, or saved labor.",true)+
+'<p class="small">Goal Hold pauses tools when enforced; session Stop uses a different latch. Neither grants unresolved launch authority.</p></aside></div>'}
+
+function options(){return hero("11 / OPTIONS · AFTER FIRST VALUE","Requests and Hold are different controls.","The R3 pass places these actions here, not in the first-run funnel. Both require real v2 permissions and an actual bound session.")+
+'<div class="columns"><section class="panel pad"><h2>Request something of the agent</h2><p class="sub">Approvers or workspace owners can request a checkpoint, replan, or switch_goal. Each per-session answer is a device report.</p>'+
+'<div class="pick">'+["checkpoint","replan","switch_goal"].map(t=>'<label><input type="radio" name="requestType" value="'+t+'" '+(S.requestType===t?'checked':'')+'> '+({checkpoint:"Checkpoint",replan:"Replan",switch_goal:"Switch goal"})[t]+'</label>').join("")+'</div>'+
+notice(S.requestType==="checkpoint"?"Checkpoint may be auto-accepted by the agent as a safe step.":S.requestType==="replan"?"Replan may draft a proposal automatically; a changed direction still requires developer acceptance.":"Switch goal always requires developer acceptance; never auto-accepted.",false)+
+'<div class="action">'+button("Simulate typed request","request",true,S.path!=="sample")+'</div>'+
+(S.request!=="none"?line("Request",S.request)+line("Session answer",S.answer==="none"?"Sent, no answer":S.answer==="declined"?"Declined · device report":S.answer==="developer_accepted"?"Accepted by developer · device report":"Accepted by agent · auto_accepted report")+
+'<div class="action">'+button(S.request==="switch_goal"?"Simulate developer acceptance":"Simulate agent auto-report",S.request==="switch_goal"?"developerReport":"acceptReport")+button("Simulate declined report","declineReport")+'</div>':'')+
+notice("Accepted/Declined is a per-session request answer, not proof the agent completed the task.",true)+'</section>'+
+'<aside class="panel pad"><h2>Hold is not Stop</h2><p class="sub">Current v2 goal Hold pauses tools on all affected sessions when its directive is enforced. Stop is per session and has an independent latch.</p>'+
+line("Goal hold",S.hold==="none"?"Not held":S.hold==="held"?"Held (fictional)":"Released (fictional)")+
+line("Hold/release receipt",S.hold==="held"?"Enforced (fictional)":S.hold==="released"?"Applied (fictional)":"Not observed")+
+'<div class="action">'+button(S.hold==="held"?"Simulate Release":"Simulate Hold",S.hold==="held"?"release":"hold",false,S.path!=="sample")+'</div>'+
+'<div class="paper" style="margin-top:17px"><span class="eyebrow">PROPOSAL · NOT RULED</span><h2>Could Hold/Release support launch?</h2><p>Not directly. Current v2 can send a new goal_version on approval, while Hold/Release separately pauses or resumes tools. Release does not authorize or publish the approved version. A future mapping needs atomic version-gated publication, defined launch authority, and negative tests.</p></div></aside></div>'}
+
+/* The product tour is a single object/state model. R2 authority mutations remain simulation only. */
+function actorSwitch(){return '<div class="action" aria-label="Fictional actor preview"><span class="small">Fictional actor:</span>'+["approver","requester"].map(x=>'<button class="btn" data-person="'+x+'" aria-pressed="'+(S.person===x)+'">'+(S.person===x?"✓ ":"")+(x==="approver"?"Dev · eligible approver":"Maya · requester")+'</button>').join("")+'</div>'}
+function dfield(label,id,placeholder,value){return '<div class="form-field"><label for="'+id+'">'+label+'</label><textarea id="'+id+'" placeholder="'+placeholder+'" maxlength="2000">'+escapeText(value||"")+'</textarea></div>'}
+function review(){
+const previous="Ship self-serve signup for individual users";
+let actions="";
+if(S.phase==="pending"&&S.person==="approver"){
+actions=dfield("Revised target","rev-target","Exact new goal target",S.draftTarget)+dfield("Counter note · required 1–2000 characters","counter-note","Why counter?",S.draftNote)+dfield("Separate Accept if… condition","condition","What must be acknowledged?",S.draftCondition)+
+'<div class="action">'+button("Counter (note required)","counter")+button("Accept if… (note + condition)","acceptIf")+'</div>'+
+dfield("Decline reason · required 1–2000 characters","decline-reason","Why decline?",S.draftReason)+
+'<div class="action">'+button("Decline with reason","decline")+button("Approve this change request","approve",true)+'</div>'}
+else if(S.phase==="countered"){
+actions=notice("Countered. Requester accepts the exact revised target/condition; eligible approver must still approve.",true)+
+(S.person==="requester"?'<div class="action">'+button("Accept counter revision (not approval)","acceptCounter",true)+'</div>':
+dfield("Decline reason · required 1–2000 characters","decline-reason","Why decline counter?",S.draftReason)+'<div class="action">'+button("Decline countered request","decline")+'</div>')}
+else if(S.phase==="pending"){
+actions=notice("Waiting on Dev, the fictional eligible approver. No role may self-authorize.",true)}
+else if(S.phase==="approved")actions=notice("Agreed. New v2 target recorded; agents still receive the previous launched goal until separate launch.",false)+'<div class="action">'+button("Review launch state","routeLaunch",true)+'</div>';
+else actions=notice("Declined with reason. No approval or release.",true)+'<div class="action">'+button("Read decision record","record",true)+'</div>';
+return hero("06 / CHANGE REQUEST","Review the exact change.","Approve, Counter (note required), Accept if… (separate condition), or Decline (reason required). Requester acceptance is never final approval.")+
+'<div class="columns"><section class="panel pad"><h2>Enterprise onboarding · revision '+S.revision+'</h2>'+line("State",S.phase)+line("Before",previous)+line("Proposed target",S.target)+line("Eligible approver","Dev Patel (fictional approval set)")+line("Requester","Maya Ortiz")+
+(S.condition?line("Condition",S.condition):"")+(S.phase==="pending"||S.phase==="countered"?actorSwitch():"")+actions+
+'<p class="small" id="validation-message" role="alert">'+escapeText(S.message)+'</p></section>'+
+'<aside class="panel pad"><h3>Authority and provenance</h3>'+notice("The demo actors are fictional. Real v2 permissions come from effective approval sets and authenticated person identity. Launcher permission remains unresolved.",true)+line("Agent-effective version",S.launch==="approved"?"v2 released (simulation)":"v1 · previous plan")+
+ruled("Accept if… condition, and requester acknowledgment of it by name and time (35376283).")+'</aside></div>'}
+function launch(){
+const approved=S.phase==="approved",released=S.launch==="approved";
+const title=approved?"Agreed, launch "+(released?"released":"not yet")+".":S.phase==="declined"?"Declined. Nothing to launch.":"Approval required.";
+const main=approved?line("Approved target","v2 · "+S.target)+line("Agent-effective plan",released?"v2 directive issued · application Not known":"v1 · previously launched")+
+line("Launch decision",S.launch==="undecided"?"Not decided":S.launch==="not_yet"?"Not yet · held":"Released (fictional preview)")+
+line("New directive",released?"Issued to bound sessions in this simulation":"Not issued")+
+(released?notice("Released is final here: the v2 directive was issued and cannot be held back. Applied still needs a device receipt; work is Not observed.",false):
+notice("Holding launch is not a Stop. Agents may continue the previously authorized v1 plan; no UI proves the old work stopped.",true)+
+'<div class="action">'+button("Preview Not yet","launchHold",false,S.launch==="not_yet")+button("Preview release v2 to agents","launchRelease")+'</div>')+
+'<div class="action">'+button("Open decision record","record",true)+'</div>':
+line("Approved target",S.phase==="declined"?"None · change request declined":"None yet · change request "+S.phase)+line("Agent-effective plan","v1 · previously launched")+line("Launch decision","Not available")+
+notice(S.phase==="declined"?"Declined with a reason: there is no approved v2 to launch, and agents keep the v1 plan.":"Launch is possible only after the eligible approver approves the change request. Agents keep the v1 plan.",true)+
+'<div class="action">'+(S.phase==="declined"?button("Open decision record","record",true):button("Review change request","review",true))+'</div>';
+return hero("07 / LAUNCH",title,"Founder ruling 33ad545d: approval records v2; only separate launch releases the executable goal to bound agents. Who may launch in v2 remains unresolved.")+
+'<div class="columns"><section class="panel pad"><h2>What are agents currently told?</h2>'+main+'</section>'+
+'<aside class="panel pad"><h3>Launch authority remains unresolved</h3><div class="unknown">Who may launch is an open founder/Sean ruling. The two secondary controls simulate outcomes, not a grant to act.</div>'+
+ruled("Directive held at approval, released only by a separate launch (33ad545d). v2 #37 still publishes on approval.")+
+(approved?line("Condition",S.condition||"None")+line("Requester acknowledgement",S.condition?(S.conditionAck?"Maya Ortiz · "+when(S.conditionAt):"Not confirmed yet"):"Not applicable")+
+(S.condition?actorSwitch()+(S.person==="requester"&&!S.conditionAck?'<div class="action">'+button("Requester acknowledges condition met","ack")+'</div>':""):"")+
+notice("An acknowledged condition is the requester's assertion, not independent verification. A missing acknowledgment does not block launch."):"")+'</aside></div>'}
+function recordScreen(){
+return hero("08 / DECISION RECORD","Read one authoritative record.","Agreement, condition acknowledgment, launch and session receipts are distinct. This is one projection of the change request, not a second store.")+
+'<div class="columns"><article class="paper"><span class="eyebrow">DEMO WORKSPACE · FICTIONAL RECORD</span><h2>'+(S.phase==="approved"?"Agreed, launch "+(S.launch==="approved"?"released":"not yet"):S.phase==="declined"?"Declined":"Pending")+'</h2>'+
+line("Before","Ship self-serve signup for individual users")+line("After",S.target)+
+line("Change request",S.phase+" · revision "+S.revision)+
+line("Approver",S.approvedBy||"No approved change")+
+(S.counterNote?line("Counter note",S.counterNote):"")+
+(S.declineReason?line("Decline reason",S.declineReason):"")+
+line("Condition",S.condition||"None")+
+line("Requester acknowledgment",S.condition?(S.conditionAck?S.conditionAck+" · "+when(S.conditionAt):"Not confirmed yet"):"Not applicable")+
+line("Launch",S.launch==="not_yet"?"Not yet":S.launch==="approved"?"Released v2 · simulated":"Not decided")+
+line("Latest v2 receipt",S.v2Receipt==="none"?"Not observed":S.v2Receipt+" · device reported")+
+'<p class="small">Not a real signature, condition verification or completed task.</p></article>'+
+'<aside class="panel pad"><h3>Decision chronology</h3>'+S.events.map((x,i)=>'<div class="line"><span>'+String(i+1).padStart(2,"0")+' · '+escapeText(x[0])+'</span><strong>'+escapeText(x[1])+'</strong></div>').join("")+
+'<div class="action">'+button("Inspect Work and receipts","work",true)+'</div></aside></div>'}
+function spanWords(a,b){const x=Date.parse(a||""),y=Date.parse(b||"");if(!Number.isFinite(x)||!Number.isFinite(y)||y<x)return null;const sec=Math.round((y-x)/1000);if(sec<60)return sec+" seconds";const m=Math.floor(sec/60);if(m<60)return m+" minutes";const hr=Math.floor(m/60);if(hr<24)return hr+" hour"+(hr===1?"":"s")+(m%60?" "+m%60+" minutes":"");return Math.floor(hr/24)+" days "+hr%24+" hours";}
+const demoTimes={proposal:"2026-10-30T16:00:00Z",approval:"2026-10-30T16:14:00Z",launch:"2026-10-30T16:22:00Z"};
+function value(){
+const approved=S.phase==="approved",measured=approved&&S.path==="sample"?(spanWords(demoTimes.proposal,demoTimes.approval)||"Not measured"):"Not measured";
+const launch=approved&&S.path==="sample"&&S.launch!=="undecided"?(spanWords(demoTimes.proposal,demoTimes.launch)||"Not measured"):"Not measured";
+const estimates=[["same_day","Same day"],["two_to_three_days","2–3 days"],["about_a_week","About a week"],["longer","Longer"],["would_not_be_decided","It wouldn’t get decided"]];
+return hero("10 / VALUE / ROI","What this decision gave you.","Recorded outcomes first, estimated value separate. No fabricated savings, agent completion, revenue or conversion.")+
+'<div class="columns"><section class="panel pad roi"><h2>What this decision gave you</h2>'+
+line("Decision",approved?"Agreed: enterprise pilot readiness":"No approved goal version on this branch")+
+line("Who approved",S.approvedBy||"Not approved")+line("Launched",S.launch==="approved"?"v2 released (fictional)":S.launch==="not_yet"?"Not yet · held":"No launch decision")+
+line("Affected work",S.shared||S.path==="sample"?"One fictional session binding":"Not known")+
+line("Agent outcome","Not observed")+
+(measured!=="Not measured"?'<p style="margin-top:15px"><span class="tag">Sample illustration</span></p>':"")+
+'<div class="cells" style="margin:15px 0">'+cell("PROPOSAL → APPROVAL",measured,approved&&S.path==="sample"?"sample illustration · fictional timestamps, not measured from this walk":"no server event timestamps")+
+cell("PROPOSAL → LAUNCH DECISION",launch,launch!=="Not measured"?"sample illustration · fictional timestamps, not measured from this walk":"no valid launch event timestamps")+'</div>'+
+notice("Time saved: Not measured. Revenue impact: Not measured. A measured coordination span is not a counterfactual savings estimate.",true)+
+'<div class="rule"></div><h3>Before Align, how long would getting this decision usually take?</h3>'+
+'<div class="pick">'+estimates.map(([id,name])=>'<label><input name="estimate" type="radio" value="'+id+'" '+(S.estimate===id?"checked":"")+'> '+name+'</label>').join("")+'</div>'+
+(S.estimate?'<p class="small">Your hypothetical estimate: '+escapeText(estimates.find(x=>x[0]===S.estimate)?.[1])+'; not measured savings.</p>':"")+
+'<div class="rule"></div><p>Liminal helps prevent wasted AI-agent work by giving teams one approved plan as priorities change.</p>'+
+'<div class="action">'+button("Preview Join Align waitlist","waitlist",true)+'</div>'+
+'<div class="action">'+button("Optional non-binding LOI","loi")+'</div>'+
+(S.ctaPreview?notice(S.ctaPreview==="waitlist"?"Waitlist is a link click, not a sign-up. This preview does not open the live form.":"LOI click is not a signed LOI; a signed letter must be independently verified. This preview opens nothing."): "")+
+'<p class="small">Production v15 only counts observed card views after a visibility/dwell threshold. This static mock emits no funnel events.</p></section>'+
+'<aside class="panel pad"><h3>What is measured versus hypothetical?</h3>'+
+line("Observed","Recorded decision timestamps only, when available")+
+line("Receipt","Received/applied reported by device")+
+line("Agent reported","Request answer (not outcome)")+
+line("Not observed","Completed work, savings, impact")+
+'<a href="./align-patterns-v2.html" class="pattern-link" target="_blank" rel="noopener noreferrer">Open Align Patterns · 33 specimens</a></aside></div>'}
+
+const renderer={start,apps,device,sessions,home,review,launch,record:recordScreen,work,value,options};
+function render(){const e=document.getElementById("screen");e.innerHTML=renderer[S.step]()+ '<p id="message" role="alert">'+escapeText(S.message)+'</p>';document.getElementById("nav").innerHTML=stages.map((s,i)=>'<button data-route="'+s+'" aria-current="'+(s===S.step?'page':'false')+'">'+(i+1)+'. '+names[s]+'</button>').join("");if(S.field&&document.getElementById(S.field)){document.getElementById(S.field).focus({preventScroll:true})}else{e.focus({preventScroll:true})}}
+document.addEventListener("click",function(e){const b=e.target.closest("button");if(!b)return;const route=b.dataset.route;const a=b.dataset.act;let result=false;if(route)result=action("route",route);else if(a==="acceptReport")result=action("report","auto_accepted");else if(a==="developerReport")result=action("report","developer_accepted");else if(a==="declineReport")result=action("report","declined");
+else if(b.dataset.person)result=action("person",b.dataset.person);
+else if(a==="routeLaunch")result=action("route","launch");
+else if(a==="counter"||a==="acceptIf")result=action(a,{target:document.getElementById("rev-target")?.value,note:document.getElementById("counter-note")?.value,condition:document.getElementById("condition")?.value});
+else if(a==="decline")result=action("decline",document.getElementById("decline-reason")?.value);
+else if(a==="received"||a==="applied")result=action("directiveReceipt",a);
+else if(a==="waitlist"||a==="loi")result=action("cta",a);
+else if(a)result=action(a);render();document.getElementById("announce").textContent=result?"Showing "+names[S.step]:S.message});
+/* Typing only updates the stored draft; re-rendering on textarea blur would wipe it and swallow the click that caused the blur. */
+const drafts={"rev-target":"draftTarget","counter-note":"draftNote","condition":"draftCondition","decline-reason":"draftReason"};
+document.addEventListener("input",function(e){const k=drafts[e.target.id];if(k)S[k]=e.target.value});
+document.addEventListener("change",function(e){const t=e.target;if(drafts[t.id])return;if(t.name==="path")action("path",t.value);if(t.id==="gate")action("gate");if(t.id==="existing")action("existing");if(t.name==="requestType")action("type",t.value);if(t.name==="estimate")action("estimate",t.value);render()});
+render();
+</script></body></html>
