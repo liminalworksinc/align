@@ -4,10 +4,11 @@
 //   phase "static": the card fetches nothing itself; ConnectAI is mounted once; Home is the only place that mounts it
 //   phase "local":  Mode L, open create -> a fresh workspace with no connected agent shows both paths, the sample link
 //                   resolves (200) and is labelled fictional, what the agent can read matches the server's tools, Hide
-//                   persists, and the status follows the server: approved only, has read the latest plan, last read an
-//                   older plan, and a failed check; the card adds no request to the connections poll
+//                   persists, the status follows the server (approved only, a failed check), and once an app has read the
+//                   plan the card yields to Home's section and the sidebar (current plan, then an older one); the card adds
+//                   no request to the connections poll
 //   phase "hosted": HOSTED=1 as Fly runs it -> no sample link (Northstar is not served), "/" still goes to /new, and an
-//                   OAuth connection plus one MCP read flips the card to "has read the latest plan"
+//                   OAuth connection plus one MCP read flips the sidebar to "Read the current plan" and the card yields
 // Screenshots of each state at 390, 768 and 1440 px go to $FIRST_RUN_SHOTS (default: a temp folder, printed at the end).
 // Usage: node scripts/test-first-run.mjs <port> [--no-build]   (from a worktree root; refuses 3100 and the main checkout)
 
@@ -236,7 +237,7 @@ async function waitFor(page, fn, ms = 25000) {
   return false;
 }
 const card = (page) => page.evaluate(() => {
-  const s = document.querySelector('section[aria-label="Get started"], section[aria-label="Agent status"]');
+  const s = document.querySelector('section[aria-label="Get started"]');
   return s ? { label: s.getAttribute("aria-label"), state: s.getAttribute("data-state"), text: s.innerText } : null;
 });
 async function shots(page, name) {
@@ -320,34 +321,7 @@ async function phaseLocal(dir) {
     const tools = rpcResult(await rpc(tok, "tools/list", {}))?.tools ?? [];
     check("'It can read' has one line per tool the MCP server lists, and every tool only reads", reads.length > 0 && reads.length === tools.length && tools.every((t) => t.annotations?.readOnlyHint === true), `${reads.length} lines, ${tools.length} tools`);
 
-    // One MCP read: the server marks the app as on the current plan, and the card flips.
-    const read = await rpc(tok, "tools/call", { name: "align_list_goals", arguments: {} });
-    const onPlan = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === true);
-    check("after one MCP read the server reports the app on the current plan", read.status === 200 && onPlan, `${read.status} ${(await connections(w)).text}`);
-    await page.reload({ waitUntil: "networkidle2" });
-    const latest = await waitFor(page, async () => (await card(page))?.state === "latest");
-    const c2 = await card(page);
-    check(
-      "the card then says 'Connected. Claude Code has read the current plan.' and that Align only sees what the agent reads",
-      latest && /Connected\. Claude Code has read the current plan\./.test(c2?.text ?? "") && /Align only sees what your agent reads here\./.test(c2?.text ?? ""),
-      c2?.text,
-    );
-    check("nothing is waiting on leadership, so it says nothing needs review yet", /Nothing here needs your review yet\./.test(c2?.text ?? ""), c2?.text);
-    check("the connected card makes no claim about work: no 'working', 'follows', 'stuck', 'blocked' or 'progress'", !/working|follows|works from|stuck|blocked|progress/i.test(c2?.text ?? ""), c2?.text);
-    await shots(page, "latest");
-
-    // The plan changes (a proposal): the app last read an older plan.
-    const p = await req("POST", "/api/proposals", { cookie: w.c.product, body: { proposed_measure_text: "Retention first for two weeks", rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
-    const stale = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === false);
-    await page.reload({ waitUntil: "networkidle2" });
-    const older = await waitFor(page, async () => (await card(page))?.state === "older");
-    const c3 = await card(page);
-    check("after the plan changes the card says Claude Code last read an older plan", p.status === 200 && stale && older && /Claude Code last read an older plan/.test(c3?.text ?? ""), `${p.status} ${c3?.text}`);
-    await shots(page, "older");
-
-    // The card adds no request: the load-time polls are the same with the card shown and hidden.
-    const withCard = await pollsOnLoad(page);
-
+    // The card adds no request: the load-time polls are the same with the card shown and hidden (counted on w2 below).
     // A failed check: the card says so, and claims nothing about the agents.
     page.blockConnections = true;
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -357,18 +331,50 @@ async function phaseLocal(dir) {
     await shots(page, "error");
     page.blockConnections = false;
 
-    // Hide: gone, and still gone after a reload (localStorage); the sidebar still lists the agent.
-    await page.reload({ waitUntil: "networkidle2" });
-    await waitFor(page, async () => !!(await card(page)));
-    await page.evaluate(() => [...document.querySelectorAll('section[aria-label="Agent status"] button')].find((b) => b.textContent === "Hide")?.click());
-    await sleep(300);
-    const goneNow = !(await card(page));
-    const withoutCard = await pollsOnLoad(page);
+    // One MCP read: the server marks the app as on the current plan, and the card yields. Home's "Connected AI apps"
+    // section and the sidebar show the read state from then on.
+    const read = await rpc(tok, "tools/call", { name: "align_list_goals", arguments: {} });
+    const onPlan = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === true);
+    check("after one MCP read the server reports the app on the current plan", read.status === 200 && onPlan, `${read.status} ${(await connections(w)).text}`);
     const sidebar = () => page.evaluate(() => document.querySelector('ul[aria-label="Connected AI apps"]')?.textContent ?? "");
-    await waitFor(page, async () => /Claude Code/.test(await sidebar()), 20000);
-    const goneAfter = !(await card(page));
-    check("Hide removes the card and it stays hidden after a reload; the sidebar still lists the app", goneNow && goneAfter && /Claude Code/.test(await sidebar()), `${goneNow} ${goneAfter} ${await sidebar()}`);
-    check("the card adds no connections request (same count on load with it shown and hidden)", withCard === withoutCard && withCard >= 1, `${withCard} vs ${withoutCard}`);
+    const home = () => page.evaluate(() => document.querySelector('section#agents')?.textContent ?? "");
+    await page.reload({ waitUntil: "networkidle2" });
+    const flipped = await waitFor(page, async () => /Claude Code\s*Read the current plan/.test(await sidebar()));
+    const yielded = await waitFor(page, async () => !(await card(page)), 5000);
+    check("after the read the sidebar says 'Claude Code Read the current plan'", flipped, await sidebar());
+    check("after the read the first-run card yields (gone), and Home's section says Claude Code read the current plan", yielded && /Claude Code[\s\S]*Read the current plan/.test(await home()), `${yielded} ${await home()}`);
+    const sideNow = await sidebar();
+    check("the sidebar makes no claim about work: no 'working', 'follows', 'stuck', 'blocked' or 'progress'", !/working|follows|works from|stuck|blocked|progress/i.test(sideNow), sideNow);
+    await shots(page, "yielded");
+
+    // The plan changes (a proposal): the sidebar says the app last read an older plan; the card stays gone.
+    const p = await req("POST", "/api/proposals", { cookie: w.c.product, body: { proposed_measure_text: "Retention first for two weeks", rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
+    const stale = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === false);
+    await page.reload({ waitUntil: "networkidle2" });
+    const older = await waitFor(page, async () => /Claude Code\s*Last read an older plan/.test(await sidebar()));
+    check("after the plan changes the sidebar says Claude Code last read an older plan, and no card comes back", p.status === 200 && stale && older && !(await card(page)), `${p.status} ${await sidebar()}`);
+    await shots(page, "older");
+
+    // Hide, on a fresh workspace: gone, and still gone after a reload (localStorage). The card adds no request: the
+    // load-time connections polls are the same with it shown and hidden.
+    const wh = await newWorkspace("FIRSTRUNH1");
+    const { browser: bh, page: ph } = await browserFor(wh.c.leadership);
+    try {
+      await ph.goto(`${origin()}/w/${wh.id}`, { waitUntil: "networkidle2" });
+      await waitFor(ph, async () => (await card(ph))?.state === "none");
+      const withCard = await pollsOnLoad(ph);
+      await waitFor(ph, async () => (await card(ph))?.state === "none");
+      await ph.evaluate(() => [...document.querySelectorAll('section[aria-label="Get started"] button')].find((b) => b.textContent === "Hide")?.click());
+      await sleep(300);
+      const goneNow = !(await card(ph));
+      const withoutCard = await pollsOnLoad(ph);
+      await sleep(1500);
+      const goneAfter = !(await card(ph));
+      check("Hide removes the card and it stays hidden after a reload", goneNow && goneAfter, `${goneNow} ${goneAfter}`);
+      check("the card adds no connections request (same count on load with it shown and hidden)", withCard === withoutCard && withCard >= 1, `${withCard} vs ${withoutCard}`);
+    } finally {
+      await bh.close();
+    }
 
     // Blocked storage: the card still renders (try/catch around every access).
     const w2 = await newWorkspace("FIRSTRUN2");
@@ -420,10 +426,10 @@ async function phaseHosted(dir) {
     const read = await rpc(tok, "tools/call", { name: "align_list_goals", arguments: {} });
     const onPlan = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === true);
     await page.reload({ waitUntil: "networkidle2" });
-    const latest = await waitFor(page, async () => (await card(page))?.state === "latest");
-    const c1 = await card(page);
-    check("hosted: after an OAuth connection and one MCP read the card says Claude Code has read the current plan", read.status === 200 && onPlan && latest && /Claude Code has read the current plan\./.test(c1?.text ?? ""), `${read.status} ${c1?.text}`);
-    await shots(page, "latest");
+    const side = () => page.evaluate(() => document.querySelector('ul[aria-label="Connected AI apps"]')?.textContent ?? "");
+    const flipped = await waitFor(page, async () => /Claude Code\s*Read the current plan/.test(await side()));
+    check("hosted: after an OAuth connection and one MCP read the sidebar says Claude Code read the current plan, and the card yields", read.status === 200 && onPlan && flipped && !(await card(page)), `${read.status} ${await side()}`);
+    await shots(page, "yielded");
   } finally {
     await browser.close();
   }

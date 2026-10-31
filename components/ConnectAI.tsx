@@ -136,14 +136,12 @@ export default function ConnectAI({
   actor,
   hosted = false,
   slot = null,
-  waiting = 0,
 }: {
   workspace: string;
   teamOf: (role: string) => string;
   actor: string;
   hosted?: boolean;
   slot?: HTMLElement | null;
-  waiting?: number;
 }) {
   const [data, setData] = useState<{ url: string; apps: App[]; plan?: { changed_at: string | null }; at: number } | null>(null);
   const [open, setOpen] = useState(false);
@@ -234,9 +232,7 @@ export default function ConnectAI({
             hosted={hosted}
             url={data?.url ?? null}
             apps={data?.apps ?? null}
-            planChangedAt={data?.plan?.changed_at ?? null}
             failed={failed}
-            waiting={waiting}
             command={(text) => <Command text={text} />}
             openConnect={() => setOpen(true)}
           />,

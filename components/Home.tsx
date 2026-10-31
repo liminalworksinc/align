@@ -622,7 +622,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
           </div>
         </div>
         )}
-        {workspace && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} hosted={!!hosted} slot={firstRunSlot} waiting={turnCount} />}
+        {workspace && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} hosted={!!hosted} slot={firstRunSlot} />}
         <div className={`${custom ? (workspace ? "mt-3" : "mt-auto") : "mt-3"} ${custom ? CUSTOM_SIDEBAR_FOOTER : ""} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
           <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
             {custom ? teamInitials(L.role[me.actor]) : initials(me.name ?? "")}

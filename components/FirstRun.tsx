@@ -5,15 +5,14 @@ import { claudeCodeLine } from "@/lib/paste-lines";
 
 // The first-run card at the top of a custom workspace's canvas. ConnectAI renders it (into a slot Home gives it), so
 // it reads the one connections poll ConnectAI already runs and never fetches on its own.
-// While no agent has read the workspace: two paths, a fictional sample and one agent over MCP. Once one has read it,
-// the card says which plan each agent last read, and nothing more: Align sees only what an agent reads here, never what
-// it does, so the card never reports progress, activity or a conflict. Dismissed per workspace in localStorage.
+// Until an app has read the workspace: two paths, a fictional sample and one agent over MCP, with what Align itself
+// has seen of the connection (approved, or not yet). Once any app has read the plan the card is gone. Every state is
+// Align-observed (a grant, a read); nothing an agent says about itself is shown. Dismissed per workspace in localStorage.
 
 export interface FirstRunApp {
   id: string;
   name: string;
   last_used_at: string | null;
-  on_current_plan?: boolean;
 }
 
 /** What an agent connected to a workspace can read: one line per tool in lib/mcp/register.ts, by its workspace title.
@@ -30,7 +29,6 @@ export const AGENT_READS = [
   "A short brief for its team",
 ];
 
-const when = (iso: string) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const hiddenKey = (ws: string) => `align.firstRun.hidden:${ws}`;
 
 function Path({ title, tag, children }: { title: string; tag?: string; children: ReactNode }) {
@@ -50,9 +48,7 @@ export default function FirstRun({
   hosted,
   url,
   apps,
-  planChangedAt,
   failed,
-  waiting,
   command,
   openConnect,
 }: {
@@ -60,9 +56,7 @@ export default function FirstRun({
   hosted: boolean;
   url: string | null;
   apps: FirstRunApp[] | null;
-  planChangedAt: string | null;
   failed: boolean;
-  waiting: number;
   command: (text: string | null) => ReactNode;
   openConnect: () => void;
 }) {
@@ -89,7 +83,7 @@ export default function FirstRun({
   if (hidden !== false) return null;
   if (failed && !apps)
     return (
-      <section aria-label="Agent status" data-state="error" className="mb-4 rounded-[14px] border border-amber-700 bg-amber-50 px-5 py-3.5 text-[15px] text-amber-900">
+      <section aria-label="Get started" data-state="error" className="mb-4 rounded-[14px] border border-amber-700 bg-amber-50 px-5 py-3.5 text-[15px] text-amber-900">
         ▲ Couldn’t check connected AI apps just now. Align tries again in a few seconds.
       </section>
     );
@@ -97,39 +91,9 @@ export default function FirstRun({
 
   const reading = apps.filter((a) => a.last_used_at);
   const approved = apps.filter((a) => !a.last_used_at);
-  const dismiss = (
-    <Button kind="ghost" onClick={hide}>
-      Hide
-    </Button>
-  );
-
-  if (reading.length > 0) {
-    const allLatest = reading.every((a) => a.on_current_plan);
-    return (
-      <section aria-label="Agent status" data-state={allLatest ? "latest" : "older"} className="mb-4 flex flex-wrap items-start gap-3 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5 text-[15px] text-zinc-900">
-        <ul className="min-w-0 flex-1 space-y-1">
-          {reading.map((a) => (
-            <li key={a.id}>
-              {a.on_current_plan ? (
-                <>
-                  <span aria-hidden className="text-violet-700">✓ </span>Connected. <b>{a.name}</b> has read the current plan.
-                </>
-              ) : (
-                <span className="text-amber-800">
-                  <span aria-hidden className="text-amber-700">▲ </span>Connected. <b className="text-zinc-900">{a.name}</b> last read an older plan
-                  {planChangedAt ? `; the plan changed at ${when(planChangedAt)}` : ""}. Send it a message and it reads the new one.
-                </span>
-              )}
-            </li>
-          ))}
-          <li className="text-zinc-600">
-            {allLatest && waiting === 0 ? "Nothing here needs your review yet. " : ""}Align only sees what your agent reads here.
-          </li>
-        </ul>
-        {dismiss}
-      </section>
-    );
-  }
+  // Once any app has read the plan, the card yields: Home's "Connected AI apps" section and the sidebar show each
+  // app's read state from here on.
+  if (reading.length > 0) return null;
 
   return (
     <section aria-label="Get started" data-state={failed ? "error" : approved.length ? "approved" : "none"} className="mb-4 rounded-[14px] border border-violet-700 bg-white p-5 text-[15px] text-zinc-900">
@@ -138,7 +102,9 @@ export default function FirstRun({
           <h2 className="text-[20px] font-semibold">Two ways to start</h2>
           <p className="text-zinc-600">Look around a made-up company first, or connect one AI agent to this workspace.</p>
         </div>
-        {dismiss}
+        <Button kind="ghost" onClick={hide}>
+          Hide
+        </Button>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         <Path title="Explore a sample" tag="Sample (fictional)">
