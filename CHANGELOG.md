@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Ported main's #29 onto v2 (PORT3-001): goals carry a target share of agent time (active targets add up to 100% or
+  less); the Spend tab shows each goal's share of the last 7 days against its target; an owner can turn on steering,
+  a local line in the session when its goal is off target (never in a stopped or held session); target changes between
+  goals need each goal's approval and reach agents only at launch; `align allocation` and `align steering status`.
+- Ported Shruti's Lanes B and C (#43, #47, #49) onto v2 (PORT3-002): an open change request is understood, then
+  decided: approved and proposed side by side, what would change (the request's own text, not evidence) beside its
+  evidence, one decision from what the server allows, a confirmation of what will be recorded, and nothing recorded if
+  the request changed meanwhile; an approver can decline while a counter waits. Home opens with a first-run card
+  (explore the sample, or connect one agent) until Align sees an app.
+- Ported #44 and audited the LIM-2455 acceptance checklist (PORT3-003): compact phone chrome and 44px tap targets;
+  "Propose a change" comes from the server's permission flags; one evidence class on every agent-status item, also in
+  `align_get_goal_activity`; every MCP tool's output schema is closed and tested. The audit is in
+  `design/acceptance/LIM-2455.v2-audit.md`.
 - Launch and conditions, the founder's required additions in #39 (LAUNCH-001, LAUNCH-002):
   - Approving a change request records the decision; agents get the new version only when someone in the goal's
     approval set or a workspace owner launches it. "Not yet" is recorded too, "Approve and launch" is one step when

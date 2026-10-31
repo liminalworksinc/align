@@ -340,7 +340,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] test-v2 checks for the queue, evidence classes and phone width
   - [x] Spec requirements updated and validated
 
-### [ ] PORT3-001 — Port main's #29: targets, allocation, steering, reallocation
+### [x] PORT3-001 — Port main's #29: targets, allocation, steering, reallocation
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (allocation, agent)
@@ -349,14 +349,14 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** none
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Server: targets, allocation, steering, reallocations with migration
-  - [ ] Agent: allocation and steering in hooks, sync and CLI
-  - [ ] UI: allocation on Spend, reallocations
+  - [x] Server: targets, allocation, steering, reallocations with migration
+  - [x] Agent: allocation and steering in hooks, sync and CLI
+  - [x] UI: allocation on Spend, reallocations
 - **Evidence:**
-  - [ ] test-v2 and align-agent tests for each behaviour
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 and align-agent tests for each behaviour
+  - [x] Spec requirements updated and validated
 
-### [ ] PORT3-002 — Port Shruti's Lanes B and C: first run, understand then decide (#43, #47, #49)
+### [x] PORT3-002 — Port Shruti's Lanes B and C: first run, understand then decide (#43, #47, #49)
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (app surface)
@@ -365,14 +365,14 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** none
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Change-request review and decide flow
-  - [ ] Decline while a counter waits
-  - [ ] First-run card on Home
+  - [x] Change-request review and decide flow
+  - [x] Decline while a counter waits
+  - [x] First-run card on Home
 - **Evidence:**
-  - [ ] test-v2 checks including 390px and focus
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 checks including 390px and focus
+  - [x] Spec requirements updated and validated
 
-### [ ] PORT3-003 — Port #44 cycle-2 layout fixes and audit the LIM-2455 checklist (#39)
+### [x] PORT3-003 — Port #44 cycle-2 layout fixes and audit the LIM-2455 checklist (#39)
 
 - **Priority:** P1
 - **Owner:** components/legacy-project-wrapper/implementation (app surface) / design/acceptance
@@ -381,9 +381,9 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** none
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] #44 fixes on v2
-  - [ ] LIM-2455 audit with fixes
+  - [x] #44 fixes on v2
+  - [x] LIM-2455 audit with fixes
 - **Evidence:**
-  - [ ] test-v2 checks for each fix
-  - [ ] Audit table committed
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 checks for each fix
+  - [x] Audit table committed
+  - [x] Spec requirements updated and validated
