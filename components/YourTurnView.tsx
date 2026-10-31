@@ -175,7 +175,8 @@ export function waitingOnMe(
       me: true,
       title: "Suggested limit for your goal",
       quote: `${LIMIT_WORDS[l.type]}: ${l.text}`,
-      sub: `${limitSub(l)}. Agents follow it once you confirm.`,
+      // Align knows only what an agent last read, so custom says "can read"; Northstar keeps its line.
+      sub: `${limitSub(l)}. ${L.northstar ? "Agents follow it once you confirm." : "Agents can read it once you confirm."}`,
       cta: "",
       open: () => undefined,
       actions: [

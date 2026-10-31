@@ -8,7 +8,10 @@ import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 // endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. An app shows as
 // connected only after its first successful read (last_used_at), never just because someone approved it. Each app
 // also shows whether it has read the plan as it stands now (on_current_plan, lib/plan-rev.ts): one that last read an
-// older plan may still be working on it. Align sees only what an app last read, never what it does.
+// older plan may still be working on it. Align sees only what an app last read, never what it does, so the copy says
+// "has read", never that an agent follows or works from the plan.
+// variant "rail" (md and up) is the sidebar card with the setup steps in a dialog; "row" (phones, the top of Work) is
+// one collapsed summary line whose button opens the same steps inline. Home mounts exactly one of them.
 
 interface App {
   id: string;
@@ -126,7 +129,7 @@ function Steps({ tab, url }: { tab: Tab; url: string }) {
 
 const when = (iso: string) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export default function ConnectAI({ workspace, teamOf, actor }: { workspace: string; teamOf: (role: string) => string; actor: string }) {
+export default function ConnectAI({ workspace, teamOf, actor, variant = "rail" }: { workspace: string; teamOf: (role: string) => string; actor: string; variant?: "rail" | "row" }) {
   const [data, setData] = useState<{ url: string; apps: App[]; plan?: { changed_at: string | null }; at: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("claude-code");
@@ -167,27 +170,135 @@ export default function ConnectAI({ workspace, teamOf, actor }: { workspace: str
   // Just connected: approved in the last 15 minutes and has read the workspace. Then the dialog says so and suggests
   // a first question.
   const fresh = reading.filter((a) => data && data.at - Date.parse(a.approved_at) < 15 * 60 * 1000);
+  // The setup steps and the connected list: in a dialog from the rail, inline under the phone row.
+  const panel = data && (
+    <>
+      <h2 className="mb-1 text-[22px] font-semibold">Connect an AI app</h2>
+      <p className="mb-4 text-zinc-700">It can read this workspace’s goals, the agreed plan and decisions. It can’t propose or approve anything.</p>
+      <div role="tablist" className="mb-3 flex flex-wrap gap-1">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+            className={`rounded-[10px] px-3 py-1.5 text-[15px] font-semibold ${tab === t.id ? "bg-violet-50 text-zinc-900 ring-1 ring-violet-700" : "text-zinc-600 hover:bg-zinc-100"}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" className="mb-4">
+        <Steps tab={tab} url={data.url} />
+      </div>
+      {fresh.length > 0 ? (
+        <div role="status" className="mb-5 rounded-[10px] border border-violet-700 bg-violet-50 p-3 text-[15px] text-zinc-900">
+          <div className="font-semibold">
+            {fresh.map((a) => `${a.name} is connected as ${teamOf(a.role)}`).join(". ")}.
+          </div>
+          Ask it:
+          <Command text={TRY} />
+          After a goal changes here, send it another message and it will see the change.
+        </div>
+      ) : (
+        <p className="mb-5 rounded-[10px] bg-zinc-50 p-3 text-[15px] text-zinc-700">
+          Once it’s connected you’ll see it here. Then ask it: “{TRY}” Apps check Align each time you send a message.
+        </p>
+      )}
+      <h3 className="mb-2 text-[18px] font-semibold">Connected</h3>
+      {data.apps.length === 0 ? (
+        <p className="mb-4 text-zinc-600">No apps yet.</p>
+      ) : (
+        <ul className="mb-4 space-y-2">
+          {data.apps.map((a) => (
+            <li key={a.id} className="flex flex-wrap items-center gap-2 rounded-[10px] border border-zinc-200 p-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">
+                  {a.name} <span className="font-normal text-zinc-500">({a.redirect_host})</span>
+                </div>
+                <div className="text-[14px] text-zinc-600">
+                  As {teamOf(a.role)} · {a.last_used_at ? `last read ${when(a.last_used_at)}` : "approved, hasn’t read anything yet"}
+                </div>
+                {a.last_used_at && (
+                  <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-emerald-800" : "text-amber-800"}`}>
+                    {a.on_current_plan
+                      ? "✓ Has read the latest plan."
+                      : `▲ Hasn’t read the plan since it changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}. It may still be working on the old plan. Send it a message to catch it up.`}
+                  </div>
+                )}
+              </div>
+              {(a.role === actor || actor === "leadership") && (
+                <Button kind="ghost" onClick={() => void disconnect(a.id)}>
+                  Disconnect
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && (
+        <p role="alert" className="mb-3 text-red-700">
+          {error}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => setOpen(false)}>Done</Button>
+        {actor === "leadership" && data.apps.length > 0 && (
+          <Button kind="danger" onClick={() => void disconnect()}>
+            Disconnect all
+          </Button>
+        )}
+      </div>
+    </>
+  );
+  const summary = (
+    <ul aria-label="Connected agents" className="space-y-1">
+      {reading.map((a) => (
+        <li key={a.id} className="flex items-start gap-1.5 text-[13px] leading-snug">
+          <span aria-hidden className={a.on_current_plan ? "text-emerald-700" : "text-amber-700"}>
+            {a.on_current_plan ? "✓" : "▲"}
+          </span>
+          <span className="min-w-0">
+            <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
+            <span className={a.on_current_plan ? "text-emerald-800" : "text-amber-800"}>{a.on_current_plan ? "has read the latest plan" : "last read an older plan"}</span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+  if (variant === "row") {
+    // Phones: one line at the top of Work. Connected counts only apps that have read once; "have read the current
+    // plan" counts only the server's on_current_plan (the plan fingerprint the app last read equals today's).
+    const current = reading.filter((a) => a.on_current_plan).length;
+    return (
+      <section data-connect-ai="row" aria-label="Agents on this plan" className="mb-4 flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="min-w-0 flex-[1_1_12rem] text-[14px] leading-snug text-zinc-700">
+            <span className="font-semibold text-violet-700">Agents on this plan</span>
+            {data && (reading.length === 0 ? " · None connected" : ` · ${reading.length} connected · ${current} ${current === 1 ? "has" : "have"} read the current plan`)}
+          </p>
+          <Button kind="secondary" onClick={() => setOpen((o) => !o)}>
+            Connect an AI app
+          </Button>
+        </div>
+        {open && data && (
+          <div role="region" aria-label="Connect an AI app" className="border-t border-zinc-200 pt-3 text-[16px] text-zinc-900">
+            {reading.length > 0 && <div className="mb-3">{summary}</div>}
+            {panel}
+          </div>
+        )}
+      </section>
+    );
+  }
   return (
-    <div className="mt-auto flex flex-col gap-2 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
+    <div data-connect-ai="rail" className="mt-auto flex flex-col gap-2 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
       <span className="al-lbl !text-violet-700">Agents on this plan</span>
       {!data ? (
         <div className="text-[13px] text-zinc-600">{"\u00a0"}</div>
       ) : reading.length === 0 ? (
-        <div className="text-[13px] text-zinc-600">None connected. Connect your AI agents and every session works from this one plan.</div>
+        <div className="text-[13px] text-zinc-600">None connected. Connect your AI agents and they can read this one plan.</div>
       ) : (
-        <ul aria-label="Connected agents" className="space-y-1">
-          {reading.map((a) => (
-            <li key={a.id} className="flex items-start gap-1.5 text-[13px] leading-snug">
-              <span aria-hidden className={a.on_current_plan ? "text-emerald-700" : "text-amber-700"}>
-                {a.on_current_plan ? "✓" : "▲"}
-              </span>
-              <span className="min-w-0">
-                <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
-                <span className={a.on_current_plan ? "text-emerald-800" : "text-amber-800"}>{a.on_current_plan ? "on the latest plan" : "still on an older plan"}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
+        summary
       )}
       <Button kind="secondary" onClick={() => setOpen(true)}>
         Connect an AI app
@@ -195,82 +306,7 @@ export default function ConnectAI({ workspace, teamOf, actor }: { workspace: str
       {open && data && (
         <div role="dialog" aria-modal="true" aria-label="Connect an AI app" className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4" onClick={() => setOpen(false)}>
           <div className="max-h-[90vh] w-full max-w-[640px] overflow-y-auto rounded-[14px] bg-white p-6 text-[16px] text-zinc-900" onClick={(e) => e.stopPropagation()}>
-            <h2 className="mb-1 text-[22px] font-semibold">Connect an AI app</h2>
-            <p className="mb-4 text-zinc-700">It can read this workspace’s goals, the agreed plan and decisions. It can’t propose or approve anything.</p>
-            <div role="tablist" className="mb-3 flex flex-wrap gap-1">
-              {TABS.map((t) => (
-                <button
-                  key={t.id}
-                  role="tab"
-                  aria-selected={tab === t.id}
-                  onClick={() => setTab(t.id)}
-                  className={`rounded-[10px] px-3 py-1.5 text-[15px] font-semibold ${tab === t.id ? "bg-violet-50 text-zinc-900 ring-1 ring-violet-700" : "text-zinc-600 hover:bg-zinc-100"}`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <div role="tabpanel" className="mb-4">
-              <Steps tab={tab} url={data.url} />
-            </div>
-            {fresh.length > 0 ? (
-              <div role="status" className="mb-5 rounded-[10px] border border-violet-700 bg-violet-50 p-3 text-[15px] text-zinc-900">
-                <div className="font-semibold">
-                  {fresh.map((a) => `${a.name} is connected as ${teamOf(a.role)}`).join(". ")}.
-                </div>
-                Ask it:
-                <Command text={TRY} />
-                After a goal changes here, send it another message and it will see the change.
-              </div>
-            ) : (
-              <p className="mb-5 rounded-[10px] bg-zinc-50 p-3 text-[15px] text-zinc-700">
-                Once it’s connected you’ll see it here. Then ask it: “{TRY}” Apps check Align each time you send a message.
-              </p>
-            )}
-            <h3 className="mb-2 text-[18px] font-semibold">Connected</h3>
-            {data.apps.length === 0 ? (
-              <p className="mb-4 text-zinc-600">No apps yet.</p>
-            ) : (
-              <ul className="mb-4 space-y-2">
-                {data.apps.map((a) => (
-                  <li key={a.id} className="flex flex-wrap items-center gap-2 rounded-[10px] border border-zinc-200 p-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="font-semibold">
-                        {a.name} <span className="font-normal text-zinc-500">({a.redirect_host})</span>
-                      </div>
-                      <div className="text-[14px] text-zinc-600">
-                        As {teamOf(a.role)} · {a.last_used_at ? `last read ${when(a.last_used_at)}` : "approved, hasn’t read anything yet"}
-                      </div>
-                      {a.last_used_at && (
-                        <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-emerald-800" : "text-amber-800"}`}>
-                          {a.on_current_plan
-                            ? "✓ On the latest plan."
-                            : `▲ Hasn’t read the plan since it changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}. It may still be working on the old plan. Send it a message to catch it up.`}
-                        </div>
-                      )}
-                    </div>
-                    {(a.role === actor || actor === "leadership") && (
-                      <Button kind="ghost" onClick={() => void disconnect(a.id)}>
-                        Disconnect
-                      </Button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {error && (
-              <p role="alert" className="mb-3 text-red-700">
-                {error}
-              </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => setOpen(false)}>Done</Button>
-              {actor === "leadership" && data.apps.length > 0 && (
-                <Button kind="danger" onClick={() => void disconnect()}>
-                  Disconnect all
-                </Button>
-              )}
-            </div>
+            {panel}
           </div>
         </div>
       )}

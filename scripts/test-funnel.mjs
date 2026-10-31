@@ -6,7 +6,10 @@
 //                   timestamps, not_yet shown as not yet, feedback stored/capped/cleaned, new actions accepted and unknown
 //                   ones refused, role-only events, cross-workspace isolation, Restart keeps them, ws-admin funnel
 //   phase "hosted": HOSTED=1 as Fly runs it -> no new route, HOSTED_ROUTES unchanged, a bad waitlist/LOI URL is hidden
-// Usage: node scripts/test-funnel.mjs <port> [--no-build]   (from a worktree root; refuses 3100 and the main checkout)
+//   phase "layout": LIM-2452 cycle 2 on a custom workspace: the phone layout (Propose a change above the fold, one
+//                   ConnectAI), the Goals map at every width, the asker's review at 768, 44px tap targets at 390,
+//                   the Switch team menu at 700, and the agents copy (has read / last read, never follow or work from)
+// Usage: node scripts/test-funnel.mjs <port> [--no-build] [--only local|layout|hosted]   (from a worktree root; refuses 3100 and the main checkout)
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,6 +20,7 @@ import puppeteer from "puppeteer-core";
 
 const PORT = Number(process.argv[2]);
 const BUILD = !process.argv.includes("--no-build");
+const ONLY = process.argv.includes("--only") ? process.argv[process.argv.indexOf("--only") + 1] : null; // one phase: local, layout or hosted
 if (!Number.isInteger(PORT) || PORT === 3100) {
   console.error("usage: node scripts/test-funnel.mjs <port> [--no-build] (not 3100)");
   process.exit(2);
@@ -569,6 +573,249 @@ async function phaseHosted(dir) {
   await stop();
 }
 
+// ---- phase layout (LIM-2452 cycle 2): a custom workspace's phone layout, Goals map, tap targets, agents copy ----
+// Production build, Mode L. Each check failed on 87f1866 and passes after cycle 2. Northstar is never opened here
+// (its UI text is test-ui-northstar's).
+async function phaseLayout(dir) {
+  phaseName = "layout";
+  HOSTED = false;
+  await start({ ALIGN_DATA_DIR: dir, ALIGN_ALLOW_OPEN_CREATE: "1" });
+  const W = await newWorkspace("LAYOUT");
+  const origin = `http://127.0.0.1:${PORT}`;
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+  const open = async (role, width, height) => {
+    const ctx = await browser.createBrowserContext();
+    const page = await ctx.newPage();
+    const logs = [];
+    page.on("console", (m) => logs.push(`${m.type()}: ${m.text()}`));
+    page.on("pageerror", (e) => logs.push(`pageerror: ${e.message}`));
+    await page.setViewport({ width, height });
+    const [name, ...v] = W.c[role].split("=");
+    await page.setCookie({ name, value: v.join("="), domain: "127.0.0.1", path: "/", httpOnly: true });
+    await page.goto(`${origin}/w/${W.ws}`, { waitUntil: "networkidle0" });
+    await waitText(page, /Your turn/);
+    await sleep(800);
+    return { page, ctx, logs };
+  };
+  const nav = async (page, label) => {
+    await page.evaluate((label) => [...document.querySelectorAll('nav[aria-label="Main"] button')].find((b) => b.querySelector("span span")?.textContent === label)?.click(), label);
+    await sleep(900);
+  };
+  const clickMain = async (page, re) => {
+    const ok = await page.evaluate((src) => {
+      const b = [...document.querySelectorAll("main button")].find((x) => new RegExp(src).test(x.textContent));
+      b?.click();
+      return !!b;
+    }, re.source);
+    await sleep(900);
+    return ok;
+  };
+  // ConnectAI copies, found by their button so this also counts 87f1866's (which had no data attribute).
+  const connectCopies = (page) =>
+    page.evaluate(() => {
+      const bs = [...document.querySelectorAll("button")].filter((b) => b.textContent.trim() === "Connect an AI app");
+      return { total: bs.length, main: bs.filter((b) => b.closest("main")).length, rail: bs.filter((b) => b.closest("aside")).length };
+    });
+  const overflow = (page) =>
+    page.evaluate(() => {
+      const m = document.querySelector("main");
+      return { doc: document.documentElement.scrollWidth, W: window.innerWidth, main: m.scrollWidth, mainW: m.clientWidth };
+    });
+  const fits = (o) => o.doc <= o.W && o.main <= o.mainW;
+  const hydration = (logs) => logs.filter((l) => /hydrat|Minified React error #(418|423|425)/i.test(l));
+  // Primary actions at 390: every Button with one of these labels, wherever it shows.
+  const PRIMARY = /^(Send proposal to |Approve the change to my goal$|Send my conditions to |Ask for changes$|Decline this proposal$|Not yet$|Approve launch$|Try to approve )/;
+  const short = [];
+  const labels = new Set();
+  const measure = async (page, where) => {
+    const hs = await page.evaluate(
+      (src) =>
+        [...document.querySelectorAll("main button")]
+          .filter((b) => new RegExp(src).test(b.textContent.trim()))
+          .map((b) => ({ t: b.textContent.trim().slice(0, 40), h: Math.round(b.getBoundingClientRect().height * 100) / 100 })),
+      PRIMARY.source,
+    );
+    for (const x of hs) {
+      labels.add(x.t.split(" ").slice(0, 3).join(" "));
+      if (x.h < 44) short.push(`${where}: ${x.t} ${x.h}px`);
+    }
+  };
+  try {
+    // (a) + (b) 390x844, the asking team's first screen: "Propose a change" above the fold, no ConnectAI in the rail.
+    {
+      const { page, ctx, logs } = await open("product", 390, 844);
+      const top = await page.evaluate(() => [...document.querySelectorAll("main button span")].find((x) => x.textContent.trim() === "Propose a change")?.getBoundingClientRect().top ?? null);
+      check("(a) 390x844: the first signed-in screen shows Propose a change above the fold (top < 844)", top !== null && top < 844, `top=${top}`);
+      const turn = await connectCopies(page);
+      await nav(page, "Work");
+      const work = await connectCopies(page);
+      const row = await page.evaluate(() => document.querySelector("main")?.innerText.match(/Agents on this plan[^\n]*/i)?.[0] ?? "");
+      check(
+        "(b) 390: no ConnectAI on Your turn; on Work exactly one, at the top of Work, as the row 'Agents on this plan · None connected'",
+        turn.total === 0 && work.total === 1 && work.main === 1 && /^Agents on this plan · None connected$/.test(row),
+        `turn=${JSON.stringify(turn)} work=${JSON.stringify(work)} row=${row}`,
+      );
+      // The row's button opens the setup steps inline (no dialog).
+      await clickMain(page, /^Connect an AI app$/);
+      const inline = await page.evaluate(() => ({ region: !!document.querySelector('main [role="region"][aria-label="Connect an AI app"] [role="tablist"]'), dialog: !!document.querySelector('[role="dialog"]') }));
+      check("(b) 390: Connect an AI app on the row opens the setup steps inline, not a dialog", inline.region && !inline.dialog, JSON.stringify(inline));
+      check("(b) 390: no hydration error on the phone layout", hydration(logs).length === 0, hydration(logs).join(" | "));
+      await ctx.close();
+    }
+    {
+      const { page, ctx } = await open("product", 1440, 1000);
+      const c = await connectCopies(page);
+      await nav(page, "Work");
+      const w = await connectCopies(page);
+      check("(b) 1440: exactly one ConnectAI, in the rail, on Your turn and on Work", c.total === 1 && c.rail === 1 && w.total === 1 && w.rail === 1, `${JSON.stringify(c)} ${JSON.stringify(w)}`);
+      await ctx.close();
+    }
+    // (c) Goals: the map never scrolls sideways (page or main column).
+    {
+      const bad = [];
+      for (const width of [500, 600, 768, 1100, 1268, 1440]) {
+        const { page, ctx } = await open("product", width, 1000);
+        await nav(page, "Goals");
+        const o = await overflow(page);
+        const map = await page.evaluate(() => !!document.querySelector('main button[aria-label*=" depends on "]'));
+        if (!fits(o) || !map) bad.push(`${width}: ${JSON.stringify(o)} map=${map}`);
+        await ctx.close();
+      }
+      check("(c) Goals: no horizontal overflow at 500, 600, 768, 1100, 1268 and 1440", bad.length === 0, bad.join(" | "));
+    }
+    // (f) Switch team as leadership at 700: the menu stays on screen.
+    {
+      const { page, ctx } = await open("leadership", 700, 1000);
+      await page.evaluate(() => [...document.querySelectorAll("header button")].find((b) => /Switch team/.test(b.textContent))?.click());
+      await sleep(400);
+      const r = await page.evaluate(() => {
+        const m = document.querySelector('[role="menu"][aria-label="Switch team"]')?.getBoundingClientRect();
+        return m ? { left: m.left, right: m.right, W: document.documentElement.clientWidth } : null;
+      });
+      check("(f) 700, leadership: the Switch team menu fits on screen", !!r && r.left >= 0 && r.right <= r.W, JSON.stringify(r));
+      await ctx.close();
+    }
+    // (g) part 1, before any app: the rail's zero line and the limit line say "can read", never "works from"/"follow".
+    {
+      const s0 = stateOf(dir, W.ws);
+      s0.limits = [{ id: "lim-layout", team: "security", type: "must", text: "LAYOUT keep the audit trail", sources: [{ kind: "manual", title: "Layout check", date: "2026-10-30", quote: "keep it" }], state: "suggested", updated_at: new Date().toISOString() }];
+      writeState(dir, W.ws, s0);
+      const { page, ctx } = await open("security", 1440, 1000);
+      await waitText(page, /LAYOUT keep the audit trail/);
+      const t = await bodyText(page);
+      check(
+        "(g) custom: 'Connect your AI agents and they can read this one plan.' and 'Agents can read it once you confirm.'; the old lines are gone",
+        t.includes("None connected. Connect your AI agents and they can read this one plan.") && t.includes("Agents can read it once you confirm.") && !/works from this one plan|Agents follow it/.test(t),
+        (t.match(/None connected[^\n]*/) ?? [""])[0] + " :: " + (t.match(/[^\n]*once you confirm[^\n]*/) ?? [""])[0],
+      );
+      await ctx.close();
+    }
+    // (d) + (e): the proposal flow at 390 (tap targets) and the asker's review of a counter at 768 (no overflow).
+    {
+      const { page, ctx } = await open("product", 390, 844);
+      await clickMain(page, /Propose a change/);
+      await measure(page, "composer");
+      await ctx.close();
+    }
+    const prop = await req("POST", "/api/proposals", { cookie: W.c.product, body: { proposed_measure_text: "LAYOUT retention first for two weeks", rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
+    const pid = prop.json?.id;
+    {
+      const { page, ctx } = await open("security", 390, 844);
+      await clickMain(page, /Review the proposal/);
+      for (const opt of ["Accept", "Accept if…", "Counter", "Decline"]) {
+        await page.evaluate((opt) => [...document.querySelectorAll("main button[aria-pressed]")].find((b) => b.querySelector("b")?.textContent === opt)?.click(), opt);
+        await sleep(400);
+        await measure(page, `review/${opt}`);
+      }
+      await ctx.close();
+    }
+    {
+      const { page, ctx } = await open("product", 390, 844);
+      await clickMain(page, /reviews the proposal/);
+      await measure(page, "asker waiting");
+      await ctx.close();
+    }
+    const ctr = await req("POST", `/api/proposals/${pid}/counter`, { cookie: W.c.security, body: { proposed_measure_text: "LAYOUT retention first for two weeks, reviewed weekly", rationale: "Needs a review cadence", conditions: "Post before each use." } });
+    {
+      const { page, ctx } = await open("product", 768, 1000);
+      const opened = await clickMain(page, /Review the changes/);
+      const o = await overflow(page);
+      const b = await page.evaluate(() => {
+        const x = [...document.querySelectorAll("main button")].find((y) => /^Accept .* changes and confirm what /.test(y.textContent.trim()));
+        const r = x?.getBoundingClientRect();
+        const box = x?.parentElement?.getBoundingClientRect();
+        return r ? { right: Math.round(r.right * 100) / 100, parentRight: Math.round(box.right * 100) / 100 } : null;
+      });
+      check(
+        "(d) 768: the asker's review of a counter does not overflow (page, main column, and the Accept … changes button inside its row)",
+        ctr.status === 200 && opened && fits(o) && !!b && b.right <= b.parentRight,
+        `${ctr.status} ${ctr.text.slice(0, 120)} ${JSON.stringify(o)} ${JSON.stringify(b)}`,
+      );
+      await ctx.close();
+    }
+    await req("POST", `/api/proposals/${pid}/acknowledge`, { cookie: W.c.product, body: {} });
+    const acc = await req("POST", `/api/proposals/${pid}/accept`, { cookie: W.c.security, body: { rationale: "ok", accept_untested: true } });
+    {
+      const { page, ctx } = await open("leadership", 390, 844);
+      await clickMain(page, /Decide the launch/);
+      await measure(page, "launch");
+      await ctx.close();
+    }
+    check(
+      "(e) 390: every primary action (Send proposal, Approve the change, Send my conditions, Ask for changes, Decline, Try to approve, Approve launch, Not yet) is at least 44px tall",
+      acc.status === 200 && labels.size >= 8 && short.length === 0,
+      `seen ${[...labels].join(", ")}; accept=${acc.status}; short: ${short.join(" | ")}`,
+    );
+    // (g) part 2: two connected apps, one that read before the plan changed and one after. The rail says "has read the
+    // latest plan" / "last read an older plan" (the server's on_current_plan); the phone row counts them.
+    {
+      const { createHash, randomBytes } = await import("node:crypto");
+      const REDIRECT = "http://127.0.0.1:33418/callback";
+      const connectApp = async (name) => {
+        const reg = await (await fetch(`${origin}/oauth/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: name, redirect_uris: [REDIRECT], token_endpoint_auth_method: "none" }) })).json();
+        const verifier = randomBytes(32).toString("base64url");
+        const params = { response_type: "code", client_id: reg.client_id, redirect_uri: REDIRECT, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256", state: "st-1", resource: `${origin}/api/mcp` };
+        const ap = await req("POST", "/api/oauth/approve", { body: { params, decision: "approve", workspace: W.ws, role: "security", passcode: W.passcodes.security }, headers: { origin } });
+        const code = ap.json?.redirect ? new URL(ap.json.redirect).searchParams.get("code") : "";
+        const form = new URLSearchParams({ grant_type: "authorization_code", code: code ?? "", redirect_uri: REDIRECT, client_id: reg.client_id, code_verifier: verifier, resource: `${origin}/api/mcp` });
+        const tok = await (await fetch(`${origin}/oauth/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form })).json();
+        return tok.access_token;
+      };
+      const read = (t) =>
+        fetch(`${origin}/api/mcp`, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${t}` },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "align_list_goals", arguments: {} } }),
+        }).then((r) => r.text());
+      const t1 = await connectApp("Layout Old App");
+      await read(t1);
+      await sleep(500);
+      await req("POST", `/api/proposals/${pid}/launch`, { cookie: W.c.leadership, body: { decision: "not_yet" } }); // the plan changes
+      const t2 = await connectApp("Layout New App");
+      await read(t2);
+      await sleep(800);
+      const apps = (await req("GET", "/api/workspaces/connections", { cookie: W.c.security })).json?.apps ?? [];
+      const { page, ctx } = await open("security", 1440, 1000);
+      await waitText(page, /Layout New App/);
+      const rail = await page.evaluate(() => document.querySelector('ul[aria-label="Connected agents"]')?.innerText ?? "");
+      check(
+        "(g) rail: 'Layout New App has read the latest plan', 'Layout Old App last read an older plan' (the server's on_current_plan); no 'on the latest plan' or 'still on an older plan'",
+        apps.filter((a) => a.on_current_plan).length === 1 && /Layout New App has read the latest plan/.test(rail) && /Layout Old App last read an older plan/.test(rail) && !/on the latest plan|still on an older plan/.test(rail),
+        `${JSON.stringify(apps.map((a) => [a.name, a.on_current_plan]))} :: ${rail}`,
+      );
+      await ctx.close();
+      const ph = await open("security", 390, 844);
+      await nav(ph.page, "Work");
+      const row = await ph.page.evaluate(() => document.querySelector("main")?.innerText.match(/Agents on this plan[^\n]*/i)?.[0] ?? "");
+      check("(g) 390 row: 'Agents on this plan · 2 connected · 1 has read the current plan'", row === "Agents on this plan · 2 connected · 1 has read the current plan", row);
+      await ph.ctx.close();
+    }
+  } finally {
+    await browser.close();
+  }
+  await stop();
+}
+
 // ---- run ----
 phaseUnit();
 if (BUILD) {
@@ -580,8 +827,9 @@ if (BUILD) {
 }
 const tmp = mkdtempSync(path.join(os.tmpdir(), "align-funnel-"));
 try {
-  await phaseLocal(path.join(tmp, "local"));
-  await phaseHosted(path.join(tmp, "hosted"));
+  if (!ONLY || ONLY === "local") await phaseLocal(path.join(tmp, "local"));
+  if (!ONLY || ONLY === "layout") await phaseLayout(path.join(tmp, "layout"));
+  if (!ONLY || ONLY === "hosted") await phaseHosted(path.join(tmp, "hosted"));
 } catch (e) {
   fail++;
   console.log(`FAIL  [${phaseName}] ${e?.stack ?? e}`);

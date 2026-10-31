@@ -818,7 +818,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           <span className="min-w-0 flex-[1_1_16rem] text-[15px] text-zinc-700">
             {who(p.recipient_owner)} asked for changes. Accept them to send the proposal back for final approval.
           </span>
-          <Button disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/acknowledge`, {})}>
+          <Button wrap={!L.northstar} disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/acknowledge`, {})}>
             {busy ? "Working…" : L.northstar ? "Accept Security's changes and confirm what Product will do" : `Accept ${poss(own)} changes and confirm what ${ask} will do`}
           </Button>
         </div>

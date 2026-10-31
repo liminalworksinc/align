@@ -75,12 +75,15 @@ export function Button({
   kind = "primary",
   disabled,
   type = "button",
+  wrap = false,
 }: {
   children: ReactNode;
   onClick?: () => void;
   kind?: "primary" | "secondary" | "danger" | "ghost";
   disabled?: boolean;
   type?: "button" | "submit";
+  /** A sentence-long label (custom only) that may wrap at any width instead of running past its container. */
+  wrap?: boolean;
 }) {
   const k = {
     // v6 .btn.p: Liminal magenta fill, near-black text.
@@ -99,7 +102,7 @@ export function Button({
   // that narrow on a phone; there a long label wraps instead of running off the screen. Northstar's main is not a
   // container, so it is unchanged.
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-[18px] @max-md:max-w-full @max-md:whitespace-normal @max-md:py-2 @max-md:text-left text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed ${off} disabled:hover:brightness-100`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 ${wrap ? "max-w-full whitespace-normal" : "whitespace-nowrap"} rounded-[10px] border px-[18px] @max-md:min-h-[44px] @max-md:max-w-full @max-md:whitespace-normal @max-md:py-2 @max-md:text-left text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed ${off} disabled:hover:brightness-100`}>
       {children}
     </button>
   );
