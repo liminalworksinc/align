@@ -1,0 +1,37 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# next.js / build
+/.next/
+/out/
+/build
+*.tsbuildinfo
+next-env.d.ts
+
+# env + secrets (never commit keys)
+.env
+.env.*
+!.env.example
+*.pem
+data/.secret
+
+# Align runtime data: the v2 database, its generated auth secret and the Mode L sign-in link, registered OAuth
+# clients, and the single-server guard
+data/
+
+# misc
+.DS_Store
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.vercel
+.claude/settings.local.json

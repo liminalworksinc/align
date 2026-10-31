@@ -1,0 +1,6985 @@
+#!/usr/bin/env node
+// Align server tests (docs/v2/WIRE.md). Builds once, then starts its own production servers (next start) on <port> with
+// a temp ALIGN_DATA_DIR, one per phase. v2 is the only model: there is no flag, and v1's routes are gone.
+//   local   Mode L, no settings        -> every /app and /api/v2 path is served; / redirects to /app; retired paths are
+//                                         404; the loopback Host check (421); one server per data directory (a second
+//                                         server is started on <port>+1); the local owner and its printed code;
+//                                         email codes (hashed, 5 min, 3 tries, send limits, no account disclosure);
+//                                         sign-in-link; test IdP off; access requests and the operator script
+//   on      Mode L, ALIGN_TEST_IDP=1    -> identity, RBAC, devices (recent sign-in), sessions, usage, spend, directives,
+//                                         directive cursor, receipts, alignments, stop sharing, delete, web UI; the
+//                                         hosted gate settings are set and ignored; align-admin workspaces (list, soft
+//                                         delete, purge)
+//   retention Mode L, ALIGN_TEST_IDP=1 -> account deletion, workspace soft delete and restore, removal with "delete
+//                                         their sessions now", and the retention job (align-admin retention run, and
+//                                         its alias scripts/retention.mjs) with ALIGN_TEST_NOW as its clock (codes,
+//                                         invites, former members, purge, audit, spend roll-ups), the web UI for them,
+//                                         and the job's run at server startup
+//   events  Mode L, ALIGN_TEST_IDP=1    -> product events (PRESEED-007): each recorded once where it is a first, no
+//                                         content in any row, the operator report's counts against this phase's
+//                                         actions, LOIs (loi_signed needs --verified-original), and events under
+//                                         account deletion, purging and the retention job
+//   hosted  HOSTED=1                    -> startup refusals, then the hosted host/https/edge checks and the route
+//                                         allowlist (/ -> /app, everything else 404); no closing date (a leftover
+//                                         ALIGN_DELETE_BY in the past is ignored); then email codes through a fake HTTPS
+//                                         email API (first owner, invites, unknown addresses, API failure); then the
+//                                         creation gate: Turnstile through a fake HTTPS verify API, creation codes and
+//                                         access requests with the operator script (align-admin), disposable domains,
+//                                         the caps, durable limits across a restart, and ALIGN_CREATION closed and open
+//   trust   (no server; then local and hosted) -> the security pack (docs/trust): the subprocessor list names every
+//                                         external host the server code can call, no model provider is called, the
+//                                         Markdown reader drops HTML and unsafe links; /privacy and /trust are served in
+//                                         Mode L and hosted, linked from sign-in and request access, and nothing else new
+//                                         is open when hosted
+// Usage: node scripts/test-v2.mjs <port>   (from a worktree root; refuses 3100, the main checkout and a busy port;
+//                                           also uses <port>+1 for the second-server check)
+
+import { spawn, spawnSync } from "node:child_process";
+import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import os from "node:os";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
+
+const PORT = Number(process.argv[2]);
+if (!Number.isInteger(PORT) || PORT === 3100) {
+  console.error("usage: node scripts/test-v2.mjs <port> (not 3100)");
+  process.exit(2);
+}
+const BASE = `http://127.0.0.1:${PORT}`;
+const ROOT = process.cwd();
+if (path.resolve(ROOT) === path.join(os.homedir(), "liminal/align")) {
+  console.error(`test-v2: refusing the main checkout ${ROOT}; run from a worktree`);
+  process.exit(2);
+}
+if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
+  console.error(`test-v2: port ${PORT} is already in use`);
+  process.exit(2);
+}
+/** The schema version the code expects (lib/v2/core.mts), which lib/v2/db.ts checks against its migrations. */
+const SCHEMA_VERSION = Number(/export const SCHEMA_VERSION = (\d+);/.exec(readFileSync(path.join(ROOT, "lib/v2/core.mts"), "utf8"))?.[1]);
+const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let pass = 0;
+let fail = 0;
+function check(name, ok, detail = "") {
+  if (ok) pass++;
+  else fail++;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `  ${String(detail).slice(0, 400)}`}`);
+}
+
+// ---- HTTP: every response is kept per caller, so the private-goal canary can be checked across all of them ----
+const seen = []; // { who, text }
+async function call(who, method, p, { body, raw, cookie, bearer, headers = {} } = {}) {
+  const h = { ...headers };
+  if ((body !== undefined || raw !== undefined) && !h["content-type"]) h["content-type"] = "application/json";
+  if (cookie) h.cookie = cookie;
+  if (bearer) h.authorization = `Bearer ${bearer}`;
+  const res = await fetch(BASE + p, { method, headers: h, body: raw ?? (body === undefined ? undefined : JSON.stringify(body)), redirect: "manual" });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {}
+  seen.push({ who, text, p });
+  return { status: res.status, json, text, headers: res.headers, setCookies: res.headers.getSetCookie?.() ?? [] };
+}
+
+const HOSTED_HOST = "align.test";
+function hosted(method, p, { body, cookie, headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const data = body === undefined ? undefined : JSON.stringify(body);
+    const h = { host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": "198.51.100.7", ...headers };
+    for (const k of Object.keys(h)) if (h[k] === undefined) delete h[k];
+    if (data) Object.assign(h, { "content-type": "application/json", "content-length": Buffer.byteLength(data) });
+    if (cookie) h.cookie = cookie;
+    const req = http.request({ host: "127.0.0.1", port: PORT, method, path: p, headers: h }, (res) => {
+      let t = "";
+      res.on("data", (c) => (t += c));
+      res.on("end", () => {
+        let json = null;
+        try {
+          json = JSON.parse(t);
+        } catch {}
+        resolve({ status: res.statusCode, headers: res.headers, text: t, json });
+      });
+    });
+    req.on("error", reject);
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
+/** A request with exactly these headers (fetch() won't send a forged Host; node:http will). */
+function rawGet(p, headers) {
+  return new Promise((resolve, reject) => {
+    for (const k of Object.keys(headers)) if (headers[k] === undefined) delete headers[k];
+    http
+      .get({ host: "127.0.0.1", port: PORT, path: p, headers }, (res) => {
+        let t = "";
+        res.on("data", (c) => (t += c));
+        res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, text: t }));
+      })
+      .on("error", reject);
+  });
+}
+
+// ---- servers ----
+let server = null;
+let stdout = ""; // the current server's standard output (Mode L prints sign-in links there)
+// Every server setting is cleared from the inherited environment, so each phase runs with exactly what it names.
+const SETTING = /^(ALIGN_|HOSTED$|AI_GATEWAY_API_KEY$|ANTHROPIC_|BETTER_AUTH_|GOOGLE_|GITHUB_)/;
+async function startServer(env) {
+  rmSync(path.join(ROOT, "data/.secret"), { force: true });
+  const clean = { ...process.env };
+  for (const k of Object.keys(clean)) if (SETTING.test(k)) delete clean[k];
+  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...clean, ...env }, stdio: ["ignore", "pipe", "pipe"], detached: true });
+  let exited = false;
+  let stderr = "";
+  stdout = "";
+  server.stderr.on("data", (c) => (stderr += c));
+  server.stdout.on("data", (c) => (stdout += c));
+  server.on("exit", () => (exited = true));
+  let last = 0;
+  for (let i = 0; i < 90 && !exited; i++) {
+    try {
+      const r = env.HOSTED === "1" ? await hosted("GET", "/api/v2/auth/get-session") : await fetch(`${BASE}/api/v2/auth/get-session`);
+      last = r.status;
+      if (r.status === 200) return { started: true, stderr: () => stderr, stdout: () => stdout, exited, last };
+      if (r.status === 503) break; // up, but serving nothing (proxy.ts startupProblems)
+    } catch {}
+    await sleep(1000);
+  }
+  return { started: false, stderr: () => stderr, stdout: () => stdout, exited, last };
+}
+async function stopServer() {
+  if (!server) return;
+  try {
+    process.kill(-server.pid, "SIGTERM");
+  } catch {}
+  spawnSync("pkill", ["-f", `next start -H 127.0.0.1 -p ${PORT}`]);
+  server = null;
+  await sleep(2500);
+  rmSync(path.join(ROOT, "data/.secret"), { force: true });
+}
+async function mustStart(env) {
+  const r = await startServer(env);
+  if (!r.started) throw new Error(`server did not start: ${r.stderr().slice(-600)}`);
+  return r;
+}
+process.on("exit", () => {
+  if (server)
+    try {
+      process.kill(-server.pid, "SIGTERM");
+    } catch {}
+});
+
+// ---- v2 routes on disk (for the always-on walk) ----
+function v2Routes() {
+  const out = [];
+  const walk = (dir, url) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name.startsWith("_")) continue;
+      const seg = e.name.replace(/^\[\.\.\..*\]$/, "x/y").replace(/^\[.*\]$/, "x");
+      if (e.isDirectory()) walk(path.join(dir, e.name), `${url}/${seg}`);
+      else if (/^(route|page)\.tsx?$/.test(e.name)) out.push(url);
+    }
+  };
+  walk(path.join(ROOT, "app/app"), "/app");
+  walk(path.join(ROOT, "app/api/v2"), "/api/v2");
+  return out;
+}
+
+// ---- identity helpers ----
+const cookieOf = (setCookies) =>
+  setCookies
+    .map((c) => c.split(";")[0])
+    .filter((c) => !/=$/.test(c))
+    .join("; ");
+
+async function signUp(who, name, email) {
+  // Better Auth wants the Origin a browser sends on these.
+  const r = await call(who, "POST", "/api/v2/auth/sign-up/email", { headers: { origin: BASE }, body: { name, email, password: `pw-${who}-123456` } });
+  return { status: r.status, id: r.json?.user?.id, cookie: cookieOf(r.setCookies), setCookies: r.setCookies, who, email, name };
+}
+
+/** Where a page response sends the browser: a 3xx Location, or the refresh tag Next streams for a redirect made after
+ *  the page shell was sent (a redirect inside <Suspense>). */
+function redirectTarget(r) {
+  const loc = r.headers.get?.("location");
+  if (r.status >= 300 && r.status < 400 && loc) return loc;
+  const m = /id="__next-page-redirect" http-equiv="refresh" content="\d;url=([^"]*)"/.exec(r.text);
+  return m ? m[1].replace(/&amp;/g, "&") : null;
+}
+
+// Email one-time codes. Mode L prints each link and writes it to <data>/v2/sign-in.txt; the test reads that file.
+const SEND = "/api/v2/auth/email-otp/send-verification-otp";
+const OTP_SIGN_IN = "/api/v2/auth/sign-in/email-otp";
+// Better Auth wants the Origin a browser sends on these (fetch sends Sec-Fetch-Mode, so it counts as a browser).
+const sendCode = (who, email) => call(who, "POST", SEND, { headers: { origin: BASE }, body: { email, type: "sign-in" } });
+const codeSignIn = (who, email, otp) => call(who, "POST", OTP_SIGN_IN, { headers: { origin: BASE }, body: { email, otp } });
+const signInLine = (dir) => (existsSync(path.join(dir, "v2", "sign-in.txt")) ? readFileSync(path.join(dir, "v2", "sign-in.txt"), "utf8") : "");
+const codeIn = (text) => /[?&]code=(\d{6})/.exec(text)?.[1] ?? "";
+const otpHash = (code) => createHash("sha256").update(code).digest("base64url");
+const LINE_RE = (email) => new RegExp(`^Align sign-in for ${email.replace(/[.]/g, "\\.")}: http://127\\.0\\.0\\.1:${PORT}/app/sign-in\\?email=${encodeURIComponent(email).replace(/[.]/g, "\\.")}&code=\\d{6}$`, "m");
+/** Make a Better Auth session look as if it signed in `minutes` ago (the test has file access, like a host admin). */
+function ageSession(cookie, minutes) {
+  const value = /align_v2\.session_token=([^;]+)/.exec(cookie)?.[1] ?? "";
+  const token = decodeURIComponent(value).split(".")[0];
+  return withDb((d) => d.prepare("UPDATE ba_session SET createdAt = ? WHERE token = ?").run(new Date(Date.now() - minutes * 60 * 1000).toISOString(), token).changes);
+}
+
+let dbFile = "";
+const withDb = (fn) => {
+  const d = new DatabaseSync(dbFile, { timeout: 5000 });
+  try {
+    return fn(d);
+  } finally {
+    d.close();
+  }
+};
+
+/** Run the operator script (scripts/align-admin.mjs) with exactly these settings, the way a host admin would. */
+function admin(args, env) {
+  const clean = { ...process.env };
+  for (const k of Object.keys(clean)) if (SETTING.test(k)) delete clean[k];
+  const all = { ...clean, ...env };
+  for (const k of Object.keys(all)) if (all[k] === undefined) delete all[k];
+  const r = spawnSync(process.execPath, ["scripts/align-admin.mjs", ...args], { cwd: ROOT, encoding: "utf8", env: all });
+  return { status: r.status, out: r.stdout ?? "", err: r.stderr ?? "" };
+}
+/** admin(), without blocking this process: for commands that call a fake API this test itself serves. */
+function adminAsync(args, env) {
+  const clean = { ...process.env };
+  for (const k of Object.keys(clean)) if (SETTING.test(k)) delete clean[k];
+  const all = { ...clean, ...env };
+  for (const k of Object.keys(all)) if (all[k] === undefined) delete all[k];
+  return new Promise((resolve) => {
+    const c = spawn(process.execPath, ["scripts/align-admin.mjs", ...args], { cwd: ROOT, env: all, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    c.stdout.on("data", (d) => (out += d));
+    c.stderr.on("data", (d) => (err += d));
+    c.on("close", (status) => resolve({ status, out, err }));
+  });
+}
+/** Every creation code in a text (alc_ + 32 base32 characters). */
+const codesIn = (text) => text.match(/alc_[a-z2-7]{32}/g) ?? [];
+/** True when no file of this database (main, WAL) contains `needle` as plain bytes. */
+const dbFilesLack = (file, needle) => [file, `${file}-wal`].every((f) => !existsSync(f) || !readFileSync(f).includes(Buffer.from(needle)));
+
+/** The keyed hash that stands for a person in v2_events (lib/v2/core.mts eventActor). */
+const eventActor = (secret, userId) => createHmac("sha256", secret).update(`ale.${userId}`).digest("base64url");
+
+/** A device keypair and its HMAC secret, as the agent would keep them. */
+function newDeviceKeys() {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  return { pub: publicKey.export({ format: "jwk" }).x, privateKey, secret: randomBytes(32) };
+}
+const sessionKey = (dev, ws, harness, native) => createHmac("sha256", dev.secret).update(`${ws}\0${harness}\0${native}`).digest("base64url");
+const repoKey = (dev, ws, repo) => createHmac("sha256", dev.secret).update(`${ws}\0repo\0${repo}`).digest("base64url");
+const reqKey = (dev, id) => createHmac("sha256", dev.secret).update(`req\0${id}`).digest("base64url");
+const epochId = () => `ep_${randomBytes(18).toString("base64url")}`;
+const sha256hex = (s) => createHash("sha256").update(s).digest("hex");
+function refreshSig(dev, deviceId, refreshToken, ts) {
+  return sign(null, Buffer.from(`align-refresh\n${deviceId}\n${sha256hex(refreshToken)}\n${ts}`, "utf8"), dev.privateKey).toString("base64url");
+}
+
+/** The whole device flow for one user, granted `wsIds`. The poll interval is skipped by clearing last_poll_at in
+ *  the database (the test has file access, like a host admin), so the run doesn't wait 5 s per poll. */
+async function pairDevice(who, user, wsIds, name = `${who}'s laptop`) {
+  const keys = newDeviceKeys();
+  const a = await call(who, "POST", "/api/v2/device/authorize", { body: { device_name: name, public_key: keys.pub } });
+  if (a.status !== 200) throw new Error(`authorize ${a.status} ${a.text}`);
+  const ap = await call(who, "POST", "/api/v2/device/approve", { cookie: user.cookie, body: { user_code: a.json.user_code, workspace_ids: wsIds } });
+  if (ap.status !== 200) throw new Error(`approve ${ap.status} ${ap.text}`);
+  const t = await call(who, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: a.json.device_code } });
+  if (t.status !== 200) throw new Error(`token ${t.status} ${t.text}`);
+  return { ...keys, who, user, id: t.json.device_id, access: t.json.access_token, refresh: t.json.refresh_token };
+}
+
+/** A paired device written straight into the database, with a live access token (the device-pairing limit, 10 per
+ *  client per hour, is spent by the time the account tests run). */
+function insertDevice(userId, name) {
+  const id = `dv_${randomBytes(15).toString("hex").slice(0, 24).replace(/[01089]/g, "a")}`;
+  const access = `alnd_${randomBytes(32).toString("base64url")}`;
+  const at = new Date().toISOString();
+  withDb((d) => {
+    d.prepare("INSERT INTO v2_devices (id, user_id, name, public_key, created_at) VALUES (?, ?, ?, ?, ?)").run(id, userId, name, newDeviceKeys().pub, at);
+    d.prepare("INSERT INTO v2_device_tokens (token_hash, device_id, kind, created_at, expires_at) VALUES (?, ?, 'access', ?, ?)").run(sha256hex(access), id, at, new Date(Date.now() + 3_600_000).toISOString());
+  });
+  return { id, access };
+}
+
+const usageRow = (dev, id, epoch, extra = {}) => ({
+  request_key: reqKey(dev, id),
+  ts: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+  epoch_id: epoch,
+  model: "claude-sonnet-4-5",
+  query_source: "main",
+  input: 1000,
+  output: 200,
+  cache_read: 5000,
+  cache_write_5m: 300,
+  cache_write_1h: 0,
+  cache_write_unsplit: 0,
+  basis: "subscription_included",
+  est_list_usd_micros: 12_345,
+  price_table_version: "2026-10-01",
+  source: "otel",
+  ...extra,
+});
+
+const NUMS = ["requests", "input", "output", "cache_read", "cache_write_5m", "cache_write_1h", "cache_write_unsplit", "est_list_usd_micros", "unpriced_requests"];
+function invariantHolds(s) {
+  return NUMS.every((k) => s.total[k] === s.rows.reduce((n, r) => n + r[k], 0) + s.unallocated[k]);
+}
+
+const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "align-v2-"));
+const build = spawnSync("npx", ["next", "build"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, HOSTED: "", ALIGN_DATA_DIR: "" } });
+if (build.status !== 0) {
+  console.log(`FAIL  next build\n${(build.stdout + build.stderr).slice(-1500)}`);
+  process.exit(1);
+}
+
+// ======== LIM-2455 §F: none of the PR #34 prototype's controls ship (a scan of the served code, no server) ========
+{
+  const PROTOTYPE = /SCRIPTED DESIGN STUDY|FICTIONAL \/ SCRIPTED|Preview role|Preview: |Simulate an authorized app read|simulated error|Ink atlas|LIM-2449|passcode/i;
+  const hits = [];
+  const scan = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) scan(p);
+      else if (/\.(?:ts|tsx|mts)$/.test(e.name) && PROTOTYPE.test(readFileSync(p, "utf8"))) hits.push(path.relative(ROOT, p));
+    }
+  };
+  scan(path.join(ROOT, "app"));
+  scan(path.join(ROOT, "lib"));
+  check("prototype controls (LIM-2455 §F): no app/ or lib/ file has the design study's banner, role preview, simulated errors or app read, Preview buttons, the Ink atlas, the LIM-2449 footer or a passcode", hits.length === 0, hits.join(", "));
+}
+
+// ======== trust: the security pack's claims that the code can check (PRESEED-008) ========
+{
+  // Every https host in the server's source (comment lines aside), in fly.toml (its own host aside), and in Better Auth's
+  // code for each sign-in provider lib/v2/auth.ts turns on, must be named in docs/trust/subprocessors.md.
+  const sources = [path.join(ROOT, "proxy.ts"), path.join(ROOT, "instrumentation.ts")];
+  const walkSrc = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walkSrc(p);
+      else if (/\.(?:ts|tsx|mts)$/.test(e.name) && !e.name.endsWith(".d.ts")) sources.push(p);
+    }
+  };
+  walkSrc(path.join(ROOT, "app"));
+  walkSrc(path.join(ROOT, "lib"));
+  const code = (text, comment) => text.split("\n").filter((l) => !comment.test(l.trim())).join("\n");
+  const hostsIn = (text) => [...text.matchAll(/https:\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi)].map((m) => m[1].toLowerCase());
+  const found = new Map();
+  for (const f of sources) for (const h of hostsIn(code(readFileSync(f, "utf8"), /^(?:\/\/|\/\*|\*)/))) found.set(h, path.relative(ROOT, f));
+  const fly = readFileSync(path.join(ROOT, "fly.toml"), "utf8");
+  for (const h of hostsIn(code(fly, /^#/))) found.set(h, "fly.toml");
+  const authSrc = readFileSync(path.join(ROOT, "lib/v2/auth.ts"), "utf8");
+  const providers = [...authSrc.matchAll(/social\.(\w+) = /g)].map((m) => m[1]);
+  for (const prov of providers) {
+    for (const h of hostsIn(readFileSync(path.join(ROOT, "node_modules/@better-auth/core/dist/social-providers", `${prov}.mjs`), "utf8"))) found.set(h, `Better Auth ${prov}`);
+  }
+  for (const h of (/^\s*ALIGN_HOSTS\s*=\s*"([^"]*)"/m.exec(fly)?.[1] ?? "").split(",")) found.delete(h.trim().toLowerCase());
+  const subprocessors = readFileSync(path.join(ROOT, "docs/trust/subprocessors.md"), "utf8");
+  const missing = [...found].filter(([h]) => !subprocessors.includes(`\`${h}\``));
+  check(
+    `trust: docs/trust/subprocessors.md names every external host the server can call (${[...found.keys()].join(", ")})`,
+    providers.length === 2 && found.has("api.resend.com") && found.has("challenges.cloudflare.com") && found.size >= 7 && missing.length === 0,
+    `missing: ${missing.map(([h, w]) => `${h} (${w})`).join(", ")}; providers: ${providers.join(",")}`,
+  );
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  const modelHost = /api\.anthropic\.com|api\.openai\.com|generativelanguage\.googleapis\.com|api\.mistral\.ai|api\.cohere\.|ai-gateway\.vercel/i;
+  const callers = sources.filter((f) => modelHost.test(readFileSync(f, "utf8")) || /from "(?:@anthropic-ai\/|openai|@ai-sdk\/|ai")/.test(readFileSync(f, "utf8")));
+  const modelDeps = deps.filter((d) => /^(?:@anthropic-ai\/|openai$|@ai-sdk\/|ai$|@google\/generative-ai|@mistralai\/|cohere-ai)/.test(d));
+  check(
+    "trust: the server calls no AI model provider (no model API host or SDK in app/, lib/, proxy.ts or package.json), so the subprocessor list rightly has none",
+    callers.length === 0 && modelDeps.length === 0 && /calls no AI model/.test(subprocessors),
+    `${callers.map((f) => path.relative(ROOT, f)).join(" ")} ${modelDeps.join(" ")}`,
+  );
+  const legal = ["privacy-policy.md", "dpa.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8"));
+  const pack = ["privacy-policy.md", "dpa.md", "subprocessors.md", "security-overview.md", "questionnaire.md"].map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8")).join("\n");
+  check(
+    "trust: the privacy policy and DPA open with 'Draft for counsel review'; the pack uses the [LEGAL ENTITY], [ADDRESS] and [PRIVACY CONTACT EMAIL] placeholders, and no PRESEED marker is left in docs/trust or SECURITY.md (every package is merged and its claims checked)",
+    legal.every((t) => t.split("\n").slice(0, 4).join(" ").includes("Draft for counsel review")) &&
+      ["[LEGAL ENTITY]", "[ADDRESS]", "[PRIVACY CONTACT EMAIL]"].every((t) => pack.includes(t)) &&
+      !/PRESEED-\d/.test(readdirSync(path.join(ROOT, "docs/trust")).map((f) => readFileSync(path.join(ROOT, "docs/trust", f), "utf8")).join("\n") + readFileSync(path.join(ROOT, "SECURITY.md"), "utf8")) &&
+      existsSync(path.join(ROOT, "SECURITY.md")),
+    "",
+  );
+  // The Markdown reader the pages use: HTML is text, comments go, only safe links keep their target.
+  const md = await import(pathToFileURL(path.join(ROOT, "lib/trust/markdown.mts")).href);
+  const opts = { prefix: "t", resolve: (p) => (p === "../RETENTION.md" ? { page: "/trust", prefix: "retention" } : null), fill: { "[PRIVACY CONTACT EMAIL]": "privacy@example.com" } };
+  const blocks = md.parseMarkdown("# Hi <b>x</b>\n<!-- secret note -->\nA <script>alert(1)</script> [js](javascript:alert) [d](data:text/html,x) [r](../RETENTION.md#the-schedule) [x](../../lib/v2/auth.ts) [w](https://example.com) at [PRIVACY CONTACT EMAIL]. <!-- PRESEED-006 -->\n", opts);
+  const flat = JSON.stringify(blocks);
+  const links = [];
+  const walkInl = (c) => c.forEach((x) => (x.t === "link" ? links.push(x.href) : x.c && walkInl(x.c)));
+  for (const b of blocks) if (b.c) walkInl(b.c);
+  check(
+    "trust: the Markdown reader keeps raw HTML as text, drops comments, drops javascript:/data:/unknown relative links, maps trust-document links to their page, and fills placeholders",
+    blocks[0].t === "heading" && blocks[0].id === "t-hi-bxb" && flat.includes("<script>alert(1)</script>") && !flat.includes("secret note") && !flat.includes("PRESEED") &&
+      JSON.stringify(links) === JSON.stringify(["/trust#retention-the-schedule", "https://example.com", "mailto:privacy@example.com"]),
+    `${flat.slice(0, 300)} links=${JSON.stringify(links)}`,
+  );
+}
+
+try {
+  // ======== phase local: Mode L with no settings (v2 always on, the local owner, email codes) ========
+  const localDir = path.join(tmpRoot, "local");
+  const localRun = await mustStart({ ALIGN_DATA_DIR: localDir });
+  dbFile = path.join(localDir, "v2", "align.sqlite");
+  const routes = v2Routes();
+  const probes = await Promise.all(routes.flatMap((r) => [call("anon", "GET", r), call("anon", "POST", r, { body: {} })]));
+  // The old flag answered {"error":"Not found"} from proxy.ts; a route's own 404 is {"error":"not_found"} (or Better Auth's).
+  const closed = routes.filter((_, i) => [probes[2 * i], probes[2 * i + 1]].some((r) => r.status === 404 && r.json?.error === "Not found"));
+  check(`local: all ${routes.length} v2 paths (/app pages and /api/v2 routes) are served with no flag set`, routes.length >= 40 && closed.length === 0, `closed: ${closed.join(" ")}`);
+  // -- the edge: / -> /app, retired v1 paths, the loopback Host rule --
+  const root = await call("anon", "GET", "/");
+  check("local: / redirects to /app (307, Location ending in /app)", root.status === 307 && /\/app$/.test(root.headers.get("location") ?? ""), `${root.status} ${root.headers.get("location")}`);
+  const retired = await Promise.all(["/setup", "/new", "/w/x", "/api/session", "/api/proposals", "/api/state", "/api/workspaces/config", "/api/directives"].map((p) => call("anon", "GET", p).then((r) => ({ p, r }))));
+  const retiredPost = await Promise.all(["/api/sessions/events", "/api/proposals", "/api/workspaces"].map((p) => call("anon", "POST", p, { body: {} }).then((r) => ({ p, r }))));
+  check("local: retired v1 paths answer 404 (/setup, /new, /w/<id>, /api/session, /api/proposals, /api/state, /api/workspaces*, /api/directives, /api/sessions/events)", [...retired, ...retiredPost].every((x) => x.r.status === 404), [...retired, ...retiredPost].map((x) => `${x.p}:${x.r.status}`).join(" "));
+  // -- the public trust pages (PRESEED-008), built from docs/trust --
+  const lPrivacy = await call("anon", "GET", "/privacy");
+  const lTrust = await call("anon", "GET", "/trust");
+  const lSignIn = await call("anon", "GET", "/app/sign-in");
+  const lRequest = await call("anon", "GET", "/app/request-access");
+  check(
+    "local: /privacy and /trust are served signed out from docs/trust (privacy policy; security overview, subprocessors, retention, DPA, questionnaire, contact), with no source comments and no raw HTML from the documents",
+    lPrivacy.status === 200 && lPrivacy.text.includes("Privacy policy") && lPrivacy.text.includes("Our two roles") && lPrivacy.text.includes("Draft for counsel review") &&
+      lTrust.status === 200 && ["Security overview", "Subprocessors", "How long Align keeps data", "Data processing agreement", "Security questionnaire answers", 'id="contact"', 'href="/trust#retention"', 'href="/privacy"'].every((t) => lTrust.text.includes(t)) &&
+      ![lPrivacy, lTrust].some((r) => /PRESEED-00|lib\/v2\/auth\.ts|<!-- (?:fly|lib|Counsel)/.test(r.text)),
+    `${lPrivacy.status} ${lTrust.status}`,
+  );
+  check(
+    "local: the sign-in and request-access pages link to /privacy and /trust",
+    [lSignIn, lRequest].every((r) => r.status === 200 && r.text.includes('href="/privacy"') && r.text.includes('href="/trust"')),
+    `${lSignIn.status} ${lRequest.status}`,
+  );
+  const rebound = await Promise.all(["/", "/app", "/privacy", "/api/v2/me", "/api/v2/auth/get-session"].map((p) => rawGet(p, { host: "evil.example" })));
+  const reboundPort = await rawGet("/app", { host: `evil.example:${PORT}` });
+  const loopNames = await Promise.all(["localhost", "[::1]"].map((h) => rawGet("/api/v2/me", { host: `${h}:${PORT}` })));
+  check(
+    "local: a non-loopback Host (DNS rebinding) -> 421 'Misdirected request: this server answers to localhost only' on every path; localhost and [::1] are served",
+    [...rebound, reboundPort].every((r) => r.status === 421 && r.text.includes("Misdirected request: this server answers to localhost only")) && loopNames.every((r) => r.status === 401),
+    `${[...rebound, reboundPort].map((r) => r.status).join(",")} loopback:${loopNames.map((r) => r.status).join(",")}`,
+  );
+  // -- one server per data directory: <data>/.pid names the live server, and a second one refuses to start --
+  const pidFile = path.join(localDir, ".pid");
+  const heldPid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) : 0;
+  let pidAlive = false;
+  try {
+    process.kill(heldPid, 0);
+    pidAlive = heldPid > 0;
+  } catch {}
+  check("single server: <data>/.pid holds the live server's pid, mode 0600", pidAlive && (statSync(pidFile).mode & 0o777) === 0o600, `${heldPid} ${existsSync(pidFile) ? (statSync(pidFile).mode & 0o777).toString(8) : "missing"}`);
+  if (spawnSync("lsof", ["-nP", `-iTCP:${PORT + 1}`, "-sTCP:LISTEN"]).status === 0) check(`single server: port ${PORT + 1} is free for the second server`, false, "in use");
+  else {
+    const clean = { ...process.env };
+    for (const k of Object.keys(clean)) if (SETTING.test(k)) delete clean[k];
+    const second = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT + 1)], { env: { ...clean, ALIGN_DATA_DIR: localDir }, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    let out2 = "";
+    second.stdout.on("data", (c) => (out2 += c));
+    second.stderr.on("data", (c) => (out2 += c));
+    const code2 = await new Promise((resolve) => {
+      const t = setTimeout(() => resolve("still running"), 60000);
+      second.on("exit", (c) => (clearTimeout(t), resolve(c)));
+    });
+    try {
+      process.kill(-second.pid, "SIGTERM");
+    } catch {}
+    const stillOne = await call("anon", "GET", "/api/v2/me");
+    check(
+      "single server: a second server on the same data directory exits with 'Another Align server (pid <n>) is using <dir>. Stop it first.' and the first keeps serving",
+      code2 !== 0 && code2 !== "still running" && out2.includes(`Another Align server (pid ${heldPid}) is using ${localDir}. Stop it first.`) && Number(readFileSync(pidFile, "utf8").trim()) === heldPid && stillOne.status === 401,
+      `exit=${code2} ${out2.slice(-300)}`,
+    );
+  }
+  const owners = withDb((d) => d.prepare("SELECT id, name, email, emailVerified FROM ba_user").all());
+  check("local owner: the first start makes exactly one account, Local owner <owner@align.localhost>, email verified", owners.length === 1 && owners[0].name === "Local owner" && owners[0].email === "owner@align.localhost" && owners[0].emailVerified === 1, JSON.stringify(owners));
+  check("local owner: in no workspace", withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_members").get().n) === 0, "");
+  const ownerLine = LINE_RE("owner@align.localhost");
+  check("local owner: stdout prints `Align sign-in for owner@align.localhost: http://127.0.0.1:<port>/app/sign-in?email=…&code=<6 digits>`", ownerLine.test(localRun.stdout()), localRun.stdout().slice(-400));
+  const signInFile = path.join(localDir, "v2", "sign-in.txt");
+  const firstCode = codeIn(signInLine(localDir));
+  check("local owner: sign-in.txt holds the same line, mode 0600", ownerLine.test(signInLine(localDir)) && (statSync(signInFile).mode & 0o777) === 0o600 && localRun.stdout().includes(signInLine(localDir).trim()), `${(statSync(signInFile).mode & 0o777).toString(8)} ${signInLine(localDir)}`);
+  const otpRows = withDb((d) => d.prepare("SELECT identifier, value, expiresAt FROM ba_verification").all());
+  check(
+    "email code: stored hashed (SHA-256), never the code itself, with 0 attempts and a 5-minute expiry",
+    otpRows.length === 1 && otpRows[0].identifier === "sign-in-otp-owner@align.localhost" && otpRows[0].value === `${otpHash(firstCode)}:0` && !otpRows[0].value.includes(firstCode) && Math.abs(Date.parse(otpRows[0].expiresAt) - Date.now() - 5 * 60 * 1000) < 60 * 1000,
+    JSON.stringify(otpRows),
+  );
+  const noTestIdp = await call("anon", "POST", "/api/v2/auth/sign-up/email", { headers: { origin: BASE }, body: { name: "x", email: "x@example.test", password: "password-123" } });
+  check("test IdP: without ALIGN_TEST_IDP=1 email + password sign-up is refused, no account made", noTestIdp.status !== 200 && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_user").get().n) === 1, `${noTestIdp.status}`);
+  const lPage = await call("anon", "GET", "/app/sign-in");
+  check("ui: the Mode L sign-in page offers the email code (Send code) and nothing else", lPage.status === 200 && lPage.text.includes("Send code") && !lPage.text.includes("Test sign-in") && !lPage.text.includes("Continue with Google") && !lPage.text.includes("Continue with GitHub") && !lPage.text.includes("No sign-in method"), `${lPage.status}`);
+  const linkPage = await call("anon", "GET", `/app/sign-in?email=${encodeURIComponent("owner@align.localhost")}&code=${firstCode}&next=%2Fapp%2Fdevices`);
+  check(
+    "ui: the link in a code message only fills the form (code step, email and code filled, Mode L hint) and sets no cookie",
+    linkPage.status === 200 && linkPage.text.includes(`value="${firstCode}"`) && linkPage.text.includes('value="owner@align.localhost"') && linkPage.text.includes("npm run sign-in-link") && linkPage.setCookies.length === 0,
+    `${linkPage.status} ${linkPage.setCookies.join(" ")}`,
+  );
+  const stillThere = withDb((d) => d.prepare("SELECT value FROM ba_verification").get()?.value);
+  check("email code: opening the link spends nothing (the code is still stored, 0 attempts)", stillThere === `${otpHash(firstCode)}:0`, stillThere);
+  const otpWrong = await codeSignIn("anon", "owner@align.localhost", firstCode === "000000" ? "000001" : "000000");
+  check("email code: a wrong code -> 400 INVALID_OTP, no cookie", otpWrong.status === 400 && otpWrong.json?.code === "INVALID_OTP" && otpWrong.setCookies.length === 0, otpWrong.text);
+  const ownerIn = await codeSignIn("LO", "owner@align.localhost", firstCode);
+  const LO = { who: "LO", cookie: cookieOf(ownerIn.setCookies) };
+  const loMe = await call("LO", "GET", "/api/v2/me", { cookie: LO.cookie });
+  check("email code: the printed code signs the local owner in (session cookie; /me is Local owner)", ownerIn.status === 200 && loMe.status === 200 && loMe.json.user.email === "owner@align.localhost", `${ownerIn.status} ${loMe.text}`);
+  const otpReuse = await codeSignIn("anon", "owner@align.localhost", firstCode);
+  check("email code: a code works once (reuse -> 400)", otpReuse.status === 400, otpReuse.text);
+  const linkScript = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT), ALIGN_LOCAL_OWNER_EMAIL: "" } });
+  const scriptCode = codeIn(signInLine(localDir));
+  for (let i = 0; i < 20 && !localRun.stdout().includes(signInLine(localDir).trim()); i++) await sleep(100); // the server's stdout arrives through a pipe
+  check(
+    "sign-in-link: asks the running server for a fresh code (exit 0); the server prints it and rewrites sign-in.txt; the script never shows the code",
+    linkScript.status === 0 && scriptCode && scriptCode !== firstCode && ownerLine.test(signInLine(localDir)) && localRun.stdout().includes(signInLine(localDir).trim()) && !linkScript.stdout.includes(scriptCode) && /printed in the terminal/.test(linkScript.stdout),
+    `${linkScript.status} ${linkScript.stdout} ${linkScript.stderr}`,
+  );
+  let clientSends = 1; // the script's send; the server's own send for the local owner has no client
+  // A new address in Mode L: the code is printed for any email, and signing in makes the account.
+  const anaSend = await sendCode("anon", "Ana@Example.test");
+  clientSends++;
+  const ownerSend = await sendCode("anon", "owner@align.localhost");
+  clientSends++;
+  check("email code: the send answer is the same for an address with no account as for one with an account (no disclosure)", anaSend.status === 200 && ownerSend.status === 200 && anaSend.text === ownerSend.text && anaSend.text === '{"success":true}', `${anaSend.status} ${anaSend.text} | ${ownerSend.status} ${ownerSend.text}`);
+  const lastCodeFor = (email) => codeIn(stdout.split("\n").filter((l) => l.includes(`?email=${encodeURIComponent(email)}&`)).pop() ?? "");
+  const anaCode = lastCodeFor("ana@example.test");
+  const anaIn = await codeSignIn("anon", "ana@example.test", anaCode);
+  const ana = withDb((d) => d.prepare("SELECT name, emailVerified FROM ba_user WHERE email = ?").get("ana@example.test"));
+  check("accounts: in Mode L a valid code for a new address creates its account (email verified, named from the address) and signs in", anaIn.status === 200 && ana?.emailVerified === 1 && ana?.name === "ana" && cookieOf(anaIn.setCookies).includes("align_v2.session_token"), `${anaIn.status} ${anaIn.text} ${JSON.stringify(ana)}`);
+  // Expired and used-up codes.
+  withDb((d) => d.prepare("UPDATE ba_verification SET expiresAt = ? WHERE identifier = ?").run(new Date(Date.now() - 1000).toISOString(), "sign-in-otp-owner@align.localhost"));
+  const ownerCode2 = lastCodeFor("owner@align.localhost");
+  const expired = await codeSignIn("anon", "owner@align.localhost", ownerCode2);
+  check("email code: a code older than 5 minutes -> 400 OTP_EXPIRED, nobody signed in", expired.status === 400 && expired.json?.code === "OTP_EXPIRED" && expired.setCookies.length === 0, expired.text);
+  await sendCode("anon", "tries@example.test");
+  clientSends++;
+  const triesCode = codeIn(signInLine(localDir));
+  const otpBad = triesCode === "000000" ? "000001" : "000000";
+  const tries = [];
+  for (let i = 0; i < 3; i++) tries.push(await codeSignIn("anon", "tries@example.test", otpBad));
+  const fourth = await codeSignIn("anon", "tries@example.test", triesCode);
+  check(
+    "email code: 3 wrong tries, then even the right code -> 403 TOO_MANY_ATTEMPTS; the code is gone and no account is made",
+    tries.every((r) => r.status === 400 && r.json?.code === "INVALID_OTP") && fourth.status === 403 && fourth.json?.code === "TOO_MANY_ATTEMPTS" && !withDb((d) => d.prepare("SELECT 1 FROM ba_verification WHERE identifier = ?").get("sign-in-otp-tries@example.test")) && !withDb((d) => d.prepare("SELECT 1 FROM ba_user WHERE email = ?").get("tries@example.test")),
+    `${tries.map((r) => r.status).join(",")} ${fourth.status} ${fourth.text}`,
+  );
+  const onlySignIn = await call("anon", "POST", SEND, { headers: { origin: BASE }, body: { email: "x@example.test", type: "forget-password" } });
+  const resetRoute = await call("anon", "POST", "/api/v2/auth/email-otp/request-password-reset", { headers: { origin: BASE }, body: { email: "x@example.test" } });
+  check("email code: only sign-in codes are sent (other types -> 400); the plugin's other routes are off (404)", onlySignIn.status === 400 && resetRoute.status === 404, `${onlySignIn.status} ${resetRoute.status}`);
+  // Send limits: 3 per email per 10 minutes, 10 per client per hour.
+  const lim = [];
+  for (let i = 0; i < 4; i++) lim.push(await sendCode("anon", "limit@example.test"));
+  clientSends += 3;
+  const afterLimit = signInLine(localDir);
+  check(
+    "send limits: a 4th code for the same email within 10 minutes -> 429; nothing printed, the 3rd code stays",
+    lim.slice(0, 3).every((r) => r.status === 200) && lim[3].status === 429 && afterLimit.includes("limit%40example.test") && localRun.stdout().split("\n").filter((l) => l.includes("limit%40example.test")).length === 3,
+    lim.map((r) => r.status).join(","),
+  );
+  const clientLim = [];
+  for (let i = 0; clientSends + i < 10; i++) clientLim.push(await sendCode("anon", `c${i}@example.test`));
+  const printedBefore = localRun.stdout().length;
+  const eleventh = await sendCode("anon", "c-last@example.test");
+  check(
+    "send limits: the 11th code from one client within an hour, for any address -> 429, nothing printed",
+    clientLim.every((r) => r.status === 200) && eleventh.status === 429 && localRun.stdout().length === printedBefore && !signInLine(localDir).includes("c-last"),
+    `${clientLim.map((r) => r.status).join(",")} 11th:${eleventh.status}`,
+  );
+  const scriptLimited = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT) } });
+  check("sign-in-link: when the server answers 429 it exits 1 saying too many codes were sent", scriptLimited.status === 1 && /Too many codes/.test(scriptLimited.stderr), `${scriptLimited.status} ${scriptLimited.stderr}`);
+  // -- access requests (PRESEED-002): a public form, stored for the operator; durable limits, 5 per client per hour and
+  //    3 per address per day; Mode L blocks no domain and shows no bot check --
+  const raPage = await call("anon", "GET", "/app/request-access");
+  check(
+    "access: /app/request-access is served signed out (no redirect to sign-in) with the form, both interest choices and copy that says it is not an agreement and commits nobody",
+    raPage.status === 200 && raPage.text.includes("Request access to Align") && raPage.text.includes('value="try"') && raPage.text.includes('value="evaluate"') && raPage.text.includes("non-binding letter of intent") && raPage.text.includes("It is not an agreement") && raPage.text.includes("commit you or your employer to anything") && !raPage.text.includes("data-turnstile-sitekey"),
+    `${raPage.status} ${redirectTarget(raPage)}`,
+  );
+  const ar = (body, headers = { origin: BASE }) => call("anon", "POST", "/api/v2/access-requests", { headers, body });
+  const arBody = { email: "Req@Example.test", name: "Rea Quest", company: "Acme", team_size: "2-10", use_case: "Keep our agents on the team's goals", interest: "evaluate" };
+  const ar1 = await ar(arBody);
+  const arRow = withDb((d) => d.prepare("SELECT * FROM v2_access_requests WHERE email = ?").get("req@example.test"));
+  check(
+    "access: POST /api/v2/access-requests (no sign-in) -> 201 {received:true}; stored with email (lowercased), name, company, team size, use, interest, status pending and created_at",
+    ar1.status === 201 && ar1.json?.received === true && /^ar_[a-z2-7]{24}$/.test(arRow?.id ?? "") && arRow.name === "Rea Quest" && arRow.company === "Acme" && arRow.team_size === "2-10" && arRow.use_case === arBody.use_case && arRow.interest === "evaluate" && arRow.status === "pending" && !Number.isNaN(Date.parse(arRow.created_at)) && arRow.decided_at === null,
+    `${ar1.status} ${ar1.text} ${JSON.stringify(arRow)}`,
+  );
+  const ar2 = await ar({ ...arBody, interest: "try" });
+  const arAll = withDb((d) => d.prepare("SELECT interest FROM v2_access_requests WHERE email = ?").all("req@example.test"));
+  check("access: sending again while a request is pending updates that one request, with the same answer", ar2.status === 201 && ar2.text === ar1.text && arAll.length === 1 && arAll[0].interest === "try", `${ar2.status} ${JSON.stringify(arAll)}`);
+  const arBad = await Promise.all([ar({ ...arBody, interest: "sign" }), ar({ ...arBody, email: "not-an-email" }), ar({ ...arBody, use_case: " " }), ar({ ...arBody, team_size: "9" }), ar({ ...arBody, use_case: "x".repeat(501) }), ar(arBody, { origin: "http://evil.example" })]);
+  check(
+    "access: an unknown interest, a bad email, an empty or 501-character use, an unknown team size -> 400; another site's Origin -> 403 cross_site",
+    arBad.slice(0, 5).every((r) => r.status === 400) && arBad[5].status === 403 && arBad[5].json?.error === "cross_site",
+    arBad.map((r) => r.status).join(","),
+  );
+  const ar3 = await ar(arBody);
+  const ar4 = await ar(arBody);
+  check("access: a 4th request for one address within a day -> 429 rate_limited (counted durably)", ar3.status === 201 && ar4.status === 429 && ar4.json?.error === "rate_limited", `${ar3.status} ${ar4.status}`);
+  const arDisposable = await ar({ ...arBody, email: "someone@mailinator.com" });
+  const ar5 = await ar({ ...arBody, email: "other@example.test" });
+  const ar6 = await ar({ ...arBody, email: "third@example.test" });
+  check(
+    "access: Mode L blocks no disposable domain (mailinator.com -> 201); the 6th request from one client within an hour -> 429",
+    arDisposable.status === 201 && ar5.status === 201 && ar6.status === 429 && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_rate_hits WHERE key LIKE 'access-email:%' AND key LIKE '%example.test%'").get().n) === 0,
+    `${arDisposable.status} ${ar5.status} ${ar6.status}`,
+  );
+  // -- the operator script on access requests and codes (Mode L: no email settings, so a code is printed) --
+  const opEnv = { ALIGN_DATA_DIR: localDir };
+  const reqList = admin(["requests", "list", "--status", "pending"], opEnv);
+  const otherId = withDb((d) => d.prepare("SELECT id FROM v2_access_requests WHERE email = ?").get("other@example.test").id);
+  check(
+    "align-admin: requests list --status pending lists each request (id, status, interest, name, email, company, team size, use)",
+    reqList.status === 0 && reqList.out.includes(arRow.id) && reqList.out.includes("Rea Quest <req@example.test>, Acme, team 2-10") && reqList.out.includes(arBody.use_case) && reqList.out.includes(otherId) && !/ExperimentalWarning/.test(reqList.err),
+    reqList.out + reqList.err,
+  );
+  const approved = admin(["requests", "approve", arRow.id], opEnv);
+  const approvedCode = codesIn(approved.out)[0] ?? "";
+  const arAfter = withDb((d) => d.prepare("SELECT status, decided_at, code_id FROM v2_access_requests WHERE id = ?").get(arRow.id));
+  const codeRow = withDb((d) => d.prepare("SELECT * FROM v2_creation_codes WHERE id = ?").get(arAfter.code_id ?? ""));
+  check(
+    "align-admin: requests approve, with no email settings, prints one email-bound code (alc_…) once; the request is approved and names the code; the code is bound to that address, expires in 14 days, and only its HMAC is stored",
+    approved.status === 0 && codesIn(approved.out).length === 1 && arAfter.status === "approved" && arAfter.decided_at && codeRow?.email === "req@example.test" && codeRow.request_id === arRow.id && Math.abs(Date.parse(codeRow.expires_at) - Date.now() - 14 * 864e5) < 6e4 && codeRow.code_hash !== approvedCode && dbFilesLack(dbFile, approvedCode),
+    approved.out + approved.err + JSON.stringify(codeRow),
+  );
+  const again = admin(["requests", "approve", arRow.id], opEnv);
+  const declined = admin(["requests", "decline", otherId], opEnv);
+  check(
+    "align-admin: approving a request that is no longer pending exits 1; requests decline marks one declined and sends nothing",
+    again.status === 1 && /No pending request/.test(again.err) && declined.status === 0 && withDb((d) => d.prepare("SELECT status FROM v2_access_requests WHERE id = ?").get(otherId).status) === "declined" && admin(["requests", "list", "--status", "declined"], opEnv).out.includes(otherId),
+    `${again.status} ${again.err} ${declined.status} ${declined.err}`,
+  );
+  const made = admin(["codes", "create", "--count", "2", "--days", "3"], opEnv);
+  const madeCodes = codesIn(made.out);
+  const listed = admin(["codes", "list"], opEnv);
+  const madeIds = [...made.out.matchAll(/\((cc_[a-z2-7]{24}), anyone, until/g)].map((m) => m[1]);
+  check(
+    "align-admin: codes create --count 2 --days 3 prints 2 distinct unbound codes once; codes list shows ids, states and bindings and never a code",
+    made.status === 0 && madeCodes.length === 2 && madeCodes[0] !== madeCodes[1] && madeIds.length === 2 && listed.status === 0 && madeIds.every((id) => listed.out.includes(id)) && listed.out.includes("req@example.test") && listed.out.includes("live") && codesIn(listed.out).length === 0 && madeCodes.every((c) => dbFilesLack(dbFile, c)),
+    made.out + made.err + listed.out,
+  );
+  const revoked = admin(["codes", "revoke", madeIds[0]], opEnv);
+  const revokedAgain = admin(["codes", "revoke", madeIds[0]], opEnv);
+  const badArgs = [admin(["codes", "create", "--count", "0"], opEnv), admin(["codes", "create", "--email", "nope"], opEnv), admin(["requests", "list", "--status", "maybe"], opEnv), admin(["nothing", "here"], opEnv)];
+  check(
+    "align-admin: codes revoke revokes an unused code (shown as revoked; a second revoke exits 1); bad arguments exit 2 with the usage",
+    revoked.status === 0 && revokedAgain.status === 1 && /revoked/.test(admin(["codes", "list"], opEnv).out) && badArgs.every((r) => r.status === 2),
+    `${revoked.status} ${revokedAgain.status} ${badArgs.map((r) => r.status).join(",")}`,
+  );
+  const noDb = admin(["codes", "list"], { ALIGN_DATA_DIR: path.join(tmpRoot, "nowhere") });
+  check("align-admin: with no database at ALIGN_DATA_DIR it exits 1 and says so", noDb.status === 1 && /No Align database/.test(noDb.err), noDb.err);
+  const loopback = await call("anon", "GET", "/api/v2/me");
+  check("local: loopback is not a credential (/api/v2/me without a cookie -> 401)", loopback.status === 401 && loopback.json?.error === "unauthorized", loopback.text);
+  await stopServer();
+  check("single server: a stopped server removes its <data>/.pid", !existsSync(path.join(localDir, ".pid")), "still there");
+  const lineBefore = signInLine(localDir);
+  const restarted = await mustStart({ ALIGN_DATA_DIR: localDir });
+  check("local owner: a later start makes no account and sends no code", !restarted.stdout().includes("Align sign-in for") && signInLine(localDir) === lineBefore && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_user WHERE name = 'Local owner'").get().n) === 1, restarted.stdout().slice(-300));
+  await stopServer();
+  const noServer = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT) } });
+  check("sign-in-link: with no server running it exits 1 saying so", noServer.status === 1 && /No Align server is running/.test(noServer.stderr), `${noServer.status} ${noServer.stderr}`);
+
+  // ======== phase on: Mode L with the test identity provider (ALIGN_TEST_IDP=1) ========
+  const onDir = path.join(tmpRoot, "on");
+  // The hosted creation gate, caps and Turnstile keys are set here only to show that Mode L ignores every one of them:
+  // the whole phase below creates workspaces, invites members and shares sessions freely.
+  const ignoredInModeL = { ALIGN_CREATION: "closed", ALIGN_MAX_WORKSPACES: "1", ALIGN_MAX_OWNED_WORKSPACES: "1", ALIGN_MAX_MEMBERS: "1", ALIGN_MAX_SESSIONS_PER_DEVICE_DAY: "1", ALIGN_TURNSTILE_SITE_KEY: "site-key-mode-l", ALIGN_TURNSTILE_SECRET_KEY: "secret-mode-l" };
+  // A loopback OAuth 2.0 provider (ALIGN_TEST_OAUTH_URL, honoured only with ALIGN_TEST_IDP=1): it issues known tokens,
+  // so the test can see how Align stores what a provider gives it.
+  const OAUTH_AT = "align-test-access-token-7f3c9a1e5b";
+  const OAUTH_RT = "align-test-refresh-token-2d8e6b4c0a";
+  const oauthUser = { sub: "tp-1", email: "oli.auth@example.test", name: "Oli Auth" };
+  const oauthStub = http.createServer((req, res) => {
+    const u = new URL(req.url, "http://127.0.0.1");
+    const json = (o) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(o));
+    };
+    if (u.pathname === "/authorize") {
+      const to = new URL(u.searchParams.get("redirect_uri"));
+      to.searchParams.set("code", "stub-code");
+      to.searchParams.set("state", u.searchParams.get("state") ?? "");
+      res.writeHead(302, { location: to.href });
+      return res.end();
+    }
+    if (u.pathname === "/token") {
+      req.resume();
+      return req.on("end", () => json({ access_token: OAUTH_AT, refresh_token: OAUTH_RT, token_type: "Bearer", expires_in: 3600, scope: "email" }));
+    }
+    // A plain OAuth 2.0 profile (no OpenID Connect): its account id is `id`, as GitHub's is.
+    if (u.pathname === "/userinfo") return json({ id: oauthUser.sub, email: oauthUser.email, name: oauthUser.name, email_verified: true });
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((r) => oauthStub.listen(0, "127.0.0.1", r));
+  await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_OAUTH_URL: `http://127.0.0.1:${oauthStub.address().port}`, ...ignoredInModeL });
+  dbFile = path.join(onDir, "v2", "align.sqlite");
+  const mode = (p) => (statSync(p).mode & 0o777).toString(8);
+  check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
+  const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
+  const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 15, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 15 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
+  check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
+  const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
+  check("storage (PORT2-001): migration 14 adds last_read_at to connected-app grants, beside last_used_at (connected, not read)", grantCols.includes("last_read_at") && grantCols.includes("last_used_at"), grantCols.join());
+  // PORT29: migration 15 on this database, and on a version 14 database that already holds a workspace, a member and a
+  // goal (built in memory from lib/v2/db.ts's own MIGRATIONS, as the server's migrate() applies them).
+  const port29Cols = withDb((d) => [["v2_goals", "target_share"], ["v2_goal_versions", "target_share"], ["v2_workspaces", "steering"]].every(([t, c]) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c)));
+  const upgraded = (() => {
+    const src = readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8");
+    const migrations = new Function(`return [${src.slice(src.indexOf("[", src.indexOf("const MIGRATIONS")) + 1, src.indexOf("];\n\n// The operator script"))}];`)();
+    const d = new DatabaseSync(":memory:");
+    d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT)");
+    migrations.slice(0, 14).forEach((m) => d.exec(m));
+    d.exec(`INSERT INTO ba_user VALUES ('u_up', 'Up'); INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_up', 'Before', 'u_up', 'x');
+      INSERT INTO v2_members VALUES ('ws_up', 'u_up', 'owner', 'x');
+      INSERT INTO v2_goals (id, ws_id, owner_id, visibility, version, title, measures_json, anchors_json, status, created_at, updated_at) VALUES ('g_up', 'ws_up', 'u_up', 'workspace', 1, 'Kept goal', '[]', '{}', 'active', 'x', 'x');`);
+    d.exec("BEGIN");
+    d.exec(migrations[14]);
+    const broken = d.prepare("PRAGMA foreign_key_check").all().length;
+    d.exec("COMMIT");
+    const out = { n: migrations.length, broken, g: d.prepare("SELECT title, target_share FROM v2_goals").get(), w: d.prepare("SELECT name, steering FROM v2_workspaces").get() };
+    d.close();
+    return out;
+  })();
+  check(
+    "storage (PORT29): migration 15 adds target_share to goals and their versions, steering (default off) to workspaces, and the steering-event and reallocation tables; a version 14 database upgrades in place, its workspace and goal kept with steering off and no target",
+    port29Cols && ["v2_steering_events", "v2_reallocations", "v2_reallocation_revisions", "v2_reallocation_approvals"].every((t) => pragmas.tables.includes(t)) && upgraded.n === 15 && upgraded.broken === 0 &&
+      upgraded.g?.title === "Kept goal" && upgraded.g.target_share === null && upgraded.w?.name === "Before" && upgraded.w.steering === "off",
+    JSON.stringify(upgraded),
+  );
+
+  // -- identity --
+  const U1 = await signUp("U1", "Una One", "u1@example.test");
+  const U2 = await signUp("U2", "Uli Two", "u2@example.test");
+  const U3 = await signUp("U3", "Uma Three", "u3@example.test");
+  const U4 = await signUp("U4", "Ugo Four", "u4@example.test");
+  const users = [U1, U2, U3, U4];
+  check("auth: test IdP sign-up for U1..U4 -> 200 with u_ ids and a session cookie", users.every((u) => u.status === 200 && /^u_[a-z2-7]{24}$/.test(u.id) && u.cookie), users.map((u) => `${u.status} ${u.id}`).join(" "));
+  const cookieNames = U1.setCookies.map((c) => c.split("=")[0]);
+  check("auth: the session cookie is align_v2.session_token (never v1's align_session), HttpOnly", cookieNames.includes("align_v2.session_token") && !cookieNames.some((n) => /align_session/.test(n)) && U1.setCookies.some((c) => /HttpOnly/i.test(c)), U1.setCookies.join(" | "));
+  const dup = await call("U1", "POST", "/api/v2/auth/sign-up/email", { headers: { origin: BASE }, body: { name: "x", email: "u1@example.test", password: "password-123" } });
+  check("auth: a second account with the same email is refused (no linking by email)", dup.status !== 200, `${dup.status}`);
+  const me1 = await call("U1", "GET", "/api/v2/me", { cookie: U1.cookie });
+  check("auth: GET /me with the cookie -> user, device null", me1.status === 200 && me1.json.user.id === U1.id && me1.json.device === null, me1.text);
+  const noAuth = await call("anon", "GET", "/api/v2/me");
+  check("auth: GET /me without credentials -> 401", noAuth.status === 401 && noAuth.json?.error === "unauthorized", noAuth.text);
+  const evilSignIn = await call("anon", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: "http://evil.example" }, body: { email: "u1@example.test", password: "pw-U1-123456" } });
+  check("auth: sign-in from a foreign Origin is refused", evilSignIn.status === 403, `${evilSignIn.status}`);
+  const otherPortSignIn = await call("anon", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: `http://127.0.0.1:${Number(PORT) + 1}` }, body: { email: "u1@example.test", password: "pw-U1-123456" } });
+  check("auth: sign-in from another localhost port is refused (only this server's own origin is trusted)", otherPortSignIn.status === 403, `${otherPortSignIn.status}`);
+  // A test-IdP account's email is not verified: an email code for it is refused, and the account is left as it was.
+  await sendCode("anon", "u1@example.test");
+  const u1Code = codeIn(signInLine(onDir));
+  const u1Wrong = await codeSignIn("anon", "u1@example.test", u1Code === "000000" ? "000001" : "000000");
+  const u1Right = await codeSignIn("anon", "u1@example.test", u1Code);
+  const u1Row = withDb((d) => d.prepare("SELECT emailVerified, (SELECT COUNT(*) FROM ba_account WHERE userId = ba_user.id) AS accounts FROM ba_user WHERE id = ?").get(U1.id));
+  check(
+    "accounts: a valid code for an account whose email is unverified -> 403 email_unverified; nothing signed in or changed (a wrong code is just INVALID_OTP)",
+    u1Wrong.status === 400 && u1Wrong.json?.code === "INVALID_OTP" && u1Right.status === 403 && u1Right.json?.code === "email_unverified" && u1Right.setCookies.length === 0 && u1Row.emailVerified === 0 && u1Row.accounts === 1,
+    `${u1Wrong.status} ${u1Right.status} ${u1Right.text} ${JSON.stringify(u1Row)}`,
+  );
+
+  // -- workspaces, invites, teams --
+  const wsA = await call("U1", "POST", "/api/v2/workspaces", { cookie: U1.cookie, body: { name: "Workspace A" } });
+  const wsB = await call("U4", "POST", "/api/v2/workspaces", { cookie: U4.cookie, body: { name: "Workspace B" } });
+  const A = wsA.json?.id;
+  const B = wsB.json?.id;
+  check("workspaces: create A (U1 owner) and B (U4 owner) -> 201 ws_ ids", wsA.status === 201 && wsB.status === 201 && /^ws_/.test(A) && /^ws_/.test(B), `${wsA.status} ${wsB.status}`);
+  const inv = {};
+  for (const [u, role] of [
+    [U2, "member"],
+    [U3, "member"],
+    [U4, "viewer"],
+  ]) {
+    const r = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: u.email.toUpperCase(), role } });
+    inv[u.who] = r.json?.token;
+  }
+  check("invites: owner creates invite links (email normalized)", Object.values(inv).every((t) => /^[A-Za-z0-9_-]{43}$/.test(t || "")), JSON.stringify(inv));
+  const wrongEmail = await call("U3", "POST", `/api/v2/invites/${inv.U2}/accept`, { cookie: U3.cookie, body: {} });
+  check("invites: accepting someone else's invite -> 403 email_mismatch", wrongEmail.status === 403 && wrongEmail.json?.error === "email_mismatch", wrongEmail.text);
+  const acc = await Promise.all([U2, U3, U4].map((u) => call(u.who, "POST", `/api/v2/invites/${inv[u.who]}/accept`, { cookie: u.cookie, body: {} })));
+  check("invites: U2, U3 join A as members, U4 as viewer", acc.every((r) => r.status === 200) && acc[2].json.role === "viewer", acc.map((r) => r.status).join(","));
+  const reuse = await call("U2", "POST", `/api/v2/invites/${inv.U2}/accept`, { cookie: U2.cookie, body: {} });
+  check("invites: an invite works once (reuse -> 404)", reuse.status === 404, `${reuse.status}`);
+  const memberInvite = await call("U3", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U3.cookie, body: { email: "z@example.test", role: "member" } });
+  check("rbac: a member creating an invite -> 403 owner_only", memberInvite.status === 403 && memberInvite.json?.error === "owner_only", memberInvite.text);
+  const pod = await call("U1", "POST", `/api/v2/workspaces/${A}/teams`, { cookie: U1.cookie, body: { name: "Platform team" } });
+  const P1 = pod.json?.id;
+  const addLead = await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "lead" } });
+  const leadAdds = await call("U2", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U2.cookie, body: { user_id: U3.id, role: "member" } });
+  const memberAdds = await call("U3", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U3.cookie, body: { user_id: U4.id, role: "member" } });
+  check("teams: owner creates a team (pod_ id) and adds a lead; the lead adds a member ({team_id, user_id, role}); a team member can't (403 not_team_lead)", pod.status === 201 && /^pod_/.test(P1) && addLead.status === 200 && addLead.json?.team_id === P1 && !("pod_id" in (addLead.json ?? {})) && leadAdds.status === 200 && memberAdds.status === 403 && memberAdds.json?.error === "not_team_lead", `${pod.status} ${addLead.text} ${leadAdds.status} ${memberAdds.status} ${memberAdds.text}`);
+  const leadPromotes = await call("U2", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U2.cookie, body: { user_id: U3.id, role: "lead" } });
+  check("teams: a lead can't make someone a lead (403 owner_only, says team lead); only a workspace owner can", leadPromotes.status === 403 && leadPromotes.json?.error === "owner_only" && /team lead/.test(leadPromotes.json?.message) && !/pod/i.test(leadPromotes.text), `${leadPromotes.status} ${leadPromotes.text}`);
+  // The old /pods paths answer exactly like /teams.
+  const aliasPod = await call("U1", "POST", `/api/v2/workspaces/${A}/pods`, { cookie: U1.cookie, body: { name: "Alias team" } });
+  const aliasSet = await call("U1", "POST", `/api/v2/workspaces/${A}/pods/${aliasPod.json?.id}/members`, { cookie: U1.cookie, body: { user_id: U3.id, role: "member" } });
+  const aliasDel = await call("U1", "DELETE", `/api/v2/workspaces/${A}/pods/${aliasPod.json?.id}/members/${U3.id}`, { cookie: U1.cookie });
+  check("teams: the /pods paths are aliases (create 201, set member -> {team_id,...}, remove 204)", aliasPod.status === 201 && /^pod_/.test(aliasPod.json?.id) && aliasSet.status === 200 && aliasSet.json?.team_id === aliasPod.json?.id && aliasDel.status === 204, `${aliasPod.status} ${aliasSet.text} ${aliasDel.status}`);
+  const multi = await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${aliasPod.json?.id}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "member" } });
+  const wsView = await call("U2", "GET", `/api/v2/workspaces/${A}`, { cookie: U2.cookie });
+  const wsList = await call("U2", "GET", "/api/v2/workspaces", { cookie: U2.cookie });
+  const inTeams = (wsView.json?.teams ?? []).filter((t) => t.members.some((m) => m.id === U2.id)).map((t) => t.id);
+  check(
+    "teams: a person can be in several teams; GET /workspaces/{ws} lists teams (no pods key), GET /workspaces lists my teams",
+    multi.status === 200 && inTeams.includes(P1) && inTeams.includes(aliasPod.json?.id) && !("pods" in (wsView.json ?? {})) && wsList.json?.workspaces?.find((w) => w.id === A)?.teams?.length === 2,
+    `${multi.status} ${JSON.stringify(inTeams)} ${wsList.text.slice(0, 200)}`,
+  );
+  await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${aliasPod.json?.id}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "lead" } });
+  const leadSelf = await call("U2", "DELETE", `/api/v2/workspaces/${A}/teams/${aliasPod.json?.id}/members/${U2.id}`, { cookie: U2.cookie });
+  check("teams: a lead removes themselves from the team -> 204", leadSelf.status === 204, `${leadSelf.status} ${leadSelf.text}`);
+
+  // -- goals --
+  const CANARY = `CANARY-PRIV-${randomBytes(6).toString("hex")}`;
+  const mkGoal = (u, body) => call(u.who, "POST", `/api/v2/workspaces/${A}/goals`, { cookie: u.cookie, body });
+  const G1 = (await mkGoal(U1, { title: "Ship onboarding v2", visibility: "workspace", measures: [{ text: "Activation rate", target: "40%" }], anchors: { repos: ["github.com/acme/web"] } })).json;
+  const G2 = (await mkGoal(U2, { title: "Platform reliability", visibility: "team", team_id: P1, measures: [{ text: "p99 latency", target: "200ms" }] })).json;
+  const GP = (await mkGoal(U2, { title: `${CANARY} secret plan`, visibility: "private", measures: [{ text: `${CANARY} measure`, target: null }] })).json;
+  const G3 = (await mkGoal(U3, { title: "Docs refresh", visibility: "workspace" })).json;
+  const GB = (await call("U4", "POST", `/api/v2/workspaces/${B}/goals`, { cookie: U4.cookie, body: { title: "B goal" } })).json;
+  check("goals: create workspace, team, private and B goals -> g_ ids at version 1", [G1, G2, GP, G3, GB].every((g) => /^g_/.test(g?.id) && g.version === 1), JSON.stringify([G1, G2, GP, G3, GB].map((g) => g?.id ?? g)));
+  const viewerGoal = await mkGoal(U4, { title: "Viewer goal" });
+  check("rbac: a viewer creating a goal -> 403 read_only", viewerGoal.status === 403 && viewerGoal.json?.error === "read_only", viewerGoal.text);
+  const notInPod = await mkGoal(U1, { title: "Owner team goal", visibility: "team", team_id: P1 });
+  check("rbac: a team goal from someone outside the team (even the workspace owner) -> 403 not_in_team", notInPod.status === 403 && notInPod.json?.error === "not_in_team", notInPod.text);
+  const teamNoId = await mkGoal(U2, { title: "Team goal without a team", visibility: "team" });
+  const podVis = await mkGoal(U2, { title: "Old visibility word", visibility: "pod", team_id: P1 });
+  const podIdAlias = await mkGoal(U2, { title: "Old key", visibility: "team", pod_id: P1 });
+  check("goals: visibility team without team_id -> 400; the old visibility pod and the old pod_id key are not accepted (400)", teamNoId.status === 400 && podVis.status === 400 && podIdAlias.status === 400, `${teamNoId.status} ${podVis.status} ${podIdAlias.status}`);
+  check("goals: the wire says team, team_id never pod (visibility team, team {id, name}, level team)", G2.visibility === "team" && G2.team?.id === P1 && G2.team?.name === "Platform team" && G2.level === "team" && !("pod" in G2), JSON.stringify(G2).slice(0, 300));
+  const feedOf = async (u) => (await call(u.who, "GET", `/api/v2/workspaces/${A}/goals`, { cookie: u.cookie })).json?.goals?.map((g) => g.id) ?? [];
+  const feeds = { U1: await feedOf(U1), U2: await feedOf(U2), U3: await feedOf(U3), U4: await feedOf(U4) };
+  check("visibility: the private goal is in its owner's feed only (not the workspace owner's)", feeds.U2.includes(GP.id) && !feeds.U1.includes(GP.id) && !feeds.U3.includes(GP.id) && !feeds.U4.includes(GP.id), JSON.stringify(feeds));
+  check("visibility: the team goal reaches team members and the workspace owner, not the viewer outside the team", feeds.U1.includes(G2.id) && feeds.U2.includes(G2.id) && feeds.U3.includes(G2.id) && !feeds.U4.includes(G2.id), JSON.stringify(feeds));
+  const ownerReadsPrivate = await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${GP.id}`, { cookie: U1.cookie });
+  check("visibility: the workspace owner reading the private goal by id -> 404", ownerReadsPrivate.status === 404, `${ownerReadsPrivate.status}`);
+  const crossGoal = await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${GB.id}`, { cookie: U1.cookie });
+  const crossGoal2 = await call("U4", "GET", `/api/v2/workspaces/${A}/goals/${GB.id}`, { cookie: U4.cookie });
+  check("rbac: a goal id from workspace B under workspace A -> 404 (also for B's owner)", crossGoal.status === 404 && crossGoal2.status === 404, `${crossGoal.status} ${crossGoal2.status}`);
+  const nonMember = await Promise.all(
+    [`/api/v2/workspaces/${B}`, `/api/v2/workspaces/${B}/goals`, `/api/v2/workspaces/${B}/goals/${GB.id}`, `/api/v2/workspaces/${B}/sessions`, `/api/v2/workspaces/${B}/spend`, `/api/v2/workspaces/${B}/alignments`, `/api/v2/workspaces/${B}/invites`].map((p) => call("U1", "GET", p, { cookie: U1.cookie })),
+  );
+  const nonMemberW = await Promise.all(
+    [
+      [`/api/v2/workspaces/${B}/goals`, { title: "x" }],
+      [`/api/v2/workspaces/${B}/invites`, { email: "a@b.c", role: "member" }],
+      [`/api/v2/workspaces/${B}/teams`, { name: "x" }],
+      [`/api/v2/workspaces/${B}/alignments`, { target_goal_id: GB.id, choice: "contribution", session_keys: [] }],
+      [`/api/v2/workspaces/${B}/goals/${GB.id}/versions`, { title: "y" }],
+    ].map(([p, b]) => call("U1", "POST", p, { cookie: U1.cookie, body: b })),
+  );
+  check("rbac: a non-member on every workspace B route (GET and POST) -> 404", [...nonMember, ...nonMemberW].every((r) => r.status === 404), [...nonMember, ...nonMemberW].map((r) => r.status).join(","));
+  const notOwnerEdit = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${G1.id}/versions`, { cookie: U3.cookie, body: { title: "hijack" } });
+  check("rbac: editing someone else's goal -> 403 not_goal_owner", notOwnerEdit.status === 403 && notOwnerEdit.json?.error === "not_goal_owner", notOwnerEdit.text);
+  const viewerWrites = await Promise.all([
+    call("U4", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U4.cookie, body: { email: "q@example.test", role: "member" } }),
+    call("U4", "POST", `/api/v2/workspaces/${A}/teams`, { cookie: U4.cookie, body: { name: "x" } }),
+    call("U4", "POST", `/api/v2/workspaces/${A}/alignments`, { cookie: U4.cookie, body: { target_goal_id: G1.id, choice: "contribution", session_keys: [] } }),
+  ]);
+  check("rbac: viewer writes (invite, team, alignment) -> 403", viewerWrites.every((r) => r.status === 403), viewerWrites.map((r) => `${r.status}:${r.json?.error}`).join(","));
+  const bearerOnWeb = await Promise.all([
+    call("anon", "GET", "/api/v2/workspaces", { bearer: "alnd_x", cookie: U1.cookie }),
+    call("anon", "GET", "/api/v2/auth/get-session", { bearer: "alnd_x", cookie: U1.cookie }),
+    call("anon", "POST", `/api/v2/workspaces/${A}/goals`, { bearer: "alnd_x", cookie: U1.cookie, body: { title: "x" } }),
+  ]);
+  check("web routes refuse a Bearer token (even with a valid cookie) -> 403 bearer_not_allowed", bearerOnWeb.every((r) => r.status === 403 && r.json?.error === "bearer_not_allowed"), bearerOnWeb.map((r) => r.status).join(","));
+  const crossSite = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, headers: { origin: "http://evil.example" }, body: { title: "csrf" } });
+  const textPlain = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, headers: { "content-type": "text/plain" }, raw: JSON.stringify({ title: "csrf" }) });
+  check("web writes: a foreign Origin -> 403 cross_site; text/plain -> 415", crossSite.status === 403 && crossSite.json?.error === "cross_site" && textPlain.status === 415, `${crossSite.status} ${textPlain.status}`);
+  const otherPorts = await Promise.all([`http://localhost:5555`, `http://127.0.0.1:${PORT + 1}`, "null"].map((o) => call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, headers: { origin: o }, body: { title: "csrf" } })));
+  const crossSiteFetch = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, headers: { "sec-fetch-site": "cross-site" }, body: { title: "csrf" } });
+  check(
+    "web writes (Mode L): another local port, a null Origin, or Sec-Fetch-Site cross-site -> 403 cross_site",
+    [...otherPorts, crossSiteFetch].every((r) => r.status === 403 && r.json?.error === "cross_site"),
+    [...otherPorts, crossSiteFetch].map((r) => `${r.status}:${r.json?.error}`).join(" "),
+  );
+
+  // exhaustive policy matrix, straight from lib/v2/policy.ts (role x pod role x visibility x ownership x action)
+  const policy = await import(path.join(ROOT, "lib/v2/policy.ts"));
+  let cases = 0;
+  const wrong = [];
+  for (const wsRole of [null, "owner", "member", "viewer"])
+    for (const podRole of [null, "lead", "member"])
+      for (const vis of ["private", "pod", "workspace"])
+        for (const own of [true, false])
+          for (const transfer of [true, false]) {
+            const pp = { userId: "u_me", wsId: "ws_x", wsRole, pods: new Map(podRole ? [["pod_1", podRole]] : []) };
+            const goal = { kind: "goal", ownerId: own ? "u_me" : "u_other", visibility: vis, podId: vis === "pod" ? "pod_1" : null };
+            const read = policy.authorize(pp, "goal.read", goal);
+            const expectRead = !!wsRole && (own || (vis === "workspace") || (vis === "pod" && (wsRole === "owner" || !!podRole)));
+            const bind = policy.authorize(pp, "goal.bind", { kind: "bind", goal, hasTransfer: transfer });
+            const expectBind = expectRead && wsRole !== "viewer" && (own || (vis === "pod" && !!podRole) || transfer);
+            const bindStatus = !expectRead ? 404 : expectBind ? 200 : 403;
+            const edit = policy.authorize(pp, "goal.edit", goal);
+            const expectEdit = !expectRead ? 404 : wsRole !== "viewer" && own ? 200 : 403;
+            const st = (d) => (d.ok ? 200 : d.status);
+            cases += 3;
+            if (read.ok !== expectRead) wrong.push(`read ${wsRole}/${podRole}/${vis}/${own}`);
+            if (st(bind) !== bindStatus) wrong.push(`bind ${wsRole}/${podRole}/${vis}/${own}/${transfer}: ${st(bind)} want ${bindStatus}`);
+            if (st(edit) !== expectEdit) wrong.push(`edit ${wsRole}/${podRole}/${vis}/${own}: ${st(edit)} want ${expectEdit}`);
+          }
+  for (const wsRole of [null, "owner", "member", "viewer"])
+    for (const a of ["workspace.manage", "goal.create", "session.share", "alignment.create", "spend.read"]) {
+      const d = policy.authorize({ userId: "u_me", wsId: "ws_x", wsRole, pods: new Map() }, a, a === "goal.create" ? { kind: "goal_draft", podId: null } : { kind: "workspace" });
+      const want = !wsRole ? 404 : policy.WORKSPACE_ROLE_ACTIONS[wsRole].includes(a) ? 200 : 403;
+      cases++;
+      if ((d.ok ? 200 : d.status) !== want) wrong.push(`${a} as ${wsRole}`);
+    }
+  check(`policy: ${cases} role x pod role x visibility x ownership x transfer cases match the spec (private never readable by a workspace owner)`, wrong.length === 0 && cases > 400, wrong.slice(0, 5).join("; "));
+
+  // -- device pairing --
+  const k1 = newDeviceKeys();
+  const auth1 = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "Una's MacBook", public_key: k1.pub } });
+  check(
+    "device: authorize -> device_code (43+), user_code XXXX-XXXX, verification_uri /app/device, expires_in 600, interval 5",
+    auth1.status === 200 && auth1.json.device_code.length >= 43 && /^[B-DF-HJ-NP-TV-XZ]{4}-[B-DF-HJ-NP-TV-XZ]{4}$/.test(auth1.json.user_code) && auth1.json.verification_uri === `${BASE}/app/device` && auth1.json.expires_in === 600 && auth1.json.interval === 5,
+    auth1.text,
+  );
+  const badKey = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "x", public_key: "AAAA" } });
+  check("device: a malformed public key -> 400", badKey.status === 400, `${badKey.status}`);
+  const poll = (code) => call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: code } });
+  const p1 = await poll(auth1.json.device_code);
+  const p2 = await poll(auth1.json.device_code);
+  const interval = withDb((d) => d.prepare("SELECT interval_s FROM v2_device_requests WHERE user_code = ?").get(auth1.json.user_code).interval_s);
+  check("device: first poll -> authorization_pending; an immediate second poll -> slow_down (interval now 10 s)", p1.status === 400 && p1.json.error === "authorization_pending" && p2.status === 400 && p2.json.error === "slow_down" && interval === 10, `${p1.text} ${p2.text} ${interval}`);
+  const look = await call("U1", "GET", `/api/v2/device/requests/${auth1.json.user_code.toLowerCase().replace("-", " ")}`, { cookie: U1.cookie });
+  const lookBad = await call("U1", "GET", `/api/v2/device/requests/BBBB-BBBB`, { cookie: U1.cookie });
+  check("device: the signed-in user looks the code up (any case/spacing): device name and age; an unknown code -> 404", look.status === 200 && look.json.device_name === "Una's MacBook" && look.json.age_seconds >= 0 && lookBad.status === 404, `${look.text} ${lookBad.status}`);
+  // Recent sign-in: approving a device needs a sign-in from the last 15 minutes; looking up and denying do not.
+  const U1old = { ...U1, cookie: cookieOf((await call("U1", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: U1.email, password: "pw-U1-123456" } })).setCookies) };
+  const aged = ageSession(U1old.cookie, 20);
+  const lookOld = await call("U1", "GET", `/api/v2/device/requests/${auth1.json.user_code}`, { cookie: U1old.cookie });
+  const approveOld = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1old.cookie, body: { user_code: auth1.json.user_code, workspace_ids: [A] } });
+  const stillPending = withDb((d) => d.prepare("SELECT state FROM v2_device_requests WHERE user_code = ?").get(auth1.json.user_code)?.state);
+  check(
+    "recent sign-in: a 20-minute-old session approving a device -> 403 reauth_required, nothing approved (looking the code up still works)",
+    aged === 1 && lookOld.status === 200 && approveOld.status === 403 && approveOld.json?.error === "reauth_required" && stillPending === "pending",
+    `${aged} ${lookOld.status} ${approveOld.status} ${approveOld.text} ${stillPending}`,
+  );
+  const devPageOld = await call("U1", "GET", `/app/device?code=${auth1.json.user_code}`, { cookie: U1old.cookie });
+  const devPageNew = await call("U1", "GET", "/app/device", { cookie: U1.cookie });
+  check(
+    "ui: /app/device with an old sign-in shows the sign-in-again prompt instead of the code form; a recent one shows the form",
+    devPageOld.status === 200 && devPageOld.text.includes("Sign in again to approve a device. Approving needs a sign-in from the last 15 minutes.") && !devPageOld.text.includes("Look up") && devPageNew.text.includes("Look up") && !devPageNew.text.includes("Sign in again to approve"),
+    `${devPageOld.status} ${devPageNew.status}`,
+  );
+  const approveB = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: auth1.json.user_code, workspace_ids: [A, B] } });
+  check("device: approving a workspace you are not in (B) -> 404", approveB.status === 404, `${approveB.status}`);
+  const approve = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: auth1.json.user_code, workspace_ids: [A] } });
+  withDb((d) => d.prepare("UPDATE v2_device_requests SET last_poll_at = NULL WHERE user_code = ?").run(auth1.json.user_code));
+  const tok = await poll(auth1.json.device_code);
+  check("device: after approval (a recent sign-in), token -> 200 dv_ id, alnd_ access (3600 s), alnr_ refresh, user", approve.status === 200 && tok.status === 200 && /^dv_/.test(tok.json.device_id) && /^alnd_/.test(tok.json.access_token) && tok.json.expires_in === 3600 && /^alnr_/.test(tok.json.refresh_token) && tok.json.user.id === U1.id, tok.text);
+  withDb((d) => d.prepare("UPDATE v2_device_requests SET last_poll_at = NULL WHERE user_code = ?").run(auth1.json.user_code));
+  const tokAgain = await poll(auth1.json.device_code);
+  check("device: the device code is spent after one success (second token -> 400 expired_token)", tokAgain.status === 400 && tokAgain.json.error === "expired_token", tokAgain.text);
+  const stored = withDb((d) => d.prepare("SELECT token_hash FROM v2_device_tokens WHERE device_id = ?").all(tok.json.device_id).map((r) => r.token_hash));
+  check("device: tokens are stored only as SHA-256 hashes", stored.length === 2 && stored.includes(sha256hex(tok.json.access_token)) && !stored.some((h) => h.includes(tok.json.access_token)), stored.join(","));
+  const D1 = { ...k1, who: "U1", user: U1, id: tok.json.device_id, access: tok.json.access_token, refresh: tok.json.refresh_token };
+
+
+  const kExp = newDeviceKeys();
+  const authExp = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "expiring", public_key: kExp.pub } });
+  withDb((d) => d.prepare("UPDATE v2_device_requests SET expires_at = ? WHERE user_code = ?").run(new Date(Date.now() - 1000).toISOString(), authExp.json.user_code));
+  const expPoll = await poll(authExp.json.device_code);
+  const expLook = await call("U1", "GET", `/api/v2/device/requests/${authExp.json.user_code}`, { cookie: U1.cookie });
+  check("device: an expired code -> expired_token for the agent and 404 at /app/device", expPoll.json?.error === "expired_token" && expLook.status === 404, `${expPoll.text} ${expLook.status}`);
+  const kDen = newDeviceKeys();
+  const authDen = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "denied", public_key: kDen.pub } });
+  const deny = await call("U1", "POST", "/api/v2/device/deny", { cookie: U1old.cookie, body: { user_code: authDen.json.user_code } });
+  const denPoll = await poll(authDen.json.device_code);
+  check("device: a denied code -> access_denied (denying needs no recent sign-in: this session is 20 minutes old)", deny.status === 200 && denPoll.json?.error === "access_denied", `${deny.status} ${denPoll.text}`);
+  const unknownCode = await poll(randomBytes(32).toString("base64url"));
+  check("device: an unknown device code -> 400 invalid_grant", unknownCode.status === 400 && unknownCode.json?.error === "invalid_grant", unknownCode.text);
+
+  const meDev = await call("U1", "GET", "/api/v2/me", { bearer: D1.access });
+  check("device: GET /me with Bearer -> user, device, only the granted workspace (A)", meDev.status === 200 && meDev.json.device?.id === D1.id && meDev.json.workspaces.length === 1 && meDev.json.workspaces[0].id === A && meDev.json.workspaces[0].role === "owner", meDev.text);
+  const withOrigin = await call("U1", "GET", "/api/v2/me", { bearer: D1.access, headers: { origin: BASE } });
+  const withCookie = await call("U1", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D1.access, cookie: U1.cookie });
+  const tokenOrigin = await call("D", "POST", "/api/v2/device/token", { headers: { origin: BASE }, body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: "x".repeat(43) } });
+  const authorizeCookie = await call("D", "POST", "/api/v2/device/authorize", { cookie: U1.cookie, body: { device_name: "x", public_key: k1.pub } });
+  check(
+    "device routes refuse any Origin header (browser) and any Cookie header -> 403",
+    withOrigin.status === 403 && withOrigin.json?.error === "browser_not_allowed" && withCookie.status === 403 && withCookie.json?.error === "cookies_not_allowed" && tokenOrigin.status === 403 && authorizeCookie.status === 403,
+    `${withOrigin.status} ${withCookie.status} ${tokenOrigin.status} ${authorizeCookie.status}`,
+  );
+  const badBearer = await call("U1", "GET", "/api/v2/directives", { bearer: "alnd_notatoken_notatoken_xx" });
+  check("device: an unknown access token -> 401 invalid_token", badBearer.status === 401 && badBearer.json?.error === "invalid_token", badBearer.text);
+
+  // refresh: signature, rotation, reuse
+  const ts = new Date().toISOString();
+  const badSig = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: D1.refresh, ts, sig: refreshSig(kExp, D1.id, D1.refresh, ts) } });
+  const stillOk = await call("U1", "GET", "/api/v2/me", { bearer: D1.access });
+  check("refresh: a signature from another key -> 401 invalid_grant, and the device keeps working", badSig.status === 401 && badSig.json?.error === "invalid_grant" && stillOk.status === 200, `${badSig.text} ${stillOk.status}`);
+  const oldTs = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+  const stale = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: D1.refresh, ts: oldTs, sig: refreshSig(D1, D1.id, D1.refresh, oldTs) } });
+  const tamper = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: D1.refresh, ts, sig: refreshSig(D1, D1.id, D1.refresh, new Date(Date.now() + 1000).toISOString()) } });
+  check("refresh: ts outside +-5 min -> 401; a signature over a different message -> 401", stale.status === 401 && tamper.status === 401, `${stale.status} ${tamper.status}`);
+  const r1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: D1.refresh, ts, sig: refreshSig(D1, D1.id, D1.refresh, ts) } });
+  check("refresh: a valid signature -> 200 new access and a rotated refresh token", r1.status === 200 && /^alnd_/.test(r1.json.access_token) && r1.json.refresh_token !== D1.refresh && r1.json.expires_in === 3600, r1.text);
+  const ts2 = new Date().toISOString();
+  const r2 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: r1.json.refresh_token, ts: ts2, sig: refreshSig(D1, D1.id, r1.json.refresh_token, ts2) } });
+  check("refresh: the rotated token refreshes again", r2.status === 200, r2.text);
+  // A dedicated device for the reuse test, so D1 stays usable.
+  const DR = await pairDevice("U1", U1, [A], "reuse test");
+  const ts3 = new Date().toISOString();
+  const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
+  const rrReuse = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
+  const afterReuse = await call("U1", "GET", "/api/v2/me", { bearer: rr1.json?.access_token });
+  const newRefreshDead = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: rr1.json?.refresh_token, ts: ts3, sig: refreshSig(DR, DR.id, rr1.json?.refresh_token ?? "", ts3) } });
+  const drRow = withDb((d) => d.prepare("SELECT revoked_at, revoked_reason FROM v2_devices WHERE id = ?").get(DR.id));
+  check(
+    "refresh: reusing an old refresh token revokes the device (new access 401, new refresh 401, revoked_reason refresh_reuse)",
+    rr1.status === 200 && rrReuse.status === 401 && afterReuse.status === 401 && newRefreshDead.status === 401 && drRow.revoked_at && drRow.revoked_reason === "refresh_reuse",
+    `${rr1.status} ${rrReuse.status} ${afterReuse.status} ${newRefreshDead.status} ${JSON.stringify(drRow)}`,
+  );
+  D1.access = r2.json.access_token;
+  D1.refresh = r2.json.refresh_token;
+
+  const D2 = await pairDevice("U2", U2, [A]);
+  const D3 = await pairDevice("U3", U3, [A]);
+  const D4 = await pairDevice("U4", U4, [A, B]);
+  const DL = await pairDevice("U3", U3, [A], "logout test");
+  const logout = await call("U3", "DELETE", "/api/v2/devices/self", { bearer: DL.access });
+  const afterLogout = await call("U3", "GET", "/api/v2/me", { bearer: DL.access });
+  check("device: DELETE /devices/self -> 204, then its token is 401", logout.status === 204 && afterLogout.status === 401, `${logout.status} ${afterLogout.status}`);
+  const devList = await call("U3", "GET", "/api/v2/devices", { cookie: U3.cookie });
+  const otherRevoke = await call("U1", "DELETE", `/api/v2/devices/${D3.id}`, { cookie: U1.cookie });
+  check("device: the web lists my devices; revoking another user's device -> 404", devList.status === 200 && devList.json.devices.length === 2 && otherRevoke.status === 404, `${devList.status} ${otherRevoke.status}`);
+  const d4OnA = await call("U4", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D4.access });
+  const d1OnB = await call("U1", "GET", `/api/v2/workspaces/${B}/goals`, { bearer: D1.access });
+  check("device grants: a device sees granted workspaces only (B is 404 for U1's device)", d4OnA.status === 200 && d1OnB.status === 404, `${d4OnA.status} ${d1OnB.status}`);
+
+  // -- MCP with a device token (specs/align/mcp.md; scripts/test-oauth.mjs has the rest) --
+  const mcpCall = async (who, dev, name, args = {}) => {
+    const r = await call(who, "POST", "/api/mcp", { bearer: dev.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } } });
+    const line = r.text.includes("data:") ? r.text.split("\n").find((l) => l.startsWith("data:"))?.slice(5) : r.text;
+    let m = null;
+    try {
+      m = JSON.parse(line);
+    } catch {}
+    return { status: r.status, sc: m?.result?.structuredContent ?? null, text: m?.result?.content?.[0]?.text ?? "", isError: !!m?.result?.isError };
+  };
+  const mcpGoals = await mcpCall("U3", D3, "align_list_goals");
+  const feed = (await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access })).json?.goals ?? [];
+  const feedGoals = feed.map((g) => g.id);
+  check("mcp: a device token reads its one workspace's goals as its person (the same ids as the goals feed)", mcpGoals.status === 200 && mcpGoals.sc?.workspace?.id === A && JSON.stringify(mcpGoals.sc.goals.map((g) => g.id)) === JSON.stringify(feedGoals), `${mcpGoals.status} ${mcpGoals.text.slice(0, 200)}`);
+  const wireOf = (g) => JSON.stringify([g.level, g.visibility, g.team?.id ?? null]);
+  check(
+    "mcp: each goal's level, visibility and team match the goals feed (team, never pod)",
+    mcpGoals.sc?.goals?.length === feed.length && mcpGoals.sc.goals.every((g, i) => wireOf(g) === wireOf(feed[i]) && !("pod" in g)) && !/\bpod\b/.test(mcpGoals.text),
+    JSON.stringify([mcpGoals.sc?.goals?.map(wireOf), feed.map(wireOf)]),
+  );
+  const mcpOwner = await mcpCall("U1", D1, "align_list_goals");
+  check("mcp: the workspace owner's device doesn't get another member's private goal; titles are marked untrusted_text", mcpOwner.sc && !mcpOwner.sc.goals.some((g) => g.id === GP.id) && mcpOwner.sc.goals.every((g) => typeof g.title?.untrusted_text === "string"), mcpOwner.text.slice(0, 200));
+  const mcpTwo = await mcpCall("U4", D4, "align_list_goals");
+  const mcpTwoB = await mcpCall("U4", D4, "align_list_goals", { workspace: B });
+  check("mcp: a device with two workspaces must name one; naming B reads B", mcpTwo.isError && mcpTwo.text === "Name a workspace: this device can read several" && mcpTwoB.sc?.workspace?.id === B, `${mcpTwo.text} ${mcpTwoB.text.slice(0, 80)}`);
+  const mcpRefresh = await call("U1", "POST", "/api/mcp", { bearer: D1.refresh, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+  const mcpAgent = await call("U1", "POST", "/api/mcp", { bearer: "agt.e30.AAAA", headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+  check("mcp: a device refresh token and an agt. token -> 401", mcpRefresh.status === 401 && mcpAgent.status === 401, `${mcpRefresh.status} ${mcpAgent.status}`);
+
+  // -- connected apps (none yet: test-oauth.mjs connects some) --
+  const appsA = await call("U1", "GET", `/api/v2/workspaces/${A}/apps`, { cookie: U1.cookie });
+  const appsB = await call("U1", "GET", `/api/v2/workspaces/${B}/apps`, { cookie: U1.cookie });
+  const appsDel = await call("U2", "DELETE", `/api/v2/workspaces/${A}/apps/gr_AAAAAAAAAAAAAAAA`, { cookie: U2.cookie });
+  const appsBearer = await call("U1", "GET", `/api/v2/workspaces/${A}/apps`, { bearer: D1.access });
+  check(
+    "apps: GET /apps -> {url: <origin>/api/mcp, apps: []}; a non-member -> 404; DELETE an unknown grant -> 404; a device token -> 403",
+    appsA.status === 200 && appsA.json.url === `${BASE}/api/mcp` && Array.isArray(appsA.json.apps) && appsA.json.apps.length === 0 && appsB.status === 404 && appsDel.status === 404 && appsBearer.status === 403,
+    `${appsA.text} ${appsB.status} ${appsDel.status} ${appsBearer.status}`,
+  );
+
+  // -- goals feed: ETag / 304 / bindable --
+  const f1 = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access });
+  const etag = f1.headers.get("etag");
+  const f2 = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access, headers: { "if-none-match": etag } });
+  const bind = Object.fromEntries((f1.json?.goals ?? []).map((g) => [g.id, g.bindable]));
+  check("feed: ETag matches the version; If-None-Match -> 304 with no body", f1.status === 200 && etag === `"${f1.json.version}"` && f2.status === 304 && f2.text === "", `${f1.status} ${etag} ${f2.status}`);
+  check("feed: bindable = own goal or team goal (U3: G3 yes, G2 yes via team, G1 no)", bind[G3.id] === true && bind[G2.id] === true && bind[G1.id] === false && !(GP.id in bind), JSON.stringify(bind));
+  const f1Goal = f1.json.goals.find((g) => g.id === G1.id);
+  check("feed: a Goal carries id, version, title, measures (id, text, target), status, level, visibility, owner, team, anchors (no pod key)", f1Goal && f1Goal.measures[0].id && f1Goal.measures[0].target === "40%" && f1Goal.owner.id === U1.id && f1Goal.team === null && f1Goal.level === "team" && f1Goal.visibility === "workspace" && !("pod" in f1Goal) && f1Goal.anchors.repos[0] === "github.com/acme/web" && Array.isArray(f1Goal.anchors.issues), JSON.stringify(f1Goal));
+
+  // -- sessions, epochs, usage --
+  const T0 = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+  const at = (min) => new Date(Date.parse(T0) + min * 60 * 1000).toISOString();
+  const S3a = sessionKey(D3, A, "claude-code", "native-3a");
+  const S3b = sessionKey(D3, A, "codex", "native-3b");
+  const S2a = sessionKey(D2, A, "claude-code", "native-2a");
+  const S1a = sessionKey(D1, A, "claude-code", "native-1a");
+  const put = (dev, key, extra = {}) =>
+    call(dev.who, "PUT", `/api/v2/workspaces/${A}/sessions/${key}`, { bearer: dev.access, body: { harness: key === S3b ? "codex" : "claude-code", repo_key: repoKey(dev, A, `/src/${dev.who}`), repo_alias: `${dev.who}-repo`, started_at: T0, title: `${dev.who} session`, ...extra } });
+  const ps = await put(D3, S3a);
+  const psAgain = await put(D3, S3a, { title: "renamed" });
+  check("sessions: PUT shares a session -> 200 shared, no epoch yet; PUT again updates it", S3a.length === 43 && ps.status === 200 && ps.json.state === "shared" && ps.json.current_epoch === null && psAgain.status === 200, `${ps.text} ${psAgain.status}`);
+  const stolen = await put(D2, S3a);
+  check("sessions: a key owned by another user/device -> 404", stolen.status === 404, `${stolen.status}`);
+  const viewerShare = await put(D4, sessionKey(D4, A, "claude-code", "v"));
+  check("rbac: a viewer's device sharing a session -> 403 read_only", viewerShare.status === 403 && viewerShare.json?.error === "read_only", viewerShare.text);
+  await put(D3, S3b);
+  await put(D2, S2a);
+  await put(D1, S1a);
+  const epoch = (dev, key, body) => call(dev.who, "POST", `/api/v2/workspaces/${A}/sessions/${key}/epochs`, { bearer: dev.access, body: { root_turn: null, cause: "manual", ...body } });
+  const E1 = epochId();
+  const E2 = epochId();
+  const needAl = await epoch(D3, S3a, { epoch_id: E1, goal_id: G1.id, starts_at: T0 });
+  check("epochs: binding to a goal that isn't yours or your team's -> 403 alignment_required", needAl.status === 403 && needAl.json?.error === "alignment_required", needAl.text);
+  const privBind = await epoch(D3, S3a, { epoch_id: E1, goal_id: GP.id, starts_at: T0 });
+  check("epochs: binding to someone's private goal -> 404", privBind.status === 404, `${privBind.status}`);
+  const e1 = await epoch(D3, S3a, { epoch_id: E1, goal_id: G3.id, starts_at: T0 });
+  const e1Again = await epoch(D3, S3a, { epoch_id: E1, goal_id: G3.id, starts_at: T0 });
+  const e1Conflict = await epoch(D3, S3a, { epoch_id: E1, goal_id: G2.id, starts_at: T0 });
+  check("epochs: a first epoch may start at the session's start; the same epoch again is idempotent; same id with other values -> 409", e1.status === 200 && e1.json.starts_at === T0 && e1.json.ends_at === null && e1.json.goal_version_at_start === 1 && e1Again.status === 200 && e1Conflict.status === 409, `${e1.text} ${e1Again.status} ${e1Conflict.status}`);
+  const e2 = await epoch(D3, S3a, { epoch_id: E2, goal_id: G2.id, starts_at: at(60), root_turn: "turn-7" });
+  const e1Row = withDb((d) => d.prepare("SELECT ends_at FROM v2_epochs WHERE epoch_id = ?").get(E1));
+  check("epochs: a team goal binds; opening it closes the previous epoch at its start", e2.status === 200 && e1Row.ends_at === at(60), `${e2.text} ${JSON.stringify(e1Row)}`);
+  const overlap = await epoch(D3, S3a, { epoch_id: epochId(), goal_id: G3.id, starts_at: at(30) });
+  const early = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date(Date.parse(T0) - 60000).toISOString() });
+  const badCause = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G3.id, starts_at: T0, cause: "directive:dir_aaaaaaaaaaaaaaaaaaaaaaaa" });
+  check("epochs: overlapping an earlier epoch -> 409 epoch_overlap; before the session started -> 400; an unknown directive cause -> 400", overlap.status === 409 && overlap.json?.error === "epoch_overlap" && early.status === 400 && badCause.status === 400, `${overlap.status} ${early.status} ${badCause.status}`);
+  const E3b = epochId();
+  await epoch(D3, S3b, { epoch_id: E3b, goal_id: null, starts_at: T0 });
+  const E2a = epochId();
+  const priv = await epoch(D2, S2a, { epoch_id: E2a, goal_id: GP.id, starts_at: T0 });
+  const E1a = epochId();
+  const own1 = await epoch(D1, S1a, { epoch_id: E1a, goal_id: G1.id, starts_at: T0 });
+  check("epochs: an unbound epoch (goal null) and the owner's own private goal bind", priv.status === 200 && own1.status === 200, `${priv.text} ${own1.text}`);
+
+  const upload = (dev, key, rows, extra = {}) => call(dev.who, "POST", `/api/v2/workspaces/${A}/sessions/${key}/usage`, { bearer: dev.access, body: { rows }, ...extra });
+  const rowsA = [usageRow(D3, "r1", E1), usageRow(D3, "r2", E1, { basis: "api_usd" }), usageRow(D3, "r3", E1, { est_list_usd_micros: null, model: "mystery-model" }), usageRow(D3, "r4", E2, { query_source: "subagent" })];
+  const u1 = await upload(D3, S3a, rowsA);
+  const u2 = await upload(D3, S3a, rowsA);
+  const u3 = await upload(D3, S3a, [{ ...rowsA[0], output: 999 }]);
+  const kept = withDb((d) => d.prepare("SELECT output FROM v2_usage WHERE request_key = ?").get(rowsA[0].request_key).output);
+  check("usage: a batch -> accepted 4; the same batch -> duplicates 4; same key with other values -> conflict, never overwritten", u1.json?.accepted === 4 && u2.json?.duplicates === 4 && u2.json.accepted === 0 && u3.json?.conflicts === 1 && kept === 200, `${u1.text} ${u2.text} ${u3.text} ${kept}`);
+  const u4 = await upload(D3, S3a, [usageRow(D3, "r5", E3b), usageRow(D3, "r6", epochId())]);
+  check("usage: a row whose epoch belongs to another session, or is unknown -> rejected per row as conflicts", u4.json?.accepted === 0 && u4.json.conflicts === 2, u4.text);
+  await upload(D3, S3b, [usageRow(D3, "b1", E3b), usageRow(D3, "b2", E3b, { basis: "workspace_credits" })]);
+  await upload(D2, S2a, [usageRow(D2, "p1", E2a, { input: 7777 })]);
+  await upload(D1, S1a, [usageRow(D1, "o1", E1a, { basis: "estimated_list_usd" })]);
+  const tooMany = await upload(D3, S3a, Array.from({ length: 501 }, (_, i) => usageRow(D3, `m${i}`, E1)));
+  const tooBig = await call("U3", "POST", `/api/v2/workspaces/${A}/sessions/${S3a}/usage`, { bearer: D3.access, raw: JSON.stringify({ rows: [], pad: "x".repeat(260 * 1024) }) });
+  const malformed = await upload(D3, S3a, [{ ...usageRow(D3, "bad", E1), input: -1 }]);
+  check("usage: 501 rows -> 413; over 256 KB -> 413; a malformed row -> 400", tooMany.status === 413 && tooBig.status === 413 && malformed.status === 400, `${tooMany.status} ${tooBig.status} ${malformed.status}`);
+  const otherUpload = await upload(D2, S3a, [usageRow(D2, "x", E1)]);
+  check("usage: uploading to another user's session -> 404", otherUpload.status === 404, `${otherUpload.status}`);
+
+  // -- spend --
+  const spendOf = async (u, by) => (await call(u.who, "GET", `/api/v2/workspaces/${A}/spend?by=${by}`, { cookie: u.cookie })).json;
+  const sp = {};
+  for (const u of users) for (const by of ["goal", "team", "session"]) sp[`${u.who}:${by}`] = await spendOf(u, by);
+  check("spend: total = sum of rows + unallocated, for every number, for U1..U4 by goal, team and session", Object.values(sp).every((s) => s && invariantHolds(s)), Object.entries(sp).filter(([, s]) => !s || !invariantHolds(s)).map(([k]) => k).join(" "));
+  const g1 = sp["U1:goal"];
+  check("spend: 8 requests in total; 2 unallocated; 1 unpriced; basis sums present", g1.total.requests === 8 && g1.unallocated.requests === 2 && g1.unpriced_requests === 1 && g1.total.by_basis.subscription_included.requests >= 4 && g1.total.by_basis.api_usd.requests === 1, JSON.stringify(g1.total).slice(0, 300));
+  const privRowU1 = g1.rows.find((r) => r.kind === "private");
+  const privRowU2 = sp["U2:goal"].rows.find((r) => r.goal?.id === GP.id);
+  check("spend: the private goal's usage is an unnamed private row for others (workspace owner included) and named for its owner", privRowU1 && privRowU1.input === 7777 && !privRowU1.goal && privRowU2 && privRowU2.input === 7777, JSON.stringify(g1.rows.map((r) => r.label)));
+  const sessRows = sp["U3:session"].rows;
+  check("spend: by session names only the caller's own sessions; everyone else's is one row", sessRows.some((r) => r.kind === "session") && sessRows.filter((r) => r.kind === "others").length === 1 && !sessRows.some((r) => r.kind === "session" && r.label.startsWith("U1")), JSON.stringify(sessRows.map((r) => r.label)));
+  const viewerSpend = sp["U4:goal"];
+  const teamRows = sp["U1:team"].rows;
+  const podAlias = await spendOf(U1, "pod");
+  const badBy = await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=person`, { cookie: U1.cookie });
+  check(
+    "spend: by=team rows carry team {id, name}; goals with no team are one 'Goals without a team' row; by=pod is the same as by=team; another by -> 400",
+    teamRows.some((r) => r.kind === "team" && r.team?.id === P1 && r.label === "Platform team") && teamRows.filter((r) => r.kind === "no_team" && r.label === "Goals without a team").length === 1 && teamRows.every((r) => !("pod" in r) && r.kind !== "pod" && r.kind !== "no_pod") && podAlias.by === "team" && JSON.stringify(podAlias.rows) === JSON.stringify(teamRows) && badBy.status === 400,
+    `${JSON.stringify(teamRows.map((r) => [r.kind, r.label]))} ${podAlias.by} ${badBy.status}`,
+  );
+  check("spend: a viewer may read spend; the team goal it can't see is in the private row", viewerSpend.rows.some((r) => r.kind === "private") && !viewerSpend.rows.some((r) => r.goal?.id === G2.id), JSON.stringify(viewerSpend.rows.map((r) => r.label)));
+  const ranged = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal&from=${encodeURIComponent(new Date().toISOString())}`, { cookie: U1.cookie })).json;
+  check("spend: from/to filter by request time", ranged.total.requests === 0 && invariantHolds(ranged), JSON.stringify(ranged.total).slice(0, 100));
+
+  // -- directives --
+  const dirs = async (dev, cursor = 0) => (await call(dev.who, "GET", `/api/v2/directives?cursor=${cursor}`, { bearer: dev.access })).json;
+  const before3 = await dirs(D3);
+  const v2G2 = await call("U2", "POST", `/api/v2/workspaces/${A}/goals/${G2.id}/versions`, { cookie: U2.cookie, body: { version: 1, title: "Platform reliability (p99)" } });
+  const after3 = await dirs(D3, before3.next_cursor);
+  const gv = after3.directives.find((d) => d.kind === "goal_version");
+  check("directives: a new goal version -> 201 version 2, and a goal_version directive for the session bound to it (its goal snapshot carries team and level)", v2G2.status === 201 && v2G2.json.version === 2 && gv && gv.session_keys.length === 1 && gv.session_keys[0] === S3a && gv.goal.version === 2 && gv.goal.title === "Platform reliability (p99)" && gv.goal.team?.id === P1 && gv.goal.level === "team" && gv.goal.visibility === "team" && !("pod" in gv.goal) && /^dir_/.test(gv.id) && gv.ws === A && gv.binding === null, JSON.stringify(after3));
+  const dirRow = withDb((d) => d.prepare("SELECT d.created_at AS dc, g.updated_at AS gu FROM v2_directives d JOIN v2_goals g ON g.id = d.goal_id WHERE d.id = ?").get(gv?.id ?? ""));
+  check("directives: the directive row was written in the goal version's transaction (same timestamp)", dirRow && dirRow.dc >= dirRow.gu, JSON.stringify(dirRow));
+  const d2dirs = await dirs(D2);
+  check("directives: other devices don't get directives for sessions that aren't theirs", !d2dirs.directives.some((d) => d.id === gv?.id), JSON.stringify(d2dirs.directives.map((d) => d.kind)));
+  const staleVersion = await call("U2", "POST", `/api/v2/workspaces/${A}/goals/${G2.id}/versions`, { cookie: U2.cookie, body: { version: 1, title: "again" } });
+  check("goals: a version based on an old version -> 409 stale_version", staleVersion.status === 409 && staleVersion.json?.error === "stale_version", staleVersion.text);
+  const stopByOwner = await call("U1", "POST", `/api/v2/workspaces/${A}/sessions/${S3a}/stop`, { cookie: U1.cookie, body: {} });
+  const stopByMember = await call("U2", "POST", `/api/v2/workspaces/${A}/sessions/${S3a}/stop`, { cookie: U2.cookie, body: {} });
+  const resumeBySelf = await call("U3", "POST", `/api/v2/workspaces/${A}/sessions/${S3a}/resume`, { cookie: U3.cookie, body: {} });
+  const sr = (await dirs(D3, after3.next_cursor)).directives;
+  check("directives: stop by a workspace owner and resume by the session owner -> stop and resume directives; another member -> 404", stopByOwner.status === 200 && stopByMember.status === 404 && resumeBySelf.status === 200 && sr.map((d) => d.kind).join(",") === "stop,resume" && sr.every((d) => d.goal === null && d.session_keys[0] === S3a), `${stopByOwner.status} ${stopByMember.status} ${resumeBySelf.status} ${JSON.stringify(sr.map((d) => d.kind))}`);
+
+  // receipts
+  const rec = (dev, id, body) => call(dev.who, "POST", `/api/v2/directives/${id}/receipts`, { bearer: dev.access, body });
+  const nowIso = new Date().toISOString();
+  const rc1 = await rec(D3, sr[0].id, { session_key: S3a, state: "received", at: nowIso });
+  const rc2 = await rec(D3, sr[0].id, { session_key: S3a, state: "received", at: nowIso });
+  const rc3 = await rec(D3, sr[0].id, { session_key: S3a, state: "enforced", at: nowIso });
+  const rcOther = await rec(D2, sr[0].id, { session_key: S3a, state: "received", at: nowIso });
+  const rcWrongKey = await rec(D3, sr[0].id, { session_key: S3b, state: "received", at: nowIso });
+  const rcBig = await call("U3", "POST", `/api/v2/directives/${sr[0].id}/receipts`, { bearer: D3.access, raw: JSON.stringify({ session_key: S3a, state: "applied", at: nowIso, pad: "x".repeat(3000) }) });
+  check("receipts: received -> fresh true, again -> fresh false, enforced -> fresh true; another user's session or a non-target -> 404; over 2 KB -> 413", rc1.json?.fresh === true && rc2.json?.fresh === false && rc3.json?.fresh === true && rcOther.status === 404 && rcWrongKey.status === 404 && rcBig.status === 413, `${rc1.text} ${rc2.text} ${rc3.text} ${rcOther.status} ${rcWrongKey.status} ${rcBig.status}`);
+  const sessView = await call("U3", "GET", `/api/v2/workspaces/${A}/sessions`, { cookie: U3.cookie });
+  const ownerView = await call("U1", "GET", `/api/v2/workspaces/${A}/sessions`, { cookie: U1.cookie });
+  check("sessions page: mine with goal, stop status and usage; owners see everyone's alias and state, never titles", sessView.status === 200 && sessView.json.mine.length === 2 && sessView.json.all === null && ownerView.json.all.length >= 4 && !ownerView.text.includes("U3 session") && ownerView.json.mine.length === 1, `${sessView.status} ${ownerView.text.slice(0, 200)}`);
+
+  // cursor paging over > 100 directives
+  for (let i = 0; i < 52; i++) {
+    await call("U3", "POST", `/api/v2/workspaces/${A}/sessions/${S3b}/stop`, { cookie: U3.cookie, body: {} });
+    await call("U3", "POST", `/api/v2/workspaces/${A}/sessions/${S3b}/resume`, { cookie: U3.cookie, body: {} });
+  }
+  const page1 = await dirs(D3, 0);
+  const page2 = await dirs(D3, page1.next_cursor);
+  const page3 = await dirs(D3, page2.next_cursor);
+  const allSeq = [...page1.directives, ...page2.directives].map((d) => d.seq);
+  check(
+    "directives: cursor paging returns at most 100 per page in seq order, next_cursor continues, the end returns none",
+    page1.directives.length === 100 && page2.directives.length >= 7 && page3.directives.length === 0 && page3.next_cursor === page2.next_cursor && allSeq.every((s, i) => i === 0 || s > allSeq[i - 1]) && page1.next_cursor === String(page1.directives[99].seq),
+    `${page1.directives.length} ${page2.directives.length} ${page3.directives.length}`,
+  );
+
+  // Cursor catch-up (what the local sync does each pass) and revoke ending access.
+  const DS = await pairDevice("U3", U3, [A], "cursor test");
+  const SS = sessionKey(DS, A, "claude-code", "cursor");
+  await put(DS, SS);
+  for (let i = 0; i < 3; i++) await call("U3", "POST", `/api/v2/workspaces/${A}/sessions/${SS}/${i % 2 ? "resume" : "stop"}`, { cookie: U3.cookie, body: {} });
+  const dsAll = (await dirs(DS)).directives;
+  const later = await dirs(DS, dsAll[0].seq);
+  check("directives: a device catches up from its cursor with only later directives, in seq order", dsAll.length === 3 && later.directives.length === 2 && later.directives[0].seq === dsAll[1].seq && later.directives[1].seq === dsAll[2].seq, JSON.stringify(later).slice(0, 200));
+  const revokeDs = await call("U3", "DELETE", `/api/v2/devices/${DS.id}`, { cookie: U3.cookie });
+  const revokedPoll = await call(DS.who, "GET", "/api/v2/directives?cursor=0", { bearer: DS.access });
+  const dirBrowser = await call("anon", "GET", "/api/v2/directives?cursor=0", { bearer: D3.access, headers: { origin: BASE } });
+  check("directives: a revoked device gets 401; a browser Origin gets 403", revokeDs.status === 204 && revokedPoll.status === 401 && dirBrowser.status === 403, `${revokeDs.status} ${revokedPoll.status} ${dirBrowser.status}`);
+
+  // -- alignments --
+  const al = (u, body) => call(u.who, "POST", `/api/v2/workspaces/${A}/alignments`, { cookie: u.cookie, body });
+  const act = (u, id, action, body = {}) => call(u.who, "POST", `/api/v2/workspaces/${A}/alignments/${id}/${action}`, { cookie: u.cookie, body });
+  const getAl = (u, id) => call(u.who, "GET", `/api/v2/workspaces/${A}/alignments/${id}`, { cookie: u.cookie });
+  const contrib = await al(U3, { target_goal_id: G1.id, source_goal_id: G3.id, choice: "contribution", session_keys: [], note: "Docs help onboarding" });
+  const reqOf = (v, forId) => v?.requirements?.find((r) => r.for === forId);
+  check(
+    "alignment (contribution): effects contributes_to only; requirements = the target's set (its owner) and the source's set (the requester, who owns it, already counted)",
+    contrib.status === 201 && contrib.json.effects.map((e) => e.kind).join() === "contributes_to" && contrib.json.requirements.length === 2 && reqOf(contrib.json, G1.id)?.approvers.map((a) => a.id).join() === U1.id && reqOf(contrib.json, G1.id)?.approved_by === null && reqOf(contrib.json, G3.id)?.approved_by?.id === U3.id && contrib.json.state === "pending",
+    contrib.text,
+  );
+  const cApprove = await act(U1, contrib.json.id, "approve", { revision: 1 });
+  const d3AfterContrib = await dirs(D3, page2.next_cursor);
+  const feedAfterContrib = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access });
+  check("alignment (contribution): approved; no binding_changed and G1 still not bindable", cApprove.json?.state === "approved" && !d3AfterContrib.directives.some((d) => d.kind === "binding_changed") && feedAfterContrib.json.goals.find((g) => g.id === G1.id).bindable === false, `${cApprove.text} ${JSON.stringify(d3AfterContrib.directives.map((d) => d.kind))}`);
+  const g1Detail = await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${G1.id}`, { cookie: U1.cookie });
+  check("alignment (contribution): the target goal lists the contributing goal", g1Detail.json?.contributions?.some((c) => c.goal?.id === G3.id), g1Detail.text.slice(0, 300));
+
+  // -- goal tree: a child contributes to a parent, is reviewed against its versions, and may depend on other goals --
+  const GT = (await mkGoal(U1, { title: "Trinity runs several unmodified models on one onboard GPU", visibility: "workspace", measures: [{ text: "Two models that don't fit share the GPU", target: "0 missed deadlines" }] })).json;
+  const GC = (await mkGoal(U3, { title: "Orchestration controller", visibility: "workspace" })).json;
+  const tree = await al(U3, { target_goal_id: GT.id, source_goal_id: GC.id, choice: "contribution", session_keys: [], note: null });
+  await act(U1, tree.json.id, "approve", { revision: 1 });
+  const childIn = async (u, dev) => (await call(u.who, "GET", `/api/v2/workspaces/${A}/goals`, dev ? { bearer: dev.access } : { cookie: u.cookie })).json.goals.find((g) => g.id === GC.id);
+  const c0 = await childIn(U3, D3);
+  check("tree: an approved contribution makes the target a parent, reviewed at its current version", c0?.contributes_to?.length === 1 && c0.contributes_to[0].id === GT.id && c0.contributes_to[0].version === 1 && c0.contributes_to[0].reviewed_version === 1 && c0.contributes_to[0].stale === false && Array.isArray(c0.depends_on), JSON.stringify(c0));
+  const fBefore = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access });
+  await call("U1", "POST", `/api/v2/workspaces/${A}/goals/${GT.id}/versions`, { cookie: U1.cookie, body: { version: 1, measures: [{ text: "Two models that don't fit share the GPU", target: "0 missed deadlines" }, { text: "Task success near solo", target: "within 5 points" }] } });
+  const c1 = await childIn(U3, D3);
+  const fAfter = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access, headers: { "if-none-match": `"${fBefore.json.version}"` } });
+  check("tree: a new parent version marks the child stale (the feed changes, so agents refetch it)", c1.contributes_to[0].version === 2 && c1.contributes_to[0].reviewed_version === 1 && c1.contributes_to[0].stale === true && fAfter.status === 200, `${JSON.stringify(c1.contributes_to)} ${fAfter.status}`);
+  const revOther = await call("U2", "POST", `/api/v2/workspaces/${A}/goals/${GC.id}/review`, { cookie: U2.cookie, body: { parent_id: GT.id } });
+  const revNotParent = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GC.id}/review`, { cookie: U3.cookie, body: { parent_id: G1.id } });
+  const revOk = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GC.id}/review`, { cookie: U3.cookie, body: { parent_id: GT.id } });
+  check("tree: only the child's owner reviews it, only against a real parent; then it is current again", revOther.status === 403 && revNotParent.status === 404 && revOk.status === 200 && revOk.json.contributes_to[0].stale === false && revOk.json.contributes_to[0].reviewed_version === 2, `${revOther.status} ${revNotParent.status} ${revOk.text.slice(0, 200)}`);
+  const depOk = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GC.id}/versions`, { cookie: U3.cookie, body: { version: 1, depends_on: [G1.id] } });
+  const depSelf = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GC.id}/versions`, { cookie: U3.cookie, body: { version: 2, depends_on: [GC.id] } });
+  const depPriv = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GC.id}/versions`, { cookie: U3.cookie, body: { version: 2, depends_on: [GP.id] } });
+  const depMany = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GC.id}/versions`, { cookie: U3.cookie, body: { version: 2, depends_on: [G1.id, G2.id, G3.id, GT.id, GB.id, "g_x"] } });
+  check("tree: depends_on is a versioned field of the goal; itself -> 400, a goal you can't see -> 404, more than 5 -> 400", depOk.status === 201 && depOk.json.version === 2 && depOk.json.depends_on.join() === G1.id && depSelf.status === 400 && depPriv.status === 404 && depMany.status === 400, `${depOk.status} ${depSelf.status} ${depPriv.status} ${depMany.status}`);
+  const depSeen = await childIn(U4, D4);
+  check("tree: a reader who can't see a dependency doesn't learn its id", depSeen && Array.isArray(depSeen.depends_on) && depSeen.depends_on.every((id) => id === G1.id), JSON.stringify(depSeen?.depends_on));
+  // A team member may name a team-mate's goal as the source, but linking it under their own goal needs its owner's approval.
+  const podMateSource = await al(U3, { target_goal_id: G3.id, source_goal_id: G2.id, choice: "contribution", session_keys: [], note: null });
+  const podMateSeen = await getAl(U2, podMateSource.json?.id);
+  check("alignment: a team-mate's goal as the source -> pending until its owner approves; the owner can see the request", podMateSource.status === 201 && podMateSource.json.state === "pending" && podMateSource.json.approvers.some((a) => a.id === U2.id) && podMateSeen.status === 200, `${podMateSource.text.slice(0, 300)} ${podMateSeen.status}`);
+  await act(U3, podMateSource.json.id, "withdraw", {});
+
+  // -- activity: in-flight work signals between members, kept 24 hours --
+  const actPost = (dev, items, extra = {}) => call(dev.who, "POST", `/api/v2/workspaces/${A}/activity`, { bearer: dev.access, body: { items }, ...extra });
+  const actGet = (dev, after = 0) => call(dev.who, "GET", `/api/v2/workspaces/${A}/activity?after=${after}`, { bearer: dev.access });
+  const RID = "a".repeat(32);
+  const nowAt = new Date().toISOString();
+  const okItems = [
+    { session_key: S3a, kind: "edit", at: nowAt, repo_id: RID, path_hash: "b".repeat(32), path: "trinity_sched/preempt.py" },
+    { session_key: S3a, kind: "commit", at: nowAt, repo_id: RID, text: "Add preemption hook" },
+    { session_key: S3a, kind: "claim", at: nowAt, repo_id: RID, path_hash: "c".repeat(32), path: "hal/timing.py", text: "tick budget" },
+    { session_key: S2a, kind: "edit", at: nowAt, repo_id: RID, path_hash: "d".repeat(32) },
+    { session_key: S3a, kind: "edit", at: new Date(Date.now() - 25 * 3600 * 1000).toISOString(), repo_id: RID, path_hash: "e".repeat(32) },
+  ];
+  const ap = await actPost(D3, okItems);
+  check("activity: a device posts its own sessions' items; another device's session and items older than 24 h are skipped", ap.status === 200 && ap.json.accepted === 3, ap.text);
+  const ag1 = await actGet(D1);
+  const mineRows = ag1.json?.items?.filter((i) => i.session_key === S3a) ?? [];
+  const aClaim = mineRows.find((i) => i.kind === "claim");
+  check("activity: another member who can read the session's goal sees the items with the sender's name, harness and goal", ag1.status === 200 && mineRows.length === 3 && mineRows.every((i) => i.user.id === U3.id && i.mine === false && i.harness === "claude-code") && mineRows[0].path === "trinity_sched/preempt.py", ag1.text.slice(0, 300));
+  check("activity: a claim expires after 1 hour, other items after 24 hours", aClaim && Date.parse(aClaim.expires_at) - Date.parse(aClaim.at) === 3600 * 1000 && Date.parse(mineRows[0].expires_at) - Date.parse(mineRows[0].at) === 24 * 3600 * 1000, JSON.stringify(aClaim));
+  const ag4 = await actGet(D4);
+  const goalOfS3a = mineRows[0]?.goal_id;
+  check("activity: a member who can't read the session's goal sees none of it", ag4.status === 200 && !ag4.json.items.some((i) => i.session_key === S3a) && goalOfS3a === G2.id, `${ag4.text.slice(0, 200)} goal ${goalOfS3a}`);
+  const ag1b = await actGet(D1, ag1.json.cursor);
+  check("activity: the cursor returns only newer items", ag1b.status === 200 && ag1b.json.items.length === 0 && ag1b.json.cursor === ag1.json.cursor, ag1b.text);
+  const badPath = await actPost(D3, [{ ...okItems[0], path: "/Users/someone/repo/x.py" }]);
+  const dotdot = await actPost(D3, [{ ...okItems[0], path: "../x.py" }]);
+  const badRepo = await actPost(D3, [{ ...okItems[0], repo_id: "not-hex" }]);
+  const actTooMany = await actPost(D3, Array.from({ length: 201 }, () => okItems[1]));
+  const actBrowser = await call("U3", "POST", `/api/v2/workspaces/${A}/activity`, { bearer: D3.access, headers: { origin: BASE }, body: { items: [] } });
+  const actWeb = await call("U3", "GET", `/api/v2/workspaces/${A}/activity`, { cookie: U3.cookie });
+  check("activity: absolute or ../ paths, bad hashes and over 200 items -> 400; a browser or a cookie -> refused", badPath.status === 400 && dotdot.status === 400 && badRepo.status === 400 && actTooMany.status === 400 && actBrowser.status === 403 && actWeb.status === 403, `${badPath.status} ${dotdot.status} ${badRepo.status} ${actTooMany.status} ${actBrowser.status} ${actWeb.status}`);
+
+  // work_toward for S3a, currently on G2 (U2's team goal): requirements G1 (U1), sessions:U3 (U3), G2 (U2: its owner and the team's lead)
+  const wt = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3a], note: "Moving to onboarding" });
+  const expected = [U1.id, U2.id, U3.id].sort().join();
+  check(
+    "alignment (work_toward): effects contributes_to + governing_goal + allocation_transfer; requirements for the target, sessions:<owner> and the goal the allocation leaves",
+    wt.status === 201 && wt.json.effects.map((e) => e.kind).join() === "contributes_to,governing_goal,allocation_transfer" && wt.json.approvers.map((a) => a.id).sort().join() === expected && wt.json.approvers.find((a) => a.id === U3.id).approved === true && reqOf(wt.json, `sessions:${U3.id}`)?.approved_by?.id === U3.id && reqOf(wt.json, G2.id)?.approvers.map((a) => a.id).join() === U2.id && reqOf(wt.json, G1.id)?.approved_by === null,
+    wt.text,
+  );
+  check("alignment: effects are plain words", wt.json.effects.every((e) => e.text.length > 20 && !/\u2014/.test(e.text)) && /Past usage stays/.test(wt.json.effects[2].text), JSON.stringify(wt.json.effects));
+  const outsider = await getAl(U4, wt.json.id);
+  check("alignment: someone not part of it -> 404", outsider.status === 404, `${outsider.status}`);
+  const u2ok = await act(U2, wt.json.id, "approve", { revision: 1 });
+  const counter = await act(U1, wt.json.id, "counter", { revision: 1, choice: "work_toward", keep: [0], note: "OK but only this one" });
+  const afterCounter = await getAl(U3, wt.json.id);
+  const u2Voided = afterCounter.json?.approvers.find((a) => a.id === U2.id)?.approved === false;
+  check("alignment: a counter creates revision 2 (countered) and voids earlier approvals", u2ok.json?.state === "pending" && counter.status === 200 && counter.json.revision === 2 && counter.json.state === "countered" && u2Voided && afterCounter.json.approvers.find((a) => a.id === U1.id).approved === true, `${u2ok.text} ${counter.text}`);
+  const approveCountered = await act(U2, wt.json.id, "approve", { revision: 2 });
+  check("alignment: approving while countered -> 409 (the requester must accept first)", approveCountered.status === 409, approveCountered.text);
+  const accept = await act(U3, wt.json.id, "accept_counter", { revision: 2 });
+  const staleRev = await act(U2, wt.json.id, "approve", { revision: 1 });
+  check("alignment: the requester accepts the counter -> pending; approve naming revision 1 -> 409 stale_revision", accept.json?.state === "pending" && staleRev.status === 409 && staleRev.json?.error === "stale_revision", `${accept.text} ${staleRev.text}`);
+  const before = await dirs(D3, page2.next_cursor);
+  const finalApprove = await act(U2, wt.json.id, "approve", { revision: 2 });
+  const after = await dirs(D3, before.next_cursor);
+  const bc = after.directives.find((d) => d.kind === "binding_changed");
+  check(
+    "alignment: the last approval -> approved, and a binding_changed directive for the session (next root turn, cause alignment:<id>)",
+    finalApprove.json?.state === "approved" && bc && bc.session_keys.join() === S3a && bc.binding.goal_id === G1.id && bc.binding.effective === "next_root_turn" && bc.binding.cause === `alignment:${wt.json.id}` && bc.goal.id === G1.id,
+    `${finalApprove.text} ${JSON.stringify(after.directives)}`,
+  );
+  check("alignment: notes and counters never reach agents", !JSON.stringify(after).includes("Moving to onboarding") && !JSON.stringify(after).includes("only this one"), "a note reached a directive");
+  const feedAfter = await call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access });
+  check("alignment: G1 is now bindable for U3", feedAfter.json.goals.find((g) => g.id === G1.id).bindable === true, "");
+  const E4 = epochId();
+  const e4 = await epoch(D3, S3a, { epoch_id: E4, goal_id: G1.id, starts_at: at(90), cause: `directive:${bc?.id}` });
+  const notCovered = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G1.id, starts_at: at(90) });
+  check("alignment: the agent opens an epoch on G1 for the covered session (cause directive:<id>); an uncovered session still -> 403", e4.status === 200 && e4.json.goal_id === G1.id && notCovered.status === 403, `${e4.text} ${notCovered.status}`);
+  await upload(D3, S3a, [usageRow(D3, "after-align", E4)]);
+  const spendAfter = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json;
+  check("alignment: future usage counts under G1; past usage did not move", spendAfter.rows.find((r) => r.goal?.id === G1.id)?.requests === 2 && spendAfter.rows.find((r) => r.goal?.id === G2.id)?.requests === 1 && invariantHolds(spendAfter), JSON.stringify(spendAfter.rows.map((r) => [r.label, r.requests])));
+  const revoke = await act(U1, wt.json.id, "revoke");
+  const afterRevoke = await dirs(D3, after.next_cursor);
+  const bs = afterRevoke.directives.find((d) => d.kind === "binding_suspended");
+  const s3aState = withDb((d) => d.prepare("SELECT state FROM v2_sessions WHERE session_key = ?").get(S3a).state);
+  const putAfter = await put(D3, S3a);
+  check(
+    "alignment: revoke -> revoked; binding_suspended for the session bound only by it; the session is suspended with no open epoch",
+    revoke.json?.state === "revoked" && bs && bs.session_keys.join() === S3a && bs.binding.cause === `alignment:${wt.json.id}` && s3aState === "suspended" && putAfter.json?.state === "suspended" && putAfter.json.current_epoch === null,
+    `${revoke.text} ${JSON.stringify(afterRevoke.directives)} ${s3aState} ${putAfter.text}`,
+  );
+  const inflight = await upload(D3, S3a, [usageRow(D3, "inflight", E4)]);
+  const rebindG1 = await epoch(D3, S3a, { epoch_id: epochId(), goal_id: G1.id, starts_at: new Date().toISOString() });
+  const rebindOwn = await epoch(D3, S3a, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString() });
+  const spendRev = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json;
+  check("alignment: revoke is prospective (in-flight usage of the old epoch still lands under G1); G1 needs alignment again; picking an own goal resumes sharing", inflight.json?.accepted === 1 && rebindG1.status === 403 && rebindOwn.status === 200 && spendRev.rows.find((r) => r.goal?.id === G1.id)?.requests === 3, `${inflight.text} ${rebindG1.status} ${rebindOwn.text}`);
+  const wd = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3b] });
+  const wdo = await act(U3, wd.json.id, "withdraw");
+  const rj = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S3b] });
+  const rjByRequester = await act(U3, rj.json.id, "reject");
+  const rjo = await act(U1, rj.json.id, "reject");
+  const afterReject = await act(U1, rj.json.id, "approve", { revision: 1 });
+  check("alignment: withdraw by the requester; reject by an approver (not the requester); a decided request can't be approved", wdo.json?.state === "withdrawn" && rjByRequester.status === 403 && rjo.json?.state === "rejected" && afterReject.status === 409, `${wdo.status} ${rjByRequester.status} ${rjo.status} ${afterReject.status}`);
+  const otherSessions = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S2a] });
+  const privTarget = await al(U3, { target_goal_id: GP.id, choice: "contribution", session_keys: [S3b] });
+  check("alignment: listing someone else's session -> 404; a private goal as target -> 404", otherSessions.status === 404 && privTarget.status === 404, `${otherSessions.status} ${privTarget.status}`);
+  const lists = await call("U1", "GET", `/api/v2/workspaces/${A}/alignments`, { cookie: U1.cookie });
+  check("alignment: the list splits waiting on me / mine / others", lists.status === 200 && Array.isArray(lists.json.waiting_on_me) && lists.json.others.length >= 3, lists.text.slice(0, 200));
+  // A private goal as the source of U2's request: its approver sees it unnamed.
+  const privSource = await call("U2", "POST", `/api/v2/workspaces/${A}/alignments`, { cookie: U2.cookie, body: { target_goal_id: G1.id, source_goal_id: GP.id, choice: "contribution", session_keys: [] } });
+  const privSourceSeen = await getAl(U1, privSource.json?.id);
+  check("alignment: a private source goal is unnamed for the approver", privSource.status === 201 && privSourceSeen.status === 200 && privSourceSeen.json.source_goal.visible === false && /a goal you can't see/.test(privSourceSeen.json.effects[0].text), privSourceSeen.text.slice(0, 300));
+  check("alignment: the requirement for a goal the approver can't read has for: null (its id is not shown)", privSourceSeen.json?.requirements?.some((r) => r.for === null) && !privSourceSeen.text.includes(GP.id), JSON.stringify(privSourceSeen.json?.requirements));
+
+  // -- company goals --
+  const GCo = await mkGoal(U1, { title: "Expand to regulated customers", level: "company" });
+  check("company goals: an owner creates one -> 201 level company, team null, visibility workspace", GCo.status === 201 && GCo.json.level === "company" && GCo.json.team === null && GCo.json.visibility === "workspace" && GCo.json.version === 1 && GCo.json.owner.id === U1.id, GCo.text);
+  const coMember = await mkGoal(U2, { title: "Member company goal", level: "company" });
+  const coTeam = await mkGoal(U1, { title: "x", level: "company", team_id: P1 });
+  const coPriv = await mkGoal(U1, { title: "x", level: "company", visibility: "private" });
+  const coLevel = await mkGoal(U1, { title: "x", level: "division" });
+  check("company goals: a member -> 403 owner_only; with a team or another visibility -> 400; an unknown level -> 400", coMember.status === 403 && coMember.json?.error === "owner_only" && coTeam.status === 400 && coPriv.status === 400 && coLevel.status === 400, `${coMember.status} ${coTeam.status} ${coPriv.status} ${coLevel.status}`);
+  const viewerSeesCo = (await call("U4", "GET", `/api/v2/workspaces/${A}/goals`, { cookie: U4.cookie })).json?.goals?.find((g) => g.id === GCo.json.id);
+  check("company goals: a viewer reads every company goal", viewerSeesCo?.level === "company", JSON.stringify(viewerSeesCo));
+  const mcpCo = await mcpCall("U1", D1, "align_list_goals");
+  const coOut = mcpCo.sc?.goals?.find((g) => g.id === GCo.json.id);
+  const teamOut = mcpCo.sc?.goals?.find((g) => g.id === G2.id);
+  check(
+    "mcp: the company goal reads level company, team null, visibility workspace; a team goal reads level team, visibility team and its team",
+    coOut?.level === "company" && coOut.team === null && coOut.visibility === "workspace" && teamOut?.level === "team" && teamOut.visibility === "team" && teamOut.team?.id === P1 && mcpCo.text.includes("company goal"),
+    JSON.stringify({ coOut, teamOut }).slice(0, 400),
+  );
+
+  // -- approval sets: never instant against others; instant when the requester owns every goal --
+  const toCo = await al(U3, { target_goal_id: GCo.json.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
+  check("approval: a member's goal contributing to a company goal -> pending; the company goal's set is the workspace owners", toCo.status === 201 && toCo.json.state === "pending" && reqOf(toCo.json, GCo.json.id)?.approvers.map((a) => a.id).join() === U1.id, toCo.text);
+  const toCoOk = await act(U1, toCo.json.id, "approve", { revision: 1 });
+  check("approval: one approval from the set satisfies the requirement and records approved_by", toCoOk.json?.state === "approved" && reqOf(toCoOk.json, GCo.json.id)?.approved_by?.id === U1.id, toCoOk.text);
+  const own = await al(U1, { target_goal_id: GCo.json.id, source_goal_id: G1.id, choice: "contribution", session_keys: [] });
+  const g1Parents = (await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${G1.id}`, { cookie: U1.cookie })).json?.goal?.contributes_to ?? [];
+  check("approval: instant when the requester owns both goals; the child lists the parent, reviewed", own.status === 201 && own.json.state === "approved" && g1Parents.some((p) => p.id === GCo.json.id && p.stale === false), `${own.text.slice(0, 200)} ${JSON.stringify(g1Parents)}`);
+  // A lead asking against their own team's goal: their request doesn't satisfy it; the goal's owner must approve.
+  await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U1.cookie, body: { user_id: U3.id, role: "lead" } });
+  const leadAsks = await al(U3, { target_goal_id: G2.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
+  check("approval: a team lead requesting against their team's goal does not count; the set is the other people in it", leadAsks.status === 201 && leadAsks.json.state === "pending" && reqOf(leadAsks.json, G2.id)?.approvers.map((a) => a.id).join() === U2.id && reqOf(leadAsks.json, G2.id)?.approved_by === null, leadAsks.text);
+  await act(U3, leadAsks.json.id, "withdraw");
+  await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P1}/members`, { cookie: U1.cookie, body: { user_id: U3.id, role: "member" } });
+
+  // -- cycles --
+  const backwards = await al(U1, { target_goal_id: G3.id, source_goal_id: GCo.json.id, choice: "contribution", session_keys: [] });
+  check("cycles: a contribution whose approval would loop (the source is already above the target) -> 409 cycle at creation", backwards.status === 409 && backwards.json?.error === "cycle", backwards.text);
+  const GXa = (await mkGoal(U3, { title: "Loop A", visibility: "workspace" })).json;
+  const GYb = (await mkGoal(U2, { title: "Loop B", visibility: "workspace" })).json;
+  const xy = await al(U3, { target_goal_id: GYb.id, source_goal_id: GXa.id, choice: "contribution", session_keys: [] });
+  const yx = await al(U2, { target_goal_id: GXa.id, source_goal_id: GYb.id, choice: "contribution", session_keys: [] });
+  const xyOk = await act(U2, xy.json.id, "approve", { revision: 1 });
+  const yxLoop = await act(U3, yx.json.id, "approve", { revision: 1 });
+  const yxAfter = await getAl(U3, yx.json.id);
+  check(
+    "cycles: two pending links in opposite directions; approving the second -> 409 cycle and it stays pending with no approval recorded",
+    xy.json?.state === "pending" && yx.json?.state === "pending" && xyOk.json?.state === "approved" && yxLoop.status === 409 && yxLoop.json?.error === "cycle" && /contribute to each other in a loop/.test(yxLoop.json?.message) && yxAfter.json?.state === "pending" && reqOf(yxAfter.json, GXa.id)?.approved_by === null,
+    `${xyOk.status} ${yxLoop.text} ${yxAfter.json?.state}`,
+  );
+  await act(U2, yx.json.id, "withdraw");
+  const depAB = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GXa.id}/versions`, { cookie: U3.cookie, body: { version: 1, depends_on: [GYb.id] } });
+  const depBA = await call("U2", "POST", `/api/v2/workspaces/${A}/goals/${GYb.id}/versions`, { cookie: U2.cookie, body: { version: 1, depends_on: [GXa.id] } });
+  const gybNow = (await call("U2", "GET", `/api/v2/workspaces/${A}/goals/${GYb.id}`, { cookie: U2.cookie })).json?.goal;
+  check("cycles: a depends_on change that closes a loop -> 409 cycle and the goal stays at its version", depAB.status === 201 && depBA.status === 409 && depBA.json?.error === "cycle" && /depend on each other in a loop/.test(depBA.json?.message) && gybNow?.version === 1, `${depAB.status} ${depBA.text} ${gybNow?.version}`);
+
+  // -- an alignment stored before requirements (a plain user-id array) --
+  const legacy = await al(U3, { target_goal_id: G1.id, source_goal_id: GXa.id, choice: "contribution", session_keys: [] });
+  withDb((d) => {
+    d.prepare("UPDATE v2_alignment_revisions SET approvers_json = ? WHERE alignment_id = ?").run(JSON.stringify([U1.id, U2.id]), legacy.json.id);
+    d.prepare("DELETE FROM v2_alignment_approvals WHERE alignment_id = ?").run(legacy.json.id);
+  });
+  const legacySeen = await getAl(U1, legacy.json.id);
+  const legacy1 = await act(U1, legacy.json.id, "approve", { revision: 1 });
+  const legacy2 = await act(U2, legacy.json.id, "approve", { revision: 1 });
+  check(
+    "requirements: an old row's user-id array reads as singleton sets (for null); it approves once each of them approved",
+    legacySeen.json?.requirements?.length === 2 && legacySeen.json.requirements.every((r) => r.for === null && r.approvers.length === 1 && r.approved_by === null) && legacy1.json?.state === "pending" && legacy2.json?.state === "approved" && legacy2.json.requirements.map((r) => r.approved_by?.id).join() === `${U1.id},${U2.id}`,
+    `${legacySeen.text.slice(0, 300)} ${legacy1.json?.state} ${legacy2.json?.state}`,
+  );
+
+  // -- change requests: a member proposes a new version of a goal they don't own; the goal's approval set decides --
+  const crPath = (g) => `/api/v2/workspaces/${A}/goals/${g}/change-requests`;
+  const propose = (u, g, body) => call(u.who, "POST", crPath(g), { cookie: u.cookie, body });
+  const crAct = (u, g, id, action, body = {}) => call(u.who, "POST", `${crPath(g)}/${id}/${action}`, { cookie: u.cookie, body });
+  const crGet = (u, g, id) => call(u.who, "GET", `${crPath(g)}/${id}`, { cookie: u.cookie });
+  const crList = (u, q = "") => call(u.who, "GET", `/api/v2/workspaces/${A}/change-requests${q}`, { cookie: u.cookie });
+  const drain = async (dev) => {
+    for (let c = "0"; ; ) {
+      const r = await dirs(dev, c);
+      if (!r.directives.length) return c;
+      c = r.next_cursor;
+    }
+  };
+  const goalVersionsFor = (list, goalId) => (list?.directives ?? []).filter((d) => d.kind === "goal_version" && d.goal?.id === goalId);
+  const auditOf = (action, objectId) => withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = ? AND object_id = ?").all(A, action, objectId)).map((r) => r.actor_id);
+  // GL: U3's workspace-visible goal in team P1 (lead U2), so its approval set is U3 (owner) and U2 (lead).
+  const GL = (await mkGoal(U3, { title: "Pen-test the platform", visibility: "workspace", team_id: P1, measures: [{ text: "Open findings", target: "0" }] })).json;
+  const SC = sessionKey(D3, A, "claude-code", "native-cr");
+  await put(D3, SC);
+  const SCe = epochId();
+  const scStart = new Date().toISOString();
+  const scBind = await epoch(D3, SC, { epoch_id: SCe, goal_id: GL.id, starts_at: scStart });
+  // Usage under GL for the snapshot: two models in the last 30 days, and one request 40 days ago (outside the window).
+  await upload(D3, SC, [usageRow(D3, "cr-a", SCe), usageRow(D3, "cr-b", SCe, { model: "claude-opus-4-1", est_list_usd_micros: 50_000 }), usageRow(D3, "cr-old", SCe, { ts: new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString() })]);
+  const mPen = { text: "Pen-test window booked", target: "May" };
+  const cr1 = await propose(U1, GL.id, { base_version: 1, changes: { measures: [...GL.measures, mPen] }, reason: "Onboarding needs a pen-test window in May" });
+  check(
+    "change requests: a member proposes on a goal they don't own -> 201 cr_ pending, revision 1, base_version 1, requester, diff, approvers = the goal's set; audit change_request.created",
+    scBind.status === 200 && cr1.status === 201 && /^cr_/.test(cr1.json.id) && cr1.json.state === "pending" && cr1.json.revision === 1 && cr1.json.base_version === 1 && cr1.json.requester.id === U1.id && cr1.json.goal.id === GL.id && cr1.json.diff.before.measures.length === 1 && cr1.json.diff.after.measures.length === 2 && !("title" in cr1.json.diff.after) && cr1.json.approvers.map((a) => a.id).sort().join() === [U2.id, U3.id].sort().join() && auditOf("change_request.created", cr1.json.id).join() === U1.id,
+    `${scBind.status} ${cr1.text.slice(0, 400)}`,
+  );
+  const ownCr = await propose(U3, GL.id, { base_version: 1, changes: { title: "x" }, reason: "mine" });
+  const viewerCr = await propose(U4, GL.id, { base_version: 1, changes: { title: "x" }, reason: "viewer" });
+  const privCr = await propose(U1, GP.id, { base_version: 1, changes: { title: "x" }, reason: "hidden" });
+  const staleCr = await propose(U2, GL.id, { base_version: 2, changes: { title: "x" }, reason: "stale" });
+  const againCr = await propose(U1, GL.id, { base_version: 1, changes: { title: "Second try" }, reason: "again" });
+  check(
+    "change requests: the owner -> 403 own_goal; a viewer -> 403 read_only; a goal you can't read -> 404; an old base_version -> 409 stale_version; a second open one -> 409 already_open",
+    ownCr.status === 403 && ownCr.json?.error === "own_goal" && viewerCr.status === 403 && viewerCr.json?.error === "read_only" && privCr.status === 404 && staleCr.status === 409 && staleCr.json?.error === "stale_version" && againCr.status === 409 && againCr.json?.error === "already_open",
+    [ownCr, viewerCr, privCr, staleCr, againCr].map((r) => `${r.status} ${r.json?.error}`).join(" "),
+  );
+  const proposeFlags = await Promise.all([U3, U1, U4].map((u) => call(u.who, "GET", `/api/v2/workspaces/${A}/goals/${GL.id}`, { cookie: u.cookie })));
+  check(
+    "goal read (LIM-2455 §A): can_propose comes from the server with the propose rule: false for the goal's owner and a viewer, true for a member who doesn't own it (the page shows Propose a change from it)",
+    proposeFlags.map((r) => r.json?.can_propose).join() === "false,true,false" && proposeFlags[0].json?.can_edit === true,
+    proposeFlags.map((r) => `${r.status} ${r.json?.can_propose}`).join(" "),
+  );
+  const bad = await Promise.all([
+    propose(U2, GL.id, { base_version: 1, changes: { anchors: { repos: ["x"] } }, reason: "anchors" }),
+    propose(U2, GL.id, { base_version: 1, changes: {}, reason: "empty" }),
+    propose(U2, GL.id, { base_version: 1, changes: "title", reason: "not an object" }),
+    propose(U2, GL.id, { base_version: 1, changes: { title: "x" } }),
+    propose(U2, GL.id, { base_version: 1, changes: { title: "x" }, reason: "   " }),
+    propose(U2, GL.id, { base_version: 1, changes: { title: "x" }, reason: "r".repeat(2001) }),
+    propose(U2, GL.id, { base_version: 1, changes: { title: "t".repeat(301) }, reason: "long title" }),
+    propose(U2, GL.id, { base_version: 1, changes: { status: "archived" }, reason: "bad status" }),
+  ]);
+  const noChange = await propose(U2, GL.id, { base_version: 1, changes: { title: GL.title }, reason: "same" });
+  const crBig = await call("U2", "POST", crPath(GL.id), { cookie: U2.cookie, raw: JSON.stringify({ base_version: 1, changes: { title: "x" }, reason: "x", pad: "x".repeat(33 * 1024) }) });
+  const okLong = await propose(U2, GL.id, { base_version: 1, changes: { title: "Pen-test the platform twice" }, reason: "r".repeat(2000) });
+  check(
+    "change requests: anchors, an empty or non-object changes, a missing, blank or 2001-character reason, an invalid title or status -> 400; nothing changing -> 409 no_change; over 32 KB -> 413; a 2000-character reason is accepted",
+    bad.every((r) => r.status === 400) && noChange.status === 409 && noChange.json?.error === "no_change" && crBig.status === 413 && okLong.status === 201,
+    `${bad.map((r) => r.status).join(",")} ${noChange.status} ${crBig.status} ${okLong.status} ${okLong.text.slice(0, 200)}`,
+  );
+  await crAct(U2, GL.id, okLong.json?.id, "withdraw");
+  const cycleCr = await propose(U1, GYb.id, { base_version: 1, changes: { depends_on: [GXa.id] }, reason: "loop" });
+  const g3Now = (await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${G3.id}`, { cookie: U1.cookie })).json?.goal;
+  const hiddenDep = await propose(U1, G3.id, { base_version: g3Now?.version, changes: { depends_on: [GP.id] }, reason: "hidden dependency" });
+  check("change requests: a depends_on that closes a loop -> 409 cycle; a dependency you can't read -> 404", cycleCr.status === 409 && cycleCr.json?.error === "cycle" && hiddenDep.status === 404, `${cycleCr.text} ${hiddenDep.status}`);
+
+  const viewerSees = await crGet(U4, GL.id, cr1.json.id);
+  const viewerApprove = await crAct(U4, GL.id, cr1.json.id, "approve", { revision: 1 });
+  const selfApprove = await crAct(U1, GL.id, cr1.json.id, "approve", { revision: 1 });
+  const wrongGoal = await crGet(U1, G1.id, cr1.json.id);
+  const badAction = await crAct(U2, GL.id, cr1.json.id, "merge", {});
+  const u2Sees = await crGet(U2, GL.id, cr1.json.id);
+  check(
+    "change requests: a viewer reads it with every can flag false and approving -> 403 read_only; the requester (not the owner) approving -> 403 not_an_approver; another goal's path or an unknown action -> 404",
+    viewerSees.status === 200 && Object.values(viewerSees.json.can).every((v) => v === false) && viewerApprove.status === 403 && viewerApprove.json?.error === "read_only" && selfApprove.status === 403 && selfApprove.json?.error === "not_an_approver" && wrongGoal.status === 404 && badAction.status === 404,
+    `${viewerSees.text.slice(0, 200)} ${viewerApprove.status} ${selfApprove.text} ${wrongGoal.status} ${badAction.status}`,
+  );
+  check(
+    "change requests: can flags match the actions: the lead may approve, reject and counter; the requester may withdraw and rebase",
+    JSON.stringify(u2Sees.json?.can) === JSON.stringify({ approve: true, approve_and_launch: true, reject: true, counter: true, accept_counter: false, acknowledge: false, withdraw: false, rebase: false, add_evidence: true, launch: false, not_yet: false }) && cr1.json.can.withdraw === true && cr1.json.can.rebase === true && cr1.json.can.approve === false && cr1.json.can.add_evidence === true && cr1.json.launch === null && cr1.json.condition === null && cr1.json.launchers.map((p) => p.id).sort().join() === [U1.id, U2.id, U3.id].sort().join(),
+    `${JSON.stringify(u2Sees.json?.can)} ${JSON.stringify(cr1.json.can)}`,
+  );
+  const crLists = {
+    U1: await crList(U1),
+    U2: await crList(U2),
+    U4: await crList(U4),
+  };
+  check(
+    "change requests: the workspace list splits waiting on me (the lead) / mine (the requester) / others (the viewer)",
+    crLists.U2.json?.waiting_on_me.some((c) => c.id === cr1.json.id) && crLists.U1.json?.mine.some((c) => c.id === cr1.json.id) && !crLists.U1.json?.waiting_on_me.some((c) => c.id === cr1.json.id) && crLists.U4.json?.others.some((c) => c.id === cr1.json.id && !c.can.approve),
+    JSON.stringify(Object.fromEntries(Object.entries(crLists).map(([k, v]) => [k, v.json && Object.fromEntries(Object.entries(v.json).map(([g, l]) => [g, l.length]))]))),
+  );
+  // -- evidence on change requests (PRESEED-006): the Align snapshot and typed links per revision --
+  const snap1 = cr1.json.revisions[0]?.snapshot;
+  check(
+    "evidence: revision 1 carries the snapshot Align recorded: the goal's spend over the last 30 days (total and by model, the old request left out), 1 bound session, last activity",
+    snap1?.revision === 1 && snap1.recorded_by === "align" && snap1.window.days === 30 && snap1.spend_hidden === false && snap1.spend.total.requests === 2 && snap1.spend.total.est_list_usd_micros === 62_345 && snap1.spend.by_model.map((m) => m.model).join() === "claude-opus-4-1,claude-sonnet-4-5" && snap1.spend.by_model[0].est_list_usd_micros === 50_000 && snap1.bound_sessions === 1 && snap1.last_activity_at === scStart && cr1.json.evidence_count === 0 && cr1.json.approved_without_evidence === null,
+    JSON.stringify(snap1),
+  );
+  const forged = await propose(U2, GL.id, { base_version: 1, changes: { title: "Forged snapshot" }, reason: "x", snapshot: { bound_sessions: 99 } });
+  check("evidence: a snapshot sent by a client is never stored (Align computes its own)", forged.status === 201 && forged.json.revisions[0].snapshot.bound_sessions === 1, forged.text.slice(0, 200));
+  await crAct(U2, GL.id, forged.json?.id, "withdraw");
+  const evPath = (g, id) => `${crPath(g)}/${id}/evidence`;
+  const addEv = (u, g, id, body) => call(u.who, "POST", evPath(g, id), { cookie: u.cookie, body });
+  const PR = "https://github.com/acme/platform/pull/42";
+  const ev1 = await addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: PR, label: "Pen-test scope PR", revision: 1 });
+  const evDev = await call("U1", "POST", evPath(GL.id, cr1.json.id), { bearer: D1.access, body: { kind: "ci_run", url: "https://ci.example.com/runs/7", label: "Scan run" } });
+  const evLead = await addEv(U2, GL.id, cr1.json.id, { kind: "dashboard", url: "https://grafana.example.com/d/pen", label: "Findings board" });
+  check(
+    "evidence: the requester adds a link from the web (201, source person, self-reported), from their device (source agent, agent-reported), and an approver adds their own; each names who added it; audit change_request.evidence_added",
+    ev1.status === 201 && ev1.json.evidence.kind === "pr" && ev1.json.evidence.url === PR && ev1.json.evidence.revision === 1 && ev1.json.evidence.source === "person" && ev1.json.evidence.reported_as === "self-reported" && ev1.json.evidence.added_by.id === U1.id && ev1.json.evidence.can_remove === true && evDev.status === 201 && evDev.json.evidence.source === "agent" && evDev.json.evidence.reported_as === "agent-reported" && evLead.status === 201 && evLead.json.evidence.added_by.id === U2.id && evLead.json.change_request.evidence_count === 3 && auditOf("change_request.evidence_added", cr1.json.id).sort().join() === [U1.id, U1.id, U2.id].sort().join(),
+    `${ev1.text.slice(0, 300)} ${evDev.text.slice(0, 200)} ${evLead.status}`,
+  );
+  const evBad = await Promise.all([
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "http://github.com/acme/platform/pull/1", label: "plain http" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "javascript:alert(1)", label: "script" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "https://user:secret@github.com/x", label: "with a password" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: `https://example.com/${"a".repeat(2040)}`, label: "too long" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "not a url", label: "nonsense" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "https://example.com/1", label: "l".repeat(121) }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "https://example.com/2", label: "  " }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "pr", url: "https://example.com/3" }),
+    addEv(U1, GL.id, cr1.json.id, { kind: "test_report", url: "https://example.com/4", label: "unknown kind" }),
+  ]);
+  const evViewer = await addEv(U4, GL.id, cr1.json.id, { kind: "doc", url: "https://example.com/v", label: "viewer" });
+  const evDup = await addEv(U2, GL.id, cr1.json.id, { kind: "pr", url: PR, label: "same PR again" });
+  const evStale = await addEv(U1, GL.id, cr1.json.id, { kind: "doc", url: "https://example.com/s", label: "stale", revision: 2 });
+  const evBig = await call("U1", "POST", evPath(GL.id, cr1.json.id), { cookie: U1.cookie, raw: JSON.stringify({ kind: "doc", url: "https://example.com/big", label: "big", pad: "x".repeat(9 * 1024) }) });
+  const evLabel120 = await addEv(U1, GL.id, cr1.json.id, { kind: "other", url: "https://example.com/120", label: "l".repeat(120) });
+  check(
+    "evidence: a non-https, javascript:, credentialed, over-2048 or unparsable url, a 121-character, blank or missing label, or an unknown kind -> 400; a viewer -> 403 read_only; the same url twice -> 409 duplicate_evidence; another revision -> 409 stale_revision; over 8 KB -> 413; a 120-character label is accepted",
+    evBad.every((r) => r.status === 400) && evViewer.status === 403 && evViewer.json?.error === "read_only" && evDup.status === 409 && evDup.json?.error === "duplicate_evidence" && evStale.status === 409 && evStale.json?.error === "stale_revision" && evBig.status === 413 && evLabel120.status === 201,
+    `${evBad.map((r) => r.status).join(",")} ${evViewer.status} ${evDup.text} ${evStale.text} ${evBig.status} ${evLabel120.status}`,
+  );
+  const fill = [];
+  for (let i = 0; i < 6; i++) fill.push(await addEv(U1, GL.id, cr1.json.id, { kind: "doc", url: `https://docs.example.com/${i}`, label: `Doc ${i}` }));
+  const evEleventh = await addEv(U2, GL.id, cr1.json.id, { kind: "doc", url: "https://docs.example.com/11", label: "eleventh" });
+  check("evidence: at most 10 links per revision (the 11th -> 409 too_much_evidence)", fill.every((r) => r.status === 201) && fill[5].json.change_request.evidence_count === 10 && evEleventh.status === 409 && evEleventh.json?.error === "too_much_evidence", `${fill.map((r) => r.status).join(",")} ${evEleventh.text}`);
+  const delEv = (u, g, id, evId) => call(u.who, "DELETE", `${evPath(g, id)}/${evId}`, { cookie: u.cookie });
+  const evDelOther = await delEv(U2, GL.id, cr1.json.id, ev1.json.evidence.id);
+  const evDelViewer = await delEv(U4, GL.id, cr1.json.id, ev1.json.evidence.id);
+  const evDelOwn = await delEv(U1, GL.id, cr1.json.id, fill[5].json?.evidence?.id);
+  const evDelGone = await delEv(U1, GL.id, cr1.json.id, fill[5].json?.evidence?.id);
+  const evDelWrongGoal = await delEv(U1, G1.id, cr1.json.id, ev1.json.evidence.id);
+  check(
+    "evidence: removing someone else's link -> 403 not_evidence_author, a viewer -> 403 read_only; the author removes their own (200, audit change_request.evidence_removed); a removed or mismatched one -> 404",
+    evDelOther.status === 403 && evDelOther.json?.error === "not_evidence_author" && evDelViewer.status === 403 && evDelOwn.status === 200 && evDelOwn.json.evidence_count === 9 && auditOf("change_request.evidence_removed", cr1.json.id).join() === U1.id && evDelGone.status === 404 && evDelWrongGoal.status === 404,
+    `${evDelOther.text} ${evDelViewer.status} ${evDelOwn.status} ${evDelGone.status} ${evDelWrongGoal.status}`,
+  );
+  const evViewerRead = await crGet(U4, GL.id, cr1.json.id);
+  const evU2Read = await crGet(U2, GL.id, cr1.json.id);
+  const rev1Ev = evViewerRead.json?.revisions?.[0]?.evidence ?? [];
+  check(
+    "evidence: everyone who reads the request sees each link with kind, url, label, who added it and how it was reported (never verified); a viewer can't add or remove; an approver can remove only their own",
+    evViewerRead.status === 200 && rev1Ev.length === 9 && rev1Ev.every((e) => ["self-reported", "agent-reported"].includes(e.reported_as) && e.added_by.name && !e.can_remove) && evViewerRead.json.can.add_evidence === false && !JSON.stringify(evViewerRead.json).includes('"verified"') && evU2Read.json.revisions[0].evidence.filter((e) => e.can_remove).map((e) => e.added_by.id).every((id) => id === U2.id) && evU2Read.json.revisions[0].evidence.some((e) => e.can_remove),
+    JSON.stringify(rev1Ev.slice(0, 2)),
+  );
+  const rejectEmpty = await crAct(U2, GL.id, cr1.json.id, "reject", {});
+  const afterRejectEmpty = await crGet(U1, GL.id, cr1.json.id);
+  check("change requests: reject without a reason -> 400 and the request is unchanged", rejectEmpty.status === 400 && afterRejectEmpty.json?.state === "pending" && afterRejectEmpty.json.revision === 1, `${rejectEmpty.text} ${afterRejectEmpty.json?.state}`);
+
+  let cursor3 = await drain(D3);
+  const counterMeasures = [...GL.measures, { text: "Pen-test window booked", target: "April" }];
+  const counterNoNote = await crAct(U2, GL.id, cr1.json.id, "counter", { changes: { measures: counterMeasures } });
+  const counterAnchors = await crAct(U2, GL.id, cr1.json.id, "counter", { changes: { anchors: { repos: ["x"] } }, note: "anchors" });
+  const COND = "Accept if the pen-test vendor is booked by May";
+  const counterBlankCond = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: counterMeasures }, note: "April", condition: "   " });
+  const counterLongCond = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: counterMeasures }, note: "April", condition: "c".repeat(2001) });
+  const noCondAck = await crAct(U1, GL.id, cr1.json.id, "acknowledge", {});
+  const counter1 = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: counterMeasures }, note: "April works better for us", condition: COND });
+  const cr_approveCountered = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 2 });
+  const ackCountered = await crAct(U1, GL.id, cr1.json.id, "acknowledge", { revision: 2 });
+  const acceptByLead = await crAct(U2, GL.id, cr1.json.id, "accept_counter", {});
+  const accept1 = await crAct(U1, GL.id, cr1.json.id, "accept_counter", { revision: 2 });
+  const ackByLead = await crAct(U2, GL.id, cr1.json.id, "acknowledge", { revision: 2 });
+  const ackByViewer = await crAct(U4, GL.id, cr1.json.id, "acknowledge", { revision: 2 });
+  check(
+    "conditions (D2): a counter's condition must be 1 to 2000 characters (400 'condition is required' / 'condition is too long (max 2000 characters)'); a request with no condition -> acknowledge 409 no_condition; the counter stores the condition on revision 2 apart from its note; acknowledging while countered -> 409 wrong_state",
+    counterBlankCond.status === 400 && counterBlankCond.json?.message === "condition is required" && counterLongCond.status === 400 && counterLongCond.json?.message === "condition is too long (max 2000 characters)" && noCondAck.status === 409 && noCondAck.json?.error === "no_condition" &&
+      counter1.json?.revisions?.[1]?.condition === COND && counter1.json.revisions[1].note === "April works better for us" && counter1.json.revisions[0].condition === null && ackCountered.status === 409 && ackCountered.json?.error === "wrong_state",
+    `${counterBlankCond.text} ${counterLongCond.text} ${noCondAck.text} ${ackCountered.text}`,
+  );
+  check(
+    "conditions (D2): accepting the counter does not acknowledge the condition (acknowledged_by null, the requester's can.acknowledge set); the lead acknowledging -> 403 not_requester, a viewer -> 403 read_only",
+    accept1.json?.condition?.text === COND && accept1.json.condition.revision === 2 && accept1.json.condition.acknowledged_by === null && accept1.json.condition.acknowledged_at === null && accept1.json.can.acknowledge === true &&
+      ackByLead.status === 403 && ackByLead.json?.error === "not_requester" && ackByViewer.status === 403 && ackByViewer.json?.error === "read_only",
+    `${JSON.stringify(accept1.json?.condition)} ${ackByLead.text} ${ackByViewer.text}`,
+  );
+  const crApproveOld = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 1 });
+  const dirsAfterCounter = await dirs(D3, cursor3);
+  check(
+    "change requests: a counter needs a note and proposable fields (400); a counter -> countered at revision 2 with the approver's changes; approving it -> 409 wrong_state; only the requester accepts (403 not_requester) -> pending at revision 2; approve naming revision 1 -> 409 stale_revision",
+    counter1.status === 200 && counter1.json.state === "countered" && counter1.json.revision === 2 && counter1.json.changes.measures[1].target === "April" && counter1.json.revisions.length === 2 && counter1.json.revisions[1].note === "April works better for us" && counter1.json.revisions[1].author.id === U2.id && counterNoNote.status === 400 && counterAnchors.status === 400 && cr_approveCountered.status === 409 && cr_approveCountered.json?.error === "wrong_state" && acceptByLead.status === 403 && acceptByLead.json?.error === "not_requester" && accept1.json?.state === "pending" && accept1.json.revision === 2 && crApproveOld.status === 409 && crApproveOld.json?.error === "stale_revision",
+    `${counter1.text.slice(0, 300)} ${counterNoNote.status} ${cr_approveCountered.text} ${acceptByLead.text} ${accept1.json?.state} ${crApproveOld.text}`,
+  );
+  const crCountered = await crGet(U1, GL.id, cr1.json.id);
+  const delFrozen = await delEv(U1, GL.id, cr1.json.id, ev1.json.evidence.id);
+  check(
+    "evidence: a counter writes revision 2 with its own snapshot; revision 1's links stay, frozen (can_remove false, removing -> 409 evidence_frozen), and revision 2 starts with none",
+    crCountered.json?.revision === 2 && crCountered.json.revisions[1].snapshot?.revision === 2 && crCountered.json.revisions[1].snapshot.bound_sessions === 1 && crCountered.json.revisions[0].evidence.length === 9 && crCountered.json.revisions[0].evidence.every((e) => !e.can_remove) && crCountered.json.revisions[1].evidence.length === 0 && crCountered.json.evidence_count === 0 && delFrozen.status === 409 && delFrozen.json?.error === "evidence_frozen",
+    `${crCountered.json?.revision} ${JSON.stringify(crCountered.json?.revisions?.[1]?.snapshot)} ${delFrozen.text}`,
+  );
+  // ---- D1: approving records the decision; agents get the new version only at launch ----
+  const glFeed = (extra = {}) => call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access, ...extra });
+  const feedBefore = await glFeed();
+  const etagBefore = feedBefore.headers.get("etag");
+  const mcpDirsBefore = await mcpCall("U3", D3, "align_get_directives", { workspace: A });
+  const approve1 = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 2, note: "Agreed for Q3" });
+  const dirsAfterApprove = await dirs(D3, cursor3);
+  const glAfterApprove = withDb((d) => d.prepare("SELECT version, created_by FROM v2_goal_versions WHERE goal_id = ? ORDER BY version DESC LIMIT 1").get(GL.id));
+  const feedAfterApprove = await glFeed();
+  const feed304 = await glFeed({ headers: { "if-none-match": etagBefore } });
+  const mcpGoalApproved = await mcpCall("U3", D3, "align_get_goal", { goal_id: GL.id, workspace: A });
+  const mcpListApproved = await mcpCall("U3", D3, "align_list_goals", { workspace: A });
+  const mcpDirsApproved = await mcpCall("U3", D3, "align_get_directives", { workspace: A });
+  const mcpRecApproved = await mcpCall("U4", D4, "align_get_decision_record", { change_request_id: cr1.json.id, workspace: A });
+  check(
+    "launch (D1): the lead approves -> approved with approved_by, note and decided_at, launch pending, version null; no goal version is written (GL still at version 1)",
+    approve1.status === 200 && approve1.json.state === "approved" && approve1.json.approved_by?.id === U2.id && approve1.json.note === "Agreed for Q3" && approve1.json.decision_note === "Agreed for Q3" && approve1.json.version === null && approve1.json.launch === "pending" && approve1.json.decided_at && glAfterApprove.version === 1 &&
+      approve1.json.goal.version === 1 && approve1.json.can.approve === false && auditOf("change_request.approved", cr1.json.id).join() === U2.id,
+    `${approve1.text.slice(0, 300)} ${JSON.stringify(glAfterApprove)}`,
+  );
+  check(
+    "launch (D1): approve without launching: no directive for the bound session (its cursor has nothing new), the goals feed returns version 1 with the same ETag (If-None-Match -> 304), and align_get_goal, align_list_goals and align_get_directives still show version 1",
+    (dirsAfterApprove?.directives ?? []).length === 0 && goalVersionsFor(dirsAfterCounter, GL.id).length === 0 && feedAfterApprove.headers.get("etag") === etagBefore && feed304.status === 304 && feedAfterApprove.json.goals.find((g) => g.id === GL.id)?.version === 1 &&
+      mcpGoalApproved.sc?.goal?.version === 1 && mcpGoalApproved.sc.goal.measures.length === 1 && mcpGoalApproved.sc.versions.length === 1 && mcpListApproved.sc?.goals?.find((g) => g.id === GL.id)?.version === 1 && JSON.stringify(mcpDirsApproved.sc?.directives) === JSON.stringify(mcpDirsBefore.sc?.directives),
+    `${JSON.stringify(dirsAfterApprove).slice(0, 300)} ${etagBefore} ${feedAfterApprove.headers.get("etag")} ${feed304.status} ${mcpGoalApproved.sc?.goal?.version}`,
+  );
+  check(
+    "launch (D1): the MCP decision record says approved, launch pending, no resulting version, 'Approved, agents still on v1 until launch', and the condition not confirmed yet",
+    mcpRecApproved.sc?.decided === true && mcpRecApproved.sc.record?.state === "approved" && mcpRecApproved.sc.record.launch === "pending" && mcpRecApproved.sc.record.resulting_version === null && mcpRecApproved.text.includes("Approved, agents still on v1 until launch.") && !/agents on v2/.test(mcpRecApproved.text) &&
+      JSON.stringify(mcpRecApproved.sc.record.condition?.text) === JSON.stringify({ untrusted_text: COND }) && mcpRecApproved.sc.record.condition.acknowledged_by === null && /not confirmed yet/.test(mcpRecApproved.text),
+    mcpRecApproved.text.slice(0, 600),
+  );
+  const notYetViewer = await crAct(U4, GL.id, cr1.json.id, "not_yet", {});
+  const notYet1 = await crAct(U2, GL.id, cr1.json.id, "not_yet", {});
+  const notYet2 = await crAct(U3, GL.id, cr1.json.id, "not_yet", {});
+  const dirsAfterNotYet = await dirs(D3, cursor3);
+  const feedAfterNotYet = await glFeed();
+  check(
+    "launch (D1): not yet (a viewer -> 403 read_only) records the decision and publishes nothing; a later not yet replaces it (launch not_yet, launch_decided_by the owner); the feed's ETag is unchanged and no directive is written; audit change_request.not_yet",
+    notYetViewer.status === 403 && notYetViewer.json?.error === "read_only" && notYet1.json?.launch === "not_yet" && notYet1.json.launch_decided_by?.id === U2.id && notYet2.json?.launch === "not_yet" && notYet2.json.launch_decided_by?.id === U3.id && notYet2.json.version === null &&
+      (dirsAfterNotYet?.directives ?? []).length === 0 && feedAfterNotYet.headers.get("etag") === etagBefore && auditOf("change_request.not_yet", cr1.json.id).sort().join() === [U2.id, U3.id].sort().join(),
+    `${notYet1.text.slice(0, 200)} ${notYet2.text.slice(0, 200)} ${JSON.stringify(dirsAfterNotYet).slice(0, 200)}`,
+  );
+  // U1, the workspace owner, is the requester: not an approver, but in the launch set.
+  const launchViewer = await crAct(U4, GL.id, cr1.json.id, "launch", {});
+  const launch1 = await crAct(U1, GL.id, cr1.json.id, "launch", {});
+  const dirsAfterLaunch = await dirs(D3, cursor3);
+  const glV2 = withDb((d) => d.prepare("SELECT version, created_by FROM v2_goal_versions WHERE goal_id = ? ORDER BY version DESC LIMIT 1").get(GL.id));
+  const gvCr = goalVersionsFor(dirsAfterLaunch, GL.id);
+  const dirsAgain = await dirs(D3, dirsAfterLaunch?.next_cursor);
+  const feedAfterLaunch = await glFeed();
+  const mcpGoalLaunched = await mcpCall("U3", D3, "align_get_goal", { goal_id: GL.id, workspace: A });
+  const mcpDirsLaunched = await mcpCall("U3", D3, "align_get_directives", { workspace: A });
+  const launchAgain = await crAct(U2, GL.id, cr1.json.id, "launch", {});
+  const notYetAfter = await crAct(U2, GL.id, cr1.json.id, "not_yet", {});
+  check(
+    "launch (D1): a viewer -> 403 read_only; the workspace owner (the requester, not an approver) launches -> launch launched, version 2, launch_decided_by them; the goal is at version 2 authored by the approver; audit change_request.launched and goal.versioned by the launcher",
+    launchViewer.status === 403 && launchViewer.json?.error === "read_only" && launch1.status === 200 && launch1.json.state === "approved" && launch1.json.launch === "launched" && launch1.json.version === 2 && launch1.json.launch_decided_by?.id === U1.id && glV2.version === 2 && glV2.created_by === U2.id &&
+      auditOf("change_request.launched", cr1.json.id).join() === U1.id && auditOf("goal.versioned", GL.id).includes(U1.id),
+    `${launch1.text.slice(0, 300)} ${JSON.stringify(glV2)}`,
+  );
+  check(
+    "launch (D1): the launch writes exactly one goal_version directive for the bound session carrying version 2 (and no request text); the next fetch from its cursor is empty; the feed's ETag changes and MCP reads version 2 with the new directive",
+    gvCr.length === 1 && dirsAfterLaunch.directives.length === 1 && gvCr[0].session_keys.includes(SC) && gvCr[0].goal.version === 2 && gvCr[0].goal.measures.some((m) => m.target === "April") && !JSON.stringify(dirsAfterLaunch).includes("Agreed for Q3") && !JSON.stringify(dirsAfterLaunch).includes("pen-test window in May") && !JSON.stringify(dirsAfterLaunch).includes("April works better") && !JSON.stringify(dirsAfterLaunch).includes(COND) &&
+      (dirsAgain?.directives ?? []).length === 0 && feedAfterLaunch.headers.get("etag") !== etagBefore && feedAfterLaunch.json.goals.find((g) => g.id === GL.id)?.version === 2 && mcpGoalLaunched.sc?.goal?.version === 2 && mcpDirsLaunched.sc?.directives?.[0]?.kind === "goal_version" && mcpDirsLaunched.sc.directives[0].goal?.version === 2 && !(mcpDirsBefore.sc?.directives ?? []).some((d) => d.id === mcpDirsLaunched.sc.directives[0].id) && (mcpDirsBefore.sc?.directives?.[0]?.id ?? null) === (mcpDirsLaunched.sc.directives[1]?.id ?? null),
+    JSON.stringify({ dirs: dirsAfterLaunch?.directives?.map((d) => [d.kind, d.goal?.id, d.goal?.version]), again: dirsAgain?.directives?.length, etag: [etagBefore, feedAfterLaunch.headers.get("etag")], feedV: feedAfterLaunch.json?.goals?.find((g) => g.id === GL.id)?.version, mcpGoal: mcpGoalLaunched.sc?.goal?.version, mcpDir: mcpDirsLaunched.sc?.directives?.slice(0, 2).map((d) => [d.id, d.kind, d.goal?.version]), before: mcpDirsBefore.sc?.directives?.[0]?.id }),
+  );
+  check(
+    "launch (D1): launching again -> 409 wrong_state 'This change is already launched as version 2.'; not yet after the launch -> 409 wrong_state",
+    launchAgain.status === 409 && launchAgain.json?.error === "wrong_state" && launchAgain.json.message === "This change is already launched as version 2." && notYetAfter.status === 409 && notYetAfter.json?.error === "wrong_state",
+    `${launchAgain.text} ${notYetAfter.text}`,
+  );
+  const ack1 = await crAct(U1, GL.id, cr1.json.id, "acknowledge", { revision: 2 });
+  const ack2 = await crAct(U1, GL.id, cr1.json.id, "acknowledge", { revision: 2 });
+  check(
+    "conditions (D2): the requester acknowledges after the launch (never a gate): acknowledged_by them with a time, audit change_request.condition_acknowledged; a second acknowledge -> 409 already_acknowledged",
+    ack1.status === 200 && ack1.json.condition?.acknowledged_by?.id === U1.id && typeof ack1.json.condition.acknowledged_at === "string" && ack1.json.revisions[1].acknowledged_by?.id === U1.id && ack1.json.can.acknowledge === false && auditOf("change_request.condition_acknowledged", cr1.json.id).join() === U1.id && ack2.status === 409 && ack2.json?.error === "already_acknowledged",
+    `${ack1.text.slice(0, 300)} ${ack2.text}`,
+  );
+  const mcpRecLaunched = await mcpCall("U4", D4, "align_get_decision_record", { change_request_id: cr1.json.id, workspace: A });
+  check(
+    "launch (D1/D2): the MCP decision record then says launch launched, resulting_version 2, launch_decided_by the owner, 'Launched, agents on v2', and the condition acknowledged by the requester (no 'verified')",
+    mcpRecLaunched.sc?.record?.launch === "launched" && mcpRecLaunched.sc.record.resulting_version === 2 && mcpRecLaunched.sc.record.launch_decided_by?.id === U1.id && mcpRecLaunched.text.includes("Launched, agents on v2.") && mcpRecLaunched.sc.record.condition?.acknowledged_by?.id === U1.id && /acknowledged by/.test(mcpRecLaunched.text) && !/verified/i.test(mcpRecLaunched.text.replace("none verified", "")),
+    mcpRecLaunched.text.slice(0, 600),
+  );
+  const record = await crGet(U4, GL.id, cr1.json.id);
+  check(
+    "change requests: the decided request is its decision record: requester, approver, reason, before/after diff from the resulting version, revisions",
+    record.status === 200 && record.json.state === "approved" && record.json.requester.id === U1.id && record.json.approved_by.id === U2.id && record.json.reason === "Onboarding needs a pen-test window in May" && record.json.diff.before.measures.length === 1 && record.json.diff.after.measures.length === 2 && record.json.version === 2 && record.json.revisions.length === 2,
+    record.text.slice(0, 400),
+  );
+  const afterDecided = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 2 });
+  check("change requests: a decided request takes no more actions (409 wrong_state)", afterDecided.status === 409 && afterDecided.json?.error === "wrong_state", afterDecided.text);
+  const evDecided = await addEv(U1, GL.id, cr1.json.id, { kind: "doc", url: "https://example.com/late", label: "late" });
+  const delDecided = await delEv(U2, GL.id, cr1.json.id, evLead.json.evidence.id);
+  check(
+    "evidence: approving a revision with no links -> approved_without_evidence true on the decision record, audit change_request.approved and change_request.approved_without_evidence by the approver; then adding -> 409 wrong_state and removing -> 409 evidence_frozen",
+    approve1.json?.approved_without_evidence === true && record.json.approved_without_evidence === true && auditOf("change_request.approved", cr1.json.id).join() === U2.id && auditOf("change_request.approved_without_evidence", cr1.json.id).join() === U2.id && evDecided.status === 409 && evDecided.json?.error === "wrong_state" && delDecided.status === 409 && delDecided.json?.error === "evidence_frozen",
+    `${approve1.json?.approved_without_evidence} ${record.json.approved_without_evidence} ${evDecided.text} ${delDecided.text}`,
+  );
+  const mcpRecord = await mcpCall("U4", D4, "align_get_decision_record", { change_request_id: cr1.json.id, workspace: A });
+  const mrec = mcpRecord.sc?.record;
+  check(
+    "evidence (mcp): the decision record says approved without evidence, lists the frozen revision-1 links (agent-reported ones labelled so) and the snapshot Align recorded at revision 2",
+    mcpRecord.sc?.decided === true && mrec?.approved_without_evidence === true && mrec.evidence.length === 9 && mrec.evidence.some((e) => e.source === "agent" && e.reported_as === "agent-reported") && mrec.evidence.every((e) => e.revision === 1) && mrec.snapshot?.revision === 2 && /Approved without evidence\./.test(mcpRecord.text) && /agent-reported/.test(mcpRecord.text),
+    mcpRecord.text.slice(0, 400),
+  );
+
+  // Reject, withdraw and rebase write no directive; stale requests need a rebase before approval.
+  cursor3 = await drain(D3);
+  const crR = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test everything" }, reason: "Wider scope" });
+  const crRbyReq = await crAct(U1, GL.id, crR.json?.id, "reject", { reason: "no" });
+  const crRrej = await crAct(U3, GL.id, crR.json?.id, "reject", { reason: "Out of scope this quarter" });
+  const crW = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the API" }, reason: "Narrower" });
+  const crWbyLead = await crAct(U2, GL.id, crW.json?.id, "withdraw", {});
+  const crWok = await crAct(U1, GL.id, crW.json?.id, "withdraw", {});
+  check(
+    "change requests: reject by the requester -> 403 not_an_approver; by the owner -> rejected with rejected_by and the reason; withdraw by someone else -> 403 not_requester, by the requester -> withdrawn",
+    crRbyReq.status === 403 && crRbyReq.json?.error === "not_an_approver" && crRrej.json?.state === "rejected" && crRrej.json.rejected_by?.id === U3.id && crRrej.json.rejection_reason === "Out of scope this quarter" && crRrej.json.decision_note === "Out of scope this quarter" && crWbyLead.status === 403 && crWbyLead.json?.error === "not_requester" && crWok.json?.state === "withdrawn",
+    `${crRbyReq.text} ${crRrej.text.slice(0, 200)} ${crWbyLead.text} ${crWok.json?.state}`,
+  );
+  // The LIM-2455 checklist (§C, §A): the reason and note caps on reject and counter, an approver declining while a counter
+  // waits on the requester, and decisions are cookie-only (a device token proposes and decides nothing).
+  const crCap = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the mobile app" }, reason: "Mobile too" });
+  const devPropose = await call("U1", "POST", crPath(GL.id), { bearer: D1.access, body: { base_version: 2, changes: { title: "Pen-test from a device" }, reason: "device" } });
+  const devApprove = await call("U3", "POST", `${crPath(GL.id)}/${crCap.json?.id}/approve`, { bearer: D3.access, body: { revision: 1 } });
+  const rejectLong = await crAct(U3, GL.id, crCap.json?.id, "reject", { reason: "r".repeat(2001) });
+  const counterLong = await crAct(U3, GL.id, crCap.json?.id, "counter", { revision: 1, changes: { title: "Pen-test the mobile app in Q3" }, note: "n".repeat(2001) });
+  const afterCapDevice = await crGet(U1, GL.id, crCap.json?.id);
+  const counterCap = await crAct(U3, GL.id, crCap.json?.id, "counter", { revision: 1, changes: { title: "Pen-test the mobile app in Q3" }, note: "Q3 fits the vendor" });
+  const rejectCountered = await crAct(U3, GL.id, crCap.json?.id, "reject", { reason: "Not this year after all" });
+  check(
+    "change requests (LIM-2455 §C): a 2001-character reject reason -> 400 'reason is too long (max 2000 characters)' and a 2001-character counter note -> 400 'note is too long (max 2000 characters)', the request unchanged; an approver declines a countered request (rejected, its reason on the record)",
+    crCap.status === 201 && rejectLong.status === 400 && rejectLong.json?.message === "reason is too long (max 2000 characters)" && counterLong.status === 400 && counterLong.json?.message === "note is too long (max 2000 characters)" &&
+      afterCapDevice.json?.state === "pending" && afterCapDevice.json.revision === 1 && counterCap.json?.state === "countered" && rejectCountered.status === 200 && rejectCountered.json?.state === "rejected" && rejectCountered.json.rejection_reason === "Not this year after all",
+    `${crCap.status} ${rejectLong.text} ${counterLong.text} ${counterCap.json?.state} ${rejectCountered.text.slice(0, 200)}`,
+  );
+  check(
+    "change requests (LIM-2455 §A): proposing and deciding are cookie-only: a device token proposing or approving -> 403 bearer_not_allowed, and nothing is written (still pending at revision 1)",
+    devPropose.status === 403 && devPropose.json?.error === "bearer_not_allowed" && devApprove.status === 403 && devApprove.json?.error === "bearer_not_allowed" && afterCapDevice.json?.state === "pending",
+    `${devPropose.text} ${devApprove.text}`,
+  );
+  const crA = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the platform and the API" }, reason: "Both" });
+  const crB = await propose(U2, GL.id, { base_version: 2, changes: { measures: [{ text: "Critical findings", target: "0" }] }, reason: "Track criticals" });
+  const crBapprovers = crB.json?.approvers?.map((a) => a.id).join();
+  const evA = await addEv(U1, GL.id, crA.json?.id, { kind: "incident", url: "https://status.example.com/incidents/12", label: "API incident that motivates this" });
+  const evNotInvolved = await addEv(U1, GL.id, crB.json?.id, { kind: "doc", url: "https://example.com/n", label: "not mine" });
+  // A device token on MCP reads only (no changes:evidence scope): the evidence tool isn't listed, and calling it gets
+  // 403 insufficient_scope. The device adds an agent-reported link through the v2 route instead.
+  const devTools = await call("U1", "POST", "/api/mcp", { bearer: D1.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+  const mcpEv = await call("U1", "POST", "/api/mcp", { bearer: D1.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "align_add_change_request_evidence", arguments: { change_request_id: crA.json?.id, kind: "doc", url: "https://example.com/mcp", label: "via mcp" } } } });
+  const devEv = await call("U1", "POST", evPath(GL.id, crA.json?.id), { bearer: D1.access, body: { kind: "ci_run", url: "https://ci.example.com/runs/8", label: "Green run on main" } });
+  const mcpList = await mcpCall("U1", D1, "align_list_change_requests", { state: "pending" });
+  const mcpA = mcpList.sc?.change_requests?.find((c) => c.id === crA.json?.id);
+  check(
+    "evidence: someone neither the requester nor an approver -> 403 not_involved; a device token's MCP tools/list has no align_add_change_request_evidence and calling it -> 403 insufficient_scope (nothing added); the device adds an agent-reported link through the v2 route",
+    evA.status === 201 && evNotInvolved.status === 403 && evNotInvolved.json?.error === "not_involved" && devTools.status === 200 && !devTools.text.includes("align_add_change_request_evidence") && devTools.text.includes("align_list_change_requests") && mcpEv.status === 403 && /insufficient_scope/.test(mcpEv.headers.get("www-authenticate") ?? "") && /changes:evidence/.test(mcpEv.headers.get("www-authenticate") ?? "") && devEv.status === 201 && devEv.json.evidence.source === "agent" && devEv.json.evidence.reported_as === "agent-reported" && devEv.json.change_request.evidence_count === 2,
+    `${evA.status} ${evNotInvolved.text} ${mcpEv.status} ${mcpEv.headers.get("www-authenticate")} ${devEv.text.slice(0, 200)}`,
+  );
+  check(
+    "evidence (mcp): align_list_change_requests returns each request's links (with revision and how they were reported) and the snapshot Align recorded at its current revision",
+    mcpA?.evidence?.length === 2 && mcpA.evidence.map((e) => e.reported_as).sort().join() === "agent-reported,self-reported" && mcpA.evidence.every((e) => e.revision === 1 && typeof e.added_by.name.untrusted_text === "string") && mcpA.snapshot?.revision === 1 && mcpA.snapshot.recorded_by === "align" && typeof mcpA.snapshot.spend?.total?.est_list_usd_micros === "number" && /Recorded by Align at revision 1/.test(mcpList.text),
+    JSON.stringify(mcpA).slice(0, 400),
+  );
+  const evEventText = withDb((d) => d.prepare("SELECT * FROM v2_events").all()).map((r) => Object.values(r).join(" ")).join("\n");
+  const evRowsAll = withDb((d) => d.prepare("SELECT url, label FROM v2_change_request_evidence").all());
+  check(
+    "evidence and product events: no product event holds an evidence link's url or label (events stay content-free)",
+    evRowsAll.length > 0 && evRowsAll.every((e) => !evEventText.includes(e.url) && !evEventText.includes(e.label)) && !evEventText.includes("https://"),
+    `${evRowsAll.length}`,
+  );
+  // Two requests approved at the same base: the first launch supersedes the other before its launch.
+  const approveA = await crAct(U3, GL.id, crA.json?.id, "approve", { revision: 1 });
+  const bNow = await crGet(U3, GL.id, crB.json?.id);
+  const approveBearly = await crAct(U3, GL.id, crB.json?.id, "approve", { revision: 1 });
+  const launchBbyReq = await crAct(U2, GL.id, crB.json?.id, "launch", {});
+  const launchA = await crAct(U3, GL.id, crA.json?.id, "launch", {});
+  const bSuperseded = await crGet(U2, GL.id, crB.json?.id);
+  const launchB = await crAct(U3, GL.id, crB.json?.id, "launch", {});
+  const bRecord = await mcpCall("U4", D4, "align_get_decision_record", { change_request_id: crB.json?.id, workspace: A });
+  check(
+    "launch (D1): a lead's own request is decided by the rest of the set (the owner); approving A leaves B pending and not behind (the goal is still at version 2), so B can be approved at the same base too",
+    crBapprovers === U3.id && approveA.json?.state === "approved" && approveA.json.launch === "pending" && approveA.json.approved_without_evidence === false && auditOf("change_request.approved_without_evidence", crA.json?.id).length === 0 && approveA.json.version === null && bNow.json?.state === "pending" && bNow.json.behind === false && bNow.json.can.approve === true && approveBearly.json?.launch === "pending",
+    `${crBapprovers} ${approveA.text.slice(0, 200)} ${bNow.json?.behind} ${approveBearly.text.slice(0, 200)}`,
+  );
+  check(
+    "launch (D1): the requester outside the launch set (a member who is neither an approver of their own request nor a workspace owner) -> 403 not_a_launcher; launching A -> version 3, and B becomes superseded before launch (approval kept, audit change_request.superseded by the launcher); launching B -> 409 wrong_state naming the requester; its decision record says it never reached agents",
+    launchBbyReq.status === 403 && launchBbyReq.json?.error === "not_a_launcher" && launchBbyReq.json.message === "Only someone who can approve for this goal, or a workspace owner, can launch it" && launchA.json?.launch === "launched" && launchA.json.version === 3 &&
+      bSuperseded.json?.state === "superseded" && bSuperseded.json.launch === "superseded" && bSuperseded.json.approved_by?.id === U3.id && bSuperseded.json.version === null && bSuperseded.json.can.launch === false && auditOf("change_request.superseded", crB.json?.id).join() === U3.id &&
+      launchB.status === 409 && launchB.json?.error === "wrong_state" && launchB.json.message === `This change was superseded before launch. ${U2.name} can propose it again.` &&
+      bRecord.sc?.decided === true && bRecord.sc.record?.state === "superseded" && bRecord.sc.record.launch === "superseded" && bRecord.sc.record.resulting_version === null && /superseded before launch: it never reached agents/.test(bRecord.text),
+    `${launchBbyReq.text} ${launchA.text.slice(0, 200)} ${bSuperseded.json?.state}/${bSuperseded.json?.launch} ${launchB.text} ${bRecord.text.slice(0, 300)}`,
+  );
+  // The requester proposes again; an approved change the owner outruns with a new version is superseded too.
+  const crBagainOld = await propose(U2, GL.id, { base_version: 2, changes: { measures: [{ text: "Critical findings", target: "0" }] }, reason: "Track criticals, again" });
+  const crB2 = await propose(U2, GL.id, { base_version: 3, changes: { measures: [{ text: "Critical findings", target: "0" }] }, reason: "Track criticals, again" });
+  const crA2 = await propose(U1, GL.id, { base_version: 3, changes: { title: "Pen-test the platform, the API and the app" }, reason: "And the app" });
+  const approveA2 = await crAct(U2, GL.id, crA2.json?.id, "approve", { revision: 1 });
+  const cursorOwnerSave = await drain(D3);
+  const ownerV4 = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GL.id}/versions`, { cookie: U3.cookie, body: { version: 3, title: "Pen-test the platform and the public API" } });
+  const a2Now = await crGet(U1, GL.id, crA2.json?.id);
+  const dirsOwnerSave = await dirs(D3, cursorOwnerSave);
+  check(
+    "launch (D1): the requester of a request superseded before launch proposes again (an old base -> 409 stale_version; the current one -> 201); an approved change the owner outruns with a new version is superseded before launch: only the owner's version reaches the session",
+    crBagainOld.status === 409 && crBagainOld.json?.error === "stale_version" && crB2.status === 201 && approveA2.json?.launch === "pending" && ownerV4.status === 201 && ownerV4.json.version === 4 && a2Now.json?.state === "superseded" && a2Now.json.launch === "superseded" && auditOf("change_request.superseded", crA2.json?.id).join() === U3.id &&
+      goalVersionsFor(dirsOwnerSave, GL.id).map((d) => d.goal.version).join() === "4" && goalVersionsFor(dirsOwnerSave, GL.id)[0].goal.title === "Pen-test the platform and the public API",
+    `${crBagainOld.text} ${crB2.status} ${ownerV4.status} ${a2Now.json?.state}/${a2Now.json?.launch} ${JSON.stringify(goalVersionsFor(dirsOwnerSave, GL.id).map((d) => d.goal.version))}`,
+  );
+  // A pending request left behind by a newer version: rebase, then approve and launch in one step.
+  const bNow2 = await crGet(U2, GL.id, crB2.json?.id);
+  const cr_approveB = await crAct(U3, GL.id, crB2.json?.id, "approve", { revision: 1 });
+  const cr_approveLaunchB = await crAct(U3, GL.id, crB2.json?.id, "approve_and_launch", { revision: 1 });
+  const rebaseOld = await crAct(U2, GL.id, crB2.json?.id, "rebase", { base_version: 3 });
+  const rebaseByOther = await crAct(U1, GL.id, crB2.json?.id, "rebase", { base_version: 4 });
+  const cursorBeforeRebase = await drain(D3);
+  const rebaseB = await crAct(U2, GL.id, crB2.json?.id, "rebase", { base_version: 4 });
+  const dirsAfterRebase = await dirs(D3, cursorBeforeRebase);
+  const approveB2 = await crAct(U3, GL.id, crB2.json?.id, "approve_and_launch", { revision: 2 });
+  const dirsAfterApproveLaunch = await dirs(D3, cursorBeforeRebase);
+  check(
+    "change requests: a pending request behind the goal stays pending (behind, can.approve false, can.rebase true); approve and approve_and_launch -> 409 stale_version",
+    bNow2.json?.state === "pending" && bNow2.json.behind === true && bNow2.json.can.rebase === true && cr_approveB.status === 409 && cr_approveB.json?.error === "stale_version" && cr_approveLaunchB.status === 409 && cr_approveLaunchB.json?.error === "stale_version",
+    `${bNow2.json?.behind} ${cr_approveB.text} ${cr_approveLaunchB.text}`,
+  );
+  check(
+    "launch (D1): rebase with an old base -> 409 stale_version, by someone else -> 403 not_requester; to the current version -> base 4, revision 2 (no directive); then approve and launch in one step -> approved and launched as version 5, one goal_version directive, audited as two decisions (approved and launched by the owner)",
+    rebaseOld.status === 409 && rebaseOld.json?.error === "stale_version" && rebaseByOther.status === 403 && rebaseByOther.json?.error === "not_requester" && rebaseB.json?.base_version === 4 && rebaseB.json.revision === 2 && rebaseB.json.behind === false && goalVersionsFor(dirsAfterRebase, GL.id).length === 0 &&
+      approveB2.json?.state === "approved" && approveB2.json.launch === "launched" && approveB2.json.version === 5 && approveB2.json.approved_by?.id === U3.id && approveB2.json.launch_decided_by?.id === U3.id && goalVersionsFor(dirsAfterApproveLaunch, GL.id).map((d) => d.goal.version).join() === "5" &&
+      auditOf("change_request.approved", crB2.json?.id).join() === U3.id && auditOf("change_request.launched", crB2.json?.id).join() === U3.id,
+    `${rebaseOld.text} ${rebaseByOther.status} ${rebaseB.text.slice(0, 200)} ${approveB2.text.slice(0, 200)}`,
+  );
+  const dirsRejWd = await dirs(D3, cursor3);
+  check(
+    "change requests (directives): only launches and the owner's version write goal_version directives (versions 3, 4 and 5 here; none for create, approve, not yet, reject, withdraw, rebase or supersede)",
+    goalVersionsFor(dirsRejWd, GL.id).map((d) => d.goal.version).join() === "3,4,5",
+    JSON.stringify(goalVersionsFor(dirsRejWd, GL.id).map((d) => d.goal.version)),
+  );
+
+  // A goal that is dropped supersedes its open requests.
+  const crS1 = await propose(U1, GL.id, { base_version: 5, changes: { title: "Pen-test it all" }, reason: "s1" });
+  const crS2 = await propose(U2, GL.id, { base_version: 5, changes: { status: "achieved" }, reason: "s2" });
+  const crS2c = await crAct(U3, GL.id, crS2.json?.id, "counter", { changes: { status: "achieved", title: "Pen-test done" }, note: "with a new title" });
+  const drop = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GL.id}/versions`, { cookie: U3.cookie, body: { version: 5, status: "dropped" } });
+  const s1 = await crGet(U1, GL.id, crS1.json?.id);
+  const s2 = await crGet(U2, GL.id, crS2.json?.id);
+  const actSuperseded = await crAct(U1, GL.id, crS1.json?.id, "withdraw", {});
+  const onDropped = await propose(U1, GL.id, { base_version: 6, changes: { title: "Revive" }, reason: "revive" });
+  check(
+    "change requests: the owner drops the goal -> its pending and countered requests become superseded (audit names the owner), take no action (409 wrong_state), and a new one -> 409 goal_not_active",
+    crS2c.json?.state === "countered" && drop.status === 201 && s1.json?.state === "superseded" && s2.json?.state === "superseded" && auditOf("change_request.superseded", crS1.json?.id).join() === U3.id && auditOf("change_request.superseded", crS2.json?.id).join() === U3.id && actSuperseded.status === 409 && actSuperseded.json?.error === "wrong_state" && onDropped.status === 409 && onDropped.json?.error === "goal_not_active",
+    `${crS2c.json?.state} ${drop.status} ${s1.json?.state} ${s2.json?.state} ${actSuperseded.status} ${onDropped.text}`,
+  );
+  // An approved request that marks the goal achieved supersedes the others too.
+  const GA = (await mkGoal(U3, { title: "Write the runbook", visibility: "workspace" })).json;
+  const crX = await propose(U1, GA.id, { base_version: 1, changes: { status: "achieved" }, reason: "It is written" });
+  const crY = await propose(U2, GA.id, { base_version: 1, changes: { title: "Write the runbooks" }, reason: "plural" });
+  const approveY = await crAct(U3, GA.id, crY.json?.id, "approve", { revision: 1 });
+  const approveX = await crAct(U3, GA.id, crX.json?.id, "approve", { revision: 1 });
+  const gaAfterApprove = (await call("U3", "GET", `/api/v2/workspaces/${A}/goals/${GA.id}`, { cookie: U3.cookie })).json?.goal;
+  const launchX = await crAct(U3, GA.id, crX.json?.id, "launch", {});
+  const y = await crGet(U2, GA.id, crY.json?.id);
+  const gaAfterLaunch = (await call("U3", "GET", `/api/v2/workspaces/${A}/goals/${GA.id}`, { cookie: U3.cookie })).json?.goal;
+  check(
+    "launch (D1): approving a request that marks the goal achieved leaves the goal active; launching it closes the goal and supersedes the approved request still waiting for launch (an open one is superseded as the drop above shows)",
+    approveX.json?.state === "approved" && approveY.json?.launch === "pending" && gaAfterApprove?.status === "active" && launchX.json?.launch === "launched" && gaAfterLaunch?.status === "achieved" && y.json?.state === "superseded" && y.json.launch === "superseded",
+    `${approveX.text.slice(0, 200)} ${gaAfterApprove?.status} ${gaAfterLaunch?.status} ${y.json?.state}/${y.json?.launch}`,
+  );
+
+  // Team goals: requests are as visible as their goal.
+  const crTeam = await propose(U3, G2.id, { base_version: (await call("U3", "GET", `/api/v2/workspaces/${A}/goals/${G2.id}`, { cookie: U3.cookie })).json.goal.version, changes: { title: "Platform reliability (p99 and p999)" }, reason: "Track tails" });
+  const teamHidden = await crGet(U4, G2.id, crTeam.json?.id);
+  const u4All = await crList(U4);
+  const u4Ids = [...u4All.json.waiting_on_me, ...u4All.json.mine, ...u4All.json.others].map((c) => c.id);
+  const byState = await call("U1", "GET", `${crPath(GL.id)}?state=superseded`, { cookie: U1.cookie });
+  const badState = await call("U1", "GET", `${crPath(GL.id)}?state=archived`, { cookie: U1.cookie });
+  const wsBadState = await crList(U1, "?state=open");
+  const wsApproved = await crList(U1, "?state=approved");
+  check(
+    "change requests: a team goal's request is hidden from someone who can't read the goal (404, not listed); ?state= filters; an unknown state -> 400",
+    crTeam.status === 201 && teamHidden.status === 404 && !u4Ids.includes(crTeam.json.id) && u4Ids.includes(cr1.json.id) && byState.status === 200 && byState.json.change_requests.length === 4 && byState.json.change_requests.every((c) => c.state === "superseded") && byState.json.change_requests.filter((c) => c.launch === "superseded").length === 2 && badState.status === 400 && wsBadState.status === 400 && [...wsApproved.json.waiting_on_me, ...wsApproved.json.mine, ...wsApproved.json.others].every((c) => c.state === "approved"),
+    `${crTeam.status} ${teamHidden.status} ${byState.status} ${byState.json?.change_requests?.length} ${badState.status} ${wsBadState.status}`,
+  );
+  const crAudit = withDb((d) => d.prepare("SELECT action, actor_id FROM v2_audit WHERE ws_id = ? AND action LIKE 'change_request.%'").all(A));
+  const crActions = ["created", "approved", "launched", "not_yet", "rejected", "countered", "counter_accepted", "condition_acknowledged", "withdrawn", "rebased", "superseded"].map((a) => `change_request.${a}`);
+  check(
+    "change requests: every action is audited with its actor (created, approved, launched, not_yet, rejected, countered, counter_accepted, condition_acknowledged, withdrawn, rebased, superseded); a launch writes goal.versioned by the launcher",
+    crActions.every((a) => crAudit.some((r) => r.action === a)) && crAudit.every((r) => r.actor_id) && auditOf("goal.versioned", GL.id).includes(U1.id) && auditOf("change_request.counter_accepted", cr1.json.id).join() === U1.id,
+    JSON.stringify(crAudit.slice(-10)),
+  );
+
+  // -- the Northstar sample workspace --
+  const s1ws = await call("U2", "POST", "/api/v2/workspaces/sample", { cookie: U2.cookie, body: {} });
+  const s2ws = await call("U2", "POST", "/api/v2/workspaces/sample", { cookie: U2.cookie });
+  const SW = s1ws.json?.id;
+  check("sample: POST /api/v2/workspaces/sample -> 201 {id, name \"Northstar (sample)\", role owner}; twice -> two workspaces", s1ws.status === 201 && /^ws_/.test(SW) && s1ws.json.name === "Northstar (sample)" && s1ws.json.role === "owner" && s2ws.status === 201 && s2ws.json.id !== SW, `${s1ws.text} ${s2ws.text}`);
+  const sDetail = (await call("U2", "GET", `/api/v2/workspaces/${SW}`, { cookie: U2.cookie })).json;
+  const sFeed = (await call("U2", "GET", `/api/v2/workspaces/${SW}/goals`, { cookie: U2.cookie })).json?.goals ?? [];
+  const sByTitle = Object.fromEntries(sFeed.map((g) => [g.title, g]));
+  const sCo = sByTitle["Expand to regulated customers"];
+  const sOn = sByTitle["Ship self-serve onboarding"];
+  const sSec = sByTitle["Pass the security review"];
+  check(
+    "sample: teams Product and Security with the caller as lead of both; every goal owned by the caller",
+    sDetail?.teams?.map((t) => t.name).sort().join() === "Product,Security" && sDetail.teams.every((t) => t.my_role === "lead" && t.members.length === 1 && t.members[0].id === U2.id) && sFeed.length === 3 && sFeed.every((g) => g.owner.id === U2.id),
+    JSON.stringify(sDetail?.teams),
+  );
+  check(
+    "sample: a company goal, two workspace-visible team goals (Product, Security) contributing to it (stale false), and onboarding depends on the security review",
+    sCo?.level === "company" && sCo.visibility === "workspace" && sOn?.level === "team" && sOn.team?.name === "Product" && sOn.visibility === "workspace" && sSec?.team?.name === "Security" && sSec.visibility === "workspace" && [sOn, sSec].every((g) => g.contributes_to.length === 1 && g.contributes_to[0].id === sCo.id && g.contributes_to[0].stale === false) && sOn.depends_on.join() === sSec.id && sFeed[0].id === sCo.id,
+    JSON.stringify(sFeed.map((g) => [g.title, g.level, g.team?.name, g.contributes_to, g.depends_on])),
+  );
+  const sAligns = (await call("U2", "GET", `/api/v2/workspaces/${SW}/alignments`, { cookie: U2.cookie })).json;
+  const sAll = [...(sAligns?.waiting_on_me ?? []), ...(sAligns?.mine ?? []), ...(sAligns?.others ?? [])];
+  check("sample: both contributions are approved alignments the caller requested and approved", sAll.length === 2 && sAll.every((a) => a.state === "approved" && a.choice === "contribution" && a.requester.id === U2.id && a.requirements.every((r) => r.approved_by?.id === U2.id)), JSON.stringify(sAll.map((a) => [a.state, a.choice])));
+  const sCrs = (await call("U2", "GET", `/api/v2/workspaces/${SW}/change-requests`, { cookie: U2.cookie })).json;
+  const sCr = sCrs?.waiting_on_me?.[0];
+  check(
+    "sample: one pending change request on the security goal, from the caller, explaining why the sample shows it; the caller can approve (or approve and launch), counter, reject, withdraw and rebase it and add evidence; its revision carries an Align snapshot",
+    sCrs?.waiting_on_me?.length === 1 && sCrs.mine.length === 0 && sCrs.others.length === 0 && sCr.goal.id === sSec.id && sCr.state === "pending" && sCr.requester.id === U2.id && /sample/i.test(sCr.reason) && sCr.diff.after.measures.length === sSec.measures.length + 1 && Object.values(sCr.can).filter(Boolean).length === 7 && sCr.can.approve_and_launch && !sCr.can.accept_counter && sCr.can.add_evidence && sCr.revisions[0].snapshot?.recorded_by === "align" && sCr.revisions[0].snapshot.revision === 1,
+    JSON.stringify(sCrs).slice(0, 400),
+  );
+  const sApprove = await call("U2", "POST", `/api/v2/workspaces/${SW}/goals/${sSec.id}/change-requests/${sCr?.id}/approve`, { cookie: U2.cookie, body: { revision: 1 } });
+  const sSecApproved = (await call("U2", "GET", `/api/v2/workspaces/${SW}/goals/${sSec.id}`, { cookie: U2.cookie })).json?.goal;
+  const sLaunch = await call("U2", "POST", `/api/v2/workspaces/${SW}/goals/${sSec.id}/change-requests/${sCr?.id}/launch`, { cookie: U2.cookie, body: {} });
+  const sSecNow = (await call("U2", "GET", `/api/v2/workspaces/${SW}/goals/${sSec.id}`, { cookie: U2.cookie })).json?.goal;
+  check(
+    "sample: approving the sample request leaves the security goal at version 1 (launch pending); the caller launches it -> version 2, the request approved and launched by the caller",
+    sApprove.json?.state === "approved" && sApprove.json.approved_by?.id === U2.id && sApprove.json.launch === "pending" && sSecApproved?.version === 1 && sLaunch.json?.launch === "launched" && sLaunch.json.launch_decided_by?.id === U2.id && sSecNow?.version === 2,
+    `${sApprove.text.slice(0, 200)} ${sLaunch.text.slice(0, 200)} ${sSecNow?.version}`,
+  );
+  const sAudit = withDb((d) => d.prepare("SELECT action, actor_id FROM v2_audit WHERE ws_id = ?").all(SW));
+  check("sample: every audit row names the caller", sAudit.length >= 10 && sAudit.every((r) => r.actor_id === U2.id) && ["workspace.created", "team.created", "goal.created", "alignment.approved", "change_request.created"].every((a) => sAudit.some((r) => r.action === a)), JSON.stringify(sAudit.slice(0, 5)));
+  const sRename = await call("U2", "PATCH", `/api/v2/workspaces/${s2ws.json?.id}`, { cookie: U2.cookie, body: { name: "Northstar, renamed" } });
+  const sDelete = await call("U2", "DELETE", `/api/v2/workspaces/${s2ws.json?.id}`, { cookie: U2.cookie });
+  const sAnon = await call("anon", "POST", "/api/v2/workspaces/sample", { body: {} });
+  check("sample: it is ordinary data (rename, delete); signed out -> 401", sRename.status === 200 && sDelete.status === 204 && sAnon.status === 401, `${sRename.status} ${sDelete.status} ${sAnon.status}`);
+  const U7 = await signUp("U7", "Uri Seven", "u7@example.test");
+  const u7ws = [];
+  for (let i = 0; i < 9; i++) u7ws.push((await call("U7", "POST", "/api/v2/workspaces", { cookie: U7.cookie, body: { name: `W${i}` } })).status);
+  const u7s1 = await call("U7", "POST", "/api/v2/workspaces/sample", { cookie: U7.cookie, body: {} });
+  const u7s2 = await call("U7", "POST", "/api/v2/workspaces/sample", { cookie: U7.cookie, body: {} });
+  check("sample: it counts toward the workspace-creation limit (9 workspaces + 1 sample, then 429 rate_limited)", u7ws.every((s) => s === 201) && u7s1.status === 201 && u7s2.status === 429 && u7s2.json?.error === "rate_limited", `${u7ws.join(",")} ${u7s1.status} ${u7s2.text}`);
+
+  // -- invites that name a team, member roles, removal, leaving, last owner --
+  const U5 = await signUp("U5", "Ugo Five", "u5@example.test");
+  const U6 = await signUp("U6", "Ula Six", "u6@example.test");
+  const sec = await call("U1", "POST", `/api/v2/workspaces/${A}/teams`, { cookie: U1.cookie, body: { name: "Security" } });
+  const P2 = sec.json?.id;
+  const inv5 = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: U5.email, role: "member", team_id: P2 } });
+  const invBadTeam = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "nt@example.test", role: "member", team_id: "pod_aaaaaaaaaaaaaaaaaaaaaaaa" } });
+  const invBadRole = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "nt@example.test", role: "member", team_id: P2, team_role: "boss" } });
+  const invRoleOnly = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "nt@example.test", role: "member", team_role: "lead" } });
+  check(
+    "team invites: an invite may name a team (team_role member by default); an unknown team -> 404, a bad team_role -> 400, team_role without team_id -> 400",
+    inv5.status === 201 && inv5.json.team_id === P2 && inv5.json.team_role === "member" && invBadTeam.status === 404 && invBadRole.status === 400 && invRoleOnly.status === 400,
+    `${inv5.text} ${invBadTeam.status} ${invBadRole.status} ${invRoleOnly.status}`,
+  );
+  const prev5 = await call("U5", "GET", `/api/v2/invites/${inv5.json.token}`, { cookie: U5.cookie });
+  const acc5 = await call("U5", "POST", `/api/v2/invites/${inv5.json.token}/accept`, { cookie: U5.cookie, body: {} });
+  const secTeam = (await call("U1", "GET", `/api/v2/workspaces/${A}`, { cookie: U1.cookie })).json?.teams?.find((t) => t.id === P2);
+  check(
+    "team invites: the preview names the team; accepting joins the workspace and the team ({workspace_id, role, team_id})",
+    prev5.json?.team?.id === P2 && prev5.json.team.name === "Security" && prev5.json.team_role === "member" && acc5.status === 200 && acc5.json.team_id === P2 && secTeam?.members.some((m) => m.id === U5.id && m.role === "member"),
+    `${prev5.text} ${acc5.text}`,
+  );
+  const inv6 = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: U6.email, role: "viewer" } });
+  await call("U6", "POST", `/api/v2/invites/${inv6.json.token}/accept`, { cookie: U6.cookie, body: {} });
+  const D5 = await pairDevice("U5", U5, [A]);
+  const G5 = (await mkGoal(U5, { title: "Pass the security review", visibility: "workspace", team_id: P2 })).json;
+  const S5 = sessionKey(D5, A, "claude-code", "native-5");
+  await put(D5, S5);
+  const e5 = await epoch(D5, S5, { epoch_id: epochId(), goal_id: G5.id, starts_at: T0 });
+  await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P2}/members`, { cookie: U1.cookie, body: { user_id: U2.id, role: "lead" } });
+  await call("U1", "POST", `/api/v2/workspaces/${A}/teams/${P2}/members`, { cookie: U1.cookie, body: { user_id: U6.id, role: "lead" } });
+  const setBefore = await al(U3, { target_goal_id: G5.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
+  check(
+    "approval: a team goal's set is its owner and the team's leads; a viewer who leads the team is never in it",
+    G5?.id && e5.status === 200 && reqOf(setBefore.json, G5.id)?.approvers.map((a) => a.id).sort().join() === [U2.id, U5.id].sort().join(),
+    `${e5.status} ${JSON.stringify(setBefore.json?.requirements)}`,
+  );
+  await act(U3, setBefore.json.id, "withdraw");
+
+  const mem = (u, target, body) => call(u.who, body ? "POST" : "DELETE", `/api/v2/workspaces/${A}/members/${target}`, { cookie: u.cookie, ...(body ? { body } : {}) });
+  // Recent sign-in: an owner's sensitive member and workspace actions need a sign-in from the last 15 minutes.
+  const staleOf = async (u) => {
+    const c = cookieOf((await call(u.who, "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: u.email, password: `pw-${u.who}-123456` } })).setCookies);
+    ageSession(c, 20);
+    return { ...u, cookie: c };
+  };
+  const U1stale = await staleOf(U1);
+  const U3stale = await staleOf(U3);
+  const staleRole = await mem(U1stale, U5.id, { role: "viewer" });
+  const staleOwner = await mem(U1stale, U3.id, { role: "owner" });
+  const staleRemove = await mem(U1stale, U5.id);
+  const staleOwnerInvite = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1stale.cookie, body: { email: "new-owner@example.test", role: "owner" } });
+  const staleDeleteWs = await call("U1", "DELETE", `/api/v2/workspaces/${A}`, { cookie: U1stale.cookie });
+  const staleByMember = await mem(U3stale, U5.id, { role: "viewer" });
+  const staleRoles = withDb((d) => d.prepare("SELECT user_id, role FROM v2_members WHERE ws_id = ? AND user_id IN (?, ?)").all(A, U3.id, U5.id).map((r) => `${r.user_id === U3.id ? "U3" : "U5"}:${r.role}`).sort().join());
+  const staleOwnerInviteRow = withDb((d) => d.prepare("SELECT 1 AS x FROM v2_invites WHERE ws_id = ? AND email = ?").get(A, "new-owner@example.test"));
+  check(
+    "recent sign-in: with a 20-minute-old session an owner's role change, ownership grant, member removal, owner invite and workspace deletion -> 403 reauth_required (\"Sign in again to ...\"), nothing changes; a member's old session still gets owner_only",
+    [staleRole, staleOwner, staleRemove, staleOwnerInvite, staleDeleteWs].every((r) => r.status === 403 && r.json?.error === "reauth_required" && /^Sign in again to .+ This needs a sign-in from the last 15 minutes\.$/.test(r.json?.message)) &&
+      staleByMember.status === 403 && staleByMember.json?.error === "owner_only" && staleRoles === "U3:member,U5:member" && !staleOwnerInviteRow &&
+      (await call("U1", "GET", `/api/v2/workspaces/${A}`, { cookie: U1.cookie })).status === 200,
+    `${[staleRole, staleOwner, staleRemove, staleOwnerInvite, staleDeleteWs, staleByMember].map((r) => `${r.status} ${r.json?.error}`).join(" | ")} ${staleRoles}`,
+  );
+  const roleByMember = await mem(U3, U5.id, { role: "viewer" });
+  const roleByViewer = await mem(U4, U5.id, { role: "viewer" });
+  const roleUnknown = await mem(U1, "u_aaaaaaaaaaaaaaaaaaaaaaaa", { role: "viewer" });
+  const roleBad = await mem(U1, U5.id, { role: "admin" });
+  const roleOk = await mem(U1, U5.id, { role: "viewer" });
+  const roleBack = await mem(U1, U5.id, { role: "member" });
+  check(
+    "members: an owner changes a role ({user_id, role}); a member -> 403 owner_only, a viewer -> 403 read_only, an unknown person -> 404, a bad role -> 400",
+    roleByMember.status === 403 && roleByMember.json?.error === "owner_only" && roleByViewer.status === 403 && roleByViewer.json?.error === "read_only" && roleUnknown.status === 404 && roleBad.status === 400 && roleOk.status === 200 && roleOk.json.role === "viewer" && roleOk.json.user_id === U5.id && roleBack.json?.role === "member",
+    `${roleByMember.status} ${roleByViewer.status} ${roleUnknown.status} ${roleBad.status} ${roleOk.text} ${roleBack.text}`,
+  );
+  const lastLeave = await mem(U1, U1.id);
+  const lastDemote = await mem(U1, U1.id, { role: "member" });
+  const stillOwner = (await call("U1", "GET", `/api/v2/workspaces/${A}`, { cookie: U1.cookie })).json?.role;
+  check("last owner: the only owner leaving or demoting themselves -> 409 last_owner and nothing changes", lastLeave.status === 409 && lastLeave.json?.error === "last_owner" && lastDemote.status === 409 && lastDemote.json?.error === "last_owner" && stillOwner === "owner", `${lastLeave.text} ${lastDemote.text} ${stillOwner}`);
+  const twoOwners = await mem(U1, U2.id, { role: "owner" });
+  const selfDemote = await mem(U2, U2.id, { role: "member" });
+  check("last owner: with a second owner, an owner may demote themselves", twoOwners.json?.role === "owner" && selfDemote.status === 200 && selfDemote.json.role === "member", `${twoOwners.text} ${selfDemote.text}`);
+  const memberRemoves = await mem(U3, U5.id);
+  check("members: a member removing someone else -> 403 owner_only", memberRemoves.status === 403 && memberRemoves.json?.error === "owner_only", memberRemoves.text);
+  const d5Before = await call("U5", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D5.access });
+  const removed = await mem(U1, U5.id);
+  const d5After = await call("U5", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D5.access });
+  const d5Me = await call("U5", "GET", "/api/v2/me", { bearer: D5.access });
+  const afterRemoval = withDb((d) => ({
+    grants: d.prepare("SELECT COUNT(*) AS n FROM v2_device_grants WHERE device_id = ?").get(D5.id).n,
+    teams: d.prepare("SELECT COUNT(*) AS n FROM v2_pod_members WHERE user_id = ? AND ws_id = ?").get(U5.id, A).n,
+    session: d.prepare("SELECT user_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(A, S5)?.user_id,
+    revoked: d.prepare("SELECT revoked_at FROM v2_devices WHERE id = ?").get(D5.id).revoked_at,
+  }));
+  const g5Seen = (await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${G5.id}`, { cookie: U1.cookie })).json?.goal;
+  const u5Gone = await call("U5", "GET", `/api/v2/workspaces/${A}`, { cookie: U5.cookie });
+  check(
+    "members: removal -> 204; their team places and device grants for the workspace end (the device stays paired); goals and sessions stay under their name",
+    d5Before.status === 200 && removed.status === 204 && d5After.status === 404 && d5Me.status === 200 && d5Me.json.workspaces.length === 0 && afterRemoval.grants === 0 && afterRemoval.teams === 0 && afterRemoval.session === U5.id && !afterRemoval.revoked && g5Seen?.owner?.name === "Ugo Five" && u5Gone.status === 404,
+    `${d5Before.status} ${removed.status} ${d5After.status} ${JSON.stringify(afterRemoval)} ${JSON.stringify(g5Seen?.owner)} ${u5Gone.status}`,
+  );
+  const setAfter = await al(U3, { target_goal_id: G5.id, source_goal_id: G3.id, choice: "contribution", session_keys: [] });
+  const fallback = await al(U2, { target_goal_id: G5.id, source_goal_id: G2.id, choice: "contribution", session_keys: [] });
+  check(
+    "approval: a former owner is never in a set (the lead remains); when the requester is the only one left, the workspace owners decide",
+    reqOf(setAfter.json, G5.id)?.approvers.map((a) => a.id).join() === U2.id && reqOf(fallback.json, G5.id)?.approvers.map((a) => a.id).join() === U1.id && fallback.json.state === "pending",
+    `${JSON.stringify(setAfter.json?.requirements)} ${JSON.stringify(fallback.json?.requirements)}`,
+  );
+  await act(U3, setAfter.json.id, "withdraw");
+  await act(U2, fallback.json.id, "withdraw");
+  const leave6 = await mem(U6, U6.id);
+  const u6Gone = await call("U6", "GET", `/api/v2/workspaces/${A}`, { cookie: U6.cookie });
+  check("members: a viewer leaves (DELETE their own id) -> 204, then the workspace is 404 for them", leave6.status === 204 && u6Gone.status === 404, `${leave6.status} ${leave6.text} ${u6Gone.status}`);
+  const inv5b = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: U5.email, role: "member" } });
+  const rejoin = await call("U5", "POST", `/api/v2/invites/${inv5b.json?.token}/accept`, { cookie: U5.cookie, body: {} });
+  check("members: a removed person can be invited back", inv5b.status === 201 && rejoin.status === 200, `${inv5b.status} ${rejoin.text}`);
+  const invW = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "withdrawn@example.test", role: "member" } });
+  await call("U1", "DELETE", `/api/v2/workspaces/${A}/invites/${invW.json.id}`, { cookie: U1.cookie });
+
+  // -- workspace rename --
+  const renByMember = await call("U3", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U3.cookie, body: { name: "Hijacked" } });
+  const renByViewer = await call("U4", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U4.cookie, body: { name: "Hijacked" } });
+  const ren = await call("U1", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U1.cookie, body: { name: "Workspace A renamed" } });
+  check("workspaces: an owner renames (PATCH -> {id, name}); a member -> 403 owner_only, a viewer -> 403 read_only", ren.status === 200 && ren.json.id === A && ren.json.name === "Workspace A renamed" && renByMember.json?.error === "owner_only" && renByViewer.json?.error === "read_only", `${ren.text} ${renByMember.text} ${renByViewer.text}`);
+
+  // -- audit trail --
+  withDb((d) => d.prepare("INSERT INTO v2_audit (ws_id, actor_id, action, object_id, at) VALUES (?, ?, 'pod.created', 'pod_legacyrowxxxxxxxxxxxxxx', ?)").run(A, U1.id, new Date().toISOString()));
+  const aud = await call("U1", "GET", `/api/v2/workspaces/${A}/audit`, { cookie: U1.cookie });
+  const audMember = await call("U3", "GET", `/api/v2/workspaces/${A}/audit`, { cookie: U3.cookie });
+  const audViewer = await call("U4", "GET", `/api/v2/workspaces/${A}/audit`, { cookie: U4.cookie });
+  const audRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ?").get(A).n);
+  const rows = aud.json?.audit ?? [];
+  const has = (action, actor) => rows.some((r) => r.action === action && r.actor?.id === actor);
+  check(
+    "audit: owners only (member 403 owner_only, viewer 403 read_only); newest first, at most 200 rows, each {at, actor:{id,name}, action, object_id}",
+    aud.status === 200 && audMember.json?.error === "owner_only" && audViewer.json?.error === "read_only" && rows.length === Math.min(200, audRows) && audRows > 0 && rows.every((r, i) => i === 0 || r.at <= rows[i - 1].at) && rows.every((r) => "object_id" in r && (r.actor === null || r.actor.name)),
+    `${aud.status} ${audMember.status} ${audViewer.status} ${rows.length}/${audRows}`,
+  );
+  check(
+    "audit: changes name their actor (renamed, member removed, member left, invite withdrawn, role changed); old pod.* rows show as team.*",
+    has("workspace.renamed", U1.id) && has("member.removed", U1.id) && has("member.left", U6.id) && has("invite.withdrawn", U1.id) && has("member.role_changed", U2.id) && rows.some((r) => r.action === "team.created" && r.object_id === "pod_legacyrowxxxxxxxxxxxxxx") && !rows.some((r) => r.action.startsWith("pod.")) && rows.every((r) => r.actor !== null),
+    JSON.stringify(rows.slice(0, 8).map((r) => [r.action, r.actor?.name])),
+  );
+  const allAudit = withDb((d) => d.prepare("SELECT ws_id, actor_id, action FROM v2_audit WHERE ws_id = ? OR action LIKE 'device.%' OR action LIKE 'team.%'").all(A));
+  check(
+    "audit: team actions are written as team.*; a person revoking a device is its actor; only refresh-token reuse has no actor",
+    allAudit.some((r) => r.action === "team.member_set" && r.actor_id === U2.id) && allAudit.some((r) => r.action === "team.member_removed") && allAudit.some((r) => r.action === "device.revoked" && r.actor_id === U3.id) && allAudit.filter((r) => r.actor_id === null).length >= 1 && allAudit.filter((r) => r.actor_id === null).every((r) => r.action === "device.revoked"),
+    JSON.stringify(allAudit.filter((r) => r.actor_id === null)),
+  );
+
+  // -- deleting a workspace: B (owned by U4) with a team, invite, goals, an alignment, a shared session with usage and activity --
+  const tB = await call("U4", "POST", `/api/v2/workspaces/${B}/teams`, { cookie: U4.cookie, body: { name: "B team" } });
+  await call("U4", "POST", `/api/v2/workspaces/${B}/invites`, { cookie: U4.cookie, body: { email: "bq@example.test", role: "member", team_id: tB.json.id } });
+  const GB2 = (await call("U4", "POST", `/api/v2/workspaces/${B}/goals`, { cookie: U4.cookie, body: { title: "B company", level: "company" } })).json;
+  const alB = await call("U4", "POST", `/api/v2/workspaces/${B}/alignments`, { cookie: U4.cookie, body: { target_goal_id: GB2.id, source_goal_id: GB.id, choice: "contribution", session_keys: [] } });
+  const SB = sessionKey(D4, B, "claude-code", "native-b");
+  await call("U4", "PUT", `/api/v2/workspaces/${B}/sessions/${SB}`, { bearer: D4.access, body: { harness: "claude-code", repo_key: repoKey(D4, B, "/src/b"), started_at: T0, title: null } });
+  const EB = epochId();
+  await call("U4", "POST", `/api/v2/workspaces/${B}/sessions/${SB}/epochs`, { bearer: D4.access, body: { epoch_id: EB, goal_id: GB.id, starts_at: T0, root_turn: null, cause: "manual" } });
+  const upB = await call("U4", "POST", `/api/v2/workspaces/${B}/sessions/${SB}/usage`, { bearer: D4.access, body: { rows: [usageRow(D4, "b-1", EB)] } });
+  await call("U4", "POST", `/api/v2/workspaces/${B}/activity`, { bearer: D4.access, body: { items: [{ session_key: SB, kind: "edit", at: new Date().toISOString(), repo_id: "f".repeat(32), path_hash: "e".repeat(32) }] } });
+  await call("U4", "POST", `/api/v2/workspaces/${B}/sessions/${SB}/stop`, { cookie: U4.cookie, body: {} });
+  const delByOther = await call("U1", "DELETE", `/api/v2/workspaces/${B}`, { cookie: U1.cookie });
+  const delA = await call("U3", "DELETE", `/api/v2/workspaces/${A}`, { cookie: U3.cookie });
+  const delB = await call("U4", "DELETE", `/api/v2/workspaces/${B}`, { cookie: U4.cookie });
+  const bGone = await call("U4", "GET", `/api/v2/workspaces/${B}`, { cookie: U4.cookie });
+  const d4OnB = await call("U4", "GET", `/api/v2/workspaces/${B}/goals`, { bearer: D4.access });
+  const d4OnAStill = await call("U4", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D4.access });
+  const u4List = (await call("U4", "GET", "/api/v2/workspaces", { cookie: U4.cookie })).json;
+  const bRow = withDb((d) => d.prepare("SELECT deleted_at FROM v2_workspaces WHERE id = ?").get(B));
+  check(
+    "workspaces: only an owner deletes (a non-member -> 404, a member -> 403 owner_only); delete -> 204, then 404 on the web and to its devices, gone from the list and kept as deleted (restorable, purged later by the retention job); the device keeps its other workspace",
+    alB.json?.state === "approved" && upB.json?.accepted === 1 && delByOther.status === 404 && delA.status === 403 && delA.json?.error === "owner_only" && delB.status === 204 && bGone.status === 404 && d4OnB.status === 404 && d4OnAStill.status === 200 && !u4List.workspaces.some((w) => w.id === B) && u4List.deleted.some((w) => w.id === B) && !!bRow?.deleted_at,
+    `${alB.status} ${upB.text} ${delByOther.status} ${delA.status} ${delB.status} ${bGone.status} ${d4OnB.status} ${d4OnAStill.status} ${JSON.stringify(u4List)} ${JSON.stringify(bRow)}`,
+  );
+
+  // -- stop sharing, then delete --
+  const stopShare = await call("U3", "POST", `/api/v2/workspaces/${A}/sessions/${S3b}/stop-sharing`, { cookie: U3.cookie, body: {} });
+  const upAfterStop = await upload(D3, S3b, [usageRow(D3, "late", E3b)]);
+  const putAfterStop = await put(D3, S3b);
+  const epochAfterStop = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString() });
+  const strangerStop = await call("U1", "POST", `/api/v2/workspaces/${A}/sessions/${S3b}/stop-sharing`, { cookie: U1.cookie, body: {} });
+  check("stop sharing: -> stopped; then usage, re-share and epochs -> 409 sharing_stopped; someone else's session -> 404", stopShare.json?.state === "stopped" && upAfterStop.status === 409 && upAfterStop.json?.error === "sharing_stopped" && putAfterStop.status === 409 && epochAfterStop.status === 409 && strangerStop.status === 404, `${stopShare.text} ${upAfterStop.status} ${putAfterStop.status} ${epochAfterStop.status} ${strangerStop.status}`);
+  const totalBefore = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json.total.requests;
+  const delOther = await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { cookie: U1.cookie });
+  const del = await call("U3", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { bearer: D3.access });
+  const delWeb = await call("U3", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3b}`, { cookie: U3.cookie });
+  const leftovers = withDb((d) => {
+    const out = {};
+    for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'v2_%'").all()) {
+      const cols = d.prepare(`PRAGMA table_info(${name})`).all().map((c) => c.name);
+      let n = 0;
+      for (const row of d.prepare(`SELECT * FROM ${name}`).all()) if (cols.some((c) => typeof row[c] === "string" && (row[c].includes(S3a) || row[c].includes(S3b)))) n++;
+      if (n) out[name] = n;
+    }
+    return out;
+  });
+  const totalAfter = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json;
+  check("delete: someone else -> 404; the owner (Bearer and cookie) -> 204", delOther.status === 404 && del.status === 204 && delWeb.status === 204, `${delOther.status} ${del.status} ${delWeb.status}`);
+  check("delete: zero rows anywhere in the v2 tables still mention the deleted sessions (read from the database file)", Object.keys(leftovers).length === 0, JSON.stringify(leftovers));
+  check("delete: spend totals change (and the invariant still holds)", totalAfter.total.requests < totalBefore && invariantHolds(totalAfter), `${totalBefore} -> ${totalAfter.total.requests}`);
+
+  // -- the device authorize limit (10 per hour per client), last so earlier pairings aren't affected --
+  let limited = 0;
+  for (let i = 0; i < 12; i++) if ((await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "x", public_key: k1.pub } })).status === 429) limited++;
+  check("device: authorize is limited to 10 per hour per client (then 429)", limited > 0, `${limited}`);
+
+  // -- the web UI renders: pages need a session, then load --
+  const pagePaths = ["/app", "/app/account", "/app/device", "/app/devices", `/app/w/${A}`, `/app/w/${A}/goals`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/requests`, `/app/w/${A}/spend`, `/app/w/${A}/apps`, `/app/invite/${"x".repeat(43)}`];
+  const anonPages = await Promise.all(pagePaths.map((p) => call("anon", "GET", p)));
+  check("ui: every /app page without a session sends you to /app/sign-in", anonPages.every((r) => (r.status === 307 && /\/app\/sign-in/.test(r.headers.get("location") || "")) || (r.status === 200 && r.text.includes("/app/sign-in?next="))), anonPages.map((r) => r.status).join(","));
+  const userPages = await Promise.all(pagePaths.map((p) => call("U1", "GET", p, { cookie: U1.cookie })));
+  check("ui: every /app page renders for a signed-in user (200, no error page)", userPages.every((r) => r.status === 200 && !/Application error|Internal Server Error/.test(r.text)), userPages.map((r) => r.status).join(","));
+  // The Home's read for every member of A (owner, members, viewer): the canary check at the end of this phase covers it,
+  // so a private goal never reaches the Home of anyone but its owner.
+  const homesA = await Promise.all([U1, U2, U3, U4].map((u) => call(u.who, "GET", `/api/v2/workspaces/${A}/home`, { cookie: u.cookie })));
+  check("home: GET .../home -> 200 for the owner, members and the viewer of A, every section read (none null)", homesA.every((r) => r.status === 200 && ["change_requests", "asks", "alignments", "goals", "apps"].every((k) => r.json?.[k] !== null && r.json?.[k] !== undefined)), homesA.map((r) => `${r.status} ${r.text.slice(0, 120)}`).join(" | "));
+
+  // -- LIM-2452 (main #40) on v2: every main /app page fits a 390x844 phone with no sideways scrolling. Workspace A has
+  //    members, teams, goals, alignments, change requests and sessions by now; a connected app (one live grant with a
+  //    read, written straight in for the duration) puts a row in the Apps table and on the Home. --
+  if (existsSync(CHROME)) {
+    const core = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
+    const kid = core.hmac(core.serverSecret(onDir, {}), "align-grant-kid").slice(0, 16);
+    const at = new Date().toISOString();
+    withDb((d) =>
+      d
+        .prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, 'c-phone', ?, ?, ?, ?, ?, 'h', ?, ?)")
+        .run("gr_PHONEPHONEPHONE1", A, U1.id, "An app with a fairly long client name", "a-rather-long-redirect-host.example.com", at, at, at, Date.now() + 86_400_000, kid),
+    );
+    const { default: puppeteer } = await import("puppeteer-core");
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    try {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.setCookie(...U1.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+      await page.setViewport({ width: 390, height: 844 });
+      const phonePaths = ["/app", "/app/account", "/app/device", "/app/devices", "/app/request-access", `/app/w/${A}`, `/app/w/${A}/goals`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/requests`, `/app/w/${A}/asks`, `/app/w/${A}/spend`, `/app/w/${A}/apps`];
+      const wide = [];
+      for (const p of phonePaths) {
+        await page.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+        // On a failure, name what runs past the edge: visible elements whose right side is beyond the width.
+        const m = await page.evaluate(() => {
+          const W = window.innerWidth;
+          const past = [...document.querySelectorAll("body *")]
+            .filter((e) => e.getBoundingClientRect().right > W + 1 && e.closest(".sr-only") === null)
+            .slice(0, 3)
+            .map((e) => `${e.tagName}.${String(e.className).slice(0, 60)}`);
+          return { sw: document.scrollingElement.scrollWidth, W, past };
+        });
+        if (!(m.sw <= m.W)) wide.push(`${p}: ${m.sw}>${m.W} ${m.past.join(", ")}`);
+      }
+      const appsRow = await page.evaluate(() => document.body.innerText);
+      check(
+        `ui (Chrome, 390x844): ${phonePaths.length} /app pages (workspaces, account, device, devices, request access, Home, Goals, a goal, People, Sessions, Alignments, Requests, Asks, Spend, Apps) each have document.scrollingElement.scrollWidth <= innerWidth; the Apps table stacks into labelled lines (Last connected, Last read the goals)`,
+        wide.length === 0 && /Sends you back to/.test(appsRow) && /Last connected/.test(appsRow) && /Last read the goals/.test(appsRow) && errors.length === 0,
+        `${wide.join(" | ")} ${errors.join(" | ")}`,
+      );
+      // -- main #44 on v2: compact chrome on a phone, 44 px action buttons, the main pages at desktop widths, the
+      //    workspace switcher at 700, one read of the connected apps per page (no poll), and the goal page's
+      //    stale-parent prompt for the child's owner only (the LIM-2455 checklist's §B) --
+      const cookiesOf = (u) => u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE }));
+      const settle = (pg) => pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      const chromeAt = async (width) => {
+        await page.setViewport({ width, height: 844 });
+        await page.goto(`${BASE}/app/w/${A}`, { waitUntil: "networkidle0" });
+        await settle(page);
+        return page.evaluate(() => ({
+          h1: document.querySelector("main h1")?.getBoundingClientRect().top ?? null,
+          header: document.querySelector("header")?.innerText ?? "",
+          tabs: document.querySelector('nav[aria-label="Workspace"]')?.innerText ?? "",
+          prompt: document.querySelector("#passkey-prompt")?.innerText ?? null,
+        }));
+      };
+      const [chrome390, chrome1000] = [await chromeAt(390), await chromeAt(1000)];
+      const wsAName = ((await call("U1", "GET", "/api/v2/workspaces", { cookie: U1.cookie })).json?.workspaces ?? []).find((w) => w.id === A)?.name;
+      check(
+        "ui (Chrome, main #44): at 390x844 the chrome is compact: the Home's heading starts above y=300, the top bar has no person's name, the passkey prompt is one short sentence and the tab row has no workspace name; at 1000 the name and the workspace show",
+        chrome390.h1 !== null && chrome390.h1 < 300 && !chrome390.header.includes(U1.name) && !chrome390.tabs.includes(wsAName) && (chrome390.prompt === null || (/Sign in with a passkey instead of an email code\./.test(chrome390.prompt) && !/phished/.test(chrome390.prompt))) &&
+          chrome1000.header.includes(U1.name) && chrome1000.tabs.includes(wsAName),
+        JSON.stringify({ wsAName, tabs390: chrome390.tabs.slice(0, 40), tabs1000: chrome1000.tabs.slice(0, 40), h1: chrome390.h1, header390: chrome390.header }),
+      );
+      await page.setViewport({ width: 390, height: 844 });
+      const short = [];
+      let tapped = 0;
+      for (const p of [`/app/w/${A}/goals`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/requests`, `/app/w/${A}/apps`, `/app/w/${A}/sessions`, `/app/w/${A}/people`, "/app/account", "/app/devices"]) {
+        await page.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await settle(page);
+        const hs = await page.evaluate(() =>
+          [...document.querySelectorAll("main button")]
+            .filter((b) => getComputedStyle(b).borderTopWidth !== "0px" && b.getBoundingClientRect().height > 0)
+            .map((b) => [b.textContent.trim().slice(0, 30), Math.round(b.getBoundingClientRect().height * 100) / 100]),
+        );
+        tapped += hs.length;
+        for (const [t, h] of hs) if (h < 44) short.push(`${p} "${t}" ${h}px`);
+      }
+      check(
+        "ui (Chrome, main #44): at 390 every action button on Goals, a goal, Requests, Apps, Sessions, People, Account and Devices is at least 44 px tall (the root font is 15 px, so the minimum is set in px)",
+        tapped >= 20 && short.length === 0,
+        `${tapped} buttons; ${short.slice(0, 6).join(" | ")}`,
+      );
+      const wideAt = [];
+      let switcher = null;
+      for (const width of [500, 600, 700, 768, 1100, 1268, 1440]) {
+        await page.setViewport({ width, height: 900 });
+        for (const p of [`/app/w/${A}`, `/app/w/${A}/goals`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/goals/${GC.id}`, `/app/w/${A}/requests`, `/app/w/${A}/apps`]) {
+          await page.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+          await settle(page);
+          const m = await page.evaluate(() => {
+            const main = document.querySelector("main");
+            const sel = document.querySelector('select[aria-label="Switch workspace"]')?.getBoundingClientRect();
+            return { sw: document.scrollingElement.scrollWidth, W: window.innerWidth, main: main?.scrollWidth, mainW: main?.clientWidth, sel: sel ? [sel.left, sel.right] : null };
+          });
+          if (m.sw > m.W || m.main > m.mainW) wideAt.push(`${width} ${p}: ${JSON.stringify(m)}`);
+          if (width === 700 && p === `/app/w/${A}`) switcher = m;
+        }
+      }
+      check(
+        "ui (Chrome, main #44): the Home, Goals, two goal pages (one with its goal tree), Requests and Apps never scroll sideways (page or main column) at 500, 600, 700, 768, 1100, 1268 and 1440 px",
+        wideAt.length === 0,
+        wideAt.slice(0, 4).join(" | "),
+      );
+      const options = await page.$$eval('select[aria-label="Switch workspace"] option', (os) => os.map((o) => o.value).filter(Boolean).sort());
+      const mineWs = ((await call("U1", "GET", "/api/v2/workspaces", { cookie: U1.cookie })).json?.workspaces ?? []).map((w) => w.id).sort();
+      const shellText = await page.evaluate(() => document.body.innerText);
+      check(
+        "ui (Chrome, main #44, LIM-2455 §F): the workspace switcher is the native select, on screen at 700 px, and lists exactly the person's own workspaces (GET /api/v2/workspaces); no passcode, role preview or \"Acting as\" control",
+        !!switcher?.sel && switcher.sel[0] >= 0 && switcher.sel[1] <= switcher.W && mineWs.length >= 1 && JSON.stringify(options) === JSON.stringify(mineWs) && !/passcode|preview role|acting as/i.test(shellText),
+        `${JSON.stringify(switcher)} ${JSON.stringify(options)} ${JSON.stringify(mineWs)}`,
+      );
+      const readsOf = async (p) => {
+        const seen = [];
+        const on = (r) => {
+          const u = new URL(r.url());
+          if (u.pathname.startsWith("/api/v2/")) seen.push(u.pathname);
+        };
+        page.on("request", on);
+        await page.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await sleep(3000);
+        page.off("request", on);
+        return seen;
+      };
+      const homeReads = await readsOf(`/app/w/${A}`);
+      const appsReads = await readsOf(`/app/w/${A}/apps`);
+      const nOf = (xs, re) => xs.filter((x) => re.test(x)).length;
+      check(
+        "ui (Chrome, main #44): one read of the connected apps per page and no poll: over 3 s after load the Home reads .../home once and .../apps never, and the Apps tab reads .../apps once",
+        nOf(homeReads, /\/home$/) === 1 && nOf(homeReads, /\/apps$/) === 0 && nOf(appsReads, /\/apps$/) === 1,
+        JSON.stringify({ homeReads, appsReads }),
+      );
+      const parentNow = (await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${GT.id}`, { cookie: U1.cookie })).json?.goal;
+      const bump = await call("U1", "POST", `/api/v2/workspaces/${A}/goals/${GT.id}/versions`, { cookie: U1.cookie, body: { version: parentNow?.version, title: `${parentNow?.title} (reworded)` } });
+      const treeAs = async (u) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width: 1000, height: 900 });
+        await pg.setCookie(...cookiesOf(u));
+        await pg.goto(`${BASE}/app/w/${A}/goals/${GC.id}`, { waitUntil: "networkidle0" });
+        await settle(pg);
+        const t = await pg.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", still: [...document.querySelectorAll("main button")].some((b) => /^Still fits version /.test(b.textContent.trim())) }));
+        await ctx.close();
+        return t;
+      };
+      const treeOwner = await treeAs(U3);
+      const treeOther = await treeAs(U2);
+      check(
+        "ui (Chrome, LIM-2455 §B): after a parent's new version only the child's owner gets the review prompt (\"has a new version, and this goal hasn't changed\") and Still fits version <n>; another member sees the amber \"reviewed against version <n>\" pill alone; nothing says agents already have the new version",
+        bump.status === 201 && treeOwner.still && /has a new version, and this goal hasn.t changed/.test(treeOwner.text) && !treeOther.still && /reviewed against version/.test(treeOther.text) && !/has a new version, and this goal/.test(treeOther.text) &&
+          !/already have the new version/.test(treeOwner.text + treeOther.text) && errors.length === 0,
+        `${bump.status} ${treeOwner.text.slice(0, 300)} || ${treeOther.text.slice(0, 300)} ${errors.join(" | ")}`,
+      );
+      await page.setViewport({ width: 1000, height: 900 });
+      await page.goto(`${BASE}/app/w/${A}/goals/${GP.id}`, { waitUntil: "networkidle0" });
+      await settle(page);
+      const hiddenText = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
+      const hiddenApi = await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${GP.id}`, { cookie: U1.cookie });
+      check(
+        "ui (Chrome, LIM-2455 §C): a goal the person can't read is 404 (never 403) and its page says \"This goal does not exist or you can't see it.\" without its title",
+        hiddenApi.status === 404 && hiddenText.includes("This goal does not exist or you can't see it.") && !hiddenText.includes(GP.title),
+        `${hiddenApi.status} ${hiddenText.slice(0, 200)}`,
+      );
+      // Keyboard and focus (the checklist's §H): Tab walks the goal page's controls in order and each shows the focus ring.
+      await page.goto(`${BASE}/app/w/${A}/goals/${G1.id}`, { waitUntil: "networkidle0" });
+      await settle(page);
+      const stops = [];
+      for (let i = 0; i < 40; i++) {
+        await page.keyboard.press("Tab");
+        stops.push(
+          await page.evaluate(() => {
+            const e = document.activeElement;
+            const cs = e ? getComputedStyle(e) : null;
+            return { tag: e?.tagName ?? "", text: (e?.textContent ?? "").trim().slice(0, 24), ring: !!cs && cs.outlineStyle === "solid" && parseFloat(cs.outlineWidth) >= 2 };
+          }),
+        );
+      }
+      const offRing = stops.filter((x) => !x.ring || !["A", "BUTTON", "SELECT", "INPUT", "TEXTAREA", "SUMMARY"].includes(x.tag));
+      check(
+        "ui (Chrome, LIM-2455 §H): keyboard: 40 Tab presses on a goal page land only on links, buttons, fields and disclosure summaries, each with the 2 px focus ring, and reach a button in main",
+        offRing.length === 0 && stops.some((x) => x.tag === "BUTTON"),
+        JSON.stringify(offRing.slice(0, 5)),
+      );
+    } catch (e) {
+      check("ui (Chrome, 390x844) phone layout run", false, e?.stack ?? e);
+    } finally {
+      await browser.close();
+      withDb((d) => d.prepare("DELETE FROM v2_oauth_grants WHERE id = 'gr_PHONEPHONEPHONE1'").run());
+    }
+  } else check("ui (Chrome) available for the phone layout", false, `no Chrome at ${CHROME}`);
+  const signInPage = await call("anon", "GET", "/app/sign-in");
+  check("ui: the sign-in page offers the email code and the test sign-in (no Google or GitHub configured here)", signInPage.status === 200 && signInPage.text.includes("Test sign-in") && signInPage.text.includes("Send code") && !signInPage.text.includes("Continue with Google") && !signInPage.text.includes("Continue with GitHub"), `${signInPage.status}`);
+  const accountPage = await call("U1", "GET", "/app/account", { cookie: U1.cookie });
+  check("ui: /app/account shows the person and \"Ways you can sign in\", with no Link buttons when no provider is configured", accountPage.status === 200 && accountPage.text.includes("Your account") && accountPage.text.includes("Ways you can sign in") && accountPage.text.includes(U1.email) && !accountPage.text.includes("Link Google") && !accountPage.text.includes("Link GitHub"), `${accountPage.status}`);
+  const nexts = [
+    ["/oauth/authorize?client_id=c1&response_type=code", "/oauth/authorize?client_id=c1&response_type=code"],
+    ["/app/w/x/people?tab=1", "/app/w/x/people?tab=1"],
+    ["https://evil.example/", "/app"],
+    ["//evil.example/app", "/app"],
+    ["/apple", "/app"],
+    ["/app\\@evil.example", "/app"],
+    ["/oauth/authorize", "/app"],
+    ["/app/w/x\tpeople", "/app"],
+  ];
+  const nextRes = await Promise.all(nexts.map(([n]) => call("U1", "GET", `/app/sign-in?next=${encodeURIComponent(n)}`, { cookie: U1.cookie })));
+  check(
+    "sign-in: next may be an /app path or an /oauth/authorize URL; anything else returns to /app",
+    nextRes.every((r, i) => redirectTarget(r) === nexts[i][1]),
+    nextRes.map((r) => `${r.status} ${redirectTarget(r)}`).join(" | "),
+  );
+  const reauthPage = await call("U1", "GET", "/app/sign-in?reauth=1&next=%2Fapp%2Fdevice", { cookie: U1.cookie });
+  check("sign-in: reauth=1 shows the form even to someone signed in", reauthPage.status === 200 && reauthPage.text.includes("Send code"), `${reauthPage.status}`);
+  // -- provider sign-in and linking (the test OAuth provider, through the same Better Auth routes as Google and GitHub):
+  //    the access and refresh tokens a provider issues are stored encrypted, and Better Auth can still read them --
+  const oauthFlow = async (p, body, cookie) => {
+    const start = await call("OA", "POST", p, { cookie, headers: { origin: BASE }, body });
+    const atStub = start.json?.url ? await fetch(start.json.url, { redirect: "manual" }) : null;
+    const back = atStub?.headers.get("location") ? new URL(atStub.headers.get("location")) : null;
+    const jar = [cookie, cookieOf(start.setCookies)].filter(Boolean).join("; ");
+    const cb = back ? await call("OA", "GET", back.pathname + back.search, { cookie: jar }) : null;
+    return { start, cb, target: cb ? redirectTarget(cb) ?? "" : "" };
+  };
+  const oaIn = await oauthFlow("/api/v2/auth/sign-in/social", { provider: "align-test", callbackURL: "/app" });
+  const oaCookie = cookieOf(oaIn.cb?.setCookies ?? []);
+  const oaMe = await call("OA", "GET", "/api/v2/me", { cookie: oaCookie });
+  const oaRow = withDb((d) => d.prepare("SELECT a.id, a.accessToken, a.refreshToken FROM ba_account a JOIN ba_user u ON u.id = a.userId WHERE a.providerId = 'align-test' AND u.email = ?").get(oauthUser.email));
+  // Decrypted with Better Auth's own helper and this server's key (Mode L: <data>/v2/.auth-secret), no app route needed.
+  const { symmetricDecrypt } = await import("better-auth/crypto");
+  const authKey = readFileSync(path.join(onDir, "v2", ".auth-secret"), "utf8").trim();
+  const opened = async (t) => (typeof t === "string" ? await symmetricDecrypt({ key: authKey, data: t }).catch(() => null) : null);
+  const oaPlain = [await opened(oaRow?.accessToken), await opened(oaRow?.refreshToken)];
+  const sealed = (t, plain) => typeof t === "string" && t.length > plain.length && !t.includes(plain) && (t.startsWith("$ba$") || /^[0-9a-f]+$/i.test(t));
+  // Better Auth's routes that would hand out, refresh or describe provider tokens, or unlink a provider, are off.
+  const oaOff = await Promise.all([
+    call("OA", "POST", "/api/v2/auth/get-access-token", { cookie: oaCookie, headers: { origin: BASE }, body: { accountId: oaRow?.id ?? "" } }),
+    call("OA", "POST", "/api/v2/auth/refresh-token", { cookie: oaCookie, headers: { origin: BASE }, body: { accountId: oaRow?.id ?? "" } }),
+    call("OA", "GET", `/api/v2/auth/account-info?accountId=${oaRow?.id ?? ""}`, { cookie: oaCookie }),
+    call("OA", "POST", "/api/v2/auth/unlink-account", { cookie: oaCookie, headers: { origin: BASE }, body: { providerId: "align-test" } }),
+  ]);
+  check(
+    "provider tokens: a sign-in through an OAuth provider works (session, /api/v2/me) and its access and refresh tokens are stored encrypted in ba_account, never as issued (not in the database file either); Better Auth's decrypt helper with the server's key opens them",
+    oaIn.cb?.status === 302 && oaIn.target.endsWith("/app") && oaMe.status === 200 && oaMe.json?.user?.email === oauthUser.email &&
+      sealed(oaRow?.accessToken, OAUTH_AT) && sealed(oaRow?.refreshToken, OAUTH_RT) && dbFilesLack(dbFile, OAUTH_AT) && dbFilesLack(dbFile, OAUTH_RT) && oaPlain[0] === OAUTH_AT && oaPlain[1] === OAUTH_RT,
+    `${oaIn.start.status} ${oaIn.start.text.slice(0, 160)} ${oaIn.cb?.status} ${oaIn.target} ${oaMe.status} ${JSON.stringify(oaRow)} ${JSON.stringify(oaPlain)}`,
+  );
+  check(
+    "provider tokens: Better Auth's get-access-token, refresh-token, account-info and unlink-account routes are off (404) for a signed-in person, and the provider stays linked",
+    oaOff.every((r) => r.status === 404) && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_account WHERE id = ?").get(oaRow?.id ?? "").n) === 1,
+    oaOff.map((r) => `${r.status} ${r.text.slice(0, 80)}`).join(" | "),
+  );
+  // Linking stays explicit: the same provider with an existing account's email doesn't sign in or link on its own,
+  // and linking it from that (recently signed-in) account works, its tokens encrypted too.
+  const UL = await signUp("UL", "Lin Kay", "lin.kay@example.test");
+  Object.assign(oauthUser, { sub: "tp-2", email: UL.email, name: "Lin Kay" });
+  const oaImplicit = await oauthFlow("/api/v2/auth/sign-in/social", { provider: "align-test", callbackURL: "/app" });
+  const ulAccountsBefore = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_account WHERE userId = ? AND providerId = 'align-test'").get(UL.id).n);
+  const oaLink = await oauthFlow("/api/v2/auth/link-social", { provider: "align-test", callbackURL: "/app/account" }, UL.cookie);
+  const ulRow = withDb((d) => d.prepare("SELECT accessToken, refreshToken FROM ba_account WHERE userId = ? AND providerId = 'align-test'").get(UL.id));
+  const ulList = await call("UL", "GET", "/api/v2/auth/list-accounts", { cookie: UL.cookie });
+  check(
+    "provider tokens: account linking still works and is explicit only: a provider sign-in with an existing account's email is refused (no link made); /link-social from that account links it, the linked tokens are encrypted too, and list-accounts shows it",
+    /error=/.test(oaImplicit.target) && cookieOf(oaImplicit.cb?.setCookies ?? []).indexOf("align_v2.session_token=") === -1 && ulAccountsBefore === 0 &&
+      oaLink.start.status === 200 && oaLink.cb?.status === 302 && oaLink.target.endsWith("/app/account") && sealed(ulRow?.accessToken, OAUTH_AT) && sealed(ulRow?.refreshToken, OAUTH_RT) &&
+      Array.isArray(ulList.json) && ulList.json.some((a) => a.providerId === "align-test"),
+    `${oaImplicit.target} ${ulAccountsBefore} ${oaLink.start.status} ${oaLink.start.text.slice(0, 160)} ${oaLink.cb?.status} ${oaLink.target} ${JSON.stringify(ulRow)} ${ulList.text.slice(0, 200)}`,
+  );
+
+  // -- sessions: 7 days rolling, a 30-day absolute cap (ALIGN_SESSION_MAX_DAYS) --
+  const S9 = await signUp("U9", "Sol Nine", "u9@example.test");
+  const signIn9 = async () => cookieOf((await call("U9", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: S9.email, password: "pw-U9-123456" } })).setCookies);
+  const tokenOf = (cookie) => decodeURIComponent(/align_v2\.session_token=([^;]+)/.exec(cookie)?.[1] ?? "").split(".")[0];
+  const old31 = await signIn9();
+  ageSession(old31, 31 * 24 * 60);
+  const capGet = await call("U9", "GET", "/api/v2/auth/get-session", { cookie: old31 });
+  const capMe = await call("U9", "GET", "/api/v2/me", { cookie: old31 });
+  const capPage = await call("U9", "GET", "/app/account", { cookie: old31 });
+  const capRow = withDb((d) => d.prepare("SELECT 1 AS x FROM ba_session WHERE token = ?").get(tokenOf(old31)));
+  check(
+    "sessions: a session signed in 31 days ago is invalid everywhere (get-session null, /api/v2/me 401, /app pages send to sign-in) and its row is deleted, however recently it was used",
+    capGet.status === 200 && capGet.json === null && capMe.status === 401 && (redirectTarget(capPage) ?? "").startsWith("/app/sign-in") && !capRow,
+    `${capGet.text} ${capMe.status} ${redirectTarget(capPage)} ${!!capRow}`,
+  );
+  const old29 = await signIn9();
+  const t29 = tokenOf(old29);
+  withDb((d) => d.prepare("UPDATE ba_session SET createdAt = ?, expiresAt = ? WHERE token = ?").run(new Date(Date.now() - 29 * 86_400_000).toISOString(), new Date(Date.now() + 5 * 86_400_000).toISOString(), t29));
+  const get29 = await call("U9", "GET", "/api/v2/auth/get-session", { cookie: old29 });
+  const row29 = withDb((d) => d.prepare("SELECT createdAt, expiresAt FROM ba_session WHERE token = ?").get(t29));
+  const fresh9 = withDb((d) => d.prepare("SELECT createdAt, expiresAt FROM ba_session WHERE userId = ? ORDER BY createdAt DESC LIMIT 1").get(S9.id));
+  check(
+    "sessions: a 29-day-old session still works and is extended on use, but only to 30 days after its sign-in; a new one lasts 7 days",
+    get29.json?.user?.id === S9.id && Date.parse(row29.expiresAt) === Date.parse(row29.createdAt) + 30 * 86_400_000 && Math.abs(Date.parse(fresh9.expiresAt) - Date.parse(fresh9.createdAt) - 7 * 86_400_000) < 5000,
+    `${get29.status} ${JSON.stringify(row29)} ${JSON.stringify(fresh9)}`,
+  );
+
+  // -- passkeys (API): list, prompt, recent sign-in for adding and deleting, Better Auth's own management routes off --
+  const S9stale = { ...S9, cookie: await signIn9() };
+  ageSession(S9stale.cookie, 20);
+  const pkList = await call("U9", "GET", "/api/v2/account/passkeys", { cookie: S9.cookie });
+  const promptPage = await call("U9", "GET", "/app", { cookie: S9.cookie });
+  const dismiss = await call("U9", "DELETE", "/api/v2/account/passkey-prompt", { cookie: S9.cookie });
+  const pkList2 = await call("U9", "GET", "/api/v2/account/passkeys", { cookie: S9.cookie });
+  const promptPage2 = await call("U9", "GET", "/app", { cookie: S9.cookie });
+  check(
+    "passkeys: GET /api/v2/account/passkeys -> {passkeys: [], prompt: true} and /app shows the add-a-passkey prompt; Not now (DELETE /api/v2/account/passkey-prompt -> 204) is remembered: prompt false, no prompt on /app",
+    pkList.status === 200 && JSON.stringify(pkList.json) === '{"passkeys":[],"prompt":true}' && promptPage.text.includes("Add a passkey to sign in with your fingerprint") && dismiss.status === 204 && pkList2.json?.prompt === false && !promptPage2.text.includes("Add a passkey to sign in with your fingerprint"),
+    `${pkList.text} ${dismiss.status} ${pkList2.text}`,
+  );
+  const regStale = await call("U9", "GET", "/api/v2/auth/passkey/generate-register-options", { cookie: S9stale.cookie });
+  const regFresh = await call("U9", "GET", "/api/v2/auth/passkey/generate-register-options", { cookie: S9.cookie });
+  const linkStale = await call("U9", "POST", "/api/v2/auth/link-social", { cookie: S9stale.cookie, headers: { origin: BASE }, body: { provider: "github", callbackURL: "/app/account" } });
+  const PK_FAKE = "a".repeat(32);
+  const delStale = await call("U9", "DELETE", `/api/v2/account/passkeys/${PK_FAKE}`, { cookie: S9stale.cookie });
+  const delUnknown = await call("U9", "DELETE", `/api/v2/account/passkeys/${PK_FAKE}`, { cookie: S9.cookie });
+  const renUnknown = await call("U9", "PATCH", `/api/v2/account/passkeys/${PK_FAKE}`, { cookie: S9.cookie, body: { name: "x" } });
+  const delBadId = await call("U9", "DELETE", "/api/v2/account/passkeys/not-an-id", { cookie: S9.cookie });
+  check(
+    "passkeys: adding (generate-register-options) and linking an account with a 20-minute-old session -> 403 reauth_required; a fresh one gets options for rp localhost (resident key required); deleting with an old session -> 403 reauth_required, an unknown or malformed id -> 404",
+    regStale.status === 403 && regStale.json?.code === "reauth_required" && regStale.json?.message === "Sign in again to add a passkey. This needs a sign-in from the last 15 minutes." &&
+      regFresh.status === 200 && regFresh.json?.rp?.id === "localhost" && regFresh.json?.rp?.name === "Align" && regFresh.json?.authenticatorSelection?.residentKey === "required" &&
+      linkStale.status === 403 && linkStale.json?.code === "reauth_required" &&
+      delStale.status === 403 && delStale.json?.error === "reauth_required" && delUnknown.status === 404 && renUnknown.status === 404 && delBadId.status === 404,
+    `${regStale.status} ${regStale.text} ${regFresh.status} ${linkStale.status} ${linkStale.text} ${delStale.status} ${delUnknown.status} ${renUnknown.status} ${delBadId.status}`,
+  );
+  const offPaths = await Promise.all([
+    call("U9", "POST", "/api/v2/auth/revoke-sessions", { cookie: S9.cookie, headers: { origin: BASE }, body: {} }),
+    call("U9", "POST", "/api/v2/auth/revoke-other-sessions", { cookie: S9.cookie, headers: { origin: BASE }, body: {} }),
+    call("U9", "POST", "/api/v2/auth/revoke-session", { cookie: S9.cookie, headers: { origin: BASE }, body: { token: "x" } }),
+    call("U9", "GET", "/api/v2/auth/passkey/list-user-passkeys", { cookie: S9.cookie }),
+    call("U9", "POST", "/api/v2/auth/passkey/delete-passkey", { cookie: S9.cookie, headers: { origin: BASE }, body: { id: PK_FAKE } }),
+    call("U9", "POST", "/api/v2/auth/passkey/update-passkey", { cookie: S9.cookie, headers: { origin: BASE }, body: { id: PK_FAKE, name: "x" } }),
+  ]);
+  check("passkeys: Better Auth's own session-revocation and passkey list, rename and delete routes are off (404); Align's are under /api/v2/account", offPaths.every((r) => r.status === 404), offPaths.map((r) => r.status).join(","));
+
+  // -- sign out everywhere --
+  const W9 = await call("U9", "POST", "/api/v2/workspaces", { cookie: S9.cookie, body: { name: "Sol's workspace" } });
+  const D9 = insertDevice(S9.id, "Sol's laptop");
+  const S9b = await signIn9();
+  withDb((d) =>
+    d.prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, 'c', 'Old app', 'x.example', ?, 'h', ?, 'old-kid')").run("gr_AAAAAAAAAAAAAAA9", W9.json.id, S9.id, new Date().toISOString(), Date.now() + 86_400_000),
+  );
+  const soeStale = await call("U9", "POST", "/api/v2/account/sign-out-everywhere", { cookie: S9stale.cookie, body: { devices: true, apps: true } });
+  const soeBad = await call("U9", "POST", "/api/v2/account/sign-out-everywhere", { cookie: S9.cookie, body: { devices: "yes" } });
+  const stillIn = await call("U9", "GET", "/api/v2/me", { cookie: S9b });
+  const soe = await call("U9", "POST", "/api/v2/account/sign-out-everywhere", { cookie: S9.cookie, body: { devices: true, apps: true } });
+  const afterSoe = await Promise.all([S9.cookie, S9b, S9stale.cookie].map((c) => call("U9", "GET", "/api/v2/me", { cookie: c })));
+  const devAfter = await call("U9", "GET", "/api/v2/me", { bearer: D9.access });
+  const soeDb = withDb((d) => ({
+    sessions: d.prepare("SELECT COUNT(*) AS n FROM ba_session WHERE userId = ?").get(S9.id).n,
+    reason: d.prepare("SELECT revoked_reason FROM v2_devices WHERE id = ?").get(D9.id)?.revoked_reason,
+    grants: d.prepare("SELECT COUNT(*) AS n FROM v2_oauth_grants WHERE user_id = ?").get(S9.id).n,
+    audit: d.prepare("SELECT ws_id, actor_id, action, object_id FROM v2_audit WHERE actor_id = ? AND action IN ('account.signed_out_everywhere', 'device.revoked')").all(S9.id),
+  }));
+  check(
+    "sign out everywhere: an old session -> 403 reauth_required and nothing ends; a non-boolean option -> 400; with devices and apps -> 200 {sessions, devices: 1, apps} and a cleared cookie: every session of the person (this one included) is gone, the device is revoked (reason signed_out_everywhere), every app grant is deleted, and the audit (no workspace) records account.signed_out_everywhere and device.revoked with the person as actor",
+    soeStale.status === 403 && soeStale.json?.error === "reauth_required" && soeBad.status === 400 && stillIn.status === 200 &&
+      soe.status === 200 && soe.json?.sessions >= 3 && soe.json?.devices === 1 && soe.json?.apps === 0 && /align_v2\.session_token=;.*Max-Age=0/i.test(soe.headers.get("set-cookie") ?? "") &&
+      afterSoe.every((r) => r.status === 401) && devAfter.status === 401 && soeDb.sessions === 0 && soeDb.reason === "signed_out_everywhere" && soeDb.grants === 0 &&
+      soeDb.audit.some((r) => r.action === "account.signed_out_everywhere" && r.ws_id === null && r.object_id === S9.id) && soeDb.audit.some((r) => r.action === "device.revoked" && r.object_id === D9.id && r.ws_id === null),
+    `${soeStale.status} ${soeBad.status} ${stillIn.status} ${soe.status} ${soe.text} ${afterSoe.map((r) => r.status)} ${devAfter.status} ${JSON.stringify(soeDb)}`,
+  );
+  const S9c = await signIn9();
+  const D9b = insertDevice(S9.id, "Sol's desktop");
+  const soePlain = await call("U9", "POST", "/api/v2/account/sign-out-everywhere", { cookie: S9c, body: {} });
+  const dev9b = await call("U9", "GET", "/api/v2/me", { bearer: D9b.access });
+  check("sign out everywhere: without the options only web sessions end; paired devices keep working", soePlain.status === 200 && soePlain.json?.devices === 0 && soePlain.json?.apps === 0 && dev9b.status === 200, `${soePlain.text} ${dev9b.status}`);
+
+  if (existsSync(CHROME)) {
+    const { default: puppeteer } = await import("puppeteer-core");
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    try {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      // Email code: Send code, read the printed code, Sign in (the button waits for 6 digits), land on next.
+      await page.goto(`${BASE}/app/sign-in?next=/app/account`, { waitUntil: "networkidle0" });
+      await page.type('#email-code input[type="email"]', "chrome@example.test");
+      await page.evaluate(() => [...document.querySelectorAll("#email-code button")].find((b) => b.textContent === "Send code")?.click());
+      await page.waitForFunction(() => document.body.innerText.includes("a 6-digit code is on its way") && document.body.innerText.includes("npm run sign-in-link"), { timeout: 15000 });
+      const chromeCode = codeIn(signInLine(onDir));
+      const disabledAt5 = await (async () => {
+        await page.type('#email-code input[name="code"]', chromeCode.slice(0, 5));
+        return page.evaluate(() => [...document.querySelectorAll("#email-code button")].find((b) => b.textContent === "Sign in")?.disabled);
+      })();
+      await page.type('#email-code input[name="code"]', chromeCode.slice(5));
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("#email-code button")].find((b) => b.textContent === "Sign in")?.click())]);
+      await page.waitForFunction(() => document.body.innerText.includes("Your account") && document.body.innerText.includes("Email code"), { timeout: 15000 });
+      check("ui (Chrome): email code sign-in (Send code, the printed code, Sign in enabled only at 6 digits) lands on next (/app/account)", disabledAt5 === true && new URL(page.url()).pathname === "/app/account", `${disabledAt5} ${page.url()}`);
+      // Recent sign-in prompt: an aged session on /app/device gets Sign in again, which signs out and comes back.
+      const chromeCookie = (await page.cookies()).find((c) => c.name === "align_v2.session_token");
+      ageSession(`align_v2.session_token=${chromeCookie?.value}`, 20);
+      await page.goto(`${BASE}/app/device?code=BCDF-GHJK`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Sign in again to approve a device"), { timeout: 15000 });
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Sign in again")?.click())]);
+      const back = new URL(page.url());
+      const signedOut = (await page.cookies()).every((c) => c.name !== "align_v2.session_token" || !c.value);
+      check(
+        "ui (Chrome): Sign in again signs out and opens /app/sign-in?next=<the device page with its code>&email=<their email>",
+        back.pathname === "/app/sign-in" && back.searchParams.get("next") === "/app/device?code=BCDF-GHJK" && back.searchParams.get("email") === "chrome@example.test" && signedOut,
+        `${page.url()} signedOut=${signedOut}`,
+      );
+      await page.goto(`${BASE}/app/sign-in?next=/app`, { waitUntil: "networkidle0" });
+      await page.evaluate(() => [...document.querySelectorAll("#test-idp button")].find((b) => b.textContent?.includes("Create a test account"))?.click());
+      await page.waitForSelector('#test-idp input[autocomplete="name"]');
+      await page.type('#test-idp input[autocomplete="name"]', "Browser User");
+      await page.type('#test-idp input[type="email"]', "ui@example.test");
+      await page.type('#test-idp input[type="password"]', "browser-pass-1");
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => document.querySelector("#test-idp button[type=submit]")?.click())]);
+      await page.waitForFunction(() => document.body.innerText.includes("Your workspaces") && document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
+      // First run: the sample, then its pending change request approved from the Requests tab.
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create the Northstar sample")?.click())]);
+      await page.waitForFunction(() => document.body.innerText.includes("Expand to regulated customers") && document.body.innerText.includes("Pass the security review"), { timeout: 15000 });
+      const sampleUrl = page.url();
+      await page.goto(`${sampleUrl}/requests`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Waiting on you") && document.body.innerText.includes("waiting for approval") && document.body.innerText.includes("Pen test window booked"), { timeout: 15000 });
+      const requestsText = await page.evaluate(() => document.body.innerText);
+      // With no evidence, choosing Approve asks first ("Approve without evidence?"); then evidence is added and the
+      // confirmation says what approving does: it records the decision, and agents switch only at launch.
+      const clickButton = (label) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), label);
+      await page.click('[data-decision="Approve"]');
+      await page.waitForFunction(() => document.body.innerText.includes("Approve without evidence?") && document.querySelector('[data-decision="Approve"]')?.getAttribute("aria-pressed") === "true", { timeout: 15000 });
+      const approvePanel = await page.evaluate(() => document.body.innerText);
+      await clickButton("Add evidence");
+      await page.waitForSelector('input[type="url"]');
+      await page.type('input[type="url"]', "https://github.com/northstar/security/pull/7");
+      await page.type('input[maxlength="120"]', "Pen-test vendor contract");
+      await clickButton("Add link");
+      await page.waitForFunction(() => [...document.querySelectorAll("a")].some((a) => a.textContent === "Pen-test vendor contract"), { timeout: 15000 });
+      const evLink = await page.evaluate(() => {
+        const a = [...document.querySelectorAll("a")].find((x) => x.textContent === "Pen-test vendor contract");
+        return { href: a?.getAttribute("href"), target: a?.getAttribute("target"), rel: a?.getAttribute("rel"), text: document.body.innerText };
+      });
+      check(
+        "ui (Chrome): choosing Approve on a request with no evidence asks \"Approve without evidence?\"; an added link shows its kind, label, host, who added it and \"self-reported\", opens in a new tab with rel noopener noreferrer, beside \"Recorded by Align at revision 1\"",
+        approvePanel.includes("Approve without evidence?") && evLink.href === "https://github.com/northstar/security/pull/7" && evLink.target === "_blank" && evLink.rel === "noopener noreferrer" && /self-reported/.test(evLink.text) && /Pull request/.test(evLink.text) && /github\.com/.test(evLink.text) && /by you/.test(evLink.text) && /Recorded by Align at revision 1/.test(evLink.text) && !/\bverified\b/.test(evLink.text.replace("never verified", "")),
+        JSON.stringify({ ...evLink, text: evLink.text.slice(0, 300) }),
+      );
+      await page.waitForFunction(() => !document.body.innerText.includes("Approve without evidence?"), { timeout: 15000 });
+      await clickButton("Review this decision");
+      await page.waitForFunction(() => document.activeElement?.textContent === "Confirm: Approve", { timeout: 15000 });
+      const confirmText = await page.$eval("[data-confirm]", (e) => e.innerText);
+      await clickButton("Confirm: Approve");
+      await page.waitForFunction(() => document.body.innerText.includes("Approved, agents still on v1 until launch") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
+      const approvedText = await page.evaluate(() => document.body.innerText);
+      const launchButtons = await page.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.textContent));
+      check(
+        "ui (Chrome): the approve confirmation says approval is not launch (agents stay on version 1 until someone launches it) and what happens (version 2 recorded as approved); after confirming the record says \"Recorded: you approved revision 1 as version 2\" and reads \"Approved, agents still on v1 until launch\" (not \"It became version 2\", never \"agents on v2\") and offers Launch version 2 to agents and Not yet",
+        /Approval is not launch\. Agents stay on version 1 until someone who can launch it does\./.test(confirmText) && /waiting for approval → approved\. Version 2 is recorded as approved/.test(confirmText) && /Recorded: you approved revision 1 as version 2/.test(approvedText) &&
+          !approvedText.includes("It became version 2") && !/agents on v2/.test(approvedText) && launchButtons.includes("Launch version 2 to agents") && launchButtons.includes("Not yet"),
+        `${confirmText.slice(0, 600)} | ${approvedText.slice(0, 600)}`,
+      );
+      await clickButton("Launch version 2 to agents");
+      await page.waitForFunction(() => document.body.innerText.includes("Launched, agents on v2") && document.body.innerText.includes("It became version 2") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
+      const sampleGoal = await page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Pass the security review")?.getAttribute("href"));
+      await page.goto(`${BASE}${sampleGoal}`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Change requests") && document.body.innerText.includes("approved") && document.body.innerText.includes("version 2"), { timeout: 15000 });
+      const ownGoalText = await page.evaluate(() => document.body.innerText);
+      check("ui (Chrome): first run offers the Northstar sample; its request is approved and launched from the Requests tab; the owner's goal page lists it without Propose a change", !ownGoalText.includes("Propose a change") && /Your requests/.test(requestsText), "");
+      await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Northstar (sample)") && !document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
+      await page.type("main form input", "UI workspace");
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create")?.click())]);
+      // A new workspace opens on its Home, which points to the Goals tab for the first goal.
+      await page.waitForFunction(() => document.body.innerText.includes("Know what needs you") && document.body.innerText.includes("No active goals you can see."), { timeout: 15000 });
+      const wsUrl = page.url();
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Create one on the Goals tab.")?.click())]);
+      check("ui (Chrome): a new workspace opens on its Home (\"Know what needs you\"); with no goals it links to the Goals tab at /app/w/<ws>/goals", new URL(page.url()).pathname === `${new URL(wsUrl).pathname}/goals`, page.url());
+      await page.waitForFunction(() => document.body.innerText.includes("New goal") && document.body.innerText.includes("Level"), { timeout: 15000 });
+      await page.type('main form input:not([aria-label])', "Browser goal");
+      await page.type('input[aria-label="Measure 1"]', "Browser measure");
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create goal")?.click());
+      await page.waitForFunction(() => document.body.innerText.includes("Browser goal") && document.body.innerText.includes("Browser measure"), { timeout: 15000 });
+      await page.goto(`${wsUrl}/spend`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Estimated list cost") && document.body.innerText.includes("Total"), { timeout: 15000 });
+      const spendText = await page.evaluate(() => document.body.innerText);
+      await page.goto(`${wsUrl}/people`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => ["Invite someone", "Teams", "No teams yet.", "Leave workspace", "Create team"].every((x) => document.body.innerText.includes(x)), { timeout: 15000 });
+      const peopleText = await page.evaluate(() => document.body.innerText);
+      for (const t of ["sessions", "alignments", "requests"]) {
+        await page.goto(`${wsUrl}/${t}`, { waitUntil: "networkidle0" });
+        await page.waitForFunction((x) => document.body.innerText.includes(x), { timeout: 15000 }, t === "sessions" ? "Shared sessions" : t === "requests" ? "You have not proposed a change" : "Waiting on you");
+      }
+      await page.goto(`${wsUrl}/apps`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("No AI apps are connected to this workspace.") && document.body.innerText.includes("/api/mcp"), { timeout: 15000 });
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Your devices"), { timeout: 15000 });
+      const allText = spendText + peopleText + (await page.evaluate(() => document.body.innerText));
+      check("ui (Chrome): test sign-up, create a workspace and a goal (an owner is offered the Level choice), then spend, people (teams, leave), sessions, alignments, apps and devices render without page errors", errors.length === 0 && /estimate/i.test(spendText), errors.join(" | "));
+      check("ui (Chrome): the People and Spend tabs say team, never pod", !/\bpods?\b/i.test(peopleText + spendText), "pod found");
+      check("ui (Chrome): no em dashes in rendered copy", !allText.includes("\u2014"), "em dash found");
+
+      // -- passkeys in Chrome, on localhost (WebAuthn needs a domain name), with a virtual authenticator --
+      const LB = `http://localhost:${PORT}`;
+      const pctx = await browser.createBrowserContext();
+      const pk = await pctx.newPage();
+      const pkErrors = [];
+      pk.on("pageerror", (e) => pkErrors.push(e.message));
+      pk.on("dialog", (d) => void d.accept());
+      const pkNavs = [];
+      pk.on("framenavigated", (f) => f === pk.mainFrame() && pkNavs.push(f.url()));
+      const cdp = await pk.createCDPSession();
+      await cdp.send("WebAuthn.enable");
+      const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
+        options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+      });
+      const pkText = () => pk.evaluate(() => document.body.innerText);
+      const pkClick = (label, root = "button") => pk.evaluate((l, r) => [...document.querySelectorAll(r)].find((b) => b.textContent?.trim() === l)?.click(), label, root);
+      const pkCookie = async () => `align_v2.session_token=${(await pk.cookies()).find((c) => c.name === "align_v2.session_token")?.value ?? ""}`;
+      const pkUser = () => withDb((d) => d.prepare("SELECT id FROM ba_user WHERE email = ?").get("pk@example.test")?.id);
+      await pk.goto(`${BASE}/app/sign-in?next=/app`, { waitUntil: "networkidle0" });
+      const loopText = await pkText();
+      await pk.goto(`${LB}/app/sign-in?next=/app`, { waitUntil: "networkidle0" });
+      const lhHasButton = (await pkText()).includes("Sign in with a passkey");
+      const emailAuto = await pk.evaluate(() => document.querySelector('#email-code input[type="email"]')?.getAttribute("autocomplete"));
+      check(
+        "ui (Chrome): at 127.0.0.1 the sign-in page says passkeys work only at http://localhost:<port> and has no passkey button; at localhost it has Sign in with a passkey and the email field offers passkeys (autocomplete \"email webauthn\")",
+        loopText.includes(`Passkeys work only at http://localhost:${PORT}`) && !loopText.includes("Sign in with a passkey") && lhHasButton && emailAuto === "email webauthn",
+        `${loopText.slice(0, 300)} | ${lhHasButton} ${emailAuto}`,
+      );
+      await pk.evaluate(() => [...document.querySelectorAll("#test-idp button")].find((b) => b.textContent?.includes("Create a test account"))?.click());
+      await pk.waitForSelector('#test-idp input[autocomplete="name"]');
+      await pk.type('#test-idp input[autocomplete="name"]', "Pat Key");
+      await pk.type('#test-idp input[type="email"]', "pk@example.test");
+      await pk.type('#test-idp input[type="password"]', "browser-pass-2");
+      await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pk.evaluate(() => document.querySelector("#test-idp button[type=submit]")?.click())]);
+      await pk.waitForFunction(() => document.body.innerText.includes("Your workspaces"), { timeout: 15000 });
+      const promptText = await pkText();
+      await pkClick("Add a passkey", "#passkey-prompt a");
+      await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet.") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Add a passkey"), { timeout: 15000 });
+      const accountNoPrompt = !(await pkText()).includes("A passkey can't be phished");
+      await pk.type('main input[maxlength="100"]:not([aria-label])', "MacBook passkey");
+      await pkClick("Add a passkey");
+      await pk.waitForFunction(() => document.body.innerText.includes("MacBook passkey") && document.body.innerText.includes("not used yet"), { timeout: 15000 });
+      const creds = (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials;
+      const pkRow = withDb((d) => d.prepare("SELECT id, name FROM ba_passkey WHERE userId = ?").all(pkUser()));
+      const pkAdded = withDb((d) => d.prepare("SELECT ws_id, actor_id FROM v2_audit WHERE action = 'passkey.added' AND object_id = ?").get(pkRow[0]?.id));
+      check(
+        "ui (Chrome): after sign-in without a passkey /app shows the add-a-passkey prompt; it leads to /app/account (no prompt there), where Add a passkey registers a discoverable credential for rp localhost labelled with the email, lists it by name (\"not used yet\") and audits passkey.added with no workspace",
+        promptText.includes("Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code.") && accountNoPrompt &&
+          creds.length === 1 && creds[0].rpId === "localhost" && creds[0].isResidentCredential && creds[0].userName === "pk@example.test" &&
+          pkRow.length === 1 && pkRow[0].name === "MacBook passkey" && pkAdded?.ws_id === null && pkAdded?.actor_id === pkUser(),
+        `${accountNoPrompt} ${JSON.stringify(creds.map((c) => [c.rpId, c.userName]))} ${JSON.stringify(pkRow)} ${JSON.stringify(pkAdded)}`,
+      );
+      ageSession(await pkCookie(), 20);
+      await pkClick("Add a passkey");
+      await pk.waitForFunction(() => document.body.innerText.includes("Sign in again to add a passkey. This needs a sign-in from the last 15 minutes."), { timeout: 15000 });
+      const credsStale = (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials.length;
+      const navsBefore = pkNavs.length;
+      await pkClick("Sign in again");
+      // The email field's autofill (conditional mediation): the virtual authenticator answers it, so the page signs in.
+      for (let i = 0; i < 150 && !pkNavs.slice(navsBefore).some((u) => u.startsWith(`${LB}/app/sign-in`)); i++) await sleep(100);
+      for (let i = 0; i < 150 && !(pkNavs.at(-1) ?? "").startsWith(`${LB}/app/account`); i++) await sleep(100);
+      await pk.waitForFunction(() => document.body.innerText.includes("last used"), { timeout: 15000 });
+      const pkUse = withDb((d) => d.prepare("SELECT last_used_at FROM v2_passkey_use WHERE passkey_id = ?").get(pkRow[0]?.id));
+      check(
+        "ui (Chrome): with an old sign-in Add a passkey shows Sign in again (nothing registered), which signs out to /app/sign-in?next=/app/account; there the email field's passkey autofill signs in and returns to /app/account, and the passkey shows when it was last used",
+        credsStale === 1 && pkNavs.slice(navsBefore).some((u) => { const x = new URL(u); return x.pathname === "/app/sign-in" && x.searchParams.get("next") === "/app/account" && x.searchParams.get("email") === "pk@example.test"; }) && !!pkUse?.last_used_at,
+        `${credsStale} ${pkNavs.slice(navsBefore).join(" ")} ${JSON.stringify(pkUse)}`,
+      );
+      // A passkey sign-in is a fresh sign-in: this session passes the recent-sign-in checks at once.
+      const pkWs = await call("PK", "POST", "/api/v2/workspaces", { cookie: await pkCookie(), body: { name: "Passkey workspace" } });
+      const pkFresh = await Promise.all([
+        call("PK", "GET", "/api/v2/auth/passkey/generate-register-options", { cookie: await pkCookie() }),
+        call("PK", "DELETE", `/api/v2/account/passkeys/${"b".repeat(32)}`, { cookie: await pkCookie() }),
+        call("PK", "POST", `/api/v2/workspaces/${pkWs.json?.id}/invites`, { cookie: await pkCookie(), body: { email: "owner2@example.test", role: "owner" } }),
+      ]);
+      check(
+        "recent sign-in: a passkey sign-in counts as a fresh sign-in (adding a passkey, deleting one (unknown: 404) and an owner invite pass the check)",
+        pkWs.status === 201 && pkFresh[0].status === 200 && pkFresh[1].status === 404 && pkFresh[2].status === 201,
+        pkFresh.map((r) => `${r.status} ${r.text.slice(0, 80)}`).join(" | "),
+      );
+      insertDevice(pkUser(), "Pat's laptop");
+      // The button, on the code step (where no autofill runs). Cookies are cleared rather than signing out, so the
+      // sign-in page's autofill can't sign straight back in first.
+      await cdp.send("Network.clearBrowserCookies");
+      await pk.goto(`${LB}/app/sign-in?next=/app/devices&email=pk%40example.test&code=123456`, { waitUntil: "networkidle0" });
+      await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pkClick("Sign in with a passkey")]);
+      await pk.waitForFunction(() => document.body.innerText.includes("Your devices"), { timeout: 15000 });
+      check("ui (Chrome): Sign in with a passkey signs in and lands on next (/app/devices)", new URL(pk.url()).pathname === "/app/devices", pk.url());
+      // People tab: an owner invite with an old sign-in gets Sign in again, which comes back to the People tab.
+      ageSession(await pkCookie(), 20);
+      await pk.goto(`${LB}/app/w/${pkWs.json?.id}/people`, { waitUntil: "networkidle0" });
+      await pk.waitForFunction(() => document.body.innerText.includes("Invite someone"), { timeout: 15000 });
+      await pk.type('main input[type="email"]', "second-owner@example.test");
+      await pk.evaluate(() => [...document.querySelectorAll("select")].find((x) => [...x.options].some((o) => o.textContent === "Viewer (read only)"))?.setAttribute("id", "invite-role"));
+      await pk.select("#invite-role", "owner");
+      await pkClick("Create invite link");
+      await pk.waitForFunction(() => document.body.innerText.includes("Sign in again to invite an owner. This needs a sign-in from the last 15 minutes."), { timeout: 15000 });
+      await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pkClick("Sign in again")]);
+      await pk.waitForFunction((w) => location.pathname === `/app/w/${w}/people`, { timeout: 15000 }, pkWs.json?.id);
+      check("ui (Chrome): People tab: an owner invite with an old sign-in shows \"Sign in again to invite an owner.\"; Sign in again (here by passkey autofill) returns to the People tab", new URL(pk.url()).pathname === `/app/w/${pkWs.json?.id}/people`, pk.url());
+      // Rename and delete.
+      await pk.goto(`${LB}/app/account`, { waitUntil: "networkidle0" });
+      await pk.waitForFunction(() => document.body.innerText.includes("MacBook passkey"), { timeout: 15000 });
+      await pkClick("Rename");
+      await pk.waitForSelector('input[aria-label="Passkey name"]');
+      await pk.click('input[aria-label="Passkey name"]', { clickCount: 3 });
+      await pk.type('input[aria-label="Passkey name"]', "Work laptop");
+      await pkClick("Save");
+      await pk.waitForFunction(() => document.body.innerText.includes("Work laptop") && !document.body.innerText.includes("MacBook passkey"), { timeout: 15000 });
+      await pkClick("Delete");
+      await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet."), { timeout: 15000 });
+      const pkGone = withDb((d) => ({
+        rows: d.prepare("SELECT COUNT(*) AS n FROM ba_passkey WHERE userId = ?").get(pkUser()).n,
+        use: d.prepare("SELECT COUNT(*) AS n FROM v2_passkey_use WHERE passkey_id = ?").get(pkRow[0]?.id).n,
+        audit: d.prepare("SELECT actor_id FROM v2_audit WHERE action = 'passkey.deleted' AND object_id = ?").get(pkRow[0]?.id)?.actor_id,
+      }));
+      check("ui (Chrome): Rename names the passkey; Delete (confirmed) removes it and its use record, and audits passkey.deleted", pkGone.rows === 0 && pkGone.use === 0 && pkGone.audit === pkUser(), JSON.stringify(pkGone));
+      // Sign out everywhere, also unpairing devices.
+      await pk.evaluate(() => document.querySelector('input[name="devices"]')?.click());
+      await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pkClick("Sign out everywhere")]);
+      const soeUi = withDb((d) => ({
+        sessions: d.prepare("SELECT COUNT(*) AS n FROM ba_session WHERE userId = ?").get(pkUser()).n,
+        devices: d.prepare("SELECT COUNT(*) AS n FROM v2_devices WHERE user_id = ? AND revoked_reason = 'signed_out_everywhere'").get(pkUser()).n,
+      }));
+      check("ui (Chrome): Sign out everywhere (with Also unpair all my devices) ends every session, revokes the device and lands on /app/sign-in", new URL(pk.url()).pathname === "/app/sign-in" && soeUi.sessions === 0 && soeUi.devices === 1, `${pk.url()} ${JSON.stringify(soeUi)}`);
+      check("ui (Chrome): the passkey, account and People pages render without page errors", pkErrors.length === 0, pkErrors.join(" | "));
+      await pctx.close();
+    } catch (e) {
+      check("ui (Chrome) run", false, e?.stack ?? e);
+    } finally {
+      await browser.close();
+    }
+  } else check("ui (Chrome) available", false, `no Chrome at ${CHROME}`);
+
+  // -- Mode L ignores ALIGN_CREATION=closed, every cap (1 here) and the Turnstile keys --
+  const U9 = await signUp("U9A", "Una Nine", "una9@example.test");
+  const u9ws = [];
+  for (const n of ["Nine A", "Nine B"]) u9ws.push(await call("U9A", "POST", "/api/v2/workspaces", { cookie: U9.cookie, body: { name: n } }));
+  const u9sample = await call("U9A", "POST", "/api/v2/workspaces/sample", { cookie: U9.cookie, body: {} });
+  const u9inv = await Promise.all(["x1@example.test", "x2@example.test"].map((email) => call("U9A", "POST", `/api/v2/workspaces/${u9ws[0].json?.id}/invites`, { cookie: U9.cookie, body: { email, role: "member" } })));
+  const u9home = await call("U9A", "GET", "/app", { cookie: U9.cookie });
+  const u9signIn = await call("anon", "GET", "/app/sign-in");
+  check(
+    "local: Mode L ignores ALIGN_CREATION=closed, the caps and the Turnstile keys: one person creates 2 workspaces and the sample with no code or check, and invites past a cap of 1; no page shows a code field, a bot check or a request-access link",
+    u9ws.every((r) => r.status === 201) && u9sample.status === 201 && u9inv.every((r) => r.status === 201) && u9home.status === 200 && !u9home.text.includes('name="creation_code"') && !u9home.text.includes("data-turnstile-sitekey") && !u9signIn.text.includes("data-turnstile-sitekey") && !u9signIn.text.includes("/app/request-access"),
+    `${u9ws.map((r) => r.status)} ${u9sample.status} ${u9inv.map((r) => r.status)} ${u9sample.text}`,
+  );
+  // -- the operator script's workspace commands: list without people; delete by the app's own (soft) deletion path,
+  //    restorable; --purge erases at once through the retention job's purge --
+  const opOn = { ALIGN_DATA_DIR: onDir };
+  const delWs = u9ws[1].json.id;
+  const delInv = await call("U9A", "POST", `/api/v2/workspaces/${delWs}/invites`, { cookie: U9.cookie, body: { email: U1.email, role: "member" } });
+  await call("U1", "POST", `/api/v2/invites/${delInv.json?.token}/accept`, { cookie: U1.cookie, body: {} });
+  const opWsList = admin(["workspaces", "list"], opOn);
+  const delLine = opWsList.out.split("\n").find((l) => l.startsWith(delWs)) ?? "";
+  check(
+    "align-admin: workspaces list shows each workspace's id, name, created date, deleted (- when live), member and owner counts, and no names or emails of people",
+    opWsList.status === 0 && /^id\s+name\s+created\s+deleted\s+members\s+owners/.test(opWsList.out) && /Nine B\s+\d{4}-\d{2}-\d{2}\s+-\s+2\s+1\s*$/.test(delLine) && !opWsList.out.includes("@") && !opWsList.out.includes("Una Nine"),
+    opWsList.out + opWsList.err,
+  );
+  const delNoYes = admin(["workspaces", "delete", delWs], opOn);
+  check("align-admin: workspaces delete without --yes deletes nothing and exits 1, asking for --yes", delNoYes.status === 1 && /--yes/.test(delNoYes.err) && withDb((d) => !d.prepare("SELECT deleted_at FROM v2_workspaces WHERE id = ?").get(delWs).deleted_at), delNoYes.err);
+  const delYes = admin(["workspaces", "delete", delWs, "--yes"], opOn);
+  const delGone = await call("U1", "GET", `/api/v2/workspaces/${delWs}`, { cookie: U1.cookie });
+  const delOwnerList = (await call("U9A", "GET", "/api/v2/workspaces", { cookie: U9.cookie })).json;
+  const delKept = withDb((d) => ({
+    deleted_at: d.prepare("SELECT deleted_at FROM v2_workspaces WHERE id = ?").get(delWs)?.deleted_at,
+    rows: ["v2_members", "v2_invites"].map((t) => d.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ws_id = ?`).get(delWs).n),
+    audit: d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = 'workspace.deleted'").all(delWs),
+  }));
+  const delListed = admin(["workspaces", "list"], opOn).out.split("\n").find((l) => l.startsWith(delWs)) ?? "";
+  const delAgain = admin(["workspaces", "delete", delWs, "--yes"], opOn);
+  check(
+    "align-admin: workspaces delete <id> --yes is the app's soft delete: the running server answers 404 for it at once, its rows stay, the audit records workspace.deleted with no actor (the operator), its owner sees it under deleted (restorable), workspaces list shows when it was deleted, and deleting it again exits 1 pointing at --purge",
+    delYes.status === 0 && /restore/.test(delYes.out) && delGone.status === 404 && !!delKept.deleted_at && delKept.rows.every((n) => n > 0) && delKept.audit.length === 1 && delKept.audit[0].actor_id === null &&
+      delOwnerList?.deleted?.some((w) => w.id === delWs) && delListed.includes(delKept.deleted_at) && delAgain.status === 1 && /--purge/.test(delAgain.err),
+    `${delYes.status} ${delYes.out} ${delYes.err} ${delGone.status} ${JSON.stringify(delKept)} ${delListed} ${delAgain.err}`,
+  );
+  const purgeNoYes = admin(["workspaces", "delete", delWs, "--purge"], opOn);
+  const purged = admin(["workspaces", "delete", delWs, "--purge", "--yes"], opOn);
+  const purgeLeft = withDb((d) => ["v2_members", "v2_invites", "v2_audit"].map((t) => d.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ws_id = ?`).get(delWs).n).concat(d.prepare("SELECT COUNT(*) AS n FROM v2_workspaces WHERE id = ?").get(delWs).n));
+  check(
+    "align-admin: workspaces delete <id> --purge needs --yes too (else nothing changes, exit 1); with it every row of the workspace (members, invites, audit, the workspace) is gone at once; an unknown id exits 1",
+    purgeNoYes.status === 1 && /--purge --yes/.test(purgeNoYes.err) && purged.status === 0 && purgeLeft.every((n) => n === 0) && admin(["workspaces", "delete", delWs, "--purge", "--yes"], opOn).status === 1,
+    `${purgeNoYes.status} ${purgeNoYes.err} ${purged.status} ${purged.err} ${purgeLeft}`,
+  );
+
+  // Each port package fills its own block below (PORT-002 limits, PORT-003 asks and activity, PORT-004 value), so the
+  // packages never edit the same lines. They run before the canary check, which covers their responses too.
+  // ==== port:limits ====
+  // PORT-002: limits are goal content (versioned, hashed, approved by the goal's approval set, delivered in goal
+  // snapshots), and suggesting limits from pasted notes stores nothing.
+  {
+    // Sign-up allows 10 a minute from one client; this phase has spent some, so wait out the window when it answers 429.
+    const lmSignUp = async (who, name, email) => {
+      for (let i = 0; ; i++) {
+        const u = await signUp(who, name, email);
+        if (u.status !== 429 || i >= 2) return u;
+        await sleep(31_000);
+      }
+    };
+    const LA = await lmSignUp("LA", "Lara Owner", "lara.limits@example.test");
+    const LB = await lmSignUp("LB", "Leo Lead", "leo.limits@example.test");
+    const LC = await lmSignUp("LC", "Lia Beta", "lia.limits@example.test");
+    const LD = await lmSignUp("LD", "Lou Viewer", "lou.limits@example.test");
+    const LE = await lmSignUp("LE", "Lee Loner", "lee.limits@example.test");
+    const lw = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${LW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    const LW = (await call("LA", "POST", "/api/v2/workspaces", { cookie: LA.cookie, body: { name: "Limits workspace" } })).json?.id;
+    for (const [u, role] of [
+      [LB, "member"],
+      [LC, "member"],
+      [LD, "viewer"],
+      [LE, "member"],
+    ]) {
+      const t = (await lw(LA, "POST", "/invites", { email: u.email, role })).json?.token;
+      await call(u.who, "POST", `/api/v2/invites/${t}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const alpha = (await lw(LA, "POST", "/teams", { name: "Alpha" })).json?.id;
+    const beta = (await lw(LA, "POST", "/teams", { name: "Beta" })).json?.id;
+    await lw(LA, "POST", `/teams/${alpha}/members`, { user_id: LB.id, role: "lead" });
+    await lw(LA, "POST", `/teams/${alpha}/members`, { user_id: LA.id, role: "member" });
+    await lw(LA, "POST", `/teams/${beta}/members`, { user_id: LC.id, role: "lead" });
+    const L_SRC = { kind: "meeting", title: "Infra sync", date: "2026-10-20" };
+    const gA = await lw(LA, "POST", "/goals", {
+      title: "Ship the inference cluster",
+      team_id: alpha,
+      visibility: "workspace",
+      measures: [{ text: "GPU memory headroom per node" }, { text: "Latency budget per request" }],
+      limits: [{ type: "must_not", text: "All three models must not fit on one GPU", source: L_SRC }],
+    });
+    const GA = gA.json;
+    const gB = await lw(LC, "POST", "/goals", { title: "Launch the billing dashboard", team_id: beta, visibility: "workspace", measures: [{ text: "Invoices reconciled nightly" }, { text: "Latency budget per page" }] });
+    const GB = gB.json;
+    const GH = (await lw(LC, "POST", "/goals", { title: "Rotate the Zanzibar credentials", team_id: beta, visibility: "team", measures: [{ text: "Vault keys rotated" }] })).json;
+    check(
+      "limits: a goal created with limits -> 201 with limits [{id lim_…, type, text, source}]; a goal without them has limits []",
+      gA.status === 201 && GA.limits?.length === 1 && /^lim_[a-z2-7]{12}$/.test(GA.limits[0].id) && GA.limits[0].type === "must_not" && GA.limits[0].text === "All three models must not fit on one GPU" && JSON.stringify(GA.limits[0].source) === JSON.stringify(L_SRC) && gB.status === 201 && Array.isArray(GB.limits) && GB.limits.length === 0 && GH?.id,
+      `${gA.text.slice(0, 300)} ${gB.text.slice(0, 200)}`,
+    );
+    const lim = (text, type = "must") => ({ type, text });
+    const vA = (u, body) => lw(u, "POST", `/goals/${GA.id}/versions`, body);
+    const six = await vA(LA, { limits: [1, 2, 3, 4, 5, 6].map((i) => lim(`Limit number ${i} must hold`)) });
+    const long = await vA(LA, { limits: [lim("x".repeat(161))] });
+    const badType = await vA(LA, { limits: [{ type: "should", text: "Keep it small" }] });
+    const badDate = await vA(LA, { limits: [{ type: "must", text: "Keep it small", source: { kind: "meeting", title: "x", date: "2026-13-01" } }] });
+    const badKind = await vA(LA, { limits: [{ type: "must", text: "Keep it small", source: { kind: "prompt", title: "x", date: "2026-10-01" } }] });
+    const notList = await vA(LA, { limits: "Keep it small" });
+    check(
+      "limits: 6 limits -> 400 limits: at most 5; 161 characters -> 400; an unknown type, a bad date, a source kind other than meeting or manual, or a non-list -> 400 naming the field; the goal stays at version 1",
+      six.status === 400 && six.json?.message === "limits: at most 5" && long.status === 400 && /limits\[0\]\.text/.test(long.json?.message) && badType.status === 400 && /limits\[0\]\.type/.test(badType.json?.message) && badDate.status === 400 && /limits\[0\]\.source\.date/.test(badDate.json?.message) && badKind.status === 400 && /source\.kind/.test(badKind.json?.message) && notList.status === 400 && (await lw(LA, "GET", `/goals/${GA.id}`)).json?.goal?.version === 1,
+      `${six.text} ${long.text} ${badType.text} ${badDate.text} ${badKind.text} ${notList.text}`,
+    );
+    const keptId = GA.limits[0].id;
+    const v2a = await vA(LA, { version: 1, limits: [GA.limits[0], { id: "lim_forgedforged", type: "out_of_scope", text: "Billing dashboards are out of scope", source: null }] });
+    check(
+      "limits: a new version keeps a sent id the previous version had and gives a new id to an unknown one (never the one sent)",
+      v2a.status === 201 && v2a.json.version === 2 && v2a.json.limits.length === 2 && v2a.json.limits[0].id === keptId && /^lim_/.test(v2a.json.limits[1].id) && v2a.json.limits[1].id !== "lim_forgedforged" && v2a.json.limits[1].source === null,
+      v2a.text.slice(0, 300),
+    );
+    const sameAgain = await vA(LA, { limits: v2a.json.limits.map(({ type, text, source }) => ({ type, text, source })) });
+    check("limits: the same limits again (even without their ids) -> 409 no_change", sameAgain.status === 409 && sameAgain.json?.error === "no_change", sameAgain.text);
+
+    // Hashes: limits join the content hash only when non-empty, so a goal without limits hashes as before migration 11.
+    const oldHash = (r) => sha256hex(JSON.stringify({ title: r.title, measures: JSON.parse(r.measures_json), anchors: JSON.parse(r.anchors_json), status: r.status }));
+    const verRow = (g, v) => withDb((d) => d.prepare("SELECT title, measures_json, anchors_json, status, limits_json, content_hash, created_by FROM v2_goal_versions WHERE goal_id = ? AND version = ?").get(g, v));
+    await lw(LC, "GET", `/goals/${GB.id}`);
+    const gb1 = verRow(GB.id, 1);
+    const gbTitle = await lw(LC, "POST", `/goals/${GB.id}/versions`, { title: "Launch the billing dashboard in Q1" });
+    const gb2 = verRow(GB.id, 2);
+    const CANARY_LIMIT = "Never paste </untrusted-text> into a reply";
+    const gbLimit = await lw(LC, "POST", `/goals/${GB.id}/versions`, { limits: [{ type: "must_not", text: CANARY_LIMIT }] });
+    const gb3 = verRow(GB.id, 3);
+    check(
+      "limits (hash): a goal without limits keeps the hash it would have had before limits existed (version 1, and a new version without limits); adding a limit changes the hash",
+      gb1.content_hash === oldHash(gb1) && gbTitle.status === 201 && gb2.content_hash === oldHash(gb2) && gb2.limits_json === "[]" && gbLimit.status === 201 && gb3.content_hash !== oldHash(gb3) && JSON.parse(gb3.limits_json).length === 1,
+      JSON.stringify([gb1, gb2, gb3]),
+    );
+    const lFeed = await call("LE", "GET", `/api/v2/workspaces/${LW}/goals`, { cookie: LE.cookie });
+    const feedGB = lFeed.json?.goals?.find((g) => g.id === GB.id);
+    check(
+      "limits: the goals feed carries each goal's limits; a limit text with </untrusted-text> comes back unchanged",
+      lFeed.status === 200 && lFeed.json.goals.every((g) => Array.isArray(g.limits)) && feedGB?.limits?.[0]?.text === CANARY_LIMIT && lFeed.json.goals.find((g) => g.id === GA.id)?.limits?.length === 2,
+      lFeed.text.slice(0, 300),
+    );
+
+    // A shared session of the team lead's, bound to GA, receives limits in the goal_version snapshot of an approved request.
+    const LDEV = insertDevice(LB.id, "Leo's laptop");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(LDEV.id, LW));
+    const lKey = randomBytes(32).toString("base64url");
+    const lStart = new Date(Date.now() - 600_000).toISOString();
+    const lPut = await call("LB", "PUT", `/api/v2/workspaces/${LW}/sessions/${lKey}`, { bearer: LDEV.access, body: { harness: "claude-code", repo_key: randomBytes(32).toString("base64url"), repo_alias: "cluster", started_at: lStart, title: "Cluster work" } });
+    const lEp = await call("LB", "POST", `/api/v2/workspaces/${LW}/sessions/${lKey}/epochs`, { bearer: LDEV.access, body: { epoch_id: epochId(), goal_id: GA.id, starts_at: lStart, root_turn: null, cause: "manual" } });
+    const lDirs = async () => (await call("LB", "GET", "/api/v2/directives?cursor=0", { bearer: LDEV.access })).json?.directives ?? [];
+    const gvOf = (list) => list.filter((d) => d.kind === "goal_version" && d.goal?.id === GA.id);
+    const before = gvOf(await lDirs()).length;
+    const curA = (await lw(LE, "GET", `/goals/${GA.id}`)).json.goal;
+    const NEW_LIMIT = { type: "must", text: "Inference must stay inside the EU region", source: { kind: "manual", title: "", date: "2026-10-28" } };
+    const crBad = await lw(LE, "POST", `/goals/${GA.id}/change-requests`, { base_version: curA.version, changes: { limits: [lim("y".repeat(161))] }, reason: "x" });
+    const crL = await lw(LE, "POST", `/goals/${GA.id}/change-requests`, { base_version: curA.version, changes: { limits: [...curA.limits, NEW_LIMIT] }, reason: "Limits from the infra sync" });
+    const counterL = await lw(LB, "POST", `/goals/${GA.id}/change-requests/${crL.json?.id}/counter`, { revision: 1, changes: { limits: [...curA.limits, { ...NEW_LIMIT, text: "Inference must stay inside the EU regions" }] }, note: "Plural" });
+    const acceptL = await lw(LE, "POST", `/goals/${GA.id}/change-requests/${crL.json?.id}/accept_counter`, { revision: 2 });
+    const afterCounter = gvOf(await lDirs()).length;
+    const crRead = await lw(LD, "GET", `/goals/${GA.id}/change-requests/${crL.json?.id}`);
+    check(
+      "limits (change requests): a non-owner proposes changes.limits -> 201 with the limits in changes and the diff (before and after); an invalid limit -> 400; creating, countering and accepting the counter write no directive",
+      lPut.status === 200 && lEp.status < 300 && crL.status === 201 && crL.json.changes.limits?.length === 3 && crL.json.diff.before.limits?.length === 2 && crL.json.diff.after.limits?.length === 3 && crBad.status === 400 && counterL.status === 200 && acceptL.status === 200 && afterCounter === before && crRead.json?.diff?.after?.limits?.[2]?.text === "Inference must stay inside the EU regions",
+      `${lPut.status} ${lEp.status} ${crL.text.slice(0, 300)} ${crBad.text} ${counterL.text.slice(0, 200)} ${acceptL.status} ${before} ${afterCounter}`,
+    );
+    const approveL = await lw(LB, "POST", `/goals/${GA.id}/change-requests/${crL.json?.id}/approve`, { revision: 2 });
+    const gaApproved = (await lw(LD, "GET", `/goals/${GA.id}`)).json?.goal;
+    const afterApproveL = gvOf(await lDirs()).length;
+    check(
+      "limits (D1): limits confirmed by an approval reach no agent until launch: the goal keeps its two limits and no directive is written",
+      approveL.status === 200 && approveL.json.launch === "pending" && gaApproved?.limits?.length === 2 && gaApproved.version === curA.version && afterApproveL === before,
+      `${approveL.text.slice(0, 200)} ${gaApproved?.limits?.length} ${afterApproveL} ${before}`,
+    );
+    const launchL = await lw(LB, "POST", `/goals/${GA.id}/change-requests/${crL.json?.id}/launch`, {});
+    const gaV = verRow(GA.id, launchL.json?.version);
+    const gvAfter = gvOf(await lDirs());
+    const snap = gvAfter[gvAfter.length - 1]?.goal;
+    check(
+      "limits (change requests): the team lead approves and launches -> a new version whose limits are the request's, created_by the lead; the bound session's goal_version directive snapshot carries limits [{id, type, text, source}] and no request reason",
+      approveL.status === 200 && approveL.json.state === "approved" && launchL.json?.launch === "launched" && gaV?.created_by === LB.id && JSON.parse(gaV.limits_json).length === 3 && gvAfter.length === before + 1 && snap?.limits?.length === 3 && snap.limits[2].text === "Inference must stay inside the EU regions" && snap.limits[2].source?.kind === "manual" && snap.limits.every((l) => /^lim_/.test(l.id)) && !JSON.stringify(gvAfter).includes("Limits from the infra sync"),
+      `${approveL.text.slice(0, 200)} ${JSON.stringify(gaV)} ${JSON.stringify(snap)}`,
+    );
+    const firstLimit = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'first_limit' AND ws_id = ?").get(LW).n);
+    check("limits (events): first_limit is recorded once for the workspace (several versions carry limits)", firstLimit === 1, `${firstLimit}`);
+
+    // -- suggesting limits from notes (as LE: a member in no team, who reads GA and GB but not Beta's team goal GH) --
+    const suggest = (u, body) => lw(u, "POST", "/limits/suggest", body);
+    const day = "2026-10-29";
+    const NOTES = [
+      "I can't find the GPU node logs.",
+      "Ensure all three models don't fit on the GPU.",
+      "Is the inference cluster out of scope?",
+      "GPU must fit.",
+      `The GPU cluster must ${Array.from({ length: 41 }, () => "really").join(" ")} hold.`,
+      "Invoice exports are out of scope for the billing dashboard.",
+      "The Zanzibar credentials must never be logged.",
+    ].join("\n");
+    const tables = () => withDb((d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'v2_%'").all().map((t) => [t.name, d.prepare(`SELECT COUNT(*) AS n FROM ${t.name}`).get().n]));
+    const rowsBefore = JSON.stringify(tables());
+    const s1 = await suggest(LE, { notes: NOTES, source: { title: "Weekly sync", date: day } });
+    const rowsAfter = JSON.stringify(tables());
+    const forGoal = (r, id) => r.json?.suggestions?.find((s) => s.goal.id === id);
+    const s1A = forGoal(s1, GA.id);
+    const s1B = forGoal(s1, GB.id);
+    const gaLimits = (await lw(LE, "GET", `/goals/${GA.id}`)).json.goal.limits;
+    check(
+      "limits (suggest): of pasted notes only rule-shaped sentences count (\"I can't find it\", a question, 3 words and 46 words -> none); \"Ensure … don't fit on the GPU\" -> must on the GPU goal, marked already (a near-duplicate of its limit); \"out of scope\" -> out_of_scope on the billing goal",
+      s1.status === 200 && s1.json.suggestions.length === 2 && s1A?.limits.length === 1 && s1A.limits[0].type === "must" && s1A.limits[0].text === "Ensure all three models don't fit on the GPU." && s1A.limits[0].already === gaLimits[0].id && s1A.limits[0].source.kind === "meeting" && s1A.limits[0].source.title === "Weekly sync" && s1B?.limits.length === 1 && s1B.limits[0].type === "out_of_scope" && s1B.limits[0].already === null,
+      s1.text.slice(0, 600),
+    );
+    check(
+      "limits (suggest): a team goal the caller can't read is never named and its words never place a sentence (the Zanzibar sentence is dropped); a non-owner may propose, not edit",
+      !s1.text.includes(GH.id) && !/Rotate|Zanzibar/.test(JSON.stringify(s1.json.suggestions)) && s1.json.dropped >= 1 && s1A.can_propose === true && s1A.can_edit === false,
+      s1.text.slice(0, 400),
+    );
+    const audits = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ?").get(LW).n);
+    check("limits (suggest): nothing is stored (every v2 table has the same row count) and nothing audited", rowsBefore === rowsAfter, `${audits}`);
+    const TIE = "The latency budget must not grow this quarter.\nKeep notes short.";
+    const tieA = await suggest(LE, { notes: TIE, source: { title: "Weekly sync", date: day }, prefer_goal_id: GA.id });
+    const tieNone = await suggest(LE, { notes: TIE, source: { title: "Weekly sync", date: day } });
+    check(
+      "limits (suggest): a sentence whose goal words two goals share equally goes to prefer_goal_id when it is one of them; without it the sentence is dropped",
+      tieA.status === 200 && tieA.json.suggestions.length === 1 && tieA.json.suggestions[0].goal.id === GA.id && tieA.json.suggestions[0].limits[0].type === "must_not" && tieNone.status === 200 && tieNone.json.suggestions.length === 0 && tieNone.json.dropped === 1,
+      `${tieA.text.slice(0, 300)} ${tieNone.text}`,
+    );
+    const typed = await suggest(LE, { notes: "Deploys must never happen on Fridays.", source: { title: "", date: day }, prefer_goal_id: GB.id });
+    const unreadable = await suggest(LE, { notes: "Deploys must never happen on Fridays.", source: { date: day }, prefer_goal_id: GH.id });
+    check(
+      "limits (suggest): a single typed sentence that matches no goal goes to prefer_goal_id as kind manual; naming an unreadable goal -> 404",
+      typed.status === 200 && typed.json.suggestions.length === 1 && typed.json.suggestions[0].goal.id === GB.id && typed.json.suggestions[0].limits[0].source.kind === "manual" && typed.json.suggestions[0].limits[0].type === "must_not" && unreadable.status === 404,
+      `${typed.text.slice(0, 300)} ${unreadable.text}`,
+    );
+    const sView = await suggest(LD, { notes: "Ensure all three models don't fit on the GPU.", source: { date: day } });
+    const sLong = await suggest(LE, { notes: "a".repeat(20_001), source: { date: day } });
+    const sDate = await suggest(LE, { notes: "Ensure all three models don't fit on the GPU.", source: { date: "29/10/2026" } });
+    const sNone = await suggest(LE, { notes: "We talked about lunch and the weather today.", source: { date: day } });
+    check(
+      "limits (suggest): a viewer -> 403 read_only; notes of 20,001 characters or a bad date -> 400; notes with no rule -> no suggestions",
+      sView.status === 403 && sView.json?.error === "read_only" && sLong.status === 400 && sDate.status === 400 && sNone.status === 200 && sNone.json.suggestions.length === 0,
+      `${sView.text} ${sLong.status} ${sDate.text} ${sNone.text}`,
+    );
+    // The web app: chips on the Goals tab, then "Paste meeting notes" -> Propose these limits (a member) and
+    // Add to a new version (the goal's owner, through the goal page's form).
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const asUser = async (u) => {
+          const page = await browser.newPage();
+          await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return page;
+        };
+        const click = (page, text) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), text);
+        const pasteNotes = async (page, notes) => {
+          await page.goto(`${BASE}/app/w/${LW}/goals`, { waitUntil: "networkidle0" });
+          await page.waitForFunction(() => document.body.innerText.includes("Ship the inference cluster"), { timeout: 15000 });
+          await click(page, "Paste meeting notes");
+          await page.waitForSelector("textarea");
+          await page.type("textarea", notes);
+          await click(page, "Suggest limits");
+        };
+        const pe = await asUser(LE);
+        await pasteNotes(pe, "Invoice exports are out of scope for the billing dashboard.\nKeep notes short.");
+        const chips = await pe.evaluate(() => document.querySelector('[aria-label="Limits of Ship the inference cluster"]')?.textContent ?? "");
+        await pe.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Propose these limits"), { timeout: 15000 });
+        await click(pe, "Propose these limits");
+        await pe.waitForFunction(() => document.body.innerText.includes("Proposed."), { timeout: 15000 });
+        const leCr = (await lw(LE, "GET", `/goals/${GB.id}/change-requests`)).json?.change_requests?.find((c) => c.requester.id === LE.id && c.state === "pending");
+        check(
+          "ui (Chrome): the Goals tab shows each goal's limit chips; a member's Paste meeting notes -> Propose these limits posts a change request with the goal's limits plus the suggestion and the reason \"Limits from pasted notes, <date>\"",
+          /Must not\s*All three models must not fit on one GPU/.test(chips) && leCr?.changes?.limits?.length === 2 && leCr.changes.limits[1].type === "out_of_scope" && /^Limits from pasted notes, \d{4}-\d{2}-\d{2}$/.test(leCr.reason),
+          `${chips} ${JSON.stringify(leCr?.changes)} ${leCr?.reason}`,
+        );
+        const pc = await asUser(LC);
+        await pasteNotes(pc, "Invoice exports are out of scope for the billing dashboard.\nKeep notes short.");
+        await pc.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Add to a new version"), { timeout: 15000 });
+        const gbVersion = (await lw(LC, "GET", `/goals/${GB.id}`)).json.goal.version;
+        await Promise.all([pc.waitForNavigation({ waitUntil: "networkidle0" }), click(pc, "Add to a new version")]);
+        await pc.waitForFunction(() => [...document.querySelectorAll("input")].some((i) => i.value === "Invoice exports are out of scope for the billing dashboard."), { timeout: 15000 });
+        const onGoalPage = new URL(pc.url()).pathname === `/app/w/${LW}/goals/${GB.id}`;
+        await click(pc, `Save version ${gbVersion + 1}`);
+        await pc.waitForFunction((v) => document.body.innerText.includes(`version ${v}`) && document.body.innerText.includes("Limits"), { timeout: 15000 }, gbVersion + 1);
+        const gbNow = (await lw(LC, "GET", `/goals/${GB.id}`)).json.goal;
+        const cardText = await pc.evaluate(() => document.body.innerText);
+        check(
+          "ui (Chrome): the owner's Add to a new version opens the goal page with the new-version form filled in (the goal's limits plus the suggestion); Save version keeps both and the Limits card shows them",
+          onGoalPage && gbNow.version === gbVersion + 1 && gbNow.limits.length === 2 && gbNow.limits[0].text === CANARY_LIMIT && gbNow.limits[1].text === "Invoice exports are out of scope for the billing dashboard." && cardText.includes("Out of scope") && cardText.includes(CANARY_LIMIT),
+          `${pc.url()} ${JSON.stringify(gbNow.limits)}`,
+        );
+      } catch (e) {
+        check("ui (Chrome): limits", false, e.message);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available", false, `no Chrome at ${CHROME}`);
+    const burst = [];
+    for (let i = 0; i < 21; i++) burst.push(await suggest(LA, { notes: "Ensure all three models don't fit on the GPU.", source: { date: day } }));
+    check(
+      "limits (suggest): the goal's owner gets can_edit; the 21st call in a minute from one person -> 429 rate_limited",
+      burst.slice(0, 20).every((r) => r.status === 200) && burst[0].json.suggestions[0]?.can_edit === true && burst[0].json.suggestions[0].can_propose === false && burst[20].status === 429 && burst[20].json?.error === "rate_limited",
+      burst.map((r) => r.status).join(","),
+    );
+
+    // The sample workspace's security goal carries one limit; seeding it records no first_limit.
+    const lSample = (await call("LA", "POST", "/api/v2/workspaces/sample", { cookie: LA.cookie, body: {} })).json?.id;
+    const lSampleSec = (await call("LA", "GET", `/api/v2/workspaces/${lSample}/goals`, { cookie: LA.cookie })).json?.goals?.find((g) => g.title === "Pass the security review");
+    check(
+      "limits (sample): \"Pass the security review\" has one must_not limit from a meeting, and the seeded sample records no first_limit",
+      lSampleSec?.limits?.length === 1 && lSampleSec.limits[0].type === "must_not" && lSampleSec.limits[0].source?.kind === "meeting" && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'first_limit' AND ws_id = ?").get(lSample).n) === 0,
+      JSON.stringify(lSampleSec?.limits),
+    );
+  }
+  // ==== end port:limits ====
+
+  // ==== port:asks ====
+  // Asks (PORT-003): a workspace of its own, so every role is exact: KO owns it; Product has a lead (KL), a member (KM)
+  // and a viewer (KV); Security has the requester (KR) and another member (KX); KN is a member in no team.
+  const kUsers = {};
+  for (const [who, name] of [
+    ["KO", "Kit Owner"],
+    ["KL", "Kai Lead"],
+    ["KM", "Kim Member"],
+    ["KV", "Kay Viewer"],
+    ["KR", "Kat Requester"],
+    ["KX", "Kev Other"],
+    ["KN", "Kip Noteam"],
+  ])
+    kUsers[who] = await signUp(who, name, `${who.toLowerCase()}@asks.example.test`);
+  const { KO, KL, KM, KV, KR, KX, KN } = kUsers;
+  const AK = (await call("KO", "POST", "/api/v2/workspaces", { cookie: KO.cookie, body: { name: "Asks workspace" } })).json?.id;
+  const ka = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${AK}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+  for (const [u, role] of [
+    [KL, "member"],
+    [KM, "member"],
+    [KV, "viewer"],
+    [KR, "member"],
+    [KX, "member"],
+    [KN, "member"],
+  ]) {
+    const i = await ka(KO, "POST", "/invites", { email: u.email, role });
+    await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+  }
+  const TP = (await ka(KO, "POST", "/teams", { name: "Product" })).json?.id;
+  const TS = (await ka(KO, "POST", "/teams", { name: "Security" })).json?.id;
+  for (const [t, u, role] of [
+    [TP, KL, "lead"],
+    [TP, KM, "member"],
+    [TP, KV, "member"],
+    [TS, KR, "member"],
+    [TS, KX, "member"],
+  ])
+    await ka(KO, "POST", `/teams/${t}/members`, { user_id: u.id, role });
+  const GPd = (await ka(KL, "POST", "/goals", { title: "Product SSO", visibility: "team", team_id: TP })).json;
+  const GPriv = (await ka(KL, "POST", "/goals", { title: "Kai's private Product goal", visibility: "private", team_id: TP })).json;
+  const GSec = (await ka(KR, "POST", "/goals", { title: "Security review", visibility: "workspace", team_id: TS })).json;
+  check("asks setup: a workspace with a Product team (lead, member, viewer), a Security team (two members), a member in no team, and team goals", !!AK && !!TP && !!TS && !!GPd?.id && !!GPriv?.id && !!GSec?.id, `${AK} ${TP} ${TS} ${JSON.stringify([GPd, GPriv, GSec]).slice(0, 300)}`);
+
+  const ASK_CANARY = `ASK-CANARY-${randomBytes(4).toString("hex")}`;
+  const askBody = (extra = {}) => ({ team_id: TP, text: `Single sign-on for faculty by June ${ASK_CANARY}`, from_label: "Faculty", source: { kind: "meeting", title: "Faculty sync", date: "2026-10-20" }, ...extra });
+  const X1r = await ka(KR, "POST", "/asks", askBody());
+  const X1 = X1r.json;
+  check(
+    "asks: a member records an ask of another team -> 201 AskView (ask_ id, open, team, requester, source, no mentions, can flags; the requester can withdraw and mention, not accept)",
+    X1r.status === 201 && /^ask_[a-z2-7]{24}$/.test(X1?.id) && X1.state === "open" && X1.team.id === TP && X1.team.name === "Product" && X1.goal === null && X1.requester.id === KR.id && X1.requester.name === "Kat Requester" && X1.from_label === "Faculty" &&
+      X1.source.kind === "meeting" && X1.source.title === "Faculty sync" && X1.source.date === "2026-10-20" && X1.mentions.length === 0 && X1.decided_by === null && X1.waiting_on_me === false &&
+      X1.can.withdraw && X1.can.mention && !X1.can.accept && !X1.can.decline && !X1.can.done && !X1.can.reopen,
+    X1r.text,
+  );
+  const badAsks = await Promise.all([
+    ka(KR, "POST", "/asks", askBody({ goal_id: GSec.id })),
+    ka(KR, "POST", "/asks", askBody({ goal_id: GPd.id })),
+    ka(KR, "POST", "/asks", askBody({ team_id: "pod_aaaaaaaaaaaaaaaaaaaaaaaa" })),
+    ka(KR, "POST", "/asks", askBody({ text: "x".repeat(401) })),
+    ka(KR, "POST", "/asks", askBody({ from_label: "y".repeat(81) })),
+    ka(KR, "POST", "/asks", askBody({ source: { kind: "meeting", date: "2026-10-20" } })),
+    ka(KR, "POST", "/asks", askBody({ source: { kind: "meeting", title: "t", date: "2026-13-40" } })),
+    ka(KR, "POST", "/asks", askBody({ source: { kind: "chat", title: "t", date: "2026-10-20" } })),
+    ka(KV, "POST", "/asks", askBody()),
+  ]);
+  check(
+    "asks: goal_id of another team's goal -> 400; an unreadable goal -> 404; an unknown team -> 404; text over 400, who-asked over 80, a meeting without a title, a bad date or source kind -> 400; a viewer -> 403 read_only",
+    badAsks[0].status === 400 && badAsks[1].status === 404 && badAsks[2].status === 404 && badAsks.slice(3, 8).every((r) => r.status === 400) && badAsks[8].status === 403 && badAsks[8].json?.error === "read_only",
+    badAsks.map((r) => `${r.status}:${r.json?.error}`).join(" "),
+  );
+  const ctrl = await ka(KR, "POST", "/asks", askBody({ text: "Line one\u0007\nline two", source: { kind: "manual", date: "2026-10-21" } }));
+  check("asks: control characters in people's text become spaces; a manual source needs no title", ctrl.status === 201 && ctrl.json?.text === "Line one  line two" && ctrl.json.source.title === null, ctrl.text);
+  // A goal its reader can't see is shown as null: Kai's private Product goal, read by Kim.
+  const Xp = await ka(KL, "POST", "/asks", askBody({ text: "Tie this to the private plan", goal_id: GPriv.id }));
+  const XpKM = await ka(KM, "GET", `/asks/${Xp.json?.id}`);
+  const XpKL = await ka(KL, "GET", `/asks/${Xp.json?.id}`);
+  check("asks: the goal an ask concerns is shown to readers of that goal, and null to a reader of the ask who can't read the goal", Xp.status === 201 && XpKL.json?.goal?.id === GPriv.id && XpKM.status === 200 && XpKM.json?.goal === null, `${Xp.text} ${XpKM.text}`);
+
+  // Who reads it: the requester, the asked team (lead, member, viewer) and workspace owners; nobody else (404).
+  const readers = { KR: 200, KL: 200, KM: 200, KV: 200, KO: 200, KX: 404, KN: 404 };
+  const reads = {};
+  const askLists = {};
+  for (const who of Object.keys(readers)) {
+    reads[who] = (await ka(kUsers[who], "GET", `/asks/${X1.id}`)).status;
+    askLists[who] = ((await ka(kUsers[who], "GET", "/asks")).json?.asks ?? []).some((a) => a.id === X1.id);
+  }
+  check(
+    "asks: read by the requester, the asked team's lead, member and viewer, and the workspace owner (200, and in GET /asks); another member and a person in no team -> 404, and not listed",
+    Object.entries(readers).every(([w, s]) => reads[w] === s && askLists[w] === (s === 200)),
+    `${JSON.stringify(reads)} ${JSON.stringify(askLists)}`,
+  );
+  const askOutsider = await call("U1", "GET", `/api/v2/workspaces/${AK}/asks`, { cookie: U1.cookie });
+  check("asks: a non-member of the workspace -> 404 on GET /asks", askOutsider.status === 404, `${askOutsider.status}`);
+
+  // The role x action matrix on the open ask (refusals change nothing).
+  const askAct = (u, id, action, body = {}) => ka(u, "POST", `/asks/${id}/${action}`, body);
+  const codeOf = (r) => (r.status === 200 ? 200 : `${r.status} ${r.json?.error}`);
+  const M = { date: "2026-10-27", text: `It came up again ${ASK_CANARY}`, source_title: "Weekly leads" };
+  const matrix = [
+    [KR, "accept", "403 not_team_lead"],
+    [KM, "accept", "403 not_team_lead"],
+    [KX, "accept", "404 not_found"],
+    [KN, "accept", "404 not_found"],
+    [KV, "accept", "403 read_only"],
+    [KR, "decline", "403 not_team_lead"],
+    [KM, "decline", "403 not_team_lead"],
+    [KV, "decline", "403 read_only"],
+    [KR, "done", "403 not_in_team"],
+    [KM, "done", "409 wrong_state"],
+    [KL, "done", "409 wrong_state"],
+    [KO, "done", "409 wrong_state"],
+    [KL, "reopen", "409 wrong_state"],
+    [KM, "reopen", "403 not_team_lead"],
+    [KL, "withdraw", "403 not_requester"],
+    [KO, "withdraw", "403 not_requester"],
+    [KX, "withdraw", "404 not_found"],
+    [KV, "mention", "403 read_only"],
+    [KX, "mention", "404 not_found"],
+    [KR, "mention", 200],
+    [KM, "mention", 200],
+  ];
+  const got = [];
+  for (const [u, a, want] of matrix) got.push([u.who, a, want, codeOf(await askAct(u, X1.id, a, a === "mention" ? M : {}))]);
+  const wrongM = got.filter(([, , want, have]) => want !== have);
+  check(`asks: role x action matrix on an open ask (${got.length} cases: 200, 403 not_team_lead / not_in_team / not_requester / read_only, 404, 409 wrong_state)`, wrongM.length === 0, JSON.stringify(wrongM));
+  const kmView = (await ka(KM, "GET", `/asks/${X1.id}`)).json;
+  const klView = (await ka(KL, "GET", `/asks/${X1.id}`)).json;
+  const kvView = (await ka(KV, "GET", `/asks/${X1.id}`)).json;
+  const koView = (await ka(KO, "GET", `/asks/${X1.id}`)).json;
+  check(
+    "asks: can flags and waiting_on_me follow the rules: the lead may accept and decline and it waits on them; a team member may only mention; a viewer may do nothing; the workspace owner may accept but it doesn't wait on them while the team has a lead; mentions name who added them",
+    klView?.can.accept && klView.can.decline && klView.waiting_on_me && !kmView?.can.accept && kmView.can.mention && !kmView.waiting_on_me && Object.values(kvView?.can ?? { x: true }).every((v) => v === false) &&
+      koView?.can.accept && !koView.waiting_on_me && kmView.mentions.length === 2 && kmView.mentions[0].n === 1 && kmView.mentions[0].added_by.id === KR.id && kmView.mentions[1].added_by.name === "Kim Member",
+    `${JSON.stringify(klView?.can)} ${JSON.stringify(kmView?.can)} ${JSON.stringify(kvView?.can)} ${JSON.stringify(koView?.can)} ${JSON.stringify(kmView?.mentions)}`,
+  );
+
+  // The state machine: open -> accept -> done -> reopen -> decline; withdraw then refused; withdraw from open by the requester.
+  const ks1 = await askAct(KL, X1.id, "accept");
+  const kmAfterAccept = (await ka(KM, "GET", `/asks/${X1.id}`)).json;
+  const ks2 = await askAct(KM, X1.id, "done");
+  const ks3 = await askAct(KL, X1.id, "reopen");
+  const ks4 = await askAct(KO, X1.id, "decline");
+  const ks5 = await askAct(KR, X1.id, "withdraw");
+  const ks6 = await askAct(KR, X1.id, "mention", M);
+  check(
+    "asks: state machine: the lead accepts (then it waits on the team to finish: Mark done for a member), a member marks it done, the lead reopens it, the workspace owner declines it; withdraw and mention on a declined ask -> 409 wrong_state",
+    ks1.json?.state === "accepted" && ks1.json.decided_by?.id === KL.id && kmAfterAccept?.waiting_on_me && kmAfterAccept.can.done && ks2.json?.state === "done" && ks2.json.decided_by?.id === KM.id &&
+      ks3.json?.state === "open" && ks4.json?.state === "declined" && ks4.json.decided_by?.id === KO.id && !!ks4.json.decided_at && ks5.status === 409 && ks5.json?.error === "wrong_state" && ks6.status === 409,
+    [ks1, ks2, ks3, ks4, ks5, ks6].map((r) => `${r.status}:${r.json?.state ?? r.json?.error}`).join(" "),
+  );
+  const X3 = (await ka(KR, "POST", "/asks", askBody({ text: "Withdraw me" }))).json;
+  const w1 = await askAct(KR, X3?.id, "withdraw");
+  const w2 = await askAct(KL, X3?.id, "reopen");
+  check("asks: the requester withdraws an open ask (state withdrawn); a withdrawn ask can't be reopened (409)", w1.status === 200 && w1.json.state === "withdrawn" && w1.json.decided_by.id === KR.id && w2.status === 409, `${w1.text} ${w2.status}`);
+  const X5 = (await ka(KO, "POST", "/asks", askBody({ text: "Owner-recorded ask", from_label: null }))).json;
+  const unknownAction = await askAct(KL, X5?.id, "approve");
+  check("asks: an unknown action -> 404", unknownAction.status === 404, `${unknownAction.status}`);
+
+  // Mentions: at most 10 (409 too_many_mentions).
+  const X6 = (await ka(KO, "POST", "/asks", askBody({ text: "Mention me ten times" }))).json;
+  const mres = [];
+  for (let i = 1; i <= 11; i++) mres.push((await askAct(KO, X6?.id, "mention", { date: `2026-10-${String(i + 1).padStart(2, "0")}`, text: `Again ${i}`, source_title: "Standup" })).status);
+  const badMention = await askAct(KO, X6?.id, "mention", { date: "2026-10-01", text: "", source_title: "Standup" });
+  check("asks: the 11th mention -> 409 too_many_mentions; a mention without text -> 400", mres.slice(0, 10).every((s) => s === 200) && mres[10] === 409 && badMention.status === 400, `${mres} ${badMention.status}`);
+
+  // Import (workspace owners; at most 60; all or nothing; appends and merges, never replaces).
+  const askCount = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_asks WHERE ws_id = ?").get(AK).n);
+  const asksBefore = askCount();
+  const impItem = (i) => ({ team_id: TS, text: `Imported ask ${i}`, source: { kind: "meeting", title: "Board", date: "2026-10-01" } });
+  const impLead = await ka(KL, "POST", "/asks/import", { asks: [impItem(1)] });
+  const impViewer = await ka(KV, "POST", "/asks/import", { asks: [impItem(1)] });
+  const imp61 = await ka(KO, "POST", "/asks/import", { asks: Array.from({ length: 61 }, (_, i) => impItem(i)) });
+  const impBad = await ka(KO, "POST", "/asks/import", { asks: [impItem(1), { ...impItem(2), source: { kind: "meeting", title: "Board", date: "yesterday" } }] });
+  check(
+    "asks import: a member -> 403 owner_only, a viewer -> 403 read_only; 61 items -> 400; one bad item -> 400 naming it; nothing stored",
+    impLead.status === 403 && impLead.json?.error === "owner_only" && impViewer.status === 403 && impViewer.json?.error === "read_only" && imp61.status === 400 && impBad.status === 400 && /asks\[1\]/.test(impBad.json?.message) && askCount() === asksBefore,
+    `${impLead.status} ${impViewer.status} ${imp61.status} ${impBad.text} ${askCount()} ${asksBefore}`,
+  );
+  const X5text = X5.text;
+  const imp = await ka(KO, "POST", "/asks/import", {
+    asks: [
+      { team_id: TP, text: X5text.toUpperCase(), source: X5.source },
+      { team_id: TP, text: X5text, source: { kind: "meeting", title: "Board", date: "2026-10-28" } },
+      impItem(1),
+      { ...impItem(2), state: "accepted", mentions: [{ date: "2026-10-05", text: "Asked again", source_title: "Board follow-up" }] },
+      impItem(1),
+    ],
+  });
+  const x5After = (await ka(KO, "GET", `/asks/${X5.id}`)).json;
+  const imported2 = ((await ka(KO, "GET", `/asks?team_id=${TS}`)).json?.asks ?? []).find((a) => a.text === "Imported ask 2");
+  check(
+    "asks import: an exact duplicate (same team, text in any case, date) changes nothing; the same text on a new date is a mention (\"came up again\"); new ones are created (with their state and mentions) -> 201 {created, merged, unchanged}",
+    imp.status === 201 && imp.json.created === 2 && imp.json.merged === 1 && imp.json.unchanged === 2 && askCount() === asksBefore + 2 &&
+      x5After?.mentions.length === 1 && x5After.mentions[0].date === "2026-10-28" && x5After.mentions[0].source_title === "Board" && imported2?.state === "accepted" && imported2.decided_by?.id === KO.id && imported2.mentions.length === 1,
+    `${imp.text} ${JSON.stringify(x5After?.mentions)} ${JSON.stringify(imported2)}`,
+  );
+
+  // The feed: ETag / 304, for a device too, and the same set as the browser; filters.
+  const kDevice = (u) => {
+    const keys = newDeviceKeys();
+    const d = insertDevice(u.id, `${u.who}'s laptop`);
+    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, AK));
+    return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
+  };
+  const DKR = kDevice(KR);
+  const fb = await ka(KR, "GET", "/asks");
+  const fb304 = await call("KR", "GET", `/api/v2/workspaces/${AK}/asks`, { cookie: KR.cookie, headers: { "if-none-match": fb.headers.get("etag") } });
+  const fd = await call("KR", "GET", `/api/v2/workspaces/${AK}/asks`, { bearer: DKR.access });
+  const fd304 = await call("KR", "GET", `/api/v2/workspaces/${AK}/asks`, { bearer: DKR.access, headers: { "if-none-match": fd.headers.get("etag") } });
+  check(
+    "asks feed: GET /asks has an ETag matching its version; If-None-Match -> 304 with no body, for the browser and for a device token; the device gets exactly the browser's set for that person",
+    fb.status === 200 && fb.headers.get("etag") === `"${fb.json.version}"` && fb304.status === 304 && fb304.text === "" && fd.status === 200 && fd304.status === 304 && fd.json.version === fb.json.version && JSON.stringify(fd.json.asks) === JSON.stringify(fb.json.asks),
+    `${fb.status} ${fb.headers.get("etag")} ${fb304.status} ${fd.status} ${fd304.status} ${fd.json?.version} ${fb.json?.version}`,
+  );
+  const fAccepted = await call("KL", "GET", `/api/v2/workspaces/${AK}/asks?state=accepted&team_id=${TP}`, { cookie: KL.cookie });
+  const fOpenAcc = await ka(KL, "GET", "/asks?state=open,accepted");
+  const fBadState = await ka(KL, "GET", "/asks?state=pending");
+  const fBadTeam = await ka(KL, "GET", "/asks?team_id=nope");
+  await askAct(KL, X5.id, "accept");
+  const fAccepted2 = await ka(KL, "GET", `/asks?state=accepted&team_id=${TP}`);
+  const fTypes = await ka(KR, "GET", `/asks?state=accepted&team_id=${TP}`);
+  const koFeed = (await ka(KO, "GET", "/asks")).json?.asks ?? [];
+  check(
+    "asks feed: ?state=accepted&team_id=<team> gives only that team's accepted asks (a new acceptance changes the version); a comma list of states works; an unknown state or a malformed team_id -> 400; the caller's own teams come first",
+    fAccepted.status === 200 && fAccepted.json.asks.every((a) => a.state === "accepted" && a.team.id === TP) && fAccepted2.json?.asks.some((a) => a.id === X5.id) && fAccepted2.json.version !== fAccepted.json.version &&
+      fOpenAcc.json?.asks.every((a) => a.state === "open" || a.state === "accepted") && fBadState.status === 400 && fBadTeam.status === 400 && fTypes.json?.asks.every((a) => a.team.id === TP) &&
+      koFeed.findLastIndex((a) => a.requester.id === KO.id) < koFeed.findIndex((a) => a.requester.id !== KO.id),
+    `${fAccepted.text.slice(0, 200)} ${fBadState.status} ${fBadTeam.status}`,
+  );
+
+  // Caps: 500 open or accepted asks per workspace (409), 60 created an hour (429).
+  const openNow = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_asks WHERE ws_id = ? AND state IN ('open','accepted')").get(AK).n);
+  const bulk = (n, state, created) =>
+    withDb((d) => {
+      const ins = d.prepare("INSERT INTO v2_asks (id, ws_id, team_id, text, created_by, source_kind, source_date, state, created_at, updated_at) VALUES (?, ?, ?, 'bulk', ?, 'manual', '2026-10-01', ?, ?, ?)");
+      for (let i = 0; i < n; i++) ins.run(`ask_bulk${state}${String(i).padStart(4, "0")}aaaaaaaaaaaa`, AK, TS, KO.id, state, created, created);
+    });
+  bulk(500 - openNow, "open", new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString());
+  const tooManyAsks = await ka(KR, "POST", "/asks", askBody({ text: "One too many" }));
+  withDb((d) => d.prepare("DELETE FROM v2_asks WHERE id LIKE 'ask_bulk%'").run());
+  const hourNow = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_asks WHERE ws_id = ? AND created_at > ?").get(AK, new Date(Date.now() - 3600_000).toISOString()).n);
+  bulk(60 - hourNow, "done", new Date().toISOString());
+  const tooFast = await ka(KR, "POST", "/asks", askBody({ text: "Sixty-first this hour" }));
+  const tooFastImport = await ka(KO, "POST", "/asks/import", { asks: [impItem(99)] });
+  withDb((d) => d.prepare("DELETE FROM v2_asks WHERE id LIKE 'ask_bulk%'").run());
+  check(
+    "asks: the 501st open or accepted ask in a workspace -> 409 too_many_asks; the 61st ask recorded in an hour -> 429 rate_limited (an import counts too)",
+    tooManyAsks.status === 409 && tooManyAsks.json?.error === "too_many_asks" && tooFast.status === 429 && tooFast.json?.error === "rate_limited" && tooFastImport.status === 429,
+    `${tooManyAsks.text} ${tooFast.text} ${tooFastImport.status}`,
+  );
+
+  // Audit and the first_ask event.
+  const askAudit = withDb((d) => d.prepare("SELECT action, actor_id, object_id FROM v2_audit WHERE ws_id = ? AND action LIKE 'ask.%'").all(AK));
+  const auditHas = (action, actor, obj) => askAudit.some((r) => r.action === action && r.actor_id === actor && (obj === undefined || r.object_id === obj));
+  check(
+    "asks: every action is audited with its actor (ask.created, accepted, done, reopened, declined, withdrawn, mentioned, imported with its count); refused actions write nothing",
+    auditHas("ask.created", KR.id, X1.id) && auditHas("ask.accepted", KL.id, X1.id) && auditHas("ask.done", KM.id, X1.id) && auditHas("ask.reopened", KL.id, X1.id) && auditHas("ask.declined", KO.id, X1.id) &&
+      auditHas("ask.withdrawn", KR.id, X3.id) && auditHas("ask.mentioned", KM.id, X1.id) && auditHas("ask.imported", KO.id, "3") && !askAudit.some((r) => [KX.id, KN.id, KV.id].includes(r.actor_id)),
+    JSON.stringify(askAudit.slice(0, 12)),
+  );
+  const firstAsk = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'first_ask' AND ws_id = ?").get(AK).n);
+  check("asks: first_ask is recorded once for the workspace", firstAsk === 1, `${firstAsk}`);
+  const askPage = await call("KO", "GET", `/app/w/${AK}/asks`, { cookie: KO.cookie });
+  const askPageAnon = await call("anon", "GET", `/app/w/${AK}/asks`);
+  check(
+    "ui: the Asks tab renders for a member (200) and sends a signed-out visitor to sign-in",
+    askPage.status === 200 && !/Application error|Internal Server Error/.test(askPage.text) && ((askPageAnon.status === 307 && /\/app\/sign-in/.test(askPageAnon.headers.get("location") || "")) || askPageAnon.text.includes("/app/sign-in?next=")),
+    `${askPage.status} ${askPageAnon.status}`,
+  );
+  // ==== end port:asks ====
+
+  // ==== port:activity ====
+  // Goal activity (PORT-003) on the asks workspace: Kai (Product lead) and Kim (Product member) share sessions toward
+  // Kai's workspace-visible Product goal; one of Kai's sessions worked on it only 20 to 15 days ago.
+  const GW = (await ka(KL, "POST", "/goals", { title: "Faculty sign-on", visibility: "workspace", team_id: TP })).json;
+  const DKL = kDevice(KL);
+  const DKM = kDevice(KM);
+  const hAgo = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString();
+  const kShare = async (dev, harness, native, startedH, epochs, usage) => {
+    const key = sessionKey(dev, AK, harness, native);
+    await call(dev.who, "PUT", `/api/v2/workspaces/${AK}/sessions/${key}`, { bearer: dev.access, body: { harness, repo_key: repoKey(dev, AK, "/src/sso"), started_at: hAgo(startedH), title: `ACT-TITLE ${native}` } });
+    const ids = [];
+    for (const [goalId, h] of epochs) {
+      const id = epochId();
+      ids.push(id);
+      await call(dev.who, "POST", `/api/v2/workspaces/${AK}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: id, goal_id: goalId, starts_at: hAgo(h), root_turn: null, cause: "manual" } });
+    }
+    const up = await call(dev.who, "POST", `/api/v2/workspaces/${AK}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: usage.map(([i, h]) => usageRow(dev, `${native}-${i}`, ids[0], { ts: hAgo(h) })) } });
+    return { key, accepted: up.json?.accepted };
+  };
+  const kSA = await kShare(DKL, "claude-code", "act-a", 4, [[GW.id, 4]], [[1, 0.5]]);
+  const kSB = await kShare(DKM, "codex", "act-b", 4, [[GW.id, 4]], [[1, 3]]);
+  const kSC = await kShare(DKL, "claude-code", "act-c", 20 * 24, [[GW.id, 20 * 24], [null, 15 * 24]], [[1, 19 * 24]]);
+  const ACT_CANARY = `ACT-CANARY-${randomBytes(4).toString("hex")}`;
+  const sigAt = new Date().toISOString();
+  const sig = await call("KL", "POST", `/api/v2/workspaces/${AK}/activity`, {
+    bearer: DKL.access,
+    body: {
+      items: [
+        { session_key: kSA.key, kind: "edit", at: sigAt, repo_id: "a".repeat(32), path_hash: "2".repeat(32), path: "src/sso.ts" },
+        { session_key: kSA.key, kind: "edit", at: sigAt, repo_id: "a".repeat(32), path_hash: "2".repeat(32), path: "src/sso.ts" },
+        { session_key: kSA.key, kind: "claim", at: sigAt, repo_id: "a".repeat(32), path_hash: "2".repeat(32), path: "src/sso.ts", text: `claim ${ACT_CANARY}` },
+        { session_key: kSA.key, kind: "edit", at: sigAt, repo_id: "a".repeat(32), path_hash: "3".repeat(32), path: "src/login.ts" },
+        { session_key: kSA.key, kind: "edit", at: sigAt, repo_id: "a".repeat(32), path_hash: "4".repeat(32) },
+        { session_key: kSA.key, kind: "commit", at: sigAt, repo_id: "a".repeat(32), text: `Commit subject ${ACT_CANARY}` },
+        { session_key: kSA.key, kind: "task", at: sigAt, repo_id: "a".repeat(32), text: `Task label ${ACT_CANARY}` },
+      ],
+    },
+  });
+  check("activity setup: two sessions bound to the goal now (Claude Code with usage 30 minutes ago, Codex with usage 3 hours ago), one bound 20 to 15 days ago, and work signals", !!GW?.id && kSA.accepted === 1 && kSB.accepted === 1 && kSC.accepted === 1 && sig.json?.accepted === 7, `${kSA.accepted} ${kSB.accepted} ${kSC.accepted} ${sig.text}`);
+  const actOf = (u, g = GW.id) => ka(u, "GET", `/goals/${g}/activity`);
+  const av = {};
+  for (const u of [KL, KM, KR, KO, KN, KV]) av[u.who] = await actOf(u);
+  const a0 = av.KM.json;
+  check(
+    "goal activity: sessions 2 (the one outside 14 days is left out), active_now 1 (usage in the last 90 minutes), by_harness, and last_activity_at the latest usage, binding or work signal; window_days 14",
+    av.KM.status === 200 && a0.window_days === 14 && a0.sessions === 2 && a0.active_now === 1 && a0.by_harness["claude-code"] === 1 && a0.by_harness.codex === 1 && a0.last_activity_at === sigAt,
+    av.KM.text,
+  );
+  check(
+    "goal activity: the detail (top files from work signals, path-hash-only files counted as hidden, the reader's own sessions) is for the goal's team and workspace owners; a member of another team and a person in no team see counts only (detail null)",
+    JSON.stringify(a0.detail?.files) === JSON.stringify(["src/sso.ts", "src/login.ts"]) && a0.detail.files_hidden === 1 && a0.detail.mine.length === 1 && a0.detail.mine[0].session_key === kSB.key && a0.detail.mine[0].harness === "codex" &&
+      av.KL.json?.detail?.mine.length === 1 && av.KL.json.detail.mine[0].session_key === kSA.key && av.KO.json?.detail?.mine.length === 0 && av.KO.json.detail.files.length === 2 &&
+      av.KR.status === 200 && av.KR.json.sessions === 2 && av.KR.json.detail === null && av.KN.json?.detail === null && av.KV.json?.detail?.files?.length === 2,
+    `${JSON.stringify(a0.detail)} ${JSON.stringify(av.KL.json?.detail)} ${av.KR.text} ${av.KN.text}`,
+  );
+  const allAct = Object.values(av).map((r) => r.text).join("\n");
+  check(
+    "goal activity: no field holds a commit subject, task label, claim reason or session title posted through activity, or any token count",
+    !allAct.includes(ACT_CANARY) && !allAct.includes("ACT-TITLE") && !/"(input|output|tokens|usd|est_list_usd_micros|text)"/.test(allAct),
+    allAct.slice(0, 300),
+  );
+  const quietAct = (await actOf(KL, GPriv.id)).json;
+  check(
+    "goal activity (LIM-2455 §E2): evidence_class agent_reported for a goal with sessions (the align CLI reported them) and not_observed for one with nothing in the window",
+    a0.evidence_class === "agent_reported" && quietAct?.sessions === 0 && quietAct.last_activity_at === null && quietAct.evidence_class === "not_observed",
+    `${a0.evidence_class} ${JSON.stringify(quietAct)}`,
+  );
+  const unreadAct = await actOf(KR, GPd.id);
+  const outsideAct = await call("U1", "GET", `/api/v2/workspaces/${AK}/goals/${GW.id}/activity`, { cookie: U1.cookie });
+  const bearerAct = await call("KL", "GET", `/api/v2/workspaces/${AK}/goals/${GW.id}/activity`, { bearer: DKL.access });
+  check("goal activity: a goal the reader can't read -> 404; a non-member -> 404; a device token -> 403 (browser only)", unreadAct.status === 404 && outsideAct.status === 404 && bearerAct.status === 403, `${unreadAct.status} ${outsideAct.status} ${bearerAct.status}`);
+  await ka(KO, "POST", `/sessions/${kSA.key}/stop`, {});
+  const stopped = (await actOf(KM)).json;
+  await ka(KO, "POST", `/sessions/${kSA.key}/resume`, {});
+  const resumed = (await actOf(KM)).json;
+  check("goal activity: a session whose agent was stopped is not active now (it counts again once resumed)", stopped?.sessions === 2 && stopped.active_now === 0 && resumed?.active_now === 1, `${JSON.stringify(stopped)} ${JSON.stringify(resumed)}`);
+
+  if (existsSync(CHROME)) {
+    const { default: puppeteer } = await import("puppeteer-core");
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    try {
+      const X7 = (await ka(KR, "POST", "/asks", askBody({ text: "Please review the SSO rollout plan" }))).json;
+      const page = await browser.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      for (const pair of KL.cookie.split("; ")) {
+        const i = pair.indexOf("=");
+        await page.setCookie({ name: pair.slice(0, i), value: pair.slice(i + 1), url: BASE });
+      }
+      await page.goto(`${BASE}/app/w/${AK}/asks`, { waitUntil: "networkidle0" });
+      await page.waitForFunction((id) => !!document.querySelector(`[data-ask="${id}"]`), { timeout: 15000 }, X7.id);
+      const tabText = await page.evaluate(() => document.body.innerText);
+      await page.evaluate((id) => [...document.querySelectorAll(`[data-ask="${id}"] button`)].find((b) => b.textContent === "Accept")?.click(), X7.id);
+      await page.waitForFunction((id) => [...document.querySelectorAll(`[data-ask="${id}"]`)].some((c) => c.textContent.includes("accepted")), { timeout: 15000 }, X7.id);
+      const x7Now = (await ka(KL, "GET", `/asks/${X7.id}`)).json;
+      check(
+        "ui (Chrome): the Asks tab shows the tab, \"Waiting on you\" with the ask quoted (\"<who> asked <team>\", meeting and date), and Accept accepts it",
+        tabText.includes("Asks") && tabText.includes("Waiting on you") && tabText.includes("Faculty asked Product") && tabText.includes("“Please review the SSO rollout plan”") && tabText.includes("Faculty sync, 2026-10-20") && x7Now?.state === "accepted" && errors.length === 0,
+        `${tabText.slice(0, 400)} ${x7Now?.state} ${errors.join(" | ")}`,
+      );
+      await page.goto(`${BASE}/app/w/${AK}/goals/${GW.id}`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.querySelector("#goal-activity")?.textContent.includes("src/sso.ts"), { timeout: 15000 });
+      const cardText = await page.evaluate(() => document.querySelector("#goal-activity")?.innerText ?? "");
+      check(
+        "ui (Chrome): the goal page's Agent activity card shows sessions by harness, active now, the files and the reader's own sessions, and says counts come from bindings",
+        cardText.includes("Counts come from bindings, not from what agents wrote") && /Sessions\s+2 \(1 Claude Code, 1 Codex\)/.test(cardText) && /Active now\s+1/.test(cardText) && cardText.includes("src/login.ts") && cardText.includes("Your sessions") && errors.length === 0,
+        `${cardText} ${errors.join(" | ")}`,
+      );
+      const actClasses = await page.$$eval("#goal-activity [data-evidence-class]", (els) => els.map((e) => e.getAttribute("data-evidence-class")));
+      check(
+        "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
+        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
+        `${JSON.stringify(actClasses)} ${cardText.slice(0, 300)}`,
+      );
+      await page.goto(`${BASE}/app/w/${AK}/sessions`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      const stopRows = await page.evaluate(() =>
+        [...document.querySelectorAll("main li")]
+          .filter((li) => /Resume sent|Resumed|Stop sent|Stop received|Local stop|Stop requested/.test(li.innerText))
+          .map((li) => ({ text: li.innerText.slice(0, 120), classes: [...li.querySelectorAll("[data-evidence-class]")].map((e) => e.getAttribute("data-evidence-class")) })),
+      );
+      check(
+        "ui (Chrome, LIM-2455 §E2): on the Sessions tab a stop or resume status carries exactly one evidence class: \"Resume sent, not yet received\" is not observed (no receipt from the machine yet)",
+        stopRows.length >= 1 && stopRows.every((r) => r.classes.length === 1) && stopRows.filter((r) => /Resume sent, not yet received/.test(r.text)).every((r) => r.classes[0] === "not_observed") && stopRows.some((r) => /Resume sent, not yet received/.test(r.text)),
+        JSON.stringify(stopRows),
+      );
+    } catch (e) {
+      check("ui (Chrome) asks and activity run", false, e?.stack ?? e);
+    } finally {
+      await browser.close();
+    }
+  } else check("ui (Chrome) available", false, `no Chrome at ${CHROME}`);
+  // ==== end port:activity ====
+
+  // ==== port:value ====
+  // The decision value card (PORT-004): GET/POST .../change-requests/{id}/value, value reports (D6), the content-free
+  // value events, access requests from the card (via), the report's Decision value section, the follow-up link rules,
+  // and the strict-Host origin in Mode L. Its own workspace, people and device, so nothing earlier in the phase matters.
+  {
+    const vc = await import(pathToFileURL(path.join(ROOT, "lib/v2/value-core.mts")).href);
+    // -- the plain rules (lib/v2/value-core.mts), as v1's test-funnel.mjs checked them --
+    check("value rules: an https URL or a mailto: with one address and only a subject may be the follow-up link", vc.loiUrlOk("https://example.com/loi") && vc.loiUrlOk("mailto:founder@example.com?subject=LOI") && vc.safeFollowUpUrl("https://loi.example.org:443/x") === "https://loi.example.org/x");
+    const badLoi = ["http://example.com/loi", "javascript:alert(1)", "data:text/html,x", "https://u:p@example.com/", "https://user@example.com/loi", "https://example.com:8443/loi", "mailto:a@b.co,c@d.co", "mailto:nobody", "mailto:a@b.co?bcc=x@y.co", "mailto:a@b.co?body=hi", "mailto:a@b.co?subject=LOI&cc=x@y.co", "mailto:%E0%A4%A@example.com", ""];
+    let threw = "";
+    for (const u of badLoi)
+      try {
+        if (vc.loiUrlOk(u)) threw += ` allowed:${u}`;
+      } catch (e) {
+        threw += ` threw:${u}:${e?.name}`;
+      }
+    check("value rules: http, javascript:, data:, credentials, a non-default port, two addresses, a bad address, bcc/cc/body and a malformed percent-escape are hidden, and the check never throws", threw === "", threw);
+    check(
+      "value rules: the follow-up link is ALIGN_FOLLOW_UP_URL when safe (hidden, with a startup warning, when not); unset, hosted defaults to <public origin>/app/request-access?interest=evaluate&via=value_card and Mode L shows none",
+      vc.followUpUrl({}) === null &&
+        vc.followUpUrl({ HOSTED: "1", ALIGN_PUBLIC_ORIGIN: "https://align.test" }) === "https://align.test/app/request-access?interest=evaluate&via=value_card" &&
+        vc.followUpUrl({ ALIGN_FOLLOW_UP_URL: "mailto:hi@example.com?subject=Align" }) === "mailto:hi@example.com?subject=Align" &&
+        vc.followUpUrl({ HOSTED: "1", ALIGN_PUBLIC_ORIGIN: "https://align.test", ALIGN_FOLLOW_UP_URL: "javascript:alert(1)" }) === null &&
+        /ALIGN_FOLLOW_UP_URL/.test(vc.followUpProblem({ ALIGN_FOLLOW_UP_URL: "http://x.example" }) ?? "") &&
+        vc.followUpProblem({ ALIGN_FOLLOW_UP_URL: "https://x.example/f" }) === null,
+      "",
+    );
+    check(
+      "value rules: measured spans read 45 seconds, 14 minutes, 2 hours 5 minutes, 3 days 4 hours; a negative span is empty; the note loses control, bidi and zero-width characters; the five answers in order",
+      vc.spanWords(45_000) === "45 seconds" && vc.spanWords(14 * 60_000 + 10_000) === "14 minutes" && vc.spanWords(125 * 60_000) === "2 hours 5 minutes" && vc.spanWords((76 * 60) * 60_000) === "3 days 4 hours" && vc.spanWords(-1) === "" &&
+        vc.cleanValueText(" a\u0000b‮c​d \n\t e\u0085؜ ") === "abcd e" && vc.ESTIMATE_WORDS.map((e) => e.id).join() === "same_day,two_to_three_days,about_a_week,longer,would_not_be_decided",
+      JSON.stringify(vc.cleanValueText(" a\u0000b‮c​d \n\t e\u0085؜ ")),
+    );
+
+    // -- a workspace: owner V1, requester V2, team lead V3 (owns the goal), viewer V4, member V5 outside the team, V6 --
+    const Vs = [];
+    for (const [who, name] of [["V1", "Vera One"], ["V2", "Vic Two"], ["V3", "Val Three"], ["V4", "Vin Four"], ["V5", "Vee Five"], ["V6", "Vik Six"], ["V7", "Vo Outside"]]) Vs.push(await signUp(who, name, `${who.toLowerCase()}@value.test`));
+    const [V1, V2, V3, V4, V5, V6, V7] = Vs;
+    const W = (await call("V1", "POST", "/api/v2/workspaces", { cookie: V1.cookie, body: { name: "Value WS" } })).json?.id;
+    for (const [u, role] of [[V2, "member"], [V3, "member"], [V4, "viewer"], [V5, "member"], [V6, "member"]]) {
+      const iv = await call("V1", "POST", `/api/v2/workspaces/${W}/invites`, { cookie: V1.cookie, body: { email: u.email, role } });
+      await call(u.who, "POST", `/api/v2/invites/${iv.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const TV = (await call("V1", "POST", `/api/v2/workspaces/${W}/teams`, { cookie: V1.cookie, body: { name: "Value team" } })).json?.id;
+    await call("V1", "POST", `/api/v2/workspaces/${W}/teams/${TV}/members`, { cookie: V1.cookie, body: { user_id: V3.id, role: "lead" } });
+    const goalIn = (u, body) => call(u.who, "POST", `/api/v2/workspaces/${W}/goals`, { cookie: u.cookie, body });
+    const GPar = (await goalIn(V1, { title: "Win regulated customers", level: "company" })).json;
+    const GV = (await goalIn(V3, { title: "Pass the pen test", visibility: "workspace", team_id: TV, measures: [{ text: "Open findings", target: "0" }] })).json;
+    const GTeam = (await goalIn(V3, { title: "Rotate keys", visibility: "team", team_id: TV })).json;
+    const GDep = (await goalIn(V5, { title: "Launch in the EU", visibility: "workspace", depends_on: [GV.id] })).json;
+    const alV = await call("V3", "POST", `/api/v2/workspaces/${W}/alignments`, { cookie: V3.cookie, body: { target_goal_id: GPar.id, source_goal_id: GV.id, choice: "contribution", session_keys: [] } });
+    const alOk = await call("V1", "POST", `/api/v2/workspaces/${W}/alignments/${alV.json?.id}/approve`, { cookie: V1.cookie, body: { revision: 1 } });
+    // V3's device (written straight in: the pairing limit is spent by now), a session bound to the goal.
+    const DV = { ...insertDevice(V3.id, "Val's laptop"), who: "V3", secret: randomBytes(32) };
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DV.id, W));
+    const SV = sessionKey(DV, W, "claude-code", "value-session");
+    const svPut = await call("V3", "PUT", `/api/v2/workspaces/${W}/sessions/${SV}`, { bearer: DV.access, body: { harness: "claude-code", repo_key: repoKey(DV, W, "/src/v"), repo_alias: "v-repo", started_at: new Date(Date.now() - 3600_000).toISOString(), title: "value session" } });
+    const svBind = await call("V3", "POST", `/api/v2/workspaces/${W}/sessions/${SV}/epochs`, { bearer: DV.access, body: { epoch_id: epochId(), goal_id: GV.id, starts_at: new Date().toISOString(), root_turn: null, cause: "manual" } });
+    check("value setup: a workspace, a team, four goals, an approved contribution and a session bound to the goal", !!W && !!TV && [GPar, GV, GTeam, GDep].every((g) => /^g_/.test(g?.id)) && alOk.json?.state === "approved" && svPut.status === 200 && svBind.status === 200, `${alV.text} ${alOk.text} ${svPut.text} ${svBind.text}`);
+
+    const crBaseV = (g) => `/api/v2/workspaces/${W}/goals/${g}/change-requests`;
+    const valuePath = (g, id) => `${crBaseV(g)}/${id}/value`;
+    const vGet = (u, g, id) => call(u.who, "GET", valuePath(g, id), { cookie: u.cookie });
+    const vPost = (u, g, id, body) => call(u.who, "POST", valuePath(g, id), { cookie: u.cookie, body });
+    const eventsIn = (name) => withDb((d) => d.prepare("SELECT actor, props FROM v2_events WHERE name = ? AND ws_id = ?").all(name, W));
+    const NOTE_CANARY = `NOTE-CANARY-${randomBytes(4).toString("hex")}`;
+    const REASON = `Value reason ${randomBytes(4).toString("hex")}`;
+    const crP = await call("V2", "POST", crBaseV(GV.id), { cookie: V2.cookie, body: { base_version: 1, changes: { title: "Pass the pen test by June" }, reason: REASON } });
+    const pendGet = await vGet(V2, GV.id, crP.json?.id);
+    const pendPost = await vPost(V2, GV.id, crP.json?.id, { action: "viewed" });
+    check("value: a pending request -> GET and POST 409 not_approved, and no event is recorded", crP.status === 201 && pendGet.status === 409 && pendGet.json?.error === "not_approved" && pendPost.status === 409 && pendPost.json?.error === "not_approved" && eventsIn("value_card_viewed").length === 0, `${crP.status} ${pendGet.text} ${pendPost.text}`);
+    const apV = await call("V3", "POST", `${crBaseV(GV.id)}/${crP.json?.id}/approve`, { cookie: V3.cookie, body: { revision: 1 } });
+    const v0 = (await vGet(V2, GV.id, crP.json?.id)).json;
+    check(
+      "value (D1): approved but not launched -> the card has no new version yet (goal.version null, base_version 1, launch pending), no delivery and no approval-to-launch or first-context span",
+      apV.json?.launch === "pending" && v0?.goal?.version === null && v0.goal.base_version === 1 && v0.launch === "pending" && v0.launched_at === null && v0.delivery === null && v0.measured.decision_to_launch === null && v0.measured.decision_to_first_applied === null,
+      JSON.stringify(v0).slice(0, 600),
+    );
+    const lnV = await call("V3", "POST", `${crBaseV(GV.id)}/${crP.json?.id}/launch`, { cookie: V3.cookie, body: {} });
+    const v1 = await vGet(V2, GV.id, crP.json?.id);
+    const vv = v1.json;
+    check(
+      "value: a launched request -> the card: the title diff, approver, the version it became and its team, the goal it contributes to and the goal depending on it, delivery from the launch's directive {1 session, 0 received, 0 applied}, proposal to approval and approval to launch measured, no first context yet, no follow-up link in Mode L",
+      apV.json?.state === "approved" && lnV.json?.launch === "launched" && v1.status === 200 && vv.change_request_id === crP.json?.id && vv.diff?.title?.after === "Pass the pen test by June" && vv.approved_by?.id === V3.id && vv.goal?.version === 2 && vv.launch === "launched" && typeof vv.launched_at === "string" && vv.goal.team?.id === TV &&
+        vv.affected.parents.some((g) => g.id === GPar.id) && vv.affected.dependents.some((g) => g.id === GDep.id) && JSON.stringify(vv.delivery) === JSON.stringify({ sessions: 1, received: 0, applied: 0 }) &&
+        /^\d+ seconds?$|minute/.test(vv.measured.proposal_to_decision) && typeof vv.measured.decision_to_launch === "string" && vv.measured.decision_to_first_applied === null && vv.follow_up_url === null && vv.my_report === null && vv.sees_all_reports === true,
+      `${apV.status} ${lnV.status} ${v1.text.slice(0, 600)}`,
+    );
+    const dirV = withDb((d) => d.prepare("SELECT id FROM v2_directives WHERE ws_id = ? AND goal_id = ? AND kind = 'goal_version' ORDER BY seq DESC LIMIT 1").get(W, GV.id))?.id;
+    const rcv = (state) => call("V3", "POST", `/api/v2/directives/${dirV}/receipts`, { bearer: DV.access, body: { session_key: SV, state, at: new Date().toISOString() } });
+    await rcv("received");
+    const vRecv = (await vGet(V2, GV.id, crP.json?.id)).json;
+    await rcv("applied");
+    const vAppl = (await vGet(V2, GV.id, crP.json?.id)).json;
+    check(
+      "value: delivery follows the directive's receipts: {1, 1, 0} after received, {1, 1, 1} after applied, and approval to first agent context is then measured",
+      JSON.stringify(vRecv?.delivery) === JSON.stringify({ sessions: 1, received: 1, applied: 0 }) && JSON.stringify(vAppl?.delivery) === JSON.stringify({ sessions: 1, received: 1, applied: 1 }) && typeof vAppl.measured.decision_to_first_applied === "string" && vAppl.measured.decision_to_first_applied.length > 0,
+      `${JSON.stringify(vRecv?.delivery)} ${JSON.stringify(vAppl?.delivery)} ${JSON.stringify(vAppl?.measured)}`,
+    );
+
+    // -- events and reports --
+    const view1 = await vPost(V2, GV.id, crP.json?.id, { action: "viewed" });
+    const view2 = await vPost(V2, GV.id, crP.json?.id, { action: "viewed" });
+    check("value: viewed twice -> recorded true, then false; one value_card_viewed for the person, with no props", view1.json?.recorded === true && view2.json?.recorded === false && eventsIn("value_card_viewed").length === 1 && eventsIn("value_card_viewed")[0].props === "{}", `${view1.text} ${view2.text}`);
+    const badEst = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "forever" });
+    const longNote = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "same_day", note: "n".repeat(501) });
+    const badAction = await vPost(V2, GV.id, crP.json?.id, { action: "approved" });
+    const badNote = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "same_day", note: 7 });
+    check("value: an unknown estimate, a note over 500 characters, a note that isn't text, or an unknown action -> 400, and nothing is stored", [badEst, longNote, badAction, badNote].every((r) => r.status === 400) && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_value_reports WHERE ws_id = ?").get(W).n) === 0, [badEst, longNote, badAction, badNote].map((r) => `${r.status} ${r.json?.error}`).join(" "));
+    const rep1 = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "about_a_week", note: ` Saved us\u0000 a week​ ${NOTE_CANARY} ` });
+    const rep2 = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "same_day", note: `Changed my mind ${NOTE_CANARY}` });
+    const reportedEv = eventsIn("value_reported");
+    const vrRows = withDb((d) => d.prepare("SELECT * FROM v2_value_reports WHERE ws_id = ?").all(W));
+    check(
+      "value: a report is saved (note cleaned), records value_reported with the estimate only; reporting again within 7 days edits the same report (recorded false) and the event keeps the first estimate",
+      rep1.status === 200 && rep1.json.recorded === true && rep1.json.report?.estimate === "about_a_week" && rep1.json.report.note === `Saved us a week ${NOTE_CANARY}` && rep1.json.report.can_edit === true && /^vr_/.test(rep1.json.report.id) &&
+        rep2.json?.recorded === false && rep2.json.report?.estimate === "same_day" && rep2.json.report.id === rep1.json.report.id && vrRows.length === 1 && vrRows[0].person_id === V2.id && vrRows[0].change_request_id === crP.json?.id &&
+        reportedEv.length === 1 && reportedEv[0].props === JSON.stringify({ estimate: "about_a_week" }),
+      `${rep1.text} ${rep2.text} ${JSON.stringify(reportedEv)}`,
+    );
+    withDb((d) => d.prepare("UPDATE v2_value_reports SET created_at = ? WHERE id = ?").run(new Date(Date.now() - 8 * 24 * 3600_000).toISOString(), rep1.json?.report?.id));
+    const rep3 = await vPost(V2, GV.id, crP.json?.id, { action: "reported", estimate: "longer" });
+    const mineOld = (await vGet(V2, GV.id, crP.json?.id)).json?.my_report;
+    check("value: 7 days after it was saved a report can't be changed (409 edit_closed, can_edit false) and stays as it was", rep3.status === 409 && rep3.json?.error === "edit_closed" && mineOld?.estimate === "same_day" && mineOld.can_edit === false, `${rep3.text} ${JSON.stringify(mineOld)}`);
+    const fu = await vPost(V2, GV.id, crP.json?.id, { action: "follow_up" });
+    const fu2 = await vPost(V2, GV.id, crP.json?.id, { action: "follow_up" });
+    check("value: follow_up -> follow_up_clicked recorded once per person", fu.json?.recorded === true && fu2.json?.recorded === false && eventsIn("follow_up_clicked").length === 1, `${fu.text} ${fu2.text}`);
+    const vView = await vGet(V4, GV.id, crP.json?.id);
+    const vViewed = await vPost(V4, GV.id, crP.json?.id, { action: "viewed" });
+    const vRep = await vPost(V4, GV.id, crP.json?.id, { action: "reported", estimate: "longer", note: "From a viewer" });
+    check("value: a viewer who reads the request sees the card, records viewed and may report (their own)", vView.status === 200 && vViewed.json?.recorded === true && vRep.json?.recorded === true && eventsIn("value_card_viewed").length === 2, `${vView.status} ${vViewed.text} ${vRep.text}`);
+    const seeV5 = (await vGet(V5, GV.id, crP.json?.id)).json;
+    const seeV1 = (await vGet(V1, GV.id, crP.json?.id)).json;
+    const seeV3 = (await vGet(V3, GV.id, crP.json?.id)).json;
+    const seeV4 = (await vGet(V4, GV.id, crP.json?.id)).json;
+    const people = (v) => (v?.reports ?? []).map((r) => r.person.id).sort().join();
+    check(
+      "value: every report is shown to the requester, the approver and a workspace owner; a reader outside them (a member, the viewer) sees only their own",
+      people((await vGet(V2, GV.id, crP.json?.id)).json) === [V2.id, V4.id].sort().join() && people(seeV3) === [V2.id, V4.id].sort().join() && people(seeV1) === [V2.id, V4.id].sort().join() && seeV1.sees_all_reports === true &&
+        seeV5?.reports?.length === 0 && seeV5.sees_all_reports === false && people(seeV4) === V4.id && seeV4.my_report?.note === "From a viewer",
+      `${people(seeV5)} | ${people(seeV4)} | ${people(seeV1)}`,
+    );
+    // An unreadable request, another goal's path, a non-member.
+    const crT = await call("V1", "POST", crBaseV(GTeam.id), { cookie: V1.cookie, body: { base_version: 1, changes: { title: "Rotate keys monthly" }, reason: "team" } });
+    await call("V3", "POST", `${crBaseV(GTeam.id)}/${crT.json?.id}/approve`, { cookie: V3.cookie, body: { revision: 1 } });
+    const hiddenV = await vGet(V5, GTeam.id, crT.json?.id);
+    const hiddenPost = await vPost(V5, GTeam.id, crT.json?.id, { action: "viewed" });
+    const wrongGoalV = await vGet(V2, GDep.id, crP.json?.id);
+    const outsiderV = await vGet(V7, GV.id, crP.json?.id);
+    const crossSiteV = await call("V2", "POST", valuePath(GV.id, crP.json?.id), { cookie: V2.cookie, headers: { origin: "http://evil.example" }, body: { action: "viewed" } });
+    check("value: a request on a goal the person can't read, another goal's path or a non-member -> 404; a cross-site POST -> 403", hiddenV.status === 404 && hiddenPost.status === 404 && wrongGoalV.status === 404 && outsiderV.status === 404 && crossSiteV.status === 403, `${hiddenV.status} ${hiddenPost.status} ${wrongGoalV.status} ${outsiderV.status} ${crossSiteV.status}`);
+    const eventRows = JSON.stringify(withDb((d) => d.prepare("SELECT * FROM v2_events WHERE ws_id = ?").all(W)));
+    check("value: no event row holds the note, the reason, a goal title, a change request id or a person's id", !eventRows.includes(NOTE_CANARY) && !eventRows.includes("From a viewer") && !eventRows.includes(REASON) && !eventRows.includes("Pass the pen test") && !eventRows.includes(crP.json?.id) && !Vs.some((u) => eventRows.includes(u.id)), eventRows.slice(0, 300));
+    // Account deletion: the person's events lose their actor, their report no longer names them, and another person may
+    // still report.
+    const v6rep = await vPost(V6, GV.id, crP.json?.id, { action: "reported", estimate: "two_to_three_days" });
+    const v6del = await call("V6", "DELETE", "/api/v2/me", { cookie: V6.cookie, headers: { origin: BASE }, body: { email: V6.email } });
+    const after6 = withDb((d) => ({
+      named: d.prepare("SELECT COUNT(*) AS n FROM v2_value_reports WHERE person_id = ?").get(V6.id).n,
+      reports: d.prepare("SELECT COUNT(*) AS n FROM v2_value_reports WHERE ws_id = ?").get(W).n,
+      nullActor: d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE ws_id = ? AND name = 'value_reported' AND actor IS NULL").get(W).n,
+    }));
+    const v5rep = await vPost(V5, GV.id, crP.json?.id, { action: "reported", estimate: "two_to_three_days" });
+    check(
+      "value: account deletion clears the person's actor on their value event and no value report names them (kept, pseudonymised); another person then reports the same estimate and it is recorded",
+      v6rep.json?.recorded === true && (v6del.status === 200 || v6del.status === 204) && after6.named === 0 && after6.reports === 3 && after6.nullActor === 1 && v5rep.json?.recorded === true && eventsIn("value_reported").length === 4,
+      `${v6rep.text} ${v6del.status} ${v6del.text} ${JSON.stringify(after6)} ${v5rep.text}`,
+    );
+
+    // -- access requests from the card: via value_card, the page preselects evaluate --
+    const arCard = await call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body: { email: "card@value.test", name: "Card Person", use_case: "Evaluate it", interest: "evaluate", via: "value_card" } });
+    const arForm = await call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body: { email: "form@value.test", name: "Form Person", use_case: "Try it", interest: "try" } });
+    const arBad = await call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body: { email: "bad@value.test", name: "Bad Via", use_case: "x", interest: "try", via: "email" } });
+    const arEvents = withDb((d) => d.prepare("SELECT props FROM v2_events WHERE name = 'access_requested' ORDER BY at").all()).map((r) => r.props);
+    check(
+      "access requests: via value_card is kept on access_requested (with the interest), the default is via form, and any other via -> 400",
+      arCard.status === 201 && arForm.status === 201 && arBad.status === 400 && arEvents.includes(JSON.stringify({ interest: "evaluate", via: "value_card" })) && arEvents.includes(JSON.stringify({ interest: "try", via: "form" })),
+      `${arCard.status} ${arForm.status} ${arBad.status} ${JSON.stringify(arEvents)}`,
+    );
+    const raEval = await call("anon", "GET", "/app/request-access?interest=evaluate&via=value_card");
+    const raPlain = await call("anon", "GET", "/app/request-access?interest=nonsense");
+    const checkedOf = (html) => (html.match(/<input[^>]*name="interest"[^>]*>/g) ?? []).filter((t) => /\bchecked=""/.test(t)).map((t) => /value="(\w+)"/.exec(t)?.[1]).join();
+    check("request access page: ?interest=evaluate preselects Evaluate; any other value preselects Try", raEval.status === 200 && checkedOf(raEval.text) === "evaluate" && checkedOf(raPlain.text) === "try", `${checkedOf(raEval.text)} ${checkedOf(raPlain.text)} ${(raEval.text.match(/<input[^>]*name="interest"[^>]*>/g) ?? []).join(" ")}`);
+
+    // -- the operator report's Decision value section --
+    const repV = admin(["report", "--json"], opOn);
+    let rv = null;
+    try {
+      rv = JSON.parse(repV.out).value;
+    } catch {}
+    const sampleWs = withDb((d) => d.prepare("SELECT ws_id FROM v2_events WHERE name = 'workspace_created' AND json_extract(props, '$.kind') = 'sample'").all().map((r) => r.ws_id));
+    const evCount = (name, extra = "") => withDb((d) => d.prepare(`SELECT COUNT(*) AS n FROM v2_events WHERE name = ? AND ws_id IS NOT NULL AND ws_id NOT IN (${sampleWs.map(() => "?").join(",") || "''"}) ${extra}`).get(name, ...sampleWs).n);
+    const repText = admin(["report"], opOn).out;
+    check(
+      "report: the value section matches the events (viewed people and workspaces, reported by estimate, follow-up clicks, access from the card by interest, first ask and first limit) and counts the workspace with an approved request; the text table reads Decision value",
+      repV.status === 0 && rv && rv.viewed.people === evCount("value_card_viewed") && rv.viewed.workspaces >= 1 && rv.reported.people === evCount("value_reported") && rv.reported.by_estimate.about_a_week >= 1 && rv.reported.by_estimate.two_to_three_days >= 2 &&
+        rv.follow_up_clicked === evCount("follow_up_clicked") && rv.access_from_value_card.evaluate === 1 && rv.access_from_value_card.try === 0 && rv.first_ask === evCount("first_ask") && rv.first_limit === evCount("first_limit") && rv.workspaces_with_approved_request >= 1 &&
+        repText.includes("Decision value") && !repText.includes("@") && !repText.includes(NOTE_CANARY),
+      `${repV.status} ${repV.err} ${JSON.stringify(rv)}`,
+    );
+
+    // -- strict Host (Mode L): a Host with more than a port passes the loopback-name edge, and gives no usable origin --
+    const hostOk = await rawGet(`/api/v2/workspaces/${W}/apps`, { host: `127.0.0.1:${PORT}`, cookie: V1.cookie });
+    const hostBad = await rawGet(`/api/v2/workspaces/${W}/apps`, { host: `127.0.0.1:${PORT};touch\${IFS}x`, cookie: V1.cookie });
+    const BAD_HOST = `127.0.0.1:${PORT};touch\${IFS}x`;
+    const metaBad = await rawGet("/.well-known/oauth-authorization-server", { host: BAD_HOST });
+    const prmBad = await rawGet("/.well-known/oauth-protected-resource/api/mcp", { host: BAD_HOST });
+    const mcpBad = await new Promise((resolve) => {
+      const r = http.request({ host: "127.0.0.1", port: PORT, method: "POST", path: "/api/mcp", headers: { host: BAD_HOST, "content-type": "application/json", accept: "application/json, text/event-stream" } }, (res) => {
+        res.resume();
+        resolve({ status: res.statusCode, challenge: res.headers["www-authenticate"] ?? "" });
+      });
+      r.on("error", () => resolve({ status: 0, challenge: "" }));
+      r.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+    });
+    let issuerBad = null;
+    let resourceBad = null;
+    try {
+      issuerBad = JSON.parse(metaBad.text).issuer;
+      resourceBad = JSON.parse(prmBad.text).resource;
+    } catch {}
+    check(
+      "strict Host (Mode L): Host 127.0.0.1:<port>;touch${IFS}x passes the loopback-name edge, but every origin from it is http://invalid.invalid (the OAuth issuer, the protected resource, the MCP 401 challenge) and the Apps route makes no URL from it (sign-in itself refuses that Host); Host 127.0.0.1:<port> gives the real URL",
+      JSON.parse(hostOk.text || "{}").url === `http://127.0.0.1:${PORT}/api/mcp` && metaBad.status === 200 && issuerBad === "http://invalid.invalid" && resourceBad === "http://invalid.invalid/api/mcp" &&
+        mcpBad.status === 401 && mcpBad.challenge.includes("http://invalid.invalid/.well-known/oauth-protected-resource/api/mcp") && !hostBad.text.includes("touch") && !metaBad.text.includes("touch") && !mcpBad.challenge.includes("touch"),
+      `${hostOk.status} ${hostOk.text.slice(0, 120)} | ${hostBad.status} ${hostBad.text.slice(0, 200)} | ${metaBad.text.slice(0, 120)} | ${prmBad.text.slice(0, 120)} | ${JSON.stringify(mcpBad)}`,
+    );
+
+    // -- the web UI (Chrome): the card on the goal page, viewed only once its top (240 px) has been mostly on screen for a
+    //    second (LIM-2445, #38: the card is taller than the screen, so "half of it" never happened); the Apps tab's
+    //    terminal lines --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await page.setViewport({ width: 1000, height: 420 });
+        const [name, ...v] = V1.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+        await page.setCookie({ name, value: v.join("="), url: BASE });
+        const before = eventsIn("value_card_viewed").length;
+        await page.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-value-card="${crP.json?.id}"]`, { timeout: 15000 });
+        const card = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => ({ top: el.getBoundingClientRect().top, vh: window.innerHeight, text: el.innerText }));
+        await sleep(1500);
+        // A glance: the card's top in view for 300 ms, then scrolled away; not a view.
+        await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => el.scrollIntoView({ block: "start" }));
+        await sleep(300);
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await sleep(2000);
+        const belowFold = eventsIn("value_card_viewed").length;
+        await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => el.scrollIntoView({ block: "start" }));
+        let seenAfter = belowFold;
+        for (let i = 0; i < 30 && seenAfter === belowFold; i++) {
+          await sleep(200);
+          seenAfter = eventsIn("value_card_viewed").length;
+        }
+        check(
+          "ui (Chrome): an approved request's card shows the accepted change, the approver, 1 of 1 shared session with the new version in context, the measured spans and the reports of others; below the fold or glanced at for 300 ms it records nothing, its top in view for a second records value_card_viewed once",
+          card.top > card.vh && /What this decision gave you/i.test(card.text) && /Who approved/i.test(card.text) && /1 of 1 shared session has it in context/.test(card.text) && /Proposal to approval/.test(card.text) && /What others said/i.test(card.text) && /Vic Two/.test(card.text) &&
+            belowFold === before && seenAfter === before + 1 && errors.length === 0,
+          `${JSON.stringify({ top: card.top, vh: card.vh, before, belowFold, seenAfter })} ${card.text.slice(0, 300)} ${errors.join(" | ")}`,
+        );
+        const valueClasses = await page.$$eval(`[data-value-card="${crP.json?.id}"] [data-evidence-class]`, (els) => els.map((e) => e.getAttribute("data-evidence-class")));
+        check(
+          "ui (Chrome, LIM-2455 §E2): the value card's \"Agents on the new version\" line carries exactly one evidence class, a delivery receipt (the session's machine sent a receipt for the launched version)",
+          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /delivery receipt/.test(card.text),
+          JSON.stringify(valueClasses),
+        );
+        // On a phone (390x844) the card is taller than the screen: its top seen for 1.5 s is a view, once; a second look
+        // adds nothing (V3, the approver, who has not viewed it yet).
+        {
+          const phone = await browser.newPage();
+          await phone.setViewport({ width: 390, height: 844 });
+          const [n3, ...v3] = V3.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+          await phone.setCookie({ name: n3, value: v3.join("="), url: BASE });
+          const byV3 = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'value_card_viewed' AND ws_id = ? AND actor IS NOT NULL").get(W).n);
+          const start = byV3();
+          await phone.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
+          await phone.waitForSelector(`[data-value-card="${crP.json?.id}"]`, { timeout: 15000 });
+          const tall = await phone.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => el.getBoundingClientRect().height > window.innerHeight * 0.5);
+          // Show about 380 px of the card's top at the bottom of the screen, as a person scrolling to it would.
+          await phone.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => window.scrollBy(0, el.getBoundingClientRect().top - (window.innerHeight - 380)));
+          await sleep(1500);
+          let one = byV3();
+          for (let i = 0; i < 15 && one === start; i++) {
+            await sleep(200);
+            one = byV3();
+          }
+          await phone.evaluate(() => window.scrollTo(0, 0));
+          await sleep(500);
+          await phone.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => window.scrollBy(0, el.getBoundingClientRect().top - (window.innerHeight - 380)));
+          await sleep(2000);
+          check(
+            "ui (Chrome, 390x844): a card taller than half the screen counts as viewed once its top has been seen for a second, and a second look adds nothing",
+            tall && one === start + 1 && byV3() === start + 1 && errors.length === 0,
+            `tall=${tall} start=${start} one=${one} after=${byV3()} ${errors.join(" | ")}`,
+          );
+          await phone.close();
+        }
+        // LAUNCH-001/002 in the browser: the record's launch wording and controls, an "Accept if" condition, and an
+        // empty approval set. GL2 is V5's goal (no team): V2's request is countered with a condition, accepted and
+        // approved by V5 but not launched; V1 (the only workspace owner, so a launcher) asks too, and with V5 made a
+        // viewer nobody can approve V1's request.
+        {
+          await page.setViewport({ width: 1000, height: 900 });
+          await page.setCookie({ name, value: v.join("="), url: BASE }); // the phone page signed this browser in as V3
+          const CONDV = `Accept if the checklist is reviewed ${randomBytes(3).toString("hex")}`;
+          const GL2 = (await goalIn(V5, { title: "Launch checklist", visibility: "workspace" })).json;
+          const crL = await call("V2", "POST", crBaseV(GL2.id), { cookie: V2.cookie, body: { base_version: 1, changes: { title: "Launch checklist, reviewed" }, reason: "Review it first" } });
+          await call("V5", "POST", `${crBaseV(GL2.id)}/${crL.json?.id}/counter`, { cookie: V5.cookie, body: { revision: 1, changes: { title: "Launch checklist, reviewed twice" }, note: "Twice", condition: CONDV } });
+          await call("V2", "POST", `${crBaseV(GL2.id)}/${crL.json?.id}/accept_counter`, { cookie: V2.cookie, body: {} });
+          const apL = await call("V5", "POST", `${crBaseV(GL2.id)}/${crL.json?.id}/approve`, { cookie: V5.cookie, body: { revision: 2 } });
+          const crE = await call("V1", "POST", crBaseV(GL2.id), { cookie: V1.cookie, body: { base_version: 1, changes: { measures: [{ text: "Checklist signed", target: "yes" }] }, reason: "Track sign-off" } });
+          withDb((d) => d.prepare("UPDATE v2_members SET role = 'viewer' WHERE ws_id = ? AND user_id = ?").run(W, V5.id));
+          const eSeen = (await call("V1", "GET", `${crBaseV(GL2.id)}/${crE.json?.id}`, { cookie: V1.cookie })).json;
+          check("launch setup (Chrome): an approved, unlaunched request with a condition, and a pending request whose approval set is empty", apL.json?.launch === "pending" && crE.status === 201 && eSeen?.approvers?.length === 0, `${apL.text.slice(0, 200)} ${JSON.stringify(eSeen?.approvers)}`);
+          const textOf = () => page.evaluate(() => document.body.innerText);
+          const btn = (label) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), label);
+          await page.goto(`${BASE}/app/w/${W}/goals/${GL2.id}`, { waitUntil: "networkidle0" });
+          await page.waitForFunction(() => document.body.innerText.includes("Approved, agents still on v1 until launch"), { timeout: 15000 });
+          const before = await textOf();
+          const buttons = await page.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.textContent));
+          check(
+            "ui (Chrome): an approved, unlaunched request reads 'Approved, agents still on v1 until launch' (never 'agents on v2'), lists who can launch, offers Launch version 2 to agents and Not yet to a launcher; its condition reads 'Accept if: …' and 'Not confirmed yet'; an open request with an empty approval set says 'Nobody can approve this yet'; nothing says verified",
+            /Can launch: you/.test(before) && !/agents on v2/.test(before) && buttons.includes("Launch version 2 to agents") && buttons.includes("Not yet") && before.includes(`Accept if: ${CONDV}`) && before.includes("Not confirmed yet") && before.includes("Nobody can approve this yet") && !/verified/i.test(before.replaceAll("none verified", "")),
+            before.slice(0, 1200),
+          );
+          await btn("Not yet");
+          await page.waitForFunction(() => document.body.innerText.includes("Not launched yet: you decided not yet"), { timeout: 15000 });
+          const afterNotYet = await textOf();
+          const v1Feed = (await call("V1", "GET", `/api/v2/workspaces/${W}/goals/${GL2.id}`, { cookie: V1.cookie })).json?.goal?.version;
+          await btn("Launch version 2 to agents");
+          await page.waitForFunction(() => document.body.innerText.includes("Launched, agents on v2"), { timeout: 15000 });
+          const afterLaunch = await textOf();
+          const v2Feed = (await call("V1", "GET", `/api/v2/workspaces/${W}/goals/${GL2.id}`, { cookie: V1.cookie })).json?.goal?.version;
+          check(
+            "ui (Chrome): Not yet keeps 'Approved, agents still on v1 until launch' and says 'Not launched yet: you decided not yet' (the goal stays at version 1); Launch version 2 to agents makes it 'Launched, agents on v2', launched by you, and the goal is at version 2",
+            afterNotYet.includes("Approved, agents still on v1 until launch") && !afterNotYet.split("\n").some((l) => l === "Not yet") && v1Feed === 1 && /Launched by you/.test(afterLaunch) && !afterLaunch.includes("Approved, agents still on v1 until launch") && v2Feed === 2 && errors.length === 0,
+            `${afterNotYet.slice(0, 400)} | ${afterLaunch.slice(0, 400)} | ${v1Feed} ${v2Feed} ${errors.join(" | ")}`,
+          );
+          const req = await browser.newPage();
+          const [n2, ...v2c] = V2.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+          await req.setCookie({ name: n2, value: v2c.join("="), url: BASE });
+          await req.goto(`${BASE}/app/w/${W}/goals/${GL2.id}`, { waitUntil: "networkidle0" });
+          await req.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Confirm the condition is met"), { timeout: 15000 });
+          await req.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Confirm the condition is met")?.click());
+          await req.waitForFunction(() => document.body.innerText.includes("Acknowledged by you"), { timeout: 15000 });
+          const ackText = await req.evaluate(() => document.body.innerText);
+          const ackRow = withDb((d) => d.prepare("SELECT acknowledged_by FROM v2_change_request_revisions WHERE change_request_id = ? AND revision = 2").get(crL.json?.id));
+          check(
+            "ui (Chrome): the requester's Confirm the condition is met acknowledges it after the launch: the record reads 'Acknowledged by you' beside 'Launched, agents on v2', stored with their id; no verified wording",
+            ackText.includes("Acknowledged by you") && ackText.includes("Launched, agents on v2") && !ackText.includes("Not confirmed yet") && ackRow?.acknowledged_by === V2.id && !/verified/i.test(ackText.replaceAll("none verified", "")),
+            ackText.slice(0, 600),
+          );
+          await req.close();
+          await page.setCookie({ name, value: v.join("="), url: BASE });
+          withDb((d) => d.prepare("UPDATE v2_members SET role = 'member' WHERE ws_id = ? AND user_id = ?").run(W, V5.id));
+        }
+        await page.setViewport({ width: 1000, height: 900 });
+        await page.goto(`${BASE}/app/w/${W}/apps`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("claude mcp add"), { timeout: 15000 });
+        const lines = await page.$$eval("[data-paste-line] code", (els) => els.map((e) => e.textContent));
+        check(
+          "ui (Chrome): the Apps tab shows the Claude Code and Codex lines, single-quoted, each with Copy, and the sh/bash/zsh note",
+          lines[0] === `claude mcp add --transport http --scope user align 'http://127.0.0.1:${PORT}/api/mcp'; claude mcp login align` && lines[1] === `codex mcp add align --url 'http://127.0.0.1:${PORT}/api/mcp'` && (await page.evaluate(() => document.body.innerText.includes("sh, bash or zsh"))) && errors.length === 0,
+          `${JSON.stringify(lines)} ${errors.join(" | ")}`,
+        );
+      } catch (e) {
+        check("ui (Chrome) value card run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the value card", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end port:value ====
+
+  // ==== port:decide ====
+  // main #43 and #49 on v2: an open change request is understood, then decided. DO owns the workspace and the goal
+  // (its approval set); DR, a member, asks; DV is a viewer. Every step is driven with real clicks and typing.
+  {
+    const dUsers = {};
+    for (const [who, name] of [
+      ["DO", "Dana Owner"],
+      ["DR", "Drew Requester"],
+      ["DV", "Devi Viewer"],
+    ])
+      dUsers[who] = await signUp(who, name, `${who.toLowerCase()}@decide.example.test`);
+    const { DO, DR, DV } = dUsers;
+    const DW = (await call("DO", "POST", "/api/v2/workspaces", { cookie: DO.cookie, body: { name: "Decide workspace" } })).json?.id;
+    const da = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${DW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [DR, "member"],
+      [DV, "viewer"],
+    ]) {
+      const iv = await da(DO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${iv.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const DG = (await da(DO, "POST", "/goals", { title: "Cut checkout latency", visibility: "workspace", measures: [{ text: "p95 latency", target: "300ms" }] })).json;
+    const crs = `/goals/${DG?.id}/change-requests`;
+    const propose = (reason) => da(DR, "POST", crs, { base_version: 1, changes: { measures: [{ id: DG.measures[0].id, text: "p95 latency", target: "200ms" }, { text: "Checkout errors", target: "0" }] }, reason });
+    const read = (id) => da(DO, "GET", `${crs}/${id}`);
+    const cr1 = (await propose("Customers notice the slow checkout")).json;
+    check("decide setup: a pending request from a member on the owner's goal", cr1?.state === "pending" && cr1.can.withdraw === true, JSON.stringify(cr1)?.slice(0, 200));
+
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const pageAs = async (u, width = 1000) => {
+          const page = await browser.newPage();
+          page.on("pageerror", (e) => errors.push(e.message));
+          await page.setViewport({ width, height: 900 });
+          await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return page;
+        };
+        const card = (id) => `[data-cr="${id}"]`;
+        const open = async (page, id) => {
+          await page.goto(`${BASE}/app/w/${DW}/goals/${DG.id}`, { waitUntil: "networkidle0" });
+          await page.waitForSelector(card(id), { timeout: 15000 });
+        };
+        const choices = (page, id) => page.$$eval(`${card(id)} [data-decision]`, (els) => els.map((e) => [e.getAttribute("data-decision"), e.getAttribute("aria-pressed")]));
+        const press = (page, id, label) => page.$$eval(`${card(id)} button`, (els, t) => els.find((b) => b.textContent === t)?.click(), label);
+        const focused = (page) =>
+          page.evaluate(() => {
+            const a = document.activeElement;
+            return { tag: a?.tagName ?? "", label: a?.closest("label")?.innerText ?? "", text: a?.innerText ?? "", notice: a?.getAttribute("data-notice") ?? "", role: a?.getAttribute("role") ?? "" };
+          });
+        const wide = (page) => page.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth);
+
+        // Understand: approved now beside proposed, the facts, what would change (the request's text), no evidence, Details closed.
+        // One page at a time: a page left in the background may be frozen by Chrome, so each is closed when done.
+        let po = await pageAs(DO);
+        await open(po, cr1.id);
+        const u = await po.evaluate((sel) => {
+          const c = document.querySelector(sel);
+          const side = (k) => c.querySelector(`[data-side="${k}"]`)?.getBoundingClientRect();
+          const d = c.querySelector("[data-details]");
+          return {
+            text: c.innerText,
+            approved: c.querySelector('[data-side="approved"]')?.innerText ?? "",
+            proposed: c.querySelector('[data-side="proposed"]')?.innerText ?? "",
+            sideBySide: Math.abs(side("approved").top - side("proposed").top) < 2 && side("approved").right <= side("proposed").left,
+            what: c.querySelector("[data-what-would-change]")?.innerText ?? "",
+            evidence: c.querySelector("[data-evidence]")?.innerText ?? "",
+            detailsOpen: d?.open,
+            details: d?.textContent ?? "",
+            inputs: c.querySelectorAll("[data-decision-input]").length,
+          };
+        }, card(cr1.id));
+        check(
+          "ui (Chrome, decide): an open request shows \"Approved now · version 1\" beside \"Proposed · revision 1\" (side by side at 1000 px) with Version, Requested by, Decides and State; \"What would change\" is tagged as the request's own text, not evidence, names each change and quotes the reason as written; the evidence beside it says \"No evidence attached.\"; Details is closed and holds the ids",
+          /Approved now · version 1/i.test(u.approved) && /300ms/.test(u.approved) && /Proposed · revision 1/i.test(u.proposed) && /200ms/.test(u.proposed) && /Checkout errors/.test(u.proposed) && u.sideBySide &&
+            /Goal at version 1/.test(u.text) && /Requested by\s*Drew Requester/i.test(u.text) && /Decides\s*you/i.test(u.text) && /State\s*waiting for approval/i.test(u.text) &&
+            /the request's own text, not evidence/.test(u.what) && /Changes the target of “p95 latency” from 300ms to 200ms\./.test(u.what) && /Adds the measure “Checkout errors” \(target: 0\)\./.test(u.what) && /Drew Requester's reason, as written: “Customers notice the slow checkout”/.test(u.what) &&
+            /No evidence attached\./.test(u.evidence) && u.detailsOpen === false && u.details.includes(cr1.id) && u.details.includes(DG.id) && u.inputs === 0 && errors.length === 0,
+          `${JSON.stringify({ ...u, text: u.text.slice(0, 500) })} ${errors.join(" | ")}`,
+        );
+        const c0 = await choices(po, cr1.id);
+        check(
+          "ui (Chrome, decide): Your decision offers only what the approver's can flags allow (Approve, Approve and launch, Accept if…, Suggest a change, Decline), none selected and no input shown until one is chosen",
+          JSON.stringify(c0.map((x) => x[0])) === JSON.stringify(["Approve", "Approve and launch", "Accept if…", "Suggest a change", "Decline"]) && c0.every((x) => x[1] === "false"),
+          JSON.stringify(c0),
+        );
+
+        // Accept if…: only its inputs, focus on the condition; an empty review is a focused error and sends nothing.
+        await po.click(`${card(cr1.id)} [data-decision="Accept if…"]`);
+        await sleep(300);
+        const f1 = await focused(po);
+        const shown = await po.$eval(`${card(cr1.id)} [data-decision-input]`, (e) => ({ labels: [...e.querySelectorAll("label")].map((l) => l.firstChild?.textContent ?? ""), pressed: document.querySelector('[data-decision="Accept if…"]')?.getAttribute("aria-pressed") }));
+        await press(po, cr1.id, "Review this decision");
+        await sleep(300);
+        const fErr = await focused(po);
+        const still = await read(cr1.id);
+        check(
+          "ui (Chrome, decide): choosing Accept if… reveals only its two inputs (the condition and a note to the requester) and moves focus to the condition; reviewing with them empty moves focus to an alert and sends nothing",
+          f1.tag === "TEXTAREA" && /^Accept if… \(the condition Drew Requester acknowledges\)/.test(f1.label) && shown.labels.length === 2 && /^Note to Drew Requester/.test(shown.labels[1]) && shown.pressed === "true" &&
+            fErr.role === "alert" && /Write the condition Drew Requester acknowledges\./.test(fErr.text) && still.json?.state === "pending" && still.json.revision === 1,
+          `${JSON.stringify(f1)} ${JSON.stringify(shown)} ${JSON.stringify(fErr)} ${still.json?.state}`,
+        );
+        const COND = `Roll back if errors rise ${randomBytes(3).toString("hex")}`;
+        const areas = await po.$$(`${card(cr1.id)} [data-decision-input] textarea`);
+        await areas[0].type(COND);
+        await areas[1].type("Fine once a rollback is agreed");
+        await press(po, cr1.id, "Review this decision");
+        await sleep(300);
+        const fC = await focused(po);
+        const conf = await po.$eval(`${card(cr1.id)} [data-confirm]`, (e) => e.innerText);
+        await press(po, cr1.id, "Back");
+        await sleep(300);
+        const kept = await po.$$eval(`${card(cr1.id)} [data-decision-input] textarea`, (els) => els.map((e) => e.value));
+        const noWrite = (await read(cr1.id)).json;
+        check(
+          "ui (Chrome, decide): Review this decision moves focus to \"Confirm: Accept if…\", which shows who acts, the exact revision, the decision, the condition and note entered, the transition to revision 2 and that approval is not launch; Back keeps what was typed; nothing is sent before Confirm",
+          fC.text === "Confirm: Accept if…" && /Acting as\s*Dana Owner \(you, in this goal's approval set\)/i.test(conf) && /Revision 1 of Drew Requester's request on “Cut checkout latency”, made against version 1/.test(conf) && conf.includes(COND) && /Fine once a rollback is agreed/.test(conf) &&
+            /waiting for approval → approver suggested a change \(revision 2\)/.test(conf) && /Approval is not launch/.test(conf) && kept[0] === COND && noWrite?.revision === 1 && noWrite.state === "pending",
+          `${JSON.stringify(fC)} ${conf.slice(0, 700)} ${JSON.stringify(kept)}`,
+        );
+        await press(po, cr1.id, "Review this decision");
+        await sleep(300);
+        await press(po, cr1.id, "Confirm: Accept if");
+        await po.waitForFunction((sel) => /Recorded: you accepted revision 1 if Drew Requester acknowledges your condition/.test(document.querySelector(sel)?.innerText ?? ""), { timeout: 15000 }, card(cr1.id));
+        const afterIf = (await read(cr1.id)).json;
+        const ifText = await po.$eval(card(cr1.id), (e) => e.innerText);
+        check(
+          "ui (Chrome, decide): confirming Accept if… posts a counter with the request's own changes, the note and the condition (countered at revision 2, the condition stored apart from the note); the card says Recorded and shows \"Accept if: …\" with \"Not confirmed yet\"",
+          afterIf?.state === "countered" && afterIf.revision === 2 && afterIf.condition?.text === COND && afterIf.revisions[1].note === "Fine once a rollback is agreed" && JSON.stringify(afterIf.changes.measures.map((m) => m.target)) === JSON.stringify(["200ms", "0"]) &&
+            ifText.includes(`Accept if: ${COND}`) && ifText.includes("Not confirmed yet") && /Fine once a rollback is agreed/.test(ifText),
+          `${JSON.stringify(afterIf)?.slice(0, 400)} ${ifText.slice(0, 400)}`,
+        );
+
+        // #49: while the counter waits on the requester, the approver may only decline; the requester sees no such line.
+        await po.close();
+        const pr = await pageAs(DR);
+        await open(pr, cr1.id);
+        const cR = await choices(pr, cr1.id);
+        const rLine = await pr.$(`${card(cr1.id)} [data-countered-decline]`);
+        const pv = await pageAs(DV);
+        await open(pv, cr1.id);
+        const vText = await pv.$eval(card(cr1.id), (e) => ({ decide: !!e.querySelector("[data-decide]"), waiting: e.querySelector("[data-waiting]")?.innerText ?? "", buttons: e.querySelectorAll("[data-decision]").length }));
+        await pr.close();
+        await pv.close();
+        po = await pageAs(DO);
+        await open(po, cr1.id);
+        const c1 = await choices(po, cr1.id);
+        const waitLine = await po.$eval(`${card(cr1.id)} [data-countered-decline]`, (e) => e.innerText).catch(() => "");
+        check(
+          "ui (Chrome, decide, #49): on a countered request the approver is offered only Decline, under \"Waiting on Drew Requester to accept your suggested change. You can still decline instead of waiting.\"; the requester is offered Accept the change and Withdraw with no such line; a viewer gets no decision, only whom it waits on",
+          JSON.stringify(c1.map((x) => x[0])) === JSON.stringify(["Decline"]) && /Waiting on Drew Requester to accept your suggested change\. You can still decline instead of waiting\./.test(waitLine) &&
+            JSON.stringify(cR.map((x) => x[0])) === JSON.stringify(["Accept the change", "Withdraw"]) && rLine === null && !vText.decide && vText.buttons === 0 && /Waiting on Drew Requester to accept the suggested change\./.test(vText.waiting),
+          `${JSON.stringify(c1)} ${waitLine} ${JSON.stringify(cR)} ${JSON.stringify(vText)}`,
+        );
+        await po.click(`${card(cr1.id)} [data-decision="Decline"]`);
+        await po.waitForSelector(`${card(cr1.id)} [data-decision-input] textarea`, { timeout: 15000 });
+        await sleep(300);
+        const fD = await focused(po);
+        await po.type(`${card(cr1.id)} [data-decision-input] textarea`, "We will revisit after the freeze");
+        await press(po, cr1.id, "Review this decision");
+        await po.waitForSelector(`${card(cr1.id)} [data-confirm]`, { timeout: 15000 });
+        const confD = await po.$eval(`${card(cr1.id)} [data-confirm]`, (e) => e.innerText);
+        await press(po, cr1.id, "Confirm: Decline");
+        await po
+          .waitForFunction((sel) => document.querySelector(sel)?.getAttribute("data-cr-view") === "record", { timeout: 15000 }, card(cr1.id))
+          .catch(async (e) => {
+            throw new Error(`${e.message}: ${await po.$eval(card(cr1.id), (c) => c.innerText.slice(-800)).catch(() => "no card")}`);
+          });
+        const declined = (await read(cr1.id)).json;
+        const recText = await po.$eval(card(cr1.id), (e) => e.innerText);
+        const lateAccept = await da(DR, "POST", `${crs}/${cr1.id}/accept_counter`, { revision: 2 });
+        check(
+          "ui (Chrome, decide, #49): the approver declines the countered request with a typed reason (focus on \"Why you're declining\"; the confirmation says nothing goes to launch); it is rejected by them with that reason, the record says \"Recorded: you declined this request\" and \"Rejected by Dana Owner\", and the requester's accept_counter then gets 409 wrong_state",
+          fD.tag === "TEXTAREA" && /^Why you're declining/.test(fD.label) && /approver suggested a change → rejected/.test(confD) && /Nothing goes to launch\. The goal stays at version 1\./.test(confD) &&
+            declined?.state === "rejected" && declined.rejected_by?.id === DO.id && declined.rejection_reason === "We will revisit after the freeze" && /Recorded: you declined this request/.test(recText) && /Rejected by Dana Owner/.test(recText) &&
+            lateAccept.status === 409 && lateAccept.json?.error === "wrong_state",
+          `${JSON.stringify(fD)} ${confD.slice(0, 300)} ${JSON.stringify(declined)?.slice(0, 300)} ${recText.slice(0, 300)} ${lateAccept.text}`,
+        );
+
+        // Freshness, on a phone: the request is withdrawn after the approver opened it; confirming sends nothing.
+        const cr2 = (await propose("Second try")).json;
+        await po.close();
+        const pp = await pageAs(DO, 390);
+        await open(pp, cr2.id);
+        const stacked = await pp.evaluate((sel) => {
+          const c = document.querySelector(sel);
+          const a = c.querySelector('[data-side="approved"]').getBoundingClientRect();
+          const p = c.querySelector('[data-side="proposed"]').getBoundingClientRect();
+          return a.bottom <= p.top;
+        }, card(cr2.id));
+        await pp.click(`${card(cr2.id)} [data-decision="Decline"]`);
+        await sleep(300);
+        await pp.type(`${card(cr2.id)} [data-decision-input] textarea`, "Not now");
+        await press(pp, cr2.id, "Review this decision");
+        await sleep(300);
+        const phoneWide = await wide(pp);
+        await da(DR, "POST", `${crs}/${cr2.id}/withdraw`, { revision: 1 });
+        await press(pp, cr2.id, "Confirm: Decline");
+        await pp.waitForFunction(() => document.activeElement?.getAttribute("data-notice") === "stale", { timeout: 15000 });
+        const fS = await focused(pp);
+        const after2 = (await read(cr2.id)).json;
+        const rejectedRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE action = 'change_request.rejected' AND object_id = ?").get(cr2.id).n);
+        check(
+          "ui (Chrome 390x844, decide): approved now and proposed stack and the confirmation fits with no sideways scroll; a request withdrawn after it was opened is read again before sending: nothing is recorded (still withdrawn, no rejection audited) and a focused alert says \"Not recorded. This request changed after you opened it: it is now “withdrawn” at revision 1. Nothing was sent.\"",
+          stacked && phoneWide && fS.role === "alert" && /^Not recorded\. This request changed after you opened it: it is now “withdrawn” at revision 1\. Nothing was sent\./.test(fS.text) && after2?.state === "withdrawn" && rejectedRows === 0 && errors.length === 0,
+          `${stacked} ${phoneWide} ${JSON.stringify(fS)} ${after2?.state} ${rejectedRows} ${errors.join(" | ")}`,
+        );
+
+        // A refusal: the goal gets a new version after the approver reviewed an approval; the server's 409 is shown, focused.
+        const cr3 = (await propose("Third try")).json;
+        await pp.close();
+        po = await pageAs(DO);
+        await open(po, cr3.id);
+        await po.click(`${card(cr3.id)} [data-decision="Approve"]`);
+        await sleep(300);
+        const fA = await focused(po);
+        await press(po, cr3.id, "Review this decision");
+        await sleep(300);
+        const bump = await da(DO, "POST", `/goals/${DG.id}/versions`, { version: 1, title: "Cut checkout latency (v2)" });
+        await press(po, cr3.id, "Confirm: Approve");
+        await po.waitForFunction(() => document.activeElement?.getAttribute("data-notice") === "refused", { timeout: 15000 });
+        const fR = await focused(po);
+        const after3 = (await read(cr3.id)).json;
+        check(
+          "ui (Chrome, decide): choosing Approve (no input needed) moves focus to Review this decision; when the server refuses with 409 stale_version (the goal moved on), a focused alert says \"Not recorded. The goal changed after this request was made. Drew Requester needs to update it before it can be approved.\" and the request stays pending",
+          fA.tag === "BUTTON" && fA.text === "Review this decision" && bump.status === 201 && fR.role === "alert" && /^Not recorded\. The goal changed after this request was made\. Drew Requester needs to update it before it can be approved\./.test(fR.text) && after3?.state === "pending" && errors.length === 0,
+          `${JSON.stringify(fA)} ${bump.status} ${JSON.stringify(fR)} ${after3?.state} ${errors.join(" | ")}`,
+        );
+      } catch (e) {
+        check("ui (Chrome) decide run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the decision panel", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end port:decide ====
+
+  // ==== port:first-run ====
+  // main #47 on v2: the Home's first-run card. FO owns workspace FW and has the Northstar sample (SW); FM is a member
+  // with no sample; FV a viewer. The card shows until Align has seen an app make a request, then yields.
+  {
+    const fUsers = {};
+    for (const [who, name] of [
+      ["FO", "Fern Owner"],
+      ["FM", "Finn Member"],
+      ["FV", "Flo Viewer"],
+    ])
+      fUsers[who] = await signUp(who, name, `${who.toLowerCase()}@first-run.example.test`);
+    const { FO, FM, FV } = fUsers;
+    const SW = (await call("FO", "POST", "/api/v2/workspaces/sample", { cookie: FO.cookie, body: {} })).json?.id;
+    const FW = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "First run workspace" } })).json?.id;
+    for (const [u, role] of [
+      [FM, "member"],
+      [FV, "viewer"],
+    ]) {
+      const iv = await call("FO", "POST", `/api/v2/workspaces/${FW}/invites`, { cookie: FO.cookie, body: { email: u.email, role } });
+      await call(u.who, "POST", `/api/v2/invites/${iv.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    // The read tools the server lists for a goals:read token (a paired device's).
+    const FD = insertDevice(FO.id, "Fern's laptop");
+    const toolsList = await call("FO", "POST", "/api/mcp", { bearer: FD.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+    const serverTools = [...toolsList.text.matchAll(/"name":"(align_[a-z_]+)"/g)].map((m) => m[1]);
+    check("first run setup: the sample and a workspace for the owner; tools/list for a goals:read token names the read tools", !!SW && !!FW && toolsList.status === 200 && serverTools.length >= 9 && !serverTools.includes("align_add_change_request_evidence"), `${SW} ${FW} ${toolsList.status} ${serverTools}`);
+
+    if (existsSync(CHROME)) {
+      const fcore = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
+      const fkid = fcore.hmac(fcore.serverSecret(onDir, {}), "align-grant-kid").slice(0, 16);
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const pageAs = async (u, width = 1000, blockStorage = false) => {
+          const page = await browser.newPage();
+          page.on("pageerror", (e) => errors.push(e.message));
+          if (blockStorage)
+            await page.evaluateOnNewDocument(() =>
+              Object.defineProperty(window, "localStorage", {
+                get() {
+                  throw new DOMException("blocked", "SecurityError");
+                },
+              }),
+            );
+          await page.setViewport({ width, height: 900 });
+          await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return page;
+        };
+        const home = async (page, ws) => {
+          await page.goto(`${BASE}/app/w/${ws}`, { waitUntil: "networkidle0" });
+          await page.waitForSelector("[data-home-summary]", { timeout: 15000 });
+          await page.waitForSelector("[data-first-run-status]:not([data-first-run-status=checking])", { timeout: 15000 }).catch(() => undefined);
+        };
+        const cardOf = (page) =>
+          page.evaluate(() => {
+            const c = document.querySelector("[data-first-run]");
+            if (!c) return null;
+            const btns = [...c.querySelectorAll("button")].map((b) => b.textContent);
+            const line = c.querySelector("[data-first-run-line]");
+            return {
+              kind: c.getAttribute("data-first-run"),
+              title: c.querySelector("h2")?.textContent ?? "",
+              text: c.innerText,
+              sample: c.querySelector("[data-sample-link]")?.getAttribute("href") ?? null,
+              sampleLabel: c.querySelector("[data-sample-link]")?.getAttribute("aria-label") ?? "",
+              paths: [...c.querySelectorAll("[data-first-run-path]")].map((p) => p.getAttribute("data-first-run-path")),
+              line: line?.textContent ?? null,
+              copyBeforeLine: !!line && btns.includes("Copy") && !!(c.querySelector("button")?.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING),
+              tools: [...c.querySelectorAll("[data-tool]")].map((t) => t.getAttribute("data-tool")),
+              status: c.querySelector("[data-first-run-status]")?.getAttribute("data-first-run-status") ?? "",
+              statusText: c.querySelector("[data-first-run-status]")?.textContent ?? "",
+              lineFits: !line || line.getBoundingClientRect().right <= window.innerWidth,
+            };
+          });
+
+        const po = await pageAs(FO);
+        await home(po, FW);
+        const a = await cardOf(po);
+        check(
+          "ui (Chrome, first run): on a workspace where no app was seen, the owner's Home shows \"Two ways to start\": Explore a sample (fictional), linking to their Northstar sample, and Connect one agent with Copy above the Claude Code line, what it can read (one line per read tool in the server's tools/list), what it can't do, \"No AI app is connected to this workspace yet.\" and that connecting is not a read",
+          a?.kind === "two" && a.title === "Two ways to start" && JSON.stringify(a.paths) === JSON.stringify(["sample", "connect"]) && a.sample === `/app/w/${SW}` && /fictional/i.test(a.sampleLabel) && /Fictional/.test(a.text) && /Nothing in it is real/.test(a.text) &&
+            a.line === `claude mcp add --transport http --scope user align 'http://127.0.0.1:${PORT}/api/mcp'; claude mcp login align` && a.copyBeforeLine && JSON.stringify([...a.tools].sort()) === JSON.stringify([...serverTools].sort()) &&
+            /can.t propose, approve, launch or change anything/.test(a.text) && a.status === "none" && a.statusText === "No AI app is connected to this workspace yet." && /Connecting is not a read/.test(a.text) && /last connected \(any request to Align\) and, separately, when it last read the goals/.test(a.text) && errors.length === 0,
+          `${JSON.stringify(a)} ${errors.join(" | ")}`,
+        );
+
+        // Live status: an approved app with no request yet, then its first request (a connection): the card yields.
+        const at = new Date().toISOString();
+        withDb((d) =>
+          d
+            .prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, 'c-first', 'Claude Code', 'localhost', ?, NULL, NULL, 'h', ?, ?)")
+            .run("gr_FIRSTRUNFIRSTRU1", FW, FO.id, at, Date.now() + 86_400_000, fkid),
+        );
+        await po.waitForSelector('[data-first-run-status="approved"]', { timeout: 15000 });
+        const st = await cardOf(po);
+        withDb((d) => d.prepare("UPDATE v2_oauth_grants SET last_used_at = ? WHERE id = 'gr_FIRSTRUNFIRSTRU1'").run(new Date().toISOString()));
+        await po.waitForFunction(() => !document.querySelector("[data-first-run]") && /Connected .+, no goal read seen yet/.test(document.querySelector("#apps")?.innerText ?? ""), { timeout: 20000 });
+        const appsNow = await po.$eval("#apps", (e) => e.innerText);
+        check(
+          "ui (Chrome, first run): the status follows what Align sees without a reload: an approved app with no request reads \"Claude Code: approved <time>, Align hasn't seen it connect yet\"; after its first request the card is gone and the Home's apps section shows \"Connected <time>, no goal read seen yet\" (not observed), never a read",
+          /^Claude Code: approved .+, Align hasn't seen it connect yet\.$/.test(st?.statusText ?? "") && /Connected .+, no goal read seen yet/.test(appsNow) && !/Read the goals /.test(appsNow) && errors.length === 0,
+          `${st?.statusText} | ${appsNow.slice(0, 300)} ${errors.join(" | ")}`,
+        );
+        withDb((d) => d.prepare("DELETE FROM v2_oauth_grants WHERE id = 'gr_FIRSTRUNFIRSTRU1'").run());
+
+        // Hide: per workspace, kept across a reload, focus back on the heading; blocked storage still hides it.
+        await home(po, FW);
+        await po.$$eval("[data-first-run] button", (els) => els.find((b) => b.textContent === "Hide")?.click());
+        await sleep(300);
+        const hid = await po.evaluate((ws) => ({ card: !!document.querySelector("[data-first-run]"), focus: document.activeElement?.tagName, stored: localStorage.getItem(`align.firstRun.hidden:${ws}`) }), FW);
+        await home(po, FW);
+        const stillHidden = !(await po.$("[data-first-run]"));
+        await home(po, SW);
+        const s = await cardOf(po);
+        await po.evaluate((ws) => localStorage.removeItem(`align.firstRun.hidden:${ws}`), FW);
+        await home(po, FW);
+        const back = !!(await po.$("[data-first-run]"));
+        const pb = await pageAs(FO, 1000, true);
+        await home(pb, FW);
+        const blockedShown = !!(await pb.$("[data-first-run]"));
+        await pb.$$eval("[data-first-run] button", (els) => els.find((b) => b.textContent === "Hide")?.click());
+        await sleep(300);
+        const blockedHidden = !(await pb.$("[data-first-run]"));
+        await pb.close(); // a page left in the background may be frozen by Chrome
+        await po.bringToFront();
+        check(
+          "ui (Chrome, first run): Hide removes the card, moves focus to the Home heading and keeps it hidden on that workspace after a reload (localStorage align.firstRun.hidden:<ws>), not on the sample's Home; with storage blocked the card shows and Hide still hides it with no page error",
+          !hid.card && hid.focus === "H1" && hid.stored === "1" && stillHidden && back && blockedShown && blockedHidden && s?.kind === "two" && errors.length === 0,
+          `${JSON.stringify(hid)} ${stillHidden} ${back} ${blockedShown} ${blockedHidden} ${errors.join(" | ")}`,
+        );
+        check(
+          "ui (Chrome, first run): on the sample's own Home the explore path says the person is in the Northstar sample, that it is fictional, and links to its change request on the Requests tab",
+          /You are in the Northstar sample/.test(s?.text ?? "") && /fictional/.test(s?.text ?? "") && s?.sample === null,
+          s?.text.slice(0, 400),
+        );
+        const sampleReq = await (async () => {
+          await home(po, SW);
+          return po.$$eval("[data-first-run] a", (els) => els.map((e) => [e.textContent, e.getAttribute("href")]));
+        })();
+        check("ui (Chrome, first run): the sample's explore link opens its Requests tab", sampleReq.some(([t, h]) => t === "Open the sample's change request" && h === `/app/w/${SW}/requests`), JSON.stringify(sampleReq));
+
+        // A member with no sample: one path; a viewer: no line, told viewers can't connect.
+        await po.close();
+        const pm = await pageAs(FM);
+        await home(pm, FW);
+        const m = await cardOf(pm);
+        await pm.close();
+        const pv = await pageAs(FV);
+        await home(pv, FW);
+        const v = await cardOf(pv);
+        await pv.close();
+        check(
+          "ui (Chrome, first run): a member with no sample sees only \"Connect one agent\" and \"You haven't connected an AI app to this workspace yet.\"; a viewer sees no command, only that viewers can't connect AI apps",
+          m?.kind === "connect" && m.title === "Connect one agent" && m.sample === null && !/Explore a sample/.test(m.text) && m.statusText === "You haven't connected an AI app to this workspace yet." && !!m.line &&
+            v?.line === null && /Viewers can.t connect AI apps to this workspace/.test(v?.text ?? "") && errors.length === 0,
+          `${JSON.stringify(m)?.slice(0, 300)} ${JSON.stringify(v)?.slice(0, 300)}`,
+        );
+        // On a phone the card and its long line fit.
+        const pp = await pageAs(FO, 390);
+        await home(pp, FW);
+        const ph = await cardOf(pp);
+        const fit = await pp.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
+        check("ui (Chrome 390x844, first run): the Home with the first-run card has no sideways scroll and the setup line wraps inside it", !!ph && ph.lineFits && fit.sw <= fit.W && errors.length === 0, `${JSON.stringify(fit)} ${ph?.lineFits} ${errors.join(" | ")}`);
+      } catch (e) {
+        check("ui (Chrome) first-run run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the first-run card", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end port:first-run ====
+
+  // ==== req:requests ====
+  // Requests and goal holds (REQ-001), on a workspace of their own: QO owns it; team Core has a lead (QL) and a member
+  // (QM, whose sessions work on the goal); QX is a member in no team; QV a viewer. QL owns the goal GR (workspace
+  // visible, team Core): its approval set is QL; QO sends as a workspace owner.
+  {
+    const qUsers = {};
+    for (const [who, name] of [
+      ["QO", "Quinn Owner"],
+      ["QL", "Quill Lead"],
+      ["QM", "Quade Member"],
+      ["QX", "Quorra Other"],
+      ["QV", "Quincy Viewer"],
+    ])
+      qUsers[who] = await signUp(who, name, `${who.toLowerCase()}@requests.example.test`);
+    const { QO, QL, QM, QX, QV } = qUsers;
+    const QW = (await call("QO", "POST", "/api/v2/workspaces", { cookie: QO.cookie, body: { name: "Requests workspace" } })).json?.id;
+    const qa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${QW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [QL, "member"],
+      [QM, "member"],
+      [QX, "member"],
+      [QV, "viewer"],
+    ]) {
+      const i = await qa(QO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const QT = (await qa(QO, "POST", "/teams", { name: "Core" })).json?.id;
+    await qa(QO, "POST", `/teams/${QT}/members`, { user_id: QL.id, role: "lead" });
+    await qa(QO, "POST", `/teams/${QT}/members`, { user_id: QM.id, role: "member" });
+    const GR = (await qa(QL, "POST", "/goals", { title: "Ship the scheduler", visibility: "workspace", team_id: QT })).json;
+    const G2 = (await qa(QL, "POST", "/goals", { title: "Harden the scheduler", visibility: "workspace", team_id: QT })).json;
+    const GX = (await qa(QX, "POST", "/goals", { title: "Quorra's own goal", visibility: "workspace" })).json;
+    const GE = (await qa(QL, "POST", "/goals", { title: "Nobody works on this", visibility: "workspace", team_id: QT })).json;
+    const qDevice = (u) => {
+      const keys = newDeviceKeys();
+      const d = insertDevice(u.id, `${u.who}'s laptop`);
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, QW));
+      return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
+    };
+    const DQM = qDevice(QM);
+    const qT0 = new Date(Date.now() - 3600_000).toISOString();
+    const qShare = async (dev, native, goalId) => {
+      const key = sessionKey(dev, QW, "claude-code", native);
+      await call(dev.who, "PUT", `/api/v2/workspaces/${QW}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, QW, `/src/${native}`), repo_alias: `repo-${native}`, started_at: qT0, title: `REQ-TITLE ${native}` } });
+      const e = await call(dev.who, "POST", `/api/v2/workspaces/${QW}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: epochId(), goal_id: goalId, starts_at: qT0, root_turn: null, cause: "manual" } });
+      return { key, status: e.status };
+    };
+    const SM1 = await qShare(DQM, "req-1", GR.id);
+    const SM2 = await qShare(DQM, "req-2", GR.id);
+    check("requests setup: a workspace with a team (lead, member), a member in no team, a viewer, goals, and two of the member's sessions bound to the goal", !!QW && !!QT && !!GR?.id && !!G2?.id && !!GX?.id && SM1.status === 200 && SM2.status === 200, `${QW} ${QT} ${SM1.status} ${SM2.status}`);
+    const qDirs = async (dev, cursor = 0) => (await call(dev.who, "GET", `/api/v2/directives?cursor=${cursor}`, { bearer: dev.access })).json;
+    const qRec = (id, key, state, extra = {}) => call("QM", "POST", `/api/v2/directives/${id}/receipts`, { bearer: DQM.access, body: { session_key: key, state, at: new Date().toISOString(), ...extra } });
+    const send = (u, body, g = GR.id) => qa(u, "POST", `/goals/${g}/requests`, body);
+    const list = (u, g = GR.id) => qa(u, "GET", `/goals/${g}/requests`);
+    const qAudit = (action, obj) => withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = ? AND object_id = ?").all(QW, action, obj)).map((r) => r.actor_id);
+
+    // -- who may send, and what a request must be --
+    const who = await Promise.all([send(QV, { type: "checkpoint" }), send(QX, { type: "checkpoint" }), send(QM, { type: "checkpoint" })]);
+    check(
+      "requests: a viewer -> 403 read_only; a member who is not in the goal's approval set (in no team, or a team member who isn't its lead or owner) -> 403 not_approver",
+      who[0].status === 403 && who[0].json?.error === "read_only" && who[1].status === 403 && who[1].json?.error === "not_approver" && who[2].status === 403 && who[2].json?.error === "not_approver",
+      who.map((r) => r.text).join(" | "),
+    );
+    const bad = await Promise.all([
+      send(QL, { type: "stop" }),
+      send(QL, { type: "checkpoint", note: "n".repeat(281) }),
+      send(QL, { type: "checkpoint", target_goal_id: G2.id }),
+      send(QL, { type: "switch_goal", target_goal_id: G2.id }),
+      send(QL, { type: "checkpoint", session_keys: ["A".repeat(43)] }),
+      send(QL, { type: "switch_goal", session_keys: [SM1.key], target_goal_id: GR.id }),
+      send(QL, { type: "checkpoint" }, GE.id),
+    ]);
+    check(
+      "requests: an unknown type, a note over 280, target_goal_id without switch_goal, switch_goal without session_keys, a session key not on the goal, a switch to the same goal -> 400; a goal no session works on -> 409 no_sessions",
+      bad.slice(0, 6).every((r) => r.status === 400) && bad[6].status === 409 && bad[6].json?.error === "no_sessions",
+      bad.map((r) => `${r.status} ${r.json?.error}`).join(" | "),
+    );
+
+    // -- a checkpoint from the goal's approver --
+    const qBefore = await qDirs(DQM);
+    const QNOTE = `Please checkpoint before the demo REQ-NOTE-${randomBytes(3).toString("hex")}`;
+    const cp = await send(QL, { type: "checkpoint", note: QNOTE });
+    const CP = cp.json?.request;
+    const cpDirs = (await qDirs(DQM, qBefore.next_cursor)).directives;
+    const cpDir = cpDirs.find((d) => d.kind === "request");
+    check(
+      "requests: the goal's approver sends a checkpoint -> 201 { request } (rq_ id, type, goal with its version, sender, quoted note, open, both sessions pending, counts)",
+      cp.status === 201 && /^rq_[a-z2-7]{24}$/.test(CP?.id) && CP.type === "checkpoint" && CP.goal.id === GR.id && CP.goal.version === 1 && CP.target_goal === null && CP.sender.id === QL.id && CP.sender.name === "Quill Lead" && CP.note === QNOTE &&
+        CP.state === "open" && CP.counts.pending === 2 && CP.sessions.length === 2 && CP.sessions.every((s) => s.state === "sent" && !s.auto_accepted) && CP.can_cancel === true,
+      cp.text,
+    );
+    check(
+      "requests (wire): one request directive for both sessions: goal and binding null, request {id, type, cancelled false, cancel_reason null, goal {id, title, version}, target_goal null, sender {id, name, role approver}, note, created_at}, and no hold field",
+      cpDirs.length === 1 && cpDir && JSON.stringify(cpDir.session_keys) === JSON.stringify([SM1.key, SM2.key].sort()) && cpDir.goal === null && cpDir.binding === null && !("hold" in cpDir) &&
+        JSON.stringify(Object.keys(cpDir.request).sort()) === JSON.stringify(["cancel_reason", "cancelled", "created_at", "goal", "id", "note", "sender", "target_goal", "type"]) &&
+        cpDir.request.id === CP.id && cpDir.request.type === "checkpoint" && cpDir.request.cancelled === false && cpDir.request.cancel_reason === null && JSON.stringify(cpDir.request.goal) === JSON.stringify({ id: GR.id, title: "Ship the scheduler", version: 1 }) &&
+        cpDir.request.target_goal === null && JSON.stringify(cpDir.request.sender) === JSON.stringify({ id: QL.id, name: "Quill Lead", role: "approver" }) && cpDir.request.note === QNOTE && cpDir.request.created_at === CP.created_at,
+      JSON.stringify(cpDirs),
+    );
+    const again = await send(QL, { type: "checkpoint" });
+    const rp = await send(QO, { type: "replan" });
+    check(
+      "requests: a second open checkpoint on the goal -> 409 already_open; a replan from a workspace owner outside the approval set -> 201 with sender.role owner (the approver's is approver)",
+      again.status === 409 && again.json?.error === "already_open" && rp.status === 201 && rp.json.request.sender.id === QO.id && rp.json.request.sender.role === "owner" && CP.sender.role === "approver",
+      `${again.text} ${rp.status} ${JSON.stringify(rp.json?.request?.sender)}`,
+    );
+    check("requests: audited as request.sent by the sender", qAudit("request.sent", CP.id).join() === QL.id && qAudit("request.sent", rp.json?.request?.id).join() === QO.id, "");
+
+    // -- receipts: received, the agent's own accept of a safe request, the developer's decline and accept --
+    const r1 = await qRec(cpDir.id, SM1.key, "received");
+    const r2 = await qRec(cpDir.id, SM1.key, "accepted", { auto_accepted: true });
+    const midView = (await list(QL)).json?.requests?.find((r) => r.id === CP.id);
+    const r3 = await qRec(cpDir.id, SM1.key, "declined");
+    const r4a = await qRec(cpDir.id, SM2.key, "accepted", { auto_accepted: true });
+    const r4 = await qRec(cpDir.id, SM2.key, "accepted");
+    const r4again = await qRec(cpDir.id, SM2.key, "accepted");
+    const r5 = await qRec(cpDir.id, SM2.key, "declined");
+    const cpView = (await list(QL)).json?.requests?.find((r) => r.id === CP.id);
+    const s1 = cpView?.sessions.find((s) => s.session_key === SM1.key);
+    const s2 = cpView?.sessions.find((s) => s.session_key === SM2.key);
+    const acceptRows = withDb((d) => d.prepare("SELECT auto_accepted FROM v2_receipts WHERE directive_id = ? AND session_key = ? AND state = 'accepted' ORDER BY auto_accepted").all(cpDir.id, SM2.key)).map((r) => r.auto_accepted);
+    check(
+      "request receipts: the developer's accept after the agent's own is recorded as a receipt of its own (fresh true, both kept), turns the session into accepted by the developer and is audited request.accepted by the session's person; the agent's accepts are audited request.done_by_agent and the decline request.declined; the same accept again -> fresh false",
+      r4a.json?.request_state === "accepted" && r4.json?.fresh === true && r4.json.request_state === "accepted" && r4again.json?.fresh === false && JSON.stringify(acceptRows) === "[0,1]" &&
+        qAudit("request.accepted", CP.id).join() === QM.id && qAudit("request.done_by_agent", CP.id).length === 2 && qAudit("request.declined", CP.id).join() === QM.id,
+      `${r4a.text} ${r4.text} ${r4again.text} ${JSON.stringify(acceptRows)}`,
+    );
+    check(
+      "request receipts: received -> request_state received; accepted with auto_accepted -> accepted, shown as done by the agent; a later decline overrides it; the developer's accept stays (a later decline changes nothing); counts follow",
+      r1.json?.fresh === true && r1.json.request_state === "received" && r2.json?.request_state === "accepted" && midView?.counts.done_by_agent === 1 && midView.sessions.find((s) => s.session_key === SM1.key)?.auto_accepted === true &&
+        r3.json?.request_state === "declined" && r4.json?.request_state === "accepted" && r5.json?.request_state === "accepted" && s1?.state === "declined" && !s1.auto_accepted && s2?.state === "accepted" && !s2.auto_accepted &&
+        cpView.state === "answered" && cpView.counts.accepted === 1 && cpView.counts.declined === 1 && cpView.counts.pending === 0 && cpView.can_cancel === false,
+      `${r1.text} ${r2.text} ${r3.text} ${r4.text} ${r5.text} ${JSON.stringify(cpView?.sessions)}`,
+    );
+    const stopQ = await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM2.key}/stop`, { cookie: QM.cookie, body: {} });
+    const stopDir = (await qDirs(DQM, cpDir.seq)).directives.find((d) => d.kind === "stop");
+    await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM2.key}/resume`, { cookie: QM.cookie, body: {} });
+    const badRec = await Promise.all([qRec(stopDir?.id, SM2.key, "accepted"), qRec(cpDir.id, SM2.key, "received", { auto_accepted: true }), qRec(cpDir.id, SM2.key, "accepted", { auto_accepted: "yes" })]);
+    check(
+      "request receipts: accepted on a stop directive, auto_accepted with any state but accepted, and a non-boolean auto_accepted -> 400",
+      stopQ.status === 200 && badRec.every((r) => r.status === 400),
+      badRec.map((r) => r.text).join(" | "),
+    );
+
+    // -- switch_goal: needs session_keys and a target every chosen session's owner may bind; only the developer accepts --
+    const notBindable = await send(QL, { type: "switch_goal", session_keys: [SM1.key], target_goal_id: GX.id });
+    const sw = await send(QL, { type: "switch_goal", session_keys: [SM1.key], target_goal_id: G2.id, note: "Hardening first" });
+    const swDir = (await qDirs(DQM, cpDir.seq)).directives.find((d) => d.kind === "request" && d.request?.id === sw.json?.request?.id);
+    check(
+      "switch_goal: a target goal the session's owner can't bind -> 409 not_bindable naming nothing; a bindable one -> 201 to the chosen session only, with target_goal {id, title, version} on the wire",
+      notBindable.status === 409 && notBindable.json?.error === "not_bindable" && !notBindable.text.includes("Quorra") && sw.status === 201 && sw.json.request.target_goal?.id === G2.id &&
+        swDir && JSON.stringify(swDir.session_keys) === JSON.stringify([SM1.key]) && JSON.stringify(swDir.request.target_goal) === JSON.stringify({ id: G2.id, title: "Harden the scheduler", version: 1 }),
+      `${notBindable.text} ${sw.text} ${JSON.stringify(swDir)}`,
+    );
+    const swAuto = await qRec(swDir?.id, SM1.key, "accepted", { auto_accepted: true });
+    const swAutoRow = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_receipts WHERE directive_id = ? AND state = 'accepted'").get(swDir?.id ?? "").n);
+    const swAcc = await qRec(swDir?.id, SM1.key, "accepted");
+    const swBind = await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM1.key}/epochs`, { bearer: DQM.access, body: { epoch_id: epochId(), goal_id: G2.id, starts_at: new Date().toISOString(), root_turn: null, cause: `directive:${swDir?.id}` } });
+    check(
+      "switch_goal: auto_accepted -> 400 and nothing recorded (it changes direction, so only the developer accepts); the developer's accept -> accepted; the binding then moves through the existing epoch path with the request directive as its cause",
+      swAuto.status === 400 && swAutoRow === 0 && swAcc.json?.request_state === "accepted" && swBind.status === 200 && swBind.json.goal_id === G2.id,
+      `${swAuto.text} ${swAutoRow} ${swAcc.text} ${swBind.text}`,
+    );
+
+    // -- reading: the sender, approvers and workspace owners see every session; others their own rows and counts --
+    const views = { QO: await list(QO), QM: await list(QM), QX: await list(QX), QV: await list(QV) };
+    const rpOf = (v) => v.json?.requests?.find((r) => r.id === rp.json?.request?.id);
+    check(
+      "requests list: anyone who reads the goal reads it, newest first; the workspace owner sees every session's row and can send; the sessions' owner sees their own rows (with titles) but can't send; another member and a viewer see the counts and no rows",
+      Object.values(views).every((v) => v.status === 200) && views.QO.json.requests[0].id === sw.json.request.id && views.QO.json.can_send === true && rpOf(views.QO)?.sessions.length === 2 && views.QO.json.sessions.length === 1 &&
+        views.QM.json.can_send === false && views.QM.json.sessions === null && rpOf(views.QM)?.sessions.length === 2 && rpOf(views.QM).sessions.every((s) => s.mine && s.title?.startsWith("REQ-TITLE")) &&
+        rpOf(views.QX)?.sessions.length === 0 && rpOf(views.QX).counts.pending === 2 && rpOf(views.QV)?.sessions.length === 0 && views.QV.json.can_send === false && !views.QO.text.includes("REQ-TITLE"),
+      JSON.stringify(Object.fromEntries(Object.entries(views).map(([k, v]) => [k, v.text.slice(0, 160)]))),
+    );
+
+    // -- cancel --
+    const RP = rp.json.request;
+    const cBy = await Promise.all([qa(QX, "DELETE", `/goals/${GR.id}/requests/${RP.id}`), qa(QL, "DELETE", `/goals/${GR.id}/requests/${RP.id}`), qa(QV, "DELETE", `/goals/${GR.id}/requests/${RP.id}`), qa(QO, "DELETE", `/goals/${GR.id}/requests/rq_aaaaaaaaaaaaaaaaaaaaaaaa`)]);
+    const rpDir = (await qDirs(DQM, cpDir.seq)).directives.find((d) => d.kind === "request" && d.request?.id === RP.id);
+    await qRec(rpDir?.id, SM2.key, "declined");
+    const cBefore = (await qDirs(DQM, swDir?.seq ?? 0)).next_cursor;
+    const cancel = await qa(QO, "DELETE", `/goals/${GR.id}/requests/${RP.id}`);
+    const cDirs = (await qDirs(DQM, cBefore)).directives.filter((d) => d.kind === "request");
+    const cancel2 = await qa(QO, "DELETE", `/goals/${GR.id}/requests/${RP.id}`);
+    const cDirs2 = (await qDirs(DQM, cBefore)).directives.filter((d) => d.kind === "request");
+    const late = await qRec(rpDir?.id, SM1.key, "accepted");
+    check(
+      "cancel: another member, the goal's approver who didn't send it -> 403 not_sender or read_only for a viewer; an unknown id -> 404; the workspace owner cancels -> the sessions still pending get a request directive with cancelled true (cancel_reason withdrawn) and become expired (an answered one keeps its answer); again changes nothing; a late accept keeps expired",
+      cBy[0].status === 403 && cBy[0].json?.error === "not_sender" && cBy[1].status === 403 && cBy[1].json?.error === "not_sender" && cBy[2].status === 403 && cBy[2].json?.error === "read_only" && cBy[3].status === 404 &&
+        cancel.status === 200 && cancel.json.request.state === "cancelled" && cancel.json.request.cancelled_by?.id === QO.id && cancel.json.request.sessions.find((s) => s.session_key === SM1.key)?.state === "expired" && cancel.json.request.sessions.find((s) => s.session_key === SM2.key)?.state === "declined" &&
+        cDirs.length === 1 && JSON.stringify(cDirs[0].session_keys) === JSON.stringify([SM1.key]) && cDirs[0].request.cancelled === true && cDirs[0].request.cancel_reason === "withdrawn" && cDirs[0].request.id === RP.id && cancel2.status === 200 && cDirs2.length === 1 && late.json?.request_state === "expired" && qAudit("request.cancelled", RP.id).join() === QO.id,
+      `${cBy.map((r) => r.status).join(",")} ${cancel.text.slice(0, 300)} ${JSON.stringify(cDirs)} ${late.text}`,
+    );
+
+    // -- limits and state --
+    withDb((d) => {
+      d.exec("PRAGMA foreign_keys = OFF");
+      const ins = d.prepare("INSERT INTO v2_requests (id, ws_id, goal_id, type, goal_version, sender_id, sender_role, directive_id, created_at) VALUES (?, ?, ?, 'replan', 1, ?, 'owner', 'dir_none', ?)");
+      for (let i = 0; i < 20; i++) ins.run(`rq_fake${String(i).padStart(17, "a")}`, QW, GE.id, QO.id, new Date().toISOString());
+    });
+    const limited = await send(QO, { type: "replan" });
+    withDb((d) => d.prepare("DELETE FROM v2_requests WHERE id LIKE 'rq_fake%'").run());
+    check("requests: the 21st request a person sends in an hour -> 429 rate_limited", limited.status === 429 && limited.json?.error === "rate_limited", limited.text);
+
+    // -- goal holds --
+    const holdOf = (u, g = GR.id) => qa(u, "GET", `/goals/${g}/hold`);
+    const put = (u, body = {}, g = GR.id) => qa(u, "PUT", `/goals/${g}/hold`, body);
+    const hBy = await Promise.all([put(QM), put(QV), put(QX)]);
+    ageSession(QL.cookie, 20);
+    const hStale = await put(QL, { reason: "Pause for the incident" });
+    ageSession(QL.cookie, 0);
+    const hBefore = (await qDirs(DQM)).next_cursor;
+    const QREASON = `Pause for the incident REQ-REASON-${randomBytes(3).toString("hex")}`;
+    const h1 = await put(QL, { reason: QREASON });
+    const h2 = await put(QL, { reason: "again" });
+    const hDirs = (await qDirs(DQM, hBefore)).directives;
+    const hDir = hDirs.find((d) => d.kind === "hold");
+    check(
+      "hold: the sessions' owner and another member -> 403 not_approver, a viewer -> 403 read_only; the approver with a sign-in older than 15 minutes -> 403 reauth_required",
+      hBy[0].json?.error === "not_approver" && hBy[1].json?.error === "read_only" && hBy[2].json?.error === "not_approver" && hStale.status === 403 && hStale.json?.error === "reauth_required",
+      `${hBy.map((r) => r.text).join(" | ")} ${hStale.text}`,
+    );
+    check(
+      "hold: the goal's approver holds it -> 201 { held {held_by, reason, held_at}, can_hold }; again -> 200 and no new directive; one hold directive to the session on the goal: hold {goal {id, title}, held_by {id, name}, reason, at}, goal null; audited goal.held",
+      h1.status === 201 && h1.json.held?.held_by?.id === QL.id && h1.json.held.reason === QREASON && h1.json.can_hold === true && h2.status === 200 && h2.json.held.reason === QREASON &&
+        hDirs.filter((d) => d.kind === "hold").length === 1 && JSON.stringify(hDir.session_keys) === JSON.stringify([SM2.key]) && hDir.goal === null && !("request" in hDir) &&
+        JSON.stringify(hDir.hold) === JSON.stringify({ goal: { id: GR.id, title: "Ship the scheduler" }, held_by: { id: QL.id, name: "Quill Lead" }, reason: QREASON, at: h1.json.held.held_at }) && qAudit("goal.held", GR.id).join() === QL.id,
+      `${h1.text} ${h2.status} ${JSON.stringify(hDirs)}`,
+    );
+    const hr = await Promise.all([qRec(hDir?.id, SM2.key, "received"), qRec(hDir?.id, SM2.key, "enforced")]);
+    const holdsX = await qa(QX, "GET", "/holds");
+    const holdM = await holdOf(QM);
+    check(
+      "hold: acknowledged with received then enforced like a stop; GET /holds lists it for any reader of the goal; GET hold tells the sessions' owner it's held and that they can't hold or release it",
+      hr.every((r) => r.json?.fresh === true) && holdsX.status === 200 && holdsX.json.holds.length === 1 && holdsX.json.holds[0].goal.id === GR.id && holdsX.json.holds[0].held_by.name === "Quill Lead" && holdM.json?.held?.reason === QREASON && holdM.json.can_hold === false,
+      `${hr.map((r) => r.text).join(" ")} ${holdsX.text} ${holdM.text}`,
+    );
+    const SM3 = await qShare(DQM, "req-3", GR.id);
+    const nb = (await qDirs(DQM, hDir?.seq ?? 0)).directives.filter((d) => d.kind === "hold");
+    await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM3.key}/epochs`, { bearer: DQM.access, body: { epoch_id: epochId(), goal_id: GR.id, starts_at: new Date().toISOString(), root_turn: null, cause: "manual" } });
+    const nb2 = (await qDirs(DQM, hDir?.seq ?? 0)).directives.filter((d) => d.kind === "hold");
+    check(
+      "hold: a session that binds to the held goal later gets a fresh hold directive (the same held_by, reason and at) in the binding's transaction; binding it again sends none",
+      SM3.status === 200 && nb.length === 1 && JSON.stringify(nb[0].session_keys) === JSON.stringify([SM3.key]) && nb[0].hold.reason === QREASON && nb[0].hold.at === hDir?.hold?.at && nb2.length === 1,
+      JSON.stringify(nb2),
+    );
+    const mcpQ = await mcpCall("QM", DQM, "align_get_directives");
+    const mReq = mcpQ.sc?.directives?.find((d) => d.kind === "request" && d.request?.id === CP.id);
+    const mHold = mcpQ.sc?.directives?.find((d) => d.kind === "hold");
+    check(
+      "mcp: align_get_directives includes requests (note, titles and names as untrusted_text) and holds, read-only; other kinds keep their fields",
+      mcpQ.status === 200 && mReq?.request?.note?.untrusted_text === QNOTE && mReq.request.goal.title?.untrusted_text === "Ship the scheduler" && mReq.request.sender.name.untrusted_text === "Quill Lead" && mReq.request.type === "checkpoint" &&
+        mHold?.hold?.reason?.untrusted_text === QREASON && mHold.hold.held_by?.id === QL.id && mcpQ.text.includes("checkpoint request") && mcpQ.sc.directives.filter((d) => d.kind === "stop").every((d) => !("request" in d) && !("hold" in d)),
+      `${mcpQ.status} ${mcpQ.text.slice(0, 300)}`,
+    );
+
+    // -- the web UI (Chrome): the hold banner and the "Agents on this goal" card; the Goals and Sessions tabs --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await page.setViewport({ width: 1100, height: 1400 });
+        const asUser = async (u) => {
+          const [name, ...v] = u.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+          await page.setCookie({ name, value: v.join("="), url: BASE });
+        };
+        await asUser(QL);
+        await page.goto(`${BASE}/app/w/${QW}/goals/${GR.id}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-request="${CP.id}"]`, { timeout: 15000 });
+        const ui = await page.evaluate(
+          (ids) => ({
+            banner: document.querySelector("[data-hold-banner]")?.innerText ?? "",
+            card: document.querySelector("#agents-on-goal")?.innerText ?? "",
+            cp: document.querySelector(`[data-request="${ids.cp}"]`)?.innerText ?? "",
+            radios: [...document.querySelectorAll('input[name="request-type"]')].map((r) => r.value),
+            answers: [...document.querySelectorAll(`[data-request="${ids.cp}"] p`)]
+              .filter((p) => p.querySelector("[data-evidence-class]"))
+              .map((p) => ({ text: p.innerText, classes: [...p.querySelectorAll("[data-evidence-class]")].map((e) => e.getAttribute("data-evidence-class")) })),
+          }),
+          { cp: CP.id },
+        );
+        check(
+          "ui (Chrome, LIM-2455 §E2): each session's answer on the Agents on this goal card carries exactly one evidence class: an answer (declined, accepted by the developer) is agent reported, never a delivery receipt",
+          ui.answers.length >= 2 && ui.answers.every((a) => a.classes.length === 1) && ui.answers.filter((a) => /declined|accepted by the developer/.test(a.text)).every((a) => a.classes[0] === "agent_reported") && ui.answers.some((a) => /declined/.test(a.text)),
+          JSON.stringify(ui.answers),
+        );
+        check(
+          "ui (Chrome): the goal page shows the hold banner with who and why, and the Agents on this goal card: Release, Send a request (Replan, Checkpoint, Switch goal), and each request with its sender, quoted note and per-session pills (declined, accepted by the developer)",
+          /All agents on this goal are on hold/.test(ui.banner) && ui.banner.includes("Quill Lead") && ui.banner.includes(QREASON) && /Agents on this goal/.test(ui.card) && /Release/.test(ui.card) && /Send a request/.test(ui.card) &&
+            JSON.stringify(ui.radios) === JSON.stringify(["replan", "checkpoint", "switch_goal"]) && /Checkpoint/.test(ui.cp) && ui.cp.includes(QNOTE) && /declined/.test(ui.cp) && /accepted by the developer/.test(ui.cp) && errors.length === 0,
+          `${JSON.stringify(ui).slice(0, 600)} ${errors.join(" | ")}`,
+        );
+        await page.click('input[name="request-type"][value="replan"]');
+        await page.type("#send-request textarea", "From the browser");
+        const sentResp = page.waitForResponse((r) => r.url().endsWith(`/goals/${GR.id}/requests`) && r.request().method() === "POST");
+        await page.evaluate(() => [...document.querySelectorAll("#send-request button")].find((b) => b.textContent === "Send")?.click());
+        const sentStatus = (await sentResp).status();
+        await page.waitForFunction(() => document.body.innerText.includes("From the browser"), { timeout: 15000 });
+        check("ui (Chrome): sending a replan from the card -> 201, and it is listed", sentStatus === 201 && errors.length === 0, `${sentStatus} ${errors.join(" | ")}`);
+        await page.goto(`${BASE}/app/w/${QW}/goals`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-held-goal="${GR.id}"]`, { timeout: 15000 });
+        await asUser(QM);
+        await page.goto(`${BASE}/app/w/${QW}/sessions`, { waitUntil: "networkidle0" });
+        await page.waitForSelector("[data-hold-banner]", { timeout: 15000 });
+        const sBanner = await page.$eval("[data-hold-banner]", (el) => el.innerText);
+        check("ui (Chrome): the Goals tab marks the held goal; the Sessions tab shows the hold banner naming the goal", sBanner.includes('"Ship the scheduler"') && errors.length === 0, `${sBanner} ${errors.join(" | ")}`);
+      } catch (e) {
+        check("ui (Chrome) requests and holds run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for requests and holds", false, `no Chrome at ${CHROME}`);
+
+    // -- release, and release on achieved: SM3 leaves the goal first, and still carries the hold until a release --
+    const left = await call("QM", "POST", `/api/v2/workspaces/${QW}/sessions/${SM3.key}/epochs`, { bearer: DQM.access, body: { epoch_id: epochId(), goal_id: G2.id, starts_at: new Date(Date.now() + 1000).toISOString(), root_turn: null, cause: "manual" } });
+    const relBefore = (await qDirs(DQM)).next_cursor;
+    const relBy = await qa(QM, "DELETE", `/goals/${GR.id}/hold`);
+    const rel = await qa(QL, "DELETE", `/goals/${GR.id}/hold`);
+    const rel2 = await qa(QL, "DELETE", `/goals/${GR.id}/hold`);
+    const relDirs = (await qDirs(DQM, relBefore)).directives.filter((d) => d.kind === "release");
+    check(
+      "release: the sessions' owner -> 403 not_approver; the approver -> 200 held null, one release directive {goal, released_by, at} to every session the hold reached (one that has since left the goal included); again -> 200 and nothing new; audited goal.released; GET /holds is empty",
+      left.status === 200 && relBy.status === 403 && rel.status === 200 && rel.json.held === null && rel2.status === 200 && relDirs.length === 1 && JSON.stringify(relDirs[0].session_keys) === JSON.stringify([SM2.key, SM3.key].sort()) &&
+        JSON.stringify(Object.keys(relDirs[0].hold).sort()) === JSON.stringify(["at", "goal", "released_by"]) && relDirs[0].hold.released_by.id === QL.id && qAudit("goal.released", GR.id).join() === QL.id && (await qa(QX, "GET", "/holds")).json?.holds?.length === 0,
+      `${relBy.status} ${rel.text} ${JSON.stringify(relDirs)}`,
+    );
+    const relRc = await Promise.all([qRec(relDirs[0]?.id, SM3.key, "received"), qRec(relDirs[0]?.id, SM3.key, "applied")]);
+    check("release: acknowledged with received then applied", relRc.every((r) => r.json?.fresh === true), relRc.map((r) => r.text).join(" "));
+    // -- requests expire when their goal is achieved or dropped (a switch_goal also when its target goal is) --
+    const eBefore = (await qDirs(DQM)).next_cursor;
+    const swE = await send(QL, { type: "switch_goal", session_keys: [SM2.key], target_goal_id: GE.id });
+    const swEDir = (await qDirs(DQM, eBefore)).directives.find((d) => d.kind === "request" && d.request?.id === swE.json?.request?.id);
+    await qRec(swEDir?.id, SM2.key, "received");
+    const dropBefore = (await qDirs(DQM)).next_cursor;
+    const dropE = await qa(QL, "POST", `/goals/${GE.id}/versions`, { version: GE.version, status: "dropped" });
+    const dropDirs = (await qDirs(DQM, dropBefore)).directives;
+    const swEView = (await list(QL)).json?.requests?.find((r) => r.id === swE.json?.request?.id);
+    check(
+      "expire: dropping the target goal of a pending switch_goal ends it in the same transaction: its unanswered session gets a request directive with cancelled true and cancel_reason goal_closed and becomes expired; the request reads expired (not cancelled); audited request.expired by the person who dropped the goal",
+      swE.status === 201 && dropE.status === 201 && dropDirs.length === 1 && dropDirs[0].kind === "request" && dropDirs[0].request?.id === swE.json.request.id && dropDirs[0].request.cancelled === true &&
+        dropDirs[0].request.cancel_reason === "goal_closed" && JSON.stringify(dropDirs[0].session_keys) === JSON.stringify([SM2.key]) && swEView?.state === "expired" && swEView.cancelled_at === null &&
+        swEView.sessions.every((x) => x.state === "expired") && qAudit("request.expired", swE.json.request.id).join() === QL.id,
+      `${swE.text.slice(0, 200)} ${dropE.status} ${JSON.stringify(dropDirs)} ${JSON.stringify(swEView)}`,
+    );
+    await put(QL, {});
+    const ecpBefore = (await qDirs(DQM)).next_cursor;
+    const ecp = await send(QL, { type: "checkpoint", note: "Before we call it done", session_keys: [SM2.key] });
+    const ecpDir = (await qDirs(DQM, ecpBefore)).directives.find((d) => d.kind === "request" && d.request?.id === ecp.json?.request?.id);
+    await qRec(ecpDir?.id, SM2.key, "received");
+    const openOnGR = () =>
+      withDb((d) =>
+        d.prepare("SELECT r.id FROM v2_requests r WHERE r.goal_id = ? AND r.cancelled_at IS NULL AND EXISTS (SELECT 1 FROM v2_request_targets t WHERE t.request_id = r.id AND t.state IN ('sent','received')) ORDER BY r.id").all(GR.id),
+      ).map((r) => r.id);
+    const openBefore = openOnGR();
+    const answeredBefore = withDb((d) => d.prepare("SELECT request_id, session_key, state, auto_accepted FROM v2_request_targets WHERE request_id IN (SELECT id FROM v2_requests WHERE goal_id = ?) AND state IN ('accepted','declined') ORDER BY request_id, session_key").all(GR.id));
+    const achBefore = (await qDirs(DQM)).next_cursor;
+    const ach = await qa(QL, "POST", `/goals/${GR.id}/versions`, { version: GR.version, status: "achieved" });
+    const achDirs = (await qDirs(DQM, achBefore)).directives;
+    const afterAch = await Promise.all([send(QL, { type: "replan" }), put(QL, {})]);
+    check(
+      "release: achieving a held goal releases it in the same transaction (a release directive after the goal_version and the requests it expires); an achieved goal takes no request and no hold -> 409 wrong_state",
+      ach.status === 201 && achDirs.map((d) => d.kind).join() === ["goal_version", ...openBefore.map(() => "request"), "release"].join() && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_goal_holds WHERE ws_id = ?").get(QW).n) === 0 &&
+        afterAch.every((r) => r.status === 409 && r.json?.error === "wrong_state"),
+      `${ach.status} ${JSON.stringify(achDirs.map((d) => d.kind))} ${afterAch.map((r) => r.text).join(" | ")}`,
+    );
+    const achReq = achDirs.filter((d) => d.kind === "request");
+    const ecpView = (await list(QL)).json?.requests?.find((r) => r.id === ecp.json?.request?.id);
+    const ecpExp = achReq.find((d) => d.request?.id === ecp.json?.request?.id);
+    const lateRc = await Promise.all([qRec(ecpExp?.id, SM2.key, "received"), qRec(ecpDir?.id, SM2.key, "accepted"), qRec(ecpDir?.id, SM2.key, "declined")]);
+    const answeredAfter = withDb((d) => d.prepare("SELECT request_id, session_key, state, auto_accepted FROM v2_request_targets WHERE request_id IN (SELECT id FROM v2_requests WHERE goal_id = ?) AND state IN ('accepted','declined') ORDER BY request_id, session_key").all(GR.id));
+    const mcpE = await mcpCall("QM", DQM, "align_get_directives");
+    const mcpExp = mcpE.sc?.directives?.find((d) => d.id === ecpExp?.id);
+    check(
+      "expire: achieving a goal ends every request on it still waiting for an answer, in that transaction: one request directive each, with cancelled true and cancel_reason goal_closed, to the sessions that had not answered, which become expired (sessions that answered keep their answer); the checkpoint reads expired and not cancelled, audited request.expired by the person who achieved the goal; later received, accepted and declined receipts leave it expired; MCP align_get_directives says why (cancel_reason)",
+      ecp.status === 201 && openBefore.includes(ecp.json.request.id) && JSON.stringify(achReq.map((d) => d.request?.id).sort()) === JSON.stringify(openBefore) &&
+        achReq.every((d) => d.request.cancelled === true && d.request.cancel_reason === "goal_closed") && JSON.stringify(ecpExp?.session_keys) === JSON.stringify([SM2.key]) && openOnGR().length === 0 &&
+        ecpView?.state === "expired" && ecpView.cancelled_at === null && ecpView.counts.expired === 1 && ecpView.sessions[0]?.state === "expired" && qAudit("request.expired", ecp.json.request.id).join() === QL.id &&
+        lateRc.every((r) => r.status === 200 && r.json?.request_state === "expired") && answeredBefore.length > 0 && JSON.stringify(answeredAfter) === JSON.stringify(answeredBefore) &&
+        mcpExp?.request?.cancel_reason === "goal_closed" && mcpE.text.includes(`expired (goal closed) checkpoint request ${ecp.json.request.id}`) && mcpE.sc.directives.find((d) => d.request?.id === RP.id && d.request.cancelled)?.request.cancel_reason === "withdrawn",
+      `${ecp.text.slice(0, 200)} ${JSON.stringify(openBefore)} ${JSON.stringify(achReq)} ${JSON.stringify(ecpView)} ${lateRc.map((r) => r.text).join(" | ")}`,
+    );
+
+    // -- events, deletion, retention --
+    const qEv = (name) => withDb((d) => d.prepare("SELECT props FROM v2_events WHERE name = ? AND ws_id = ?").all(name, QW)).map((r) => r.props);
+    check("events: first_request once for the workspace with its type, first_hold once with no props; first_directive allows the new kinds", JSON.stringify(qEv("first_request")) === JSON.stringify(['{"type":"checkpoint"}']) && JSON.stringify(qEv("first_hold")) === JSON.stringify(["{}"]) && qEv("first_directive").length === 1, `${qEv("first_request")} ${qEv("first_hold")}`);
+    const tBefore = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_request_targets WHERE session_key = ?").get(SM2.key).n);
+    const del = await call("QM", "DELETE", `/api/v2/workspaces/${QW}/sessions/${SM2.key}`, { cookie: QM.cookie });
+    const tAfter = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_request_targets WHERE session_key = ?").get(SM2.key).n);
+    check("deleting a session's shared history deletes its request states with its directive deliveries", tBefore >= 2 && del.status === 204 && tAfter === 0, `${tBefore} ${del.status} ${tAfter}`);
+    const reqN = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_requests").get().n);
+    const dry = (months) => {
+      const t = new Date();
+      t.setUTCMonth(t.getUTCMonth() + months);
+      const r = admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: t.toISOString() });
+      try {
+        return JSON.parse(r.out.trim().split("\n").pop()).requests_deleted;
+      } catch {
+        return `${r.status} ${r.out} ${r.err}`;
+      }
+    };
+    const dry12 = dry(12);
+    const dry14 = dry(14);
+    check("retention (dry run): requests are kept 12 months and deleted after 13 (requests_deleted counts every one)", dry12 === 0 && dry14 === reqN && reqN >= 4, `${dry12} ${dry14} ${reqN}`);
+  }
+  // ==== end req:requests ====
+
+  // ==== port2:home ====
+  // The workspace Home (PORT2-001, main #41/#42 on v2): GET .../home and the page at /app/w/<ws>. Its own workspace: HO
+  // owns it and the company goal; team Core has a lead (HL, owns its goal) and a member (HM, who proposes a change); HX is
+  // a member in no team (asks to align with the company goal); HV is a viewer.
+  {
+    const hc = await import(pathToFileURL(path.join(ROOT, "lib/v2/home-core.mts")).href);
+    const P = (id, name) => ({ id, name });
+    check(
+      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Delivery receipt\", \"Agent reported\", \"Not observed\"",
+      hc.appEvidence("2026-10-31T00:00:00Z") === "delivery_receipt" && hc.appEvidence(null) === "not_observed" && hc.appEvidence(undefined) === "not_observed" && hc.appEvidence("") === "not_observed" &&
+        JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Delivery receipt|Agent reported|Not observed",
+      "",
+    );
+    const T = "2026-10-31T00:00:00Z";
+    const sw = (o) => hc.appStatusWords({ approved_at: "A", last_used_at: null, last_read_at: null, ...o }, (iso) => `@${iso}`);
+    const words = [sw({ last_used_at: "U", last_read_at: "R" }), sw({ last_used_at: "U" }), sw({})];
+    check(
+      "home rules (connected is not read, main #48): an app with a goal read says \"Read the goals <time>\"; one that only connected \"Connected <time>, no goal read seen yet\"; one with neither \"Approved <time>, no goal read seen yet\"; none says \"on the current plan\" or names a version",
+      JSON.stringify(words) === JSON.stringify(["Read the goals @R", "Connected @U, no goal read seen yet", "Approved @A, no goal read seen yet"]) && words.every((w) => !/current plan|version/i.test(w)) && hc.appEvidence(T) === "delivery_receipt",
+      JSON.stringify(words),
+    );
+    const cw = (o) => hc.changeWaits({ requester: P("r", "Rae"), approvers: [P("a", "Ann")], behind: false, ...o });
+    check(
+      "home rules: a pending change request waits on its approvers to decide (nobody when the set is empty), behind its goal on the requester to update it, countered on the requester; a closed one waits on nobody",
+      JSON.stringify(cw({ state: "pending" })) === JSON.stringify({ next: "decide", waiting_on: [P("a", "Ann")] }) && JSON.stringify(cw({ state: "pending", approvers: [] })) === JSON.stringify({ next: "decide", waiting_on: [] }) &&
+        JSON.stringify(cw({ state: "pending", behind: true })) === JSON.stringify({ next: "rebase", waiting_on: [P("r", "Rae")] }) && JSON.stringify(cw({ state: "countered" })) === JSON.stringify({ next: "accept_counter", waiting_on: [P("r", "Rae")] }) &&
+        ["approved", "rejected", "withdrawn", "superseded"].every((st) => cw({ state: st }) === null),
+      "",
+    );
+    check(
+      "home rules: a pending alignment waits on everyone who could satisfy a requirement nobody satisfied yet, countered on its requester",
+      JSON.stringify(hc.alignmentWaits({ state: "pending", requester: P("r", "Rae"), requirements: [{ approvers: [P("b", "Bo"), P("a", "Ann")], approved_by: null }, { approvers: [P("c", "Cy")], approved_by: P("c", "Cy") }] })) === JSON.stringify({ next: "decide", waiting_on: [P("a", "Ann"), P("b", "Bo")] }) &&
+        JSON.stringify(hc.alignmentWaits({ state: "countered", requester: P("r", "Rae"), requirements: [] })) === JSON.stringify({ next: "accept_counter", waiting_on: [P("r", "Rae")] }) && hc.alignmentWaits({ state: "approved", requester: P("r", "Rae"), requirements: [] }) === null,
+      "",
+    );
+    const lw0 = hc.launchWaits;
+    check(
+      "home rules (LAUNCH-001): an approved request waits on a launch when its view's launch is pending or not_yet; can.launch makes it the reader's, else its launchers'; launched, superseded, null, another value or a request not approved is not waiting",
+      lw0({ state: "approved" }) === null && lw0({ state: "approved", launch: null }) === null && lw0({ state: "approved", launch: "launched" }) === null && lw0({ state: "superseded", launch: "superseded" }) === null && lw0({ state: "approved", launch: 7 }) === null && lw0({ state: "pending", launch: "not_yet" }) === null && lw0(null) === null && lw0("x") === null &&
+        JSON.stringify(lw0({ state: "approved", launch: "not_yet" })) === JSON.stringify({ state: "not_yet", can_launch: false, launchers: [] }) &&
+        JSON.stringify(lw0({ state: "approved", launch: "pending", launchers: [P("a", "Ann"), { id: 1 }], can: { launch: true } })) === JSON.stringify({ state: "pending", can_launch: true, launchers: [P("a", "Ann")] }) &&
+        JSON.stringify(lw0({ state: "approved", launch: "pending", launchers: [P("b", "Bo")], can: { launch: "yes" } })) === JSON.stringify({ state: "pending", can_launch: false, launchers: [P("b", "Bo")] }),
+      "",
+    );
+
+    const hUsers = {};
+    for (const [who, name] of [
+      ["HO", "Hana Owner"],
+      ["HL", "Hugo Lead"],
+      ["HM", "Hedy Member"],
+      ["HX", "Hank Other"],
+      ["HV", "Hope Viewer"],
+      ["HN", "Hal Nonmember"],
+    ])
+      hUsers[who] = await signUp(who, name, `${who.toLowerCase()}@home.example.test`);
+    const { HO, HL, HM, HX, HV, HN } = hUsers;
+    const HW = (await call("HO", "POST", "/api/v2/workspaces", { cookie: HO.cookie, body: { name: "Home workspace" } })).json?.id;
+    const ha = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${HW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [HL, "member"],
+      [HM, "member"],
+      [HX, "member"],
+      [HV, "viewer"],
+    ]) {
+      const i = await ha(HO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const HT = (await ha(HO, "POST", "/teams", { name: "Core" })).json?.id;
+    await ha(HO, "POST", `/teams/${HT}/members`, { user_id: HL.id, role: "lead" });
+    await ha(HO, "POST", `/teams/${HT}/members`, { user_id: HM.id, role: "member" });
+    const GC = (await ha(HO, "POST", "/goals", { title: "Win the regulated market", level: "company" })).json;
+    const GT = (await ha(HL, "POST", "/goals", { title: "Ship the audit log", visibility: "workspace", team_id: HT })).json;
+    const GX = (await ha(HX, "POST", "/goals", { title: "Hank's side project", visibility: "workspace" })).json;
+    const home = async (u) => (await ha(u, "GET", "/home")).json;
+    const emptyHome = await home(HO);
+    check(
+      "home: a workspace with goals and nothing pending -> every section read, nothing waiting, its active goals, apps {everyone: true, items: []} for the owner",
+      !!HW && emptyHome?.change_requests?.waiting_on_me.length === 0 && emptyHome.change_requests.waiting_on_others.length === 0 && emptyHome.asks?.waiting_on_me.length === 0 && emptyHome.alignments?.waiting_on_me.length === 0 &&
+        emptyHome.goals?.length === 3 && emptyHome.goals[0].id === GC.id && emptyHome.goals[0].mine === true && emptyHome.apps?.everyone === true && emptyHome.apps.items.length === 0,
+      JSON.stringify(emptyHome).slice(0, 400),
+    );
+
+    // -- a change request, an ask and an alignment --
+    const crH = await ha(HM, "POST", `/goals/${GT.id}/change-requests`, { base_version: 1, changes: { title: "Ship the audit log with export" }, reason: "Home: auditors want an export" });
+    await ha(HO, "POST", "/asks", { team_id: HT, text: "Home: write the runbook", from_label: "Compliance", source: { kind: "manual", date: "2026-10-30" } });
+    const alH = await call("HX", "POST", `/api/v2/workspaces/${HW}/alignments`, { cookie: HX.cookie, body: { target_goal_id: GC.id, source_goal_id: GX.id, choice: "contribution", session_keys: [] } });
+    const [hO, hL, hM, hX, hV] = await Promise.all([HO, HL, HM, HX, HV].map(home));
+    const crOf = (h, list) => h?.change_requests?.[list]?.find((c) => c.id === crH.json?.id);
+    const alOf = (h, list) => h?.alignments?.[list]?.find((a) => a.id === alH.json?.id);
+    check(
+      "home: a pending change request is waiting on the goal's lead (next decide) and, for its requester, waiting on others with waiting_on [the lead]; it is on no one else's Home",
+      crH.status === 201 && crOf(hL, "waiting_on_me")?.next === "decide" && crOf(hL, "waiting_on_me").goal.title === "Ship the audit log" && crOf(hL, "waiting_on_me").reason === "Home: auditors want an export" &&
+        crOf(hM, "waiting_on_others")?.next === "decide" && JSON.stringify(crOf(hM, "waiting_on_others").waiting_on) === JSON.stringify([{ id: HL.id, name: "Hugo Lead" }]) && hM.change_requests.waiting_on_me.length === 0 &&
+        !crOf(hO, "waiting_on_me") && !crOf(hO, "waiting_on_others") && !crOf(hX, "waiting_on_others") && hV.change_requests.waiting_on_others.length === 0,
+      `${crH.status} ${JSON.stringify(hL?.change_requests)} ${JSON.stringify(hM?.change_requests)}`,
+    );
+    check(
+      "home: an open ask of a team is waiting on its lead (next accept), not on its other member; an alignment with the company goal waits on the workspace owner and, for its requester, on others with waiting_on [the owner]",
+      hL.asks?.waiting_on_me.length === 1 && hL.asks.waiting_on_me[0].next === "accept" && hL.asks.waiting_on_me[0].text === "Home: write the runbook" && hL.asks.waiting_on_me[0].team.name === "Core" && hM.asks?.waiting_on_me.length === 0 &&
+        alH.status === 201 && alOf(hO, "waiting_on_me")?.next === "decide" && alOf(hO, "waiting_on_me").target_goal?.title === "Win the regulated market" && alOf(hX, "waiting_on_others")?.waiting_on.some((p) => p.id === HO.id) && !alOf(hM, "waiting_on_others"),
+      `${alH.status} ${JSON.stringify(hL?.asks)} ${JSON.stringify(hO?.alignments)} ${JSON.stringify(hX?.alignments)}`,
+    );
+    check(
+      "home: active goals mark the reader's own (owned, their team's, or a company goal for a workspace owner) and list them first",
+      hM.goals?.find((g) => g.id === GT.id)?.mine === true && hM.goals.find((g) => g.id === GC.id)?.mine === false && hM.goals[0].id === GT.id && hX.goals?.[0].id === GX.id && hV.goals?.length === 3 && hV.goals.every((g) => !g.mine),
+      JSON.stringify(hM?.goals),
+    );
+    // Counter: the requester's turn. Accept, then the owner saves a new version: the request is behind, so it waits on
+    // the requester to update it, not on the lead (who can't approve it yet).
+    await ha(HL, "POST", `/goals/${GT.id}/change-requests/${crH.json?.id}/counter`, { revision: 1, changes: { title: "Ship the audit log with CSV export" }, note: "CSV only" });
+    const [cL, cM] = await Promise.all([HL, HM].map(home));
+    await ha(HM, "POST", `/goals/${GT.id}/change-requests/${crH.json?.id}/accept_counter`, { revision: 2 });
+    const v2 = await ha(HL, "POST", `/goals/${GT.id}/versions`, { version: 1, title: "Ship the audit log (v2)" });
+    const [bL, bM] = await Promise.all([HL, HM].map(home));
+    check(
+      "home: countered -> waiting on the requester (accept_counter) and, for the lead, on others with waiting_on [the requester]; pending behind a newer version -> the requester's to update (rebase), the lead's Home says it waits on the requester",
+      crOf(cM, "waiting_on_me")?.next === "accept_counter" && crOf(cL, "waiting_on_others")?.next === "accept_counter" && JSON.stringify(crOf(cL, "waiting_on_others").waiting_on) === JSON.stringify([{ id: HM.id, name: "Hedy Member" }]) &&
+        v2.status === 201 && crOf(bM, "waiting_on_me")?.next === "rebase" && crOf(bM, "waiting_on_me").goal.version === 2 && crOf(bL, "waiting_on_others")?.next === "rebase" && !crOf(bL, "waiting_on_me"),
+      `${v2.status} ${JSON.stringify(cM?.change_requests)} ${JSON.stringify(bL?.change_requests)}`,
+    );
+
+    // -- connected apps: what the Apps tab has (name, connected by, approved, last connected, last read the goals), each
+    //    with one evidence class: Claude Code read the goals; Codex only connected (initialize and tools/list) --
+    const hcore = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
+    const hkid = hcore.hmac(hcore.serverSecret(onDir, {}), "align-grant-kid").slice(0, 16);
+    const readAt = new Date(Date.now() - 3 * 60_000).toISOString();
+    const usedAt = new Date(Date.now() - 60_000).toISOString();
+    withDb((d) => {
+      const ins = d.prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, ?, ?, 'app.example', ?, ?, ?, 'h', ?, ?)");
+      ins.run("gr_HOMEHOMEHOMEHOM1", HW, HM.id, "c-home-1", "Claude Code", readAt, readAt, readAt, Date.now() + 86_400_000, hkid);
+      ins.run("gr_HOMEHOMEHOMEHOM2", HW, HO.id, "c-home-2", "Codex", readAt, usedAt, null, Date.now() + 86_400_000, hkid);
+    });
+    const [aO, aM, aV] = await Promise.all([HO, HM, HV].map(home));
+    check(
+      "home: connected apps -> a workspace owner sees every app (everyone: true), a member only their own, a viewer none; each has name, connected_by, approved_at, last_used_at, last_read_at and one evidence_class: delivery_receipt only with a goal read (last_read_at), not_observed for an app that only connected (a last_used_at, no last_read_at); no plan-version claim",
+      aO.apps?.everyone === true && aO.apps.items.length === 2 && aO.apps.items[0].name === "Claude Code" && aO.apps.items[0].last_read_at === readAt && aO.apps.items[0].evidence_class === "delivery_receipt" && aO.apps.items[0].connected_by.name === "Hedy Member" &&
+        aO.apps.items[1].last_used_at === usedAt && aO.apps.items[1].last_read_at === null && aO.apps.items[1].evidence_class === "not_observed" && aM.apps?.everyone === false && aM.apps.items.length === 1 && aM.apps.items[0].evidence_class === "delivery_receipt" && aV.apps?.items.length === 0 &&
+        aO.apps.items.every((a) => Object.keys(a).sort().join() === "approved_at,connected_by,evidence_class,id,last_read_at,last_used_at,name") && !/current.plan|plan_version/i.test(JSON.stringify(aO.apps)),
+      JSON.stringify(aO?.apps),
+    );
+    const HD = insertDevice(HO.id, "Hana's laptop");
+    const [nonMember, anon, bearer] = await Promise.all([ha(HN, "GET", "/home"), call("anon", "GET", `/api/v2/workspaces/${HW}/home`), call("HO", "GET", `/api/v2/workspaces/${HW}/home`, { bearer: HD.access })]);
+    check("home: a non-member -> 404; no session -> 401; a device token -> 403 bearer_not_allowed", nonMember.status === 404 && anon.status === 401 && bearer.status === 403 && bearer.json?.error === "bearer_not_allowed", `${nonMember.status} ${anon.status} ${bearer.status}`);
+
+    // -- the page (Chrome) --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const pageAs = async (u, width = 1000) => {
+          const page = await browser.newPage();
+          page.on("pageerror", (e) => errors.push(e.message));
+          await page.setViewport({ width, height: 844 });
+          await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return page;
+        };
+        const tiles = (page) => page.$$eval("[data-tile]", (els) => Object.fromEntries(els.map((e) => [e.getAttribute("data-tile"), e.firstElementChild?.textContent ?? ""])));
+        const po = await pageAs(HO);
+        await po.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await po.waitForSelector("[data-home-app]", { timeout: 15000 });
+        const o = await po.evaluate(() => ({
+          text: document.body.innerText,
+          tab: [...document.querySelectorAll('nav[aria-label="Workspace"] a')].map((a) => [a.textContent, a.getAttribute("href")]),
+          apps: [...document.querySelectorAll("[data-home-app]")].map((e) => ({ classes: [...e.querySelectorAll("[data-evidence-class]")].map((c) => c.getAttribute("data-evidence-class")), text: e.innerText })),
+          appsSection: document.querySelector("#apps")?.innerText ?? "",
+          items: [...document.querySelectorAll("[data-home-item]")].map((e) => e.getAttribute("data-home-item")),
+        }));
+        const oT = await tiles(po);
+        check(
+          "ui (Chrome): the workspace opens on Home (\"Know what needs you\", the Home tab first, Goals at /goals): tiles Waiting on you 1, Waiting on others 0, Active goals 3, Connected apps that read the goals \"1 of 2\" (the app that only connected is not counted); the alignment is waiting on the owner with Open",
+          /Know what needs you/.test(o.text) && /1 thing waiting on you\./.test(o.text) && o.tab[0]?.[0] === "Home" && o.tab[0][1] === `/app/w/${HW}` && o.tab[1]?.[0] === "Goals" && o.tab[1][1] === `/app/w/${HW}/goals` &&
+            oT["Waiting on you"] === "1" && oT["Waiting on others"] === "0" && oT["Active goals"] === "3" && oT["Connected apps that read the goals"] === "1 of 2" && o.items.includes(`alignment:${alH.json?.id}`) && /Hank Other asks to align with Win the regulated market/.test(o.text),
+          `${JSON.stringify(oT)} ${JSON.stringify(o.tab)} ${o.text.slice(0, 400)}`,
+        );
+        check(
+          "ui (Chrome, §E2): every connected app on Home shows exactly one evidence class (delivery receipt with \"Read the goals <time>\"; the app that only connected not observed with \"Connected <time>, no goal read seen yet\"); the section says connecting is not a read and Align sees goal reads, not which version an app has or what it does; nothing on the page says \"on the current plan\" or infers working, stuck, blocked or diverged",
+          o.apps.length === 2 && o.apps.every((a) => a.classes.length === 1) && o.apps[0].classes[0] === "delivery_receipt" && /delivery receipt/.test(o.apps[0].text) && /Read the goals /.test(o.apps[0].text) && !/Connected .*no goal read/.test(o.apps[0].text) && /connected by Hedy Member/.test(o.apps[0].text) &&
+            o.apps[1].classes[0] === "not_observed" && /not observed/.test(o.apps[1].text) && /Connected .+, no goal read seen yet/.test(o.apps[1].text) && !/Read the goals/.test(o.apps[1].text) &&
+            /Connecting is not a read/.test(o.appsSection) && /not which version it has or what it does with them/.test(o.appsSection) && !/\b(working|stuck|blocked|diverged)\b/i.test(o.appsSection) && !/current plan/i.test(o.text) && errors.length === 0,
+          `${JSON.stringify(o.apps)} ${errors.join(" | ")}`,
+        );
+        // The Apps tab: Last connected and Last read the goals, never one "Last read" fed by a connection.
+        const pa = await pageAs(HO);
+        await pa.goto(`${BASE}/app/w/${HW}/apps`, { waitUntil: "networkidle0" });
+        await pa.waitForSelector("tbody tr", { timeout: 15000 });
+        const ap = await pa.evaluate(() => ({
+          heads: [...document.querySelectorAll("thead th")].map((t) => t.textContent.trim()).filter(Boolean),
+          rows: [...document.querySelectorAll("tbody tr")].map((r) => ({
+            text: r.innerText,
+            connected: r.querySelector('[data-label="Last connected"]')?.textContent ?? null,
+            read: r.querySelector('[data-label="Last read the goals"]')?.textContent ?? null,
+          })),
+          note: document.querySelector("[data-apps-times]")?.textContent ?? "",
+          text: document.body.innerText,
+        }));
+        const claude = ap.rows.find((r) => r.text.startsWith("Claude Code"));
+        const codex = ap.rows.find((r) => r.text.startsWith("Codex"));
+        check(
+          "ui (Chrome): the Apps tab's columns are App, Sends you back to, Connected by, Approved, Last connected, Last read the goals (no bare \"Last read\"); the app that read shows a time in both, the app that only connected a time under Last connected and \"Not seen yet\" under Last read the goals; a note says connecting and listing tools is not a read and that Align doesn't see an app's goal version",
+          JSON.stringify(ap.heads) === JSON.stringify(["App", "Sends you back to", "Connected by", "Approved", "Last connected", "Last read the goals"]) &&
+            !!claude && /\d/.test(claude.connected ?? "") && /\d/.test(claude.read ?? "") && !!codex && /\d/.test(codex.connected ?? "") && codex.read === "Not seen yet" &&
+            /connecting and listing tools included/.test(ap.note) && /Last read the goals is its last call that returned goals/.test(ap.note) && /doesn.t see which goal version an app has/.test(ap.note) && !/current plan/i.test(ap.text) && errors.length === 0,
+          `${JSON.stringify(ap.heads)} ${JSON.stringify(ap.rows)} ${ap.note}`,
+        );
+        const pl = await pageAs(HL);
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await pl.waitForSelector("[data-home-app]", { timeout: 15000 });
+        const l = await pl.evaluate(() => ({ text: document.body.innerText, waiting: document.querySelector("#waiting")?.innerText ?? "", others: document.querySelector("#others")?.innerText ?? "", none: document.querySelector('[data-home-app="none"]')?.innerText ?? "", noneClasses: [...document.querySelectorAll('[data-home-app="none"] [data-evidence-class]')].map((c) => c.getAttribute("data-evidence-class")) }));
+        check(
+          "ui (Chrome): the lead's Home lists the ask waiting on them (\"Compliance asked Core\", the quoted text) and, under Waiting on others, the change request waiting on Hedy Member to update it to version 2; with no app of their own, one \"not observed\" item",
+          /Compliance asked Core/.test(l.waiting) && /“Home: write the runbook”/.test(l.waiting) && /Hedy Member's request on Ship the audit log \(v2\)/.test(l.others) && /Waiting on Hedy Member to update it to version 2\./.test(l.others) &&
+            JSON.stringify(l.noneClasses) === JSON.stringify(["not_observed"]) && /Align has observed no goal reads/.test(l.none) && errors.length === 0,
+          `${l.waiting.slice(0, 300)} | ${l.others.slice(0, 300)} | ${l.none} ${errors.join(" | ")}`,
+        );
+        // A failed read of the Home: every count says unknown, never zero.
+        const pf = await pageAs(HO);
+        await pf.setRequestInterception(true);
+        pf.on("request", (r) => (r.url().endsWith(`/api/v2/workspaces/${HW}/home`) ? r.respond({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "server_error", message: "Server error" }) }) : r.continue()));
+        await pf.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await pf.waitForSelector("[data-tile]", { timeout: 15000 });
+        const fT = await tiles(pf);
+        const fText = await pf.evaluate(() => document.body.innerText);
+        check(
+          "ui (Chrome, §E2): when the Home's read fails every tile says unknown (never 0), the summary says how much is waiting is unknown, and the apps section says their reads are unknown",
+          Object.keys(fT).length === 4 && Object.values(fT).every((v) => v === "unknown") && /so how much is waiting is unknown/.test(fText) && /whether any of them read the goals is unknown/.test(fText) && !/Nothing is waiting on you/.test(fText) && !/\bnot observed\b/.test(fText),
+          `${JSON.stringify(fT)} ${fText.slice(0, 500)}`,
+        );
+        // On a phone: the lead's Home with its queue fits 390 px.
+        const pp = await pageAs(HL, 390);
+        await pp.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await pp.waitForSelector("[data-home-app]", { timeout: 15000 });
+        const pm = await pp.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
+        check("ui (Chrome, 390x844): the Home with its queue has no sideways scroll", pm.sw <= pm.W && errors.length === 0, `${JSON.stringify(pm)} ${errors.join(" | ")}`);
+      } catch (e) {
+        check("ui (Chrome) home run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the Home", false, `no Chrome at ${CHROME}`);
+
+    // -- LAUNCH-001 on Home: an approved change nobody launched is "Approved, not launched" for the people who can
+    //    launch it (Hank, the goal's owner and approver, and Hana, the workspace owner), and waiting on them for its
+    //    requester; once launched it leaves every Home --
+    const crHL = await ha(HM, "POST", `/goals/${GX.id}/change-requests`, { base_version: 1, changes: { title: "Hank's side project, shipped" }, reason: "Home: launch spot" });
+    const apHL = await ha(HX, "POST", `/goals/${GX.id}/change-requests/${crHL.json?.id}/approve`, { revision: 1 });
+    const [lX, lO, lM, lL] = await Promise.all([HX, HO, HM, HL].map(home));
+    const lOf = (h, list) => h?.change_requests?.[list]?.find((c) => c.id === crHL.json?.id);
+    check(
+      "home (LAUNCH-001): an approved, unlaunched change is waiting on each person who can launch it (the goal's owner and the workspace owner) with next launch, and on others for its requester with waiting_on the launchers; a team lead with no part in it doesn't see it",
+      apHL.json?.launch === "pending" && lOf(lX, "waiting_on_me")?.next === "launch" && lOf(lX, "waiting_on_me").state === "approved" && lOf(lO, "waiting_on_me")?.next === "launch" && !lOf(lM, "waiting_on_me") &&
+        lOf(lM, "waiting_on_others")?.next === "launch" && JSON.stringify(lOf(lM, "waiting_on_others").waiting_on) === JSON.stringify([{ id: HO.id, name: "Hana Owner" }, { id: HX.id, name: "Hank Other" }]) && !lOf(lL, "waiting_on_me") && !lOf(lL, "waiting_on_others"),
+      `${apHL.text.slice(0, 200)} ${JSON.stringify(lX?.change_requests)} ${JSON.stringify(lM?.change_requests)}`,
+    );
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1000, height: 844 });
+        await page.setCookie(...HX.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await page.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("Approved, not launched"), { timeout: 15000 });
+        const hx = await page.evaluate(() => document.querySelector("#waiting")?.innerText ?? document.body.innerText);
+        check("ui (Chrome): the launcher's Home lists the approved change under waiting on you as \"Approved, not launched\", agents still on version 1 until they launch it", /Approved, not launched: agents are still on version 1 until you launch it\./.test(hx), hx.slice(0, 400));
+      } catch (e) {
+        check("ui (Chrome) home launch run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    }
+    const lnHL = await ha(HO, "POST", `/goals/${GX.id}/change-requests/${crHL.json?.id}/launch`, {});
+    const [kX, kM] = await Promise.all([HX, HM].map(home));
+    check("home (LAUNCH-001): once launched the change leaves every Home", lnHL.json?.launch === "launched" && !lOf(kX, "waiting_on_me") && !lOf(kM, "waiting_on_others"), lnHL.text.slice(0, 200));
+  }
+  // ==== end port2:home ====
+
+  // ==== port29:allocation ====
+  // Goal sessions: agent time follows priorities (main #29), on a workspace of its own. AO owns it; team Core has a
+  // lead (AL, who owns GA) and a member (AM, whose device's sessions do the work and who owns the private goal GP); AX
+  // is a member in no team who owns GB; AV is a viewer; AO owns the company goal GC. Targets are versioned goal content;
+  // a reallocation is approved per goal by its approval set and then launched.
+  {
+    const aUsers = {};
+    for (const [who, name] of [
+      ["AO", "Alma Owner"],
+      ["AL", "Abel Lead"],
+      ["AM", "Ari Member"],
+      ["AX", "Axel Other"],
+      ["AV", "Ava Viewer"],
+    ])
+      aUsers[who] = await signUp(who, name, `${who.toLowerCase()}@allocation.example.test`);
+    const { AO, AL, AM, AX, AV } = aUsers;
+    const AW = (await call("AO", "POST", "/api/v2/workspaces", { cookie: AO.cookie, body: { name: "Allocation workspace" } })).json?.id;
+    const aa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${AW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [AL, "member"],
+      [AM, "member"],
+      [AX, "member"],
+      [AV, "viewer"],
+    ]) {
+      const i = await aa(AO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const AT = (await aa(AO, "POST", "/teams", { name: "Core" })).json?.id;
+    await aa(AO, "POST", `/teams/${AT}/members`, { user_id: AL.id, role: "lead" });
+    await aa(AO, "POST", `/teams/${AT}/members`, { user_id: AM.id, role: "member" });
+    const ACANARY = `ALLOC-PRIV-${randomBytes(4).toString("hex")}`;
+
+    // -- targets: versioned goal content, set by the goal's owner; active targets add up to 100 or less --
+    const GA = await aa(AL, "POST", "/goals", { title: "Ship the importer", visibility: "workspace", team_id: AT, target_share: 20 });
+    const GB = await aa(AX, "POST", "/goals", { title: "Write the docs", visibility: "workspace", target_share: 30 });
+    const GP = await aa(AM, "POST", "/goals", { title: `${ACANARY} side project`, visibility: "private", target_share: 20 });
+    const GCover = await aa(AO, "POST", "/goals", { title: "Win the regulated market", level: "company", target_share: 40 });
+    const GC = await aa(AO, "POST", "/goals", { title: "Win the regulated market", level: "company", target_share: 10 });
+    const GN = await aa(AX, "POST", "/goals", { title: "No target here", visibility: "workspace" });
+    const badTargets = await Promise.all([40.5, -1, 101, "20"].map((t) => aa(AX, "POST", "/goals", { title: "Bad target", target_share: t })));
+    check(
+      "targets: a goal is created with target_share (a whole percent, or none: null); a private goal's target counts toward the workspace's 100%, so a company goal asking 40% -> 409 targets_over_100 naming only the sums (110%, other goals 70%), never a goal; 40.5, -1, 101 or \"20\" -> 400",
+      [GA, GB, GP, GC].every((r) => r.status === 201) && GA.json.target_share === 20 && GP.json.target_share === 20 && GC.json.target_share === 10 && GN.json?.target_share === null &&
+        GCover.status === 409 && GCover.json?.error === "targets_over_100" && /110%/.test(GCover.json.message) && /70%/.test(GCover.json.message) && !GCover.text.includes(ACANARY) && !/importer|docs/i.test(GCover.json.message) &&
+        badTargets.every((r) => r.status === 400),
+      `${GA.status} ${GP.status} ${GC.status} ${GCover.text} ${badTargets.map((r) => r.status)}`,
+    );
+    const ga = GA.json;
+    const gb = GB.json;
+    const gc = GC.json;
+    const gp = GP.json;
+    const hashOf = (g, v) => withDb((d) => d.prepare("SELECT content_hash, target_share, created_by FROM v2_goal_versions WHERE goal_id = ? AND version = ?").get(g, v));
+    const plain = (t) => sha256hex(JSON.stringify({ title: t, measures: [], anchors: { repos: [], branch_patterns: [], issues: [] }, status: "active" }));
+    check(
+      "targets: target_share joins the version's content hash only when set (a goal with no target hashes as before targets existed) and is stored on the version row",
+      hashOf(GN.json?.id, 1)?.content_hash === plain("No target here") && hashOf(ga.id, 1)?.content_hash !== plain("Ship the importer") && hashOf(ga.id, 1)?.target_share === 20,
+      JSON.stringify([hashOf(GN.json?.id, 1), hashOf(ga.id, 1)]),
+    );
+
+    // Sessions with usage: AM's device has three, bound to GA (their team's goal), their private GP and no goal; AX's
+    // has one bound to their own GB.
+    const aDevice = (u, name) => {
+      const keys = newDeviceKeys();
+      const d = insertDevice(u.id, name);
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, AW));
+      return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
+    };
+    const DM = aDevice(AM, "Ari's laptop");
+    const DX = aDevice(AX, "Axel's laptop");
+    const aT0 = new Date(Date.now() - 3600_000).toISOString();
+    const aShare = async (dev, native, goalId, tokens, extra = {}) => {
+      const key = sessionKey(dev, AW, "claude-code", native);
+      await call(dev.who, "PUT", `/api/v2/workspaces/${AW}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, AW, `/src/${native}`), repo_alias: null, started_at: aT0, title: null } });
+      const ep = epochId();
+      const e = await call(dev.who, "POST", `/api/v2/workspaces/${AW}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: ep, goal_id: goalId, starts_at: aT0, root_turn: null, cause: "manual" } });
+      const up = await call(dev.who, "POST", `/api/v2/workspaces/${AW}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: [usageRow(dev, `${native}-1`, ep, { input: tokens, output: 0, cache_write_5m: 0, cache_read: 99_000, ...extra })] } });
+      return { key, ep, epoch: e.status, accepted: up.json?.accepted };
+    };
+    const SA = await aShare(DM, "alloc-a", ga.id, 6000);
+    const SB = await aShare(DX, "alloc-b", gb.id, 1500, { output: 500, est_list_usd_micros: null }); // unpriced still counts
+    const SP = await aShare(DM, "alloc-p", gp.id, 1000);
+    const SU = await aShare(DM, "alloc-u", null, 1000);
+    check("allocation setup: four sessions with usage (AM's bound to GA, the private GP and no goal; AX's bound to GB)", [SA, SB, SP, SU].every((s) => s.epoch === 200 && s.accepted === 1), JSON.stringify([SA, SB, SP, SU].map((s) => [s.epoch, s.accepted])));
+
+    // -- GET …/allocation: fresh tokens per goal against target; privacy as spend --
+    const allocOf = (u, q = "") => aa(u, "GET", `/allocation${q}`);
+    const al = await allocOf(AO);
+    const rowFor = (a, id) => a?.window.rows.find((r) => r.goal?.id === id);
+    const aFresh = withDb((d) => d.prepare("SELECT SUM(input + output + cache_write_5m + cache_write_1h + cache_write_unsplit) AS n FROM v2_usage WHERE ws_id = ?").get(AW).n);
+    const W = al.json?.window;
+    check(
+      "allocation: rows' fresh tokens (input, output and cache writes, every model, priced or not; cache reads left out) add up to the total, which matches the database (10,000); GA 60% against a 20% target (gap 40), GB 20% with its unpriced request counted",
+      al.status === 200 && W.total_fresh_tokens === 10_000 && aFresh === 10_000 && W.rows.reduce((n, r) => n + r.fresh_tokens, 0) === W.total_fresh_tokens && rowFor(al.json, ga.id)?.share === 60 && rowFor(al.json, ga.id).target_share === 20 && rowFor(al.json, ga.id).gap === 40 &&
+        rowFor(al.json, gb.id)?.share === 20 && rowFor(al.json, gb.id).unpriced_requests === 1 && W.unpriced_requests === 1,
+      JSON.stringify(W?.rows),
+    );
+    const priv = W?.rows.find((r) => r.kind === "private");
+    const unal = W?.rows.find((r) => r.kind === "unallocated");
+    check(
+      "allocation: another person's private goal is one unnamed row with no target (10%), work bound to no goal is its own row (10%); an active goal with a target and no usage is listed at 0% (the company goal: gap -10); no person, session or private title appears",
+      priv && priv.goal === null && priv.target_share === null && priv.share === 10 && unal?.share === 10 && rowFor(al.json, gc.id)?.share === 0 && rowFor(al.json, gc.id).gap === -10 && !rowFor(al.json, GN.json.id) &&
+        ![AO.id, AL.id, AM.id, AX.id, SA.key, SB.key, ACANARY].some((s) => al.text.includes(s)),
+      JSON.stringify(W?.rows.map((r) => [r.kind, r.goal?.title, r.share, r.target_share])),
+    );
+    const mine = await allocOf(AM);
+    const viewerAl = await allocOf(AV);
+    const bearerAl = await call("AM", "GET", `/api/v2/workspaces/${AW}/allocation`, { bearer: DM.access });
+    const outsider = await call("U1", "GET", `/api/v2/workspaces/${AW}/allocation`, { cookie: U1.cookie });
+    const badWeeks = await Promise.all(["?weeks=0", "?weeks=27", "?weeks=x", "?from=nope", `?from=${new Date().toISOString()}&to=${aT0}`].map((q) => allocOf(AO, q)));
+    check(
+      "allocation: the private goal's owner sees it named with its target; a viewer reads it too (spend.read); a device token works; a non-member -> 404; weeks outside 1..26, a bad time or from after to -> 400",
+      rowFor(mine.json, gp.id)?.target_share === 20 && rowFor(mine.json, gp.id).share === 10 && viewerAl.status === 200 && bearerAl.status === 200 && rowFor(bearerAl.json, gp.id) && outsider.status === 404 && badWeeks.every((r) => r.status === 400),
+      `${viewerAl.status} ${bearerAl.status} ${outsider.status} ${badWeeks.map((r) => r.status)}`,
+    );
+    check(
+      "allocation: six calendar weeks, oldest first, each starting Monday 00:00 UTC, together holding the workspace's usage; a steering count (off, 0 lines)",
+      al.json.weekly.length === 6 && al.json.weekly.every((w, i) => new Date(w.week_start).getUTCDay() === 1 && w.week_start.endsWith("T00:00:00.000Z") && (i === 0 || w.week_start > al.json.weekly[i - 1].week_start)) &&
+        al.json.weekly.reduce((n, w) => n + w.total_fresh_tokens, 0) === 10_000 && al.json.steering.steering === "off" && al.json.steering.total === 0,
+      JSON.stringify(al.json?.weekly.map((w) => [w.week_start, w.total_fresh_tokens])),
+    );
+
+    // -- the goals feed: each goal's target and 7-day allocation (whole percents) and the steering switch --
+    const feedAs = (dev, etag) => call(dev.who, "GET", `/api/v2/workspaces/${AW}/goals`, { bearer: dev.access, headers: etag ? { "if-none-match": etag } : {} });
+    const f1 = await feedAs(DM);
+    const fa = f1.json?.goals.find((g) => g.id === ga.id);
+    const fn = f1.json?.goals.find((g) => g.id === GN.json.id);
+    check(
+      "feed: each active goal carries target_share and allocation {target_share, share_7d, gap_7d, held} in whole percents (GA 60, gap 40; a goal with no target: gap null); the feed carries steering off; the private goal is in its owner's feed with its target",
+      f1.status === 200 && f1.json.steering === "off" && fa?.target_share === 20 && JSON.stringify(fa.allocation) === JSON.stringify({ target_share: 20, share_7d: 60, gap_7d: 40, held: false }) && fn?.allocation?.gap_7d === null && fn.allocation.share_7d === 0 &&
+        f1.json.goals.find((g) => g.id === gp.id)?.allocation?.share_7d === 10,
+      JSON.stringify(f1.json?.goals.map((g) => [g.title, g.allocation])),
+    );
+    const tiny = await call("AM", "POST", `/api/v2/workspaces/${AW}/sessions/${SA.key}/usage`, { bearer: DM.access, body: { rows: [usageRow(DM, "alloc-a-tiny", SA.ep, { input: 1, output: 0, cache_write_5m: 0 })] } });
+    const f2 = await feedAs(DM, f1.headers.get("etag"));
+    check("feed: usage too small to move any share a full point keeps the version (304)", tiny.json?.accepted === 1 && f2.status === 304, `${tiny.text} ${f2.status}`);
+
+    // -- the owner changes a target in a new version: a goal_version directive carries it --
+    const dirs = async (cursor = 0, dev = DM) => (await call(dev.who, "GET", `/api/v2/directives?cursor=${cursor}`, { bearer: dev.access })).json;
+    const c0 = (await dirs()).next_cursor;
+    const v2 = await aa(AL, "POST", `/goals/${ga.id}/versions`, { version: 1, target_share: 25 });
+    const notOwner = await aa(AX, "POST", `/goals/${ga.id}/versions`, { version: 2, target_share: 30 });
+    const same = await aa(AL, "POST", `/goals/${ga.id}/versions`, { version: 2, target_share: 25 });
+    const tooMuch = await aa(AL, "POST", `/goals/${ga.id}/versions`, { version: 2, target_share: 50 });
+    const d1 = (await dirs(c0)).directives;
+    const det = await aa(AX, "GET", `/goals/${ga.id}`);
+    check(
+      "targets: the owner saves a version with a new target (201, version 2) and the bound session gets a goal_version directive whose goal carries target_share 25; another member -> 403 not_goal_owner; the same target -> 409 no_change; one that would pass 100% -> 409 targets_over_100; the goal page lists each version's target",
+      v2.status === 201 && v2.json.version === 2 && v2.json.target_share === 25 && d1.some((d) => d.kind === "goal_version" && d.goal?.id === ga.id && d.goal.target_share === 25 && d.session_keys.includes(SA.key)) &&
+        notOwner.json?.error === "not_goal_owner" && same.json?.error === "no_change" && tooMuch.json?.error === "targets_over_100" && JSON.stringify(det.json?.versions.map((v) => v.target_share)) === "[25,20]",
+      `${v2.text.slice(0, 150)} ${notOwner.status} ${same.status} ${tooMuch.status} ${JSON.stringify(d1.map((d) => [d.kind, d.goal?.target_share]))}`,
+    );
+
+    // -- steering: the workspace owner's switch, and the lines agents report --
+    const stMember = await aa(AL, "PATCH", "", { steering: "on" });
+    const stViewer = await aa(AV, "PATCH", "", { steering: "on" });
+    const stBad = await aa(AO, "PATCH", "", { steering: "maybe" });
+    const stNone = await aa(AO, "PATCH", "", {});
+    const stOn = await aa(AO, "PATCH", "", { steering: "on" });
+    const wsDet = await aa(AM, "GET", "");
+    const f3 = await feedAs(DM, f1.headers.get("etag"));
+    const stAudit = withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = 'workspace.steering_on'").all(AW)).map((r) => r.actor_id);
+    const rename = await aa(AO, "PATCH", "", { name: "Allocation workspace (renamed)" });
+    check(
+      "steering: a member -> 403 owner_only, a viewer -> 403 read_only; a bad value or an empty body -> 400; the owner turns it on (audited workspace.steering_on), GET /workspaces/{ws} says on, and the feed gets a new version with steering on; renaming still works and keeps it on",
+      stMember.json?.error === "owner_only" && stViewer.json?.error === "read_only" && stBad.status === 400 && stNone.status === 400 && stOn.status === 200 && stOn.json.steering === "on" && wsDet.json?.workspace.steering === "on" &&
+        f3.status === 200 && f3.json.steering === "on" && stAudit.join() === AO.id && rename.json?.name === "Allocation workspace (renamed)" && rename.json.steering === "on",
+      `${stMember.text} ${stBad.status} ${stOn.text} ${f3.status} ${rename.text}`,
+    );
+    const ev = (over = {}) => ({ session_key: SA.key, goal_id: ga.id, suggested_goal_id: gb.id, share: 60, target: 25, at: new Date().toISOString(), ...over });
+    const postEv = (dev, events, extra = {}) => call(dev.who, "POST", `/api/v2/workspaces/${AW}/steering`, { bearer: dev.access, body: { events }, ...extra });
+    const dl = insertDevice(AL.id, "Abel's laptop");
+    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(dl.id, AW));
+    const DL = { who: "AL", access: dl.access };
+    const e1 = ev();
+    const s1 = await postEv(DM, [e1]);
+    const s2 = await postEv(DM, [e1]);
+    const sOld = await postEv(DM, [ev({ at: new Date(Date.now() - 20 * 86_400_000).toISOString() })]);
+    const sForeign = await postEv(DL, [ev({ at: new Date(Date.now() - 1000).toISOString() })]);
+    const sBad = await Promise.all([[ev({ share: 101 })], [ev({ goal_id: "not an id" })], [ev({ at: "yesterday" })], Array.from({ length: 101 }, (_, i) => ev({ at: new Date(Date.now() - i * 1000).toISOString() }))].map((e) => postEv(DM, e)));
+    const sCookie = await call("AM", "POST", `/api/v2/workspaces/${AW}/steering`, { cookie: AM.cookie, body: { events: [ev()] } });
+    const evRow = withDb((d) => d.prepare("SELECT * FROM v2_steering_events WHERE ws_id = ?").all(AW));
+    const stCount = (await allocOf(AO)).json?.steering;
+    check(
+      "steering events: this device's shared session -> accepted 1, the same line again -> 0, one older than 14 days -> skipped, another device's report about it -> skipped; a share over 100, a bad goal id, a bad time or 101 events -> 400; a cookie -> refused; stored as session key, goal ids and whole percents only; allocation counts 1 line today",
+      s1.json?.accepted === 1 && s2.json?.accepted === 0 && sOld.json?.accepted === 0 && sForeign.json?.accepted === 0 && sBad.every((r) => r.status === 400) && sCookie.status >= 400 &&
+        evRow.length === 1 && JSON.stringify(Object.keys(evRow[0]).sort()) === JSON.stringify(["at", "goal_id", "recorded_at", "session_key", "share", "suggested_goal_id", "target", "ws_id"]) &&
+        stCount?.steering === "on" && stCount.total === 1 && stCount.days.length === 1 && stCount.days[0].day === new Date().toISOString().slice(0, 10),
+      `${s1.text} ${s2.text} ${sOld.text} ${sForeign.text} ${sBad.map((r) => r.status)} ${sCookie.status} ${JSON.stringify(stCount)}`,
+    );
+
+    // -- a held goal is marked in the feed: agents never steer from or toward it --
+    const hold = await aa(AL, "PUT", `/goals/${ga.id}/hold`, { reason: "Alloc hold" });
+    const fHeld = await feedAs(DM);
+    await aa(AL, "DELETE", `/goals/${ga.id}/hold`);
+    const fFree = await feedAs(DM);
+    check(
+      "feed: a goal on hold carries allocation.held true (and a new feed version); released, false again",
+      hold.status === 201 && fHeld.json?.goals.find((g) => g.id === ga.id)?.allocation?.held === true && fHeld.json.version !== f3.json.version && fFree.json?.goals.find((g) => g.id === ga.id)?.allocation?.held === false,
+      `${hold.status} ${JSON.stringify(fHeld.json?.goals.find((g) => g.id === ga.id)?.allocation)}`,
+    );
+
+    // -- reallocations: new targets for several goals; each goal's approval set approves, then someone launches --
+    const rl = (u, body) => aa(u, "POST", "/reallocations", body);
+    const rlAct = (u, id, action, body = {}) => aa(u, "POST", `/reallocations/${id}/${action}`, body);
+    const rlGet = (u, id) => aa(u, "GET", `/reallocations/${id}`);
+    const tOf = (r, g) => r?.targets.find((t) => t.goal?.id === g);
+    const RNOTE = "Docs need more agent time this month";
+    const p1 = await rl(AM, { targets: [{ goal_id: ga.id, target_share: 15 }, { goal_id: gb.id, target_share: 40 }, { goal_id: gc.id, target_share: 10 }], note: RNOTE });
+    const P1 = p1.json;
+    check(
+      "reallocation: a member proposes new targets for two goals they don't own (a goal already at its target is left out) -> 201 pending, rl_ id, revision 1; each goal lists its from and proposed target and its approval set (GA: its owner and team lead AL; GB: AX), nothing approved; the requester can't approve",
+      p1.status === 201 && /^rl_[a-z2-7]{24}$/.test(P1?.id) && P1.state === "pending" && P1.revision === 1 && P1.targets.length === 2 && P1.note === RNOTE && P1.launch === null &&
+        tOf(P1, ga.id)?.from_share === 25 && tOf(P1, ga.id).target_share === 15 && JSON.stringify(tOf(P1, ga.id).approvers.map((a) => a.id)) === JSON.stringify([AL.id]) && JSON.stringify(tOf(P1, gb.id).approvers.map((a) => a.id)) === JSON.stringify([AX.id]) &&
+        P1.targets.every((t) => !t.approved) && P1.can.approve === false && P1.can.withdraw === true,
+      p1.text.slice(0, 400),
+    );
+    const pViewer = await rl(AV, { targets: [{ goal_id: ga.id, target_share: 10 }] });
+    const pOver = await rl(AM, { targets: [{ goal_id: gb.id, target_share: 80 }] });
+    const pSame = await rl(AM, { targets: [{ goal_id: ga.id, target_share: 25 }] });
+    const pPriv = await rl(AL, { targets: [{ goal_id: gp.id, target_share: 5 }] });
+    const pBad = await Promise.all([{ targets: [] }, { targets: [{ goal_id: ga.id, target_share: 12.5 }] }, { targets: [{ goal_id: ga.id, target_share: 10 }, { goal_id: ga.id, target_share: 11 }] }, { targets: [{ goal_id: ga.id, target_share: 10 }], note: "n".repeat(1001) }].map((b) => rl(AM, b)));
+    check(
+      "reallocation: a viewer -> 403 read_only; over 100% -> 409 targets_over_100; no change -> 409 no_change; a goal the proposer can't read -> 404; no targets, a fraction, a goal twice or a note over 1000 -> 400",
+      pViewer.json?.error === "read_only" && pOver.json?.error === "targets_over_100" && pSame.json?.error === "no_change" && pPriv.status === 404 && pBad.every((r) => r.status === 400),
+      `${pViewer.status} ${pOver.status} ${pSame.status} ${pPriv.status} ${pBad.map((r) => r.status)}`,
+    );
+    const asL = (await rlGet(AL, P1.id)).json;
+    const asV = await rlGet(AV, P1.id);
+    const asOut = await call("U1", "GET", `/api/v2/workspaces/${AW}/reallocations/${P1.id}`, { cookie: U1.cookie });
+    const listL = await aa(AL, "GET", "/reallocations");
+    check(
+      "reallocation: readable by everyone who can read one of its goals (a viewer too, who can't act), 404 to a non-member; it is waiting on GA's approver, who may approve and counter but not launch yet",
+      asL?.can.approve === true && asL.can.counter === true && asL.can.launch === false && asL.waiting_on_me === true && asV.status === 200 && Object.values(asV.json.can).every((v) => v === false) && asOut.status === 404 &&
+        listL.json?.waiting_on_me.some((r) => r.id === P1.id),
+      `${JSON.stringify(asL?.can)} ${asV.status} ${asOut.status}`,
+    );
+    const apL = await rlAct(AL, P1.id, "approve", { revision: 1 });
+    const apL2 = await rlAct(AL, P1.id, "approve", { revision: 1 });
+    const apStale = await rlAct(AX, P1.id, "approve", { revision: 2 });
+    const lnEarly = await rlAct(AO, P1.id, "launch");
+    const notApprover = await rlAct(AV, P1.id, "approve", { revision: 1 });
+    check(
+      "reallocation: GA's approver approves its part (still pending, GA approved by AL); approving again -> 409 already_approved; a wrong revision -> 409 stale_revision; launching before every goal is approved -> 409 wrong_state; a viewer -> 403",
+      apL.json?.state === "pending" && tOf(apL.json, ga.id)?.approved_by?.id === AL.id && !tOf(apL.json, gb.id).approved && apL2.json?.error === "already_approved" && apStale.json?.error === "stale_revision" && lnEarly.json?.error === "wrong_state" && notApprover.status === 403,
+      `${apL.text.slice(0, 200)} ${apL2.status} ${apStale.status} ${lnEarly.status}`,
+    );
+    const ctr = await rlAct(AX, P1.id, "counter", { revision: 1, targets: [{ goal_id: ga.id, target_share: 15 }, { goal_id: gb.id, target_share: 35 }], note: "Meet in the middle" });
+    const accept = await rlAct(AM, P1.id, "accept_counter", { revision: 2 });
+    check(
+      "reallocation: GB's approver counters (revision 2, countered; their own goal approved by writing it, GA's approval from revision 1 no longer counts); the requester accepts the counter -> pending again",
+      ctr.json?.state === "countered" && ctr.json.revision === 2 && tOf(ctr.json, gb.id)?.approved_by?.id === AX.id && !tOf(ctr.json, ga.id).approved && accept.json?.state === "pending",
+      `${ctr.text.slice(0, 300)} ${accept.status}`,
+    );
+    const etagBefore = (await feedAs(DM)).headers.get("etag");
+    const c1 = (await dirs()).next_cursor;
+    const c1x = (await dirs(0, DX)).next_cursor;
+    const ap2 = await rlAct(AL, P1.id, "approve", { revision: 2 });
+    const gaAfterApprove = (await aa(AL, "GET", `/goals/${ga.id}`)).json?.goal;
+    const fSame = await feedAs(DM, etagBefore);
+    const dNone = [...(await dirs(c1)).directives, ...(await dirs(c1x, DX)).directives];
+    const lnX = await rlAct(AX, P1.id, "launch");
+    const asO = (await rlGet(AO, P1.id)).json;
+    check(
+      "reallocation: once every goal is approved it is approved with launch pending: no goal version, no directive, the feed unchanged (304); AX, outside GA's launch set -> 403 not_a_launcher; the workspace owner may launch or say not yet, and it is waiting on them",
+      ap2.json?.state === "approved" && ap2.json.launch === "pending" && gaAfterApprove?.version === 2 && gaAfterApprove.target_share === 25 && fSame.status === 304 && dNone.length === 0 && lnX.json?.error === "not_a_launcher" &&
+        asO?.can.launch === true && asO.can.not_yet === true && asO.waiting_on_me === true,
+      `${ap2.text.slice(0, 200)} ${fSame.status} ${dNone.length} ${lnX.status} ${JSON.stringify(asO?.can)}`,
+    );
+    const ny = await rlAct(AO, P1.id, "not_yet");
+    const ln = await rlAct(AO, P1.id, "launch");
+    const ln2 = await rlAct(AO, P1.id, "launch");
+    const gaNow = (await aa(AL, "GET", `/goals/${ga.id}`)).json;
+    const gbNow = (await aa(AX, "GET", `/goals/${gb.id}`)).json;
+    const dLaunch = [...(await dirs(c1)).directives, ...(await dirs(c1x, DX)).directives];
+    const rlAudit = (action) => withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = ? AND object_id = ?").all(AW, action, P1.id)).map((r) => r.actor_id);
+    check(
+      "reallocation: not yet is recorded; the launch writes each goal's next version with its new target (GA 15, GB 35), authored by the person who approved that goal (AL, AX); the bound sessions get goal_version directives carrying the new targets; launching again -> 409; audited reallocation.not_yet and reallocation.launched by the owner",
+      ny.json?.launch === "not_yet" && ln.json?.launch === "launched" && ln.json.launch_decided_by?.id === AO.id && gaNow?.goal.target_share === 15 && gaNow.goal.version === 3 && gbNow?.goal.target_share === 35 &&
+        hashOf(ga.id, 3)?.created_by === AL.id && hashOf(gb.id, 2)?.created_by === AX.id && dLaunch.some((d) => d.kind === "goal_version" && d.goal?.id === ga.id && d.goal.target_share === 15) &&
+        dLaunch.some((d) => d.kind === "goal_version" && d.goal?.id === gb.id && d.goal.target_share === 35) && ln2.status === 409 && rlAudit("reallocation.not_yet").join() === AO.id && rlAudit("reallocation.launched").join() === AO.id,
+      `${ny.status} ${ln.text.slice(0, 200)} ${JSON.stringify(dLaunch.map((d) => [d.kind, d.goal?.id, d.goal?.target_share]))}`,
+    );
+
+    // superseded before launch, and while open; declined; withdrawn; the company goal; own goals; decreases first
+    const p2 = (await rl(AM, { targets: [{ goal_id: ga.id, target_share: 10 }] })).json;
+    await rlAct(AL, p2?.id, "approve", { revision: 1 });
+    const p3 = (await rl(AM, { targets: [{ goal_id: ga.id, target_share: 12 }, { goal_id: gb.id, target_share: 30 }] })).json;
+    const edit = await aa(AL, "POST", `/goals/${ga.id}/versions`, { version: 3, title: "Ship the importer (v2)" });
+    const [p2s, p3s] = await Promise.all([rlGet(AM, p2?.id), rlGet(AM, p3?.id)]);
+    const lnSup = await rlAct(AO, p2?.id, "launch");
+    check(
+      "reallocation: a newer version of one of its goals supersedes an approved, unlaunched proposal (launch superseded; launching it -> 409) and an open one (state superseded); neither reached agents",
+      edit.status === 201 && p2s.json?.state === "superseded" && p2s.json.launch === "superseded" && p3s.json?.state === "superseded" && p3s.json.launch === null && lnSup.status === 409 && (await aa(AL, "GET", `/goals/${ga.id}`)).json?.goal.target_share === 15,
+      `${p2s.text.slice(0, 160)} ${p3s.text.slice(0, 160)} ${lnSup.status}`,
+    );
+    const p4 = (await rl(AM, { targets: [{ goal_id: gb.id, target_share: 31 }] })).json;
+    const rejReq = await rlAct(AM, p4?.id, "reject", {});
+    const rej = await rlAct(AX, p4?.id, "reject", { reason: "Not this month" });
+    const rejLate = await rlAct(AX, p4?.id, "approve", { revision: 1 });
+    const p5 = (await rl(AM, { targets: [{ goal_id: gb.id, target_share: 32 }] })).json;
+    const wdOther = await rlAct(AX, p5?.id, "withdraw");
+    const wd = await rlAct(AM, p5?.id, "withdraw");
+    check(
+      "reallocation: the requester can't decline (403); an approver declines with a reason (rejected, shown with who); a decided proposal can't be approved (409); only the requester withdraws",
+      rejReq.status === 403 && rej.json?.state === "rejected" && rej.json.rejection_reason === "Not this month" && rej.json.rejected_by?.id === AX.id && rejLate.status === 409 && wdOther.status === 403 && wd.json?.state === "withdrawn",
+      `${rejReq.status} ${rej.text.slice(0, 160)} ${rejLate.status} ${wdOther.status} ${wd.status}`,
+    );
+    const p6 = (await rl(AM, { targets: [{ goal_id: gc.id, target_share: 5 }] })).json;
+    const p6v = (await rlGet(AO, p6?.id)).json;
+    const anl = await rlAct(AO, p6?.id, "approve_and_launch", { revision: 1 });
+    const own = (await rl(AX, { targets: [{ goal_id: gb.id, target_share: 25 }] })).json;
+    const ownLn = await rlAct(AX, own?.id, "launch");
+    check(
+      "reallocation: on the company goal the workspace owner (its approval set) approves and launches in one step (GC 5); a proposal on only your own goals is approved by asking and waits for your launch (GB 25)",
+      p6v?.can.approve_and_launch === true && anl.json?.state === "approved" && anl.json.launch === "launched" && (await aa(AO, "GET", `/goals/${gc.id}`)).json?.goal.target_share === 5 &&
+        own?.state === "approved" && own.launch === "pending" && ownLn.json?.launch === "launched" && (await aa(AX, "GET", `/goals/${gb.id}`)).json?.goal.target_share === 25,
+      `${JSON.stringify(p6v?.can)} ${anl.text.slice(0, 160)} ${JSON.stringify(own).slice(0, 160)} ${ownLn.status}`,
+    );
+    // Targets now: GA 15, GB 25, GP 20, GC 5 (65). The owner raises GC to 40 (100); then GC 40 -> 20 with GA 15 -> 30
+    // only fits if the launch lowers GC before it raises GA (raising GA first would make 115).
+    const gcFull = await aa(AO, "POST", `/goals/${gc.id}/versions`, { target_share: 40 });
+    const p7 = (await rl(AO, { targets: [{ goal_id: ga.id, target_share: 30 }, { goal_id: gc.id, target_share: 20 }] })).json;
+    await rlAct(AL, p7?.id, "approve", { revision: 1 });
+    const ln7 = await rlAct(AO, p7?.id, "launch");
+    const [ga7, gc7] = await Promise.all([aa(AL, "GET", `/goals/${ga.id}`), aa(AO, "GET", `/goals/${gc.id}`)]);
+    check(
+      "reallocation: with the workspace at 100%, a launch that lowers one goal by 20 and raises another by 15 writes the decrease first and succeeds (GA 30, GC 20)",
+      gcFull.status === 201 && ln7.json?.launch === "launched" && ga7.json?.goal.target_share === 30 && gc7.json?.goal.target_share === 20,
+      `${gcFull.text.slice(0, 120)} ${ln7.text.slice(0, 200)}`,
+    );
+    const lists = await aa(AM, "GET", "/reallocations");
+    check(
+      "reallocation: GET …/reallocations groups what I can read as waiting_on_me, mine and others",
+      lists.status === 200 && lists.json.mine.some((r) => r.id === P1.id) && lists.json.others.some((r) => r.id === own.id) && !lists.json.waiting_on_me.length,
+      lists.text.slice(0, 300),
+    );
+    const personCols = withDb((d) =>
+      [
+        ["v2_reallocations", ["requester_id", "launch_by", "decided_by"]],
+        ["v2_reallocation_revisions", ["author_id"]],
+        ["v2_reallocation_approvals", ["user_id"]],
+      ].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))),
+    );
+    const retention = await import(pathToFileURL(path.join(ROOT, "lib/v2/retention-core.mts")).href);
+    check(
+      "reallocation: every column that names a person is pseudonymised by the retention job (PERSON_COLUMNS)",
+      personCols && ["requester_id", "launch_by", "decided_by"].every((c) => retention.PERSON_COLUMNS.some(([t, x]) => t === "v2_reallocations" && x === c)) && retention.PERSON_COLUMNS.some(([t, x]) => t === "v2_reallocation_revisions" && x === "author_id") && retention.PERSON_COLUMNS.some(([t, x]) => t === "v2_reallocation_approvals" && x === "user_id"),
+      "",
+    );
+
+    // -- the screens: a target on a new goal, the Spend tab's allocation and switch, target changes on Alignments --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const pageAs = async (u, width = 1000) => {
+          const p = await browser.newPage();
+          p.on("pageerror", (e) => errors.push(e.message));
+          await p.setViewport({ width, height: 844 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return p;
+        };
+        const page = await pageAs(AX);
+        await page.goto(`${BASE}/app/w/${AW}/goals`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("New goal"), { timeout: 15000 });
+        const hint = await page.evaluate(() => document.body.innerText);
+        await page.type('main form input[required][maxlength="300"]', "Browser target goal");
+        await page.type('input[aria-label="Target share of agent time"]', "3");
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create goal")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Browser target goal") && document.body.innerText.includes("target 3%"), { timeout: 15000 });
+        const goalsText = await page.evaluate(() => document.body.innerText);
+        check(
+          "ui (Chrome): the new-goal form has a target field that says how much the other goals you can see take (here 75%: GA 30, GB 25, GC 20; the private goal is not shown); the new goal is listed with target 3% and the goals list shows each goal's share of the last 7 days",
+          /Other active goals you can see already take 75%/.test(hint) && /target 3%/.test(goalsText) && /last 7 days \d+%/.test(goalsText),
+          hint.slice(0, 400),
+        );
+        const sp = await pageAs(AO);
+        await sp.goto(`${BASE}/app/w/${AW}/spend`, { waitUntil: "networkidle0" });
+        await sp.waitForFunction(() => document.body.innerText.includes("Agent time against targets") && document.body.innerText.includes("Steering is on"), { timeout: 15000 });
+        const spendText = await sp.evaluate(() => document.body.innerText);
+        await sp.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Turn steering off")?.click());
+        await sp.waitForFunction(() => document.body.innerText.includes("Steering is off"), { timeout: 15000 });
+        check(
+          "ui (Chrome): the Spend tab shows agent time against targets (share, target, points over or under, the unnamed private row, no person) and the owner turns steering off",
+          /Ship the importer \(v2\)/.test(spendText) && /60% of agent time · target 30%/.test(spendText) && /30 points over/.test(spendText) && /Goals you can't see/.test(spendText) && !spendText.includes(ACANARY) && !spendText.includes("Ari Member") && (await aa(AO, "GET", "")).json?.workspace.steering === "off",
+          spendText.slice(0, 600),
+        );
+        const memberSpend = await pageAs(AM);
+        await memberSpend.goto(`${BASE}/app/w/${AW}/spend`, { waitUntil: "networkidle0" });
+        await memberSpend.waitForFunction(() => document.body.innerText.includes("Steering is off"), { timeout: 15000 });
+        const noSwitch = await memberSpend.evaluate(() => ![...document.querySelectorAll("button")].some((b) => /Turn steering/.test(b.textContent || "")));
+        const ap = await pageAs(AX);
+        await ap.goto(`${BASE}/app/w/${AW}/alignments`, { waitUntil: "networkidle0" });
+        await ap.waitForFunction(() => document.body.innerText.includes("Target changes") && document.body.innerText.includes("Propose new targets"), { timeout: 15000 });
+        await ap.type('input[aria-label="New target for Browser target goal"]', "4");
+        await ap.evaluate(() => [...document.querySelectorAll("button")].find((b) => /^Propose 1 change/.test(b.textContent || ""))?.click());
+        await ap.waitForFunction(() => document.body.innerText.includes("3% → 4%") && document.body.innerText.includes("waiting for launch"), { timeout: 15000 });
+        await ap.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Launch")?.click());
+        await ap.waitForFunction(() => /Launched by Axel Other/.test(document.body.innerText), { timeout: 15000 });
+        const browserGoal = (await aa(AX, "GET", "/goals")).json?.goals.find((g) => g.title === "Browser target goal");
+        check(
+          "ui (Chrome): a member sees no steering switch; on the Alignments page a proposal on your own goal is approved by asking and waits for launch; Launch gives the goal its new target (4%)",
+          noSwitch && browserGoal?.target_share === 4 && browserGoal.version === 2,
+          JSON.stringify(browserGoal),
+        );
+        const gp7 = await pageAs(AL);
+        await gp7.goto(`${BASE}/app/w/${AW}/goals/${ga.id}`, { waitUntil: "networkidle0" });
+        await gp7.waitForFunction(() => document.body.innerText.includes("target 30% of agent time"), { timeout: 15000 });
+        const goalText = await gp7.evaluate(() => document.body.innerText);
+        const narrow = [];
+        for (const p of [`/app/w/${AW}/spend`, `/app/w/${AW}/alignments`]) {
+          const ph = await pageAs(AO, 390);
+          await ph.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+          await ph.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+          const m = await ph.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth, text: document.body.innerText }));
+          if (!(m.sw <= m.W)) narrow.push(`${p}: ${m.sw}>${m.W}`);
+          if (m.text.includes("—")) narrow.push(`${p}: em dash`);
+        }
+        check(
+          "ui (Chrome): the goal page shows the target pill and each version's target; at 390 px the Spend and Alignments tabs have no sideways scroll and no em dash; no page errors",
+          /, target 30%\)/.test(goalText) && /, target 20%\)/.test(goalText) && narrow.length === 0 && errors.length === 0,
+          `${narrow.join(" | ")} ${errors.join(" | ")}`,
+        );
+      } catch (e) {
+        check("ui (Chrome) allocation run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for allocation", false, `no Chrome at ${CHROME}`);
+
+    const aLeaks = seen.filter((s) => s.who !== "AM" && s.text.includes(ACANARY));
+    check("allocation canary: the private goal's title reached nobody but its owner (allocation, feeds, reallocations, refusals)", aLeaks.length === 0 && seen.some((s) => s.who === "AM" && s.text.includes(ACANARY)), aLeaks.map((s) => s.p).join(" "));
+  }
+  // ==== end port29:allocation ====
+
+  // -- the private-goal canary never reached anyone but its owner --
+  const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
+  const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));
+  check(`canary: the private goal's text appears in none of ${seen.filter((s) => s.who !== "U2").length} responses to anyone but its owner (workspace owner included); its owner sees it`, leaks.length === 0 && ownerSaw, leaks.map((l) => `${l.who} ${l.p}`).join(" | "));
+  await stopServer();
+  oauthStub.close();
+
+  // ======== phase retention: account deletion, workspace soft delete and restore, and the retention job ========
+  // Mode L with the test IdP on a fresh data directory. The job runs as the operator runs it, node scripts/retention.mjs
+  // against the live database, with ALIGN_TEST_NOW (honoured only with ALIGN_TEST_IDP=1) as its clock.
+  const retDir = path.join(tmpRoot, "retention");
+  await mustStart({ ALIGN_DATA_DIR: retDir, ALIGN_TEST_IDP: "1" });
+  dbFile = path.join(retDir, "v2", "align.sqlite");
+  {
+    const DAY = 24 * 3600 * 1000;
+    const later = (ms) => new Date(Date.now() + ms).toISOString();
+    const monthsLater = (m, days = 0) => {
+      const d = new Date(Date.now() + days * DAY);
+      d.setUTCMonth(d.getUTCMonth() + m);
+      return d.toISOString();
+    };
+    const scriptEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !SETTING.test(k)));
+    const retention = (now, { dryRun = false, testIdp = true } = {}) => {
+      const r = spawnSync("node", ["scripts/retention.mjs", ...(dryRun ? ["--dry-run"] : [])], {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: { ...scriptEnv, ALIGN_DATA_DIR: retDir, ...(testIdp ? { ALIGN_TEST_IDP: "1" } : {}), ...(now ? { ALIGN_TEST_NOW: now } : {}) },
+      });
+      let counts = null;
+      try {
+        counts = JSON.parse(r.stdout.trim().split("\n").pop());
+      } catch {}
+      return { status: r.status, out: `${r.stdout}${r.stderr}`.slice(-1200), counts: counts ?? {} };
+    };
+    const signIn = async (u) => {
+      const r = await call(u.who, "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: u.email, password: `pw-${u.who}-123456` } });
+      u.cookie = cookieOf(r.setCookies);
+      return r.status;
+    };
+    const ws = (u, method, w, p = "", body) => call(u.who, method, `/api/v2/workspaces/${w}${p}`, { cookie: u.cookie, ...(body ? { body } : {}) });
+    const newWs = async (u, name) => (await call(u.who, "POST", "/api/v2/workspaces", { cookie: u.cookie, body: { name } })).json.id;
+    const join = async (owner, w, u, role = "member") => {
+      const i = await ws(owner, "POST", w, "/invites", { email: u.email, role });
+      return call(u.who, "POST", `/api/v2/invites/${i.json.token}/accept`, { cookie: u.cookie, body: {} });
+    };
+    const goal = async (u, w, title) => (await ws(u, "POST", w, "/goals", { title, visibility: "workspace" })).json;
+    const share = async (dev, w, native, goalId, n) => {
+      const key = sessionKey(dev, w, "claude-code", native);
+      const start = new Date(Date.now() - 3600 * 1000).toISOString();
+      await call(dev.who, "PUT", `/api/v2/workspaces/${w}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, w, "/src/r"), started_at: start, title: null } });
+      const ep = epochId();
+      await call(dev.who, "POST", `/api/v2/workspaces/${w}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: ep, goal_id: goalId, starts_at: start, root_turn: null, cause: "manual" } });
+      const up = await call(dev.who, "POST", `/api/v2/workspaces/${w}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: Array.from({ length: n }, (_, i) => usageRow(dev, `${native}-${i}`, ep)) } });
+      return { key, accepted: up.json?.accepted };
+    };
+    /** Rows in every table (Better Auth's included) holding `needle` in any text column; `wsOnly` limits to one workspace's rows. */
+    const mentions = (needle, wsOnly = null) =>
+      withDb((d) => {
+        const out = {};
+        for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()) {
+          const cols = d.prepare(`PRAGMA table_info("${name}")`).all().map((c) => c.name);
+          if (wsOnly && !cols.includes("ws_id")) continue;
+          const rows = wsOnly ? d.prepare(`SELECT * FROM "${name}" WHERE ws_id = ?`).all(wsOnly) : d.prepare(`SELECT * FROM "${name}"`).all();
+          const n = rows.filter((row) => cols.some((c) => typeof row[c] === "string" && row[c].toLowerCase().includes(needle.toLowerCase()))).length;
+          if (n) out[name] = n;
+        }
+        return out;
+      });
+    const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));
+    const q1 = (sql, ...a) => withDb((d) => d.prepare(sql).get(...a));
+
+    const Rs = {};
+    for (const [who, name] of [
+      ["R1", "Rita One"],
+      ["R2", "Rob Two"],
+      ["R3", "Rae Three"],
+      ["R4", "Ron Four"],
+      ["R5", "Rex Five"],
+      ["R6", "Ria Six"],
+    ])
+      Rs[who] = await signUp(who, name, `${who.toLowerCase()}@example.test`);
+    const { R1: r1, R2: r2, R3: r3, R4: r4, R5: r5, R6: r6 } = Rs;
+    const W1 = await newWs(r1, "Retention A");
+    for (const u of [r2, r3, r5]) await join(r1, W1, u);
+    const D2 = await pairDevice("R2", r2, [W1]);
+    const D3 = await pairDevice("R3", r3, [W1]);
+    const D5 = await pairDevice("R5", r5, [W1]);
+    const G1 = await goal(r1, W1, "Rita's goal");
+    const G2 = await goal(r2, W1, "Rob's goal");
+    const G3 = await goal(r3, W1, "Rae's goal");
+    const G5 = await goal(r5, W1, "Rex's goal");
+    const S2 = await share(D2, W1, "r2", G2.id, 2);
+    const S3 = await share(D3, W1, "r3", G3.id, 3);
+    const S5 = await share(D5, W1, "r5", G5.id, 1);
+    const act3 = await call("R3", "POST", `/api/v2/workspaces/${W1}/activity`, { bearer: D3.access, body: { items: [{ session_key: S3.key, kind: "edit", at: new Date().toISOString(), repo_id: "f".repeat(32), path_hash: "e".repeat(32) }] } });
+    const cr = await ws(r2, "POST", W1, `/goals/${G1.id}/change-requests`, { base_version: 1, changes: { title: "Rita's goal, sharper" }, reason: "clearer" });
+    const W4 = await newWs(r4, "Solo");
+    // Rae also has a workspace of her own, so her events there show that only W1's lose her actor hash later.
+    const W3x = await newWs(r3, "Rae's own");
+    const G4 = await goal(r4, W4, "Ron's goal");
+    const spend0 = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
+    check(
+      "retention setup: a workspace with three members' goals, shared sessions with usage (6 requests) and a change request; a one-person workspace",
+      G1?.id && G2?.id && G3?.id && G5?.id && G4?.id && S2.accepted === 2 && S3.accepted === 3 && S5.accepted === 1 && cr.status === 201 && spend0?.total?.requests === 6,
+      `${S2.accepted} ${S3.accepted} ${S5.accepted} ${cr.status} ${cr.text} ${spend0?.total?.requests}`,
+    );
+
+    // -- account deletion --
+    const lastOwner = await call("R1", "DELETE", "/api/v2/me", { cookie: r1.cookie, body: { email: r1.email } });
+    check(
+      "account deletion: the only owner of a workspace with other members -> 409 last_owner naming it, and nothing changes",
+      lastOwner.status === 409 && lastOwner.json?.error === "last_owner" && lastOwner.json.message.includes("Retention A") && !!q1("SELECT 1 AS x FROM ba_user WHERE id = ?", r1.id),
+      lastOwner.text,
+    );
+    ageSession(r4.cookie, 20);
+    const stale4 = await call("R4", "DELETE", "/api/v2/me", { cookie: r4.cookie, body: { email: r4.email } });
+    await signIn(r4);
+    const wrong4 = await call("R4", "DELETE", "/api/v2/me", { cookie: r4.cookie, body: { email: "someone@example.test" } });
+    const cross4 = await call("R4", "DELETE", "/api/v2/me", { cookie: r4.cookie, headers: { origin: "http://evil.example" }, body: { email: r4.email } });
+    const bearer4 = await call("R4", "DELETE", "/api/v2/me", { bearer: D2.access, body: { email: r4.email } });
+    check(
+      "account deletion: a sign-in older than 15 minutes -> 403 reauth_required; a mistyped email -> 400; a cross-site write -> 403; a device token -> 403",
+      stale4.status === 403 && stale4.json?.error === "reauth_required" && wrong4.status === 400 && cross4.status === 403 && bearer4.status === 403 && !!q1("SELECT 1 AS x FROM ba_user WHERE id = ?", r4.id),
+      `${stale4.text} ${wrong4.text} ${cross4.status} ${bearer4.status}`,
+    );
+    // Before deleting: they signed out everywhere once (audited with their id), and they have a passkey with a last use
+    // (inserted here: the web UI test below registers a real one) and said "Not now" to the passkey prompt.
+    const soe4 = await call("R4", "POST", "/api/v2/account/sign-out-everywhere", { cookie: r4.cookie, body: { devices: true, apps: true } });
+    await signIn(r4);
+    const pk4 = `pk4${randomBytes(8).toString("hex")}`;
+    withDb((d) => {
+      d.prepare("INSERT INTO ba_passkey (id, name, publicKey, userId, credentialID, counter, deviceType, backedUp, transports, createdAt) VALUES (?, ?, ?, ?, ?, 0, 'singleDevice', 0, 'internal', ?)").run(pk4, "Ron's key", "cHVibGljLWtleQ", r4.id, `cred-${pk4}`, new Date().toISOString());
+      d.prepare("INSERT INTO v2_passkey_use (passkey_id, last_used_at) VALUES (?, ?)").run(pk4, new Date().toISOString());
+    });
+    const dismiss4 = await call("R4", "DELETE", "/api/v2/account/passkey-prompt", { cookie: r4.cookie });
+    // And hosted-access rows naming them: an access request (with its email-keyed rate-limit counter), an unused
+    // creation code bound to their email, and a used one they redeemed.
+    const ar4 = await call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body: { email: r4.email, name: "Ron Four", use_case: "Try it", interest: "try" } });
+    const code4 = admin(["codes", "create", "--email", r4.email], { ALIGN_DATA_DIR: retDir });
+    withDb((d) =>
+      d
+        .prepare("INSERT INTO v2_creation_codes (id, code_hash, email, created_at, expires_at, redeemed_at, redeemed_by, ws_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(`cc_used${randomBytes(6).toString("hex")}`, randomBytes(16).toString("hex"), r4.email, new Date().toISOString(), later(DAY), new Date().toISOString(), r4.id, W4),
+    );
+    const accessKey4 = `access-email:${createHmac("sha256", readFileSync(path.join(retDir, ".secret"), "utf8").trim()).update(`ala.${r4.email}`).digest("base64url")}`;
+    const hits4 = () => q1("SELECT COUNT(*) AS n FROM v2_rate_hits WHERE key = ?", accessKey4).n;
+    const before4 = { requests: q1("SELECT COUNT(*) AS n FROM v2_access_requests WHERE email = ?", r4.email).n, codes: q1("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE email = ?", r4.email).n, hits: hits4() };
+    const pkList4 = (await call("R4", "GET", "/api/v2/account/passkeys", { cookie: r4.cookie })).json;
+    const del4 = await call("R4", "DELETE", "/api/v2/me", { cookie: r4.cookie, body: { email: r4.email.toUpperCase() } });
+    const me4 = await call("R4", "GET", "/api/v2/me", { cookie: r4.cookie });
+    const w4Row = q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W4);
+    const g4Owner = q1("SELECT owner_id FROM v2_goals WHERE id = ?", G4.id)?.owner_id;
+    const r4Left = { ...mentions(r4.email), ...mentions(r4.id) };
+    const accountAudit = q("SELECT ws_id, actor_id, object_id FROM v2_audit WHERE action = 'account.deleted'");
+    check(
+      "account deletion: the email typed in any case -> 204; signed out (401); their one-person workspace is deleted with it (restorable by nobody, purged later); no row anywhere holds their id or email; one audit row with no workspace, actor or email",
+      del4.status === 204 && me4.status === 401 && !!w4Row?.deleted_at && g4Owner === "fm_1" && Object.keys(r4Left).length === 0 && accountAudit.length === 1 && accountAudit.every((a) => a.ws_id === null && a.actor_id === null && a.object_id === null),
+      `${del4.status} ${del4.text} ${me4.status} ${JSON.stringify(w4Row)} ${g4Owner} ${JSON.stringify(r4Left)} ${JSON.stringify(accountAudit)}`,
+    );
+    const pkLeft4 = {
+      passkeys: q1("SELECT COUNT(*) AS n FROM ba_passkey WHERE userId = ? OR id = ?", r4.id, pk4).n,
+      use: q1("SELECT COUNT(*) AS n FROM v2_passkey_use WHERE passkey_id = ?", pk4).n,
+      dismissed: q1("SELECT COUNT(*) AS n FROM v2_passkey_prompt_dismissed WHERE user_id = ?", r4.id).n,
+      soeAudit: q("SELECT actor_id, object_id FROM v2_audit WHERE action = 'account.signed_out_everywhere'"),
+    };
+    const access4 = {
+      requests: q1("SELECT COUNT(*) AS n FROM v2_access_requests WHERE lower(email) = ?", r4.email).n,
+      codes: q("SELECT email, redeemed_by, ws_id FROM v2_creation_codes"),
+      hits: hits4(),
+    };
+    check(
+      "account deletion: their access request and its email-keyed rate-limit counter are deleted; an unused creation code bound to their email is deleted; a used one stays as the record of what created a workspace, with no email or redeemer",
+      ar4.status === 201 && code4.status === 0 && before4.requests === 1 && before4.codes === 2 && before4.hits === 1 &&
+        access4.requests === 0 && access4.hits === 0 && access4.codes.length === 1 && access4.codes[0].email === null && access4.codes[0].redeemed_by === null && access4.codes[0].ws_id === W4,
+      `${ar4.status} ${code4.err} ${JSON.stringify(before4)} ${JSON.stringify(access4)}`,
+    );
+    check(
+      "account deletion after signing out everywhere, with a passkey: their passkey, its last use and their \"Not now\" on the passkey prompt are deleted too, and the sign-out-everywhere audit row keeps no actor or object",
+      soe4.status === 200 && dismiss4.status === 204 && pkList4?.passkeys?.length === 1 && !!pkList4.passkeys[0].last_used_at && pkList4.prompt === false &&
+        pkLeft4.passkeys === 0 && pkLeft4.use === 0 && pkLeft4.dismissed === 0 && pkLeft4.soeAudit.length === 1 && pkLeft4.soeAudit.every((a) => a.actor_id === null && a.object_id === null),
+      `${soe4.status} ${soe4.text} ${dismiss4.status} ${JSON.stringify(pkList4)} ${JSON.stringify(pkLeft4)}`,
+    );
+    // Evidence they added to their change request, from the web and from their device, stays as the former member's.
+    const crEv = (body, auth) => call("R2", "POST", `/api/v2/workspaces/${W1}/goals/${G1.id}/change-requests/${cr.json?.id}/evidence`, { ...auth, body });
+    const ev2 = [await crEv({ kind: "pr", url: "https://github.com/acme/r/pull/2", label: "Rob's PR" }, { cookie: r2.cookie }), await crEv({ kind: "ci_run", url: "https://ci.example.com/r/2", label: "Rob's CI run" }, { bearer: D2.access })];
+    // Asks (PORT-003) naming them: one they recorded, one they accepted and mentioned as their team's lead, and a value
+    // report (PORT-004) of theirs, so the "no row holds their id or email" check below covers those tables with rows in.
+    const teamR2 = (await ws(r1, "POST", W1, "/teams", { name: "Rob's team" })).json?.id;
+    await ws(r1, "POST", W1, `/teams/${teamR2}/members`, { user_id: r2.id, role: "lead" });
+    const askBy2 = await ws(r2, "POST", W1, "/asks", { team_id: teamR2, text: "Rob recorded this", source: { kind: "manual", date: "2026-10-01" } });
+    const askOf2 = await ws(r1, "POST", W1, "/asks", { team_id: teamR2, text: "Rita asked Rob's team", source: { kind: "meeting", title: "Planning", date: "2026-10-02" } });
+    const acc2 = await ws(r2, "POST", W1, `/asks/${askOf2.json?.id}/accept`, {});
+    const men2 = await ws(r2, "POST", W1, `/asks/${askOf2.json?.id}/mention`, { date: "2026-10-03", text: "Rob raised it again", source_title: "Standup" });
+    const vrAt2 = new Date().toISOString();
+    withDb((d) => d.prepare("INSERT INTO v2_value_reports (id, ws_id, change_request_id, person_id, estimate, note, created_at, updated_at) VALUES (?, ?, ?, ?, 'longer', 'Rob note', ?, ?)").run(`vr_${randomBytes(12).toString("hex").slice(0, 24)}`, W1, cr.json?.id, r2.id, vrAt2, vrAt2));
+    const named2 = () => [q1("SELECT COUNT(*) AS n FROM v2_asks WHERE created_by = ? OR decided_by = ?", r2.id, r2.id).n, q1("SELECT COUNT(*) AS n FROM v2_ask_mentions WHERE added_by = ?", r2.id).n, q1("SELECT COUNT(*) AS n FROM v2_value_reports WHERE person_id = ?", r2.id).n];
+    const named2Before = named2();
+    const del2 = await call("R2", "DELETE", "/api/v2/me", { cookie: r2.cookie, body: { email: r2.email } });
+    const d2Me = await call("R2", "GET", "/api/v2/me", { bearer: D2.access });
+    const g2Seen = (await ws(r1, "GET", W1, `/goals/${G2.id}`)).json?.goal;
+    const crSeen = (await ws(r1, "GET", W1, `/goals/${G1.id}/change-requests/${cr.json?.id}`)).json;
+    const crReq = (crSeen?.change_request ?? crSeen)?.requester;
+    const spend1 = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
+    const s2Row = q1("SELECT user_id, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S2.key);
+    const r2Left = { ...mentions(r2.email), ...mentions(r2.id) };
+    const ev2Rows = q("SELECT added_by, source FROM v2_change_request_evidence WHERE change_request_id = ?", cr.json?.id);
+    check(
+      "account deletion: evidence links they added (from the web and from their device) stay on the change request, added by \"Former member #1\"",
+      ev2.every((r) => r.status === 201) && ev2Rows.length === 2 && ev2Rows.every((e) => e.added_by === "fm_1") && ev2Rows.map((e) => e.source).sort().join() === "agent,person",
+      `${ev2.map((r) => `${r.status} ${r.text.slice(0, 120)}`).join(" | ")} ${JSON.stringify(ev2Rows)}`,
+    );
+    const w1Audit = (await ws(r1, "GET", W1, "/audit")).json?.audit ?? [];
+    check(
+      "account deletion: a member's goals, change requests and session spend stay for the others as \"Former member #1\" (no device on the session); their device is unpaired; no row anywhere holds their id or email; the workspace audit shows member.account_deleted by the former member",
+      del2.status === 204 && d2Me.status === 401 && g2Seen?.owner?.id === "fm_1" && g2Seen.owner.name === "Former member #1" && crReq?.name === "Former member #1" && spend1?.total?.requests === 6 && s2Row?.user_id === "fm_1" && s2Row.device_id === null && Object.keys(r2Left).length === 0 && w1Audit.some((a) => a.action === "member.account_deleted" && a.actor?.name === "Former member #1"),
+      `${del2.status} ${d2Me.status} ${JSON.stringify(g2Seen?.owner)} ${JSON.stringify(crReq)} ${spend1?.total?.requests} ${JSON.stringify(s2Row)} ${JSON.stringify(r2Left)}`,
+    );
+
+    const askOf2After = (await ws(r1, "GET", W1, `/asks/${askOf2.json?.id}`)).json;
+    const askBy2After = (await ws(r1, "GET", W1, `/asks/${askBy2.json?.id}`)).json;
+    check(
+      "account deletion: asks they recorded and decided, the mentions they added and their value report were there and stay, as \"Former member #1\" (person_id fm_1); none of those rows holds their id (the check above covers every table)",
+      askBy2.status === 201 && askOf2.status === 201 && acc2.status === 200 && men2.status === 200 && named2Before.join() === "2,1,1" && named2().join() === "0,0,0" &&
+        askBy2After?.requester?.name === "Former member #1" && askOf2After?.decided_by?.id === "fm_1" && askOf2After.mentions[0]?.added_by?.name === "Former member #1" && q1("SELECT person_id FROM v2_value_reports WHERE ws_id = ?", W1)?.person_id === "fm_1",
+      `${askBy2.status} ${askOf2.status} ${acc2.status} ${men2.status} ${named2Before} ${named2()} ${JSON.stringify(askBy2After?.requester)} ${JSON.stringify(askOf2After?.decided_by)}`,
+    );
+
+    // -- removal: "delete their sessions now", and the 30-day former-member rule --
+    const rm5 = await call("R1", "DELETE", `/api/v2/workspaces/${W1}/members/${r5.id}?delete_sessions=1`, { cookie: r1.cookie });
+    const s5Left = q1("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S5.key).n;
+    const spend2 = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
+    const rm3 = await call("R1", "DELETE", `/api/v2/workspaces/${W1}/members/${r3.id}`, { cookie: r1.cookie });
+    const g3Now = (await ws(r1, "GET", W1, `/goals/${G3.id}`)).json?.goal;
+    check(
+      "removal: ?delete_sessions=1 deletes the person's shared sessions in the workspace at once (spend drops by theirs); without it their sessions and goals stay under their name",
+      rm5.status === 204 && s5Left === 0 && spend2?.total?.requests === 5 && invariantHolds(spend2) && rm3.status === 204 && g3Now?.owner?.name === "Rae Three" && q1("SELECT user_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S3.key)?.user_id === r3.id,
+      `${rm5.status} ${s5Left} ${spend2?.total?.requests} ${rm3.status} ${JSON.stringify(g3Now?.owner)}`,
+    );
+
+    // -- workspace soft delete and restore --
+    const W6 = await newWs(r1, "Retention B");
+    await join(r1, W6, r6);
+    const D1 = await pairDevice("R1", r1, [W1, W6]);
+    // A change request with evidence in it, so the purge 31 days on has evidence to erase.
+    const G6 = await goal(r1, W6, "Rita's B goal");
+    const cr6 = await ws(r6, "POST", W6, `/goals/${G6.id}/change-requests`, { base_version: 1, changes: { title: "Rita's B goal, sharper" }, reason: "clearer" });
+    const ev6 = await ws(r6, "POST", W6, `/goals/${G6.id}/change-requests/${cr6.json?.id}/evidence`, { kind: "doc", url: "https://docs.example.com/b", label: "Design note" });
+    const del6 = await ws(r1, "DELETE", W6);
+    const r6Get = await ws(r6, "GET", W6);
+    const r1Get = await ws(r1, "GET", W6);
+    const d1Get = await call("R1", "GET", `/api/v2/workspaces/${W6}/goals`, { bearer: D1.access });
+    const d1Me = await call("R1", "GET", "/api/v2/me", { bearer: D1.access });
+    const r1List = (await call("R1", "GET", "/api/v2/workspaces", { cookie: r1.cookie })).json;
+    const r6List = (await call("R6", "GET", "/api/v2/workspaces", { cookie: r6.cookie })).json;
+    const listed = r1List?.deleted?.find((w) => w.id === W6);
+    check(
+      "soft delete: everyone gets 404 at once (owner, member, the owner's device); it leaves every list; its owner sees it under deleted with restore_until 30 days on; a member doesn't",
+      del6.status === 204 && r6Get.status === 404 && r1Get.status === 404 && d1Get.status === 404 && !d1Me.json.workspaces.some((w) => w.id === W6) && !r1List.workspaces.some((w) => w.id === W6) && !!listed && Math.abs(Date.parse(listed.restore_until) - Date.parse(listed.deleted_at) - 30 * DAY) < 1000 && listed.name === "Retention B" && r6List.deleted.length === 0,
+      `${del6.status} ${r6Get.status} ${r1Get.status} ${d1Get.status} ${JSON.stringify(r1List)} ${JSON.stringify(r6List)}`,
+    );
+    const r6Restore = await ws(r6, "POST", W6, "/restore", {});
+    ageSession(r1.cookie, 20);
+    const staleRestore = await ws(r1, "POST", W6, "/restore", {});
+    await signIn(r1);
+    const restored = await ws(r1, "POST", W6, "/restore", {});
+    const again = await ws(r1, "POST", W6, "/restore", {});
+    const r6Back = await ws(r6, "GET", W6);
+    const d1Back = await call("R1", "GET", `/api/v2/workspaces/${W6}/goals`, { bearer: D1.access });
+    const w6Audit = (await ws(r1, "GET", W6, "/audit")).json?.audit ?? [];
+    check(
+      "restore: a member -> 404; an owner with an old sign-in -> 403 reauth_required; with a fresh one -> 200 {id, name, role}; everyone and the device reach it again; restoring a live workspace -> 409 not_deleted; the audit has workspace.deleted and workspace.restored",
+      r6Restore.status === 404 && staleRestore.status === 403 && staleRestore.json?.error === "reauth_required" && restored.status === 200 && restored.json.id === W6 && restored.json.role === "owner" && again.status === 409 && again.json?.error === "not_deleted" && r6Back.status === 200 && d1Back.status === 200 && ["workspace.deleted", "workspace.restored"].every((a) => w6Audit.some((r) => r.action === a)),
+      `${r6Restore.status} ${staleRestore.text} ${restored.text} ${again.text} ${r6Back.status} ${d1Back.status}`,
+    );
+    await ws(r1, "DELETE", W6);
+
+    // -- the job: codes, invites, former members, purge, audit, roll-up --
+    await ws(r1, "POST", W1, "/invites", { email: "pending@example.test", role: "member" });
+    await sendCode("R1", r1.email);
+    const codes = () => q1("SELECT COUNT(*) AS n FROM ba_verification").n;
+    const pendingInv = () => q1("SELECT COUNT(*) AS n FROM v2_invites WHERE email = 'pending@example.test'").n;
+    const w6Exists = () => !!q1("SELECT 1 AS x FROM v2_workspaces WHERE id = ?", W6);
+    const codesBefore = codes();
+    // Access requests: one stays pending, one is declined now, one approved (its decision recorded 60 days on).
+    for (const who of ["pend", "decl", "appr"]) {
+      await call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body: { email: `${who}@requests.example.test`, name: who, use_case: "Try it", interest: "try" } });
+    }
+    const reqId = (who) => q1("SELECT id FROM v2_access_requests WHERE email = ?", `${who}@requests.example.test`)?.id;
+    const reqDecided = [admin(["requests", "decline", reqId("decl")], { ALIGN_DATA_DIR: retDir }), admin(["requests", "approve", reqId("appr"), "--print"], { ALIGN_DATA_DIR: retDir })];
+    withDb((d) => d.prepare("UPDATE v2_access_requests SET decided_at = ? WHERE email = ?").run(later(60 * DAY), "appr@requests.example.test"));
+    const reqsLeft = () => q("SELECT email FROM v2_access_requests WHERE email LIKE '%@requests.example.test' ORDER BY email").map((r) => r.email.split("@")[0]).join();
+    const runA = retention(later(13 * DAY));
+    check(
+      "retention (+13 days): expired email codes, sign-in sessions and activity signals are deleted; an invite 6 days past its expiry stays; a workspace deleted 13 days ago stays restorable; a member removed 13 days ago keeps their name",
+      runA.status === 0 && codesBefore > 0 && codes() === 0 && runA.counts.codes_deleted >= 1 && runA.counts.sign_in_sessions_deleted >= 1 && act3.json?.accepted === 1 && runA.counts.activity_deleted === 1 && q1("SELECT COUNT(*) AS n FROM v2_activity").n === 0 && pendingInv() === 1 && w6Exists() && runA.counts.workspaces_purged === 0 && runA.counts.former_members_pseudonymised === 0,
+      `${runA.status} ${codesBefore} ${codes()} ${pendingInv()} ${runA.out}`,
+    );
+    const runB = retention(later(15 * DAY));
+    check("retention (+15 days): a pending invite 7 days past its expiry is deleted", runB.status === 0 && runB.counts.invites_deleted === 1 && pendingInv() === 0, runB.out);
+    const dry = retention(later(31 * DAY), { dryRun: true });
+    check(
+      "retention: --dry-run prints what it would do (purge 2 workspaces, pseudonymise 2 former members) and changes nothing",
+      dry.status === 0 && dry.counts.dry_run === true && /^Would \(as of /.test(dry.out) && dry.counts.workspaces_purged === 2 && dry.counts.former_members_pseudonymised === 2 && w6Exists() && q1("SELECT user_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S3.key)?.user_id === r3.id,
+      dry.out,
+    );
+    const noIdp = retention(later(31 * DAY), { testIdp: false });
+    check(
+      "retention: ALIGN_TEST_NOW is ignored without ALIGN_TEST_IDP=1 (the job runs at the real time, so nothing is due)",
+      noIdp.status === 0 && Math.abs(Date.parse(noIdp.counts.now) - Date.now()) < 60_000 && noIdp.counts.workspaces_purged === 0 && noIdp.counts.former_members_pseudonymised === 0 && w6Exists(),
+      noIdp.out,
+    );
+    const actor3 = eventActor(readFileSync(path.join(retDir, ".secret"), "utf8").trim(), r3.id);
+    const ev3 = (w) => q1("SELECT COUNT(*) AS n FROM v2_events WHERE ws_id = ? AND actor = ?", w, actor3).n;
+    const ev3Before = { w1: ev3(W1), own: ev3(W3x), total: q1("SELECT COUNT(*) AS n FROM v2_events").n };
+    const runE = retention(later(31 * DAY));
+    const ev3After = { w1: ev3(W1), own: ev3(W3x), total: q1("SELECT COUNT(*) AS n FROM v2_events").n };
+    check(
+      "retention (+31 days): making someone \"Former member #n\" in a workspace clears their actor hash from that workspace's product events (the events stay); their events in a workspace they are still in keep it",
+      ev3Before.w1 > 0 && ev3Before.own > 0 && ev3After.w1 === 0 && ev3After.own === ev3Before.own && ev3After.total === ev3Before.total,
+      `${JSON.stringify(ev3Before)} ${JSON.stringify(ev3After)}`,
+    );
+    await signIn(r1);
+    const g3Later = (await ws(r1, "GET", W1, `/goals/${G3.id}`)).json?.goal;
+    const s3Row = q1("SELECT user_id, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W1, S3.key);
+    const r3InW1 = { ...mentions(r3.id, W1), ...mentions(r3.email, W1) };
+    const w6Left = mentions(W6);
+    check(
+      "retention (+31 days): workspaces deleted 31 days ago (by their owner, or with an account) are purged (no row anywhere mentions them, change-request evidence included) and can't be restored",
+      runE.status === 0 && runE.counts.workspaces_purged === 2 && Object.keys(w6Left).length === 0 && Object.keys(mentions(W4)).length === 0 && (await ws(r1, "POST", W6, "/restore", {})).status === 404 &&
+        cr6.status === 201 && ev6.status === 201 && q1("SELECT COUNT(*) AS n FROM v2_change_request_evidence WHERE id = ?", ev6.json?.evidence?.id).n === 0,
+      `${runE.out} ${JSON.stringify(w6Left)}`,
+    );
+    check(
+      "retention (+31 days): removed members become \"Former member #n\" in the order they left (numbers stable per workspace); their sessions lose the device; no row of that workspace holds their id or email; their account itself stays",
+      runE.counts.former_members_pseudonymised === 2 && g3Later?.owner?.id === "fm_3" && g3Later.owner.name === "Former member #3" && s3Row?.user_id === "fm_3" && s3Row.device_id === null && Object.keys(r3InW1).length === 0 && !!q1("SELECT 1 AS x FROM ba_user WHERE id = ?", r3.id) && q1("SELECT owner_id FROM v2_goals WHERE id = ?", G5.id)?.owner_id === "fm_2",
+      `${JSON.stringify(g3Later?.owner)} ${JSON.stringify(s3Row)} ${JSON.stringify(r3InW1)}`,
+    );
+    const runE2 = retention(later(31 * DAY));
+    check("retention: running it again with the same clock changes nothing (idempotent)", runE2.status === 0 && ["workspaces_purged", "sessions_rolled_up", "former_members_pseudonymised", "audit_rows_deleted", "invites_deleted"].every((k) => runE2.counts[k] === 0), runE2.out);
+    const auditN = () => q1("SELECT COUNT(*) AS n FROM v2_audit WHERE ws_id = ?", W1).n;
+    const runF = retention(monthsLater(11));
+    check("retention (+11 months): the audit log and raw session rows are kept", runF.status === 0 && runF.counts.audit_rows_deleted === 0 && runF.counts.sessions_rolled_up === 0 && auditN() > 0, runF.out);
+    const runG = retention(monthsLater(12, 2));
+    const rawSessions = () => q1("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ?", W1).n;
+    check("retention (1 year + 2 days): audit rows older than a year are deleted; session rows (13 months) are not yet", runG.status === 0 && runG.counts.audit_rows_deleted > 0 && auditN() === 0 && runG.counts.sessions_rolled_up === 0 && rawSessions() === 2, runG.out);
+    const reqsAtYear = reqsLeft();
+    const runH = retention(monthsLater(13, 2));
+    const reqsAt13 = reqsLeft();
+    await signIn(r1);
+    const spendH = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
+    const spendHs = (await ws(r1, "GET", W1, "/spend?by=session")).json;
+    const spendLaterFrom = (await ws(r1, "GET", W1, `/spend?by=goal&from=${encodeURIComponent(later(2 * DAY))}`)).json;
+    const rollCols = withDb((d) => d.prepare("PRAGMA table_info(v2_spend_rollups)").all().map((c) => c.name));
+    const usageLeft = q1("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ?", W1).n;
+    check(
+      "retention (13 months + 2 days): sessions are rolled up into per-goal, per-day, per-model totals with no person or session, and their raw rows (sessions, epochs, usage) are deleted",
+      runH.status === 0 && runH.counts.sessions_rolled_up === 2 && runH.counts.usage_rows_rolled_up === 5 && rawSessions() === 0 && usageLeft === 0 && q1("SELECT COUNT(*) AS n FROM v2_spend_rollups WHERE ws_id = ?", W1).n > 0 && !rollCols.some((c) => /user|session|owner|device/.test(c)),
+      `${runH.out} ${rawSessions()} ${usageLeft} ${rollCols}`,
+    );
+    const g2Row = spendH?.rows?.find((r) => r.goal?.id === G2.id);
+    check(
+      "spend: rolled-up totals still report by goal (the same totals as before, invariant holds); by=session they are one \"Older sessions (rolled up)\" row; a from after their day leaves them out",
+      spendH?.total?.requests === 5 && invariantHolds(spendH) && g2Row?.requests === 2 && g2Row.est_list_usd_micros === 2 * 12_345 && spendHs?.rows?.length === 1 && spendHs.rows[0].kind === "rolled_up" && spendHs.rows[0].label === "Older sessions (rolled up)" && spendHs.rows[0].requests === 5 && invariantHolds(spendHs) && spendLaterFrom?.total?.requests === 0,
+      `${JSON.stringify(spendH?.total?.requests)} ${JSON.stringify(spendHs?.rows)} ${spendLaterFrom?.total?.requests}`,
+    );
+    const runReq = retention(monthsLater(15));
+    check(
+      "retention: access requests go 13 months after their decision, or after the request while pending: at 1 year + 2 days all 3 stay; at 13 months + 2 days the pending and the declined ones go and the one approved 60 days later stays; it goes by 15 months",
+      reqDecided.every((r) => r.status === 0) && reqsAtYear === "appr,decl,pend" && runH.counts.access_requests_deleted === 2 && reqsAt13 === "appr" && runReq.status === 0 && runReq.counts.access_requests_deleted === 1 && reqsLeft() === "",
+      `${reqDecided.map((r) => r.err).join(" ")} ${reqsAtYear} ${runH.counts.access_requests_deleted} ${reqsAt13} ${runReq.out}`,
+    );
+    const runH2 = retention(monthsLater(13, 2));
+    await signIn(r1);
+    const spendH2 = (await ws(r1, "GET", W1, "/spend?by=goal")).json;
+    check("retention: a second roll-up run adds nothing (totals unchanged)", runH2.status === 0 && runH2.counts.sessions_rolled_up === 0 && spendH2?.total?.requests === 5, runH2.out);
+
+    // -- the operator's run reads ALIGN_SESSION_MAX_DAYS as the server does: a 2-day-old session with days left on its
+    //    rolling expiry is past a cap of 1 day, not past the default 30 --
+    const R9 = await signUp("R9", "Ria Nine", "r9@example.test");
+    withDb((d) => d.prepare("UPDATE ba_session SET createdAt = ? WHERE userId = ?").run(new Date(Date.now() - 2 * DAY).toISOString(), R9.id));
+    const capRun = (env) => {
+      const r = admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: retDir, ...env });
+      let c = {};
+      try {
+        c = JSON.parse(r.out.trim().split("\n").pop());
+      } catch {}
+      return { status: r.status, out: r.out + r.err, n: c.sign_in_sessions_deleted };
+    };
+    const capDefault = capRun({});
+    const capOne = capRun({ ALIGN_SESSION_MAX_DAYS: "1" });
+    check(
+      "align-admin retention run --dry-run reads ALIGN_SESSION_MAX_DAYS as the server does: with 1 it would also delete a 2-day-old session the default 30 keeps, and changes nothing",
+      capDefault.status === 0 && capOne.status === 0 && capOne.n === capDefault.n + 1 && q1("SELECT COUNT(*) AS n FROM ba_session WHERE userId = ?", R9.id).n === 1,
+      `${capDefault.out} | ${capOne.out}`,
+    );
+
+    // -- the web UI: restore from /app, the remove panel's checkbox, and deleting an account --
+    await signIn(r1);
+    const W8 = await newWs(r1, "Retention UI");
+    const R7 = await signUp("R7", "Rhea Seven", "r7@example.test");
+    await join(r1, W8, R7);
+    const D7 = await pairDevice("R7", R7, [W8]);
+    const G7 = await goal(R7, W8, "Rhea's goal");
+    const S7 = await share(D7, W8, "r7", G7.id, 1);
+    await ws(r1, "DELETE", W8);
+    const R8 = await signUp("R8", "Rory Eight", "r8@example.test");
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const asUser = async (page, u) => {
+        await page.deleteCookie(...(await page.cookies(BASE)));
+        const [name, ...v] = u.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+        await page.setCookie({ name, value: v.join("="), url: BASE });
+      };
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        page.on("dialog", (d) => void d.accept());
+        await asUser(page, r1);
+        await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("Deleted workspaces") && document.body.innerText.includes("Retention UI"), { timeout: 15000 });
+        // Each of restore, removal, workspace deletion and account deletion first with a sign-in older than 15 minutes:
+        // Sign in again shows, nothing changes, and it signs out to sign-in with next= back to the page.
+        const signInAgainTo = async (u, nextPath) => {
+          await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Sign in again")?.click())]);
+          const at = new URL(page.url());
+          const ok = at.pathname === "/app/sign-in" && at.searchParams.get("next") === nextPath && at.searchParams.get("email") === u.email;
+          await signIn(u);
+          await asUser(page, u);
+          await page.goto(`${BASE}${nextPath}`, { waitUntil: "networkidle0" });
+          return ok;
+        };
+        ageSession(r1.cookie, 20);
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Restore")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Sign in again to restore a workspace. This needs a sign-in from the last 15 minutes."), { timeout: 15000 });
+        const staleRestoreUi = !!q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W8)?.deleted_at;
+        const restoreBack = await signInAgainTo(r1, "/app");
+        check("ui (Chrome): Restore with an old sign-in shows \"Sign in again to restore a workspace.\" and restores nothing; Sign in again signs out to /app/sign-in?next=/app", staleRestoreUi && restoreBack, page.url());
+        await page.waitForFunction(() => document.body.innerText.includes("Deleted workspaces") && document.body.innerText.includes("Retention UI"), { timeout: 15000 });
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Restore")?.click());
+        await page.waitForFunction((w) => !!document.querySelector(`a[href="/app/w/${w}"]`) && !document.body.innerText.includes("Deleted workspaces"), { timeout: 15000 }, W8);
+        check("ui (Chrome): /app lists deleted workspaces with Restore; restoring brings the workspace back into the list", true);
+        await page.goto(`${BASE}/app/w/${W8}/people`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("Delete this workspace") && document.body.innerText.includes("Rhea Seven"), { timeout: 15000 });
+        ageSession(r1.cookie, 20);
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Remove")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Also delete their shared sessions in this workspace now"), { timeout: 15000 });
+        await page.click('[role="group"] input[type="checkbox"]');
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Remove Rhea Seven")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Sign in again to remove a member. This needs a sign-in from the last 15 minutes."), { timeout: 15000 });
+        const panelStays = await page.evaluate(() => !!document.querySelector('[role="group"] input[type="checkbox"]')?.checked);
+        const staleRemoveUi = !!q1("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", W8, R7.id) && q1("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W8, S7.key).n === 1;
+        const removeBack = await signInAgainTo(r1, `/app/w/${W8}/people`);
+        check("ui (Chrome): the remove panel with an old sign-in shows \"Sign in again to remove a member.\" (the panel stays open, ticked; nobody is removed, no session deleted); Sign in again comes back to People", panelStays && staleRemoveUi && removeBack, page.url());
+        await page.waitForFunction(() => document.body.innerText.includes("Delete this workspace") && document.body.innerText.includes("Rhea Seven"), { timeout: 15000 });
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Remove")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Also delete their shared sessions in this workspace now"), { timeout: 15000 });
+        await page.click('[role="group"] input[type="checkbox"]');
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Remove Rhea Seven")?.click());
+        await page.waitForFunction(() => !document.body.innerText.includes("Rhea Seven"), { timeout: 15000 });
+        const s7Left = q1("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ? AND session_key = ?", W8, S7.key).n;
+        check("ui (Chrome): People's Remove opens a panel with \"Also delete their shared sessions in this workspace now\"; ticked, the member and their sessions go", s7Left === 0 && S7.accepted === 1, `${s7Left}`);
+        ageSession(r1.cookie, 20);
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete workspace")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Sign in again to delete this workspace. This needs a sign-in from the last 15 minutes."), { timeout: 15000 });
+        const staleDeleteUi = !q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W8)?.deleted_at;
+        const deleteBack = await signInAgainTo(r1, `/app/w/${W8}/people`);
+        check("ui (Chrome): Delete workspace with an old sign-in shows \"Sign in again to delete this workspace.\" and deletes nothing; Sign in again comes back to People", staleDeleteUi && deleteBack, page.url());
+        await page.waitForFunction(() => document.body.innerText.includes("Delete this workspace"), { timeout: 15000 });
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete workspace")?.click());
+        await page.waitForFunction(() => location.pathname === "/app" && document.body.innerText.includes("Deleted workspaces"), { timeout: 15000 });
+        check("ui (Chrome): People's Delete workspace (confirmed) deletes it and the workspace shows under Deleted workspaces", !!q1("SELECT deleted_at FROM v2_workspaces WHERE id = ?", W8)?.deleted_at);
+        // Account deletion, on localhost (passkeys need a domain name) with a virtual authenticator: R8 adds a passkey,
+        // says "Not now" to the prompt, comes back with an old sign-in (Sign in again; the passkey autofill signs in),
+        // then deletes the account. Nothing that names them is left, passkey tables included.
+        const LB = `http://localhost:${PORT}`;
+        const pctx = await browser.createBrowserContext();
+        const pk = await pctx.newPage();
+        pk.on("pageerror", (e) => errors.push(e.message));
+        pk.on("dialog", (d) => void d.accept());
+        const cdp = await pk.createCDPSession();
+        await cdp.send("WebAuthn.enable");
+        await cdp.send("WebAuthn.addVirtualAuthenticator", {
+          options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+        });
+        const pkText = () => pk.evaluate(() => document.body.innerText);
+        const pkClick = (label) => pk.evaluate((l) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === l)?.click(), label);
+        const pkCookie = async () => `align_v2.session_token=${(await pk.cookies()).find((c) => c.name === "align_v2.session_token")?.value ?? ""}`;
+        {
+          const [name, ...v] = R8.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+          await pk.setCookie({ name, value: v.join("="), url: LB });
+        }
+        await pk.goto(`${LB}/app/account`, { waitUntil: "networkidle0" });
+        await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet.") && document.body.innerText.includes("Delete your account"), { timeout: 15000 });
+        await pk.type('main input[maxlength="100"]:not([aria-label])', "Rory's passkey");
+        await pkClick("Add a passkey");
+        await pk.waitForFunction(() => document.body.innerText.includes("Rory's passkey"), { timeout: 15000 });
+        await pk.evaluate(() => fetch("/api/v2/account/passkey-prompt", { method: "DELETE", credentials: "same-origin" }));
+        const pk8 = q1("SELECT id FROM ba_passkey WHERE userId = ?", R8.id)?.id;
+        ageSession(await pkCookie(), 20);
+        await pk.goto(`${LB}/app/account`, { waitUntil: "networkidle0" });
+        await pk.waitForFunction(() => document.body.innerText.includes("Sign in again to delete your account."), { timeout: 15000 });
+        const staleForm = (await pkText()).includes("Delete my account");
+        await pkClick("Sign in again");
+        // The sign-in page's passkey autofill answers at once and comes back to /app/account.
+        await pk.waitForFunction(() => location.pathname === "/app/account" && document.body.innerText.includes("last used"), { timeout: 20000 });
+        const before8 = {
+          passkeys: q1("SELECT COUNT(*) AS n FROM ba_passkey WHERE userId = ?", R8.id).n,
+          use: q1("SELECT COUNT(*) AS n FROM v2_passkey_use WHERE passkey_id = ?", pk8 ?? "").n,
+          dismissed: q1("SELECT COUNT(*) AS n FROM v2_passkey_prompt_dismissed WHERE user_id = ?", R8.id).n,
+        };
+        await pk.waitForFunction(() => document.body.innerText.includes("Delete your account"), { timeout: 15000 });
+        const disabledBefore = await pk.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete my account")?.disabled);
+        await pk.type('input[aria-label="Your email, to confirm"]', R8.email);
+        await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pkClick("Delete my account")]);
+        const after8 = {
+          passkeys: q1("SELECT COUNT(*) AS n FROM ba_passkey WHERE userId = ? OR id = ?", R8.id, pk8 ?? "").n,
+          use: q1("SELECT COUNT(*) AS n FROM v2_passkey_use WHERE passkey_id = ?", pk8 ?? "").n,
+          dismissed: q1("SELECT COUNT(*) AS n FROM v2_passkey_prompt_dismissed WHERE user_id = ?", R8.id).n,
+          left: { ...mentions(R8.id), ...mentions(R8.email) },
+        };
+        check(
+          "ui (Chrome): /app/account with an old sign-in shows \"Sign in again to delete your account.\" instead of the form; Sign in again (here by passkey) comes back to it",
+          !staleForm && before8.passkeys === 1 && before8.use === 1 && before8.dismissed === 1,
+          `${staleForm} ${JSON.stringify(before8)}`,
+        );
+        check(
+          "ui (Chrome): /app/account's Delete my account stays disabled until the email is typed, then deletes the account and opens sign-in; their passkey, its last use and their \"Not now\" are gone and no row anywhere holds their id or email",
+          disabledBefore === true && new URL(pk.url()).pathname === "/app/sign-in" && !q1("SELECT 1 AS x FROM ba_user WHERE id = ?", R8.id) &&
+            after8.passkeys === 0 && after8.use === 0 && after8.dismissed === 0 && Object.keys(after8.left).length === 0 && errors.length === 0,
+          `${disabledBefore} ${pk.url()} ${JSON.stringify(after8)} ${errors.join(" | ")}`,
+        );
+        await pctx.close();
+      } catch (e) {
+        check("ui (Chrome) retention run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available", false, `no Chrome at ${CHROME}`);
+
+    // PORT-003 fills this block: asks, mentions and value reports under account deletion, former members, purge and
+    // the 13-month rule for closed asks.
+    // ==== port:retention ====
+    // Asks, their mentions and value reports (PORT-003) under account deletion, former members, purge and the 13-month
+    // rules. Quinn leads a team in WA; Quill records asks there and in WP, adds mentions, and has a value report in each.
+    await signIn(r1);
+    const QA = await signUp("QA", "Quinn Lead", "qa@example.test");
+    const QB = await signUp("QB", "Quill Asker", "qb@example.test");
+    const WA = await newWs(r1, "Retention asks");
+    const WP = await newWs(r1, "Retention asks purge");
+    for (const [w, u] of [
+      [WA, QA],
+      [WA, QB],
+      [WP, QB],
+    ])
+      await join(r1, w, u);
+    const qTeam = async (w, lead) => {
+      const t = (await ws(r1, "POST", w, "/teams", { name: "Quinn's team" })).json?.id;
+      await ws(r1, "POST", w, `/teams/${t}/members`, { user_id: lead.id, role: "lead" });
+      return t;
+    };
+    const TQ = await qTeam(WA, QA);
+    const TQP = await qTeam(WP, r1);
+    const qAsk = async (w, team, text) => (await ws(QB, "POST", w, "/asks", { team_id: team, text, source: { kind: "meeting", title: "Retro", date: "2026-10-01" } })).json?.id;
+    const qAct = (u, w, id, action, body = {}) => ws(u, "POST", w, `/asks/${id}/${action}`, body);
+    const qMention = { date: "2026-10-02", text: "Quill said it again", source_title: "Standup" };
+    const qIds = {};
+    for (const k of ["open", "accepted", "done", "declined", "withdrawn"]) qIds[k] = await qAsk(WA, TQ, `Ask that ends ${k}`);
+    await qAct(QB, WA, qIds.open, "mention", qMention);
+    await qAct(QB, WA, qIds.done, "mention", qMention);
+    for (const k of ["accepted", "done"]) await qAct(QA, WA, qIds[k], "accept");
+    await qAct(QA, WA, qIds.done, "done");
+    await qAct(QA, WA, qIds.declined, "decline");
+    await qAct(QB, WA, qIds.withdrawn, "withdraw");
+    const pAsk = await qAsk(WP, TQP, "Ask in a workspace that gets purged");
+    await qAct(QB, WP, pAsk, "mention", qMention);
+    // A value report each (PORT-004 writes them through its route; here the row is put in directly), on a change request
+    // Quill made.
+    const vReport = async (w) => {
+      const g = await goal(r1, w, "Rita's goal for value");
+      const c = await ws(QB, "POST", w, `/goals/${g.id}/change-requests`, { base_version: 1, changes: { title: "Sharper" }, reason: "clearer" });
+      const at = new Date().toISOString();
+      withDb((d) => d.prepare("INSERT INTO v2_value_reports (id, ws_id, change_request_id, person_id, estimate, note, created_at, updated_at) VALUES (?, ?, ?, ?, 'about_a_week', 'Quill note', ?, ?)").run(`vr_${randomBytes(12).toString("hex").slice(0, 24)}`, w, c.json?.id, QB.id, at, at));
+      return c.status;
+    };
+    const vrStatus = [await vReport(WA), await vReport(WP)];
+    const qStates = q(`SELECT state FROM v2_asks WHERE ws_id = ? ORDER BY text`, WA).map((r) => r.state).join();
+    check(
+      "retention setup (asks): asks in every state, mentions and a value report in a workspace, and an ask, mention and value report in a second one",
+      qStates === "accepted,declined,done,open,withdrawn" && vrStatus.every((s) => s === 201) && q1("SELECT COUNT(*) AS n FROM v2_ask_mentions WHERE ws_id = ?", WP).n === 1,
+      `${qStates} ${vrStatus}`,
+    );
+
+    // Account deletion of the lead who decided them: no row anywhere holds their id or email; the asks stay.
+    const delQA = await call("QA", "DELETE", "/api/v2/me", { cookie: QA.cookie, body: { email: QA.email } });
+    const qaLeft = { ...mentions(QA.id), ...mentions(QA.email) };
+    const decidedNow = (await ws(r1, "GET", WA, `/asks/${qIds.done}`)).json?.decided_by;
+    check(
+      "account deletion (asks): a team lead who accepted, declined and finished asks deletes their account: no row anywhere holds their id or email; the asks stay, decided by \"Former member #n\"",
+      delQA.status === 204 && Object.keys(qaLeft).length === 0 && /^fm_\d+$/.test(decidedNow?.id ?? "") && /^Former member #\d+$/.test(decidedNow?.name ?? "") && q1("SELECT COUNT(*) AS n FROM v2_asks WHERE ws_id = ?", WA).n === 5,
+      `${delQA.status} ${JSON.stringify(qaLeft)} ${JSON.stringify(decidedNow)}`,
+    );
+
+    // Quill is removed from WA (a former member 30 days on) and WP is deleted (purged 30 days on).
+    const rmQB = await call("R1", "DELETE", `/api/v2/workspaces/${WA}/members/${QB.id}`, { cookie: r1.cookie });
+    const delWP = await ws(r1, "DELETE", WP);
+    const wpRows = () => ["v2_asks", "v2_ask_mentions", "v2_value_reports"].map((t) => q1(`SELECT COUNT(*) AS n FROM ${t} WHERE ws_id = ?`, WP).n);
+    const dryQ = retention(later(31 * DAY), { dryRun: true });
+    const wpBefore = wpRows();
+    const runQ = retention(later(31 * DAY));
+    await signIn(r1);
+    const qbInWA = { ...mentions(QB.id, WA), ...mentions(QB.email, WA) };
+    const openNow = (await ws(r1, "GET", WA, `/asks/${qIds.open}`)).json;
+    const qbVr = q1("SELECT person_id FROM v2_value_reports WHERE ws_id = ?", WA)?.person_id;
+    check(
+      "retention (+31 days, asks): a removed member's asks, mentions and value report read \"Former member #n\" and no row of that workspace holds their id or email (their account stays); a purged workspace's asks, mentions and value reports are gone; the dry run changed nothing",
+      rmQB.status === 204 && delWP.status === 204 && dryQ.status === 0 && wpBefore.every((n) => n === 1) && runQ.status === 0 && wpRows().every((n) => n === 0) &&
+        Object.keys(qbInWA).length === 0 && /^Former member #\d+$/.test(openNow?.requester?.name ?? "") && /^Former member #\d+$/.test(openNow?.mentions?.[0]?.added_by?.name ?? "") && /^fm_\d+$/.test(qbVr ?? "") && !!q1("SELECT 1 AS x FROM ba_user WHERE id = ?", QB.id),
+      `${rmQB.status} ${delWP.status} ${wpBefore} ${wpRows()} ${JSON.stringify(qbInWA)} ${JSON.stringify(openNow?.requester)} ${qbVr} ${runQ.out}`,
+    );
+
+    // Closed asks and value reports keep 13 months after their last change.
+    const qLeft = () => q("SELECT state FROM v2_asks WHERE ws_id = ? ORDER BY state", WA).map((r) => r.state).join();
+    const vrN = () => q1("SELECT COUNT(*) AS n FROM v2_value_reports").n;
+    const vr0 = vrN();
+    const run12 = retention(monthsLater(12));
+    const dry13 = retention(monthsLater(13, 2), { dryRun: true });
+    const kept13 = { asks: qLeft(), mentions: q1("SELECT COUNT(*) AS n FROM v2_ask_mentions WHERE ws_id = ?", WA).n, vr: vrN() };
+    const run13 = retention(monthsLater(13, 2));
+    const run13b = retention(monthsLater(13, 2));
+    check(
+      "retention (asks): at 12 months nothing goes; at 13 months + 2 days done, declined and withdrawn asks go with their mentions (asks_deleted 3) and open and accepted ones stay, and value reports go (value_reports_deleted); the dry run reports the same and changes nothing; a second run changes nothing",
+      run12.status === 0 && run12.counts.asks_deleted === 0 && run12.counts.value_reports_deleted === 0 &&
+        dry13.status === 0 && dry13.counts.asks_deleted === 3 && dry13.counts.value_reports_deleted === vr0 && kept13.asks === "accepted,declined,done,open,withdrawn" && kept13.mentions === 2 && kept13.vr === vr0 &&
+        run13.status === 0 && run13.counts.asks_deleted === 3 && run13.counts.value_reports_deleted === vr0 && vr0 >= 1 && vrN() === 0 && qLeft() === "accepted,open" &&
+        q1("SELECT COUNT(*) AS n FROM v2_ask_mentions WHERE ws_id = ?", WA).n === 1 && run13b.counts.asks_deleted === 0,
+      `${run12.out} | ${dry13.out} | ${JSON.stringify(kept13)} | ${run13.out} | ${qLeft()} ${vr0}`,
+    );
+    // ==== end port:retention ====
+
+    // -- the server runs the job at startup --
+    await signIn(r1);
+    const W9 = await newWs(r1, "Retention startup");
+    await ws(r1, "DELETE", W9);
+    await stopServer();
+    const boot = await mustStart({ ALIGN_DATA_DIR: retDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: later(31 * DAY) });
+    await sleep(500);
+    check(
+      "retention: the server runs the job at startup (it logs counts only) and purges a workspace deleted 31 days before its clock",
+      !q1("SELECT 1 AS x FROM v2_workspaces WHERE id = ?", W9) && /Align retention: workspaces purged [1-9]/.test(boot.stdout()) && !boot.stdout().includes("@example.test"),
+      boot.stdout().slice(-400),
+    );
+  }
+  await stopServer();
+
+  // ======== phase events: product events (PRESEED-007) and the operator's report ========
+  // Mode L with the test IdP on a fresh data directory: a scripted set of actions, so every funnel count is known.
+  const evDir = path.join(tmpRoot, "events");
+  await mustStart({ ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" });
+  dbFile = path.join(evDir, "v2", "align.sqlite");
+  {
+    const evEnv = { ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" };
+    const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));
+    const ev = (name, w = null) => (w ? q("SELECT * FROM v2_events WHERE name = ? AND ws_id = ?", name, w) : q("SELECT * FROM v2_events WHERE name = ?", name));
+    const ws = (u, method, w, p = "", body) => call(u.who, method, `/api/v2/workspaces/${w}${p}`, { cookie: u.cookie, ...(body ? { body } : {}) });
+    const E = {};
+    for (const [who, name] of [
+      ["E1", "Evelyn Funnelton"],
+      ["E2", "Edgar Quillfeather"],
+      ["E3", "Esme Lonelyworth"],
+    ])
+      E[who] = await signUp(who, name, `${who.toLowerCase()}-funnel@example.test`);
+    const { E1: e1, E2: e2, E3: e3 } = E;
+    const WS_NAME = "Zanzibar Secret Project";
+    const W = (await call("E1", "POST", "/api/v2/workspaces", { cookie: e1.cookie, body: { name: WS_NAME } })).json?.id;
+    const WQ = (await call("E3", "POST", "/api/v2/workspaces", { cookie: e3.cookie, body: { name: "Quiet Kestrel Workspace" } })).json?.id;
+    const WS_SAMPLE = (await call("E1", "POST", "/api/v2/workspaces/sample", { cookie: e1.cookie, body: {} })).json?.id;
+    const inv = await ws(e1, "POST", W, "/invites", { email: e2.email, role: "member" });
+    await ws(e1, "POST", W, "/invites", { email: "dormant-invitee@example.test", role: "viewer" });
+    const acc = await call("E2", "POST", `/api/v2/invites/${inv.json?.token}/accept`, { cookie: e2.cookie, body: {} });
+    const DE1 = await pairDevice("E1", e1, [W], "Evelyn's Marigold laptop");
+    const DE2 = await pairDevice("E2", e2, [W], "Edgar's Thistle laptop");
+    const GOAL_TITLE = "Launch the Periwinkle initiative";
+    const G = (await ws(e1, "POST", W, "/goals", { title: GOAL_TITLE, visibility: "workspace" })).json;
+    const shareS = async (dev, native, goalId, n, alias) => {
+      const key = sessionKey(dev, W, "claude-code", native);
+      const start = new Date(Date.now() - 3600 * 1000).toISOString();
+      const put = await call(dev.who, "PUT", `/api/v2/workspaces/${W}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, W, "/src/r"), repo_alias: alias, started_at: start, title: "Refactor the Gooseberry module" } });
+      const ep = epochId();
+      const epoch = await call(dev.who, "POST", `/api/v2/workspaces/${W}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: ep, goal_id: goalId, starts_at: start, root_turn: null, cause: "manual" } });
+      const up = n ? await call(dev.who, "POST", `/api/v2/workspaces/${W}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: Array.from({ length: n }, (_, i) => usageRow(dev, `${native}-${i}`, ep)) } }) : null;
+      return { key, ok: put.status === 200 && epoch.status < 300 && (!up || up.json?.accepted === n) };
+    };
+    const S1 = await shareS(DE1, "e1-a", G?.id, 2, "pomegranate-repo");
+    const S2 = await shareS(DE1, "e1-b", null, 0, "pomegranate-repo");
+    const S3 = await shareS(DE2, "e2-a", null, 1, "quince-repo");
+    const ep2 = await call("E1", "POST", `/api/v2/workspaces/${W}/sessions/${S2.key}/epochs`, { bearer: DE1.access, body: { epoch_id: epochId(), goal_id: G?.id, starts_at: new Date(Date.now() - 1000).toISOString(), root_turn: null, cause: "manual" } });
+    const CR_REASON = "Because the Tangerine audit asked for it";
+    const cr1 = await ws(e2, "POST", W, `/goals/${G?.id}/change-requests`, { base_version: 1, changes: { title: "Launch the Periwinkle initiative sooner" }, reason: CR_REASON });
+    const crOk = await ws(e1, "POST", W, `/goals/${G?.id}/change-requests/${cr1.json?.id}/approve`, { revision: 1, note: "Approved after the Saffron review" });
+    const evOnApprove = withDb((d) => d.prepare("SELECT name FROM v2_events WHERE ws_id = ? AND name IN ('first_approval', 'first_launch', 'first_directive')").all(W).map((r) => r.name).sort().join());
+    const crLaunch = await ws(e1, "POST", W, `/goals/${G?.id}/change-requests/${cr1.json?.id}/launch`, {});
+    const cr2 = await ws(e2, "POST", W, `/goals/${G?.id}/change-requests`, { base_version: 2, changes: { title: "Launch the Periwinkle initiative later" }, reason: "second thoughts" });
+    const stopS3 = await ws(e1, "POST", W, `/sessions/${S3.key}/stop`, {});
+    const mcp1 = await mcpCall("E1", DE1, "align_list_goals");
+    const mcp2 = await mcpCall("E2", DE2, "align_list_goals");
+    await sleep(200);
+    check(
+      "events setup: two workspaces and a sample; an invite accepted and one pending; two paired devices; three sessions (one bound to a goal at once, one later, one never); a change request approved and another made; an agent stopped; two MCP reads",
+      W && WQ && WS_SAMPLE && acc.status === 200 && G?.id && S1.ok && S2.ok && S3.ok && ep2.status < 300 && cr1.status === 201 && crOk.status === 200 && crLaunch.json?.launch === "launched" && cr2.status === 201 && stopS3.status === 200 && mcp1.status === 200 && !mcp1.isError && mcp2.status === 200 && !mcp2.isError,
+      `${acc.status} ${S1.ok} ${S2.ok} ${S3.ok} ${ep2.status} ${cr1.status} ${crOk.status} ${crOk.text} ${cr2.status} ${cr2.text} ${stopS3.status} ${mcp1.status} ${mcp2.status}`,
+    );
+
+    // -- each event once where it is a first, by the right code point --
+    const once = (name, w = W) => ev(name, w).length === 1;
+    const props = (name, w = W) => JSON.parse(ev(name, w)[0]?.props ?? "null");
+    check(
+      "events: workspace_created once per workspace (kind blank, or sample for the sample); invite_sent per invite with its role; invite_accepted and second_member_joined once; device_paired per device for its workspace",
+      once("workspace_created") && once("workspace_created", WQ) && props("workspace_created").kind === "blank" && props("workspace_created", WS_SAMPLE)?.kind === "sample" &&
+        ev("invite_sent", W).length === 2 && ev("invite_sent", W).map((e) => JSON.parse(e.props).role).sort().join() === "member,viewer" && once("invite_accepted") && once("second_member_joined") &&
+        ev("device_paired", W).length === 2 && JSON.parse(ev("device_paired", W)[0].props).workspaces === 1 && ev("code_redeemed").length === 0,
+      JSON.stringify(q("SELECT name, ws_id, props FROM v2_events")),
+    );
+    check(
+      "events: three sessions shared -> first_session_captured once for the workspace and member_first_session_captured once per person (2), with the harness only; first_session_bound once (two sessions bound), harness and authority own",
+      once("first_session_captured") && props("first_session_captured").harness === "claude-code" && ev("member_first_session_captured", W).length === 2 && new Set(ev("member_first_session_captured", W).map((e) => e.actor)).size === 2 &&
+        once("first_session_bound") && props("first_session_bound").authority === "own" && props("first_session_bound").harness === "claude-code",
+      JSON.stringify([ev("first_session_captured"), ev("member_first_session_captured"), ev("first_session_bound")]),
+    );
+    check(
+      "events: first_change_request once (two requests), first_approval once (recorded alone at the approval: no first_launch or first_directive yet), first_launch once with no props, first_directive once (the launch's goal_version reached the bound sessions; the stop came later), first_mcp_read once (two reads) with the client kind; the sample's seeded request records nothing",
+      evOnApprove === "first_approval" && once("first_change_request") && once("first_approval") && once("first_launch") && props("first_launch") && Object.keys(props("first_launch")).length === 0 && once("first_directive") && props("first_directive").kind === "goal_version" && once("first_mcp_read") && props("first_mcp_read").client === "device" &&
+        ev("first_change_request", WS_SAMPLE).length === 0 && q("SELECT COUNT(*) AS n FROM v2_directives WHERE ws_id = ?", W)[0].n >= 2,
+      JSON.stringify(q("SELECT name, ws_id, props FROM v2_events WHERE name LIKE 'first_%'")),
+    );
+    const dupes = q("SELECT name, ws_id, COUNT(*) AS n FROM v2_events WHERE ws_id IS NOT NULL AND (name LIKE 'first_%' OR name IN ('workspace_created', 'code_redeemed', 'second_member_joined')) GROUP BY name, ws_id HAVING n > 1");
+    let dupInsert = "";
+    let appendOnly = "";
+    withDb((d) => {
+      try {
+        d.prepare("INSERT INTO v2_events (name, ws_id, at, props) VALUES ('first_approval', ?, ?, '{}')").run(W, new Date().toISOString());
+      } catch (e) {
+        dupInsert = String(e.message);
+      }
+      try {
+        d.prepare("UPDATE v2_events SET props = '{\"x\":1}' WHERE name = 'workspace_created'").run();
+      } catch (e) {
+        appendOnly = String(e.message);
+      }
+    });
+    check(
+      "events: no first-time event appears twice for a workspace, a second one is refused by the database's unique index, and the table is append-only (changing an event's props is refused)",
+      dupes.length === 0 && /UNIQUE/.test(dupInsert) && /append-only/.test(appendOnly),
+      `${JSON.stringify(dupes)} ${dupInsert} ${appendOnly}`,
+    );
+
+    // -- access requests and codes through the operator script --
+    const arE = (body) => call("anon", "POST", "/api/v2/access-requests", { headers: { origin: BASE }, body });
+    const ar1 = await arE({ email: "hopeful-applicant@example.test", name: "Horatio Hopeful", company: "Wobblegong Ltd", use_case: "Steer the Wobblegong agents", interest: "try" });
+    const ar1b = await arE({ email: "hopeful-applicant@example.test", name: "Horatio Hopeful", company: "Wobblegong Ltd", use_case: "Steer the Wobblegong agents, again", interest: "try" });
+    const ar2 = await arE({ email: "keen-evaluator@example.test", name: "Kerensa Keen", use_case: "Evaluate for the Marmalade team", interest: "evaluate" });
+    const reqIds = q("SELECT id, email FROM v2_access_requests ORDER BY created_at");
+    const apr = admin(["requests", "approve", reqIds.find((r) => r.email.startsWith("hopeful"))?.id ?? "", "--print"], evEnv);
+    const dec = admin(["requests", "decline", reqIds.find((r) => r.email.startsWith("keen"))?.id ?? ""], evEnv);
+    const opCodes = admin(["codes", "create", "--count", "2"], evEnv);
+    check(
+      "events: access_requested once per request (sending again updates it and records nothing), with its interest; approving records access_approved and code_created (source request), declining access_declined, codes create code_created (source operator) per code; none has a workspace or actor",
+      ar1.status === 201 && ar1b.status === 201 && ar2.status === 201 && apr.status === 0 && dec.status === 0 && opCodes.status === 0 &&
+        ev("access_requested").length === 2 && ev("access_requested").map((e) => JSON.parse(e.props).interest).sort().join() === "evaluate,try" && ev("access_approved").length === 1 && ev("access_declined").length === 1 &&
+        ev("code_created").map((e) => JSON.parse(e.props).source).sort().join() === "operator,operator,request" &&
+        [...ev("access_requested"), ...ev("access_approved"), ...ev("access_declined"), ...ev("code_created")].every((e) => e.ws_id === null && e.actor === null),
+      `${ar1.status} ${ar2.status} ${apr.status} ${apr.err} ${dec.status} ${JSON.stringify(q("SELECT name, props FROM v2_events WHERE ws_id IS NULL"))}`,
+    );
+
+    // -- LOIs: operator-recorded only; signed needs --verified-original --
+    const loiSent = admin(["events", "record", "loi_sent", "--workspace", W, "--note-ref", "LOI-2026-007"], evEnv);
+    const loiNoVerify = admin(["events", "record", "loi_signed", "--workspace", W], evEnv);
+    const afterNoVerify = ev("loi_signed").length;
+    const loiBadRef = admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original", "--note-ref", "https://docs.example.test/loi"], evEnv);
+    const loiEmailRef = admin(["events", "record", "loi_sent", "--workspace", WQ, "--note-ref", "someone@example.test"], evEnv);
+    const loiSentVerify = admin(["events", "record", "loi_sent", "--workspace", WQ, "--verified-original"], evEnv);
+    const loiUnknownWs = admin(["events", "record", "loi_sent", "--workspace", "ws_aaaaaaaaaaaaaaaaaaaaaaaa"], evEnv);
+    const loiOther = admin(["events", "record", "first_approval", "--workspace", W], evEnv);
+    const loiSigned = admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original", "--note-ref", "LOI-2026-007"], evEnv);
+    const loiAgain = admin(["events", "record", "loi_signed", "--workspace", W, "--verified-original"], evEnv);
+    check(
+      "align-admin events record: loi_sent records once with the note ref; loi_signed without --verified-original exits 2, says a form or claim is not a signature, and records nothing; a ref that is a URL or email, --verified-original on loi_sent or any other event name exits 2; an unknown workspace exits 1; with --verified-original it records (verified_original yes), and a second time exits 1",
+      loiSent.status === 0 && loiNoVerify.status === 2 && /--verified-original/.test(loiNoVerify.err) && /not a signature/.test(loiNoVerify.err) && afterNoVerify === 0 &&
+        loiBadRef.status === 2 && loiEmailRef.status === 2 && loiSentVerify.status === 2 && loiOther.status === 2 && loiUnknownWs.status === 1 &&
+        loiSigned.status === 0 && /verified original/.test(loiSigned.out) && loiAgain.status === 1 && ev("loi_sent").length === 1 && props("loi_sent").note_ref === "LOI-2026-007" && ev("loi_signed").length === 1 && props("loi_signed").verified_original === "yes" && ev("loi_signed")[0].actor === null,
+      `${loiSent.status} ${loiSent.err} | ${loiNoVerify.status} ${loiNoVerify.err} | ${loiBadRef.status} ${loiEmailRef.status} ${loiSentVerify.status} ${loiOther.status} ${loiUnknownWs.status} ${loiSigned.status} ${loiSigned.out} ${loiAgain.status}`,
+    );
+
+    // -- the ported content (PORT-004): a limit, an ask with a mention, and a value report, each with its own words --
+    const gNow = (await ws(e1, "GET", W, `/goals/${G?.id}`)).json?.goal;
+    const limV = await ws(e1, "POST", W, `/goals/${G?.id}/versions`, { version: gNow?.version, limits: [{ type: "must_not", text: "Never touch the Bramblewick ledger", source: { kind: "meeting", title: "Featherstone sync", date: "2026-10-20" } }] });
+    const teamE = (await ws(e1, "POST", W, "/teams", { name: "Sassafras team" })).json?.id;
+    const askE = await ws(e1, "POST", W, "/asks", { team_id: teamE, text: "Ask the Cobblestone team for the export", from_label: "Larkspur Faculty", source: { kind: "meeting", title: "Juniper standup", date: "2026-10-21" } });
+    const mentionE = await ws(e1, "POST", W, `/asks/${askE.json?.id}/mention`, { date: "2026-10-22", text: "Huckleberry came up again", source_title: "Nutmeg review" });
+    const valueE = await ws(e2, "POST", W, `/goals/${G?.id}/change-requests/${cr1.json?.id}/value`, { action: "reported", estimate: "longer", note: "Saved the Pimpernel week" });
+    check(
+      "events setup (ported content): a goal version with a limit, an ask with a mention, and a value report with a note, through the routes",
+      limV.status === 201 && limV.json?.limits?.length === 1 && !!teamE && askE.status === 201 && mentionE.status === 200 && valueE.status === 200 && valueE.json?.recorded === true,
+      `${limV.status} ${limV.text.slice(0, 160)} ${askE.status} ${askE.text.slice(0, 160)} ${mentionE.status} ${valueE.status} ${valueE.text.slice(0, 160)}`,
+    );
+
+    // -- no content in any event row --
+    const fixtures = [
+      ...Object.values(E).flatMap((u) => [u.email, u.name, u.id]),
+      WS_NAME, "Quiet Kestrel", "Northstar", GOAL_TITLE, "Periwinkle", CR_REASON, "Tangerine", "Saffron", "pomegranate", "quince", "Gooseberry", "Marigold", "Thistle",
+      "hopeful-applicant", "Horatio", "Wobblegong", "Kerensa", "Marmalade", "dormant-invitee", "@", "http", "alc_", "alnd_", "alnr_", DE1.access, DE1.id, "ba_", "cr_",
+      // the ported content: limit text and source title, team name, ask text, who asked, its source title, mention text
+      // and source title, a value report's note, and the ids of the ask and the change request
+      "Bramblewick", "Featherstone", "Sassafras", "Cobblestone", "Larkspur", "Juniper", "Huckleberry", "Nutmeg", "Pimpernel", "ask_", "lim_", "vr_",
+    ];
+    const rowsText = q("SELECT * FROM v2_events").map((r) => Object.values(r).join(" ")).join("\n");
+    const found = fixtures.filter((f) => f && rowsText.toLowerCase().includes(String(f).toLowerCase()));
+    const ALLOWED = {
+      access_requested: ["interest", "via"], access_approved: [], access_declined: [], code_created: ["source"], code_redeemed: [], workspace_created: ["kind"], invite_sent: ["role"], invite_accepted: ["role"],
+      device_paired: ["workspaces"], first_session_captured: ["harness"], member_first_session_captured: ["harness"], first_session_bound: ["harness", "authority"], second_member_joined: [],
+      first_change_request: [], first_approval: [], first_directive: ["kind"], first_mcp_read: ["client"], loi_sent: ["note_ref"], loi_signed: ["note_ref", "verified_original"],
+      first_ask: [], first_limit: [], value_card_viewed: [], value_reported: ["estimate"], follow_up_clicked: [], first_request: ["type"], first_hold: [], first_launch: [],
+    };
+    const offList = q("SELECT name, props FROM v2_events").filter((r) => !ALLOWED[r.name] || Object.keys(JSON.parse(r.props)).some((k) => !ALLOWED[r.name].includes(k)));
+    check(
+      "events: no event row holds an email, name, user id, workspace name, goal title, change request text, repo alias, session title, device name, URL, code or token from this phase, nor limit, ask, mention or value report text, and every props key is on its event's allowlist",
+      q("SELECT COUNT(*) AS n FROM v2_events")[0].n > 20 && found.length === 0 && offList.length === 0,
+      `${found.join(", ")} ${JSON.stringify(offList)}`,
+    );
+
+    // -- the report --
+    const repJ = admin(["report", "--json"], evEnv);
+    let rep = null;
+    try {
+      rep = JSON.parse(repJ.out);
+    } catch {}
+    const step = (s) => rep?.funnel?.find((f) => f.step === s)?.workspaces;
+    check(
+      "align-admin report --json: access 2 requested (1 try, 1 evaluate), 1 approved, 1 declined, 3 codes (1 from requests), 0 redeemed; the funnel over the 2 non-sample workspaces: created 2, device paired 1, first session 1, bound 1, second member 1, change request 1, approval or directive 1, MCP read 1 (of previous 50%); 1 sample, 2 invites sent, 1 accepted, 2 people with a first session",
+      repJ.status === 0 && rep && rep.access.requested === 2 && rep.access.requested_try === 1 && rep.access.requested_evaluate === 1 && rep.access.approved === 1 && rep.access.declined === 1 && rep.access.codes_created === 3 && rep.access.codes_from_requests === 1 && rep.access.codes_redeemed === 0 &&
+        step("workspace created") === 2 && step("device paired") === 1 && step("first session captured") === 1 && step("first session bound to a goal") === 1 && step("second member joined") === 1 &&
+        step("first change request") === 1 && step("first approval or directive") === 1 && step("first MCP read") === 1 && rep.funnel[1].of_previous === 0.5 &&
+        rep.other.sample_workspaces_created === 1 && rep.other.invites_sent === 2 && rep.other.invites_accepted === 1 && rep.other.people_with_a_first_session === 2,
+      `${repJ.status} ${repJ.err} ${JSON.stringify(rep?.access)} ${JSON.stringify(rep?.funnel)} ${JSON.stringify(rep?.other)}`,
+    );
+    const ttfv = rep?.time_to_first_value;
+    const waw = rep?.weekly_active_workspaces ?? [];
+    check(
+      "align-admin report --json: time to first value from workspace created over 1 workspace (median = p75, a few minutes at most), none from a code; 8 weeks of active workspaces ending with this week's 2 (the sample left out); this week's cohort of 2 with week 1 and week 4 not yet known",
+      ttfv?.from_workspace_created.workspaces === 1 && ttfv.from_workspace_created.median_minutes !== null && ttfv.from_workspace_created.median_minutes === ttfv.from_workspace_created.p75_minutes && ttfv.from_workspace_created.median_minutes < 10 &&
+        ttfv.from_code_redeemed.workspaces === 0 && ttfv.from_code_redeemed.median_minutes === null &&
+        waw.length === 8 && waw[7].active === 2 && waw[7].complete === false && waw.slice(0, 7).every((w) => w.active === 0) && rep.retention.length === 1 && rep.retention[0].workspaces === 2 && rep.retention[0].week1 === null && rep.retention[0].week4 === null,
+      `${JSON.stringify(ttfv)} ${JSON.stringify(waw)} ${JSON.stringify(rep?.retention)}`,
+    );
+    const gb = rep?.goal_binding;
+    check(
+      "align-admin report --json: goal binding from the session and usage tables: 2 of 3 sessions bound, 2 of 3 requests and 24,690 of 37,035 estimated micro-dollars on goals; LOIs 1 sent and 1 signed for the workspace",
+      gb?.sessions === 3 && gb.bound_sessions === 2 && gb.requests === 3 && gb.bound_requests === 2 && gb.est_list_usd_micros === 37035 && gb.bound_est_list_usd_micros === 24690 && gb.spend_share === 0.6667 &&
+        rep.lois.sent === 1 && rep.lois.signed === 1 && rep.lois.workspaces.length === 1 && rep.lois.workspaces[0].ws_id === W && rep.lois.workspaces[0].signed_at,
+      `${JSON.stringify(gb)} ${JSON.stringify(rep?.lois)}`,
+    );
+    const repT = admin(["report"], evEnv);
+    const repFuture = admin(["report", "--since", "2999-01-01", "--json"], evEnv);
+    const repBad = admin(["report", "--since", "last week"], evEnv);
+    let future = null;
+    try {
+      future = JSON.parse(repFuture.out);
+    } catch {}
+    check(
+      "align-admin report: plain text tables (access, workspace funnel, time to first value, weekly active workspaces, retention, bound to goals, LOIs) with no name or email; --since filters (a future date counts nothing); a bad --since exits 2",
+      repT.status === 0 && ["Access", "Workspace funnel", "Time to first value", "Weekly active workspaces", "Retention by creation week", "Bound to goals", "LOIs (operator-recorded): 1 sent, 1 signed"].every((h) => repT.out.includes(h)) &&
+        /first session bound to a goal\s+1\s+100%\s+50%/.test(repT.out) && !repT.out.includes("@") && !repT.out.includes("Evelyn") && !repT.out.includes(WS_NAME) &&
+        repFuture.status === 0 && future?.access.requested === 0 && future.funnel[0].workspaces === 0 && future.lois.sent === 0 && repBad.status === 2,
+      `${repT.status} ${repT.out.slice(0, 1500)} ${repT.err} | ${repFuture.status} ${repBad.status}`,
+    );
+
+    // -- account deletion clears the person's actor; purging re-keys the workspace; retention keeps 13 months --
+    const secretE = readFileSync(path.join(evDir, ".secret"), "utf8").trim();
+    const e2Actor = eventActor(secretE, e2.id);
+    const e2Before = q("SELECT COUNT(*) AS n FROM v2_events WHERE actor = ?", e2Actor)[0].n;
+    const totalBefore = q("SELECT COUNT(*) AS n FROM v2_events")[0].n;
+    const delE2 = await call("E2", "DELETE", "/api/v2/me", { cookie: e2.cookie, body: { email: e2.email } });
+    check(
+      "events and account deletion: a person's events carry the keyed hash of their id (HMAC under the server secret); deleting their account clears it from every event, keeps the events (the funnel is unchanged), and their account is gone",
+      e2Before >= 4 && delE2.status === 204 && q("SELECT COUNT(*) AS n FROM v2_events WHERE actor = ?", e2Actor)[0].n === 0 && q("SELECT COUNT(*) AS n FROM v2_events")[0].n === totalBefore &&
+        q("SELECT COUNT(*) AS n FROM v2_events WHERE actor = ?", eventActor(secretE, e1.id))[0].n > 0 && !q("SELECT 1 AS x FROM ba_user WHERE id = ?", e2.id).length,
+      `${e2Before} ${delE2.status} ${delE2.text} ${totalBefore}`,
+    );
+    const purge = admin(["workspaces", "delete", WQ, "--purge", "--yes"], evEnv);
+    const rekeyed = q("SELECT ws_id FROM v2_events WHERE name = 'workspace_created' AND ws_id LIKE 'wsx_%'");
+    const repAfter = JSON.parse(admin(["report", "--json"], evEnv).out || "null");
+    check(
+      "events and purging: a purged workspace's events stay under a random wsx_ id, so no row names it and the report still counts it as created",
+      purge.status === 0 && ev("workspace_created", WQ).length === 0 && q("SELECT COUNT(*) AS n FROM v2_events WHERE ws_id = ?", WQ)[0].n === 0 && rekeyed.length === 1 && /^wsx_[a-z2-7]{24}$/.test(rekeyed[0].ws_id) && repAfter?.funnel[0].workspaces === 2,
+      `${purge.status} ${purge.err} ${JSON.stringify(rekeyed)} ${JSON.stringify(repAfter?.funnel?.[0])}`,
+    );
+    const monthsAgo = (m) => {
+      const d = new Date();
+      d.setUTCMonth(d.getUTCMonth() - m);
+      return d.toISOString();
+    };
+    withDb((d) => {
+      d.prepare("INSERT INTO v2_events (name, ws_id, at, props) VALUES ('invite_sent', ?, ?, '{\"role\":\"member\"}')").run(W, monthsAgo(14));
+      d.prepare("INSERT INTO v2_events (name, ws_id, at, props) VALUES ('invite_sent', ?, ?, '{\"role\":\"viewer\"}')").run(W, monthsAgo(12));
+    });
+    const retE = admin(["retention", "run"], evEnv);
+    let retCounts = {};
+    try {
+      retCounts = JSON.parse(retE.out.trim().split("\n").pop());
+    } catch {}
+    check(
+      "events and retention: the job deletes events older than 13 months (events_deleted 1) and keeps a 12-month-old one",
+      retE.status === 0 && retCounts.events_deleted === 1 && q("SELECT COUNT(*) AS n FROM v2_events WHERE at < ?", monthsAgo(13))[0].n === 0 && q("SELECT COUNT(*) AS n FROM v2_events WHERE at < ?", monthsAgo(11))[0].n === 1,
+      `${retE.status} ${retE.out} ${retE.err}`,
+    );
+  }
+  await stopServer();
+
+  // ======== phase hosted: v2 startup refusals, then v2 behind the hosted checks ========
+  const hostedDir = path.join(tmpRoot, "hosted");
+  const good = {
+    HOSTED: "1",
+    ALIGN_HOSTS: HOSTED_HOST,
+    ALIGN_SECRET: "t".repeat(48),
+    ALIGN_DATA_DIR: hostedDir,
+    BETTER_AUTH_SECRET: "b".repeat(40),
+    GOOGLE_CLIENT_ID: "test-google-id",
+    GOOGLE_CLIENT_SECRET: "test-google-secret",
+    GITHUB_CLIENT_ID: "test-github-id",
+    GITHUB_CLIENT_SECRET: "test-github-secret",
+    ALIGN_PUBLIC_ORIGIN: `https://${HOSTED_HOST}`,
+  };
+  const noProviders = { GOOGLE_CLIENT_ID: undefined, GOOGLE_CLIENT_SECRET: undefined, GITHUB_CLIENT_ID: undefined, GITHUB_CLIENT_SECRET: undefined };
+  // Every hosted startup check (lib/config.ts hostedProblems and lib/v2/config.ts v2Problems), each on its own server.
+  const refusals = [
+    ["no ALIGN_HOSTS", { ALIGN_HOSTS: undefined }, "ALIGN_HOSTS must list"],
+    ["a loopback name in ALIGN_HOSTS", { ALIGN_HOSTS: `${HOSTED_HOST},localhost` }, "ALIGN_HOSTS must not include loopback names"],
+    ["no ALIGN_SECRET", { ALIGN_SECRET: undefined }, "ALIGN_SECRET must be set (32+ characters)"],
+    ["a short ALIGN_SECRET", { ALIGN_SECRET: "s".repeat(20) }, "ALIGN_SECRET must be set (32+ characters)"],
+    ["a relative ALIGN_DATA_DIR", { ALIGN_DATA_DIR: "data/hosted" }, "ALIGN_DATA_DIR must be an absolute path"],
+    ["an ALIGN_DATA_DIR inside the app", { ALIGN_DATA_DIR: path.join(ROOT, "data", "hosted-inside") }, "ALIGN_DATA_DIR must be outside the app directory"],
+    ["ALIGN_PUBLIC=1", { ALIGN_PUBLIC: "1" }, "Public mode is not supported"],
+    ["no BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: undefined }, "BETTER_AUTH_SECRET must be set"],
+    ["a short BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: "short" }, "BETTER_AUTH_SECRET must be set"],
+    ["no ALIGN_PUBLIC_ORIGIN", { ALIGN_PUBLIC_ORIGIN: undefined }, "ALIGN_PUBLIC_ORIGIN must be an https origin"],
+    ["an http ALIGN_PUBLIC_ORIGIN", { ALIGN_PUBLIC_ORIGIN: `http://${HOSTED_HOST}` }, "ALIGN_PUBLIC_ORIGIN must be an https origin"],
+    ["an ALIGN_PUBLIC_ORIGIN outside ALIGN_HOSTS", { ALIGN_PUBLIC_ORIGIN: "https://other.example" }, "must be listed in ALIGN_HOSTS"],
+    ["no way to sign in (no email settings, no Google, no GitHub)", noProviders, "Sign-in needs the email settings"],
+    ["only some of the email settings", { ...noProviders, ALIGN_EMAIL_API_URL: "https://mail.example/emails", ALIGN_EMAIL_API_KEY: "k".repeat(20) }, "Set all of ALIGN_EMAIL_API_URL, ALIGN_EMAIL_API_KEY, ALIGN_EMAIL_FROM or none (missing ALIGN_EMAIL_FROM)"],
+    ["an http ALIGN_EMAIL_API_URL", { ALIGN_EMAIL_API_URL: "http://mail.example/emails", ALIGN_EMAIL_API_KEY: "k".repeat(20), ALIGN_EMAIL_FROM: "Align <a@mail.example>" }, "ALIGN_EMAIL_API_URL must be an https URL"],
+    ["a Google id without its secret", { GOOGLE_CLIENT_SECRET: undefined }, "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together"],
+    ["ALIGN_TEST_IDP", { ALIGN_TEST_IDP: "1" }, "ALIGN_TEST_IDP is not allowed when hosted"],
+    ["ALIGN_TEST_NOW (the retention job's test clock)", { ALIGN_TEST_NOW: "2030-01-01T00:00:00Z" }, "ALIGN_TEST_NOW is not allowed when hosted"],
+    ["ALIGN_TEST_OAUTH_URL (the test OAuth provider)", { ALIGN_TEST_OAUTH_URL: "http://127.0.0.1:1" }, "ALIGN_TEST_OAUTH_URL is not allowed when hosted"],
+    ["ALIGN_LOCAL_OWNER_EMAIL", { ALIGN_LOCAL_OWNER_EMAIL: "me@example.test" }, "ALIGN_LOCAL_OWNER_EMAIL is not allowed when hosted"],
+    ["a bad ALIGN_SESSION_MAX_DAYS", { ALIGN_SESSION_MAX_DAYS: "0" }, "ALIGN_SESSION_MAX_DAYS must be a whole number of days from 1 to 365"],
+    ["an unknown ALIGN_CREATION", { ALIGN_CREATION: "invite-only" }, "ALIGN_CREATION must be codes, open or closed"],
+    ["a cap that is not a positive whole number", { ALIGN_MAX_MEMBERS: "0" }, "ALIGN_MAX_MEMBERS must be a positive whole number"],
+    ["a Turnstile site key without its secret key", { ALIGN_TURNSTILE_SITE_KEY: "site" }, "ALIGN_TURNSTILE_SITE_KEY and ALIGN_TURNSTILE_SECRET_KEY must be set together"],
+    ["an http ALIGN_TURNSTILE_VERIFY_URL", { ALIGN_TURNSTILE_SITE_KEY: "site", ALIGN_TURNSTILE_SECRET_KEY: "secret", ALIGN_TURNSTILE_VERIFY_URL: "http://127.0.0.1:1/siteverify" }, "ALIGN_TURNSTILE_VERIFY_URL must be an https URL"],
+  ];
+  for (const [what, delta, needle] of refusals) {
+    const env = { ...good, ...delta };
+    for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
+    const r = await startServer(env);
+    check(`hosted: refuses to serve with ${what}`, !r.started && (r.exited || r.last === 503) && r.stderr().includes(needle), r.started ? "it started" : `exited=${r.exited} last=${r.last} ${r.stderr().slice(-300)}`);
+    await stopServer();
+  }
+  // The retired v1 settings are neither required (good has no passcodes or signup codes) nor refused.
+  const v1Env = { ALIGN_SIGNUP_CODES: "x", ALIGN_PRODUCT_PASSCODE: "product-demo", AI_GATEWAY_API_KEY: "sk-test", ANTHROPIC_API_KEY: "sk-test", ALIGN_CAPTURE: "1", ALIGN_MCP_TOKEN: "t".repeat(32), ALIGN_GOAL_SESSIONS: "0" };
+  const withV1 = await startServer({ ...good, ...v1Env });
+  check("hosted: starts without v1's passcodes or signup codes, and ignores v1-era settings (signup codes, default passcodes, AI keys, capture, ALIGN_MCP_TOKEN, ALIGN_GOAL_SESSIONS)", withV1.started, withV1.stderr().slice(-300));
+  const v1Off = await Promise.all([hosted("GET", "/api/v2/me"), hosted("GET", "/api/mcp", { headers: { authorization: `Bearer ${v1Env.ALIGN_MCP_TOKEN}` } })]);
+  check("hosted: with ALIGN_GOAL_SESSIONS=0 v2 is still on, and ALIGN_MCP_TOKEN is no credential (/api/mcp -> 401)", v1Off[0].status === 401 && v1Off[1].status === 401, v1Off.map((r) => r.status).join(","));
+  await stopServer();
+  const goodRun = await mustStart(good);
+  await sleep(300);
+  const turnstileWarnings = (goodRun.stderr() + goodRun.stdout()).split("\n").filter((l) => l.includes("ALIGN_TURNSTILE_SITE_KEY and ALIGN_TURNSTILE_SECRET_KEY are not set"));
+  check("hosted: without Turnstile keys the server starts and logs one warning that there is no bot check", turnstileWarnings.length === 1, (goodRun.stderr() + goodRun.stdout()).slice(-400));
+  // -- the hosted route allowlist: / -> /app; /app*, /api/v2/*, /api/mcp, /oauth/*, /.well-known/*, /api/oauth/* and static assets; else 404 --
+  const hRoot = await hosted("GET", "/");
+  check("hosted: / redirects to https://<host>/app (307)", hRoot.status === 307 && hRoot.headers.location === `https://${HOSTED_HOST}/app`, `${hRoot.status} ${hRoot.headers.location}`);
+  const outside = [
+    ["GET", "/api/state"],
+    ["POST", "/api/sessions/events"],
+    ["GET", "/setup"],
+    ["GET", "/new"],
+    ["GET", "/w/x"],
+    ["POST", "/api/session"],
+    ["GET", "/api/workspaces/config"],
+    ["GET", "/api/policy/security"],
+    ["GET", "/apps"],
+    ["GET", "/api/v2x"],
+    ["GET", "/oauthx"],
+    ["GET", "/file.svg"],
+    ["GET", "/privacy/x"],
+    ["GET", "/trust/security"],
+    ["GET", "/trustx"],
+    ["GET", "/privacy-policy"],
+    ["GET", "/security"],
+    ["GET", "/SECURITY.md"],
+    ["GET", "/docs/trust/privacy-policy.md"],
+    ["GET", "/_trust/doc"],
+  ];
+  const outsideR = await Promise.all(outside.map(([m, p]) => hosted(m, p, m === "POST" ? { body: {}, headers: { origin: `https://${HOSTED_HOST}` } } : {})));
+  check(
+    `hosted: every path outside the allowlist -> 404 {"error":"Not found"} (${outside.map(([m, p]) => `${m} ${p}`).join(", ")})`,
+    outsideR.every((r) => r.status === 404 && r.json?.error === "Not found"),
+    outsideR.map((r, i) => `${outside[i][1]}:${r.status}`).join(" "),
+  );
+  const inside = await Promise.all([
+    hosted("GET", "/app"),
+    hosted("GET", "/api/mcp"),
+    hosted("GET", "/.well-known/oauth-authorization-server"),
+    hosted("GET", "/.well-known/oauth-protected-resource/api/mcp"),
+    hosted("POST", "/oauth/register", { body: {} }),
+    hosted("POST", "/api/oauth/approve", { body: {}, headers: { origin: `https://${HOSTED_HOST}` } }),
+    hosted("GET", "/favicon.ico"),
+  ]);
+  check(
+    "hosted: allowlisted paths reach their routes (/app, /api/mcp 401, /.well-known/* 200, /oauth/register 400, /api/oauth/approve, /favicon.ico 200)",
+    inside.every((r) => r.status !== 404 || r.json?.error !== "Not found") && inside[1].status === 401 && inside[2].status === 200 && inside[3].status === 200 && inside[4].status === 400 && inside[6].status === 200,
+    inside.map((r) => `${r.status}`).join(" "),
+  );
+  const hTrustPages = await Promise.all([hosted("GET", "/privacy"), hosted("GET", "/trust")]);
+  check(
+    "hosted: /privacy and /trust are served (200, the privacy policy and the trust page); nothing under them is",
+    hTrustPages[0].status === 200 && hTrustPages[0].text.includes("Our two roles") && hTrustPages[1].status === 200 && hTrustPages[1].text.includes("Subprocessors"),
+    hTrustPages.map((r) => r.status).join(" "),
+  );
+  const hMe = await hosted("GET", "/api/v2/me");
+  const hSignIn = await hosted("GET", "/app/sign-in");
+  const hSession = await hosted("GET", "/api/v2/auth/get-session");
+  const hAsks = await hosted("GET", "/api/v2/workspaces/ws_aaaaaaaaaaaaaaaaaaaaaaaa/asks");
+  const hSuggest = await hosted("POST", "/api/v2/workspaces/ws_aaaaaaaaaaaaaaaaaaaaaaaa/limits/suggest", { body: {}, headers: { origin: `https://${HOSTED_HOST}` } });
+  check(
+    "hosted: the port routes pass the hosted edge (GET .../asks reaches its route: 401; POST .../limits/suggest is not the edge's 404)",
+    hAsks.status === 401 && hAsks.json?.error === "unauthorized" && !(hSuggest.status === 404 && hSuggest.json?.error === "Not found"),
+    `${hAsks.status} ${hAsks.text.slice(0, 100)} ${hSuggest.status} ${hSuggest.text.slice(0, 100)}`,
+  );
+  check("hosted: v2 routes are served (/api/v2/me 401, /app/sign-in 200, Better Auth answers)", hMe.status === 401 && hSignIn.status === 200 && hSession.status === 200, `${hMe.status} ${hSignIn.status} ${hSession.status}`);
+  check("hosted: the sign-in page offers Google and GitHub, never the test sign-in; without email settings, no email code", hSignIn.text.includes("Continue with Google") && hSignIn.text.includes("Continue with GitHub") && !hSignIn.text.includes("Test sign-in") && !hSignIn.text.includes("Send code"), "");
+  check("hosted: the sign-in page links to /privacy and /trust", hSignIn.text.includes('href="/privacy"') && hSignIn.text.includes('href="/trust"'), "");
+  dbFile = path.join(hostedDir, "v2", "align.sqlite");
+  const hNoEmail = await hosted("POST", SEND, { body: { email: "x@example.test", type: "sign-in" }, headers: { origin: `https://${HOSTED_HOST}` } });
+  check("hosted: without the email settings a request to send a code is refused (404) and nothing is sent", hNoEmail.status === 404 && !existsSync(path.join(hostedDir, "v2", "sign-in.txt")), `${hNoEmail.status}`);
+  check("hosted: no local owner is made", withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_user").get().n) === 0, "");
+  const hSignUp = await hosted("POST", "/api/v2/auth/sign-up/email", { body: { name: "x", email: "x@example.test", password: "password-123" }, headers: { origin: `https://${HOSTED_HOST}` } });
+  check("hosted: email + password sign-up is off", hSignUp.status !== 200, `${hSignUp.status} ${hSignUp.text.slice(0, 100)}`);
+  const hHttp = await hosted("GET", "/api/v2/me", { headers: { "x-forwarded-proto": "http" } });
+  const hNoEdge = await hosted("GET", "/api/v2/me", { headers: { "fly-client-ip": undefined } });
+  const hForeign = await new Promise((resolve) => {
+    http.get({ host: "127.0.0.1", port: PORT, path: "/api/v2/me", headers: { host: "evil.example", "x-forwarded-proto": "https", "fly-client-ip": "1.2.3.4" } }, (res) => resolve(res.statusCode));
+  });
+  check("hosted: v2 routes pass the same checks (http -> 403, no Fly-Client-IP -> 403, foreign Host -> 421)", hHttp.status === 403 && hNoEdge.status === 403 && hForeign === 421, `${hHttp.status} ${hNoEdge.status} ${hForeign}`);
+  // Hosted cookie writes: Origin is required and must be exactly https://<Host> (as lib/http.ts). The site
+  // check runs before the session, so with no session the right Origin gets 401 and every other one 403 cross_site.
+  const hOrigins = [undefined, `http://${HOSTED_HOST}`, `https://${HOSTED_HOST}:8443`, "null", "https://evil.example"];
+  const hRefused = [];
+  for (const o of hOrigins) hRefused.push({ o: o ?? "none", r: await hosted("POST", "/api/v2/workspaces", { body: { name: "x" }, headers: { origin: o } }) });
+  const hRightOrigin = await hosted("POST", "/api/v2/workspaces", { body: { name: "x" }, headers: { origin: `https://${HOSTED_HOST}` } });
+  check(
+    "hosted: a cookie write needs Origin exactly https://<Host> (none, http, another port, null, foreign -> 403 cross_site; exact -> on to sign-in, 401)",
+    hRefused.every((x) => x.r.status === 403 && x.r.json?.error === "cross_site") && hRightOrigin.status === 401,
+    `${hRefused.map((x) => `${x.o}:${x.r.status}`).join(" ")} exact:${hRightOrigin.status}`,
+  );
+  const hDev = await hosted("POST", "/api/v2/device/authorize", { body: { device_name: "x", public_key: newDeviceKeys().pub } });
+  check("hosted: the device verification URI is the public origin", hDev.status === 200 && hDev.json.verification_uri === `https://${HOSTED_HOST}/app/device`, hDev.text);
+  await stopServer();
+
+  // ======== no closing date: a hosted server never shuts itself down (a leftover ALIGN_DELETE_BY is ignored) ========
+  const leftover = await startServer({ ...good, ALIGN_DELETE_BY: "2020-01-01" });
+  const leftoverMe = leftover.started ? await hosted("GET", "/app") : { status: 0 };
+  check(
+    "no closing date: a hosted server with a past ALIGN_DELETE_BY still starts and serves (no 410)",
+    leftover.started && leftoverMe.status !== 410 && leftoverMe.status < 500,
+    `${leftover.last} ${leftoverMe.status} ${leftover.stderr().slice(-200)}`,
+  );
+  await stopServer();
+
+  // ======== hosted email codes, through a fake Resend-compatible HTTPS email API ========
+  const ssl = spawnSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", path.join(tmpRoot, "tls-key.pem"), "-out", path.join(tmpRoot, "tls-cert.pem"), "-days", "2", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"], { encoding: "utf8" });
+  if (ssl.status !== 0) throw new Error(`openssl: ${ssl.stderr}`);
+  const caFile = path.join(tmpRoot, "ca.pem");
+  writeFileSync(caFile, (process.env.NODE_EXTRA_CA_CERTS && existsSync(process.env.NODE_EXTRA_CA_CERTS) ? readFileSync(process.env.NODE_EXTRA_CA_CERTS, "utf8") + "\n" : "") + readFileSync(path.join(tmpRoot, "tls-cert.pem"), "utf8"));
+  const mails = [];
+  const mailApi = https.createServer({ key: readFileSync(path.join(tmpRoot, "tls-key.pem")), cert: readFileSync(path.join(tmpRoot, "tls-cert.pem")) }, (req, res) => {
+    let t = "";
+    req.on("data", (c) => (t += c));
+    req.on("end", () => {
+      let body = null;
+      try {
+        body = JSON.parse(t);
+      } catch {}
+      mails.push({ method: req.method, url: req.url, auth: req.headers.authorization, type: req.headers["content-type"], body });
+      const fail = body?.to === "fail@example.test";
+      res.writeHead(fail ? 500 : 200, { "content-type": "application/json" });
+      res.end(fail ? '{"error":"down"}' : `{"id":"${randomBytes(6).toString("hex")}"}`);
+    });
+  });
+  await new Promise((r) => mailApi.listen(0, "127.0.0.1", r));
+  const MAIL_KEY = `re_${randomBytes(12).toString("hex")}`;
+  const emailDir = path.join(tmpRoot, "hosted-email");
+  const emailEnv = { ...good, ...noProviders, ALIGN_DATA_DIR: emailDir, ALIGN_EMAIL_API_URL: `https://127.0.0.1:${mailApi.address().port}/emails`, ALIGN_EMAIL_API_KEY: MAIL_KEY, ALIGN_EMAIL_FROM: "Align <signin@align.test>", ALIGN_FIRST_OWNER_EMAIL: "Ops@Example.test", NODE_EXTRA_CA_CERTS: caFile, ALIGN_SESSION_MAX_DAYS: "3" };
+  for (const k of Object.keys(emailEnv)) if (emailEnv[k] === undefined) delete emailEnv[k];
+  const eRun = await startServer(emailEnv);
+  check("hosted email: starts with only the three email settings (no Google, no GitHub)", eRun.started, eRun.stderr().slice(-400));
+  dbFile = path.join(emailDir, "v2", "align.sqlite");
+  const hOrigin = { origin: `https://${HOSTED_HOST}` };
+  // Each send from its own client address: hosted, Better Auth allows 3 sends per client per minute (durably).
+  let sendIp = 0;
+  const hSend = (email) => hosted("POST", SEND, { body: { email, type: "sign-in" }, headers: { ...hOrigin, "fly-client-ip": `203.0.113.${++sendIp}` } });
+  const hCodeSignIn = (email, otp) => hosted("POST", OTP_SIGN_IN, { body: { email, otp }, headers: hOrigin });
+  const hCookie = (r) => cookieOf([].concat(r.headers["set-cookie"] ?? []));
+  const mailCode = (to) => /code is (\d{6})/.exec(mails.filter((m) => m.body?.to === to).pop()?.body?.text ?? "")?.[1] ?? "";
+  const ePage = await hosted("GET", "/app/sign-in?email=ops%40example.test&code=123456");
+  check("hosted email: the sign-in page offers the email code only (no provider buttons); the link fills the form without the Mode L hint", ePage.status === 200 && ePage.text.includes('value="123456"') && !ePage.text.includes("Continue with") && !ePage.text.includes("npm run sign-in-link") && !ePage.text.includes("Test sign-in"), `${ePage.status}`);
+  const opsSend = await hSend("ops@example.test");
+  const m0 = mails[0];
+  const opsCode = mailCode("ops@example.test");
+  check(
+    "hosted email: a code is one HTTPS POST of {from, to, subject, text} with the Bearer key; subject \"Your Align sign-in code\"; the text has the code, the public-origin link and the 5-minute expiry",
+    opsSend.status === 200 && mails.length === 1 && m0.method === "POST" && m0.url === "/emails" && m0.auth === `Bearer ${MAIL_KEY}` && /application\/json/.test(m0.type) && Object.keys(m0.body).sort().join() === "from,subject,text,to" && m0.body.from === "Align <signin@align.test>" && m0.body.to === "ops@example.test" && m0.body.subject === "Your Align sign-in code" && /^\d{6}$/.test(opsCode) && m0.body.text.includes(`https://${HOSTED_HOST}/app/sign-in?email=ops%40example.test&code=${opsCode}`) && m0.body.text.includes("5 minutes"),
+    `${opsSend.status} ${JSON.stringify(mails)}`,
+  );
+  const unknownSend = await hSend("nobody@example.test");
+  check("hosted email: the send answer for an address with no account and no invite is the same as for any other (no disclosure)", unknownSend.status === opsSend.status && unknownSend.text === opsSend.text, `${unknownSend.status} ${unknownSend.text} | ${opsSend.text}`);
+  const nobodyIn = await hCodeSignIn("nobody@example.test", mailCode("nobody@example.test"));
+  check(
+    "hosted email: a valid code for an address with no account and no pending invite -> 403 \"This email can't sign in here yet. Ask a workspace owner to invite you.\"; no account, no session",
+    nobodyIn.status === 403 && nobodyIn.json?.message === "This email can't sign in here yet. Ask a workspace owner to invite you." && !hCookie(nobodyIn) && !withDb((d) => d.prepare("SELECT 1 FROM ba_user WHERE email = ?").get("nobody@example.test")),
+    `${nobodyIn.status} ${nobodyIn.text}`,
+  );
+  const opsIn = await hCodeSignIn("ops@example.test", opsCode);
+  const OPS = { cookie: hCookie(opsIn) };
+  const opsRow = withDb((d) => d.prepare("SELECT emailVerified FROM ba_user WHERE email = ?").get("ops@example.test"));
+  check("hosted email: ALIGN_FIRST_OWNER_EMAIL (any case) is the first account: its code creates it (verified) and signs in with the __Secure- cookie", opsIn.status === 200 && OPS.cookie.includes("__Secure-align_v2.session_token") && opsRow?.emailVerified === 1, `${opsIn.status} ${opsIn.text}`);
+  const opsSession = withDb((d) => d.prepare("SELECT s.createdAt, s.expiresAt FROM ba_session s JOIN ba_user u ON u.id = s.userId WHERE u.email = ?").get("ops@example.test"));
+  const hReg = await hosted("GET", "/api/v2/auth/passkey/generate-register-options", { cookie: OPS.cookie });
+  check(
+    "hosted: ALIGN_SESSION_MAX_DAYS=3 caps a new session at 3 days after sign-in (under the 7-day rolling expiry); passkeys use the public host as relying party",
+    Date.parse(opsSession?.expiresAt) === Date.parse(opsSession?.createdAt) + 3 * 86_400_000 && hReg.status === 200 && hReg.json?.rp?.id === HOSTED_HOST,
+    `${JSON.stringify(opsSession)} ${hReg.status} ${hReg.text.slice(0, 200)}`,
+  );
+  const eWs = await hosted("POST", "/api/v2/workspaces", { body: { name: "Hosted email" }, cookie: OPS.cookie, headers: hOrigin });
+  const eInv = await hosted("POST", `/api/v2/workspaces/${eWs.json?.id}/invites`, { body: { email: "Invitee@Example.test", role: "member" }, cookie: OPS.cookie, headers: hOrigin });
+  await hSend("invitee@example.test");
+  const invIn = await hCodeSignIn("invitee@example.test", mailCode("invitee@example.test"));
+  const invAccept = await hosted("POST", `/api/v2/invites/${eInv.json?.token}/accept`, { body: {}, cookie: hCookie(invIn), headers: hOrigin });
+  check("hosted email: an address with a pending invite gets an account from its code, then accepts the invite", eWs.status === 201 && eInv.status === 201 && invIn.status === 200 && invAccept.status === 200 && invAccept.json?.role === "member", `${eWs.status} ${eInv.status} ${invIn.status} ${invIn.text} ${invAccept.status} ${invAccept.text}`);
+  const mailsBefore = mails.length;
+  const failSend = await hSend("fail@example.test");
+  await sleep(300);
+  const failLog = eRun.stderr() + eRun.stdout();
+  check(
+    "hosted email: an email API failure fails the send (5xx), the code is deleted, and the log names only the status (never the address, code or key)",
+    failSend.status >= 500 && mails.length === mailsBefore + 1 && !withDb((d) => d.prepare("SELECT 1 FROM ba_verification WHERE identifier = ?").get("sign-in-otp-fail@example.test")) && failLog.includes("Sign-in email failed: HTTP 500") && !failLog.includes("fail@example.test") && !failLog.includes(MAIL_KEY),
+    `${failSend.status} ${failSend.text} ${failLog.slice(-300)}`,
+  );
+  const codes = mails.map((m) => /code is (\d{6})/.exec(m.body?.text ?? "")?.[1]).filter(Boolean);
+  check("hosted email: no code is ever printed or logged, and no sign-in.txt is written", codes.length >= 3 && codes.every((c) => !failLog.includes(c)) && !existsSync(path.join(emailDir, "v2", "sign-in.txt")), `${codes.length}`);
+  await stopServer();
+  const lateRun = await startServer({ ...emailEnv, ALIGN_FIRST_OWNER_EMAIL: "late@example.test" });
+  await hSend("late@example.test");
+  const lateIn = await hCodeSignIn("late@example.test", mailCode("late@example.test"));
+  check("hosted email: ALIGN_FIRST_OWNER_EMAIL gets no exception once any account exists (403)", lateRun.started && lateIn.status === 403 && !withDb((d) => d.prepare("SELECT 1 FROM ba_user WHERE email = ?").get("late@example.test")), `${lateIn.status} ${lateIn.text}`);
+  await stopServer();
+
+  // ======== hosted gate: creation codes, request access, Turnstile through a fake verify API, durable limits, caps ========
+  const verifies = [];
+  const verifyApi = https.createServer({ key: readFileSync(path.join(tmpRoot, "tls-key.pem")), cert: readFileSync(path.join(tmpRoot, "tls-cert.pem")) }, (req, res) => {
+    let t = "";
+    req.on("data", (c) => (t += c));
+    req.on("end", () => {
+      let body = null;
+      try {
+        body = JSON.parse(t);
+      } catch {}
+      verifies.push({ url: req.url, body });
+      const tok = String(body?.response ?? "");
+      if (tok === "down") {
+        res.writeHead(500, { "content-type": "application/json" });
+        return res.end("{}");
+      }
+      const ok = tok.startsWith("ok") && body?.secret === "turnstile-secret";
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(ok ? { success: true, hostname: tok === "ok-elsewhere" ? "elsewhere.example" : HOSTED_HOST, action: "" } : { success: false, "error-codes": ["invalid-input-response"] }));
+    });
+  });
+  await new Promise((r) => verifyApi.listen(0, "127.0.0.1", r));
+  const gateDir = path.join(tmpRoot, "hosted-gate");
+  const gateEnv = {
+    ...emailEnv,
+    ALIGN_DATA_DIR: gateDir,
+    ALIGN_FIRST_OWNER_EMAIL: "ops@example.test",
+    ALIGN_TURNSTILE_SITE_KEY: "turnstile-site",
+    ALIGN_TURNSTILE_SECRET_KEY: "turnstile-secret",
+    ALIGN_TURNSTILE_VERIFY_URL: `https://127.0.0.1:${verifyApi.address().port}/siteverify`,
+    ALIGN_MAX_WORKSPACES: "4",
+    ALIGN_MAX_MEMBERS: "3",
+    ALIGN_MAX_SESSIONS_PER_DEVICE_DAY: "2",
+  };
+  const gRun = await startServer(gateEnv);
+  dbFile = path.join(gateDir, "v2", "align.sqlite");
+  check("gate: a hosted server with Turnstile keys, an https verify URL and caps starts, with no bot-check warning", gRun.started && !(gRun.stderr() + gRun.stdout()).includes("no bot check"), gRun.stderr().slice(-300));
+  let gIp = 0;
+  const nextIp = () => `198.18.0.${++gIp}`;
+  const bot = (tok = "ok") => (tok === null ? {} : { "x-captcha-response": tok });
+  const gSend = (email, tok = "ok", ip = nextIp()) => hosted("POST", SEND, { body: { email, type: "sign-in" }, headers: { ...hOrigin, ...bot(tok), "fly-client-ip": ip } });
+  const gCodeIn = (email, otp, tok = "ok") => hosted("POST", OTP_SIGN_IN, { body: { email, otp }, headers: { ...hOrigin, ...bot(tok), "fly-client-ip": nextIp() } });
+  const gSignIn = async (email) => {
+    await gSend(email);
+    const r = await gCodeIn(email, mailCode(email));
+    return { status: r.status, text: r.text, cookie: hCookie(r), email };
+  };
+  const gPost = (p, body, who, tok = "ok") => hosted("POST", p, { body, cookie: who?.cookie, headers: { ...hOrigin, ...bot(tok) } });
+  const gCreate = (who, name, code, tok = "ok") => gPost("/api/v2/workspaces", code === undefined ? { name } : { name, creation_code: code }, who, tok);
+  const gAccess = (body, tok = "ok") => hosted("POST", "/api/v2/access-requests", { body, headers: { ...hOrigin, ...bot(tok), "fly-client-ip": nextIp() } });
+  const opGate = { HOSTED: "1", ALIGN_DATA_DIR: gateDir, ALIGN_SECRET: good.ALIGN_SECRET, ALIGN_PUBLIC_ORIGIN: good.ALIGN_PUBLIC_ORIGIN, ALIGN_EMAIL_API_URL: emailEnv.ALIGN_EMAIL_API_URL, ALIGN_EMAIL_API_KEY: MAIL_KEY, ALIGN_EMAIL_FROM: emailEnv.ALIGN_EMAIL_FROM, NODE_EXTRA_CA_CERTS: caFile };
+
+  // -- pages: the widget, and links to request access --
+  const gSignInPage = await hosted("GET", "/app/sign-in");
+  const gRaPage = await hosted("GET", "/app/request-access");
+  check(
+    "gate: the sign-in and request-access pages render the Turnstile widget with the site key, and sign-in links to /app/request-access while creation needs a code",
+    gSignInPage.status === 200 && gSignInPage.text.includes('data-turnstile-sitekey="turnstile-site"') && gSignInPage.text.includes('href="/app/request-access"') && gRaPage.status === 200 && gRaPage.text.includes('data-turnstile-sitekey="turnstile-site"') && !gRaPage.text.includes("without a code"),
+    `${gSignInPage.status} ${gRaPage.status}`,
+  );
+  // -- Turnstile on the email-code send and sign-in routes (Better Auth's captcha plugin) --
+  const mailsAt = mails.length;
+  const noTok = await gSend("ops@example.test", null);
+  const badTok = await gSend("ops@example.test", "bad");
+  const elsewhere = await gSend("ops@example.test", "ok-elsewhere");
+  check(
+    "gate: sending a code without a token -> 400 MISSING_RESPONSE, with a rejected token or one solved on another host -> 403 VERIFICATION_FAILED; nothing is sent",
+    noTok.status === 400 && noTok.json?.code === "MISSING_RESPONSE" && badTok.status === 403 && badTok.json?.code === "VERIFICATION_FAILED" && elsewhere.status === 403 && mails.length === mailsAt,
+    `${noTok.status} ${noTok.text} ${badTok.status} ${elsewhere.status}`,
+  );
+  const vAt = verifies.length;
+  const okSend = await gSend("ops@example.test", "ok", "198.18.9.9");
+  const v = verifies[vAt];
+  check(
+    "gate: with a passing token the code is sent; the server posted {secret, response, remoteip} to ALIGN_TURNSTILE_VERIFY_URL",
+    okSend.status === 200 && mails.length === mailsAt + 1 && v?.url === "/siteverify" && v.body.secret === "turnstile-secret" && v.body.response === "ok" && v.body.remoteip === "198.18.9.9",
+    `${okSend.status} ${JSON.stringify(v)}`,
+  );
+  const opsCodeG = mailCode("ops@example.test");
+  const inNoTok = await gCodeIn("ops@example.test", opsCodeG, null);
+  const opsInG = await gCodeIn("ops@example.test", opsCodeG);
+  const OPSG = { cookie: hCookie(opsInG) };
+  check("gate: signing in with a code needs a token too (400 without, and the code still works); with one, the first owner signs in", inNoTok.status === 400 && opsInG.status === 200 && !!OPSG.cookie, `${inNoTok.status} ${opsInG.status} ${opsInG.text}`);
+  // -- the first owner's first workspace needs no code; every create needs the token --
+  const opsHome = await hosted("GET", "/app", { cookie: OPSG.cookie });
+  check("gate: /app for the first owner on an empty server has the widget and no creation code field", opsHome.status === 200 && opsHome.text.includes('data-turnstile-sitekey="turnstile-site"') && !opsHome.text.includes('name="creation_code"'), `${opsHome.status}`);
+  const cNoTok = await gCreate(OPSG, "Ops One", undefined, null);
+  const cBadTok = await gCreate(OPSG, "Ops One", undefined, "bad");
+  const cDown = await gCreate(OPSG, "Ops One", undefined, "down");
+  const W1 = await gCreate(OPSG, "Ops One");
+  check(
+    "gate: creating needs the token (none -> 400 captcha_required, rejected -> 403 captcha_failed, verify API down -> 503 captcha_unavailable); ALIGN_FIRST_OWNER_EMAIL's first workspace on an empty server needs no code (201)",
+    cNoTok.status === 400 && cNoTok.json?.error === "captcha_required" && cBadTok.status === 403 && cBadTok.json?.error === "captcha_failed" && cDown.status === 503 && cDown.json?.error === "captcha_unavailable" && W1.status === 201,
+    `${cNoTok.status} ${cBadTok.status} ${cDown.status} ${W1.status} ${W1.text}`,
+  );
+  const opsSecond = await gCreate(OPSG, "Ops Two");
+  const opsSample = await gPost("/api/v2/workspaces/sample", {}, OPSG);
+  const opsHome2 = await hosted("GET", "/app", { cookie: OPSG.cookie });
+  check(
+    "gate: after that a create without a code -> 403 creation_code_required (the sample too); /app now asks for a creation code and links to /app/request-access",
+    opsSecond.status === 403 && opsSecond.json?.error === "creation_code_required" && /Request access/.test(opsSecond.json?.message) && opsSample.status === 403 && opsSample.json?.error === "creation_code_required" && opsHome2.text.includes('name="creation_code"') && opsHome2.text.includes('href="/app/request-access"'),
+    `${opsSecond.status} ${opsSecond.text} ${opsSample.status}`,
+  );
+  // -- request access (hosted: token required, disposable domains refused) --
+  const reqBody = { email: "alice@example.test", name: "Alice Able", company: "Able Co", team_size: "11-50", use_case: "Goals for our agent fleet", interest: "evaluate" };
+  const aNoTok = await gAccess(reqBody, null);
+  const aDisp = await gAccess({ ...reqBody, email: "temp@mailinator.com" });
+  const aDispSub = await gAccess({ ...reqBody, email: "temp@x.mailinator.com" });
+  const aOk = await gAccess(reqBody);
+  const aliceReq = withDb((d) => d.prepare("SELECT * FROM v2_access_requests WHERE email = ?").get("alice@example.test"));
+  check(
+    "gate: an access request needs the token (400 captcha_required); a disposable address or a subdomain of one -> 403 disposable_email; a good one -> 201, stored pending",
+    aNoTok.status === 400 && aNoTok.json?.error === "captcha_required" && aDisp.status === 403 && aDisp.json?.error === "disposable_email" && aDispSub.status === 403 && aOk.status === 201 && aliceReq?.status === "pending" && aliceReq.interest === "evaluate" && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_access_requests").get().n) === 1,
+    `${aNoTok.status} ${aDisp.status} ${aDispSub.status} ${aOk.status}`,
+  );
+  // -- the operator approves: an email-bound code, emailed, never printed --
+  const noSecret = admin(["requests", "approve", aliceReq.id], { ...opGate, ALIGN_SECRET: undefined });
+  const mailsBeforeApprove = mails.length;
+  const approveG = await adminAsync(["requests", "approve", aliceReq.id], opGate);
+  const aliceMail = mails.slice(mailsBeforeApprove).find((m) => m.body?.to === "alice@example.test");
+  const aliceCode = codesIn(aliceMail?.body?.text ?? "")[0] ?? "";
+  check(
+    "align-admin (hosted): requests approve refuses without ALIGN_SECRET; with it, emails the code through the email API (subject, sign-in link, the code, its address and expiry) and prints only the code's id, never the code",
+    noSecret.status === 1 && /ALIGN_SECRET/.test(noSecret.err) && approveG.status === 0 && /emailed a creation code \(cc_/.test(approveG.out) && aliceMail?.auth === `Bearer ${MAIL_KEY}` && aliceMail.body.subject === "Your Align workspace creation code" && aliceMail.body.text.includes(`https://${HOSTED_HOST}/app/sign-in?email=alice%40example.test`) && aliceCode && aliceMail.body.text.includes("only for alice@example.test") && codesIn(approveG.out + approveG.err).length === 0 && dbFilesLack(dbFile, aliceCode),
+    `${noSecret.status} ${noSecret.err} | ${approveG.status} ${approveG.out} ${approveG.err} ${JSON.stringify(aliceMail?.body)}`,
+  );
+  // -- the approved person can sign in by email code (no invite needed) and spends the code once --
+  const ALICE = await gSignIn("alice@example.test");
+  const aBadFormat = await gCreate(ALICE, "Alice One", "alc_nope");
+  const W2 = await gCreate(ALICE, "Alice One", aliceCode);
+  const aReuse = await gCreate(ALICE, "Alice Two", aliceCode);
+  const aliceCodeRow = withDb((d) => d.prepare("SELECT c.* FROM v2_creation_codes c JOIN v2_access_requests r ON r.code_id = c.id WHERE r.id = ?").get(aliceReq.id));
+  check(
+    "gate: an approved address signs in by email code with no invite; a malformed code -> 403 creation_code_invalid; its code creates one workspace (201) and is spent with it; using it again -> 403 creation_code_invalid",
+    ALICE.status === 200 && aBadFormat.status === 403 && aBadFormat.json?.error === "creation_code_invalid" && W2.status === 201 && aReuse.status === 403 && aReuse.json?.error === "creation_code_invalid" && aliceCodeRow?.ws_id === W2.json?.id && aliceCodeRow.redeemed_at && aliceCodeRow.redeemed_by,
+    `${ALICE.status} ${ALICE.text} ${aBadFormat.status} ${W2.status} ${W2.text} ${aReuse.status}`,
+  );
+  // -- product events (PRESEED-007) on the hosted path: the request, its approval and code, the redemption --
+  const gEv = (name, ws = null) => withDb((d) => (ws ? d.prepare("SELECT * FROM v2_events WHERE name = ? AND ws_id = ?").all(name, ws) : d.prepare("SELECT * FROM v2_events WHERE name = ?").all(name)));
+  const evApproved0 = gEv("access_approved").length;
+  const evCodes0 = gEv("code_created").length;
+  const failReq = await gAccess({ ...reqBody, email: "fail@example.test", interest: "try" });
+  const failReqRow = withDb((d) => d.prepare("SELECT * FROM v2_access_requests WHERE email = ?").get("fail@example.test"));
+  const failApprove = await adminAsync(["requests", "approve", failReqRow?.id ?? "ar_none"], opGate);
+  const failAfter = withDb((d) => d.prepare("SELECT status, code_id FROM v2_access_requests WHERE id = ?").get(failReqRow?.id ?? ""));
+  check(
+    "events (hosted): each access request records access_requested with its interest only; an approval records access_approved and code_created (source request); when the approval's email fails, the request stays pending and both events are taken back",
+    failReq.status === 201 && gEv("access_requested").length === 2 && gEv("access_requested").map((e) => JSON.parse(e.props).interest).sort().join() === "evaluate,try" &&
+      evApproved0 === 1 && evCodes0 === 1 && JSON.parse(gEv("code_created")[0].props).source === "request" && gEv("access_requested").every((e) => e.ws_id === null && e.actor === null) &&
+      failApprove.status === 1 && failAfter?.status === "pending" && failAfter.code_id === null && gEv("access_approved").length === 1 && gEv("code_created").length === 1,
+    `${failReq.status} ${JSON.stringify(gEv("access_requested"))} ${evApproved0} ${evCodes0} ${failApprove.status} ${failApprove.err} ${JSON.stringify(failAfter)} ${gEv("access_approved").length} ${gEv("code_created").length}`,
+  );
+  const redeemedEv = gEv("code_redeemed");
+  check(
+    "events (hosted): spending a creation code records code_redeemed for the workspace it made, by a keyed hash of the person (not their id); the first owner's code-free workspace records workspace_created and no code_redeemed",
+    redeemedEv.length === 1 && redeemedEv[0].ws_id === W2.json?.id && redeemedEv[0].actor === eventActor(good.ALIGN_SECRET, withDb((d) => d.prepare("SELECT id FROM ba_user WHERE email = ?").get("alice@example.test")?.id)) &&
+      gEv("workspace_created", W1.json?.id).length === 1 && gEv("code_redeemed", W1.json?.id).length === 0 && gEv("workspace_created", W2.json?.id).length === 1,
+    JSON.stringify(redeemedEv),
+  );
+  // -- codes made by the operator: revoked, expired and bound to someone else don't work; a disposable address can't create --
+  const gMade = admin(["codes", "create", "--count", "4"], opGate);
+  const [U1c, U2c, revC, expC] = codesIn(gMade.out);
+  const gIds = [...gMade.out.matchAll(/\((cc_[a-z2-7]{24}),/g)].map((m) => m[1]);
+  const bobMade = admin(["codes", "create", "--email", "Bob@Example.test"], opGate);
+  const bobC = codesIn(bobMade.out)[0];
+  admin(["codes", "revoke", gIds[2]], opGate);
+  withDb((d) => d.prepare("UPDATE v2_creation_codes SET expires_at = ? WHERE id = ?").run(new Date(Date.now() - 1000).toISOString(), gIds[3]));
+  const useRevoked = await gCreate(ALICE, "Alice Two", revC);
+  const useExpired = await gCreate(ALICE, "Alice Two", expC);
+  const useBobs = await gCreate(ALICE, "Alice Two", bobC);
+  check(
+    "gate: a revoked code, an expired code, and a code bound to another address -> 403 creation_code_invalid, and none of them is spent",
+    gMade.status === 0 && bobMade.status === 0 && [useRevoked, useExpired, useBobs].every((r) => r.status === 403 && r.json?.error === "creation_code_invalid") && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE redeemed_at IS NOT NULL").get().n) === 1,
+    `${useRevoked.status} ${useExpired.status} ${useBobs.status} ${gMade.err}`,
+  );
+  const tmpInv = await gPost(`/api/v2/workspaces/${W2.json?.id}/invites`, { email: "temp@mailinator.com", role: "member" }, ALICE);
+  const TEMP = await gSignIn("temp@mailinator.com");
+  const tempCreate = await gCreate(TEMP, "Temp", U2c);
+  check(
+    "gate: a disposable address is not blocked at sign-in (an invited one signs in), but can't create a workspace (403 disposable_email, code not spent)",
+    tmpInv.status === 201 && TEMP.status === 200 && tempCreate.status === 403 && tempCreate.json?.error === "disposable_email" && withDb((d) => d.prepare("SELECT redeemed_at FROM v2_creation_codes WHERE id = ?").get(gIds[1]).redeemed_at) === null,
+    `${tmpInv.status} ${TEMP.status} ${TEMP.text} ${tempCreate.status} ${tempCreate.text}`,
+  );
+  // -- members per workspace (3 here), pending invites counted --
+  const W1id = W1.json?.id;
+  const bobInv = await gPost(`/api/v2/workspaces/${W1id}/invites`, { email: "bob@example.test", role: "member" }, OPSG);
+  const carolInv = await gPost(`/api/v2/workspaces/${W1id}/invites`, { email: "carol@example.test", role: "member" }, OPSG);
+  const daveInv = await gPost(`/api/v2/workspaces/${W1id}/invites`, { email: "dave@example.test", role: "member" }, OPSG);
+  check(
+    "caps: members per workspace (ALIGN_MAX_MEMBERS=3) count open invites: owner + 2 invites fills it, a 3rd invite -> 403 member_cap with a message to contact the operator",
+    bobInv.status === 201 && carolInv.status === 201 && daveInv.status === 403 && daveInv.json?.error === "member_cap" && /Contact the operator/.test(daveInv.json?.message),
+    `${bobInv.status} ${carolInv.status} ${daveInv.status} ${daveInv.text}`,
+  );
+  const BOB = await gSignIn("bob@example.test");
+  const bobAccept = await gPost(`/api/v2/invites/${bobInv.json?.token}/accept`, {}, BOB);
+  check("caps: accepting an open invite within the cap works (it was already counted)", BOB.status === 200 && bobAccept.status === 200, `${BOB.status} ${bobAccept.status} ${bobAccept.text}`);
+  // -- workspaces per account (2 by default) and on the server (4 here) --
+  const W3 = await gCreate(OPSG, "Ops Two", U1c);
+  const opsThird = await gCreate(OPSG, "Ops Three", U2c);
+  const W4 = await gCreate(BOB, "Bob One", bobC);
+  const bobSecond = await gCreate(BOB, "Bob Two", U2c);
+  check(
+    "caps: an account owning 2 workspaces (the default ALIGN_MAX_OWNED_WORKSPACES) -> 403 owned_workspace_cap; at 4 on the server (ALIGN_MAX_WORKSPACES) -> 403 workspace_cap; both say to contact the operator and spend no code",
+    W3.status === 201 && opsThird.status === 403 && opsThird.json?.error === "owned_workspace_cap" && /Contact the operator/.test(opsThird.json?.message) && W4.status === 201 && bobSecond.status === 403 && bobSecond.json?.error === "workspace_cap" && /Contact the operator/.test(bobSecond.json?.message) && withDb((d) => d.prepare("SELECT redeemed_at FROM v2_creation_codes WHERE id = ?").get(gIds[1]).redeemed_at) === null,
+    `${W3.status} ${opsThird.status} ${opsThird.text} ${W4.status} ${W4.text} ${bobSecond.status} ${bobSecond.text}`,
+  );
+  // -- the workspace caps count live workspaces: a deleted one (restorable for 30 days) frees its place, and restoring
+  //    it must fit under both caps again (409) --
+  const W3id = W3.json?.id;
+  const gDel = (who, ws) => hosted("DELETE", `/api/v2/workspaces/${ws}`, { cookie: who.cookie, headers: hOrigin });
+  const gRestore = (who, ws) => hosted("POST", `/api/v2/workspaces/${ws}/restore`, { body: {}, cookie: who.cookie, headers: hOrigin });
+  const capC = codesIn(admin(["codes", "create"], opGate).out)[0];
+  const delW3 = await gDel(OPSG, W3id);
+  const opsAgain = await gCreate(OPSG, "Ops Three", capC);
+  const restoreFull = await gRestore(OPSG, W3id);
+  const delW4 = await gDel(BOB, W4.json?.id);
+  const restoreOwned = await gRestore(OPSG, W3id);
+  const delOps3 = await gDel(OPSG, opsAgain.json?.id);
+  const restoreOk = await gRestore(OPSG, W3id);
+  check(
+    "caps and soft delete: deleting a workspace frees its place at once (the owner creates another at the owned cap of 2 and the server cap of 4); restoring the deleted one then -> 409 workspace_cap (server full), and with room on the server but 2 owned -> 409 owned_workspace_cap; with room under both it is restored (200)",
+    delW3.status === 204 && opsAgain.status === 201 && restoreFull.status === 409 && restoreFull.json?.error === "workspace_cap" && /Contact the operator/.test(restoreFull.json?.message) &&
+      delW4.status === 204 && restoreOwned.status === 409 && restoreOwned.json?.error === "owned_workspace_cap" && delOps3.status === 204 && restoreOk.status === 200 && restoreOk.json?.id === W3id,
+    `${delW3.status} ${opsAgain.status} ${opsAgain.text} ${restoreFull.status} ${restoreFull.text} ${delW4.status} ${delW4.text} ${restoreOwned.status} ${restoreOwned.text} ${delOps3.status} ${restoreOk.status} ${restoreOk.text}`,
+  );
+  // -- new shared sessions per device per day (2 here) --
+  const gKeys = newDeviceKeys();
+  const gAuth = await hosted("POST", "/api/v2/device/authorize", { body: { device_name: "ops laptop", public_key: gKeys.pub } });
+  const gAppr = await gPost("/api/v2/device/approve", { user_code: gAuth.json?.user_code, workspace_ids: [W1id] }, OPSG, null);
+  const gTok = await hosted("POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: gAuth.json?.device_code } });
+  const gDev = { ...gKeys };
+  const share = (n) =>
+    hosted("PUT", `/api/v2/workspaces/${W1id}/sessions/${sessionKey(gDev, W1id, "claude-code", n)}`, {
+      body: { harness: "claude-code", repo_key: repoKey(gDev, W1id, "repo"), started_at: new Date(Date.now() - 60_000).toISOString() },
+      headers: { authorization: `Bearer ${gTok.json?.access_token}` },
+    });
+  const shares = [await share("s1"), await share("s2"), await share("s3"), await share("s1")];
+  check(
+    "caps: a device shares at most ALIGN_MAX_SESSIONS_PER_DEVICE_DAY (2) new sessions in 24 hours: the 3rd -> 403 session_cap (contact the operator); updating a session it already shares still works",
+    gTok.status === 200 && gAppr.status === 200 && shares[0].status === 200 && shares[1].status === 200 && shares[2].status === 403 && shares[2].json?.error === "session_cap" && /Contact the operator/.test(shares[2].json?.message) && shares[3].status === 200,
+    `${gAppr.status} ${gTok.status} ${shares.map((r) => `${r.status} ${r.text.slice(0, 80)}`).join(" | ")}`,
+  );
+  // -- durable limits: per-address code sends (5 an hour, hosted) and Better Auth's per-client limit survive a restart --
+  const rl = [];
+  for (let i = 0; i < 4; i++) rl.push(await gSend("rl@example.test"));
+  const ipSends = [];
+  for (let i = 0; i < 4; i++) ipSends.push(await gSend(`ip${i}@example.test`, "ok", "198.18.200.1"));
+  const baRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_rate_limit").get().n);
+  check(
+    "limits: hosted, 3 sends per address in 10 minutes (then 429), and Better Auth allows 3 code sends per client per minute (the 4th -> 429), its counters in the ba_rate_limit table",
+    rl.slice(0, 3).every((r) => r.status === 200) && rl[3].status === 429 && ipSends.slice(0, 3).every((r) => r.status === 200) && ipSends[3].status === 429 && baRows > 0,
+    `${rl.map((r) => r.status)} ${ipSends.map((r) => r.status)} ${baRows}`,
+  );
+  await stopServer();
+  // ======== the kill switch (ALIGN_CREATION=closed), on a restart that keeps the durable limits ========
+  const closedRun = await startServer({ ...gateEnv, ALIGN_CREATION: "closed" });
+  const ipAfter = await gSend("ip9@example.test", "ok", "198.18.200.1");
+  const rlAfter = [await gSend("rl@example.test"), await gSend("rl@example.test"), await gSend("rl@example.test")];
+  const hitKeys = withDb((d) => d.prepare("SELECT key FROM v2_rate_hits").all().map((r) => r.key));
+  check(
+    "limits: after a restart Better Auth's per-client send limit still holds (429), and an address that had 3 sends gets 2 more and then 429 (5 per hour, durable); the stored keys hold no email address",
+    closedRun.started && ipAfter.status === 429 && rlAfter[0].status === 200 && rlAfter[1].status === 200 && rlAfter[2].status === 429 && hitKeys.some((k) => k.startsWith("otp-email-hour:")) && !hitKeys.some((k) => k.includes("@")),
+    `${ipAfter.status} ${rlAfter.map((r) => r.status)} ${hitKeys.slice(0, 3)}`,
+  );
+  const OPSC = await gSignIn("ops@example.test");
+  const closedCreate = await gCreate(OPSC, "Closed", U2c);
+  const closedHome = await hosted("GET", "/app", { cookie: OPSC.cookie });
+  check(
+    "gate: ALIGN_CREATION=closed refuses every create (403 creation_closed, code not spent) and /app says creation is closed",
+    closedCreate.status === 403 && closedCreate.json?.error === "creation_closed" && closedHome.text.includes("be created on this server right now") && !closedHome.text.includes('name="creation_code"') && withDb((d) => d.prepare("SELECT redeemed_at FROM v2_creation_codes WHERE id = ?").get(gIds[1]).redeemed_at) === null,
+    `${closedCreate.status} ${closedCreate.text}`,
+  );
+  await stopServer();
+  const openRun = await startServer({ ...gateEnv, ALIGN_CREATION: "open", ALIGN_MAX_WORKSPACES: "10" });
+  const CAROL = await gSignIn("carol@example.test");
+  const carolHome = await hosted("GET", "/app", { cookie: CAROL.cookie });
+  const carolCreate = await gCreate(CAROL, "Carol One");
+  const carolNoTok = await gCreate(CAROL, "Carol Two", undefined, null);
+  const noLinkSignIn = await hosted("GET", "/app/sign-in");
+  check(
+    "gate: ALIGN_CREATION=open lets any signed-in person create without a code (the token is still required), and no page asks for a code or links to request access",
+    openRun.started && CAROL.status === 200 && carolCreate.status === 201 && carolNoTok.status === 400 && !carolHome.text.includes('name="creation_code"') && !noLinkSignIn.text.includes("/app/request-access"),
+    `${CAROL.status} ${carolCreate.status} ${carolCreate.text} ${carolNoTok.status}`,
+  );
+  verifyApi.close();
+  mailApi.close();
+} catch (e) {
+  check("v2 run", false, e?.stack ?? e);
+} finally {
+  await stopServer();
+  rmSync(tmpRoot, { recursive: true, force: true });
+}
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

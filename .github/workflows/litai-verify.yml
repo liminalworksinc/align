@@ -1,0 +1,30 @@
+# Literate AI gate: the committed test receipt must match the code and tests it covers, and the spec must validate.
+# A change to the app, its tests or its harness without a fresh `litai project test-receipt run-retained` fails here;
+# it does not run the suite itself (about 25 minutes, with Chromium and a live server).
+name: litai-verify
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # literate-ai at the exact revision this project's locks and receipt were produced with.
+      LITAI_SOURCE: git+https://github.com/allsmog/literate-ai@2867597f11241306ff14118449af74e93bf50f92
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install litai
+        run: python -m pip install "$LITAI_SOURCE"
+      - name: Receipt, locks and authority are current
+        run: litai verify
+      - name: Spec validates
+        run: litai spec validate specs/align --id-prefix align

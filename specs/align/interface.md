@@ -1,0 +1,1234 @@
+---
+name: Interface
+summary: The screens people use in Align, what each role can see and do on them, and which endpoint each action calls.
+kind: area
+---
+
+# Interface
+
+Align's web interface is the web app under `/app`, plus the OAuth consent page that connected AI apps send people
+to. Everyone signs in as a person (Google, GitHub, an email one-time code or a passkey); nothing is reached with a
+shared passcode. `/` redirects to `/app`. Every path under `/app` is served in Mode L and when hosted.
+
+Each page reads the `/api/v2` endpoints it needs when it loads and reloads them after each of its own actions; pages
+do not poll, except the Home's first-run card, which checks the Apps endpoint while it is shown. A page shows only the controls the server would accept from the signed-in person: their workspace role
+(`owner`, `member` or `viewer`), their team role (`lead` or `member`), whether they own a goal or are in its approval
+set, and the `can` flags the server returns on alignments and change requests. "Pod" is stored data only: every
+screen says "team".
+
+| Route | Screen | Who uses it | Purpose |
+| --- | --- | --- | --- |
+| `/` | (redirect) | Anyone | Redirects to `/app` |
+| `/app/sign-in` | Sign in | A signed-out person | Sign in with Google, GitHub, an email code or a passkey |
+| `/app/request-access` | Request access | Anyone, signed in or not | Ask the operator for a creation code (hosted) |
+| `/app` | Your workspaces | A signed-in person | List and create workspaces, restore a deleted one; first run offers the Northstar sample |
+| `/app/account` | Your account | A signed-in person | See the account, link Google or GitHub, manage passkeys, sign out everywhere, delete the account |
+| `/app/device` | Connect a device | A signed-in person (recent sign-in) | Approve the code that `align login` printed |
+| `/app/devices` | Your devices | A signed-in person | List and revoke paired devices |
+| `/app/invite/<token>` | Workspace invite | The invited person | Join a workspace (and team) from an invite link |
+| `/app/w/<ws>` | Home | Workspace members | What waits on the person and on others, the active goals, and when connected AI apps last read the goals or connected |
+| `/app/w/<ws>/goals` | Goals tab | Workspace members | Goals the person can read; create a goal |
+| `/app/w/<ws>/goals/<goal>` | Goal page | Workspace members | One goal: versions, tree, new version, alignment request, change requests |
+| `/app/w/<ws>/people` | People tab | Workspace members | Members, roles, invites, teams, leaving, deleting the workspace |
+| `/app/w/<ws>/sessions` | Sessions tab | Workspace members | Shared sessions, stop and resume |
+| `/app/w/<ws>/alignments` | Alignments tab | Workspace members | Alignment requests the person is part of |
+| `/app/w/<ws>/requests` | Requests tab | Workspace members | Change requests: waiting on me, mine, others |
+| `/app/w/<ws>/asks` | Asks tab | Workspace members | What teams were asked to do: waiting on me, my teams', mine, others; record and import asks |
+| `/app/w/<ws>/spend` | Spend tab | Workspace members | Usage and estimated cost by goal, team or session |
+| `/app/w/<ws>/apps` | Apps tab | Workspace members | Connected AI apps and how to connect one |
+| `/privacy` | Privacy policy | Anyone, signed in or not | Align's privacy policy (public, also when hosted) |
+| `/trust` | Trust | Anyone, signed in or not | Security overview, subprocessors, retention, DPA, questionnaire answers and contact |
+| `/oauth/authorize` | Connect <app> to Align | A person connecting an AI app (recent sign-in) | Grant an AI app read-only access to one workspace as themselves (or, when the app asks, read access plus agent-reported evidence links) |
+| (any) | Error page | Anyone | Plain error with Try again |
+
+Navigation: every `/app` page except sign-in has a top bar with the **Align** mark (a link to `/app`), a workspace
+switcher (shown once the person has a workspace), **Devices**, **Account**, the person's name (email on hover) and
+**Sign out**. Under it, a person with no passkey who has not dismissed the offer sees the add-a-passkey prompt. Inside
+a workspace a second bar shows the workspace name, the person's role and the tabs Home, Goals,
+People, Sessions, Alignments, Requests, Asks, Spend and Apps, with the current tab highlighted. Opening a workspace
+(from the list, the switcher, a new workspace, the sample or an invite) lands on its Home.
+
+### Requirement: Root path redirects to the web app
+
+The server SHALL answer `/` with a redirect to `/app`, and SHALL serve no other page outside `/app`,
+`/oauth/authorize` and the public trust pages `/privacy` and `/trust`.
+
+#### Scenario: Opening the root
+
+- **WHEN** anyone opens `/` in Mode L or hosted
+- **THEN** the response redirects to `/app`, which shows the person's workspaces or sends a signed-out visitor to sign-in
+
+#### Scenario: Retired pages
+
+- **WHEN** someone opens `/new`, `/setup` or `/w/<id>`
+- **THEN** the server answers 404; no page offers passcodes, role cards or **Switch team**
+
+### Requirement: Signed-out visitors are sent to sign-in
+
+Every `/app` page other than `/app/sign-in` and `/app/request-access` SHALL send a signed-out visitor to
+`/app/sign-in?next=<page>`, and
+`/oauth/authorize`, once the request itself is valid, SHALL show a signed-out visitor a **Sign in** link to
+`/app/sign-in?next=<this /oauth/authorize URL>` (as the `mcp` part specifies); sign-in SHALL return only to an `/app`
+path or an `/oauth/authorize` URL, falling back to `/app` for anything else.
+
+#### Scenario: Deep link while signed out
+
+- **WHEN** a signed-out person opens `/app/w/<ws>/requests`
+- **THEN** they land on `/app/sign-in?next=%2Fapp%2Fw%2F<ws>%2Frequests` and, after signing in, on the Requests tab
+
+#### Scenario: Foreign next
+
+- **WHEN** `next` is `https://evil.example/`, `//evil.example` or any path outside `/app` and `/oauth/authorize`
+- **THEN** sign-in sends the person to `/app`
+
+#### Scenario: Session ends while a page is open
+
+- **WHEN** an API call from an open page returns 401
+- **THEN** the page navigates to `/app/sign-in?next=<current path>`
+
+### Requirement: Sign-in screen
+
+The `/app/sign-in` page SHALL offer **Continue with Google** and **Continue with GitHub** only when that provider's
+client id and secret are configured, and SHALL offer the email-code form whenever email sign-in is available (always
+in Mode L; when hosted, whenever the email settings are set, as the `workspaces` part specifies); a person who is
+already signed in SHALL be sent straight to `next`, unless the URL carries `reauth=1`, which shows the form anyway.
+When hosted with `ALIGN_CREATION=codes` it SHALL link to `/app/request-access`, and when the bot check is on it SHALL
+render one Turnstile widget for the email-code form, sending its token with each send and sign-in and asking for a new
+one after each try.
+
+#### Scenario: Social sign-in
+
+- **WHEN** a person presses **Continue with Google**
+- **THEN** the page posts `{provider:"google", callbackURL:<next>, errorCallbackURL:"/app/sign-in"}` to `POST /api/v2/auth/sign-in/social` and follows the returned URL; an error is shown in red at the bottom of the sign-in card
+
+#### Scenario: Neither provider configured
+
+- **WHEN** neither Google nor GitHub is configured (in Mode L, or hosted with the email settings set)
+- **THEN** the page shows only the email-code form; it never says that no sign-in method is configured
+
+#### Scenario: Request access link and bot check
+
+- **WHEN** a hosted server with `ALIGN_CREATION=codes` and both Turnstile keys serves `/app/sign-in`
+- **THEN** the card ends with "New to Align? Creating a workspace here needs a creation code. **Request access**" (a link to `/app/request-access`), and the email-code form shows the Turnstile widget; **Send code** and **Sign in** stay disabled until it gives a token, and a refused check shows "Complete the check that you are a person, then try again." or "The check that you are a person didn't pass. Try it again."; Mode L shows neither
+
+#### Scenario: Test identity provider
+
+- **WHEN** the server runs with `ALIGN_TEST_IDP=1` (never when hosted)
+- **THEN** the page also shows "Test sign-in (this machine only)" with **Sign in** and **Create a test account** (name, email, password of at least 8 characters), posting to `POST /api/v2/auth/sign-in/email` or `POST /api/v2/auth/sign-up/email`; without the flag that section is absent
+
+### Requirement: Passkey sign-in
+
+The sign-in page SHALL offer **Sign in with a passkey** and passkey suggestions in the email field (WebAuthn
+conditional mediation, `autocomplete="email webauthn"`) whenever the page is served from the passkey relying party's
+host, and on any other host SHALL say where passkeys work instead.
+
+#### Scenario: Button
+
+- **WHEN** a person presses **Sign in with a passkey** and picks a registered passkey
+- **THEN** the page gets `/api/v2/auth/passkey/generate-authenticate-options`, asks the browser for the passkey, posts the answer to `/api/v2/auth/passkey/verify-authentication` and on success navigates to `next`; a cancelled request shows "Passkey sign-in was cancelled.", a passkey Align doesn't know shows "That passkey isn't registered with Align. Sign in another way, then add it from your account page."
+
+#### Scenario: Autofill
+
+- **WHEN** the email step is shown in a browser that supports conditional mediation and the person picks a passkey from the email field's suggestions
+- **THEN** the page signs them in the same way and navigates to `next`; nothing happens until they pick one
+
+#### Scenario: Mode L at 127.0.0.1
+
+- **WHEN** the sign-in page is opened at `http://127.0.0.1:<port>` in Mode L
+- **THEN** it has no passkey button and says "Passkeys work only at http://localhost:<port> (a passkey needs a domain name, and this address is a number)."
+
+### Requirement: Email code sign-in form
+
+The sign-in page SHALL sign a person in with a 6-digit email code in two steps, **Send code** and **Sign in**, and
+SHALL sign in only on a POST that the person submits; opening a sign-in link SHALL only fill the form.
+
+#### Scenario: Send a code
+
+- **WHEN** a person types their email and presses **Send code**
+- **THEN** the page posts `{email, type:"sign-in"}` to `POST /api/v2/auth/email-otp/send-verification-otp`, then shows "If this email can sign in to Align, a 6-digit code is on its way. It works for 5 minutes." (the same text whether or not an account exists), a 6-digit "Code" field, **Sign in**, **Send a new code** and **Use another email**
+
+#### Scenario: Enter the code
+
+- **WHEN** the person types the 6 digits and presses **Sign in**
+- **THEN** the page posts `{email, otp}` to `POST /api/v2/auth/sign-in/email-otp` and on success navigates to `next`; **Sign in** is disabled until the field holds exactly 6 digits
+
+#### Scenario: Code refused
+
+- **WHEN** the code is wrong, expired, or has used up its 3 attempts
+- **THEN** the page shows "That code didn't work. Check it and try again.", "That code has expired. Send a new one." or "Too many wrong tries. Send a new code." respectively, and stays on the code step
+
+#### Scenario: Email that cannot sign in
+
+- **WHEN** the server is hosted, the code's email has no account, no invite for it is pending, and it is not the
+  `ALIGN_FIRST_OWNER_EMAIL` address while the server has no account yet
+- **THEN** sign-in fails and the page shows "This email can't sign in here yet. Ask a workspace owner to invite you."
+
+#### Scenario: Too many codes
+
+- **WHEN** sending is refused with 429 (more than 3 sends for that email in 10 minutes, or more than 10 from this client in an hour)
+- **THEN** the page shows "Too many codes were sent. Wait a few minutes, then try again." and sends nothing
+
+#### Scenario: Link from the email
+
+- **WHEN** a person opens `/app/sign-in?email=<email>&code=<code>` (with or without `next`)
+- **THEN** the page shows the code step with both fields filled and does not sign in until the person presses **Sign in**; `email` alone fills only the email field
+
+#### Scenario: Mode L hint
+
+- **WHEN** the page is served in Mode L
+- **THEN** the code step adds "On this machine the code is not emailed: it is printed in the terminal running Align and saved in `<data>/v2/sign-in.txt`. Run `npm run sign-in-link` to get a new one." Being on loopback never signs the person in
+
+### Requirement: Account screen and provider linking
+
+The `/app/account` page SHALL show the signed-in person's name and email and the sign-in methods linked to the
+account, and SHALL let the person link Google or GitHub explicitly; accounts are never linked implicitly.
+
+#### Scenario: Link GitHub
+
+- **WHEN** GitHub is configured, not yet linked, and the person presses **Link GitHub**
+- **THEN** the page posts `{provider:"github", callbackURL:"/app/account", errorCallbackURL:"/app/account"}` to `POST /api/v2/auth/link-social`, follows the returned URL, and on return lists GitHub with a green "linked" pill under "Ways you can sign in"
+
+#### Scenario: Linked methods
+
+- **WHEN** the page loads
+- **THEN** it reads `GET /api/v2/auth/list-accounts` and lists "Email code" (whenever email sign-in is available), each linked provider and, for a test account, "Test password (this machine only)"; a provider that is not configured on this server, or is already linked, has no **Link** button
+
+#### Scenario: Provider account already in use
+
+- **WHEN** linking fails because that Google or GitHub account belongs to another Align account
+- **THEN** the provider sends the person back to `/app/account?error=<code>` and the page shows "That account is already linked to another Align account, so nothing was linked." (other link failures show "Linking didn't work (<code>). Nothing was linked."); nothing is linked
+
+### Requirement: Account passkeys
+
+The `/app/account` page SHALL list the person's passkeys under "Passkeys" with each one's name ("Unnamed passkey"
+when it has none), when it was added and when it was last used ("not used yet" before its first sign-in), and SHALL
+let the person add, rename and delete passkeys.
+
+#### Scenario: Add a passkey
+
+- **WHEN** the person, on the relying party's host, optionally types a name and presses **Add a passkey**
+- **THEN** the page runs Better Auth's passkey registration (`/api/v2/auth/passkey/generate-register-options`, the browser's passkey dialog, `/verify-registration`), then names the new passkey with `PATCH /api/v2/account/passkeys/<id>` if a name was given, and lists it; a cancelled dialog shows "Adding a passkey was cancelled. Nothing was added."
+
+#### Scenario: Rename and delete
+
+- **WHEN** the person presses **Rename**, edits the name and presses **Save**, or presses **Delete** and confirms "Delete the passkey "<name>"? It will no longer sign you in to Align."
+- **THEN** the page calls `PATCH /api/v2/account/passkeys/<id> {name}` or `DELETE /api/v2/account/passkeys/<id>` and reloads the list
+
+#### Scenario: Another host
+
+- **WHEN** the page is opened at `http://127.0.0.1:<port>` in Mode L, or in a browser without WebAuthn
+- **THEN** instead of the add form it says "Passkeys work only at http://localhost:<port>, because a passkey needs a domain name and this address is a number. Open Align there and sign in to add or use one." or "This browser can't use passkeys."
+
+### Requirement: Add-a-passkey prompt
+
+Every `/app` page with the top bar, except `/app/account`, SHALL show under it, to a person the server reports as due
+for the prompt, "Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code. A passkey
+can't be phished." with an **Add a passkey** link to `/app/account#passkeys` and **Not now**.
+
+#### Scenario: Not now
+
+- **WHEN** the person presses **Not now**
+- **THEN** the prompt disappears and the page calls `DELETE /api/v2/account/passkey-prompt`, so no page shows it to them again
+
+### Requirement: Sign out everywhere button
+
+The `/app/account` page SHALL offer **Sign out everywhere** with two unticked options, "Also unpair all my devices"
+and "Also disconnect all my AI apps, in every workspace".
+
+#### Scenario: Sign out everywhere
+
+- **WHEN** the person ticks any options, presses **Sign out everywhere** and confirms "Sign out of Align on every browser, this one included[, and unpair all your devices][ and disconnect all your AI apps]?"
+- **THEN** the page posts `{devices, apps}` to `POST /api/v2/account/sign-out-everywhere` and opens `/app/sign-in`
+
+### Requirement: Account deletion screen
+
+The `/app/account` page SHALL offer a "Delete your account" card that says what deletion does and keeps, enables
+**Delete my account** only once the person has typed their email, and asks for a fresh sign-in first when their
+sign-in is older than 15 minutes.
+
+#### Scenario: Delete the account
+
+- **WHEN** a person with a recent sign-in types their email into "Type <email> to confirm" and presses **Delete my account**
+- **THEN** the page calls `DELETE /api/v2/me` with `{email}` and, on 204, opens `/app/sign-in`; until the typed text equals their email (in any case) the button stays disabled
+
+#### Scenario: Old sign-in or refusal
+
+- **WHEN** the person's sign-in is older than 15 minutes, or the server answers 403 `reauth_required`
+- **THEN** the card is replaced by "Sign in again to delete your account. This needs a sign-in from the last 15 minutes." with **Sign in again** (coming back to `/app/account`); any other refusal, such as 409 `last_owner`, shows the server's message in red
+
+### Requirement: Workspace list and first-run sample
+
+The `/app` page SHALL list the person's workspaces from `GET /api/v2/workspaces` with their role and teams, let them
+create a workspace (with a "Creation code" field and a **Request access** link when the hosted creation gate needs a
+code from them, the Turnstile widget when the bot check is on, and only a note when creation is closed), and offer
+**Create the Northstar sample** only when they have no workspaces and need no code.
+
+#### Scenario: Workspaces listed
+
+- **WHEN** a person with workspaces opens `/app`
+- **THEN** each workspace is a link to `/app/w/<ws>` with a role pill and one pill per team (" (lead)" for a team they lead), followed by a "Create a workspace" card (Name, up to 100 characters, **Create**, posting `{name}` to `POST /api/v2/workspaces` and then opening the new workspace) and a "Connect a device" card pointing to `align login` and `/app/device`
+
+#### Scenario: First run
+
+- **WHEN** a person in no workspace opens `/app`
+- **THEN** the page shows "You are not in a workspace yet. Create one, open an invite link someone sent you, or start from a sample." and a "Try Align with a sample" card with **Create the Northstar sample**, which posts to `POST /api/v2/workspaces/sample` and opens the new "Northstar (sample)" workspace; the button is not shown once the person has any workspace
+
+#### Scenario: Deleted workspaces
+
+- **WHEN** the person owns workspaces deleted in the last 30 days
+- **THEN** a "Deleted workspaces" card lists each with "Deleted <time>. You can restore it until <time>; then it is erased." and **Restore**, which posts to `POST /api/v2/workspaces/<ws>/restore` and reloads the list, where the workspace is back among the links; 403 `reauth_required` shows the server's "Sign in again to restore a workspace. This needs a sign-in from the last 15 minutes." with **Sign in again** (coming back to `/app`); a hosted restore that would pass a workspace cap (409 `workspace_cap` or `owned_workspace_cap`) shows the server's message in red; the card is absent when there is nothing to restore
+
+#### Scenario: Create refused
+
+- **WHEN** creating a workspace or the sample returns an error (for example 429 `rate_limited`, 403 `creation_code_invalid` or 403 `owned_workspace_cap`)
+- **THEN** the card shows the server's message in red and stays on `/app`
+
+#### Scenario: Creation code
+
+- **WHEN** a hosted person who needs a code opens `/app`
+- **THEN** "Create a workspace" has Name, "Creation code" (hint: each code creates one workspace and came in the email that answered the access request), "No code yet? **Request access**", the widget when the bot check is on, and **Create**, disabled until the name, the code and the check are filled, posting `{name, creation_code}`; the sample card is not shown
+
+#### Scenario: Creation closed
+
+- **WHEN** a hosted server runs with `ALIGN_CREATION=closed`
+- **THEN** "Create a workspace" shows only "New workspaces can't be created on this server right now. Contact its operator."
+
+### Requirement: Request access page
+
+The `/app/request-access` page SHALL, without sign-in, collect email, name, company (optional), team size (optional),
+what the person wants to use Align for, and one interest, **Try Align** or **Evaluate Align on a real workflow** (a
+follow-up about an evaluation and, if it fits, a non-binding letter of intent), post them to
+`POST /api/v2/access-requests` with the Turnstile token when the bot check is on, and say plainly that the form is not
+an agreement, commits neither the person nor their employer, and asks nobody to sign for their organization.
+
+#### Scenario: Send a request
+
+- **WHEN** someone fills the form and presses **Send request**
+- **THEN** the page posts the fields and shows "Thanks. We got your request and will answer it by email at <email>, usually within a day." with a link back to sign-in; an error is shown in red under the form
+
+#### Scenario: No agreement implied
+
+- **WHEN** the page is read
+- **THEN** it says "Sending this form only asks for access. It is not an agreement, and asking for a follow-up or a letter of intent doesn't commit you or your employer to anything. Nothing here asks you to sign for your organization."; in Mode L it also notes that anyone signed in on this machine can create a workspace without a code
+
+#### Scenario: Opened from the value card
+
+- **WHEN** the page is opened as `/app/request-access?interest=evaluate&via=value_card` (the decision value card's default follow-up link)
+- **THEN** **Evaluate Align on a real workflow** is preselected and the request is posted with `via: "value_card"`, which the server keeps only on the `access_requested` product event (`metrics`); without those parameters, or with any other value, **Try Align** is preselected and `via` is `form`
+
+### Requirement: Public trust pages
+
+The server SHALL serve `/privacy` (the privacy policy, `docs/trust/privacy-policy.md`) and `/trust` (the security
+overview, the subprocessor list, the retention schedule `docs/RETENTION.md`, the DPA cover note, the questionnaire
+answers and a contact section, each from its file in `docs/trust`, with a link to `/privacy`) to anyone, signed in or
+not, in Mode L and hosted; it SHALL build both pages from that Markdown when the app is built, show no HTML and no
+comment from the documents, keep a link's target only when it is https, http, mailto, an anchor or another trust
+document, and fill the placeholders `[LEGAL ENTITY]`, `[ADDRESS]`, `[PRIVACY CONTACT EMAIL]` and
+`[SECURITY CONTACT EMAIL]` from `lib/trust/entity.ts`; the sign-in and request-access cards SHALL end with links to
+both pages, and the request-access form SHALL link to `/privacy`.
+
+#### Scenario: Reading the trust page
+
+- **WHEN** anyone opens `/trust`
+- **THEN** the page lists its sections (Security overview, Subprocessors, Retention, Data processing agreement, Questionnaire answers, Privacy policy, Contact) and shows each document below, its title one heading level down, with every link between documents pointing at `/trust#<section>` or `/privacy`
+
+#### Scenario: Source notes stay out
+
+- **WHEN** a trust document carries an HTML comment (a source note or a `PRESEED-…` marker) or raw HTML
+- **THEN** the comment does not appear in the page, and the raw HTML is shown as text
+
+#### Scenario: Links from sign-in
+
+- **WHEN** someone opens `/app/sign-in` or `/app/request-access`
+- **THEN** the card ends with **Privacy** (`/privacy`) and **Trust and security** (`/trust`)
+
+### Requirement: Device approval screen
+
+The `/app/device` page SHALL let a person with a recent sign-in look up the code that `align login` printed, choose
+which of their workspaces the device may use, and approve or deny it.
+
+#### Scenario: Approve a device
+
+- **WHEN** a person enters the code, presses **Look up**, ticks at least one workspace and presses **Approve**
+- **THEN** the page calls `GET /api/v2/device/requests/<code>` (showing the device name and "Asked <n> seconds/minutes ago") and then `POST /api/v2/device/approve` with `{user_code, workspace_ids}`, and says "<device> is connected. You can close this page."; **Approve** stays disabled until a workspace is ticked
+
+#### Scenario: Unknown code or deny
+
+- **WHEN** the code is unknown or expired, or the person presses **Deny**
+- **THEN** the page shows "No device is waiting for that code. Check it, or run align login again.", or calls `POST /api/v2/device/deny {user_code}` and says "Denied. That device was not connected."
+
+#### Scenario: Nothing to grant
+
+- **WHEN** the person is in no workspace
+- **THEN** the looked-up device shows "You are not in any workspace yet, so there is nothing to grant." and **Approve** stays disabled
+
+### Requirement: Recent sign-in prompt
+
+The device approval page and the OAuth consent page SHALL ask a person whose sign-in is older than 15 minutes to
+sign in again before they can approve, and SHALL show the same prompt when the server refuses an approval with 403
+`reauth_required`; the account page, the workspace list and the People tab SHALL show it, with the server's message,
+when an action there is refused with 403 `reauth_required`.
+
+#### Scenario: Stale sign-in on the device page
+
+- **WHEN** a person who signed in 40 minutes ago opens `/app/device`
+- **THEN** instead of the code form the page shows "Sign in again to approve a device. Approving needs a sign-in from the last 15 minutes." with **Sign in again**; the consent page shows "Sign in again to connect an app. Connecting needs a sign-in from the last 15 minutes." with **Sign in again** and **Cancel**
+
+#### Scenario: Signing in again
+
+- **WHEN** the person presses **Sign in again**
+- **THEN** the app posts to `POST /api/v2/auth/sign-out` and opens `/app/sign-in?next=<this page, with its query>&email=<their email>`, so after a fresh sign-in they return to the same device code or consent request
+
+#### Scenario: Sign-in ages while the page is open
+
+- **WHEN** the page was opened with a recent sign-in, but **Approve**, **Allow read-only access** or **Allow access** gets 403 `reauth_required`
+- **THEN** the page replaces the form with the sign-in-again prompt and nothing is approved
+
+#### Scenario: Account page, workspace list and People tab
+
+- **WHEN** adding or deleting a passkey, linking a provider, signing out everywhere or deleting the account on `/app/account`, restoring a deleted workspace on `/app`, or changing a role, removing a member, inviting an owner or deleting the workspace on the People tab, gets 403 `reauth_required`
+- **THEN** the page shows the server's message (for example "Sign in again to invite an owner. This needs a sign-in from the last 15 minutes.") with **Sign in again**, which signs out and opens `/app/sign-in?next=<that page>&email=<their email>`; nothing changed; on the People tab the remove panel stays open as it was, and the prompt for deleting the workspace shows just above the "Delete this workspace" card
+
+### Requirement: Devices screen
+
+The `/app/devices` page SHALL list the person's paired devices from `GET /api/v2/devices` and let them revoke an
+active one.
+
+#### Scenario: Revoke a device
+
+- **WHEN** a person presses **Revoke** on an active device
+- **THEN** the page calls `DELETE /api/v2/devices/<id>` and the device shows a red "revoked" pill instead of the green "active" one; each row shows when it was connected, when it was last seen and its workspaces
+
+#### Scenario: No devices
+
+- **WHEN** the person has no paired device
+- **THEN** the page shows "No devices yet. Run align login on your machine to connect one."
+
+### Requirement: Invite acceptance page
+
+The `/app/invite/<token>` page SHALL preview an invite with `GET /api/v2/invites/<token>` and let only the invited
+email join with **Join workspace**.
+
+#### Scenario: Accept an invite
+
+- **WHEN** the signed-in person's email matches the invite and they press **Join workspace**
+- **THEN** the page shows "You are invited to <workspace> as <role>." (adding "and to the team <team> as <team role>." when the invite names a team), posts to `POST /api/v2/invites/<token>/accept` and opens `/app/w/<ws>`
+
+#### Scenario: Wrong account or unusable link
+
+- **WHEN** the signed-in email differs from the invited one, or the token is unknown, accepted, withdrawn or expired
+- **THEN** the page says "This invite is for <invited email>. You are signed in as <email>. Sign in with the invited address to join." with no button, or "This invite link is not valid. It may have been used, withdrawn or expired."
+
+#### Scenario: Invitee without an account
+
+- **WHEN** a signed-out invitee opens the invite link
+- **THEN** sign-in opens with `next` set to the invite page; the email code for the invited address creates their account, because an invite for it is pending
+
+### Requirement: Workspace Home
+
+The Home at `/app/w/<ws>`, a workspace's landing view, SHALL show under "Know what needs you", from one read of
+`GET /api/v2/workspaces/<ws>/home`, a line saying how many things wait on the person, four count tiles ("Waiting on
+you", "Waiting on others", "Active goals", and "Connected apps that read the goals" as "<read> of <connected>", or
+"Connected apps" with none), each a link to its section, and the sections "Waiting on you", "Waiting on others",
+"Active goals" and "Connected AI apps · when they last read the goals". It SHALL show only what the server holds: a count or a
+section the server could not read SHALL say "unknown", never zero, and nothing on the page SHALL infer what an agent is
+doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version or is "on
+the current plan": Align keeps no per-app version). The page
+reads once when it opens and does not poll (only its first-run card checks the apps while it is shown).
+
+The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
+bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`), `asks`
+(`waiting_on_me`), `alignments` (`waiting_on_me`, `waiting_on_others`), `goals` and `apps` (`everyone`, `items`),
+each `null` when the server could not read it. Every queue item SHALL carry `next` (what it needs) and `waiting_on`
+(the people it waits on). An open change request waits on its approvers to decide (`waiting_on` is the effective
+approval set, and empty when nobody can approve it yet); pending behind the goal's current version, on its requester to
+update it (`rebase`); countered, on its requester to accept the change (`accept_counter`). It is waiting on the person
+when their `approve` or `accept_counter` flag is set or it is their own request to update; otherwise it is listed under
+waiting on others when the person asked for it, is in its approval set, or the goal is theirs, their team's, or (for a
+workspace owner) a company goal. An ask waits on the person when its `waiting_on_me` is set (`accept` while open,
+`done` once accepted). An alignment the person is part of waits on its requester when countered and, when pending, on
+everyone who could satisfy a requirement nobody has satisfied yet. Active goals are the readable active goals, the
+person's own (owned, their team's, or a company goal for a workspace owner) first. An approved change request that is
+not launched (`launch` `pending` or `not_yet`) SHALL be listed with `next: "launch"` as "Approved, not launched": waiting
+on the person when their `can.launch` flag is set, otherwise under waiting on others, with `waiting_on` its `launchers`,
+when the person asked for it or the goal is theirs, their team's, or (for a workspace owner) a company goal. A launched
+or superseded request is on no Home.
+
+Every agent-status item SHALL show exactly one evidence class, "delivery receipt" (a `received`, `applied` or
+`enforced` receipt, or a goal read Align served), "agent reported" (the agent's own claim or evidence link) or "not
+observed" (Align has nothing), and the read SHALL return the same class as `evidence_class`. Each connected app is
+listed with what the Apps tab has: its name, who connected it, when it was approved, `last_used_at` (**Last
+connected**) and `last_read_at` (**Last read the goals**, the `mcp` part's goal read). Only an app with a
+`last_read_at` is a delivery receipt, with "Read the goals <time>"; an app that connected but has no goal read is not
+observed, with "Connected <time>, no goal read seen yet", and one with neither is not observed with "Approved <time>,
+no goal read seen yet". A connection SHALL never be shown or counted as a read. The tile counts the apps with a goal
+read. A workspace owner sees every connected app and anyone else their own, as on the Apps tab.
+
+#### Scenario: Waiting on you and on others
+
+- **WHEN** a member proposes a change to a team goal and the team's lead opens the Home
+- **THEN** the lead's "Waiting on you" lists "<requester>'s request on <goal>" with the quoted reason, "Approve it, suggest a change or decline it." and **Open** (the goal page's change requests), and the requester's "Waiting on others" lists it with "Waiting on <lead> to decide."; after a counter it waits on the requester, and after the goal's owner saves a newer version it reads "Waiting on <requester> to update it to version <n>."
+
+#### Scenario: Asks and alignments
+
+- **WHEN** an ask of the lead's team is open and an alignment request with a company goal is pending
+- **THEN** the lead's "Waiting on you" lists "<who asked> asked <team>" with the quoted ask, and the workspace owner's lists "<requester> asks to align with <goal>"; each opens its tab
+
+#### Scenario: Connected apps
+
+- **WHEN** a workspace owner opens the Home with one app that has read the goals and one that has only connected (`initialize` and `tools/list`)
+- **THEN** the tile reads "1 of 2", the first app shows "delivery receipt" and "Read the goals <time>", the second "not observed" and "Connected <time>, no goal read seen yet", the section says that a delivery receipt here is a goal read Align served (recorded at most every 5 minutes), that connecting is not a read, and that Align sees when an app last read the goals, not which version it has or what it does with them, and nothing on the page says "on the current plan"
+
+#### Scenario: Nothing observed
+
+- **WHEN** the person has no connected app they can see
+- **THEN** the section shows one item marked "not observed": no app is connected (for a member, they have not connected one), so Align has observed no goal reads, with a link to the Apps tab
+
+#### Scenario: A failed read
+
+- **WHEN** the Home's read fails, or the server could not read one of its sections
+- **THEN** each affected tile says "unknown", the line says how much is waiting is unknown, and the section says Align couldn't read it just now, so it is unknown; nothing shows zero or "not observed" in its place
+
+#### Scenario: A workspace with no goals
+
+- **WHEN** a workspace has no active goal the person can see
+- **THEN** "Active goals" says "No active goals you can see." with a link to the Goals tab
+
+### Requirement: Evidence class on every agent-status item
+
+Every item in the web app that says what agents or their sessions did, received or reported SHALL carry exactly one
+evidence class, shown as a plain pill with the words of the Home ("delivery receipt", "agent reported", "not
+observed", `lib/v2/home-core.mts`), and nothing SHALL be inferred past it (no working, stuck, blocked or diverged
+state): the Home's connected apps (see "Workspace Home"); the goal page's Agent activity card ("agent reported" from
+the align CLI's bindings, usage and work signals, else "not observed"); each session's answer on the Agents on this goal
+card ("delivery receipt" for a request received and not answered, "agent reported" for an answer, "not observed"
+otherwise); the value card's "Agents on the new version" line ("delivery receipt" once any receipt for the launched
+version arrived, else "not observed"); and the Sessions tab's stop or resume progress (the same rule). Where an MCP
+read returns the same item (`align_get_goal_activity`), it SHALL carry the same class as `evidence_class`.
+
+#### Scenario: One class per item
+
+- **WHEN** a goal has two bound sessions that reported activity, a checkpoint request one session's developer accepted and another declined, a launched change whose directive a session received, and a resumed session whose machine sent no receipt yet
+- **THEN** the Agent activity card shows "agent reported", each request answer "agent reported", the value card's delivery line "delivery receipt" and the Sessions tab's "Resume sent, not yet received" "not observed", one pill each
+
+### Requirement: Home first-run card
+
+The Home SHALL show, between its summary line and its count tiles, a first-run card ("Get started") while its read
+returned the apps section and none of those apps (a workspace owner's: every app; anyone else's: their own) has a
+`last_used_at` or `last_read_at`, that is, while Align has seen no app the person can see here make a request. It
+SHALL not show when the apps section is unknown. The card has a **Hide** button that hides it for that workspace in
+the browser's `localStorage` (key `align.firstRun.hidden:<ws>`; when storage is blocked it stays shown, and Hide hides
+it until the page reloads) and moves focus to the page heading.
+
+The card SHALL offer two paths when the person has a sample: **Explore a sample**, tagged "Fictional", and **Connect
+one agent**, tagged "Claude Code", titled "Two ways to start". A sample is a workspace named "Northstar (sample)" in
+`GET /api/v2/workspaces`. The card never creates one: the sample is offered on `/app` only to a person with no
+workspace who needs no creation code, in Mode L and hosted alike, so on any other Home the card links to the sample
+the person has ("Open the Northstar sample", labelled fictional), on the sample's own Home says the person is in it
+and that its company, teams, goals and change request are fictional, with a link to its Requests tab, and with no
+sample shows only the connect path, titled "Connect one agent".
+
+The connect path SHALL show the Claude Code line of the Apps tab (`lib/paste-lines.ts`, from the MCP URL that
+`GET /api/v2/workspaces/<ws>/apps` returns) with **Copy** above it, say that it adds Align to Claude Code for the
+person's user account and starts the sign-in and writes no hooks, list what a connected agent can read as the person,
+one line per read tool the server lists for a `goals:read` token (`lib/mcp/read-tools.ts`, the activity line marked
+agent-reported), say that it can't propose, approve, launch or change anything (and that, if allowed when connecting,
+it can add evidence links labelled agent-reported), and link to the Apps tab for other apps; for a viewer it says
+viewers can't connect apps instead of the line. Its status line (a polite live region) SHALL say only what Align has
+seen: no app connected yet (for anyone but an owner: they haven't connected one), or for each approved app with no
+request "<app>: approved <time>, Align hasn't seen it connect yet", or that the check failed and is retried; it
+explains that once an app connects, the Home and the Apps tab show when it last connected (any request) and,
+separately, when it last read the goals, and that connecting is not a read. While shown and the tab is visible, the
+card SHALL read `GET /api/v2/workspaces/<ws>/apps` every 5 seconds; once an app has a `last_used_at` or `last_read_at`
+it reads the Home again and yields to the "Connected AI apps" section.
+
+#### Scenario: Two paths
+
+- **WHEN** a person with the Northstar sample opens the Home of another workspace where nobody connected an app
+- **THEN** the card shows "Two ways to start", **Open the Northstar sample** (fictional) linking to the sample's Home, and the connect path with the Claude Code line and **Copy**, the read list with one line per read tool of the server's `tools/list`, what it can't do and "No AI app is connected to this workspace yet."
+
+#### Scenario: In the sample
+
+- **WHEN** the person opens the sample's own Home
+- **THEN** the explore path says they are in the Northstar sample and that it is fictional, and links to its Requests tab
+
+#### Scenario: No sample
+
+- **WHEN** a person with no sample workspace opens a Home with no app seen
+- **THEN** the card is titled "Connect one agent" and shows only the connect path
+
+#### Scenario: Status follows what Align sees
+
+- **WHEN** the person approves an app that has not made a request yet, and later the app makes one
+- **THEN** the status first says "<app>: approved <time>, Align hasn't seen it connect yet", and after the request the card is gone and the Home's "Connected AI apps" section shows the app as "Connected <time>, no goal read seen yet"
+
+#### Scenario: Hide
+
+- **WHEN** the person presses **Hide**
+- **THEN** the card is gone, focus is on the page heading, and it stays hidden on that workspace's Home after a reload in the same browser; with storage blocked, Hide still hides it and nothing fails
+
+### Requirement: Web app fits a phone
+
+Every `/app` page SHALL fit a 390×844 screen with no sideways scrolling (`document.scrollingElement.scrollWidth` no
+wider than the window): the top bar, the workspace tabs and the passkey prompt wrap, padding narrows below 640 px, a
+word longer than its line (a link label, a URL, a host or a path) breaks instead of running off the side while button
+labels break only between words, and the Spend and Apps tables show each row as lines labelled with their column
+names. Below 640 px the chrome SHALL be compact: the top bar drops the person's name (the Account page has it), the
+passkey prompt is one short sentence ("Sign in with a passkey instead of an email code."), and the workspace tab row
+drops the workspace's name and role (the switcher shows the name), so a workspace page's heading starts above y=300 on
+a 390×844 screen; and every action button SHALL be at least 44 px tall (in px: the root font is 15 px, so a rem
+height falls short). At every width from 500 to 1440 px the Home, Goals, goal, Requests and Apps pages SHALL not
+scroll sideways (page or main column), and a long button label SHALL wrap inside its container. The workspace switcher
+SHALL be the browser's own select, listing only the person's workspaces, so its list never runs off a narrow window.
+A page SHALL read the connected apps at most once (the Home through its one read, the Apps tab through
+`GET .../apps`) and SHALL not poll.
+
+#### Scenario: Compact phone chrome
+
+- **WHEN** a signed-in person with the passkey prompt due opens a workspace's Home on a 390×844 screen
+- **THEN** the heading starts above y=300, the top bar has no person's name, the prompt reads "Sign in with a passkey instead of an email code." and the tab row has no workspace name; at 1000 px the name and the workspace show again
+
+#### Scenario: Tap targets and widths
+
+- **WHEN** the person opens Goals, a goal, Requests, Apps, Sessions, People, Account or Devices at 390 px, and the Home, Goals, a goal with its tree, Requests and Apps at 500, 600, 700, 768, 1100, 1268 and 1440 px
+- **THEN** every action button at 390 is at least 44 px tall, no page scrolls sideways, and at 700 px the workspace switcher is on screen and lists exactly the person's workspaces
+
+#### Scenario: Phone
+
+- **WHEN** a signed-in person opens the workspace list, account, device, devices, request access, a workspace's Home (with its first-run card), Goals tab, a goal page, People, Sessions, Alignments, Requests (an open request's decision and confirmation included), Asks, Spend or Apps on a 390 px wide screen
+- **THEN** nothing scrolls sideways, approved now and proposed stack, and an Apps connection reads as its name, then "Sends you back to", "Connected by", "Approved", "Last connected" and "Last read the goals" lines, then **Disconnect**
+
+### Requirement: Workspace Goals tab
+
+The Goals tab at `/app/w/<ws>/goals` SHALL list the goals the person can read from `GET /api/v2/workspaces/<ws>/goals`,
+and SHALL give everyone but viewers a "New goal" form that posts to `POST /api/v2/workspaces/<ws>/goals`.
+
+#### Scenario: Goal list
+
+- **WHEN** a member opens the tab
+- **THEN** each goal links to its goal page and shows its status pill, a "company" pill for a company goal, its visibility ("Only me", "My team", "Everyone in the workspace"), its team, "you can bind sessions" (green) or "needs alignment to bind" (amber), "target <n>%" when it has a target share, "last 7 days <n>%" (amber when 10 or more points from its target) when it has a target or had shared agent time in the last 7 days, its owner ("Yours" for the person's own) and version, its measures, and one chip per limit ("Must", "Must not" or "Out of scope" and its text, at most 5); with none, "No goals you can see yet."
+
+#### Scenario: Create a team goal
+
+- **WHEN** a member fills Goal (up to 300 characters), measures (up to 10, each with an optional target), "Who can see it", Team ("No team" or one of the person's teams; hint "Members of the team can bind their sessions to it"), the optional "Target share of agent time (%)" (hint "Optional. Other active goals you can see already take <n>%, so up to <100-n>% is left (goals you can't see count too). …") and the optional anchors, and presses **Create goal**
+- **THEN** the page posts `{title, level:"team", visibility, team_id, measures, anchors, limits, target_share}` (limits from the limit editor, empty rows left out; a blank target is `null`) and lists the new goal; a target that would put the workspace's targets over 100% shows the server's message; "My team" is disabled for a person in no team, and **Create goal** stays disabled for "My team" without a team
+
+#### Scenario: Create a company goal
+
+- **WHEN** a workspace owner chooses Level "Company goal"
+- **THEN** the Team field is hidden, visibility is fixed to "Everyone in the workspace", and the page posts `{level:"company", visibility:"workspace", …}` with no `team_id`; members and viewers are not offered the Level choice
+
+### Requirement: Limits from pasted meeting notes
+
+The Goals tab and the goal page's "Limits" card SHALL give everyone but viewers **Paste meeting notes**, which sends
+`{notes, source:{title, date}, prefer_goal_id?}` to `POST /api/v2/workspaces/<ws>/limits/suggest` (`prefer_goal_id`
+is the goal page's goal) and shows the suggestions grouped by goal, each with a checkbox (ticked unless the goal
+already has a limit like it), its kind and text, and the sentence it came from. Nothing is saved until the person acts
+on a group: **Add to a new version** (only when the response says `can_edit`) opens that goal's page with the new-version
+form filled in with the goal's limits plus the ticked ones, and **Propose these limits** (when `can_propose`) posts a
+change request with `changes.limits` set to the goal's current limits plus the ticked ones and the reason
+"Limits from <meeting>, <date>".
+
+#### Scenario: Notes with no rule
+
+- **WHEN** a member pastes notes in which no sentence reads like a rule
+- **THEN** the page shows "No limits found. Write them as rules, like “The three models must not all fit on the GPU.”"
+
+#### Scenario: Proposing suggested limits
+
+- **WHEN** a member who does not own a suggested goal presses **Propose these limits**
+- **THEN** the page reads the goal again, posts `{base_version, changes:{limits}, reason:"Limits from <meeting>, <date>"}` to its change requests, and says the request was proposed with a link to the Requests tab; more than 5 limits in all shows "A goal keeps at most 5 limits …" and sends nothing
+
+#### Scenario: Owner adds suggested limits
+
+- **WHEN** the goal's owner presses **Add to a new version**
+- **THEN** the goal page opens at its "New version" form with the limit editor filled in with the goal's limits and the ticked suggestions, and nothing is saved until they press **Save version <n+1>**
+
+### Requirement: Goal page details and new version
+
+The goal page at `/app/w/<ws>/goals/<goal>` SHALL show the goal from `GET /api/v2/workspaces/<ws>/goals/<goal>`, its
+tree and every version, and SHALL give a person the server lets edit it (`can_edit`) a "New version" form.
+
+#### Scenario: Reading a goal
+
+- **WHEN** a member opens a goal
+- **THEN** the page shows its title, status, level, visibility, team, version, a "target <n>% of agent time" pill when it has a target share, owner ("you" for the person's own), measures with targets, anchors, contributing goals, a "Limits" card with the version's limits (kind, text, and where and when each was said) or "No limits on this version.", and every version (title, status, its target when it had one, time and the first 12 characters of its content hash); a goal the server does not return shows "This goal does not exist or you can't see it."
+
+#### Scenario: Save a new version
+
+- **WHEN** the owner edits Goal, measures, limits (kind "Must", "Must not" or "Out of scope", text up to 160 characters, an optional meeting and date; at most 5), Status (Active, Achieved, Dropped), "Target share of agent time (%)" (blank for none), anchors and "Depends on" (other active goals) and presses **Save version <n+1>**
+- **THEN** the page posts them with `version` to `POST .../goals/<goal>/versions`; a 409 `cycle` shows "That would make these goals depend on each other in a loop." and other errors show the server's message
+
+#### Scenario: Goal tree
+
+- **WHEN** the goal contributes to goals or depends on goals
+- **THEN** a "Goal tree" card links each parent with its version, a green "reviewed" or an amber "reviewed against version <n>" / "not reviewed yet" pill, and for an editor, on a parent not reviewed against
+  its current version, **Still fits version <n>**, which posts `{parent_id}` to `POST .../goals/<goal>/review`; dependencies are listed as links with their versions. The review prompt ("A goal this one contributes to has a new version, and this goal hasn't changed. Check that it still fits: press Still fits, or save a new version.") is shown to the editor alone, and never says the sessions on the goal have the parent's new version
+
+### Requirement: Ask to align from the goal page
+
+The goal page SHALL offer an "Align with this goal" card on an active goal owned by someone else to every member who
+is not a viewer, and SHALL send the request with `POST /api/v2/workspaces/<ws>/alignments`.
+
+#### Scenario: Send an alignment request
+
+- **WHEN** a member picks **Recognize contribution only** (optionally naming one of their own bindable goals) or **Work toward this goal and count future usage here**, ticks shared sessions (at least one for work toward), writes an optional note "never sent to agents" (up to 1000 characters) and presses **Send request**
+- **THEN** the page posts `{target_goal_id, source_goal_id, choice, session_keys, note}` and says "Sent. Follow it on Alignments." with a link to the Alignments tab; **Send request** stays disabled until at least one session is ticked (for work toward) or a session or contributing goal is chosen (for contribution only)
+
+#### Scenario: Refused request
+
+- **WHEN** the server answers 409 `cycle`, `already_governed`, `sharing_stopped` or `goal_not_active`
+- **THEN** the card shows the server's message and nothing is sent again automatically
+
+### Requirement: Propose a change from the goal page
+
+The goal page SHALL offer **Propose a change** on an `active` goal to every member who can read the goal, is not a
+viewer and does not own it, as the goal read's `can_propose` says (the page never works the rule out itself), and SHALL
+send the proposal with
+`POST /api/v2/workspaces/<ws>/goals/<goal>/change-requests`.
+
+#### Scenario: Propose a change
+
+- **WHEN** a member presses **Propose a change**, edits the pre-filled Goal, measures, limits, Status and "Depends on", writes "Why this change" (required, 1 to 2000 characters) and presses **Send for approval**
+- **THEN** the page posts `{base_version:<current version>, changes:<only the fields that differ>, reason}` and the new request appears in the goal's "Change requests" list as "waiting for approval"; **Send for approval** stays disabled while nothing differs or the reason is empty
+
+#### Scenario: Suggest a limit
+
+- **WHEN** a member who can propose a change presses **Suggest a limit** in the goal's "Limits" card, adds a limit to the editor (pre-filled with the goal's limits), writes "Why this limit" and presses **Send for approval**
+- **THEN** the page posts `{base_version, changes:{limits}, reason}` to the goal's change requests and the goal's "Change requests" list reloads with it; change request cards show a "Limits" row with the limits before and after
+
+#### Scenario: Stale or duplicate proposal
+
+- **WHEN** the server answers 409 `stale_version` or 409 `already_open`
+- **THEN** the form shows "This goal changed while you were editing. Reload to start from version <n>." or "You already have an open change request on this goal. See it below." with a link to the goal's "Change requests" list
+
+#### Scenario: Who does not see it
+
+- **WHEN** the goal's owner or a viewer opens the goal page, or anyone opens an achieved or dropped goal
+- **THEN** there is no **Propose a change**; the owner uses the "New version" form instead
+
+### Requirement: Change request controls on the goal page
+
+The goal page SHALL list the goal's change requests from `GET .../goals/<goal>/change-requests` to everyone who can
+read the goal, and SHALL show on each request only the actions its `can` flags allow, posting them to
+`POST .../goals/<goal>/change-requests/<id>/<action>`. A decided request (approved, rejected, withdrawn or superseded)
+SHALL be its record. An open request (pending or countered) SHALL be shown to be understood, then decided, in this
+order: approved now beside proposed; what would change beside the evidence; the person's decision; a confirmation;
+and a closed "Details" disclosure.
+
+#### Scenario: Reading a request
+
+- **WHEN** a member opens a request in "Change requests"
+- **THEN** the card, built from the list response, shows the requester and a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"); a decided request shows the base version, the revision, the reason, a before and after view of each changed field, who approved or rejected it and their note or reason, and every revision with its author and note under "Revisions" once there is more than one; a superseded request says "Closed because the goal was marked achieved or dropped."
+
+#### Scenario: Understand an open request
+
+- **WHEN** anyone who can read the goal opens a pending or countered request
+- **THEN** "Approved now · version <base>" and "Proposed · revision <r>" show each changed field side by side (stacked below 640 px), with the facts Version ("Goal at version <n>", and the request's base when the goal moved on), Requested by, Decides (who can approve, or "Nobody can approve this yet") and State; "What would change", tagged "the request's own text, not evidence", says field by field what the request would change, quotes the requester's reason "as written" and the latest counter's note, and shows any "Accept if…" condition with "Not confirmed yet" until acknowledged; beside it "Evidence for revision <r>" shows Align's snapshot and the links (self-reported or agent-reported, never verified) or "No evidence attached."; "Details", closed, lists the request, goal, requester and approver ids, the state, revision and base version, the evidence ids and the times
+
+#### Scenario: Choose a decision
+
+- **WHEN** a person with at least one decision flag opens an open request
+- **THEN** "Your decision" offers only the decisions their `can` flags allow, none selected: **Approve** (`approve`), **Approve and launch** (`approve_and_launch`), **Accept if…** and **Suggest a change** (`counter`), **Decline** (`reject`), **Accept the change** (`accept_counter`), **Confirm the condition is met** (`acknowledge`, with a condition) and **Withdraw** (`withdraw`); choosing one reveals only its input and moves focus to it (to **Review this decision** when it needs none): Approve and Approve and launch an optional note behind "Add a note (optional)" (with no evidence links, "Approve without evidence?" and that the record and the audit log will say so); Accept if… the condition and a note to the requester, both required; Suggest a change the request's fields pre-filled on the goal as it is now, a required note and an optional "Accept if… (optional condition the requester confirms)"; Decline "Why you're declining", required; the others "This needs no text."; a missing required input shows a focused error and sends nothing; someone with no decision sees whom the request waits on
+
+#### Scenario: Confirm before sending
+
+- **WHEN** the person presses **Review this decision**
+- **THEN** a focused "Confirm: <decision>" shows Acting as (their name and part), On (the exact revision, whose request on which goal, and its base version), Decision, what they entered (or "Nothing. This decision needs no text."), What happens (the expected state change) and Launch ("Approval is not launch. Agents stay on version <n> until someone who can launch it does.", or for Approve and launch that it does both, or for Decline and Withdraw that nothing goes to launch); **Back** returns with the input kept; **Confirm: <decision>** sends the same body as before (`{revision, note}` to `approve` or `approve_and_launch`; `{revision, changes, note, condition}` to `counter`, Accept if… sending the request's own changes; `{revision, reason}` to `reject`; `{revision}` to `accept_counter` and `withdraw`; `{revision}` of the condition to `acknowledge`) and then shows "Recorded: …" on the reloaded card
+
+#### Scenario: The request changed before sending
+
+- **WHEN** the request's revision or state changed after the person opened it and they confirm
+- **THEN** the page reads the request again first, sends nothing, and shows a focused alert "Not recorded. This request changed after you opened it: it is now “<state>” at revision <r>. Nothing was sent. Read it again and decide again." on the reloaded card
+
+#### Scenario: Refused by the server
+
+- **WHEN** the server answers a decision with 409 (for example `stale_version`, `wrong_state` or `stale_revision`)
+- **THEN** the card shows a focused alert "Not recorded. <the server's message>" and reloads; for `stale_version` that message is "The goal changed after this request was made. <requester> needs to update it before it can be approved." and the request stays pending
+
+#### Scenario: Decline while a counter waits
+
+- **WHEN** an approver opens a request they countered, while it waits on the requester to accept
+- **THEN** "Your decision" says "Waiting on <requester> to accept your suggested change. You can still decline instead of waiting." and offers only **Decline**, with a required reason, which posts `{revision, reason}` to `reject`; the requester sees no such line and is offered **Accept the change** and **Withdraw**
+
+#### Scenario: Approved, not launched
+
+- **WHEN** a request is approved and not launched
+- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}`
+
+#### Scenario: Launched or superseded before launch
+
+- **WHEN** a request is launched, or superseded after its approval
+- **THEN** the card says "Launched, agents on v<n+1>" with who launched it and when, or "Approved, then superseded before launch: the goal got a newer version or was closed first. It never reached agents. <requester> can propose it again."; no card says that an agent did or executed anything
+
+#### Scenario: Accept if condition
+
+- **WHEN** an approver chooses **Accept if…**, or adds the optional condition to **Suggest a change** (at most 2000 characters), and the request is countered with it
+- **THEN** the card shows "Accept if: <condition>" with "Not confirmed yet" until the requester acknowledges it, then "Acknowledged by <name>, <time>"; the requester, when `can.acknowledge` is set, gets **Confirm the condition is met**, a decision on an open request and a button on an approved one, which posts `{revision}` to `acknowledge`; nothing says verified
+
+#### Scenario: Requester acts
+
+- **WHEN** the requester views their own open request
+- **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending) and **Withdraw**; a pending one offers **Withdraw** (`withdraw`) and, with an unacknowledged condition, **Confirm the condition is met**; and one whose base version is behind the goal and whose `can.rebase` flag is set shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{revision, base_version:<n>}` to `rebase`
+
+#### Scenario: Viewer
+
+- **WHEN** a viewer opens the goal page
+- **THEN** the change requests are listed with no decision and no action buttons; an open one says whom it waits on
+
+### Requirement: Evidence on change request cards
+
+Every change request card (on the goal page and in the Requests tab) SHALL show, under "Evidence for revision <n>"
+(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days with its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence." or "Approved with <n> evidence link(s), none verified."
+
+#### Scenario: Approve without evidence
+
+- **WHEN** an approver chooses **Approve** on a revision with no evidence links
+- **THEN** its input asks "Approve without evidence?" and explains that the decision record and the audit log will say so, and the confirmation's Evidence row says "None"; once approved the record says "Approved without evidence."
+
+#### Scenario: A link is added
+
+- **WHEN** the requester adds a pull request link labelled "Pen-test vendor contract"
+- **THEN** the card lists "Pull request", "Pen-test vendor contract" linking to the URL in a new tab with `rel="noopener noreferrer"`, the URL's host, "by you" and "self-reported", and approving it afterwards shows "Approved with 1 evidence link, none verified."
+
+### Requirement: Workspace Requests tab
+
+The Requests tab at `/app/w/<ws>/requests` SHALL show the change requests the person can see, from
+`GET /api/v2/workspaces/<ws>/change-requests`, in three sections: "Waiting on you", "Your requests" and "Others".
+
+#### Scenario: Sections
+
+- **WHEN** a member opens the tab
+- **THEN** "Waiting on you" holds the requests whose `waiting_on_me` is true for the person (pending requests they may approve, their own countered requests waiting for them to accept, and approved requests they may launch that nobody has launched or put off with not yet), "Your requests" holds the person's other requests, and "Others" holds every other request they can see; each card names the goal (a link to its goal page), the requester, the state pill, the reason and the changed fields, with the same actions as on the goal page
+
+#### Scenario: Empty sections
+
+- **WHEN** a section has nothing
+- **THEN** it shows "Nothing is waiting on you.", "You have not proposed a change. Open someone else's goal to propose one." or "None." respectively
+
+### Requirement: Decision value card
+
+An approved change request's card, on the goal page and the Requests tab, SHALL show a "What this decision gave you"
+card for every reader of the request, from `GET /api/v2/workspaces/<ws>/goals/<goal>/change-requests/<id>/value`
+(`lib/v2/value.ts`; `409 not_approved` for any other state, `404` for a request the person can't read), with these
+rows: "Accepted change" (each changed field, and the version it became once launched, or "Approved, agents still on
+v<n> until launch"), "Who approved" (the approver and time, and "approved without evidence" when so), "Affected goals and
+teams" (the goal and its team, the readable goals it contributes to and the readable goals that depend on or contribute
+to it), "Agents on the new version" (before the launch "Not launched yet: agents stay on v<n> until launch."; after it,
+of the bound sessions the launch's `goal_version` directive reached: how many have it in context, received but not used
+yet, and not reached; "No shared sessions work toward this goal yet." when none; marked "delivery receipt" when any of
+those sessions' machines sent a receipt for it, else "not observed", as in "Evidence class on every agent-status
+item"), "Measured in Align" (proposal to
+approval, approval to launch, and approval to the first `applied` receipt of the launch's directive, from server
+timestamps only; "not yet" while there is none), one optional question with a note, the reports
+of others, and the follow-up link.
+
+#### Scenario: The optional question
+
+- **WHEN** a reader answers "Before Align, how long would getting this decision usually take?" with one of five answers (Same day, 2–3 days, About a week, Longer, It wouldn't get decided) and an optional note of at most 500 characters
+- **THEN** `POST .../value {action: "reported", estimate, note?}` saves their value report (`v2_value_reports`, one per person per request; control, bidi and zero-width characters removed from the note), records `value_reported` with the estimate only, and the card shows "Your estimate: … · Measured here: …" with the note; for 7 days after it was saved they may change it (**Change my answer**), after that the server answers `409 edit_closed`
+
+#### Scenario: Who sees the reports
+
+- **WHEN** the request's requester, a revision author, its approver or a member of its approval set, or a workspace owner opens the card
+- **THEN** "What others said" lists every other person's estimate and note; any other reader sees only their own report
+
+#### Scenario: Viewed once it is seen
+
+- **WHEN** the card loads below the fold and the person scrolls until at least 75% of its top 240 px is on screen (clipped by the window and any scroll column) and stays there for one second
+- **THEN** the page posts `{action: "viewed"}` once (the server keeps one `value_card_viewed` per person per workspace); a card nobody scrolled to, or whose top was seen for less than a second, records nothing. The card is taller than the screen, so its top, not half of it, is what a reader sees (LIM-2445, #38)
+
+#### Scenario: Follow-up link
+
+- **WHEN** a follow-up link is set (`ALIGN_FOLLOW_UP_URL`, shown only if it is an https URL without credentials or a non-default port, or a `mailto:` with one address and only a subject; when hosted and unset, `<public origin>/app/request-access?interest=evaluate&via=value_card`; in Mode L and unset, none)
+- **THEN** the card shows the pitch and "Want to evaluate Align on a real workflow? Ask for a follow-up; it can end with an optional, non-binding letter of intent." opening it in a new tab (`noopener noreferrer`), and a click posts `{action: "follow_up"}`; with no valid link the row is not shown
+
+### Requirement: Workspace People tab members
+
+The People tab SHALL list the workspace's members from `GET /api/v2/workspaces/<ws>`, let a workspace owner change a
+member's role or remove a member, and let any member leave.
+
+#### Scenario: Change a role
+
+- **WHEN** an owner picks Owner, Member or Viewer next to a member
+- **THEN** the page posts `{role}` to `POST /api/v2/workspaces/<ws>/members/<user>` and the list shows the new role; members and viewers see roles as pills only
+
+#### Scenario: Remove a member
+
+- **WHEN** an owner presses **Remove** next to another member
+- **THEN** a panel under the member says "Remove <name> from <workspace>? Their team places, device access and connected apps for this workspace end. Their goals, sessions and history stay, under their name for 30 days and then as "Former member"." with an unticked "Also delete their shared sessions in this workspace now" box, **Remove <name>** and **Cancel**; **Remove <name>** calls `DELETE /api/v2/workspaces/<ws>/members/<user>` (with `?delete_sessions=1` when the box is ticked) and the member disappears from the list
+
+#### Scenario: Delete the workspace
+
+- **WHEN** an owner presses **Delete workspace** in the "Delete this workspace" card and confirms "Delete <workspace>? Everyone loses access now. Owners can restore it for 30 days, then it is erased."
+- **THEN** the page calls `DELETE /api/v2/workspaces/<ws>` and opens `/app`, where the workspace is under "Deleted workspaces"; members who are not owners see no such card
+
+#### Scenario: Leave
+
+- **WHEN** a member presses **Leave workspace** and confirms "Leave <workspace>? You lose access to it. Your goals, sessions and history stay."
+- **THEN** the page calls `DELETE /api/v2/workspaces/<ws>/members/<own id>` and opens `/app`
+
+#### Scenario: Last owner
+
+- **WHEN** a role change, removal or leave gets 409 `last_owner`
+- **THEN** the page shows "A workspace needs at least one owner. Make someone else an owner first." and nothing changes
+
+### Requirement: Workspace People tab invites
+
+The People tab SHALL give workspace owners an "Invite someone" card that creates an email-bound invite link,
+optionally naming a team, and lists and withdraws open invites.
+
+#### Scenario: Create an invite
+
+- **WHEN** an owner enters an email, picks a Role (Member, "Viewer (read only)", Owner), optionally a Team and a team role (Member by default, or Lead), and presses **Create invite link**
+- **THEN** the page posts `{email, role, team_id, team_role}` to `POST /api/v2/workspaces/<ws>/invites` and shows "Send this link to them yourself. It works once, for that email address, for 7 days: <link>"
+
+#### Scenario: Open invites
+
+- **WHEN** invites exist
+- **THEN** each shows its email, role, team, and "joined <time>" or "expires <time>"; an unaccepted one has **Withdraw**, which calls `DELETE .../invites/<id>`; members and viewers see no invite card
+
+### Requirement: Workspace People tab teams
+
+The People tab SHALL show a "Teams" card listing every team with its members and roles, let workspace owners create
+teams, and let owners and team leads manage team members, with lead changes reserved to workspace owners.
+
+#### Scenario: Create a team
+
+- **WHEN** an owner enters a name (up to 100 characters) under "New team" and presses **Create team**
+- **THEN** the page posts `{name}` to `POST /api/v2/workspaces/<ws>/teams` and lists the team; with no teams the card says "No teams yet." (owners also see "Teams group people; members can bind their sessions to the team's goals.")
+
+#### Scenario: Add a team member
+
+- **WHEN** an owner or the team's lead picks a workspace member under "Add someone", a role and presses **Add**
+- **THEN** the page posts `{user_id, role}` to `POST .../teams/<team>/members`; a person can be in several teams, so "Add someone" lists every member not already in this team
+
+#### Scenario: Leads are owner-only
+
+- **WHEN** a team lead who is not a workspace owner manages the team
+- **THEN** the role choice offers only Member, and other leads have no **Remove** or role control; a workspace owner can make anyone a lead, change a lead's role (posting the new role to `.../teams/<team>/members`) and remove anyone with **Remove** (`DELETE .../teams/<team>/members/<user>`)
+
+### Requirement: Workspace Sessions tab
+
+The Sessions tab SHALL list the person's own shared sessions with their usage and controls, and for workspace owners
+everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<ws>/sessions`.
+
+#### Scenario: Own sessions
+
+- **WHEN** a member opens the tab
+- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared"), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
+
+#### Scenario: Confirmed actions
+
+- **WHEN** the person presses **Stop sharing** or **Delete shared history**
+- **THEN** the page asks "Stop sharing this session? Nothing more will be uploaded. What was already shared stays until you delete it." or "Delete this session's shared history? Its usage is removed from every total, so goal and team totals will change. This can't be undone." and on confirm posts to `.../sessions/<key>/stop-sharing` or calls `DELETE .../sessions/<key>`
+
+#### Scenario: Owners see everyone's sessions
+
+- **WHEN** a workspace owner opens the tab
+- **THEN** an "Everyone's shared sessions (workspace owners)" card lists each session's owner, repo alias and harness with **Stop agent** or **Resume agent** (`POST .../sessions/<key>/stop` or `/resume`), never titles or usage; a suspended own session shows "The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads."
+
+### Requirement: Workspace Alignments tab
+
+The Alignments tab SHALL show the alignment requests the person is part of, from
+`GET /api/v2/workspaces/<ws>/alignments`, under "Waiting on you", "Your requests" and "Others you are part of", with
+only the actions the server allows.
+
+#### Scenario: Alignment card
+
+- **WHEN** a member opens the tab
+- **THEN** each card shows "<requester> asks to align with <goal>" (goals the person can't read show as "a goal you can't see"), the state, the choice, the revision, its effects, its sessions, each approval requirement with the people who can satisfy it and whether it is satisfied, the note and the history, and the buttons its `can` flags allow: **Approve**, **Suggest a change**, **Accept the change**, **Decline**, **Withdraw**, **Revoke**
+
+#### Scenario: Counter and revoke
+
+- **WHEN** an approver presses **Suggest a change**, or someone involved presses **Revoke**
+- **THEN** a counter form (choice, sessions to keep, note) posts `{revision, choice, keep, note}` to `.../alignments/<id>/counter`, and revoking first confirms "Revoke this alignment? From now on it has no effect. Sessions that counted under the goal only because of it stop uploading until their owner picks a goal. Past usage does not move."
+
+#### Scenario: Target changes
+
+- **WHEN** a member opens the tab
+- **THEN** a "Target changes" card (anchor `#target-changes`) lists the reallocations from `GET /api/v2/workspaces/<ws>/reallocations` the person can read, each as "<requester or You> proposed new targets", its state ("waiting for approval", "approver suggested other targets", "approved", "declined", "withdrawn", "superseded"), each goal as "<title>: <from> → <to>" ("A goal you can't see: changes" otherwise) with "(approved by <name>)" or "(needs one of: <names>)", the note, where the launch stands ("Approved, waiting for launch. Agents still have the old targets.", "Approved, not launched yet: …", "Launched by <name>, <time>. Agents on these goals hear the new targets at their next turn.", or why it was superseded), and the buttons its `can` flags allow: **Approve (agents switch at launch)**, **Approve and launch**, **Launch**, **Not yet**, **Accept the counter**, **Counter** (a target field per goal and a note), **Decline**, **Withdraw**; for everyone but viewers a "Propose new targets" form lists each active goal ("<title> (now <n>% | no target)") with a blank field meaning unchanged, an optional "Why", and **Propose <n> change(s)**, which posts `{targets, note}` to `POST /api/v2/workspaces/<ws>/reallocations`
+
+#### Scenario: Approval would make a loop
+
+- **WHEN** **Approve** gets 409 `cycle`
+- **THEN** the card shows "Approving this would make these goals contribute to each other in a loop." and the request stays pending
+
+### Requirement: Workspace Asks tab
+
+The Asks tab at `/app/w/<ws>/asks` SHALL show the asks the person reads, from `GET /api/v2/workspaces/<ws>/asks`, under
+"Waiting on you" (asks whose `waiting_on_me` is set), "Asked of your teams", "Your asks" and, for workspace owners,
+"Others", each card with only the buttons its `can` flags allow; it SHALL give owners and members a "Record an ask"
+form and workspace owners an import.
+
+#### Scenario: Ask card
+
+- **WHEN** a member opens the tab
+- **THEN** each card shows "<who asked> asked <team>" (the requester's name when nobody is named), the state pill (open amber, accepted violet, done green, declined and withdrawn neutral), the goal it concerns as a link when the person can read it, the text in quotes, "<meeting>, <date>" (just the date for an ask recorded by hand) followed by " · came up again <n> times, last on <date> (<where>)" when it has mentions, who recorded and who last decided it, the mentions under "When it came up again", and **Accept**, **Mark done**, **Decline**, **Reopen**, **Came up again** and **Withdraw**, which post to `.../asks/<id>/<action>`; with none in a section, "Nothing is waiting on you." or "No asks yet."
+
+#### Scenario: Came up again
+
+- **WHEN** a person presses **Came up again**
+- **THEN** a form with When (a date), What was said (up to 300 characters) and Where (up to 120) posts `{date, text, source_title}` to `.../asks/<id>/mention`
+
+#### Scenario: Record an ask
+
+- **WHEN** an owner or member fills Team asked, What they were asked (up to 400 characters), Who asked (optional, up to 80), Where it was asked ("In a meeting" with its title, or "Recorded by hand"), Date and the optional goal it concerns (the selected team's active goals) and presses **Record ask**
+- **THEN** the page posts `{team_id, text, from_label, goal_id, source:{kind, title, date}}` to `POST .../asks` and lists the new ask; viewers see no form, and a workspace with no teams says "This workspace has no teams yet. A workspace owner adds them on the People tab."
+
+#### Scenario: Import asks
+
+- **WHEN** a workspace owner opens "Import asks (JSON, at most 60)", pastes a list of asks (or `{"asks": [...]}`) and presses **Import**
+- **THEN** the page posts `{asks}` to `POST .../asks/import` and shows "Imported: <created> new, <merged> came up again, <unchanged> already recorded."
+
+### Requirement: Agent activity on the goal page
+
+The goal page SHALL show an "Agent activity" card from `GET /api/v2/workspaces/<ws>/goals/<goal>/activity`, marked
+with the response's one evidence class ("agent reported", or "not observed" with nothing in the window) and saying
+"Sessions people shared toward this goal, last 14 days. Counts come from bindings, not from what agents wrote.", with
+Sessions (and how many per harness, as "<n> Claude Code, <n> Codex"), Active now and Last activity ("None yet" when
+there is none), and, when the response has `detail`, "Files these sessions reported working on" (its paths, then "and
+<n> more whose paths aren't shared") and "Your sessions" (harness, a state pill and the last activity). Nothing on the
+card says what agents are doing: the files are what the sessions' align CLI reported.
+
+#### Scenario: Activity card
+
+- **WHEN** a member of the goal's team opens a goal with two bound sessions, one active, and work signals with paths
+- **THEN** the card is marked "agent reported" and shows "Sessions 2 (1 Claude Code, 1 Codex)", "Active now 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card is marked "not observed" and says "No shared sessions worked toward this goal in the last 14 days."
+
+### Requirement: Agents on this goal card
+
+The goal page SHALL show, under the "Agent activity" card, an "Agents on this goal" card from
+`GET /api/v2/workspaces/<ws>/goals/<goal>/requests`, shown when the reader may send requests or hold the goal or
+when the goal has requests. For a person who may hold the goal it SHALL offer **Hold all agents on this goal** with an
+optional reason (at most 280 characters, "shown to the developers") while the goal is active and not held, and
+**Release** while it is held, calling `PUT` and `DELETE /api/v2/workspaces/<ws>/goals/<goal>/hold` and showing
+**Sign in again** on 403 `reauth_required`. For a person who may send requests it SHALL offer "Send a request" with
+the type choices Replan, Checkpoint and Switch goal (each with a sentence saying what the agent does and whether the
+developer is asked first), for Switch goal a checkbox per session on the goal and a target-goal picker of the other
+active goals, an optional note (at most 280 characters, "shown to the developer and the agent, quoted") and
+**Send** (`POST …/requests`), or "No shared session is working on this goal, so there is no one to send a request
+to." when there is no session. Each request SHALL be listed with its type, a pill (waiting, answered, cancelled, or "expired: the goal closed"), its
+sender and time, the goal version it was sent at, the target goal ("a goal you can't see" when hidden), the quoted
+note, who cancelled it, the counts, and per visible session a pill: pending, accepted by the developer, done by the
+agent (an `auto_accepted` accept), declined or expired, each with one evidence class: "delivery receipt" for a request
+the session's machine received and has not answered, "agent reported" for an answer (accepted, done by the agent,
+declined: the developer's or the agent's own word, sent from their machine), "not observed" for one sent with nothing
+back or expired; with **Cancel** when its `can_cancel` is true.
+
+#### Scenario: Approver sends a replan
+
+- **WHEN** a goal's lead picks Replan, types a note and presses **Send** while sessions work on the goal
+- **THEN** the request is created (201) and listed with "waiting", the lead as sender and the quoted note
+
+#### Scenario: Agent did the checkpoint
+
+- **WHEN** a session's agent accepted a checkpoint on its own and another session's developer accepted it
+- **THEN** the request's sessions show "done by the agent" and "accepted by the developer", each marked "agent reported", never "delivery receipt"
+
+### Requirement: Hold banner
+
+The app SHALL show, while a goal is held, a banner "All agents on this goal are on hold." naming who paused them,
+when, and the reason, saying their tools are blocked until someone who can approve for the goal releases it: at the
+top of the goal page (from `GET …/goals/<goal>/hold`), and on the Sessions tab for each held goal the reader can read
+(from `GET /api/v2/workspaces/<ws>/holds`, naming the goal); the Goals tab SHALL mark a held goal's row with an
+"agents on hold" pill.
+
+#### Scenario: Member's Sessions tab during a hold
+
+- **WHEN** a member whose sessions work on a held goal opens the Sessions tab
+- **THEN** a banner says all agents on that goal, by its title, are on hold, with who held it and the reason
+
+### Requirement: Workspace Spend tab
+
+The Spend tab SHALL show token usage and estimated list cost from
+`GET /api/v2/workspaces/<ws>/spend?by=goal|team|session` with a "Group by" choice of By goal, By team and By my
+sessions.
+
+#### Scenario: Usage table
+
+- **WHEN** a member (viewers included) opens the tab
+- **THEN** a table shows, per row, requests, input, output, cache read, cache write and estimated list cost, with the billing basis per row, then "Not bound to a goal" and "Total", the server's note, "Goals you can't see are grouped without names. There is no per-person view.", and a count of unpriced requests when there are any; by my sessions, usage of rolled-up sessions older than 13 months is one "Older sessions (rolled up)" row
+
+#### Scenario: Agent time against targets
+
+- **WHEN** a member (viewers included) opens the tab
+- **THEN** above the usage table an "Agent time against targets" card (pill "steering on" or "steering off") reads `GET /api/v2/workspaces/<ws>/allocation?weeks=6` and shows, for the last 7 days, one line per row ("<goal>", "Goals you can't see" or "Not bound to a goal") with "<share>% of agent time · target <n>%", a pill "<n> points over", "<n> points under", "on target" or "no target" (amber at 10 points or more), a bar with the target marked, and its fresh tokens, list price, unpriced requests and sessions; a table of each goal's share per week (weeks start Monday, UTC); "Steering is <on|off>. …" with how many lines were shown in the last 7 days; a "Propose new targets" link to the Alignments tab's target changes; and, for a workspace owner only, **Turn steering on** / **Turn steering off**, which PATCHes `{steering}` to `/api/v2/workspaces/<ws>`
+
+### Requirement: Workspace Apps tab
+
+The Apps tab at `/app/w/<ws>/apps` SHALL list the AI apps connected to the workspace from
+`GET /api/v2/workspaces/<ws>/apps` and explain how to connect one; a person sees their own connections, and a
+workspace owner sees everyone's.
+
+#### Scenario: Connected apps
+
+- **WHEN** a member opens the tab
+- **THEN** each connection shows the app's name with "Reads only" or, for a grant holding `changes:evidence`, "Reads, and adds evidence links", its redirect host, the person who connected it, when it was approved, **Last connected** (its last request to Align, `Never` when none) and **Last read the goals** (its last call that returned goals, "Not seen yet" when none), under a note that connecting and listing tools is not a read and that Align doesn't see which goal version an app has, with **Disconnect** on the person's own connections (an owner sees **Disconnect** on every connection), which calls `DELETE /api/v2/workspaces/<ws>/apps/<id>`; with none, "No AI apps are connected to this workspace."
+
+#### Scenario: How to connect
+
+- **WHEN** a member who is not a viewer opens the tab
+- **THEN** a "Connect an AI app" card shows the MCP URL `<origin>/api/mcp` with **Copy** and says the app will send them to Align to sign in and choose this workspace; a viewer sees "Viewers can't connect apps to this workspace." instead
+
+#### Scenario: Terminal lines
+
+- **WHEN** a member who is not a viewer opens the tab
+- **THEN** under "Paste into a sh, bash or zsh terminal" it shows a **Claude Code** line, `claude mcp add --transport http --scope user align '<url>'; claude mcp login align`, and a **Codex** line, `codex mcp add align --url '<url>'`, each with its own **Copy**, built by `lib/paste-lines.ts` from the URL alone (single-quoted, never a workspace, team or company name, no hooks and no agent instruction file), and says "For goal context inside Claude Code and Codex sessions, install the align CLI (`align login`, `align install`)."
+
+#### Scenario: A URL Align couldn't have made
+
+- **WHEN** the URL is not `http(s)://` followed by a host name or bracketed IPv6 address, an optional numeric port and `/api/mcp`
+- **THEN** each line reads "This server's address can't be turned into a command. Copy the URL instead." and no command is shown
+
+### Requirement: OAuth consent screen
+
+The `/oauth/authorize` page SHALL, in the same look as the web app, let a signed-in person with a recent sign-in grant
+an AI app read-only access to one workspace in which they are an owner or member, acting as themselves (and, only when the app asks for the scope `changes:evidence`, also let it add agent-reported evidence links to change requests), and SHALL
+refuse requests it cannot trust without redirecting.
+
+#### Scenario: What the page shows
+
+- **WHEN** a signed-in person with a recent sign-in arrives with a valid request
+- **THEN** the page shows "Connect <app> to Align", "This app named itself." unless it is a known AI provider's client document, "After you allow it, Align sends you back to <redirect host>.", "Signed in as <name> (<email>).", and "What it can do": it reads goals, change requests, decision records and directives in the workspace they choose, as them and with their role; it can’t propose, approve or change anything; it never sees captured prompts; what it reads is sent to <provider>; they or a workspace owner can disconnect it on the workspace’s Apps tab, and it is disconnected if they leave the workspace
+
+#### Scenario: App asks to add evidence
+
+- **WHEN** the request's `scope` names `changes:evidence`
+- **THEN** "What it can do" has the same lines plus "It may also attach links to change requests you can act on, as evidence. Align labels them agent-reported.", and the button reads **Allow access** instead of **Allow read-only access**
+
+#### Scenario: Choose a workspace and allow
+
+- **WHEN** the person picks one workspace under "Which workspace" and presses **Allow read-only access**
+- **THEN** the page posts `{params, decision:"approve", workspace_id}` to `POST /api/oauth/approve` and follows the returned redirect; **Cancel** posts `decision:"deny"`; **Allow read-only access** stays disabled until a workspace is picked (a person with exactly one such workspace has it picked already)
+
+#### Scenario: Viewer workspaces
+
+- **WHEN** the person is a viewer in some workspaces
+- **THEN** those workspaces are not offered; with no workspace they own or are a member of, the page shows "You have no workspace where you can connect an app. Viewers can't connect apps." and no **Allow** button
+
+#### Scenario: Loopback redirect
+
+- **WHEN** the redirect URI is on `localhost`, `127.0.0.1` or `[::1]`
+- **THEN** the page shows an amber warning "This app sends you back to a program on this computer (<host>). Allow it only if you started it yourself just now."
+
+#### Scenario: Untrusted or rate-limited request
+
+- **WHEN** the app or redirect fails the server check, or this network made too many requests
+- **THEN** the page shows "Can’t connect this app" with the reason, or with "Too many requests from this network. Wait a minute, then reload this page.", or for a redirectable error with "The app sent a request Align can’t accept. Go back to the app and try again." and a **Return to the app** link; it offers no **Allow** button
+
+#### Scenario: Server stops answering
+
+- **WHEN** the approve request gets no answer within 20 seconds
+- **THEN** the page shows "Align didn’t answer. Reload this page and choose Allow again." and re-enables the buttons
+
+### Requirement: Render error page
+
+The app SHALL show a plain error page for any render error, without the error message or stack.
+
+#### Scenario: Render error
+
+- **WHEN** a page under the root layout throws while rendering
+- **THEN** the page shows "Something went wrong on this page." with **Try again** and, for a server error, "Reference: <digest>"; with JavaScript off the page shows "Align needs JavaScript. Turn it on and reload this page."
+
+#### Scenario: Loading
+
+- **WHEN** an `/app` page or the consent page is waiting for the server
+- **THEN** it shows "Loading Align…" (whole page) or "Loading…" (one card) instead of an empty screen, and an API error shows the server's message in red
+
+### Requirement: Web app status pills
+
+Pages under `/app` SHALL mark states with plain-word pills whose colors follow one rule: green for a settled good
+state, amber for something waiting or needing attention, red for revoked or stopped, violet for names and labels that
+are not states (a team, a "company" goal, an active goal's status) and for an accepted ask (agreed, under way, like an
+active goal), neutral otherwise.
+
+#### Scenario: Pill colors
+
+- **WHEN** a page shows a state
+- **THEN** an approved alignment, alignment requirement or change request, an active device, a linked sign-in method, a shared session, an achieved goal, a goal "you can bind sessions" to and a reviewed parent goal are green; a pending or countered alignment or change request, a requirement still waiting, a suspended session, "needs alignment to bind" and a parent not reviewed against its current version are amber; a revoked device and a stopped agent are red; an open ask is amber, an accepted ask violet, a done ask green, and a declined or withdrawn ask neutral
+
+## Open questions
+
+- Should a person be able to propose reopening an achieved or dropped goal? The server refuses change requests on
+  such goals (409 `goal_not_active`), so this spec offers **Propose a change** only on active goals.
+- Should the account page also let a person unlink a provider? The owner's decision names only linking, so this
+  spec offers no unlink.
+
+## Sources
+
+- `proxy.ts`
+- `app/page.tsx`
+- `app/layout.tsx`
+- `app/error.tsx`
+- `app/global-error.tsx`
+- `app/app/_ui/server.ts`
+- `app/app/_ui/kit.tsx`
+- `app/app/_ui/passkey.ts`
+- `app/app/_ui/types.ts`
+- `app/app/_ui/goalform.tsx`
+- `app/app/_ui/limits.tsx`
+- `app/app/_ui/changes.tsx`
+- `app/app/_ui/crparts.tsx`
+- `app/app/_ui/decide.tsx`
+- `lib/v2/launch-words.ts`
+- `app/app/_ui/value.tsx`
+- `lib/v2/value-core.mts`
+- `lib/paste-lines.ts`
+- `app/app/_ui/words.ts`
+- `app/app/_ui/error-notice.tsx`
+- `app/app/page.tsx`
+- `app/app/view.tsx`
+- `app/app/sign-in/page.tsx`
+- `app/app/sign-in/view.tsx`
+- `app/app/request-access/page.tsx`
+- `app/app/request-access/view.tsx`
+- `app/app/_ui/turnstile.tsx`
+- `app/privacy/page.tsx`
+- `app/trust/page.tsx`
+- `app/_trust/doc.tsx`
+- `lib/trust/markdown.mts`
+- `lib/trust/docs.ts`
+- `lib/trust/entity.ts`
+- `docs/trust/privacy-policy.md`
+- `docs/trust/security-overview.md`
+- `docs/trust/subprocessors.md`
+- `docs/trust/dpa.md`
+- `docs/trust/questionnaire.md`
+- `app/app/account/page.tsx`
+- `app/app/device/page.tsx`
+- `app/app/account/view.tsx`
+- `app/app/device/view.tsx`
+- `app/app/devices/view.tsx`
+- `app/app/invite/[token]/view.tsx`
+- `app/app/w/[ws]/view.tsx`
+- `app/app/w/[ws]/first-run.tsx`
+- `lib/mcp/read-tools.ts`
+- `app/app/w/[ws]/goals/view.tsx`
+- `app/api/v2/workspaces/[ws]/home/route.ts`
+- `lib/v2/home.ts`
+- `lib/v2/home-core.mts`
+- `app/app/w/[ws]/goals/[goal]/view.tsx`
+- `app/app/w/[ws]/people/view.tsx`
+- `app/app/w/[ws]/sessions/view.tsx`
+- `app/app/w/[ws]/alignments/view.tsx`
+- `app/app/w/[ws]/requests/view.tsx`
+- `app/app/w/[ws]/asks/page.tsx`
+- `app/app/w/[ws]/asks/view.tsx`
+- `app/app/_ui/activity.tsx`
+- `app/app/_ui/evidence.tsx`
+- `app/app/_ui/requests.tsx`
+- `app/app/w/[ws]/spend/view.tsx`
+- `app/app/w/[ws]/spend/allocation.tsx`
+- `app/app/_ui/reallocations.tsx`
+- `app/app/w/[ws]/apps/view.tsx`
+- `app/oauth/authorize/page.tsx`
+- `app/oauth/authorize/AuthorizeForm.tsx`
+- `app/api/oauth/approve/route.ts`
+- `lib/oauth/clients.ts`
+- `lib/oauth/limits.ts`
+- `lib/oauth/server.ts`
+- `lib/v2/auth.ts`
+- `lib/v2/config.ts`
+- `lib/v2/changes.ts`
+- `lib/v2/mail.ts`
