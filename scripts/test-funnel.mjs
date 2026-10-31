@@ -8,7 +8,8 @@
 //   phase "hosted": HOSTED=1 as Fly runs it -> no new route, HOSTED_ROUTES unchanged, a bad waitlist/LOI URL is hidden
 //   phase "layout": LIM-2452 cycle 2 on a custom workspace: the phone layout (Propose a change above the fold, one
 //                   ConnectAI), the Goals map at every width, the asker's review at 768, 44px tap targets at 390,
-//                   the Switch team menu at 700, and the AI apps copy (Seen on the current plan / Last seen on an older plan, never reads, follows or works from)
+//                   the Switch team menu at 700, and the AI apps copy (Seen since the latest change / Last seen before the latest change, never reads, follows or works from),
+//                   the disabled + New conflict at 390 (the logo keeps its width) and one pink primary on the composer
 // Usage: node scripts/test-funnel.mjs <port> [--no-build] [--only local|layout|hosted]   (from a worktree root; refuses 3100 and the main checkout)
 
 import { spawn, spawnSync } from "node:child_process";
@@ -749,10 +750,43 @@ async function phaseLayout(dir) {
       const { page, ctx } = await open("product", 390, 844);
       await clickMain(page, /Propose a change/);
       await measure(page, "composer");
+      // One pink primary on the composer: "Send proposal"; the rail's + New conflict steps down to secondary.
+      const pink = await page.evaluate(() =>
+        [...document.querySelectorAll("button, a")].filter((b) => b.className.includes("bg-violet-700 text-black") && b.getBoundingClientRect().height > 0).map((b) => b.textContent.trim().slice(0, 40)),
+      );
+      check("(h) 390 composer: exactly one pink primary (Send proposal), + New conflict is secondary", pink.length === 1 && /^Send proposal/.test(pink[0]), JSON.stringify(pink));
       await ctx.close();
     }
     const prop = await req("POST", "/api/proposals", { cookie: W.c.product, body: { proposed_measure_text: "LAYOUT retention first for two weeks", rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
     const pid = prop.json?.id;
+    // (i) 390: + New conflict disabled with its reason (the owner: only the asking team proposes; the asker: a proposal
+    // is already open). The reason runs under the logo row, so the logo cell keeps its natural width and nothing overlaps.
+    for (const role of ["security", "product"]) {
+      const { page, ctx } = await open(role, 390, 844);
+      const r = await page.evaluate(() => {
+        const side = document.querySelector("aside:not([aria-label])");
+        const logo = side.firstElementChild;
+        const btn = [...side.querySelectorAll("button")].find((b) => b.textContent.trim() === "+ New conflict");
+        const why = btn?.nextElementSibling;
+        const L = logo.getBoundingClientRect();
+        const B = btn?.getBoundingClientRect();
+        const W = why?.getBoundingClientRect();
+        return {
+          disabled: !!btn?.disabled,
+          why: why?.textContent ?? "",
+          logoW: Math.round(L.width),
+          natural: logo.scrollWidth,
+          overlap: !!B && L.right > B.left + 0.5 && L.bottom > B.top + 0.5,
+          whyBelow: !!W && !!B && W.top >= Math.max(L.bottom, B.bottom) - 0.5,
+        };
+      });
+      check(
+        `(i) 390 ${role}: disabled + New conflict with its reason; the logo keeps its width, nothing overlaps, the reason runs under the row`,
+        r.disabled && r.why.length > 0 && r.logoW >= r.natural && !r.overlap && r.whyBelow,
+        JSON.stringify(r),
+      );
+      await ctx.close();
+    }
     let answers = 0;
     {
       const { page, ctx } = await open("security", 390, 844);
@@ -808,7 +842,7 @@ async function phaseLayout(dir) {
       `answers=${answers} seen ${[...labels].join(", ")}; accept=${acc.status}; short: ${short.join(" | ")}`,
     );
     // (g) part 2: two connected apps, one that read before the plan changed and one after. The rail says "Read the
-    // "Seen on the current plan" / "Last seen on an older plan" (the server's on_current_plan); the phone row counts them.
+    // "Seen since the latest change" / "Last seen before the latest change" (the server's on_current_plan); the phone row counts them.
     {
       const { createHash, randomBytes } = await import("node:crypto");
       const REDIRECT = "http://127.0.0.1:33418/callback";
@@ -846,15 +880,15 @@ async function phaseLayout(dir) {
         return !!ul && !ul.innerHTML.includes("emerald") && marks.some(([t, c]) => t === "✓" && c.includes("text-violet-700")) && marks.some(([t, c]) => t === "▲" && c.includes("text-amber-700"));
       });
       check(
-        "(g) rail: 'Layout New App Seen on the current plan' (violet ✓), 'Layout Old App Last seen on an older plan' (the server's on_current_plan); no 'read', 'latest plan' or 'still on'",
-        apps.filter((a) => a.on_current_plan).length === 1 && /Layout New App Seen on the current plan/.test(rail) && /Layout Old App Last seen on an older plan/.test(rail) && !/read|latest plan|still on/i.test(rail) && railTone,
+        "(g) rail: 'Layout New App Seen since the latest change' (violet ✓), 'Layout Old App Last seen before the latest change' (the server's on_current_plan); no 'read', 'current plan', 'older plan' or 'still on'",
+        apps.filter((a) => a.on_current_plan).length === 1 && /Layout New App Seen since the latest change/.test(rail) && /Layout Old App Last seen before the latest change/.test(rail) && !/read|current plan|older plan|still on/i.test(rail) && railTone,
         `${JSON.stringify(apps.map((a) => [a.name, a.on_current_plan]))} :: ${rail}`,
       );
       await ctx.close();
       const ph = await open("security", 390, 844);
       await nav(ph.page, "Work");
       const row = await ph.page.evaluate(() => document.querySelector("main")?.innerText.match(/Connected AI apps[^\n]*/i)?.[0] ?? "");
-      check("(g) 390 row: 'Connected AI apps · 2 connected · 1 seen on the current plan'", row === "Connected AI apps · 2 connected · 1 seen on the current plan", row);
+      check("(g) 390 row: 'Connected AI apps · 2 connected · 1 seen since the latest change'", row === "Connected AI apps · 2 connected · 1 seen since the latest change", row);
       // Open, the row lists each app once (the Connected list), under one landmark.
       await clickMain(ph.page, /^Connect an AI app$/);
       const once = await ph.page.evaluate(() => {

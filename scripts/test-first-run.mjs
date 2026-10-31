@@ -5,10 +5,10 @@
 //   phase "local":  Mode L, open create -> a fresh workspace with no connected agent shows both paths, the sample link
 //                   resolves (200) and is labelled fictional, what the agent can read matches the server's tools, Hide
 //                   persists, the status follows the server (approved, not seen by Align yet; a failed check), and once Align has
-//                   seen an app (any MCP request) the card yields to Home's section and the sidebar (seen on the current
-//                   plan, then on an older one); the card adds no request to the connections poll
+//                   seen an app (any MCP request) the card yields to Home's section and the sidebar (seen since the
+//                   latest change, then last seen before it); the card adds no request to the connections poll
 //   phase "hosted": HOSTED=1 as Fly runs it -> no sample link (Northstar is not served), "/" still goes to /new, and an
-//                   OAuth connection plus one MCP request flips the sidebar to "Seen on the current plan" and the card yields
+//                   OAuth connection plus one MCP request flips the sidebar to "Seen since the latest change" and the card yields
 // Screenshots of each state at 390, 768 and 1440 px go to $FIRST_RUN_SHOTS (default: a temp folder, printed at the end).
 // Usage: node scripts/test-first-run.mjs <port> [--no-build]   (from a worktree root; refuses 3100 and the main checkout)
 
@@ -378,22 +378,28 @@ async function phaseLocal(dir) {
     const sidebar = () => page.evaluate(() => document.querySelector('ul[aria-label="Connected AI apps"]')?.textContent ?? "");
     const home = () => page.evaluate(() => document.querySelector('section#agents')?.textContent ?? "");
     await page.reload({ waitUntil: "networkidle2" });
-    const flipped = await waitFor(page, async () => /Claude Code\s*Seen on the current plan/.test(await sidebar()));
+    const flipped = await waitFor(page, async () => /Claude Code\s*Seen since the latest change/.test(await sidebar()));
     const yielded = await waitFor(page, async () => !(await card(page)), 5000);
-    check("once seen, the sidebar says 'Claude Code Seen on the current plan'", flipped, await sidebar());
-    check("once seen, the first-run card yields (gone), and Home's section says Claude Code was seen on the current plan", yielded && /Claude Code[\s\S]*Seen on the current plan/.test(await home()), `${yielded} ${await home()}`);
+    check("once seen, the sidebar says 'Claude Code Seen since the latest change'", flipped, await sidebar());
+    check("once seen, the first-run card yields (gone), and Home's section says Claude Code was seen since the latest change", yielded && /Claude Code[\s\S]*Seen since the latest change/.test(await home()), `${yielded} ${await home()}`);
     const sideNow = await sidebar();
     check("the sidebar claims no read or work: no 'read', 'working', 'follows', 'stuck', 'blocked' or 'progress'", !/\bread\b|working|follows|works from|stuck|blocked|progress/i.test(sideNow), sideNow);
     await shots(page, "yielded");
 
-    // The plan changes (a proposal): the sidebar says the app was last seen on an older plan; the card stays gone.
+    // The workspace changes (a request, not an agreement): the sidebar says the app was last seen before the latest
+    // change, not "on an older plan"; the card stays gone.
     const p = await req("POST", "/api/proposals", { cookie: w.c.product, body: { proposed_measure_text: "Retention first for two weeks", rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
     const stale = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === false);
     await page.reload({ waitUntil: "networkidle2" });
-    const older = await waitFor(page, async () => /Claude Code\s*Last seen on an older plan/.test(await sidebar()));
-    check("after the plan changes the sidebar says Claude Code was last seen on an older plan, and no card comes back", p.status === 200 && stale && older && !(await card(page)), `${p.status} ${await sidebar()}`);
-    check("Home's section says the same: Last seen on an older plan", /Claude Code[\s\S]*Last seen on an older plan/.test(await home()), await home());
+    const older = await waitFor(page, async () => /Claude Code\s*Last seen before the latest change/.test(await sidebar()));
+    check("after a request the sidebar says Claude Code was last seen before the latest change, and no card comes back", p.status === 200 && stale && older && !(await card(page)), `${p.status} ${await sidebar()}`);
+    check("Home's section says the same, and that the workspace (not the plan) changed", /Claude Code[\s\S]*Last seen before the latest change/.test(await home()) && /The workspace changed/.test(await home()) && !/older plan|The plan changed/.test(await home()), await home());
     await shots(page, "older");
+    // Why a request counts as a change: what the agent reads changed. Its agreed-plan answer now names the open request
+    // as proposed and not agreed; reading it brings the app back to seen since the latest change.
+    const planText = rpcResult(await rpc(tok, "tools/call", { name: "align_get_accepted_plan", arguments: {} }))?.content?.[0]?.text ?? "";
+    const caught = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === true);
+    check("an open request changes what the agent reads (proposed, not agreed), and reading it marks the app seen since the change", /is proposed \(/.test(planText) && /not agreed/.test(planText) && caught, planText.slice(0, 300));
 
     // Hide, on a fresh workspace: gone, and still gone after a reload (localStorage). The card adds no request: the
     // load-time connections polls are the same with it shown and hidden.
@@ -476,8 +482,8 @@ async function phaseHosted(dir) {
     const onPlan = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === true);
     await page.reload({ waitUntil: "networkidle2" });
     const side = () => page.evaluate(() => document.querySelector('ul[aria-label="Connected AI apps"]')?.textContent ?? "");
-    const flipped = await waitFor(page, async () => /Claude Code\s*Seen on the current plan/.test(await side()));
-    check("hosted: after an OAuth connection and one MCP request the sidebar says Claude Code was seen on the current plan, and the card yields", read.status === 200 && onPlan && flipped && !(await card(page)), `${read.status} ${await side()}`);
+    const flipped = await waitFor(page, async () => /Claude Code\s*Seen since the latest change/.test(await side()));
+    check("hosted: after an OAuth connection and one MCP request the sidebar says Claude Code was seen since the latest change, and the card yields", read.status === 200 && onPlan && flipped && !(await card(page)), `${read.status} ${await side()}`);
     await shots(page, "yielded");
   } finally {
     await browser.close();

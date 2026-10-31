@@ -266,8 +266,8 @@ export default function ConnectAI({
                 {a.last_used_at && (
                   <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"}`}>
                     {a.on_current_plan
-                      ? "✓ Seen on the current plan."
-                      : `▲ Last seen on an older plan: Align hasn’t seen it since the plan changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}.`}
+                      ? "✓ Seen since the latest change."
+                      : `▲ Last seen before the latest change: Align hasn’t seen it since the workspace changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}.`}
                   </div>
                 )}
               </div>
@@ -287,6 +287,7 @@ export default function ConnectAI({
       )}
       <div className="flex flex-wrap gap-2">
         <Button
+          kind="secondary"
           onClick={() => {
             setOpen(false);
             setInline(false);
@@ -310,7 +311,7 @@ export default function ConnectAI({
     </div>
   );
   if (variant === "row") {
-    // Phones: one line. "connected" counts only apps Align has seen; "seen on the current plan" counts only the
+    // Phones: one line. "connected" counts only apps Align has seen; "seen since the latest change" counts only the
     // server's on_current_plan. The open row shows the same steps and Connected list as the dialog, once.
     const current = reading.filter((a) => a.on_current_plan).length;
     return (
@@ -321,7 +322,7 @@ export default function ConnectAI({
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <p className="min-w-0 flex-[1_1_12rem] text-[14px] leading-snug text-zinc-700">
                   <span className="font-semibold text-violet-700">Connected AI apps</span>
-                  {data && (data.apps.length === 0 ? " · No AI app has connected yet" : ` · ${reading.length} connected · ${current} seen on the current plan`)}
+                  {data && (data.apps.length === 0 ? " · No AI app has connected yet" : ` · ${reading.length} connected · ${current} seen since the latest change`)}
                 </p>
                 <Button kind="secondary" onClick={() => setInline((o) => !o)}>
                   Connect an AI app
@@ -353,7 +354,7 @@ export default function ConnectAI({
               </span>
               <span className="min-w-0">
                 <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
-                <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Seen on the current plan" : "Last seen on an older plan"}</span>
+                <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"}</span>
               </span>
             </li>
           ))}
