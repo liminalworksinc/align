@@ -37,3 +37,10 @@ Align is Liminal's wedge product, a working prototype. We built the first versio
 ## Run it
 
 The app, its local agent and its MCP bridge are in [`components/legacy-project-wrapper/implementation`](components/legacy-project-wrapper/implementation). Its [README](components/legacy-project-wrapper/implementation/README.md) covers running it locally (Mode L), pairing the `align` CLI, connecting an AI app, hosting it, and the test gate. The contract is the specification in [`specs/align`](specs/align).
+
+## Release Engineers
+
+Only these GitHub logins may change the release state, cut a release line or publish a major or minor release with `litai release` (see [`literate.release.json`](literate.release.json)):
+
+- `allsmog`
+- `liminalshruti`

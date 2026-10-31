@@ -1,5 +1,71 @@
 {
   "schema": "literate-ai/release-roadmap-goals@1",
   "roadmap": "docs/roadmap/active-work.md",
-  "releases": {}
+  "releases": {
+    "2.0.0": [
+      {
+        "id": "PRESEED-001"
+      },
+      {
+        "id": "PRESEED-002"
+      },
+      {
+        "id": "PRESEED-003"
+      },
+      {
+        "id": "PRESEED-004"
+      },
+      {
+        "id": "PRESEED-005"
+      },
+      {
+        "id": "PRESEED-006"
+      },
+      {
+        "id": "PRESEED-007"
+      },
+      {
+        "id": "PRESEED-008"
+      },
+      {
+        "id": "PORT-001"
+      },
+      {
+        "id": "PORT-002"
+      },
+      {
+        "id": "PORT-003"
+      },
+      {
+        "id": "PORT-004"
+      },
+      {
+        "id": "PORT-005"
+      },
+      {
+        "id": "REQ-001"
+      },
+      {
+        "id": "REQ-002"
+      },
+      {
+        "id": "LAUNCH-001"
+      },
+      {
+        "id": "LAUNCH-002"
+      },
+      {
+        "id": "PORT2-001"
+      },
+      {
+        "id": "PORT3-001"
+      },
+      {
+        "id": "PORT3-002"
+      },
+      {
+        "id": "PORT3-003"
+      }
+    ]
+  }
 }
