@@ -31,8 +31,10 @@ async function verifyToken(req: Request, bearerToken?: string): Promise<AuthInfo
   if (bearerToken.startsWith("alm.")) {
     const app = readMcpToken(bearerToken, resourceFor(originOf(req)));
     if (!app) return undefined;
+    // Connected, not read: initialize and tools/list land here too. A goal read is noted by the tools that return goal
+    // content (lib/mcp/register.ts readGoals).
     noteGrantUse(app.grant);
-    return { token: bearerToken, clientId: app.client_id, scopes: app.scopes, expiresAt: app.exp, extra: { kind: "app", uid: app.uid, workspaces: [app.ws] } };
+    return { token: bearerToken, clientId: app.client_id, scopes: app.scopes, expiresAt: app.exp, extra: { kind: "app", uid: app.uid, workspaces: [app.ws], grant: app.grant } };
   }
   const dev = deviceFromAccessToken(bearerToken);
   if (!dev) return undefined;

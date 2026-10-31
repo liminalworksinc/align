@@ -14,8 +14,10 @@ import { pinClient } from "./clients";
 // the one before, to catch reuse) keyed with ALIGN_SECRET, and which ALIGN_SECRET it was made under (kid): after a
 // rotation its tokens can never work again, so it is treated as gone and dropped on that person's next grant. The
 // refresh expiry is set once, at creation, and rotation never extends it. A grant records the scopes the person
-// allowed (`scope`, space-separated; lib/oauth/server.ts) and rotation never changes them. last_used_at is set by MCP
-// calls, at most every 5 minutes.
+// allowed (`scope`, space-separated; lib/oauth/server.ts) and rotation never changes them. Two times say what Align saw
+// of the app, each written at most every 5 minutes: last_used_at (shown as "Last connected") by any /api/mcp request
+// whose token verifies, initialize and tools/list included, and last_read_at (shown as "Last read the goals") only by a
+// tool call that returned goal content (lib/mcp/register.ts). A connection alone is never a read.
 
 export interface Grant {
   id: string;
@@ -25,7 +27,10 @@ export interface Grant {
   client_name: string;
   redirect_host: string;
   created_at: string;
+  /** The last /api/mcp request whose token verified ("Last connected"). */
   last_used_at: string | null;
+  /** The last tool call that returned goal content ("Last read the goals"). */
+  last_read_at: string | null;
   refresh_hash: string;
   prev_refresh_hash: string | null;
   refresh_exp: number;
@@ -90,6 +95,7 @@ export async function createGrant(
     redirect_host: a.redirect_host,
     created_at: new Date(now).toISOString(),
     last_used_at: null,
+    last_read_at: null,
     refresh_hash: refreshHash(secret),
     prev_refresh_hash: null,
     refresh_exp: refreshExpiry(now),
@@ -187,7 +193,7 @@ export function listGrants(pp: PolicyPrincipal) {
     pp.wsId,
   )
     .filter((g) => g.kid === kid && g.refresh_exp > now && visibleTo(pp, g))
-    .map((g) => ({ id: g.id, name: g.client_name, redirect_host: g.redirect_host, user: { id: g.user_id, name: g.user_name }, approved_at: g.created_at, last_used_at: g.last_used_at, scopes: g.scope.split(" ") }));
+    .map((g) => ({ id: g.id, name: g.client_name, redirect_host: g.redirect_host, user: { id: g.user_id, name: g.user_name }, approved_at: g.created_at, last_used_at: g.last_used_at, last_read_at: g.last_read_at, scopes: g.scope.split(" ") }));
 }
 
 /** Disconnect one app: its person or a workspace owner. Anything else is not found. */
@@ -203,22 +209,29 @@ export async function revokeGrant(pp: PolicyPrincipal, grantId: string) {
   if (!n) throw notFound();
 }
 
-const g = globalThis as unknown as { __alignGrantUse?: Map<string, number> };
-const lastWrite = (g.__alignGrantUse ??= new Map());
+const g = globalThis as unknown as { __alignGrantUse?: Map<string, number>; __alignGrantRead?: Map<string, number> };
+const lastUse = (g.__alignGrantUse ??= new Map());
+const lastRead = (g.__alignGrantRead ??= new Map());
 
-/** Record a successful MCP call, off the request path: the first one at once, then at most every 5 minutes per
+/** Write `column` = now for one grant, off the request path: the first time at once, then at most every 5 minutes per
  *  grant. Failures (a busy database) are skipped, never thrown. */
-export function noteGrantUse(id: string) {
+function noteGrant(seen: Map<string, number>, column: "last_used_at" | "last_read_at", id: string) {
   const now = Date.now();
-  if (now - (lastWrite.get(id) ?? 0) < USE_WRITE_MS) return;
-  lastWrite.delete(id);
-  lastWrite.set(id, now);
-  while (lastWrite.size > 10_000) lastWrite.delete(lastWrite.keys().next().value!);
+  if (now - (seen.get(id) ?? 0) < USE_WRITE_MS) return;
+  seen.delete(id);
+  seen.set(id, now);
+  while (seen.size > 10_000) seen.delete(seen.keys().next().value!);
   setImmediate(() => {
     try {
-      run("UPDATE v2_oauth_grants SET last_used_at = ? WHERE id = ?", new Date(now).toISOString(), id);
+      run(`UPDATE v2_oauth_grants SET ${column} = ? WHERE id = ?`, new Date(now).toISOString(), id);
     } catch {
-      lastWrite.delete(id);
+      seen.delete(id);
     }
   });
 }
+
+/** Record a request whose token verified (initialize and tools/list included): the app connected, nothing more. */
+export const noteGrantUse = (id: string) => noteGrant(lastUse, "last_used_at", id);
+
+/** Record a tool call that returned goal content to the app (lib/mcp/register.ts): an observed read of the goals. */
+export const noteGrantRead = (id: string) => noteGrant(lastRead, "last_read_at", id);

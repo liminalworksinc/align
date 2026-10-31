@@ -10,7 +10,7 @@ import type { PolicyPrincipal } from "./policy";
 import { memberName } from "./workspaces";
 
 // The workspace Home (PORT2-001, from v1's "Know what needs you", main #41/#42): one read of what needs this person
-// and what waits on others, the active goals, and the connected AI apps with when each last read the workspace. Built
+// and what waits on others, the active goals, and the connected AI apps with when each last read the goals. Built
 // only from what the server already holds; it records nothing. The rules that need no database (evidence classes,
 // what an open item waits on, whether an approved change waits on a launch) are in lib/v2/home-core.mts.
 // Each section is read on its own: a section whose read fails is null, which the page shows as "unknown", never as
@@ -66,6 +66,9 @@ export interface HomeApp {
   name: string;
   connected_by: HomePerson;
   approved_at: string;
+  /** The last MCP request whose token verified: the app connected. Never a read on its own. */
+  last_used_at: string | null;
+  /** The last tool call that returned goal content (lib/mcp/register.ts): the only read Align observes. */
   last_read_at: string | null;
   evidence_class: EvidenceClass;
 }
@@ -169,7 +172,15 @@ export function workspaceHome(pp: PolicyPrincipal) {
     /** A workspace owner sees every connected app; anyone else, their own (as on the Apps tab). */
     everyone: pp.wsRole === "owner",
     items: listGrants(pp).map(
-      (g): HomeApp => ({ id: g.id, name: g.name, connected_by: g.user, approved_at: g.approved_at, last_read_at: g.last_used_at, evidence_class: appEvidence(g.last_used_at) }),
+      (g): HomeApp => ({
+        id: g.id,
+        name: g.name,
+        connected_by: g.user,
+        approved_at: g.approved_at,
+        last_used_at: g.last_used_at,
+        last_read_at: g.last_read_at,
+        evidence_class: appEvidence(g.last_read_at),
+      }),
     ),
   }));
 

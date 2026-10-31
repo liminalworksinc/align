@@ -193,8 +193,11 @@ binding exists only because of it get `binding_suspended`.
 
 ## Connected AI apps and MCP
 `GET /api/v2/workspaces/:ws/apps` (cookie, members) → `{ "url": "<origin>/api/mcp", "apps": [{ "id": "gr_…", "name",
-"redirect_host", "user": { "id", "name" }, "approved_at", "last_used_at", "scopes": ["goals:read", "changes:evidence"?] }] }`: every live grant for a workspace owner,
-the caller's own for anyone else. `DELETE /api/v2/workspaces/:ws/apps/:grant` (cookie write) → 204 for the grant's
+"redirect_host", "user": { "id", "name" }, "approved_at", "last_used_at", "last_read_at", "scopes": ["goals:read", "changes:evidence"?] }] }`: every live grant for a workspace owner,
+the caller's own for anyone else. `last_used_at` is the last `/api/mcp` request whose token verified (shown as "Last
+connected"; `initialize` and `tools/list` count); `last_read_at` the last call to `align_list_goals`, `align_get_goal`,
+`align_get_brief` or `align_get_limits` that returned a goal (shown as "Last read the goals"); each is written at most
+every 5 minutes and null until the first. `DELETE /api/v2/workspaces/:ws/apps/:grant` (cookie write) → 204 for the grant's
 person or a workspace owner, else `404 not_found`; audit `oauth.app_revoked`. Removing a member, leaving and deleting
 the workspace revoke the person's (or every) grant there. `/api/mcp` accepts a device access token
 (`alnd_`) as well as Align's OAuth tokens; a device names the workspace in each tool call (`workspace`) unless it can
@@ -319,8 +322,9 @@ decision_to_first_applied }, my_report, reports, sees_all_reports, follow_up_url
 approval, 409 `edit_closed` 7 days after a report was saved, 429 past 30 a minute per person; see `lib/v2/value.ts`),
 the workspace Home (`GET .../home`, cookie only, members and viewers → `{ me, change_requests: { waiting_on_me,
 waiting_on_others } | null, asks: { waiting_on_me } | null, alignments: { waiting_on_me, waiting_on_others } | null, goals
-| null, apps: { everyone, items: [ { id, name, connected_by, approved_at, last_read_at, evidence_class:
-"delivery_receipt"|"agent_reported"|"not_observed" } ] } | null }`; each queue item has `next` and `waiting_on`; a section
+| null, apps: { everyone, items: [ { id, name, connected_by, approved_at, last_used_at, last_read_at, evidence_class:
+"delivery_receipt"|"agent_reported"|"not_observed" } ] } | null }` (an app is a delivery receipt only with a
+`last_read_at`; one that only connected is not observed); each queue item has `next` and `waiting_on`; a section
 the server couldn't read is `null`; see `lib/v2/home.ts`),
 `GET /api/v2/device/requests/:code`,
 `POST /api/v2/device/approve` (`{ user_code, workspace_ids }`; needs a sign-in from the last 15 minutes, else

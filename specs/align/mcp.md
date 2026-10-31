@@ -677,7 +677,7 @@ The authorization server SHALL issue refresh tokens of the form `alr.<ws id>.<gr
 
 ### Requirement: Connected app grants
 
-The authorization server SHALL store each grant in the v2 database with its id, `client_id`, client name, redirect host, `user_id`, `ws_id`, creation time, `last_used_at`, current and previous refresh-token hashes, refresh expiry, the `ALIGN_SECRET` key id it was made under, and its `scope` (the scopes the person allowed, space-separated, `goals:read` by default). The Apps list (`GET /api/v2/workspaces/{ws}/apps`) SHALL show each grant's `scopes`. A grant is created when a code is exchanged at `/oauth/token`, not at approval. A new grant for the same `client_id`, person and workspace SHALL replace the earlier one (the person's grants in that workspace made under an earlier `ALIGN_SECRET` are deleted at the same time), and at most 20 grants SHALL be kept per person per workspace, the oldest dropped first. A grant SHALL stop working, together with its access and refresh tokens, in each of these cases:
+The authorization server SHALL store each grant in the v2 database with its id, `client_id`, client name, redirect host, `user_id`, `ws_id`, creation time, `last_used_at`, `last_read_at`, current and previous refresh-token hashes, refresh expiry, the `ALIGN_SECRET` key id it was made under, and its `scope` (the scopes the person allowed, space-separated, `goals:read` by default). The Apps list (`GET /api/v2/workspaces/{ws}/apps`) SHALL show each grant's `scopes`. A grant is created when a code is exchanged at `/oauth/token`, not at approval. A new grant for the same `client_id`, person and workspace SHALL replace the earlier one (the person's grants in that workspace made under an earlier `ALIGN_SECRET` are deleted at the same time), and at most 20 grants SHALL be kept per person per workspace, the oldest dropped first. A grant SHALL stop working, together with its access and refresh tokens, in each of these cases:
 
 - The person or a workspace owner disconnects it at `/app/w/{ws}/apps`.
 - The person leaves the workspace or is removed from it.
@@ -686,7 +686,7 @@ The authorization server SHALL store each grant in the v2 database with its id, 
 - Its refresh token or authorization code is replayed.
 - The workspace is deleted.
 
-A grant's `last_used_at` SHALL be set (asynchronously) by the first `/api/mcp` request whose access token verifies, then at most every 5 minutes.
+A grant's `last_used_at` SHALL be set (asynchronously) by the first `/api/mcp` request whose access token verifies, then at most every 5 minutes. It records that the app connected, not that it read anything: `initialize` and `tools/list` set it, and no surface SHALL call it a read.
 
 #### Scenario: Same app connected twice
 
@@ -697,6 +697,20 @@ A grant's `last_used_at` SHALL be set (asynchronously) by the first `/api/mcp` r
 
 - **WHEN** two members of one workspace each connect the same CIMD app
 - **THEN** there are two grants, each app session reads only what its own person can read, and disconnecting one leaves the other working
+
+### Requirement: An app's goal read is recorded apart from its connection
+
+A grant's `last_read_at` SHALL be set (asynchronously), and only set, when its app calls `align_list_goals`, `align_get_goal`, `align_get_brief` or `align_get_limits` and the answer holds at least one goal, at most every 5 minutes per grant like `last_used_at`. These four answer with the goals themselves (title and version, with their measures or limits) at their launched version. No other request SHALL set it: not `initialize`, `tools/list` or any other `/api/mcp` request, not `align_get_decision_record` (one request's before and after; the "after" of a rejected or unlaunched request is not a goal agents read), not `align_get_directives` (directive delivery has its own receipts), and not a call that fails or returns no goal. Device tokens use no grant, so nothing is recorded for them. A migrated database's grants start with `last_read_at` null: an earlier connection proves no read.
+
+#### Scenario: Connecting is not reading
+
+- **WHEN** an app exchanges its code and sends only `initialize` and `tools/list`
+- **THEN** its grant's `last_used_at` is set and its `last_read_at` stays null, and the Apps list shows it as connected with no goal read
+
+#### Scenario: Reading a goal
+
+- **WHEN** that app then calls `align_get_asks` and `align_get_goal` for a goal that does not exist, then `align_get_goal` for a goal it can read
+- **THEN** `last_read_at` stays null until the third call and is set by it; an `align_list_goals` call a moment later leaves it unchanged, because it is written at most every 5 minutes
 
 ### Requirement: Leaving or removal revokes app grants
 
@@ -716,10 +730,10 @@ When a member leaves a workspace or a workspace owner removes them (`DELETE /api
 
 The server SHALL list and revoke a workspace's connected apps through cookie-authenticated v2 routes, with the v2 error shape `{error, message}`:
 
-- `GET /api/v2/workspaces/{ws}/apps` returns `{url: "<origin>/api/mcp", apps: [{id, name, redirect_host, user: {id, name}, approved_at, last_used_at}]}` with live grants only, oldest first. A workspace owner sees every grant in the workspace; any other member sees only their own. A non-member gets `404 not_found`, and a request with an `Authorization` header gets `403 bearer_not_allowed`.
+- `GET /api/v2/workspaces/{ws}/apps` returns `{url: "<origin>/api/mcp", apps: [{id, name, redirect_host, user: {id, name}, approved_at, last_used_at, last_read_at, scopes}]}` with live grants only, oldest first. A workspace owner sees every grant in the workspace; any other member sees only their own. A non-member gets `404 not_found`, and a request with an `Authorization` header gets `403 bearer_not_allowed`.
 - `DELETE /api/v2/workspaces/{ws}/apps/{grant}` revokes one grant and returns `204`. It is allowed for the grant's person and for a workspace owner. A grant the caller cannot see, or one that does not exist, gets `404 not_found`. The route requires the same-site check of cookie writes (`403 cross_site`) and refuses an `Authorization` header (`403 bearer_not_allowed`). It writes a v2 audit row with the caller as actor and action `oauth.app_revoked`.
 
-The Apps tab at `/app/w/{ws}/apps` (its full content is in the `interface` part) SHALL show the MCP URL with a `Copy` button to people who can connect an app and one row per listed grant with the app's name, redirect host, person, approval time, last use (`Never` when null) and a `Disconnect` button, on the rows the caller may revoke, that calls the `DELETE` route. With no grants it SHALL say `No AI apps are connected to this workspace.`
+The Apps tab at `/app/w/{ws}/apps` (its full content is in the `interface` part) SHALL show the MCP URL with a `Copy` button to people who can connect an app and one row per listed grant with the app's name, redirect host, person, approval time, **Last connected** (`last_used_at`, `Never` when null), **Last read the goals** (`last_read_at`, `Not seen yet` when null) and a `Disconnect` button, on the rows the caller may revoke, that calls the `DELETE` route. With no grants it SHALL say `No AI apps are connected to this workspace.`
 
 #### Scenario: Owner disconnects another member's app
 

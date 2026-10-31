@@ -3,13 +3,14 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Card, Loading, Note, Pill, Shell, useApi, when } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
-import { EVIDENCE_WORDS, type EvidenceClass, type HomeNext, type HomePerson } from "@/lib/v2/home-core.mts";
+import { appStatusWords, EVIDENCE_WORDS, type EvidenceClass, type HomeNext, type HomePerson } from "@/lib/v2/home-core.mts";
 
 // The workspace Home, the workspace's landing view (PORT2-001, from v1's "Know what needs you", main #41/#42). One read
 // of GET /api/v2/workspaces/<ws>/home: what waits on this person and on others, the active goals, and the connected AI
-// apps with when each last read the workspace. Counts are only numbers Align has: a section the server couldn't read
-// (null), or a failed read of the whole page, shows "unknown", never zero. Every agent-status item carries exactly one
-// evidence class (delivery receipt, agent reported, not observed); nothing says what an agent is doing.
+// apps with when each last read the goals (or only connected). Counts are only numbers Align has: a section the server
+// couldn't read (null), or a failed read of the whole page, shows "unknown", never zero. Every agent-status item carries
+// exactly one evidence class (delivery receipt, agent reported, not observed); nothing says what an agent is doing or
+// which goal version an app has. A connection is never shown as a read (main #48).
 
 interface Change {
   id: string;
@@ -52,6 +53,7 @@ interface App {
   name: string;
   connected_by: HomePerson;
   approved_at: string;
+  last_used_at: string | null;
   last_read_at: string | null;
   evidence_class: EvidenceClass;
 }
@@ -190,7 +192,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
   const onMe = h && h.change_requests && h.asks && h.alignments ? h.change_requests.waiting_on_me.length + h.asks.waiting_on_me.length + h.alignments.waiting_on_me.length : null;
   const onOthers = h && h.change_requests && h.alignments ? h.change_requests.waiting_on_others.length + h.alignments.waiting_on_others.length : null;
   const apps = h?.apps ?? null;
-  const read = apps?.items.filter((a) => a.last_read_at).length ?? 0;
+  const read = apps?.items.filter((a) => a.evidence_class === "delivery_receipt").length ?? 0;
 
   return (
     <Shell me={me} ws={ws} tab="Home">
@@ -206,7 +208,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
             <Tile n={onMe} label="Waiting on you" href="#waiting" hot={!!onMe} />
             <Tile n={onOthers} label="Waiting on others" href="#others" />
             <Tile n={h.goals ? h.goals.length : null} label="Active goals" href="#goals" />
-            <Tile n={apps ? (apps.items.length ? `${read} of ${apps.items.length}` : 0) : null} label={apps && apps.items.length ? "Connected apps with a read seen" : "Connected apps"} href="#apps" />
+            <Tile n={apps ? (apps.items.length ? `${read} of ${apps.items.length}` : 0) : null} label={apps && apps.items.length ? "Connected apps that read the goals" : "Connected apps"} href="#apps" />
           </div>
 
           <section id="waiting" aria-label="Waiting on you" className="scroll-mt-4">
@@ -264,14 +266,14 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           </section>
 
           <section id="apps" aria-label="Connected AI apps" className="scroll-mt-4">
-            <Card title="Connected AI apps · what they last read">
+            <Card title="Connected AI apps · when they last read the goals">
               {!apps ? (
-                <Note>Align couldn&apos;t read the connected apps just now, so whether any of them read this workspace is unknown. Reload the page to try again.</Note>
+                <Note>Align couldn&apos;t read the connected apps just now, so whether any of them read the goals is unknown. Reload the page to try again.</Note>
               ) : apps.items.length === 0 ? (
                 <div className="flex flex-wrap items-center gap-2 text-[15px] text-zinc-600" data-home-app="none">
                   <Evidence c="not_observed" />
                   <span>
-                    {apps.everyone ? "No AI app is connected to this workspace" : "You have not connected an AI app to this workspace"}, so Align has observed no agent reads.{" "}
+                    {apps.everyone ? "No AI app is connected to this workspace" : "You have not connected an AI app to this workspace"}, so Align has observed no goal reads.{" "}
                     <Link href={`${base}/apps`} className="underline">
                       Connect one on the Apps tab.
                     </Link>
@@ -284,14 +286,14 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
                       <span className="min-w-0 break-words font-semibold text-zinc-900">{a.name}</span>
                       <span className="text-[14px] text-zinc-500">connected by {a.connected_by.id === me.id ? "you" : a.connected_by.name}</span>
                       <Evidence c={a.evidence_class} />
-                      <span className="text-[14px] text-zinc-700">{a.last_read_at ? `Last read ${when(a.last_read_at)}` : `Approved ${when(a.approved_at)}, no read seen yet`}</span>
+                      <span className="text-[14px] text-zinc-700">{appStatusWords(a, when)}</span>
                     </li>
                   ))}
                 </ul>
               )}
               {apps && (
                 <p className="mt-2 text-[13px] text-zinc-500">
-                  {apps.everyone ? "" : "Your own connections; a workspace owner sees everyone's. "}A delivery receipt here is a read Align served to the app (recorded at most every 5 minutes). Align sees when an app last read this workspace, not what it does with it.
+                  {apps.everyone ? "" : "Your own connections; a workspace owner sees everyone's. "}A delivery receipt here is a goal read Align served to the app: a call that returned goals (recorded at most every 5 minutes). Connecting is not a read, so an app that only connected is not observed. Align sees when an app last read the goals, not which version it has or what it does with them.
                 </p>
               )}
             </Card>

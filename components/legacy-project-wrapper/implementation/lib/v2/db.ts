@@ -937,6 +937,14 @@ const MIGRATIONS: string[] = [
     'first_change_request', 'first_approval', 'first_directive', 'first_mcp_read', 'loi_sent', 'loi_signed',
     'first_ask', 'first_limit', 'first_request', 'first_hold', 'first_launch');
   `,
+  // PORT2-001: connecting is not reading (the v2 counterpart of main #48). last_used_at stays "last connected": any
+  // /api/mcp request whose token verifies, initialize and tools/list included. last_read_at is set only when the app
+  // calls a tool that returned goal content (lib/mcp/register.ts GOAL_READS), at most every 5 minutes
+  // (lib/oauth/grants.ts noteGrantRead). Existing grants start with no read seen: a past connection proves none.
+  `
+  -- 14 (PORT2-001)
+  ALTER TABLE v2_oauth_grants ADD COLUMN last_read_at TEXT;
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

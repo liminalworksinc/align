@@ -58,6 +58,17 @@ disconnects it on the Apps tab (`DELETE /api/v2/workspaces/{ws}/apps/{grant}`), 
 grant's foreign key to `v2_members` cascades too), when its refresh token or code is replayed, after 7 days, or when
 `ALIGN_SECRET` is rotated.
 
+**Connected is not read.** A grant keeps two times, each written off the request path at most every 5 minutes and null
+until the first (`lib/oauth/grants.ts`). `last_used_at`, shown as **Last connected**, is set by any `/api/mcp` request
+whose access token verifies, `initialize` and `tools/list` included, so it says only that the app connected.
+`last_read_at`, shown as **Last read the goals**, is set only when `align_list_goals`, `align_get_goal`,
+`align_get_brief` or `align_get_limits` returns at least one goal (`lib/mcp/register.ts` `readGoals`): those four answer
+with the goals themselves at their launched version. A decision record (one request's before and after), directives
+(their delivery has its own receipts), change requests, asks and activity don't set it. On the Home an app with a
+`last_read_at` is a delivery receipt ("Read the goals <time>"); one that only connected is not observed ("Connected
+<time>, no goal read seen yet"). Neither says which goal version the app has or what it did. Device tokens have no
+grant, so neither time is kept for them.
+
 **Scopes.** `goals:read` is always granted and is the default. `changes:evidence` is granted only when the authorization
 request names it (unknown scope names are ignored); dynamic registration accepts and echoes it. The grant stores its
 scopes (`v2_oauth_grants.scope`, shown on the Apps tab), the token response's `scope` says which, and a refresh keeps

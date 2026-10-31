@@ -41,7 +41,10 @@ interface App {
   redirect_host: string;
   user: { id: string; name: string };
   approved_at: string;
+  /** The last MCP request from the app (initialize and tools/list included): it connected. Not a read. */
   last_used_at: string | null;
+  /** The last tool call that returned goals to the app: the only read Align observes. */
+  last_read_at: string | null;
   /** "goals:read", plus "changes:evidence" when the person let it add evidence links. */
   scopes: string[];
 }
@@ -62,7 +65,7 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
   return (
     <Shell me={me} ws={ws} tab="Apps">
       <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">Connected AI apps</h1>
-      <p className="mb-5 text-[15px] text-zinc-600">Apps that read this workspace through Align&apos;s MCP server, each as the person who connected it. They can read; they can&apos;t change anything.</p>
+      <p className="mb-5 text-[15px] text-zinc-600">Apps connected to this workspace through Align&apos;s MCP server, each reading as the person who connected it. They can read; they can&apos;t change anything.</p>
       <Card title="Connect an AI app">
         {!apps.data || !role ? (
           <Loading />
@@ -99,7 +102,8 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                   <th className="py-2 pr-3 font-normal">Sends you back to</th>
                   <th className="py-2 pr-3 font-normal">Connected by</th>
                   <th className="py-2 pr-3 font-normal">Approved</th>
-                  <th className="py-2 pr-3 font-normal">Last read</th>
+                  <th className="py-2 pr-3 font-normal">Last connected</th>
+                  <th className="py-2 pr-3 font-normal">Last read the goals</th>
                   <th className="py-2 font-normal" />
                 </tr>
               </thead>
@@ -113,7 +117,8 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                     <td data-label="Sends you back to" className={`py-2 pr-3 font-mono text-[14px] ${PHONE_TABLE.cell}`}>{a.redirect_host}</td>
                     <td data-label="Connected by" className={`py-2 pr-3 ${PHONE_TABLE.cell}`}>{a.user.name}</td>
                     <td data-label="Approved" className={`py-2 pr-3 ${PHONE_TABLE.cell}`}>{when(a.approved_at)}</td>
-                    <td data-label="Last read" className={`py-2 pr-3 ${PHONE_TABLE.cell}`}>{a.last_used_at ? when(a.last_used_at) : "Never"}</td>
+                    <td data-label="Last connected" className={`py-2 pr-3 ${PHONE_TABLE.cell}`}>{a.last_used_at ? when(a.last_used_at) : "Never"}</td>
+                    <td data-label="Last read the goals" className={`py-2 pr-3 ${PHONE_TABLE.cell}`}>{a.last_read_at ? when(a.last_read_at) : "Not seen yet"}</td>
                     <td className={`py-2 text-right ${PHONE_TABLE.whole}`}>
                       {(role === "owner" || a.user.id === detail.data?.me) && (
                         <Btn kind="danger" onClick={() => void disconnect(a)} disabled={act.busy}>
@@ -125,6 +130,9 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                 ))}
               </tbody>
             </table>
+            <p className="mt-2 text-[13px] text-zinc-500" data-apps-times>
+              Last connected is the app&apos;s last request to Align, connecting and listing tools included. Last read the goals is its last call that returned goals. Each is recorded at most every 5 minutes. Align doesn&apos;t see which goal version an app has or what it does with it.
+            </p>
           </div>
         )}
       </Card>

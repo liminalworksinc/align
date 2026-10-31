@@ -19,7 +19,9 @@ it, and keeps the coding agents working toward that goal current with it.
   doc), labelled self-reported or agent-reported and never verified. Approving without evidence is allowed and audited.
 - **Read-only MCP.** Connected AI apps read goals, change requests (with their evidence), decision records and
   directives through `/api/mcp`, as the person who connected them. An app the person allows the opt-in scope
-  `changes:evidence` can also add agent-reported evidence links (`docs/MCP.md`).
+  `changes:evidence` can also add agent-reported evidence links (`docs/MCP.md`). The Apps tab and the Home show when
+  each app last connected and, separately, when it last read the goals (a tool call that returned goals); connecting
+  alone is never shown as a read.
 
 The contract is the specification in `specs/align/*.md` at the repository root. This folder is its implementation:
 a Next.js app (`app/`, `lib/`), the local agent package (`packages/align-agent`) and a stdio bridge for MCP clients

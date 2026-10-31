@@ -713,9 +713,11 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 13, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 13 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 14, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 14 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
+  const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
+  check("storage (PORT2-001): migration 14 adds last_read_at to connected-app grants, beside last_used_at (connected, not read)", grantCols.includes("last_read_at") && grantCols.includes("last_used_at"), grantCols.join());
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -2190,8 +2192,8 @@ try {
     const at = new Date().toISOString();
     withDb((d) =>
       d
-        .prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, 'c-phone', ?, ?, ?, ?, 'h', ?, ?)")
-        .run("gr_PHONEPHONEPHONE1", A, U1.id, "An app with a fairly long client name", "a-rather-long-redirect-host.example.com", at, at, Date.now() + 86_400_000, kid),
+        .prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, 'c-phone', ?, ?, ?, ?, ?, 'h', ?, ?)")
+        .run("gr_PHONEPHONEPHONE1", A, U1.id, "An app with a fairly long client name", "a-rather-long-redirect-host.example.com", at, at, at, Date.now() + 86_400_000, kid),
     );
     const { default: puppeteer } = await import("puppeteer-core");
     const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
@@ -2219,8 +2221,8 @@ try {
       }
       const appsRow = await page.evaluate(() => document.body.innerText);
       check(
-        `ui (Chrome, 390x844): ${phonePaths.length} /app pages (workspaces, account, device, devices, request access, Home, Goals, a goal, People, Sessions, Alignments, Requests, Asks, Spend, Apps) each have document.scrollingElement.scrollWidth <= innerWidth; the Apps table stacks into labelled lines`,
-        wide.length === 0 && /Sends you back to/.test(appsRow) && /Last read/.test(appsRow) && errors.length === 0,
+        `ui (Chrome, 390x844): ${phonePaths.length} /app pages (workspaces, account, device, devices, request access, Home, Goals, a goal, People, Sessions, Alignments, Requests, Asks, Spend, Apps) each have document.scrollingElement.scrollWidth <= innerWidth; the Apps table stacks into labelled lines (Last connected, Last read the goals)`,
+        wide.length === 0 && /Sends you back to/.test(appsRow) && /Last connected/.test(appsRow) && /Last read the goals/.test(appsRow) && errors.length === 0,
         `${wide.join(" | ")} ${errors.join(" | ")}`,
       );
     } catch (e) {
@@ -4146,10 +4148,18 @@ try {
     const hc = await import(pathToFileURL(path.join(ROOT, "lib/v2/home-core.mts")).href);
     const P = (id, name) => ({ id, name });
     check(
-      "home rules: an app's read is a delivery receipt and no read is not observed; the three classes read \"Delivery receipt\", \"Agent reported\", \"Not observed\"",
+      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Delivery receipt\", \"Agent reported\", \"Not observed\"",
       hc.appEvidence("2026-10-31T00:00:00Z") === "delivery_receipt" && hc.appEvidence(null) === "not_observed" && hc.appEvidence(undefined) === "not_observed" && hc.appEvidence("") === "not_observed" &&
         JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Delivery receipt|Agent reported|Not observed",
       "",
+    );
+    const T = "2026-10-31T00:00:00Z";
+    const sw = (o) => hc.appStatusWords({ approved_at: "A", last_used_at: null, last_read_at: null, ...o }, (iso) => `@${iso}`);
+    const words = [sw({ last_used_at: "U", last_read_at: "R" }), sw({ last_used_at: "U" }), sw({})];
+    check(
+      "home rules (connected is not read, main #48): an app with a goal read says \"Read the goals <time>\"; one that only connected \"Connected <time>, no goal read seen yet\"; one with neither \"Approved <time>, no goal read seen yet\"; none says \"on the current plan\" or names a version",
+      JSON.stringify(words) === JSON.stringify(["Read the goals @R", "Connected @U, no goal read seen yet", "Approved @A, no goal read seen yet"]) && words.every((w) => !/current plan|version/i.test(w)) && hc.appEvidence(T) === "delivery_receipt",
+      JSON.stringify(words),
     );
     const cw = (o) => hc.changeWaits({ requester: P("r", "Rae"), approvers: [P("a", "Ann")], behind: false, ...o });
     check(
@@ -4251,21 +4261,23 @@ try {
       `${v2.status} ${JSON.stringify(cM?.change_requests)} ${JSON.stringify(bL?.change_requests)}`,
     );
 
-    // -- connected apps: what the Apps tab has (name, connected by, approved, last read), each with one evidence class --
+    // -- connected apps: what the Apps tab has (name, connected by, approved, last connected, last read the goals), each
+    //    with one evidence class: Claude Code read the goals; Codex only connected (initialize and tools/list) --
     const hcore = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
     const hkid = hcore.hmac(hcore.serverSecret(onDir, {}), "align-grant-kid").slice(0, 16);
     const readAt = new Date(Date.now() - 3 * 60_000).toISOString();
+    const usedAt = new Date(Date.now() - 60_000).toISOString();
     withDb((d) => {
-      const ins = d.prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, ?, ?, 'app.example', ?, ?, 'h', ?, ?)");
-      ins.run("gr_HOMEHOMEHOMEHOM1", HW, HM.id, "c-home-1", "Claude Code", readAt, readAt, Date.now() + 86_400_000, hkid);
-      ins.run("gr_HOMEHOMEHOMEHOM2", HW, HO.id, "c-home-2", "Codex", readAt, null, Date.now() + 86_400_000, hkid);
+      const ins = d.prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, ?, ?, 'app.example', ?, ?, ?, 'h', ?, ?)");
+      ins.run("gr_HOMEHOMEHOMEHOM1", HW, HM.id, "c-home-1", "Claude Code", readAt, readAt, readAt, Date.now() + 86_400_000, hkid);
+      ins.run("gr_HOMEHOMEHOMEHOM2", HW, HO.id, "c-home-2", "Codex", readAt, usedAt, null, Date.now() + 86_400_000, hkid);
     });
     const [aO, aM, aV] = await Promise.all([HO, HM, HV].map(home));
     check(
-      "home: connected apps -> a workspace owner sees every app (everyone: true), a member only their own, a viewer none; each has name, connected_by, approved_at, last_read_at and one evidence_class: delivery_receipt with a read, not_observed without; no plan-version claim",
+      "home: connected apps -> a workspace owner sees every app (everyone: true), a member only their own, a viewer none; each has name, connected_by, approved_at, last_used_at, last_read_at and one evidence_class: delivery_receipt only with a goal read (last_read_at), not_observed for an app that only connected (a last_used_at, no last_read_at); no plan-version claim",
       aO.apps?.everyone === true && aO.apps.items.length === 2 && aO.apps.items[0].name === "Claude Code" && aO.apps.items[0].last_read_at === readAt && aO.apps.items[0].evidence_class === "delivery_receipt" && aO.apps.items[0].connected_by.name === "Hedy Member" &&
-        aO.apps.items[1].last_read_at === null && aO.apps.items[1].evidence_class === "not_observed" && aM.apps?.everyone === false && aM.apps.items.length === 1 && aM.apps.items[0].evidence_class === "delivery_receipt" && aV.apps?.items.length === 0 &&
-        aO.apps.items.every((a) => Object.keys(a).sort().join() === "approved_at,connected_by,evidence_class,id,last_read_at,name"),
+        aO.apps.items[1].last_used_at === usedAt && aO.apps.items[1].last_read_at === null && aO.apps.items[1].evidence_class === "not_observed" && aM.apps?.everyone === false && aM.apps.items.length === 1 && aM.apps.items[0].evidence_class === "delivery_receipt" && aV.apps?.items.length === 0 &&
+        aO.apps.items.every((a) => Object.keys(a).sort().join() === "approved_at,connected_by,evidence_class,id,last_read_at,last_used_at,name") && !/current.plan|plan_version/i.test(JSON.stringify(aO.apps)),
       JSON.stringify(aO?.apps),
     );
     const HD = insertDevice(HO.id, "Hana's laptop");
@@ -4298,16 +4310,40 @@ try {
         }));
         const oT = await tiles(po);
         check(
-          "ui (Chrome): the workspace opens on Home (\"Know what needs you\", the Home tab first, Goals at /goals): tiles Waiting on you 1, Waiting on others 0, Active goals 3, Connected apps with a read seen \"1 of 2\"; the alignment is waiting on the owner with Open",
+          "ui (Chrome): the workspace opens on Home (\"Know what needs you\", the Home tab first, Goals at /goals): tiles Waiting on you 1, Waiting on others 0, Active goals 3, Connected apps that read the goals \"1 of 2\" (the app that only connected is not counted); the alignment is waiting on the owner with Open",
           /Know what needs you/.test(o.text) && /1 thing waiting on you\./.test(o.text) && o.tab[0]?.[0] === "Home" && o.tab[0][1] === `/app/w/${HW}` && o.tab[1]?.[0] === "Goals" && o.tab[1][1] === `/app/w/${HW}/goals` &&
-            oT["Waiting on you"] === "1" && oT["Waiting on others"] === "0" && oT["Active goals"] === "3" && oT["Connected apps with a read seen"] === "1 of 2" && o.items.includes(`alignment:${alH.json?.id}`) && /Hank Other asks to align with Win the regulated market/.test(o.text),
+            oT["Waiting on you"] === "1" && oT["Waiting on others"] === "0" && oT["Active goals"] === "3" && oT["Connected apps that read the goals"] === "1 of 2" && o.items.includes(`alignment:${alH.json?.id}`) && /Hank Other asks to align with Win the regulated market/.test(o.text),
           `${JSON.stringify(oT)} ${JSON.stringify(o.tab)} ${o.text.slice(0, 400)}`,
         );
         check(
-          "ui (Chrome, §E2): every connected app on Home shows exactly one evidence class (delivery receipt with its Last read; not observed with no read seen yet); the section says Align sees reads, not what an app does, and infers no working, stuck, blocked or diverged state",
-          o.apps.length === 2 && o.apps.every((a) => a.classes.length === 1) && o.apps[0].classes[0] === "delivery_receipt" && /delivery receipt/.test(o.apps[0].text) && /Last read /.test(o.apps[0].text) && /connected by Hedy Member/.test(o.apps[0].text) &&
-            o.apps[1].classes[0] === "not_observed" && /not observed/.test(o.apps[1].text) && /no read seen yet/.test(o.apps[1].text) && /not what it does with it/.test(o.appsSection) && !/\b(working|stuck|blocked|diverged|current plan)\b/i.test(o.appsSection) && errors.length === 0,
+          "ui (Chrome, §E2): every connected app on Home shows exactly one evidence class (delivery receipt with \"Read the goals <time>\"; the app that only connected not observed with \"Connected <time>, no goal read seen yet\"); the section says connecting is not a read and Align sees goal reads, not which version an app has or what it does; nothing on the page says \"on the current plan\" or infers working, stuck, blocked or diverged",
+          o.apps.length === 2 && o.apps.every((a) => a.classes.length === 1) && o.apps[0].classes[0] === "delivery_receipt" && /delivery receipt/.test(o.apps[0].text) && /Read the goals /.test(o.apps[0].text) && !/Connected .*no goal read/.test(o.apps[0].text) && /connected by Hedy Member/.test(o.apps[0].text) &&
+            o.apps[1].classes[0] === "not_observed" && /not observed/.test(o.apps[1].text) && /Connected .+, no goal read seen yet/.test(o.apps[1].text) && !/Read the goals/.test(o.apps[1].text) &&
+            /Connecting is not a read/.test(o.appsSection) && /not which version it has or what it does with them/.test(o.appsSection) && !/\b(working|stuck|blocked|diverged)\b/i.test(o.appsSection) && !/current plan/i.test(o.text) && errors.length === 0,
           `${JSON.stringify(o.apps)} ${errors.join(" | ")}`,
+        );
+        // The Apps tab: Last connected and Last read the goals, never one "Last read" fed by a connection.
+        const pa = await pageAs(HO);
+        await pa.goto(`${BASE}/app/w/${HW}/apps`, { waitUntil: "networkidle0" });
+        await pa.waitForSelector("tbody tr", { timeout: 15000 });
+        const ap = await pa.evaluate(() => ({
+          heads: [...document.querySelectorAll("thead th")].map((t) => t.textContent.trim()).filter(Boolean),
+          rows: [...document.querySelectorAll("tbody tr")].map((r) => ({
+            text: r.innerText,
+            connected: r.querySelector('[data-label="Last connected"]')?.textContent ?? null,
+            read: r.querySelector('[data-label="Last read the goals"]')?.textContent ?? null,
+          })),
+          note: document.querySelector("[data-apps-times]")?.textContent ?? "",
+          text: document.body.innerText,
+        }));
+        const claude = ap.rows.find((r) => r.text.startsWith("Claude Code"));
+        const codex = ap.rows.find((r) => r.text.startsWith("Codex"));
+        check(
+          "ui (Chrome): the Apps tab's columns are App, Sends you back to, Connected by, Approved, Last connected, Last read the goals (no bare \"Last read\"); the app that read shows a time in both, the app that only connected a time under Last connected and \"Not seen yet\" under Last read the goals; a note says connecting and listing tools is not a read and that Align doesn't see an app's goal version",
+          JSON.stringify(ap.heads) === JSON.stringify(["App", "Sends you back to", "Connected by", "Approved", "Last connected", "Last read the goals"]) &&
+            !!claude && /\d/.test(claude.connected ?? "") && /\d/.test(claude.read ?? "") && !!codex && /\d/.test(codex.connected ?? "") && codex.read === "Not seen yet" &&
+            /connecting and listing tools included/.test(ap.note) && /Last read the goals is its last call that returned goals/.test(ap.note) && /doesn.t see which goal version an app has/.test(ap.note) && !/current plan/i.test(ap.text) && errors.length === 0,
+          `${JSON.stringify(ap.heads)} ${JSON.stringify(ap.rows)} ${ap.note}`,
         );
         const pl = await pageAs(HL);
         await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
@@ -4316,7 +4352,7 @@ try {
         check(
           "ui (Chrome): the lead's Home lists the ask waiting on them (\"Compliance asked Core\", the quoted text) and, under Waiting on others, the change request waiting on Hedy Member to update it to version 2; with no app of their own, one \"not observed\" item",
           /Compliance asked Core/.test(l.waiting) && /“Home: write the runbook”/.test(l.waiting) && /Hedy Member's request on Ship the audit log \(v2\)/.test(l.others) && /Waiting on Hedy Member to update it to version 2\./.test(l.others) &&
-            JSON.stringify(l.noneClasses) === JSON.stringify(["not_observed"]) && /Align has observed no agent reads/.test(l.none) && errors.length === 0,
+            JSON.stringify(l.noneClasses) === JSON.stringify(["not_observed"]) && /Align has observed no goal reads/.test(l.none) && errors.length === 0,
           `${l.waiting.slice(0, 300)} | ${l.others.slice(0, 300)} | ${l.none} ${errors.join(" | ")}`,
         );
         // A failed read of the Home: every count says unknown, never zero.
@@ -4329,7 +4365,7 @@ try {
         const fText = await pf.evaluate(() => document.body.innerText);
         check(
           "ui (Chrome, §E2): when the Home's read fails every tile says unknown (never 0), the summary says how much is waiting is unknown, and the apps section says their reads are unknown",
-          Object.keys(fT).length === 4 && Object.values(fT).every((v) => v === "unknown") && /so how much is waiting is unknown/.test(fText) && /whether any of them read this workspace is unknown/.test(fText) && !/Nothing is waiting on you/.test(fText) && !/\bnot observed\b/.test(fText),
+          Object.keys(fT).length === 4 && Object.values(fT).every((v) => v === "unknown") && /so how much is waiting is unknown/.test(fText) && /whether any of them read the goals is unknown/.test(fText) && !/Nothing is waiting on you/.test(fText) && !/\bnot observed\b/.test(fText),
           `${JSON.stringify(fT)} ${fText.slice(0, 500)}`,
         );
         // On a phone: the lead's Home with its queue fits 390 px.

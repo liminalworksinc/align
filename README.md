@@ -4,13 +4,13 @@
 - Parent repository: [github.com/jordanhubbard/literate-ai](<https://github.com/jordanhubbard/literate-ai>)
 <!-- /literate-ai:parent-repositories -->
 
-**Align is a command center for parallel AI work: one place to see what needs your decision and when each connected AI app last read your workspace. Underneath, only the people entitled to approve for a goal can change it, every version is kept, and AI agents read the approved version.**
+**Align is a command center for parallel AI work: one place to see what needs your decision and which connected AI apps have read the goals or only connected. Underneath, only the people entitled to approve for a goal can change it, every version is kept, and AI agents read the approved version.**
 
 Align is Liminal's wedge product, a working prototype. We built the first version in one day at SpeedHacks (Oct 11, 2026), where it won Best Use of Sparta, and rebuilt it during the Proving Ground founder sprint (Oct 21 to 23, 2026). This repository holds Align v2: everyone signs in as themselves, and workspaces, teams and change requests replace the first version's shared team passcodes. Built by Shayaun Nejad and Shruti Rajagopal Nejad.
 
 ## What it does today
 
-- **Home shows what needs you.** A workspace opens on its Home: the change requests, asks and alignment requests waiting on you, what you are part of that waits on someone else (and on whom), the active goals, and each connected AI app with when it last read the workspace. Every agent-status item is labelled delivery receipt, agent reported or not observed. A read that fails shows unknown, never zero.
+- **Home shows what needs you.** A workspace opens on its Home: the change requests, asks and alignment requests waiting on you, what you are part of that waits on someone else (and on whom), the active goals, and each connected AI app with when it last read the goals, or, if Align has seen no goal read from it, when it last connected. A goal read counts as a delivery receipt; an app that only connected is not observed, since connecting is not reading. Every agent-status item is labelled delivery receipt, agent reported or not observed. A read that fails shows unknown, never zero.
 - **People, not passcodes.** Everyone signs in as themselves with Google or GitHub (when the server has them set up), a one-time email code (printed on the machine in Mode L) or a passkey. Workspaces have owners, members and viewers; teams have leads and members. Sensitive actions need a sign-in from the last 15 minutes.
 - **Goals with versions.** Company and team goals have measures, limits (must, must not, out of scope) and dependencies, and team goals can contribute to company goals. Every change makes a new version; earlier versions are kept.
 - **Only the approval set decides.** A member proposes a change to a goal they don't own. The goal's owner, its team's leads and, for a company goal, the workspace owners can approve it, suggest a change, or decline it with a reason. One approval is enough, and the server refuses anyone else (HTTP 403). An approved request stays as its decision record. An approver can attach an "Accept if…" condition to a suggested change, which only the requester confirms; it is never a gate and never called verified.
@@ -28,9 +28,9 @@ Align is Liminal's wedge product, a working prototype. We built the first versio
 
 ## What it does not do yet
 
-- **It doesn't verify evidence or outcomes.** Evidence links are labelled by who added them and never checked. Align records reads and delivery receipts, not whether an agent's work met the goal.
+- **It doesn't verify evidence or outcomes.** Evidence links are labelled by who added them and never checked. Align records goal reads and delivery receipts, not whether an agent's work met the goal.
 - **It reaches only agents running the `align` CLI.** Goal changes, requests, stops and holds reach Claude Code and Codex sessions shared through the CLI's hooks. An AI app connected only through MCP can read; Align can't stop it.
-- **It doesn't know which goal version an app read.** The Home and the Apps tab show when an app last read the workspace, not what it read.
+- **It doesn't know which goal version an app has.** The Home and the Apps tab show when an app last connected and when it last read the goals, not which version it read or what it did with it.
 - **It does not sign records.** Decision records live in Align's database, unsigned.
 - **No outside team has used this version yet.** It has not been deployed for outside teams, and no outside team has completed an evaluation on its own.
 

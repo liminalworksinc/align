@@ -1132,12 +1132,74 @@ async function local(env) {
   const appsOwner = await web(U1, "GET", `/api/v2/workspaces/${A}/apps`);
   const mine = appsOwner.json?.apps?.find((a) => a.user.id === U1.id && a.name === "Test CLI");
   check(
-    "GET /apps: {url: <origin>/api/mcp, apps: [{id, name, redirect_host, user {id, name}, approved_at, last_used_at, scopes}]}, last_used_at set by the first MCP call, scopes [goals:read] by default",
-    appsOwner.status === 200 && appsOwner.json.url === `${origin()}/api/mcp` && mine && /^gr_/.test(mine.id) && mine.redirect_host === "127.0.0.1:33418" && mine.user.name === "Ola Owner" && !!mine.approved_at && !!mine.last_used_at && JSON.stringify(Object.keys(mine).sort()) === JSON.stringify(["approved_at", "id", "last_used_at", "name", "redirect_host", "scopes", "user"]) && JSON.stringify(mine.scopes) === '["goals:read"]',
+    "GET /apps: {url: <origin>/api/mcp, apps: [{id, name, redirect_host, user {id, name}, approved_at, last_used_at, last_read_at, scopes}]}, last_used_at set by the first MCP call, last_read_at by its goal reads, scopes [goals:read] by default",
+    appsOwner.status === 200 && appsOwner.json.url === `${origin()}/api/mcp` && mine && /^gr_/.test(mine.id) && mine.redirect_host === "127.0.0.1:33418" && mine.user.name === "Ola Owner" && !!mine.approved_at && !!mine.last_used_at && !!mine.last_read_at && JSON.stringify(Object.keys(mine).sort()) === JSON.stringify(["approved_at", "id", "last_read_at", "last_used_at", "name", "redirect_host", "scopes", "user"]) && JSON.stringify(mine.scopes) === '["goals:read"]',
     appsOwner.text,
   );
   const grantRow = withDb((d) => d.prepare("SELECT * FROM v2_oauth_grants WHERE id = ?").get(mine?.id ?? ""));
   check("a grant is stored in the v2 database with user_id, ws_id, client, redirect host, refresh expiry 7 days after creation, kid", grantRow?.user_id === U1.id && grantRow.ws_id === A && grantRow.client_id === clientId && Math.abs(grantRow.refresh_exp - Date.parse(grantRow.created_at) - 7 * 24 * 3600 * 1000) < 5000 && !!grantRow.kid, JSON.stringify(grantRow));
+  // -- connected, not read (PORT2-001, the v2 counterpart of main #48): any verified request sets last_used_at ("Last
+  //    connected"); only a tool call that returned goals sets last_read_at ("Last read the goals"), at most every 5 minutes --
+  {
+    const regR = await req("POST", "/oauth/register", { body: { client_name: "Reads CLI", redirect_uris: [REDIRECT], token_endpoint_auth_method: "none" } });
+    const tR = await connect(regR.json?.client_id, U1, A);
+    const gid = tR.refresh_token.split(".")[2];
+    const times = () => withDb((d) => d.prepare("SELECT last_used_at, last_read_at FROM v2_oauth_grants WHERE id = ?").get(gid));
+    const listed = async () => (await web(U1, "GET", `/api/v2/workspaces/${A}/apps`)).json?.apps?.find((a) => a.id === gid);
+    const fresh = times();
+    const initR = rpcOf(await mcp(tR.access_token, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } }));
+    const toolsR = rpcOf(await mcp(tR.access_token, "tools/list"))?.result?.tools ?? [];
+    await sleep(300);
+    const connected = times();
+    const apiConnected = await listed();
+    check(
+      "connected, not read: a new grant has neither time; initialize and tools/list set last_used_at and leave last_read_at null, and GET /apps returns both (last_read_at null)",
+      fresh?.last_used_at === null && fresh.last_read_at === null && initR?.result?.serverInfo?.name === "align" && toolsR.length === 9 && !!connected?.last_used_at && connected.last_read_at === null && apiConnected?.last_used_at === connected.last_used_at && apiConnected.last_read_at === null,
+      `${JSON.stringify(fresh)} ${JSON.stringify(connected)} ${JSON.stringify(apiConnected)}`,
+    );
+    // Tools that answer with no goal content, and a goal read that fails, are not reads.
+    const crs = await tool(tR.access_token, "align_list_change_requests");
+    const notReads = [
+      crs,
+      await tool(tR.access_token, "align_get_decision_record", { change_request_id: crs.sc?.change_requests?.find((c) => c.state === "approved" || c.state === "rejected")?.id ?? crs.sc?.change_requests?.[0]?.id ?? "cr_none" }),
+      await tool(tR.access_token, "align_get_directives"),
+      await tool(tR.access_token, "align_get_asks"),
+      await tool(tR.access_token, "align_get_goal_activity"),
+      await tool(tR.access_token, "align_get_goal", { goal_id: "g_doesnotexist0000000000" }),
+    ];
+    await sleep(300);
+    const afterOthers = times();
+    check(
+      "connected, not read: align_list_change_requests, align_get_decision_record, align_get_directives, align_get_asks, align_get_goal_activity and an align_get_goal for a goal it can't read leave last_read_at null",
+      notReads.every((r) => r.status === 200) && notReads.at(-1).isError && afterOthers?.last_read_at === null,
+      `${notReads.map((r) => `${r.status}${r.isError ? "!" : ""}`).join(" ")} ${JSON.stringify(afterOthers)}`,
+    );
+    const got = await tool(tR.access_token, "align_get_goal", { goal_id: GC.id });
+    await sleep(300);
+    const read = times();
+    const apiRead = await listed();
+    check(
+      "a goal read: align_get_goal for a goal it can read sets last_read_at (and GET /apps returns it beside last_used_at)",
+      got.status === 200 && got.sc?.goal?.id === GC.id && !!read?.last_read_at && read.last_read_at >= connected.last_used_at && apiRead?.last_read_at === read.last_read_at && apiRead.last_used_at === read.last_used_at,
+      `${got.status} ${JSON.stringify(read)} ${JSON.stringify(apiRead)}`,
+    );
+    const again = [await tool(tR.access_token, "align_list_goals"), await tool(tR.access_token, "align_get_brief"), await tool(tR.access_token, "align_get_limits")];
+    await sleep(300);
+    const throttled = times();
+    check(
+      "a goal read is recorded at most every 5 minutes: align_list_goals, align_get_brief and align_get_limits right after leave last_read_at (and last_used_at) unchanged",
+      again.every((r) => r.status === 200 && !r.isError) && again[0].sc?.goals?.length > 0 && throttled?.last_read_at === read.last_read_at && throttled.last_used_at === connected.last_used_at,
+      `${JSON.stringify(read)} ${JSON.stringify(throttled)}`,
+    );
+    // A device token has no grant: its goal reads touch no grant's times.
+    const grantTimes = () => JSON.stringify(withDb((d) => d.prepare("SELECT id, last_used_at, last_read_at FROM v2_oauth_grants ORDER BY id").all()));
+    const beforeDev = grantTimes();
+    const devGoal = await tool(D1.access, "align_get_goal", { goal_id: GC.id, workspace: A });
+    await sleep(300);
+    check("a device token's goal read records nothing on any grant (devices use no grant)", devGoal.status === 200 && grantTimes() === beforeDev, `${devGoal.status} ${devGoal.text.slice(0, 120)}`);
+    // Disconnect it, so the Apps checks below count as before.
+    await web(U1, "DELETE", `/api/v2/workspaces/${A}/apps/${gid}`);
+  }
   const cimd = "https://pub-two.addr.align-test/doc";
   const tU1 = await connect(cimd, U1, A);
   const tU4 = await connect(cimd, U4, A);

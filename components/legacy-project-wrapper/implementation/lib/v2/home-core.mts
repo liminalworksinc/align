@@ -4,7 +4,8 @@
 
 /** Where an agent-status claim comes from (LIM-2454 3770c6c4, the checklist's §E2). Every agent-status item carries
  *  exactly one:
- *    delivery_receipt  Align observed it: a received, applied or enforced receipt, or a read Align served;
+ *    delivery_receipt  Align observed it: a received, applied or enforced receipt, or a goal read Align served (a
+ *                      connection alone is not a read);
  *    agent_reported    the agent's own claim or evidence link, never verified;
  *    not_observed      Align has nothing.
  *  Nothing is ever inferred from these (no "working", "stuck", "blocked" or "diverged"). */
@@ -18,8 +19,19 @@ export const EVIDENCE_WORDS: Record<EvidenceClass, string> = {
   not_observed: "Not observed",
 };
 
-/** A connected app: a read Align served is a delivery receipt; an app with no read yet is not observed. */
+/** A connected app: a goal read Align served (the grant's last_read_at) is a delivery receipt; an app that only
+ *  connected (last_used_at: initialize, tools/list or any other call that returned no goal) or never connected is not
+ *  observed. Pass last_read_at, never last_used_at: a connection is not a read (main #48). */
 export const appEvidence = (lastReadAt: string | null | undefined): EvidenceClass => (typeof lastReadAt === "string" && lastReadAt ? "delivery_receipt" : "not_observed");
+
+/** What the Home says about a connected app, from what the server holds: when it last read the goals, else when it last
+ *  connected with no goal read seen, else when it was approved. Never which version it has ("on the current plan"):
+ *  Align keeps no per-app version (the checklist's §B). `at` formats a time. */
+export function appStatusWords(a: { approved_at: string; last_used_at: string | null; last_read_at: string | null }, at: (iso: string) => string): string {
+  if (a.last_read_at) return `Read the goals ${at(a.last_read_at)}`;
+  if (a.last_used_at) return `Connected ${at(a.last_used_at)}, no goal read seen yet`;
+  return `Approved ${at(a.approved_at)}, no goal read seen yet`;
+}
 
 export interface HomePerson {
   id: string;

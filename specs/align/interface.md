@@ -26,7 +26,7 @@ screen says "team".
 | `/app/device` | Connect a device | A signed-in person (recent sign-in) | Approve the code that `align login` printed |
 | `/app/devices` | Your devices | A signed-in person | List and revoke paired devices |
 | `/app/invite/<token>` | Workspace invite | The invited person | Join a workspace (and team) from an invite link |
-| `/app/w/<ws>` | Home | Workspace members | What waits on the person and on others, the active goals, and what connected AI apps last read |
+| `/app/w/<ws>` | Home | Workspace members | What waits on the person and on others, the active goals, and when connected AI apps last read the goals or connected |
 | `/app/w/<ws>/goals` | Goals tab | Workspace members | Goals the person can read; create a goal |
 | `/app/w/<ws>/goals/<goal>` | Goal page | Workspace members | One goal: versions, tree, new version, alignment request, change requests |
 | `/app/w/<ws>/people` | People tab | Workspace members | Members, roles, invites, teams, leaving, deleting the workspace |
@@ -428,11 +428,12 @@ email join with **Join workspace**.
 
 The Home at `/app/w/<ws>`, a workspace's landing view, SHALL show under "Know what needs you", from one read of
 `GET /api/v2/workspaces/<ws>/home`, a line saying how many things wait on the person, four count tiles ("Waiting on
-you", "Waiting on others", "Active goals", and "Connected apps with a read seen" as "<read> of <connected>", or
+you", "Waiting on others", "Active goals", and "Connected apps that read the goals" as "<read> of <connected>", or
 "Connected apps" with none), each a link to its section, and the sections "Waiting on you", "Waiting on others",
-"Active goals" and "Connected AI apps · what they last read". It SHALL show only what the server holds: a count or a
+"Active goals" and "Connected AI apps · when they last read the goals". It SHALL show only what the server holds: a count or a
 section the server could not read SHALL say "unknown", never zero, and nothing on the page SHALL infer what an agent is
-doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version). The page
+doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version or is "on
+the current plan": Align keeps no per-app version). The page
 reads once when it opens and does not poll.
 
 The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
@@ -454,11 +455,14 @@ when the person asked for it or the goal is theirs, their team's, or (for a work
 or superseded request is on no Home.
 
 Every agent-status item SHALL show exactly one evidence class, "delivery receipt" (a `received`, `applied` or
-`enforced` receipt, or a read Align served), "agent reported" (the agent's own claim or evidence link) or "not
+`enforced` receipt, or a goal read Align served), "agent reported" (the agent's own claim or evidence link) or "not
 observed" (Align has nothing), and the read SHALL return the same class as `evidence_class`. Each connected app is
-listed with what the Apps tab has: its name, who connected it, when it was approved and **Last read**; an app with a
-read is a delivery receipt with "Last read <time>", one without is not observed with "Approved <time>, no read seen
-yet". A workspace owner sees every connected app and anyone else their own, as on the Apps tab.
+listed with what the Apps tab has: its name, who connected it, when it was approved, `last_used_at` (**Last
+connected**) and `last_read_at` (**Last read the goals**, the `mcp` part's goal read). Only an app with a
+`last_read_at` is a delivery receipt, with "Read the goals <time>"; an app that connected but has no goal read is not
+observed, with "Connected <time>, no goal read seen yet", and one with neither is not observed with "Approved <time>,
+no goal read seen yet". A connection SHALL never be shown or counted as a read. The tile counts the apps with a goal
+read. A workspace owner sees every connected app and anyone else their own, as on the Apps tab.
 
 #### Scenario: Waiting on you and on others
 
@@ -472,13 +476,13 @@ yet". A workspace owner sees every connected app and anyone else their own, as o
 
 #### Scenario: Connected apps
 
-- **WHEN** a workspace owner opens the Home with one app that has read the workspace and one that has not
-- **THEN** the tile reads "1 of 2", the first app shows "delivery receipt" and "Last read <time>", the second "not observed" and "no read seen yet", and the section says that a delivery receipt here is a read Align served (recorded at most every 5 minutes) and that Align sees when an app last read the workspace, not what it does with it
+- **WHEN** a workspace owner opens the Home with one app that has read the goals and one that has only connected (`initialize` and `tools/list`)
+- **THEN** the tile reads "1 of 2", the first app shows "delivery receipt" and "Read the goals <time>", the second "not observed" and "Connected <time>, no goal read seen yet", the section says that a delivery receipt here is a goal read Align served (recorded at most every 5 minutes), that connecting is not a read, and that Align sees when an app last read the goals, not which version it has or what it does with them, and nothing on the page says "on the current plan"
 
 #### Scenario: Nothing observed
 
 - **WHEN** the person has no connected app they can see
-- **THEN** the section shows one item marked "not observed": no app is connected (for a member, they have not connected one), so Align has observed no agent reads, with a link to the Apps tab
+- **THEN** the section shows one item marked "not observed": no app is connected (for a member, they have not connected one), so Align has observed no goal reads, with a link to the Apps tab
 
 #### Scenario: A failed read
 
@@ -501,7 +505,7 @@ names.
 #### Scenario: Phone
 
 - **WHEN** a signed-in person opens the workspace list, account, device, devices, request access, a workspace's Home, Goals tab, a goal page, People, Sessions, Alignments, Requests, Asks, Spend or Apps on a 390 px wide screen
-- **THEN** nothing scrolls sideways, and an Apps connection reads as its name, then "Sends you back to", "Connected by", "Approved" and "Last read" lines, then **Disconnect**
+- **THEN** nothing scrolls sideways, and an Apps connection reads as its name, then "Sends you back to", "Connected by", "Approved", "Last connected" and "Last read the goals" lines, then **Disconnect**
 
 ### Requirement: Workspace Goals tab
 
@@ -927,7 +931,7 @@ workspace owner sees everyone's.
 #### Scenario: Connected apps
 
 - **WHEN** a member opens the tab
-- **THEN** each connection shows the app's name with "Reads only" or, for a grant holding `changes:evidence`, "Reads, and adds evidence links", its redirect host, the person who connected it, when it was approved and when it last read the workspace, with **Disconnect** on the person's own connections (an owner sees **Disconnect** on every connection), which calls `DELETE /api/v2/workspaces/<ws>/apps/<id>`; with none, "No AI apps are connected to this workspace."
+- **THEN** each connection shows the app's name with "Reads only" or, for a grant holding `changes:evidence`, "Reads, and adds evidence links", its redirect host, the person who connected it, when it was approved, **Last connected** (its last request to Align, `Never` when none) and **Last read the goals** (its last call that returned goals, "Not seen yet" when none), under a note that connecting and listing tools is not a read and that Align doesn't see which goal version an app has, with **Disconnect** on the person's own connections (an owner sees **Disconnect** on every connection), which calls `DELETE /api/v2/workspaces/<ws>/apps/<id>`; with none, "No AI apps are connected to this workspace."
 
 #### Scenario: How to connect
 
