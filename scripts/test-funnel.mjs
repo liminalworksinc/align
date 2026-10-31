@@ -6,7 +6,11 @@
 //                   timestamps, not_yet shown as not yet, feedback stored/capped/cleaned, new actions accepted and unknown
 //                   ones refused, role-only events, cross-workspace isolation, Restart keeps them, ws-admin funnel
 //   phase "hosted": HOSTED=1 as Fly runs it -> no new route, HOSTED_ROUTES unchanged, a bad waitlist/LOI URL is hidden
-// Usage: node scripts/test-funnel.mjs <port> [--no-build]   (from a worktree root; refuses 3100 and the main checkout)
+//   phase "layout": LIM-2452 cycle 2 on a custom workspace: the phone layout (Propose a change above the fold, one
+//                   ConnectAI), the Goals map at every width, the asker's review at 768, 44px tap targets at 390,
+//                   the Switch team menu at 700, and the AI apps copy (Seen since the latest change / Last seen before the latest change, never reads, follows or works from),
+//                   the disabled + New conflict at 390 (the logo keeps its width) and one pink primary on the composer
+// Usage: node scripts/test-funnel.mjs <port> [--no-build] [--only local|layout|hosted]   (from a worktree root; refuses 3100 and the main checkout)
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,6 +21,7 @@ import puppeteer from "puppeteer-core";
 
 const PORT = Number(process.argv[2]);
 const BUILD = !process.argv.includes("--no-build");
+const ONLY = process.argv.includes("--only") ? process.argv[process.argv.indexOf("--only") + 1] : null; // one phase: local, layout or hosted
 if (!Number.isInteger(PORT) || PORT === 3100) {
   console.error("usage: node scripts/test-funnel.mjs <port> [--no-build] (not 3100)");
   process.exit(2);
@@ -569,6 +574,336 @@ async function phaseHosted(dir) {
   await stop();
 }
 
+// ---- phase layout (LIM-2452 cycle 2): a custom workspace's phone layout, Goals map, tap targets, agents copy ----
+// Production build, Mode L. Each check failed on 87f1866 and passes after cycle 2. Northstar is never opened here
+// (its UI text is test-ui-northstar's).
+async function phaseLayout(dir) {
+  phaseName = "layout";
+  HOSTED = false;
+  await start({ ALIGN_DATA_DIR: dir, ALIGN_ALLOW_OPEN_CREATE: "1" });
+  const W = await newWorkspace("LAYOUT");
+  const origin = `http://127.0.0.1:${PORT}`;
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+  const open = async (role, width, height) => {
+    const ctx = await browser.createBrowserContext();
+    const page = await ctx.newPage();
+    const logs = [];
+    page.on("console", (m) => logs.push(`${m.type()}: ${m.text()}`));
+    page.on("pageerror", (e) => logs.push(`pageerror: ${e.message}`));
+    await page.setViewport({ width, height });
+    const [name, ...v] = W.c[role].split("=");
+    await page.setCookie({ name, value: v.join("="), domain: "127.0.0.1", path: "/", httpOnly: true });
+    await page.goto(`${origin}/w/${W.ws}`, { waitUntil: "networkidle0" });
+    await waitText(page, /Your turn/);
+    await sleep(800);
+    return { page, ctx, logs };
+  };
+  const nav = async (page, label) => {
+    await page.evaluate((label) => [...document.querySelectorAll('nav[aria-label="Main"] button')].find((b) => b.querySelector("span span")?.textContent === label)?.click(), label);
+    await sleep(900);
+  };
+  const clickMain = async (page, re) => {
+    const ok = await page.evaluate((src) => {
+      const b = [...document.querySelectorAll("main button")].find((x) => new RegExp(src).test(x.textContent));
+      b?.click();
+      return !!b;
+    }, re.source);
+    await sleep(900);
+    return ok;
+  };
+  // ConnectAI copies, found by their button so this also counts 87f1866's (which had no data attribute).
+  const connectCopies = (page) =>
+    page.evaluate(() => {
+      const bs = [...document.querySelectorAll("button")].filter((b) => b.textContent.trim() === "Connect an AI app");
+      return { total: bs.length, main: bs.filter((b) => b.closest("main")).length, rail: bs.filter((b) => b.closest("aside")).length };
+    });
+  const overflow = (page) =>
+    page.evaluate(() => {
+      const m = document.querySelector("main");
+      return { doc: document.documentElement.scrollWidth, W: window.innerWidth, main: m.scrollWidth, mainW: m.clientWidth };
+    });
+  const fits = (o) => o.doc <= o.W && o.main <= o.mainW;
+  const hydration = (logs) => logs.filter((l) => /hydrat|Minified React error #(418|423|425)/i.test(l));
+  // Actions at 390: every Button (components/ui.tsx, its px-[18px] signature) in the main column, wherever it shows.
+  const short = [];
+  const labels = new Set();
+  const measure = async (page, where) => {
+    const hs = await page.evaluate(() =>
+      [...document.querySelectorAll("main button")]
+        .filter((b) => b.className.includes("px-[18px]") && b.getBoundingClientRect().height > 0)
+        .map((b) => ({ t: b.textContent.trim().slice(0, 40), h: Math.round(b.getBoundingClientRect().height * 100) / 100 })),
+    );
+    for (const x of hs) {
+      labels.add(x.t.split(/[\s:]/)[0] + (x.t.startsWith("Confirm") ? ":" : x.t.startsWith("Not yet") ? " yet" : ""));
+      if (x.h < 44) short.push(`${where}: ${x.t} ${x.h}px`);
+    }
+  };
+  // The review (components/ReviewDecide.tsx): each answer, its "Review this decision", the confirmation, then Back.
+  const walkReview = async (page, where) => {
+    const answers = await page.evaluate(() => [...document.querySelectorAll('main [role="group"][aria-label="Your answer"] button')].map((b) => b.textContent.trim()));
+    for (const a of answers) {
+      await page.evaluate((a) => [...document.querySelectorAll('main [role="group"][aria-label="Your answer"] button')].find((b) => b.textContent.trim() === a)?.click(), a);
+      await sleep(400);
+      await measure(page, `${where}/${a.slice(0, 20)}`);
+      if (await clickMain(page, /^Review this decision$/)) {
+        await measure(page, `${where}/${a.slice(0, 20)}/confirm`);
+        await clickMain(page, /^Back$/);
+      }
+    }
+    return answers.length;
+  };
+  try {
+    // (a) + (b) 390x844, the asking team's first screen: "Propose a change" above the fold, no ConnectAI in the rail.
+    {
+      const { page, ctx, logs } = await open("product", 390, 844);
+      // The shell's share of the first screen: the sidebar and header above the main column end by y=400 (87f1866: about
+      // 630). What the main column puts first (the first-run card, Your turn's order) is those views' own.
+      const m = await page.evaluate(() => ({
+        main: Math.round(document.querySelector("main").getBoundingClientRect().top),
+        propose: [...document.querySelectorAll("main button span")].find((x) => x.textContent.trim() === "Propose a change")?.getBoundingClientRect().top ?? null,
+      }));
+      check("(a) 390x844: the phone chrome is compact; the main column starts above y=400", m.main < 400, JSON.stringify(m));
+      // (e) shell: the sidebar and header controls sit in no @container, so they need the viewport variant to be 44px.
+      // (c, nav) the four nav items fit on one row at 390.
+      const shell = await page.evaluate(() => {
+        const nav = [...document.querySelectorAll('nav[aria-label="Main"] button')];
+        const side = "aside:not([aria-label])"; // the sidebar (the Inspector rail is labelled)
+        const ctl = [...nav, ...document.querySelectorAll(`${side} > a, ${side} > div > button, header button`)].filter((b) => b.getBoundingClientRect().height > 0);
+        return {
+          short: ctl.filter((b) => b.getBoundingClientRect().height < 44).map((b) => `${b.textContent.trim().slice(0, 20)} ${Math.round(b.getBoundingClientRect().height * 100) / 100}px`),
+          n: ctl.length,
+          rows: new Set(nav.map((b) => Math.round(b.getBoundingClientRect().top))).size,
+        };
+      });
+      check("(c) 390: the four nav items fit on one row", shell.rows === 1, JSON.stringify(shell));
+      check("(e) 390: the sidebar and header controls (nav, + New conflict, Switch team, Sign out) are at least 44px tall", shell.n >= 7 && shell.short.length === 0, JSON.stringify(shell));
+      const turn = await connectCopies(page);
+      await nav(page, "Work");
+      const work = await connectCopies(page);
+      const row = await page.evaluate(() => document.querySelector("main")?.innerText.match(/Connected AI apps[^\n]*/i)?.[0] ?? "");
+      check(
+        "(b) 390: no ConnectAI card on Your turn; on Work exactly one, at the top of Work, as the row 'Connected AI apps · No AI app has connected yet'",
+        turn.total === 0 && work.total === 1 && work.main === 1 && /^Connected AI apps · No AI app has connected yet$/.test(row),
+        `turn=${JSON.stringify(turn)} work=${JSON.stringify(work)} row=${row}`,
+      );
+      // The row's button opens the setup steps inline (no dialog), under one "Connected AI apps" landmark.
+      await clickMain(page, /^Connect an AI app$/);
+      const inline = await page.evaluate(() => ({
+        steps: !!document.querySelector('main [data-connect-ai="row"] [role="tablist"]'),
+        dialog: !!document.querySelector('[role="dialog"]'),
+        landmarks: document.querySelectorAll('main [aria-label="Connected AI apps"]').length,
+      }));
+      check("(b) 390: Connect an AI app on the row opens the setup steps inline, not a dialog, in one landmark", inline.steps && !inline.dialog && inline.landmarks === 1, JSON.stringify(inline));
+      check("(b) 390: no hydration error on the phone layout", hydration(logs).length === 0, hydration(logs).join(" | "));
+      await ctx.close();
+    }
+    {
+      const { page, ctx } = await open("product", 1440, 1000);
+      const c = await connectCopies(page);
+      await nav(page, "Work");
+      const w = await connectCopies(page);
+      check("(b) 1440: exactly one ConnectAI, in the rail, on Your turn and on Work", c.total === 1 && c.rail === 1 && w.total === 1 && w.rail === 1, `${JSON.stringify(c)} ${JSON.stringify(w)}`);
+      await ctx.close();
+    }
+    // (c) Goals: the map never scrolls sideways (page or main column).
+    {
+      const bad = [];
+      for (const width of [500, 600, 768, 1100, 1268, 1440]) {
+        const { page, ctx } = await open("product", width, 1000);
+        await nav(page, "Goals");
+        const o = await overflow(page);
+        const map = await page.evaluate(() => !!document.querySelector('main button[aria-label*=" depends on "]'));
+        if (!fits(o) || !map) bad.push(`${width}: ${JSON.stringify(o)} map=${map}`);
+        await ctx.close();
+      }
+      check("(c) Goals: no horizontal overflow at 500, 600, 768, 1100, 1268 and 1440", bad.length === 0, bad.join(" | "));
+    }
+    // (f) Switch team as leadership at 700: the menu stays on screen.
+    {
+      const { page, ctx } = await open("leadership", 700, 1000);
+      await page.evaluate(() => [...document.querySelectorAll("header button")].find((b) => /Switch team/.test(b.textContent))?.click());
+      await sleep(400);
+      const r = await page.evaluate(() => {
+        const m = document.querySelector('[role="menu"][aria-label="Switch team"]')?.getBoundingClientRect();
+        return m ? { left: m.left, right: m.right, W: document.documentElement.clientWidth } : null;
+      });
+      check("(f) 700, leadership: the Switch team menu fits on screen", !!r && r.left >= 0 && r.right <= r.W, JSON.stringify(r));
+      await ctx.close();
+    }
+    // (g) part 1, before any app: the rail's zero line and the limit line say "can read", never "works from"/"follow".
+    {
+      const s0 = stateOf(dir, W.ws);
+      s0.limits = [{ id: "lim-layout", team: "security", type: "must", text: "LAYOUT keep the audit trail", sources: [{ kind: "manual", title: "Layout check", date: "2026-10-30", quote: "keep it" }], state: "suggested", updated_at: new Date().toISOString() }];
+      writeState(dir, W.ws, s0);
+      const { page, ctx } = await open("security", 1440, 1000);
+      await waitText(page, /LAYOUT keep the audit trail/);
+      const t = await bodyText(page);
+      check(
+        "(g) custom: 'No AI app has connected yet.' in the rail and 'Agents can read it once you confirm.'; no 'works from', 'follow' or 'Read the current plan'",
+        t.includes("No AI app has connected yet.") && t.includes("Agents can read it once you confirm.") && !/works from this one plan|Agents follow it|Read the current plan|None connected/.test(t),
+        (t.match(/[^\n]*connected yet[^\n]*/) ?? [""])[0] + " :: " + (t.match(/[^\n]*once you confirm[^\n]*/) ?? [""])[0],
+      );
+      await ctx.close();
+    }
+    // (d) + (e): the proposal flow at 390 (tap targets) and the asker's review of a counter at 768 (no overflow).
+    {
+      const { page, ctx } = await open("product", 390, 844);
+      await clickMain(page, /Propose a change/);
+      await measure(page, "composer");
+      // One pink primary on the composer: "Send proposal"; the rail's + New conflict steps down to secondary.
+      const pink = await page.evaluate(() =>
+        [...document.querySelectorAll("button, a")].filter((b) => b.className.includes("bg-violet-700 text-black") && b.getBoundingClientRect().height > 0).map((b) => b.textContent.trim().slice(0, 40)),
+      );
+      check("(h) 390 composer: exactly one pink primary (Send proposal), + New conflict is secondary", pink.length === 1 && /^Send proposal/.test(pink[0]), JSON.stringify(pink));
+      await ctx.close();
+    }
+    const prop = await req("POST", "/api/proposals", { cookie: W.c.product, body: { proposed_measure_text: "LAYOUT retention first for two weeks", rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
+    const pid = prop.json?.id;
+    // (i) 390: + New conflict disabled with its reason (the owner: only the asking team proposes; the asker: a proposal
+    // is already open). The reason runs under the logo row, so the logo cell keeps its natural width and nothing overlaps.
+    for (const role of ["security", "product"]) {
+      const { page, ctx } = await open(role, 390, 844);
+      const r = await page.evaluate(() => {
+        const side = document.querySelector("aside:not([aria-label])");
+        const logo = side.firstElementChild;
+        const btn = [...side.querySelectorAll("button")].find((b) => b.textContent.trim() === "+ New conflict");
+        const why = btn?.nextElementSibling;
+        const L = logo.getBoundingClientRect();
+        const B = btn?.getBoundingClientRect();
+        const W = why?.getBoundingClientRect();
+        return {
+          disabled: !!btn?.disabled,
+          why: why?.textContent ?? "",
+          logoW: Math.round(L.width),
+          natural: logo.scrollWidth,
+          overlap: !!B && L.right > B.left + 0.5 && L.bottom > B.top + 0.5,
+          whyBelow: !!W && !!B && W.top >= Math.max(L.bottom, B.bottom) - 0.5,
+        };
+      });
+      check(
+        `(i) 390 ${role}: disabled + New conflict with its reason; the logo keeps its width, nothing overlaps, the reason runs under the row`,
+        r.disabled && r.why.length > 0 && r.logoW >= r.natural && !r.overlap && r.whyBelow,
+        JSON.stringify(r),
+      );
+      await ctx.close();
+    }
+    let answers = 0;
+    {
+      const { page, ctx } = await open("security", 390, 844);
+      await clickMain(page, /Review the proposal/);
+      answers = await walkReview(page, "owner review");
+      await ctx.close();
+    }
+    const ctr = await req("POST", `/api/proposals/${pid}/counter`, { cookie: W.c.security, body: { proposed_measure_text: "LAYOUT retention first for two weeks, reviewed weekly", rationale: "Needs a review cadence", conditions: "Post before each use." } });
+    {
+      // At 768 the asker opens the counter, picks "Accept … changes", reviews it and sees the confirmation: nothing
+      // runs past the page or the main column at any step.
+      const { page, ctx } = await open("product", 768, 1000);
+      const opened = await clickMain(page, /Review the changes/);
+      const steps = [];
+      const look = async (name) => {
+        const o = await overflow(page);
+        const past = await page.evaluate(() => {
+          const m = document.querySelector("main").getBoundingClientRect().right;
+          return [...document.querySelectorAll("main button")].filter((b) => b.getBoundingClientRect().right > m + 0.5).map((b) => b.textContent.trim().slice(0, 40));
+        });
+        steps.push({ name, ok: fits(o) && past.length === 0, o, past });
+      };
+      await look("review");
+      const picked = await page.evaluate(() => {
+        const b = [...document.querySelectorAll('main [role="group"][aria-label="Your answer"] button')].find((x) => /^Accept .*changes/.test(x.textContent.trim()));
+        b?.click();
+        return !!b;
+      });
+      await sleep(400);
+      await look("accept picked");
+      const reviewed = await clickMain(page, /^Review this decision$/);
+      await look("confirm");
+      check(
+        "(d) 768: the asker's review of a counter (accept the changes, review, confirm) does not overflow the page or the main column",
+        ctr.status === 200 && opened && picked && reviewed && steps.every((x) => x.ok),
+        `${ctr.status} picked=${picked} reviewed=${reviewed} ${JSON.stringify(steps.filter((x) => !x.ok))}`,
+      );
+      await walkReview(page, "asker review");
+      await ctx.close();
+    }
+    await req("POST", `/api/proposals/${pid}/acknowledge`, { cookie: W.c.product, body: {} });
+    const acc = await req("POST", `/api/proposals/${pid}/accept`, { cookie: W.c.security, body: { rationale: "ok", accept_untested: true } });
+    {
+      const { page, ctx } = await open("leadership", 390, 844);
+      await clickMain(page, /Decide the launch/);
+      await measure(page, "launch");
+      await ctx.close();
+    }
+    const want = ["Send", "Review", "Confirm:", "Back", "Approve", "Not yet"];
+    check(
+      "(e) 390: every action Button in the main column (Send proposal, each review answer's Review this decision, Confirm, Back, Approve launch, Not yet) is at least 44px tall",
+      acc.status === 200 && answers >= 4 && want.every((w) => labels.has(w)) && short.length === 0,
+      `answers=${answers} seen ${[...labels].join(", ")}; accept=${acc.status}; short: ${short.join(" | ")}`,
+    );
+    // (g) part 2: two connected apps, one that read before the plan changed and one after. The rail says "Read the
+    // "Seen since the latest change" / "Last seen before the latest change" (the server's on_current_plan); the phone row counts them.
+    {
+      const { createHash, randomBytes } = await import("node:crypto");
+      const REDIRECT = "http://127.0.0.1:33418/callback";
+      const connectApp = async (name) => {
+        const reg = await (await fetch(`${origin}/oauth/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: name, redirect_uris: [REDIRECT], token_endpoint_auth_method: "none" }) })).json();
+        const verifier = randomBytes(32).toString("base64url");
+        const params = { response_type: "code", client_id: reg.client_id, redirect_uri: REDIRECT, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256", state: "st-1", resource: `${origin}/api/mcp` };
+        const ap = await req("POST", "/api/oauth/approve", { body: { params, decision: "approve", workspace: W.ws, role: "security", passcode: W.passcodes.security }, headers: { origin } });
+        const code = ap.json?.redirect ? new URL(ap.json.redirect).searchParams.get("code") : "";
+        const form = new URLSearchParams({ grant_type: "authorization_code", code: code ?? "", redirect_uri: REDIRECT, client_id: reg.client_id, code_verifier: verifier, resource: `${origin}/api/mcp` });
+        const tok = await (await fetch(`${origin}/oauth/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form })).json();
+        return tok.access_token;
+      };
+      const read = (t) =>
+        fetch(`${origin}/api/mcp`, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${t}` },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "align_list_goals", arguments: {} } }),
+        }).then((r) => r.text());
+      const t1 = await connectApp("Layout Old App");
+      await read(t1);
+      await sleep(500);
+      await req("POST", `/api/proposals/${pid}/launch`, { cookie: W.c.leadership, body: { decision: "not_yet" } }); // the plan changes
+      const t2 = await connectApp("Layout New App");
+      await read(t2);
+      await sleep(800);
+      const apps = (await req("GET", "/api/workspaces/connections", { cookie: W.c.security })).json?.apps ?? [];
+      const { page, ctx } = await open("security", 1440, 1000);
+      await waitText(page, /Layout New App/);
+      const rail = await page.evaluate(() => document.querySelector('ul[aria-label="Connected AI apps"]')?.innerText ?? "");
+      // ✓ in violet for the current plan, ▲ in amber for an older one; no emerald anywhere in the list.
+      const railTone = await page.evaluate(() => {
+        const ul = document.querySelector('ul[aria-label="Connected AI apps"]');
+        const marks = [...(ul?.querySelectorAll("span[aria-hidden]") ?? [])].map((s) => [s.textContent, s.className]);
+        return !!ul && !ul.innerHTML.includes("emerald") && marks.some(([t, c]) => t === "✓" && c.includes("text-violet-700")) && marks.some(([t, c]) => t === "▲" && c.includes("text-amber-700"));
+      });
+      check(
+        "(g) rail: 'Layout New App Seen since the latest change' (violet ✓), 'Layout Old App Last seen before the latest change' (the server's on_current_plan); no 'read', 'current plan', 'older plan' or 'still on'",
+        apps.filter((a) => a.on_current_plan).length === 1 && /Layout New App Seen since the latest change/.test(rail) && /Layout Old App Last seen before the latest change/.test(rail) && !/read|current plan|older plan|still on/i.test(rail) && railTone,
+        `${JSON.stringify(apps.map((a) => [a.name, a.on_current_plan]))} :: ${rail}`,
+      );
+      await ctx.close();
+      const ph = await open("security", 390, 844);
+      await nav(ph.page, "Work");
+      const row = await ph.page.evaluate(() => document.querySelector("main")?.innerText.match(/Connected AI apps[^\n]*/i)?.[0] ?? "");
+      check("(g) 390 row: 'Connected AI apps · 2 connected · 1 seen since the latest change'", row === "Connected AI apps · 2 connected · 1 seen since the latest change", row);
+      // Open, the row lists each app once (the Connected list), under one landmark.
+      await clickMain(ph.page, /^Connect an AI app$/);
+      const once = await ph.page.evaluate(() => {
+        const sec = document.querySelector('main [data-connect-ai="row"]');
+        return { names: [...(sec?.querySelectorAll("li") ?? [])].filter((li) => li.textContent.includes("Layout New App")).length, landmarks: document.querySelectorAll('main [aria-label="Connected AI apps"]').length };
+      });
+      check("(g) 390 open row: each app listed once, one 'Connected AI apps' landmark", once.names === 1 && once.landmarks === 1, JSON.stringify(once));
+      await ph.ctx.close();
+    }
+  } finally {
+    await browser.close();
+  }
+  await stop();
+}
+
 // ---- run ----
 phaseUnit();
 if (BUILD) {
@@ -580,8 +915,9 @@ if (BUILD) {
 }
 const tmp = mkdtempSync(path.join(os.tmpdir(), "align-funnel-"));
 try {
-  await phaseLocal(path.join(tmp, "local"));
-  await phaseHosted(path.join(tmp, "hosted"));
+  if (!ONLY || ONLY === "local") await phaseLocal(path.join(tmp, "local"));
+  if (!ONLY || ONLY === "layout") await phaseLayout(path.join(tmp, "layout"));
+  if (!ONLY || ONLY === "hosted") await phaseHosted(path.join(tmp, "hosted"));
 } catch (e) {
   fail++;
   console.log(`FAIL  [${phaseName}] ${e?.stack ?? e}`);

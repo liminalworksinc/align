@@ -77,6 +77,7 @@ export function Button({
   type = "button",
   wrap = false,
   ref,
+  shell = false,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -86,6 +87,8 @@ export function Button({
   /** A long label wraps inside the button at any width (not only in a narrow custom main column). */
   wrap?: boolean;
   ref?: Ref<HTMLButtonElement>;
+  /** In a custom workspace's sidebar or header (no @container there): 44px tall on a phone viewport (below 768px). */
+  shell?: boolean;
 }) {
   const k = {
     // v6 .btn.p: Liminal magenta fill, near-black text.
@@ -102,10 +105,11 @@ export function Button({
   // @max-md: is a CONTAINER query, not the 768px viewport breakpoint: it applies when the nearest @container is under
   // 28rem (about 420-448px). The only one a Button sits in is a custom workspace's main column (CUSTOM_MAIN), which is
   // that narrow on a phone; there a long label wraps instead of running off the screen. Northstar's main is not a
-  // container, so it is unchanged.
+  // container, so it is unchanged. There it is also 44px tall: the root font is 15px, so min-h-11 is only 41.25px.
+  // `shell` is the same for the custom sidebar and header, which sit in no container: a viewport variant instead.
   const fit = wrap ? "min-h-[44px] max-w-full whitespace-normal py-2 text-left" : "whitespace-nowrap";
   return (
-    <button ref={ref} type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 ${fit} rounded-[10px] border px-[18px] @max-md:max-w-full @max-md:whitespace-normal @max-md:py-2 @max-md:text-left text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed ${off} disabled:hover:brightness-100`}>
+    <button ref={ref} type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 ${fit} rounded-[10px] border px-[18px] @max-md:min-h-[44px] ${shell ? "max-md:min-h-[44px] " : ""}@max-md:max-w-full @max-md:whitespace-normal @max-md:py-2 @max-md:text-left text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed ${off} disabled:hover:brightness-100`}>
       {children}
     </button>
   );

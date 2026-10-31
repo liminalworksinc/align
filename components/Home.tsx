@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { BriefDrawer } from "@/components/BriefDrawer";
 import { EvidenceView } from "@/components/EvidenceView";
 import { GoalsView } from "@/components/GoalsView";
@@ -65,24 +65,31 @@ const teamInitials = (team: string) => {
 // independent testers on 900–1024px laptops never scroll sideways. The header wraps at every width.
 // Phones: the shell's max-md: variants key on the VIEWPORT, below 768px (md); 768px and up is exactly as before. One
 // column: the sidebar becomes a stacked bar above the header (its nav in a row), so the main column gets the full width.
-// Layout only: the sidebar stays mounted at every width, so its state (ConnectAI's dialog, the composer, Switch team)
-// survives a resize. Inside the main column, components use @max-md: instead, a CONTAINER query on CUSTOM_MAIN (the
+// Layout only: the sidebar stays mounted at every width, so its state (the composer, Switch team) survives a resize.
+// ConnectAI stays mounted once too; on a phone it shows as a row at the top of Work instead (usePhone). Inside the main
+// column, components use @max-md: instead, a CONTAINER query on CUSTOM_MAIN (the
 // only @container they sit in): it applies when that column is under 28rem (about 420-448px), which on a phone it is.
 const CUSTOM_SHELL =
   "grid min-h-screen grid-cols-[236px_minmax(0,1fr)] grid-rows-[auto_auto_auto] min-[1100px]:h-screen min-[1100px]:grid-cols-[236px_minmax(0,1fr)_360px] min-[1100px]:grid-rows-[auto_minmax(0,1fr)] min-[1100px]:overflow-hidden max-md:grid-cols-1 max-md:grid-rows-none";
 const CUSTOM_SIDEBAR =
-  "sticky top-0 row-span-3 flex h-screen flex-col self-start border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5 min-[1100px]:static min-[1100px]:row-span-2 min-[1100px]:h-auto min-[1100px]:self-stretch max-md:static max-md:row-span-1 max-md:h-auto max-md:min-w-0 max-md:self-auto max-md:border-r-0 max-md:border-b";
-// Below md: the nav runs as a wrapping row, and the sidebar's footer (the same person and team as the header) is hidden.
-const CUSTOM_NAV = "max-md:flex-row max-md:flex-wrap max-md:gap-1";
-const CUSTOM_NAV_ITEM = "max-md:w-auto max-md:min-h-11";
+  "sticky top-0 row-span-3 flex h-screen flex-col self-start border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5 min-[1100px]:static min-[1100px]:row-span-2 min-[1100px]:h-auto min-[1100px]:self-stretch max-md:static max-md:row-span-1 max-md:grid max-md:h-auto max-md:min-w-0 max-md:grid-cols-[1fr_auto] max-md:items-center max-md:gap-x-2 max-md:self-auto max-md:border-r-0 max-md:border-b max-md:pb-2";
+// Below md: the logo and + New conflict share one row, the nav runs as a row under them (tighter items, so all four fit
+// at 390px), and the sidebar's footer (the same person and team as the header) is hidden. ConnectAI's card becomes a
+// row at the top of Work (usePhone). Sidebar and header controls are 44px tall there: they sit in no @container, so they use the
+// viewport variant (Button `shell`), not Button's @max-md: container one. The root font is 15px, so min-h-11 is 41.25px.
+const CUSTOM_LOGO = "flex h-16 items-center gap-2.5 px-2.5 max-md:h-14 max-md:min-w-0";
+const CUSTOM_NEW = "max-md:my-0 max-md:min-h-[44px]";
+const CUSTOM_NAV = "max-md:col-span-full max-md:flex-row max-md:flex-wrap max-md:gap-1";
+const CUSTOM_NAV_ITEM = "max-md:w-auto max-md:min-h-[44px] max-md:gap-1.5 max-md:px-2.5";
 const CUSTOM_SIDEBAR_FOOTER = "max-md:hidden";
-const CUSTOM_HEADER = "flex min-h-16 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-200 px-6 py-2.5 min-[1100px]:col-span-2 max-md:px-4";
+const CUSTOM_HEADER = "flex min-h-16 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-200 px-6 py-2.5 min-[1100px]:col-span-2 max-md:min-h-0 max-md:gap-y-1.5 max-md:px-4 max-md:py-2";
 const CUSTOM_MAIN = "@container relative min-w-0 p-6 text-[16px] min-[1100px]:overflow-y-auto max-md:p-4";
 const CUSTOM_RAIL = "min-w-0 border-t border-zinc-200 bg-zinc-50 p-[22px] min-[1100px]:overflow-y-auto min-[1100px]:border-t-0 min-[1100px]:border-l max-md:p-4";
-// The company-goal strip stacks its three parts when the main column is narrow.
+// The company-goal strip stacks its three parts when the main column is narrow. Phones show only the company goal:
+// the requirement and your goal repeat in the header banner and the Your turn card.
 const CUSTOM_STRIP =
-  "mb-4 grid grid-cols-1 items-center gap-4 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5 @[60rem]:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] @[60rem]:gap-6";
-const CUSTOM_STRIP_CELL = "flex min-w-0 flex-col gap-1 border-t border-zinc-200 pt-3 @[60rem]:border-t-0 @[60rem]:border-l @[60rem]:pl-6 @[60rem]:pt-0";
+  "mb-4 grid grid-cols-1 items-center gap-4 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5 @[60rem]:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] @[60rem]:gap-6 max-md:mb-3 max-md:px-4 max-md:py-3";
+const CUSTOM_STRIP_CELL = "flex min-w-0 flex-col gap-1 border-t border-zinc-200 pt-3 @[60rem]:border-t-0 @[60rem]:border-l @[60rem]:pl-6 @[60rem]:pt-0 max-md:hidden";
 // api() falls back to "HTTP <status>" when a response carries no sentence; custom screens never show that.
 const plainError = (e: string) => (/^HTTP \d+$/.test(e) ? "Something went wrong. Please try again." : e);
 
@@ -94,18 +101,44 @@ interface LoginInfo {
 }
 const WS_ID = /^w_[a-z2-7]{12}$/;
 
+// Phones (the same edge as Tailwind's max-md:, a viewport under 48rem). Picks the variant of the one ConnectAI (one
+// fetch and poll loop, never remounted by a resize): the rail card at md and up, on a phone a row it renders at the top
+// of Work. The server can't know the viewport, so it and the first client render say "not a phone" (the rail); the
+// phone value follows right after hydration with no mismatch (useSyncExternalStore's server snapshot).
+const PHONE = "(width < 48rem)";
+const subscribePhone = (cb: () => void) => {
+  const m = window.matchMedia(PHONE);
+  m.addEventListener("change", cb);
+  return () => m.removeEventListener("change", cb);
+};
+const usePhone = () => useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE).matches, () => false);
+
 /** The header's Switch team menu (custom scenarios): the other teams, one click each. */
 function SwitchTeam({ L, current, onPick }: { L: Labels; current: string; onPick: (r: Role) => void }) {
   const [open, setOpen] = useState(false);
+  // Which edge the menu hangs from: under the button's right edge when there's room to its left (the md+ header),
+  // else its left edge (a wrapped phone header puts the button at the left). Measured on open, so at any width and
+  // wherever the header wrapped the button, the menu stays on screen; max-w is the backstop on a very narrow screen.
+  const [leftAnchor, setLeftAnchor] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
   const others = ROLES.map((r) => r.id).filter((r) => r !== current);
   return (
-    <div className="relative">
-      <Button kind="secondary" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
+    <div className="relative" ref={box}>
+      <Button
+        kind="secondary"
+        shell
+        onClick={() => {
+          const r = box.current?.getBoundingClientRect();
+          if (r) setLeftAnchor(r.right - 220 < 16);
+          setOpen((o) => !o);
+        }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
         Switch team ▾
       </Button>
       {open && (
-        // Phones (viewport below 768px): the wrapped header puts this button at the left, so the menu opens rightward.
-        <div role="menu" aria-label="Switch team" className="absolute right-0 top-full z-20 mt-1 flex min-w-[220px] flex-col rounded-[10px] border border-zinc-300 bg-white p-1 shadow-lg max-md:left-0 max-md:right-auto">
+        <div role="menu" aria-label="Switch team" className={`absolute top-full z-20 mt-1 flex min-w-[min(220px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex-col rounded-[10px] border border-zinc-300 bg-white p-1 shadow-lg ${leftAnchor ? "left-0" : "right-0"}`}>
           {others.map((r) => (
             <button
               key={r}
@@ -393,6 +426,8 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
   }, []);
   const [confirmReset, setConfirmReset] = useState(false);
   const [firstRunSlot, setFirstRunSlot] = useState<HTMLDivElement | null>(null); // where ConnectAI renders the first-run card
+  const [connectRowSlot, setConnectRowSlot] = useState<HTMLDivElement | null>(null); // phones: ConnectAI's row, top of Work
+  const phone = usePhone();
 
   const closeDrawer = useCallback(() => setDrawer(null), []);
   useEffect(() => {
@@ -518,8 +553,11 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
           ? { why: "A proposal is already open. Finish it first." }
           : { go: "proposals" };
   // One pink primary per screen: the rail's button steps down to secondary where the main column has its own primary
-  // (Home's waiting-on-you cards, the decision record's "See work still on the old plan").
-  const railQuiet = (view === "turn" && turnCount > 0) || (view === "decision" && rel?.status === "ACCEPTED" && !!accepted(state));
+  // (Home's waiting-on-you cards, the decision record's "See work still on the old plan", and the asking team's
+  // composer, whose "Send proposal" is the screen's primary: on Proposals with nothing open, + New conflict only opens
+  // that same composer).
+  const railQuiet =
+    (view === "turn" && turnCount > 0) || (view === "decision" && rel?.status === "ACCEPTED" && !!accepted(state)) || (view === "proposals" && !!newConflict.go);
   const myGoal = me.actor === "product" || me.actor === "security" ? currentGoal(state, me.actor) : undefined;
   const kr2 = ceo?.measures.find((m) => m.id === companyMeasureId(state));
   // Custom: the goal's current target. An approval swaps the owner's measure, not its objective.
@@ -562,7 +600,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
     <div className={custom ? CUSTOM_SHELL : "grid h-screen grid-cols-[236px_minmax(0,1fr)_360px] grid-rows-[64px_minmax(0,1fr)] overflow-hidden"}>
       {/* Sidebar */}
       <aside className={custom ? CUSTOM_SIDEBAR : "row-span-2 flex flex-col border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5"}>
-        <div className="flex h-16 items-center gap-2.5 px-2.5">
+        <div className={custom ? CUSTOM_LOGO : "flex h-16 items-center gap-2.5 px-2.5"}>
           <span aria-hidden className="grid size-7 place-items-center rounded-lg bg-violet-700 font-display text-[18px] text-black">A</span>
           <span className="font-display text-[22px] leading-none">Align</span>
           <span className="border-l border-zinc-200 pl-2.5 text-[13px] text-zinc-500">by Liminal</span>
@@ -570,15 +608,17 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
         {/* Northstar is the shared demo store: "+ New conflict" (leadership's /setup) would replace it, so it is hidden
             there entirely (founder default, LIM-2424 S1). Custom scenarios keep it. */}
         {!custom ? null : newConflict.href ? (
-          <a href={newConflict.href} className={`mb-3.5 mt-1 inline-flex min-h-11 items-center justify-center rounded-[10px] border px-[18px] text-[15px] font-semibold ${railQuiet ? "border-zinc-300 text-zinc-900 hover:bg-zinc-100" : "border-transparent bg-violet-700 text-black hover:brightness-110"}`}>
+          <a href={newConflict.href} className={`mb-3.5 mt-1 ${CUSTOM_NEW} inline-flex min-h-11 items-center justify-center rounded-[10px] border px-[18px] text-[15px] font-semibold ${railQuiet ? "border-zinc-300 text-zinc-900 hover:bg-zinc-100" : "border-transparent bg-violet-700 text-black hover:brightness-110"}`}>
             + New conflict
           </a>
         ) : (
-          <div className="mb-3.5 mt-1 flex flex-col gap-1">
-            <Button kind={railQuiet ? "secondary" : "primary"} disabled={!newConflict.go} onClick={() => { if (!newConflict.go) return; props.go(newConflict.go); setCompose(true); }}>
+          // Phones: `contents`, so the button takes the logo row's auto column and the reason runs full width under it
+          // (inside one cell, the sentence's width became the column's and squeezed the logo).
+          <div className={`mb-3.5 mt-1 ${CUSTOM_NEW} flex flex-col gap-1 max-md:contents`}>
+            <Button shell kind={railQuiet ? "secondary" : "primary"} disabled={!newConflict.go} onClick={() => { if (!newConflict.go) return; props.go(newConflict.go); setCompose(true); }}>
               + New conflict
             </Button>
-            {newConflict.why && <span className="px-1 text-[12.5px] leading-snug text-zinc-500">{newConflict.why}</span>}
+            {newConflict.why && <span className="px-1 text-[12.5px] leading-snug text-zinc-500 max-md:col-span-full max-md:px-2.5">{newConflict.why}</span>}
           </div>
         )}
         <nav className={`flex flex-col gap-0.5 ${custom ? CUSTOM_NAV : ""}`} aria-label="Main">
@@ -625,7 +665,17 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
           </div>
         </div>
         )}
-        {workspace && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} hosted={!!hosted} slot={firstRunSlot} />}
+        {workspace && (
+          <ConnectAI
+            variant={phone ? "row" : "rail"}
+            rowSlot={connectRowSlot}
+            workspace={workspace}
+            actor={me.actor}
+            teamOf={(r) => L.role[r as Role] ?? r}
+            hosted={!!hosted}
+            slot={firstRunSlot}
+          />
+        )}
         <div className={`${custom ? (workspace ? "mt-3" : "mt-auto") : "mt-3"} ${custom ? CUSTOM_SIDEBAR_FOOTER : ""} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
           <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
             {custom ? teamInitials(L.role[me.actor]) : initials(me.name ?? "")}
@@ -642,11 +692,11 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
         <div className={custom ? "shrink-0 whitespace-nowrap text-[15px] text-zinc-500 max-md:min-w-0 max-md:shrink max-md:whitespace-normal" : "shrink-0 whitespace-nowrap text-[15px] text-zinc-500"}>
           <span className="font-semibold text-zinc-900">{state.company}</span> · {state.timeframe}
           {custom && state.scenario_config?.company_note && (
-            <div className="whitespace-normal text-[13px] text-zinc-500">{state.scenario_config.company_note}</div>
+            <div className="whitespace-normal text-[13px] text-zinc-500 max-md:hidden">{state.scenario_config.company_note}</div>
           )}
         </div>
         {custom && (
-          <span className="rounded-full border border-violet-700 bg-violet-50 px-3 py-1 text-[16px] font-semibold text-violet-700">
+          <span className="rounded-full border border-violet-700 bg-violet-50 px-3 py-1 text-[16px] font-semibold text-violet-700 max-md:hidden">
             Acting as {L.role[me.actor]}
           </span>
         )}
@@ -683,12 +733,12 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
             </Button>
           )}
           {workspace && me.actor === "leadership" && (
-            <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
+            <Button shell kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
               {confirmReset ? "Click again to restart this scenario" : "Restart this scenario"}
             </Button>
           )}
           {ops && custom && !workspace && me.actor === "leadership" && (
-            <Button kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
+            <Button shell kind={confirmReset ? "danger" : "ghost"} onClick={reset}>
               {confirmReset ? "Click again to go back to the Northstar demo" : "Back to the Northstar demo"}
             </Button>
           )}
@@ -706,7 +756,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
             )}
           </div>
           {custom && <SwitchTeam L={L} current={me.actor} onPick={(r) => void switchTo(r)} />}
-          <Button kind="ghost" onClick={signOut}>
+          <Button shell={custom} kind="ghost" onClick={signOut}>
             Sign&nbsp;out
           </Button>
         </div>
@@ -771,6 +821,8 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
         {view === "studio" && L.sandbox && <ScenarioStudio {...props} />}
         {view === "evidence" && L.sandbox && <EvidenceView {...props} />}
         {view === "decisions" && <DecisionsView {...props} />}
+        {/* Phones: ConnectAI (mounted once, in the sidebar) renders its collapsed row here, at the top of Work. */}
+        {view === "work" && workspace && phone && <div ref={setConnectRowSlot} />}
         {view === "work" && <WorkMap {...props} />}
         {view === "decision" && <DecisionView {...props} />}
         {view === "today" && <DecisionView {...props} />}
