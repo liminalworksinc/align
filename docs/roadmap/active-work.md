@@ -293,7 +293,7 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
   - [x] align-agent tests for each behaviour; live agent-to-server checks
   - [x] Spec requirements updated and validated
 
-### [ ] LAUNCH-001 — Launch releases an approved change to agents (#39 D1)
+### [x] LAUNCH-001 — Launch releases an approved change to agents (#39 D1)
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (change requests)
@@ -302,14 +302,14 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** none
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Approve without publishing; launch and not-yet routes; approve-and-launch
-  - [ ] Supersede unlaunched changes on a newer version or a closed goal
-  - [ ] Record wording, MCP outputs, value-card spans from the launch
+  - [x] Approve without publishing; launch and not-yet routes; approve-and-launch
+  - [x] Supersede unlaunched changes on a newer version or a closed goal
+  - [x] Record wording, MCP outputs, value-card spans from the launch
 - **Evidence:**
-  - [ ] The #39 D1 acceptance test (approve without launching, then launch; not yet; rebase) in test-v2, test-oauth and test-agent-live
-  - [ ] Spec requirements updated and validated
+  - [x] The #39 D1 acceptance test (approve without launching, then launch; not yet; rebase) in test-v2, test-oauth and test-agent-live
+  - [x] Spec requirements updated and validated
 
-### [ ] LAUNCH-002 — Accept if conditions on a counter (#39 D2)
+### [x] LAUNCH-002 — Accept if conditions on a counter (#39 D2)
 
 - **Priority:** P0
 - **Owner:** components/legacy-project-wrapper/implementation (change requests)
@@ -318,13 +318,13 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** none
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Condition on counter revisions; acknowledge route
-  - [ ] Record UI and MCP outputs
+  - [x] Condition on counter revisions; acknowledge route
+  - [x] Record UI and MCP outputs
 - **Evidence:**
-  - [ ] The #39 D2 acceptance test in test-v2 and test-oauth
-  - [ ] Spec requirements updated and validated
+  - [x] The #39 D2 acceptance test in test-v2 and test-oauth
+  - [x] Spec requirements updated and validated
 
-### [ ] PORT2-001 — Port main's Home attention queue, phone layout and README (#41, #42, #40, #22)
+### [x] PORT2-001 — Port main's Home attention queue, phone layout and README (#41, #42, #40, #22)
 
 - **Priority:** P1
 - **Owner:** components/legacy-project-wrapper/implementation (app surface) / README
@@ -333,9 +333,9 @@ release-visible outcome to `CHANGELOG.md`; Git preserves prior queue states.
 - **Depends on:** none
 - **Completion prerequisites:** none
 - **Implementation:**
-  - [ ] Home attention queue on v2 data with evidence classes
-  - [ ] 390px layout checks
-  - [ ] Root README for v2
+  - [x] Home attention queue on v2 data with evidence classes
+  - [x] 390px layout checks
+  - [x] Root README for v2
 - **Evidence:**
-  - [ ] test-v2 checks for the queue, evidence classes and phone width
-  - [ ] Spec requirements updated and validated
+  - [x] test-v2 checks for the queue, evidence classes and phone width
+  - [x] Spec requirements updated and validated

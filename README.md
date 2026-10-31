@@ -4,7 +4,7 @@
 - Parent repository: [github.com/jordanhubbard/literate-ai](<https://github.com/jordanhubbard/literate-ai>)
 <!-- /literate-ai:parent-repositories -->
 
-**Align is a command center for parallel AI work: one place to see what needs your decision and which connected AI apps have read the goals or only connected. Underneath, only the people entitled to approve for a goal can change it, every version is kept, and AI agents read the approved version.**
+**Align is a command center for parallel AI work: understand and direct all of it from one place, starting with what needs your decision and which connected AI apps have read the goals or only connected. Underneath, only the people entitled to approve for a goal can change it, every version is kept, and AI agents read the approved version.**
 
 Align is Liminal's wedge product, a working prototype. We built the first version in one day at SpeedHacks (Oct 11, 2026), where it won Best Use of Sparta, and rebuilt it during the Proving Ground founder sprint (Oct 21 to 23, 2026). This repository holds Align v2: everyone signs in as themselves, and workspaces, teams and change requests replace the first version's shared team passcodes. Built by Shayaun Nejad and Shruti Rajagopal Nejad.
 

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Launch and conditions, the founder's required additions in #39 (LAUNCH-001, LAUNCH-002):
+  - Approving a change request records the decision; agents get the new version only when someone in the goal's
+    approval set or a workspace owner launches it. "Not yet" is recorded too, "Approve and launch" is one step when
+    the same person may do both, and an unlaunched change is superseded if the goal gets a newer version or closes.
+    The record reads "Approved, agents still on v<n> until launch", then "Launched, agents on v<n+1>"; MCP, the goals
+    feed and directives show the launched version only.
+  - "Accept if…": a counter can carry a condition that only the requester acknowledges, as a separate step; it never
+    gates approval or launch, and nothing is called verified.
+- Ported main's #22, #40, #41, #42 and #48 (PORT2-001): a workspace Home that shows what needs you, with one evidence
+  class on every agent-status item; every page fits a 390px phone; the root README describes v2; an app's last
+  connection is shown apart from its last goal read, and only a read counts as a delivery receipt.
+- The owner decisions the spec cites by date are recorded in `docs/decisions/0003-owner-decisions-v2.md`.
 - Requests and goal holds (REQ-001, REQ-002), the middle level between informing and instructing agents (owner
   decision 2026-10-30):
   - A goal's approvers and workspace owners can send running agents typed requests (replan, checkpoint, switch goal),
