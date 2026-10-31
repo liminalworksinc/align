@@ -168,11 +168,13 @@ unchanged; same team and text on an open or accepted ask with another date → a
 
 ## Goal activity (PORT-003)
 `GET /api/v2/workspaces/:ws/goals/:goal/activity` (cookie; readers of the goal) → `{ "window_days": 14, "sessions",
-"active_now", "by_harness": { "claude-code", "codex" }, "last_activity_at": string|null, "detail": { "files":
+"active_now", "by_harness": { "claude-code", "codex" }, "last_activity_at": string|null, "evidence_class":
+"agent_reported"|"not_observed", "detail": { "files":
 [repo-relative path] (top 4), "files_hidden", "mine": [ { "session_key", "harness", "state", "last_activity_at" } ] } |
 null }`. Counts come from bindings (epochs bound to or governed by the goal overlapping the last 14 days), usage times
 and work signals; never prompts, replies, task labels, commit subjects, tokens or cost. `detail` only for the goal's
-owner, its team and workspace owners.
+owner, its team and workspace owners. `evidence_class` (LIM-2455 §E2) is `agent_reported` when there is any session or
+activity in the window (the align CLI reported all of it) and `not_observed` otherwise.
 
 ## Allocation (v2.3, main #29)
 Additive fields; older agents ignore them. Spec: `goals-and-proposals`, `workspaces`, `directives`, `local-agent`.

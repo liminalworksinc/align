@@ -112,7 +112,9 @@ function PasskeyPrompt() {
   };
   return (
     <div id="passkey-prompt" className="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-violet-50 px-6 py-2 text-[15px] text-zinc-800 max-sm:px-4">
-      <span className="flex-1">Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code. A passkey can&apos;t be phished.</span>
+      {/* Below 640px (sm) the prompt is one short line, so it takes less of a phone's first screen. */}
+      <span className="flex-1 max-sm:hidden">Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code. A passkey can&apos;t be phished.</span>
+      <span className="flex-1 sm:hidden">Sign in with a passkey instead of an email code.</span>
       <Link href="/app/account#passkeys" className="font-medium text-violet-700 hover:underline">
         Add a passkey
       </Link>
@@ -126,13 +128,17 @@ function PasskeyPrompt() {
 /** Page frame: top bar (workspace switcher, devices, sign out), the passkey prompt when due and, inside a workspace,
  *  its tabs. Every bar wraps, below 640px (sm) the padding narrows, and a word longer than its line (a 120-character
  *  link label, a URL, a pasted path) breaks rather than running off the side, so every /app page fits a 390px phone
- *  without sideways scrolling (LIM-2452, PORT2-001; scripts/test-v2.mjs checks each page at 390x844). */
+ *  without sideways scrolling (LIM-2452, PORT2-001; scripts/test-v2.mjs checks each page at 390x844). Below 640px the
+ *  chrome is compact (main #44): the top bar drops the person's name (Account has it), the passkey prompt is one short
+ *  line, and the tab row drops the workspace's name and role (the switcher shows the name), so a page's heading starts
+ *  in the top third of a 390x844 screen. The switcher is the native select: its list is the browser's, so it never
+ *  runs off a narrow window, and it lists only the person's own workspaces (GET /api/v2/workspaces). */
 export function Shell({ me, ws, tab, children }: { me: { name: string; email: string; passkeyPrompt?: boolean }; ws?: string; tab?: string; children: ReactNode }) {
   const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
   const current = list.data?.workspaces.find((w) => w.id === ws);
   return (
     <div className="min-h-screen bg-[var(--al-bg)] text-zinc-800">
-      <header className="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-[var(--al-rail)] px-6 py-3 max-sm:px-4">
+      <header className="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-[var(--al-rail)] px-6 py-3 max-sm:gap-x-3 max-sm:gap-y-1 max-sm:px-4 max-sm:py-2">
         <Link href="/app" className="font-display text-[26px] leading-none">
           Align
         </Link>
@@ -160,7 +166,7 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
           <Link href="/app/account" className="hover:text-zinc-900">
             Account
           </Link>
-          <span className="text-zinc-500" title={me.email}>
+          <span className="text-zinc-500 max-sm:hidden" title={me.email}>
             {me.name}
           </span>
           <button type="button" onClick={signOut} className="hover:text-zinc-900">
@@ -170,8 +176,8 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
       </header>
       {me.passkeyPrompt && <PasskeyPrompt />}
       {ws && (
-        <nav className="flex flex-wrap gap-1 border-b border-zinc-200 px-6 pt-2 max-sm:px-4" aria-label="Workspace">
-          <span className="mr-4 self-center text-[15px] text-zinc-500">
+        <nav className="flex flex-wrap gap-1 border-b border-zinc-200 px-6 pt-2 max-sm:gap-0.5 max-sm:px-3 max-sm:pt-1" aria-label="Workspace">
+          <span className="mr-4 self-center text-[15px] text-zinc-500 max-sm:hidden">
             {current?.name ?? ""}
             {current && <span className="al-lbl ml-2">{current.role}</span>}
           </span>
@@ -179,7 +185,7 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
             <Link
               key={t.href}
               href={`/app/w/${ws}${t.href}`}
-              className={`rounded-t-[8px] px-3 py-2 text-[15px] ${tab === t.label ? "border border-b-0 border-zinc-200 bg-white text-zinc-900" : "text-zinc-500 hover:text-zinc-900"}`}
+              className={`rounded-t-[8px] px-3 py-2 text-[15px] max-sm:px-2.5 ${tab === t.label ? "border border-b-0 border-zinc-200 bg-white text-zinc-900" : "text-zinc-500 hover:text-zinc-900"}`}
             >
               {t.label}
             </Link>
@@ -224,6 +230,9 @@ export function Card({ title, children, actions }: { title?: ReactNode; children
   );
 }
 
+/** An action button. A long label wraps between words instead of running past its container (max-w-full), at any
+ *  width. Below 640px every button is at least 44px tall, a phone's tap target: the root font is 15px, so rem-based
+ *  heights (min-h-11 is 41.25px here) fall short, and the height is in px (main #44). */
 export function Btn({ children, onClick, kind = "primary", disabled, type = "button" }: { children: ReactNode; onClick?: () => void; kind?: "primary" | "secondary" | "danger"; disabled?: boolean; type?: "button" | "submit" }) {
   const k = {
     primary: "border-violet-700 bg-violet-700 text-[var(--al-bg)] hover:opacity-90",
@@ -231,7 +240,7 @@ export function Btn({ children, onClick, kind = "primary", disabled, type = "but
     danger: "border-red-700 bg-transparent text-red-700 hover:bg-red-50",
   }[kind];
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`rounded-[10px] border px-3.5 py-2 text-[15px] font-medium transition [overflow-wrap:normal] disabled:cursor-not-allowed disabled:opacity-50 ${k}`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`max-w-full rounded-[10px] border px-3.5 py-2 text-[15px] font-medium transition [overflow-wrap:normal] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] ${k}`}>
       {children}
     </button>
   );

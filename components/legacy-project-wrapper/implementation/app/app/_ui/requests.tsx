@@ -3,6 +3,8 @@ import { useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, SignInAgain, TextArea, useAction, useApi, when } from "./kit";
 import type { Me } from "./server";
 import type { Goal } from "./types";
+import { EvidencePill } from "./evidence";
+import { answerEvidence } from "@/lib/v2/home-core.mts";
 
 // The goal page's "Agents on this goal" card (REQ-001): requests to the agents working on the goal (replan,
 // checkpoint, switch goal) and the goal hold. Align writes the wording the developer and the agent see; the sender is
@@ -48,8 +50,19 @@ const TYPE_HELP: Record<RequestType, string> = {
   switch_goal: "The sessions you pick move to another goal, only if their developer accepts. Until then they keep working toward this goal.",
 };
 
-/** pending / accepted / declined / expired, and whether an accept was the agent's own (a safe request) or the developer's. */
+/** One session's answer, with its evidence class (lib/v2/home-core.mts answerEvidence): received is a delivery
+ *  receipt, an answer is agent reported, nothing back is not observed. */
 function statePill(s: { state: TargetState; auto_accepted: boolean }) {
+  return (
+    <>
+      {answerPill(s)}
+      <EvidencePill c={answerEvidence(s.state)} />
+    </>
+  );
+}
+
+/** pending / accepted / declined / expired, and whether an accept was the agent's own (a safe request) or the developer's. */
+function answerPill(s: { state: TargetState; auto_accepted: boolean }) {
   if (s.state === "accepted") return <Pill tone="green">{s.auto_accepted ? "done by the agent" : "accepted by the developer"}</Pill>;
   if (s.state === "declined") return <Pill tone="red">declined</Pill>;
   if (s.state === "expired") return <Pill>expired</Pill>;

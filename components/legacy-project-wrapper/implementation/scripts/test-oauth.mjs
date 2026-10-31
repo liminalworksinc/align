@@ -270,12 +270,52 @@ function mcp(tokenValue, method, params = {}, { headers = {}, host } = {}) {
     host,
   });
 }
+/** Every structuredContent a tool call returned, for the strict outputSchema check at the end of the local phase. */
+const toolOutputs = [];
 /** tools/call: { status, result (JSON-RPC result), sc (structuredContent), text, isError, error } */
 async function tool(tokenValue, name, args = {}, opts) {
   const r = await mcp(tokenValue, "tools/call", { name, arguments: args }, opts);
   const m = rpcOf(r);
   const result = m?.result ?? null;
-  return { status: r.status, result, sc: result?.structuredContent ?? null, text: result?.content?.map((c) => c.text).join("\n") ?? "", isError: !!result?.isError, error: m?.error ?? null };
+  const out = { status: r.status, result, sc: result?.structuredContent ?? null, text: result?.content?.map((c) => c.text).join("\n") ?? "", isError: !!result?.isError, error: m?.error ?? null };
+  if (out.sc && !out.isError) toolOutputs.push({ name, sc: out.sc });
+  return out;
+}
+
+/** A strict JSON Schema check, as a validating MCP client applies a tool's outputSchema (the checklist's §E): type,
+ *  enum, const, required, properties, additionalProperties false, items, anyOf/oneOf and local $refs. Returns the
+ *  first problem's path and reason, or null. */
+function schemaProblem(schema, v, at = "$", root = schema) {
+  if (schema === true || schema === undefined) return null;
+  if (schema === false) return `${at}: not allowed`;
+  if (schema.$ref) return schemaProblem(schema.$ref.replace(/^#\//, "").split("/").reduce((o, k) => o?.[k], root), v, at, root);
+  for (const k of ["anyOf", "oneOf"]) if (schema[k] && !schema[k].some((s) => schemaProblem(s, v, at, root) === null)) return `${at}: matches none of ${k}`;
+  if ("const" in schema && JSON.stringify(schema.const) !== JSON.stringify(v)) return `${at}: not ${JSON.stringify(schema.const)}`;
+  if (schema.enum && !schema.enum.some((e) => JSON.stringify(e) === JSON.stringify(v))) return `${at}: ${JSON.stringify(v)} not in enum`;
+  const typeOf = (x) => (x === null ? "null" : Array.isArray(x) ? "array" : Number.isInteger(x) ? "integer" : typeof x);
+  if (schema.type) {
+    const types = [].concat(schema.type);
+    const t = typeOf(v);
+    if (!types.includes(t) && !(t === "integer" && types.includes("number"))) return `${at}: ${t}, want ${types.join("|")}`;
+  }
+  if (typeOf(v) === "object") {
+    for (const k of schema.required ?? []) if (!(k in v)) return `${at}.${k}: missing`;
+    for (const [k, x] of Object.entries(v)) {
+      if (schema.properties && k in schema.properties) {
+        const p = schemaProblem(schema.properties[k], x, `${at}.${k}`, root);
+        if (p) return p;
+      } else if (schema.additionalProperties === false) return `${at}.${k}: not declared`;
+      else if (typeof schema.additionalProperties === "object") {
+        const p = schemaProblem(schema.additionalProperties, x, `${at}.${k}`, root);
+        if (p) return p;
+      }
+    }
+  }
+  if (typeOf(v) === "array" && schema.items) for (const [i, x] of v.entries()) {
+    const p = schemaProblem(schema.items, x, `${at}[${i}]`, root);
+    if (p) return p;
+  }
+  return null;
 }
 const ut = (s) => ({ untrusted_text: s });
 
@@ -1078,6 +1118,11 @@ async function local(env) {
     );
     check("align_get_goal_activity: a Product member and a member in no team get no detail on Security's goal", a0(actU4)?.detail === null && a0(actNot)?.detail === null, JSON.stringify([a0(actU4), a0(actNot)]));
     check(
+      "align_get_goal_activity (§E2): each goal carries one evidence_class as the goal page shows it: agent_reported for Security's goal with its bound session (and the summary says so), not_observed exactly for goals with no session or activity in the window",
+      a0(actU4)?.evidence_class === "agent_reported" && actU4.text.includes("(agent reported)") && (actAllOwner.sc?.goals ?? []).every((g) => g.evidence_class === (g.sessions > 0 || g.last_activity_at ? "agent_reported" : "not_observed")) && (actAllOwner.sc?.goals ?? []).some((g) => g.evidence_class === "not_observed"),
+      JSON.stringify((actAllOwner.sc?.goals ?? []).map((g) => [g.sessions, g.last_activity_at, g.evidence_class])),
+    );
+    check(
       "align_get_goal_activity: Security's lead and a workspace owner get the detail (the repo-relative paths as untrusted_text, the hash-only item counted); every reader gets the counts (1 session, 1 Claude Code)",
       a0(actSec)?.detail?.files?.some((f) => JSON.stringify(f) === JSON.stringify(ut("api/auth.py"))) && a0(actSec).detail.files_hidden >= 1 && a0(actOwner)?.detail !== null && a0(actU4)?.sessions === 1 && a0(actU4).by_harness["claude-code"] === 1,
       JSON.stringify([a0(actSec), a0(actU4)]),
@@ -1375,6 +1420,36 @@ async function local(env) {
     );
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+
+  // -- strict outputs (the checklist's §E): every object in every tool's outputSchema is closed (additionalProperties
+  //    false), and every structuredContent this phase saw validates against its tool's schema as a strict client
+  //    would, on workspace A and on a fresh Northstar sample read through its own app connection --
+  {
+    const sampleWs = (await web(U1, "POST", "/api/v2/workspaces/sample", {})).json?.id;
+    const sampleApp = sampleWs ? (await connect(clientId, U1, sampleWs)).access_token : null;
+    const readTools = ["align_get_asks", "align_get_brief", "align_get_directives", "align_get_goal_activity", "align_get_limits", "align_list_change_requests", "align_list_goals"];
+    const sampleOut = sampleApp ? await Promise.all(readTools.map((n) => tool(sampleApp, n))) : [];
+    const sampleGoals = sampleOut.find((r) => r.sc?.goals && r.sc.workspace && Array.isArray(r.sc.goals) && r.sc.goals[0]?.measures)?.sc?.goals ?? [];
+    const sampleCr = sampleOut.find((r) => Array.isArray(r.sc?.change_requests))?.sc?.change_requests?.[0];
+    if (sampleGoals[0]) sampleOut.push(await tool(sampleApp, "align_get_goal", { goal_id: sampleGoals[0].id }));
+    if (sampleCr) sampleOut.push(await tool(sampleApp, "align_get_decision_record", { change_request_id: sampleCr.id }));
+    const listed = rpcOf(await mcp(app, "tools/list"))?.result?.tools ?? [];
+    const schemas = Object.fromEntries([...listedEv, ...listed].map((t) => [t.name, t.outputSchema])); // listedEv: the evidence grant's list
+    const open = [];
+    const walk = (sch, at) => {
+      if (!sch || typeof sch !== "object") return;
+      // A map (z.record: additionalProperties is a schema, such as by_basis) is constrained too; only a missing or true one is open.
+      if (sch.type === "object" && (sch.additionalProperties === undefined || sch.additionalProperties === true)) open.push(at);
+      for (const [k, x] of Object.entries(sch)) if (x && typeof x === "object") walk(x, `${at}/${k}`);
+    };
+    for (const [n, sch] of Object.entries(schemas)) walk(sch, n);
+    const bad = toolOutputs.map((o) => [o.name, schemas[o.name] ? schemaProblem(schemas[o.name], o.sc) : "no outputSchema"]).filter(([, p]) => p);
+    check(
+      `outputSchema (E): every object in all ${Object.keys(schemas).length} tools' outputSchemas is closed (additionalProperties false, or a schema for a map), and all ${toolOutputs.length} structuredContent results seen (workspace A, and the nine read tools on a fresh Northstar sample) validate strictly against them`,
+      Object.keys(schemas).length === 10 && open.length === 0 && bad.length === 0 && sampleOut.length === 9 && sampleOut.every((r) => !r.isError && r.sc),
+      `open: ${open.slice(0, 3).join(" ")} bad: ${bad.slice(0, 5).map(([n, p]) => `${n} ${p}`).join(" | ")} ${sampleOut.filter((r) => r.isError).map((r) => r.text).join(" | ")}`,
+    );
   }
 
   // -- registration flood (last: it spends this machine's registrations for the hour) --

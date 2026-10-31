@@ -346,6 +346,22 @@ if (build.status !== 0) {
   process.exit(1);
 }
 
+// ======== LIM-2455 §F: none of the PR #34 prototype's controls ship (a scan of the served code, no server) ========
+{
+  const PROTOTYPE = /SCRIPTED DESIGN STUDY|FICTIONAL \/ SCRIPTED|Preview role|Preview: |Simulate an authorized app read|simulated error|Ink atlas|LIM-2449|passcode/i;
+  const hits = [];
+  const scan = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) scan(p);
+      else if (/\.(?:ts|tsx|mts)$/.test(e.name) && PROTOTYPE.test(readFileSync(p, "utf8"))) hits.push(path.relative(ROOT, p));
+    }
+  };
+  scan(path.join(ROOT, "app"));
+  scan(path.join(ROOT, "lib"));
+  check("prototype controls (LIM-2455 §F): no app/ or lib/ file has the design study's banner, role preview, simulated errors or app read, Preview buttons, the Ink atlas, the LIM-2449 footer or a passcode", hits.length === 0, hits.join(", "));
+}
+
 // ======== trust: the security pack's claims that the code can check (PRESEED-008) ========
 {
   // Every https host in the server's source (comment lines aside), in fly.toml (its own host aside), and in Better Auth's
@@ -1510,6 +1526,12 @@ try {
     ownCr.status === 403 && ownCr.json?.error === "own_goal" && viewerCr.status === 403 && viewerCr.json?.error === "read_only" && privCr.status === 404 && staleCr.status === 409 && staleCr.json?.error === "stale_version" && againCr.status === 409 && againCr.json?.error === "already_open",
     [ownCr, viewerCr, privCr, staleCr, againCr].map((r) => `${r.status} ${r.json?.error}`).join(" "),
   );
+  const proposeFlags = await Promise.all([U3, U1, U4].map((u) => call(u.who, "GET", `/api/v2/workspaces/${A}/goals/${GL.id}`, { cookie: u.cookie })));
+  check(
+    "goal read (LIM-2455 §A): can_propose comes from the server with the propose rule: false for the goal's owner and a viewer, true for a member who doesn't own it (the page shows Propose a change from it)",
+    proposeFlags.map((r) => r.json?.can_propose).join() === "false,true,false" && proposeFlags[0].json?.can_edit === true,
+    proposeFlags.map((r) => `${r.status} ${r.json?.can_propose}`).join(" "),
+  );
   const bad = await Promise.all([
     propose(U2, GL.id, { base_version: 1, changes: { anchors: { repos: ["x"] } }, reason: "anchors" }),
     propose(U2, GL.id, { base_version: 1, changes: {}, reason: "empty" }),
@@ -1790,6 +1812,27 @@ try {
     "change requests: reject by the requester -> 403 not_an_approver; by the owner -> rejected with rejected_by and the reason; withdraw by someone else -> 403 not_requester, by the requester -> withdrawn",
     crRbyReq.status === 403 && crRbyReq.json?.error === "not_an_approver" && crRrej.json?.state === "rejected" && crRrej.json.rejected_by?.id === U3.id && crRrej.json.rejection_reason === "Out of scope this quarter" && crRrej.json.decision_note === "Out of scope this quarter" && crWbyLead.status === 403 && crWbyLead.json?.error === "not_requester" && crWok.json?.state === "withdrawn",
     `${crRbyReq.text} ${crRrej.text.slice(0, 200)} ${crWbyLead.text} ${crWok.json?.state}`,
+  );
+  // The LIM-2455 checklist (§C, §A): the reason and note caps on reject and counter, an approver declining while a counter
+  // waits on the requester, and decisions are cookie-only (a device token proposes and decides nothing).
+  const crCap = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the mobile app" }, reason: "Mobile too" });
+  const devPropose = await call("U1", "POST", crPath(GL.id), { bearer: D1.access, body: { base_version: 2, changes: { title: "Pen-test from a device" }, reason: "device" } });
+  const devApprove = await call("U3", "POST", `${crPath(GL.id)}/${crCap.json?.id}/approve`, { bearer: D3.access, body: { revision: 1 } });
+  const rejectLong = await crAct(U3, GL.id, crCap.json?.id, "reject", { reason: "r".repeat(2001) });
+  const counterLong = await crAct(U3, GL.id, crCap.json?.id, "counter", { revision: 1, changes: { title: "Pen-test the mobile app in Q3" }, note: "n".repeat(2001) });
+  const afterCapDevice = await crGet(U1, GL.id, crCap.json?.id);
+  const counterCap = await crAct(U3, GL.id, crCap.json?.id, "counter", { revision: 1, changes: { title: "Pen-test the mobile app in Q3" }, note: "Q3 fits the vendor" });
+  const rejectCountered = await crAct(U3, GL.id, crCap.json?.id, "reject", { reason: "Not this year after all" });
+  check(
+    "change requests (LIM-2455 §C): a 2001-character reject reason -> 400 'reason is too long (max 2000 characters)' and a 2001-character counter note -> 400 'note is too long (max 2000 characters)', the request unchanged; an approver declines a countered request (rejected, its reason on the record)",
+    crCap.status === 201 && rejectLong.status === 400 && rejectLong.json?.message === "reason is too long (max 2000 characters)" && counterLong.status === 400 && counterLong.json?.message === "note is too long (max 2000 characters)" &&
+      afterCapDevice.json?.state === "pending" && afterCapDevice.json.revision === 1 && counterCap.json?.state === "countered" && rejectCountered.status === 200 && rejectCountered.json?.state === "rejected" && rejectCountered.json.rejection_reason === "Not this year after all",
+    `${crCap.status} ${rejectLong.text} ${counterLong.text} ${counterCap.json?.state} ${rejectCountered.text.slice(0, 200)}`,
+  );
+  check(
+    "change requests (LIM-2455 §A): proposing and deciding are cookie-only: a device token proposing or approving -> 403 bearer_not_allowed, and nothing is written (still pending at revision 1)",
+    devPropose.status === 403 && devPropose.json?.error === "bearer_not_allowed" && devApprove.status === 403 && devApprove.json?.error === "bearer_not_allowed" && afterCapDevice.json?.state === "pending",
+    `${devPropose.text} ${devApprove.text}`,
   );
   const crA = await propose(U1, GL.id, { base_version: 2, changes: { title: "Pen-test the platform and the API" }, reason: "Both" });
   const crB = await propose(U2, GL.id, { base_version: 2, changes: { measures: [{ text: "Critical findings", target: "0" }] }, reason: "Track criticals" });
@@ -2250,6 +2293,150 @@ try {
         `ui (Chrome, 390x844): ${phonePaths.length} /app pages (workspaces, account, device, devices, request access, Home, Goals, a goal, People, Sessions, Alignments, Requests, Asks, Spend, Apps) each have document.scrollingElement.scrollWidth <= innerWidth; the Apps table stacks into labelled lines (Last connected, Last read the goals)`,
         wide.length === 0 && /Sends you back to/.test(appsRow) && /Last connected/.test(appsRow) && /Last read the goals/.test(appsRow) && errors.length === 0,
         `${wide.join(" | ")} ${errors.join(" | ")}`,
+      );
+      // -- main #44 on v2: compact chrome on a phone, 44 px action buttons, the main pages at desktop widths, the
+      //    workspace switcher at 700, one read of the connected apps per page (no poll), and the goal page's
+      //    stale-parent prompt for the child's owner only (the LIM-2455 checklist's §B) --
+      const cookiesOf = (u) => u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE }));
+      const settle = (pg) => pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      const chromeAt = async (width) => {
+        await page.setViewport({ width, height: 844 });
+        await page.goto(`${BASE}/app/w/${A}`, { waitUntil: "networkidle0" });
+        await settle(page);
+        return page.evaluate(() => ({
+          h1: document.querySelector("main h1")?.getBoundingClientRect().top ?? null,
+          header: document.querySelector("header")?.innerText ?? "",
+          tabs: document.querySelector('nav[aria-label="Workspace"]')?.innerText ?? "",
+          prompt: document.querySelector("#passkey-prompt")?.innerText ?? null,
+        }));
+      };
+      const [chrome390, chrome1000] = [await chromeAt(390), await chromeAt(1000)];
+      const wsAName = ((await call("U1", "GET", "/api/v2/workspaces", { cookie: U1.cookie })).json?.workspaces ?? []).find((w) => w.id === A)?.name;
+      check(
+        "ui (Chrome, main #44): at 390x844 the chrome is compact: the Home's heading starts above y=300, the top bar has no person's name, the passkey prompt is one short sentence and the tab row has no workspace name; at 1000 the name and the workspace show",
+        chrome390.h1 !== null && chrome390.h1 < 300 && !chrome390.header.includes(U1.name) && !chrome390.tabs.includes(wsAName) && (chrome390.prompt === null || (/Sign in with a passkey instead of an email code\./.test(chrome390.prompt) && !/phished/.test(chrome390.prompt))) &&
+          chrome1000.header.includes(U1.name) && chrome1000.tabs.includes(wsAName),
+        JSON.stringify({ wsAName, tabs390: chrome390.tabs.slice(0, 40), tabs1000: chrome1000.tabs.slice(0, 40), h1: chrome390.h1, header390: chrome390.header }),
+      );
+      await page.setViewport({ width: 390, height: 844 });
+      const short = [];
+      let tapped = 0;
+      for (const p of [`/app/w/${A}/goals`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/requests`, `/app/w/${A}/apps`, `/app/w/${A}/sessions`, `/app/w/${A}/people`, "/app/account", "/app/devices"]) {
+        await page.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await settle(page);
+        const hs = await page.evaluate(() =>
+          [...document.querySelectorAll("main button")]
+            .filter((b) => getComputedStyle(b).borderTopWidth !== "0px" && b.getBoundingClientRect().height > 0)
+            .map((b) => [b.textContent.trim().slice(0, 30), Math.round(b.getBoundingClientRect().height * 100) / 100]),
+        );
+        tapped += hs.length;
+        for (const [t, h] of hs) if (h < 44) short.push(`${p} "${t}" ${h}px`);
+      }
+      check(
+        "ui (Chrome, main #44): at 390 every action button on Goals, a goal, Requests, Apps, Sessions, People, Account and Devices is at least 44 px tall (the root font is 15 px, so the minimum is set in px)",
+        tapped >= 20 && short.length === 0,
+        `${tapped} buttons; ${short.slice(0, 6).join(" | ")}`,
+      );
+      const wideAt = [];
+      let switcher = null;
+      for (const width of [500, 600, 700, 768, 1100, 1268, 1440]) {
+        await page.setViewport({ width, height: 900 });
+        for (const p of [`/app/w/${A}`, `/app/w/${A}/goals`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/goals/${GC.id}`, `/app/w/${A}/requests`, `/app/w/${A}/apps`]) {
+          await page.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+          await settle(page);
+          const m = await page.evaluate(() => {
+            const main = document.querySelector("main");
+            const sel = document.querySelector('select[aria-label="Switch workspace"]')?.getBoundingClientRect();
+            return { sw: document.scrollingElement.scrollWidth, W: window.innerWidth, main: main?.scrollWidth, mainW: main?.clientWidth, sel: sel ? [sel.left, sel.right] : null };
+          });
+          if (m.sw > m.W || m.main > m.mainW) wideAt.push(`${width} ${p}: ${JSON.stringify(m)}`);
+          if (width === 700 && p === `/app/w/${A}`) switcher = m;
+        }
+      }
+      check(
+        "ui (Chrome, main #44): the Home, Goals, two goal pages (one with its goal tree), Requests and Apps never scroll sideways (page or main column) at 500, 600, 700, 768, 1100, 1268 and 1440 px",
+        wideAt.length === 0,
+        wideAt.slice(0, 4).join(" | "),
+      );
+      const options = await page.$$eval('select[aria-label="Switch workspace"] option', (os) => os.map((o) => o.value).filter(Boolean).sort());
+      const mineWs = ((await call("U1", "GET", "/api/v2/workspaces", { cookie: U1.cookie })).json?.workspaces ?? []).map((w) => w.id).sort();
+      const shellText = await page.evaluate(() => document.body.innerText);
+      check(
+        "ui (Chrome, main #44, LIM-2455 §F): the workspace switcher is the native select, on screen at 700 px, and lists exactly the person's own workspaces (GET /api/v2/workspaces); no passcode, role preview or \"Acting as\" control",
+        !!switcher?.sel && switcher.sel[0] >= 0 && switcher.sel[1] <= switcher.W && mineWs.length >= 1 && JSON.stringify(options) === JSON.stringify(mineWs) && !/passcode|preview role|acting as/i.test(shellText),
+        `${JSON.stringify(switcher)} ${JSON.stringify(options)} ${JSON.stringify(mineWs)}`,
+      );
+      const readsOf = async (p) => {
+        const seen = [];
+        const on = (r) => {
+          const u = new URL(r.url());
+          if (u.pathname.startsWith("/api/v2/")) seen.push(u.pathname);
+        };
+        page.on("request", on);
+        await page.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await sleep(3000);
+        page.off("request", on);
+        return seen;
+      };
+      const homeReads = await readsOf(`/app/w/${A}`);
+      const appsReads = await readsOf(`/app/w/${A}/apps`);
+      const nOf = (xs, re) => xs.filter((x) => re.test(x)).length;
+      check(
+        "ui (Chrome, main #44): one read of the connected apps per page and no poll: over 3 s after load the Home reads .../home once and .../apps never, and the Apps tab reads .../apps once",
+        nOf(homeReads, /\/home$/) === 1 && nOf(homeReads, /\/apps$/) === 0 && nOf(appsReads, /\/apps$/) === 1,
+        JSON.stringify({ homeReads, appsReads }),
+      );
+      const parentNow = (await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${GT.id}`, { cookie: U1.cookie })).json?.goal;
+      const bump = await call("U1", "POST", `/api/v2/workspaces/${A}/goals/${GT.id}/versions`, { cookie: U1.cookie, body: { version: parentNow?.version, title: `${parentNow?.title} (reworded)` } });
+      const treeAs = async (u) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width: 1000, height: 900 });
+        await pg.setCookie(...cookiesOf(u));
+        await pg.goto(`${BASE}/app/w/${A}/goals/${GC.id}`, { waitUntil: "networkidle0" });
+        await settle(pg);
+        const t = await pg.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", still: [...document.querySelectorAll("main button")].some((b) => /^Still fits version /.test(b.textContent.trim())) }));
+        await ctx.close();
+        return t;
+      };
+      const treeOwner = await treeAs(U3);
+      const treeOther = await treeAs(U2);
+      check(
+        "ui (Chrome, LIM-2455 §B): after a parent's new version only the child's owner gets the review prompt (\"has a new version, and this goal hasn't changed\") and Still fits version <n>; another member sees the amber \"reviewed against version <n>\" pill alone; nothing says agents already have the new version",
+        bump.status === 201 && treeOwner.still && /has a new version, and this goal hasn.t changed/.test(treeOwner.text) && !treeOther.still && /reviewed against version/.test(treeOther.text) && !/has a new version, and this goal/.test(treeOther.text) &&
+          !/already have the new version/.test(treeOwner.text + treeOther.text) && errors.length === 0,
+        `${bump.status} ${treeOwner.text.slice(0, 300)} || ${treeOther.text.slice(0, 300)} ${errors.join(" | ")}`,
+      );
+      await page.setViewport({ width: 1000, height: 900 });
+      await page.goto(`${BASE}/app/w/${A}/goals/${GP.id}`, { waitUntil: "networkidle0" });
+      await settle(page);
+      const hiddenText = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
+      const hiddenApi = await call("U1", "GET", `/api/v2/workspaces/${A}/goals/${GP.id}`, { cookie: U1.cookie });
+      check(
+        "ui (Chrome, LIM-2455 §C): a goal the person can't read is 404 (never 403) and its page says \"This goal does not exist or you can't see it.\" without its title",
+        hiddenApi.status === 404 && hiddenText.includes("This goal does not exist or you can't see it.") && !hiddenText.includes(GP.title),
+        `${hiddenApi.status} ${hiddenText.slice(0, 200)}`,
+      );
+      // Keyboard and focus (the checklist's §H): Tab walks the goal page's controls in order and each shows the focus ring.
+      await page.goto(`${BASE}/app/w/${A}/goals/${G1.id}`, { waitUntil: "networkidle0" });
+      await settle(page);
+      const stops = [];
+      for (let i = 0; i < 40; i++) {
+        await page.keyboard.press("Tab");
+        stops.push(
+          await page.evaluate(() => {
+            const e = document.activeElement;
+            const cs = e ? getComputedStyle(e) : null;
+            return { tag: e?.tagName ?? "", text: (e?.textContent ?? "").trim().slice(0, 24), ring: !!cs && cs.outlineStyle === "solid" && parseFloat(cs.outlineWidth) >= 2 };
+          }),
+        );
+      }
+      const offRing = stops.filter((x) => !x.ring || !["A", "BUTTON", "SELECT", "INPUT", "TEXTAREA", "SUMMARY"].includes(x.tag));
+      check(
+        "ui (Chrome, LIM-2455 §H): keyboard: 40 Tab presses on a goal page land only on links, buttons, fields and disclosure summaries, each with the 2 px focus ring, and reach a button in main",
+        offRing.length === 0 && stops.some((x) => x.tag === "BUTTON"),
+        JSON.stringify(offRing.slice(0, 5)),
       );
     } catch (e) {
       check("ui (Chrome, 390x844) phone layout run", false, e?.stack ?? e);
@@ -3344,6 +3531,12 @@ try {
     !allAct.includes(ACT_CANARY) && !allAct.includes("ACT-TITLE") && !/"(input|output|tokens|usd|est_list_usd_micros|text)"/.test(allAct),
     allAct.slice(0, 300),
   );
+  const quietAct = (await actOf(KL, GPriv.id)).json;
+  check(
+    "goal activity (LIM-2455 §E2): evidence_class agent_reported for a goal with sessions (the align CLI reported them) and not_observed for one with nothing in the window",
+    a0.evidence_class === "agent_reported" && quietAct?.sessions === 0 && quietAct.last_activity_at === null && quietAct.evidence_class === "not_observed",
+    `${a0.evidence_class} ${JSON.stringify(quietAct)}`,
+  );
   const unreadAct = await actOf(KR, GPd.id);
   const outsideAct = await call("U1", "GET", `/api/v2/workspaces/${AK}/goals/${GW.id}/activity`, { cookie: U1.cookie });
   const bearerAct = await call("KL", "GET", `/api/v2/workspaces/${AK}/goals/${GW.id}/activity`, { bearer: DKL.access });
@@ -3384,6 +3577,24 @@ try {
         "ui (Chrome): the goal page's Agent activity card shows sessions by harness, active now, the files and the reader's own sessions, and says counts come from bindings",
         cardText.includes("Counts come from bindings, not from what agents wrote") && /Sessions\s+2 \(1 Claude Code, 1 Codex\)/.test(cardText) && /Active now\s+1/.test(cardText) && cardText.includes("src/login.ts") && cardText.includes("Your sessions") && errors.length === 0,
         `${cardText} ${errors.join(" | ")}`,
+      );
+      const actClasses = await page.$$eval("#goal-activity [data-evidence-class]", (els) => els.map((e) => e.getAttribute("data-evidence-class")));
+      check(
+        "ui (Chrome, LIM-2455 §E2): the Agent activity card carries exactly one evidence class, \"agent reported\", and names the files as reported (\"Files these sessions reported working on\"), never \"Files agents are working on\"",
+        JSON.stringify(actClasses) === '["agent_reported"]' && cardText.includes("agent reported") && cardText.includes("Files these sessions reported working on") && !cardText.includes("Files agents are working on"),
+        `${JSON.stringify(actClasses)} ${cardText.slice(0, 300)}`,
+      );
+      await page.goto(`${BASE}/app/w/${AK}/sessions`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      const stopRows = await page.evaluate(() =>
+        [...document.querySelectorAll("main li")]
+          .filter((li) => /Resume sent|Resumed|Stop sent|Stop received|Local stop|Stop requested/.test(li.innerText))
+          .map((li) => ({ text: li.innerText.slice(0, 120), classes: [...li.querySelectorAll("[data-evidence-class]")].map((e) => e.getAttribute("data-evidence-class")) })),
+      );
+      check(
+        "ui (Chrome, LIM-2455 §E2): on the Sessions tab a stop or resume status carries exactly one evidence class: \"Resume sent, not yet received\" is not observed (no receipt from the machine yet)",
+        stopRows.length >= 1 && stopRows.every((r) => r.classes.length === 1) && stopRows.filter((r) => /Resume sent, not yet received/.test(r.text)).every((r) => r.classes[0] === "not_observed") && stopRows.some((r) => /Resume sent, not yet received/.test(r.text)),
+        JSON.stringify(stopRows),
       );
     } catch (e) {
       check("ui (Chrome) asks and activity run", false, e?.stack ?? e);
@@ -3656,6 +3867,12 @@ try {
           card.top > card.vh && /What this decision gave you/i.test(card.text) && /Who approved/i.test(card.text) && /1 of 1 shared session has it in context/.test(card.text) && /Proposal to approval/.test(card.text) && /What others said/i.test(card.text) && /Vic Two/.test(card.text) &&
             belowFold === before && seenAfter === before + 1 && errors.length === 0,
           `${JSON.stringify({ top: card.top, vh: card.vh, before, belowFold, seenAfter })} ${card.text.slice(0, 300)} ${errors.join(" | ")}`,
+        );
+        const valueClasses = await page.$$eval(`[data-value-card="${crP.json?.id}"] [data-evidence-class]`, (els) => els.map((e) => e.getAttribute("data-evidence-class")));
+        check(
+          "ui (Chrome, LIM-2455 §E2): the value card's \"Agents on the new version\" line carries exactly one evidence class, a delivery receipt (the session's machine sent a receipt for the launched version)",
+          JSON.stringify(valueClasses) === '["delivery_receipt"]' && /delivery receipt/.test(card.text),
+          JSON.stringify(valueClasses),
         );
         // On a phone (390x844) the card is taller than the screen: its top seen for 1.5 s is a view, once; a second look
         // adds nothing (V3, the approver, who has not viewed it yet).
@@ -4043,8 +4260,16 @@ try {
             card: document.querySelector("#agents-on-goal")?.innerText ?? "",
             cp: document.querySelector(`[data-request="${ids.cp}"]`)?.innerText ?? "",
             radios: [...document.querySelectorAll('input[name="request-type"]')].map((r) => r.value),
+            answers: [...document.querySelectorAll(`[data-request="${ids.cp}"] p`)]
+              .filter((p) => p.querySelector("[data-evidence-class]"))
+              .map((p) => ({ text: p.innerText, classes: [...p.querySelectorAll("[data-evidence-class]")].map((e) => e.getAttribute("data-evidence-class")) })),
           }),
           { cp: CP.id },
+        );
+        check(
+          "ui (Chrome, LIM-2455 §E2): each session's answer on the Agents on this goal card carries exactly one evidence class: an answer (declined, accepted by the developer) is agent reported, never a delivery receipt",
+          ui.answers.length >= 2 && ui.answers.every((a) => a.classes.length === 1) && ui.answers.filter((a) => /declined|accepted by the developer/.test(a.text)).every((a) => a.classes[0] === "agent_reported") && ui.answers.some((a) => /declined/.test(a.text)),
+          JSON.stringify(ui.answers),
         );
         check(
           "ui (Chrome): the goal page shows the hold banner with who and why, and the Agents on this goal card: Release, Send a request (Replan, Checkpoint, Switch goal), and each request with its sender, quoted note and per-session pills (declined, accepted by the developer)",

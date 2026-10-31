@@ -94,7 +94,7 @@ tool, listed only for a token holding `changes:evidence`, is `readOnlyHint: fals
 | `align_get_directives` | none | The newest 50 directives sent to the person's own sessions in the workspace |
 | `align_get_limits` | `goal_id?` | The limits (must, must not, out of scope) of goals whose limits are shared with the caller, with their source and who saved the version; own and own teams' goals first |
 | `align_get_asks` | `state?`, `team_id?` | Asks between teams the person can read (their teams', the ones they recorded; all for a workspace owner), their teams' first, open → accepted → closed, newest; at most 100 |
-| `align_get_goal_activity` | `goal_id?` | For each readable goal, the last 14 days: sessions, active now, by harness, last activity; for the goal's owner, team and workspace owners also the top file paths and the person's own sessions; `unbound` (their shared sessions with no goal) |
+| `align_get_goal_activity` | `goal_id?` | For each readable goal, the last 14 days: sessions, active now, by harness, last activity and its `evidence_class` (`agent_reported` or `not_observed`); for the goal's owner, team and workspace owners also the top file paths and the person's own sessions; `unbound` (their shared sessions with no goal) |
 | `align_get_brief` | none | The person's goals (own and their teams'; company goals too for a workspace owner) with measures and limits, the change requests and alignments on them still waiting on someone (who, never the reason), and up to 5 open or accepted asks of their teams; summary at most 1,800 characters |
 
 **Read scoping of the four newer tools.** A token reads what its person reads in the web app, with one narrowing for

@@ -1,10 +1,25 @@
 "use client";
 import { api, Btn, Card, Err, Loading, Note, Pill, Shell, num, useAction, useApi, when } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
+import { EvidencePill } from "../../../_ui/evidence";
 import { HoldBanner } from "../../../_ui/requests";
+import { receiptEvidence } from "@/lib/v2/home-core.mts";
 import type { AnySession, GoalLabel, MySession, StopStatus } from "../../../_ui/types";
 
 const goalText = (g: GoalLabel | null | undefined) => (!g ? "no goal" : g.private ? "a goal you can't see" : g.title);
+
+/** How far a stop or resume got, with its evidence class (the checklist's §E2): a delivery receipt once the machine
+ *  sent any receipt, else not observed. */
+function StopStatusPills({ s, stopped }: { s: StopStatus | null; stopped: boolean }) {
+  const text = stopText(s, stopped);
+  if (!text) return null;
+  return (
+    <>
+      <Pill tone={stopped ? "red" : "neutral"}>{text}</Pill>
+      <EvidencePill c={receiptEvidence(s?.receipts.length ?? 0)} />
+    </>
+  );
+}
 
 /** Plain words for how far a stop or resume got: sent, received by the machine, active there. */
 function stopText(s: StopStatus | null, stopped: boolean) {
@@ -39,7 +54,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                 <span className="text-[16px] text-zinc-900">{s.title || s.repo_alias || `${s.harness} session`}</span>
                 <Pill>{s.harness}</Pill>
                 <Pill tone={s.state === "shared" ? "green" : s.state === "suspended" ? "amber" : "neutral"}>{s.state === "stopped" ? "not shared" : s.state}</Pill>
-                {stopText(s.stop_status, s.agent_stopped) && <Pill tone={s.agent_stopped ? "red" : "neutral"}>{stopText(s.stop_status, s.agent_stopped)}</Pill>}
+                <StopStatusPills s={s.stop_status} stopped={s.agent_stopped} />
               </div>
               <p className="text-[14px] text-zinc-500">
                 Started {when(s.started_at)}. Counting under: {goalText(s.current_epoch?.goal)}
@@ -92,7 +107,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
               <li key={s.session_key} className="flex flex-wrap items-center gap-2 py-2 text-[15px]">
                 <span className="text-zinc-900">{s.owner.name}</span>
                 <span className="text-zinc-500">{s.repo_alias ? `${s.repo_alias} (${s.harness})` : `a ${s.harness} session`}</span>
-                {stopText(s.stop_status, s.agent_stopped) && <Pill tone={s.agent_stopped ? "red" : "neutral"}>{stopText(s.stop_status, s.agent_stopped)}</Pill>}
+                <StopStatusPills s={s.stop_status} stopped={s.agent_stopped} />
                 <span className="ml-auto">
                   {s.agent_stopped ? (
                     <Btn kind="secondary" disabled={act.busy} onClick={() => void post(s.session_key, "resume")}>

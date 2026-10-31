@@ -576,6 +576,9 @@ const ActivityGoalOut = z.object({
   active_now: z.number(),
   by_harness: z.object({ "claude-code": z.number(), codex: z.number() }),
   last_activity_at: z.string().nullable(),
+  /** The checklist's §E2, as the goal page shows it: agent_reported (from the align CLI on developers' machines) or
+   *  not_observed (nothing in the window). */
+  evidence_class: z.enum(["agent_reported", "not_observed"]),
   /** Only for the goal's owner, members and leads of its team, and workspace owners; else null. */
   detail: z
     .object({
@@ -598,11 +601,12 @@ function activityOut(pp: PolicyPrincipal, g: GoalRow, a: GoalActivity): z.infer<
     active_now: a.active_now,
     by_harness: { "claude-code": a.by_harness["claude-code"], codex: a.by_harness.codex },
     last_activity_at: a.last_activity_at,
+    evidence_class: a.evidence_class === "agent_reported" ? "agent_reported" : "not_observed",
     detail: d && { files: d.files.map(ut), files_hidden: d.files_hidden, mine: d.mine.map((m) => ({ session_key: m.session_key, harness: m.harness, state: m.state, last_activity_at: m.last_activity_at })) },
   };
 }
 const activityLine = (a: z.infer<typeof ActivityGoalOut>) =>
-  `- goal ${a.goal.id} ${tag(a.goal.title.untrusted_text)}: ${a.sessions} sessions (${a.by_harness["claude-code"]} Claude Code, ${a.by_harness.codex} Codex), ${a.active_now} active now, last activity ${a.last_activity_at ?? "none"}${a.detail ? `; files ${a.detail.files.map((f) => tag(f.untrusted_text)).join(", ") || "none shown"}${a.detail.files_hidden ? ` (+${a.detail.files_hidden} without a path)` : ""}; ${a.detail.mine.length} of yours` : ""}`;
+  `- goal ${a.goal.id} ${tag(a.goal.title.untrusted_text)}: ${a.sessions} sessions (${a.by_harness["claude-code"]} Claude Code, ${a.by_harness.codex} Codex), ${a.active_now} active now, last activity ${a.last_activity_at ?? "none"} (${a.evidence_class === "agent_reported" ? "agent reported" : "not observed"})${a.detail ? `; files ${a.detail.files.map((f) => tag(f.untrusted_text)).join(", ") || "none shown"}${a.detail.files_hidden ? ` (+${a.detail.files_hidden} without a path)` : ""}; ${a.detail.mine.length} of yours` : ""}`;
 
 // ---------- align_get_brief ----------
 
@@ -965,7 +969,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
     {
       title: "Get agent activity toward goals",
       description:
-        "Agent sessions people shared toward each goal you can read, over the last 14 days: how many, how many are active now, by harness, and the last activity, from bindings and usage times, never from what agents wrote. For your own goals, your teams' goals (or every goal, for a workspace owner) also the top repo-relative file paths of work signals and your own sessions. unbound counts your shared sessions with no goal now. With goal_id, that goal only.",
+        "Agent sessions people shared toward each goal you can read, over the last 14 days: how many, how many are active now, by harness, and the last activity, from bindings and usage times, never from what agents wrote. Each goal's evidence_class is agent_reported (the align CLI on developers' machines reported it; Align didn't observe it) or not_observed (nothing in the window). For your own goals, your teams' goals (or every goal, for a workspace owner) also the top repo-relative file paths of work signals and your own sessions. unbound counts your shared sessions with no goal now. With goal_id, that goal only.",
       inputSchema: z.object({ goal_id: z.string().max(64).optional(), ...wsInput }),
       outputSchema: ActivityOut,
       annotations: READ_ONLY,

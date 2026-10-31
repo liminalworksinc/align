@@ -610,5 +610,8 @@ export function goalDetail(pp: PolicyPrincipal, goalId: string) {
     versions: versions.map((v) => ({ ...v, created_by: undefined })),
     contributions,
     can_edit: g.owner_id === pp.userId && pp.wsRole !== "viewer",
+    /** Whether the reader may propose a change (lib/v2/changes.ts's rule: not the owner, not a viewer, an active goal),
+     *  so the page shows Propose a change from the server's answer instead of working it out (the checklist's §A). */
+    can_propose: g.owner_id !== pp.userId && pp.wsRole !== "viewer" && g.status === "active",
   };
 }

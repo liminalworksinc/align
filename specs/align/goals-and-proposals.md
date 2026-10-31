@@ -315,12 +315,12 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/limits/suggest {notes, sou
 
 ### Requirement: One goal with its versions and contributions
 
-The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as `{goal, versions, contributions, can_edit}`: `goal` as in the feed, `versions` every version newest first as `{version, title, status, content_hash, created_at}`, `contributions` the readable source goals of approved alignments targeting this goal as `{goal:{id, title}}`, and `can_edit` true only for the goal's owner when not a viewer. A goal the caller may not read SHALL be 404.
+The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as `{goal, versions, contributions, can_edit, can_propose}`: `goal` as in the feed, `versions` every version newest first as `{version, title, status, content_hash, created_at}`, `contributions` the readable source goals of approved alignments targeting this goal as `{goal:{id, title}}`, `can_edit` true only for the goal's owner when not a viewer, and `can_propose` true exactly when "Proposing a change request" would not refuse the reader for who they are or the goal's status: not the goal's owner, not a viewer, and the goal `active`. A goal the caller may not read SHALL be 404.
 
 #### Scenario: Owner opens their goal
 
 - **WHEN** the owner of a goal at version 3 opens it
-- **THEN** the response has three `versions` (3, 2, 1) and `can_edit: true`; a member reading the same goal gets `can_edit: false`
+- **THEN** the response has three `versions` (3, 2, 1), `can_edit: true` and `can_propose: false`; a member reading the same goal gets `can_edit: false` and `can_propose: true`, and a viewer gets both false
 
 ### Requirement: Parents come from approved alignments
 
