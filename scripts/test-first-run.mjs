@@ -14,7 +14,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -264,9 +264,10 @@ async function pollsOnLoad(page, ms = 3000) {
 // ---- phase static ----
 function phaseStatic() {
   phaseName = "static";
-  const src = (f) => readFileSync(path.join(ROOT, f), "utf8");
+  const src = (f) => (existsSync(path.join(ROOT, f)) ? readFileSync(path.join(ROOT, f), "utf8") : null);
   const firstRun = src("components/FirstRun.tsx");
-  check("FirstRun.tsx makes no request and runs no timer loop of its own (no fetch, api(), setInterval)", !/\bfetch\(|\bapi\(|setInterval/.test(firstRun), "");
+  check("components/FirstRun.tsx exists", firstRun !== null, "missing");
+  check("FirstRun.tsx makes no request and runs no timer loop of its own (no fetch, api(), setInterval)", firstRun !== null && !/\bfetch\(|\bapi\(|setInterval/.test(firstRun), "");
   const mounts = readdirSync(path.join(ROOT, "components"))
     .filter((f) => f.endsWith(".tsx"))
     .flatMap((f) => (src(`components/${f}`).match(/<ConnectAI\b/g) ?? []).map(() => f));

@@ -6,11 +6,11 @@ import { Button } from "@/components/ui";
 import { api } from "@/components/useAlign";
 import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 
-// "Your AI apps" in a custom workspace's sidebar: the one URL any AI app connects with (Align's read-only MCP
-// endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. An app shows as
-// connected only after its first successful read (last_used_at), never just because someone approved it. Each app
-// also shows whether it has read the plan as it stands now (on_current_plan, lib/plan-rev.ts): one that last read an
-// older plan may still be working on it. Align sees only what an app last read, never what it does.
+// "Connected AI apps" in a custom workspace's sidebar: the one URL any AI app connects with (Align's read-only MCP
+// endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. An approved app
+// that hasn't read anything yet is listed as approved, never as having read the plan. Each app that has read shows
+// whether it read the plan as it stands now (on_current_plan, lib/plan-rev.ts) or an older one. Align sees only what
+// an app last read, never what it does. The same poll feeds the first-run card (components/FirstRun.tsx).
 
 interface App {
   id: string;

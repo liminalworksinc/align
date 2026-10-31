@@ -9,7 +9,7 @@ import { claudeCodeLine } from "@/lib/paste-lines";
 // has seen of the connection (approved, or not yet). Once any app has read the plan the card is gone. Every state is
 // Align-observed (a grant, a read); nothing an agent says about itself is shown. Dismissed per workspace in localStorage.
 
-export interface FirstRunApp {
+interface FirstRunApp {
   id: string;
   name: string;
   last_used_at: string | null;
@@ -17,7 +17,7 @@ export interface FirstRunApp {
 
 /** What an agent connected to a workspace can read: one line per tool in lib/mcp/register.ts, by its workspace title.
  *  scripts/test-first-run.mjs checks the count against the server's tools/list. */
-export const AGENT_READS = [
+const AGENT_READS = [
   "The teams’ goals",
   "The agreed plan",
   "The work map",
