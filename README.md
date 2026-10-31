@@ -2,20 +2,21 @@
 
 **A priority changes. Who can approve the new plan, and which work is still on the old one? Align lets only the goal's owner approve the change, keeps both versions, and lets AI agents read the approved plan.**
 
-Align is Liminal's wedge product, a working prototype. We built the first version in one day at SpeedHacks (Oct 11, 2026), where it won Best Use of Sparta, and rebuilt it during the Proving Ground founder sprint (Oct 21 to 23, 2026) so a team can set up its own two-team case without us. Built by Shayaun Nejad and Shruti Rajagopal.
+Align is Liminal's wedge product, a working prototype. We built the first version in one day at SpeedHacks (Oct 11, 2026), where it won Best Use of Sparta, and rebuilt it during the Proving Ground founder sprint (Oct 21 to 23, 2026) so a team can set up its own two-team case without us. Built by Shayaun Nejad and Shruti Rajagopal Nejad.
 
 ## What it does today
 
 - **Set up your own case.** One team (the asking team) proposes a change to another team's goal. Leadership sees it.
 - **Only the owner decides.** Only the goal's owning team can counter, reject or approve. Anyone else is refused by the server (HTTP 403).
 - **Nothing is overwritten.** Approval creates a new goal version and keeps the old one, with an acceptance entry and an audit row. A plan with no sandbox test needs an explicit "accept untested". Leadership makes a separate launch decision.
-- **Agents read the approved plan.** A read-only MCP server (5 tools, no write tools) serves the current approved plan. Claude Code sessions connected to a workspace are notified when a plan is approved (local setup; see docs/MCP.md).
+- **Agents read the approved plan.** A read-only MCP server (9 tools, no write tools) serves the current approved plan. Claude Code, Codex, the Claude app or ChatGPT connects to a workspace with its MCP URL and a team passcode (OAuth). Claude Code sessions connected to a workspace are notified when a plan is approved (local setup; see docs/MCP.md).
+- **Home shows what needs you.** What is waiting on you and on others, the active goals, and which connected AI apps have read the current plan. Align sees what an app last read, not what it does.
 
 ## What it does not do yet
 
 - It does not stop an agent that ignores the approved plan. (A manual Stop is in testing behind a flag.)
 - It does not sign records. Liminal's desktop app keeps signed, offline-verifiable decision records; connecting it to Align is next.
-- It is not hosted yet, and no outside team has completed a test.
+- It runs hosted for invited testers only, and no outside team has yet completed an evaluation on its own.
 
 ## The original SpeedHacks demo (Oct 11, 2026)
 
@@ -355,6 +356,6 @@ sparta/walkthrough-lab/
 ## Team and provenance
 
 - **Shayaun Nejad:** server, agent integration, Sparta harness, MCP server and live replan.
-- **Shruti Rajagopal:** product and UI/UX design, front end, demo.
+- **Shruti Rajagopal Nejad:** product and UI/UX design, front end, demo.
 
 Built during SpeedHacks hours on **Oct 11, 2026**. All application code is new. The visual theme is our own, with public Google Fonts. It uses only public SDKs and libraries (Next.js, React, `sparta_worlds` from npm, the MCP SDK) and the Anthropic Messages API format, served for the recorded runs by Vercel AI Gateway with `openai/gpt-4.1`. The Sparta agent is adapted from the public Anthropic-format starter included in `sparta_worlds`.
