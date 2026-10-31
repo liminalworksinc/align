@@ -22,13 +22,34 @@ CL
 CEO / Leadership
 Leadership · Owner
 Sign out
-Your turn
+Know what needs you
 
 Nothing waiting on you.
 
+0
+Waiting on you
+0
+Waiting on others
+3
+Active goals
 WAITING ON YOU
 0
 Nothing is waiting on you.
+ACTIVE GOALS
+COMPANY
+v2
+▲
+Changed today
+Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.
+Open
+PRODUCT
+v3
+Ship the beta and clear anything blocking the launch.
+Open
+SECURITY
+v2.2
+Handle customer and security issues quickly and correctly.
+Open
 CHANGED TODAY
 CEO
 Beta customers' issues handled first: marked urgent, tagged as beta, a private note for engineers, and a reply to the customer
