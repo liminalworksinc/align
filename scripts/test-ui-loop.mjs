@@ -288,11 +288,16 @@ async function main() {
     await openProposals(O);
     await waitText(O, "Your decision");
     await narrow(O, "N2 the owning team's review of the proposal");
-    await click(O, "Counter"); // v6: pick the Counter answer, which shows the ask-for-changes form
-    await fill(O, "Ask for changes: your version of the target", COUNTER);
-    await fill(O, "Why you want these changes", "UILOOP two fixed nights are easier to plan around.");
-    await fill(O, "Conditions (optional)", CONDITIONS);
-    await click(O, "Ask for changes");
+    // Lane C: choose Counter, write the one required input (the revised target), open the optional extras, then
+    // review and confirm. Nothing is sent before the confirmation.
+    await click(O, "Counter");
+    await fill(O, "Your revised target", COUNTER);
+    await click(O, "Add a reason or conditions");
+    await fill(O, "Your reason (optional)", "UILOOP two fixed nights are easier to plan around.");
+    await fill(O, "Conditions (optional", CONDITIONS);
+    await click(O, "Review this decision");
+    check("U4 the confirmation names the revised target and that the asking team must accept it", (await waitText(O, "Confirm: Counter")) && (await text(O)).includes(`${ASKING} must accept your changes`), (await text(O)).slice(-800));
+    await click(O, "Confirm: Counter");
     check("U4 the owning team asks for changes and waits on the asking team", await waitText(O, `Waiting for ${ASKING}`), (await text(O)).slice(0, 300));
 
     // The asking team sees the conditions and accepts
@@ -300,6 +305,8 @@ async function main() {
     check("U5 the asking team sees the conditions before accepting, marked not confirmed yet", (await waitText(A, CONDITIONS.slice(0, 40))) && /not confirmed yet/i.test(await text(A)), (await text(A)).slice(0, 500));
     await narrow(A, "N3 the asking team's review of the changes, with its long accept button");
     await click(A, `Accept ${OWNING}`);
+    await click(A, "Review this decision");
+    await click(A, "Confirm: Accept");
     check("U5 the asking team accepts the changes", await waitText(A, "accepted"), (await text(A)).slice(0, 300));
 
     // U5b The refusal demo, while the proposal waits on the owner. The owner never sees the button; the asking team's
@@ -406,8 +413,11 @@ async function main() {
     // The owning team approves, ticking "without a sandbox test"
     await openProposals(O);
     await waitText(O, "Your decision");
+    await click(O, "Approve this exact revision");
     await click(O, "without a sandbox test", "label");
-    await click(O, "Approve the change to my goal");
+    await click(O, "Review this decision");
+    check("U7 the confirmation says approval is not launch", (await waitText(O, "Approval is not launch")), (await text(O)).slice(-800));
+    await click(O, "Confirm: Approve this exact revision");
     check("U7 the owning team approves: the page says \"Agreed, launch pending\"", await waitText(O, "Agreed, launch pending"), (await text(O)).slice(0, 300));
     await click(O, "See the decision");
     await sleep(800);
