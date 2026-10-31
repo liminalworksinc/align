@@ -16,9 +16,11 @@ const TONES: Record<Tone, string> = {
 
 const ICONS: Record<Tone, string> = { violet: "◆", amber: "▲", neutral: "●", red: "✕", green: "✓", blue: "ⓘ" };
 
-/** `wrap` lets a long badge (a sentence, not a status word) wrap inside its pill instead of running off the edge. */
+/** `wrap` lets a long badge (a sentence, not a status word) wrap inside its pill instead of running off the edge. In a
+ *  narrow container (@max-md:, a container query: the nearest @container under 28rem, i.e. a custom workspace's main
+ *  column on a phone; Northstar's main is not a container) every badge may wrap, so none runs off the screen. */
 export function Badge({ tone, children, icon = true, wrap = false }: { tone: Tone; children: ReactNode; icon?: boolean; wrap?: boolean }) {
-  const fit = wrap ? "min-w-0 whitespace-normal rounded-[14px]" : "shrink-0 whitespace-nowrap rounded-full";
+  const fit = wrap ? "min-w-0 whitespace-normal rounded-[14px]" : "shrink-0 whitespace-nowrap rounded-full @max-md:min-w-0 @max-md:shrink @max-md:whitespace-normal";
   return (
     <span className={`inline-flex max-w-full items-center gap-1.5 border px-2.5 py-[3px] font-mono text-[12px] font-bold leading-[1.3] tracking-[0.04em] ${fit} ${TONES[tone]}`}>
       {icon && <span aria-hidden>{ICONS[tone]}</span>}
@@ -92,8 +94,12 @@ export function Button({
   // Disabled: a faded magenta fill left near-black text at ~1.7:1 on the dark page, so the primary button turns into a
   // neutral surface with readable mid-grey text instead; the outlined kinds keep the plain fade.
   const off = kind === "primary" ? "disabled:bg-zinc-200 disabled:text-zinc-600" : "disabled:opacity-40";
+  // @max-md: is a CONTAINER query, not the 768px viewport breakpoint: it applies when the nearest @container is under
+  // 28rem (about 420-448px). The only one a Button sits in is a custom workspace's main column (CUSTOM_MAIN), which is
+  // that narrow on a phone; there a long label wraps instead of running off the screen. Northstar's main is not a
+  // container, so it is unchanged.
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-[18px] text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed ${off} disabled:hover:brightness-100`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-[18px] @max-md:max-w-full @max-md:whitespace-normal @max-md:py-2 @max-md:text-left text-[15px] font-semibold transition duration-150 ease-[cubic-bezier(0.4,0,0.2,1)] ${k} disabled:cursor-not-allowed ${off} disabled:hover:brightness-100`}>
       {children}
     </button>
   );

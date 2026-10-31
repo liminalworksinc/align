@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
-import { field, type Form } from "@/components/ScenarioForm";
+import { field, toBody, type Form } from "@/components/ScenarioForm";
+import { ScenarioInput } from "@/lib/scenario-input";
 import { ConflictSentence } from "@/components/v6/ConflictSentence";
 
 // The intake interview on /new (lib/interview.ts): Claude asks one question at a time and drafts the form below.
@@ -51,21 +52,28 @@ const READ: Record<string, (f: Form) => string> = {
 /** A form step to jump to: its number in ScenarioFields (the "n." in the step heading), and which control to focus there. */
 export type FormTarget = { step: number; control?: "textarea" };
 
-const filled = (s: string | undefined) => !!s?.trim();
+/** "Draft so far": one row per thing Create needs, each with the schema paths it covers (lib/scenario-input.ts, the
+ *  same rules the server applies). A row is ticked when none of its paths has an issue. Each one jumps to its step. */
+const ROWS: { label: string; paths: string[]; target: FormTarget }[] = [
+  { label: "Company", paths: ["company"], target: { step: 1 } },
+  { label: "What changed", paths: ["company_goal.measures", "company_measure"], target: { step: 2 } },
+  { label: "Goal it affects", paths: ["company_goal.objective"], target: { step: 2 } },
+  { label: "Who’s changing the priority", paths: ["asking.team", "asking.lead"], target: { step: 3 } },
+  { label: "What they’re after", paths: ["asking.objective", "asking.measures"], target: { step: 3 } },
+  { label: "Whose plan has to change", paths: ["owning.team", "owning.lead"], target: { step: 4 } },
+  { label: "What they were working toward", paths: ["owning.objective"], target: { step: 4 } },
+  { label: "How they track it", paths: ["owning.measures", "owner_measure"], target: { step: 4 } },
+  { label: "Why one needs the other", paths: ["dependency"], target: { step: 4, control: "textarea" } },
+  { label: "Work on the old plan", paths: ["work_items"], target: { step: 5 } },
+  { label: "The plan", paths: ["plan"], target: { step: 6, control: "textarea" } },
+];
 
-/** "Draft so far": the fields Create needs, read from the live form. Each one jumps to its step in the form. */
-function checklist(f: Form): { label: string; ok: boolean; target: FormTarget }[] {
-  return [
-    { label: "Company", ok: filled(f.company), target: { step: 1 } },
-    { label: "What changed", ok: filled(f.company_goal.measures[0]), target: { step: 2 } },
-    { label: "Goal it affects", ok: filled(f.company_goal.objective), target: { step: 2 } },
-    { label: "Who’s changing the priority", ok: filled(f.asking.team) && filled(f.asking.lead), target: { step: 3 } },
-    { label: "Whose plan has to change", ok: filled(f.owning.team) && filled(f.owning.lead), target: { step: 4 } },
-    { label: "How they track it", ok: filled(f.owning.measures[0]), target: { step: 4 } },
-    { label: "Why one needs the other", ok: filled(f.dependency), target: { step: 4, control: "textarea" } },
-    { label: "Work on the old plan", ok: filled(f.work_items[0]?.task) && filled(f.work_items[1]?.task), target: { step: 5 } },
-    { label: "The plan", ok: f.plan.text.trim().length >= 20, target: { step: 6, control: "textarea" } },
-  ];
+/** The checklist rows, and whether the whole form would pass Create's validation as it stands. */
+function checklist(f: Form): { items: { label: string; ok: boolean; target: FormTarget }[]; valid: boolean } {
+  const parsed = ScenarioInput.safeParse({ ...toBody(f), confirm: "replace" });
+  const bad = parsed.success ? [] : parsed.error.issues.map((i) => i.path.join("."));
+  const hit = (p: string) => bad.some((b) => b === p || b.startsWith(`${p}.`));
+  return { items: ROWS.map((r) => ({ label: r.label, ok: !r.paths.some(hit), target: r.target })), valid: parsed.success };
 }
 
 function MicIcon() {
@@ -210,8 +218,9 @@ export function InterviewPanel({
       </section>
     );
 
-  const items = checklist(form);
+  const { items, valid } = checklist(form);
   const count = items.filter((i) => i.ok).length;
+  const missing = items.length - count;
 
   return (
     <section aria-labelledby="interview-heading" className="mb-6 rounded-[14px] border border-violet-300 bg-white p-5">
@@ -267,11 +276,19 @@ export function InterviewPanel({
         {busy && <p className="text-[16px] text-zinc-600">Thinking…</p>}
         <div ref={end} />
       </div>
-      {done && (
-        <p role="status" className="mb-3 rounded-[10px] border border-emerald-300 bg-emerald-50 p-3 text-[16px] text-zinc-900">
-          The form below is filled in. Check each field, change anything that’s off, then press Create.
-        </p>
-      )}
+      {/* "Filled in" only when Create's own rules pass; otherwise say how many rows still need the person. */}
+      {done &&
+        (valid ? (
+          <p role="status" className="mb-3 rounded-[10px] border border-emerald-300 bg-emerald-50 p-3 text-[16px] text-zinc-900">
+            The form below is filled in. Check each field, change anything that’s off, then press Create.
+          </p>
+        ) : (
+          <p role="status" className="mb-3 rounded-[10px] border border-amber-300 bg-amber-50 p-3 text-[16px] text-zinc-900">
+            {missing === 0
+              ? "The interviewer is done. Some fields still need fixing. Open the form below to check them."
+              : `The interviewer is done. ${missing} ${missing === 1 ? "field still needs" : "fields still need"} you; ${missing === 1 ? "it’s" : "they’re"} marked ○ in Draft so far.`}
+          </p>
+        ))}
       {problem && (
         <p role="alert" className="mb-3 rounded-[10px] border border-red-300 bg-red-50 p-3 text-[16px] text-red-800">
           {problem}

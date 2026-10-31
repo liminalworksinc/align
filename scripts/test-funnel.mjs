@@ -316,6 +316,16 @@ async function phaseLocal(dir) {
       check(`browser ${role}: Your turn shows the card after RATIFIED, with the accepted change, approvers, goals and teams, work and links`, shown && want.every((re) => re.test(card)), `missing ${want.filter((re) => !re.test(card)).join(" ")} :: ${card.slice(0, 900)}`);
       check(`browser ${role}: measured time comes from the timestamps (Proposal to agreement: 14 minutes)`, /Proposal to agreement:\s*14 minutes/.test(t), (t.match(/Proposal to agreement:[^\n]*/) ?? [""])[0]);
       if (role === "leadership") check("browser: with no launch decision the card says not decided yet", /Launch decision:\s*Not decided yet/.test(t) && /no launch decision yet/.test(t), (t.match(/Launch decision:[^\n]*/) ?? [""])[0]);
+      // LIM-2452 review: at exactly 768px (the md edge, where the shell's phone layout is off) a workspace's leadership
+      // header (Restart this scenario, Switch team, Sign out) wraps instead of running off the screen.
+      if (role === "leadership") {
+        await pg.setViewport({ width: 768, height: 1000 });
+        await sleep(600);
+        const m = await pg.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, W: window.innerWidth }));
+        await pg.setViewport({ width: 1440, height: 1000 });
+        await sleep(300);
+        check("browser leadership: at 768 the workspace page does not scroll sideways", m.scrollWidth <= m.W, JSON.stringify(m));
+      }
       const links = await pg.$$eval("a[target=_blank]", (as) => as.map((a) => ({ href: a.href, rel: a.rel, text: a.textContent })));
       const w = links.find((l) => /waitlist/.test(l.text));
       const l = links.find((x) => /letter of intent/.test(x.text));
@@ -420,6 +430,88 @@ async function phaseLocal(dir) {
       check("browser: scrolling the card into view records value_card_viewed once (not again on a second scroll)", n === 1 && viewedBy("product") === 1, `${n} ${viewedBy("product")}`);
     } finally {
       await browser.close();
+    }
+  }
+
+  // A view is the card's top seen for a second (LIM-2445 under-count). The card is taller than the scroll column (the main
+  // column on desktop, the window on a phone), so a person who scrolls to it sees its heading and first rows, not half of it.
+  // Per viewport, a fresh workspace: product never scrolls to it, then glances (< 500 ms); security looks for 1.5 s, twice.
+  for (const [vw, vh] of [
+    [1440, 900],
+    [390, 844],
+  ]) {
+    const W = await newWorkspace(`FUNNELV${vw}`);
+    const ag = await agree(W);
+    const viewedBy = (role) => (stateOf(dir, W.ws).funnel?.events ?? []).filter((e) => e.action === "value_card_viewed" && e.role === role).length;
+    const settle = async (role, want) => {
+      let n = viewedBy(role);
+      for (let i = 0; i < 10 && n < want; i++) {
+        await sleep(300);
+        n = viewedBy(role);
+      }
+      return n;
+    };
+    // Scroll the card's scroll container so its top `px` pixels show at the bottom of the column (px = 0 scrolls to the top).
+    const showTop = (pg, px) =>
+      pg.evaluate((px) => {
+        const card = document.querySelector('section[aria-label="What this decision gave you"]');
+        let sc = card.parentElement;
+        while (sc && sc !== document.body && !(/(auto|scroll)/.test(getComputedStyle(sc).overflowY) && sc.scrollHeight > sc.clientHeight)) sc = sc.parentElement;
+        const win = !sc || sc === document.body;
+        if (px === 0) {
+          if (win) window.scrollTo(0, 0);
+          else sc.scrollTop = 0;
+        } else {
+          const bottom = win ? window.innerHeight : sc.getBoundingClientRect().bottom;
+          const delta = card.getBoundingClientRect().top - (bottom - px);
+          if (win) window.scrollBy(0, delta);
+          else sc.scrollTop += delta;
+        }
+        const top = card.getBoundingClientRect().top;
+        const colTop = win ? 0 : sc.getBoundingClientRect().top;
+        const bottom = win ? window.innerHeight : sc.getBoundingClientRect().bottom;
+        return { visible: Math.round(Math.max(0, bottom - Math.max(top, colTop))), headingAt: Math.round(top - colTop), column: Math.round(bottom - colTop), card: Math.round(card.getBoundingClientRect().height) };
+      }, px);
+    const open = async (role) => {
+      const b = await browserFor(W.c[role]);
+      await b.page.setViewport({ width: vw, height: vh });
+      await b.page.goto(`http://127.0.0.1:${PORT}/w/${W.ws}`, { waitUntil: "networkidle0" });
+      await waitText(b.page, /What this decision gave you/);
+      return b;
+    };
+    {
+      const { browser, page: pg } = await open("product");
+      try {
+        await sleep(2500);
+        const at = await showTop(pg, 0);
+        check(`browser ${vw}x${vh}: (a) a card never scrolled to records no value_card_viewed`, ag.ok && at.visible === 0 && viewedBy("product") === 0, `${ag.detail} ${JSON.stringify(at)} events=${viewedBy("product")}`);
+        const g = await showTop(pg, 380);
+        await sleep(300);
+        await showTop(pg, 0);
+        await sleep(2500);
+        check(`browser ${vw}x${vh}: (c) the card's top seen under 500 ms, then scrolled away, records no value_card_viewed`, g.visible >= 300 && viewedBy("product") === 0, `${JSON.stringify(g)} events=${viewedBy("product")}`);
+      } finally {
+        await browser.close();
+      }
+    }
+    {
+      const { browser, page: pg } = await open("security");
+      try {
+        await sleep(1000);
+        const before = viewedBy("security");
+        // As a person scrolls to it: the heading and the accepted change in view, ~380 px of the card showing.
+        const at = await showTop(pg, 380);
+        await sleep(1500);
+        const n = await settle("security", 1);
+        check(`browser ${vw}x${vh}: (b) the card's top in view for 1.5 s records value_card_viewed exactly once`, before === 0 && n === 1, `before=${before} after=${n} ${JSON.stringify(at)}`);
+        await showTop(pg, 0);
+        await sleep(500);
+        await showTop(pg, 380);
+        await sleep(2000);
+        check(`browser ${vw}x${vh}: (d) viewing the card a second time still leaves one value_card_viewed`, viewedBy("security") === 1, `events=${viewedBy("security")}`);
+      } finally {
+        await browser.close();
+      }
     }
   }
 

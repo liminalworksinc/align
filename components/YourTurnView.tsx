@@ -78,12 +78,12 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
         <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
           {avatar(it.team)}
         </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <span className="flex min-w-0 flex-1 flex-col gap-1.5 @max-md:basis-[calc(100%-48px)]">
           <span className="text-[16px] font-semibold leading-snug text-zinc-900">{it.title}</span>
           {it.quote && <span className="text-[15px] leading-snug text-zinc-700">“{it.quote}”</span>}
           {it.sub && <span className="text-[14px] leading-snug text-zinc-500">{it.sub}</span>}
         </span>
-        <span className="flex shrink-0 gap-2 self-center">
+        <span className="flex shrink-0 flex-wrap gap-2 self-center @max-md:ml-12 @max-md:self-start">
           {it.actions.map((a) => (
             <button
               key={a.label}
@@ -101,7 +101,7 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
     <button
       type="button"
       onClick={it.open}
-      className={`flex w-full items-start gap-3.5 rounded-[14px] border bg-white px-[18px] py-4 text-left transition hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 ${hot ? "border-violet-700" : "border-zinc-200"}`}
+      className={`flex w-full items-start gap-3.5 rounded-[14px] border bg-white px-[18px] py-4 text-left transition @max-md:flex-wrap hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 ${hot ? "border-violet-700" : "border-zinc-200"}`}
     >
       <span
         aria-hidden
@@ -109,13 +109,13 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
       >
         {avatar(it.team)}
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+      <span className="flex min-w-0 flex-1 flex-col gap-1.5 @max-md:basis-[calc(100%-48px)]">
         <span className="text-[16px] font-semibold leading-snug text-zinc-900">{it.title}</span>
         {it.quote && <span className="text-[15px] leading-snug text-zinc-700">“{it.quote}”</span>}
         {it.sub && <span className="text-[14px] leading-snug text-zinc-500">{it.sub}</span>}
       </span>
       <span
-        className={`inline-flex min-h-[34px] shrink-0 items-center self-center rounded-[10px] border px-3 text-[14px] font-semibold ${hot ? "border-transparent bg-violet-700 text-black" : "border-zinc-300 text-zinc-900"}`}
+        className={`inline-flex min-h-[34px] shrink-0 items-center self-center rounded-[10px] border px-3 text-[14px] font-semibold @max-md:ml-12 @max-md:self-start ${hot ? "border-transparent bg-violet-700 text-black" : "border-zinc-300 text-zinc-900"}`}
       >
         {it.cta}
       </span>
@@ -380,11 +380,11 @@ export function YourTurnView(props: ViewProps) {
         <section aria-label="What changed" className="flex flex-col gap-2.5">
           <h2 className="al-lbl">{changedToday(ceo) || isToday(acc?.ratified_at) ? "Changed today" : "What changed"}</h2>
           {kr && (
-            <div className="flex items-start gap-3.5 rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4">
+            <div className="flex items-start gap-3.5 rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 @max-md:flex-wrap">
               <Badge tone="amber" icon={false}>
                 {L.northstar ? "CEO" : L.team.ceo}
               </Badge>
-              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5 @max-md:basis-full">
                 <span className="text-[16px] font-semibold leading-snug text-zinc-900">{kr.text}</span>
                 <span className="flex flex-wrap items-center gap-2 text-[14px] text-zinc-500">
                   Affects {poss(L.team.security)} goal and what {L.team.product} needs from {L.team.security}
@@ -398,7 +398,7 @@ export function YourTurnView(props: ViewProps) {
                   if (ceo) select({ kind: "goal", id: ceo.id });
                   go("goals");
                 }}
-                className="inline-flex min-h-[34px] shrink-0 items-center self-center rounded-[10px] px-3 text-[14px] font-semibold text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"
+                className="inline-flex min-h-[34px] shrink-0 items-center self-center rounded-[10px] px-3 text-[14px] font-semibold text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 @max-md:-ml-3 @max-md:self-start"
               >
                 See goals
               </button>
