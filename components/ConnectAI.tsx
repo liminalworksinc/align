@@ -271,7 +271,7 @@ export default function ConnectAI({
               </div>
             ) : (
               <p className="mb-5 rounded-[10px] bg-zinc-50 p-3 text-[15px] text-zinc-700">
-                Once it’s connected you’ll see it here. Then ask it: “{TRY}” Apps check Align each time you send a message.
+                Once it’s connected you’ll see it here. Then ask it: “{TRY}” Apps can check Align when you send them a message.
               </p>
             )}
             <h3 className="mb-2 text-[18px] font-semibold">Connected</h3>
