@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Card, Err, Loading, Note, Select, Shell, num, usd, useApi } from "../../../_ui/kit";
+import { Card, Err, Loading, Note, PHONE_TABLE, Select, Shell, num, usd, useApi } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
 
 type Nums = { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number };
@@ -26,8 +26,8 @@ const cacheWrite = (s: Nums) => s.cache_write_5m + s.cache_write_1h + s.cache_wr
 function Row({ label, s, strong }: { label: string; s: Sums; strong?: boolean }) {
   const bases = Object.entries(s.by_basis).filter(([, v]) => v.requests > 0);
   return (
-    <tr className={`border-t border-zinc-200 align-top ${strong ? "font-semibold text-zinc-900" : ""}`}>
-      <td className="py-2 pr-3">
+    <tr className={`border-t border-zinc-200 align-top ${PHONE_TABLE.row} ${strong ? "font-semibold text-zinc-900" : ""}`}>
+      <td className={`py-2 pr-3 ${PHONE_TABLE.whole}`}>
         {label}
         {bases.length > 0 && (
           <div className="text-[13px] font-normal text-zinc-500">
@@ -35,14 +35,16 @@ function Row({ label, s, strong }: { label: string; s: Sums; strong?: boolean })
           </div>
         )}
       </td>
-      <td className="py-2 pr-3 text-right">{num(s.requests)}</td>
-      <td className="py-2 pr-3 text-right">{num(s.input)}</td>
-      <td className="py-2 pr-3 text-right">{num(s.output)}</td>
-      <td className="py-2 pr-3 text-right">{num(s.cache_read)}</td>
-      <td className="py-2 pr-3 text-right">{num(cacheWrite(s))}</td>
-      <td className="py-2 text-right">
-        {usd(s.est_list_usd_micros)}
-        {s.unpriced_requests > 0 && <div className="text-[13px] font-normal text-amber-700">{num(s.unpriced_requests)} unpriced</div>}
+      <td data-label="Requests" className={`py-2 pr-3 text-right ${PHONE_TABLE.cell}`}>{num(s.requests)}</td>
+      <td data-label="Input" className={`py-2 pr-3 text-right ${PHONE_TABLE.cell}`}>{num(s.input)}</td>
+      <td data-label="Output" className={`py-2 pr-3 text-right ${PHONE_TABLE.cell}`}>{num(s.output)}</td>
+      <td data-label="Cache read" className={`py-2 pr-3 text-right ${PHONE_TABLE.cell}`}>{num(s.cache_read)}</td>
+      <td data-label="Cache write" className={`py-2 pr-3 text-right ${PHONE_TABLE.cell}`}>{num(cacheWrite(s))}</td>
+      <td data-label="Estimated list cost" className={`py-2 text-right ${PHONE_TABLE.cell}`}>
+        <span>
+          {usd(s.est_list_usd_micros)}
+          {s.unpriced_requests > 0 && <span className="block text-[13px] font-normal text-amber-700">{num(s.unpriced_requests)} unpriced</span>}
+        </span>
       </td>
     </tr>
   );
@@ -71,8 +73,8 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
           <>
             <Note>{d.data.note} Goals you can&apos;t see are grouped without names. There is no per-person view.</Note>
             <div className="overflow-x-auto">
-              <table className="w-full text-[15px]">
-                <thead>
+              <table className={`w-full text-[15px] ${PHONE_TABLE.table}`}>
+                <thead className={PHONE_TABLE.head}>
                   <tr className="text-left text-[13px] text-zinc-500">
                     <th className="py-2 pr-3 font-normal">{by === "goal" ? "Goal" : by === "team" ? "Team" : "Session"}</th>
                     <th className="py-2 pr-3 text-right font-normal">Requests</th>
@@ -83,7 +85,7 @@ export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
                     <th className="py-2 text-right font-normal">Estimated list cost</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className={PHONE_TABLE.body}>
                   {d.data.rows.map((r) => (
                     <Row key={r.key} label={r.label} s={r} />
                   ))}

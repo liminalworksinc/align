@@ -49,7 +49,7 @@ export function GoalActivityCard({ ws, goal, me }: { ws: string; goal: Goal; me:
             {(a.detail.files.length > 0 || a.detail.files_hidden > 0) && (
               <div className="mt-3">
                 <p className="text-[14px] text-zinc-500">Files agents are working on</p>
-                <ul className="list-disc pl-5 font-mono text-[13px] text-zinc-700">
+                <ul className="list-disc pl-5 font-mono text-[13px] text-zinc-700 [overflow-wrap:anywhere]">
                   {a.detail.files.map((f) => (
                     <li key={f}>{f}</li>
                   ))}

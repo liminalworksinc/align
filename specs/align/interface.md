@@ -26,7 +26,8 @@ screen says "team".
 | `/app/device` | Connect a device | A signed-in person (recent sign-in) | Approve the code that `align login` printed |
 | `/app/devices` | Your devices | A signed-in person | List and revoke paired devices |
 | `/app/invite/<token>` | Workspace invite | The invited person | Join a workspace (and team) from an invite link |
-| `/app/w/<ws>` | Goals tab | Workspace members | Goals the person can read; create a goal |
+| `/app/w/<ws>` | Home | Workspace members | What waits on the person and on others, the active goals, and what connected AI apps last read |
+| `/app/w/<ws>/goals` | Goals tab | Workspace members | Goals the person can read; create a goal |
 | `/app/w/<ws>/goals/<goal>` | Goal page | Workspace members | One goal: versions, tree, new version, alignment request, change requests |
 | `/app/w/<ws>/people` | People tab | Workspace members | Members, roles, invites, teams, leaving, deleting the workspace |
 | `/app/w/<ws>/sessions` | Sessions tab | Workspace members | Shared sessions, stop and resume |
@@ -43,8 +44,9 @@ screen says "team".
 Navigation: every `/app` page except sign-in has a top bar with the **Align** mark (a link to `/app`), a workspace
 switcher (shown once the person has a workspace), **Devices**, **Account**, the person's name (email on hover) and
 **Sign out**. Under it, a person with no passkey who has not dismissed the offer sees the add-a-passkey prompt. Inside
-a workspace a second bar shows the workspace name, the person's role and the tabs Goals,
-People, Sessions, Alignments, Requests, Asks, Spend and Apps, with the current tab highlighted.
+a workspace a second bar shows the workspace name, the person's role and the tabs Home, Goals,
+People, Sessions, Alignments, Requests, Asks, Spend and Apps, with the current tab highlighted. Opening a workspace
+(from the list, the switcher, a new workspace, the sample or an invite) lands on its Home.
 
 ### Requirement: Root path redirects to the web app
 
@@ -422,9 +424,88 @@ email join with **Join workspace**.
 - **WHEN** a signed-out invitee opens the invite link
 - **THEN** sign-in opens with `next` set to the invite page; the email code for the invited address creates their account, because an invite for it is pending
 
+### Requirement: Workspace Home
+
+The Home at `/app/w/<ws>`, a workspace's landing view, SHALL show under "Know what needs you", from one read of
+`GET /api/v2/workspaces/<ws>/home`, a line saying how many things wait on the person, four count tiles ("Waiting on
+you", "Waiting on others", "Active goals", and "Connected apps with a read seen" as "<read> of <connected>", or
+"Connected apps" with none), each a link to its section, and the sections "Waiting on you", "Waiting on others",
+"Active goals" and "Connected AI apps · what they last read". It SHALL show only what the server holds: a count or a
+section the server could not read SHALL say "unknown", never zero, and nothing on the page SHALL infer what an agent is
+doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version). The page
+reads once when it opens and does not poll.
+
+The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
+bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`), `asks`
+(`waiting_on_me`), `alignments` (`waiting_on_me`, `waiting_on_others`), `goals` and `apps` (`everyone`, `items`),
+each `null` when the server could not read it. Every queue item SHALL carry `next` (what it needs) and `waiting_on`
+(the people it waits on). An open change request waits on its approvers to decide (`waiting_on` is the effective
+approval set, and empty when nobody can approve it yet); pending behind the goal's current version, on its requester to
+update it (`rebase`); countered, on its requester to accept the change (`accept_counter`). It is waiting on the person
+when their `approve` or `accept_counter` flag is set or it is their own request to update; otherwise it is listed under
+waiting on others when the person asked for it, is in its approval set, or the goal is theirs, their team's, or (for a
+workspace owner) a company goal. An ask waits on the person when its `waiting_on_me` is set (`accept` while open,
+`done` once accepted). An alignment the person is part of waits on its requester when countered and, when pending, on
+everyone who could satisfy a requirement nobody has satisfied yet. Active goals are the readable active goals, the
+person's own (owned, their team's, or a company goal for a workspace owner) first. An approved change request that is
+not launched (`launch` `pending` or `not_yet`) SHALL be listed with `next: "launch"` as "Approved, not launched": waiting
+on the person when their `can.launch` flag is set, otherwise under waiting on others, with `waiting_on` its `launchers`,
+when the person asked for it or the goal is theirs, their team's, or (for a workspace owner) a company goal. A launched
+or superseded request is on no Home.
+
+Every agent-status item SHALL show exactly one evidence class, "delivery receipt" (a `received`, `applied` or
+`enforced` receipt, or a read Align served), "agent reported" (the agent's own claim or evidence link) or "not
+observed" (Align has nothing), and the read SHALL return the same class as `evidence_class`. Each connected app is
+listed with what the Apps tab has: its name, who connected it, when it was approved and **Last read**; an app with a
+read is a delivery receipt with "Last read <time>", one without is not observed with "Approved <time>, no read seen
+yet". A workspace owner sees every connected app and anyone else their own, as on the Apps tab.
+
+#### Scenario: Waiting on you and on others
+
+- **WHEN** a member proposes a change to a team goal and the team's lead opens the Home
+- **THEN** the lead's "Waiting on you" lists "<requester>'s request on <goal>" with the quoted reason, "Approve it, suggest a change or decline it." and **Open** (the goal page's change requests), and the requester's "Waiting on others" lists it with "Waiting on <lead> to decide."; after a counter it waits on the requester, and after the goal's owner saves a newer version it reads "Waiting on <requester> to update it to version <n>."
+
+#### Scenario: Asks and alignments
+
+- **WHEN** an ask of the lead's team is open and an alignment request with a company goal is pending
+- **THEN** the lead's "Waiting on you" lists "<who asked> asked <team>" with the quoted ask, and the workspace owner's lists "<requester> asks to align with <goal>"; each opens its tab
+
+#### Scenario: Connected apps
+
+- **WHEN** a workspace owner opens the Home with one app that has read the workspace and one that has not
+- **THEN** the tile reads "1 of 2", the first app shows "delivery receipt" and "Last read <time>", the second "not observed" and "no read seen yet", and the section says that a delivery receipt here is a read Align served (recorded at most every 5 minutes) and that Align sees when an app last read the workspace, not what it does with it
+
+#### Scenario: Nothing observed
+
+- **WHEN** the person has no connected app they can see
+- **THEN** the section shows one item marked "not observed": no app is connected (for a member, they have not connected one), so Align has observed no agent reads, with a link to the Apps tab
+
+#### Scenario: A failed read
+
+- **WHEN** the Home's read fails, or the server could not read one of its sections
+- **THEN** each affected tile says "unknown", the line says how much is waiting is unknown, and the section says Align couldn't read it just now, so it is unknown; nothing shows zero or "not observed" in its place
+
+#### Scenario: A workspace with no goals
+
+- **WHEN** a workspace has no active goal the person can see
+- **THEN** "Active goals" says "No active goals you can see." with a link to the Goals tab
+
+### Requirement: Web app fits a phone
+
+Every `/app` page SHALL fit a 390×844 screen with no sideways scrolling (`document.scrollingElement.scrollWidth` no
+wider than the window): the top bar, the workspace tabs and the passkey prompt wrap, padding narrows below 640 px, a
+word longer than its line (a link label, a URL, a host or a path) breaks instead of running off the side while button
+labels break only between words, and the Spend and Apps tables show each row as lines labelled with their column
+names.
+
+#### Scenario: Phone
+
+- **WHEN** a signed-in person opens the workspace list, account, device, devices, request access, a workspace's Home, Goals tab, a goal page, People, Sessions, Alignments, Requests, Asks, Spend or Apps on a 390 px wide screen
+- **THEN** nothing scrolls sideways, and an Apps connection reads as its name, then "Sends you back to", "Connected by", "Approved" and "Last read" lines, then **Disconnect**
+
 ### Requirement: Workspace Goals tab
 
-The Goals tab at `/app/w/<ws>` SHALL list the goals the person can read from `GET /api/v2/workspaces/<ws>/goals`,
+The Goals tab at `/app/w/<ws>/goals` SHALL list the goals the person can read from `GET /api/v2/workspaces/<ws>/goals`,
 and SHALL give everyone but viewers a "New goal" form that posts to `POST /api/v2/workspaces/<ws>/goals`.
 
 #### Scenario: Goal list
@@ -982,6 +1063,10 @@ active goal), neutral otherwise.
 - `app/app/devices/view.tsx`
 - `app/app/invite/[token]/view.tsx`
 - `app/app/w/[ws]/view.tsx`
+- `app/app/w/[ws]/goals/view.tsx`
+- `app/api/v2/workspaces/[ws]/home/route.ts`
+- `lib/v2/home.ts`
+- `lib/v2/home-core.mts`
 - `app/app/w/[ws]/goals/[goal]/view.tsx`
 - `app/app/w/[ws]/people/view.tsx`
 - `app/app/w/[ws]/sessions/view.tsx`

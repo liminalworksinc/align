@@ -317,6 +317,11 @@ applied } | null (the launch's directive), measured: { proposal_to_decision, dec
 decision_to_first_applied }, my_report, reports, sees_all_reports, follow_up_url }`; `POST .../value` same-site `{ action:
 "viewed"|"follow_up"|"reported", estimate?, note? (≤ 500) }` → `{ recorded, report }`; 409 `not_approved` before
 approval, 409 `edit_closed` 7 days after a report was saved, 429 past 30 a minute per person; see `lib/v2/value.ts`),
+the workspace Home (`GET .../home`, cookie only, members and viewers → `{ me, change_requests: { waiting_on_me,
+waiting_on_others } | null, asks: { waiting_on_me } | null, alignments: { waiting_on_me, waiting_on_others } | null, goals
+| null, apps: { everyone, items: [ { id, name, connected_by, approved_at, last_read_at, evidence_class:
+"delivery_receipt"|"agent_reported"|"not_observed" } ] } | null }`; each queue item has `next` and `waiting_on`; a section
+the server couldn't read is `null`; see `lib/v2/home.ts`),
 `GET /api/v2/device/requests/:code`,
 `POST /api/v2/device/approve` (`{ user_code, workspace_ids }`; needs a sign-in from the last 15 minutes, else
 `403 reauth_required`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,

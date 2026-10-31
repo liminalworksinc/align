@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { api, Btn, Card, Err, Loading, Note, Shell, useAction, useApi, when } from "../../../_ui/kit";
+import { api, Btn, Card, Err, Loading, Note, PHONE_TABLE, Shell, useAction, useApi, when } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
 import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 
@@ -72,7 +72,7 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
           <>
             <p className="mb-3 text-[15px]">Add this MCP server URL to your AI app. It will send you to Align to sign in and choose this workspace.</p>
             <div className="flex flex-wrap items-center gap-2">
-              <code className="rounded-[8px] bg-zinc-100 px-2 py-1 font-mono text-[14px] text-zinc-900">{apps.data.url}</code>
+              <code className="break-all rounded-[8px] bg-zinc-100 px-2 py-1 font-mono text-[14px] text-zinc-900">{apps.data.url}</code>
               <Btn kind="secondary" onClick={() => void copy(apps.data!.url)}>
                 {copied ? "Copied" : "Copy"}
               </Btn>
@@ -92,8 +92,8 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
         {apps.data && apps.data.apps.length === 0 && <Note>No AI apps are connected to this workspace.</Note>}
         {apps.data && apps.data.apps.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="w-full text-[15px]">
-              <thead>
+            <table className={`w-full text-[15px] ${PHONE_TABLE.table}`}>
+              <thead className={PHONE_TABLE.head}>
                 <tr className="text-left text-[13px] text-zinc-500">
                   <th className="py-2 pr-3 font-normal">App</th>
                   <th className="py-2 pr-3 font-normal">Sends you back to</th>
@@ -103,18 +103,18 @@ export default function AppsPage({ me, ws }: { me: Me; ws: string }) {
                   <th className="py-2 font-normal" />
                 </tr>
               </thead>
-              <tbody>
+              <tbody className={PHONE_TABLE.body}>
                 {apps.data.apps.map((a) => (
-                  <tr key={a.id} className="border-t border-zinc-200 align-top">
-                    <td className="py-2 pr-3 text-zinc-900">
+                  <tr key={a.id} className={`border-t border-zinc-200 align-top ${PHONE_TABLE.row}`}>
+                    <td className={`py-2 pr-3 text-zinc-900 ${PHONE_TABLE.whole}`}>
                       {a.name}
                       <div className="text-[13px] text-zinc-500">{a.scopes.includes("changes:evidence") ? "Reads, and adds evidence links" : "Reads only"}</div>
                     </td>
-                    <td className="py-2 pr-3 font-mono text-[14px]">{a.redirect_host}</td>
-                    <td className="py-2 pr-3">{a.user.name}</td>
-                    <td className="py-2 pr-3">{when(a.approved_at)}</td>
-                    <td className="py-2 pr-3">{a.last_used_at ? when(a.last_used_at) : "Never"}</td>
-                    <td className="py-2 text-right">
+                    <td data-label="Sends you back to" className={`py-2 pr-3 font-mono text-[14px] ${PHONE_TABLE.cell}`}>{a.redirect_host}</td>
+                    <td data-label="Connected by" className={`py-2 pr-3 ${PHONE_TABLE.cell}`}>{a.user.name}</td>
+                    <td data-label="Approved" className={`py-2 pr-3 ${PHONE_TABLE.cell}`}>{when(a.approved_at)}</td>
+                    <td data-label="Last read" className={`py-2 pr-3 ${PHONE_TABLE.cell}`}>{a.last_used_at ? when(a.last_used_at) : "Never"}</td>
+                    <td className={`py-2 text-right ${PHONE_TABLE.whole}`}>
                       {(role === "owner" || a.user.id === detail.data?.me) && (
                         <Btn kind="danger" onClick={() => void disconnect(a)} disabled={act.busy}>
                           Disconnect

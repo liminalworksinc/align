@@ -86,7 +86,8 @@ export interface WsSummary {
 }
 
 const WS_TABS = [
-  { href: "", label: "Goals" },
+  { href: "", label: "Home" },
+  { href: "/goals", label: "Goals" },
   { href: "/people", label: "People" },
   { href: "/sessions", label: "Sessions" },
   { href: "/alignments", label: "Alignments" },
@@ -110,7 +111,7 @@ function PasskeyPrompt() {
     void fetch("/api/v2/account/passkey-prompt", { method: "DELETE", credentials: "same-origin" }).catch(() => undefined);
   };
   return (
-    <div id="passkey-prompt" className="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-violet-50 px-6 py-2 text-[15px] text-zinc-800">
+    <div id="passkey-prompt" className="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-violet-50 px-6 py-2 text-[15px] text-zinc-800 max-sm:px-4">
       <span className="flex-1">Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code. A passkey can&apos;t be phished.</span>
       <Link href="/app/account#passkeys" className="font-medium text-violet-700 hover:underline">
         Add a passkey
@@ -123,13 +124,15 @@ function PasskeyPrompt() {
 }
 
 /** Page frame: top bar (workspace switcher, devices, sign out), the passkey prompt when due and, inside a workspace,
- *  its tabs. */
+ *  its tabs. Every bar wraps, below 640px (sm) the padding narrows, and a word longer than its line (a 120-character
+ *  link label, a URL, a pasted path) breaks rather than running off the side, so every /app page fits a 390px phone
+ *  without sideways scrolling (LIM-2452, PORT2-001; scripts/test-v2.mjs checks each page at 390x844). */
 export function Shell({ me, ws, tab, children }: { me: { name: string; email: string; passkeyPrompt?: boolean }; ws?: string; tab?: string; children: ReactNode }) {
   const list = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
   const current = list.data?.workspaces.find((w) => w.id === ws);
   return (
     <div className="min-h-screen bg-[var(--al-bg)] text-zinc-800">
-      <header className="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-[var(--al-rail)] px-6 py-3">
+      <header className="flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-[var(--al-rail)] px-6 py-3 max-sm:px-4">
         <Link href="/app" className="font-display text-[26px] leading-none">
           Align
         </Link>
@@ -150,7 +153,7 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
             ))}
           </select>
         )}
-        <nav className="ml-auto flex items-center gap-4 text-[15px] text-zinc-600">
+        <nav className="ml-auto flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-[15px] text-zinc-600">
           <Link href="/app/devices" className="hover:text-zinc-900">
             Devices
           </Link>
@@ -167,7 +170,7 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
       </header>
       {me.passkeyPrompt && <PasskeyPrompt />}
       {ws && (
-        <nav className="flex flex-wrap gap-1 border-b border-zinc-200 px-6 pt-2" aria-label="Workspace">
+        <nav className="flex flex-wrap gap-1 border-b border-zinc-200 px-6 pt-2 max-sm:px-4" aria-label="Workspace">
           <span className="mr-4 self-center text-[15px] text-zinc-500">
             {current?.name ?? ""}
             {current && <span className="al-lbl ml-2">{current.role}</span>}
@@ -183,7 +186,7 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
           ))}
         </nav>
       )}
-      <main className="mx-auto max-w-[1100px] p-6">{children}</main>
+      <main className="mx-auto max-w-[1100px] p-6 [overflow-wrap:anywhere] max-sm:p-4">{children}</main>
     </div>
   );
 }
@@ -228,7 +231,7 @@ export function Btn({ children, onClick, kind = "primary", disabled, type = "but
     danger: "border-red-700 bg-transparent text-red-700 hover:bg-red-50",
   }[kind];
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`rounded-[10px] border px-3.5 py-2 text-[15px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${k}`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`rounded-[10px] border px-3.5 py-2 text-[15px] font-medium transition [overflow-wrap:normal] disabled:cursor-not-allowed disabled:opacity-50 ${k}`}>
       {children}
     </button>
   );
@@ -273,7 +276,7 @@ export function Note({ children }: { children: ReactNode }) {
 
 export function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "violet" | "amber" | "red" | "green" }) {
   const t = { neutral: "text-zinc-600 border-zinc-300", violet: "text-violet-700 border-violet-700", amber: "text-amber-700 border-amber-700", red: "text-red-700 border-red-700", green: "text-emerald-700 border-emerald-700" }[tone];
-  return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[12px] tracking-[0.04em] ${t}`}>{children}</span>;
+  return <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 font-mono text-[12px] tracking-[0.04em] [overflow-wrap:anywhere] ${t}`}>{children}</span>;
 }
 
 /** The footer of the sign-in and request-access cards: the public privacy policy and trust page (PRESEED-008). */
@@ -290,6 +293,18 @@ export function TrustLinks() {
     </p>
   );
 }
+
+/** A table on a phone (below 640px): each row becomes a block and each cell a line with its column name (the cell's
+ *  data-label) on the left, so the table never scrolls sideways (LIM-2452's phone layout, PORT2-001). `whole` is a
+ *  cell shown as its own line with no label (a row's name, its buttons). */
+export const PHONE_TABLE = {
+  table: "max-sm:block",
+  head: "max-sm:sr-only",
+  body: "max-sm:block",
+  row: "max-sm:block max-sm:py-2",
+  cell: "max-sm:flex max-sm:justify-between max-sm:gap-3 max-sm:py-0.5 max-sm:pr-0 max-sm:text-right max-sm:before:shrink-0 max-sm:before:text-left max-sm:before:text-[13px] max-sm:before:font-normal max-sm:before:text-zinc-500 max-sm:before:content-[attr(data-label)]",
+  whole: "max-sm:block max-sm:py-0.5 max-sm:pr-0 max-sm:text-left",
+};
 
 export const Loading = () => <p className="text-[15px] text-zinc-500">Loading…</p>;
 
