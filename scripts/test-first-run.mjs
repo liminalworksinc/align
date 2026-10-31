@@ -321,6 +321,11 @@ async function phaseLocal(dir) {
     // Any successful MCP call counts as a read (last_used_at), tools/list included, so it comes after the approved check.
     const tools = rpcResult(await rpc(tok, "tools/list", {}))?.tools ?? [];
     check("'It can read' has one line per tool the MCP server lists, and every tool only reads", reads.length > 0 && reads.length === tools.length && tools.every((t) => t.annotations?.readOnlyHint === true), `${reads.length} lines, ${tools.length} tools`);
+    check(
+      "the goal-activity line says it is what sessions reported (not what Align saw), with no hosted suffix in Mode L",
+      tools.some((t) => t.name === "align_get_goal_activity") && reads.includes("What connected sessions reported on each goal") && !reads.some((r) => /What agents did/.test(r)),
+      reads.join(" | "),
+    );
 
     // The card adds no request: the load-time polls are the same with the card shown and hidden (counted on w2 below).
     // A failed check: the card says so, and claims nothing about the agents.
@@ -421,6 +426,8 @@ async function phaseHosted(dir) {
     const c0 = await card(page);
     const link = await page.evaluate(() => !!document.querySelector('section[aria-label="Get started"] a[href="/"]'));
     check("hosted: the card shows both paths; Explore says there's no sample here and has no link", shown && /Explore a sample/.test(c0?.text ?? "") && /There’s no sample on this test server\./.test(c0?.text ?? "") && !link && /Connect one agent/.test(c0?.text ?? ""), c0?.text);
+    const hReads = await page.evaluate(() => [...document.querySelectorAll('ul[aria-label="What the agent can read"] li')].map((li) => li.textContent));
+    check("hosted: the goal-activity line says it is reported and off on the test server", hReads.includes("What connected sessions reported on each goal (off on the test server)"), hReads.join(" | "));
     check("hosted: the setup line names this server's https MCP URL", /claude mcp add/.test(c0?.text ?? "") && c0.text.includes(`https://${HOSTED_HOST}/api/mcp`), c0?.text);
     await shots(page, "none");
     const tok = await connect(w, await newClient("Claude Code"), "leadership");

@@ -15,8 +15,11 @@ interface FirstRunApp {
   last_used_at: string | null;
 }
 
-/** What an agent connected to a workspace can read: one line per tool in lib/mcp/register.ts, by its workspace title.
+/** What an agent connected to a workspace can read: one line per tool in lib/mcp/register.ts, by its workspace title,
+ *  except align_get_goal_activity. That tool summarises what Claude Code and Codex sessions reported through the capture
+ *  hooks (agent-reported, not seen by Align), and capture is off when hosted, so its line says so.
  *  scripts/test-first-run.mjs checks the count against the server's tools/list. */
+const REPORTED = "What connected sessions reported on each goal";
 const AGENT_READS = [
   "The teams’ goals",
   "The agreed plan",
@@ -24,7 +27,7 @@ const AGENT_READS = [
   "The latest request between teams",
   "What changed and what is waiting",
   "What’s asked of its team",
-  "What agents did on each goal",
+  REPORTED,
   "The goals’ limits",
   "A short brief for its team",
 ];
@@ -129,7 +132,7 @@ export default function FirstRun({
             <div className="font-semibold">It can read</div>
             <ul aria-label="What the agent can read" className="ml-5 list-disc text-zinc-700">
               {AGENT_READS.map((r) => (
-                <li key={r}>{r}</li>
+                <li key={r}>{r === REPORTED && hosted ? `${r} (off on the test server)` : r}</li>
               ))}
             </ul>
           </div>
