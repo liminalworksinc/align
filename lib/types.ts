@@ -215,6 +215,7 @@ export interface Acceptance {
 export interface LaunchDecision {
   decision: "approved" | "not_yet";
   note?: string; // at most 500 characters; never written to the audit log
+  untested?: true; // approved knowing the plan had no sandbox test (the request carried accept_untested)
   by: "leadership";
   at: string;
 }
@@ -275,6 +276,59 @@ export interface AppState {
   scenario?: ScenarioKind;
   teams?: Record<Owner, ScenarioTeam>;
   scenario_config?: ScenarioConfig;
+  asks?: Ask[]; // custom only: what people asked of a team, mostly from meetings (lib/asks.ts)
+  limits?: Limit[]; // custom only: what a team's goal must, must not or need not cover (lib/limits.ts)
+  funnel?: Funnel; // custom only, written once a proposal is RATIFIED (lib/funnel.ts); deleted with the workspace
+}
+
+/** Custom only. What testers did after a decision (issue #30 item 5): timestamped events with the role only, no identity. */
+export interface Funnel {
+  events: FunnelEvent[]; // at most one per action, role and proposal
+  reports: ValueReport[]; // at most one per role and proposal
+}
+
+export interface FunnelEvent {
+  action: "value_card_viewed" | "value_reported" | "waitlist_clicked" | "loi_cta_clicked";
+  role: Actor;
+  proposal_id: string;
+  at: string;
+}
+
+/** The tester's own answer to "Before Align, how long would getting this decision usually take?". Self-reported, never
+ *  a measurement; the measured times come from proposal and acceptance timestamps. */
+export interface ValueReport {
+  proposal_id: string;
+  role: Actor;
+  estimate: "same_day" | "two_to_three_days" | "about_a_week" | "longer" | "would_not_be_decided";
+  text?: string; // at most 500 characters, cleaned
+  at: string;
+}
+
+/** A bound on a team's goal. Suggested from what people said (meetings, prompts to agents) or typed by a person;
+ *  it is a rule for agents only once that goal's owner confirms it. */
+export interface Limit {
+  id: string;
+  team: Owner; // whose goal it bounds; that team confirms it
+  type: "must" | "must_not" | "out_of_scope";
+  text: string;
+  sources: { kind: "meeting" | "prompt" | "manual"; title: string; date: string; quote: string }[]; // first first
+  state: "suggested" | "confirmed" | "dismissed";
+  decided?: { by: Actor; at: string };
+  flags?: { session: string; sentence: string; at: string }[]; // agent reports that may cross it, found as they arrive
+  cleared?: string[]; // agent sessions the owner looked at and found within the limit
+  updated_at: string;
+}
+
+/** Something one person or group asked of a team, with where it was asked and every later time it came up. */
+export interface Ask {
+  id: string;
+  from: string; // who asked, as people say it: "Faculty", "A labmate", "Lab group"
+  to: Owner; // the team it is asked of
+  text: string;
+  source: { kind: "meeting" | "manual"; title: string; date: string }; // date: YYYY-MM-DD
+  status: "open" | "accepted" | "done" | "declined";
+  history: { date: string; text: string; source: string }[]; // later meetings that re-raised or changed it
+  updated_at: string;
 }
 
 export type ScenarioKind = "northstar" | "custom";
@@ -302,8 +356,9 @@ export interface ScenarioConfig {
 // B1-6: /api/state is a per-role allowlist projection (lib/flow.ts viewFor), never a spread of AppState.
 // A field a role may not see is absent. Signed-in view: goals and private constraints filtered to the viewer,
 // org_draft for leadership only, ingest_errors with absolute paths stripped.
-export interface StateView extends Omit<AppState, "org_draft"> {
+export interface StateView extends Omit<AppState, "org_draft" | "funnel"> {
   org_draft?: OrgDraft | null;
+  funnel?: { reports: ValueReport[] }; // custom: the viewer's own value reports only; funnel events never leave the server
   me: Actor;
 }
 
@@ -364,6 +419,7 @@ export interface AgentSession {
   last_at: string;
   ended_at?: string;
   directives?: DirectiveDelivery[]; // authority changes pushed into this session
+  live?: boolean; // a live hook (not an import) has reported on it: imports can no longer backdate its events
 }
 
 export interface DirectiveDelivery {

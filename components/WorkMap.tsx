@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentSession, Goal, RegistryEntry, SessionMapping, StateView } from "@/lib/types";
+import { matchSessions } from "@/lib/activity";
 import { labelsFor } from "@/lib/labels";
 import type { ViewProps } from "./props";
 import { api } from "./useAlign";
@@ -152,7 +153,8 @@ function SessionCard({ session, m, ctx }: { session: AgentSession; m: SessionMap
   const { props } = ctx;
   const goal = ctx.goalOf(m?.choice ?? null);
   const actor: string | null = props.me.actor;
-  const canAct = m?.state === "PROPOSED" && !!goal && !!actor && OWNER_ACTOR[goal.owner_id] === actor;
+  // A workspace's links come from matching the goal's own words (lib/activity.ts), not the mapper: nothing to confirm.
+  const canAct = labelsFor(props.s).northstar && m?.state === "PROPOSED" && !!goal && !!actor && OWNER_ACTOR[goal.owner_id] === actor;
   const last = session.prompts.at(-1)?.text ?? session.last_message ?? "";
   const when = ago(session.last_at, ctx.now);
   const base = `/api/mappings/${encodeURIComponent(session.id)}`;
@@ -222,10 +224,12 @@ function Lane({ entry, items, ctx }: { entry: RegistryEntry; items: { session: A
   );
 }
 
-/** Northstar only: captured agent sessions in one lane per goal. Polls /api/mappings while mounted. */
+/** Captured agent sessions in one lane per goal. Northstar polls /api/mappings (the mapper's links); a workspace links
+ *  each session to the goal whose own words it shares most (lib/activity.ts), computed here from state. */
 function AgentLanes(props: ViewProps) {
   const { s } = props;
   const L = labelsFor(s);
+  const custom = !L.northstar;
   const [remote, setRemote] = useState<MappingsResponse | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [flash, setFlash] = useState(false);
@@ -233,6 +237,13 @@ function AgentLanes(props: ViewProps) {
 
   useEffect(() => {
     let live = true;
+    if (custom) {
+      const t = setInterval(() => live && setNow(Date.now()), 30000);
+      return () => {
+        live = false;
+        clearInterval(t);
+      };
+    }
     const load = () => {
       setNow(Date.now());
       api<MappingsResponse>("/api/mappings")
@@ -245,11 +256,18 @@ function AgentLanes(props: ViewProps) {
       live = false;
       clearInterval(t);
     };
-  }, [s.registry_version]);
+  }, [s.registry_version, custom]);
 
   // State polls faster than the mappings route, so prefer its mappings and version; take the registry from the route when present.
   const version = s.registry_version ?? remote?.registry_version ?? "";
-  const mappings = useMemo(() => s.mappings ?? remote?.mappings ?? [], [s.mappings, remote]);
+  const matched = useMemo(() => {
+    if (!custom) return null;
+    const at = new Date(0).toISOString();
+    return [...matchSessions({ goals: s.goals, work_items: s.work_items, sessions: s.sessions ?? [] })].map(
+      ([session_id, choice]): SessionMapping => ({ session_id, registry_version: "", choice, confidence: null, probabilities: {}, state: choice ? "PROPOSED" : "UNASSIGNED", model: null, mapped_at: at }),
+    );
+  }, [custom, s.goals, s.work_items, s.sessions]);
+  const mappings = useMemo(() => matched ?? s.mappings ?? remote?.mappings ?? [], [matched, s.mappings, remote]);
   const registry = useMemo(() => {
     const r = remote?.registry?.length ? remote.registry : fallbackRegistry(s);
     return [...r.filter((e) => e.key !== "none"), ...r.filter((e) => e.key === "none")];
@@ -295,7 +313,7 @@ function AgentLanes(props: ViewProps) {
     return out;
   }, [mappings, registry, s.sessions, goalById]);
 
-  const rematching = mappings.some((m) => m.registry_version !== version || m.state === "PENDING");
+  const rematching = !custom && mappings.some((m) => m.registry_version !== version || m.state === "PENDING");
   const push = s.pushes?.at(-1);
   const sessions = s.sessions ?? [];
 
@@ -303,7 +321,9 @@ function AgentLanes(props: ViewProps) {
       <section aria-label="Where AI agent work is going">
       <h2 className="text-[22px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Where AI agent work is going</h2>
       <p className="mb-5 max-w-4xl text-[15px] text-zinc-500">
-        AI coding sessions (Claude Code and Codex) are recorded automatically and linked to the approved goal each one seems to serve. Each link is only a guess until that goal&apos;s owner confirms it.
+        {custom
+          ? "AI coding sessions (Claude Code and Codex) recorded for this workspace, each placed under the goal whose own words it shares most. A placement is a guess, not a record of who owns the work."
+          : "AI coding sessions (Claude Code and Codex) are recorded automatically and linked to the approved goal each one seems to serve. Each link is only a guess until that goal's owner confirms it."}
       </p>
 
       <div className={`mb-5 flex flex-wrap items-center gap-2 rounded-[14px] border bg-white px-4 py-3 transition ${flash ? "border-violet-500" : "border-zinc-200"}`}>
@@ -336,8 +356,8 @@ function AgentLanes(props: ViewProps) {
   );
 }
 
-/** v6 Work: the old-plan sweep and the goal cascade; Northstar adds the agent lanes. Custom scenarios have no session
- *  capture or goal linking (and /api/mappings refuses workspace sessions), so they never mount the lanes or poll. */
+/** v6 Work: the old-plan sweep and the goal cascade, then the agent lanes: always for Northstar, and for a workspace
+ *  once it has recorded sessions (local capture or import; hosted keeps capture closed). */
 export function WorkMap(props: ViewProps) {
   const { s } = props;
   const L = labelsFor(s);
@@ -345,7 +365,7 @@ export function WorkMap(props: ViewProps) {
     <div className="mx-auto flex max-w-[1600px] flex-col gap-8">
       <OldPlanWork s={s} />
       <GoalCascade s={s} L={L} />
-      {L.northstar && <AgentLanes {...props} />}
+      {(L.northstar || (s.sessions?.length ?? 0) > 0) && <AgentLanes {...props} />}
     </div>
   );
 }

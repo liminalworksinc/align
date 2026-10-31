@@ -256,7 +256,7 @@ export function ratifyProposal(s: AppState, who: Session, pid: string, body: { r
 export const MAX_LAUNCH_NOTE = 500;
 
 /** Custom only: leadership approves the launch of the agreed plan, or says not yet. A later call replaces the earlier one. */
-export function decideLaunch(s: AppState, who: Session, pid: string, body: { decision?: unknown; note?: unknown }, beforeWrite?: () => void) {
+export function decideLaunch(s: AppState, who: Session, pid: string, body: { decision?: unknown; note?: unknown; accept_untested?: unknown }, beforeWrite?: () => void) {
   if (s.scenario !== "custom") throw new HttpError(404, "Launch decisions exist only in custom scenarios");
   if (who.actor !== "leadership") forbid("Only leadership can decide on the launch");
   const p = openProposal(s, pid);
@@ -269,8 +269,20 @@ export function decideLaunch(s: AppState, who: Session, pid: string, body: { dec
     note = body.note.trim() || undefined;
     if (note && note.length > MAX_LAUNCH_NOTE) throw new HttpError(400, `Keep the note to ${MAX_LAUNCH_NOTE} characters or fewer`);
   }
+  // The launch is where an untested plan meets the world, so approving it needs the same explicit acknowledgement as the
+  // owning team's approval (LIM-2437 finding 3). "Not yet" needs none.
+  const untested = p.test_status !== "TESTED";
+  if (body.decision === "approved" && untested && body.accept_untested !== true)
+    conflict("This plan has no sandbox test. Approve the launch explicitly as not sandbox-tested.");
   beforeWrite?.(); // the route's rate limit: only a decision that would be written counts, not a refused one
-  acc!.launch_decision = { decision: body.decision, ...(note ? { note } : {}), by: "leadership", at: now() };
+  acc!.launch_decision = {
+    decision: body.decision,
+    ...(note ? { note } : {}),
+    ...(body.decision === "approved" && untested ? { untested: true as const } : {}),
+    by: "leadership",
+    at: now(),
+  };
+  // The untested acknowledgement lives on launch_decision.untested; the audit action keeps its two names.
   audit(s, who, body.decision === "approved" ? "launch_approved" : "launch_not_yet", p.id); // never the note text
   return acc!.launch_decision;
 }
@@ -326,6 +338,8 @@ const SIGNED_IN: Partial<Record<keyof AppState | "capture_consents", Project>> =
   private_constraints: (_v, s, c) => s.private_constraints.filter((x) => x.owner === c.me),
   org_draft: (v, _s, c) => (c.me === "leadership" ? v : OMIT), // Leadership's unpublished next company goal
   pushes: keep,
+  limits: keep, // custom only: suggested and confirmed limits (every signed-in role sees them, as with goals)
+  asks: keep, // custom only: what was asked of each team (every signed-in role sees all of them)
   sessions: keep, // captured sessions and their mappings: signed-in roles only (AgentPane, WorkMap, AuthorityStrip)
   mappings: keep,
   capture_consents: keep,
@@ -334,6 +348,9 @@ const SIGNED_IN: Partial<Record<keyof AppState | "capture_consents", Project>> =
   scenario: keep,
   teams: keep,
   scenario_config: keep,
+  // Custom only: the viewer's own value reports (its estimate and note). Funnel events and other roles' answers stay on
+  // the server (scripts/ws-admin.mjs funnel reads them on the host).
+  funnel: (_v, s, c) => (s.funnel ? { reports: s.funnel.reports.filter((r) => r.role === c.me) } : OMIT),
 };
 
 /** Goals the viewer may not see: private goals of another owner (Owner mapped to Actor, so ceo is leadership). */

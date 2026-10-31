@@ -20,15 +20,15 @@ Without `HOSTED`, nothing changes. The loopback rules, cookie and Northstar beha
 
 | Area | HOSTED=1 behaviour |
 |---|---|
-| Routes | Only the tester routes exist: `/new`, `/w/<id>`, `/api/workspaces` (create, config, login-info), `/api/session`, `/api/state`, `/api/timer`, `/api/reset`, `/api/proposals` and `/api/proposals/<id>/(accept|acknowledge|counter|reject)`. `/` and `/setup` redirect to `/new`. **Every other path is 404**, so a route added later stays closed until it's added to `proxy.ts`. test-tenancy H6 checks every route in `app/`. |
+| Routes | Only the tester routes exist: `/new`, `/w/<id>`, `/api/workspaces` (create, config, login-info), `/api/session`, `/api/state`, `/api/timer`, `/api/reset`, `/api/proposals` and `/api/proposals/<id>/(accept|acknowledge|counter|reject)`, plus the connected-apps routes (see "Connected AI apps" below). `/` and `/setup` redirect to `/new`. **Every other path is 404**, so a route added later stays closed until it's added to `proxy.ts`. test-tenancy H6 checks every route in `app/`. |
 | Northstar | **Off entirely** (go-C condition 1). Northstar sign-in is 404 and Northstar tokens are ignored. The Northstar store refuses every read and write (`lib/store.ts`). The image holds no fixture and no Sparta evidence. There's no override. |
 | Hosts | Only the hostnames in `ALIGN_HOSTS` are served. Every other Host gets 421, loopback included. |
 | Proxy | Without `X-Forwarded-Proto: https`, a request gets 403. Without `Fly-Client-IP`, it also gets 403, since it didn't come through Fly's edge. |
 | Cookies | `__Host-align_session`, with `Secure; HttpOnly; SameSite=Strict; Path=/`. A cookie without the prefix isn't accepted. |
 | Creation | **One single-use invite code per tester** (`ALIGN_SIGNUP_CODES`). A used code is refused, and used codes are kept only as SHA-256 hashes. Wrong codes: 10 per 10 minutes per client, then 429. 5 creates per rolling hour (fixed). `ALIGN_MAX_WORKSPACES` caps the total (default 25). |
 | Sign-in | Passcode hashing runs at most 2 at a time, with 8 waiting; the rest get 429. Backoff is per workspace, role and client: after 5 wrong tries, that client waits. Another person's tries never lock you out. |
-| Notice | `/new` says it's a test server, says not to enter confidential details, and gives the deletion date (`ALIGN_DELETE_BY`). The passcode card repeats the date (go-C condition 3). Shruti owns the wording. |
-| Capture and AI | `/api/sessions/events` is 404. No AI key is used, even if one is set (startup refuses it too). |
+| Notice | `/new` says it's a test server, says not to enter confidential details, says Liminal analyzes the workspaces (founder ruling 2026-10-27, LIM-2424), and gives the deletion date (`ALIGN_DELETE_BY`). The passcode card repeats the analysis note and the date (go-C condition 3). Shruti owns the wording. |
+| Capture and AI | `/api/sessions/events` is 404. `AI_GATEWAY_API_KEY` is never used (startup refuses it). The only AI key is `ALIGN_INTERVIEW_API_KEY`, used solely by the intake interview on `/new` ("Intake interview" below). A tester may connect their own AI app read-only ("Connected AI apps"); agent tokens and capture stay off. |
 | Files | Workspace folders are 0700 and files 0600, owned by the `node` user. |
 | Logs | Server errors log only the error's name, never a message, body or path (go-C condition 5). |
 | Isolation | Each tester workspace is its own directory under `$ALIGN_DATA_DIR/workspaces/<id>/`. A workspace session can't read or write another workspace (test-tenancy A1 to A12, H7). |
@@ -43,7 +43,7 @@ The server won't serve until all of these hold. On `next start` it exits with th
 - `ALIGN_SIGNUP_CODES`: one or more invite codes, each 12+ characters. `ALIGN_SIGNUP_CODE` (a single shared code) is refused.
 - `ALIGN_DELETE_BY`: the deletion date, `YYYY-MM-DD`. Once that day ends (midnight Pacific), the server is closed: it answers 410 to every request, whatever its headers, and a restart comes back closed (it starts and logs `has passed: closed`, so it never crash-loops). Testers keep the whole day; the operator purges with `ws-admin` that evening (see "Deleting workspaces").
 - `ALIGN_PRODUCT_PASSCODE`, `ALIGN_SECURITY_PASSCODE`, `ALIGN_LEADERSHIP_PASSCODE`: set, not the `*-demo` defaults, and 12+ characters. They serve nothing while Northstar is off; they're required so a mistake there could never expose the demo passcodes.
-- These must be unset (any value is refused, `"0"` included): `AI_GATEWAY_API_KEY`, `ALIGN_CREATE_PER_HOUR`, `ALIGN_NORTHSTAR_PUBLIC`. These must be unset or off: `ALIGN_CAPTURE` (or `0`), `ALIGN_ALLOW_OPEN_CREATE` and `ALIGN_PUBLIC` (anything but `1`).
+- These must be unset (any value is refused, `"0"` included): `AI_GATEWAY_API_KEY`, every `ANTHROPIC_*` variable (the SDK reads its key, base URL, headers, logging and telemetry from these), `ALIGN_CREATE_PER_HOUR`, `ALIGN_NORTHSTAR_PUBLIC`. `ALIGN_INTERVIEW=1` (the Mode L development switch) is refused too; `ALIGN_INTERVIEW_API_KEY`, when set, must look like a key (20+ characters). These must be unset or off: `ALIGN_CAPTURE` (or `0`), `ALIGN_ALLOW_OPEN_CREATE` and `ALIGN_PUBLIC` (anything but `1`).
 
 test-tenancy H1 checks every one of these on a production server: each must exit, or stay up answering only 503, and name its problem. `scripts/test-image.sh` checks a refusal on the built image.
 
@@ -57,6 +57,9 @@ test-tenancy H1 checks every one of these on a production server: each must exit
 | `ALIGN_MAX_WORKSPACES` | `fly.toml` | `25`. The cap exists for polling cost (spec section 10). `0`, a negative or a non-number falls back to 25; it can't close creation. |
 | `ALIGN_DELETE_BY` | `fly.toml` | `2026-11-13` (founder ruling 2026-10-22; change it in one place) |
 | `ALIGN_SECRET` | `fly secrets` | `openssl rand -hex 32` |
+| `ALIGN_INTERVIEW_API_KEY` | `fly secrets` | optional. An Anthropic API key for the intake interview on `/new`. Unset, the interview is off and its route is 404. |
+| `ALIGN_WAITLIST_URL` | `fly.toml` | optional. Replaces the waitlist Google Form linked from the decision value card (default `WAITLIST_URL` in `lib/config.ts`). Only an https `docs.google.com/forms/...` URL is used; anything else hides the button. |
+| `ALIGN_LOI_URL` | `fly.toml` | optional. The target of "Ask about a non-binding letter of intent": an https URL or a `mailto:`. Unset, it is the waitlist form (its last section holds the optional LOI); an invalid value hides the link. |
 | `ALIGN_SIGNUP_CODES` | `fly secrets` | one code per planned tester, e.g. five of `openssl rand -hex 8`, comma-separated. To add testers later, set the list again with the new codes added. |
 | `ALIGN_*_PASSCODE` (3) | `fly secrets` | random; unused while Northstar is off |
 
@@ -68,9 +71,11 @@ test-tenancy H1 checks every one of these on a production server: each must exit
   - `auth.json` (passcode hashes and epoch);
   - `scenario.json` (the setup input, used by Restart and never served);
   - `workspace.json`;
-  - `audit-archive.jsonl`.
+  - `audit-archive.jsonl`;
+  - `oauth.json` (connected AI apps: app name, redirect host, role, hashed refresh token; no access token is stored).
 - `/data/workspaces/_events.jsonl` logs creates and deletes, with ids only.
 - `/data/workspaces/_used_invites.json` holds the hashes of spent invite codes.
+- `/data/workspaces/_oauth_clients.json` holds AI apps that registered themselves (name and redirect URIs only). `ws-admin delete --all --yes` removes it.
 - `/data/.pid` is the running server's pid.
 
 No plaintext passcode or invite code is stored anywhere. Passcodes are shown once, at creation.
@@ -105,6 +110,8 @@ On the machine (`fly ssh console`), as the `node` user. As root, the tool could 
 cd /app
 alias wsa='setpriv --reuid=node --regid=node --init-groups node scripts/ws-admin.mjs'
 wsa list
+wsa funnel               # per workspace: created, first action, ratified, launch, value-card events (role and time); totals
+wsa funnel --with-feedback   # the same, plus testers' free-text answers
 wsa delete <workspace id>
 wsa delete --all --yes   # the end-of-test purge
 ```
@@ -167,10 +174,39 @@ Run this before the first tester gets a link, and post the results on LIM-2424:
 3. The server refuses to start with default passcodes (redeploy with one unset, then put it back).
 4. Capture (`/api/sessions/events`) is 404.
 5. `/api/state` without a session is 404.
-6. Northstar sign-in, `/`, `/api/mcp` and `/api/policy/security`: 404, and `/` redirects to `/new`.
+6. Northstar sign-in and `/api/policy/security`: 404, and `/` redirects to `/new`. `/api/mcp` without a token is 401 with a `resource_metadata` link to `https://<host>/.well-known/oauth-protected-resource/api/mcp`, and with an `Origin` header it is 403.
 7. Two synthetic workspaces can't read each other.
+8. Connect one real app (Claude Code: the one line in the workspace's "Connect an AI app" dialog) to a synthetic workspace, ask it for the goals, and check the workspace's "Your AI apps" card lists it. Disconnect it there and check the app is refused.
 
 Delete the synthetic workspaces afterwards with `ws-admin.mjs`.
+
+## Intake interview (founder ruling 2026-10-29, amending go-C (LIM-2424 9976b9e0))
+
+Instead of typing the conflict form, a tester can talk it through: on `/new`, "Start the interview" opens a chat where Claude (`claude-opus-5-5`, effort low, server-side refusal fallback on) asks one short question at a time and drafts the form below it. Voice uses the browser's own speech recognition; the mic button is hidden where there is none.
+
+- **It only drafts.** The tester reviews every field and presses Create, which runs the normal checks. A field the tester edited is never overwritten.
+- **Entry rule:** the same code check as creating (`lib/create-access.ts`): the tester's own unspent invite, checked read-only. Interviewing never spends it, and the code is never sent to the model.
+- **Limits:** at most 30 messages a conversation (2,000 characters each, 30,000 in all, 48 KB body), 40 turns per client per 30 minutes, **60 per invite code per day** (so one code used from many addresses still has a ceiling), 300 per server per hour and 1,500 per day, 4 at a time. Over a limit is 429 or 413 before any model call, and a call refused for being busy doesn't count as a turn. The API address and SDK logging are pinned in code. Set a monthly spend limit on the key's Anthropic workspace as well; that is the hard ceiling.
+- **Nothing is stored.** What the tester says goes to Anthropic to draft the form; only what they create is kept. The `/new` notice keeps its research line and doesn't name the provider (founder's call, 10-29). Server errors log only the error's name.
+- **Turning it off:** unset `ALIGN_INTERVIEW_API_KEY` (`fly secrets unset`); the route then answers 404 and `/new` hides the panel.
+- **Local development:** `ALIGN_INTERVIEW=1` in Mode L uses the SDK's own credentials (an `ant auth login` profile) instead of a key.
+- Tests: `node scripts/test-interview.mjs <port>` (34 checks; Anthropic is never reached; `scripts/interview-test-net.mjs` answers locally).
+
+## Connected AI apps (founder ruling 2026-10-27, amending go-C (LIM-2424 0ed9b310))
+
+Testers can point the AI they already use at their own workspace. The app gets read-only access to one workspace, approved with that workspace's role passcode. Agent tokens (`agt.`), `ALIGN_MCP_TOKEN`, capture and wake-ups stay closed when hosted.
+
+- **One URL for every app:** `https://<host>/api/mcp` (Streamable HTTP, the nine read-only tools in `lib/mcp/register.ts`: the five Northstar ones plus `align_get_asks`, `align_get_goal_activity`, `align_get_limits` and `align_get_brief`). Claude (desktop, Cowork, claude.ai), ChatGPT, Claude Code and Codex all add it as a remote MCP server; the steps for each are in the workspace under "Your AI apps", "Connect an AI app".
+- **OAuth 2.1 in the app** (`lib/oauth/`): authorization code with PKCE S256 only, public clients, client metadata documents (Claude Code's is `https://claude.ai/oauth/claude-code-client-metadata`) or dynamic registration, refresh token rotation with reuse detection, tokens bound to the resource (RFC 8707), `iss` on every redirect (RFC 9207). Metadata: `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource/api/mcp`.
+- **Consent page** `/oauth/authorize`: names the app and where it sends the person back, says it is read-only and which company receives what it reads, then asks for the workspace link, a team and that team's passcode (or uses the session the browser already has). Sign-in goes through the same backoff and scrypt slots as `/api/session`. Never framed, never cached.
+- **Tokens:** access tokens are `alm.` (1 hour, HMAC with `ALIGN_SECRET`, checked against the grant on every call). Refresh tokens last 7 days and never past the end of `ALIGN_DELETE_BY`; only an HMAC of each, keyed with `ALIGN_SECRET`, is stored.
+- **Revoking:** the team that connected an app, or leadership, disconnects it from the workspace; leadership can disconnect all. Restart disconnects every app. Rotating `ALIGN_SECRET` ends every token, refresh tokens included, in every workspace, and those apps stop being listed as connected.
+- **Client documents** (an app whose client_id is a URL): fetched from public addresses only (an IPv6 address that carries an IPv4 one is refused), 3 s in all, at most 5 KB, at most 8 at once across the server. Documents on Anthropic's and OpenAI's own sites have 8 slots of their own, and an app seen in the last day keeps its last good document while the slots are full, so stalled documents elsewhere can't block them. The cache holds 200 documents, plus the good one of every app with a live connection, so a flood of other documents can't push those out. The consent page allows 30 views a minute per client, and says "This app named itself" for every app except a client document on Anthropic's or OpenAI's own sites.
+- **What an app reads (founder ruling 2026-10-29, #32):** an app approved with leadership's passcode reads the whole workspace. An app approved by a team reads that team's asks, limits and agent activity (goal activity, the work map, directives' delivery counts, the brief), plus what every signed-in person sees: the shared goals, the plans and the proposals between teams. The role is the one stored on the grant; a grant with no valid role (made before roles were stored) reads no team's data, never leadership's. Details in `docs/MCP.md`, "What a connected app reads".
+- **The URL people paste:** the connect URL is built from the Host header. `proxy.ts` (`hostAllowed`, `lib/config.ts`) lets through only an allowed name plus an optional numeric port, and `originFromHost` (`lib/oauth/server.ts`) checks again: only a host name or bracketed IPv6 address and a numeric port, anything else becomes `invalid.invalid`, which matches no token. The Claude Code and Codex lines (`lib/paste-lines.ts`) single-quote the URL, carry no workspace or company name (the rule Codex's line adds to the global `AGENTS.md` is fixed text, added once per machine), and show no command for a URL Align couldn't have made (`scripts/test-paste-lines.mjs` runs them in sh, bash and zsh with hostile names and URLs).
+- **What leaves Align:** what the app reads is sent to that app's AI provider (Anthropic or OpenAI). The consent page says so. Claude and ChatGPT call the URL from their own servers, so the machine has to stay up (a paid Fly org; the trial stops machines).
+- **Copy check:** the steps shown for ChatGPT and the Claude app come from their docs on 2026-10-26. Claude Code 2.1.311 was connected end to end against this code on a local server (add, sign in through the consent page, call the tools); the other apps, and any app against the Fly URL, are not checked yet (smoke test item 8 covers one app).
+- Tests: `node scripts/test-oauth.mjs <port>` (133 checks: local and hosted phases, then a restart with a new `ALIGN_SECRET`); `node scripts/test-paste-lines.mjs` (30 checks).
 
 ## Limits worth knowing
 

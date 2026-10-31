@@ -133,10 +133,10 @@ export async function cappedJson<T = Record<string, unknown>>(req: Request, max 
 }
 
 /** Per-field caps for custom workspace bodies: every string 300 characters, plan text 4000, a counter's conditions
- *  MAX_CONDITIONS (lib/flow.ts checks the same limit for /setup scenarios). */
+ *  MAX_CONDITIONS (lib/flow.ts checks the same limit for /setup scenarios), pasted meeting notes 20000 (limits route). */
 export function capFields(v: unknown, at = "body"): void {
   if (typeof v === "string") {
-    const max = /(^|\.)(text|plan_text)$/.test(at) ? 4000 : at === "body.conditions" ? MAX_CONDITIONS : 300;
+    const max = /(^|\.)(text|plan_text)$/.test(at) ? 4000 : at === "body.conditions" ? MAX_CONDITIONS : at === "body.notes" ? 20000 : 300;
     if (v.length > max) throw new HttpError(400, `${at.replace(/^body\./, "")} is too long (max ${max} characters)`);
   } else if (Array.isArray(v)) v.forEach((x, i) => capFields(x, `${at}[${i}]`));
   else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) capFields(x, `${at}.${k}`);

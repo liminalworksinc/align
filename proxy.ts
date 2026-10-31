@@ -15,6 +15,7 @@ const HOSTED_ROUTES = [
   /^\/w\/[^/]+$/,
   /^\/api\/workspaces$/,
   /^\/api\/workspaces\/config$/,
+  /^\/api\/workspaces\/interview$/, // the intake interview on /new (founder ruling 10-29, LIM-2424 9976b9e0)
   /^\/api\/workspaces\/[^/]+\/login-info$/,
   /^\/api\/session$/,
   /^\/api\/state$/,
@@ -22,6 +23,15 @@ const HOSTED_ROUTES = [
   /^\/api\/reset$/,
   /^\/api\/proposals$/,
   /^\/api\/proposals\/[^/]+\/(?:accept|acknowledge|counter|launch|reject)$/,
+  // Connected AI apps (founder ruling 10-27, amending go-C (LIM-2424 0ed9b310)): the read-only MCP endpoint, which takes only Align's own
+  // OAuth tokens when hosted (app/api/mcp/route.ts), the OAuth server that issues them after a passcode sign-in, and
+  // the workspace's list of connected apps. Capture, wake-ups and agent tokens stay closed.
+  /^\/api\/mcp$/,
+  /^\/\.well-known\/oauth-protected-resource(?:\/api\/mcp)?$/,
+  /^\/\.well-known\/oauth-authorization-server$/,
+  /^\/oauth\/(?:authorize|token|register)$/,
+  /^\/api\/oauth\/approve$/,
+  /^\/api\/workspaces\/connections$/,
 ];
 // Goal sessions (ALIGN_GOAL_SESSIONS=1 only): the web app and its API. With the flag unset these are 404 in both modes; when
 // hosted they pass the same host, https and edge checks as the tester routes and are allowed alongside them.

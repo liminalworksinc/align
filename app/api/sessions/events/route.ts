@@ -3,6 +3,7 @@ import { handle } from "@/lib/http";
 import { scheduleMapping } from "@/lib/mapper";
 import { markActed } from "@/lib/directives";
 import { agentFrom } from "@/lib/agent-token";
+import { flagReports, PROMPT_WAITING_MAX, suggestLimits } from "@/lib/limits";
 import { originIsThisServer } from "@/lib/local-guard";
 import { hasCaptureConsent, HttpError, mutate, mutateWs, now, readState } from "@/lib/store";
 import type { AgentSession, AppState, SessionOriginKind } from "@/lib/types";
@@ -27,6 +28,17 @@ interface CaptureEvent {
   last_message?: unknown;
   branch?: unknown;
   repo?: unknown;
+  at?: unknown; // imports of past sessions (scripts/align-import-sessions.mjs): when this event happened
+  import?: unknown; // true only from that importer; without it `at` is ignored and the event is "now"
+}
+
+const IMPORT_MAX_AGE_MS = 120 * 86400000;
+/** A past time an import may give; anything else (future, too old, not a date) means "now". */
+function eventTime(v: unknown, nowMs = Date.now()): string | null {
+  if (typeof v !== "string") return null;
+  const t = Date.parse(v);
+  if (Number.isNaN(t) || t > nowMs || nowMs - t > IMPORT_MAX_AGE_MS) return null;
+  return new Date(t).toISOString();
 }
 
 function assertLocalOrigin(req: Request) {
@@ -157,9 +169,13 @@ export async function POST(req: Request) {
     if (agent && (harness !== agent.harness || consentRepo !== agent.repo))
       throw new HttpError(403, `This agent token is for ${agent.harness} in ${agent.repo}`);
 
+    // A past time is kept only for an explicit import (review L3), and only while the session has had no live event
+    // (follow-up L3): once a live hook has reported on a session, an "import" can't rewrite its times.
+    const imported = ev.import === true;
+    const past = imported ? eventTime(ev.at) : null;
     const upsert = (s: AppState) => {
-      const at = now();
       let sess = s.sessions.find((x) => x.id === id);
+      const at = past && !sess?.live ? past : now();
       if (!sess) {
         sess = {
           id,
@@ -177,10 +193,12 @@ export async function POST(req: Request) {
         };
         s.sessions.push(sess);
       }
+      if (!imported) sess.live = true;
       if (repo) sess.repo = repo;
       if (branch) sess.branch = branch;
       if (cwdName) sess.cwd_name = cwdName;
-      sess.last_at = at;
+      if (at > sess.last_at) sess.last_at = at;
+      if (at < sess.started_at) sess.started_at = at;
 
       if (prompt && sess.prompts[sess.prompts.length - 1]?.text !== prompt) {
         sess.prompts.push({ at, text: prompt });
@@ -213,7 +231,21 @@ export async function POST(req: Request) {
         // A token writes only its own repo's sessions: never adopt (and re-label) a session another repo started.
         const existing = s.sessions.find((x) => x.id === id);
         if (existing && existing.repo !== agent.repo) throw new HttpError(403, `This session belongs to ${existing.repo}, not ${agent.repo}`);
-        return upsert(s);
+        const out = upsert(s);
+        // What the person tells an agent can state a limit on a team's goal ("the three models must not all fit");
+        // it becomes a suggestion that goal's owner confirms, never a rule by itself. Only sentences about a goal count.
+        if (hookEvent === "UserPromptSubmit" && prompt) {
+          const at = past ?? now();
+          // One agent token (a harness in one folder) may have at most PROMPT_WAITING_MAX suggestions waiting, so its
+          // prompts can't fill a team's waiting list (review L3).
+          suggestLimits(s, prompt, { kind: "prompt", title: `${harness === "codex" ? "Codex" : "Claude Code"} session in ${agent.repo}`, date: at.slice(0, 10) }, at, null, null, PROMPT_WAITING_MAX);
+        }
+        // An agent's report is checked against the confirmed limits when it arrives, and kept if it may cross one.
+        if (lastMessage) {
+          const sess = s.sessions.find((x) => x.id === id);
+          if (sess) flagReports(s, [sess], now());
+        }
+        return out;
       }); // custom workspaces are never mapped
       return { ok: true, id };
     }

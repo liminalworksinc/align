@@ -125,6 +125,43 @@ async function openProposals(page) {
   if (await waitText(page, MEASURE.slice(0, 30))) await click(page, MEASURE.slice(0, 30)).catch(() => {}); // open it from the inbox
 }
 
+// LIM-2452: a phone (390 wide, or `width`). The page must not scroll sideways, and `needle` (a button's exact label),
+// when given, must sit inside the width. Resizing keeps the page's state; it goes back to 1440 afterwards.
+async function narrow(page, label, needle, width = 390) {
+  await page.setViewport({ width, height: 844 });
+  await sleep(600);
+  const r = await page.evaluate((needle) => {
+    const W = window.innerWidth;
+    const el = needle ? [...document.querySelectorAll("button, a, span")].filter((e) => e.offsetParent !== null && e.innerText?.replace(/\s+/g, " ").trim() === needle).at(-1) : null;
+    const b = el?.getBoundingClientRect();
+    // On a failure, name what runs past the edge: the text nodes and elements whose right side is beyond the width.
+    const past = [];
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n && past.length < 3; n = walk.nextNode()) {
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      if (range.getBoundingClientRect().right > W + 1) past.push(`"${n.nodeValue.slice(0, 40)}" in ${n.parentElement?.tagName}.${String(n.parentElement?.className).slice(0, 80)}`);
+    }
+    return { scrollWidth: document.documentElement.scrollWidth, W, found: !!el, left: b ? Math.round(b.left) : null, right: b ? Math.round(b.right) : null, past };
+  }, needle ?? null);
+  await page.setViewport({ width: 1440, height: 900 });
+  await sleep(300);
+  check(`${label}: no sideways scroll at ${width}${needle ? `, and "${needle}" fits the width` : ""}`, r.scrollWidth <= r.W && (!needle || (r.found && r.left >= 0 && r.right <= r.W)), JSON.stringify(r));
+}
+
+// LIM-2452 review: at 390 the Switch team menu opens inside the screen (every item within [0, width]), then closes.
+async function narrowMenu(page, label) {
+  await page.setViewport({ width: 390, height: 844 });
+  await sleep(600);
+  await click(page, "Switch team");
+  await page.waitForSelector("[role=menuitem]", { timeout: 10000 });
+  const r = await page.evaluate(() => ({ W: window.innerWidth, items: [...document.querySelectorAll("[role=menuitem]")].map((m) => { const b = m.getBoundingClientRect(); return { text: m.innerText.trim(), left: Math.round(b.left), right: Math.round(b.right) }; }) }));
+  await click(page, "Switch team"); // close it again
+  await page.setViewport({ width: 1440, height: 900 });
+  await sleep(300);
+  check(`${label}: at 390 every Switch team menu item is inside the screen`, r.items.length > 0 && r.items.every((i) => i.left >= 0 && i.right <= r.W), JSON.stringify(r));
+}
+
 // One click, no waiting: false when no visible enabled button carries the text (the page already stopped).
 const clickNow = (page, label) =>
   page.evaluate((label) => {
@@ -235,6 +272,9 @@ async function main() {
       check("CN4 the header shows the company note under the company name, once signed in", head.includes(fixture.company) && head.indexOf(fixture.company_note) > head.indexOf(fixture.company), head.slice(0, 300));
     }
 
+    await narrow(A, "N1 the asking team's first signed-in screen", "Propose a change");
+    await narrowMenu(A, "N6 the asking team's header");
+
     // Propose (with no proposal yet, + New conflict opens the composer directly)
     await click(A, "New conflict");
     if (!(await waitText(A, "Send proposal to"))) await click(A, "Propose a change");
@@ -246,6 +286,8 @@ async function main() {
 
     // The owning team asks for changes, with conditions
     await openProposals(O);
+    await waitText(O, "Your decision");
+    await narrow(O, "N2 the owning team's review of the proposal");
     await click(O, "Counter"); // v6: pick the Counter answer, which shows the ask-for-changes form
     await fill(O, "Ask for changes: your version of the target", COUNTER);
     await fill(O, "Why you want these changes", "UILOOP two fixed nights are easier to plan around.");
@@ -256,6 +298,7 @@ async function main() {
     // The asking team sees the conditions and accepts
     await openProposals(A);
     check("U5 the asking team sees the conditions before accepting, marked not confirmed yet", (await waitText(A, CONDITIONS.slice(0, 40))) && /not confirmed yet/i.test(await text(A)), (await text(A)).slice(0, 500));
+    await narrow(A, "N3 the asking team's review of the changes, with its long accept button");
     await click(A, `Accept ${OWNING}`);
     check("U5 the asking team accepts the changes", await waitText(A, "accepted"), (await text(A)).slice(0, 300));
 
@@ -372,6 +415,7 @@ async function main() {
     check("U8 the decision record shows the conditions (not confirmed yet), that agreement is not launch approval, and one next step", dec.includes(CONDITIONS.slice(0, 40)) && /not approval to launch/i.test(dec) && /Not confirmed yet/.test(dec) && (dec.match(/Next step/gi) ?? []).length === 1, dec.slice(0, 500));
     check("U8 the decision record has no Northstar copy", !LEAK.test(dec), leakIn(dec));
     check("U8 open conditions are flagged not confirmed yet, once", (dec.match(/not confirmed yet/gi) ?? []).length === 1, dec.slice(0, 500));
+    await narrow(O, "N4 the decision record");
 
     const acc = (await api(lead, "GET", "/api/state")).json?.acceptances?.at(-1);
     for (const [pg, team] of [[A, ASKING], [O, OWNING]]) {
@@ -404,6 +448,9 @@ async function main() {
     await click(A, "Your turn");
     check("U12 after \"not yet\" the asking team still sees that leadership decides the launch", await waitText(A, "decides the launch"), (await text(A)).slice(0, 400));
     await LP.close();
+
+    await waitText(A, "What this decision gave you");
+    await narrow(A, "N5 the asking team's Your turn with the decision value card");
 
     // U13 After a decided proposal, + New conflict opens the composer, not the old decided thread.
     await click(A, "New conflict");

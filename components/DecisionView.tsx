@@ -4,10 +4,11 @@ import { CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, de
 import type { Acceptance, SimulationRun } from "@/lib/types";
 import type { ViewProps } from "./props";
 import { AuthorityStrip } from "./AuthorityStrip";
+import { DecisionValueCard } from "./DecisionValueCard";
 import { STALE_APPROVAL_NOTE, agreementStatus, approvedStale, launchLine, launchState } from "./launch";
 import { ProofStrip } from "./ProofStrip";
 import { accepted, activeProposal, comparablePair, currentGoal } from "./select";
-import { nextStepHint } from "./nextStep";
+import { NextStepAction } from "./Handoff";
 import { depRelation } from "./TeamLens";
 import { SpartaProof } from "./SpartaProof";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, StateBadge, fmtTime } from "./ui";
@@ -406,7 +407,7 @@ function CustomDecision({ props, L }: { props: ViewProps; L: Labels }) {
             </span>
           )}
         </div>
-        {nextStepHint(prop, me.actor, L) && <p className="text-[16px] text-zinc-700">{nextStepHint(prop, me.actor, L)}</p>}
+        <NextStepAction p={prop} viewer={me.actor ?? ""} L={L} onSwitch={props.switchTeam} />
       </div>
     );
   }
@@ -570,6 +571,7 @@ function CustomRecord({ props, L, acc }: { props: ViewProps; L: Labels; acc: Acc
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <MeasuredTile s={s} />
           </div>
+          <DecisionValueCard {...props} />
           <div className="flex flex-wrap items-center gap-2.5 border-t border-zinc-200 pt-4">
             <CopyText text={copy} />
             <MoveWork props={props} />

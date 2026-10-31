@@ -1,10 +1,15 @@
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { authorityEvents, describeEvent, oneLine, pendingFor, quoted } from "../directives";
+import { activityText, goalActivity, matchSessions } from "../activity";
+import { asksText } from "../asks";
+import { briefText } from "../brief";
+import { limitsText } from "../limits";
 import { acceptedPlan, launchApproved } from "../policy";
 import { activeRegistry, currentGoals } from "../registry";
 import { readState } from "../store";
-import { AGREED_NOT_LAUNCH, AGREED_STATUS, agreedStatus, leadOf, poss, scenarioOf, teamOf } from "../labels";
+import { AGREED_NOT_LAUNCH, AGREED_STATUS, agreedStatus, customStateLabel, labelsFor, leadOf, poss, scenarioOf, teamOf } from "../labels";
 import type { AgentSession, AppState, Owner, SessionMapping } from "../types";
 import type { WsId } from "../workspace";
 import { scopeToGrant, type AgentHarness } from "../agent-token";
@@ -40,6 +45,63 @@ async function sessionState(ctx: ServerContext): Promise<AppState> {
   const s = await readState(storeOf(ctx));
   const g = grantOf(ctx);
   return g ? scopeToGrant(s, g) : s;
+}
+
+/** The goal slot of an app signed in through Align's OAuth (leadership holds the company goal); null otherwise. */
+function roleOf(ctx: ServerContext): Owner | null {
+  const r = ctx.http?.authInfo?.extra?.role;
+  return r === "leadership" ? "ceo" : r === "product" || r === "security" ? r : null;
+}
+
+/**
+ * What a connected app may read (founder ruling 2026-10-29 on #32): an app approved by leadership reads the whole
+ * workspace; one approved by a team reads that team's asks, limits and agent sessions (goal activity, the work map,
+ * directives' delivery counts, the brief), plus what every signed-in person sees in the app: the shared goals, the
+ * plans and the proposals between teams. The role is the one stored on the grant (lib/oauth/server.ts readMcpToken);
+ * a grant with no valid role (made before roles were stored, or damaged) reads no team's data, never leadership's.
+ */
+type AppView = { all: true } | { all: false; team: Owner | null };
+function appViewOf(ctx: ServerContext): AppView {
+  const r = ctx.http?.authInfo?.extra?.role;
+  if (r === "leadership") return { all: true };
+  return { all: false, team: r === "product" || r === "security" ? r : null };
+}
+
+/** The team whose goal a session served, by the same placement the Work view and goal activity use (lib/activity.ts),
+ *  computed on the whole workspace so every reader places a session the same way; null when no goal matched. */
+function sessionTeams(s: AppState): Map<string, Owner | null> {
+  const ownerOf = new Map(s.goals.map((g) => [g.id, g.owner_id]));
+  const placed = matchSessions(s);
+  return new Map(s.sessions.map((x) => [x.id, (placed.get(x.id) && ownerOf.get(placed.get(x.id)!)) || null]));
+}
+
+/** The workspace as one app may read it (AppView). Leadership's view is the state unchanged. */
+function scopeToApp(s: AppState, v: AppView): AppState {
+  if (v.all) return s;
+  const team = v.team;
+  const teams = sessionTeams(s);
+  // A session counts as the team's only when it was placed under that team's goal; unplaced sessions are nobody's.
+  const sessions = team ? s.sessions.filter((x) => teams.get(x.id) === team) : [];
+  const ids = new Set(sessions.map((x) => x.id));
+  return {
+    ...s,
+    sessions,
+    mappings: (s.mappings ?? []).filter((m) => ids.has(m.session_id)),
+    asks: team ? (s.asks ?? []).filter((a) => a.to === team) : [],
+    limits: team ? (s.limits ?? []).filter((l) => l.team === team) : [],
+    private_constraints: [],
+  };
+}
+
+/** State for an app's reads: its agent-token scope (sessionState), then its team's scope when it is a connected app. */
+async function readFor(ctx: ServerContext, apps: boolean): Promise<AppState> {
+  const s = await sessionState(ctx);
+  return apps ? scopeToApp(s, appViewOf(ctx)) : s;
+}
+
+/** Confirmed limits for an app in a custom workspace, placed first in what it reads; nothing for Northstar. */
+function limitsHead(s: AppState, ctx: ServerContext): string {
+  return scenarioOf(s) === "custom" && (s.limits ?? []).length ? `${limitsText(s, (o) => teamName(s, o), roleOf(ctx))}\n\n` : "";
 }
 
 /** Defense in depth: withMcpAuth already rejected unauthenticated requests. */
@@ -113,6 +175,9 @@ function listGoals(s: AppState): z.infer<typeof ListGoalsOut> {
     registry: visibleRegistry(s).map((e) => ({ key: e.key, label: e.label, team: e.team, version: e.version })),
   };
 }
+
+/** The proposal still waiting for a decision, if any (custom scenarios allow one at a time). */
+const openProposal = (s: AppState) => s.proposals.findLast((p) => p.state !== "RATIFIED" && p.state !== "REJECTED");
 
 // ---------- align_get_accepted_plan ----------
 
@@ -401,13 +466,26 @@ function directives(s: AppState, sessionId: string | undefined): z.infer<typeof 
 
 // ---------- registration ----------
 
-export function registerAlign(server: McpServer) {
+/**
+ * `apps`: the tools as AI apps signed in through Align's OAuth see them (one custom workspace). The accepted plan
+ * takes no `team` there: the argument is Northstar's (its schema is frozen in the Northstar snapshot) and a chat app
+ * showed it to the person as "Team: security", a name the workspace never uses.
+ */
+export function registerAlign(server: McpServer, { apps = false }: { apps?: boolean } = {}) {
+  // Apps get titles and descriptions that say what each tool holds, so an agent asked to plan team work picks Align
+  // (live 10-27: Codex, asked for a cutover runbook, searched Drive instead and used a superseded date). Northstar's
+  // wording stays as frozen in its snapshot.
+  const say = (northstar: string, app: string) => (apps ? app : northstar);
+  if (apps) registerWorkspaceTools(server);
   server.registerTool(
     "align_list_goals",
     {
-      title: "List ratified goals",
+      title: say("List ratified goals", "List the teams' goals"),
       description:
-        "Current company and team goals in Align (company goals pushed by Leadership, team goals ratified by their owners), the latest Leadership push, and the goal registry that agent work is mapped against. Read before you work.",
+        say(
+          "Current company and team goals in Align (company goals pushed by Leadership, team goals ratified by their owners), the latest Leadership push, and the goal registry that agent work is mapped against. Read before you work.",
+          "This company's goals for each team, with targets and deadlines, as their owners approved them. Check before you plan or do work for one of these teams: deadlines here override older docs.",
+        ),
       inputSchema: z.object({}),
       outputSchema: ListGoalsOut,
       annotations: READ_ONLY,
@@ -424,10 +502,13 @@ export function registerAlign(server: McpServer) {
   server.registerTool(
     "align_get_accepted_plan",
     {
-      title: "Get the accepted plan",
+      title: say("Get the accepted plan", "Get the agreed plan"),
       description:
-        "Which plan a team's agents are authorized to run right now, per the latest ratified decision. ACCEPTED is a human decision, not proof of success.",
-      inputSchema: z.object({ team: z.enum(["security"]).default("security") }),
+        say(
+          "Which plan a team's agents are authorized to run right now, per the latest ratified decision. ACCEPTED is a human decision, not proof of success.",
+          "The plan the teams agreed on: what changed, new targets and dates, what each team committed to in return, and whether launch is approved. Check before planning or starting work, runbooks, migrations or schema changes included. Agreed is a human decision, not proof of success.",
+        ),
+      inputSchema: apps ? z.object({}) : z.object({ team: z.enum(["security"]).default("security") }),
       outputSchema: AcceptedPlanOut,
       annotations: READ_ONLY,
     },
@@ -457,7 +538,11 @@ export function registerAlign(server: McpServer) {
             : [
                 `${a.company}: no change is agreed. ${out.authority}.`,
                 `${poss(a.owning_team)} current measures: ${a.owning_measures.map(quoted).join("; ")}`,
-                `Plan ${quoted(a.plan_title)} is proposed only, not agreed. Do not act on it.`,
+                // Before anyone proposes it, the plan is only the candidate written at setup: an agent read it as
+                // "proposed" in the end-to-end test (10-26), so say which it is.
+                openProposal(s)
+                  ? `Plan ${quoted(a.plan_title)} is proposed (${openProposal(s)!.id}), not agreed: ${customStateLabel(openProposal(s)!.state, labelsFor(s)) ?? openProposal(s)!.state}. Do not act on it.`
+                  : `Plan ${quoted(a.plan_title)} is the candidate plan written at setup. Nobody has proposed it yet, and it is not agreed. Do not act on it.`,
               ];
         return result(out, lines.filter(Boolean).map(oneLine).join("\n"));
       }
@@ -481,7 +566,7 @@ export function registerAlign(server: McpServer) {
     },
     async ({ session_id }, ctx) => {
       requireRead(ctx);
-      const out = workMap(await sessionState(ctx), session_id);
+      const out = workMap(await readFor(ctx, apps), session_id);
       const summary = out.query
         ? out.total_sessions
           ? (() => {
@@ -498,9 +583,12 @@ export function registerAlign(server: McpServer) {
   server.registerTool(
     "align_get_decision_record",
     {
-      title: "Get a decision record",
+      title: say("Get a decision record", "Get the latest request between teams"),
       description:
-        "The latest (or a given) proposal to change a team goal: proposed text, counters, Product acknowledgment, ratification, and referenced Sparta sandbox runs. VERIFIED only means a sandbox check passed; the company outcome is not verified by this record.",
+        say(
+          "The latest (or a given) proposal to change a team goal: proposed text, counters, Product acknowledgment, ratification, and referenced Sparta sandbox runs. VERIFIED only means a sandbox check passed; the company outcome is not verified by this record.",
+          "The latest request from one team to change another team's goal: what was asked, what the asking team gives in return, counters, and whether the owning team accepted it. Check before work that touches either team's goal.",
+        ),
       inputSchema: z.object({ proposal_id: z.string().max(100).optional() }),
       outputSchema: DecisionOut,
       annotations: READ_ONLY,
@@ -509,6 +597,11 @@ export function registerAlign(server: McpServer) {
       requireRead(ctx);
       const s = await readState(storeOf(ctx));
       const out = decisionRecord(s, proposal_id);
+      // Apps see the workspace's own team names, not the slots behind them ("security" is Data Platform here).
+      if (apps && out.record && scenarioOf(s) === "custom") {
+        const n = (o: string) => teamName(s, o);
+        out.record = { ...out.record, proposed_by: n(out.record.proposed_by), recipient: n(out.record.recipient), counters: out.record.counters.map((c) => ({ ...c, by: n(c.by) })) };
+      }
       const r = out.record;
       // A custom plan is inline text with no sandbox, so its record names no Sparta runs.
       const runs = (x: NonNullable<typeof r>) =>
@@ -516,7 +609,7 @@ export function registerAlign(server: McpServer) {
           ? "no sandbox test exists for this plan"
           : `${x.sparta_runs.length} Sparta run(s): ${x.sparta_runs.map((y) => `${y.plan} ${y.verdict}`).join(", ") || "none"}`;
       const summary = r
-        ? `Proposal ${r.proposal_id} (${r.state}) on ${r.target_goal_id} ${r.target_goal_version}; ${r.counters.length} counter(s); ${
+        ? `Proposal ${r.proposal_id} (${scenarioOf(s) === "custom" ? (customStateLabel(r.state, labelsFor(s)) ?? r.state) : r.state}) on ${apps && scenarioOf(s) === "custom" ? `${r.recipient}'s goal` : r.target_goal_id} ${r.target_goal_version}; ${r.counters.length} counter(s); ${
             r.ratification ? `ratified as ${r.ratification.accepted_version} at ${r.ratification.ratified_at} (${r.ratification.test_status})` : "not ratified"
           }; ${runs(r)}. ${scenarioOf(s) === "custom" && r.ratification ? (launchApproved(s) ? `Status: ${agreedStatus(true).toLowerCase()} by ${leadOf(s, "ceo")}. ` : `Status: ${AGREED_STATUS.toLowerCase()}. ${AGREED_NOT_LAUNCH} `) : ""}${OUTCOME_NOTE}`
         : `${proposal_id ? `No proposal ${proposal_id}.` : "No proposals recorded yet."} ${OUTCOME_NOTE}`;
@@ -527,23 +620,148 @@ export function registerAlign(server: McpServer) {
   server.registerTool(
     "align_get_directives",
     {
-      title: "Get authority directives",
-      description:
+      title: say("Get authority directives", "Get what changed and what is waiting"),
+      description: say(
         "Authority changes (a Leadership company-goal push or a goal owner's ratification) that Align routes to agent sessions. Pass session_id (full id or a suffix of the raw session id) to get the directives that session has not received yet. Also lists the 10 most recent authority events with delivery counts.",
+        "Call first, at the start of every work request for this company's teams: what changed (new company requirements, changes a team accepted) and what is waiting on someone's approval. If a change you depend on is not approved, stop and say who has to approve it.",
+      ),
       inputSchema: z.object({ session_id: z.string().max(200).optional() }),
       outputSchema: DirectivesOut,
       annotations: READ_ONLY,
     },
     async ({ session_id }, ctx) => {
       requireRead(ctx);
-      const out = directives(await sessionState(ctx), session_id);
+      const st = await readFor(ctx, apps);
+      const out = directives(st, session_id);
       const head = out.session_id
         ? out.session_found
           ? `${out.directives.length} pending directive(s) for ${out.session_id}${out.directives.length ? `: ${out.directives.map((d) => d.title).join("; ")}` : ""}.`
           : `No captured session matches "${out.session_id}".`
         : "No session_id given; pending directives not computed.";
       const lines = out.recent.map((e) => oneLine(`- ${e.title} at ${e.at}: delivered ${e.delivered}, acted ${e.acted}`));
-      return result(out, `${oneLine(head)}\n${out.recent.length} recent authority event(s)${lines.length ? `:\n${lines.join("\n")}` : "."}`);
+      // Apps read the goals' limits first: this is the call they make before every piece of work.
+      const limits = apps ? limitsHead(st, ctx) : "";
+      return result(out, `${limits}${oneLine(head)}\n${out.recent.length} recent authority event(s)${lines.length ? `:\n${lines.join("\n")}` : "."}`);
     },
   );
+}
+
+/**
+ * Two reads only apps get (Northstar's tool list is frozen in its snapshot): what was asked of the caller's team,
+ * mostly in meetings, and what agents have done on each goal. Both are custom-workspace reads, capped, and need no
+ * model call, so checking Align before work stays cheap.
+ */
+function registerWorkspaceTools(server: McpServer) {
+  server.registerTool(
+    "align_get_asks",
+    {
+      title: "Get what's asked of you",
+      description:
+        "What people asked of your team and of other teams (mostly in meetings): who asked, when and where, whether it is open, accepted or done, and every later meeting where it came up again. Check before planning work so you know what is expected of you.",
+      inputSchema: z.object({}),
+      annotations: READ_ONLY,
+    },
+    async (_args, ctx) => {
+      requireRead(ctx);
+      const s = await readFor(ctx, true);
+      if (scenarioOf(s) !== "custom") return { content: [{ type: "text" as const, text: "Asks are recorded in workspaces only." }] };
+      return { content: [{ type: "text" as const, text: asksText(s, (o) => teamName(s, o), roleOf(ctx)) }] };
+    },
+  );
+  server.registerTool(
+    "align_get_goal_activity",
+    {
+      title: "Get what agents did on each goal",
+      description:
+        "A short summary, per goal, of what Claude Code and Codex sessions in this workspace worked on in the last 14 days: how many, which are active now, what the latest ones were asked and how they ended, and the files they touched most. Check before starting work so you build on it instead of redoing it.",
+      inputSchema: z.object({}),
+      annotations: READ_ONLY,
+    },
+    async (_args, ctx) => {
+      requireRead(ctx);
+      const s = await sessionState(ctx);
+      if (scenarioOf(s) !== "custom") return { content: [{ type: "text" as const, text: "Goal activity is available in workspaces only." }] };
+      // Placed on the whole workspace (so a session lands under the same goal for every reader), then cut to what this
+      // app may read: a team's app sees its own team's goals and their sessions, and no count of anyone else's.
+      const a = goalActivity(s, (g) => teamName(s, g.owner_id));
+      const v = appViewOf(ctx);
+      const owner = new Map(s.goals.map((g) => [g.id, g.owner_id]));
+      const shown = v.all ? a : { ...a, goals: a.goals.filter((g) => v.team !== null && owner.get(g.goal_id) === v.team), unmatched: 0 };
+      return { content: [{ type: "text" as const, text: activityText(shown) }] };
+    },
+  );
+  // Limits alone, for a hook that runs after the agent's context is summarized (SessionStart "compact" in Claude Code
+  // and Codex, an mcp_tool hook on this already-connected server): the rules come back without a full check.
+  server.registerTool(
+    "align_get_limits",
+    {
+      title: "Get the goals' limits",
+      description:
+        "The limits the goal owners confirmed: what each team's goal must cover, must not do, and leaves out of scope. Short. Also part of align_get_directives; call this alone to get them back after your context was summarized.",
+      inputSchema: HOOK_INPUT,
+      annotations: READ_ONLY,
+    },
+    async (input, ctx) => {
+      requireRead(ctx);
+      const s = await readFor(ctx, true);
+      const text = scenarioOf(s) !== "custom" ? "Limits are recorded in workspaces only." : limitsText(s, (o) => teamName(s, o), roleOf(ctx));
+      return hookOrText(text, input, ctx, "limits");
+    },
+  );
+  // The brief, for hooks that add it to an agent's context on each prompt and after compaction (Codex and Claude Code
+  // UserPromptSubmit / SessionStart): limits, what is not agreed and who decides, the caller's goal, its open asks.
+  server.registerTool(
+    "align_get_brief",
+    {
+      title: "Get a short brief for your team",
+      description:
+        "About 300 tokens: the goals' confirmed limits, proposals not agreed yet and who has to approve them, your team's goal and measures, and what was asked of your team and isn't done. Read it before planning; the other align tools have the details.",
+      inputSchema: HOOK_INPUT,
+      annotations: READ_ONLY,
+    },
+    async (input, ctx) => {
+      requireRead(ctx);
+      const s = await readFor(ctx, true);
+      const text = scenarioOf(s) !== "custom" ? "The brief is for workspaces only." : briefText(s, (o) => teamName(s, o), roleOf(ctx));
+      return hookOrText(text, input, ctx, "brief");
+    },
+  );
+}
+
+// format "hook": the output Claude Code and Codex hooks inject as context (hookSpecificOutput.additionalContext). Live
+// 10-27, Claude Code logged an mcp_tool hook's plain text after compaction but did not give it to the model.
+// session: the hook's own session id, for clients that don't name a thread (Claude Code fills "${session_id}").
+const HOOK_INPUT = z.object({
+  format: z.enum(["text", "hook"]).optional(),
+  event: z.enum(["SessionStart", "UserPromptSubmit"]).optional(),
+  session: z.string().max(200).optional(),
+});
+
+// A hook on every prompt must not resend what the thread already holds. Codex names its thread in each call
+// (_meta.threadId, seen live 10-27); Claude Code doesn't, so its hook passes the session id. A prompt gets the text only
+// when this thread hasn't had this exact version, or had it more than 12 hours ago. SessionStart (after compaction,
+// which drops it) always sends, and records it, so a compaction at a prompt sends it once, not twice. Without either id
+// it always sends. In memory only: after a restart a thread gets it once more. Capped, oldest dropped first.
+const SENT = new Map<string, { hash: string; at: number }>();
+const SENT_MAX = 2000;
+const RESEND_MS = 12 * 60 * 60 * 1000;
+
+function hookOrText(text: string, input: z.infer<typeof HOOK_INPUT>, ctx: ServerContext, what: string) {
+  const { format, event = "SessionStart", session } = input;
+  if (format !== "hook") return { content: [{ type: "text" as const, text }] };
+  // An unfilled "${session_id}" (a client that doesn't substitute) names no session.
+  const meta = ctx.mcpReq?._meta?.threadId;
+  const thread = typeof meta === "string" && meta ? meta : session && !session.includes("${") ? `s:${session}` : undefined;
+  const auth = ctx.http?.authInfo;
+  if (typeof thread === "string" && thread && auth) {
+    const key = `${what}:${auth.clientId}:${String(auth.extra?.ws ?? "")}:${String(auth.extra?.role ?? "")}:${thread.slice(0, 100)}`;
+    const hash = createHash("sha256").update(text).digest("hex");
+    const prev = SENT.get(key);
+    if (event === "UserPromptSubmit" && prev?.hash === hash && Date.now() - prev.at < RESEND_MS)
+      return { content: [{ type: "text" as const, text: JSON.stringify({ hookSpecificOutput: { hookEventName: event } }) }] };
+    SENT.delete(key);
+    SENT.set(key, { hash, at: Date.now() });
+    while (SENT.size > SENT_MAX) SENT.delete(SENT.keys().next().value!);
+  }
+  return { content: [{ type: "text" as const, text: JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }) }] };
 }

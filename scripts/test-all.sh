@@ -51,6 +51,10 @@ fi
 step lint npm run lint
 step typecheck bash -c 'npx next typegen && npx tsc --noEmit'
 step syntax bash -c 'for f in scripts/*.mjs scripts/lib/*.mjs; do node --check "$f" || exit 1; done; echo "node --check clean"'
+# The Connect dialog's paste lines run in sh, bash and zsh with hostile company names and URLs (no server needed).
+step test-paste-lines node scripts/test-paste-lines.mjs
+# The session importer takes only its folder's sessions, never a sibling folder with the same prefix (fake HOME).
+step test-import-sessions node scripts/test-import-sessions.mjs
 
 # ---- fresh server ----
 rm -f data/state.json data/.secret
@@ -77,6 +81,11 @@ step test-mapper env ALIGN_URL="$BASE" node scripts/test-mapper.mjs
 stop_server
 SERVER=""
 step test-tenancy node scripts/test-tenancy.mjs "$PORT"
+# Connected AI apps: the OAuth server and the OAuth-only MCP endpoint, Mode L and hosted (reuses the build test-tenancy made).
+step test-oauth node scripts/test-oauth.mjs "$PORT" --no-build
+step test-interview node scripts/test-interview.mjs "$PORT" --no-build
+# The decision value card, its waitlist and LOI links and its funnel events (issue #30), Mode L and hosted. Needs Chrome.
+step test-funnel node scripts/test-funnel.mjs "$PORT" --no-build
 # The goal sessions hosted server (docs/v2/WIRE.md): flag off, Mode L with the test identity provider, hosted refusals.
 step test-v2 node scripts/test-v2.mjs "$PORT"
 # The same Northstar snapshot against the same baseline with ALIGN_GOAL_SESSIONS=1 (its database in a temp ALIGN_DATA_DIR, so
