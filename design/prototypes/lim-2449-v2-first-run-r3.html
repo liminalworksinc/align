@@ -18,7 +18,7 @@ h1,h2,h3,p{margin:0}h1{font-size:clamp(29px,3.5vw,45px);line-height:1.12;letter-
 "use strict";
 const stages=["start","apps","device","sessions","home","work","options"];
 const names={start:"Start",apps:"Apps",device:"Device",sessions:"Session",home:"Home",work:"Affected work",options:"Options"};
-function newState(){return {step:"start",path:"sample",sampleAllowed:true,app:false,device:false,hooks:false,shared:false,bound:false,priorReceipt:false,requestType:"checkpoint",request:"none",answer:"none",hold:"none",message:""}}
+function newState(){return {step:"start",path:"sample",sampleAllowed:true,existingWorkspace:false,app:false,device:false,hooks:false,shared:false,bound:false,priorReceipt:false,requestType:"checkpoint",request:"none",answer:"none",hold:"none",message:""}}
 let S=newState();
 function escapeText(t){return String(t).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function button(t,a,primary,disabled){return '<button data-act="'+a+'" class="btn '+(primary?'primary':'')+'" '+(disabled?'disabled':'')+'>'+escapeText(t)+'</button>'}
@@ -34,8 +34,9 @@ function action(a,value){S.message="";
 if(a==="reset"){S=newState();return true}
 if(a==="path"){S.path=value==="own"?"own":"sample";S.step="start";return true}
 if(a==="gate"){S.sampleAllowed=!S.sampleAllowed;return true}
+if(a==="existing"){S.existingWorkspace=!S.existingWorkspace;return true}
 if(a==="route"){if(!stages.includes(value)){S.message="Unknown page";return false}S.step=value;return true}
-if(a==="begin"){if(S.path==="sample"&&!S.sampleAllowed){S.message="The sample is not offered behind a creation-code gate.";return false}S.step=S.path==="sample"?"home":"apps";return true}
+if(a==="begin"){if(S.path==="sample"&&(!S.sampleAllowed||S.existingWorkspace)){S.message="The sample requires zero existing workspaces and no creation code.";return false}S.step=S.path==="sample"?"home":"apps";return true}
 if(a==="grant"){S.app=true;S.step="device";return true}
 if(a==="skipGrant"){S.step="device";return true}
 if(a==="pair"){S.device=true;S.step="sessions";return true}
@@ -52,10 +53,10 @@ if(a==="release"){if(S.hold!=="held")return false;S.hold="released";return true}
 return false}
 function start(){return hero("00 / FIRST RUN","Get one useful answer first.","Choose a fictional sample, or inspect the steps to connect one agent in v2. This preview never touches a real user account.")+
 '<section class="panel pad" style="margin-top:19px"><h2>How would you start?</h2><div class="pick"><label><input type="radio" name="path" value="sample" '+(S.path==="sample"?'checked':'')+'> Northstar sample</label><label><input type="radio" name="path" value="own" '+(S.path==="own"?'checked':'')+'> One connected agent</label></div>'+
-(S.path==="sample"?line("Sample eligibility",S.sampleAllowed?"No workspaces, no creation code required":"Creation code required · sample unavailable")+
-'<label class="small"><input type="checkbox" id="gate" '+(!S.sampleAllowed?'checked':'')+'> Preview hosted creation gate</label>':
+(S.path==="sample"?line("Sample eligibility",S.existingWorkspace?"Existing workspace · sample unavailable":S.sampleAllowed?"No workspaces, no creation code required":"Creation code required · sample unavailable")+
+'<label class="small"><input type="checkbox" id="gate" '+(!S.sampleAllowed?'checked':'')+'> Preview hosted creation gate</label> <label class="small" style="margin-left:12px"><input type="checkbox" id="existing" '+(S.existingWorkspace?'checked':'')+'> Preview existing workspace</label>':
 notice("Real route: sign in → enter authorized workspace → Apps/Devices. This prototype simulates the connection; it cannot connect to your agent.",false))+
-'<div class="action">'+button(S.path==="sample"?"Open sample":"Enter workspace preview","begin",true,S.path==="sample"&&!S.sampleAllowed)+'</div></section>'+
+'<div class="action">'+button(S.path==="sample"?"Open sample":"Enter workspace preview","begin",true,S.path==="sample"&&(!S.sampleAllowed||S.existingWorkspace))+'</div></section>'+
 notice("The sample cannot establish what happens in your actual project. When the creation gate is enabled, the real product offers Request access, not a sample.",true)}
 function apps(){return hero("01 / APPS","An app grant is not a session.","OAuth lets an AI app read a workspace as a particular person. It does not install hooks or produce a session receipt.")+
 '<div class="columns"><section class="panel pad"><h2>Connect an AI app</h2><p class="sub">In v2, copy the MCP URL from Apps, use it in Claude Code or Codex, then authorize the workspace through the OAuth flow.</p><code class="code">Apps → MCP server URL → AI app → OAuth workspace consent</code>'+
@@ -116,6 +117,6 @@ line("Hold/release receipt",S.hold==="held"?"Enforced (fictional)":S.hold==="rel
 const renderer={start,apps,device,sessions,home,work,options};
 function render(){const e=document.getElementById("screen");e.innerHTML=renderer[S.step]()+ '<p id="message" role="alert">'+escapeText(S.message)+'</p>';document.getElementById("nav").innerHTML=stages.map((s,i)=>'<button data-route="'+s+'" aria-current="'+(s===S.step?'page':'false')+'">'+(i+1)+'. '+names[s]+'</button>').join("");e.focus({preventScroll:true})}
 document.addEventListener("click",function(e){const b=e.target.closest("button");if(!b)return;const route=b.dataset.route;const a=b.dataset.act;let result=false;if(route)result=action("route",route);else if(a==="acceptReport")result=action("report","auto_accepted");else if(a==="developerReport")result=action("report","developer_accepted");else if(a==="declineReport")result=action("report","declined");else if(a)result=action(a);render();document.getElementById("announce").textContent=result?"Screen updated: "+S.step:S.message});
-document.addEventListener("change",function(e){const t=e.target;if(t.name==="path")action("path",t.value);if(t.id==="gate")action("gate");if(t.name==="requestType")action("type",t.value);render()});
+document.addEventListener("change",function(e){const t=e.target;if(t.name==="path")action("path",t.value);if(t.id==="gate")action("gate");if(t.id==="existing")action("existing");if(t.name==="requestType")action("type",t.value);render()});
 render();
 </script></body></html>
