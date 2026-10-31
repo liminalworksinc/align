@@ -160,7 +160,10 @@ export function ProposalsView(props: ViewProps) {
   const list = [...s.proposals].reverse();
   const openOne = s.proposals.find((p) => OPEN_STATES.includes(p.state)) ?? null;
   const selected = selection?.kind === "proposal" ? s.proposals.find((p) => p.id === selection.id) : undefined;
-  const active = selected ?? activeProposal(s);
+  // A request with a notice stays on screen: a declined one leaves activeProposal(), which would show another request
+  // and drop the notice.
+  const noticed = notice ? s.proposals.find((p) => p.id === notice.id) : undefined;
+  const active = selected ?? noticed ?? activeProposal(s);
   const isProduct = me.actor === "product";
   // + New conflict and the Your turn card ask for the composer (props.compose) until a proposal is picked or sent.
   const showComposer = isProduct && !openOne && (composing || !!props.compose || !active);
@@ -229,7 +232,11 @@ export function ProposalsView(props: ViewProps) {
           <Composer {...props} busy={busy} run={run} onSent={() => { setComposing(false); props.setCompose?.(false); }} />
         ) : active ? (
           // Keyed on state and revision count so Detail's local state (the untested tick) never carries over to a new revision.
-          <Detail key={`${active.id}:${active.state}:${active.counter_versions.length}`} {...props} p={active} busy={busy} run={run} notice={notice?.id === active.id ? notice.n : null} setNotice={(n) => setNotice(n ? { id: active.id, n } : null)} />
+          <Detail key={`${active.id}:${active.state}:${active.counter_versions.length}`} {...props} p={active} busy={busy} run={run} notice={notice?.id === active.id ? notice.n : null}
+            setNotice={(n) => {
+              setNotice(n ? { id: active.id, n } : null);
+            }}
+          />
         ) : (
           <Card tone="readonly">
             <p className="text-[18px] font-semibold text-zinc-900">No proposals to your goal yet.</p>

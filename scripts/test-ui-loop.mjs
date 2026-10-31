@@ -486,9 +486,17 @@ async function main() {
     await fill(A, `What ${ASKING} will do in return`, "UILOOP nothing extra.");
     await click(A, "Send proposal to");
     await waitText(A, "Waiting");
-    const owner = await signIn(BASE, "security");
-    const pend = (await api(lead, "GET", "/api/state")).json?.proposals?.find((x) => x.state === "PENDING_SECURITY");
-    const rj = await api(owner, "POST", `/api/proposals/${pend?.id}/reject`, {});
+    // The owner declines on screen: the notice stays on the declined request (it leaves activeProposal()).
+    await O.reload({ waitUntil: "networkidle2" });
+    await openProposals(O);
+    await waitText(O, "Your decision");
+    await click(O, "Decline");
+    await click(O, "Review this decision");
+    await click(O, "Confirm: decline this request");
+    const recorded = await waitText(O, "Recorded: you declined this request");
+    check("U14 the owner declines on screen and stays on that request with the recorded notice", recorded, (await text(O)).slice(0, 500));
+    const pend = (await api(lead, "GET", "/api/state")).json?.proposals?.find((x) => x.state === "PENDING_SECURITY" || x.state === "REJECTED");
+    const rj = pend?.state === "REJECTED" ? { status: 200, text: "declined on screen" } : await api(await signIn(BASE, "security"), "POST", `/api/proposals/${pend?.id}/reject`, {});
     await A.reload({ waitUntil: "networkidle2" });
     await click(A, "Your turn");
     const yt = await waitText(A, "declined your last proposal");
