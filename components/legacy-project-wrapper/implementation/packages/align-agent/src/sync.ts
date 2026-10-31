@@ -15,6 +15,7 @@ import { kvGet, kvSet } from "./db.ts";
 import { tailAll, type TailResult } from "./tailer.ts";
 import { detectGitEdits, fetchPod, uploadActivity } from "./activity.ts";
 import { fetchAsks } from "./asks.ts";
+import { computeUnsharedDigest, uploadSteering } from "./allocation.ts";
 import { layout, listSpool, localId } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
 import type { SpoolRecord } from "./shared/types.ts";
@@ -401,6 +402,7 @@ export interface SyncResult {
   uploaded: number;
   directives: number;
   activity?: number;
+  steering?: number;
 }
 
 /**
@@ -436,6 +438,11 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     res.spooled += ingestSpool(ctx);
     res.tail = tailAll(ctx, opts.tailBudgetMs);
     res.spooled += ingestSpool(ctx);
+    try {
+      computeUnsharedDigest(ctx);
+    } catch {
+      /* best effort; the note just doesn't show */
+    }
     if (!signedIn(ctx.home)) return res;
     const refresh = new Set<string>();
     res.sent += (await flushOutbox(ctx)).sent;
@@ -462,6 +469,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     }
     res.activity = await uploadActivity(ctx).catch(() => 0);
     for (const ws of refresh) await fetchPod(ctx, ws).catch(() => 0);
+    res.steering = await uploadSteering(ctx).catch(() => 0);
     return res;
   } finally {
     try {

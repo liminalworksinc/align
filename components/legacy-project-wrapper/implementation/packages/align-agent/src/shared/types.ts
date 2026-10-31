@@ -36,6 +36,10 @@ export interface Goal {
   contributes_to?: { id: string; title: string; version: number; reviewed_version: number | null; stale: boolean }[];
   /** Limits set in this version by the goal's approvers (absent from servers before PORT-002). */
   limits?: Limit[];
+  /** Share of the workspace's agent time this goal should get, 0 to 100, or null (versioned; absent from older servers). */
+  target_share?: number | null;
+  /** Trailing 7 days, whole percents (goals feed only; absent from older servers). */
+  allocation?: { target_share: number | null; share_7d: number; gap_7d: number | null; held?: boolean } | null;
 }
 
 /** A goal related to the bound one that its agent should also know: a parent it contributes to, or a dependency. */
@@ -163,6 +167,8 @@ export interface InjectedState {
    * auto-accepted a safe request.
    */
   requests_seen?: Record<string, { shown?: boolean; told?: string; answer?: "accepted" | "declined"; auto?: boolean }>;
+  /** When this session was shown its one steering line, if ever. */
+  steering_at?: string;
   at: string;
 }
 
@@ -181,6 +187,8 @@ export interface FeedFile {
   etag: string | null;
   fetched_at: string;
   goals: Goal[];
+  /** The workspace's steering switch (absent from older servers, which means off). */
+  steering?: "off" | "on";
 }
 
 /** An ask as `GET /api/v2/workspaces/:ws/asks` returns it (AskView, PORT-003), without the `can` flags. */

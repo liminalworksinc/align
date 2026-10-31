@@ -32,6 +32,10 @@ align bind <session> --goal <ref|none>                takes effect at the next p
 align requests [--all] [--json]                       requests sent to your sessions and their answers (offline)
 align requests accept|decline <id> [--session S]      answer one; the receipt goes to the sender
 align latch status                                    stop latches and goal holds (they come from the web)
+align allocation [--workspace W] [--week YYYY-MM-DD] [--refresh] [--json]
+                                                      agent time per goal against its target, and this machine's
+                                                      unshared share (local only)
+align steering status [--workspace W]                 steering switch, lines shown this week, lines waiting to report
 align install [--claude] [--codex] [--dry-run]
 align uninstall [--purge]
 align sync                                            one pass: spool, transcripts, outbox, directives, upload
@@ -119,6 +123,24 @@ call.
   shared, are skipped; the server also refuses an epoch that would start before history it already holds
   (`epoch_overlap`), and the CLI reports that session as skipped.
 
+## Allocation and steering
+
+- Each goal can carry a target share of the workspace's agent time. It is versioned goal content: the owner sets it in
+  a new version, and anyone else proposes new targets (for one goal or several at once) that each goal's approvers
+  approve and someone launches, on the web. The goals feed carries each active goal's trailing-7-day share and gap
+  (whole percents), whether it is on hold, and the workspace's steering switch (owners turn it on or off on the web).
+- With steering on, a shared session that starts (or `/clear`s) on a goal at least 10 points over its target, while
+  another goal you can see is at least 10 points under, gets one line in context naming both goals and shares. Once
+  per session; never at resume or compaction, never while the session is stopped or held, never from or toward a goal
+  on hold; never names people. Each line shown is queued in `ALIGN_HOME/steering/` and reported by the next sync
+  (session key, goal ids and whole percents only).
+- Once a week, at the first fresh session, a user-only note says how much of this machine's agent time in the last 7
+  days was in sessions not shared toward any goal, and in which folders. The sync pass computes it from local
+  transcripts into `ALIGN_HOME/unshared-digest.json`; it is never uploaded and never reaches the model.
+- `align allocation` prints share, target and gap per goal from the cached feed (`--refresh` refetches; `--week`
+  asks the server for a past week) and the local unshared share. `align steering status` shows the switch, the lines
+  shown this week and those waiting to be reported.
+
 ## What `align install` changes
 
 Copies the built `dist/` to `ALIGN_HOME/bin/<version>/` (adds a `package.json` with `"type": "module"`) and points the
@@ -147,7 +169,9 @@ what was added.
 directives, requests, holds, shares, aliases), `rules.json` folder share rules, `hot/` and `injected/` per-session JSON for hooks,
 `latch/` stop latches and goal holds, `spool/` hook records for the next sync, `feeds/` cached goals (`<ws>.json`), team activity
 (`activity-<ws>.json`) and asks (`asks-<ws>.json`), `drift/` drift notices waiting for the next prompt (limit ids only),
-`me.json`, `last-sync.json`, `logs/`.
+`steering/` steering lines shown and not yet reported, `unshared-digest.json` and `unshared-shown.json` (this machine's
+agent time outside shared sessions, by folder, and the week its note was shown; never sent), `me.json`,
+`last-sync.json`, `logs/`.
 
 Set `"default_workspace": "<ws id>"` in `config.json` if you belong to several workspaces and want `::align share`
 without `--dir`.
@@ -162,7 +186,8 @@ without `--dir`.
   What reaches the model: ratified goal fields (with the version's limits) inside a fixed envelope (<= 1,200 chars, or
   1,800 with limits) or delta (<= 300 chars), the accepted asks of the goal's team (<= 2,200 more, quoted with who
   asked and who accepted), Align-worded requests that name their sender and quote the sender's note as data, and the
-  pod card and notes (<= 300 chars), all passed through the same sanitizer, and
+  pod card and notes (<= 300 chars), at most one steering line per session (<= 320 chars: two goal titles and whole
+  percents), all passed through the same sanitizer, and
   nothing at all when unchanged. From
   this machine's own sessions the card carries file paths, task labels and commit subjects. From other people it
   carries only a first name (letters only) and paths made of path characters (overlap is named by this session's own

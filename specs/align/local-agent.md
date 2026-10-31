@@ -52,6 +52,8 @@ seconds (always at the end of a turn) a hook starts a detached `align sync --hoo
 | `align requests [--all] [--json]` | Requests sent to this device's sessions and their answers (offline) | no |
 | `align requests accept\|decline <id> [--session <session>]` | Answer a request; the receipt is queued for the sender | no (queued) |
 | `align latch status` | List stop latches and goal holds | no |
+| `align allocation [--workspace <name\|id>] [--week YYYY-MM-DD] [--refresh] [--json]` | Agent time per goal against its target (cached feed; `--week` asks the server) and this machine's unshared share | for `--refresh` and `--week` |
+| `align steering status [--workspace <name\|id>]` | The steering switch, lines shown this week, lines waiting to be reported | no |
 | `align install [--claude] [--codex] [--dry-run]` | Install hooks (both harnesses when no flag is given) | no |
 | `align uninstall [--purge]` | Remove Align's hooks; `--purge` also deletes `ALIGN_HOME` | no |
 | `align sync [--hook] [--settle <ms>]` | One pass: spool, transcripts, outbox, directives, usage, feeds, activity | uploads need it |
@@ -72,7 +74,9 @@ sent), `align.db` (SQLite, WAL), `rules.json` (folder rules), `me.json`, `instal
 `latch/<lid>.hold.json` (goal holds),
 `spool/` (hook records waiting for the next sync), `activity/<lid>.jsonl` (team activity), `feeds/<ws>.json`
 (goal feeds), `feeds/activity-<ws>.json` (other machines' activity), `feeds/asks-<ws>.json` (asks between teams),
-`drift/<lid>.json` (a drift notice waiting for the next prompt), `logs/align.log`, `logs/sync.log`, and
+`drift/<lid>.json` (a drift notice waiting for the next prompt), `steering/` (steering lines shown, waiting to be
+reported), `unshared-digest.json` and `unshared-shown.json` (this machine's agent time outside shared sessions and the
+week its note was shown; never sent), `logs/align.log`, `logs/sync.log`, and
 `bin/<version>/` with the symlink `bin/current` that hooks run from. Every location can be overridden with
 `HOME`, `ALIGN_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `ALIGN_SERVER`.
 
@@ -88,8 +92,9 @@ never an `Origin` header, and time out after 15 s. Endpoints used: `POST /api/v2
 `POST .../sessions/:session_key/stop-sharing`, `DELETE .../sessions/:session_key`,
 `GET /api/v2/directives?cursor=<seq>`, `POST /api/v2/directives/:id/receipts` (body `{session_key, state, at}`, plus
 `auto_accepted: true` on an `accepted` receipt the agent posted for a safe request),
-`POST /api/v2/workspaces/:ws/activity`, `GET /api/v2/workspaces/:ws/activity?after=<seq>` and
-`GET /api/v2/workspaces/:ws/asks`. The agent never
+`POST /api/v2/workspaces/:ws/activity`, `GET /api/v2/workspaces/:ws/activity?after=<seq>`,
+`GET /api/v2/workspaces/:ws/asks`, `POST /api/v2/workspaces/:ws/steering` and
+`GET /api/v2/workspaces/:ws/allocation`. The agent never
 calls the v1 routes (`/api/sessions*`, `/api/directives*`), which no longer exist.
 
 Every device is paired by a person signed in to the web app with their own account; no shared secret, passcode or
@@ -223,7 +228,9 @@ spent.` `--json` SHALL print the same rows with per-basis usage aggregates as JS
 The `align goals` command SHALL print each cached workspace as `<name> (cached <time>)` or `<name> (not fetched
 yet; use --refresh)` followed by one line per goal (`*` when bindable, id, `v<version>`, status, visibility as
 `private`, `team` or `workspace`, title) and the legend `* = you can bind a session to it now.` `--refresh` SHALL require sign-in and refetch
-`/api/v2/me` and each feed. Feeds SHALL be fetched with `If-None-Match` and a 304 SHALL only update `fetched_at`.
+`/api/v2/me` and each feed. Feeds SHALL be fetched with `If-None-Match` and a 304 SHALL only update `fetched_at`; a
+fetched feed SHALL keep each goal's `target_share` and `allocation` and the feed's `steering` (`off` when the server sends
+none).
 
 #### Scenario: Not signed in yet
 
@@ -421,7 +428,8 @@ and when signed in flush the outbox, poll directives, upload usage, refresh `/ap
 otherwise every 10 minutes) and every workspace's goal feed, fetch each workspace's asks feed with `If-None-Match`
 into `feeds/asks-<ws>.json` (a 304 only updates `fetched_at`; it keeps the asks of the person's teams and the asks
 they recorded, at most 200 with open and accepted first, without the server's `can` flags; any failure leaves the
-cached file as it was), detect git edits, upload activity and fetch team activity. It SHALL record `{at, ms, pid}` in `~/.align/last-sync.json`. Run from the CLI it SHALL print `Local: <n>
+cached file as it was), detect git edits, upload activity, fetch team activity and report queued steering lines; and,
+signed in or not, recompute the local unshared-time digest at most every 6 hours. It SHALL record `{at, ms, pid}` in `~/.align/last-sync.json`. Run from the CLI it SHALL print `Local: <n>
 hook records, <n> files scanned (<n> new bytes).` and then either `Signed out: nothing uploaded.` or `Server: <n>
 queued calls sent, <n> usage rows uploaded, <n> directives, <n> still queued.`, or `Another sync is running.`
 
@@ -849,6 +857,74 @@ unaffected.
 - **WHEN** a workspace owner removes the person from `ws_acme` while one of their sessions is shared there, and `align goals --refresh` and `align sync` then run
 - **THEN** `align goals` no longer lists Acme, the server stores no further usage for that session, and `align sessions --json` keeps counting its new requests
 
+### Requirement: One steering line at a fresh session start
+
+The `align` hook SHALL, on `SessionStart` with source `startup` or `clear` for a shared session bound to a goal (or a
+session a folder rule shares at that start), add at most one line to `additionalContext`, once per session (kept as
+`steering_at` in `~/.align/injected/<lid>.json`), when the cached feed's `steering` is `on`, the bound goal is active,
+not held and at least 10 points over its target (`allocation.gap_7d` of 10 or more), and another active goal in the
+feed that is not held, has a target above 0 and is at least 10 points under it exists; it names the goal furthest under
+target: `[Align] Last 7 days: "<goal>" had <share>% of the workspace's agent time (target <t>%); "<other>" has <share>%
+of its <t>% target. Tell the user once if relevant; don't switch tasks on your own.`, titles cleaned and cut to 60
+characters, at most 320 characters, never naming a person. There SHALL be no line on `resume`, `compact` or `fork`,
+with steering off or absent from the feed, without a cached feed, for an unshared session, or while the session has a
+stop latch or a goal hold. Each line shown SHALL be queued as one file in `~/.align/steering/` holding the local id,
+workspace, the two goal ids, the share, the target and the time.
+
+#### Scenario: Once per session
+
+- **WHEN** a shared session bound to a goal at 24% against a 10% target starts while another goal is at 0% of a 20% target, then clears, restarts, resumes and compacts (test `allocation` "a fresh shared session over target gets the line once ...")
+- **THEN** the first start's context holds the line naming both goals, one line is queued, and no later start adds another
+
+#### Scenario: Holds and latches
+
+- **WHEN** the only goal under target is held, or the bound goal is held, or the session has a stop latch or a goal hold (tests `allocation` "a goal on hold is never steered from or toward ..." and "a stopped or held session gets no steering line")
+- **THEN** no line is shown or queued; with another goal under target that is not held, that goal is named instead
+
+### Requirement: Steering lines are reported by the sync pass
+
+The sync pass SHALL, when signed in, send each queued steering line whose session is shared to
+`POST /api/v2/workspaces/:ws/steering` in batches of at most 100, as `{session_key, goal_id, suggested_goal_id, share,
+target, at}` and nothing else, deleting the files of a batch the server answered (a 4xx batch too, which would be
+refused again) and keeping them on a network failure, a 5xx or a 401. A line whose session is not shared SHALL wait,
+and be deleted unsent once it is more than a day old.
+
+#### Scenario: Shared once, unshared dropped
+
+- **WHEN** three lines are queued, one for a shared session, one for a session never shared from now, and one for such a session two days ago (test `allocation` "lines for shared sessions reach the server once ...")
+- **THEN** the server gets one event with exactly those six keys, the recent unshared line stays queued, the old one is deleted, and the next pass sends nothing
+
+### Requirement: Weekly note on agent time outside shared sessions
+
+The sync pass SHALL compute, from the local ledger and at most every 6 hours, this machine's fresh tokens (input,
+output and cache writes) of the last 7 days and the part in sessions not shared toward a goal, grouped by folder (top
+5), into `~/.align/unshared-digest.json`, which SHALL never be uploaded. The `align` hook SHALL, on `SessionStart` with
+source `startup` (shared or not), show once per calendar week (Monday, UTC), as `systemMessage` only and never
+`additionalContext`, `Align: <n>% of this machine's agent time in the last 7 days was in sessions not shared toward any
+goal (mostly <up to 3 folder names>). Run \`align share --dir <folder> --workspace <workspace> --goal <goal>\` to count a
+folder toward a goal. This stays on this machine.` when that part is more than 3%.
+
+#### Scenario: Digest and note
+
+- **WHEN** the last 7 days hold 600 fresh tokens in a shared session and 400 in two unshared ones, plus older and cache-read tokens (tests `allocation` "the digest splits shared from unshared work ..." and "the note shows once a week ...")
+- **THEN** the digest says 40% unshared by folder and nothing is queued for upload; the first fresh start shows the note to the user only, the next start that week shows nothing, and at 3% or less there is no note
+
+### Requirement: Allocation and steering commands
+
+`align allocation` SHALL print, per cached workspace, `<name>, last 7 days (cached <time>, steering <on|off>)` (or
+`(not fetched yet; use --refresh)`), a header `SHARE TARGET GAP GOAL`, one line per active goal (share, target or `-`,
+`<n> over`, `<n> under` or `on target`, title) from the feed's `allocation`, and, when this machine has agent time, the
+unshared share with its top 3 folders and `This part stays on this machine.`; `--refresh` SHALL refetch the feeds
+first, `--json` print the same as JSON, and `--week YYYY-MM-DD` (a usage error, exit 2, for anything else) print that week's rows
+from `GET /api/v2/workspaces/:ws/allocation`. `align steering status` SHALL print `<workspace>: steering <on|off>` with,
+when signed in, the lines shown this week, then how many lines wait to be reported; any other subcommand SHALL be a
+usage error (exit 2): the switch is a workspace owner's, on the web.
+
+#### Scenario: From the refreshed feed
+
+- **WHEN** the feed has goals at 40% of a 10% target and 5% of a 30% target with steering on, and the user runs `align allocation --refresh`, `align allocation --json` and `align steering status` (test `allocation` "align allocation prints share, target and gap ...")
+- **THEN** the lines read `40% 10% 30 over Alpha goal` and `5% 30% 25 under Beta goal`, the JSON carries the goals' allocation and `steering: "on"`, and the status says `steering on` and `0 lines waiting to be reported by the next sync.`; `align steering on` exits 2
+
 ### Requirement: Nothing private leaves the machine
 
 The `align` CLI, hooks and sync pass SHALL never upload or store prompts, responses, tool output, file contents or
@@ -859,7 +935,9 @@ machine only as described under team activity upload. The agent SHALL identify r
 `repo_alias` only when the user chose one) and send session titles as null; SHALL identify repos in team activity
 only by `repo_id`, an unkeyed hash of the workspace and the normalized git remote (or local folder) that is the same on
 every member's machine; SHALL keep folder rules, repo paths and branch names local unless work signals are on; and
-SHALL never send an `Origin` header. Sessions that are not shared SHALL cause zero server requests about them.
+SHALL never send an `Origin` header. Steering reports SHALL carry only a shared session's key, two goal ids, two whole
+percents and a time, and the unshared-time digest (folders and token counts) SHALL stay on the machine. Sessions that
+are not shared SHALL cause zero server requests about them.
 
 #### Scenario: Canary text
 
@@ -1098,6 +1176,8 @@ next to a session shared in the same folder in the last 24 hours, `Align: this f
 - `packages/align-agent/src/requests.ts`
 - `packages/align-agent/src/activity.ts`
 - `packages/align-agent/src/asks.ts`
+- `packages/align-agent/src/allocation.ts`
+- `packages/align-agent/src/shared/steering.ts`
 - `packages/align-agent/src/hot.ts`
 - `packages/align-agent/src/version.ts`
 - `packages/align-agent/src/shared/anchors.ts`
@@ -1116,6 +1196,7 @@ next to a session shared in the same folder in the last 24 hours, `Align: this f
 - `packages/align-agent/test/pod.test.ts`
 - `packages/align-agent/test/past.test.ts`
 - `packages/align-agent/test/requests.test.ts`
+- `packages/align-agent/test/allocation.test.ts`
 - `packages/align-agent/test/fixtures/envelope-golden.json`
 - `packages/align-agent/test/helpers.ts`
 - `packages/align-agent/test/fake-server.ts`
