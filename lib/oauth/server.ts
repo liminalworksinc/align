@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { signPayload } from "../auth";
 import { config } from "../config";
 import type { Actor } from "../types";
-import { agentEpochOf, parseCustomWs, readAuth, type CustomWsId } from "../workspace";
+import { agentEpochOf, isRole, parseCustomWs, readAuth, type CustomWsId } from "../workspace";
 import { ClientUnreachable, redirectAllowed, resolveClient, type OAuthClient } from "./clients";
 import { HttpError } from "../errors";
 import { createGrant, liveGrants, newGrantId, parseRefresh, removeGrant, rotateGrant } from "./grants";
@@ -20,9 +20,17 @@ export const SCOPE = "goals:read";
 const ACCESS_TTL_S = 60 * 60;
 const CODE_TTL_MS = 60 * 1000;
 
-/** This server's public origin from the Host the request used (proxy.ts has already checked it): https when hosted. */
+// A Host header as an origin may carry it: a DNS name or a bracketed IPv6 address, then an optional numeric port.
+// proxy.ts checks only the name before ":", so anything after it ("align.test:443;touch${IFS}x") is refused here:
+// this origin becomes the URL people paste into a terminal (lib/paste-lines.ts quotes it as well).
+const HOST_HEADER = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?$/;
+const NO_ORIGIN = "invalid.invalid"; // RFC 6761: never resolves, and matches no token audience
+
+/** This server's public origin from the Host the request used (proxy.ts has already checked its name): https when
+ *  hosted. A Host that is more than a plain name and numeric port gives an origin that matches nothing. */
 export function originFromHost(host: string | null): string {
-  return `${config().hosted ? "https" : "http"}://${(host ?? "").toLowerCase()}`;
+  const h = (host ?? "").toLowerCase();
+  return `${config().hosted ? "https" : "http"}://${HOST_HEADER.test(h) ? h : NO_ORIGIN}`;
 }
 export const originOf = (req: Request) => originFromHost(req.headers.get("host"));
 export const resourceFor = (origin: string) => `${origin}${MCP_PATH}`;
@@ -61,7 +69,7 @@ export interface McpGrant {
   ws: CustomWsId;
   grant: string;
   client_id: string;
-  role: Actor;
+  role: Actor | null; // null: the grant has no valid role on record, so the app reads no team's data (lib/mcp/register.ts)
   exp: number; // seconds
 }
 
@@ -92,7 +100,8 @@ export function readMcpToken(token: string | undefined, aud: string): McpGrant |
   if (!auth || agentEpochOf(auth) !== p.ep) return null;
   const grant = liveGrants(ws).find((x) => x.id === p.gid);
   if (!grant || grant.client_id !== p.cid) return null;
-  return { ws, grant: grant.id, client_id: grant.client_id, role: grant.role, exp: p.exp };
+  // The role comes from the grant on disk, never from the token: a grant without a valid one fails closed (no team).
+  return { ws, grant: grant.id, client_id: grant.client_id, role: isRole(grant.role) ? grant.role : null, exp: p.exp };
 }
 
 // ---- authorization requests ----
