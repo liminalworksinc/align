@@ -57,7 +57,7 @@ let HOSTED = false;
 const origin = () => (HOSTED ? `https://${HOSTED_HOST}` : `http://127.0.0.1:${PORT}`);
 function req(method, p, { body, form, cookie, headers = {}, raw = false } = {}) {
   return new Promise((resolve, reject) => {
-    const write = !["GET", "HEAD"].includes(method);
+    const write = !["GET", "HEAD"].includes(method) && !["/api/mcp", "/oauth/token", "/oauth/register"].includes(p);
     const h = HOSTED
       ? { host: HOSTED_HOST, "x-forwarded-proto": "https", "fly-client-ip": "198.51.100.11", ...(write ? { origin: origin() } : {}) }
       : { host: `127.0.0.1:${PORT}`, ...(write ? { origin: origin() } : {}) };
@@ -227,7 +227,6 @@ async function browserFor(cookie) {
   }
   return { browser, page };
 }
-const bodyText = (page) => page.evaluate(() => document.body.innerText);
 async function waitFor(page, fn, ms = 25000) {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
@@ -307,18 +306,19 @@ async function phaseLocal(dir) {
     const reads = await page.evaluate(() => [...document.querySelectorAll('ul[aria-label="What the agent can read"] li')].map((li) => li.textContent));
     const client = await newClient("Claude Code");
     const tok = await connect(w, client, "leadership");
-    const tools = rpcResult(await rpc(tok, "tools/list", {}))?.tools ?? [];
-    check("'It can read' has one line per tool the MCP server lists, and every tool only reads", reads.length > 0 && reads.length === tools.length && tools.every((t) => t.annotations?.readOnlyHint === true), `${reads.length} lines, ${tools.length} tools`);
 
-    // Approved, nothing read yet: the grant exists with no last_used_at (tools/list is not a read of the workspace).
+    // Approved, nothing read yet: the grant exists with no last_used_at.
     const approvedApi = await untilApi(w, (j) => j?.apps?.length === 1 && j.apps[0].last_used_at === null, 3000);
     if (approvedApi) {
       await page.reload({ waitUntil: "networkidle2" });
       const ok = await waitFor(page, async () => (await card(page))?.state === "approved");
       const c1 = await card(page);
-      check("approved but no read yet: the card says Claude Code is approved but hasn't read anything yet", ok && /Claude Code is approved but hasn’t read anything yet\./.test(c1?.text ?? ""), c1?.text);
+      check("approved but no read yet: the card says 'Claude Code: Approved, hasn't read the plan yet'", ok && /Claude Code: Approved, hasn’t read the plan yet\./.test(c1?.text ?? ""), c1?.text);
       await shots(page, "approved");
     } else check("approved but no read yet: the server reports the grant with no read", false, (await connections(w)).text);
+    // Any successful MCP call counts as a read (last_used_at), tools/list included, so it comes after the approved check.
+    const tools = rpcResult(await rpc(tok, "tools/list", {}))?.tools ?? [];
+    check("'It can read' has one line per tool the MCP server lists, and every tool only reads", reads.length > 0 && reads.length === tools.length && tools.every((t) => t.annotations?.readOnlyHint === true), `${reads.length} lines, ${tools.length} tools`);
 
     // One MCP read: the server marks the app as on the current plan, and the card flips.
     const read = await rpc(tok, "tools/call", { name: "align_list_goals", arguments: {} });
@@ -328,8 +328,8 @@ async function phaseLocal(dir) {
     const latest = await waitFor(page, async () => (await card(page))?.state === "latest");
     const c2 = await card(page);
     check(
-      "the card then says 'Connected. Claude Code has read the latest plan.' and that Align only sees what the agent reads",
-      latest && /Connected\. Claude Code has read the latest plan\./.test(c2?.text ?? "") && /Align only sees what your agent reads here\./.test(c2?.text ?? ""),
+      "the card then says 'Connected. Claude Code has read the current plan.' and that Align only sees what the agent reads",
+      latest && /Connected\. Claude Code has read the current plan\./.test(c2?.text ?? "") && /Align only sees what your agent reads here\./.test(c2?.text ?? ""),
       c2?.text,
     );
     check("nothing is waiting on leadership, so it says nothing needs review yet", /Nothing here needs your review yet\./.test(c2?.text ?? ""), c2?.text);
@@ -353,7 +353,7 @@ async function phaseLocal(dir) {
     await page.reload({ waitUntil: "domcontentloaded" });
     const errored = await waitFor(page, async () => (await card(page))?.state === "error", 10000);
     const c4 = await card(page);
-    check("when the connections check fails the card says it couldn't check, and names no agent", errored && /Couldn’t check for connected agents/.test(c4?.text ?? "") && !/Claude Code/.test(c4?.text ?? ""), c4?.text);
+    check("when the connections check fails the card says it couldn't check, and names no agent", errored && /Couldn’t check connected AI apps/.test(c4?.text ?? "") && !/Claude Code/.test(c4?.text ?? ""), c4?.text);
     await shots(page, "error");
     page.blockConnections = false;
 
@@ -364,9 +364,10 @@ async function phaseLocal(dir) {
     await sleep(300);
     const goneNow = !(await card(page));
     const withoutCard = await pollsOnLoad(page);
-    await waitFor(page, async () => /Claude Code/.test(await bodyText(page)), 10000);
+    const sidebar = () => page.evaluate(() => document.querySelector('ul[aria-label="Connected AI apps"]')?.textContent ?? "");
+    await waitFor(page, async () => /Claude Code/.test(await sidebar()), 20000);
     const goneAfter = !(await card(page));
-    check("Hide removes the card and it stays hidden after a reload; the sidebar still lists the agent", goneNow && goneAfter && /Agents on this plan[\s\S]*Claude Code/.test(await bodyText(page)), `${goneNow} ${goneAfter}`);
+    check("Hide removes the card and it stays hidden after a reload; the sidebar still lists the app", goneNow && goneAfter && /Claude Code/.test(await sidebar()), `${goneNow} ${goneAfter} ${await sidebar()}`);
     check("the card adds no connections request (same count on load with it shown and hidden)", withCard === withoutCard && withCard >= 1, `${withCard} vs ${withoutCard}`);
 
     // Blocked storage: the card still renders (try/catch around every access).
@@ -421,7 +422,7 @@ async function phaseHosted(dir) {
     await page.reload({ waitUntil: "networkidle2" });
     const latest = await waitFor(page, async () => (await card(page))?.state === "latest");
     const c1 = await card(page);
-    check("hosted: after an OAuth connection and one MCP read the card says Claude Code has read the latest plan", read.status === 200 && onPlan && latest && /Claude Code has read the latest plan\./.test(c1?.text ?? ""), `${read.status} ${c1?.text}`);
+    check("hosted: after an OAuth connection and one MCP read the card says Claude Code has read the current plan", read.status === 200 && onPlan && latest && /Claude Code has read the current plan\./.test(c1?.text ?? ""), `${read.status} ${c1?.text}`);
     await shots(page, "latest");
   } finally {
     await browser.close();

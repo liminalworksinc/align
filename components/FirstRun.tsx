@@ -147,7 +147,7 @@ export default function FirstRun({
           ) : (
             <>
               <p className="text-zinc-700">
-                Northstar Security, a made-up company, partway through the same kind of decision. It opens in a new tab and asks for the demo passcode. Signing in there signs this
+                Northstar Security, a made-up company where two teams need each other to change a goal. It opens in a new tab and asks for the demo passcode. Signing in there signs this
                 browser out of this workspace.
               </p>
               <a href="/" target="_blank" rel="noopener" aria-label="Open the sample (fictional)" className="inline-flex min-h-11 w-fit items-center rounded-[10px] border border-zinc-300 px-4 text-[15px] font-semibold text-zinc-900 hover:bg-zinc-100">
@@ -158,7 +158,7 @@ export default function FirstRun({
         </Path>
         <Path title="Connect one agent" tag="Claude Code">
           <p className="text-zinc-700">Paste this into a terminal in the folder where you work, then choose Allow on the Align page that opens:</p>
-          {url ? command(claudeCodeLine(url)) : null}
+          {url ? <div className="max-h-36 overflow-y-auto">{command(claudeCodeLine(url))}</div> : null}
           <div>
             <div className="font-semibold">It can read</div>
             <ul aria-label="What the agent can read" className="ml-5 list-disc text-zinc-700">
