@@ -37,7 +37,12 @@ export function validRequest(q: WireRequest | undefined): q is WireRequest {
 export function applyRequest(ctx: Ctx, directiveId: string, q: WireRequest | undefined, lid: string, at: string): "received" | "stale" {
   if (!validRequest(q)) return "stale";
   if (q.cancelled === true) {
-    ctx.db.prepare("UPDATE goal_requests SET state='withdrawn', answered_at=? WHERE request_id=? AND local_id=? AND state='pending'").run(at, q.id, lid);
+    // Keep why it ended (withdrawn by its sender, or its goal closed) for the notice the hook shows.
+    const row = ctx.db.prepare("SELECT json FROM goal_requests WHERE request_id=? AND local_id=? AND state='pending'").get(q.id, lid) as { json: string } | undefined;
+    if (row) {
+      const json = JSON.stringify({ ...(JSON.parse(row.json) as object), cancel_reason: q.cancel_reason === "goal_closed" ? "goal_closed" : "withdrawn" });
+      ctx.db.prepare("UPDATE goal_requests SET state='withdrawn', json=?, answered_at=? WHERE request_id=? AND local_id=? AND state='pending'").run(json, at, q.id, lid);
+    }
     return "received";
   }
   const { cancelled: _c, ...wire } = q;

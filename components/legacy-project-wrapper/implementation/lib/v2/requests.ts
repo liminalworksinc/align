@@ -54,10 +54,14 @@ interface HoldRow {
   directive_id: string | null;
 }
 
-/** v2_directives.request_json: which request, and whether this directive withdraws it. */
+/** Why a request stopped waiting for answers: its sender (or a workspace owner) withdrew it, or its goal (or a
+ *  switch_goal's target goal) was achieved or dropped. */
+export type CancelReason = "withdrawn" | "goal_closed";
+/** v2_directives.request_json: which request, whether this directive withdraws it, and why (absent: withdrawn). */
 export interface RequestJson {
   request_id: string;
   cancelled: boolean;
+  reason?: CancelReason;
 }
 /** v2_directives.hold_json: who held (or released) the goal, why, and when. */
 export interface HoldJson {
@@ -191,12 +195,32 @@ export async function cancelRequest(pp: PolicyPrincipal, goalId: string, id: str
     const cur = requestRow(pp.wsId, id)!;
     if (cur.cancelled_at) return;
     const open = all<{ session_key: string }>(`SELECT t.session_key FROM v2_request_targets t WHERE t.request_id = ? AND ${OPEN_TARGET}`, id).map((t) => t.session_key);
-    writeDirective(pp.wsId, "request", open, null, null, { goalId: g.id, request: { request_id: id, cancelled: true } });
+    writeDirective(pp.wsId, "request", open, null, null, { goalId: g.id, request: { request_id: id, cancelled: true, reason: "withdrawn" } });
     run(`UPDATE v2_request_targets SET state = 'expired', updated_at = ? WHERE request_id = ? AND state IN ('sent','received')`, at, id);
     run("UPDATE v2_requests SET cancelled_at = ?, cancelled_by = ? WHERE id = ?", at, pp.userId, id);
     audit(pp.wsId, pp.userId, "request.cancelled", id, at);
   });
   return { request: requestView(pp, g, requestRow(pp.wsId, id)!) };
+}
+
+/** When a goal is achieved or dropped (inside writeGoalVersion's tx): its requests, and switch_goal requests toward
+ *  it, stop waiting. The sessions still `sent` or `received` get a `request` directive with cancelled true (reason
+ *  goal_closed) and become expired, as on a cancel; sessions that answered keep their answer, and the request is not
+ *  marked cancelled. Each such request is audited request.expired with the person whose action closed the goal. */
+export function expireOpenRequests(ws: string, goalId: string, actorId: string, at: string) {
+  const open = all<{ id: string; goal_id: string }>(
+    `SELECT r.id, r.goal_id FROM v2_requests r WHERE r.ws_id = ? AND (r.goal_id = ? OR r.target_goal_id = ?) AND r.cancelled_at IS NULL
+     AND EXISTS (SELECT 1 FROM v2_request_targets t WHERE t.request_id = r.id AND ${OPEN_TARGET}) ORDER BY r.created_at, r.id`,
+    ws,
+    goalId,
+    goalId,
+  );
+  for (const r of open) {
+    const keys = all<{ session_key: string }>(`SELECT t.session_key FROM v2_request_targets t WHERE t.request_id = ? AND ${OPEN_TARGET}`, r.id).map((t) => t.session_key);
+    writeDirective(ws, "request", keys, null, null, { goalId: r.goal_id, request: { request_id: r.id, cancelled: true, reason: "goal_closed" } });
+    run(`UPDATE v2_request_targets SET state = 'expired', updated_at = ? WHERE request_id = ? AND state IN ('sent','received')`, at, r.id);
+    audit(ws, actorId, "request.expired", r.id, at);
+  }
 }
 
 interface TargetRow {
@@ -232,7 +256,8 @@ function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers =
     created_at: r.created_at,
     cancelled_at: r.cancelled_at,
     cancelled_by: r.cancelled_by ? person(r.cancelled_by) : null,
-    state: r.cancelled_at ? ("cancelled" as const) : pending ? ("open" as const) : ("answered" as const),
+    // expired: its goal closed before any session answered (lib/v2/goals.ts writeGoalVersion).
+    state: r.cancelled_at ? ("cancelled" as const) : pending ? ("open" as const) : rows.length && count("expired") === rows.length ? ("expired" as const) : ("answered" as const),
     counts: { pending, accepted: count("accepted"), declined: count("declined"), expired: count("expired"), done_by_agent: rows.filter((t) => t.state === "accepted" && t.auto_accepted).length },
     sessions: rows
       .filter((t) => everyone || t.user_id === pp.userId)
@@ -269,7 +294,8 @@ export function listRequests(pp: PolicyPrincipal, goalId: string) {
 }
 
 /** A request on the device wire (GET /api/v2/directives, kind request). Goal titles are withheld (null) from a person
- *  who can no longer read that goal; null when the request no longer exists. */
+ *  who can no longer read that goal; null when the request no longer exists. A cancelled one says why (cancel_reason
+ *  withdrawn or goal_closed); cancel_reason is null otherwise. */
 export function requestWire(pp: PolicyPrincipal, j: RequestJson) {
   const r = requestRow(pp.wsId, j.request_id);
   if (!r) return null;
@@ -282,6 +308,7 @@ export function requestWire(pp: PolicyPrincipal, j: RequestJson) {
     id: r.id,
     type: r.type,
     cancelled: j.cancelled,
+    cancel_reason: j.cancelled ? (j.reason ?? "withdrawn") : null,
     goal: { id: r.goal_id, title: title(r.goal_id).title, version: r.goal_version },
     target_goal: r.target_goal_id ? { id: r.target_goal_id, title: target!.title, version: target!.version } : null,
     sender: sender(r),

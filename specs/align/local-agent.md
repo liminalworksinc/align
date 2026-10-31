@@ -623,7 +623,7 @@ session keys this device shares in the directive's workspace, and post receipts:
 
 ### Requirement: Requests reach a running session at its next prompt
 
-The `align sync` pass SHALL store each `request` directive (`request: {id, type, cancelled, goal,
+The `align sync` pass SHALL store each `request` directive (`request: {id, type, cancelled, cancel_reason, goal,
 target_goal, sender: {id, name, role}, note, created_at}`) once per targeted session, and the `align` hook SHALL deliver each request once, at the
 session's next `UserPromptSubmit` and never at `PreToolUse` (so never mid-turn), in two parts. The user notice
 (`systemMessage`) SHALL read `Align: <sender> (approver of "<goal>") asks: <Align-written sentence>. Note: "<note>".
@@ -638,8 +638,10 @@ the developer accepts, asking the developer and working toward the current goal 
 same sanitizer as other context (one line, the `[Align` marker neutralized, at most 280 characters, its double quotes
 made single). After a compact or clear, requests still waiting for an answer SHALL be put back into context. A request
 its sender withdraws (`cancelled: true`) after it reached the session SHALL produce one user notice `Align: the request
-<id> to <what> was withdrawn by <sender>.` and nothing for the model, and the agent SHALL no longer do or accept it;
-one withdrawn before it reached the session SHALL produce nothing. `<id>` is the first 6 characters after `rq_`.
+<id> to <what> was withdrawn by <sender>.` (`... was withdrawn because the goal was closed.` when `cancel_reason` is
+`goal_closed`: its goal, or a switch's target goal, was achieved or dropped) and nothing for the model, and the agent
+SHALL no longer do or accept it; one withdrawn before it reached the session SHALL produce nothing. `<id>` is the first
+6 characters after `rq_`.
 
 #### Scenario: Once, at the next prompt, never mid-turn
 
@@ -650,6 +652,11 @@ one withdrawn before it reached the session SHALL produce nothing. `<id>` is the
 
 - **WHEN** a `replan` arrives from a sender whose `sender.role` is `owner` (test `requests` "a request from a workspace owner outside the goal's approval set ...")
 - **THEN** the notice starts `Align: Olga Owner (workspace owner) asks:` and the context starts `[Align] A request from Olga Owner, a workspace owner, about goal "Ship the v2 onboarding flow":`
+
+#### Scenario: The goal closed before an answer
+
+- **WHEN** a delivered `checkpoint` is cancelled with `cancel_reason` `goal_closed`, then the turn ends (test `requests` "a request whose goal closed before an answer ...")
+- **THEN** the next prompt shows only `Align: the request <id> to make a checkpoint was withdrawn because the goal was closed.`, once, the `Stop` hook queues no `accepted` receipt, and `::align accept <id>` finds no open request
 
 #### Scenario: Compact re-shows, withdrawal is user-only
 

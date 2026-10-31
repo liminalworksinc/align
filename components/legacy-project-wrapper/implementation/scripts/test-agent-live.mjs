@@ -20,8 +20,8 @@
 //            workspace owner's request; cancel after and before delivery; switch_goal (never auto-accepted; the
 //            developer's accept opens the epoch on the target goal with cause directive:<id>); a goal hold (every tool
 //            denied with the server's title and reason, enforced; a session that binds later is held too; release
-//            reaches a session that left the goal, applied); hold and stop independent; the note and reason reach
-//            the model only quoted
+//            reaches a session that left the goal, applied); hold and stop independent; a goal achieved while a
+//            request waits (expired, "the goal was closed"); the note and reason reach the model only quoted
 // Usage: node scripts/test-agent-live.mjs <port> [--no-build]   (from a worktree root; refuses 3100, the main checkout
 //                                                                 and a busy port; --no-build reuses the app's build)
 
@@ -763,6 +763,27 @@ try {
     "hold and stop are independent: resuming a held, stopped session leaves the hold (Read still denied with the hold wording); releasing a stopped one leaves the stop (Bash denied as stopped, Read allowed); a resume then frees it",
     [stop1, resume1, stop2, resume2].every((r) => r.status === 200) && denied(q1AfterResume) === HOLD_WORDS && (denied(q1Bash) ?? "").startsWith("Align: this session was stopped from its Align workspace.") && denied(q1Read) === null && denied(q1Free2) === null,
     `${[stop1, resume1, stop2, resume2].map((r) => r.status)} afterResume=${q1AfterResume.stdout} bash=${q1Bash.stdout} read=${q1Read.stdout} free=${q1Free2.stdout}`,
+  );
+
+  // -- the goal closes while a request waits: the server expires it, the agent drops it with one notice --
+  const cl = await sendReq(L, { type: "checkpoint", note: "Before we call it done" });
+  const CL = cl.json?.request;
+  sync();
+  const clShown = prompt(Q1);
+  const gqNow = (await ws(M, "GET", `/goals/${GQ?.id}`)).json?.goal;
+  const achieved = await ws(M, "POST", `/goals/${GQ?.id}/versions`, { version: gqNow?.version, status: "achieved" });
+  sync();
+  const clClosed = prompt(Q1);
+  const clStop = turnEnd(Q1);
+  sync();
+  const clView = await reqView(CL?.id);
+  check(
+    "request (goal closed): the owner achieves the goal while a checkpoint waits; after `align sync` the next prompt tells the developer it was withdrawn because the goal was closed (the model hears only the goal's new version), the agent does not do it at turn end, and the server shows the session expired, audited request.expired",
+    cl.status === 201 && (clShown.context ?? "").includes("commit your work") && achieved.status === 201 &&
+      clClosed.system === `Align: the request ${short(CL?.id)} to make a checkpoint was withdrawn because the goal was closed.` && (clClosed.context ?? "").includes("achieved") && !(clClosed.context ?? "").includes("checkpoint") &&
+      clStop.stdout === "" && reqRow(clView, Q1.key)?.state === "expired" && clView.state === "expired" && receipts(reqDirId(CL?.id, false), Q1.key, "accepted").length === 0 &&
+      JSON.stringify(await auditOf("request.expired", CL?.id)) === JSON.stringify([M.id]) && localRequests().find((r) => r.id === CL?.id)?.state === "withdrawn",
+    `${cl.text.slice(0, 200)} shown=${clShown.stdout} ${achieved.status} ${achieved.text.slice(0, 200)} closed=${clClosed.stdout} ${JSON.stringify(clView)}`,
   );
 
   // -- canaries: people's words reach the model only inside Align's quoted-data wording --

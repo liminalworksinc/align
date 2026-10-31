@@ -283,7 +283,7 @@ The server SHALL accept `POST /api/v2/directives/{id}/receipts` from a device ac
 
 ### Requirement: Request directives on the device wire
 
-The server SHALL serve a request, and its cancellation, to the targeted sessions as a directive of kind `request` with `goal` and `binding` null and a `request` field `{id, type, cancelled, goal: {id, title, version}, target_goal: {id, title, version} | null, sender: {id, name, role}, note, created_at}`, where `type` is `replan`, `checkpoint` or `switch_goal`, `goal.version` is the goal's version when the request was sent, `target_goal` is set only for `switch_goal`, `sender.role` is `approver` when the sender was in the goal's approval set when they sent it and `owner` for a workspace owner outside it, `note` is the sender's quoted note or null, a goal's `title` is null for a person who can no longer read that goal, and `request` is null when the request no longer exists. Directives of the other kinds SHALL carry no `request` or `hold` field.
+The server SHALL serve a request, and its cancellation, to the targeted sessions as a directive of kind `request` with `goal` and `binding` null and a `request` field `{id, type, cancelled, cancel_reason, goal: {id, title, version}, target_goal: {id, title, version} | null, sender: {id, name, role}, note, created_at}`, where `type` is `replan`, `checkpoint` or `switch_goal`, `cancel_reason` is null on a request that is not cancelled and, on a cancellation, `withdrawn` when its sender or a workspace owner cancelled it or `goal_closed` when its goal, or a `switch_goal`'s target goal, was achieved or dropped while sessions had not answered, `goal.version` is the goal's version when the request was sent, `target_goal` is set only for `switch_goal`, `sender.role` is `approver` when the sender was in the goal's approval set when they sent it and `owner` for a workspace owner outside it, `note` is the sender's quoted note or null, a goal's `title` is null for a person who can no longer read that goal, and `request` is null when the request no longer exists. Directives of the other kinds SHALL carry no `request` or `hold` field.
 
 #### Scenario: Checkpoint reaches the device
 
@@ -293,7 +293,12 @@ The server SHALL serve a request, and its cancellation, to the targeted sessions
 #### Scenario: Cancelled request
 
 - **WHEN** the sender cancels a request one session has not answered
-- **THEN** that session's device gets a second `request` directive with the same `request.id` and `request.cancelled` true
+- **THEN** that session's device gets a second `request` directive with the same `request.id`, `request.cancelled` true and `request.cancel_reason` `withdrawn`
+
+#### Scenario: Request whose goal closes
+
+- **WHEN** a goal is achieved while a session has not answered a checkpoint sent to it
+- **THEN** that session's device gets a `request` directive with the checkpoint's `request.id`, `request.cancelled` true and `request.cancel_reason` `goal_closed`, and a `received` receipt on it leaves the session `expired`
 
 ### Requirement: Request answers move a session's request state
 

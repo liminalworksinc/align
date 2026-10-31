@@ -25,7 +25,7 @@ interface RequestView {
   created_at: string;
   cancelled_at: string | null;
   cancelled_by: Person | null;
-  state: "open" | "answered" | "cancelled";
+  state: "open" | "answered" | "cancelled" | "expired";
   counts: { pending: number; accepted: number; declined: number; expired: number; done_by_agent: number };
   sessions: { session_key: string; owner: Person; mine: boolean; repo_alias: string | null; harness: string; title: string | null; state: TargetState; auto_accepted: boolean; updated_at: string }[];
   can_cancel: boolean;
@@ -177,7 +177,7 @@ function RequestRow({ ws, r, onDone }: { ws: string; r: RequestView; onDone: () 
     <li className="py-3" data-request={r.id}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[16px] text-zinc-900">{TYPE_LABEL[r.type]}</span>
-        {r.state === "cancelled" ? <Pill>cancelled</Pill> : r.state === "open" ? <Pill tone="amber">waiting</Pill> : <Pill tone="green">answered</Pill>}
+        {r.state === "cancelled" ? <Pill>cancelled</Pill> : r.state === "expired" ? <Pill>expired: the goal closed</Pill> : r.state === "open" ? <Pill tone="amber">waiting</Pill> : <Pill tone="green">answered</Pill>}
         <span className="text-[14px] text-zinc-500">
           from {r.sender.name} ({r.sender.role === "approver" ? "approver" : "workspace owner"}), {when(r.created_at)}, goal version {r.goal.version}
         </span>

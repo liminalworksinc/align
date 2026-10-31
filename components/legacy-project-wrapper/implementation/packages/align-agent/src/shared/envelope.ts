@@ -424,8 +424,10 @@ export function requestAnswerLine(r: HotRequest, answer: "accepted" | "declined"
   return `[Align] The developer accepted ${senderName(r)}'s request to ${requestWhat(r)}.`;
 }
 
+/** The one user notice for a request that ended before an answer: withdrawn by its sender, or its goal closed. */
 export function requestWithdrawnNotice(r: HotRequest): string {
-  return `Align: the request ${requestShortId(r.id)} to ${requestWhat(r)} was withdrawn by ${senderName(r)}.`;
+  const why = r.cancel_reason === "goal_closed" ? "because the goal was closed" : `by ${senderName(r)}`;
+  return `Align: the request ${requestShortId(r.id)} to ${requestWhat(r)} was withdrawn ${why}.`;
 }
 
 /** The PreToolUse deny reason while a goal hold is on (and for a hold file that can't be read). */

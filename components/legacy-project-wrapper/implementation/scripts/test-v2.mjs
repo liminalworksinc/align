@@ -3503,10 +3503,10 @@ try {
       cp.text,
     );
     check(
-      "requests (wire): one request directive for both sessions: goal and binding null, request {id, type, cancelled false, goal {id, title, version}, target_goal null, sender {id, name, role approver}, note, created_at}, and no hold field",
+      "requests (wire): one request directive for both sessions: goal and binding null, request {id, type, cancelled false, cancel_reason null, goal {id, title, version}, target_goal null, sender {id, name, role approver}, note, created_at}, and no hold field",
       cpDirs.length === 1 && cpDir && JSON.stringify(cpDir.session_keys) === JSON.stringify([SM1.key, SM2.key].sort()) && cpDir.goal === null && cpDir.binding === null && !("hold" in cpDir) &&
-        JSON.stringify(Object.keys(cpDir.request).sort()) === JSON.stringify(["cancelled", "created_at", "goal", "id", "note", "sender", "target_goal", "type"]) &&
-        cpDir.request.id === CP.id && cpDir.request.type === "checkpoint" && cpDir.request.cancelled === false && JSON.stringify(cpDir.request.goal) === JSON.stringify({ id: GR.id, title: "Ship the scheduler", version: 1 }) &&
+        JSON.stringify(Object.keys(cpDir.request).sort()) === JSON.stringify(["cancel_reason", "cancelled", "created_at", "goal", "id", "note", "sender", "target_goal", "type"]) &&
+        cpDir.request.id === CP.id && cpDir.request.type === "checkpoint" && cpDir.request.cancelled === false && cpDir.request.cancel_reason === null && JSON.stringify(cpDir.request.goal) === JSON.stringify({ id: GR.id, title: "Ship the scheduler", version: 1 }) &&
         cpDir.request.target_goal === null && JSON.stringify(cpDir.request.sender) === JSON.stringify({ id: QL.id, name: "Quill Lead", role: "approver" }) && cpDir.request.note === QNOTE && cpDir.request.created_at === CP.created_at,
       JSON.stringify(cpDirs),
     );
@@ -3598,10 +3598,10 @@ try {
     const cDirs2 = (await qDirs(DQM, cBefore)).directives.filter((d) => d.kind === "request");
     const late = await qRec(rpDir?.id, SM1.key, "accepted");
     check(
-      "cancel: another member, the goal's approver who didn't send it -> 403 not_sender or read_only for a viewer; an unknown id -> 404; the workspace owner cancels -> the sessions still pending get a request directive with cancelled true and become expired (an answered one keeps its answer); again changes nothing; a late accept keeps expired",
+      "cancel: another member, the goal's approver who didn't send it -> 403 not_sender or read_only for a viewer; an unknown id -> 404; the workspace owner cancels -> the sessions still pending get a request directive with cancelled true (cancel_reason withdrawn) and become expired (an answered one keeps its answer); again changes nothing; a late accept keeps expired",
       cBy[0].status === 403 && cBy[0].json?.error === "not_sender" && cBy[1].status === 403 && cBy[1].json?.error === "not_sender" && cBy[2].status === 403 && cBy[2].json?.error === "read_only" && cBy[3].status === 404 &&
         cancel.status === 200 && cancel.json.request.state === "cancelled" && cancel.json.request.cancelled_by?.id === QO.id && cancel.json.request.sessions.find((s) => s.session_key === SM1.key)?.state === "expired" && cancel.json.request.sessions.find((s) => s.session_key === SM2.key)?.state === "declined" &&
-        cDirs.length === 1 && JSON.stringify(cDirs[0].session_keys) === JSON.stringify([SM1.key]) && cDirs[0].request.cancelled === true && cDirs[0].request.id === RP.id && cancel2.status === 200 && cDirs2.length === 1 && late.json?.request_state === "expired" && qAudit("request.cancelled", RP.id).join() === QO.id,
+        cDirs.length === 1 && JSON.stringify(cDirs[0].session_keys) === JSON.stringify([SM1.key]) && cDirs[0].request.cancelled === true && cDirs[0].request.cancel_reason === "withdrawn" && cDirs[0].request.id === RP.id && cancel2.status === 200 && cDirs2.length === 1 && late.json?.request_state === "expired" && qAudit("request.cancelled", RP.id).join() === QO.id,
       `${cBy.map((r) => r.status).join(",")} ${cancel.text.slice(0, 300)} ${JSON.stringify(cDirs)} ${late.text}`,
     );
 
@@ -3734,16 +3734,58 @@ try {
     );
     const relRc = await Promise.all([qRec(relDirs[0]?.id, SM3.key, "received"), qRec(relDirs[0]?.id, SM3.key, "applied")]);
     check("release: acknowledged with received then applied", relRc.every((r) => r.json?.fresh === true), relRc.map((r) => r.text).join(" "));
+    // -- requests expire when their goal is achieved or dropped (a switch_goal also when its target goal is) --
+    const eBefore = (await qDirs(DQM)).next_cursor;
+    const swE = await send(QL, { type: "switch_goal", session_keys: [SM2.key], target_goal_id: GE.id });
+    const swEDir = (await qDirs(DQM, eBefore)).directives.find((d) => d.kind === "request" && d.request?.id === swE.json?.request?.id);
+    await qRec(swEDir?.id, SM2.key, "received");
+    const dropBefore = (await qDirs(DQM)).next_cursor;
+    const dropE = await qa(QL, "POST", `/goals/${GE.id}/versions`, { version: GE.version, status: "dropped" });
+    const dropDirs = (await qDirs(DQM, dropBefore)).directives;
+    const swEView = (await list(QL)).json?.requests?.find((r) => r.id === swE.json?.request?.id);
+    check(
+      "expire: dropping the target goal of a pending switch_goal ends it in the same transaction: its unanswered session gets a request directive with cancelled true and cancel_reason goal_closed and becomes expired; the request reads expired (not cancelled); audited request.expired by the person who dropped the goal",
+      swE.status === 201 && dropE.status === 201 && dropDirs.length === 1 && dropDirs[0].kind === "request" && dropDirs[0].request?.id === swE.json.request.id && dropDirs[0].request.cancelled === true &&
+        dropDirs[0].request.cancel_reason === "goal_closed" && JSON.stringify(dropDirs[0].session_keys) === JSON.stringify([SM2.key]) && swEView?.state === "expired" && swEView.cancelled_at === null &&
+        swEView.sessions.every((x) => x.state === "expired") && qAudit("request.expired", swE.json.request.id).join() === QL.id,
+      `${swE.text.slice(0, 200)} ${dropE.status} ${JSON.stringify(dropDirs)} ${JSON.stringify(swEView)}`,
+    );
     await put(QL, {});
+    const ecpBefore = (await qDirs(DQM)).next_cursor;
+    const ecp = await send(QL, { type: "checkpoint", note: "Before we call it done", session_keys: [SM2.key] });
+    const ecpDir = (await qDirs(DQM, ecpBefore)).directives.find((d) => d.kind === "request" && d.request?.id === ecp.json?.request?.id);
+    await qRec(ecpDir?.id, SM2.key, "received");
+    const openOnGR = () =>
+      withDb((d) =>
+        d.prepare("SELECT r.id FROM v2_requests r WHERE r.goal_id = ? AND r.cancelled_at IS NULL AND EXISTS (SELECT 1 FROM v2_request_targets t WHERE t.request_id = r.id AND t.state IN ('sent','received')) ORDER BY r.id").all(GR.id),
+      ).map((r) => r.id);
+    const openBefore = openOnGR();
+    const answeredBefore = withDb((d) => d.prepare("SELECT request_id, session_key, state, auto_accepted FROM v2_request_targets WHERE request_id IN (SELECT id FROM v2_requests WHERE goal_id = ?) AND state IN ('accepted','declined') ORDER BY request_id, session_key").all(GR.id));
     const achBefore = (await qDirs(DQM)).next_cursor;
     const ach = await qa(QL, "POST", `/goals/${GR.id}/versions`, { version: GR.version, status: "achieved" });
     const achDirs = (await qDirs(DQM, achBefore)).directives;
     const afterAch = await Promise.all([send(QL, { type: "replan" }), put(QL, {})]);
     check(
-      "release: achieving a held goal releases it in the same transaction (a release directive after the goal_version); an achieved goal takes no request and no hold -> 409 wrong_state",
-      ach.status === 201 && achDirs.map((d) => d.kind).join() === "goal_version,release" && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_goal_holds WHERE ws_id = ?").get(QW).n) === 0 &&
+      "release: achieving a held goal releases it in the same transaction (a release directive after the goal_version and the requests it expires); an achieved goal takes no request and no hold -> 409 wrong_state",
+      ach.status === 201 && achDirs.map((d) => d.kind).join() === ["goal_version", ...openBefore.map(() => "request"), "release"].join() && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_goal_holds WHERE ws_id = ?").get(QW).n) === 0 &&
         afterAch.every((r) => r.status === 409 && r.json?.error === "wrong_state"),
       `${ach.status} ${JSON.stringify(achDirs.map((d) => d.kind))} ${afterAch.map((r) => r.text).join(" | ")}`,
+    );
+    const achReq = achDirs.filter((d) => d.kind === "request");
+    const ecpView = (await list(QL)).json?.requests?.find((r) => r.id === ecp.json?.request?.id);
+    const ecpExp = achReq.find((d) => d.request?.id === ecp.json?.request?.id);
+    const lateRc = await Promise.all([qRec(ecpExp?.id, SM2.key, "received"), qRec(ecpDir?.id, SM2.key, "accepted"), qRec(ecpDir?.id, SM2.key, "declined")]);
+    const answeredAfter = withDb((d) => d.prepare("SELECT request_id, session_key, state, auto_accepted FROM v2_request_targets WHERE request_id IN (SELECT id FROM v2_requests WHERE goal_id = ?) AND state IN ('accepted','declined') ORDER BY request_id, session_key").all(GR.id));
+    const mcpE = await mcpCall("QM", DQM, "align_get_directives");
+    const mcpExp = mcpE.sc?.directives?.find((d) => d.id === ecpExp?.id);
+    check(
+      "expire: achieving a goal ends every request on it still waiting for an answer, in that transaction: one request directive each, with cancelled true and cancel_reason goal_closed, to the sessions that had not answered, which become expired (sessions that answered keep their answer); the checkpoint reads expired and not cancelled, audited request.expired by the person who achieved the goal; later received, accepted and declined receipts leave it expired; MCP align_get_directives says why (cancel_reason)",
+      ecp.status === 201 && openBefore.includes(ecp.json.request.id) && JSON.stringify(achReq.map((d) => d.request?.id).sort()) === JSON.stringify(openBefore) &&
+        achReq.every((d) => d.request.cancelled === true && d.request.cancel_reason === "goal_closed") && JSON.stringify(ecpExp?.session_keys) === JSON.stringify([SM2.key]) && openOnGR().length === 0 &&
+        ecpView?.state === "expired" && ecpView.cancelled_at === null && ecpView.counts.expired === 1 && ecpView.sessions[0]?.state === "expired" && qAudit("request.expired", ecp.json.request.id).join() === QL.id &&
+        lateRc.every((r) => r.status === 200 && r.json?.request_state === "expired") && answeredBefore.length > 0 && JSON.stringify(answeredAfter) === JSON.stringify(answeredBefore) &&
+        mcpExp?.request?.cancel_reason === "goal_closed" && mcpE.text.includes(`expired (goal closed) checkpoint request ${ecp.json.request.id}`) && mcpE.sc.directives.find((d) => d.request?.id === RP.id && d.request.cancelled)?.request.cancel_reason === "withdrawn",
+      `${ecp.text.slice(0, 200)} ${JSON.stringify(openBefore)} ${JSON.stringify(achReq)} ${JSON.stringify(ecpView)} ${lateRc.map((r) => r.text).join(" | ")}`,
     );
 
     // -- events, deletion, retention --

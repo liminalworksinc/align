@@ -781,7 +781,7 @@ the type choices Replan, Checkpoint and Switch goal (each with a sentence saying
 developer is asked first), for Switch goal a checkbox per session on the goal and a target-goal picker of the other
 active goals, an optional note (at most 280 characters, "shown to the developer and the agent, quoted") and
 **Send** (`POST …/requests`), or "No shared session is working on this goal, so there is no one to send a request
-to." when there is no session. Each request SHALL be listed with its type, a pill (waiting, answered or cancelled), its
+to." when there is no session. Each request SHALL be listed with its type, a pill (waiting, answered, cancelled, or "expired: the goal closed"), its
 sender and time, the goal version it was sent at, the target goal ("a goal you can't see" when hidden), the quoted
 note, who cancelled it, the counts, and per visible session a pill: pending, accepted by the developer, done by the
 agent (an `auto_accepted` accept), declined or expired, with **Cancel** when its `can_cancel` is true.

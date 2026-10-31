@@ -672,9 +672,23 @@ The server SHALL let the request's sender or a workspace owner cancel it with `D
 - **WHEN** a workspace owner cancels a replan that one session declined and another has not answered
 - **THEN** only the unanswered session gets a cancelled `request` directive and becomes `expired`, the declined one stays `declined`, and `request.state` is `cancelled`
 
+### Requirement: Requests expire when their goal is achieved or dropped
+
+The server SHALL, in the transaction that gives a goal status `achieved` or `dropped` (the one that writes that version, an owner's version or an approved change request), after its `goal_version` directive and before any `release` directive, end every request on that goal, and every `switch_goal` request toward it, that is not cancelled and still has a session `sent` or `received`: write a `request` directive with `request.cancelled` true and `request.cancel_reason` `goal_closed` to those sessions, set their state to `expired` (sessions that already answered keep their answer, and the request is not marked cancelled), and write the audit row `request.expired` naming the person whose action changed the status, with the request id as object. A receipt for such a session SHALL leave it `expired`.
+
+#### Scenario: Achieving a goal with a checkpoint still waiting
+
+- **WHEN** the owner of a goal saves a version with `status: "achieved"` while one session has received a checkpoint and not answered it and another session already declined a replan
+- **THEN** the same transaction writes the `goal_version` directive and then a `request` directive with `cancelled` true and `cancel_reason` `goal_closed` to the session that had not answered; that session reads `expired`, the request's `state` is `expired`, the declined replan is unchanged, the audit has `request.expired` by the owner, and a later `accepted` receipt leaves the session `expired`
+
+#### Scenario: Dropping the target of a switch
+
+- **WHEN** a goal that a pending `switch_goal` request names as its target is dropped
+- **THEN** the request's sessions that had not answered get a cancelled `request` directive with `cancel_reason` `goal_closed` and become `expired`
+
 ### Requirement: Reading a goal's requests
 
-The server SHALL answer `GET /api/v2/workspaces/{ws}/goals/{goal}/requests` for anyone who can read the goal with `{requests, can_send, sessions, hold}`: the newest 50 requests on the goal, each `{id, type, goal:{id, title, version}, target_goal, note, sender: {id, name, role}, created_at, cancelled_at, cancelled_by, state, counts, sessions, can_cancel}` with `state` `open` (a session still pending), `answered` or `cancelled`, `counts` `{pending, accepted, declined, expired, done_by_agent}`, and `sessions` rows `{session_key, owner, mine, repo_alias, harness, title, state, auto_accepted, updated_at}` where `state` is `sent`, `received`, `accepted`, `declined` or `expired` and `title` is shown only on the reader's own sessions. The sender, the goal's approval set and workspace owners SHALL get every session's row; anyone else only their own sessions' rows, with the counts. `target_goal` SHALL be `{id: null, title: null, version: null, private: true}` for a reader who cannot read that goal. `can_send` SHALL be true only for a person who may send requests while the goal is active, `sessions` SHALL list the sessions on the goal (owner, repository alias, harness) for such a person and be null otherwise, and `hold` SHALL be as `GET …/hold` answers.
+The server SHALL answer `GET /api/v2/workspaces/{ws}/goals/{goal}/requests` for anyone who can read the goal with `{requests, can_send, sessions, hold}`: the newest 50 requests on the goal, each `{id, type, goal:{id, title, version}, target_goal, note, sender: {id, name, role}, created_at, cancelled_at, cancelled_by, state, counts, sessions, can_cancel}` with `state` `open` (a session still pending), `cancelled`, `expired` (not cancelled, and every session expired because the goal closed before any answered) or `answered`, `counts` `{pending, accepted, declined, expired, done_by_agent}`, and `sessions` rows `{session_key, owner, mine, repo_alias, harness, title, state, auto_accepted, updated_at}` where `state` is `sent`, `received`, `accepted`, `declined` or `expired` and `title` is shown only on the reader's own sessions. The sender, the goal's approval set and workspace owners SHALL get every session's row; anyone else only their own sessions' rows, with the counts. `target_goal` SHALL be `{id: null, title: null, version: null, private: true}` for a reader who cannot read that goal. `can_send` SHALL be true only for a person who may send requests while the goal is active, `sessions` SHALL list the sessions on the goal (owner, repository alias, harness) for such a person and be null otherwise, and `hold` SHALL be as `GET …/hold` answers.
 
 #### Scenario: A member who reads the goal but has no session on it
 
@@ -706,7 +720,7 @@ The server SHALL accept `DELETE /api/v2/workspaces/{ws}/goals/{goal}/hold` from 
 
 ### Requirement: Request and hold audit and events
 
-The server SHALL write audit rows naming the actor for `request.sent` and `request.cancelled` (the request id as object), for the answers that change a session's request state (`request.accepted`, `request.done_by_agent`, `request.declined`, as the `directives` part specifies), and for `goal.held` and `goal.released` (the goal id as object), and record the product events `first_request` (props `{type}`) and `first_hold` (no props) once per workspace in the transaction of the first request and the first hold.
+The server SHALL write audit rows naming the actor for `request.sent`, `request.cancelled` and `request.expired` (the request id as object), for the answers that change a session's request state (`request.accepted`, `request.done_by_agent`, `request.declined`, as the `directives` part specifies), and for `goal.held` and `goal.released` (the goal id as object), and record the product events `first_request` (props `{type}`) and `first_hold` (no props) once per workspace in the transaction of the first request and the first hold.
 
 #### Scenario: First request in a workspace
 

@@ -66,8 +66,8 @@ call.
   or `::align accept <id>`, which tells it to follow the updated plan), and a
   `switch_goal` waits for `::align accept <id>` (or `align requests accept <id>`), which moves the session to the
   target goal at its next prompt like `align bind`. Your answer goes back as an `accepted` or `declined` receipt and
-  reaches the model as one line at the next prompt. A withdrawn request is one notice for you and nothing for the
-  model. After a compact, requests still waiting are put back into context.
+  reaches the model as one line at the next prompt. A request withdrawn by its sender, or whose goal was achieved or dropped
+  before you answered, is one notice for you and nothing for the model. After a compact, requests still waiting are put back into context.
 - **Goal holds.** A `hold` directive writes `latch/<lid>.hold.json`; while it exists, every tool (read-only ones too)
   is denied with who paused the goal and why, without needing a sync, and an unreadable file denies too. `release`
   removes it and tells you once. A session that moves to another goal stays held until that goal's release reaches it.

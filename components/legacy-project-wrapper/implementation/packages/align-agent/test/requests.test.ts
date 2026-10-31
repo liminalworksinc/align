@@ -62,6 +62,7 @@ function request(type: WireRequest["type"], extra: Partial<WireRequest> = {}): W
     cancelled: false,
     goal: { id: GOAL.id, title: GOAL.title, version: GOAL.version },
     target_goal: type === "switch_goal" ? { id: "g_perf", title: "Cut hook latency", version: 1 } : null,
+    cancel_reason: null,
     sender: { id: "u_dana", name: "Dana Lee", role: "approver" },
     note: "Board moved the date",
     created_at: nowIso(),
@@ -209,9 +210,29 @@ describe("requests", () => {
     // Withdrawn before it reached the session: nothing at all.
     const cp = request("checkpoint");
     handleDirective(ctx, directive("request", sid, { request: cp }));
-    handleDirective(ctx, directive("request", sid, { request: { ...cp, cancelled: true } }));
+    handleDirective(ctx, directive("request", sid, { request: { ...cp, cancelled: true, cancel_reason: "withdrawn" } }));
     assert.equal(prompt(t, sid).stdout, "");
     assert.equal(receipts(ctx).filter((r) => r.body.state === "accepted").length, 1);
+  });
+
+  test("a request whose goal closed before an answer gets one user notice saying so, no context and no auto-accept", () => {
+    const { t, ctx } = setup();
+    const sid = "sess-req-closed";
+    shareSession(ctx, sid);
+    runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup" });
+    const cp = request("checkpoint", { note: "Before the demo" });
+    handleDirective(ctx, directive("request", sid, { request: cp }));
+    assert.match(json(prompt(t, sid).stdout).hookSpecificOutput.additionalContext, /commit your work/);
+    handleDirective(ctx, directive("request", sid, { request: { ...cp, cancelled: true, cancel_reason: "goal_closed" } }));
+    assert.equal(stateOf(ctx, cp.id), "withdrawn");
+    const gone = json(prompt(t, sid).stdout);
+    assert.equal(gone.systemMessage, `Align: the request ${requestShortId(cp.id)} to make a checkpoint was withdrawn because the goal was closed.`);
+    assert.equal(gone.hookSpecificOutput, undefined, "nothing for the model");
+    assert.equal(prompt(t, sid).stdout, "", "once");
+    runHook(t, "claude", "Stop", { session_id: sid });
+    ingestSpool(ctx);
+    assert.equal(receipts(ctx).filter((r) => r.body.state === "accepted").length, 0, "the agent does not do a request whose goal closed");
+    assert.match(json(prompt(t, sid, `::align accept ${requestShortId(cp.id)}`).stdout).reason, /no open request matches/);
   });
 
   test("a request from a workspace owner outside the goal's approval set names them as workspace owner", () => {

@@ -378,6 +378,8 @@ const RequestOut = z.object({
   id: z.string(),
   type: z.enum(["replan", "checkpoint", "switch_goal"]),
   cancelled: z.boolean(),
+  /** Why a cancelled request stopped waiting: withdrawn by its sender, or its goal was achieved or dropped. */
+  cancel_reason: z.enum(["withdrawn", "goal_closed"]).nullable(),
   goal: RequestGoalOut,
   target_goal: RequestGoalOut.nullable(),
   /** role: approver (in the goal's approval set) or owner (a workspace owner outside it), when it was sent. */
@@ -449,7 +451,7 @@ function requestOut(pp: PolicyPrincipal, d: DirectiveRow): z.infer<typeof Reques
   const r = d.request_json ? requestWire(pp, JSON.parse(d.request_json) as RequestJson) : null;
   if (!r) return null;
   const g = (x: { id: string; title: string | null; version: number | null }) => ({ id: x.id, title: utOrNull(x.title), version: x.version });
-  return { id: r.id, type: r.type, cancelled: r.cancelled, goal: g(r.goal), target_goal: r.target_goal ? g(r.target_goal) : null, sender: { ...personOut(r.sender), role: r.sender.role }, note: utOrNull(r.note), created_at: r.created_at };
+  return { id: r.id, type: r.type, cancelled: r.cancelled, cancel_reason: r.cancel_reason, goal: g(r.goal), target_goal: r.target_goal ? g(r.target_goal) : null, sender: { ...personOut(r.sender), role: r.sender.role }, note: utOrNull(r.note), created_at: r.created_at };
 }
 
 function holdOut(pp: PolicyPrincipal, d: DirectiveRow): z.infer<typeof HoldOut> | null {
@@ -835,7 +837,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
       const out = { workspace: workspaceOf(pp), directives };
       const lines = directives.map(
         (d) =>
-          `- ${d.created_at} ${d.kind} for ${d.session_keys.length} of your sessions${d.goal ? `: goal ${d.goal.id} v${d.goal.version} ${tag(d.goal.title.untrusted_text)}` : ""}${d.binding ? ` (bound to ${d.binding.goal_id ?? "no goal"}, ${d.binding.effective})` : ""}${d.request ? `: ${d.request.cancelled ? "withdrawn " : ""}${d.request.type} request ${d.request.id} on goal ${d.request.goal.id} v${d.request.goal.version} from ${tag(d.request.sender.name.untrusted_text)}${d.request.target_goal ? `, to goal ${d.request.target_goal.id}` : ""}${d.request.note ? `, note ${tag(d.request.note.untrusted_text)}` : ""}` : ""}${d.hold ? `: goal ${d.hold.goal.id} ${d.kind === "hold" ? `held by ${tag(d.hold.held_by?.name.untrusted_text ?? "")}` : `released by ${tag(d.hold.released_by?.name.untrusted_text ?? "")}`}` : ""}`,
+          `- ${d.created_at} ${d.kind} for ${d.session_keys.length} of your sessions${d.goal ? `: goal ${d.goal.id} v${d.goal.version} ${tag(d.goal.title.untrusted_text)}` : ""}${d.binding ? ` (bound to ${d.binding.goal_id ?? "no goal"}, ${d.binding.effective})` : ""}${d.request ? `: ${d.request.cancel_reason === "goal_closed" ? "expired (goal closed) " : d.request.cancelled ? "withdrawn " : ""}${d.request.type} request ${d.request.id} on goal ${d.request.goal.id} v${d.request.goal.version} from ${tag(d.request.sender.name.untrusted_text)}${d.request.target_goal ? `, to goal ${d.request.target_goal.id}` : ""}${d.request.note ? `, note ${tag(d.request.note.untrusted_text)}` : ""}` : ""}${d.hold ? `: goal ${d.hold.goal.id} ${d.kind === "hold" ? `held by ${tag(d.hold.held_by?.name.untrusted_text ?? "")}` : `released by ${tag(d.hold.released_by?.name.untrusted_text ?? "")}`}` : ""}`,
       );
       return result(out, [`${directives.length} recent directives for your sessions.`, ...lines].join("\n"));
     },

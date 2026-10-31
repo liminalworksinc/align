@@ -46,6 +46,7 @@ export interface FakeRequestWire {
   id: string;
   type: "replan" | "checkpoint" | "switch_goal";
   cancelled: boolean;
+  cancel_reason: "withdrawn" | "goal_closed" | null;
   goal: { id: string; title: string; version: number };
   target_goal: { id: string; title: string; version: number } | null;
   sender: { id: string; name: string; role: "approver" | "owner" };
@@ -215,6 +216,7 @@ export class FakeServer {
       id: `rq_${Array.from(crypto.randomBytes(24), (b) => "abcdefghijklmnopqrstuvwxyz234567"[b % 32]).join("")}`,
       type: o.type,
       cancelled: false,
+      cancel_reason: null,
       goal: this.goalRef(ws, o.goal_id),
       target_goal: o.target_goal_id ? this.goalRef(ws, o.target_goal_id) : null,
       sender: o.sender || { id: "u_dana", name: "Dana Lee", role: "approver" },
@@ -227,13 +229,14 @@ export class FakeServer {
     return req;
   }
 
-  /** DELETE …/requests/{id}: a `request` directive with `cancelled: true` to the targets still sent/received; they expire. */
-  cancelRequest(id: string): FakeDirective | null {
+  /** DELETE …/requests/{id} (`withdrawn`), or its goal achieved or dropped (`goal_closed`): a `request` directive with
+   *  `cancelled: true` to the targets still sent/received; they expire. */
+  cancelRequest(id: string, reason: "withdrawn" | "goal_closed" = "withdrawn"): FakeDirective | null {
     const req = this.requests.get(id)!;
     const open = [...req.targets].filter(([, t]) => t.state === "sent" || t.state === "received").map(([k]) => k);
     for (const k of open) req.targets.get(k)!.state = "expired";
     if (!open.length) return null;
-    return this.pushDirective({ ws: req.ws, kind: "request", session_keys: open, goal: null, binding: null, request: { ...req.wire, cancelled: true } });
+    return this.pushDirective({ ws: req.ws, kind: "request", session_keys: open, goal: null, binding: null, request: { ...req.wire, cancelled: true, cancel_reason: reason } });
   }
 
   /** PUT …/goals/{goal}/hold: idempotent; a `hold` directive to every session on the goal. */

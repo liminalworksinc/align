@@ -99,12 +99,14 @@ plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absen
   until the user picks a goal; the agent continues privately.
 - `stop` / `resume`: set / clear the local stop latch.
 - `request` (`goal` and `binding` null): `"request": { "id": "rq_...", "type": "replan"|"checkpoint"|"switch_goal",
-  "cancelled": bool, "goal": { "id", "title"|null, "version" }, "target_goal": { "id", "title"|null, "version" }|null,
+  "cancelled": bool, "cancel_reason": "withdrawn"|"goal_closed"|null, "goal": { "id", "title"|null, "version" }, "target_goal": { "id", "title"|null, "version" }|null,
   "sender": { "id", "name", "role": "approver"|"owner" }, "note": string|null, "created_at" }` (null if the request no
   longer exists; `role` is how the sender could send it: in the goal's approval set, or a workspace owner outside it). `goal.version`
   is the goal's version when it was sent; `target_goal` only on `switch_goal`; a title is null for a goal the person
   can no longer read. A cancellation is a second `request` directive with the same `request.id` and `cancelled: true`,
-  sent to the sessions that had not answered. checkpoint and drafting a replan are safe (the agent may accept them
+  sent to the sessions that had not answered: `cancel_reason` is `withdrawn` when its sender (or a workspace owner)
+  cancelled it and `goal_closed` when its goal, or a switch_goal's target goal, was achieved or dropped (null while not
+  cancelled). checkpoint and drafting a replan are safe (the agent may accept them
   itself, `auto_accepted`); a switch_goal takes effect only on the developer's accept, through the usual epoch path
   (`cause: "directive:<this directive id>"`).
 - `hold` (`goal` and `binding` null): `"hold": { "goal": { "id", "title"|null }, "held_by": { "id", "name" }, "reason":

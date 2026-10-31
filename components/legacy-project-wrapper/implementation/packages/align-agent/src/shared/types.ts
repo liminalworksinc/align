@@ -95,6 +95,9 @@ export interface WireRequest {
   id: string;
   type: RequestType;
   cancelled: boolean;
+  /** On a cancellation: `withdrawn` by its sender (or a workspace owner), or `goal_closed` when its goal (or a
+   *  switch_goal's target goal) was achieved or dropped. Null otherwise; absent from older servers (read as withdrawn). */
+  cancel_reason?: "withdrawn" | "goal_closed" | null;
   goal: { id: string; title: string; version: number };
   target_goal: { id: string; title: string; version: number } | null;
   /** How the sender could send it: `approver` (in the goal's approval set when sent) or `owner` (a workspace owner

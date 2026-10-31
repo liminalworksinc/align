@@ -7,7 +7,7 @@ import { event } from "./events";
 import { limitsIn, limitsOf, type Limit } from "./goal-limits";
 import { need } from "./workspaces";
 import { personName } from "./retention";
-import { releaseHold } from "./requests";
+import { expireOpenRequests, releaseHold } from "./requests";
 import { optStr, str, type Body } from "./validate";
 
 // Goals and their immutable versions. A goal's current fields live on v2_goals; every version (including the
@@ -449,7 +449,8 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
  *  takes, whether the owner saves it or an approver approves a change request: version row with its content hash,
  *  audit goal.versioned, review against the parents as they are now, one goal_version directive for every session
  *  bound to or governed by the goal, and, when the goal becomes achieved or dropped, every open change request on
- *  it is superseded and a hold on it is released. 409 stale_version if the goal moved since `g` was read. */
+ *  it is superseded, the requests to its agents (and switch_goal requests toward it) still waiting for an answer
+ *  expire, and a hold on it is released. 409 stale_version if the goal moved since `g` was read. */
 export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at: string): GoalRow {
   if (c.depends_on.length) assertNoDependencyCycle(g.ws_id, g.id, c.depends_on); // again, inside the transaction
   const v = g.version + 1;
@@ -491,6 +492,7 @@ export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at
   goalVersionDirective(g.ws_id, next);
   if (c.status === "achieved" || c.status === "dropped") {
     supersedeOpenRequests(g.ws_id, g.id, actorId, at);
+    expireOpenRequests(g.ws_id, g.id, actorId, at); // nobody can act on a request toward a goal that is done
     releaseHold(g.ws_id, g.id, actorId, at); // a goal that is done holds no agents
   }
   return next;
