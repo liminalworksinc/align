@@ -257,8 +257,9 @@ export function GoalsView(props: ViewProps) {
         )}
       </div>
 
-      {/* Connectors: from the company node down to both teams; each leg dims with its team. */}
-      <div className="grid h-7 grid-cols-[1fr_200px_1fr]" aria-hidden>
+      {/* Connectors: from the company node down to both teams; each leg dims with its team. In a narrow container (a custom
+          workspace on a phone) the map stacks into one column and the connectors are hidden. */}
+      <div className="grid h-7 grid-cols-[1fr_200px_1fr] @max-md:hidden" aria-hidden>
         <div className={`relative transition-opacity ${dimP ? "opacity-30" : ""}`}>
           <div className="absolute left-1/2 right-0 top-0 border-t-2 border-zinc-300" />
           <div className="absolute bottom-0 left-1/2 top-0 border-l-2 border-zinc-300" />
@@ -273,17 +274,17 @@ export function GoalsView(props: ViewProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_200px_1fr] items-stretch">
+      <div className="grid grid-cols-[1fr_200px_1fr] items-stretch @max-md:grid-cols-1 @max-md:gap-3">
         <TeamNode props={props} L={L} owner="product" sel={sel === "product"} dim={dimP} onPick={() => pick("product")} />
-        <div className="relative flex justify-center pt-[18px]">
-          <div className={`absolute inset-x-0 top-[46px] border-t-2 ${line}`} aria-hidden />
+        <div className="relative flex justify-center pt-[18px] @max-md:pt-0">
+          <div className={`absolute inset-x-0 top-[46px] border-t-2 ${line} @max-md:hidden`} aria-hidden />
           {rel ? (
             <button
               type="button"
               onClick={() => pick("dep")}
               aria-pressed={sel === "dep"}
               aria-label={`${L.team.product} depends on ${L.team.security}: ${rel.label}. Status: ${pill.text}`}
-              className={`${NODE} relative z-10 h-fit w-[176px] items-center px-3 py-3.5 text-center ${depBorder} ${nodeState(sel === "dep", false)}`}
+              className={`${NODE} relative z-10 h-fit w-[176px] items-center px-3 py-3.5 text-center @max-md:w-full ${depBorder} ${nodeState(sel === "dep", false)}`}
             >
               <Lbl>
                 {L.team.product} → {L.team.security}

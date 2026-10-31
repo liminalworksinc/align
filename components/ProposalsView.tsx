@@ -808,7 +808,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
 
       {isSecurity && p.state === "COUNTERED" && (
         <div className={footer}>
-          <Badge tone="amber">{L.northstar ? "Waiting for Product to accept your changes" : `Waiting for ${ask} to accept your changes`}</Badge>
+          <Badge tone="amber" wrap={!L.northstar}>{L.northstar ? "Waiting for Product to accept your changes" : `Waiting for ${ask} to accept your changes`}</Badge>
           <NextStepAction p={p} viewer={me.actor ?? ""} L={L} onSwitch={props.switchTeam} />
         </div>
       )}
@@ -829,7 +829,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           {p.state === "PENDING_SECURITY" ? (
             <Badge tone="amber">Waiting for {who("security")}</Badge>
           ) : (
-            <Badge tone="amber">You accepted the changes · waiting for {who("security")} to approve</Badge>
+            <Badge tone="amber" wrap={!L.northstar}>You accepted the changes · waiting for {who("security")} to approve</Badge>
           )}
           {/* A 16rem basis, not flex-1's 0: with a 0 basis flex-wrap never breaks the line and squeezes this text to
               one word per line between the badge and the button. Custom: the progress strip already says whose step it is. */}
