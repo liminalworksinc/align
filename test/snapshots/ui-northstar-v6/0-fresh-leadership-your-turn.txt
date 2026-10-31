@@ -21,10 +21,16 @@ CL
 CEO / Leadership
 Leadership · Owner
 Sign out
-Your turn
+Know what needs you
 
 1 thing waiting on you.
 
+1
+Waiting on you
+0
+Waiting on others
+3
+Active goals
 WAITING ON YOU
 1
 LE
@@ -32,6 +38,19 @@ The next company goal is ready. Approve it and send it to every team
 “Launch the beta of our new monitoring product, with support ready to help beta customers quickly and safely.”
 Then Product and Security see what changed for their goals
 Review and send
+ACTIVE GOALS
+COMPANY
+v1
+Launch the beta of our new monitoring product.
+Open
+PRODUCT
+v3
+Ship the beta and clear anything blocking the launch.
+Open
+SECURITY
+v1
+Handle customer and security issues quickly and correctly.
+Open
 DETAILS
 CEO
 v1

@@ -124,8 +124,10 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
 }
 
 // Connected AI apps, as GET /api/workspaces/connections reports them (custom workspaces only; Northstar has none).
-// Align sees what an app last read, never what it does: "read the current plan" means its last read matched the plan
-// as it stands now (lib/plan-rev.ts), nothing more. An approved app that hasn't read anything isn't connected yet.
+// Align knows only when an app last contacted it, never what it read or does: any authenticated MCP request, even
+// initialize or tools/list, sets last_used_at (app/api/mcp/route.ts verifyToken -> noteGrantUse), and "on the current
+// plan" means the plan hadn't changed since that contact (lib/plan-rev.ts). An approved app Align hasn't seen isn't
+// connected yet.
 interface AgentApp {
   id: string;
   name: string;
@@ -191,14 +193,14 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
   const older = reading.filter((a) => !a.on_current_plan);
   return (
     <section id="agents" aria-label="Connected AI apps" className="flex scroll-mt-4 flex-col gap-2.5">
-      <h2 className="al-lbl">Connected AI apps · what they last read</h2>
+      <h2 className="al-lbl">Connected AI apps · when Align last saw them</h2>
       {read === "unknown" ? (
-        <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Couldn’t check connected apps just now, so their read state is unknown. Align retries every 15 seconds.</div>
+        <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Couldn’t check connected apps just now, so whether they’re on the current plan is unknown. Align retries every 15 seconds.</div>
       ) : !agents ? (
         <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Checking connected apps…</div>
       ) : reading.length === 0 && waiting.length === 0 ? (
         <div className="rounded-[14px] border border-dashed border-zinc-300 px-[18px] py-4 text-[15px] text-zinc-600">
-          No AI app has read this plan yet, so there is nothing to observe. Use <b className="text-zinc-900">Connect an AI app</b> to connect Claude Code, Codex, Claude or ChatGPT.
+          No AI app has connected yet, so there is nothing to observe. Use <b className="text-zinc-900">Connect an AI app</b> to connect Claude Code, Codex, Claude or ChatGPT.
         </div>
       ) : (
         <div className="flex flex-col divide-y divide-zinc-200 rounded-[14px] border border-zinc-200 bg-white">
@@ -210,7 +212,7 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
               <span className="min-w-0 font-semibold text-zinc-900">{a.name}</span>
               <span className="text-[14px] text-zinc-500">as {teamOf(a.role)}</span>
               <span className={`ml-auto text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"} @max-md:ml-6 @max-md:basis-full`}>
-                {a.on_current_plan ? "Read the current plan" : "Last read an older plan"} · read seen by Align {ago(a.last_used_at!)}
+                {a.on_current_plan ? "Seen on the current plan" : "Last seen on an older plan"} · last seen by Align {ago(a.last_used_at!)}
               </span>
             </div>
           ))}
@@ -219,15 +221,15 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
               <span aria-hidden>○</span>
               <span className="min-w-0 font-semibold text-zinc-700">{a.name}</span>
               <span className="text-[14px]">as {teamOf(a.role)}</span>
-              <span className="ml-auto text-[14px] @max-md:ml-6 @max-md:basis-full">Approved, hasn’t read the plan yet</span>
+              <span className="ml-auto text-[14px] @max-md:ml-6 @max-md:basis-full">Approved, not seen by Align yet</span>
             </div>
           ))}
         </div>
       )}
       {agents && reading.length > 0 && (
         <p className="text-[13px] leading-snug text-zinc-500">
-          {older.length > 0 && agents.changedAt ? `The plan changed ${ago(agents.changedAt)}; ${older.length === 1 ? "one app hasn’t" : `${older.length} apps haven’t`} read it since. ` : ""}
-          Align sees what each app last read, not what it does.
+          {older.length > 0 && agents.changedAt ? `The plan changed ${ago(agents.changedAt)}; ${older.length === 1 ? "one app hasn’t" : `${older.length} apps haven’t`} been seen since. ` : ""}
+          Align sees when each app last contacted it, not what it read or does.
         </p>
       )}
     </section>
@@ -481,9 +483,12 @@ export function YourTurnView(props: ViewProps) {
         : { text: "Proposal in progress", tone: "violet" };
   const decided = acc ? recordFacts(s, acc) : null;
 
-  // Home as an attention queue, from real state only: which connected agents have read the current plan, what needs
+  // Home as an attention queue, from real state only: which connected apps Align has seen on the current plan, what needs
   // this person, and the goals in play. Tiles carry only numbers Align has.
-  const agentsRead = useAgents(L.northstar ? undefined : props.workspace);
+  // Only a custom workspace has connected apps: Northstar and a Mode L /setup scenario (workspace "northstar") have no
+  // connections endpoint, so they never poll it.
+  const connectable = !L.northstar && !!props.workspace && props.workspace !== "northstar";
+  const agentsRead = useAgents(connectable ? props.workspace : undefined);
   const agents = agentsRead === "unknown" ? null : agentsRead;
   const reading = agents?.apps.filter((a) => a.last_used_at) ?? [];
   const onCurrent = reading.filter((a) => a.on_current_plan).length;
@@ -502,23 +507,23 @@ export function YourTurnView(props: ViewProps) {
         <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Know what needs you</h1>
         <p className="mt-1.5 text-[16px] text-zinc-500">
           {mine.length ? `${mine.length} thing${mine.length === 1 ? "" : "s"} waiting on you.` : "Nothing waiting on you."}
-          {!L.northstar && agents && reading.length > 0 && ` ${onCurrent} of ${reading.length} connected app${reading.length === 1 ? " has" : "s have"} read the current plan.`}
+          {connectable && agents && reading.length > 0 && ` ${onCurrent} of ${reading.length} connected app${reading.length === 1 ? " was" : "s were"} last seen on the current plan.`}
         </p>
       </div>
 
       <div className="grid grid-cols-2 gap-2.5 @[36rem]:grid-cols-4">
         <Tile n={mine.length} label="Waiting on you" href="#waiting" hot={mine.length > 0} />
         <Tile n={others.length} label="Waiting on others" href={others.length ? "#others" : "#waiting"} />
-        {!L.northstar && (
+        {connectable && (
           <Tile
             n={agentsRead === "unknown" ? "?" : !agents ? "–" : reading.length ? `${onCurrent}/${reading.length}` : 0}
             label={
               agentsRead === "unknown"
                 ? "Apps: unknown"
                 : agents && reading.length
-                  ? "Apps that read the current plan"
+                  ? "Apps seen on the current plan"
                   : agents && agents.apps.length
-                    ? `Apps have read the plan · ${agents.apps.length} approved`
+                    ? `Apps seen · ${agents.apps.length} approved`
                     : "Apps connected"
             }
             href="#agents"
@@ -527,7 +532,7 @@ export function YourTurnView(props: ViewProps) {
         <Tile n={goals.length} label="Active goals" href="#goals" />
       </div>
 
-      {!L.northstar && <AgentsSection agents={agentsRead} teamOf={teamOf} />}
+      {connectable && <AgentsSection agents={agentsRead} teamOf={teamOf} />}
 
       <section id="waiting" aria-label="Waiting on you" className="flex scroll-mt-4 flex-col gap-2.5">
         <div className="flex items-center gap-2.5">
