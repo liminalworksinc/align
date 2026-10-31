@@ -66,7 +66,7 @@ const teamInitials = (team: string) => {
 // Phones: the shell's max-md: variants key on the VIEWPORT, below 768px (md); 768px and up is exactly as before. One
 // column: the sidebar becomes a stacked bar above the header (its nav in a row), so the main column gets the full width.
 // Layout only: the sidebar stays mounted at every width, so its state (the composer, Switch team) survives a resize.
-// ConnectAI is the exception: on a phone it mounts in the main column instead (usePhone), never twice. Inside the main
+// ConnectAI stays mounted once too; on a phone it shows as a row at the top of Work instead (usePhone). Inside the main
 // column, components use @max-md: instead, a CONTAINER query on CUSTOM_MAIN (the
 // only @container they sit in): it applies when that column is under 28rem (about 420-448px), which on a phone it is.
 const CUSTOM_SHELL =
@@ -74,8 +74,8 @@ const CUSTOM_SHELL =
 const CUSTOM_SIDEBAR =
   "sticky top-0 row-span-3 flex h-screen flex-col self-start border-r border-zinc-200 bg-[var(--al-rail)] px-3 pb-3.5 min-[1100px]:static min-[1100px]:row-span-2 min-[1100px]:h-auto min-[1100px]:self-stretch max-md:static max-md:row-span-1 max-md:grid max-md:h-auto max-md:min-w-0 max-md:grid-cols-[1fr_auto] max-md:items-center max-md:gap-x-2 max-md:self-auto max-md:border-r-0 max-md:border-b max-md:pb-2";
 // Below md: the logo and + New conflict share one row, the nav runs as a row under them (tighter items, so all four fit
-// at 390px), and the sidebar's footer (the same person and team as the header) is hidden. ConnectAI moves to the main
-// column (usePhone). Sidebar and header controls are 44px tall there: they sit in no @container, so they use the
+// at 390px), and the sidebar's footer (the same person and team as the header) is hidden. ConnectAI's card becomes a
+// row at the top of Work (usePhone). Sidebar and header controls are 44px tall there: they sit in no @container, so they use the
 // viewport variant (Button `shell`), not Button's @max-md: container one. The root font is 15px, so min-h-11 is 41.25px.
 const CUSTOM_LOGO = "flex h-16 items-center gap-2.5 px-2.5 max-md:h-14 max-md:min-w-0";
 const CUSTOM_NEW = "max-md:my-0 max-md:min-h-[44px]";
@@ -101,11 +101,10 @@ interface LoginInfo {
 }
 const WS_ID = /^w_[a-z2-7]{12}$/;
 
-// Phones (the same edge as Tailwind's max-md:, a viewport under 48rem). Decides where a workspace's ConnectAI mounts:
-// one copy only (its fetch and poll loop runs once), in the rail at md and up and in the main column on a phone (its
-// row shows at the top of Work; on every view it renders the first-run card into Home's slot). The
-// server can't know the viewport, so it and the first client render say "not a phone" (the rail); the phone value
-// follows right after hydration with no mismatch (useSyncExternalStore's server snapshot).
+// Phones (the same edge as Tailwind's max-md:, a viewport under 48rem). Picks the variant of the one ConnectAI (one
+// fetch and poll loop, never remounted by a resize): the rail card at md and up, on a phone a row it renders at the top
+// of Work. The server can't know the viewport, so it and the first client render say "not a phone" (the rail); the
+// phone value follows right after hydration with no mismatch (useSyncExternalStore's server snapshot).
 const PHONE = "(width < 48rem)";
 const subscribePhone = (cb: () => void) => {
   const m = window.matchMedia(PHONE);
@@ -427,6 +426,7 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
   }, []);
   const [confirmReset, setConfirmReset] = useState(false);
   const [firstRunSlot, setFirstRunSlot] = useState<HTMLDivElement | null>(null); // where ConnectAI renders the first-run card
+  const [connectRowSlot, setConnectRowSlot] = useState<HTMLDivElement | null>(null); // phones: ConnectAI's row, top of Work
   const phone = usePhone();
 
   const closeDrawer = useCallback(() => setDrawer(null), []);
@@ -657,7 +657,17 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
           </div>
         </div>
         )}
-        {workspace && !phone && <ConnectAI workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} hosted={!!hosted} slot={firstRunSlot} />}
+        {workspace && (
+          <ConnectAI
+            variant={phone ? "row" : "rail"}
+            rowSlot={connectRowSlot}
+            workspace={workspace}
+            actor={me.actor}
+            teamOf={(r) => L.role[r as Role] ?? r}
+            hosted={!!hosted}
+            slot={firstRunSlot}
+          />
+        )}
         <div className={`${custom ? (workspace ? "mt-3" : "mt-auto") : "mt-3"} ${custom ? CUSTOM_SIDEBAR_FOOTER : ""} flex items-center gap-2.5 border-t border-zinc-200 px-1 pt-3`}>
           <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
             {custom ? teamInitials(L.role[me.actor]) : initials(me.name ?? "")}
@@ -797,17 +807,14 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
             </div>
           </div>
         )}
-        {/* Phones: the one ConnectAI lives here (not in the rail), so the first-run card keeps its poll on every view; its
-            collapsed row shows only at the top of Work. */}
-        {workspace && phone && (
-          <ConnectAI variant="row" show={view === "work"} workspace={workspace} actor={me.actor} teamOf={(r) => L.role[r as Role] ?? r} hosted={!!hosted} slot={firstRunSlot} />
-        )}
         {/* v6 routes: nav id → view. "decision" is the record route; "proposals" is the review a Your turn card opens. */}
         {view === "turn" && <YourTurnView {...props} />}
         {view === "goals" && <GoalsView {...props} />}
         {view === "studio" && L.sandbox && <ScenarioStudio {...props} />}
         {view === "evidence" && L.sandbox && <EvidenceView {...props} />}
         {view === "decisions" && <DecisionsView {...props} />}
+        {/* Phones: ConnectAI (mounted once, in the sidebar) renders its collapsed row here, at the top of Work. */}
+        {view === "work" && workspace && phone && <div ref={setConnectRowSlot} />}
         {view === "work" && <WorkMap {...props} />}
         {view === "decision" && <DecisionView {...props} />}
         {view === "today" && <DecisionView {...props} />}

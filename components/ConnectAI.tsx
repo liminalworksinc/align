@@ -12,9 +12,9 @@ import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 // stamped with the plan revision current at that moment (lib/plan-rev.ts). It says the app was seen while that plan
 // was current, not that it read the plan. An approved app Align hasn't seen yet is listed as "Approved, not seen by Align yet".
 // Align sees when an app connects, never what it does. The same poll feeds the first-run card (components/FirstRun.tsx).
-// Home mounts exactly one ConnectAI (one poll): variant "rail" (the sidebar card, steps in a dialog) at md and up;
-// on a phone, variant "row" in the main column, shown as one collapsed line at the top of Work (`show`) whose button
-// opens the same steps inline. Off Work the row renders only the first-run card, so that card keeps its poll.
+// Home mounts exactly one ConnectAI (one poll) and only switches its variant: "rail" (the sidebar card, steps in a
+// dialog) at md and up; "row" on a phone, one collapsed line rendered into `rowSlot` (the top of Work, when Work is
+// open) whose button opens the same steps inline. Off Work the row renders nothing but the first-run card.
 
 interface App {
   id: string;
@@ -141,7 +141,7 @@ export default function ConnectAI({
   hosted = false,
   slot = null,
   variant = "rail",
-  show = true,
+  rowSlot = null,
 }: {
   workspace: string;
   teamOf: (role: string) => string;
@@ -149,7 +149,7 @@ export default function ConnectAI({
   hosted?: boolean;
   slot?: HTMLElement | null;
   variant?: "rail" | "row";
-  show?: boolean;
+  rowSlot?: HTMLElement | null;
 }) {
   const [data, setData] = useState<{ url: string; apps: App[]; plan?: { changed_at: string | null }; at: number } | null>(null);
   const [open, setOpen] = useState(false); // the dialog
@@ -210,7 +210,7 @@ export default function ConnectAI({
         apps={data?.apps ?? null}
         failed={failed}
         copy={(text) => <Copy value={text} />}
-        openConnect={() => (variant === "row" && show ? setInline(true) : setOpen(true))}
+        openConnect={() => (variant === "row" && rowSlot ? setInline(true) : setOpen(true))}
       />,
       slot,
     );
@@ -315,20 +315,22 @@ export default function ConnectAI({
     const current = reading.filter((a) => a.on_current_plan).length;
     return (
       <>
-        {show && (
-          <section data-connect-ai="row" aria-label="Connected AI apps" className="mb-4 flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <p className="min-w-0 flex-[1_1_12rem] text-[14px] leading-snug text-zinc-700">
-                <span className="font-semibold text-violet-700">Connected AI apps</span>
-                {data && (data.apps.length === 0 ? " · No AI app has connected yet" : ` · ${reading.length} connected · ${current} seen on the current plan`)}
-              </p>
-              <Button kind="secondary" onClick={() => setInline((o) => !o)}>
-                Connect an AI app
-              </Button>
-            </div>
-            {inline && data && <div className="border-t border-zinc-200 pt-3 text-[16px] text-zinc-900">{panel}</div>}
-          </section>
-        )}
+        {rowSlot &&
+          createPortal(
+            <section data-connect-ai="row" aria-label="Connected AI apps" className="mb-4 flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <p className="min-w-0 flex-[1_1_12rem] text-[14px] leading-snug text-zinc-700">
+                  <span className="font-semibold text-violet-700">Connected AI apps</span>
+                  {data && (data.apps.length === 0 ? " · No AI app has connected yet" : ` · ${reading.length} connected · ${current} seen on the current plan`)}
+                </p>
+                <Button kind="secondary" onClick={() => setInline((o) => !o)}>
+                  Connect an AI app
+                </Button>
+              </div>
+              {inline && data && <div className="border-t border-zinc-200 pt-3 text-[16px] text-zinc-900">{panel}</div>}
+            </section>,
+            rowSlot,
+          )}
         {firstRun}
         {/* Off Work, the first-run card's "connect" opens the same steps in the dialog. */}
         {dialog}
