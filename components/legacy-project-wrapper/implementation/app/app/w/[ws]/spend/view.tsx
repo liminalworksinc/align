@@ -2,6 +2,8 @@
 import { useState } from "react";
 import { Card, Err, Loading, Note, PHONE_TABLE, Select, Shell, num, usd, useApi } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
+import type { WsDetail } from "../../../_ui/types";
+import { AllocationCard } from "./allocation";
 
 type Nums = { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number };
 type Sums = Nums & { by_basis: Record<string, Nums> };
@@ -53,10 +55,12 @@ function Row({ label, s, strong }: { label: string; s: Sums; strong?: boolean })
 export default function SpendPage({ me, ws }: { me: Me; ws: string }) {
   const [by, setBy] = useState<"goal" | "team" | "session">("goal");
   const d = useApi<Spend>(`/api/v2/workspaces/${ws}/spend?by=${by}`);
+  const detail = useApi<WsDetail>(`/api/v2/workspaces/${ws}`);
   return (
     <Shell me={me} ws={ws} tab="Spend">
       <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">Usage by goal</h1>
       <p className="mb-5 text-[15px] text-zinc-600">Tokens from shared sessions, counted under the goal each session was bound to when the work happened.</p>
+      <AllocationCard ws={ws} detail={detail.data} />
       <Card
         actions={
           <Select aria-label="Group by" value={by} onChange={(e) => setBy(e.target.value as "goal" | "team" | "session")}>

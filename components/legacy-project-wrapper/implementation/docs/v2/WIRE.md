@@ -1,6 +1,6 @@
 # Goal sessions wire contract (local agent ⇄ hosted server)
 
-Status: v2.2, 2026-10-22 (goal tree fields; in-flight activity). v2.1: directive SSE stream removed; cursor polling only. Source of truth for both halves. Plan: `~/.claude/plans/no-we-need-a-logical-lark.md` (rev 2).
+Status: v2.3, 2026-10-31 (allocation: target shares, steering, reallocations; main #29 on v2). v2.2, 2026-10-22 (goal tree fields; in-flight activity). v2.1: directive SSE stream removed; cursor polling only. Source of truth for both halves. Plan: `~/.claude/plans/no-we-need-a-logical-lark.md` (rev 2).
 Always on (no flag): every `/app*` and `/api/v2/*` path is served in Mode L and when hosted.
 
 ## Conventions
@@ -173,6 +173,42 @@ unchanged; same team and text on an open or accepted ask with another date → a
 null }`. Counts come from bindings (epochs bound to or governed by the goal overlapping the last 14 days), usage times
 and work signals; never prompts, replies, task labels, commit subjects, tokens or cost. `detail` only for the goal's
 owner, its team and workspace owners.
+
+## Allocation (v2.3, main #29)
+Additive fields; older agents ignore them. Spec: `goals-and-proposals`, `workspaces`, `directives`, `local-agent`.
+- `Goal.target_share`: int 0..100 or null. The share of the workspace's agent time the goal should get. Versioned goal
+  content: the owner sets it on create (`POST .../goals { target_share }`) or in a version (`POST .../goals/:goal/versions
+  { version, target_share }`); anyone else proposes it through a reallocation. It reaches agents only in a saved or
+  launched version (the `goal_version` snapshot carries `target_share`; older snapshots read as null). Active targets in a
+  workspace, private goals included, sum to 100 or less, else `409 targets_over_100` (the message names only sums).
+- Goals feed: `{ version, goals, steering: "off"|"on" }`; each goal also carries `"allocation": { "target_share",
+  "share_7d", "gap_7d", "held" } | null` (active goals only; whole percents over the trailing 7 days; `gap_7d` null without
+  a target or without usage; `held` while the goal is on hold). `version` hashes goals and switch; shares are whole
+  percents, so usage moves it only when a share moves a full point.
+- Agent time = fresh tokens: `input + output + cache_write_5m + cache_write_1h + cache_write_unsplit`, every model, priced
+  or not; cache reads left out. Shares are of all shared usage in the workspace in the window.
+- `GET /api/v2/workspaces/:ws/allocation?from&to&weeks` (Bearer or cookie; every member) → `{ "window": { "from", "to",
+  "total_fresh_tokens", "total_est_list_usd_micros", "unpriced_requests", "rows": [ { "kind": "goal"|"private"|
+  "unallocated", "goal": { "id", "title" } | null, "fresh_tokens", "share", "target_share", "gap",
+  "est_list_usd_micros", "unpriced_requests", "sessions" } ], "note" }, "weekly": [ { "week_start", "total_fresh_tokens",
+  "rows": [ { "kind", "goal", "share", "target_share" } ] } ], "steering": { "steering", "total", "days": [ { "day", "n" } ] } }`.
+  Default window: last 7 days; weeks 6 (1..26, Monday 00:00 UTC). Σ rows.fresh_tokens = total. No per-person view.
+- `PATCH /api/v2/workspaces/:ws { "name"?, "steering"?: "on"|"off" }` (cookie, workspace owner) → `{ id, name, steering }`.
+  `GET /api/v2/workspaces/:ws` includes `workspace.steering`.
+- `POST /api/v2/workspaces/:ws/steering` (Bearer) `{ "events": [ { "session_key", "goal_id", "suggested_goal_id",
+  "share", "target", "at" } ] }`, at most 100 → `{ "accepted" }`. Only this device's own shared sessions count; others,
+  and times more than 5 minutes ahead or 14 days back, are skipped; a repeat is stored once.
+- Steering rule (agent, `packages/align-agent/src/shared/steering.ts`): with steering on, a shared session at
+  `SessionStart` (`startup` or `clear`), not stopped or held, bound to a goal at least 10 points over its target and not
+  held, while another active goal it can read is not held, has a target above 0 and is at least 10 points under, gets one
+  line naming both goals and shares, once per session. Never at resume or compact; never names people. No directive.
+- Reallocations (cookie): `POST /api/v2/workspaces/:ws/reallocations { "targets": [ { "goal_id", "target_share" } ],
+  "note"? }` → 201; `GET .../reallocations` → `{ waiting_on_me, mine, others }`; `GET .../reallocations/:id`;
+  `POST .../reallocations/:id/{approve|approve_and_launch|launch|not_yet|counter|accept_counter|reject|withdraw}`
+  (approve and approve_and_launch carry `revision`; counter `targets` and `note`; reject `reason`). Each goal needs one
+  approval from its effective approval set; then someone in every goal's launch set who can read every goal launches it,
+  which writes each goal's next version with its new target (decreases first), authored by its approver. A newer version
+  of any of its goals supersedes it. Readable by everyone who can read one of its goals.
 
 ## Spend
 `GET /api/v2/workspaces/:ws/spend?by=goal|team|session&from&to` (`by=pod` is accepted as `by=team`) (cookie) → rows with token sums by basis and

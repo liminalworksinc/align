@@ -91,6 +91,15 @@ The server SHALL put a limit's text into a directive only inside the goal snapsh
 - **WHEN** a member pastes notes into `POST /api/v2/workspaces/{ws}/limits/suggest` and gets suggestions for a goal with bound sessions
 - **THEN** no directive is written and the goal's limits are unchanged
 
+### Requirement: Target shares reach agents only in a launched version
+
+The server SHALL put a goal's target share into a directive only as `target_share` inside the goal snapshot of a saved goal version (one its owner saved, or one the launch of an approved change request or reallocation wrote; `null` for no target, and for snapshots stored before targets existed), and SHALL write no directive for proposing, approving, countering, accepting, rejecting, withdrawing, saying not yet to or superseding a reallocation, for turning steering on or off, or for a steering report. What a steering line tells an agent is decided on the device from the goals feed (launched targets, 7-day shares, holds and the switch; see `local-agent`), not by a directive.
+
+#### Scenario: Approved, then launched
+
+- **WHEN** both approvers approve a reallocation that lowers goal G's target from 25 to 15 while session S is bound to G, and later a workspace owner launches it
+- **THEN** S's fetch returns nothing new after the approvals; after the launch it returns one `goal_version` directive whose `goal.target_share` is 15
+
 ### Requirement: Directives are written in the transaction of the change that caused them
 
 The server SHALL write every directive row and its target rows inside the same database transaction as the goal version, alignment decision or stop/resume that caused it, assign each directive the next `seq` in one sequence shared by all workspaces, and write no directive at all when the change has no target session.
@@ -112,7 +121,7 @@ The server SHALL write every directive row and its target rows inside the same d
 
 ### Requirement: goal_version directives reach bound and governed sessions
 
-The server SHALL, whenever a new version of a goal is saved (by the goal's owner through `POST /api/v2/workspaces/{ws}/goals/{goal}/versions`, or by the launch of an approved change request), write one `goal_version` directive whose `goal` is the snapshot of the new version and whose `binding` is null, targeting every session in that workspace whose sharing is not stopped and whose open epoch is bound to the goal or whose governing goal (from an approved `work_toward` alignment) is the goal.
+The server SHALL, whenever a new version of a goal is saved (by the goal's owner through `POST /api/v2/workspaces/{ws}/goals/{goal}/versions`, or by the launch of an approved change request or reallocation), write one `goal_version` directive whose `goal` is the snapshot of the new version and whose `binding` is null, targeting every session in that workspace whose sharing is not stopped and whose open epoch is bound to the goal or whose governing goal (from an approved `work_toward` alignment) is the goal.
 
 #### Scenario: Owner publishes a new version
 
@@ -415,6 +424,8 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 - lib/v2/sessions.ts
 - lib/v2/goals.ts
 - lib/v2/changes.ts
+- lib/v2/reallocations.ts
+- lib/v2/steering.ts
 - lib/v2/alignments.ts
 - lib/v2/workspaces.ts
 - lib/v2/lifecycle.ts

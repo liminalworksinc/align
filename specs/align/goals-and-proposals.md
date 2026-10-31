@@ -1,6 +1,6 @@
 ---
 name: Goals, alignments and change requests
-summary: Company and team goals with immutable versions, owners, teams, visibility and dependencies; approval sets; typed requests to a goal's agents and goal holds; alignments that make goals and sessions contribute to a goal with every affected goal's consent; change requests that let a member propose a new version of someone else's goal, with advisory evidence (typed links and an Align snapshot per revision), "Accept if…" conditions the requester acknowledges, and a launch step that releases an approved change to agents; and the Northstar sample workspace.
+summary: Company and team goals with immutable versions, owners, teams, visibility, dependencies and target shares of agent time; approval sets; typed requests to a goal's agents and goal holds; alignments that make goals and sessions contribute to a goal with every affected goal's consent; change requests that let a member propose a new version of someone else's goal, with advisory evidence (typed links and an Align snapshot per revision), "Accept if…" conditions the requester acknowledges, and a launch step that releases an approved change to agents; reallocations that change the target shares of several goals at once, approved and launched the same way; and the Northstar sample workspace.
 kind: area
 ---
 
@@ -25,6 +25,15 @@ in one step. An approved change that the goal outruns before launch (a newer ver
 dropped) is superseded before launch: it never reaches agents, and the requester can propose again. Proposed is not
 approved, approved is not launched, and launched (a version delivered to agents) is not an observed outcome: Align
 records delivery receipts, never that an agent did anything.
+
+A goal's **target share** is the share of the workspace's shared agent time it should get (main #29, "agent time
+follows priorities"). It is versioned goal content like a goal's measures: its owner sets it in a version, and anyone
+else proposes a change through a **reallocation**, which can move target shares between several goals at once. Each
+goal in a reallocation is approved by its own approval set and the whole reallocation is launched like a change
+request, so agents hear a new target only in a launched version. Where #29 had every affected owner approve and the new
+targets apply at once, this part keeps the v2 rules: approval sets with the requester rule, and approve is not launch.
+How actual agent time is counted against targets, and the steering switch, are in `workspaces`; the steering line an
+agent shows is in `local-agent`.
 
 A counter may carry an "Accept if…" condition (ruling LIM-2454 35376283). The requester acknowledges it as a step of
 its own, separate from accepting the counter; the acknowledgement records who and when, never gates approval or
@@ -63,6 +72,9 @@ or agent sees says "team".
 | Condition | An "Accept if…" text (1 to 2000 characters) an approver puts on a counter revision, separate from its note; the requester acknowledges it, which is never a verification |
 | Evidence link | A typed link (`ev_…`: `pr`, `ci_run`, `incident`, `dashboard`, `doc` or `other`) on one change request revision, self-reported by a person or agent-reported by an agent; Align never marks one verified |
 | Align snapshot | What the server recorded about the goal when a change request revision was written: its 30-day spend, bound sessions and last activity |
+| Target share | `target_share` on a goal and on each version: a whole percent from 0 to 100, or `null` for no target. The share of the workspace's shared agent time the goal should get |
+| Agent time | Fresh tokens of shared usage: input + output + cache writes (5-minute, 1-hour and unsplit), for every model, priced or not; cache reads are left out |
+| Reallocation | A proposal (`rl_…`) to change the target shares of one or more goals at once, approved per goal by its approval set and then launched |
 | Sample workspace | "Northstar (sample)", ordinary data created by `POST /api/v2/workspaces/sample` |
 
 ## Alignment state model
@@ -114,9 +126,31 @@ stateDiagram-v2
     not_yet --> superseded: newer goal version, or goal achieved or dropped
 ```
 
+## Reallocation state model
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: POST reallocations (requester)
+    [*] --> approved: POST reallocations, every goal the requester's own
+    pending --> approved: approve (the last goal approved)
+    pending --> countered: counter (approver)
+    countered --> pending: accept_counter (requester)
+    countered --> approved: accept_counter, every goal approved
+    pending --> rejected: reject (approver)
+    countered --> rejected: reject (approver)
+    pending --> withdrawn: withdraw (requester)
+    countered --> withdrawn: withdraw (requester)
+    pending --> superseded: a newer version of one of its goals
+    countered --> superseded: a newer version of one of its goals
+    approved --> superseded: a newer version of one of its goals, before launch
+```
+
+Its `launch` follows the change request's launch states (`pending`, `not_yet`, `launched`, `superseded`; `null` until
+approved).
+
 ### Requirement: Creating a company or team goal
 
-The server SHALL create a goal on `POST /api/v2/workspaces/{ws}/goals` (browser session; workspace owners and members, viewers 403 `read_only`) from `{title, level?, team_id?, visibility?, measures?, anchors?, depends_on?}`, owned by the caller, at version 1 with status `active`, responding 201 with the goal. `level` SHALL default to `team`; only a workspace owner may create a `company` goal (403 `owner_only` otherwise), and a company goal SHALL have no team (400 when `team_id` is sent) and visibility `workspace` (400 when another `visibility` is sent). A team goal's `visibility` SHALL default to `workspace`; a goal with visibility `team` SHALL name a team (400 otherwise), an unknown `team_id` SHALL be 404, and naming a team the caller is not in SHALL be 403 `not_in_team`. A workspace already holding 1,000 goals SHALL answer 409 `too_many_goals`. Creating a goal SHALL write audit action `goal.created` with the caller as actor. Level, owning team and visibility never change after creation.
+The server SHALL create a goal on `POST /api/v2/workspaces/{ws}/goals` (browser session; workspace owners and members, viewers 403 `read_only`) from `{title, level?, team_id?, visibility?, measures?, anchors?, depends_on?, limits?, target_share?}`, owned by the caller, at version 1 with status `active`, responding 201 with the goal. `level` SHALL default to `team`; only a workspace owner may create a `company` goal (403 `owner_only` otherwise), and a company goal SHALL have no team (400 when `team_id` is sent) and visibility `workspace` (400 when another `visibility` is sent). A team goal's `visibility` SHALL default to `workspace`; a goal with visibility `team` SHALL name a team (400 otherwise), an unknown `team_id` SHALL be 404, and naming a team the caller is not in SHALL be 403 `not_in_team`. A workspace already holding 1,000 goals SHALL answer 409 `too_many_goals`. Creating a goal SHALL write audit action `goal.created` with the caller as actor. Level, owning team and visibility never change after creation.
 
 #### Scenario: Owner creates a company goal
 
@@ -140,7 +174,7 @@ The server SHALL create a goal on `POST /api/v2/workspaces/{ws}/goals` (browser 
 
 ### Requirement: Goal content validation
 
-The server SHALL validate goal content the same way on creation, on a new version and in a change request: `title` 1 to 300 characters after trimming; `measures` a list of at most 10 objects with `text` (1 to 300 characters) and optional `target` (at most 100), each keeping a sent `id` only when the previous version had a measure with that id (otherwise a new `m_…` id); `anchors` an object of `repos`, `branch_patterns` and `issues` lists of at most 20 strings of at most 200 characters each, trimmed and de-duplicated; `depends_on` a list of at most 5 goal ids, none equal to the goal itself; `status` one of `active`, `achieved`, `dropped`; and `limits` a list of at most 5 objects with `type` one of `must`, `must_not`, `out_of_scope`, `text` (1 to 160 characters after control characters become spaces and runs of spaces one), and optional `source` (null, or `{kind: meeting|manual, title: at most 120 characters, date: YYYY-MM-DD}`), each keeping a sent `id` only when the previous version had a limit with that id, else reusing the id of a previous limit it repeats word for word (type, text and source), else a new `lim_<12 base32>` id. A violation SHALL be 400 naming the field (`limits: at most 5`, `limits[i].text`, `limits[i].type`, `limits[i].source.date`), and a `depends_on` id that does not exist or that the caller may not read SHALL be 404.
+The server SHALL validate goal content the same way on creation, on a new version and in a change request: `title` 1 to 300 characters after trimming; `measures` a list of at most 10 objects with `text` (1 to 300 characters) and optional `target` (at most 100), each keeping a sent `id` only when the previous version had a measure with that id (otherwise a new `m_…` id); `anchors` an object of `repos`, `branch_patterns` and `issues` lists of at most 20 strings of at most 200 characters each, trimmed and de-duplicated; `depends_on` a list of at most 5 goal ids, none equal to the goal itself; `status` one of `active`, `achieved`, `dropped`; and `limits` a list of at most 5 objects with `type` one of `must`, `must_not`, `out_of_scope`, `text` (1 to 160 characters after control characters become spaces and runs of spaces one), and optional `source` (null, or `{kind: meeting|manual, title: at most 120 characters, date: YYYY-MM-DD}`), each keeping a sent `id` only when the previous version had a limit with that id, else reusing the id of a previous limit it repeats word for word (type, text and source), else a new `lim_<12 base32>` id. A `target_share` SHALL be a whole number from 0 to 100 or `null` (no target; on a new version, an absent `target_share` keeps the current one). A violation SHALL be 400 naming the field (`limits: at most 5`, `limits[i].text`, `limits[i].type`, `limits[i].source.date`, `target_share must be a whole percent from 0 to 100, or null`), and a `depends_on` id that does not exist or that the caller may not read SHALL be 404.
 
 #### Scenario: Too many dependencies
 
@@ -173,7 +207,7 @@ The server SHALL let a goal's owner always read it, and otherwise decide by visi
 
 ### Requirement: Goals feed with ETag
 
-The server SHALL serve the goals the caller may read on `GET /api/v2/workspaces/{ws}/goals` (device token with a grant for the workspace, or browser session) as `{version, goals}`, oldest first, where `version` is the first 16 hex characters of the sha256 of the serialized goals and is also sent as a quoted `ETag` with `cache-control: private, no-cache`, and SHALL answer 304 with no body when `If-None-Match` matches it (or is `*`). Each goal SHALL be `{id, version, title, measures, status, level, visibility, owner:{id,name}, team:{id,name}|null, anchors, depends_on, limits, bindable, contributes_to}`, where `limits` is the current version's limits (`[]` when it has none) and is read by whoever reads the goal, where `visibility` shows `team` for a stored `pod` and `depends_on` lists only goals the caller may read. A goal's current version is its last launched (or owner-saved) version: an approved but unlaunched change request SHALL change neither the feed's goals nor its `version`.
+The server SHALL serve the goals the caller may read on `GET /api/v2/workspaces/{ws}/goals` (device token with a grant for the workspace, or browser session) as `{version, goals, steering}`, oldest first, where `steering` is the workspace's steering switch (`off` or `on`, see `workspaces`) and `version` is the first 16 hex characters of the sha256 of the serialized goals and switch together, also sent as a quoted `ETag` with `cache-control: private, no-cache`, and SHALL answer 304 with no body when `If-None-Match` matches it (or is `*`). Each goal SHALL be `{id, version, title, measures, status, level, visibility, owner:{id,name}, team:{id,name}|null, anchors, depends_on, limits, target_share, bindable, contributes_to, allocation}`, where `limits` is the current version's limits (`[]` when it has none) and is read by whoever reads the goal, where `visibility` shows `team` for a stored `pod` and `depends_on` lists only goals the caller may read, and where `allocation` is, for an `active` goal, `{target_share, share_7d, gap_7d, held}`: the goal's share of the workspace's agent time over the trailing 7 days (counted as the `workspaces` part's allocation report counts it) and its gap to the target, both whole percents, `gap_7d` `null` without a target or without any shared usage in the window, and `held` true while the goal is on hold; `allocation` is `null` for a goal that is not active. Because shares are whole percents, usage changes the feed's `version` only when a share moves a full point. A goal's current version is its last launched (or owner-saved) version: an approved but unlaunched change request SHALL change neither the feed's goals nor its `version`.
 
 #### Scenario: Approval leaves the feed alone
 
@@ -185,6 +219,11 @@ The server SHALL serve the goals the caller may read on `GET /api/v2/workspaces/
 - **WHEN** a client sends `If-None-Match` equal to the current feed `ETag`
 - **THEN** the server responds 304 with no body
 
+#### Scenario: Allocation in the feed
+
+- **WHEN** a goal with target 20 had 6,000 of the workspace's 10,000 fresh tokens in the last 7 days, and one more token is uploaded
+- **THEN** its `allocation` is `{target_share: 20, share_7d: 60, gap_7d: 40, held: false}`, a goal with no target has `gap_7d: null`, and the feed still answers 304 to the earlier `ETag`; turning steering on, or holding the goal, gives the feed a new `version`
+
 #### Scenario: Team naming on the wire
 
 - **WHEN** a member reads a goal created with `visibility: "team"` for team Product
@@ -192,7 +231,7 @@ The server SHALL serve the goals the caller may read on `GET /api/v2/workspaces/
 
 ### Requirement: Immutable goal versions
 
-The server SHALL record each change to a goal as a new immutable version on `POST /api/v2/workspaces/{ws}/goals/{goal}/versions` (browser session) from `{version?, title?, measures?, anchors?, depends_on?, status?, limits?}`, accepted only from the goal's owner (403 `not_goal_owner` for another reader, 403 `read_only` for a viewer, 404 for a goal the caller may not read). A sent `version` other than the current one, or a concurrent write, SHALL be 409 `stale_version`, and a body whose resulting content (title, measures, anchors, status, sorted `depends_on`, limits) hashes the same as the current version SHALL be 409 `no_change`; `depends_on` and `limits` SHALL join the hash only when non-empty, so a version without them hashes as it did before they existed. On success the server SHALL, in one transaction, raise the version by one, keep the previous versions unchanged, store the new version with its content hash and author, write audit action `goal.versioned`, record the goal as reviewed against its parents' current versions, and write one `goal_version` directive, carrying a snapshot of the goal with its `team`, `level` and `limits`, for every non-stopped session whose open epoch is bound to the goal or that the goal governs; the response is 201 with the goal.
+The server SHALL record each change to a goal as a new immutable version on `POST /api/v2/workspaces/{ws}/goals/{goal}/versions` (browser session) from `{version?, title?, measures?, anchors?, depends_on?, status?, limits?, target_share?}`, accepted only from the goal's owner (403 `not_goal_owner` for another reader, 403 `read_only` for a viewer, 404 for a goal the caller may not read). A sent `version` other than the current one, or a concurrent write, SHALL be 409 `stale_version`, and a body whose resulting content (title, measures, anchors, status, sorted `depends_on`, limits, target share) hashes the same as the current version SHALL be 409 `no_change`; `depends_on` and `limits` SHALL join the hash only when non-empty, and `target_share` only when it is not `null`, so a version without them hashes as it did before they existed. On success the server SHALL, in one transaction, raise the version by one, keep the previous versions unchanged, store the new version with its content hash and author, write audit action `goal.versioned`, record the goal as reviewed against its parents' current versions, and write one `goal_version` directive, carrying a snapshot of the goal with its `team`, `level`, `limits` and `target_share`, for every non-stopped session whose open epoch is bound to the goal or that the goal governs; the response is 201 with the goal.
 
 #### Scenario: New version
 
@@ -213,6 +252,15 @@ The server SHALL record each change to a goal as a new immutable version on `POS
 
 - **WHEN** a member who can read the goal but does not own it POSTs a new version
 - **THEN** the response is 403 `not_goal_owner`; they can propose a change request instead
+
+### Requirement: Target shares add up to 100 or less
+
+The server SHALL keep the target shares of a workspace's `active` goals, every visibility counted (private goals included), at 100 or less: creating a goal with a target, and writing any version (an owner's, or a launched change request or reallocation) that sets or raises an active goal's target or makes a goal with a target active again, SHALL be refused with 409 `targets_over_100` when the sum would pass 100, with a message that names only the resulting sum and what the other goals already take, never a goal. Lowering or clearing a target, and a goal that is achieved or dropped, SHALL free its share. Nothing is written on a refusal.
+
+#### Scenario: A private goal's target counts
+
+- **WHEN** a workspace's active goals hold targets 20, 30 and (a member's private goal) 20, and the workspace owner creates a company goal with target 40
+- **THEN** the response is 409 `targets_over_100` saying the targets would add up to 110% with 70% already taken, naming no goal; the same goal with target 10 is created
 
 ### Requirement: Dependency cycles are refused
 
@@ -322,7 +370,7 @@ The server SHALL compute a goal's approval set, at the time it is needed, as the
 
 ### Requirement: Requester rule and workspace-owner fallback
 
-Wherever a goal's consent is needed (an alignment requirement or a change request), the server SHALL treat one approval from the goal's approval set as that goal's consent, SHALL count the requester toward the set only when the requester is the goal's owner, and, when the requester is not the goal's owner and the set holds no one other than the requester, SHALL use the workspace owners other than the requester as the set. If even that set is empty, the request SHALL stay open until someone eligible exists or the requester withdraws it.
+Wherever a goal's consent is needed (an alignment requirement, a change request or a goal in a reallocation), the server SHALL treat one approval from the goal's approval set as that goal's consent, SHALL count the requester toward the set only when the requester is the goal's owner, and, when the requester is not the goal's owner and the set holds no one other than the requester, SHALL use the workspace owners other than the requester as the set. If even that set is empty, the request SHALL stay open until someone eligible exists or the requester withdraws it.
 
 #### Scenario: Lead asks against their own team's goal
 
@@ -447,7 +495,7 @@ The server SHALL let a workspace owner or member who can read a goal but does no
 
 ### Requirement: Change request contents
 
-The server SHALL accept in `changes` only the keys `title`, `measures`, `depends_on`, `status` and `limits` (400 for any other key, an empty object or a non-object), validate each like a new goal version against the base version, answer 409 `no_change` when applying them to the base version changes nothing, and 409 `cycle` when the resulting `depends_on` would close a dependency cycle. The same rules SHALL apply to `changes` sent with `counter` and `rebase`, and a request's read view SHALL show `limits` in its `changes` and in `diff.before` / `diff.after` when it changes them.
+The server SHALL accept in `changes` only the keys `title`, `measures`, `depends_on`, `status` and `limits` (400 for any other key, an empty object or a non-object; a target share changes only through its owner's version or a reallocation), validate each like a new goal version against the base version, answer 409 `no_change` when applying them to the base version changes nothing, and 409 `cycle` when the resulting `depends_on` would close a dependency cycle. The same rules SHALL apply to `changes` sent with `counter` and `rebase`, and a request's read view SHALL show `limits` in its `changes` and in `diff.before` / `diff.after` when it changes them.
 
 #### Scenario: Anchors are not proposable
 
@@ -605,6 +653,70 @@ The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goa
 
 - **WHEN** a team lead calls `GET /api/v2/workspaces/{ws}/change-requests`
 - **THEN** pending requests on their team's goals are under `waiting_on_me`, their own requests under `mine`, and the rest they can read under `others`
+
+### Requirement: Proposing a reallocation
+
+The server SHALL let a workspace owner or member (viewers 403 `read_only`) propose new target shares on `POST /api/v2/workspaces/{ws}/reallocations {targets:[{goal_id, target_share}], note?}` (browser session, body at most 16 KB) and respond 201 with the reallocation (`id` `rl_…`, `revision: 1`). Each target SHALL name a goal the caller may read (404 otherwise) that is `active` (409 `goal_not_active`), at most once, with `target_share` a whole number from 0 to 100 or `null` (400); `targets` SHALL hold 1 to 50 entries and `note` at most 1000 characters (400). The reallocation SHALL keep only the goals whose target changes, each with the goal's version and target at that time (409 `no_change` when none changes), and SHALL be refused with 409 `targets_over_100` when the workspace's targets with these changes would pass 100. Each kept goal needs one approval from its effective approval set (the requester rule and workspace-owner fallback apply per goal); the requester's own goals are approved by asking. When every goal is then approved the reallocation is `approved` with `launch: "pending"`, else `pending`. Proposing SHALL write no goal version and no directive, and audit `reallocation.requested`.
+
+#### Scenario: Two goals, two approval sets
+
+- **WHEN** a member of team Core proposes GA (owned by Core's lead) from 25 to 15 and GB (owned by a member in no team) from 30 to 40, and a third goal at its current target
+- **THEN** the response is 201 `pending` with two targets, GA's approvers the lead and GB's its owner, neither approved, and the third goal left out; a viewer gets 403 `read_only`, another person's private goal 404, GB at 80 409 `targets_over_100`
+
+#### Scenario: Only my own goals
+
+- **WHEN** a goal's owner proposes a new target for their own goal only
+- **THEN** the reallocation is `approved` at once with `launch: "pending"`, and the goal keeps its target until it is launched
+
+### Requirement: Approving a reallocation
+
+The server SHALL accept `POST .../reallocations/{id}/approve {revision}` only from someone in the effective approval set of one of its goals (403 `not_an_approver`), only on a `pending` reallocation (409 `wrong_state`) at its current `revision` (409 `stale_revision`), recording the caller's approval for every goal of that revision they may approve for and nobody approved yet (409 `already_approved` when there is none), with audit `reallocation.approval`. When every goal of the current revision is approved the server SHALL set it `approved` with `launch: "pending"` and `decided_at`, audit `reallocation.approved`, and write no goal version and no directive: the goals, the feed and every agent read keep the launched targets until a launch.
+
+#### Scenario: Approved, not launched
+
+- **WHEN** GA's lead approves after GB's owner has
+- **THEN** the reallocation is `approved` with `launch: "pending"`, both goals keep their versions and targets, no directive is written and the feed answers 304 to its earlier `ETag`
+
+### Requirement: Launching a reallocation
+
+The server SHALL let someone who is in the launch set of every goal of an approved reallocation (each goal's effective approval set plus every workspace owner) and who can read every goal launch it on `POST .../reallocations/{id}/launch {revision?}` (403 `not_a_launcher` otherwise, 403 `read_only` for a viewer), only while it is `approved` with `launch` `pending` or `not_yet` (409 `wrong_state`) and the workspace's targets with its changes fit in 100 (409 `targets_over_100`). In one transaction the server SHALL set `launch: "launched"` with `launch_decided_by` and `launch_decided_at`, then write each goal's next version with its new target through the single write path every goal version takes (content hash, audit `goal.versioned` by the launcher, `created_by` the person whose approval counted for that goal, one `goal_version` directive for every non-stopped session bound to or governed by it), lowering targets before raising them so the workspace never passes 100 on the way, and audit `reallocation.launched`. `POST .../not_yet` from the same people SHALL record that it waits (`launch: "not_yet"`, audit `reallocation.not_yet`) and publish nothing; a later `not_yet` or `launch` replaces it. `POST .../approve_and_launch {revision}` SHALL approve and launch in one transaction when the caller's approval completes the reallocation and they may launch it (403 `not_a_launcher`, or 409 `not_ready` when other goals still need an approval; a refusal writes nothing).
+
+#### Scenario: Launch from a full workspace
+
+- **WHEN** the workspace's targets add up to 100 and a launched reallocation lowers a company goal from 40 to 20 and raises GA from 15 to 30
+- **THEN** both goals get new versions (the company goal first), the bound sessions get `goal_version` directives carrying the new targets, and each version names as its author the person who approved that goal
+
+#### Scenario: Someone outside a launch set
+
+- **WHEN** GB's owner, who is not in GA's approval set and not a workspace owner, tries to launch a reallocation that changes GA and GB
+- **THEN** the response is 403 `not_a_launcher`; a workspace owner who can read both goals may launch it or say not yet
+
+### Requirement: Countering, rejecting and withdrawing a reallocation
+
+The server SHALL let an approver who is not the requester `counter {targets, note?, revision?}` a `pending` reallocation with new targets (validated as on proposing; 409 `targets_over_100`), writing a new revision with each goal's version and target at that time, approving every goal of it the counter's author may approve for, setting `countered` and auditing `reallocation.countered`; approvals of earlier revisions SHALL not count. Only the requester SHALL `accept_counter {revision?}` a `countered` one (403 `not_requester`), which returns it to `pending`, approves the requester's own goals in it and approves it when every goal is approved (audit `reallocation.counter_accepted`). An approver who is not the requester MAY `reject {reason?}` (at most 1000 characters) a `pending` or `countered` reallocation, which becomes `rejected` with `rejected_by`, `rejection_reason` and `decided_at` (audit `reallocation.rejected`); only the requester MAY `withdraw` one (audit `reallocation.withdrawn`). Someone outside every approval set SHALL get 403 `not_an_approver`, any other state 409 `wrong_state`, and a sent `revision` other than the current one 409 `stale_revision`.
+
+#### Scenario: Counter, then accept
+
+- **WHEN** GB's owner counters with GB at 35, and the requester accepts the counter
+- **THEN** the reallocation is at revision 2, `pending`, with GB approved by its owner and GA (approved on revision 1) waiting for approval again
+
+### Requirement: Reallocations are superseded by a newer goal version
+
+The server SHALL, in the transaction that writes any new version of a goal (an owner's version, a launched change request, or the launch of another reallocation), set every `pending` or `countered` reallocation whose current revision names that goal, and every `approved` one whose `launch` is `pending` or `not_yet`, to `superseded` (with `launch: "superseded"` when it was approved), auditing `reallocation.superseded` with the person whose action wrote the version. A superseded reallocation SHALL never reach agents and SHALL accept no further action (409 `wrong_state`); the requester may propose again.
+
+#### Scenario: The owner edits the goal first
+
+- **WHEN** GA's owner saves a new version while one reallocation changing GA is approved but not launched and another is pending
+- **THEN** both are `superseded` (the first with `launch: "superseded"`), launching the first is 409, and GA keeps the owner's target
+
+### Requirement: Reading reallocations
+
+The server SHALL list on `GET /api/v2/workspaces/{ws}/reallocations` (browser session) the reallocations the caller can read, newest change first and at most 200, as `{waiting_on_me, mine, others}`, and serve one on `GET .../reallocations/{id}`. A reallocation SHALL be readable by everyone who can read at least one of its goals (viewers included, with every `can` flag false) and 404 to anyone else. Each SHALL be `{id, state, revision, requester, targets, note, history, launch, launch_decided_by, launch_decided_at, rejected_by, rejection_reason, waiting_on_me, can, created_at, updated_at, decided_at}`, where each target is `{goal:{id, title}, from_share, current_share, target_share, base_version, approvers, approved_by, approved}` for a goal the caller can read, and `{goal: null, …}` with every number `null` and no approvers for one they cannot; `history` lists each revision's author, note and time; `can` holds `{approve, approve_and_launch, launch, not_yet, counter, accept_counter, reject, withdraw}`, true exactly when the server would accept that action; and `waiting_on_me` is true when the caller's `approve` or `accept_counter` flag is, or their `launch` flag while `launch` is `pending`.
+
+#### Scenario: A viewer reads
+
+- **WHEN** a viewer opens a pending reallocation on workspace goals
+- **THEN** the response is 200 with the targets and approvers and every `can` flag false; a non-member gets 404
 
 ### Requirement: Align snapshot on each change request revision
 
@@ -841,10 +953,15 @@ The server SHALL write audit rows naming the actor for `request.sent`, `request.
 ## Open questions
 
 - When the requester is the only person who could approve a goal's requirement and no other workspace owner exists, the request stays open indefinitely; should it instead be refused up front?
+- A reallocation is superseded by any newer version of one of its goals, even one that leaves the target alone (a title edit), and the requester proposes again; a change request instead becomes `behind` and is rebased. Should reallocations get a rebase too, or is starting again right for a numbers-only proposal?
+- A workspace owner who cannot read a private goal in a reallocation (only its owner can propose one, for their own goal) sees it unnamed and cannot launch it; the goal's owner can. Is that the right split, or should a reallocation refuse private goals?
 
 ## Sources
 
 - `lib/v2/goals.ts`
+- `lib/v2/reallocations.ts`
+- `lib/v2/allocation.ts` (`feedAllocation` only)
+- `lib/v2/steering.ts` (`workspaceSteering` only)
 - `lib/v2/requests.ts`
 - `lib/v2/approval.ts`
 - `lib/v2/alignments.ts`
@@ -887,10 +1004,14 @@ The server SHALL write audit rows naming the actor for `request.sent`, `request.
 - `app/api/v2/workspaces/[ws]/alignments/route.ts`
 - `app/api/v2/workspaces/[ws]/alignments/[id]/route.ts`
 - `app/api/v2/workspaces/[ws]/alignments/[id]/[action]/route.ts`
+- `app/api/v2/workspaces/[ws]/reallocations/route.ts`
+- `app/api/v2/workspaces/[ws]/reallocations/[id]/route.ts`
+- `app/api/v2/workspaces/[ws]/reallocations/[id]/[action]/route.ts`
 - `app/app/view.tsx`
 - `app/app/_ui/kit.tsx`
 - `app/app/_ui/changes.tsx`
 - `app/app/_ui/limits.tsx`
+- `app/app/_ui/reallocations.tsx`
 - `app/app/w/[ws]/goals/[goal]/view.tsx`
 - `app/app/w/[ws]/requests/view.tsx`
 - `app/app/w/[ws]/alignments/view.tsx`

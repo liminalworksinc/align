@@ -19,7 +19,7 @@ export interface Sql {
 
 /** The PRAGMA user_version of a fully migrated database (lib/v2/db.ts MIGRATIONS.length; db.ts checks they agree).
  *  The operator script refuses any other, so it never writes to a schema it doesn't know. */
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 // ---- settings shared with the operator script (lib/v2/config.ts re-exports these) ----
 

@@ -61,6 +61,12 @@ export const layout = {
   driftDir: (h: string) => path.join(h, "drift"),
   /** A local drift notice waiting for the session's next prompt. */
   drift: (h: string, lid: string) => path.join(h, "drift", `${safe(lid)}.json`),
+  /** Steering lines shown, one file each, until the sync pass reports them. */
+  steeringDir: (h: string) => path.join(h, "steering"),
+  /** This machine's agent time outside shared sessions, last 7 days (computed by sync, read by hooks; never uploaded). */
+  unsharedDigest: (h: string) => path.join(h, "unshared-digest.json"),
+  /** The week (Monday, UTC) the unshared-work note was last shown. */
+  unsharedShown: (h: string) => path.join(h, "unshared-shown.json"),
 };
 
 function safe(s: string): string {

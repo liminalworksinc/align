@@ -8,6 +8,9 @@ import { limitsIn, limitsOf, type Limit } from "./goal-limits";
 import { need } from "./workspaces";
 import { personName } from "./retention";
 import { expireOpenRequests, releaseHold } from "./requests";
+import { feedAllocation } from "./allocation";
+import { workspaceSteering } from "./steering";
+import { supersedeReallocations } from "./reallocations";
 import { optStr, str, type Body } from "./validate";
 
 // Goals and their immutable versions. A goal's current fields live on v2_goals; every version (including the
@@ -18,6 +21,9 @@ import { optStr, str, type Body } from "./validate";
 // The goal tree: a goal contributes to the targets of its approved alignments (its parents) and may depend on other
 // goals whose output it consumes. A child records which version of each parent its owner last reviewed it against;
 // a newer parent version marks the child stale until its owner confirms it or saves a new version.
+// A goal's target share (PORT29) is the share of the workspace's agent time it should get: versioned content like the
+// rest, so it reaches agents only in a saved or launched version. Active goals' targets, every visibility counted, add
+// up to 100 or less (writeGoalVersion refuses more; the refusal names only sums).
 
 export type GoalStatus = "active" | "achieved" | "dropped";
 export type GoalLevel = "company" | "team";
@@ -55,6 +61,8 @@ export interface GoalRow {
   limits_json: string;
   status: GoalStatus;
   level: GoalLevel;
+  /** Share of the workspace's agent time (fresh tokens) this goal should get, 0 to 100, or null. */
+  target_share: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -75,6 +83,8 @@ export interface GoalCore {
   depends_on: string[];
   /** What work toward this goal must do, must not do, or leaves out of scope (lib/v2/goal-limits.ts), at most 5. */
   limits: Limit[];
+  /** Share of the workspace's agent time this goal should get (0 to 100), or null for no target. */
+  target_share: number | null;
 }
 /** A goal this one contributes to, and whether this goal was reviewed against its current version. */
 export interface ParentRef {
@@ -116,6 +126,7 @@ export function goalCore(g: GoalRow): GoalCore {
     anchors: JSON.parse(g.anchors_json),
     depends_on: JSON.parse(g.depends_on_json || "[]"),
     limits: limitsOf(g),
+    target_share: g.target_share ?? null,
   };
 }
 
@@ -221,12 +232,16 @@ export function visibleGoals(pp: PolicyPrincipal): GoalRow[] {
   return all<GoalRow>("SELECT * FROM v2_goals WHERE ws_id = ? ORDER BY created_at, id", pp.wsId).filter((g) => canReadGoal(pp, goalObj(g)));
 }
 
-/** The goals feed: the visible set with `bindable`, and a short version hash for ETag / If-None-Match. */
+/** The goals feed: the visible set with `bindable` and each active goal's trailing-7-day allocation (whole percents,
+ *  lib/v2/allocation.ts), the workspace's steering switch, and a short version hash of both for ETag / If-None-Match.
+ *  Shares are whole percents, so usage moves the hash only when a share moves a full point. */
 export function goalsFeed(pp: PolicyPrincipal) {
   const transfers = transferGoals(pp.wsId, pp.userId);
-  const goals = visibleGoals(pp).map((g) => serializeGoal(pp, g, transfers));
-  const version = sha256hex(JSON.stringify(goals)).slice(0, 16);
-  return { version, goals };
+  const shares = feedAllocation(pp);
+  const goals = visibleGoals(pp).map((g) => ({ ...serializeGoal(pp, g, transfers), allocation: shares.get(g.id) ?? null }));
+  const steering = workspaceSteering(pp.wsId);
+  const version = sha256hex(JSON.stringify({ goals, steering })).slice(0, 16);
+  return { version, goals, steering };
 }
 
 // ---- input ----
@@ -313,10 +328,12 @@ export interface GoalContent {
   status: GoalStatus;
   depends_on: string[];
   limits: Limit[];
+  /** 0 to 100, or null: no target. */
+  target_share: number | null;
 }
 
-// depends_on and limits join the hash only when non-empty, so the hash of every version written before they existed
-// is unchanged.
+// depends_on and limits join the hash only when non-empty, and target_share only when set, so the hash of every
+// version written before they existed is unchanged.
 const contentHash = (c: GoalContent) =>
   sha256hex(
     JSON.stringify({
@@ -326,12 +343,13 @@ const contentHash = (c: GoalContent) =>
       status: c.status,
       ...(c.depends_on?.length ? { depends_on: [...c.depends_on].sort() } : {}),
       ...(c.limits?.length ? { limits: c.limits } : {}),
+      ...(c.target_share !== null && c.target_share !== undefined ? { target_share: c.target_share } : {}),
     }),
   );
 export const sameContent = (a: GoalContent, b: GoalContent) => contentHash(a) === contentHash(b);
 
 /** A goal's (or one stored version's) content. */
-export function contentOf(r: { title: string; measures_json: string; anchors_json: string; status: string; depends_on_json: string; limits_json: string }): GoalContent {
+export function contentOf(r: { title: string; measures_json: string; anchors_json: string; status: string; depends_on_json: string; limits_json: string; target_share?: number | null }): GoalContent {
   return {
     title: r.title,
     measures: JSON.parse(r.measures_json),
@@ -339,13 +357,14 @@ export function contentOf(r: { title: string; measures_json: string; anchors_jso
     status: r.status as GoalStatus,
     depends_on: JSON.parse(r.depends_on_json || "[]"),
     limits: limitsOf(r),
+    target_share: r.target_share ?? null,
   };
 }
 
 /** The content of one stored version of a goal. */
 export function versionContentOf(wsId: string, goalId: string, version: number): GoalContent | undefined {
-  const r = get<{ title: string; measures_json: string; anchors_json: string; status: string; depends_on_json: string; limits_json: string }>(
-    "SELECT title, measures_json, anchors_json, status, depends_on_json, limits_json FROM v2_goal_versions WHERE ws_id = ? AND goal_id = ? AND version = ?",
+  const r = get<{ title: string; measures_json: string; anchors_json: string; status: string; depends_on_json: string; limits_json: string; target_share: number | null }>(
+    "SELECT title, measures_json, anchors_json, status, depends_on_json, limits_json, target_share FROM v2_goal_versions WHERE ws_id = ? AND goal_id = ? AND version = ?",
     wsId,
     goalId,
     version,
@@ -365,23 +384,45 @@ export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalConte
     status,
     depends_on: dependsIn(pp, b.depends_on, goalId, prev.depends_on),
     limits: limitsIn(b.limits, prev.limits),
+    target_share: targetIn(b.target_share, prev.target_share),
   };
   assertNoDependencyCycle(pp.wsId, goalId, next.depends_on);
   if (sameContent(next, prev)) throw conflict("no_change", "Nothing changed");
   return next;
 }
 
+/** A target share from a body: undefined keeps `prev`, null clears it, else a whole percent from 0 to 100 (400). */
+export function targetIn(v: unknown, prev: number | null = null): number | null {
+  if (v === undefined) return prev;
+  if (v === null) return null;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 100) throw badRequest("target_share must be a whole percent from 0 to 100, or null");
+  return v;
+}
+
+/** 409 targets_over_100 when the workspace's active goals' targets, with `next` replacing some goals' targets (each of
+ *  them active), would add up to more than 100. Every visibility counts; the message names only the sums. */
+export function assertTargetsFit(wsId: string, next: ReadonlyMap<string, number | null>) {
+  let others = 0;
+  for (const r of all<{ id: string; target_share: number }>("SELECT id, target_share FROM v2_goals WHERE ws_id = ? AND status = 'active' AND target_share IS NOT NULL", wsId)) {
+    if (!next.has(r.id)) others += r.target_share;
+  }
+  const total = others + [...next.values()].reduce<number>((a, t) => a + (t ?? 0), 0);
+  if (total > 100) throw conflict("targets_over_100", `Targets of active goals would add up to ${total}%; keep them at 100% or less (other goals already take ${others}%).`);
+}
+
 /** Insert a new goal at version 1 (inside the caller's tx). Used by createGoal and the sample workspace. */
 export function insertGoal(
   pp: PolicyPrincipal,
-  f: { title: string; level: GoalLevel; podId: string | null; visibility: Visibility; measures: Measure[]; anchors: Anchors; dependsOn: string[]; limits?: Limit[] },
+  f: { title: string; level: GoalLevel; podId: string | null; visibility: Visibility; measures: Measure[]; anchors: Anchors; dependsOn: string[]; limits?: Limit[]; targetShare?: number | null },
   at: string,
 ): string {
   const id = newId("g");
   const limits = f.limits ?? [];
+  const target = f.targetShare ?? null;
+  if (target !== null) assertTargetsFit(pp.wsId, new Map([[id, target]]));
   run(
-    `INSERT INTO v2_goals (id, ws_id, owner_id, pod_id, visibility, level, version, title, measures_json, anchors_json, depends_on_json, limits_json, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+    `INSERT INTO v2_goals (id, ws_id, owner_id, pod_id, visibility, level, version, title, measures_json, anchors_json, depends_on_json, limits_json, target_share, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
     id,
     pp.wsId,
     pp.userId,
@@ -393,11 +434,12 @@ export function insertGoal(
     JSON.stringify(f.anchors),
     JSON.stringify(f.dependsOn),
     JSON.stringify(limits),
+    target,
     at,
     at,
   );
   run(
-    "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, limits_json, status, content_hash, created_by, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+    "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, limits_json, target_share, status, content_hash, created_by, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)",
     pp.wsId,
     id,
     f.title,
@@ -405,7 +447,8 @@ export function insertGoal(
     JSON.stringify(f.anchors),
     JSON.stringify(f.dependsOn),
     JSON.stringify(limits),
-    contentHash({ title: f.title, measures: f.measures, anchors: f.anchors, status: "active", depends_on: f.dependsOn, limits }),
+    target,
+    contentHash({ title: f.title, measures: f.measures, anchors: f.anchors, status: "active", depends_on: f.dependsOn, limits, target_share: target }),
     pp.userId,
     at,
   );
@@ -433,11 +476,12 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   const anchors = anchorsIn(b.anchors ?? {});
   const dependsOn = dependsIn(pp, b.depends_on ?? [], null);
   const limits = limitsIn(b.limits ?? [], []);
+  const targetShare = targetIn(b.target_share);
   const at = nowIso();
   const count = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_goals WHERE ws_id = ?", pp.wsId)?.n ?? 0;
   if (count >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals");
   const id = await tx(() => {
-    const created = insertGoal(pp, { title, level, podId, visibility, measures, anchors, dependsOn, limits }, at);
+    const created = insertGoal(pp, { title, level, podId, visibility, measures, anchors, dependsOn, limits, targetShare }, at);
     // Here, not in insertGoal: the sample workspace's seeded limit is nobody's first.
     if (limits.length) event("first_limit", { ws: pp.wsId, user: pp.userId, at });
     return created;
@@ -452,18 +496,27 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
  *  governed by the goal, every other approved change request still waiting for launch is superseded before launch,
  *  and, when the goal becomes achieved or dropped, every open change request on it is superseded, the requests to its
  *  agents (and switch_goal requests toward it) still waiting for an answer expire, and a hold on it is released.
- *  409 stale_version if the goal moved since `g` was read. */
-export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at: string, authorId = actorId): GoalRow {
+ *  Every open or approved-unlaunched reallocation that names the goal is superseded (lib/v2/reallocations.ts). An
+ *  active goal whose target is set or raised, or that becomes active with one, must keep the workspace's targets at
+ *  100 or less (409 targets_over_100). 409 stale_version if the goal moved since `g` was read. */
+export function writeGoalVersion(g: GoalRow, content: GoalContent, actorId: string, at: string, authorId = actorId): GoalRow {
+  // Content approved before targets existed (a change request's approved_json) carries none: no target.
+  const c: GoalContent = { ...content, target_share: content.target_share ?? null };
   if (c.depends_on.length) assertNoDependencyCycle(g.ws_id, g.id, c.depends_on); // again, inside the transaction
+  const prevTarget = g.target_share ?? null;
+  if (c.status === "active" && c.target_share !== null && (g.status !== "active" || prevTarget === null || c.target_share > prevTarget)) {
+    assertTargetsFit(g.ws_id, new Map([[g.id, c.target_share]]));
+  }
   const v = g.version + 1;
   const n = run(
-    "UPDATE v2_goals SET version = ?, title = ?, measures_json = ?, anchors_json = ?, depends_on_json = ?, limits_json = ?, status = ?, updated_at = ? WHERE ws_id = ? AND id = ? AND version = ?",
+    "UPDATE v2_goals SET version = ?, title = ?, measures_json = ?, anchors_json = ?, depends_on_json = ?, limits_json = ?, target_share = ?, status = ?, updated_at = ? WHERE ws_id = ? AND id = ? AND version = ?",
     v,
     c.title,
     JSON.stringify(c.measures),
     JSON.stringify(c.anchors),
     JSON.stringify(c.depends_on),
     JSON.stringify(c.limits),
+    c.target_share,
     c.status,
     at,
     g.ws_id,
@@ -472,7 +525,7 @@ export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at
   );
   if (!n) throw conflict("stale_version", "This goal changed meanwhile; reload and try again");
   run(
-    "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, limits_json, status, content_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, limits_json, target_share, status, content_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     g.ws_id,
     g.id,
     v,
@@ -481,6 +534,7 @@ export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at
     JSON.stringify(c.anchors),
     JSON.stringify(c.depends_on),
     JSON.stringify(c.limits),
+    c.target_share,
     c.status,
     contentHash(c),
     authorId,
@@ -493,6 +547,7 @@ export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at
   const next = goalRow(g.ws_id, g.id)!;
   goalVersionDirective(g.ws_id, next);
   supersedeUnlaunched(g.ws_id, g.id, actorId, at); // the goal outran them: they never reach agents
+  supersedeReallocations(g.ws_id, g.id, actorId, at); // likewise for target changes that name it
   if (c.status === "achieved" || c.status === "dropped") {
     supersedeOpenRequests(g.ws_id, g.id, actorId, at);
     expireOpenRequests(g.ws_id, g.id, actorId, at); // nobody can act on a request toward a goal that is done
@@ -535,8 +590,8 @@ export async function newGoalVersion(pp: PolicyPrincipal, goalId: string, b: Bod
 
 export function goalDetail(pp: PolicyPrincipal, goalId: string) {
   const g = visibleGoal(pp, goalId);
-  const versions = all<{ version: number; title: string; status: string; content_hash: string; created_at: string; created_by: string }>(
-    "SELECT version, title, status, content_hash, created_at, created_by FROM v2_goal_versions WHERE goal_id = ? ORDER BY version DESC",
+  const versions = all<{ version: number; title: string; status: string; target_share: number | null; content_hash: string; created_at: string; created_by: string }>(
+    "SELECT version, title, status, target_share, content_hash, created_at, created_by FROM v2_goal_versions WHERE goal_id = ? ORDER BY version DESC",
     g.id,
   );
   // Goals recorded as contributing to this one (approved contribution effects whose source the caller may see).

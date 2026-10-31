@@ -1,6 +1,6 @@
 ---
 name: Identity and workspaces
-summary: How people sign in as themselves (Google, GitHub, an emailed one-time code, printed locally in Mode L, or a passkey), how long a sign-in lasts, and how workspaces, roles, invites, teams, the audit trail, paired devices, shared sessions, usage and spend, activity, asks between teams, goal activity counts, account and workspace deletion, the data retention schedule, rate limits and the local and hosted edges work.
+summary: How people sign in as themselves (Google, GitHub, an emailed one-time code, printed locally in Mode L, or a passkey), how long a sign-in lasts, and how workspaces, roles, invites, teams, the audit trail, paired devices, shared sessions, usage and spend, agent time against goal targets and the steering switch, activity, asks between teams, goal activity counts, account and workspace deletion, the data retention schedule, rate limits and the local and hosted edges work.
 kind: area
 ---
 
@@ -752,7 +752,7 @@ Mode L has none of these caps.
 
 ### Requirement: Workspace rename and deletion
 
-The server SHALL let a workspace owner rename the workspace on `PATCH /api/v2/workspaces/{ws} {name}` and delete it on
+The server SHALL let a workspace owner rename the workspace and turn steering on or off on `PATCH /api/v2/workspaces/{ws} {name?, steering?}` (at least one of them, 400 otherwise; `steering` `on` or `off`, 400 otherwise; both in one transaction) and delete it on
 `DELETE /api/v2/workspaces/{ws}`, where deletion marks the workspace deleted, makes it unreachable to everyone at once
 and revokes every OAuth grant for it, and SHALL let an owner of a deleted workspace with a sign-in from the last 15
 minutes restore it on `POST /api/v2/workspaces/{ws}/restore` within 30 days of its deletion.
@@ -760,7 +760,12 @@ minutes restore it on `POST /api/v2/workspaces/{ws}/restore` within 30 days of i
 #### Scenario: Rename
 
 - **WHEN** an owner PATCHes `{name:"Acme Robotics"}`
-- **THEN** the response is `{id, name:"Acme Robotics"}` and the audit records `workspace.renamed`; a member gets 403 `owner_only`, a viewer 403 `read_only`
+- **THEN** the response is `{id, name:"Acme Robotics", steering}` and the audit records `workspace.renamed`; a member gets 403 `owner_only`, a viewer 403 `read_only`
+
+#### Scenario: Steering switch
+
+- **WHEN** an owner PATCHes `{steering:"on"}` on a workspace whose steering is off (the default)
+- **THEN** the response carries `steering:"on"`, the audit records `workspace.steering_on` (turning it off records `workspace.steering_off`; sending the current value records nothing), `GET /api/v2/workspaces/{ws}` and the goals feed say `on`, and the feed gets a new `version`; a member gets 403 `owner_only`, `{steering:"maybe"}` or `{}` 400
 
 #### Scenario: Delete
 
@@ -797,7 +802,7 @@ credential the caller's identity on `GET /api/v2/me`.
 #### Scenario: Workspace views
 
 - **WHEN** a member calls `GET /api/v2/workspaces` and `GET /api/v2/workspaces/{ws}`
-- **THEN** the responses are `{workspaces:[{id, name, role, teams:[{id, name, role}]}], deleted:[{id, name, deleted_at, restore_until}]}` (`deleted` lists only workspaces the caller owns that can still be restored, newest first, with `restore_until` 30 days after `deleted_at`) and `{workspace:{id, name, created_at}, role, me, members:[{id, name, email, role}], teams:[{id, name, my_role, members:[{id, name, role}]}]}`
+- **THEN** the responses are `{workspaces:[{id, name, role, teams:[{id, name, role}]}], deleted:[{id, name, deleted_at, restore_until}]}` (`deleted` lists only workspaces the caller owns that can still be restored, newest first, with `restore_until` 30 days after `deleted_at`) and `{workspace:{id, name, created_at, steering}, role, me, members:[{id, name, email, role}], teams:[{id, name, my_role, members:[{id, name, role}]}]}`
 
 #### Scenario: Who am I
 
@@ -965,11 +970,11 @@ owners see and revoke every grant and other members only their own.
 ### Requirement: Workspace audit trail
 
 The server SHALL write an audit row naming its actor for every change a person makes to a workspace's settings,
-members, invites, teams, goals, alignments, change requests, asks, connected-app revocations and session controls (stop sharing, history
+members, invites, teams, goals, alignments, change requests, reallocations, asks, connected-app revocations and session controls (stop sharing, history
 deletion, agent stop and resume), with actor null only for system actions and the row that records an account
 deletion, show a former member as `{id:"fm_<n>", name:"Former member #<n>"}`, and serve the newest 200 rows of that
 workspace to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`. Device uploads (sharing a session, opening an
-epoch, usage and activity) write no audit row, and device pairing and revocation, passkeys added and deleted, and
+epoch, usage, activity and steering reports) write no audit row, and device pairing and revocation, passkeys added and deleted, and
 signing out everywhere are recorded without a workspace, so they never appear in a workspace's audit.
 
 #### Scenario: Reading the audit
@@ -1106,6 +1111,45 @@ the caller may not see.
 
 - **WHEN** the workspace has sessions the retention job rolled up
 - **THEN** their usage counts in `total`, `unallocated` and the goal, team and private rows exactly as before, filtered by `from` and `to` by its UTC day (a day counts when its start is at or after `from` and before `to`), and `by=session` shows it as one `{kind:"rolled_up", label:"Older sessions (rolled up)"}` row; the invariant `total = rows + unallocated` still holds
+
+### Requirement: Agent time against targets
+
+The server SHALL report agent time per goal against each goal's target share on
+`GET /api/v2/workspaces/{ws}/allocation?from&to&weeks` (device token or browser session) to every workspace member,
+viewers included, as `{window, weekly, steering}`. Agent time SHALL be counted in fresh tokens (input, output and the
+three cache-write counts, for every model, priced or not; cache reads left out), each request under the goal of the
+epoch it was uploaded with, rolled-up days by goal as in the spend report. `window` covers [`from`, `to`) (default: the
+7 days before `to`, or before now) as `{from, to, total_fresh_tokens, total_est_list_usd_micros, unpriced_requests,
+rows, note}`, where each row is `{kind, goal, fresh_tokens, share, target_share, gap, est_list_usd_micros,
+unpriced_requests, sessions}`: one `goal` row per goal the caller can read that had usage or is active with a target
+(its `share` of the total in percent to one decimal, its target while active, and `gap` = share minus target, `null`
+without a target), one unnamed `private` row for goals the caller cannot read (no target shown), and one `unallocated`
+row for usage bound to no goal, so that the rows' fresh tokens add up to the total. `weekly` holds the last `weeks`
+calendar weeks (default 6, 1 to 26; weeks start Monday 00:00 UTC), oldest first, each `{week_start,
+total_fresh_tokens, rows:[{kind, goal, share, target_share}]}`; `steering` is `{steering, total, days:[{day, n}]}`, the
+switch and how many steering lines agents reported in the window per UTC day. No person, session or private goal is
+ever named. `weeks` outside 1 to 26, a time that does not parse, or `from` not before `to` SHALL be 400.
+
+#### Scenario: Shares of fresh tokens
+
+- **WHEN** a workspace's last 7 days hold 6,000 fresh tokens on GA (target 20), 2,000 on GB (one request unpriced), 1,000 on a member's private goal and 1,000 bound to no goal, with large cache reads on each
+- **THEN** the total is 10,000 (cache reads left out, the unpriced request counted), GA's row is 60% with gap 40, the private goal is one unnamed 10% row with no target for everyone but its owner, the unbound work is a 10% row, an active goal with a target and no usage is a 0% row, and the response holds no user id or session key
+
+### Requirement: Steering line reports
+
+The server SHALL accept on `POST /api/v2/workspaces/{ws}/steering {events}` (device token only; workspace owners and
+members) up to 100 events `{session_key, goal_id, suggested_goal_id, share, target, at}`, the steering lines this
+device's shared sessions showed (see `local-agent`), and respond `{accepted}`. A malformed session key or goal id, a
+share or target that is not a whole number from 0 to 100, an `at` that does not parse, or more than 100 events SHALL be
+400 and store nothing; an event for a session that is not this device's and this person's, is not `shared`, or is dated
+more than 5 minutes ahead or 14 days back SHALL be skipped, and a repeat (same session and time) stored once. Only the
+session key, the two goal ids, the two whole percents and the times are stored; an event goes with its session when the
+session is deleted or rolled up.
+
+#### Scenario: Another device's session
+
+- **WHEN** a member's device reports a line for its own shared session, then again, and another member's device reports one for the same session
+- **THEN** the responses are `{accepted:1}`, `{accepted:0}` and `{accepted:0}`, and the allocation report counts one line that day
 
 ### Requirement: Activity signals
 
@@ -1283,7 +1327,7 @@ expiry and ends only when it is released.
 #### Scenario: Session roll-up
 
 - **WHEN** the job runs more than 13 months after a shared session ended (its `stopped_at`, or else its last activity: its last update, usage upload or epoch)
-- **THEN** its usage is added to `v2_spend_rollups` per workspace, goal (none for unbound), UTC day of the request, model and basis, with request, token and estimated-cost sums and no person or session, and the session, its epochs, usage, alignment links, directive deliveries and receipts are deleted, as are directives left with no recipient; running the job again adds nothing
+- **THEN** its usage is added to `v2_spend_rollups` per workspace, goal (none for unbound), UTC day of the request, model and basis, with request, token and estimated-cost sums and no person or session, and the session, its epochs, usage, alignment links, directive deliveries, receipts and steering reports are deleted, as are directives left with no recipient; running the job again adds nothing
 
 #### Scenario: Former members
 
@@ -1402,6 +1446,8 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 - lib/v2/sessions.ts
 - lib/v2/activity.ts
 - lib/v2/spend.ts
+- lib/v2/allocation.ts
+- lib/v2/steering.ts
 - scripts/sign-in-link.mjs
 - docs/v2/WIRE.md
 - docs/HOSTING.md
@@ -1446,6 +1492,8 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 - app/api/v2/workspaces/[ws]/sessions/[key]/usage/route.ts
 - app/api/v2/workspaces/[ws]/sessions/[key]/stop-sharing/route.ts
 - app/api/v2/workspaces/[ws]/spend/route.ts
+- app/api/v2/workspaces/[ws]/allocation/route.ts
+- app/api/v2/workspaces/[ws]/steering/route.ts
 - app/api/v2/workspaces/[ws]/activity/route.ts
 - lib/v2/asks.ts
 - lib/v2/goal-activity.ts
