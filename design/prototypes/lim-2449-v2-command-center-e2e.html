@@ -33,7 +33,7 @@ h1,h2,h3,p{margin:0}h1{font-size:clamp(29px,3.5vw,45px);line-height:1.12;letter-
 "use strict";
 const stages=["start","apps","device","sessions","home","review","launch","record","work","value","options"];
 const names={start:"First run",apps:"Apps",device:"Devices",sessions:"Sessions",home:"Home",review:"Change request",launch:"Launch",record:"Decision record",work:"Work & evidence",value:"Value / ROI",options:"Options"};
-function newState(){return {step:"start",path:"sample",sampleAllowed:true,existingWorkspace:false,app:false,device:false,hooks:false,shared:false,bound:false,priorReceipt:false,phase:"pending",person:"approver",revision:1,target:"Prioritize SSO and audit logs for enterprise pilots; defer self-serve",counterNote:"",condition:"",conditionAck:"",conditionAt:"",approvedBy:"",approvalAt:"",declineReason:"",launch:"undecided",launchAt:"",v2Receipt:"none",estimate:"",valueText:"",ctaPreview:"",events:[["Proposed","Maya created fictional goal change request"]],requestType:"checkpoint",request:"none",answer:"none",hold:"none",message:""}}
+function newState(){return {step:"start",path:"sample",sampleAllowed:true,existingWorkspace:false,app:false,device:false,hooks:false,shared:false,bound:false,priorReceipt:false,phase:"pending",person:"approver",revision:1,draftTarget:"Prioritize SSO and audit logs for enterprise pilots; defer self-serve",draftNote:"",draftCondition:"",draftReason:"",field:"",target:"Prioritize SSO and audit logs for enterprise pilots; defer self-serve",counterNote:"",condition:"",conditionAck:"",conditionAt:"",approvedBy:"",approvalAt:"",declineReason:"",launch:"undecided",launchAt:"",v2Receipt:"none",estimate:"",valueText:"",ctaPreview:"",events:[["Proposed","Maya created fictional goal change request"]],requestType:"checkpoint",request:"none",answer:"none",hold:"none",message:""}}
 let S=newState();
 function escapeText(t){return String(t).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function button(t,a,primary,disabled){return '<button data-act="'+a+'" class="btn '+(primary?'primary':'')+'" '+(disabled?'disabled':'')+'>'+escapeText(t)+'</button>'}
@@ -45,7 +45,7 @@ const newGoal="Enterprise pilots require SSO and audit logs before self-serve gr
 const oldGoal="Ship self-serve signup for individual users";
 function src(){const sample=S.path==="sample";return {newGoal:sample||S.bound,oldDirective:sample||S.priorReceipt,bound:sample||S.bound,oldSource:sample?"Northstar fictional prior v1 applied directive":"Paired-device directive and applied receipt (simulated)",newSource:sample?"Northstar fictional goal version":"Current workspace goal version (simulated)",approver:sample?"Dev Patel · fictional goal approval set":"V2 server approval set · exact names not loaded"}}
 function canMismatch(){const x=src();return x.newGoal&&x.oldDirective&&x.bound}
-function action(a,value){S.message="";
+function action(a,value){S.message="";S.field="";
 if(a==="reset"){S=newState();return true}
 if(a==="path"){S=newState();S.path=value==="own"?"own":"sample";S.step="start";return true}
 if(a==="gate"){S.sampleAllowed=!S.sampleAllowed;return true}
@@ -69,14 +69,15 @@ if(a==="review"){S.step="review";return true}
 if(a==="person"){if(!["requester","approver"].includes(value))return false;S.person=value;return true}
 if(["counter","acceptIf"].includes(a)){
 if(S.person!=="approver"||S.phase!=="pending")return fail("Only an eligible approver can counter a pending change request");
-const target=String(value?.target||"").trim(), note=String(value?.note||"").trim(),condition=String(value?.condition||"").trim();
-if(!target)return fail("Revised target is required");
-if(note.length<1||note.length>2000)return fail("Counter note must contain 1–2000 characters");
-if(a==="acceptIf"&&!condition)return fail("Accept if… requires a separate condition");
+S.draftTarget=String(value?.target||"");S.draftNote=String(value?.note||"");S.draftCondition=String(value?.condition||"");
+const target=S.draftTarget.trim(), note=S.draftNote.trim(), condition=S.draftCondition.trim();
+if(!target){S.field="rev-target";return fail("Revised target is required")}
+if(note.length<1||note.length>2000){S.field="counter-note";return fail("Counter note must contain 1–2000 characters")}
+if(a==="acceptIf"&&!condition){S.field="condition";return fail("Accept if… requires a separate condition")}
 S.target=target;S.counterNote=note;S.condition=a==="acceptIf"?condition:"";S.phase="countered";S.revision=2;S.events.push(["Countered","Dev proposed exact revision 2"]);return true}
 if(a==="acceptCounter"){if(S.phase!=="countered"||S.person!=="requester")return fail("Only the requester may accept a counter");S.phase="pending";S.events.push(["Requester accepted counter","Maya acknowledged exact counter revision; final approval outstanding"]);return true}
 if(a==="approve"){if(S.phase!=="pending"||S.person!=="approver")return fail("Only eligible approver can approve pending accepted revision");S.phase="approved";S.approvedBy="Dev Patel";S.approvalAt=new Date().toISOString();S.events.push(["Approved","Goal v2 recorded; no new executable directive issued"]);S.step="launch";return true}
-if(a==="decline"){if(!["pending","countered"].includes(S.phase)||S.person!=="approver")return fail("Only eligible approver may decline");const reason=String(value||"").trim();if(reason.length<1||reason.length>2000)return fail("Decline reason must be 1–2000 characters");S.phase="declined";S.declineReason=reason;S.events.push(["Declined","Dev declined with stated reason; no launch"]);S.step="record";return true}
+if(a==="decline"){if(!["pending","countered"].includes(S.phase)||S.person!=="approver")return fail("Only eligible approver may decline");S.draftReason=String(value||"");const reason=S.draftReason.trim();if(reason.length<1||reason.length>2000){S.field="decline-reason";return fail("Decline reason must be 1–2000 characters")}S.phase="declined";S.declineReason=reason;S.events.push(["Declined","Dev declined with stated reason; no launch"]);S.step="record";return true}
 if(a==="ack"){if(S.phase!=="approved"||S.person!=="requester"||!S.condition||S.conditionAck)return fail("Only requester can acknowledge their condition once");S.conditionAck="Maya Ortiz";S.conditionAt=new Date().toISOString();S.events.push(["Condition acknowledged","Requester attested, not independently verified"]);return true}
 if(a==="launchHold"){if(S.phase!=="approved")return fail("Approval required");S.launch="not_yet";S.events.push(["Not yet","Leadership release held; simulated, authority unresolved"]);return true}
 if(a==="launchRelease"){if(S.phase!=="approved")return fail("Approval required");S.launch="approved";S.launchAt=new Date().toISOString();S.events.push(["Released","Fictional v2 executable directive issued; receipt not observed"]);return true}
@@ -123,21 +124,30 @@ line("Who can approve the goal change?",x.approver)+line("Who can launch?", "Unr
 '<aside class="panel pad"><h3>Is the agent stuck?</h3>'+notice("Not known. Applied means the device reported application of a directive, not completed work, actual code quality, or an independently verified switch.",true)+
 '<h3 style="margin-top:16px">What about an approved-but-held goal?</h3><p class="sub">Agreement and launch are separate. A goal Hold pauses tools; it does not itself authorize a new version. This example does not simulate launch.</p>'+
 (S.path==="own"&&S.bound&&!S.priorReceipt?'<div class="action">'+button("Simulate an earlier applied receipt","receipt")+'</div>':'')+'</aside></div>'}
-function work(){const x=src();return hero("05 / AFFECTED WORK","Follow the evidence, not a task claim.","Each line names the source and its limit. That is what makes the mismatch actionable without inventing agent observation.")+
-'<div class="columns"><section class="panel pad"><h2>Source-linked chain</h2>'+
-line("Current required goal",x.newGoal?"Enterprise pilot readiness":"Not known")+
-'<div class="source">'+(x.newGoal?escapeText(x.newSource):"No readable goal record")+'</div>'+
-line("Shared session",x.bound?"One session bound to onboarding":"Not observed")+
-'<div class="source">V2 Sessions · epoch/governing-goal relationship</div>'+
-line("Last applied goal_version",x.oldDirective?"v1 · self-serve signup":"Not known")+
-'<div class="source">'+escapeText(x.oldDirective?x.oldSource:"No device-reported applied receipt")+'</div>'+
-(canMismatch()?'<div class="mismatch"><strong>Potential old-plan exposure</strong><p>The last applied goal context and the latest goal requirement differ. This is not proof that the session kept working on the old task.</p></div>':notice("There is not enough recorded evidence to establish a version mismatch.",true))+
-'<div class="action">'+button("See decision value / ROI","value",true)+button("Inspect Options","options",false)+'</div></section>'+
-'<aside class="panel pad"><h3>What is actually known?</h3>'+line("Goal change",x.newGoal?"Known in sample/simulation":"Not known")+
-line("Binding",x.bound?"Recorded in sample/simulation":"Not known")+
-line("Directive reported applied",x.oldDirective?"Yes, fictional":"Not known")+
-line("What the agent did afterward","Not observed")+line("Whether it switched now","Not known")+
-notice("The comparison names the recorded goal and directive sources. It does not inspect the agent’s work.",false)+'</aside></div>'}
+function work(){
+const x=src();const applied=S.v2Receipt==="applied";const delivered=S.v2Receipt==="received"||applied;
+return hero("09 / WORK AND EVIDENCE","What can we actually prove?","The goal/version record and bounded session receipts are source claims. They never establish what an agent completed.")+
+'<div class="columns"><section class="panel pad"><h2>Goal → agent evidence</h2>'+
+line("Latest authorized goal",S.phase==="approved"?"v2 · "+S.target:"v1 · Enterprise onboarding")+
+'<div class="source">Source: '+(S.phase==="approved"?"fictional approved change request":"fictional prior approved goal")+'</div>'+
+line("Session binding",x.bound?"One shared agent session on onboarding":"Not known")+
+'<div class="source">Source: '+(x.bound?"Northstar sample / simulated v2 Sessions":"no shared session-goal binding")+'</div>'+
+line("Previous agent-effective context",x.oldDirective?"v1 · device reported applied":"Not known")+
+line("New executable goal",S.launch==="approved"?"v2 issued to bound agents (simulation)":"Not released · agents still on v1")+
+line("v2 receipt",S.v2Receipt==="none"?"Not observed":S.v2Receipt+" · device reported")+
+line("Has agent switched?",applied?"Device reported applying v2; actual execution Not observed":delivered?"Received; applied Not known":"Not known")+
+line("Agent task output","Not observed")+
+line("Task completion / ROI","Not observed")+
+'<div class="action">'+button("Simulate v2 received receipt","received",false,S.launch!=="approved")+
+button("Simulate v2 applied receipt","applied",false,S.launch!=="approved")+'</div>'+
+(canMismatch()?'<div class="mismatch"><span class="eyebrow">NEEDS JUDGMENT · LAST APPLIED CONTEXT</span><p>Last recorded v1 context may differ from current v2 priority. It is not proof of continued work on the old goal.</p></div>':notice("No old applied receipt: mismatch is Not known.",true))+
+'<div class="action">'+button("See decision value / ROI","value",true)+button("Explore agent Options","options")+'</div></section>'+
+'<aside class="panel pad"><h3>Truth legend</h3>'+
+notice("<b>Receipt</b> — device-reported received/applied/enforced protocol state, not work output.",false)+
+notice("<b>Agent reported</b> — accepted/declined request answer, not observed execution.",false)+
+notice("<b>Not observed</b> — task success, correctness, downstream output, or saved labor.",true)+
+'<p class="small">Goal Hold pauses tools when enforced; session Stop uses a different latch. Neither grants unresolved launch authority.</p></aside></div>'}
+
 function options(){return hero("06 / OPTIONS · AFTER FIRST VALUE","Requests and Hold are different controls.","The R3 pass places these actions here, not in the first-run funnel. Both require real v2 permissions and an actual bound session.")+
 '<div class="columns"><section class="panel pad"><h2>Request something of the agent</h2><p class="sub">Approvers or workspace owners can request a checkpoint, replan, or switch_goal. Each per-session answer is a device report.</p>'+
 '<div class="pick">'+["checkpoint","replan","switch_goal"].map(t=>'<label><input type="radio" name="requestType" value="'+t+'" '+(S.requestType===t?'checked':'')+'> '+({checkpoint:"Checkpoint",replan:"Replan",switch_goal:"Switch goal"})[t]+'</label>').join("")+'</div>'+
@@ -159,14 +169,14 @@ function review(){
 const previous="Ship self-serve signup for individual users";
 let actions="";
 if(S.phase==="pending"&&S.person==="approver"){
-actions=dfield("Revised target","rev-target","Exact new goal target",S.target)+dfield("Counter note · required 1–2000 characters","counter-note","Why counter?",S.counterNote)+dfield("Separate Accept if… condition","condition","What must be acknowledged?",S.condition)+
+actions=dfield("Revised target","rev-target","Exact new goal target",S.draftTarget)+dfield("Counter note · required 1–2000 characters","counter-note","Why counter?",S.draftNote)+dfield("Separate Accept if… condition","condition","What must be acknowledged?",S.draftCondition)+
 '<div class="action">'+button("Counter (note required)","counter")+button("Accept if… (note + condition)","acceptIf")+'</div>'+
-dfield("Decline reason · required 1–2000 characters","decline-reason","Why decline?",S.declineReason)+
+dfield("Decline reason · required 1–2000 characters","decline-reason","Why decline?",S.draftReason)+
 '<div class="action">'+button("Decline with reason","decline")+button("Approve this change request","approve",true)+'</div>'}
 else if(S.phase==="countered"){
 actions=notice("Countered. Requester accepts the exact revised target/condition; eligible approver must still approve.",true)+actorSwitch()+
 (S.person==="requester"?'<div class="action">'+button("Accept counter revision (not approval)","acceptCounter",true)+'</div>':
-dfield("Decline reason · required 1–2000 characters","decline-reason","Why decline counter?",S.declineReason)+'<div class="action">'+button("Decline countered request","decline")+'</div>')}
+dfield("Decline reason · required 1–2000 characters","decline-reason","Why decline counter?",S.draftReason)+'<div class="action">'+button("Decline countered request","decline")+'</div>')}
 else if(S.phase==="pending"){
 actions=notice("Waiting on Dev, the fictional eligible approver. No role may self-authorize.",true)+actorSwitch()}
 else if(S.phase==="approved")actions=notice("Agreed. New v2 target recorded; agents still receive the previous launched goal until separate launch.",false)+'<div class="action">'+button("Review launch state","routeLaunch",true)+'</div>';
@@ -198,15 +208,17 @@ line("Approver",S.approvedBy||"No approved change")+
 (S.counterNote?line("Counter note",S.counterNote):"")+
 (S.declineReason?line("Decline reason",S.declineReason):"")+
 line("Condition",S.condition||"None")+
-line("Requester acknowledgment",S.condition?(S.conditionAck+" · "+S.conditionAt||"Not confirmed yet"):"Not applicable")+
+line("Requester acknowledgment",S.condition?(S.conditionAck?S.conditionAck+" · "+S.conditionAt:"Not confirmed yet"):"Not applicable")+
 line("Launch",S.launch==="not_yet"?"Not yet":S.launch==="approved"?"Released v2 · simulated":"Not decided")+
 line("Latest v2 receipt",S.v2Receipt==="none"?"Not observed":S.v2Receipt+" · device reported")+
 '<p class="small">Not a real signature, condition verification or completed task.</p></article>'+
 '<aside class="panel pad"><h3>Decision chronology</h3>'+S.events.map((x,i)=>'<div class="line"><span>'+String(i+1).padStart(2,"0")+' · '+escapeText(x[0])+'</span><strong>'+escapeText(x[1])+'</strong></div>').join("")+
 '<div class="action">'+button("Inspect Work and receipts","work",true)+'</div></aside></div>'}
+function spanWords(a,b){const x=Date.parse(a||""),y=Date.parse(b||"");if(!Number.isFinite(x)||!Number.isFinite(y)||y<x)return null;const sec=Math.round((y-x)/1000);if(sec<60)return sec+" seconds";const m=Math.floor(sec/60);if(m<60)return m+" minutes";const hr=Math.floor(m/60);if(hr<24)return hr+" hour"+(hr===1?"":"s")+(m%60?" "+m%60+" minutes":"");return Math.floor(hr/24)+" days "+hr%24+" hours";}
+const demoTimes={proposal:"2026-10-30T16:00:00Z",approval:"2026-10-30T16:14:00Z",launch:"2026-10-30T16:22:00Z"};
 function value(){
-const approved=S.phase==="approved",measured=approved&&S.path==="sample"?"14 minutes · sample event timestamps":"Not measured";
-const launch=approved&&S.path==="sample"&&S.launch!=="undecided"?"22 minutes · fictional timestamps":"Not measured";
+const approved=S.phase==="approved",measured=approved&&S.path==="sample"?(spanWords(demoTimes.proposal,demoTimes.approval)||"Not measured"):"Not measured";
+const launch=approved&&S.path==="sample"&&S.launch!=="undecided"?(spanWords(demoTimes.proposal,demoTimes.launch)||"Not measured"):"Not measured";
 const estimates=[["same_day","Same day"],["two_to_three_days","2–3 days"],["about_a_week","About a week"],["longer","Longer"],["would_not_be_decided","It wouldn’t get decided"]];
 return hero("10 / VALUE / ROI","What this decision gave you.","Recorded outcomes first, estimated value separate. No fabricated savings, agent completion, revenue or conversion.")+
 '<div class="columns"><section class="panel pad roi"><h2>What this decision gave you</h2>'+
@@ -233,7 +245,7 @@ line("Not observed","Completed work, savings, impact")+
 '<a href="./align-patterns-v2.html" class="pattern-link" target="_blank" rel="noopener noreferrer">Open Align Patterns · 33 specimens</a></aside></div>'}
 
 const renderer={start,apps,device,sessions,home,review,launch,record:recordScreen,work,value,options};
-function render(){const e=document.getElementById("screen");e.innerHTML=renderer[S.step]()+ '<p id="message" role="alert">'+escapeText(S.message)+'</p>';document.getElementById("nav").innerHTML=stages.map((s,i)=>'<button data-route="'+s+'" aria-current="'+(s===S.step?'page':'false')+'">'+(i+1)+'. '+names[s]+'</button>').join("");e.focus({preventScroll:true})}
+function render(){const e=document.getElementById("screen");e.innerHTML=renderer[S.step]()+ '<p id="message" role="alert">'+escapeText(S.message)+'</p>';document.getElementById("nav").innerHTML=stages.map((s,i)=>'<button data-route="'+s+'" aria-current="'+(s===S.step?'page':'false')+'">'+(i+1)+'. '+names[s]+'</button>').join("");if(S.field&&document.getElementById(S.field)){document.getElementById(S.field).focus({preventScroll:true})}else{e.focus({preventScroll:true})}}
 document.addEventListener("click",function(e){const b=e.target.closest("button");if(!b)return;const route=b.dataset.route;const a=b.dataset.act;let result=false;if(route)result=action("route",route);else if(a==="acceptReport")result=action("report","auto_accepted");else if(a==="developerReport")result=action("report","developer_accepted");else if(a==="declineReport")result=action("report","declined");
 else if(b.dataset.person)result=action("person",b.dataset.person);
 else if(a==="routeLaunch")result=action("route","launch");
