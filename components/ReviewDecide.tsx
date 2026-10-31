@@ -328,118 +328,49 @@ export function ReviewDecide(
       )}
 
       {/* 1. Understand: approved vs proposed, with the facts a reviewer needs. */}
-      <section aria-labelledby={`understand-${p.id}`} className="space-y-3">
-        <h2 id={`understand-${p.id}`} className="al-lbl">
-          Approved now and proposed
-        </h2>
-        <div className="grid min-w-0 gap-3 @[44rem]:grid-cols-2">
-          <Card tone="readonly" label="Approved now">
-            <div className="al-lbl !text-[11px]">Approved · {target?.version ?? "Not known"}</div>
-            <p className="mt-1 text-[16px] font-semibold text-zinc-900 [overflow-wrap:anywhere]">{replaced?.text ?? target?.objective ?? "Not known"}</p>
-            {target?.objective && replaced && <p className="mt-1 text-[14px] text-zinc-600 [overflow-wrap:anywhere]">Goal: {target.objective}</p>}
-            {otherMeasures.length > 0 && (
-              <ul className="mt-2 space-y-0.5 text-[14px] text-zinc-600">
-                {otherMeasures.map((m) => (
-                  <li key={m.id} className="[overflow-wrap:anywhere]">
-                    Also measured on: {m.text}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-          <Card tone="violet" label="Proposed">
-            <div className="al-lbl !text-[11px] !text-violet-700">Proposed · {revisionLabel}</div>
-            <p className="mt-1 whitespace-pre-wrap text-[16px] font-semibold text-zinc-900 [overflow-wrap:anywhere]">{latestText}</p>
-            <p className="mt-1 text-[14px] text-zinc-600">Not approved. It changes nothing until {who(approverSlot)} approves it.</p>
-          </Card>
-        </div>
-        <dl className="grid min-w-0 grid-cols-2 gap-3 rounded-xl bg-white p-4 ring-1 ring-zinc-200 @[44rem]:grid-cols-4">
-          <Fact k="Approved version">{target?.version ?? "Not known"}</Fact>
-          <Fact k="Requested by">{who(p.proposing_owner)}</Fact>
-          <Fact k="Decides">{who(approverSlot)}</Fact>
-          <Fact k="Request state">{stateText(p.state, L)}</Fact>
-        </dl>
-      </section>
+      <CompareBaseline
+        id={p.id}
+        approvedVersion={target?.version ?? "Not known"}
+        approvedText={replaced?.text ?? target?.objective ?? "Not known"}
+        approvedObjective={replaced ? target?.objective : undefined}
+        otherMeasures={otherMeasures.map((m) => m.text)}
+        proposedLabel={revisionLabel}
+        proposedText={latestText}
+        requester={who(p.proposing_owner)}
+        approver={who(approverSlot)}
+        stateLabel={stateText(p.state, L)}
+      />
 
       {/* 2. What would change: derived from the request text, never evidence. */}
-      <section aria-labelledby={`change-${p.id}`} className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 id={`change-${p.id}`} className="al-lbl">
-            What would change
-          </h2>
-          <Badge tone="neutral" wrap>
-            From the request text · not evidence
-          </Badge>
-        </div>
-        <ul className="space-y-2.5 rounded-xl bg-white p-4 text-[15px] text-zinc-900 ring-1 ring-zinc-200">
-          <li className="[overflow-wrap:anywhere]">
-            <b>Target.</b>{" "}
-            {lastCounter && latestText.trim() === (p.counter_versions.at(-2)?.proposed_measure_text ?? p.proposed_measure_text).trim()
-              ? `Kept as ${ask} proposed: “${latestText}”.`
-              : `“${replaced?.text ?? "Not known"}” would be replaced by “${latestText}”.`}
-          </li>
-          <li className="[overflow-wrap:anywhere]">
-            <b>{ask} would do in return.</b> {p.reciprocal_commitment ? `“${p.reciprocal_commitment}”` : "Nothing stated."}
-          </li>
-          {p.rationale && (
-            <li className="[overflow-wrap:anywhere]">
-              <b>{poss(ask)} reason, as written.</b> “{p.rationale}”
-            </li>
-          )}
-          {lastCounter?.rationale && (
-            <li className="[overflow-wrap:anywhere]">
-              <b>{poss(own)} reason for revision {lastCounter.version}, as written.</b> “{lastCounter.rationale}”
-            </li>
-          )}
-          {conditions.length > 0 && (
-            <li className="space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <b>{poss(own)} conditions</b>
-                <Badge tone="amber">{CONDITIONS_UNCONFIRMED}</Badge>
-              </div>
-              <NumberedLines lines={conditions} />
-              <p className="text-[13px] text-zinc-500">{conditionsUnconfirmedNote(conditions.length)}</p>
-              {p.product_ack_at && (
-                <p className="text-[13px] text-zinc-600">
-                  {ask} said it accepts {conditions.length === 1 ? "this condition" : "these conditions"} at {fmtTime(p.product_ack_at)}. That is
-                  their statement, not a check.
-                </p>
-              )}
-            </li>
-          )}
-          {companyNow && (
-            <li className="text-[14px] text-zinc-600 [overflow-wrap:anywhere]">
-              Why this came up: {poss(L.team.ceo)} requirement, “{companyNow}”
-            </li>
-          )}
-        </ul>
-        <div className="space-y-2 rounded-xl bg-white p-4 ring-1 ring-zinc-200">
-          <div className="al-lbl !text-[11px]">Evidence</div>
-          {runs.length > 0 ? (
-            <ul className="space-y-1.5 text-[15px]">
-              {runs.map((r) => (
-                <li key={r.id} className="flex flex-wrap items-center gap-2">
-                  <Badge tone={r.verdict === "FAIL" ? "red" : "neutral"}>{r.verdict === "FAIL" ? "Failed" : "Passed"}</Badge>
-                  <span className="text-zinc-900">
-                    Source: sandbox run, {r.checks.filter((c) => c.passed).length} of {r.checks.length} checks passed
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2 text-[15px] text-zinc-700">
-              <Badge tone="amber">Evidence unavailable</Badge>
-              <span>No test result is attached to this request. Nothing in it was run or checked.</span>
-            </div>
-          )}
-          {plan?.text && (
-            <Collapsible title={`The plan as written${plan.title ? `: ${plan.title}` : ""}`}>
-              <p className="whitespace-pre-wrap text-[15px] text-zinc-900 [overflow-wrap:anywhere]">{plan.text}</p>
-              <p className="mt-1 text-[14px] text-zinc-600">Plan text from setup. It is a description, not a test result.</p>
-            </Collapsible>
-          )}
-        </div>
-      </section>
+      <WhatWouldChange
+        id={p.id}
+        target={
+          lastCounter && latestText.trim() === (p.counter_versions.at(-2)?.proposed_measure_text ?? p.proposed_measure_text).trim()
+            ? `Kept as ${ask} proposed: “${latestText}”.`
+            : replaced
+              ? `“${replaced.text}” would be replaced by “${latestText}”.`
+              : `“${latestText}” would be added as a new target. No current target is replaced (the one this conflict was about was already changed in an earlier version).`
+        }
+        statements={[
+          { label: `${ask} would do in return.`, text: p.reciprocal_commitment ? `“${p.reciprocal_commitment}”` : "Nothing stated." },
+          ...(p.rationale ? [{ label: `${poss(ask)} reason, as written.`, text: `“${p.rationale}”` }] : []),
+          ...(lastCounter?.rationale ? [{ label: `${poss(own)} reason for revision ${lastCounter.version}, as written.`, text: `“${lastCounter.rationale}”` }] : []),
+        ]}
+        conditions={conditions}
+        conditionsBy={own}
+        conditionsAck={
+          p.product_ack_at && conditions.length
+            ? `${ask} said it accepts ${conditions.length === 1 ? "this condition" : "these conditions"} at ${fmtTime(p.product_ack_at)}. That is their statement, not a check.`
+            : undefined
+        }
+        context={companyNow ? `Why this came up: ${poss(L.team.ceo)} requirement, “${companyNow}”` : undefined}
+        evidence={runs.map((r) => ({
+          id: r.id,
+          failed: r.verdict === "FAIL",
+          text: `Source: sandbox run, ${r.checks.filter((c) => c.passed).length} of ${r.checks.length} checks passed`,
+        }))}
+        plan={plan?.text ? { title: plan.title, text: plan.text } : undefined}
+      />
 
       {/* 3-4. Decide: choose first, then that choice's one required input, then confirm. */}
       {decisions.length > 0 ? (
@@ -531,7 +462,7 @@ export function ReviewDecide(
                     type="button"
                     aria-expanded={moreOpen}
                     onClick={() => setMoreOpen((o) => !o)}
-                    className={`rounded text-[14px] font-semibold text-zinc-700 underline underline-offset-2 hover:text-zinc-900 ${focusRing}`}
+                    className={`inline-flex min-h-[44px] items-center rounded text-[14px] font-semibold text-zinc-700 underline underline-offset-2 hover:text-zinc-900 ${focusRing}`}
                   >
                     {choice === "counter" ? "Add a reason or conditions (optional)" : "Add a reason (optional)"}
                   </button>
@@ -664,9 +595,133 @@ export function ReviewDecide(
   );
 }
 
+// ---- Presentational pieces, props only and no data fetching, so a later decision-workflow lens can reuse them. ----
+
+/** Approved vs proposed, side by side (stacked in a narrow column), with the baseline facts a reviewer needs. */
+export function CompareBaseline(props: {
+  id: string;
+  approvedVersion: string;
+  approvedText: string;
+  approvedObjective?: string;
+  otherMeasures?: string[];
+  proposedLabel: string;
+  proposedText: string;
+  requester: string;
+  approver: string;
+  stateLabel: string;
+}) {
+  return (
+    <section aria-labelledby={`understand-${props.id}`} className="space-y-3">
+      <h2 id={`understand-${props.id}`} className="al-lbl">
+        Approved now and proposed
+      </h2>
+      <div className="grid min-w-0 gap-3 @[660px]:grid-cols-2">
+        <Card tone="readonly" label="Approved now">
+          <div className="al-lbl !text-[11px]">Approved · {props.approvedVersion}</div>
+          <p className="mt-1 text-[16px] font-semibold text-zinc-900 [overflow-wrap:anywhere]">{props.approvedText}</p>
+          {props.approvedObjective && <p className="mt-1 text-[14px] text-zinc-600 [overflow-wrap:anywhere]">Goal: {props.approvedObjective}</p>}
+          {!!props.otherMeasures?.length && (
+            <ul className="mt-2 space-y-0.5 text-[14px] text-zinc-600">
+              {props.otherMeasures.map((m, i) => (
+                <li key={i} className="[overflow-wrap:anywhere]">
+                  {props.approvedObjective ? "Also measured on" : "Measured on"}: {m}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+        <Card tone="violet" label="Proposed">
+          <div className="al-lbl !text-[11px] !text-violet-700">Proposed · {props.proposedLabel}</div>
+          <p className="mt-1 whitespace-pre-wrap text-[16px] font-semibold text-zinc-900 [overflow-wrap:anywhere]">{props.proposedText}</p>
+          <p className="mt-1 text-[14px] text-zinc-600">Not approved. It changes nothing until {props.approver} approves it.</p>
+        </Card>
+      </div>
+      <dl className="grid min-w-0 grid-cols-2 gap-3 rounded-xl bg-white p-4 ring-1 ring-zinc-200 @[660px]:grid-cols-4">
+        <Fact k="Approved version">{props.approvedVersion}</Fact>
+        <Fact k="Requested by">{props.requester}</Fact>
+        <Fact k="Decides">{props.approver}</Fact>
+        <Fact k="Request state">{props.stateLabel}</Fact>
+      </dl>
+    </section>
+  );
+}
+
+/** What the request says would change. Always labelled as read from the request text, never as evidence; evidence is
+ *  listed separately with its source, or "Evidence unavailable". */
+export function WhatWouldChange(props: {
+  id: string;
+  target: string;
+  statements: { label: string; text: string }[];
+  conditions: string[];
+  conditionsBy: string;
+  conditionsAck?: string;
+  context?: string;
+  evidence: { id: string; failed: boolean; text: string }[];
+  plan?: { title?: string; text: string };
+}) {
+  return (
+    <section aria-labelledby={`change-${props.id}`} className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 id={`change-${props.id}`} className="al-lbl">
+          What would change
+        </h2>
+        <Badge tone="neutral" wrap>
+          From the request text · not evidence
+        </Badge>
+      </div>
+      <ul className="space-y-2.5 rounded-xl bg-white p-4 text-[15px] text-zinc-900 ring-1 ring-zinc-200">
+        <li className="[overflow-wrap:anywhere]">
+          <b>Target.</b> {props.target}
+        </li>
+        {props.statements.map((st) => (
+          <li key={st.label} className="[overflow-wrap:anywhere]">
+            <b>{st.label}</b> {st.text}
+          </li>
+        ))}
+        {props.conditions.length > 0 && (
+          <li className="space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <b>{poss(props.conditionsBy)} conditions</b>
+              <Badge tone="amber">{CONDITIONS_UNCONFIRMED}</Badge>
+            </div>
+            <NumberedLines lines={props.conditions} />
+            <p className="text-[13px] text-zinc-500">{conditionsUnconfirmedNote(props.conditions.length)}</p>
+            {props.conditionsAck && <p className="text-[13px] text-zinc-600">{props.conditionsAck}</p>}
+          </li>
+        )}
+        {props.context && <li className="text-[14px] text-zinc-600 [overflow-wrap:anywhere]">{props.context}</li>}
+      </ul>
+      <div className="space-y-2 rounded-xl bg-white p-4 ring-1 ring-zinc-200">
+        <div className="al-lbl !text-[11px]">Evidence</div>
+        {props.evidence.length > 0 ? (
+          <ul className="space-y-1.5 text-[15px]">
+            {props.evidence.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-2">
+                <Badge tone={r.failed ? "red" : "neutral"}>{r.failed ? "Failed" : "Passed"}</Badge>
+                <span className="text-zinc-900">{r.text}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 text-[15px] text-zinc-700">
+            <Badge tone="amber">Evidence unavailable</Badge>
+            <span>No test result is attached to this request. Nothing in it was run or checked.</span>
+          </div>
+        )}
+        {props.plan && (
+          <Collapsible title={`The plan as written${props.plan.title ? `: ${props.plan.title}` : ""}`}>
+            <p className="whitespace-pre-wrap text-[15px] text-zinc-900 [overflow-wrap:anywhere]">{props.plan.text}</p>
+            <p className="mt-1 text-[14px] text-zinc-600">Plan text from setup. It is a description, not a test result.</p>
+          </Collapsible>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ConfirmRow({ k, children }: { k: string; children: ReactNode }) {
   return (
-    <div className="grid min-w-0 gap-0.5 @[36rem]:grid-cols-[11rem_minmax(0,1fr)] @[36rem]:gap-3">
+    <div className="grid min-w-0 gap-0.5 @[540px]:grid-cols-[11rem_minmax(0,1fr)] @[540px]:gap-3">
       <dt className="al-lbl !text-[11px] pt-0.5">{k}</dt>
       <dd className="min-w-0 [overflow-wrap:anywhere]">{children}</dd>
     </div>
