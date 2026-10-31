@@ -31,6 +31,7 @@
 | A · Connected route | `86ac5d159c605b0d7d82ba9a3695afd0c5d213f5` | Single file includes setup → Home → review/launch → record/Work → ROI | JavaScript syntax validated; independent D2 **NOT RUN** |
 | B · Correctness | `25f4745df3f7cf38e01a6e65ddd7e3a5de42a287` | Work follows release and new receipt state; R2 form validation drafts/focus; timestamp-based sample spans | 71/71 scripted state/branch checks PASS, one enabled primary action per screen in tested states. Independent D2 **NOT RUN** |
 | C · Evidence and map | This map plus PR-description correction | Explicit screen→ruling contract, verification handoff | Source/readback after commit; independent D2 **NOT RUN** |
+| D · Canon polish | `d621050a72821245ae0fe5c8ffce852822b02d50` | Pink reserved for the primary button, brand mark violet; mono 10px uppercase tags with 2px tracking | Source and JS syntax checked; independent D2 **NOT RUN** |
 
 ### Required S0 D2 checks on the **final R4 head**
 
