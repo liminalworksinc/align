@@ -138,16 +138,18 @@ interface Agents {
   apps: AgentApp[];
   changedAt: string | null;
 }
+/** null = not checked yet; "unknown" = the check failed before any good read (never shown as zero apps). */
+type AgentsRead = Agents | "unknown" | null;
 
-function useAgents(workspace?: string): Agents | null {
-  const [data, setData] = useState<Agents | null>(null);
+function useAgents(workspace?: string): AgentsRead {
+  const [data, setData] = useState<AgentsRead>(null);
   useEffect(() => {
     if (!workspace) return;
     let live = true;
     const load = () =>
       api<{ apps: AgentApp[]; plan?: { changed_at: string | null } }>("/api/workspaces/connections", { workspace }).then(
         (d) => live && setData({ apps: d.apps, changedAt: d.plan?.changed_at ?? null }),
-        () => undefined, // keep the last good read; the section says nothing it can't back
+        () => live && setData((d) => (d && d !== "unknown" ? d : "unknown")), // keep the last good read; never guess
       );
     const first = setTimeout(() => void load(), 0);
     const t = setInterval(() => void load(), 15000);
@@ -182,14 +184,17 @@ function Tile({ n, label, href, hot }: { n: ReactNode; label: string; href: stri
   );
 }
 
-function AgentsSection({ agents, teamOf }: { agents: Agents | null; teamOf: (role: string) => string }) {
+function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (role: string) => string }) {
+  const agents = read === "unknown" ? null : read;
   const reading = agents?.apps.filter((a) => a.last_used_at) ?? [];
   const waiting = agents?.apps.filter((a) => !a.last_used_at) ?? [];
   const older = reading.filter((a) => !a.on_current_plan);
   return (
     <section id="agents" aria-label="Agents on this plan" className="flex scroll-mt-4 flex-col gap-2.5">
       <h2 className="al-lbl">Agents on this plan</h2>
-      {!agents ? (
+      {read === "unknown" ? (
+        <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Couldn’t check connected apps just now, so their read state is unknown. Align retries every 15 seconds.</div>
+      ) : !agents ? (
         <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Checking connected apps…</div>
       ) : reading.length === 0 && waiting.length === 0 ? (
         <div className="rounded-[14px] border border-dashed border-zinc-300 px-[18px] py-4 text-[15px] text-zinc-600">
@@ -478,7 +483,8 @@ export function YourTurnView(props: ViewProps) {
 
   // Home as an attention queue, from real state only: which connected agents have read the current plan, what needs
   // this person, and the goals in play. Tiles carry only numbers Align has.
-  const agents = useAgents(L.northstar ? undefined : props.workspace);
+  const agentsRead = useAgents(L.northstar ? undefined : props.workspace);
+  const agents = agentsRead === "unknown" ? null : agentsRead;
   const reading = agents?.apps.filter((a) => a.last_used_at) ?? [];
   const onCurrent = reading.filter((a) => a.on_current_plan).length;
   const goals = (["ceo", "product", "security"] as const)
@@ -505,15 +511,15 @@ export function YourTurnView(props: ViewProps) {
         <Tile n={others.length} label="Waiting on others" href={others.length ? "#others" : "#waiting"} />
         {!L.northstar && (
           <Tile
-            n={!agents ? "–" : reading.length ? `${onCurrent}/${reading.length}` : 0}
-            label={agents && reading.length ? "Apps on the current plan" : "Apps connected"}
+            n={agentsRead === "unknown" ? "?" : !agents ? "–" : reading.length ? `${onCurrent}/${reading.length}` : 0}
+            label={agentsRead === "unknown" ? "Apps: unknown" : agents && reading.length ? "Apps on the current plan" : "Apps connected"}
             href="#agents"
           />
         )}
         <Tile n={goals.length} label="Active goals" href="#goals" />
       </div>
 
-      {!L.northstar && <AgentsSection agents={agents} teamOf={teamOf} />}
+      {!L.northstar && <AgentsSection agents={agentsRead} teamOf={teamOf} />}
 
       <section id="waiting" aria-label="Waiting on you" className="flex scroll-mt-4 flex-col gap-2.5">
         <div className="flex items-center gap-2.5">
