@@ -1,6 +1,6 @@
 # Align
 
-**Align is a command center for parallel AI work: one place to see what needs your decision and which AI apps have read the current plan or last read an older one. Underneath, only a goal's owner can approve a change, both versions are kept, and AI agents read the approved plan.**
+**Align is a command center for parallel AI work: one place to see what needs your decision and which connected AI apps are on the current plan. Underneath, only a goal's owner can approve a change, both versions are kept, and AI agents read the approved plan.**
 
 Align is Liminal's wedge product, a working prototype. We built the first version in one day at SpeedHacks (Oct 11, 2026), where it won Best Use of Sparta, and rebuilt it during the Proving Ground founder sprint (Oct 21 to 23, 2026) so a team can set up its own two-team case without us. Built by Shayaun Nejad and Shruti Rajagopal Nejad.
 
@@ -12,7 +12,7 @@ Align is Liminal's wedge product, a working prototype. We built the first versio
 - **Agents read the approved plan.** A read-only MCP server (9 tools, no write tools) serves the current approved plan. Claude Code (tested end to end) or another MCP client, such as Codex, the Claude app or ChatGPT, connects to a workspace with its MCP URL and a team passcode (OAuth), and reads only that team's data. Claude Code sessions connected to a workspace are notified when a plan is approved (local setup; see docs/MCP.md).
 - **Limits from meeting notes.** Paste notes and Align suggests limits for the goal they name; agents can read a limit only once that goal's owner confirms it. No model is called for this.
 - **What the decision gave you.** After approval, a value card shows the measured time from proposal to decision, with a tester's own estimate shown separately. Its follow-up is a waitlist form that ends with an optional, non-binding letter of intent.
-- **Home shows what needs you.** What is waiting on you and on others, the active goals, and which connected AI apps have read the current plan. Align sees what an app last read, not what it does.
+- **Home shows what needs you.** What is waiting on you and on others, the active goals, and which connected AI apps have connected since the current plan was approved. Align sees when an app last connected, not what it does.
 
 ## What it does not do yet
 
