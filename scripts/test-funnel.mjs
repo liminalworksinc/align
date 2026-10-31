@@ -524,12 +524,14 @@ async function phaseLocal(dir) {
 // ---- phase hosted ----
 async function phaseHosted(dir) {
   phaseName = "hosted";
-  // HOSTED_ROUTES is unchanged: proxy.ts matches the merge base with origin/main (skipped without git), and no
-  // new path is reachable when hosted.
+  // HOSTED_ROUTES is unchanged: the list in proxy.ts matches the merge base with origin/main (skipped without git),
+  // and no new path is reachable when hosted. Other proxy.ts changes (e.g. response headers) don't trip this.
   const base = spawnSync("git", ["merge-base", "HEAD", "origin/main"], { cwd: ROOT, encoding: "utf8" }).stdout.trim();
   if (base) {
-    const d = spawnSync("git", ["diff", "--quiet", base, "--", "proxy.ts"], { cwd: ROOT });
-    check(`proxy.ts (HOSTED_ROUTES) is unchanged against ${base.slice(0, 7)}`, d.status === 0, "proxy.ts differs");
+    const routes = (src) => (src.match(/const HOSTED_ROUTES = \[[\s\S]*?\];/) || [""])[0];
+    const was = spawnSync("git", ["show", `${base}:proxy.ts`], { cwd: ROOT, encoding: "utf8" }).stdout;
+    const now = readFileSync(path.join(ROOT, "proxy.ts"), "utf8");
+    check(`proxy.ts HOSTED_ROUTES is unchanged against ${base.slice(0, 7)}`, routes(was) !== "" && routes(was) === routes(now), "HOSTED_ROUTES differs");
   }
   check("HOSTED_ROUTES still lists /api/timer", /\/\^\\\/api\\\/timer\$\//.test(readFileSync(path.join(ROOT, "proxy.ts"), "utf8")), "");
   HOSTED = true;
