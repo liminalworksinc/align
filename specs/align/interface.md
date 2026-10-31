@@ -11,7 +11,7 @@ to. Everyone signs in as a person (Google, GitHub, an email one-time code or a p
 shared passcode. `/` redirects to `/app`. Every path under `/app` is served in Mode L and when hosted.
 
 Each page reads the `/api/v2` endpoints it needs when it loads and reloads them after each of its own actions; pages
-do not poll. A page shows only the controls the server would accept from the signed-in person: their workspace role
+do not poll, except the Home's first-run card, which checks the Apps endpoint while it is shown. A page shows only the controls the server would accept from the signed-in person: their workspace role
 (`owner`, `member` or `viewer`), their team role (`lead` or `member`), whether they own a goal or are in its approval
 set, and the `can` flags the server returns on alignments and change requests. "Pod" is stored data only: every
 screen says "team".
@@ -434,7 +434,7 @@ you", "Waiting on others", "Active goals", and "Connected apps that read the goa
 section the server could not read SHALL say "unknown", never zero, and nothing on the page SHALL infer what an agent is
 doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version or is "on
 the current plan": Align keeps no per-app version). The page
-reads once when it opens and does not poll.
+reads once when it opens and does not poll (only its first-run card checks the apps while it is shown).
 
 The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
 bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`), `asks`
@@ -494,6 +494,62 @@ read. A workspace owner sees every connected app and anyone else their own, as o
 - **WHEN** a workspace has no active goal the person can see
 - **THEN** "Active goals" says "No active goals you can see." with a link to the Goals tab
 
+### Requirement: Home first-run card
+
+The Home SHALL show, between its summary line and its count tiles, a first-run card ("Get started") while its read
+returned the apps section and none of those apps (a workspace owner's: every app; anyone else's: their own) has a
+`last_used_at` or `last_read_at`, that is, while Align has seen no app the person can see here make a request. It
+SHALL not show when the apps section is unknown. The card has a **Hide** button that hides it for that workspace in
+the browser's `localStorage` (key `align.firstRun.hidden:<ws>`; when storage is blocked it stays shown, and Hide hides
+it until the page reloads) and moves focus to the page heading.
+
+The card SHALL offer two paths when the person has a sample: **Explore a sample**, tagged "Fictional", and **Connect
+one agent**, tagged "Claude Code", titled "Two ways to start". A sample is a workspace named "Northstar (sample)" in
+`GET /api/v2/workspaces`. The card never creates one: the sample is offered on `/app` only to a person with no
+workspace who needs no creation code, in Mode L and hosted alike, so on any other Home the card links to the sample
+the person has ("Open the Northstar sample", labelled fictional), on the sample's own Home says the person is in it
+and that its company, teams, goals and change request are fictional, with a link to its Requests tab, and with no
+sample shows only the connect path, titled "Connect one agent".
+
+The connect path SHALL show the Claude Code line of the Apps tab (`lib/paste-lines.ts`, from the MCP URL that
+`GET /api/v2/workspaces/<ws>/apps` returns) with **Copy** above it, say that it adds Align to Claude Code for the
+person's user account and starts the sign-in and writes no hooks, list what a connected agent can read as the person,
+one line per read tool the server lists for a `goals:read` token (`lib/mcp/read-tools.ts`, the activity line marked
+agent-reported), say that it can't propose, approve, launch or change anything (and that, if allowed when connecting,
+it can add evidence links labelled agent-reported), and link to the Apps tab for other apps; for a viewer it says
+viewers can't connect apps instead of the line. Its status line (a polite live region) SHALL say only what Align has
+seen: no app connected yet (for anyone but an owner: they haven't connected one), or for each approved app with no
+request "<app>: approved <time>, Align hasn't seen it connect yet", or that the check failed and is retried; it
+explains that once an app connects, the Home and the Apps tab show when it last connected (any request) and,
+separately, when it last read the goals, and that connecting is not a read. While shown and the tab is visible, the
+card SHALL read `GET /api/v2/workspaces/<ws>/apps` every 5 seconds; once an app has a `last_used_at` or `last_read_at`
+it reads the Home again and yields to the "Connected AI apps" section.
+
+#### Scenario: Two paths
+
+- **WHEN** a person with the Northstar sample opens the Home of another workspace where nobody connected an app
+- **THEN** the card shows "Two ways to start", **Open the Northstar sample** (fictional) linking to the sample's Home, and the connect path with the Claude Code line and **Copy**, the read list with one line per read tool of the server's `tools/list`, what it can't do and "No AI app is connected to this workspace yet."
+
+#### Scenario: In the sample
+
+- **WHEN** the person opens the sample's own Home
+- **THEN** the explore path says they are in the Northstar sample and that it is fictional, and links to its Requests tab
+
+#### Scenario: No sample
+
+- **WHEN** a person with no sample workspace opens a Home with no app seen
+- **THEN** the card is titled "Connect one agent" and shows only the connect path
+
+#### Scenario: Status follows what Align sees
+
+- **WHEN** the person approves an app that has not made a request yet, and later the app makes one
+- **THEN** the status first says "<app>: approved <time>, Align hasn't seen it connect yet", and after the request the card is gone and the Home's "Connected AI apps" section shows the app as "Connected <time>, no goal read seen yet"
+
+#### Scenario: Hide
+
+- **WHEN** the person presses **Hide**
+- **THEN** the card is gone, focus is on the page heading, and it stays hidden on that workspace's Home after a reload in the same browser; with storage blocked, Hide still hides it and nothing fails
+
 ### Requirement: Web app fits a phone
 
 Every `/app` page SHALL fit a 390×844 screen with no sideways scrolling (`document.scrollingElement.scrollWidth` no
@@ -504,7 +560,7 @@ names.
 
 #### Scenario: Phone
 
-- **WHEN** a signed-in person opens the workspace list, account, device, devices, request access, a workspace's Home, Goals tab, a goal page, People, Sessions, Alignments, Requests (an open request's decision and confirmation included), Asks, Spend or Apps on a 390 px wide screen
+- **WHEN** a signed-in person opens the workspace list, account, device, devices, request access, a workspace's Home (with its first-run card), Goals tab, a goal page, People, Sessions, Alignments, Requests (an open request's decision and confirmation included), Asks, Spend or Apps on a 390 px wide screen
 - **THEN** nothing scrolls sideways, approved now and proposed stack, and an Apps connection reads as its name, then "Sends you back to", "Connected by", "Approved", "Last connected" and "Last read the goals" lines, then **Disconnect**
 
 ### Requirement: Workspace Goals tab
@@ -1093,6 +1149,8 @@ active goal), neutral otherwise.
 - `app/app/devices/view.tsx`
 - `app/app/invite/[token]/view.tsx`
 - `app/app/w/[ws]/view.tsx`
+- `app/app/w/[ws]/first-run.tsx`
+- `lib/mcp/read-tools.ts`
 - `app/app/w/[ws]/goals/view.tsx`
 - `app/api/v2/workspaces/[ws]/home/route.ts`
 - `lib/v2/home.ts`

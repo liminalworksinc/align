@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Card, Loading, Note, Pill, Shell, useApi, when } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
+import FirstRun, { seenApp } from "./first-run";
 import { appStatusWords, EVIDENCE_WORDS, type EvidenceClass, type HomeNext, type HomePerson } from "@/lib/v2/home-core.mts";
 
 // The workspace Home, the workspace's landing view (PORT2-001, from v1's "Know what needs you", main #41/#42). One read
@@ -196,7 +197,9 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
 
   return (
     <Shell me={me} ws={ws} tab="Home">
-      <h1 className="text-[26px] font-semibold text-zinc-900">Know what needs you</h1>
+      <h1 tabIndex={-1} className="text-[26px] font-semibold text-zinc-900 focus:outline-none">
+        Know what needs you
+      </h1>
       {!h ? (
         <Loading />
       ) : (
@@ -204,6 +207,8 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           <p className="mb-5 mt-1 text-[16px] text-zinc-600" data-home-summary>
             {onMe === null ? "Align couldn't read everything that may be waiting on you, so how much is waiting is unknown." : onMe ? `${onMe} thing${onMe === 1 ? "" : "s"} waiting on you.` : "Nothing is waiting on you."}
           </p>
+          {/* First run (main #47): until Align has seen an app this person can see here; never when that is unknown. */}
+          {apps && !apps.items.some(seenApp) && <FirstRun ws={ws} onSeen={d.reload} />}
           <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             <Tile n={onMe} label="Waiting on you" href="#waiting" hot={!!onMe} />
             <Tile n={onOthers} label="Waiting on others" href="#others" />

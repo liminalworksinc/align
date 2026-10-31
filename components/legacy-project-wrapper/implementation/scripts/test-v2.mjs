@@ -3981,6 +3981,178 @@ try {
   }
   // ==== end port:decide ====
 
+  // ==== port:first-run ====
+  // main #47 on v2: the Home's first-run card. FO owns workspace FW and has the Northstar sample (SW); FM is a member
+  // with no sample; FV a viewer. The card shows until Align has seen an app make a request, then yields.
+  {
+    const fUsers = {};
+    for (const [who, name] of [
+      ["FO", "Fern Owner"],
+      ["FM", "Finn Member"],
+      ["FV", "Flo Viewer"],
+    ])
+      fUsers[who] = await signUp(who, name, `${who.toLowerCase()}@first-run.example.test`);
+    const { FO, FM, FV } = fUsers;
+    const SW = (await call("FO", "POST", "/api/v2/workspaces/sample", { cookie: FO.cookie, body: {} })).json?.id;
+    const FW = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "First run workspace" } })).json?.id;
+    for (const [u, role] of [
+      [FM, "member"],
+      [FV, "viewer"],
+    ]) {
+      const iv = await call("FO", "POST", `/api/v2/workspaces/${FW}/invites`, { cookie: FO.cookie, body: { email: u.email, role } });
+      await call(u.who, "POST", `/api/v2/invites/${iv.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    // The read tools the server lists for a goals:read token (a paired device's).
+    const FD = insertDevice(FO.id, "Fern's laptop");
+    const toolsList = await call("FO", "POST", "/api/mcp", { bearer: FD.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+    const serverTools = [...toolsList.text.matchAll(/"name":"(align_[a-z_]+)"/g)].map((m) => m[1]);
+    check("first run setup: the sample and a workspace for the owner; tools/list for a goals:read token names the read tools", !!SW && !!FW && toolsList.status === 200 && serverTools.length >= 9 && !serverTools.includes("align_add_change_request_evidence"), `${SW} ${FW} ${toolsList.status} ${serverTools}`);
+
+    if (existsSync(CHROME)) {
+      const fcore = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
+      const fkid = fcore.hmac(fcore.serverSecret(onDir, {}), "align-grant-kid").slice(0, 16);
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const pageAs = async (u, width = 1000, blockStorage = false) => {
+          const page = await browser.newPage();
+          page.on("pageerror", (e) => errors.push(e.message));
+          if (blockStorage)
+            await page.evaluateOnNewDocument(() =>
+              Object.defineProperty(window, "localStorage", {
+                get() {
+                  throw new DOMException("blocked", "SecurityError");
+                },
+              }),
+            );
+          await page.setViewport({ width, height: 900 });
+          await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return page;
+        };
+        const home = async (page, ws) => {
+          await page.goto(`${BASE}/app/w/${ws}`, { waitUntil: "networkidle0" });
+          await page.waitForSelector("[data-home-summary]", { timeout: 15000 });
+          await page.waitForSelector("[data-first-run-status]:not([data-first-run-status=checking])", { timeout: 15000 }).catch(() => undefined);
+        };
+        const cardOf = (page) =>
+          page.evaluate(() => {
+            const c = document.querySelector("[data-first-run]");
+            if (!c) return null;
+            const btns = [...c.querySelectorAll("button")].map((b) => b.textContent);
+            const line = c.querySelector("[data-first-run-line]");
+            return {
+              kind: c.getAttribute("data-first-run"),
+              title: c.querySelector("h2")?.textContent ?? "",
+              text: c.innerText,
+              sample: c.querySelector("[data-sample-link]")?.getAttribute("href") ?? null,
+              sampleLabel: c.querySelector("[data-sample-link]")?.getAttribute("aria-label") ?? "",
+              paths: [...c.querySelectorAll("[data-first-run-path]")].map((p) => p.getAttribute("data-first-run-path")),
+              line: line?.textContent ?? null,
+              copyBeforeLine: !!line && btns.includes("Copy") && !!(c.querySelector("button")?.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING),
+              tools: [...c.querySelectorAll("[data-tool]")].map((t) => t.getAttribute("data-tool")),
+              status: c.querySelector("[data-first-run-status]")?.getAttribute("data-first-run-status") ?? "",
+              statusText: c.querySelector("[data-first-run-status]")?.textContent ?? "",
+              lineFits: !line || line.getBoundingClientRect().right <= window.innerWidth,
+            };
+          });
+
+        const po = await pageAs(FO);
+        await home(po, FW);
+        const a = await cardOf(po);
+        check(
+          "ui (Chrome, first run): on a workspace where no app was seen, the owner's Home shows \"Two ways to start\": Explore a sample (fictional), linking to their Northstar sample, and Connect one agent with Copy above the Claude Code line, what it can read (one line per read tool in the server's tools/list), what it can't do, \"No AI app is connected to this workspace yet.\" and that connecting is not a read",
+          a?.kind === "two" && a.title === "Two ways to start" && JSON.stringify(a.paths) === JSON.stringify(["sample", "connect"]) && a.sample === `/app/w/${SW}` && /fictional/i.test(a.sampleLabel) && /Fictional/.test(a.text) && /Nothing in it is real/.test(a.text) &&
+            a.line === `claude mcp add --transport http --scope user align 'http://127.0.0.1:${PORT}/api/mcp'; claude mcp login align` && a.copyBeforeLine && JSON.stringify([...a.tools].sort()) === JSON.stringify([...serverTools].sort()) &&
+            /can.t propose, approve, launch or change anything/.test(a.text) && a.status === "none" && a.statusText === "No AI app is connected to this workspace yet." && /Connecting is not a read/.test(a.text) && /last connected \(any request to Align\) and, separately, when it last read the goals/.test(a.text) && errors.length === 0,
+          `${JSON.stringify(a)} ${errors.join(" | ")}`,
+        );
+
+        // Live status: an approved app with no request yet, then its first request (a connection): the card yields.
+        const at = new Date().toISOString();
+        withDb((d) =>
+          d
+            .prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, 'c-first', 'Claude Code', 'localhost', ?, NULL, NULL, 'h', ?, ?)")
+            .run("gr_FIRSTRUNFIRSTRU1", FW, FO.id, at, Date.now() + 86_400_000, fkid),
+        );
+        await po.waitForSelector('[data-first-run-status="approved"]', { timeout: 15000 });
+        const st = await cardOf(po);
+        withDb((d) => d.prepare("UPDATE v2_oauth_grants SET last_used_at = ? WHERE id = 'gr_FIRSTRUNFIRSTRU1'").run(new Date().toISOString()));
+        await po.waitForFunction(() => !document.querySelector("[data-first-run]") && /Connected .+, no goal read seen yet/.test(document.querySelector("#apps")?.innerText ?? ""), { timeout: 20000 });
+        const appsNow = await po.$eval("#apps", (e) => e.innerText);
+        check(
+          "ui (Chrome, first run): the status follows what Align sees without a reload: an approved app with no request reads \"Claude Code: approved <time>, Align hasn't seen it connect yet\"; after its first request the card is gone and the Home's apps section shows \"Connected <time>, no goal read seen yet\" (not observed), never a read",
+          /^Claude Code: approved .+, Align hasn't seen it connect yet\.$/.test(st?.statusText ?? "") && /Connected .+, no goal read seen yet/.test(appsNow) && !/Read the goals /.test(appsNow) && errors.length === 0,
+          `${st?.statusText} | ${appsNow.slice(0, 300)} ${errors.join(" | ")}`,
+        );
+        withDb((d) => d.prepare("DELETE FROM v2_oauth_grants WHERE id = 'gr_FIRSTRUNFIRSTRU1'").run());
+
+        // Hide: per workspace, kept across a reload, focus back on the heading; blocked storage still hides it.
+        await home(po, FW);
+        await po.$$eval("[data-first-run] button", (els) => els.find((b) => b.textContent === "Hide")?.click());
+        await sleep(300);
+        const hid = await po.evaluate((ws) => ({ card: !!document.querySelector("[data-first-run]"), focus: document.activeElement?.tagName, stored: localStorage.getItem(`align.firstRun.hidden:${ws}`) }), FW);
+        await home(po, FW);
+        const stillHidden = !(await po.$("[data-first-run]"));
+        await home(po, SW);
+        const s = await cardOf(po);
+        await po.evaluate((ws) => localStorage.removeItem(`align.firstRun.hidden:${ws}`), FW);
+        await home(po, FW);
+        const back = !!(await po.$("[data-first-run]"));
+        const pb = await pageAs(FO, 1000, true);
+        await home(pb, FW);
+        const blockedShown = !!(await pb.$("[data-first-run]"));
+        await pb.$$eval("[data-first-run] button", (els) => els.find((b) => b.textContent === "Hide")?.click());
+        await sleep(300);
+        const blockedHidden = !(await pb.$("[data-first-run]"));
+        await pb.close(); // a page left in the background may be frozen by Chrome
+        await po.bringToFront();
+        check(
+          "ui (Chrome, first run): Hide removes the card, moves focus to the Home heading and keeps it hidden on that workspace after a reload (localStorage align.firstRun.hidden:<ws>), not on the sample's Home; with storage blocked the card shows and Hide still hides it with no page error",
+          !hid.card && hid.focus === "H1" && hid.stored === "1" && stillHidden && back && blockedShown && blockedHidden && s?.kind === "two" && errors.length === 0,
+          `${JSON.stringify(hid)} ${stillHidden} ${back} ${blockedShown} ${blockedHidden} ${errors.join(" | ")}`,
+        );
+        check(
+          "ui (Chrome, first run): on the sample's own Home the explore path says the person is in the Northstar sample, that it is fictional, and links to its change request on the Requests tab",
+          /You are in the Northstar sample/.test(s?.text ?? "") && /fictional/.test(s?.text ?? "") && s?.sample === null,
+          s?.text.slice(0, 400),
+        );
+        const sampleReq = await (async () => {
+          await home(po, SW);
+          return po.$$eval("[data-first-run] a", (els) => els.map((e) => [e.textContent, e.getAttribute("href")]));
+        })();
+        check("ui (Chrome, first run): the sample's explore link opens its Requests tab", sampleReq.some(([t, h]) => t === "Open the sample's change request" && h === `/app/w/${SW}/requests`), JSON.stringify(sampleReq));
+
+        // A member with no sample: one path; a viewer: no line, told viewers can't connect.
+        await po.close();
+        const pm = await pageAs(FM);
+        await home(pm, FW);
+        const m = await cardOf(pm);
+        await pm.close();
+        const pv = await pageAs(FV);
+        await home(pv, FW);
+        const v = await cardOf(pv);
+        await pv.close();
+        check(
+          "ui (Chrome, first run): a member with no sample sees only \"Connect one agent\" and \"You haven't connected an AI app to this workspace yet.\"; a viewer sees no command, only that viewers can't connect AI apps",
+          m?.kind === "connect" && m.title === "Connect one agent" && m.sample === null && !/Explore a sample/.test(m.text) && m.statusText === "You haven't connected an AI app to this workspace yet." && !!m.line &&
+            v?.line === null && /Viewers can.t connect AI apps to this workspace/.test(v?.text ?? "") && errors.length === 0,
+          `${JSON.stringify(m)?.slice(0, 300)} ${JSON.stringify(v)?.slice(0, 300)}`,
+        );
+        // On a phone the card and its long line fit.
+        const pp = await pageAs(FO, 390);
+        await home(pp, FW);
+        const ph = await cardOf(pp);
+        const fit = await pp.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
+        check("ui (Chrome 390x844, first run): the Home with the first-run card has no sideways scroll and the setup line wraps inside it", !!ph && ph.lineFits && fit.sw <= fit.W && errors.length === 0, `${JSON.stringify(fit)} ${ph?.lineFits} ${errors.join(" | ")}`);
+      } catch (e) {
+        check("ui (Chrome) first-run run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the first-run card", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end port:first-run ====
 
   // ==== req:requests ====
   // Requests and goal holds (REQ-001), on a workspace of their own: QO owns it; team Core has a lead (QL) and a member
