@@ -355,7 +355,7 @@ async function phaseLocal(dir) {
       tools.some((t) => t.name === "align_get_goal_activity") &&
         tools.some((t) => t.name === "align_get_work_map") &&
         reads.includes("What connected sessions reported on each goal") &&
-        reads.includes("Sessions that reported in, grouped by goal (the work map)") &&
+        reads.includes("The work map: sessions that reported in, by goal") &&
         !reads.some((r) => /What agents did|off on the test server|^The work map$/.test(r)),
       reads.join(" | "),
     );
@@ -466,7 +466,7 @@ async function phaseHosted(dir) {
     const hReads = await page.evaluate(() => [...document.querySelectorAll('ul[aria-label="What the agent can read"] li')].map((li) => li.textContent));
     check(
       "hosted: the work-map and goal-activity lines say they are reported and off on the test server",
-      hReads.includes("What connected sessions reported on each goal (off on the test server)") && hReads.includes("Sessions that reported in, grouped by goal (the work map) (off on the test server)"),
+      hReads.includes("What connected sessions reported on each goal (off on the test server)") && hReads.includes("The work map: sessions that reported in, by goal (off on the test server)"),
       hReads.join(" | "),
     );
     check("hosted: the setup line names this server's https MCP URL", /claude mcp add/.test(c0?.text ?? "") && c0.text.includes(`https://${HOSTED_HOST}/api/mcp`), c0?.text);

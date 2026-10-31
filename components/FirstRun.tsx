@@ -20,7 +20,7 @@ interface FirstRunApp {
  *  except align_get_work_map and align_get_goal_activity. Both come from what Claude Code and Codex sessions reported
  *  through the capture hooks (agent-reported, not seen by Align), and capture is off when hosted, so their lines say so.
  *  scripts/test-first-run.mjs checks the count against the server's tools/list. */
-const WORK_MAP = "Sessions that reported in, grouped by goal (the work map)";
+const WORK_MAP = "The work map: sessions that reported in, by goal";
 const ACTIVITY = "What connected sessions reported on each goal";
 const REPORTED = new Set([WORK_MAP, ACTIVITY]);
 const AGENT_READS = [
