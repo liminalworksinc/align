@@ -58,6 +58,8 @@ test-tenancy H1 checks every one of these on a production server: each must exit
 | `ALIGN_DELETE_BY` | `fly.toml` | `2026-11-13` (founder ruling 2026-10-22; change it in one place) |
 | `ALIGN_SECRET` | `fly secrets` | `openssl rand -hex 32` |
 | `ALIGN_INTERVIEW_API_KEY` | `fly secrets` | optional. An Anthropic API key for the intake interview on `/new`. Unset, the interview is off and its route is 404. |
+| `ALIGN_WAITLIST_URL` | `fly.toml` | optional. Replaces the waitlist Google Form linked from the decision value card (default `WAITLIST_URL` in `lib/config.ts`). Only an https `docs.google.com/forms/...` URL is used; anything else hides the button. |
+| `ALIGN_LOI_URL` | `fly.toml` | optional. The target of "Ask about a non-binding letter of intent": an https URL or a `mailto:`. Unset, it is the waitlist form (its last section holds the optional LOI); an invalid value hides the link. |
 | `ALIGN_SIGNUP_CODES` | `fly secrets` | one code per planned tester, e.g. five of `openssl rand -hex 8`, comma-separated. To add testers later, set the list again with the new codes added. |
 | `ALIGN_*_PASSCODE` (3) | `fly secrets` | random; unused while Northstar is off |
 
@@ -108,6 +110,8 @@ On the machine (`fly ssh console`), as the `node` user. As root, the tool could 
 cd /app
 alias wsa='setpriv --reuid=node --regid=node --init-groups node scripts/ws-admin.mjs'
 wsa list
+wsa funnel               # per workspace: created, first action, ratified, launch, value-card events (role and time); totals
+wsa funnel --with-feedback   # the same, plus testers' free-text answers
 wsa delete <workspace id>
 wsa delete --all --yes   # the end-of-test purge
 ```

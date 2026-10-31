@@ -5,7 +5,7 @@ import { Button } from "@/components/ui";
 import { InterviewPanel, type FormTarget } from "@/components/InterviewPanel";
 import { EMPTY, Field, field, issuesFrom, ScenarioFields, toBody, type Form, type Issues } from "@/components/ScenarioForm";
 import { isCodeRefusal } from "@/lib/codes";
-import { NO_ANSWER_HOSTED, NO_ANSWER_LOCAL, ROLE_SWITCH } from "@/lib/labels";
+import { NO_ANSWER_HOSTED, NO_ANSWER_LOCAL, roleSwitch } from "@/lib/labels";
 
 // Create a new custom workspace from the same form as /setup. No sign-in is needed and creating does not sign anyone in.
 // POSTs to /api/workspaces; the three passcodes come back once and are shown once on the success card.
@@ -108,6 +108,17 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
     control?.focus({ preventScroll: true });
   }, [jump]);
 
+  // After a Create that failed validation: the first marked field (Field sets data-invalid), scrolled to and focused.
+  // Runs after the render that showed the marks and unfolded the form, so the field is laid out.
+  const [focusInvalid, setFocusInvalid] = useState(0);
+  useEffect(() => {
+    if (!focusInvalid) return;
+    const control = document.querySelector<HTMLInputElement | HTMLTextAreaElement>("[data-invalid] input, [data-invalid] textarea");
+    if (!control) return;
+    control.scrollIntoView({ behavior: smooth(), block: "center" });
+    control.focus({ preventScroll: true });
+  }, [focusInvalid]);
+
   const openForm = (to: FormTarget | "heading") => {
     setFormOpen(true);
     setJump((j) => ({ to, at: (j?.at ?? 0) + 1 })); // a new object each time, so the same target can be jumped to twice
@@ -153,7 +164,8 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
       if (res.status === 400 && Array.isArray(data.issues)) {
         setIssues(issuesFrom(data.issues));
         setFormOpen(true); // the marks are inside the form, so a folded form opens to show them
-        setProblem("Some fields need fixing. They are marked below.");
+        setProblem("Some fields need fixing. They are marked in red above.");
+        setFocusInvalid((n) => n + 1); // then scroll to and focus the first one
       } else if (res.status === 403 && cfg?.signup_code_required && isCodeRefusal(error)) {
         setIssues({ signup_code: [error] });
         setProblem("Check the signup code.");
@@ -217,7 +229,7 @@ export default function NewWorkspace({ testServer }: { testServer: { delete_by: 
         </p>
         <p className="mb-5 text-[16px] text-zinc-700">
           A browser holds one workspace session at a time. Signing in here signs that browser out of any other workspace, including the demo.
-          {" "}{ROLE_SWITCH}
+          {" "}{roleSwitch(created.people.find((p) => p.role === "product")?.team ?? "the team asking for the change")}
         </p>
         <label className="mb-4 flex items-start gap-2 rounded-[10px] bg-amber-50 p-3 text-[16px] ring-1 ring-amber-300">
           <input type="checkbox" className="mt-1 size-4 accent-violet-700" checked={saved} onChange={(e) => setSaved(e.target.checked)} />

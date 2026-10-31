@@ -278,6 +278,30 @@ export interface AppState {
   scenario_config?: ScenarioConfig;
   asks?: Ask[]; // custom only: what people asked of a team, mostly from meetings (lib/asks.ts)
   limits?: Limit[]; // custom only: what a team's goal must, must not or need not cover (lib/limits.ts)
+  funnel?: Funnel; // custom only, written once a proposal is RATIFIED (lib/funnel.ts); deleted with the workspace
+}
+
+/** Custom only. What testers did after a decision (issue #30 item 5): timestamped events with the role only, no identity. */
+export interface Funnel {
+  events: FunnelEvent[]; // at most one per action, role and proposal
+  reports: ValueReport[]; // at most one per role and proposal
+}
+
+export interface FunnelEvent {
+  action: "value_card_viewed" | "value_reported" | "waitlist_clicked" | "loi_cta_clicked";
+  role: Actor;
+  proposal_id: string;
+  at: string;
+}
+
+/** The tester's own answer to "Before Align, how long would getting this decision usually take?". Self-reported, never
+ *  a measurement; the measured times come from proposal and acceptance timestamps. */
+export interface ValueReport {
+  proposal_id: string;
+  role: Actor;
+  estimate: "same_day" | "two_to_three_days" | "about_a_week" | "longer" | "would_not_be_decided";
+  text?: string; // at most 500 characters, cleaned
+  at: string;
 }
 
 /** A bound on a team's goal. Suggested from what people said (meetings, prompts to agents) or typed by a person;
@@ -332,8 +356,9 @@ export interface ScenarioConfig {
 // B1-6: /api/state is a per-role allowlist projection (lib/flow.ts viewFor), never a spread of AppState.
 // A field a role may not see is absent. Signed-in view: goals and private constraints filtered to the viewer,
 // org_draft for leadership only, ingest_errors with absolute paths stripped.
-export interface StateView extends Omit<AppState, "org_draft"> {
+export interface StateView extends Omit<AppState, "org_draft" | "funnel"> {
   org_draft?: OrgDraft | null;
+  funnel?: { reports: ValueReport[] }; // custom: the viewer's own value reports only; funnel events never leave the server
   me: Actor;
 }
 

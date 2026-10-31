@@ -5,6 +5,9 @@
 //   phase "off":    Mode L, no interview key            -> the route is absent (404), config says interview: false
 //   phase "local":  Mode L, a shared signup code, a key -> gating, caps, cleaning, refusals, the request sent
 //   phase "hosted": HOSTED=1 as Fly runs it, invites    -> Origin, invites never spent, and two startup refusals
+//   phase "ui":     Mode L, in Chrome (LIM-2452)        -> the done note says "filled in" only when Create would pass,
+//                                                          "Draft so far" covers every required field, and a failed
+//                                                          Create focuses the first marked field
 // Usage: node scripts/test-interview.mjs <port> [--no-build]   (from a worktree root; refuses 3100 and the main checkout)
 
 import { spawn, spawnSync } from "node:child_process";
@@ -13,6 +16,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import puppeteer from "puppeteer-core";
 
 const PORT = Number(process.argv[2]);
 const BUILD = !process.argv.includes("--no-build");
@@ -32,6 +36,7 @@ if (spawnSync("lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN"]).status === 0) {
 const FIXTURE = JSON.parse(readFileSync(path.join(ROOT, "data/scenarios/example-custom.json"), "utf8"));
 const HOSTED_HOST = "align.test";
 const KEY = "sk-ant-test-interview-key-0001";
+const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 let pass = 0;
 let fail = 0;
@@ -206,6 +211,104 @@ async function phaseLocal(net, dataDir) {
   await stop();
 }
 
+// In Chrome, as a tester would use /new. The stub finishes ("DONE") with a draft that leaves required fields empty.
+async function phaseUi(net, dataDir) {
+  phaseName = "ui";
+  HOSTED = false;
+  const CODE = "local-signup-code-ui-1";
+  await start({ ...net, ALIGN_DATA_DIR: dataDir, ALIGN_SIGNUP_CODE: CODE, ALIGN_INTERVIEW_API_KEY: KEY });
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1440, height: 900 });
+    const text = () => page.evaluate(() => document.body.innerText);
+    const waitText = async (needle, ms = 20000) => {
+      const t0 = Date.now();
+      while (Date.now() - t0 < ms) {
+        if ((await text()).includes(needle)) return true;
+        await sleep(200);
+      }
+      return false;
+    };
+    const click = (label) =>
+      page.evaluate((label) => {
+        const b = [...document.querySelectorAll("button")].find((x) => x.offsetParent !== null && !x.disabled && x.innerText.replace(/\s+/g, " ").trim() === label);
+        b?.click();
+        return !!b;
+      }, label);
+    // React-safe fill of the nth visible field whose label starts with `label`.
+    const fill = (label, value, nth = 0) =>
+      page.evaluate(
+        (label, value, nth) => {
+          const l = [...document.querySelectorAll("label")].filter((x) => x.offsetParent !== null && x.innerText.trim().startsWith(label))[nth];
+          const el = l?.querySelector("input:not([type=checkbox]), textarea");
+          if (!el) return false;
+          Object.getOwnPropertyDescriptor(el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value").set.call(el, value);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          return true;
+        },
+        label,
+        value,
+        nth,
+      );
+    const draftRows = () =>
+      page.evaluate(() => {
+        const h = [...document.querySelectorAll("h3")].find((x) => x.innerText.startsWith("Draft so far"));
+        return [...(h?.parentElement?.querySelectorAll("li") ?? [])].map((li) => li.innerText.replace(/\s+/g, " ").trim());
+      });
+
+    await page.goto(`http://127.0.0.1:${PORT}/new`, { waitUntil: "networkidle2" });
+    await fill("Signup code", CODE);
+    await click("Start the interview");
+    await page.waitForSelector("section[aria-labelledby=interview-heading] textarea");
+    await page.type("section[aria-labelledby=interview-heading] textarea", "Mobile needs Design to change a goal. DONE");
+    await click("Send");
+    const answered = await waitText("All set");
+    await sleep(300);
+    const t1 = await text();
+    const rows = await draftRows();
+    check("the stub's partial draft finishes the interview", answered, t1.slice(-400));
+    check("Draft so far lists every required field, including what each side is after", rows.length === 11 && rows.some((r) => r.includes("What they’re after")) && rows.some((r) => r.includes("What they were working toward")), rows.join(" | "));
+    const open = rows.filter((r) => r.startsWith("○")).length;
+    check("done with required fields empty: no \"filled in\" note; it says how many fields still need the person", !t1.includes("The form below is filled in") && t1.includes(`The interviewer is done. ${open} fields still need you; they’re marked ○ in Draft so far.`) && open > 1, t1.slice(-600));
+
+    // Create now: the server refuses, and the first marked field gets focus.
+    await click("Create the workspace");
+    const refused = await waitText("Some fields need fixing. They are marked in red above.");
+    await sleep(800);
+    const focus = await page.evaluate(() => {
+      const first = document.querySelector("[data-invalid] input, [data-invalid] textarea");
+      const a = document.activeElement;
+      const r = a?.getBoundingClientRect();
+      return { same: !!first && a === first, label: a?.closest("label")?.innerText.split("\n")[0] ?? null, inView: !!r && r.top >= 0 && r.bottom <= innerHeight };
+    });
+    check("a Create that fails validation says the marks are above, and focuses the first marked field, on screen", refused && focus.same && focus.inView, JSON.stringify(focus));
+
+    // Fill all but one: the note counts one field, in the singular.
+    const fills = [
+      ["What changed", "A new enterprise customer needs a tablet layout"],
+      ["What they’re after", "Win the enterprise renewal"],
+      ["Team or role", "Design", 1],
+      ["Who decides for them", "Bea Test", 1],
+      ["What they were working toward", "Ship the spring release redesign"],
+      ["How they track it", "Spring release ships by April 30"],
+      ["Why Mobile needs", "Mobile needs Design to produce tablet layouts first."],
+      ["Running on the old plan for Mobile", "Tablet prototype"],
+    ];
+    for (const [l, v, n] of fills) await fill(l, v, n ?? 0);
+    await sleep(300);
+    const t2 = await text();
+    check("one required field left: \"1 field still needs you; it’s marked\"", t2.includes("The interviewer is done. 1 field still needs you; it’s marked ○ in Draft so far.") && !t2.includes("The form below is filled in"), t2.slice(-500));
+    await fill("Running on the old plan for Design", "Spring release redesign");
+    await sleep(300);
+    const t3 = await text();
+    check("every required field filled: the \"filled in\" note shows, the count note is gone", t3.includes("The form below is filled in.") && !t3.includes("still need") && (await draftRows()).every((r) => r.startsWith("✓")), t3.slice(-500));
+  } finally {
+    await browser.close();
+    await stop();
+  }
+}
+
 async function phaseHosted(net, dataDir) {
   phaseName = "hosted";
   HOSTED = true;
@@ -274,6 +377,7 @@ try {
   const net = (name) => ({ NODE_OPTIONS: `--import ${pathToFileURL(path.join(ROOT, "scripts/interview-test-net.mjs")).href}`, ALIGN_TEST_INTERVIEW_LOG: path.join(tmp, `${name}.log`) });
   await phaseOff({ ...net("off"), ALIGN_DATA_DIR: path.join(tmp, "off") });
   await phaseLocal(net("local"), path.join(tmp, "local"));
+  await phaseUi(net("ui"), path.join(tmp, "ui"));
   await phaseHosted(net("hosted"), path.join(tmp, "hosted"));
 } catch (e) {
   fail++;

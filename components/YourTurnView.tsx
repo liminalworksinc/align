@@ -6,8 +6,9 @@ import { accepted, changedToday, currentGoal, isToday } from "@/components/selec
 import { Badge, STATE_LABEL, type Tone } from "@/components/ui";
 import { companyMeasureId, dependencyId, labelsFor, poss, slotOf, type Labels } from "@/lib/labels";
 import { LIMIT_WORDS, limitDrift } from "@/lib/limits";
-import type { Actor, Ask, Limit, Proposal, StateView } from "@/lib/types";
+import type { Actor, Ask, Goal, Limit, Proposal, StateView } from "@/lib/types";
 import { api } from "@/components/useAlign";
+import { DecisionValueCard } from "@/components/DecisionValueCard";
 
 // v6 "Your turn": the landing view for every role, built from state only. Waiting on you = proposals whose next action
 // is the signed-in actor's (the same rules the server enforces in lib/flow.ts), each quoting the exact measure text with
@@ -77,12 +78,12 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
         <span aria-hidden className="grid size-[34px] shrink-0 place-items-center rounded-full border border-violet-700 bg-violet-50 text-[12px] font-bold text-violet-700">
           {avatar(it.team)}
         </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <span className="flex min-w-0 flex-1 flex-col gap-1.5 @max-md:basis-[calc(100%-48px)]">
           <span className="text-[16px] font-semibold leading-snug text-zinc-900">{it.title}</span>
           {it.quote && <span className="text-[15px] leading-snug text-zinc-700">“{it.quote}”</span>}
           {it.sub && <span className="text-[14px] leading-snug text-zinc-500">{it.sub}</span>}
         </span>
-        <span className="flex shrink-0 gap-2 self-center">
+        <span className="flex shrink-0 flex-wrap gap-2 self-center @max-md:ml-12 @max-md:self-start">
           {it.actions.map((a) => (
             <button
               key={a.label}
@@ -100,7 +101,7 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
     <button
       type="button"
       onClick={it.open}
-      className={`flex w-full items-start gap-3.5 rounded-[14px] border bg-white px-[18px] py-4 text-left transition hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 ${hot ? "border-violet-700" : "border-zinc-200"}`}
+      className={`flex w-full items-start gap-3.5 rounded-[14px] border bg-white px-[18px] py-4 text-left transition @max-md:flex-wrap hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 ${hot ? "border-violet-700" : "border-zinc-200"}`}
     >
       <span
         aria-hidden
@@ -108,17 +109,155 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
       >
         {avatar(it.team)}
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+      <span className="flex min-w-0 flex-1 flex-col gap-1.5 @max-md:basis-[calc(100%-48px)]">
         <span className="text-[16px] font-semibold leading-snug text-zinc-900">{it.title}</span>
         {it.quote && <span className="text-[15px] leading-snug text-zinc-700">“{it.quote}”</span>}
         {it.sub && <span className="text-[14px] leading-snug text-zinc-500">{it.sub}</span>}
       </span>
       <span
-        className={`inline-flex min-h-[34px] shrink-0 items-center self-center rounded-[10px] border px-3 text-[14px] font-semibold ${hot ? "border-transparent bg-violet-700 text-black" : "border-zinc-300 text-zinc-900"}`}
+        className={`inline-flex min-h-[34px] shrink-0 items-center self-center rounded-[10px] border px-3 text-[14px] font-semibold @max-md:ml-12 @max-md:self-start ${hot ? "border-transparent bg-violet-700 text-black" : "border-zinc-300 text-zinc-900"}`}
       >
         {it.cta}
       </span>
     </button>
+  );
+}
+
+// Connected AI apps, as GET /api/workspaces/connections reports them (custom workspaces only; Northstar has none).
+// Align sees what an app last read, never what it does: "read the current plan" means its last read matched the plan
+// as it stands now (lib/plan-rev.ts), nothing more. An approved app that hasn't read anything isn't connected yet.
+interface AgentApp {
+  id: string;
+  name: string;
+  role: string;
+  approved_at: string;
+  last_used_at: string | null;
+  on_current_plan?: boolean;
+}
+interface Agents {
+  apps: AgentApp[];
+  changedAt: string | null;
+}
+/** null = not checked yet; "unknown" = the check failed before any good read (never shown as zero apps). */
+type AgentsRead = Agents | "unknown" | null;
+
+function useAgents(workspace?: string): AgentsRead {
+  const [data, setData] = useState<AgentsRead>(null);
+  useEffect(() => {
+    if (!workspace) return;
+    let live = true;
+    const load = () =>
+      api<{ apps: AgentApp[]; plan?: { changed_at: string | null } }>("/api/workspaces/connections", { workspace }).then(
+        (d) => live && setData({ apps: d.apps, changedAt: d.plan?.changed_at ?? null }),
+        () => live && setData((d) => (d && d !== "unknown" ? d : "unknown")), // keep the last good read; never guess
+      );
+    const first = setTimeout(() => void load(), 0);
+    const t = setInterval(() => void load(), 15000);
+    return () => {
+      live = false;
+      clearTimeout(first);
+      clearInterval(t);
+    };
+  }, [workspace]);
+  return data;
+}
+
+function ago(iso: string) {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+/** Small count tiles: only numbers Align has. Each jumps to its section. */
+function Tile({ n, label, href, hot }: { n: ReactNode; label: string; href: string; hot?: boolean }) {
+  return (
+    <a
+      href={href}
+      className={`flex min-w-0 flex-col gap-1 rounded-[14px] border bg-white px-4 py-3 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 ${hot ? "border-violet-700" : "border-zinc-200"}`}
+    >
+      <span className="text-[24px] font-semibold leading-none tabular-nums text-zinc-900">{n}</span>
+      <span className="text-[13px] leading-snug text-zinc-500">{label}</span>
+    </a>
+  );
+}
+
+function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (role: string) => string }) {
+  const agents = read === "unknown" ? null : read;
+  const reading = agents?.apps.filter((a) => a.last_used_at) ?? [];
+  const waiting = agents?.apps.filter((a) => !a.last_used_at) ?? [];
+  const older = reading.filter((a) => !a.on_current_plan);
+  return (
+    <section id="agents" aria-label="Connected AI apps" className="flex scroll-mt-4 flex-col gap-2.5">
+      <h2 className="al-lbl">Connected AI apps · what they last read</h2>
+      {read === "unknown" ? (
+        <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Couldn’t check connected apps just now, so their read state is unknown. Align retries every 15 seconds.</div>
+      ) : !agents ? (
+        <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Checking connected apps…</div>
+      ) : reading.length === 0 && waiting.length === 0 ? (
+        <div className="rounded-[14px] border border-dashed border-zinc-300 px-[18px] py-4 text-[15px] text-zinc-600">
+          No AI app has read this plan yet, so there is nothing to observe. Use <b className="text-zinc-900">Connect an AI app</b> to connect Claude Code, Codex, Claude or ChatGPT.
+        </div>
+      ) : (
+        <div className="flex flex-col divide-y divide-zinc-200 rounded-[14px] border border-zinc-200 bg-white">
+          {reading.map((a) => (
+            <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-[18px] py-3">
+              <span aria-hidden className={a.on_current_plan ? "text-violet-700" : "text-amber-700"}>
+                {a.on_current_plan ? "✓" : "▲"}
+              </span>
+              <span className="min-w-0 font-semibold text-zinc-900">{a.name}</span>
+              <span className="text-[14px] text-zinc-500">as {teamOf(a.role)}</span>
+              <span className={`ml-auto text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"} @max-md:ml-6 @max-md:basis-full`}>
+                {a.on_current_plan ? "Read the current plan" : "Last read an older plan"} · read seen by Align {ago(a.last_used_at!)}
+              </span>
+            </div>
+          ))}
+          {waiting.map((a) => (
+            <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-[18px] py-3 text-zinc-500">
+              <span aria-hidden>○</span>
+              <span className="min-w-0 font-semibold text-zinc-700">{a.name}</span>
+              <span className="text-[14px]">as {teamOf(a.role)}</span>
+              <span className="ml-auto text-[14px] @max-md:ml-6 @max-md:basis-full">Approved, hasn’t read the plan yet</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {agents && reading.length > 0 && (
+        <p className="text-[13px] leading-snug text-zinc-500">
+          {older.length > 0 && agents.changedAt ? `The plan changed ${ago(agents.changedAt)}; ${older.length === 1 ? "one app hasn’t" : `${older.length} apps haven’t`} read it since. ` : ""}
+          Align sees what each app last read, not what it does.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function GoalsSection({ goals, L, onOpen }: { goals: { who: "ceo" | "product" | "security"; g: Goal }[]; L: Labels; onOpen: (g: Goal) => void }) {
+  if (!goals.length) return null;
+  return (
+    <section id="goals" aria-label="Active goals" className="flex scroll-mt-4 flex-col gap-2.5">
+      <h2 className="al-lbl">Active goals</h2>
+      {goals.map(({ who, g }) => (
+        <button
+          key={g.id}
+          type="button"
+          onClick={() => onOpen(g)}
+          className="flex w-full items-start gap-3.5 rounded-[14px] border border-zinc-200 bg-white px-[18px] py-3.5 text-left hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
+        >
+          <span className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="flex flex-wrap items-center gap-2 text-[13px] text-zinc-500">
+              <span className="al-lbl">{who === "ceo" ? (L.northstar ? "Company" : L.team.ceo) : L.team[who]}</span>
+              <Badge tone="neutral" icon={false}>{g.version}</Badge>
+              {changedToday(g) && <Badge tone="amber">Changed today</Badge>}
+            </span>
+            <span className="text-[15px] font-semibold leading-snug text-zinc-900">{g.objective}</span>
+          </span>
+          <span className="inline-flex min-h-[34px] shrink-0 items-center self-center rounded-[10px] px-3 text-[14px] font-semibold text-zinc-700 @max-md:hidden">Open</span>
+        </button>
+      ))}
+    </section>
   );
 }
 
@@ -174,7 +313,7 @@ export function waitingOnMe(
       me: true,
       title: "Suggested limit for your goal",
       quote: `${LIMIT_WORDS[l.type]}: ${l.text}`,
-      sub: `${limitSub(l)}. Agents follow it once you confirm.`,
+      sub: `${limitSub(l)}. Agents can read it once you confirm.`,
       cta: "",
       open: () => undefined,
       actions: [
@@ -342,16 +481,55 @@ export function YourTurnView(props: ViewProps) {
         : { text: "Proposal in progress", tone: "violet" };
   const decided = acc ? recordFacts(s, acc) : null;
 
+  // Home as an attention queue, from real state only: which connected agents have read the current plan, what needs
+  // this person, and the goals in play. Tiles carry only numbers Align has.
+  const agentsRead = useAgents(L.northstar ? undefined : props.workspace);
+  const agents = agentsRead === "unknown" ? null : agentsRead;
+  const reading = agents?.apps.filter((a) => a.last_used_at) ?? [];
+  const onCurrent = reading.filter((a) => a.on_current_plan).length;
+  const goals = (["ceo", "product", "security"] as const)
+    .map((who) => ({ who, g: currentGoal(s, who) }))
+    .filter((x): x is { who: "ceo" | "product" | "security"; g: Goal } => !!x.g);
+  const teamOf = (r: string) => L.role[r as Actor] ?? r;
+  const openGoal = (g: Goal) => {
+    select({ kind: "goal", id: g.id });
+    go("goals");
+  };
+
   return (
     <div className="flex max-w-[880px] flex-col gap-[22px]">
       <div>
-        <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Your turn</h1>
+        <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Know what needs you</h1>
         <p className="mt-1.5 text-[16px] text-zinc-500">
           {mine.length ? `${mine.length} thing${mine.length === 1 ? "" : "s"} waiting on you.` : "Nothing waiting on you."}
+          {!L.northstar && agents && reading.length > 0 && ` ${onCurrent} of ${reading.length} connected app${reading.length === 1 ? " has" : "s have"} read the current plan.`}
         </p>
       </div>
 
-      <section aria-label="Waiting on you" className="flex flex-col gap-2.5">
+      <div className="grid grid-cols-2 gap-2.5 @[36rem]:grid-cols-4">
+        <Tile n={mine.length} label="Waiting on you" href="#waiting" hot={mine.length > 0} />
+        <Tile n={others.length} label="Waiting on others" href={others.length ? "#others" : "#waiting"} />
+        {!L.northstar && (
+          <Tile
+            n={agentsRead === "unknown" ? "?" : !agents ? "–" : reading.length ? `${onCurrent}/${reading.length}` : 0}
+            label={
+              agentsRead === "unknown"
+                ? "Apps: unknown"
+                : agents && reading.length
+                  ? "Apps that read the current plan"
+                  : agents && agents.apps.length
+                    ? `Apps have read the plan · ${agents.apps.length} approved`
+                    : "Apps connected"
+            }
+            href="#agents"
+          />
+        )}
+        <Tile n={goals.length} label="Active goals" href="#goals" />
+      </div>
+
+      {!L.northstar && <AgentsSection agents={agentsRead} teamOf={teamOf} />}
+
+      <section id="waiting" aria-label="Waiting on you" className="flex scroll-mt-4 flex-col gap-2.5">
         <div className="flex items-center gap-2.5">
           <h2 className="al-lbl">Waiting on you</h2>
           <span className={`grid h-[22px] min-w-[22px] place-items-center rounded-full px-1.5 text-[12px] font-bold ${mine.length ? "bg-violet-700 text-black" : "bg-zinc-100 text-zinc-900"}`}>
@@ -365,7 +543,7 @@ export function YourTurnView(props: ViewProps) {
       </section>
 
       {others.length > 0 && (
-        <section aria-label="Waiting on others" className="flex flex-col gap-2.5">
+        <section id="others" aria-label="Waiting on others" className="flex scroll-mt-4 flex-col gap-2.5">
           <h2 className="al-lbl">Waiting on others</h2>
           {others.map((it) => (
             <Card key={it.key} it={it} />
@@ -373,17 +551,19 @@ export function YourTurnView(props: ViewProps) {
         </section>
       )}
 
+      <GoalsSection goals={goals} L={L} onOpen={openGoal} />
+
       {!L.northstar && <LimitNotes workspace={props.workspace} />}
 
       {(kr || (acc && decided)) && (
         <section aria-label="What changed" className="flex flex-col gap-2.5">
           <h2 className="al-lbl">{changedToday(ceo) || isToday(acc?.ratified_at) ? "Changed today" : "What changed"}</h2>
           {kr && (
-            <div className="flex items-start gap-3.5 rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4">
+            <div className="flex items-start gap-3.5 rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 @max-md:flex-wrap">
               <Badge tone="amber" icon={false}>
                 {L.northstar ? "CEO" : L.team.ceo}
               </Badge>
-              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5 @max-md:basis-full">
                 <span className="text-[16px] font-semibold leading-snug text-zinc-900">{kr.text}</span>
                 <span className="flex flex-wrap items-center gap-2 text-[14px] text-zinc-500">
                   Affects {poss(L.team.security)} goal and what {L.team.product} needs from {L.team.security}
@@ -397,7 +577,7 @@ export function YourTurnView(props: ViewProps) {
                   if (ceo) select({ kind: "goal", id: ceo.id });
                   go("goals");
                 }}
-                className="inline-flex min-h-[34px] shrink-0 items-center self-center rounded-[10px] px-3 text-[14px] font-semibold text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"
+                className="inline-flex min-h-[34px] shrink-0 items-center self-center rounded-[10px] px-3 text-[14px] font-semibold text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 @max-md:-ml-3 @max-md:self-start"
               >
                 See goals
               </button>
@@ -420,6 +600,8 @@ export function YourTurnView(props: ViewProps) {
           )}
         </section>
       )}
+
+      <DecisionValueCard {...props} />
     </div>
   );
 }
