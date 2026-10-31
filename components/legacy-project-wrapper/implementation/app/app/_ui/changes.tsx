@@ -1,182 +1,17 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { api, ApiError, Btn, Err, Field, Input, Loading, Note, num, Pill, Select, TextArea, usd, useAction, useApi, when } from "./kit";
-import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, measuresOut, sameLimits, type LimitDraft, type MeasureDraft } from "./goalform";
-import { LIMIT_WORDS } from "./limits";
-import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
+import { api, ApiError, Btn, Err, Note, Pill, useAction, useApi, when } from "./kit";
+import { ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, Diff, EvidenceItem, NoticeBox, Revisions, SnapshotBox, useNotice, type Notice } from "./crparts";
+import { OpenRequest } from "./decide";
+import type { ChangeRequest, Goal } from "./types";
 import { ValueCard } from "./value";
 import { launchWords } from "@/lib/v2/launch-words";
 
-// Change requests in the web app: the proposal form (also used to suggest a change as an approver, with an optional
-// "Accept if…" condition) and one request's card with exactly the actions its `can` flags allow: approving records the
-// decision, and agents switch only at launch (LAUNCH-001). Used by the goal page and the workspace Requests tab.
-
-export const CR_STATE_WORDS: Record<ChangeRequest["state"], string> = {
-  pending: "waiting for approval",
-  countered: "approver suggested a change",
-  approved: "approved",
-  rejected: "rejected",
-  withdrawn: "withdrawn",
-  superseded: "superseded",
-};
-const tone = (s: ChangeRequest["state"]) => (s === "approved" ? "green" : s === "pending" || s === "countered" ? "amber" : "neutral");
-
-const FIELD_LABEL: Record<keyof ChangeFields, string> = { title: "Goal", measures: "Measures", depends_on: "Depends on", status: "Status", limits: "Limits" };
-const STATUS_WORD: Record<Goal["status"], string> = { active: "Active", achieved: "Achieved", dropped: "Dropped" };
-
-/** One field's value in plain words (dependencies by title when the person can see them). */
-function FieldValue({ k, v, titles }: { k: keyof ChangeFields; v: ChangeFields[keyof ChangeFields]; titles: Map<string, string> }) {
-  if (v === undefined) return <span className="text-zinc-500">(unchanged)</span>;
-  if (k === "measures") {
-    const ms = v as Goal["measures"];
-    if (!ms.length) return <span className="text-zinc-500">No measures</span>;
-    return (
-      <ul className="list-disc pl-5">
-        {ms.map((m, i) => (
-          <li key={`${m.id}-${i}`}>
-            {m.text}
-            {m.target && <span className="text-zinc-500"> (target: {m.target})</span>}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  if (k === "depends_on") {
-    const ids = v as string[];
-    return <span>{ids.length ? ids.map((id) => titles.get(id) ?? "a goal").join(", ") : "Nothing"}</span>;
-  }
-  if (k === "status") return <span>{STATUS_WORD[v as Goal["status"]] ?? String(v)}</span>;
-  if (k === "limits") {
-    const ls = v as Goal["limits"];
-    if (!ls.length) return <span className="text-zinc-500">No limits</span>;
-    return (
-      <ul className="list-disc pl-5">
-        {ls.map((l, i) => (
-          <li key={`${l.id}-${i}`}>
-            {LIMIT_WORDS[l.type]}: {l.text}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  return <span>{String(v)}</span>;
-}
-
-function Diff({ cr, titles }: { cr: ChangeRequest; titles: Map<string, string> }) {
-  const keys = (Object.keys(FIELD_LABEL) as (keyof ChangeFields)[]).filter((k) => k in cr.diff.after || k in cr.diff.before);
-  if (!keys.length) return null;
-  return (
-    <div className="my-2 grid gap-2">
-      {keys.map((k) => (
-        <div key={k} className="grid gap-2 rounded-[10px] bg-zinc-50 p-2 text-[14px] sm:grid-cols-[120px_1fr_1fr]">
-          <span className="text-zinc-600">{FIELD_LABEL[k]}</span>
-          <div>
-            <span className="block text-[12px] text-zinc-500">Before</span>
-            <FieldValue k={k} v={cr.diff.before[k]} titles={titles} />
-          </div>
-          <div>
-            <span className="block text-[12px] text-zinc-500">After</span>
-            <FieldValue k={k} v={cr.diff.after[k]} titles={titles} />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const sameMeasures = (a: { id?: string; text: string; target: string | null }[], b: Goal["measures"]) =>
-  JSON.stringify(a.map((m) => [m.id ?? null, m.text, m.target ?? null])) === JSON.stringify(b.map((m) => [m.id, m.text, m.target ?? null]));
-const sameIds = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
-
-/** Goal, measures, Status and Depends on, pre-filled from `start`. `onSend` gets only the fields that differ from
- *  `goal` (plus any in `keep`, for a counter that restates the request's fields). */
-function ChangesForm({
-  ws,
-  goal,
-  start,
-  keep = [],
-  noteLabel,
-  noteRequired,
-  withCondition = false,
-  sendLabel,
-  busy,
-  onSend,
-}: {
-  ws: string;
-  goal: Goal;
-  start: ChangeFields;
-  keep?: (keyof ChangeFields)[];
-  noteLabel: string;
-  noteRequired: boolean;
-  /** Offer the "Accept if…" condition (an approver's counter). */
-  withCondition?: boolean;
-  sendLabel: string;
-  busy: boolean;
-  onSend: (changes: ChangeFields, note: string, condition: string) => void;
-}) {
-  const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
-  const [title, setTitle] = useState(start.title ?? goal.title);
-  const [status, setStatus] = useState<Goal["status"]>(start.status ?? goal.status);
-  const [measures, setMeasures] = useState<MeasureDraft[]>(measuresDraft({ ...goal, measures: start.measures ?? goal.measures }));
-  const [deps, setDeps] = useState<string[]>(start.depends_on ?? goal.depends_on ?? []);
-  const [limits, setLimits] = useState<LimitDraft[]>(limitsDraft(start.limits ?? goal.limits ?? []));
-  const [note, setNote] = useState("");
-  const [condition, setCondition] = useState("");
-  const others = feed.data?.goals.filter((g) => g.id !== goal.id && (g.status === "active" || deps.includes(g.id))) ?? [];
-  const out = measuresOut(measures);
-  const changes: ChangeFields = {};
-  if (title.trim() !== goal.title || keep.includes("title")) changes.title = title.trim();
-  if (!sameMeasures(out, goal.measures) || keep.includes("measures")) changes.measures = out as Goal["measures"];
-  if (status !== goal.status || keep.includes("status")) changes.status = status;
-  if (!sameIds(deps, goal.depends_on ?? []) || keep.includes("depends_on")) changes.depends_on = deps;
-  const limitsChanged = !sameLimits(limits, goal.limits ?? []);
-  if (limitsChanged || keep.includes("limits")) changes.limits = limitsOut(limits) as Goal["limits"];
-  const differs = title.trim() !== goal.title || !sameMeasures(out, goal.measures) || status !== goal.status || !sameIds(deps, goal.depends_on ?? []) || limitsChanged || keep.length > 0;
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSend(changes, note.trim(), condition.trim());
-      }}
-    >
-      <Field label="Goal">
-        <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required />
-      </Field>
-      <MeasuresEditor value={measures} onChange={setMeasures} />
-      <LimitEditor value={limits} onChange={setLimits} />
-      <Field label="Status">
-        <Select value={status} onChange={(e) => setStatus(e.target.value as Goal["status"])}>
-          <option value="active">Active</option>
-          <option value="achieved">Achieved</option>
-          <option value="dropped">Dropped</option>
-        </Select>
-      </Field>
-      {others.length > 0 && (
-        <div className="mb-3">
-          <p className="mb-1 text-[14px] text-zinc-600">Depends on</p>
-          {others.map((g) => (
-            <label key={g.id} className="mb-1 flex items-center gap-2 text-[15px]">
-              <input type="checkbox" checked={deps.includes(g.id)} onChange={(e) => setDeps((d) => (e.target.checked ? [...d, g.id] : d.filter((x) => x !== g.id)))} />
-              {g.title}
-            </label>
-          ))}
-        </div>
-      )}
-      <Field label={noteLabel} hint="Never sent to agents. 1 to 2000 characters.">
-        <TextArea rows={3} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} required={noteRequired} />
-      </Field>
-      {withCondition && (
-        <Field label="Accept if… (optional condition the requester confirms)" hint="Never sent to agents, and never a gate on approval or launch. At most 2000 characters.">
-          <TextArea rows={2} value={condition} maxLength={2000} onChange={(e) => setCondition(e.target.value)} />
-        </Field>
-      )}
-      <Btn type="submit" disabled={busy || !differs || (noteRequired && !note.trim()) || !title.trim()}>
-        {sendLabel}
-      </Btn>
-    </form>
-  );
-}
+// Change requests in the web app: the proposal form and one request's card. An open request is understood, then
+// decided (decide.tsx); a decided one is its record, with exactly the launch and acknowledge actions its `can` flags
+// allow: approving records the decision, and agents switch only at launch (LAUNCH-001). Used by the goal page and the
+// workspace Requests tab.
 
 /** "Propose a change": for a member who can read an active goal but doesn't own it. */
 export function ProposeChange({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () => void }) {
@@ -229,181 +64,31 @@ export function ProposeChange({ ws, goal, onDone }: { ws: string; goal: Goal; on
   );
 }
 
-/** An approver's "Suggest a change": the request's changes pre-filled on the goal as it is now. */
-function CounterForm({ ws, cr, onDone }: { ws: string; cr: ChangeRequest; onDone: () => void }) {
-  const g = useApi<{ goal: Goal }>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}`);
+/** One change request. While it is open (pending or countered) it is the open view (decide.tsx: understand the change,
+ *  then decide); once decided it is its record, with the launch and acknowledge controls its `can` flags allow. */
+export function ChangeRequestCard(props: { ws: string; cr: ChangeRequest; me: string; showGoal?: boolean; titles: Map<string, string>; onDone: () => void }) {
+  // A decision's outcome (recorded, or not recorded and why) outlives the remount its reload causes.
+  const [notice, setNotice] = useNotice(props.cr.id);
+  if (props.cr.state === "pending" || props.cr.state === "countered") return <OpenRequest {...props} notice={notice} setNotice={setNotice} />;
+  return <RequestRecord {...props} notice={notice} />;
+}
+
+/** A decided request (approved, rejected, withdrawn or superseded): its decision record. */
+function RequestRecord({ ws, cr, me, showGoal, titles, onDone, notice }: { ws: string; cr: ChangeRequest; me: string; showGoal?: boolean; titles: Map<string, string>; onDone: () => void; notice: Notice | null }) {
   const act = useAction();
-  if (g.loading) return <Loading />;
-  if (!g.data) return <Err>{g.error}</Err>;
-  return (
-    <div className="mt-3 rounded-[12px] border border-zinc-300 p-3">
-      <p className="mb-2 text-[15px] text-zinc-700">Suggest a change. {cr.requester.name} can accept it, and then it can be approved.</p>
-      <ChangesForm
-        ws={ws}
-        goal={g.data.goal}
-        start={cr.changes}
-        keep={Object.keys(cr.changes) as (keyof ChangeFields)[]}
-        noteLabel="Note"
-        noteRequired
-        withCondition
-        sendLabel="Send suggestion"
-        busy={act.busy}
-        onSend={(changes, note, condition) =>
-          void act.run(() => api(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}/counter`, { body: { revision: cr.revision, changes, note, ...(condition ? { condition } : {}) } }), onDone)
-        }
-      />
-      <Err>{act.error}</Err>
-    </div>
-  );
-}
-
-// ---- evidence: links people or agents say support the change (never verified), and Align's own snapshot ----
-
-const KIND_WORD: Record<EvidenceKind, string> = { pr: "Pull request", ci_run: "CI run", incident: "Incident", dashboard: "Dashboard", doc: "Doc", other: "Link" };
-
-const hostOf = (url: string) => {
-  try {
-    return new URL(url).host;
-  } catch {
-    return "";
-  }
-};
-
-/** One link: kind, label (opens in a new tab, no referrer), its host, who added it and how it was reported. */
-function EvidenceItem({ e, me, busy, onRemove }: { e: Evidence; me: string; busy: boolean; onRemove: (id: string) => void }) {
-  return (
-    <li className="flex flex-wrap items-center gap-2 py-1 text-[14px]">
-      <Pill>{KIND_WORD[e.kind]}</Pill>
-      <a href={e.url} target="_blank" rel="noopener noreferrer" className="text-violet-700 underline">
-        {e.label}
-      </a>
-      <span className="text-zinc-500">({hostOf(e.url)})</span>
-      <Pill tone={e.source === "agent" ? "amber" : "neutral"}>{e.reported_as}</Pill>
-      <span className="text-zinc-500">
-        by {e.added_by.id === me ? "you" : e.added_by.name}, {when(e.added_at)}
-      </span>
-      {e.can_remove && (
-        <button type="button" className="text-[13px] text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => onRemove(e.id)}>
-          Remove
-        </button>
-      )}
-    </li>
-  );
-}
-
-/** "Recorded by Align at revision N": the goal's spend over 30 days, bound sessions and last activity. */
-function SnapshotBox({ s }: { s: AlignSnapshot }) {
-  const models = s.spend?.by_model ?? [];
-  return (
-    <div className="my-2 rounded-[10px] bg-zinc-50 p-2 text-[14px] text-zinc-700">
-      <p className="text-[12px] text-zinc-500">
-        Recorded by Align at revision {s.revision}, {when(s.recorded_at)}
-      </p>
-      <p>
-        {s.spend ? (
-          <>
-            Spend on this goal in the last {s.window.days} days: {usd(s.spend.total.est_list_usd_micros)} estimated at list price, {num(s.spend.total.requests)} requests
-            {models.length > 0 && <> ({models.map((m) => `${m.model} ${usd(m.est_list_usd_micros)}`).join(", ")})</>}.
-          </>
-        ) : (
-          <>Spend on this goal is hidden from you.</>
-        )}{" "}
-        Sessions bound to it: {num(s.bound_sessions)}. Last activity: {s.last_activity_at ? when(s.last_activity_at) : "none"}.
-      </p>
-    </div>
-  );
-}
-
-/** Add a link to the current revision (the requester, or someone who can approve, while the request is open). */
-function AddEvidence({ path, revision, onDone }: { path: string; revision: number; onDone: () => void }) {
-  const act = useAction();
-  const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<EvidenceKind>("pr");
-  const [url, setUrl] = useState("");
-  const [label, setLabel] = useState("");
-  if (!open)
-    return (
-      <Btn kind="secondary" onClick={() => setOpen(true)}>
-        Add evidence
-      </Btn>
-    );
-  return (
-    <form
-      className="mt-2 rounded-[12px] border border-zinc-300 p-3"
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        void act.run(
-          () => api(`${path}/evidence`, { body: { kind, url: url.trim(), label: label.trim(), revision } }),
-          () => {
-            setOpen(false);
-            setUrl("");
-            setLabel("");
-            onDone();
-          },
-        );
-      }}
-    >
-      <p className="mb-2 text-[14px] text-zinc-600">A link that supports this change. It is shown as self-reported: Align does not check it.</p>
-      <Field label="Kind">
-        <Select value={kind} onChange={(e) => setKind(e.target.value as EvidenceKind)}>
-          {(Object.keys(KIND_WORD) as EvidenceKind[]).map((k) => (
-            <option key={k} value={k}>
-              {KIND_WORD[k]}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      <Field label="Link (https)">
-        <Input type="url" value={url} onChange={(e) => setUrl(e.target.value)} maxLength={2048} placeholder="https://" required />
-      </Field>
-      <Field label="What it shows" hint="At most 120 characters.">
-        <Input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={120} required />
-      </Field>
-      <div className="flex flex-wrap gap-2">
-        <Btn type="submit" disabled={act.busy || !/^https:\/\//i.test(url.trim()) || !label.trim()}>
-          Add link
-        </Btn>
-        <Btn kind="secondary" onClick={() => setOpen(false)}>
-          Cancel
-        </Btn>
-      </div>
-      <Err>{act.error}</Err>
-    </form>
-  );
-}
-
-/** One change request: what it changes, its history and decision, and the actions the server allows this person. */
-export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws: string; cr: ChangeRequest; me: string; showGoal?: boolean; titles: Map<string, string>; onDone: () => void }) {
-  const act = useAction();
-  const [mode, setMode] = useState<"" | "approve" | "reject" | "counter">("");
-  const [text, setText] = useState("");
-  const [stale, setStale] = useState(false);
   const path = `/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}`;
-  const doIt = (action: string, body: Record<string, unknown>) =>
-    act.run(async () => {
-      try {
-        await api(`${path}/${action}`, { body });
-      } catch (e) {
-        if (e instanceof ApiError && e.code === "stale_version" && (action === "approve" || action === "approve_and_launch")) {
-          setStale(true);
-          return;
-        }
-        throw e;
-      }
-      setMode("");
-      setText("");
-    }, onDone);
+  const doIt = (action: string, body: Record<string, unknown>) => act.run(() => api(`${path}/${action}`, { body }), onDone);
   const mine = cr.requester.id === me;
   const current = cr.revisions.find((r) => r.revision === cr.revision);
   const earlier = cr.revisions.filter((r) => r.revision !== cr.revision && r.evidence.length > 0);
   const remove = (id: string) => void act.run(() => api(`${path}/evidence/${id}`, { method: "DELETE" }), onDone);
-  const noEvidence = cr.evidence_count === 0;
   const names = (ps: { id: string; name: string }[]) => ps.map((a) => (a.id === me ? "you" : a.name)).join(" or ");
   const said = (p: { id: string; name: string } | null) => (p ? (p.id === me ? "you" : p.name) : "someone");
   const words = launchWords(cr.launch, cr.base_version, cr.version);
   const next = cr.goal.version + 1;
   return (
-    <div className="mb-4 rounded-[12px] border border-zinc-200 p-4">
+    <div className="mb-4 rounded-[12px] border border-zinc-200 p-4" data-cr={cr.id} data-cr-view="record">
+      {notice && <NoticeBox notice={notice} />}
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <span className="text-[16px] text-zinc-900">
           {mine ? "You" : cr.requester.name} proposed a change
@@ -417,7 +102,7 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
             </>
           )}
         </span>
-        <Pill tone={tone(cr.state)}>{CR_STATE_WORDS[cr.state]}</Pill>
+        <Pill tone={crTone(cr.state)}>{CR_STATE_WORDS[cr.state]}</Pill>
         <Pill>base version {cr.base_version}</Pill>
         <Pill>revision {cr.revision}</Pill>
       </div>
@@ -453,34 +138,13 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
           {(cr.launch === "pending" || cr.launch === "not_yet") && <p className="text-zinc-500">{cr.launchers.length ? `Can launch: ${names(cr.launchers)}` : "Nobody can launch this yet"}</p>}
         </div>
       )}
-      {cr.condition && (
-        <div className="my-2 rounded-[10px] border border-zinc-200 p-2 text-[14px]" data-condition={cr.condition.acknowledged_by ? "acknowledged" : "open"}>
-          <p>
-            <span className="text-zinc-600">Accept if:</span> {cr.condition.text}
-          </p>
-          <p className={cr.condition.acknowledged_by ? "text-zinc-600" : "text-amber-800"}>
-            {cr.condition.acknowledged_by ? `Acknowledged by ${said(cr.condition.acknowledged_by)}${cr.condition.acknowledged_at ? `, ${when(cr.condition.acknowledged_at)}` : ""}` : "Not confirmed yet"}
-          </p>
-        </div>
-      )}
+      {cr.condition && <ConditionBox c={cr.condition} said={said} />}
       {cr.state === "approved" && <ValueCard ws={ws} cr={cr} me={me} />}
       {cr.state === "rejected" && (
         <p className="text-[14px] text-zinc-600">
           Rejected by {cr.rejected_by?.name}
           {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}. Reason: {cr.rejection_reason}
         </p>
-      )}
-      {(cr.state === "pending" || cr.state === "countered") && <p className="text-[14px] text-zinc-500">{cr.approvers.length ? `Can approve: ${names(cr.approvers)}` : "Nobody can approve this yet"}</p>}
-      {(stale || (cr.behind && cr.state === "pending" && !mine)) && <Note>The goal changed after this request was made. {cr.requester.name} needs to update it before it can be approved.</Note>}
-      {cr.behind && cr.can.rebase && (
-        <div className="my-2 flex flex-wrap items-center gap-2">
-          <Note>
-            Made against version {cr.base_version}. The goal is now at version {cr.goal.version}.
-          </Note>
-          <Btn kind="secondary" disabled={act.busy} onClick={() => void doIt("rebase", { revision: cr.revision, base_version: cr.goal.version })}>
-            Update to version {cr.goal.version}
-          </Btn>
-        </div>
       )}
       <div className="mt-2">
         <p className="text-[14px] font-medium text-zinc-800">Evidence for revision {cr.revision}</p>
@@ -492,7 +156,7 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
             ))}
           </ul>
         ) : (
-          <p className="text-[14px] text-zinc-500">No evidence links on this revision.</p>
+          <p className="text-[14px] text-zinc-500">No evidence attached.</p>
         )}
         {earlier.map((r) => (
           <div key={r.revision} className="mt-1">
@@ -504,43 +168,9 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
             </ul>
           </div>
         ))}
-        {cr.can.add_evidence && <AddEvidence path={path} revision={cr.revision} onDone={onDone} />}
       </div>
-      {cr.revisions.length > 1 && (
-        <details className="mt-1 text-[14px] text-zinc-500">
-          <summary className="cursor-pointer">Revisions</summary>
-          {cr.revisions.map((r) => (
-            <div key={r.revision}>
-              <p>
-                Revision {r.revision} by {r.author.name} against version {r.base_version}, {when(r.created_at)}
-                {r.note ? `: ${r.note}` : ""}
-              </p>
-              {r.snapshot && r.revision !== cr.revision && <SnapshotBox s={r.snapshot} />}
-            </div>
-          ))}
-        </details>
-      )}
+      <Revisions cr={cr} />
       <div className="mt-3 flex flex-wrap gap-2">
-        {cr.can.approve && (
-          <Btn disabled={act.busy} onClick={() => setMode(mode === "approve" ? "" : "approve")}>
-            Approve
-          </Btn>
-        )}
-        {cr.can.counter && (
-          <Btn kind="secondary" disabled={act.busy} onClick={() => setMode(mode === "counter" ? "" : "counter")}>
-            Suggest a change
-          </Btn>
-        )}
-        {cr.can.reject && (
-          <Btn kind="danger" disabled={act.busy} onClick={() => setMode(mode === "reject" ? "" : "reject")}>
-            Reject
-          </Btn>
-        )}
-        {cr.can.accept_counter && (
-          <Btn disabled={act.busy} onClick={() => void doIt("accept_counter", { revision: cr.revision })}>
-            Accept the change
-          </Btn>
-        )}
         {cr.can.acknowledge && cr.condition && (
           <Btn kind="secondary" disabled={act.busy} onClick={() => void doIt("acknowledge", { revision: cr.condition!.revision })}>
             Confirm the condition is met
@@ -556,47 +186,7 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
             Not yet
           </Btn>
         )}
-        {cr.can.withdraw && (
-          <Btn kind="danger" disabled={act.busy} onClick={() => void doIt("withdraw", { revision: cr.revision })}>
-            Withdraw
-          </Btn>
-        )}
       </div>
-      {mode === "approve" && (
-        <div className="mt-3">
-          {noEvidence && (
-            <div className="mb-3 rounded-[10px] border border-amber-700 p-3 text-[14px] text-amber-800">
-              <p className="font-medium">Approve without evidence?</p>
-              <p>This revision has no evidence links. You can still approve it; the decision record and the audit log will say it was approved without evidence.</p>
-            </div>
-          )}
-          <Field label="Note (optional, never sent to agents)">
-            <TextArea rows={2} value={text} maxLength={2000} onChange={(e) => setText(e.target.value)} />
-          </Field>
-          <p className="mb-2 text-[14px] text-zinc-600">Approving records the decision. Agents stay on version {cr.goal.version} until someone launches it.</p>
-          <div className="flex flex-wrap gap-2">
-            <Btn disabled={act.busy} onClick={() => void doIt("approve", { revision: cr.revision, note: text.trim() || null })}>
-              {noEvidence ? `Approve without evidence as version ${next} (agents switch at launch)` : `Approve as version ${next} (agents switch at launch)`}
-            </Btn>
-            {cr.can.approve_and_launch && (
-              <Btn kind="secondary" disabled={act.busy} onClick={() => void doIt("approve_and_launch", { revision: cr.revision, note: text.trim() || null })}>
-                {noEvidence ? `Approve without evidence and launch version ${next}` : `Approve and launch version ${next}`}
-              </Btn>
-            )}
-          </div>
-        </div>
-      )}
-      {mode === "reject" && (
-        <div className="mt-3">
-          <Field label="Why you're rejecting">
-            <TextArea rows={2} value={text} maxLength={2000} onChange={(e) => setText(e.target.value)} />
-          </Field>
-          <Btn kind="danger" disabled={act.busy || !text.trim()} onClick={() => void doIt("reject", { reason: text.trim() })}>
-            Reject
-          </Btn>
-        </div>
-      )}
-      {mode === "counter" && <CounterForm ws={ws} cr={cr} onDone={onDone} />}
       <Err>{act.error}</Err>
     </div>
   );

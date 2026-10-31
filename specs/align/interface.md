@@ -504,8 +504,8 @@ names.
 
 #### Scenario: Phone
 
-- **WHEN** a signed-in person opens the workspace list, account, device, devices, request access, a workspace's Home, Goals tab, a goal page, People, Sessions, Alignments, Requests, Asks, Spend or Apps on a 390 px wide screen
-- **THEN** nothing scrolls sideways, and an Apps connection reads as its name, then "Sends you back to", "Connected by", "Approved", "Last connected" and "Last read the goals" lines, then **Disconnect**
+- **WHEN** a signed-in person opens the workspace list, account, device, devices, request access, a workspace's Home, Goals tab, a goal page, People, Sessions, Alignments, Requests (an open request's decision and confirmation included), Asks, Spend or Apps on a 390 px wide screen
+- **THEN** nothing scrolls sideways, approved now and proposed stack, and an Apps connection reads as its name, then "Sends you back to", "Connected by", "Approved", "Last connected" and "Last read the goals" lines, then **Disconnect**
 
 ### Requirement: Workspace Goals tab
 
@@ -619,17 +619,45 @@ viewer and does not own it, and SHALL send the proposal with
 
 The goal page SHALL list the goal's change requests from `GET .../goals/<goal>/change-requests` to everyone who can
 read the goal, and SHALL show on each request only the actions its `can` flags allow, posting them to
-`POST .../goals/<goal>/change-requests/<id>/<action>`.
+`POST .../goals/<goal>/change-requests/<id>/<action>`. A decided request (approved, rejected, withdrawn or superseded)
+SHALL be its record. An open request (pending or countered) SHALL be shown to be understood, then decided, in this
+order: approved now beside proposed; what would change beside the evidence; the person's decision; a confirmation;
+and a closed "Details" disclosure.
 
 #### Scenario: Reading a request
 
 - **WHEN** a member opens a request in "Change requests"
-- **THEN** the card, built from the list response, shows the requester, a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"), the base version, the revision, the reason, a before and after view of each changed field, who can approve it while it is open, every revision with its author and note (under "Revisions" once there is more than one), and once decided who approved or rejected it and their note or reason; an open request with an empty approval set says "Nobody can approve this yet" instead of who can approve; a superseded request says "Closed because the goal was marked achieved or dropped."
+- **THEN** the card, built from the list response, shows the requester and a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"); a decided request shows the base version, the revision, the reason, a before and after view of each changed field, who approved or rejected it and their note or reason, and every revision with its author and note under "Revisions" once there is more than one; a superseded request says "Closed because the goal was marked achieved or dropped."
 
-#### Scenario: Approver acts
+#### Scenario: Understand an open request
 
-- **WHEN** a member of the goal's approval set (other than the requester, unless they own the goal) acts on a pending request
-- **THEN** **Approve** opens an optional note ("never sent to agents"), the line "Approving records the decision. Agents stay on version <n> until someone launches it." and **Approve as version <n+1> (agents switch at launch)**, which posts `{revision, note}` to `approve`, and **Approve and launch version <n+1>**, which posts the same to `approve_and_launch` (on a revision with no evidence links it first asks "Approve without evidence?" and the buttons read **Approve without evidence as version <n+1> (agents switch at launch)** and **Approve without evidence and launch version <n+1>**); **Reject** requires "Why you're rejecting" and posts `{reason}` to `reject`; and **Suggest a change** opens the pre-filled fields with a required note and **Send suggestion**, which posts `{revision, changes, note}` to `counter`
+- **WHEN** anyone who can read the goal opens a pending or countered request
+- **THEN** "Approved now · version <base>" and "Proposed · revision <r>" show each changed field side by side (stacked below 640 px), with the facts Version ("Goal at version <n>", and the request's base when the goal moved on), Requested by, Decides (who can approve, or "Nobody can approve this yet") and State; "What would change", tagged "the request's own text, not evidence", says field by field what the request would change, quotes the requester's reason "as written" and the latest counter's note, and shows any "Accept if…" condition with "Not confirmed yet" until acknowledged; beside it "Evidence for revision <r>" shows Align's snapshot and the links (self-reported or agent-reported, never verified) or "No evidence attached."; "Details", closed, lists the request, goal, requester and approver ids, the state, revision and base version, the evidence ids and the times
+
+#### Scenario: Choose a decision
+
+- **WHEN** a person with at least one decision flag opens an open request
+- **THEN** "Your decision" offers only the decisions their `can` flags allow, none selected: **Approve** (`approve`), **Approve and launch** (`approve_and_launch`), **Accept if…** and **Suggest a change** (`counter`), **Decline** (`reject`), **Accept the change** (`accept_counter`), **Confirm the condition is met** (`acknowledge`, with a condition) and **Withdraw** (`withdraw`); choosing one reveals only its input and moves focus to it (to **Review this decision** when it needs none): Approve and Approve and launch an optional note behind "Add a note (optional)" (with no evidence links, "Approve without evidence?" and that the record and the audit log will say so); Accept if… the condition and a note to the requester, both required; Suggest a change the request's fields pre-filled on the goal as it is now, a required note and an optional "Accept if… (optional condition the requester confirms)"; Decline "Why you're declining", required; the others "This needs no text."; a missing required input shows a focused error and sends nothing; someone with no decision sees whom the request waits on
+
+#### Scenario: Confirm before sending
+
+- **WHEN** the person presses **Review this decision**
+- **THEN** a focused "Confirm: <decision>" shows Acting as (their name and part), On (the exact revision, whose request on which goal, and its base version), Decision, what they entered (or "Nothing. This decision needs no text."), What happens (the expected state change) and Launch ("Approval is not launch. Agents stay on version <n> until someone who can launch it does.", or for Approve and launch that it does both, or for Decline and Withdraw that nothing goes to launch); **Back** returns with the input kept; **Confirm: <decision>** sends the same body as before (`{revision, note}` to `approve` or `approve_and_launch`; `{revision, changes, note, condition}` to `counter`, Accept if… sending the request's own changes; `{revision, reason}` to `reject`; `{revision}` to `accept_counter` and `withdraw`; `{revision}` of the condition to `acknowledge`) and then shows "Recorded: …" on the reloaded card
+
+#### Scenario: The request changed before sending
+
+- **WHEN** the request's revision or state changed after the person opened it and they confirm
+- **THEN** the page reads the request again first, sends nothing, and shows a focused alert "Not recorded. This request changed after you opened it: it is now “<state>” at revision <r>. Nothing was sent. Read it again and decide again." on the reloaded card
+
+#### Scenario: Refused by the server
+
+- **WHEN** the server answers a decision with 409 (for example `stale_version`, `wrong_state` or `stale_revision`)
+- **THEN** the card shows a focused alert "Not recorded. <the server's message>" and reloads; for `stale_version` that message is "The goal changed after this request was made. <requester> needs to update it before it can be approved." and the request stays pending
+
+#### Scenario: Decline while a counter waits
+
+- **WHEN** an approver opens a request they countered, while it waits on the requester to accept
+- **THEN** "Your decision" says "Waiting on <requester> to accept your suggested change. You can still decline instead of waiting." and offers only **Decline**, with a required reason, which posts `{revision, reason}` to `reject`; the requester sees no such line and is offered **Accept the change** and **Withdraw**
 
 #### Scenario: Approved, not launched
 
@@ -643,32 +671,28 @@ read the goal, and SHALL show on each request only the actions its `can` flags a
 
 #### Scenario: Accept if condition
 
-- **WHEN** an approver suggests a change, the form offers an optional "Accept if… (a condition the requester confirms)" field (at most 2000 characters) posted as `condition`
-- **THEN** the card shows "Accept if: <condition>" with "Not confirmed yet" until the requester acknowledges it, then "Acknowledged by <name>, <time>", next to the approval; the requester, when `can.acknowledge` is set, gets **Confirm the condition is met**, which posts `{revision}` to `acknowledge`; nothing says verified
-
-#### Scenario: Approval blocked by a newer version
-
-- **WHEN** **Approve** gets 409 `stale_version`
-- **THEN** the request shows "The goal changed after this request was made. <requester> needs to update it before it can be approved." and stays pending; this also happens to other open requests on a goal after one of them is approved
+- **WHEN** an approver chooses **Accept if…**, or adds the optional condition to **Suggest a change** (at most 2000 characters), and the request is countered with it
+- **THEN** the card shows "Accept if: <condition>" with "Not confirmed yet" until the requester acknowledges it, then "Acknowledged by <name>, <time>"; the requester, when `can.acknowledge` is set, gets **Confirm the condition is met**, a decision on an open request and a button on an approved one, which posts `{revision}` to `acknowledge`; nothing says verified
 
 #### Scenario: Requester acts
 
-- **WHEN** the requester views their own request
-- **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending); a pending or countered one offers **Withdraw** (`withdraw`), both posting `{revision}`; and one whose base version is behind the goal and whose `can.rebase` flag is set shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{revision, base_version:<n>}` to `rebase`
+- **WHEN** the requester views their own open request
+- **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending) and **Withdraw**; a pending one offers **Withdraw** (`withdraw`) and, with an unacknowledged condition, **Confirm the condition is met**; and one whose base version is behind the goal and whose `can.rebase` flag is set shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{revision, base_version:<n>}` to `rebase`
 
 #### Scenario: Viewer
 
 - **WHEN** a viewer opens the goal page
-- **THEN** the change requests are listed with no action buttons
+- **THEN** the change requests are listed with no decision and no action buttons; an open one says whom it waits on
 
 ### Requirement: Evidence on change request cards
 
-Every change request card (on the goal page and in the Requests tab) SHALL show, under "Evidence for revision <n>", the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days with its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence." or "Approved with <n> evidence link(s), none verified."
+Every change request card (on the goal page and in the Requests tab) SHALL show, under "Evidence for revision <n>"
+(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days with its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence." or "Approved with <n> evidence link(s), none verified."
 
 #### Scenario: Approve without evidence
 
-- **WHEN** an approver presses **Approve** on a revision with no evidence links
-- **THEN** the card asks "Approve without evidence?", explains that the decision record and the audit log will say so, and offers **Approve without evidence as version <n+1>**
+- **WHEN** an approver chooses **Approve** on a revision with no evidence links
+- **THEN** its input asks "Approve without evidence?" and explains that the decision record and the audit log will say so, and the confirmation's Evidence row says "None"; once approved the record says "Approved without evidence."
 
 #### Scenario: A link is added
 
@@ -1036,6 +1060,8 @@ active goal), neutral otherwise.
 - `app/app/_ui/goalform.tsx`
 - `app/app/_ui/limits.tsx`
 - `app/app/_ui/changes.tsx`
+- `app/app/_ui/crparts.tsx`
+- `app/app/_ui/decide.tsx`
 - `lib/v2/launch-words.ts`
 - `app/app/_ui/value.tsx`
 - `lib/v2/value-core.mts`

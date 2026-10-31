@@ -541,6 +541,11 @@ The server SHALL accept `reject {reason}` (reason 1 to 2000 characters, 400 othe
 - **WHEN** an approver POSTs `reject {}`
 - **THEN** the response is 400 and the request is unchanged
 
+#### Scenario: Decline while a counter waits
+
+- **WHEN** an approver counters a request and, while it waits on the requester to accept, POSTs `reject {revision, reason}`
+- **THEN** the request is `rejected` with that approver as `rejected_by` and the reason, and the requester's `accept_counter` then gets 409 `wrong_state`
+
 #### Scenario: Counter then accept
 
 - **WHEN** an approver counters with changed measures and the requester calls `accept_counter`
