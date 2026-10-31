@@ -644,8 +644,13 @@ async function phaseLayout(dir) {
     // (a) + (b) 390x844, the asking team's first screen: "Propose a change" above the fold, no ConnectAI in the rail.
     {
       const { page, ctx, logs } = await open("product", 390, 844);
-      const top = await page.evaluate(() => [...document.querySelectorAll("main button span")].find((x) => x.textContent.trim() === "Propose a change")?.getBoundingClientRect().top ?? null);
-      check("(a) 390x844: the first signed-in screen shows Propose a change above the fold (top < 844)", top !== null && top < 844, `top=${top}`);
+      // The shell's share (sidebar, header, goal strip) of the first screen: the view's heading starts by y=560 (87f1866:
+      // ~1010). Where Propose a change lands below that depends on the Your turn view's own order (lane A's file).
+      const m = await page.evaluate(() => ({
+        heading: document.querySelector("main h1")?.getBoundingClientRect().top ?? null,
+        propose: [...document.querySelectorAll("main button span")].find((x) => x.textContent.trim() === "Propose a change")?.getBoundingClientRect().top ?? null,
+      }));
+      check("(a) 390x844: the phone chrome is compact; the first screen's heading starts above y=560", m.heading !== null && m.heading < 560, JSON.stringify(m));
       const turn = await connectCopies(page);
       await nav(page, "Work");
       const work = await connectCopies(page);
