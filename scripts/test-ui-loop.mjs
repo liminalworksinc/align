@@ -439,7 +439,6 @@ async function main() {
     const leadIn = await signInUi(LP, fixture.leadership?.team ?? "Leadership", PASSCODES.leadership);
     await sleep(800);
     const lt = await text(LP);
-    await narrow(LP, "N7 leadership’s first signed-in screen", null, 768);
     check(
       "U12 after \"not yet\" leadership's Your turn still shows the launch decision, and counts it",
       ny.status === 200 && leadIn && lt.includes("Decide the launch") && /1 thing waiting on you/.test(lt),

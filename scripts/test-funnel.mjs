@@ -316,6 +316,16 @@ async function phaseLocal(dir) {
       check(`browser ${role}: Your turn shows the card after RATIFIED, with the accepted change, approvers, goals and teams, work and links`, shown && want.every((re) => re.test(card)), `missing ${want.filter((re) => !re.test(card)).join(" ")} :: ${card.slice(0, 900)}`);
       check(`browser ${role}: measured time comes from the timestamps (Proposal to agreement: 14 minutes)`, /Proposal to agreement:\s*14 minutes/.test(t), (t.match(/Proposal to agreement:[^\n]*/) ?? [""])[0]);
       if (role === "leadership") check("browser: with no launch decision the card says not decided yet", /Launch decision:\s*Not decided yet/.test(t) && /no launch decision yet/.test(t), (t.match(/Launch decision:[^\n]*/) ?? [""])[0]);
+      // LIM-2452 review: at exactly 768px (the md edge, where the shell's phone layout is off) a workspace's leadership
+      // header (Restart this scenario, Switch team, Sign out) wraps instead of running off the screen.
+      if (role === "leadership") {
+        await pg.setViewport({ width: 768, height: 1000 });
+        await sleep(600);
+        const m = await pg.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, W: window.innerWidth }));
+        await pg.setViewport({ width: 1440, height: 1000 });
+        await sleep(300);
+        check("browser leadership: at 768 the workspace page does not scroll sideways", m.scrollWidth <= m.W, JSON.stringify(m));
+      }
       const links = await pg.$$eval("a[target=_blank]", (as) => as.map((a) => ({ href: a.href, rel: a.rel, text: a.textContent })));
       const w = links.find((l) => /waitlist/.test(l.text));
       const l = links.find((x) => /letter of intent/.test(x.text));
