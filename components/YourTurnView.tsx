@@ -125,9 +125,9 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
 
 // Connected AI apps, as GET /api/workspaces/connections reports them (custom workspaces only; Northstar has none).
 // Align knows only when an app last contacted it, never what it read or does: any authenticated MCP request, even
-// initialize or tools/list, sets last_used_at (app/api/mcp/route.ts verifyToken -> noteGrantUse), and "on the current
-// plan" means the plan hadn't changed since that contact (lib/plan-rev.ts). An approved app Align hasn't seen isn't
-// connected yet.
+// initialize or tools/list, sets last_used_at (app/api/mcp/route.ts verifyToken -> noteGrantUse), and "seen since the
+// latest change" means nothing an agent reads changed since that contact (lib/plan-rev.ts: goals, requests and their
+// answers, decisions). An approved app Align hasn't seen isn't connected yet.
 interface AgentApp {
   id: string;
   name: string;
@@ -195,7 +195,7 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
     <section id="agents" aria-label="Connected AI apps" className="flex scroll-mt-4 flex-col gap-2.5">
       <h2 className="al-lbl">Connected AI apps · when Align last saw them</h2>
       {read === "unknown" ? (
-        <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Couldn’t check connected apps just now, so whether they’re on the current plan is unknown. Align retries every 15 seconds.</div>
+        <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Couldn’t check connected apps just now, so whether they’ve been seen since the latest change is unknown. Align retries every 15 seconds.</div>
       ) : !agents ? (
         <div className="rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 text-[15px] text-zinc-500">Checking connected apps…</div>
       ) : reading.length === 0 && waiting.length === 0 ? (
@@ -212,7 +212,7 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
               <span className="min-w-0 font-semibold text-zinc-900">{a.name}</span>
               <span className="text-[14px] text-zinc-500">as {teamOf(a.role)}</span>
               <span className={`ml-auto text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"} @max-md:ml-6 @max-md:basis-full`}>
-                {a.on_current_plan ? "Seen on the current plan" : "Last seen on an older plan"} · last seen by Align {ago(a.last_used_at!)}
+                {a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"} · last seen by Align {ago(a.last_used_at!)}
               </span>
             </div>
           ))}
@@ -228,7 +228,7 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
       )}
       {agents && reading.length > 0 && (
         <p className="text-[13px] leading-snug text-zinc-500">
-          {older.length > 0 && agents.changedAt ? `The plan changed ${ago(agents.changedAt)}; ${older.length === 1 ? "one app hasn’t" : `${older.length} apps haven’t`} been seen since. ` : ""}
+          {older.length > 0 && agents.changedAt ? `The workspace changed ${ago(agents.changedAt)}; ${older.length === 1 ? "one app hasn’t" : `${older.length} apps haven’t`} been seen since. ` : ""}
           Align sees when each app last contacted it, not what it read or does.
         </p>
       )}
@@ -482,8 +482,13 @@ export function YourTurnView(props: ViewProps) {
         ? { text: "Not agreed yet", tone: "amber" }
         : { text: "Proposal in progress", tone: "violet" };
   const decided = acc ? recordFacts(s, acc) : null;
+  // The asking team's latest request was declined. While nothing is agreed the propose card says so; after an agreement
+  // (or alongside other work) this card does, so "the asking team sees that you declined" (ReviewDecide) stays true.
+  // Requests are appended, so the last one sent is newer than any agreement or open request.
+  const lastSent = [...s.proposals].reverse().find((p) => p.state !== "DRAFT" && p.proposing_owner === actor);
+  const declined = !L.northstar && lastSent?.state === "REJECTED" && !mine.some((it) => it.key === "propose") ? lastSent : null;
 
-  // Home as an attention queue, from real state only: which connected apps Align has seen on the current plan, what needs
+  // Home as an attention queue, from real state only: which connected apps Align has seen since the latest change, what needs
   // this person, and the goals in play. Tiles carry only numbers Align has.
   // Only a custom workspace has connected apps: Northstar and a Mode L /setup scenario (workspace "northstar") have no
   // connections endpoint, so they never poll it.
@@ -507,7 +512,7 @@ export function YourTurnView(props: ViewProps) {
         <h1 className="text-[30px] font-semibold leading-tight tracking-[-0.01em] text-zinc-900">Know what needs you</h1>
         <p className="mt-1.5 text-[16px] text-zinc-500">
           {mine.length ? `${mine.length} thing${mine.length === 1 ? "" : "s"} waiting on you.` : "Nothing waiting on you."}
-          {connectable && agents && reading.length > 0 && ` ${onCurrent} of ${reading.length} connected app${reading.length === 1 ? " was" : "s were"} last seen on the current plan.`}
+          {connectable && agents && reading.length > 0 && ` ${onCurrent} of ${reading.length} connected app${reading.length === 1 ? " was" : "s were"} seen since the latest change.`}
         </p>
       </div>
 
@@ -521,7 +526,7 @@ export function YourTurnView(props: ViewProps) {
               agentsRead === "unknown"
                 ? "Apps: unknown"
                 : agents && reading.length
-                  ? "Apps seen on the current plan"
+                  ? "Apps seen since the latest change"
                   : agents && agents.apps.length
                     ? `Apps seen · ${agents.apps.length} approved`
                     : "Apps connected"
@@ -560,9 +565,25 @@ export function YourTurnView(props: ViewProps) {
 
       {!L.northstar && <LimitNotes workspace={props.workspace} />}
 
-      {(kr || (acc && decided)) && (
+      {(kr || (acc && decided) || declined) && (
         <section aria-label="What changed" className="flex flex-col gap-2.5">
           <h2 className="al-lbl">{changedToday(ceo) || isToday(acc?.ratified_at) ? "Changed today" : "What changed"}</h2>
+          {declined && (
+            <Card
+              it={{
+                key: "declined",
+                team: L.person.security,
+                title: `${L.person.security} declined your last proposal`,
+                quote: declined.counter_versions.at(-1)?.proposed_measure_text ?? declined.proposed_measure_text,
+                sub: `${poss(L.team.security)} goal stays as it was`,
+                cta: "See the request",
+                open: () => {
+                  select({ kind: "proposal", id: declined.id });
+                  go("proposals");
+                },
+              }}
+            />
+          )}
           {kr && (
             <div className="flex items-start gap-3.5 rounded-[14px] border border-zinc-200 bg-white px-[18px] py-4 @max-md:flex-wrap">
               <Badge tone="amber" icon={false}>

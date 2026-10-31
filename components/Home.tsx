@@ -517,6 +517,9 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
         : proposalOpen
           ? { why: "A proposal is already open. Finish it first." }
           : { go: "proposals" };
+  // One pink primary per screen: the rail's button steps down to secondary where the main column has its own primary
+  // (Home's waiting-on-you cards, the decision record's "See work still on the old plan").
+  const railQuiet = (view === "turn" && turnCount > 0) || (view === "decision" && rel?.status === "ACCEPTED" && !!accepted(state));
   const myGoal = me.actor === "product" || me.actor === "security" ? currentGoal(state, me.actor) : undefined;
   const kr2 = ceo?.measures.find((m) => m.id === companyMeasureId(state));
   // Custom: the goal's current target. An approval swaps the owner's measure, not its objective.
@@ -567,12 +570,12 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
         {/* Northstar is the shared demo store: "+ New conflict" (leadership's /setup) would replace it, so it is hidden
             there entirely (founder default, LIM-2424 S1). Custom scenarios keep it. */}
         {!custom ? null : newConflict.href ? (
-          <a href={newConflict.href} className="mb-3.5 mt-1 inline-flex min-h-11 items-center justify-center rounded-[10px] bg-violet-700 px-[18px] text-[15px] font-semibold text-black hover:brightness-110">
+          <a href={newConflict.href} className={`mb-3.5 mt-1 inline-flex min-h-11 items-center justify-center rounded-[10px] border px-[18px] text-[15px] font-semibold ${railQuiet ? "border-zinc-300 text-zinc-900 hover:bg-zinc-100" : "border-transparent bg-violet-700 text-black hover:brightness-110"}`}>
             + New conflict
           </a>
         ) : (
           <div className="mb-3.5 mt-1 flex flex-col gap-1">
-            <Button disabled={!newConflict.go} onClick={() => { if (!newConflict.go) return; props.go(newConflict.go); setCompose(true); }}>
+            <Button kind={railQuiet ? "secondary" : "primary"} disabled={!newConflict.go} onClick={() => { if (!newConflict.go) return; props.go(newConflict.go); setCompose(true); }}>
               + New conflict
             </Button>
             {newConflict.why && <span className="px-1 text-[12.5px] leading-snug text-zinc-500">{newConflict.why}</span>}
