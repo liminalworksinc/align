@@ -1,6 +1,6 @@
 import { ESTIMATES } from "./core.mts";
 import { getChangeRequest as diffOf, type ChangeDiff } from "./changes-read";
-import { getChangeRequest } from "./changes";
+import { getChangeRequest, type LaunchState } from "./changes";
 import { all, get, run, tx } from "./db";
 import { badRequest, conflict } from "./errors";
 import { event } from "./events";
@@ -13,7 +13,8 @@ import { memberName } from "./workspaces";
 import { cleanValueText, ESTIMATE_WORDS, followUpUrl, loiUrlOk, spanWords, VALUE_EDIT_DAYS, VALUE_NOTE_MAX } from "./value-core.mts";
 
 // The decision value card on an approved change request (PORT-004): what was decided, who approved it, which goals it
-// touches, whether agents have the new version, how long the decision took as Align measured it, and the value reports
+// touches, whether it is launched and agents have the new version (the launch's goal_version directive and its
+// receipts, LAUNCH-001), how long the decision and the launch took as Align measured them, and the value reports
 // of the people involved (an estimate of how long it would have taken without Align, with an optional note; one per
 // person per request, editable by its author for 7 days, stored in v2_value_reports). The content-free product events
 // (value_card_viewed, value_reported with the estimate only, follow_up_clicked) are recorded once per person per
@@ -47,7 +48,11 @@ export interface ValueReport {
 /** GET .../goals/{goal}/change-requests/{id}/value. */
 export interface ValueView {
   change_request_id: string;
-  goal: { id: string; title: string; version: number; team: { id: string; name: string } | null };
+  /** version: the goal version the launch created, null until launched (agents stay on base_version until then). */
+  goal: { id: string; title: string; version: number | null; base_version: number; team: { id: string; name: string } | null };
+  /** pending | not_yet | launched (an approved request is never superseded: that is another state). */
+  launch: LaunchState;
+  launched_at: string | null;
   diff: ChangeDiff;
   approved_by: { id: string; name: string };
   decided_at: string;
@@ -55,10 +60,12 @@ export interface ValueView {
   approved_without_evidence: boolean | null;
   /** Readable goals only. */
   affected: { parents: { id: string; title: string }[]; dependents: { id: string; title: string }[] };
-  /** The goal_version directive of the approved version: its target sessions, and those with a received or applied
-   *  receipt; null when there was none. */
+  /** The launch's goal_version directive: its target sessions, and those with a received or applied receipt; null
+   *  before the launch, or when it reached no session. */
   delivery: { sessions: number; received: number; applied: number } | null;
-  measured: { proposal_to_decision: string; decision_to_first_applied: string | null };
+  /** decision_to_launch and decision_to_first_applied (the launch directive's first applied receipt) are null until
+   *  they happened. */
+  measured: { proposal_to_decision: string; decision_to_launch: string | null; decision_to_first_applied: string | null };
   /** The reader's own report, if any. */
   my_report: ValueReport | null;
   /** Every report, for the request's participants and approvers and workspace owners; else only the reader's own. */
@@ -80,7 +87,7 @@ interface ReportRow {
 /** The request (404 when the caller can't read it or it is on another goal), and 409 not_approved unless approved. */
 function approvedRequest(pp: PolicyPrincipal, goalId: string, requestId: string) {
   const cr = getChangeRequest(pp, requestId, goalId);
-  if (cr.state !== "approved" || !cr.approved_by || !cr.decided_at || cr.version === null) throw conflict("not_approved", "This change request isn't approved, so it has no value card");
+  if (cr.state !== "approved" || !cr.approved_by || !cr.decided_at) throw conflict("not_approved", "This change request isn't approved, so it has no value card");
   return cr;
 }
 
@@ -120,13 +127,17 @@ export function valueView(pp: PolicyPrincipal, goalId: string, requestId: string
     .filter((x) => !!x);
   const team = g.pod_id ? get<{ id: string; name: string }>("SELECT id, name FROM v2_pods WHERE ws_id = ? AND id = ?", pp.wsId, g.pod_id) ?? null : null;
 
-  // Delivery: the goal_version directive the approval wrote for this version (none when no session was bound).
-  const dir = get<{ id: string }>(
-    "SELECT id FROM v2_directives WHERE ws_id = ? AND goal_id = ? AND kind = 'goal_version' AND json_extract(goal_json, '$.version') = ? ORDER BY seq LIMIT 1",
-    pp.wsId,
-    g.id,
-    cr.version,
-  );
+  // Delivery: the goal_version directive the launch wrote for this version (none before the launch, or when no session
+  // was bound).
+  const launched = cr.launch === "launched" && cr.version !== null;
+  const dir = launched
+    ? get<{ id: string }>(
+        "SELECT id FROM v2_directives WHERE ws_id = ? AND goal_id = ? AND kind = 'goal_version' AND json_extract(goal_json, '$.version') = ? ORDER BY seq LIMIT 1",
+        pp.wsId,
+        g.id,
+        cr.version,
+      )
+    : undefined;
   let delivery: ValueView["delivery"] = null;
   let firstApplied: string | null = null;
   if (dir) {
@@ -141,6 +152,8 @@ export function valueView(pp: PolicyPrincipal, goalId: string, requestId: string
   }
   const decided = Date.parse(cr.decided_at!);
   const toApplied = firstApplied ? spanWords(Math.max(0, Date.parse(firstApplied) - decided)) : null;
+  const launchedAt = launched ? cr.launch_decided_at : null;
+  const toLaunch = launchedAt ? spanWords(Math.max(0, Date.parse(launchedAt) - decided)) : null;
 
   const now = Date.now();
   const participants = new Set<string>([cr.requester.id, cr.approved_by!.id, ...cr.approvers.map((a) => a.id), ...cr.revisions.map((r) => r.author.id)]);
@@ -149,7 +162,9 @@ export function valueView(pp: PolicyPrincipal, goalId: string, requestId: string
   const mine = rows.find((r) => r.person_id === pp.userId);
   return {
     change_request_id: cr.id,
-    goal: { id: g.id, title: g.title, version: cr.version!, team },
+    goal: { id: g.id, title: g.title, version: launched ? cr.version : null, base_version: cr.base_version, team },
+    launch: cr.launch ?? "launched",
+    launched_at: launchedAt,
     diff: diffOf(pp, cr.id)?.diff ?? {},
     approved_by: cr.approved_by!,
     decided_at: cr.decided_at!,
@@ -157,7 +172,7 @@ export function valueView(pp: PolicyPrincipal, goalId: string, requestId: string
     approved_without_evidence: cr.approved_without_evidence,
     affected: { parents, dependents },
     delivery,
-    measured: { proposal_to_decision: spanWords(Math.max(0, decided - Date.parse(cr.created_at))), decision_to_first_applied: toApplied },
+    measured: { proposal_to_decision: spanWords(Math.max(0, decided - Date.parse(cr.created_at))), decision_to_launch: toLaunch, decision_to_first_applied: toApplied },
     my_report: mine ? reportOf(pp, mine, now) : null,
     reports: (seesAll ? rows : rows.filter((r) => r.person_id === pp.userId)).map((r) => reportOf(pp, r, now)),
     sees_all_reports: seesAll,

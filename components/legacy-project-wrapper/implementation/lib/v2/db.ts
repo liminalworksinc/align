@@ -915,6 +915,28 @@ const MIGRATIONS: string[] = [
     'first_change_request', 'first_approval', 'first_directive', 'first_mcp_read', 'loi_sent', 'loi_signed',
     'first_ask', 'first_limit', 'first_request', 'first_hold');
   `,
+  // LAUNCH-001/002: launching an approved change request, and "Accept if…" conditions on counters (lib/v2/changes.ts).
+  // Approving keeps the resulting content on the request (approved_json) and publishes nothing; a launch writes it as
+  // the goal's next version. launch is null until approval; launch_by and launch_at are the latest not yet or launch.
+  // A counter revision may carry a condition, which only the requester acknowledges (once per revision).
+  `
+  -- 13 (LAUNCH-001/002)
+  ALTER TABLE v2_change_requests ADD COLUMN launch TEXT CHECK (launch IS NULL OR launch IN ('pending','not_yet','launched','superseded'));
+  ALTER TABLE v2_change_requests ADD COLUMN approved_json TEXT;
+  ALTER TABLE v2_change_requests ADD COLUMN launch_by TEXT;
+  ALTER TABLE v2_change_requests ADD COLUMN launch_at TEXT;
+  -- Requests approved before launch existed published at once: they count as launched.
+  UPDATE v2_change_requests SET launch = 'launched', launch_by = approved_by, launch_at = decided_at WHERE state = 'approved';
+  ALTER TABLE v2_change_request_revisions ADD COLUMN condition TEXT CHECK (condition IS NULL OR length(condition) BETWEEN 1 AND 2000);
+  ALTER TABLE v2_change_request_revisions ADD COLUMN acknowledged_by TEXT;
+  ALTER TABLE v2_change_request_revisions ADD COLUMN acknowledged_at TEXT;
+
+  DROP INDEX v2_events_once_ws;
+  CREATE UNIQUE INDEX v2_events_once_ws ON v2_events(name, ws_id) WHERE ws_id IS NOT NULL AND name IN (
+    'workspace_created', 'code_redeemed', 'first_session_captured', 'first_session_bound', 'second_member_joined',
+    'first_change_request', 'first_approval', 'first_directive', 'first_mcp_read', 'loi_sent', 'loi_signed',
+    'first_ask', 'first_limit', 'first_request', 'first_hold', 'first_launch');
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

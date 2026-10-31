@@ -6,9 +6,11 @@ import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, mea
 import { LIMIT_WORDS } from "./limits";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
 import { ValueCard } from "./value";
+import { launchWords } from "@/lib/v2/launch-words";
 
-// Change requests in the web app: the proposal form (also used to suggest a change as an approver) and one request's
-// card with exactly the actions its `can` flags allow. Used by the goal page and the workspace Requests tab.
+// Change requests in the web app: the proposal form (also used to suggest a change as an approver, with an optional
+// "Accept if…" condition) and one request's card with exactly the actions its `can` flags allow: approving records the
+// decision, and agents switch only at launch (LAUNCH-001). Used by the goal page and the workspace Requests tab.
 
 export const CR_STATE_WORDS: Record<ChangeRequest["state"], string> = {
   pending: "waiting for approval",
@@ -96,6 +98,7 @@ function ChangesForm({
   keep = [],
   noteLabel,
   noteRequired,
+  withCondition = false,
   sendLabel,
   busy,
   onSend,
@@ -106,9 +109,11 @@ function ChangesForm({
   keep?: (keyof ChangeFields)[];
   noteLabel: string;
   noteRequired: boolean;
+  /** Offer the "Accept if…" condition (an approver's counter). */
+  withCondition?: boolean;
   sendLabel: string;
   busy: boolean;
-  onSend: (changes: ChangeFields, note: string) => void;
+  onSend: (changes: ChangeFields, note: string, condition: string) => void;
 }) {
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const [title, setTitle] = useState(start.title ?? goal.title);
@@ -117,6 +122,7 @@ function ChangesForm({
   const [deps, setDeps] = useState<string[]>(start.depends_on ?? goal.depends_on ?? []);
   const [limits, setLimits] = useState<LimitDraft[]>(limitsDraft(start.limits ?? goal.limits ?? []));
   const [note, setNote] = useState("");
+  const [condition, setCondition] = useState("");
   const others = feed.data?.goals.filter((g) => g.id !== goal.id && (g.status === "active" || deps.includes(g.id))) ?? [];
   const out = measuresOut(measures);
   const changes: ChangeFields = {};
@@ -131,7 +137,7 @@ function ChangesForm({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onSend(changes, note.trim());
+        onSend(changes, note.trim(), condition.trim());
       }}
     >
       <Field label="Goal">
@@ -160,6 +166,11 @@ function ChangesForm({
       <Field label={noteLabel} hint="Never sent to agents. 1 to 2000 characters.">
         <TextArea rows={3} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} required={noteRequired} />
       </Field>
+      {withCondition && (
+        <Field label="Accept if… (optional condition the requester confirms)" hint="Never sent to agents, and never a gate on approval or launch. At most 2000 characters.">
+          <TextArea rows={2} value={condition} maxLength={2000} onChange={(e) => setCondition(e.target.value)} />
+        </Field>
+      )}
       <Btn type="submit" disabled={busy || !differs || (noteRequired && !note.trim()) || !title.trim()}>
         {sendLabel}
       </Btn>
@@ -180,7 +191,9 @@ export function ProposeChange({ ws, goal, onDone }: { ws: string; goal: Goal; on
     );
   return (
     <div className="rounded-[12px] border border-zinc-300 p-4">
-      <p className="mb-3 text-[15px] text-zinc-600">Edit what should change. The goal&apos;s owner or a lead of its team decides; an approval publishes it as version {goal.version + 1}.</p>
+      <p className="mb-3 text-[15px] text-zinc-600">
+        Edit what should change. The goal&apos;s owner or a lead of its team decides. Once approved and launched it becomes version {goal.version + 1}; agents switch at launch.
+      </p>
       <ChangesForm
         key={goal.version}
         ws={ws}
@@ -232,9 +245,12 @@ function CounterForm({ ws, cr, onDone }: { ws: string; cr: ChangeRequest; onDone
         keep={Object.keys(cr.changes) as (keyof ChangeFields)[]}
         noteLabel="Note"
         noteRequired
+        withCondition
         sendLabel="Send suggestion"
         busy={act.busy}
-        onSend={(changes, note) => void act.run(() => api(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}/counter`, { body: { revision: cr.revision, changes, note } }), onDone)}
+        onSend={(changes, note, condition) =>
+          void act.run(() => api(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}/counter`, { body: { revision: cr.revision, changes, note, ...(condition ? { condition } : {}) } }), onDone)
+        }
       />
       <Err>{act.error}</Err>
     </div>
@@ -368,7 +384,7 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
       try {
         await api(`${path}/${action}`, { body });
       } catch (e) {
-        if (e instanceof ApiError && e.code === "stale_version" && action === "approve") {
+        if (e instanceof ApiError && e.code === "stale_version" && (action === "approve" || action === "approve_and_launch")) {
           setStale(true);
           return;
         }
@@ -382,6 +398,10 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
   const earlier = cr.revisions.filter((r) => r.revision !== cr.revision && r.evidence.length > 0);
   const remove = (id: string) => void act.run(() => api(`${path}/evidence/${id}`, { method: "DELETE" }), onDone);
   const noEvidence = cr.evidence_count === 0;
+  const names = (ps: { id: string; name: string }[]) => ps.map((a) => (a.id === me ? "you" : a.name)).join(" or ");
+  const said = (p: { id: string; name: string } | null) => (p ? (p.id === me ? "you" : p.name) : "someone");
+  const words = launchWords(cr.launch, cr.base_version, cr.version);
+  const next = cr.goal.version + 1;
   return (
     <div className="mb-4 rounded-[12px] border border-zinc-200 p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2">
@@ -403,14 +423,45 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
       </div>
       <p className="text-[15px] text-zinc-700">Why: {cr.reason}</p>
       <Diff cr={cr} titles={titles} />
-      {cr.state === "superseded" && <Note>Closed because the goal was marked achieved or dropped.</Note>}
-      {cr.state === "approved" && (
-        <p className="text-[14px] text-zinc-600">
+      {cr.state === "superseded" && cr.launch !== "superseded" && <Note>Closed because the goal was marked achieved or dropped.</Note>}
+      {cr.state === "superseded" && cr.launch === "superseded" && (
+        <Note>
           Approved by {cr.approved_by?.name}
-          {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}. It became version {cr.version}.{cr.note ? ` Note: ${cr.note}` : ""}
-          {cr.approved_without_evidence === true && <> Approved without evidence.</>}
-          {cr.approved_without_evidence === false && <> Approved with {cr.evidence_count} evidence {cr.evidence_count === 1 ? "link" : "links"}, none verified.</>}
-        </p>
+          {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}, then superseded before launch: the goal got a newer version or was closed first. It never reached agents. {mine ? "You" : cr.requester.name} can propose it again.
+        </Note>
+      )}
+      {cr.state === "approved" && (
+        <div className="text-[14px] text-zinc-600" data-launch={cr.launch ?? ""}>
+          <p className="font-medium text-zinc-900">{words}.</p>
+          <p>
+            Approved by {cr.approved_by?.name}
+            {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}.{cr.note ? ` Note: ${cr.note}` : ""}
+            {cr.approved_without_evidence === true && <> Approved without evidence.</>}
+            {cr.approved_without_evidence === false && <> Approved with {cr.evidence_count} evidence {cr.evidence_count === 1 ? "link" : "links"}, none verified.</>}
+          </p>
+          {cr.launch === "launched" && (
+            <p>
+              Launched by {said(cr.launch_decided_by)}
+              {cr.launch_decided_at ? `, ${when(cr.launch_decided_at)}` : ""}. It became version {cr.version}.
+            </p>
+          )}
+          {cr.launch === "not_yet" && (
+            <p>
+              Not launched yet: {said(cr.launch_decided_by)} decided not yet{cr.launch_decided_at ? `, ${when(cr.launch_decided_at)}` : ""}.
+            </p>
+          )}
+          {(cr.launch === "pending" || cr.launch === "not_yet") && <p className="text-zinc-500">{cr.launchers.length ? `Can launch: ${names(cr.launchers)}` : "Nobody can launch this yet"}</p>}
+        </div>
+      )}
+      {cr.condition && (
+        <div className="my-2 rounded-[10px] border border-zinc-200 p-2 text-[14px]" data-condition={cr.condition.acknowledged_by ? "acknowledged" : "open"}>
+          <p>
+            <span className="text-zinc-600">Accept if:</span> {cr.condition.text}
+          </p>
+          <p className={cr.condition.acknowledged_by ? "text-zinc-600" : "text-amber-800"}>
+            {cr.condition.acknowledged_by ? `Acknowledged by ${said(cr.condition.acknowledged_by)}${cr.condition.acknowledged_at ? `, ${when(cr.condition.acknowledged_at)}` : ""}` : "Not confirmed yet"}
+          </p>
+        </div>
       )}
       {cr.state === "approved" && <ValueCard ws={ws} cr={cr} me={me} />}
       {cr.state === "rejected" && (
@@ -419,7 +470,7 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
           {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}. Reason: {cr.rejection_reason}
         </p>
       )}
-      {(cr.state === "pending" || cr.state === "countered") && cr.approvers.length > 0 && <p className="text-[14px] text-zinc-500">Can approve: {cr.approvers.map((a) => (a.id === me ? "you" : a.name)).join(" or ")}</p>}
+      {(cr.state === "pending" || cr.state === "countered") && <p className="text-[14px] text-zinc-500">{cr.approvers.length ? `Can approve: ${names(cr.approvers)}` : "Nobody can approve this yet"}</p>}
       {(stale || (cr.behind && cr.state === "pending" && !mine)) && <Note>The goal changed after this request was made. {cr.requester.name} needs to update it before it can be approved.</Note>}
       {cr.behind && cr.can.rebase && (
         <div className="my-2 flex flex-wrap items-center gap-2">
@@ -490,6 +541,21 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
             Accept the change
           </Btn>
         )}
+        {cr.can.acknowledge && cr.condition && (
+          <Btn kind="secondary" disabled={act.busy} onClick={() => void doIt("acknowledge", { revision: cr.condition!.revision })}>
+            Confirm the condition is met
+          </Btn>
+        )}
+        {cr.can.launch && (
+          <Btn disabled={act.busy} onClick={() => void doIt("launch", {})}>
+            Launch version {next} to agents
+          </Btn>
+        )}
+        {cr.can.not_yet && cr.launch !== "not_yet" && (
+          <Btn kind="secondary" disabled={act.busy} onClick={() => void doIt("not_yet", {})}>
+            Not yet
+          </Btn>
+        )}
         {cr.can.withdraw && (
           <Btn kind="danger" disabled={act.busy} onClick={() => void doIt("withdraw", { revision: cr.revision })}>
             Withdraw
@@ -507,9 +573,17 @@ export function ChangeRequestCard({ ws, cr, me, showGoal, titles, onDone }: { ws
           <Field label="Note (optional, never sent to agents)">
             <TextArea rows={2} value={text} maxLength={2000} onChange={(e) => setText(e.target.value)} />
           </Field>
-          <Btn disabled={act.busy} onClick={() => void doIt("approve", { revision: cr.revision, note: text.trim() || null })}>
-            {noEvidence ? `Approve without evidence as version ${cr.goal.version + 1}` : `Approve as version ${cr.goal.version + 1}`}
-          </Btn>
+          <p className="mb-2 text-[14px] text-zinc-600">Approving records the decision. Agents stay on version {cr.goal.version} until someone launches it.</p>
+          <div className="flex flex-wrap gap-2">
+            <Btn disabled={act.busy} onClick={() => void doIt("approve", { revision: cr.revision, note: text.trim() || null })}>
+              {noEvidence ? `Approve without evidence as version ${next} (agents switch at launch)` : `Approve as version ${next} (agents switch at launch)`}
+            </Btn>
+            {cr.can.approve_and_launch && (
+              <Btn kind="secondary" disabled={act.busy} onClick={() => void doIt("approve_and_launch", { revision: cr.revision, note: text.trim() || null })}>
+                {noEvidence ? `Approve without evidence and launch version ${next}` : `Approve and launch version ${next}`}
+              </Btn>
+            )}
+          </div>
         </div>
       )}
       {mode === "reject" && (

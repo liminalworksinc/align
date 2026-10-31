@@ -23,7 +23,7 @@ import { createWorkspace } from "./workspaces";
 export const SAMPLE_NAME = "Northstar (sample)";
 
 export const SAMPLE_REASON =
-  "This is a sample change request. Onboarding can't launch to regulated customers until a pen test is booked, so this asks the security goal to measure that too. In a real workspace a teammate proposes changes to a goal they don't own and the goal's owner or team lead decides. Here you own the goal, so you can approve it, suggest a change, reject it, withdraw it or update it to try each step.";
+  "This is a sample change request. Onboarding can't launch to regulated customers until a pen test is booked, so this asks the security goal to measure that too. In a real workspace a teammate proposes changes to a goal they don't own and the goal's owner or team lead decides. Here you own the goal, so you can approve it (then launch it, which is when agents get the new version), suggest a change, reject it, withdraw it or update it to try each step.";
 
 const measure = (text: string, target: string | null): Measure => ({ id: newId("m"), text, target });
 const NO_ANCHORS = { repos: [], branch_patterns: [], issues: [] };

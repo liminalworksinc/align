@@ -2,7 +2,7 @@ import { all, audit, get, run, tx } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso } from "./ids";
-import { effectiveSet } from "./approval";
+import { effectiveSet, launchSet } from "./approval";
 import { contentOf, goalObj, goalRow, nextContent, sameContent, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName } from "./workspaces";
@@ -13,12 +13,19 @@ import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evid
 // version). The goal's approval set decides, under the requester rule (lib/v2/approval.ts): one approval is enough.
 //   pending -> approved | rejected | withdrawn | superseded;  pending -> countered -> pending (accept_counter)
 //   approve        an approver, at the current revision, while the goal is still at base_version (else 409
-//                  stale_version and the requester rebases). It writes the goal's next version, authored by the
-//                  approver, through writeGoalVersion: the same path as an owner's edit, so goal_version directives
-//                  reach bound sessions. Nothing else here writes a directive.
-//   reject         an approver, with a reason;  counter: an approver replaces the changes (new revision)
-//   accept_counter / withdraw / rebase: the requester only
-// A goal that becomes achieved or dropped supersedes every open request on it (writeGoalVersion does that).
+//                  stale_version and the requester rebases). It records the decision and keeps the resulting content
+//                  on the request (approved_json, launch "pending"): no goal version, no directive (LAUNCH-001).
+//   launch         the launch set (the effective approval set plus workspace owners) publishes the approved content
+//                  as the goal's next version, authored by the approver, through writeGoalVersion: the same path as an
+//                  owner's edit, so goal_version directives reach bound sessions in the same transaction. Nothing
+//                  else here writes a directive. not_yet records that it waits (a later decision replaces it);
+//                  approve_and_launch does both in one transaction, audited as two decisions.
+//   reject         an approver, with a reason;  counter: an approver replaces the changes (new revision), optionally
+//                  with an "Accept if…" condition, which only the requester acknowledges (acknowledge, LAUNCH-002):
+//                  never a gate on approval or launch, never "verified".
+//   accept_counter / acknowledge / withdraw / rebase: the requester only
+// A goal that becomes achieved or dropped supersedes every open request on it, and any newer version supersedes the
+// approved requests still waiting for launch (writeGoalVersion does both).
 // Everyone who can read the goal can read its requests (viewers too); viewers can't act. A request is its own
 // decision record once approved or rejected.
 // Evidence (lib/v2/evidence.ts): each revision carries the snapshot Align recorded when it was written, and the
@@ -27,8 +34,12 @@ import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evid
 
 export const CHANGE_REQUEST_STATES = ["pending", "countered", "approved", "rejected", "withdrawn", "superseded"] as const;
 export type ChangeRequestState = (typeof CHANGE_REQUEST_STATES)[number];
-export const CHANGE_REQUEST_ACTIONS = ["approve", "reject", "counter", "accept_counter", "withdraw", "rebase"] as const;
+export const CHANGE_REQUEST_ACTIONS = ["approve", "approve_and_launch", "launch", "not_yet", "reject", "counter", "accept_counter", "acknowledge", "withdraw", "rebase"] as const;
 export type ChangeRequestAction = (typeof CHANGE_REQUEST_ACTIONS)[number];
+/** Where an approved request stands toward agents: pending (no launch decision yet), not_yet, launched, or superseded
+ *  (the goal got a newer version, or closed, before the launch). null before approval. */
+export const LAUNCH_STATES = ["pending", "not_yet", "launched", "superseded"] as const;
+export type LaunchState = (typeof LAUNCH_STATES)[number];
 
 /** The fields a change request may change (anchors are the owner's: they describe where the owner's work happens).
  *  Limits are goal content too: a change request is how anyone but the owner proposes them, and an approval by the
@@ -57,6 +68,12 @@ interface ChangeRequestRow {
   updated_at: string;
   decided_at: string | null;
   approved_without_evidence: number | null;
+  launch: LaunchState | null;
+  /** The approved-unlaunched version's content (GoalContent JSON), stored at approval. */
+  approved_json: string | null;
+  /** The latest launch decision (not yet or launch): who and when. */
+  launch_by: string | null;
+  launch_at: string | null;
 }
 interface RevisionRow {
   revision: number;
@@ -66,6 +83,10 @@ interface RevisionRow {
   author_id: string;
   created_at: string;
   snapshot_json: string | null;
+  /** A counter's "Accept if…" condition, and the requester's acknowledgement of it. */
+  condition: string | null;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
 }
 
 const sortedIds = (ids: string[]) => [...ids].sort().join(",");
@@ -128,9 +149,9 @@ export function insertChangeRequest(pp: PolicyPrincipal, g: GoalRow, changes: Ch
 }
 
 /** A new revision, with the snapshot Align records for the goal now (in the caller's transaction). */
-function writeRevision(ws: string, goalId: string, id: string, revision: number, baseVersion: number, changes: Changes, note: string | null, author: string, at: string) {
+function writeRevision(ws: string, goalId: string, id: string, revision: number, baseVersion: number, changes: Changes, note: string | null, author: string, at: string, condition: string | null = null) {
   run(
-    "INSERT INTO v2_change_request_revisions (ws_id, change_request_id, revision, base_version, changes_json, note, author_id, created_at, snapshot_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO v2_change_request_revisions (ws_id, change_request_id, revision, base_version, changes_json, note, author_id, created_at, snapshot_json, condition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ws,
     id,
     revision,
@@ -140,8 +161,15 @@ function writeRevision(ws: string, goalId: string, id: string, revision: number,
     author,
     at,
     recordSnapshot(ws, goalId, at),
+    condition,
   );
 }
+
+const revisionRows = (id: string) => all<RevisionRow>("SELECT * FROM v2_change_request_revisions WHERE change_request_id = ? ORDER BY revision", id);
+
+/** The revision whose condition is the request's: its latest counter (a revision with a note; rebases and the first
+ *  revision have none). Its condition may be null. */
+const counterRevision = (revs: RevisionRow[]) => [...revs].reverse().find((v) => v.note !== null);
 
 export async function createChangeRequest(pp: PolicyPrincipal, goalId: string, b: Body) {
   const g = visibleGoal(pp, goalId);
@@ -182,6 +210,9 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
     const approverOnly = () => {
       if (!isApprover) throw forbidden("not_an_approver", "Only someone who can approve for this goal can do this");
     };
+    const launcherOnly = () => {
+      if (!launchSet(g, r.requester_id).includes(me)) throw forbidden("not_a_launcher", "Only someone who can approve for this goal, or a workspace owner, can launch it");
+    };
     const requesterOnly = () => {
       if (!isRequester) throw forbidden("not_requester", "Only the person who asked can do this");
     };
@@ -191,34 +222,88 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
     const expectRevision = (required: boolean) => {
       if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", `This request is at revision ${r.revision}; reload and try again`);
     };
+    /** Record the approval and keep the resulting content on the request, approved but unlaunched (no version, no
+     *  directive). Returns that content. */
+    const approve = (): GoalContent => {
+      approverOnly();
+      inState("pending");
+      expectRevision(true);
+      const note = optStr(b, "note", TEXT_MAX);
+      if (g.version !== r.base_version) {
+        throw conflict("stale_version", `The goal changed after this request was made. ${memberName(r.requester_id)} needs to update it before it can be approved.`);
+      }
+      const next = applied(contentOf(g), changes);
+      if (sameContent(next, contentOf(g))) throw conflict("no_change", "This request no longer changes anything");
+      // Advisory evidence: approving a revision with no links is allowed, and recorded on the decision and in the audit.
+      const without = evidenceCount(r.id, r.revision) === 0 ? 1 : 0;
+      run(
+        "UPDATE v2_change_requests SET state = 'approved', approved_by = ?, decision_note = ?, decided_at = ?, updated_at = ?, approved_without_evidence = ?, launch = 'pending', approved_json = ? WHERE id = ?",
+        me,
+        note,
+        at,
+        at,
+        without,
+        JSON.stringify(next),
+        r.id,
+      );
+      audit(pp.wsId, me, "change_request.approved", r.id, at);
+      if (without) audit(pp.wsId, me, "change_request.approved_without_evidence", r.id, at);
+      event("first_approval", { ws: pp.wsId, user: me, at });
+      return next;
+    };
+    /** An approved request still waiting for launch, on a goal still at its base version (else 409). */
+    const launchable = () => {
+      if (r.state === "approved" && r.launch === "launched") throw conflict("wrong_state", `This change is already launched as version ${r.version}.`);
+      if (r.state === "superseded" && r.launch === "superseded") throw conflict("wrong_state", `This change was superseded before launch. ${memberName(r.requester_id)} can propose it again.`);
+      if (r.state !== "approved") throw conflict("wrong_state", `This request is ${r.state}`);
+      // A newer version supersedes it in the same transaction, so this is a guard, not a path.
+      if (g.version !== r.base_version) throw conflict("stale_version", `This goal is at version ${g.version}; reload and try again`);
+    };
+    /** Publish the approved content as the goal's next version (authored by the approver) with its directives. */
+    const launch = (content: GoalContent, approvedBy: string) => {
+      // Launched first, so the new version's supersede-before-launch step leaves this request alone.
+      run("UPDATE v2_change_requests SET launch = 'launched', launch_by = ?, launch_at = ?, updated_at = ? WHERE id = ?", me, at, at, r.id);
+      const written = writeGoalVersion(g, content, me, at, approvedBy);
+      run("UPDATE v2_change_requests SET version = ? WHERE id = ?", written.version, r.id);
+      audit(pp.wsId, me, "change_request.launched", r.id, at);
+      event("first_launch", { ws: pp.wsId, user: me, at });
+    };
     switch (action) {
       case "approve": {
-        approverOnly();
-        inState("pending");
-        expectRevision(true);
-        const note = optStr(b, "note", TEXT_MAX);
-        if (g.version !== r.base_version) {
-          throw conflict("stale_version", `The goal changed after this request was made. ${memberName(r.requester_id)} needs to update it before it can be approved.`);
-        }
-        const next = applied(contentOf(g), changes);
-        if (sameContent(next, contentOf(g))) throw conflict("no_change", "This request no longer changes anything");
-        // Advisory evidence: approving a revision with no links is allowed, and recorded on the decision and in the audit.
-        const without = evidenceCount(r.id, r.revision) === 0 ? 1 : 0;
-        // Decided first, so the new version's supersede step (achieved or dropped) leaves this request alone.
-        run(
-          "UPDATE v2_change_requests SET state = 'approved', approved_by = ?, decision_note = ?, decided_at = ?, updated_at = ?, approved_without_evidence = ? WHERE id = ?",
-          me,
-          note,
-          at,
-          at,
-          without,
-          r.id,
-        );
-        const written = writeGoalVersion(g, next, me, at);
-        run("UPDATE v2_change_requests SET version = ? WHERE id = ?", written.version, r.id);
-        audit(pp.wsId, me, "change_request.approved", r.id, at);
-        if (without) audit(pp.wsId, me, "change_request.approved_without_evidence", r.id, at);
-        event("first_approval", { ws: pp.wsId, user: me, at });
+        approve();
+        break;
+      }
+      case "approve_and_launch": {
+        const content = approve();
+        launcherOnly(); // every approver may launch; checked all the same
+        launch(content, me);
+        break;
+      }
+      case "launch": {
+        launcherOnly();
+        launchable();
+        expectRevision(false);
+        launch(JSON.parse(r.approved_json!) as GoalContent, r.approved_by!);
+        break;
+      }
+      case "not_yet": {
+        launcherOnly();
+        launchable();
+        expectRevision(false);
+        run("UPDATE v2_change_requests SET launch = 'not_yet', launch_by = ?, launch_at = ?, updated_at = ? WHERE id = ?", me, at, at, r.id);
+        audit(pp.wsId, me, "change_request.not_yet", r.id, at);
+        break;
+      }
+      case "acknowledge": {
+        requesterOnly();
+        inState("pending", "approved");
+        const c = counterRevision(revisionRows(r.id));
+        if (!c?.condition) throw conflict("no_condition", "This request has no condition to acknowledge");
+        if (b.revision !== undefined && b.revision !== c.revision) throw conflict("stale_revision", `The condition is on revision ${c.revision}; reload and try again`);
+        if (c.acknowledged_by) throw conflict("already_acknowledged", "This condition is already acknowledged");
+        run("UPDATE v2_change_request_revisions SET acknowledged_by = ?, acknowledged_at = ? WHERE change_request_id = ? AND revision = ?", me, at, r.id, c.revision);
+        run("UPDATE v2_change_requests SET updated_at = ? WHERE id = ?", at, r.id);
+        audit(pp.wsId, me, "change_request.condition_acknowledged", r.id, at);
         break;
       }
       case "reject": {
@@ -235,10 +320,11 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         inState("pending");
         expectRevision(false);
         const note = str(b, "note", TEXT_MAX);
+        const condition = b.condition === undefined || b.condition === null ? null : str(b, "condition", TEXT_MAX);
         const base = versionContentOf(pp.wsId, g.id, r.base_version)!;
         const countered = changesIn(pp, g.id, base, b.changes);
         const next = r.revision + 1;
-        writeRevision(pp.wsId, g.id, r.id, next, r.base_version, countered, note, me, at);
+        writeRevision(pp.wsId, g.id, r.id, next, r.base_version, countered, note, me, at, condition);
         run("UPDATE v2_change_requests SET state = 'countered', revision = ?, changes_json = ?, updated_at = ? WHERE id = ?", next, JSON.stringify(countered), at, r.id);
         audit(pp.wsId, me, "change_request.countered", r.id, at);
         break;
@@ -367,27 +453,43 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
   const after = result ?? applied(base, changes);
   const pick = (c: GoalContent) => shown(Object.fromEntries(fields.map((k) => [k, c[k]])) as Changes);
   const approvers = effectiveSet(g, r.requester_id);
+  const launchers = launchSet(g, r.requester_id);
   const me = pp.userId;
   const isRequester = r.requester_id === me;
   const isApprover = approvers.includes(me);
   const open = isOpen(r);
+  const unlaunched = r.state === "approved" && (r.launch === "pending" || r.launch === "not_yet");
+  const person = (id: string | null) => (id ? { id, name: memberName(id) } : null);
+  const revRows = revisionRows(r.id);
+  const counter = counterRevision(revRows);
+  /** The request's "Accept if…" condition (its latest counter's), and the requester's acknowledgement. */
+  const condition = counter?.condition
+    ? { revision: counter.revision, text: counter.condition, acknowledged_by: person(counter.acknowledged_by), acknowledged_at: counter.acknowledged_at }
+    : null;
   const can = {
     approve: r.state === "pending" && isApprover && r.base_version === g.version,
+    approve_and_launch: r.state === "pending" && isApprover && r.base_version === g.version,
     reject: open && isApprover,
     counter: r.state === "pending" && isApprover,
     accept_counter: r.state === "countered" && isRequester,
+    acknowledge: (r.state === "pending" || r.state === "approved") && isRequester && !!condition && !condition.acknowledged_by,
     withdraw: open && isRequester,
     rebase: r.state === "pending" && isRequester,
     add_evidence: mayAddEvidence(pp, r, approvers),
+    launch: unlaunched && launchers.includes(me) && r.base_version === g.version,
+    not_yet: unlaunched && launchers.includes(me) && r.base_version === g.version,
   };
   if (pp.wsRole === "viewer") for (const k of Object.keys(can) as (keyof typeof can)[]) can[k] = false;
-  const person = (id: string | null) => (id ? { id, name: memberName(id) } : null);
   const evidence = evidenceRows(r.id);
-  const revisions = all<RevisionRow>("SELECT * FROM v2_change_request_revisions WHERE change_request_id = ? ORDER BY revision", r.id).map((v) => ({
+  const revisions = revRows.map((v) => ({
     revision: v.revision,
     base_version: v.base_version,
     changes: shown(JSON.parse(v.changes_json) as Changes),
     note: v.note,
+    /** A counter's "Accept if…" condition (never sent to agents), and who acknowledged it and when. */
+    condition: v.condition,
+    acknowledged_by: person(v.acknowledged_by),
+    acknowledged_at: v.acknowledged_at,
     author: person(v.author_id)!,
     created_at: v.created_at,
     /** The links added while this revision was current (frozen once it is superseded or the request decided). */
@@ -409,19 +511,28 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     revisions,
     diff: { before: pick(base), after: pick(after) },
     approvers: approvers.map((id) => person(id)!),
+    /** Who may launch it once approved: the approval set plus workspace owners. */
+    launchers: launchers.map((id) => person(id)!),
     approved_by: person(r.approved_by),
     rejected_by: person(r.rejected_by),
     /** The approver's note (approved) or the rejection reason (rejected). */
     decision_note: r.decision_note,
     note: r.state === "approved" ? r.decision_note : null,
     rejection_reason: r.state === "rejected" ? r.decision_note : null,
+    /** The goal version the launch created (null until launched). */
     version: r.version,
+    /** pending (approved, no launch decision yet) | not_yet | launched | superseded (before launch) | null. */
+    launch: r.launch ?? null,
+    /** The latest not yet or launch: who and when. */
+    launch_decided_by: person(r.launch_by),
+    launch_decided_at: r.launch_at,
+    condition,
     /** Links on the current revision (the one an approval decides). */
     evidence_count: evidence.filter((e) => e.revision === r.revision).length,
     /** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
     approved_without_evidence: r.state === "approved" && r.approved_without_evidence !== null ? r.approved_without_evidence === 1 : null,
     can,
-    waiting_on_me: can.approve || can.accept_counter,
+    waiting_on_me: can.approve || can.accept_counter || (can.launch && r.launch === "pending"),
     created_at: r.created_at,
     updated_at: r.updated_at,
     decided_at: r.decided_at,
@@ -455,7 +566,7 @@ export function listChangeRequests(pp: PolicyPrincipal, opts: { state?: string |
   return rows.filter((r) => (!state || r.state === state) && canRead(r.goal_id)).map((r) => requestView(pp, r));
 }
 
-/** The workspace Requests tab: waiting on me (my approve or accept_counter flag is set), mine, others. */
+/** The workspace Requests tab: waiting on me (my approve or accept_counter flag, or launch while nobody decided), mine, others. */
 export function changeRequestGroups(pp: PolicyPrincipal, state?: string | null) {
   const views = listChangeRequests(pp, { state });
   return {
@@ -474,4 +585,12 @@ export function getChangeRequest(pp: PolicyPrincipal, id: string, goalId?: strin
 export function assertChangeRequestAction(a: string): ChangeRequestAction {
   if (!(CHANGE_REQUEST_ACTIONS as readonly string[]).includes(a)) throw notFound();
   return a as ChangeRequestAction;
+}
+
+/** A request's "Accept if…" condition and its acknowledgement, for reads that don't build the whole view (the MCP
+ *  brief). The caller has checked that the person can read the request's goal. */
+export function requestCondition(id: string) {
+  const c = counterRevision(revisionRows(id));
+  if (!c?.condition) return null;
+  return { revision: c.revision, text: c.condition, acknowledged_by: c.acknowledged_by ? { id: c.acknowledged_by, name: memberName(c.acknowledged_by) } : null, acknowledged_at: c.acknowledged_at };
 }

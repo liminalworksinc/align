@@ -297,16 +297,23 @@ see `lib/v2/limit-suggest.ts`), `GET .../sessions`, `GET .../alignments`, `GET .
 (a new "Northstar (sample)" workspace owned by the caller, counted like any workspace creation), change requests
 (`GET`/`POST .../goals/:goal/change-requests` with `{ base_version, changes, reason }`, `changes` any of `title`,
 `measures`, `depends_on`, `status`, `limits`, `GET .../change-requests/:id`,
-`POST .../change-requests/:id/{approve|reject|counter|accept_counter|withdraw|rebase}`, and the workspace-wide
-`GET .../change-requests?state=` as `{ waiting_on_me, mine, others }`; see `lib/v2/changes.ts`), change request
+`POST .../change-requests/:id/{approve|approve_and_launch|launch|not_yet|reject|counter|accept_counter|acknowledge|withdraw|rebase}`
+(approve records the decision and keeps the version unlaunched, `launch: "pending"`; `launch` publishes it as the goal's
+next version with its `goal_version` directives, from the approval set or a workspace owner, 403 `not_a_launcher`;
+`not_yet` publishes nothing; a newer goal version or a closed goal first makes it `superseded` with `launch:
+"superseded"`; `counter` takes an optional `condition` (1 to 2000) that only the requester `acknowledge`s, 403
+`not_requester`, 409 `already_acknowledged`, never a gate), each request reading `launch`, `launch_decided_by`,
+`launch_decided_at`, `launchers`, `condition` and `can.{approve_and_launch, launch, not_yet, acknowledge}`, and the
+workspace-wide `GET .../change-requests?state=` as `{ waiting_on_me, mine, others }`; see `lib/v2/changes.ts`), change request
 evidence (`POST .../change-requests/:id/evidence` `{ kind: "pr"|"ci_run"|"incident"|"dashboard"|"doc"|"other", url
 (https, ≤ 2048), label (≤ 120), revision? }` → 201 `{ evidence, change_request }`, cookie or device token, at most 10
 per revision; `DELETE .../change-requests/:id/evidence/:evidence` by its author while the revision is current and the
 request open, else `409 evidence_frozen`; each revision reads `evidence[]` with `source: "person"|"agent"` and
 `reported_as`, and the server-recorded `snapshot`; an approval sets `approved_without_evidence`; see
 `lib/v2/evidence.ts`), the decision value card of an approved request (`GET .../change-requests/:id/value` →
-`{ change_request_id, goal, diff, approved_by, decided_at, created_at, approved_without_evidence, affected: { parents,
-dependents }, delivery: { sessions, received, applied } | null, measured: { proposal_to_decision,
+`{ change_request_id, goal (version null until launched, base_version), launch, launched_at, diff, approved_by,
+decided_at, created_at, approved_without_evidence, affected: { parents, dependents }, delivery: { sessions, received,
+applied } | null (the launch's directive), measured: { proposal_to_decision, decision_to_launch,
 decision_to_first_applied }, my_report, reports, sees_all_reports, follow_up_url }`; `POST .../value` same-site `{ action:
 "viewed"|"follow_up"|"reported", estimate?, note? (≤ 500) }` → `{ recorded, report }`; 409 `not_approved` before
 approval, 409 `edit_closed` 7 days after a report was saved, 429 past 30 a minute per person; see `lib/v2/value.ts`),

@@ -7,7 +7,10 @@ it, and keeps the coding agents working toward that goal current with it.
   have owners, members and viewers; teams have leads and members.
 - **Goals with owners.** Goals have immutable versions and roll up from team goals to company goals. A goal changes
   only through its owner, or through a change request that someone in its approval set (the owner, the team's leads,
-  and for a company goal the workspace owners) approves or rejects, with a decision record.
+  and for a company goal the workspace owners) approves or rejects, with a decision record. Approving records the
+  decision; agents get the new version only when someone in the approval set or a workspace owner launches it
+  (or "not yet"; "Approve and launch" does both). A counter may carry an "Accept if…" condition the requester
+  acknowledges, never verified and never a gate.
 - **Agents that stay current.** The `align` CLI (`packages/align-agent`) pairs a machine, shares chosen Claude Code
   and Codex sessions toward a goal, meters their usage locally and delivers goal changes and stop directives at the
   next turn. Usage and estimated spend are reported per goal, team and session.

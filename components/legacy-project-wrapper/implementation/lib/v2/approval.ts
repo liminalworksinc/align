@@ -6,6 +6,7 @@ import { all } from "./db";
 //   keeping only current workspace members with role owner or member (viewers and people who left never approve).
 // The requester rule: the requester counts toward a set only if they own the goal. When the set then holds nobody,
 // the workspace owners other than the requester are the set (which may still be empty: the request stays open).
+// Launching an approved change request (lib/v2/changes.ts) is open to its effective set plus every workspace owner.
 
 export interface ApprovalGoal {
   id: string;
@@ -36,4 +37,10 @@ export function effectiveSet(g: ApprovalGoal, requesterId: string): string[] {
   const others = base.filter((u) => u !== requesterId);
   if (others.length) return others;
   return workspaceOwners(g.ws_id).filter((u) => u !== requesterId);
+}
+
+/** Who may launch an approved change request by `requesterId` (LAUNCH-001, owner decision 2026-10-31): its effective
+ *  approval set plus every workspace owner, sorted. Viewers never (neither set holds one). */
+export function launchSet(g: ApprovalGoal, requesterId: string): string[] {
+  return [...new Set([...effectiveSet(g, requesterId), ...workspaceOwners(g.ws_id)])].sort();
 }

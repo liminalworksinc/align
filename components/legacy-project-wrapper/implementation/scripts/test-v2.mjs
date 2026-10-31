@@ -713,7 +713,9 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 12, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 12 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 13, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 13 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
+  check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -1517,7 +1519,7 @@ try {
   );
   check(
     "change requests: can flags match the actions: the lead may approve, reject and counter; the requester may withdraw and rebase",
-    JSON.stringify(u2Sees.json?.can) === JSON.stringify({ approve: true, reject: true, counter: true, accept_counter: false, withdraw: false, rebase: false, add_evidence: true }) && cr1.json.can.withdraw === true && cr1.json.can.rebase === true && cr1.json.can.approve === false && cr1.json.can.add_evidence === true,
+    JSON.stringify(u2Sees.json?.can) === JSON.stringify({ approve: true, approve_and_launch: true, reject: true, counter: true, accept_counter: false, acknowledge: false, withdraw: false, rebase: false, add_evidence: true, launch: false, not_yet: false }) && cr1.json.can.withdraw === true && cr1.json.can.rebase === true && cr1.json.can.approve === false && cr1.json.can.add_evidence === true && cr1.json.launch === null && cr1.json.condition === null && cr1.json.launchers.map((p) => p.id).sort().join() === [U1.id, U2.id, U3.id].sort().join(),
     `${JSON.stringify(u2Sees.json?.can)} ${JSON.stringify(cr1.json.can)}`,
   );
   const crLists = {
@@ -1603,10 +1605,29 @@ try {
   const counterMeasures = [...GL.measures, { text: "Pen-test window booked", target: "April" }];
   const counterNoNote = await crAct(U2, GL.id, cr1.json.id, "counter", { changes: { measures: counterMeasures } });
   const counterAnchors = await crAct(U2, GL.id, cr1.json.id, "counter", { changes: { anchors: { repos: ["x"] } }, note: "anchors" });
-  const counter1 = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: counterMeasures }, note: "April works better for us" });
+  const COND = "Accept if the pen-test vendor is booked by May";
+  const counterBlankCond = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: counterMeasures }, note: "April", condition: "   " });
+  const counterLongCond = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: counterMeasures }, note: "April", condition: "c".repeat(2001) });
+  const noCondAck = await crAct(U1, GL.id, cr1.json.id, "acknowledge", {});
+  const counter1 = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: counterMeasures }, note: "April works better for us", condition: COND });
   const cr_approveCountered = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 2 });
+  const ackCountered = await crAct(U1, GL.id, cr1.json.id, "acknowledge", { revision: 2 });
   const acceptByLead = await crAct(U2, GL.id, cr1.json.id, "accept_counter", {});
   const accept1 = await crAct(U1, GL.id, cr1.json.id, "accept_counter", { revision: 2 });
+  const ackByLead = await crAct(U2, GL.id, cr1.json.id, "acknowledge", { revision: 2 });
+  const ackByViewer = await crAct(U4, GL.id, cr1.json.id, "acknowledge", { revision: 2 });
+  check(
+    "conditions (D2): a counter's condition must be 1 to 2000 characters (400 'condition is required' / 'condition is too long (max 2000 characters)'); a request with no condition -> acknowledge 409 no_condition; the counter stores the condition on revision 2 apart from its note; acknowledging while countered -> 409 wrong_state",
+    counterBlankCond.status === 400 && counterBlankCond.json?.message === "condition is required" && counterLongCond.status === 400 && counterLongCond.json?.message === "condition is too long (max 2000 characters)" && noCondAck.status === 409 && noCondAck.json?.error === "no_condition" &&
+      counter1.json?.revisions?.[1]?.condition === COND && counter1.json.revisions[1].note === "April works better for us" && counter1.json.revisions[0].condition === null && ackCountered.status === 409 && ackCountered.json?.error === "wrong_state",
+    `${counterBlankCond.text} ${counterLongCond.text} ${noCondAck.text} ${ackCountered.text}`,
+  );
+  check(
+    "conditions (D2): accepting the counter does not acknowledge the condition (acknowledged_by null, the requester's can.acknowledge set); the lead acknowledging -> 403 not_requester, a viewer -> 403 read_only",
+    accept1.json?.condition?.text === COND && accept1.json.condition.revision === 2 && accept1.json.condition.acknowledged_by === null && accept1.json.condition.acknowledged_at === null && accept1.json.can.acknowledge === true &&
+      ackByLead.status === 403 && ackByLead.json?.error === "not_requester" && ackByViewer.status === 403 && ackByViewer.json?.error === "read_only",
+    `${JSON.stringify(accept1.json?.condition)} ${ackByLead.text} ${ackByViewer.text}`,
+  );
   const crApproveOld = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 1 });
   const dirsAfterCounter = await dirs(D3, cursor3);
   check(
@@ -1621,19 +1642,90 @@ try {
     crCountered.json?.revision === 2 && crCountered.json.revisions[1].snapshot?.revision === 2 && crCountered.json.revisions[1].snapshot.bound_sessions === 1 && crCountered.json.revisions[0].evidence.length === 9 && crCountered.json.revisions[0].evidence.every((e) => !e.can_remove) && crCountered.json.revisions[1].evidence.length === 0 && crCountered.json.evidence_count === 0 && delFrozen.status === 409 && delFrozen.json?.error === "evidence_frozen",
     `${crCountered.json?.revision} ${JSON.stringify(crCountered.json?.revisions?.[1]?.snapshot)} ${delFrozen.text}`,
   );
+  // ---- D1: approving records the decision; agents get the new version only at launch ----
+  const glFeed = (extra = {}) => call("U3", "GET", `/api/v2/workspaces/${A}/goals`, { bearer: D3.access, ...extra });
+  const feedBefore = await glFeed();
+  const etagBefore = feedBefore.headers.get("etag");
+  const mcpDirsBefore = await mcpCall("U3", D3, "align_get_directives", { workspace: A });
   const approve1 = await crAct(U2, GL.id, cr1.json.id, "approve", { revision: 2, note: "Agreed for Q3" });
   const dirsAfterApprove = await dirs(D3, cursor3);
-  const glV2 = withDb((d) => d.prepare("SELECT version, created_by FROM v2_goal_versions WHERE goal_id = ? ORDER BY version DESC LIMIT 1").get(GL.id));
-  const gvCr = goalVersionsFor(dirsAfterApprove, GL.id);
+  const glAfterApprove = withDb((d) => d.prepare("SELECT version, created_by FROM v2_goal_versions WHERE goal_id = ? ORDER BY version DESC LIMIT 1").get(GL.id));
+  const feedAfterApprove = await glFeed();
+  const feed304 = await glFeed({ headers: { "if-none-match": etagBefore } });
+  const mcpGoalApproved = await mcpCall("U3", D3, "align_get_goal", { goal_id: GL.id, workspace: A });
+  const mcpListApproved = await mcpCall("U3", D3, "align_list_goals", { workspace: A });
+  const mcpDirsApproved = await mcpCall("U3", D3, "align_get_directives", { workspace: A });
+  const mcpRecApproved = await mcpCall("U4", D4, "align_get_decision_record", { change_request_id: cr1.json.id, workspace: A });
   check(
-    "change requests: the lead approves -> approved with approved_by, note and version 2; the goal is at version 2 authored by the approver",
-    approve1.status === 200 && approve1.json.state === "approved" && approve1.json.approved_by?.id === U2.id && approve1.json.note === "Agreed for Q3" && approve1.json.decision_note === "Agreed for Q3" && approve1.json.version === 2 && approve1.json.decided_at && glV2.version === 2 && glV2.created_by === U2.id,
-    `${approve1.text.slice(0, 300)} ${JSON.stringify(glV2)}`,
+    "launch (D1): the lead approves -> approved with approved_by, note and decided_at, launch pending, version null; no goal version is written (GL still at version 1)",
+    approve1.status === 200 && approve1.json.state === "approved" && approve1.json.approved_by?.id === U2.id && approve1.json.note === "Agreed for Q3" && approve1.json.decision_note === "Agreed for Q3" && approve1.json.version === null && approve1.json.launch === "pending" && approve1.json.decided_at && glAfterApprove.version === 1 &&
+      approve1.json.goal.version === 1 && approve1.json.can.approve === false && auditOf("change_request.approved", cr1.json.id).join() === U2.id,
+    `${approve1.text.slice(0, 300)} ${JSON.stringify(glAfterApprove)}`,
   );
   check(
-    "change requests (directives): counter and accept_counter write no directive; the approval writes one goal_version directive for the bound session with the new version, and no request text reaches it",
-    goalVersionsFor(dirsAfterCounter, GL.id).length === 0 && gvCr.length === 1 && gvCr[0].session_keys.includes(SC) && gvCr[0].goal.version === 2 && gvCr[0].goal.measures.some((m) => m.target === "April") && !JSON.stringify(dirsAfterApprove).includes("Agreed for Q3") && !JSON.stringify(dirsAfterApprove).includes("pen-test window in May") && !JSON.stringify(dirsAfterApprove).includes("April works better"),
-    JSON.stringify(dirsAfterApprove.directives.map((d) => [d.kind, d.goal?.id, d.goal?.version])),
+    "launch (D1): approve without launching: no directive for the bound session (its cursor has nothing new), the goals feed returns version 1 with the same ETag (If-None-Match -> 304), and align_get_goal, align_list_goals and align_get_directives still show version 1",
+    (dirsAfterApprove?.directives ?? []).length === 0 && goalVersionsFor(dirsAfterCounter, GL.id).length === 0 && feedAfterApprove.headers.get("etag") === etagBefore && feed304.status === 304 && feedAfterApprove.json.goals.find((g) => g.id === GL.id)?.version === 1 &&
+      mcpGoalApproved.sc?.goal?.version === 1 && mcpGoalApproved.sc.goal.measures.length === 1 && mcpGoalApproved.sc.versions.length === 1 && mcpListApproved.sc?.goals?.find((g) => g.id === GL.id)?.version === 1 && JSON.stringify(mcpDirsApproved.sc?.directives) === JSON.stringify(mcpDirsBefore.sc?.directives),
+    `${JSON.stringify(dirsAfterApprove).slice(0, 300)} ${etagBefore} ${feedAfterApprove.headers.get("etag")} ${feed304.status} ${mcpGoalApproved.sc?.goal?.version}`,
+  );
+  check(
+    "launch (D1): the MCP decision record says approved, launch pending, no resulting version, 'Approved, agents still on v1 until launch', and the condition not confirmed yet",
+    mcpRecApproved.sc?.decided === true && mcpRecApproved.sc.record?.state === "approved" && mcpRecApproved.sc.record.launch === "pending" && mcpRecApproved.sc.record.resulting_version === null && mcpRecApproved.text.includes("Approved, agents still on v1 until launch.") && !/agents on v2/.test(mcpRecApproved.text) &&
+      JSON.stringify(mcpRecApproved.sc.record.condition?.text) === JSON.stringify({ untrusted_text: COND }) && mcpRecApproved.sc.record.condition.acknowledged_by === null && /not confirmed yet/.test(mcpRecApproved.text),
+    mcpRecApproved.text.slice(0, 600),
+  );
+  const notYetViewer = await crAct(U4, GL.id, cr1.json.id, "not_yet", {});
+  const notYet1 = await crAct(U2, GL.id, cr1.json.id, "not_yet", {});
+  const notYet2 = await crAct(U3, GL.id, cr1.json.id, "not_yet", {});
+  const dirsAfterNotYet = await dirs(D3, cursor3);
+  const feedAfterNotYet = await glFeed();
+  check(
+    "launch (D1): not yet (a viewer -> 403 read_only) records the decision and publishes nothing; a later not yet replaces it (launch not_yet, launch_decided_by the owner); the feed's ETag is unchanged and no directive is written; audit change_request.not_yet",
+    notYetViewer.status === 403 && notYetViewer.json?.error === "read_only" && notYet1.json?.launch === "not_yet" && notYet1.json.launch_decided_by?.id === U2.id && notYet2.json?.launch === "not_yet" && notYet2.json.launch_decided_by?.id === U3.id && notYet2.json.version === null &&
+      (dirsAfterNotYet?.directives ?? []).length === 0 && feedAfterNotYet.headers.get("etag") === etagBefore && auditOf("change_request.not_yet", cr1.json.id).sort().join() === [U2.id, U3.id].sort().join(),
+    `${notYet1.text.slice(0, 200)} ${notYet2.text.slice(0, 200)} ${JSON.stringify(dirsAfterNotYet).slice(0, 200)}`,
+  );
+  // U1, the workspace owner, is the requester: not an approver, but in the launch set.
+  const launchViewer = await crAct(U4, GL.id, cr1.json.id, "launch", {});
+  const launch1 = await crAct(U1, GL.id, cr1.json.id, "launch", {});
+  const dirsAfterLaunch = await dirs(D3, cursor3);
+  const glV2 = withDb((d) => d.prepare("SELECT version, created_by FROM v2_goal_versions WHERE goal_id = ? ORDER BY version DESC LIMIT 1").get(GL.id));
+  const gvCr = goalVersionsFor(dirsAfterLaunch, GL.id);
+  const dirsAgain = await dirs(D3, dirsAfterLaunch?.next_cursor);
+  const feedAfterLaunch = await glFeed();
+  const mcpGoalLaunched = await mcpCall("U3", D3, "align_get_goal", { goal_id: GL.id, workspace: A });
+  const mcpDirsLaunched = await mcpCall("U3", D3, "align_get_directives", { workspace: A });
+  const launchAgain = await crAct(U2, GL.id, cr1.json.id, "launch", {});
+  const notYetAfter = await crAct(U2, GL.id, cr1.json.id, "not_yet", {});
+  check(
+    "launch (D1): a viewer -> 403 read_only; the workspace owner (the requester, not an approver) launches -> launch launched, version 2, launch_decided_by them; the goal is at version 2 authored by the approver; audit change_request.launched and goal.versioned by the launcher",
+    launchViewer.status === 403 && launchViewer.json?.error === "read_only" && launch1.status === 200 && launch1.json.state === "approved" && launch1.json.launch === "launched" && launch1.json.version === 2 && launch1.json.launch_decided_by?.id === U1.id && glV2.version === 2 && glV2.created_by === U2.id &&
+      auditOf("change_request.launched", cr1.json.id).join() === U1.id && auditOf("goal.versioned", GL.id).includes(U1.id),
+    `${launch1.text.slice(0, 300)} ${JSON.stringify(glV2)}`,
+  );
+  check(
+    "launch (D1): the launch writes exactly one goal_version directive for the bound session carrying version 2 (and no request text); the next fetch from its cursor is empty; the feed's ETag changes and MCP reads version 2 with the new directive",
+    gvCr.length === 1 && dirsAfterLaunch.directives.length === 1 && gvCr[0].session_keys.includes(SC) && gvCr[0].goal.version === 2 && gvCr[0].goal.measures.some((m) => m.target === "April") && !JSON.stringify(dirsAfterLaunch).includes("Agreed for Q3") && !JSON.stringify(dirsAfterLaunch).includes("pen-test window in May") && !JSON.stringify(dirsAfterLaunch).includes("April works better") && !JSON.stringify(dirsAfterLaunch).includes(COND) &&
+      (dirsAgain?.directives ?? []).length === 0 && feedAfterLaunch.headers.get("etag") !== etagBefore && feedAfterLaunch.json.goals.find((g) => g.id === GL.id)?.version === 2 && mcpGoalLaunched.sc?.goal?.version === 2 && mcpDirsLaunched.sc?.directives?.[0]?.kind === "goal_version" && mcpDirsLaunched.sc.directives[0].goal?.version === 2 && !(mcpDirsBefore.sc?.directives ?? []).some((d) => d.id === mcpDirsLaunched.sc.directives[0].id) && (mcpDirsBefore.sc?.directives?.[0]?.id ?? null) === (mcpDirsLaunched.sc.directives[1]?.id ?? null),
+    JSON.stringify({ dirs: dirsAfterLaunch?.directives?.map((d) => [d.kind, d.goal?.id, d.goal?.version]), again: dirsAgain?.directives?.length, etag: [etagBefore, feedAfterLaunch.headers.get("etag")], feedV: feedAfterLaunch.json?.goals?.find((g) => g.id === GL.id)?.version, mcpGoal: mcpGoalLaunched.sc?.goal?.version, mcpDir: mcpDirsLaunched.sc?.directives?.slice(0, 2).map((d) => [d.id, d.kind, d.goal?.version]), before: mcpDirsBefore.sc?.directives?.[0]?.id }),
+  );
+  check(
+    "launch (D1): launching again -> 409 wrong_state 'This change is already launched as version 2.'; not yet after the launch -> 409 wrong_state",
+    launchAgain.status === 409 && launchAgain.json?.error === "wrong_state" && launchAgain.json.message === "This change is already launched as version 2." && notYetAfter.status === 409 && notYetAfter.json?.error === "wrong_state",
+    `${launchAgain.text} ${notYetAfter.text}`,
+  );
+  const ack1 = await crAct(U1, GL.id, cr1.json.id, "acknowledge", { revision: 2 });
+  const ack2 = await crAct(U1, GL.id, cr1.json.id, "acknowledge", { revision: 2 });
+  check(
+    "conditions (D2): the requester acknowledges after the launch (never a gate): acknowledged_by them with a time, audit change_request.condition_acknowledged; a second acknowledge -> 409 already_acknowledged",
+    ack1.status === 200 && ack1.json.condition?.acknowledged_by?.id === U1.id && typeof ack1.json.condition.acknowledged_at === "string" && ack1.json.revisions[1].acknowledged_by?.id === U1.id && ack1.json.can.acknowledge === false && auditOf("change_request.condition_acknowledged", cr1.json.id).join() === U1.id && ack2.status === 409 && ack2.json?.error === "already_acknowledged",
+    `${ack1.text.slice(0, 300)} ${ack2.text}`,
+  );
+  const mcpRecLaunched = await mcpCall("U4", D4, "align_get_decision_record", { change_request_id: cr1.json.id, workspace: A });
+  check(
+    "launch (D1/D2): the MCP decision record then says launch launched, resulting_version 2, launch_decided_by the owner, 'Launched, agents on v2', and the condition acknowledged by the requester (no 'verified')",
+    mcpRecLaunched.sc?.record?.launch === "launched" && mcpRecLaunched.sc.record.resulting_version === 2 && mcpRecLaunched.sc.record.launch_decided_by?.id === U1.id && mcpRecLaunched.text.includes("Launched, agents on v2.") && mcpRecLaunched.sc.record.condition?.acknowledged_by?.id === U1.id && /acknowledged by/.test(mcpRecLaunched.text) && !/verified/i.test(mcpRecLaunched.text.replace("none verified", "")),
+    mcpRecLaunched.text.slice(0, 600),
   );
   const record = await crGet(U4, GL.id, cr1.json.id);
   check(
@@ -1700,41 +1792,82 @@ try {
     evRowsAll.length > 0 && evRowsAll.every((e) => !evEventText.includes(e.url) && !evEventText.includes(e.label)) && !evEventText.includes("https://"),
     `${evRowsAll.length}`,
   );
+  // Two requests approved at the same base: the first launch supersedes the other before its launch.
   const approveA = await crAct(U3, GL.id, crA.json?.id, "approve", { revision: 1 });
-  const bNow = await crGet(U2, GL.id, crB.json?.id);
-  const cr_approveB = await crAct(U3, GL.id, crB.json?.id, "approve", { revision: 1 });
-  const rebaseOld = await crAct(U2, GL.id, crB.json?.id, "rebase", { base_version: 2 });
-  const rebaseByOther = await crAct(U1, GL.id, crB.json?.id, "rebase", { base_version: 3 });
-  const cursorBeforeRebase = await drain(D3);
-  const rebaseB = await crAct(U2, GL.id, crB.json?.id, "rebase", { base_version: 3 });
-  const dirsAfterRebase = await dirs(D3, cursorBeforeRebase);
-  const approveB2 = await crAct(U3, GL.id, crB.json?.id, "approve", { revision: 2 });
+  const bNow = await crGet(U3, GL.id, crB.json?.id);
+  const approveBearly = await crAct(U3, GL.id, crB.json?.id, "approve", { revision: 1 });
+  const launchBbyReq = await crAct(U2, GL.id, crB.json?.id, "launch", {});
+  const launchA = await crAct(U3, GL.id, crA.json?.id, "launch", {});
+  const bSuperseded = await crGet(U2, GL.id, crB.json?.id);
+  const launchB = await crAct(U3, GL.id, crB.json?.id, "launch", {});
+  const bRecord = await mcpCall("U4", D4, "align_get_decision_record", { change_request_id: crB.json?.id, workspace: A });
   check(
-    "change requests: a lead's own request is decided by the rest of the set (the owner); after another request is approved it stays pending, behind, approve -> 409 stale_version",
-    crBapprovers === U3.id && approveA.json?.state === "approved" && approveA.json.approved_without_evidence === false && auditOf("change_request.approved_without_evidence", crA.json?.id).length === 0 && approveA.json.version === 3 && bNow.json?.state === "pending" && bNow.json.behind === true && bNow.json.can.approve === false && bNow.json.can.rebase === true && cr_approveB.status === 409 && cr_approveB.json?.error === "stale_version",
-    `${crBapprovers} ${approveA.text.slice(0, 200)} ${bNow.json?.state} ${cr_approveB.text}`,
+    "launch (D1): a lead's own request is decided by the rest of the set (the owner); approving A leaves B pending and not behind (the goal is still at version 2), so B can be approved at the same base too",
+    crBapprovers === U3.id && approveA.json?.state === "approved" && approveA.json.launch === "pending" && approveA.json.approved_without_evidence === false && auditOf("change_request.approved_without_evidence", crA.json?.id).length === 0 && approveA.json.version === null && bNow.json?.state === "pending" && bNow.json.behind === false && bNow.json.can.approve === true && approveBearly.json?.launch === "pending",
+    `${crBapprovers} ${approveA.text.slice(0, 200)} ${bNow.json?.behind} ${approveBearly.text.slice(0, 200)}`,
   );
   check(
-    "change requests: rebase with an old base -> 409 stale_version, by someone else -> 403 not_requester; to the current version -> base 3, revision 2 (no directive), then approve -> version 4",
-    rebaseOld.status === 409 && rebaseOld.json?.error === "stale_version" && rebaseByOther.status === 403 && rebaseByOther.json?.error === "not_requester" && rebaseB.json?.base_version === 3 && rebaseB.json.revision === 2 && rebaseB.json.behind === false && goalVersionsFor(dirsAfterRebase, GL.id).length === 0 && approveB2.json?.state === "approved" && approveB2.json.version === 4,
+    "launch (D1): the requester outside the launch set (a member who is neither an approver of their own request nor a workspace owner) -> 403 not_a_launcher; launching A -> version 3, and B becomes superseded before launch (approval kept, audit change_request.superseded by the launcher); launching B -> 409 wrong_state naming the requester; its decision record says it never reached agents",
+    launchBbyReq.status === 403 && launchBbyReq.json?.error === "not_a_launcher" && launchBbyReq.json.message === "Only someone who can approve for this goal, or a workspace owner, can launch it" && launchA.json?.launch === "launched" && launchA.json.version === 3 &&
+      bSuperseded.json?.state === "superseded" && bSuperseded.json.launch === "superseded" && bSuperseded.json.approved_by?.id === U3.id && bSuperseded.json.version === null && bSuperseded.json.can.launch === false && auditOf("change_request.superseded", crB.json?.id).join() === U3.id &&
+      launchB.status === 409 && launchB.json?.error === "wrong_state" && launchB.json.message === `This change was superseded before launch. ${U2.name} can propose it again.` &&
+      bRecord.sc?.decided === true && bRecord.sc.record?.state === "superseded" && bRecord.sc.record.launch === "superseded" && bRecord.sc.record.resulting_version === null && /superseded before launch: it never reached agents/.test(bRecord.text),
+    `${launchBbyReq.text} ${launchA.text.slice(0, 200)} ${bSuperseded.json?.state}/${bSuperseded.json?.launch} ${launchB.text} ${bRecord.text.slice(0, 300)}`,
+  );
+  // The requester proposes again; an approved change the owner outruns with a new version is superseded too.
+  const crBagainOld = await propose(U2, GL.id, { base_version: 2, changes: { measures: [{ text: "Critical findings", target: "0" }] }, reason: "Track criticals, again" });
+  const crB2 = await propose(U2, GL.id, { base_version: 3, changes: { measures: [{ text: "Critical findings", target: "0" }] }, reason: "Track criticals, again" });
+  const crA2 = await propose(U1, GL.id, { base_version: 3, changes: { title: "Pen-test the platform, the API and the app" }, reason: "And the app" });
+  const approveA2 = await crAct(U2, GL.id, crA2.json?.id, "approve", { revision: 1 });
+  const cursorOwnerSave = await drain(D3);
+  const ownerV4 = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GL.id}/versions`, { cookie: U3.cookie, body: { version: 3, title: "Pen-test the platform and the public API" } });
+  const a2Now = await crGet(U1, GL.id, crA2.json?.id);
+  const dirsOwnerSave = await dirs(D3, cursorOwnerSave);
+  check(
+    "launch (D1): the requester of a request superseded before launch proposes again (an old base -> 409 stale_version; the current one -> 201); an approved change the owner outruns with a new version is superseded before launch: only the owner's version reaches the session",
+    crBagainOld.status === 409 && crBagainOld.json?.error === "stale_version" && crB2.status === 201 && approveA2.json?.launch === "pending" && ownerV4.status === 201 && ownerV4.json.version === 4 && a2Now.json?.state === "superseded" && a2Now.json.launch === "superseded" && auditOf("change_request.superseded", crA2.json?.id).join() === U3.id &&
+      goalVersionsFor(dirsOwnerSave, GL.id).map((d) => d.goal.version).join() === "4" && goalVersionsFor(dirsOwnerSave, GL.id)[0].goal.title === "Pen-test the platform and the public API",
+    `${crBagainOld.text} ${crB2.status} ${ownerV4.status} ${a2Now.json?.state}/${a2Now.json?.launch} ${JSON.stringify(goalVersionsFor(dirsOwnerSave, GL.id).map((d) => d.goal.version))}`,
+  );
+  // A pending request left behind by a newer version: rebase, then approve and launch in one step.
+  const bNow2 = await crGet(U2, GL.id, crB2.json?.id);
+  const cr_approveB = await crAct(U3, GL.id, crB2.json?.id, "approve", { revision: 1 });
+  const cr_approveLaunchB = await crAct(U3, GL.id, crB2.json?.id, "approve_and_launch", { revision: 1 });
+  const rebaseOld = await crAct(U2, GL.id, crB2.json?.id, "rebase", { base_version: 3 });
+  const rebaseByOther = await crAct(U1, GL.id, crB2.json?.id, "rebase", { base_version: 4 });
+  const cursorBeforeRebase = await drain(D3);
+  const rebaseB = await crAct(U2, GL.id, crB2.json?.id, "rebase", { base_version: 4 });
+  const dirsAfterRebase = await dirs(D3, cursorBeforeRebase);
+  const approveB2 = await crAct(U3, GL.id, crB2.json?.id, "approve_and_launch", { revision: 2 });
+  const dirsAfterApproveLaunch = await dirs(D3, cursorBeforeRebase);
+  check(
+    "change requests: a pending request behind the goal stays pending (behind, can.approve false, can.rebase true); approve and approve_and_launch -> 409 stale_version",
+    bNow2.json?.state === "pending" && bNow2.json.behind === true && bNow2.json.can.rebase === true && cr_approveB.status === 409 && cr_approveB.json?.error === "stale_version" && cr_approveLaunchB.status === 409 && cr_approveLaunchB.json?.error === "stale_version",
+    `${bNow2.json?.behind} ${cr_approveB.text} ${cr_approveLaunchB.text}`,
+  );
+  check(
+    "launch (D1): rebase with an old base -> 409 stale_version, by someone else -> 403 not_requester; to the current version -> base 4, revision 2 (no directive); then approve and launch in one step -> approved and launched as version 5, one goal_version directive, audited as two decisions (approved and launched by the owner)",
+    rebaseOld.status === 409 && rebaseOld.json?.error === "stale_version" && rebaseByOther.status === 403 && rebaseByOther.json?.error === "not_requester" && rebaseB.json?.base_version === 4 && rebaseB.json.revision === 2 && rebaseB.json.behind === false && goalVersionsFor(dirsAfterRebase, GL.id).length === 0 &&
+      approveB2.json?.state === "approved" && approveB2.json.launch === "launched" && approveB2.json.version === 5 && approveB2.json.approved_by?.id === U3.id && approveB2.json.launch_decided_by?.id === U3.id && goalVersionsFor(dirsAfterApproveLaunch, GL.id).map((d) => d.goal.version).join() === "5" &&
+      auditOf("change_request.approved", crB2.json?.id).join() === U3.id && auditOf("change_request.launched", crB2.json?.id).join() === U3.id,
     `${rebaseOld.text} ${rebaseByOther.status} ${rebaseB.text.slice(0, 200)} ${approveB2.text.slice(0, 200)}`,
   );
   const dirsRejWd = await dirs(D3, cursor3);
   check(
-    "change requests (directives): only approvals write goal_version directives (two approvals here, none for create, reject, withdraw or rebase)",
-    goalVersionsFor(dirsRejWd, GL.id).map((d) => d.goal.version).join() === "3,4",
+    "change requests (directives): only launches and the owner's version write goal_version directives (versions 3, 4 and 5 here; none for create, approve, not yet, reject, withdraw, rebase or supersede)",
+    goalVersionsFor(dirsRejWd, GL.id).map((d) => d.goal.version).join() === "3,4,5",
     JSON.stringify(goalVersionsFor(dirsRejWd, GL.id).map((d) => d.goal.version)),
   );
 
   // A goal that is dropped supersedes its open requests.
-  const crS1 = await propose(U1, GL.id, { base_version: 4, changes: { title: "Pen-test it all" }, reason: "s1" });
-  const crS2 = await propose(U2, GL.id, { base_version: 4, changes: { status: "achieved" }, reason: "s2" });
+  const crS1 = await propose(U1, GL.id, { base_version: 5, changes: { title: "Pen-test it all" }, reason: "s1" });
+  const crS2 = await propose(U2, GL.id, { base_version: 5, changes: { status: "achieved" }, reason: "s2" });
   const crS2c = await crAct(U3, GL.id, crS2.json?.id, "counter", { changes: { status: "achieved", title: "Pen-test done" }, note: "with a new title" });
-  const drop = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GL.id}/versions`, { cookie: U3.cookie, body: { version: 4, status: "dropped" } });
+  const drop = await call("U3", "POST", `/api/v2/workspaces/${A}/goals/${GL.id}/versions`, { cookie: U3.cookie, body: { version: 5, status: "dropped" } });
   const s1 = await crGet(U1, GL.id, crS1.json?.id);
   const s2 = await crGet(U2, GL.id, crS2.json?.id);
   const actSuperseded = await crAct(U1, GL.id, crS1.json?.id, "withdraw", {});
-  const onDropped = await propose(U1, GL.id, { base_version: 5, changes: { title: "Revive" }, reason: "revive" });
+  const onDropped = await propose(U1, GL.id, { base_version: 6, changes: { title: "Revive" }, reason: "revive" });
   check(
     "change requests: the owner drops the goal -> its pending and countered requests become superseded (audit names the owner), take no action (409 wrong_state), and a new one -> 409 goal_not_active",
     crS2c.json?.state === "countered" && drop.status === 201 && s1.json?.state === "superseded" && s2.json?.state === "superseded" && auditOf("change_request.superseded", crS1.json?.id).join() === U3.id && auditOf("change_request.superseded", crS2.json?.id).join() === U3.id && actSuperseded.status === 409 && actSuperseded.json?.error === "wrong_state" && onDropped.status === 409 && onDropped.json?.error === "goal_not_active",
@@ -1744,9 +1877,17 @@ try {
   const GA = (await mkGoal(U3, { title: "Write the runbook", visibility: "workspace" })).json;
   const crX = await propose(U1, GA.id, { base_version: 1, changes: { status: "achieved" }, reason: "It is written" });
   const crY = await propose(U2, GA.id, { base_version: 1, changes: { title: "Write the runbooks" }, reason: "plural" });
+  const approveY = await crAct(U3, GA.id, crY.json?.id, "approve", { revision: 1 });
   const approveX = await crAct(U3, GA.id, crX.json?.id, "approve", { revision: 1 });
+  const gaAfterApprove = (await call("U3", "GET", `/api/v2/workspaces/${A}/goals/${GA.id}`, { cookie: U3.cookie })).json?.goal;
+  const launchX = await crAct(U3, GA.id, crX.json?.id, "launch", {});
   const y = await crGet(U2, GA.id, crY.json?.id);
-  check("change requests: approving a request that marks the goal achieved supersedes the goal's other open requests", approveX.json?.state === "approved" && y.json?.state === "superseded", `${approveX.text.slice(0, 200)} ${y.json?.state}`);
+  const gaAfterLaunch = (await call("U3", "GET", `/api/v2/workspaces/${A}/goals/${GA.id}`, { cookie: U3.cookie })).json?.goal;
+  check(
+    "launch (D1): approving a request that marks the goal achieved leaves the goal active; launching it closes the goal and supersedes the approved request still waiting for launch (an open one is superseded as the drop above shows)",
+    approveX.json?.state === "approved" && approveY.json?.launch === "pending" && gaAfterApprove?.status === "active" && launchX.json?.launch === "launched" && gaAfterLaunch?.status === "achieved" && y.json?.state === "superseded" && y.json.launch === "superseded",
+    `${approveX.text.slice(0, 200)} ${gaAfterApprove?.status} ${gaAfterLaunch?.status} ${y.json?.state}/${y.json?.launch}`,
+  );
 
   // Team goals: requests are as visible as their goal.
   const crTeam = await propose(U3, G2.id, { base_version: (await call("U3", "GET", `/api/v2/workspaces/${A}/goals/${G2.id}`, { cookie: U3.cookie })).json.goal.version, changes: { title: "Platform reliability (p99 and p999)" }, reason: "Track tails" });
@@ -1759,14 +1900,14 @@ try {
   const wsApproved = await crList(U1, "?state=approved");
   check(
     "change requests: a team goal's request is hidden from someone who can't read the goal (404, not listed); ?state= filters; an unknown state -> 400",
-    crTeam.status === 201 && teamHidden.status === 404 && !u4Ids.includes(crTeam.json.id) && u4Ids.includes(cr1.json.id) && byState.status === 200 && byState.json.change_requests.length === 2 && byState.json.change_requests.every((c) => c.state === "superseded") && badState.status === 400 && wsBadState.status === 400 && [...wsApproved.json.waiting_on_me, ...wsApproved.json.mine, ...wsApproved.json.others].every((c) => c.state === "approved"),
+    crTeam.status === 201 && teamHidden.status === 404 && !u4Ids.includes(crTeam.json.id) && u4Ids.includes(cr1.json.id) && byState.status === 200 && byState.json.change_requests.length === 4 && byState.json.change_requests.every((c) => c.state === "superseded") && byState.json.change_requests.filter((c) => c.launch === "superseded").length === 2 && badState.status === 400 && wsBadState.status === 400 && [...wsApproved.json.waiting_on_me, ...wsApproved.json.mine, ...wsApproved.json.others].every((c) => c.state === "approved"),
     `${crTeam.status} ${teamHidden.status} ${byState.status} ${byState.json?.change_requests?.length} ${badState.status} ${wsBadState.status}`,
   );
   const crAudit = withDb((d) => d.prepare("SELECT action, actor_id FROM v2_audit WHERE ws_id = ? AND action LIKE 'change_request.%'").all(A));
-  const crActions = ["created", "approved", "rejected", "countered", "counter_accepted", "withdrawn", "rebased", "superseded"].map((a) => `change_request.${a}`);
+  const crActions = ["created", "approved", "launched", "not_yet", "rejected", "countered", "counter_accepted", "condition_acknowledged", "withdrawn", "rebased", "superseded"].map((a) => `change_request.${a}`);
   check(
-    "change requests: every action is audited with its actor (created, approved, rejected, countered, counter_accepted, withdrawn, rebased, superseded); an approval also writes goal.versioned by the approver",
-    crActions.every((a) => crAudit.some((r) => r.action === a)) && crAudit.every((r) => r.actor_id) && auditOf("goal.versioned", GL.id).includes(U2.id) && auditOf("change_request.counter_accepted", cr1.json.id).join() === U1.id,
+    "change requests: every action is audited with its actor (created, approved, launched, not_yet, rejected, countered, counter_accepted, condition_acknowledged, withdrawn, rebased, superseded); a launch writes goal.versioned by the launcher",
+    crActions.every((a) => crAudit.some((r) => r.action === a)) && crAudit.every((r) => r.actor_id) && auditOf("goal.versioned", GL.id).includes(U1.id) && auditOf("change_request.counter_accepted", cr1.json.id).join() === U1.id,
     JSON.stringify(crAudit.slice(-10)),
   );
 
@@ -1797,13 +1938,19 @@ try {
   const sCrs = (await call("U2", "GET", `/api/v2/workspaces/${SW}/change-requests`, { cookie: U2.cookie })).json;
   const sCr = sCrs?.waiting_on_me?.[0];
   check(
-    "sample: one pending change request on the security goal, from the caller, explaining why the sample shows it; the caller can approve, counter, reject, withdraw and rebase it and add evidence; its revision carries an Align snapshot",
-    sCrs?.waiting_on_me?.length === 1 && sCrs.mine.length === 0 && sCrs.others.length === 0 && sCr.goal.id === sSec.id && sCr.state === "pending" && sCr.requester.id === U2.id && /sample/i.test(sCr.reason) && sCr.diff.after.measures.length === sSec.measures.length + 1 && Object.values(sCr.can).filter(Boolean).length === 6 && !sCr.can.accept_counter && sCr.can.add_evidence && sCr.revisions[0].snapshot?.recorded_by === "align" && sCr.revisions[0].snapshot.revision === 1,
+    "sample: one pending change request on the security goal, from the caller, explaining why the sample shows it; the caller can approve (or approve and launch), counter, reject, withdraw and rebase it and add evidence; its revision carries an Align snapshot",
+    sCrs?.waiting_on_me?.length === 1 && sCrs.mine.length === 0 && sCrs.others.length === 0 && sCr.goal.id === sSec.id && sCr.state === "pending" && sCr.requester.id === U2.id && /sample/i.test(sCr.reason) && sCr.diff.after.measures.length === sSec.measures.length + 1 && Object.values(sCr.can).filter(Boolean).length === 7 && sCr.can.approve_and_launch && !sCr.can.accept_counter && sCr.can.add_evidence && sCr.revisions[0].snapshot?.recorded_by === "align" && sCr.revisions[0].snapshot.revision === 1,
     JSON.stringify(sCrs).slice(0, 400),
   );
   const sApprove = await call("U2", "POST", `/api/v2/workspaces/${SW}/goals/${sSec.id}/change-requests/${sCr?.id}/approve`, { cookie: U2.cookie, body: { revision: 1 } });
+  const sSecApproved = (await call("U2", "GET", `/api/v2/workspaces/${SW}/goals/${sSec.id}`, { cookie: U2.cookie })).json?.goal;
+  const sLaunch = await call("U2", "POST", `/api/v2/workspaces/${SW}/goals/${sSec.id}/change-requests/${sCr?.id}/launch`, { cookie: U2.cookie, body: {} });
   const sSecNow = (await call("U2", "GET", `/api/v2/workspaces/${SW}/goals/${sSec.id}`, { cookie: U2.cookie })).json?.goal;
-  check("sample: approving the sample request -> the security goal is at version 2 and the request approved by the caller", sApprove.json?.state === "approved" && sApprove.json.approved_by?.id === U2.id && sSecNow?.version === 2, `${sApprove.text.slice(0, 200)} ${sSecNow?.version}`);
+  check(
+    "sample: approving the sample request leaves the security goal at version 1 (launch pending); the caller launches it -> version 2, the request approved and launched by the caller",
+    sApprove.json?.state === "approved" && sApprove.json.approved_by?.id === U2.id && sApprove.json.launch === "pending" && sSecApproved?.version === 1 && sLaunch.json?.launch === "launched" && sLaunch.json.launch_decided_by?.id === U2.id && sSecNow?.version === 2,
+    `${sApprove.text.slice(0, 200)} ${sLaunch.text.slice(0, 200)} ${sSecNow?.version}`,
+  );
   const sAudit = withDb((d) => d.prepare("SELECT action, actor_id FROM v2_audit WHERE ws_id = ?").all(SW));
   check("sample: every audit row names the caller", sAudit.length >= 10 && sAudit.every((r) => r.actor_id === U2.id) && ["workspace.created", "team.created", "goal.created", "alignment.approved", "change_request.created"].every((a) => sAudit.some((r) => r.action === a)), JSON.stringify(sAudit.slice(0, 5)));
   const sRename = await call("U2", "PATCH", `/api/v2/workspaces/${s2ws.json?.id}`, { cookie: U2.cookie, body: { name: "Northstar, renamed" } });
@@ -2257,7 +2404,8 @@ try {
       // With no evidence, Approve asks first ("Approve without evidence?"); then evidence is added and it approves plainly.
       const clickButton = (label) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), label);
       await clickButton("Approve");
-      await page.waitForFunction(() => document.body.innerText.includes("Approve without evidence?") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve without evidence as version 2"), { timeout: 15000 });
+      await page.waitForFunction(() => document.body.innerText.includes("Approve without evidence?") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve without evidence as version 2 (agents switch at launch)") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve without evidence and launch version 2"), { timeout: 15000 });
+      const approvePanel = await page.evaluate(() => document.body.innerText);
       await clickButton("Approve");
       await clickButton("Add evidence");
       await page.waitForSelector('input[type="url"]');
@@ -2275,14 +2423,23 @@ try {
         JSON.stringify({ ...evLink, text: evLink.text.slice(0, 300) }),
       );
       await clickButton("Approve");
-      await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve as version 2"), { timeout: 15000 });
-      await clickButton("Approve as version 2");
-      await page.waitForFunction(() => document.body.innerText.includes("Approved by") && document.body.innerText.includes("It became version 2") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve as version 2 (agents switch at launch)") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve and launch version 2"), { timeout: 15000 });
+      await clickButton("Approve as version 2 (agents switch at launch)");
+      await page.waitForFunction(() => document.body.innerText.includes("Approved, agents still on v1 until launch") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
+      const approvedText = await page.evaluate(() => document.body.innerText);
+      const launchButtons = await page.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.textContent));
+      check(
+        "ui (Chrome): the approve panel says agents stay on version 1 until someone launches it and labels the buttons \"(agents switch at launch)\" and \"Approve and launch version 2\"; after approving the record reads \"Approved, agents still on v1 until launch\" (not \"It became version 2\", never \"agents on v2\") and offers Launch version 2 to agents and Not yet",
+        approvePanel.includes("Approving records the decision. Agents stay on version 1 until someone launches it.") && !approvedText.includes("It became version 2") && !/agents on v2/.test(approvedText) && launchButtons.includes("Launch version 2 to agents") && launchButtons.includes("Not yet"),
+        approvedText.slice(0, 600),
+      );
+      await clickButton("Launch version 2 to agents");
+      await page.waitForFunction(() => document.body.innerText.includes("Launched, agents on v2") && document.body.innerText.includes("It became version 2") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
       const sampleGoal = await page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Pass the security review")?.getAttribute("href"));
       await page.goto(`${BASE}${sampleGoal}`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Change requests") && document.body.innerText.includes("approved") && document.body.innerText.includes("version 2"), { timeout: 15000 });
       const ownGoalText = await page.evaluate(() => document.body.innerText);
-      check("ui (Chrome): first run offers the Northstar sample; its request is approved from the Requests tab; the owner's goal page lists it without Propose a change", !ownGoalText.includes("Propose a change") && /Your requests/.test(requestsText), "");
+      check("ui (Chrome): first run offers the Northstar sample; its request is approved and launched from the Requests tab; the owner's goal page lists it without Propose a change", !ownGoalText.includes("Propose a change") && /Your requests/.test(requestsText), "");
       await page.goto(`${BASE}/app`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Northstar (sample)") && !document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
       await page.type("main form input", "UI workspace");
@@ -2621,12 +2778,20 @@ try {
       `${lPut.status} ${lEp.status} ${crL.text.slice(0, 300)} ${crBad.text} ${counterL.text.slice(0, 200)} ${acceptL.status} ${before} ${afterCounter}`,
     );
     const approveL = await lw(LB, "POST", `/goals/${GA.id}/change-requests/${crL.json?.id}/approve`, { revision: 2 });
-    const gaV = verRow(GA.id, approveL.json?.version);
+    const gaApproved = (await lw(LD, "GET", `/goals/${GA.id}`)).json?.goal;
+    const afterApproveL = gvOf(await lDirs()).length;
+    check(
+      "limits (D1): limits confirmed by an approval reach no agent until launch: the goal keeps its two limits and no directive is written",
+      approveL.status === 200 && approveL.json.launch === "pending" && gaApproved?.limits?.length === 2 && gaApproved.version === curA.version && afterApproveL === before,
+      `${approveL.text.slice(0, 200)} ${gaApproved?.limits?.length} ${afterApproveL} ${before}`,
+    );
+    const launchL = await lw(LB, "POST", `/goals/${GA.id}/change-requests/${crL.json?.id}/launch`, {});
+    const gaV = verRow(GA.id, launchL.json?.version);
     const gvAfter = gvOf(await lDirs());
     const snap = gvAfter[gvAfter.length - 1]?.goal;
     check(
-      "limits (change requests): the team lead approves -> a new version whose limits are the request's, created_by the lead; the bound session's goal_version directive snapshot carries limits [{id, type, text, source}] and no request reason",
-      approveL.status === 200 && approveL.json.state === "approved" && gaV?.created_by === LB.id && JSON.parse(gaV.limits_json).length === 3 && gvAfter.length === before + 1 && snap?.limits?.length === 3 && snap.limits[2].text === "Inference must stay inside the EU regions" && snap.limits[2].source?.kind === "manual" && snap.limits.every((l) => /^lim_/.test(l.id)) && !JSON.stringify(gvAfter).includes("Limits from the infra sync"),
+      "limits (change requests): the team lead approves and launches -> a new version whose limits are the request's, created_by the lead; the bound session's goal_version directive snapshot carries limits [{id, type, text, source}] and no request reason",
+      approveL.status === 200 && approveL.json.state === "approved" && launchL.json?.launch === "launched" && gaV?.created_by === LB.id && JSON.parse(gaV.limits_json).length === 3 && gvAfter.length === before + 1 && snap?.limits?.length === 3 && snap.limits[2].text === "Inference must stay inside the EU regions" && snap.limits[2].source?.kind === "manual" && snap.limits.every((l) => /^lim_/.test(l.id)) && !JSON.stringify(gvAfter).includes("Limits from the infra sync"),
       `${approveL.text.slice(0, 200)} ${JSON.stringify(gaV)} ${JSON.stringify(snap)}`,
     );
     const firstLimit = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'first_limit' AND ws_id = ?").get(LW).n);
@@ -3214,14 +3379,21 @@ try {
     const pendPost = await vPost(V2, GV.id, crP.json?.id, { action: "viewed" });
     check("value: a pending request -> GET and POST 409 not_approved, and no event is recorded", crP.status === 201 && pendGet.status === 409 && pendGet.json?.error === "not_approved" && pendPost.status === 409 && pendPost.json?.error === "not_approved" && eventsIn("value_card_viewed").length === 0, `${crP.status} ${pendGet.text} ${pendPost.text}`);
     const apV = await call("V3", "POST", `${crBaseV(GV.id)}/${crP.json?.id}/approve`, { cookie: V3.cookie, body: { revision: 1 } });
+    const v0 = (await vGet(V2, GV.id, crP.json?.id)).json;
+    check(
+      "value (D1): approved but not launched -> the card has no new version yet (goal.version null, base_version 1, launch pending), no delivery and no approval-to-launch or first-context span",
+      apV.json?.launch === "pending" && v0?.goal?.version === null && v0.goal.base_version === 1 && v0.launch === "pending" && v0.launched_at === null && v0.delivery === null && v0.measured.decision_to_launch === null && v0.measured.decision_to_first_applied === null,
+      JSON.stringify(v0).slice(0, 600),
+    );
+    const lnV = await call("V3", "POST", `${crBaseV(GV.id)}/${crP.json?.id}/launch`, { cookie: V3.cookie, body: {} });
     const v1 = await vGet(V2, GV.id, crP.json?.id);
     const vv = v1.json;
     check(
-      "value: an approved request -> the card: the title diff, approver, the version it became and its team, the goal it contributes to and the goal depending on it, delivery {1 session, 0 received, 0 applied}, proposal to approval measured, no first context yet, no follow-up link in Mode L",
-      apV.json?.state === "approved" && v1.status === 200 && vv.change_request_id === crP.json?.id && vv.diff?.title?.after === "Pass the pen test by June" && vv.approved_by?.id === V3.id && vv.goal?.version === 2 && vv.goal.team?.id === TV &&
+      "value: a launched request -> the card: the title diff, approver, the version it became and its team, the goal it contributes to and the goal depending on it, delivery from the launch's directive {1 session, 0 received, 0 applied}, proposal to approval and approval to launch measured, no first context yet, no follow-up link in Mode L",
+      apV.json?.state === "approved" && lnV.json?.launch === "launched" && v1.status === 200 && vv.change_request_id === crP.json?.id && vv.diff?.title?.after === "Pass the pen test by June" && vv.approved_by?.id === V3.id && vv.goal?.version === 2 && vv.launch === "launched" && typeof vv.launched_at === "string" && vv.goal.team?.id === TV &&
         vv.affected.parents.some((g) => g.id === GPar.id) && vv.affected.dependents.some((g) => g.id === GDep.id) && JSON.stringify(vv.delivery) === JSON.stringify({ sessions: 1, received: 0, applied: 0 }) &&
-        /^\d+ seconds?$|minute/.test(vv.measured.proposal_to_decision) && vv.measured.decision_to_first_applied === null && vv.follow_up_url === null && vv.my_report === null && vv.sees_all_reports === true,
-      `${apV.status} ${v1.text.slice(0, 600)}`,
+        /^\d+ seconds?$|minute/.test(vv.measured.proposal_to_decision) && typeof vv.measured.decision_to_launch === "string" && vv.measured.decision_to_first_applied === null && vv.follow_up_url === null && vv.my_report === null && vv.sees_all_reports === true,
+      `${apV.status} ${lnV.status} ${v1.text.slice(0, 600)}`,
     );
     const dirV = withDb((d) => d.prepare("SELECT id FROM v2_directives WHERE ws_id = ? AND goal_id = ? AND kind = 'goal_version' ORDER BY seq DESC LIMIT 1").get(W, GV.id))?.id;
     const rcv = (state) => call("V3", "POST", `/api/v2/directives/${dirV}/receipts`, { bearer: DV.access, body: { session_key: SV, state, at: new Date().toISOString() } });
@@ -3429,6 +3601,65 @@ try {
             `tall=${tall} start=${start} one=${one} after=${byV3()} ${errors.join(" | ")}`,
           );
           await phone.close();
+        }
+        // LAUNCH-001/002 in the browser: the record's launch wording and controls, an "Accept if" condition, and an
+        // empty approval set. GL2 is V5's goal (no team): V2's request is countered with a condition, accepted and
+        // approved by V5 but not launched; V1 (the only workspace owner, so a launcher) asks too, and with V5 made a
+        // viewer nobody can approve V1's request.
+        {
+          await page.setViewport({ width: 1000, height: 900 });
+          await page.setCookie({ name, value: v.join("="), url: BASE }); // the phone page signed this browser in as V3
+          const CONDV = `Accept if the checklist is reviewed ${randomBytes(3).toString("hex")}`;
+          const GL2 = (await goalIn(V5, { title: "Launch checklist", visibility: "workspace" })).json;
+          const crL = await call("V2", "POST", crBaseV(GL2.id), { cookie: V2.cookie, body: { base_version: 1, changes: { title: "Launch checklist, reviewed" }, reason: "Review it first" } });
+          await call("V5", "POST", `${crBaseV(GL2.id)}/${crL.json?.id}/counter`, { cookie: V5.cookie, body: { revision: 1, changes: { title: "Launch checklist, reviewed twice" }, note: "Twice", condition: CONDV } });
+          await call("V2", "POST", `${crBaseV(GL2.id)}/${crL.json?.id}/accept_counter`, { cookie: V2.cookie, body: {} });
+          const apL = await call("V5", "POST", `${crBaseV(GL2.id)}/${crL.json?.id}/approve`, { cookie: V5.cookie, body: { revision: 2 } });
+          const crE = await call("V1", "POST", crBaseV(GL2.id), { cookie: V1.cookie, body: { base_version: 1, changes: { measures: [{ text: "Checklist signed", target: "yes" }] }, reason: "Track sign-off" } });
+          withDb((d) => d.prepare("UPDATE v2_members SET role = 'viewer' WHERE ws_id = ? AND user_id = ?").run(W, V5.id));
+          const eSeen = (await call("V1", "GET", `${crBaseV(GL2.id)}/${crE.json?.id}`, { cookie: V1.cookie })).json;
+          check("launch setup (Chrome): an approved, unlaunched request with a condition, and a pending request whose approval set is empty", apL.json?.launch === "pending" && crE.status === 201 && eSeen?.approvers?.length === 0, `${apL.text.slice(0, 200)} ${JSON.stringify(eSeen?.approvers)}`);
+          const textOf = () => page.evaluate(() => document.body.innerText);
+          const btn = (label) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), label);
+          await page.goto(`${BASE}/app/w/${W}/goals/${GL2.id}`, { waitUntil: "networkidle0" });
+          await page.waitForFunction(() => document.body.innerText.includes("Approved, agents still on v1 until launch"), { timeout: 15000 });
+          const before = await textOf();
+          const buttons = await page.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.textContent));
+          check(
+            "ui (Chrome): an approved, unlaunched request reads 'Approved, agents still on v1 until launch' (never 'agents on v2'), lists who can launch, offers Launch version 2 to agents and Not yet to a launcher; its condition reads 'Accept if: …' and 'Not confirmed yet'; an open request with an empty approval set says 'Nobody can approve this yet'; nothing says verified",
+            /Can launch: you/.test(before) && !/agents on v2/.test(before) && buttons.includes("Launch version 2 to agents") && buttons.includes("Not yet") && before.includes(`Accept if: ${CONDV}`) && before.includes("Not confirmed yet") && before.includes("Nobody can approve this yet") && !/verified/i.test(before.replaceAll("none verified", "")),
+            before.slice(0, 1200),
+          );
+          await btn("Not yet");
+          await page.waitForFunction(() => document.body.innerText.includes("Not launched yet: you decided not yet"), { timeout: 15000 });
+          const afterNotYet = await textOf();
+          const v1Feed = (await call("V1", "GET", `/api/v2/workspaces/${W}/goals/${GL2.id}`, { cookie: V1.cookie })).json?.goal?.version;
+          await btn("Launch version 2 to agents");
+          await page.waitForFunction(() => document.body.innerText.includes("Launched, agents on v2"), { timeout: 15000 });
+          const afterLaunch = await textOf();
+          const v2Feed = (await call("V1", "GET", `/api/v2/workspaces/${W}/goals/${GL2.id}`, { cookie: V1.cookie })).json?.goal?.version;
+          check(
+            "ui (Chrome): Not yet keeps 'Approved, agents still on v1 until launch' and says 'Not launched yet: you decided not yet' (the goal stays at version 1); Launch version 2 to agents makes it 'Launched, agents on v2', launched by you, and the goal is at version 2",
+            afterNotYet.includes("Approved, agents still on v1 until launch") && !afterNotYet.split("\n").some((l) => l === "Not yet") && v1Feed === 1 && /Launched by you/.test(afterLaunch) && !afterLaunch.includes("Approved, agents still on v1 until launch") && v2Feed === 2 && errors.length === 0,
+            `${afterNotYet.slice(0, 400)} | ${afterLaunch.slice(0, 400)} | ${v1Feed} ${v2Feed} ${errors.join(" | ")}`,
+          );
+          const req = await browser.newPage();
+          const [n2, ...v2c] = V2.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+          await req.setCookie({ name: n2, value: v2c.join("="), url: BASE });
+          await req.goto(`${BASE}/app/w/${W}/goals/${GL2.id}`, { waitUntil: "networkidle0" });
+          await req.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Confirm the condition is met"), { timeout: 15000 });
+          await req.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Confirm the condition is met")?.click());
+          await req.waitForFunction(() => document.body.innerText.includes("Acknowledged by you"), { timeout: 15000 });
+          const ackText = await req.evaluate(() => document.body.innerText);
+          const ackRow = withDb((d) => d.prepare("SELECT acknowledged_by FROM v2_change_request_revisions WHERE change_request_id = ? AND revision = 2").get(crL.json?.id));
+          check(
+            "ui (Chrome): the requester's Confirm the condition is met acknowledges it after the launch: the record reads 'Acknowledged by you' beside 'Launched, agents on v2', stored with their id; no verified wording",
+            ackText.includes("Acknowledged by you") && ackText.includes("Launched, agents on v2") && !ackText.includes("Not confirmed yet") && ackRow?.acknowledged_by === V2.id && !/verified/i.test(ackText.replaceAll("none verified", "")),
+            ackText.slice(0, 600),
+          );
+          await req.close();
+          await page.setCookie({ name, value: v.join("="), url: BASE });
+          withDb((d) => d.prepare("UPDATE v2_members SET role = 'member' WHERE ws_id = ? AND user_id = ?").run(W, V5.id));
         }
         await page.setViewport({ width: 1000, height: 900 });
         await page.goto(`${BASE}/app/w/${W}/apps`, { waitUntil: "networkidle0" });
@@ -4550,6 +4781,8 @@ try {
     const CR_REASON = "Because the Tangerine audit asked for it";
     const cr1 = await ws(e2, "POST", W, `/goals/${G?.id}/change-requests`, { base_version: 1, changes: { title: "Launch the Periwinkle initiative sooner" }, reason: CR_REASON });
     const crOk = await ws(e1, "POST", W, `/goals/${G?.id}/change-requests/${cr1.json?.id}/approve`, { revision: 1, note: "Approved after the Saffron review" });
+    const evOnApprove = withDb((d) => d.prepare("SELECT name FROM v2_events WHERE ws_id = ? AND name IN ('first_approval', 'first_launch', 'first_directive')").all(W).map((r) => r.name).sort().join());
+    const crLaunch = await ws(e1, "POST", W, `/goals/${G?.id}/change-requests/${cr1.json?.id}/launch`, {});
     const cr2 = await ws(e2, "POST", W, `/goals/${G?.id}/change-requests`, { base_version: 2, changes: { title: "Launch the Periwinkle initiative later" }, reason: "second thoughts" });
     const stopS3 = await ws(e1, "POST", W, `/sessions/${S3.key}/stop`, {});
     const mcp1 = await mcpCall("E1", DE1, "align_list_goals");
@@ -4557,7 +4790,7 @@ try {
     await sleep(200);
     check(
       "events setup: two workspaces and a sample; an invite accepted and one pending; two paired devices; three sessions (one bound to a goal at once, one later, one never); a change request approved and another made; an agent stopped; two MCP reads",
-      W && WQ && WS_SAMPLE && acc.status === 200 && G?.id && S1.ok && S2.ok && S3.ok && ep2.status < 300 && cr1.status === 201 && crOk.status === 200 && cr2.status === 201 && stopS3.status === 200 && mcp1.status === 200 && !mcp1.isError && mcp2.status === 200 && !mcp2.isError,
+      W && WQ && WS_SAMPLE && acc.status === 200 && G?.id && S1.ok && S2.ok && S3.ok && ep2.status < 300 && cr1.status === 201 && crOk.status === 200 && crLaunch.json?.launch === "launched" && cr2.status === 201 && stopS3.status === 200 && mcp1.status === 200 && !mcp1.isError && mcp2.status === 200 && !mcp2.isError,
       `${acc.status} ${S1.ok} ${S2.ok} ${S3.ok} ${ep2.status} ${cr1.status} ${crOk.status} ${crOk.text} ${cr2.status} ${cr2.text} ${stopS3.status} ${mcp1.status} ${mcp2.status}`,
     );
 
@@ -4578,8 +4811,8 @@ try {
       JSON.stringify([ev("first_session_captured"), ev("member_first_session_captured"), ev("first_session_bound")]),
     );
     check(
-      "events: first_change_request once (two requests), first_approval once, first_directive once (the approval's goal_version reached the bound sessions; the stop came later), first_mcp_read once (two reads) with the client kind; the sample's seeded request records nothing",
-      once("first_change_request") && once("first_approval") && once("first_directive") && props("first_directive").kind === "goal_version" && once("first_mcp_read") && props("first_mcp_read").client === "device" &&
+      "events: first_change_request once (two requests), first_approval once (recorded alone at the approval: no first_launch or first_directive yet), first_launch once with no props, first_directive once (the launch's goal_version reached the bound sessions; the stop came later), first_mcp_read once (two reads) with the client kind; the sample's seeded request records nothing",
+      evOnApprove === "first_approval" && once("first_change_request") && once("first_approval") && once("first_launch") && props("first_launch") && Object.keys(props("first_launch")).length === 0 && once("first_directive") && props("first_directive").kind === "goal_version" && once("first_mcp_read") && props("first_mcp_read").client === "device" &&
         ev("first_change_request", WS_SAMPLE).length === 0 && q("SELECT COUNT(*) AS n FROM v2_directives WHERE ws_id = ?", W)[0].n >= 2,
       JSON.stringify(q("SELECT name, ws_id, props FROM v2_events WHERE name LIKE 'first_%'")),
     );
@@ -4669,7 +4902,7 @@ try {
       access_requested: ["interest", "via"], access_approved: [], access_declined: [], code_created: ["source"], code_redeemed: [], workspace_created: ["kind"], invite_sent: ["role"], invite_accepted: ["role"],
       device_paired: ["workspaces"], first_session_captured: ["harness"], member_first_session_captured: ["harness"], first_session_bound: ["harness", "authority"], second_member_joined: [],
       first_change_request: [], first_approval: [], first_directive: ["kind"], first_mcp_read: ["client"], loi_sent: ["note_ref"], loi_signed: ["note_ref", "verified_original"],
-      first_ask: [], first_limit: [], value_card_viewed: [], value_reported: ["estimate"], follow_up_clicked: [], first_request: ["type"], first_hold: [],
+      first_ask: [], first_limit: [], value_card_viewed: [], value_reported: ["estimate"], follow_up_clicked: [], first_request: ["type"], first_hold: [], first_launch: [],
     };
     const offList = q("SELECT name, props FROM v2_events").filter((r) => !ALLOWED[r.name] || Object.keys(JSON.parse(r.props)).some((k) => !ALLOWED[r.name].includes(k)));
     check(

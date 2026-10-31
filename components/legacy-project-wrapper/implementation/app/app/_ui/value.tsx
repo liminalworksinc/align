@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, Btn, Err, useAction, useApi, when } from "./kit";
 import type { ChangeRequest } from "./types";
 import { ESTIMATE_WORDS, estimateSaid, VALUE_NOTE_MAX, VALUE_QUESTION, type EstimateId } from "@/lib/v2/value-core.mts";
+import { launchWords } from "@/lib/v2/launch-words";
 
 // The decision value card on an approved change request (PORT-004): the accepted change, who approved it, the goals
 // and teams it affects, whether agents have the new version, the spans Align measured, the value reports (an estimate
@@ -23,7 +24,9 @@ interface Report {
 
 interface ValueView {
   change_request_id: string;
-  goal: { id: string; title: string; version: number; team: { id: string; name: string } | null };
+  goal: { id: string; title: string; version: number | null; base_version: number; team: { id: string; name: string } | null };
+  launch: "pending" | "not_yet" | "launched";
+  launched_at: string | null;
   diff: Record<string, { before: unknown; after: unknown }>;
   approved_by: { id: string; name: string };
   decided_at: string;
@@ -31,7 +34,7 @@ interface ValueView {
   approved_without_evidence: boolean | null;
   affected: { parents: { id: string; title: string }[]; dependents: { id: string; title: string }[] };
   delivery: { sessions: number; received: number; applied: number } | null;
-  measured: { proposal_to_decision: string; decision_to_first_applied: string | null };
+  measured: { proposal_to_decision: string; decision_to_launch: string | null; decision_to_first_applied: string | null };
   my_report: Report | null;
   reports: Report[];
   sees_all_reports: boolean;
@@ -131,7 +134,11 @@ export function ValueCard({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: s
         ) : (
           "No field changes are shown to you."
         )}
-        <span className="text-zinc-600">It became version {d.goal.version} of “{d.goal.title}”.</span>
+        {d.goal.version !== null ? (
+          <span className="text-zinc-600">It became version {d.goal.version} of “{d.goal.title}”.</span>
+        ) : (
+          <span className="text-zinc-600">{launchWords(d.launch, d.goal.base_version, null)}.</span>
+        )}
       </Row>
 
       <Row label="Who approved">
@@ -151,7 +158,9 @@ export function ValueCard({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: s
       </Row>
 
       <Row label="Agents on the new version">
-        {!dl || dl.sessions === 0 ? (
+        {d.launch !== "launched" ? (
+          `Not launched yet: agents stay on v${d.goal.base_version} until launch.`
+        ) : !dl || dl.sessions === 0 ? (
           "No shared sessions work toward this goal yet."
         ) : (
           <ul className="flex flex-col gap-0.5">
@@ -168,6 +177,9 @@ export function ValueCard({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: s
         <ul className="flex flex-col gap-0.5">
           <li>
             Proposal to approval: <span className="font-semibold">{d.measured.proposal_to_decision || "—"}</span>
+          </li>
+          <li>
+            Approval to launch: <span className="font-semibold">{d.measured.decision_to_launch ?? "not yet"}</span>
           </li>
           <li>
             Approval to first agent context: <span className="font-semibold">{d.measured.decision_to_first_applied ?? "not yet"}</span>

@@ -1,6 +1,6 @@
 import { get } from "./db";
 import { V2Error } from "./errors";
-import { getChangeRequest as requestView, listChangeRequests as requestViews, type ChangeRequestState as StoredState, type ChangeRequestView } from "./changes";
+import { getChangeRequest as requestView, listChangeRequests as requestViews, type ChangeRequestState as StoredState, type ChangeRequestView, type LaunchState } from "./changes";
 import type { EvidenceKind, EvidenceSource, SnapshotView } from "./evidence";
 import type { Limit } from "./goal-limits";
 import type { GoalStatus, Measure } from "./goals";
@@ -32,10 +32,21 @@ export interface EvidenceLink {
   added_at: string;
 }
 
+/** A counter's "Accept if…" condition and the requester's acknowledgement (never "verified"). */
+export interface Condition {
+  revision: number;
+  text: string;
+  acknowledged_by: { id: string; name: string } | null;
+  acknowledged_at: string | null;
+}
+
 export interface ChangeRequestSummary {
   id: string;
   goal: { id: string; title: string };
   state: ChangeRequestState;
+  /** Toward agents, once approved: pending | not_yet | launched | superseded (before launch); null before approval. */
+  launch: LaunchState | null;
+  condition: Condition | null;
   requested_by: { id: string; name: string };
   base_version: number;
   revision: number;
@@ -64,8 +75,11 @@ export interface ChangeRequestDetail extends ChangeRequestSummary {
   /** The approval note or the rejection reason. */
   decision_note: string | null;
   diff: ChangeDiff;
-  /** The goal version an approval created. */
+  /** The goal version the launch created (null before the launch). */
   resulting_version: number | null;
+  /** The latest launch decision (not yet or launch). */
+  launch_decided_by: { id: string; name: string } | null;
+  launch_decided_at: string | null;
   /** Approved with no evidence link on the approved revision (null unless approved). */
   approved_without_evidence: boolean | null;
   decided_at: string | null;
@@ -77,6 +91,8 @@ const summary = (v: ChangeRequestView): ChangeRequestSummary => ({
   id: v.id,
   goal: { id: v.goal.id, title: v.goal.title },
   state: v.state,
+  launch: v.launch,
+  condition: v.condition,
   requested_by: v.requester,
   base_version: v.base_version,
   revision: v.revision,
@@ -90,7 +106,8 @@ const summary = (v: ChangeRequestView): ChangeRequestSummary => ({
 });
 
 function detail(v: ChangeRequestView): ChangeRequestDetail {
-  const decided = v.state === "approved" || v.state === "rejected";
+  // Superseded after its approval (before launch) is still a decision record.
+  const decided = v.state === "approved" || v.state === "rejected" || (v.state === "superseded" && !!v.approved_by);
   const diff: ChangeDiff = {};
   const { before, after } = v.diff;
   if (after.title !== undefined) diff.title = { before: before.title!, after: after.title };
@@ -103,7 +120,9 @@ function detail(v: ChangeRequestView): ChangeRequestDetail {
     decided_by: decided ? (v.approved_by ?? v.rejected_by) : null,
     decision_note: decided ? v.decision_note : null,
     diff,
-    resulting_version: v.state === "approved" ? v.version : null,
+    resulting_version: v.state === "approved" && v.launch === "launched" ? v.version : null,
+    launch_decided_by: v.launch_decided_by,
+    launch_decided_at: v.launch_decided_at,
     approved_without_evidence: v.approved_without_evidence,
     decided_at: decided ? v.decided_at : null,
   };

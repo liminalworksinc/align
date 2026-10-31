@@ -539,12 +539,27 @@ read the goal, and SHALL show on each request only the actions its `can` flags a
 #### Scenario: Reading a request
 
 - **WHEN** a member opens a request in "Change requests"
-- **THEN** the card, built from the list response, shows the requester, a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"), the base version, the revision, the reason, a before and after view of each changed field, who can approve it while it is open, every revision with its author and note (under "Revisions" once there is more than one), and once decided who approved or rejected it, their note or reason and the resulting version; a superseded request says "Closed because the goal was marked achieved or dropped."
+- **THEN** the card, built from the list response, shows the requester, a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"), the base version, the revision, the reason, a before and after view of each changed field, who can approve it while it is open, every revision with its author and note (under "Revisions" once there is more than one), and once decided who approved or rejected it and their note or reason; an open request with an empty approval set says "Nobody can approve this yet" instead of who can approve; a superseded request says "Closed because the goal was marked achieved or dropped."
 
 #### Scenario: Approver acts
 
 - **WHEN** a member of the goal's approval set (other than the requester, unless they own the goal) acts on a pending request
-- **THEN** **Approve** opens an optional note and **Approve as version <n+1>**, which posts `{revision, note}` to `approve` (on a revision with no evidence links it first asks "Approve without evidence?" and the button reads **Approve without evidence as version <n+1>**); **Reject** requires "Why you're rejecting" and posts `{reason}` to `reject`; and **Suggest a change** opens the pre-filled fields with a required note and **Send suggestion**, which posts `{revision, changes, note}` to `counter`
+- **THEN** **Approve** opens an optional note ("never sent to agents"), the line "Approving records the decision. Agents stay on version <n> until someone launches it." and **Approve as version <n+1> (agents switch at launch)**, which posts `{revision, note}` to `approve`, and **Approve and launch version <n+1>**, which posts the same to `approve_and_launch` (on a revision with no evidence links it first asks "Approve without evidence?" and the buttons read **Approve without evidence as version <n+1> (agents switch at launch)** and **Approve without evidence and launch version <n+1>**); **Reject** requires "Why you're rejecting" and posts `{reason}` to `reject`; and **Suggest a change** opens the pre-filled fields with a required note and **Send suggestion**, which posts `{revision, changes, note}` to `counter`
+
+#### Scenario: Approved, not launched
+
+- **WHEN** a request is approved and not launched
+- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}`
+
+#### Scenario: Launched or superseded before launch
+
+- **WHEN** a request is launched, or superseded after its approval
+- **THEN** the card says "Launched, agents on v<n+1>" with who launched it and when, or "Approved, then superseded before launch: the goal got a newer version or was closed first. It never reached agents. <requester> can propose it again."; no card says that an agent did or executed anything
+
+#### Scenario: Accept if condition
+
+- **WHEN** an approver suggests a change, the form offers an optional "Accept if… (a condition the requester confirms)" field (at most 2000 characters) posted as `condition`
+- **THEN** the card shows "Accept if: <condition>" with "Not confirmed yet" until the requester acknowledges it, then "Acknowledged by <name>, <time>", next to the approval; the requester, when `can.acknowledge` is set, gets **Confirm the condition is met**, which posts `{revision}` to `acknowledge`; nothing says verified
 
 #### Scenario: Approval blocked by a newer version
 
@@ -583,7 +598,7 @@ The Requests tab at `/app/w/<ws>/requests` SHALL show the change requests the pe
 #### Scenario: Sections
 
 - **WHEN** a member opens the tab
-- **THEN** "Waiting on you" holds the requests whose `approve` or `accept_counter` flag is true for the person (pending requests they may approve, and their own countered requests waiting for them to accept), "Your requests" holds the person's other requests, and "Others" holds every other request they can see; each card names the goal (a link to its goal page), the requester, the state pill, the reason and the changed fields, with the same actions as on the goal page
+- **THEN** "Waiting on you" holds the requests whose `waiting_on_me` is true for the person (pending requests they may approve, their own countered requests waiting for them to accept, and approved requests they may launch that nobody has launched or put off with not yet), "Your requests" holds the person's other requests, and "Others" holds every other request they can see; each card names the goal (a link to its goal page), the requester, the state pill, the reason and the changed fields, with the same actions as on the goal page
 
 #### Scenario: Empty sections
 
@@ -595,12 +610,14 @@ The Requests tab at `/app/w/<ws>/requests` SHALL show the change requests the pe
 An approved change request's card, on the goal page and the Requests tab, SHALL show a "What this decision gave you"
 card for every reader of the request, from `GET /api/v2/workspaces/<ws>/goals/<goal>/change-requests/<id>/value`
 (`lib/v2/value.ts`; `409 not_approved` for any other state, `404` for a request the person can't read), with these
-rows: "Accepted change" (each changed field, and the version it became), "Who approved" (the approver and time, and
-"approved without evidence" when so), "Affected goals and teams" (the goal and its team, the readable goals it
-contributes to and the readable goals that depend on or contribute to it), "Agents on the new version" (of the bound
-sessions the approval's `goal_version` directive reached: how many have it in context, received but not used yet, and
-not reached; "No shared sessions work toward this goal yet." when none), "Measured in Align" (proposal to approval, and
-approval to the first `applied` receipt, from server timestamps only), one optional question with a note, the reports
+rows: "Accepted change" (each changed field, and the version it became once launched, or "Approved, agents still on
+v<n> until launch"), "Who approved" (the approver and time, and "approved without evidence" when so), "Affected goals and
+teams" (the goal and its team, the readable goals it contributes to and the readable goals that depend on or contribute
+to it), "Agents on the new version" (before the launch "Not launched yet: agents stay on v<n> until launch."; after it,
+of the bound sessions the launch's `goal_version` directive reached: how many have it in context, received but not used
+yet, and not reached; "No shared sessions work toward this goal yet." when none), "Measured in Align" (proposal to
+approval, approval to launch, and approval to the first `applied` receipt of the launch's directive, from server
+timestamps only; "not yet" while there is none), one optional question with a note, the reports
 of others, and the follow-up link.
 
 #### Scenario: The optional question
@@ -934,6 +951,7 @@ active goal), neutral otherwise.
 - `app/app/_ui/goalform.tsx`
 - `app/app/_ui/limits.tsx`
 - `app/app/_ui/changes.tsx`
+- `lib/v2/launch-words.ts`
 - `app/app/_ui/value.tsx`
 - `lib/v2/value-core.mts`
 - `lib/paste-lines.ts`

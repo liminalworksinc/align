@@ -50,7 +50,8 @@ The events, where they are recorded and what they may carry:
 | `first_session_bound` | the first binding epoch in the workspace that names a goal (first value) | the workspace, the person | `harness`, `authority`: `own`, `pod` or `alignment` |
 | `second_member_joined` | an accepted invite brings the workspace to two members | the workspace, the new member | none |
 | `first_change_request` | the workspace's first change request made through the API or web app | the workspace, the requester | none |
-| `first_approval` | the workspace's first approved change request | the workspace, the approver | none |
+| `first_approval` | the workspace's first approved change request (launched or not; unchanged by the launch step) | the workspace, the approver | none |
+| `first_launch` | the workspace's first launch of an approved change request (alone or in an approve and launch) | the workspace, the launcher | none |
 | `first_directive` | the workspace's first directive that reached a session | the workspace, none | `kind` |
 | `first_mcp_read` | the workspace's first MCP tool call | the workspace, the person | `client`: `app` or `device` |
 | `loi_sent` | the operator records it | the workspace, none | `note_ref` |
@@ -76,8 +77,13 @@ props); and it SHALL do the same in Mode L, where the events stay on the person'
 
 #### Scenario: First-time events once
 
-- **WHEN** a workspace's members share three sessions, bind two of them to goals, make two change requests, approve one, stop an agent and read through MCP twice
-- **THEN** `first_session_captured`, `first_session_bound`, `first_change_request`, `first_approval`, `first_directive` and `first_mcp_read` each appear once for the workspace, `member_first_session_captured` once per person who shared, and a second first-time row for the workspace is refused by the database
+- **WHEN** a workspace's members share three sessions, bind two of them to goals, make two change requests, approve one, launch it, stop an agent and read through MCP twice
+- **THEN** `first_session_captured`, `first_session_bound`, `first_change_request`, `first_approval`, `first_launch`, `first_directive` and `first_mcp_read` each appear once for the workspace, `member_first_session_captured` once per person who shared, and a second first-time row for the workspace is refused by the database
+
+#### Scenario: Approval and launch are separate events
+
+- **WHEN** an approver approves a workspace's first change request and nobody launches it
+- **THEN** the workspace has `first_approval` and no `first_launch` (and the approval wrote no directive, so no `first_directive` from it); the launch then records `first_launch`, with no props, once
 
 #### Scenario: Sample workspace
 

@@ -9,7 +9,8 @@
 //   session  `align share --dir`, then simulated Claude Code hook inputs (SessionStart, UserPromptSubmit, Stop) through
 //            the hook entry point, with `align sync` run between them where a hook would start one in the background
 //   checks   the session-start envelope (both limits and the accepted ask, quoted with attribution; neither canary); a
-//            change request adding a limit -> the goal_version directive -> one limit delta; a second accepted ask ->
+//            change request adding a limit, approved but not launched -> nothing reaches the agent (LAUNCH-001), then
+//            launched -> the goal_version directive -> one limit delta; a second accepted ask ->
 //            one asks delta; the asks feed's ETag; `align asks --json`; `align team`; the local drift notice (a user
 //            systemMessage, nothing in model context, nothing uploaded: checked in the server's database files); and
 //            `align share --dir --past` (an already-metered past session shared from its start; a session the server
@@ -361,6 +362,20 @@ try {
   const cur = (await ws(O, "GET", `/goals/${G.id}`)).json?.goal;
   const cr = await ws(O, "POST", `/goals/${G.id}/change-requests`, { base_version: cur?.version, changes: { limits: [...(cur?.limits ?? []), { type: "must", text: LIM3, source: { kind: "meeting", title: "EU review", date: "2026-10-27" } }] }, reason: "From the EU review" });
   const appr = await ws(L, "POST", `/goals/${G.id}/change-requests/${cr.json?.id}/approve`, { revision: 1 });
+  // Approved, not launched: a sync finds no directive, the agent hears nothing and the goal stays at version 1.
+  const seqBeforeApprove = sdb((d) => d.prepare("SELECT COALESCE(MAX(seq), 0) AS s FROM v2_directives WHERE ws_id = ?").get(W).s);
+  sync();
+  const unlaunchedPrompt = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p1b", prompt: "keep going", cwd: repo });
+  sync();
+  const unlaunchedPrompt2 = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p1c", prompt: "and on", cwd: repo });
+  const dirsSinceApprove = sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_directives WHERE ws_id = ? AND seq > ?").get(W, seqBeforeApprove).n);
+  const goalAfterApprove = (await ws(O, "GET", `/goals/${G.id}`)).json?.goal;
+  check(
+    "launch (D1): the lead approves the change request and nobody launches it: no directive is written, two syncs deliver nothing, the agent's next prompts get no context, and the goal stays at version 1 with two limits",
+    appr.status === 200 && appr.json?.launch === "pending" && dirsSinceApprove === 0 && unlaunchedPrompt.stdout === "" && unlaunchedPrompt2.stdout === "" && goalAfterApprove?.version === 1 && goalAfterApprove.limits?.length === 2,
+    `${appr.text.slice(0, 200)} dirs=${dirsSinceApprove} p=${unlaunchedPrompt.stdout} ${unlaunchedPrompt2.stdout} v=${goalAfterApprove?.version}`,
+  );
+  const launch = await ws(L, "POST", `/goals/${G.id}/change-requests/${cr.json?.id}/launch`, {});
   const beforeSync = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p2", prompt: "next step", cwd: repo });
   sync();
   const dirRow = sdb((d) => d.prepare("SELECT id, goal_json FROM v2_directives WHERE ws_id = ? AND kind = 'goal_version' AND goal_id = ? ORDER BY seq DESC LIMIT 1").get(W, G.id));
@@ -370,8 +385,9 @@ try {
   const deltaAgain = hook("UserPromptSubmit", { session_id: SID, prompt_id: "p4", prompt: "and again", cwd: repo });
   sync();
   check(
-    "limit delta: the owner proposes a third limit, the lead approves (version 2); nothing reaches the session before the CLI syncs; after `align sync` (goal_version directive, received) the next prompt names the new limit, once",
-    cr.status === 201 && appr.status === 200 && appr.json?.state === "approved" && beforeSync.stdout === "" && JSON.parse(dirRow?.goal_json ?? "{}").limits?.length === 3 && received &&
+    "limit delta: the owner proposes a third limit, the lead approves and then launches it (version 2); nothing reaches the session before the CLI syncs; after `align sync` (one goal_version directive, received) the next prompt names the new limit, once",
+    cr.status === 201 && appr.status === 200 && appr.json?.state === "approved" && launch.json?.launch === "launched" && launch.json.version === 2 && beforeSync.stdout === "" &&
+      sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_directives WHERE ws_id = ? AND kind = 'goal_version' AND goal_id = ? AND seq > ?").get(W, G.id, seqBeforeApprove).n) === 1 && JSON.parse(dirRow?.goal_json ?? "{}").limits?.length === 3 && received &&
       delta.context === `[Align] Goal "${GOAL_TITLE}" is now v2 (active). New limit: Must "${LIM3}". No added authority.` && delta.json?.systemMessage === undefined && deltaAgain.stdout === "",
     `${cr.status} ${cr.text.slice(0, 200)} ${appr.status} ${appr.text.slice(0, 200)} before=${beforeSync.stdout} received=${received} delta=${delta.stdout} again=${deltaAgain.stdout}`,
   );

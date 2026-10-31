@@ -78,7 +78,7 @@ tool, listed only for a token holding `changes:evidence`, is `readOnlyHint: fals
 | `align_list_goals` | none | The goals the person can read, at their current version: owner, team, level, visibility, parents, `depends_on`, `bindable` |
 | `align_get_goal` | `goal_id`, `version?` | One goal version with its measures, and every version (title, status, content hash) |
 | `align_list_change_requests` | `state?` | Change requests on goals the person can read, with every evidence link and the Align snapshot of the current revision |
-| `align_get_decision_record` | `change_request_id` | A decided change request: who asked and decided, the reason, the diff, the resulting version, its evidence, `approved_without_evidence` |
+| `align_get_decision_record` | `change_request_id` | A decided change request: who asked and decided, the reason, the diff, `launch` (pending, not_yet, launched or superseded) and the version the launch created, its "Accept if" `condition` and acknowledgement, its evidence, `approved_without_evidence` |
 | `align_add_change_request_evidence` (only with `changes:evidence`) | `change_request_id`, `kind`, `url`, `label`, `revision?` | Adds an agent-reported link to the current revision of an open request the person asked for or can approve (`lib/v2/changes.ts` `addEvidence`) |
 | `align_get_directives` | none | The newest 50 directives sent to the person's own sessions in the workspace |
 | `align_get_limits` | `goal_id?` | The limits (must, must not, out of scope) of goals whose limits are shared with the caller, with their source and who saved the version; own and own teams' goals first |

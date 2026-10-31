@@ -8,10 +8,10 @@ kind: area
 
 A directive is a structured record that Align writes for one or more shared agent sessions when a human decision
 changes what those sessions work under. The objective is that a recorded decision by an accountable person, and only
-that, changes what a running agent sees: a saved goal version (published by its owner or by an approver of a change
-request), an approved or revoked alignment, a stop or resume by the session's owner or a workspace owner, or a
-request or goal hold from someone who can approve for the goal. Change requests in flight, counters, alignment notes
-and drafts never reach agents.
+that, changes what a running agent sees: a saved goal version (published by its owner, or by the launch of an
+approved change request), an approved or revoked alignment, a stop or resume by the session's owner or a workspace owner, or a
+request or goal hold from someone who can approve for the goal. Change requests in flight, counters and their
+conditions, approved change requests that nobody has launched, alignment notes and drafts never reach agents.
 
 Align reaches agents at three levels (owner decision, 2026-10-30). **Inform**: facts the agent works under (goal
 versions with their limits, bindings, accepted asks). **Request**: one of a fixed set of typed requests (`replan`,
@@ -74,17 +74,17 @@ The server SHALL put into a directive only its kind, the goal snapshot of a save
 
 #### Scenario: Approval note stays on the decision record
 
-- **WHEN** an approver approves a change request with `note` "Agreed for Q3" and a bound session then fetches its directives
+- **WHEN** an approver approves a change request with `note` "Agreed for Q3", someone launches it, and a bound session then fetches its directives
 - **THEN** the `goal_version` directive's `goal` holds the new version's fields and no field of the directive contains the request's `reason` or the approver's `note`
 
 ### Requirement: Limit text reaches agents only in a saved version's snapshot
 
-The server SHALL put a limit's text into a directive only inside the goal snapshot of a saved goal version (the `limits` of a version its owner saved or an approver approved), and never from a limit suggestion, a change request that is pending or countered, or an ask.
+The server SHALL put a limit's text into a directive only inside the goal snapshot of a saved goal version (the `limits` of a version its owner saved or that the launch of an approved change request wrote), and never from a limit suggestion, a change request that is pending, countered or approved but not launched, or an ask.
 
 #### Scenario: Proposed limit waits for approval
 
 - **WHEN** a member proposes a change request adding a limit to a goal with a bound session, and an approver counters it
-- **THEN** no directive is written; once the approver approves it, the bound session's `goal_version` directive has the limit in `goal.limits` with its `id`, `type`, `text` and `source`, and no field holds the request's reason
+- **THEN** no directive is written, nor when the approver approves it; once someone launches it, the bound session's `goal_version` directive has the limit in `goal.limits` with its `id`, `type`, `text` and `source`, and no field holds the request's reason
 
 #### Scenario: Suggestions are not delivered
 
@@ -112,7 +112,7 @@ The server SHALL write every directive row and its target rows inside the same d
 
 ### Requirement: goal_version directives reach bound and governed sessions
 
-The server SHALL, whenever a new version of a goal is saved (by the goal's owner through `POST /api/v2/workspaces/{ws}/goals/{goal}/versions`, or by the approval of a change request), write one `goal_version` directive whose `goal` is the snapshot of the new version and whose `binding` is null, targeting every session in that workspace whose sharing is not stopped and whose open epoch is bound to the goal or whose governing goal (from an approved `work_toward` alignment) is the goal.
+The server SHALL, whenever a new version of a goal is saved (by the goal's owner through `POST /api/v2/workspaces/{ws}/goals/{goal}/versions`, or by the launch of an approved change request), write one `goal_version` directive whose `goal` is the snapshot of the new version and whose `binding` is null, targeting every session in that workspace whose sharing is not stopped and whose open epoch is bound to the goal or whose governing goal (from an approved `work_toward` alignment) is the goal.
 
 #### Scenario: Owner publishes a new version
 
@@ -129,14 +129,19 @@ The server SHALL, whenever a new version of a goal is saved (by the goal's owner
 - **WHEN** a `goal_version` directive is written for a goal owned by the team "Security"
 - **THEN** its goal snapshot has `team` `{ "id": <team id>, "name": "Security" }` and no `pod` key
 
-### Requirement: Approved change requests reach agents as goal versions
+### Requirement: Launched change requests reach agents as goal versions
 
-The server SHALL, when an approver approves a change request, create the goal's next version authored by the approver and write its `goal_version` directive through the same path and in the same transaction as an owner's edit, and write no directive for creating, countering, accepting a counter, rebasing, rejecting, withdrawing or superseding a change request.
+The server SHALL, when someone in its launch set launches an approved change request (or an approver approves and launches it in one step), create the goal's next version authored by the approver and write its `goal_version` directive through the same path and in the same transaction as an owner's edit, and write no directive for creating, countering, accepting a counter, acknowledging a condition, rebasing, approving without launching, saying not yet, rejecting, withdrawing or superseding a change request.
 
-#### Scenario: Approval updates a running agent
+#### Scenario: Approval without launch reaches no agent
 
-- **WHEN** an approver approves a pending change request on goal G at version 2 while session S is bound to G
-- **THEN** G is at version 3 with `created_by` the approver, and S's device receives a `goal_version` directive with `goal.version` 3 on its next fetch
+- **WHEN** an approver approves a pending change request on goal G at version 2 while session S is bound to G, and S's device fetches after its cursor
+- **THEN** no directive is returned, G is still at version 2, and S's agent reads version 2 everywhere (feed, MCP)
+
+#### Scenario: Launch updates a running agent
+
+- **WHEN** someone in the launch set then launches that request
+- **THEN** G is at version 3 with `created_by` the approver, and S's device receives exactly one `goal_version` directive with `goal.version` 3 on its next fetch; a second fetch from the new cursor returns nothing
 
 #### Scenario: Stale approval writes nothing
 

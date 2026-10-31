@@ -445,13 +445,15 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   return serializeGoal(pp, goalRow(pp.wsId, id)!);
 }
 
-/** Write the goal's next version, authored by `actorId` (inside the caller's tx). The one path every new version
- *  takes, whether the owner saves it or an approver approves a change request: version row with its content hash,
- *  audit goal.versioned, review against the parents as they are now, one goal_version directive for every session
- *  bound to or governed by the goal, and, when the goal becomes achieved or dropped, every open change request on
- *  it is superseded, the requests to its agents (and switch_goal requests toward it) still waiting for an answer
- *  expire, and a hold on it is released. 409 stale_version if the goal moved since `g` was read. */
-export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at: string): GoalRow {
+/** Write the goal's next version (inside the caller's tx), by `actorId` and authored by `authorId` (the actor, unless
+ *  a launch publishes what an approver confirmed). The one path every new version takes, whether the owner saves it
+ *  or someone launches an approved change request: version row with its content hash, audit goal.versioned by the
+ *  actor, review against the parents as they are now, one goal_version directive for every session bound to or
+ *  governed by the goal, every other approved change request still waiting for launch is superseded before launch,
+ *  and, when the goal becomes achieved or dropped, every open change request on it is superseded, the requests to its
+ *  agents (and switch_goal requests toward it) still waiting for an answer expire, and a hold on it is released.
+ *  409 stale_version if the goal moved since `g` was read. */
+export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at: string, authorId = actorId): GoalRow {
   if (c.depends_on.length) assertNoDependencyCycle(g.ws_id, g.id, c.depends_on); // again, inside the transaction
   const v = g.version + 1;
   const n = run(
@@ -481,15 +483,16 @@ export function writeGoalVersion(g: GoalRow, c: GoalContent, actorId: string, at
     JSON.stringify(c.limits),
     c.status,
     contentHash(c),
-    actorId,
+    authorId,
     at,
   );
   audit(g.ws_id, actorId, "goal.versioned", g.id, at);
-  // The workspace's first version that carries a limit, whether its owner saved it or an approver approved it.
-  if (c.limits.length) event("first_limit", { ws: g.ws_id, user: actorId, at });
+  // The workspace's first version that carries a limit, whether its owner saved it or a launch published it.
+  if (c.limits.length) event("first_limit", { ws: g.ws_id, user: authorId, at });
   reviewParents(g.ws_id, g.id, at); // saving a version is a review against the parents as they are now
   const next = goalRow(g.ws_id, g.id)!;
   goalVersionDirective(g.ws_id, next);
+  supersedeUnlaunched(g.ws_id, g.id, actorId, at); // the goal outran them: they never reach agents
   if (c.status === "achieved" || c.status === "dropped") {
     supersedeOpenRequests(g.ws_id, g.id, actorId, at);
     expireOpenRequests(g.ws_id, g.id, actorId, at); // nobody can act on a request toward a goal that is done
@@ -504,6 +507,17 @@ function supersedeOpenRequests(wsId: string, goalId: string, actorId: string, at
   const open = all<{ id: string }>("SELECT id FROM v2_change_requests WHERE ws_id = ? AND goal_id = ? AND state IN ('pending','countered')", wsId, goalId);
   for (const r of open) {
     run("UPDATE v2_change_requests SET state = 'superseded', updated_at = ? WHERE id = ?", at, r.id);
+    audit(wsId, actorId, "change_request.superseded", r.id, at);
+  }
+}
+
+/** Approved change requests on this goal still waiting for launch (launch pending or not yet) are superseded before
+ *  launch when the goal gets a newer version (LAUNCH-001): the approval stays on the record, nothing reaches agents, and
+ *  the requester can propose again. A request being launched is marked launched before its version is written. */
+function supersedeUnlaunched(wsId: string, goalId: string, actorId: string, at: string) {
+  const waiting = all<{ id: string }>("SELECT id FROM v2_change_requests WHERE ws_id = ? AND goal_id = ? AND state = 'approved' AND launch IN ('pending','not_yet')", wsId, goalId);
+  for (const r of waiting) {
+    run("UPDATE v2_change_requests SET state = 'superseded', launch = 'superseded', updated_at = ? WHERE id = ?", at, r.id);
     audit(wsId, actorId, "change_request.superseded", r.id, at);
   }
 }

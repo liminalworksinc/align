@@ -19,7 +19,7 @@ export interface Sql {
 
 /** The PRAGMA user_version of a fully migrated database (lib/v2/db.ts MIGRATIONS.length; db.ts checks they agree).
  *  The operator script refuses any other, so it never writes to a schema it doesn't know. */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 // ---- settings shared with the operator script (lib/v2/config.ts re-exports these) ----
 
@@ -119,6 +119,7 @@ export const EVENT_PROPS = {
   follow_up_clicked: {},
   first_request: { type: ["replan", "checkpoint", "switch_goal"] },
   first_hold: {},
+  first_launch: {},
 } as const satisfies Record<string, Record<string, PropRule>>;
 export type EventName = keyof typeof EVENT_PROPS;
 export type EventProps = Record<string, string | number>;
@@ -140,6 +141,7 @@ export const ONCE_PER_WORKSPACE: readonly EventName[] = [
   "first_limit",
   "first_request",
   "first_hold",
+  "first_launch",
 ];
 
 /** Recorded at most once per person in a workspace (the unique index v2_events_once_person in lib/v2/db.ts lists the

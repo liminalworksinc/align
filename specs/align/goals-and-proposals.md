@@ -1,6 +1,6 @@
 ---
 name: Goals, alignments and change requests
-summary: Company and team goals with immutable versions, owners, teams, visibility and dependencies; approval sets; typed requests to a goal's agents and goal holds; alignments that make goals and sessions contribute to a goal with every affected goal's consent; change requests that let a member propose a new version of someone else's goal, with advisory evidence (typed links and an Align snapshot per revision); and the Northstar sample workspace.
+summary: Company and team goals with immutable versions, owners, teams, visibility and dependencies; approval sets; typed requests to a goal's agents and goal holds; alignments that make goals and sessions contribute to a goal with every affected goal's consent; change requests that let a member propose a new version of someone else's goal, with advisory evidence (typed links and an Align snapshot per revision), "Accept if…" conditions the requester acknowledges, and a launch step that releases an approved change to agents; and the Northstar sample workspace.
 kind: area
 ---
 
@@ -15,6 +15,20 @@ Evidence on change requests is advisory. Each revision carries a snapshot that A
 requester and approvers can attach typed links, each labelled by who reported it. Approving without evidence is
 allowed and recorded. Align never marks a link verified; checking CI results against their source (for example
 GitHub check runs) is later work, not part of this contract.
+
+Approving and launching are two decisions (founder ruling LIM-2454 33ad545d, owner answers 2026-10-31). Approving a
+change request records the decision and keeps the resulting version approved but unlaunched, stored on the request;
+the goal, its versions and what agents read stay at the last launched version. **Launch** publishes it, through the
+same write path as an owner's new version, and only then do bound and governed sessions get it. **Not yet** records
+that the change waits, and a later launch or not yet replaces it. A person who may both approve and launch can do both
+in one step. An approved change that the goal outruns before launch (a newer version, or the goal achieved or
+dropped) is superseded before launch: it never reaches agents, and the requester can propose again. Proposed is not
+approved, approved is not launched, and launched (a version delivered to agents) is not an observed outcome: Align
+records delivery receipts, never that an agent did anything.
+
+A counter may carry an "Accept if…" condition (ruling LIM-2454 35376283). The requester acknowledges it as a step of
+its own, separate from accepting the counter; the acknowledgement records who and when, never gates approval or
+launch, and is never called verified.
 
 Every route here is under `/api/v2/workspaces/{ws}` and follows the common rules of the `workspaces` part:
 a browser session cookie (or, where stated, a device token), same-origin writes, JSON bodies, error bodies
@@ -43,7 +57,10 @@ or agent sees says "team".
 | Alignment | A request (`al_…`) to link a source goal or chosen sessions to a target goal, with revisions, approval requirements and effects |
 | Approval requirement | `{for, set}` on an alignment revision: `for` is a goal id or `sessions:<user id>`, `set` the user ids any one of whom satisfies it |
 | Change request | A proposed new version (`cr_…`) of a goal the requester does not own, decided by the goal's approval set |
-| Decision record | A change request once it is `approved` or `rejected` |
+| Decision record | A change request once it is `approved` or `rejected`, or `superseded` after its approval (superseded before launch) |
+| Launch | The decision that publishes an approved change request's version to the goal and its agents; `launch` on a request is `pending` (approved, no launch decision yet), `not_yet`, `launched` or `superseded` (superseded before launch), and `null` before approval |
+| Launch set | The people who may launch an approved change request: the goal's effective approval set for that request (owner, team leads and, on a company goal, workspace owners, after the requester rule) plus every workspace owner |
+| Condition | An "Accept if…" text (1 to 2000 characters) an approver puts on a counter revision, separate from its note; the requester acknowledges it, which is never a verification |
 | Evidence link | A typed link (`ev_…`: `pr`, `ci_run`, `incident`, `dashboard`, `doc` or `other`) on one change request revision, self-reported by a person or agent-reported by an agent; Align never marks one verified |
 | Align snapshot | What the server recorded about the goal when a change request revision was written: its 30-day spend, bound sessions and last activity |
 | Sample workspace | "Northstar (sample)", ordinary data created by `POST /api/v2/workspaces/sample` |
@@ -73,13 +90,28 @@ stateDiagram-v2
     pending --> countered: counter (approver)
     countered --> pending: accept_counter (requester)
     pending --> pending: rebase (requester)
-    pending --> approved: approve (approver)
+    pending --> approved: approve or approve_and_launch (approver)
+    approved --> superseded: newer goal version, or goal achieved or dropped, before launch
     pending --> rejected: reject (approver)
     countered --> rejected: reject (approver)
     pending --> withdrawn: withdraw (requester)
     countered --> withdrawn: withdraw (requester)
     pending --> superseded: goal achieved or dropped
     countered --> superseded: goal achieved or dropped
+```
+
+The launch of an approved request (`launch` on the request; `null` until it is approved):
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: approve
+    [*] --> launched: approve_and_launch
+    pending --> not_yet: not_yet (launch set)
+    not_yet --> not_yet: not_yet again (replaces the earlier one)
+    pending --> launched: launch (launch set)
+    not_yet --> launched: launch (launch set)
+    pending --> superseded: newer goal version, or goal achieved or dropped
+    not_yet --> superseded: newer goal version, or goal achieved or dropped
 ```
 
 ### Requirement: Creating a company or team goal
@@ -141,7 +173,12 @@ The server SHALL let a goal's owner always read it, and otherwise decide by visi
 
 ### Requirement: Goals feed with ETag
 
-The server SHALL serve the goals the caller may read on `GET /api/v2/workspaces/{ws}/goals` (device token with a grant for the workspace, or browser session) as `{version, goals}`, oldest first, where `version` is the first 16 hex characters of the sha256 of the serialized goals and is also sent as a quoted `ETag` with `cache-control: private, no-cache`, and SHALL answer 304 with no body when `If-None-Match` matches it (or is `*`). Each goal SHALL be `{id, version, title, measures, status, level, visibility, owner:{id,name}, team:{id,name}|null, anchors, depends_on, limits, bindable, contributes_to}`, where `limits` is the current version's limits (`[]` when it has none) and is read by whoever reads the goal, where `visibility` shows `team` for a stored `pod` and `depends_on` lists only goals the caller may read.
+The server SHALL serve the goals the caller may read on `GET /api/v2/workspaces/{ws}/goals` (device token with a grant for the workspace, or browser session) as `{version, goals}`, oldest first, where `version` is the first 16 hex characters of the sha256 of the serialized goals and is also sent as a quoted `ETag` with `cache-control: private, no-cache`, and SHALL answer 304 with no body when `If-None-Match` matches it (or is `*`). Each goal SHALL be `{id, version, title, measures, status, level, visibility, owner:{id,name}, team:{id,name}|null, anchors, depends_on, limits, bindable, contributes_to}`, where `limits` is the current version's limits (`[]` when it has none) and is read by whoever reads the goal, where `visibility` shows `team` for a stored `pod` and `depends_on` lists only goals the caller may read. A goal's current version is its last launched (or owner-saved) version: an approved but unlaunched change request SHALL change neither the feed's goals nor its `version`.
+
+#### Scenario: Approval leaves the feed alone
+
+- **WHEN** an approver approves a change request on a goal and nobody launches it
+- **THEN** the feed returns the same goals and the same `ETag` as before, and an `If-None-Match` with the earlier `ETag` still answers 304; after the launch the goal has the new version and the `ETag` changes
 
 #### Scenario: Conditional feed
 
@@ -188,16 +225,21 @@ The server SHALL refuse with 409 `cycle` any write that would make a goal depend
 
 ### Requirement: Limits are confirmed only by a goal's approval set
 
-The server SHALL make a limit part of a goal only through a saved goal version: one its owner saves (on creation or `POST …/versions`) or one written when a member of its approval set approves a change request whose `changes` include `limits`. A limit SHALL reach agents only inside that version's snapshot (the `directives` part), and nothing else (a suggestion, a pending or countered request) SHALL change a goal's limits. A request with `limits` is dismissed by rejecting or withdrawing it.
+The server SHALL make a limit part of a goal only through a saved goal version: one its owner saves (on creation or `POST …/versions`) or one written when a change request whose `changes` include `limits`, approved by a member of its approval set, is launched. A limit SHALL reach agents only inside that version's snapshot (the `directives` part), and nothing else (a suggestion, a pending or countered request, an approved request that is not launched) SHALL change a goal's limits. A request with `limits` is dismissed by rejecting or withdrawing it.
 
 #### Scenario: Proposed by a member, approved by the team lead
 
 - **WHEN** a member in no team proposes `changes:{limits:[…current, {type:"must", text:"Inference must stay inside the EU region"}]}` on a workspace goal of team Alpha and Alpha's lead approves it
 - **THEN** the goal's next version carries the three limits, authored by the lead, and the bound sessions' `goal_version` directive snapshot has them in `limits`
 
+#### Scenario: Confirmed limits wait for launch
+
+- **WHEN** the lead approves that request and nobody launches it
+- **THEN** the goal and its limits are unchanged and no directive is written; once someone in the launch set launches it, the new version carries the limits and the bound sessions get them
+
 ### Requirement: First limit event
 
-The server SHALL record the product event `first_limit` (no props, actor the version's author) for a workspace in the transaction of the first goal version with at least one limit, whether created, saved by the owner or written by an approval; a limit seeded in the sample workspace SHALL record nothing.
+The server SHALL record the product event `first_limit` (no props, actor the version's author) for a workspace in the transaction of the first goal version with at least one limit, whether created, saved by the owner or written by the launch of an approved change request; a limit seeded in the sample workspace SHALL record nothing.
 
 #### Scenario: Several versions with limits
 
@@ -419,25 +461,80 @@ The server SHALL refuse a second change request from the same person on the same
 #### Scenario: Second request
 
 - **WHEN** a member with a pending request on a goal POSTs another one to that goal
-- **THEN** the response is 409 `already_open`; once the first is withdrawn or decided, a new one is accepted
+- **THEN** the response is 409 `already_open`; once the first is withdrawn or decided, a new one is accepted; an approved request waiting for launch is decided, so the requester may propose again
 
 ### Requirement: Approving a change request
 
-The server SHALL accept `POST .../change-requests/{id}/approve {revision, note?}` (`note` at most 2000 characters) only from a member of the goal's approval set under the requester rule (403 `not_an_approver`), only for a `pending` request (409 `wrong_state`) at its current `revision` (409 `stale_revision`), and only while the goal is still at `base_version` (409 `stale_version`; the requester must `rebase`). On success it SHALL, in one transaction, create the goal's next version with the requested changes applied, authored by the approver and written through the same path as an owner's new version (content hash, audit `goal.versioned`, parent review and `goal_version` directives to bound sessions), set the request `approved` with `approved_by`, `note`, `version` (the new goal version), `decided_at` and `approved_without_evidence` (see "Approving without evidence"), write audit action `change_request.approved`, and respond with the request.
+The server SHALL accept `POST .../change-requests/{id}/approve {revision, note?}` (`note` at most 2000 characters) only from a member of the goal's approval set under the requester rule (403 `not_an_approver`), only for a `pending` request (409 `wrong_state`) at its current `revision` (409 `stale_revision`), and only while the goal is still at `base_version` (409 `stale_version`; the requester must `rebase`), and 409 `no_change` when the changes no longer change the goal. On success it SHALL, in one transaction, set the request `approved` with `approved_by`, `note`, `decided_at`, `approved_without_evidence` (see "Approving without evidence") and `launch: "pending"`, store the resulting goal content on the request as its approved-unlaunched version, write audit action `change_request.approved`, record `first_approval`, and respond with the request. Approving SHALL write no goal version and no directive, and SHALL NOT change the goal: its version, content, versions list, feed and every agent read stay at the last launched version until a launch (see "Launching an approved change request"). `version` stays `null` until the launch.
 
 #### Scenario: Team lead approves
 
-- **WHEN** a lead of the goal's owning team approves a pending request at its current revision on a goal still at its base version
-- **THEN** the goal moves to the next version with the requested changes, the request is `approved` with `approved_by` the lead and `version` the new goal version, and every session bound to the goal gets a `goal_version` directive
+- **WHEN** a lead of the goal's owning team approves a pending request at its current revision on a goal at version 2 still at its base version
+- **THEN** the request is `approved` with `approved_by` the lead, `launch: "pending"` and `version: null`; the goal is still at version 2 and no session gets a directive
 
 #### Scenario: Goal moved meanwhile
 
 - **WHEN** the owner published a new version after the request was made and an approver approves it
 - **THEN** the response is 409 `stale_version` and the request stays `pending`
 
+### Requirement: Who may launch a change request
+
+The server SHALL compute, at the time it is needed, the launch set of a change request as its effective approval set (the goal's approval set under the requester rule and the workspace-owner fallback) plus every workspace owner, keeping only current members with role `owner` or `member`; a viewer SHALL never be in it. Every approver of a request is in its launch set. The set SHALL be read on the request as `launchers` (`[{id, name}]`).
+
+#### Scenario: A workspace owner outside the approval set
+
+- **WHEN** a team goal's request was approved by the team's lead and a workspace owner who is neither the goal's owner nor a lead opens it
+- **THEN** the owner is in `launchers` and may launch it; a plain member outside the approval set may not (403 `not_a_launcher`)
+
+### Requirement: Launching an approved change request
+
+The server SHALL accept `POST .../change-requests/{id}/launch {revision?}` only from a member of the request's launch set (403 `read_only` for a viewer, 403 `not_a_launcher` with "Only someone who can approve for this goal, or a workspace owner, can launch it" otherwise), only for an `approved` request whose `launch` is `pending` or `not_yet` (409 `wrong_state`: "This change is already launched as version <n>." when launched, "This change was superseded before launch. <requester> can propose it again." when superseded before launch, "This request is <state>" otherwise), and only while the goal is still at the request's `base_version` (409 `stale_version`). On success it SHALL, in one transaction, write the approved-unlaunched version as the goal's next version through the single write path every goal version takes (the same as an owner's new version: content hash, `created_by` the approver who confirmed it, audit `goal.versioned` by the launcher, parent review, one `goal_version` directive for every non-stopped session bound to or governed by the goal, and, when the version makes the goal achieved or dropped, the closing steps of "Change requests are superseded when the goal is achieved or dropped" and "Requests expire when their goal is achieved or dropped" and the hold release), set the request's `launch` to `launched` with `launch_decided_by` the launcher, `launch_decided_at` and `version` the new goal version, write audit action `change_request.launched`, record the content-free event `first_launch`, and respond with the request. A refused launch SHALL write nothing.
+
+#### Scenario: Approve without launching, then launch
+
+- **WHEN** a goal is at version 2 with a bound session, an approver approves a request on it, and a workspace owner then launches it
+- **THEN** after the approval the goal is at version 2 and the session's directive cursor has nothing new; after the launch the goal is at version 3 with `created_by` the approver, the session gets exactly one `goal_version` directive carrying version 3, and the request reads `launch: "launched"`, `version: 3`, `launch_decided_by` the owner
+
+#### Scenario: Launch twice
+
+- **WHEN** someone launches a request that is already launched
+- **THEN** the response is 409 `wrong_state` and no second version or directive is written
+
+### Requirement: Not yet keeps agents on the launched version
+
+The server SHALL accept `POST .../change-requests/{id}/not_yet {revision?}` from the launch set (403 `not_a_launcher` otherwise) on an `approved` request whose `launch` is `pending` or `not_yet` (409 `wrong_state` otherwise), and SHALL record the decision (`launch: "not_yet"`, `launch_decided_by`, `launch_decided_at`, audit `change_request.not_yet`) and publish nothing: no goal version, no directive. A later `not_yet` or `launch` SHALL replace the earlier decision.
+
+#### Scenario: Not yet, then launch
+
+- **WHEN** a lead says not yet on an approved request and later launches it
+- **THEN** after not yet the goal and the bound sessions' directives are unchanged and the request reads `launch: "not_yet"` with the lead and the time; after the launch it reads `launch: "launched"` and the sessions get the new version once
+
+### Requirement: Approve and launch in one step
+
+The server SHALL accept `POST .../change-requests/{id}/approve_and_launch {revision, note?}` from a person who may both approve the request and launch it (every approver may), under the rules of both actions, and SHALL in one transaction approve it and launch it, auditing two decisions (`change_request.approved`, with `change_request.approved_without_evidence` when so, then `change_request.launched`) and recording `first_approval` and `first_launch`. A refusal of either SHALL write nothing.
+
+#### Scenario: Owner approves and launches
+
+- **WHEN** the goal's owner approves and launches a pending request in one step while a session is bound to the goal
+- **THEN** the request is `approved` with `launch: "launched"`, the goal is at its next version, the session gets one `goal_version` directive, and the audit has both `change_request.approved` and `change_request.launched` by the owner
+
+### Requirement: Approved changes are superseded before launch
+
+The server SHALL, in the transaction that writes any new version of a goal (an owner's version, or the launch of another request), set every other `approved` request on that goal whose `launch` is `pending` or `not_yet` to state `superseded` with `launch: "superseded"`, keeping its approval (`approved_by`, `note`, `decided_at`), and write audit action `change_request.superseded` for each with the person whose action wrote the version as actor. Such a request SHALL never reach agents, SHALL accept no launch (409 `wrong_state`), and SHALL not stop its requester proposing again.
+
+#### Scenario: Owner saves a version before launch
+
+- **WHEN** a request on a goal at version 2 is approved and, before anyone launches it, the owner saves version 3
+- **THEN** the request is `superseded` with `launch: "superseded"` and its approver kept, launching it answers 409 `wrong_state`, no directive carries its content, and its requester can open a new request against version 3
+
+#### Scenario: Another request launches first
+
+- **WHEN** two requests on the same goal are approved and one is launched
+- **THEN** the other becomes `superseded` before launch; a third request that was still pending is `behind` and its requester can rebase it
+
 ### Requirement: Rejecting and countering a change request
 
-The server SHALL accept `reject {reason}` (reason 1 to 2000 characters, 400 otherwise) from an approver on a `pending` or `countered` request, setting `rejected` with `rejected_by`, `reason` and `decided_at`; and `counter {changes, note, revision?}` (note 1 to 2000 characters) from an approver on a `pending` request, replacing the proposed changes, raising `revision` and setting `countered`. Only the requester SHALL `accept_counter` (403 `not_requester`) a `countered` request, which returns it to `pending` with the countered changes. A caller outside the approval set SHALL get 403 `not_an_approver`, a request in another state 409 `wrong_state`, and a sent `revision` other than the current one 409 `stale_revision`.
+The server SHALL accept `reject {reason}` (reason 1 to 2000 characters, 400 otherwise) from an approver on a `pending` or `countered` request, setting `rejected` with `rejected_by`, `reason` and `decided_at`; and `counter {changes, note, condition?, revision?}` (note 1 to 2000 characters; `condition`, when sent and not null, 1 to 2000 characters, 400 "condition is required" or "condition is too long (max 2000 characters)") from an approver on a `pending` request, replacing the proposed changes, raising `revision`, storing the condition on that new revision separately from its note, and setting `countered`. Only the requester SHALL `accept_counter` (403 `not_requester`) a `countered` request, which returns it to `pending` with the countered changes. A caller outside the approval set SHALL get 403 `not_an_approver`, a request in another state 409 `wrong_state`, and a sent `revision` other than the current one 409 `stale_revision`.
 
 #### Scenario: Reject needs a reason
 
@@ -448,6 +545,20 @@ The server SHALL accept `reject {reason}` (reason 1 to 2000 characters, 400 othe
 
 - **WHEN** an approver counters with changed measures and the requester calls `accept_counter`
 - **THEN** the request is `pending` at revision 2 with the approver's changes, and an approver can then approve revision 2
+
+### Requirement: Accept if conditions on a counter
+
+The server SHALL show a request's condition as `condition` `{revision, text, acknowledged_by, acknowledged_at}` (the condition of its latest counter revision, or `null` when that counter carries none or there is no counter) and on each revision as `condition`, `acknowledged_by` and `acknowledged_at`. Only the requester SHALL acknowledge it, with `POST .../change-requests/{id}/acknowledge {revision?}` (403 `not_requester` for anyone else, 403 `read_only` for a viewer), as a step separate from `accept_counter`: on a `pending` or `approved` request (409 `wrong_state` while `countered` and in every closed state), with a condition (409 `no_condition`), naming its revision when `revision` is sent (409 `stale_revision`), and only once per revision (409 `already_acknowledged`). It SHALL store who acknowledged and when on that revision, write audit `change_request.condition_acknowledged`, and change nothing else. A condition SHALL never gate approval or launch, SHALL never reach a directive, and nothing SHALL call it verified: until acknowledged the record shows it as not confirmed yet.
+
+#### Scenario: Condition acknowledged by the requester
+
+- **WHEN** an approver counters with `condition: "Accept if the pen-test vendor is booked by May"`, the requester accepts the counter, another member acknowledges, and then the requester acknowledges twice
+- **THEN** after the accept the condition has `acknowledged_by: null`; the other member gets 403 `not_requester`; the requester's first acknowledge stores their id and the time; the second answers 409 `already_acknowledged`
+
+#### Scenario: Not a gate
+
+- **WHEN** an approver approves and launches a request whose condition nobody acknowledged
+- **THEN** both succeed, and the record shows the condition as not confirmed yet next to the approval
 
 ### Requirement: Withdrawing and rebasing a change request
 
@@ -460,21 +571,21 @@ The server SHALL let only the requester (403 `not_requester`) `withdraw` a `pend
 
 ### Requirement: Change requests are superseded when the goal is achieved or dropped
 
-The server SHALL, in the transaction that gives a goal status `achieved` or `dropped` (an owner's version or an approved change request), set every other `pending` or `countered` change request on that goal to `superseded` and write audit action `change_request.superseded` for each, with the person whose action changed the goal's status as actor. A new version that leaves the goal `active` SHALL NOT change other open requests: they stay `pending` or `countered`, and approving one answers 409 `stale_version` until its requester rebases it.
+The server SHALL, in the transaction that gives a goal status `achieved` or `dropped` (an owner's version or a launched change request), set every other `pending` or `countered` change request on that goal to `superseded` and write audit action `change_request.superseded` for each, with the person whose action changed the goal's status as actor. A new version that leaves the goal `active` SHALL NOT change other open requests: they stay `pending` or `countered`, and approving one answers 409 `stale_version` until its requester rebases it.
 
 #### Scenario: Owner drops the goal
 
 - **WHEN** the owner saves a version with `status: "dropped"` while two requests on the goal are pending
 - **THEN** both requests become `superseded` and accept no further action (409 `wrong_state`)
 
-#### Scenario: Another request is approved
+#### Scenario: Another request is launched
 
-- **WHEN** two requests on an active goal are pending and an approver approves one without changing the status
+- **WHEN** two requests on an active goal are pending and an approver approves and launches one without changing the status
 - **THEN** the other stays `pending`, and approving it answers 409 `stale_version` until its requester rebases it
 
 ### Requirement: Change request audit
 
-The server SHALL write an audit row naming its actor for every change request action: `change_request.created`, `.approved`, `.approved_without_evidence`, `.rejected`, `.countered`, `.counter_accepted`, `.withdrawn`, `.rebased`, `.superseded`, `.evidence_added` and `.evidence_removed`, with the request id as object.
+The server SHALL write an audit row naming its actor for every change request action: `change_request.created`, `.approved`, `.approved_without_evidence`, `.launched`, `.not_yet`, `.rejected`, `.countered`, `.counter_accepted`, `.condition_acknowledged`, `.withdrawn`, `.rebased`, `.superseded`, `.evidence_added` and `.evidence_removed`, with the request id as object.
 
 #### Scenario: Audited decision
 
@@ -483,7 +594,7 @@ The server SHALL write an audit row naming its actor for every change request ac
 
 ### Requirement: Reading change requests and decision records
 
-The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, each list item being the same object as the single read below, with its `can` flags, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `waiting_on_me` holds the requests where the caller's `approve` or `accept_counter` flag is true, `mine` the caller's other requests, and `others` the rest. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title, version}`, `state`, `revision`, `base_version`, `behind` (true while the request is open and the goal has moved past `base_version`), `requester`, `changes`, `reason` (the requester's), `revisions` (each `{revision, base_version, changes, note, author, created_at, evidence, snapshot}`, with `evidence` and `snapshot` as "Evidence links on change request revisions" and "Align snapshot on each change request revision" describe), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; once approved, from the resulting version), `approvers` (the effective approval set after the requester rule), `approved_by`, `rejected_by`, `decision_note` (the approval note or the rejection reason) also shown as `note` when approved and `rejection_reason` when rejected, `version` (the goal version an approval created), `evidence_count` (the links on the current revision), `approved_without_evidence` (`true` or `false` once approved, else `null`), `can` flags `{approve, reject, counter, accept_counter, withdraw, rebase, add_evidence}` that are true exactly when the server would accept that action from the caller (`approve` false while `behind`; all false for a viewer), `waiting_on_me`, `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read, or on a goal other than the one in the path, SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read.
+The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, each list item being the same object as the single read below, with its `can` flags, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `waiting_on_me` holds the requests whose `waiting_on_me` is true, `mine` the caller's other requests, and `others` the rest. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title, version}`, `state`, `revision`, `base_version`, `behind` (true while the request is open and the goal has moved past `base_version`), `requester`, `changes`, `reason` (the requester's), `revisions` (each `{revision, base_version, changes, note, author, created_at, evidence, snapshot}`, with `evidence` and `snapshot` as "Evidence links on change request revisions" and "Align snapshot on each change request revision" describe), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; once launched, from the resulting version), `approvers` (the effective approval set after the requester rule), `launchers` (the launch set), `approved_by`, `rejected_by`, `decision_note` (the approval note or the rejection reason) also shown as `note` when approved and `rejection_reason` when rejected, `launch` (`pending`, `not_yet`, `launched`, `superseded` or `null`), `launch_decided_by` and `launch_decided_at` (the latest not yet or launch, or `null`), `version` (the goal version the launch created, `null` before it), `condition` (see "Accept if conditions on a counter"), `evidence_count` (the links on the current revision), `approved_without_evidence` (`true` or `false` once approved, else `null`), `can` flags `{approve, approve_and_launch, reject, counter, accept_counter, acknowledge, withdraw, rebase, add_evidence, launch, not_yet}` that are true exactly when the server would accept that action from the caller (`approve` false while `behind`; all false for a viewer), `waiting_on_me` (true when the caller's `approve` or `accept_counter` flag is, or their `launch` flag while `launch` is `pending`), `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read, or on a goal other than the one in the path, SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read.
 
 #### Scenario: Viewer reads but cannot act
 
@@ -573,7 +684,7 @@ The server SHALL approve a revision that has no evidence links like any other, a
 
 ### Requirement: Change request controls in the app
 
-The goal page SHALL offer **Propose a change** on any `active` goal the person can read but does not own, unless they are a viewer, and a "Change requests" list whose approve, reject and counter controls appear only for people in the goal's approval set; the workspace SHALL have a "Requests" tab, read from `GET /api/v2/workspaces/{ws}/change-requests`, with the groups waiting on me, mine and others, each control appearing only when the server's `can` flag allows it. The "Requests" tab SHALL show change requests only; alignments keep their own "Alignments" tab.
+The goal page SHALL offer **Propose a change** on any `active` goal the person can read but does not own, unless they are a viewer, and a "Change requests" list whose approve, approve and launch, reject and counter controls appear only for people in the goal's approval set, whose launch and not yet controls appear only for the request's launch set, and whose acknowledge control appears only for the requester; the workspace SHALL have a "Requests" tab, read from `GET /api/v2/workspaces/{ws}/change-requests`, with the groups waiting on me, mine and others, each control appearing only when the server's `can` flag allows it. The "Requests" tab SHALL show change requests only; alignments keep their own "Alignments" tab.
 
 #### Scenario: Non-owner proposes from the goal page
 
@@ -674,7 +785,7 @@ The server SHALL let the request's sender or a workspace owner cancel it with `D
 
 ### Requirement: Requests expire when their goal is achieved or dropped
 
-The server SHALL, in the transaction that gives a goal status `achieved` or `dropped` (the one that writes that version, an owner's version or an approved change request), after its `goal_version` directive and before any `release` directive, end every request on that goal, and every `switch_goal` request toward it, that is not cancelled and still has a session `sent` or `received`: write a `request` directive with `request.cancelled` true and `request.cancel_reason` `goal_closed` to those sessions, set their state to `expired` (sessions that already answered keep their answer, and the request is not marked cancelled), and write the audit row `request.expired` naming the person whose action changed the status, with the request id as object. A receipt for such a session SHALL leave it `expired`.
+The server SHALL, in the transaction that gives a goal status `achieved` or `dropped` (the one that writes that version, an owner's version or a launched change request), after its `goal_version` directive and before any `release` directive, end every request on that goal, and every `switch_goal` request toward it, that is not cancelled and still has a session `sent` or `received`: write a `request` directive with `request.cancelled` true and `request.cancel_reason` `goal_closed` to those sessions, set their state to `expired` (sessions that already answered keep their answer, and the request is not marked cancelled), and write the audit row `request.expired` naming the person whose action changed the status, with the request id as object. A receipt for such a session SHALL leave it `expired`.
 
 #### Scenario: Achieving a goal with a checkpoint still waiting
 
@@ -739,6 +850,7 @@ The server SHALL write audit rows naming the actor for `request.sent`, `request.
 - `lib/v2/alignments.ts`
 - `lib/v2/changes.ts`
 - `lib/v2/changes-read.ts`
+- `lib/v2/launch-words.ts`
 - `lib/v2/evidence.ts`
 - `lib/v2/spend.ts` (`goalSpend` only)
 - `lib/v2/sample.ts`
