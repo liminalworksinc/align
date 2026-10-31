@@ -5,9 +5,10 @@ import { claudeCodeLine } from "@/lib/paste-lines";
 
 // The first-run card at the top of a custom workspace's canvas. ConnectAI renders it (into a slot Home gives it), so
 // it reads the one connections poll ConnectAI already runs and never fetches on its own.
-// Until an app has read the workspace: two paths, a fictional sample and one agent over MCP, with what Align itself
-// has seen of the connection (approved, or not yet). Once any app has read the plan the card is gone. Every state is
-// Align-observed (a grant, a read); nothing an agent says about itself is shown. Dismissed per workspace in localStorage.
+// Until Align has seen an app: two paths, a fictional sample and one agent over MCP, with what Align itself has seen
+// of the connection (approved, not seen by Align yet). Once any app has been seen (last_used_at: any authenticated MCP request)
+// the card is gone. Every state is Align-observed (a grant, an app seen); nothing an agent says about itself is shown,
+// and the one reported read (goal activity) is labelled as reported. Dismissed per workspace in localStorage.
 
 interface FirstRunApp {
   id: string;
@@ -92,11 +93,11 @@ export default function FirstRun({
     );
   if (!apps) return null; // first poll still in flight
 
-  const reading = apps.filter((a) => a.last_used_at);
+  const seen = apps.filter((a) => a.last_used_at);
   const approved = apps.filter((a) => !a.last_used_at);
-  // Once any app has read the plan, the card yields: Home's "Connected AI apps" section and the sidebar show each
-  // app's read state from here on.
-  if (reading.length > 0) return null;
+  // Once any app has been seen, the card yields: Home's "Connected AI apps" section and the sidebar show each app's
+  // state from here on.
+  if (seen.length > 0) return null;
 
   return (
     <section aria-label="Get started" data-state={failed ? "error" : approved.length ? "approved" : "none"} className="mb-4 rounded-[14px] border border-violet-700 bg-white p-5 text-[15px] text-zinc-900">
@@ -143,8 +144,8 @@ export default function FirstRun({
             {failed
               ? "▲ Couldn’t check connected AI apps just now. Align tries again in a few seconds."
               : approved.length
-                ? `○ ${approved.map((a) => `${a.name}: Approved, hasn’t read the plan yet`).join(". ")}.`
-                : "Not connected yet."}
+                ? `○ ${approved.map((a) => `${a.name}: Approved, not seen by Align yet`).join(". ")}.`
+                : "No AI app has connected yet."}
           </p>
           <button onClick={openConnect} className="w-fit text-[14px] font-semibold text-violet-700 underline">
             Using Codex, the Claude app or ChatGPT?

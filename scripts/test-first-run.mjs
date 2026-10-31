@@ -4,11 +4,11 @@
 //   phase "static": the card fetches nothing itself; ConnectAI is mounted once; Home is the only place that mounts it
 //   phase "local":  Mode L, open create -> a fresh workspace with no connected agent shows both paths, the sample link
 //                   resolves (200) and is labelled fictional, what the agent can read matches the server's tools, Hide
-//                   persists, the status follows the server (approved only, a failed check), and once an app has read the
-//                   plan the card yields to Home's section and the sidebar (current plan, then an older one); the card adds
-//                   no request to the connections poll
+//                   persists, the status follows the server (approved, not seen by Align yet; a failed check), and once Align has
+//                   seen an app (any MCP request) the card yields to Home's section and the sidebar (seen on the current
+//                   plan, then on an older one); the card adds no request to the connections poll
 //   phase "hosted": HOSTED=1 as Fly runs it -> no sample link (Northstar is not served), "/" still goes to /new, and an
-//                   OAuth connection plus one MCP read flips the sidebar to "Read the current plan" and the card yields
+//                   OAuth connection plus one MCP request flips the sidebar to "Seen on the current plan" and the card yields
 // Screenshots of each state at 390, 768 and 1440 px go to $FIRST_RUN_SHOTS (default: a temp folder, printed at the end).
 // Usage: node scripts/test-first-run.mjs <port> [--no-build]   (from a worktree root; refuses 3100 and the main checkout)
 
@@ -292,7 +292,7 @@ async function phaseLocal(dir) {
       !!c0 && /Explore a sample/.test(c0.text) && /Sample \(fictional\)/.test(c0.text) && /Connect one agent/.test(c0.text) && /Claude Code/.test(c0.text),
       c0?.text,
     );
-    check("Connect one agent shows the Claude Code setup line and status 'Not connected yet.'", !!c0 && /claude mcp add/.test(c0.text) && /Not connected yet\./.test(c0.text) && c0.state === "none", c0?.text);
+    check("Connect one agent shows the Claude Code setup line and status 'No AI app has connected yet.'", !!c0 && /claude mcp add/.test(c0.text) && /No AI app has connected yet\./.test(c0.text) && c0.state === "none", c0?.text);
     check("it says what the agent can't do: propose, approve or change anything", !!c0 && /It can’t propose, approve or change anything here/.test(c0.text.replace(/\s+/g, " ")), "");
     await shots(page, "none");
 
@@ -309,16 +309,16 @@ async function phaseLocal(dir) {
     const client = await newClient("Claude Code");
     const tok = await connect(w, client, "leadership");
 
-    // Approved, nothing read yet: the grant exists with no last_used_at.
+    // Approved, not seen yet: the grant exists with no last_used_at.
     const approvedApi = await untilApi(w, (j) => j?.apps?.length === 1 && j.apps[0].last_used_at === null, 3000);
     if (approvedApi) {
       await page.reload({ waitUntil: "networkidle2" });
       const ok = await waitFor(page, async () => (await card(page))?.state === "approved");
       const c1 = await card(page);
-      check("approved but no read yet: the card says 'Claude Code: Approved, hasn't read the plan yet'", ok && /Claude Code: Approved, hasn’t read the plan yet\./.test(c1?.text ?? ""), c1?.text);
+      check("approved, not seen yet: the card says 'Claude Code: Approved, not seen by Align yet'", ok && /Claude Code: Approved, not seen by Align yet\./.test(c1?.text ?? ""), c1?.text);
       await shots(page, "approved");
-    } else check("approved but no read yet: the server reports the grant with no read", false, (await connections(w)).text);
-    // Any successful MCP call counts as a read (last_used_at), tools/list included, so it comes after the approved check.
+    } else check("approved, not seen yet: the server reports the grant with no last_used_at", false, (await connections(w)).text);
+    // Any authenticated MCP request marks the app seen (last_used_at), tools/list included, so it comes after that check.
     const tools = rpcResult(await rpc(tok, "tools/list", {}))?.tools ?? [];
     check("'It can read' has one line per tool the MCP server lists, and every tool only reads", reads.length > 0 && reads.length === tools.length && tools.every((t) => t.annotations?.readOnlyHint === true), `${reads.length} lines, ${tools.length} tools`);
     check(
@@ -337,28 +337,28 @@ async function phaseLocal(dir) {
     await shots(page, "error");
     page.blockConnections = false;
 
-    // One MCP read: the server marks the app as on the current plan, and the card yields. Home's "Connected AI apps"
-    // section and the sidebar show the read state from then on.
+    // One MCP request: the server marks the app seen on the current plan, and the card yields. Home's "Connected AI
+    // apps" section and the sidebar show the app from then on.
     const read = await rpc(tok, "tools/call", { name: "align_list_goals", arguments: {} });
     const onPlan = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === true);
-    check("after one MCP read the server reports the app on the current plan", read.status === 200 && onPlan, `${read.status} ${(await connections(w)).text}`);
+    check("after one MCP request the server reports the app seen on the current plan", read.status === 200 && onPlan, `${read.status} ${(await connections(w)).text}`);
     const sidebar = () => page.evaluate(() => document.querySelector('ul[aria-label="Connected AI apps"]')?.textContent ?? "");
     const home = () => page.evaluate(() => document.querySelector('section#agents')?.textContent ?? "");
     await page.reload({ waitUntil: "networkidle2" });
-    const flipped = await waitFor(page, async () => /Claude Code\s*Read the current plan/.test(await sidebar()));
+    const flipped = await waitFor(page, async () => /Claude Code\s*Seen on the current plan/.test(await sidebar()));
     const yielded = await waitFor(page, async () => !(await card(page)), 5000);
-    check("after the read the sidebar says 'Claude Code Read the current plan'", flipped, await sidebar());
-    check("after the read the first-run card yields (gone), and Home's section says Claude Code read the current plan", yielded && /Claude Code[\s\S]*Read the current plan/.test(await home()), `${yielded} ${await home()}`);
+    check("once seen, the sidebar says 'Claude Code Seen on the current plan'", flipped, await sidebar());
+    check("once seen, the first-run card yields (gone), and Home's section lists Claude Code", yielded && /Claude Code/.test(await home()), `${yielded} ${await home()}`);
     const sideNow = await sidebar();
-    check("the sidebar makes no claim about work: no 'working', 'follows', 'stuck', 'blocked' or 'progress'", !/working|follows|works from|stuck|blocked|progress/i.test(sideNow), sideNow);
+    check("the sidebar claims no read or work: no 'read', 'working', 'follows', 'stuck', 'blocked' or 'progress'", !/\bread\b|working|follows|works from|stuck|blocked|progress/i.test(sideNow), sideNow);
     await shots(page, "yielded");
 
-    // The plan changes (a proposal): the sidebar says the app last read an older plan; the card stays gone.
+    // The plan changes (a proposal): the sidebar says the app was last seen on an older plan; the card stays gone.
     const p = await req("POST", "/api/proposals", { cookie: w.c.product, body: { proposed_measure_text: "Retention first for two weeks", rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
     const stale = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === false);
     await page.reload({ waitUntil: "networkidle2" });
-    const older = await waitFor(page, async () => /Claude Code\s*Last read an older plan/.test(await sidebar()));
-    check("after the plan changes the sidebar says Claude Code last read an older plan, and no card comes back", p.status === 200 && stale && older && !(await card(page)), `${p.status} ${await sidebar()}`);
+    const older = await waitFor(page, async () => /Claude Code\s*Last seen on an older plan/.test(await sidebar()));
+    check("after the plan changes the sidebar says Claude Code was last seen on an older plan, and no card comes back", p.status === 200 && stale && older && !(await card(page)), `${p.status} ${await sidebar()}`);
     await shots(page, "older");
 
     // Hide, on a fresh workspace: gone, and still gone after a reload (localStorage). The card adds no request: the
@@ -435,8 +435,8 @@ async function phaseHosted(dir) {
     const onPlan = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === true);
     await page.reload({ waitUntil: "networkidle2" });
     const side = () => page.evaluate(() => document.querySelector('ul[aria-label="Connected AI apps"]')?.textContent ?? "");
-    const flipped = await waitFor(page, async () => /Claude Code\s*Read the current plan/.test(await side()));
-    check("hosted: after an OAuth connection and one MCP read the sidebar says Claude Code read the current plan, and the card yields", read.status === 200 && onPlan && flipped && !(await card(page)), `${read.status} ${await side()}`);
+    const flipped = await waitFor(page, async () => /Claude Code\s*Seen on the current plan/.test(await side()));
+    check("hosted: after an OAuth connection and one MCP request the sidebar says Claude Code was seen on the current plan, and the card yields", read.status === 200 && onPlan && flipped && !(await card(page)), `${read.status} ${await side()}`);
     await shots(page, "yielded");
   } finally {
     await browser.close();

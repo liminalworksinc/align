@@ -7,10 +7,11 @@ import { api } from "@/components/useAlign";
 import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 
 // "Connected AI apps" in a custom workspace's sidebar: the one URL any AI app connects with (Align's read-only MCP
-// endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. An approved app
-// that hasn't read anything yet is listed as approved, never as having read the plan. Each app that has read shows
-// whether it read the plan as it stands now (on_current_plan, lib/plan-rev.ts) or an older one. Align sees only what
-// an app last read, never what it does. The same poll feeds the first-run card (components/FirstRun.tsx).
+// endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. The signal is
+// last_used_at: when Align last saw the app make any authenticated MCP request (app/api/mcp/route.ts noteGrantUse),
+// stamped with the plan revision current at that moment (lib/plan-rev.ts). It says the app was seen while that plan
+// was current, not that it read the plan. An approved app Align hasn't seen yet is listed as "Approved, not seen by Align yet".
+// Align sees when an app connects, never what it does. The same poll feeds the first-run card (components/FirstRun.tsx).
 
 interface App {
   id: string;
@@ -187,7 +188,7 @@ export default function ConnectAI({
   }
 
   const reading = data?.apps.filter((a) => a.last_used_at) ?? [];
-  // Just connected: approved in the last 15 minutes and has read the workspace. Then the dialog says so and suggests
+  // Just connected: approved in the last 15 minutes and seen by Align since. Then the dialog says so and suggests
   // a first question.
   const fresh = reading.filter((a) => data && data.at - Date.parse(a.approved_at) < 15 * 60 * 1000);
   return (
@@ -196,7 +197,7 @@ export default function ConnectAI({
       {!data ? (
         <div className="text-[13px] text-zinc-600">{"\u00a0"}</div>
       ) : data.apps.length === 0 ? (
-        <div className="text-[13px] text-zinc-600">None connected. A connected AI agent can read this plan.</div>
+        <div className="text-[13px] text-zinc-600">No AI app has connected yet.</div>
       ) : (
         <ul aria-label="Connected AI apps" className="space-y-1">
           {reading.map((a) => (
@@ -206,7 +207,7 @@ export default function ConnectAI({
               </span>
               <span className="min-w-0">
                 <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
-                <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Read the current plan" : "Last read an older plan"}</span>
+                <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Seen on the current plan" : "Last seen on an older plan"}</span>
               </span>
             </li>
           ))}
@@ -216,7 +217,7 @@ export default function ConnectAI({
               <li key={a.id} className="flex items-start gap-1.5 text-[13px] leading-snug text-zinc-500">
                 <span aria-hidden>○</span>
                 <span className="min-w-0">
-                  <span className="font-semibold text-zinc-700">{a.name}</span> Approved, hasn’t read the plan yet
+                  <span className="font-semibold text-zinc-700">{a.name}</span> Approved, not seen by Align yet
                 </span>
               </li>
             ))}
@@ -266,7 +267,7 @@ export default function ConnectAI({
                 </div>
                 Ask it:
                 <Command text={TRY} />
-                After a goal changes here, send it another message and it will see the change.
+                Align sees when each app last contacted it, not what it read or does.
               </div>
             ) : (
               <p className="mb-5 rounded-[10px] bg-zinc-50 p-3 text-[15px] text-zinc-700">
@@ -285,13 +286,13 @@ export default function ConnectAI({
                         {a.name} <span className="font-normal text-zinc-500">({a.redirect_host})</span>
                       </div>
                       <div className="text-[14px] text-zinc-600">
-                        As {teamOf(a.role)} · {a.last_used_at ? `last read ${when(a.last_used_at)}` : "approved, hasn’t read the plan yet"}
+                        As {teamOf(a.role)} · {a.last_used_at ? `last seen by Align ${when(a.last_used_at)}` : "Approved, not seen by Align yet"}
                       </div>
                       {a.last_used_at && (
                         <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"}`}>
                           {a.on_current_plan
-                            ? "✓ Read the current plan."
-                            : `▲ Last read an older plan: it hasn’t read the plan since it changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}. Send it a message and it reads the new one.`}
+                            ? "✓ Seen on the current plan."
+                            : `▲ Last seen on an older plan: Align hasn’t seen it since the plan changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}.`}
                         </div>
                       )}
                     </div>
