@@ -21,6 +21,13 @@ const PITCH = "Liminal helps prevent wasted AI-agent work by giving teams one ap
 const LOI_IN_FORM = "Want to evaluate Align on a real workflow? The waitlist form ends with an optional, non-binding letter of intent.";
 const LOI_ELSEWHERE = "Want to evaluate Align on a real workflow? Ask about a non-binding letter of intent.";
 const sent = new Set<string>(); // value_card_viewed already sent from this page, per workspace, proposal and role
+// The top region that counts as seeing the card. Measured (1440x900 and 390x844): at 1440 the heading ends at 47 px, the
+// accepted change at 132 and who approved at 246; at 390 the heading ends at 157 and the accepted change starts below it.
+// 240 px covers the heading and the accepted change on desktop and the heading plus the change's first lines on a phone,
+// while staying under a third of the scroll column (791 px / 844 px), so it fits whole wherever the card's top sits.
+const TOP_PX = 240;
+const TOP_SEEN_RATIO = 0.75; // "most of it shown": 180 of the 240 px
+const VIEW_DWELL_MS = 1000;
 
 function when(iso?: string | null) {
   if (!iso) return "";
@@ -55,27 +62,41 @@ function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Pr
   const actor = me.actor;
   const mark = (action: FunnelAction) => void post(workspace, { action, proposal_id: p.id }).catch(() => undefined);
 
-  // value_card_viewed once the card is at least half on screen (or fills half the screen), once per workspace, proposal and role. No
-  // IntersectionObserver, no event: a card below the fold that nobody scrolled to was not viewed.
-  const ref = useRef<HTMLElement>(null);
+  // value_card_viewed once the card's top (the `top` sentinel, TOP_PX tall) has been on screen for VIEW_DWELL_MS, once per workspace,
+  // proposal and role. The card is taller than the column it scrolls in (desktop: the main column, ~790 px at 1440x900;
+  // phone: the window), so a person who scrolls to it sees its heading and first rows, not half of it. A glance shorter
+  // than the dwell is not a view. No IntersectionObserver, no event: a card below the fold that nobody scrolled to was not viewed.
+  const top = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const key = `${workspace}:${p.id}:${actor}`;
-    const el = ref.current;
+    const el = top.current;
     if (sent.has(key) || !el || typeof IntersectionObserver === "undefined") return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stopTimer = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+    };
     const io = new IntersectionObserver(
       (entries) => {
-        // Half the card on screen, or (a card taller than two screens, as on a phone) half the screen filled by it.
-        const seen = (e: IntersectionObserverEntry) =>
-          e.isIntersecting && (e.intersectionRatio >= 0.5 || e.intersectionRect.height >= 0.5 * (e.rootBounds?.height ?? window.innerHeight));
-        if (!entries.some(seen) || sent.has(key)) return;
-        sent.add(key);
-        io.disconnect();
-        void post(workspace, { action: "value_card_viewed", proposal_id: p.id }).catch(() => sent.delete(key));
+        const e = entries[entries.length - 1];
+        // "Seen": most of the top region on screen (clipped by the scroll column as well as the window).
+        if (!e.isIntersecting || e.intersectionRatio < TOP_SEEN_RATIO) return stopTimer();
+        if (timer !== undefined) return;
+        timer = setTimeout(() => {
+          timer = undefined;
+          if (sent.has(key)) return io.disconnect();
+          sent.add(key);
+          io.disconnect();
+          void post(workspace, { action: "value_card_viewed", proposal_id: p.id }).catch(() => sent.delete(key));
+        }, VIEW_DWELL_MS);
       },
-      { threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1] },
+      { threshold: [0, 0.25, 0.5, TOP_SEEN_RATIO, 1] },
     );
     io.observe(el);
-    return () => io.disconnect();
+    return () => {
+      stopTimer();
+      io.disconnect();
+    };
   }, [workspace, p.id, actor]);
 
   // The accepted change: the owning team's target before and after.
@@ -104,7 +125,9 @@ function ValueCard({ props, acc, p }: { props: ViewProps; acc: Acceptance; p: Pr
   const toLaunch = d ? spanWords(p.created_at, d.at) : null;
 
   return (
-    <section ref={ref} aria-label="What this decision gave you" className="flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-white p-[18px]">
+    <section aria-label="What this decision gave you" className="relative flex flex-col gap-3 rounded-[14px] border border-zinc-200 bg-white p-[18px]">
+      {/* The card's top region, watched for value_card_viewed; invisible and takes no space. */}
+      <div ref={top} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0" style={{ height: TOP_PX }} />
       <h2 className="text-[20px] font-semibold leading-snug text-zinc-900">What this decision gave you</h2>
 
       <Row label="Accepted change">
