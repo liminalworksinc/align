@@ -23,10 +23,14 @@ export interface Goal {
   depends_on: string[];
   limits: Limit[];
   contributes_to: { id: string; title: string; version: number; reviewed_version: number | null; stale: boolean }[];
+  /** Share of the workspace's agent time this goal should get (0 to 100), or null. */
+  target_share: number | null;
+  /** Trailing 7 days, whole percents (goals feed only; null for a goal that is not active). */
+  allocation?: { target_share: number | null; share_7d: number; gap_7d: number | null; held: boolean } | null;
 }
 
 export interface WsDetail {
-  workspace: { id: string; name: string };
+  workspace: { id: string; name: string; steering: "off" | "on" };
   role: "owner" | "member" | "viewer";
   me: string;
   members: { id: string; name: string; email: string; role: "owner" | "member" | "viewer" }[];
@@ -165,6 +169,55 @@ export interface ChangeRequest {
   approved_without_evidence: boolean | null;
   can: Record<"approve" | "approve_and_launch" | "reject" | "counter" | "accept_counter" | "acknowledge" | "withdraw" | "rebase" | "add_evidence" | "launch" | "not_yet", boolean>;
   waiting_on_me: boolean;
+  created_at: string;
+  updated_at: string;
+  decided_at: string | null;
+}
+
+/** One row of GET …/allocation (lib/v2/allocation.ts). */
+export interface AllocationRow {
+  kind: "goal" | "private" | "unallocated";
+  goal: { id: string; title: string } | null;
+  fresh_tokens: number;
+  share: number;
+  target_share: number | null;
+  gap: number | null;
+  est_list_usd_micros: number;
+  unpriced_requests: number;
+  sessions: number;
+}
+
+export interface AllocationResponse {
+  window: { from: string | null; to: string | null; total_fresh_tokens: number; total_est_list_usd_micros: number; unpriced_requests: number; rows: AllocationRow[]; note: string };
+  weekly: { week_start: string; total_fresh_tokens: number; rows: { kind: AllocationRow["kind"]; goal: { id: string; title: string } | null; share: number; target_share: number | null }[] }[];
+  steering: { steering: "off" | "on"; total: number; days: { day: string; n: number }[] };
+}
+
+/** A proposal to change the target shares of one or more goals (lib/v2/reallocations.ts). */
+export interface Reallocation {
+  id: string;
+  state: "pending" | "countered" | "approved" | "rejected" | "withdrawn" | "superseded";
+  revision: number;
+  requester: { id: string; name: string };
+  targets: {
+    goal: { id: string; title: string } | null;
+    from_share: number | null;
+    current_share: number | null;
+    target_share: number | null;
+    base_version: number | null;
+    approvers: { id: string; name: string }[];
+    approved_by: { id: string; name: string } | null;
+    approved: boolean;
+  }[];
+  note: string | null;
+  history: { revision: number; author: { id: string; name: string }; note: string | null; created_at: string }[];
+  launch: "pending" | "not_yet" | "launched" | "superseded" | null;
+  launch_decided_by: { id: string; name: string } | null;
+  launch_decided_at: string | null;
+  rejected_by: { id: string; name: string } | null;
+  rejection_reason: string | null;
+  waiting_on_me: boolean;
+  can: Record<"approve" | "approve_and_launch" | "launch" | "not_yet" | "counter" | "accept_counter" | "reject" | "withdraw", boolean>;
   created_at: string;
   updated_at: string;
   decided_at: string | null;

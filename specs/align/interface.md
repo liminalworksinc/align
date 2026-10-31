@@ -515,12 +515,12 @@ and SHALL give everyone but viewers a "New goal" form that posts to `POST /api/v
 #### Scenario: Goal list
 
 - **WHEN** a member opens the tab
-- **THEN** each goal links to its goal page and shows its status pill, a "company" pill for a company goal, its visibility ("Only me", "My team", "Everyone in the workspace"), its team, "you can bind sessions" (green) or "needs alignment to bind" (amber), its owner ("Yours" for the person's own) and version, its measures, and one chip per limit ("Must", "Must not" or "Out of scope" and its text, at most 5); with none, "No goals you can see yet."
+- **THEN** each goal links to its goal page and shows its status pill, a "company" pill for a company goal, its visibility ("Only me", "My team", "Everyone in the workspace"), its team, "you can bind sessions" (green) or "needs alignment to bind" (amber), "target <n>%" when it has a target share, "last 7 days <n>%" (amber when 10 or more points from its target) when it has a target or had shared agent time in the last 7 days, its owner ("Yours" for the person's own) and version, its measures, and one chip per limit ("Must", "Must not" or "Out of scope" and its text, at most 5); with none, "No goals you can see yet."
 
 #### Scenario: Create a team goal
 
-- **WHEN** a member fills Goal (up to 300 characters), measures (up to 10, each with an optional target), "Who can see it", Team ("No team" or one of the person's teams; hint "Members of the team can bind their sessions to it") and the optional anchors, and presses **Create goal**
-- **THEN** the page posts `{title, level:"team", visibility, team_id, measures, anchors, limits}` (limits from the limit editor, empty rows left out) and lists the new goal; "My team" is disabled for a person in no team, and **Create goal** stays disabled for "My team" without a team
+- **WHEN** a member fills Goal (up to 300 characters), measures (up to 10, each with an optional target), "Who can see it", Team ("No team" or one of the person's teams; hint "Members of the team can bind their sessions to it"), the optional "Target share of agent time (%)" (hint "Optional. Other active goals you can see already take <n>%, so up to <100-n>% is left (goals you can't see count too). …") and the optional anchors, and presses **Create goal**
+- **THEN** the page posts `{title, level:"team", visibility, team_id, measures, anchors, limits, target_share}` (limits from the limit editor, empty rows left out; a blank target is `null`) and lists the new goal; a target that would put the workspace's targets over 100% shows the server's message; "My team" is disabled for a person in no team, and **Create goal** stays disabled for "My team" without a team
 
 #### Scenario: Create a company goal
 
@@ -561,11 +561,11 @@ tree and every version, and SHALL give a person the server lets edit it (`can_ed
 #### Scenario: Reading a goal
 
 - **WHEN** a member opens a goal
-- **THEN** the page shows its title, status, level, visibility, team, version, owner ("you" for the person's own), measures with targets, anchors, contributing goals, a "Limits" card with the version's limits (kind, text, and where and when each was said) or "No limits on this version.", and every version (title, status, time and the first 12 characters of its content hash); a goal the server does not return shows "This goal does not exist or you can't see it."
+- **THEN** the page shows its title, status, level, visibility, team, version, a "target <n>% of agent time" pill when it has a target share, owner ("you" for the person's own), measures with targets, anchors, contributing goals, a "Limits" card with the version's limits (kind, text, and where and when each was said) or "No limits on this version.", and every version (title, status, its target when it had one, time and the first 12 characters of its content hash); a goal the server does not return shows "This goal does not exist or you can't see it."
 
 #### Scenario: Save a new version
 
-- **WHEN** the owner edits Goal, measures, limits (kind "Must", "Must not" or "Out of scope", text up to 160 characters, an optional meeting and date; at most 5), Status (Active, Achieved, Dropped), anchors and "Depends on" (other active goals) and presses **Save version <n+1>**
+- **WHEN** the owner edits Goal, measures, limits (kind "Must", "Must not" or "Out of scope", text up to 160 characters, an optional meeting and date; at most 5), Status (Active, Achieved, Dropped), "Target share of agent time (%)" (blank for none), anchors and "Depends on" (other active goals) and presses **Save version <n+1>**
 - **THEN** the page posts them with `version` to `POST .../goals/<goal>/versions`; a 409 `cycle` shows "That would make these goals depend on each other in a loop." and other errors show the server's message
 
 #### Scenario: Goal tree
@@ -826,6 +826,11 @@ only the actions the server allows.
 - **WHEN** an approver presses **Suggest a change**, or someone involved presses **Revoke**
 - **THEN** a counter form (choice, sessions to keep, note) posts `{revision, choice, keep, note}` to `.../alignments/<id>/counter`, and revoking first confirms "Revoke this alignment? From now on it has no effect. Sessions that counted under the goal only because of it stop uploading until their owner picks a goal. Past usage does not move."
 
+#### Scenario: Target changes
+
+- **WHEN** a member opens the tab
+- **THEN** a "Target changes" card (anchor `#target-changes`) lists the reallocations from `GET /api/v2/workspaces/<ws>/reallocations` the person can read, each as "<requester or You> proposed new targets", its state ("waiting for approval", "approver suggested other targets", "approved", "declined", "withdrawn", "superseded"), each goal as "<title>: <from> → <to>" ("A goal you can't see: changes" otherwise) with "(approved by <name>)" or "(needs one of: <names>)", the note, where the launch stands ("Approved, waiting for launch. Agents still have the old targets.", "Approved, not launched yet: …", "Launched by <name>, <time>. Agents on these goals hear the new targets at their next turn.", or why it was superseded), and the buttons its `can` flags allow: **Approve (agents switch at launch)**, **Approve and launch**, **Launch**, **Not yet**, **Accept the counter**, **Counter** (a target field per goal and a note), **Decline**, **Withdraw**; for everyone but viewers a "Propose new targets" form lists each active goal ("<title> (now <n>% | no target)") with a blank field meaning unchanged, an optional "Why", and **Propose <n> change(s)**, which posts `{targets, note}` to `POST /api/v2/workspaces/<ws>/reallocations`
+
 #### Scenario: Approval would make a loop
 
 - **WHEN** **Approve** gets 409 `cycle`
@@ -921,6 +926,11 @@ sessions.
 
 - **WHEN** a member (viewers included) opens the tab
 - **THEN** a table shows, per row, requests, input, output, cache read, cache write and estimated list cost, with the billing basis per row, then "Not bound to a goal" and "Total", the server's note, "Goals you can't see are grouped without names. There is no per-person view.", and a count of unpriced requests when there are any; by my sessions, usage of rolled-up sessions older than 13 months is one "Older sessions (rolled up)" row
+
+#### Scenario: Agent time against targets
+
+- **WHEN** a member (viewers included) opens the tab
+- **THEN** above the usage table an "Agent time against targets" card (pill "steering on" or "steering off") reads `GET /api/v2/workspaces/<ws>/allocation?weeks=6` and shows, for the last 7 days, one line per row ("<goal>", "Goals you can't see" or "Not bound to a goal") with "<share>% of agent time · target <n>%", a pill "<n> points over", "<n> points under", "on target" or "no target" (amber at 10 points or more), a bar with the target marked, and its fresh tokens, list price, unpriced requests and sessions; a table of each goal's share per week (weeks start Monday, UTC); "Steering is <on|off>. …" with how many lines were shown in the last 7 days; a "Propose new targets" link to the Alignments tab's target changes; and, for a workspace owner only, **Turn steering on** / **Turn steering off**, which PATCHes `{steering}` to `/api/v2/workspaces/<ws>`
 
 ### Requirement: Workspace Apps tab
 
@@ -1081,6 +1091,8 @@ active goal), neutral otherwise.
 - `app/app/_ui/activity.tsx`
 - `app/app/_ui/requests.tsx`
 - `app/app/w/[ws]/spend/view.tsx`
+- `app/app/w/[ws]/spend/allocation.tsx`
+- `app/app/_ui/reallocations.tsx`
 - `app/app/w/[ws]/apps/view.tsx`
 - `app/oauth/authorize/page.tsx`
 - `app/oauth/authorize/AuthorizeForm.tsx`

@@ -10,6 +10,8 @@ import { event } from "./events";
 import { take } from "./limits";
 import { deleteMemberSessions, onMemberRemoved } from "./lifecycle";
 import { cancelDeparture, noteDeparture, personName, RESTORE_DAYS } from "./retention";
+import { workspaceSteering, writeSteering } from "./steering";
+import { str, type Body } from "./validate";
 
 // Workspaces, members, invites and teams. Teams are stored as pods (v2_pods, pod_ ids); every response, message and
 // audit action says "team". The /pods routes remain as aliases of /teams.
@@ -83,7 +85,7 @@ export async function createWorkspace(req: Request, p: WebPrincipal, name: strin
 }
 
 export function workspaceDetail(pp: PolicyPrincipal) {
-  const ws = get<{ id: string; name: string; created_at: string }>("SELECT id, name, created_at FROM v2_workspaces WHERE id = ?", pp.wsId);
+  const ws = get<{ id: string; name: string; created_at: string; steering: "off" | "on" }>("SELECT id, name, created_at, steering FROM v2_workspaces WHERE id = ?", pp.wsId);
   if (!ws) throw notFound();
   const members = all<{ id: string; name: string; email: string; role: WsRole }>(
     "SELECT u.id, u.name, u.email, m.role FROM v2_members m JOIN ba_user u ON u.id = m.user_id WHERE m.ws_id = ? ORDER BY u.name, u.id",
@@ -100,14 +102,21 @@ export function workspaceDetail(pp: PolicyPrincipal) {
   return { workspace: ws, role: pp.wsRole, me: pp.userId, members, teams };
 }
 
-export async function renameWorkspace(pp: PolicyPrincipal, name: string) {
+/** PATCH { name?, steering? } (owners): rename the workspace and/or turn steering on or off (lib/v2/steering.ts).
+ *  At least one of them; both in one transaction. */
+export async function updateWorkspace(pp: PolicyPrincipal, b: Body) {
   need(pp, "workspace.manage");
+  if (b.name === undefined && b.steering === undefined) throw badRequest("Send name or steering");
+  const name = b.name === undefined ? undefined : str(b, "name", 100);
   const at = nowIso();
-  await tx(() => {
-    run("UPDATE v2_workspaces SET name = ? WHERE id = ?", name, pp.wsId);
-    audit(pp.wsId, pp.userId, "workspace.renamed", pp.wsId, at);
+  const steering = await tx(() => {
+    if (name !== undefined) {
+      run("UPDATE v2_workspaces SET name = ? WHERE id = ?", name, pp.wsId);
+      audit(pp.wsId, pp.userId, "workspace.renamed", pp.wsId, at);
+    }
+    return b.steering === undefined ? workspaceSteering(pp.wsId) : writeSteering(pp, b.steering, at);
   });
-  return { id: pp.wsId, name };
+  return { id: pp.wsId, name: get<{ name: string }>("SELECT name FROM v2_workspaces WHERE id = ?", pp.wsId)!.name, steering };
 }
 
 /** Soft delete (softDeleteWorkspace in lib/v2/core.mts, the one deletion path, shared with account deletion and

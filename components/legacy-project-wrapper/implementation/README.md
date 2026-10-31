@@ -14,6 +14,11 @@ it, and keeps the coding agents working toward that goal current with it.
 - **Agents that stay current.** The `align` CLI (`packages/align-agent`) pairs a machine, shares chosen Claude Code
   and Codex sessions toward a goal, meters their usage locally and delivers goal changes and stop directives at the
   next turn. Usage and estimated spend are reported per goal, team and session.
+- **Agent time follows priorities.** A goal can carry a target share of the workspace's agent time, set in a version by
+  its owner or proposed by anyone in a reallocation that each goal's approvers approve and someone launches. The Spend
+  tab shows agent time (fresh tokens) per goal against its target over 7 days and six weeks. With steering on (a
+  workspace owner's switch), a session that starts on a goal well over target while another is well under gets one
+  line saying so; the experiment is in `docs/ALLOCATION_EXPERIMENT.md`.
 - **Evidence on change requests.** Each revision carries a snapshot Align records itself (the goal's 30-day spend,
   bound sessions, last activity). The requester and approvers attach typed links (PR, CI run, incident, dashboard,
   doc), labelled self-reported or agent-reported and never verified. Approving without evidence is allowed and audited.

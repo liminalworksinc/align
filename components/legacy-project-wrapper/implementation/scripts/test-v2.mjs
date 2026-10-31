@@ -713,11 +713,37 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 14, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 14 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 15, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 15 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
   check("storage (PORT2-001): migration 14 adds last_read_at to connected-app grants, beside last_used_at (connected, not read)", grantCols.includes("last_read_at") && grantCols.includes("last_used_at"), grantCols.join());
+  // PORT29: migration 15 on this database, and on a version 14 database that already holds a workspace, a member and a
+  // goal (built in memory from lib/v2/db.ts's own MIGRATIONS, as the server's migrate() applies them).
+  const port29Cols = withDb((d) => [["v2_goals", "target_share"], ["v2_goal_versions", "target_share"], ["v2_workspaces", "steering"]].every(([t, c]) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c)));
+  const upgraded = (() => {
+    const src = readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8");
+    const migrations = new Function(`return [${src.slice(src.indexOf("[", src.indexOf("const MIGRATIONS")) + 1, src.indexOf("];\n\n// The operator script"))}];`)();
+    const d = new DatabaseSync(":memory:");
+    d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT)");
+    migrations.slice(0, 14).forEach((m) => d.exec(m));
+    d.exec(`INSERT INTO ba_user VALUES ('u_up', 'Up'); INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_up', 'Before', 'u_up', 'x');
+      INSERT INTO v2_members VALUES ('ws_up', 'u_up', 'owner', 'x');
+      INSERT INTO v2_goals (id, ws_id, owner_id, visibility, version, title, measures_json, anchors_json, status, created_at, updated_at) VALUES ('g_up', 'ws_up', 'u_up', 'workspace', 1, 'Kept goal', '[]', '{}', 'active', 'x', 'x');`);
+    d.exec("BEGIN");
+    d.exec(migrations[14]);
+    const broken = d.prepare("PRAGMA foreign_key_check").all().length;
+    d.exec("COMMIT");
+    const out = { n: migrations.length, broken, g: d.prepare("SELECT title, target_share FROM v2_goals").get(), w: d.prepare("SELECT name, steering FROM v2_workspaces").get() };
+    d.close();
+    return out;
+  })();
+  check(
+    "storage (PORT29): migration 15 adds target_share to goals and their versions, steering (default off) to workspaces, and the steering-event and reallocation tables; a version 14 database upgrades in place, its workspace and goal kept with steering off and no target",
+    port29Cols && ["v2_steering_events", "v2_reallocations", "v2_reallocation_revisions", "v2_reallocation_approvals"].every((t) => pragmas.tables.includes(t)) && upgraded.n === 15 && upgraded.broken === 0 &&
+      upgraded.g?.title === "Kept goal" && upgraded.g.target_share === null && upgraded.w?.name === "Before" && upgraded.w.steering === "off",
+    JSON.stringify(upgraded),
+  );
 
   // -- identity --
   const U1 = await signUp("U1", "Una One", "u1@example.test");
@@ -4416,6 +4442,442 @@ try {
     check("home (LAUNCH-001): once launched the change leaves every Home", lnHL.json?.launch === "launched" && !lOf(kX, "waiting_on_me") && !lOf(kM, "waiting_on_others"), lnHL.text.slice(0, 200));
   }
   // ==== end port2:home ====
+
+  // ==== port29:allocation ====
+  // Goal sessions: agent time follows priorities (main #29), on a workspace of its own. AO owns it; team Core has a
+  // lead (AL, who owns GA) and a member (AM, whose device's sessions do the work and who owns the private goal GP); AX
+  // is a member in no team who owns GB; AV is a viewer; AO owns the company goal GC. Targets are versioned goal content;
+  // a reallocation is approved per goal by its approval set and then launched.
+  {
+    const aUsers = {};
+    for (const [who, name] of [
+      ["AO", "Alma Owner"],
+      ["AL", "Abel Lead"],
+      ["AM", "Ari Member"],
+      ["AX", "Axel Other"],
+      ["AV", "Ava Viewer"],
+    ])
+      aUsers[who] = await signUp(who, name, `${who.toLowerCase()}@allocation.example.test`);
+    const { AO, AL, AM, AX, AV } = aUsers;
+    const AW = (await call("AO", "POST", "/api/v2/workspaces", { cookie: AO.cookie, body: { name: "Allocation workspace" } })).json?.id;
+    const aa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${AW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [AL, "member"],
+      [AM, "member"],
+      [AX, "member"],
+      [AV, "viewer"],
+    ]) {
+      const i = await aa(AO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const AT = (await aa(AO, "POST", "/teams", { name: "Core" })).json?.id;
+    await aa(AO, "POST", `/teams/${AT}/members`, { user_id: AL.id, role: "lead" });
+    await aa(AO, "POST", `/teams/${AT}/members`, { user_id: AM.id, role: "member" });
+    const ACANARY = `ALLOC-PRIV-${randomBytes(4).toString("hex")}`;
+
+    // -- targets: versioned goal content, set by the goal's owner; active targets add up to 100 or less --
+    const GA = await aa(AL, "POST", "/goals", { title: "Ship the importer", visibility: "workspace", team_id: AT, target_share: 20 });
+    const GB = await aa(AX, "POST", "/goals", { title: "Write the docs", visibility: "workspace", target_share: 30 });
+    const GP = await aa(AM, "POST", "/goals", { title: `${ACANARY} side project`, visibility: "private", target_share: 20 });
+    const GCover = await aa(AO, "POST", "/goals", { title: "Win the regulated market", level: "company", target_share: 40 });
+    const GC = await aa(AO, "POST", "/goals", { title: "Win the regulated market", level: "company", target_share: 10 });
+    const GN = await aa(AX, "POST", "/goals", { title: "No target here", visibility: "workspace" });
+    const badTargets = await Promise.all([40.5, -1, 101, "20"].map((t) => aa(AX, "POST", "/goals", { title: "Bad target", target_share: t })));
+    check(
+      "targets: a goal is created with target_share (a whole percent, or none: null); a private goal's target counts toward the workspace's 100%, so a company goal asking 40% -> 409 targets_over_100 naming only the sums (110%, other goals 70%), never a goal; 40.5, -1, 101 or \"20\" -> 400",
+      [GA, GB, GP, GC].every((r) => r.status === 201) && GA.json.target_share === 20 && GP.json.target_share === 20 && GC.json.target_share === 10 && GN.json?.target_share === null &&
+        GCover.status === 409 && GCover.json?.error === "targets_over_100" && /110%/.test(GCover.json.message) && /70%/.test(GCover.json.message) && !GCover.text.includes(ACANARY) && !/importer|docs/i.test(GCover.json.message) &&
+        badTargets.every((r) => r.status === 400),
+      `${GA.status} ${GP.status} ${GC.status} ${GCover.text} ${badTargets.map((r) => r.status)}`,
+    );
+    const ga = GA.json;
+    const gb = GB.json;
+    const gc = GC.json;
+    const gp = GP.json;
+    const hashOf = (g, v) => withDb((d) => d.prepare("SELECT content_hash, target_share, created_by FROM v2_goal_versions WHERE goal_id = ? AND version = ?").get(g, v));
+    const plain = (t, v) => sha256hex(JSON.stringify({ title: t, measures: [], anchors: { repos: [], branch_patterns: [], issues: [] }, status: "active" }));
+    check(
+      "targets: target_share joins the version's content hash only when set (a goal with no target hashes as before targets existed) and is stored on the version row",
+      hashOf(GN.json?.id, 1)?.content_hash === plain("No target here") && hashOf(ga.id, 1)?.content_hash !== plain("Ship the importer") && hashOf(ga.id, 1)?.target_share === 20,
+      JSON.stringify([hashOf(GN.json?.id, 1), hashOf(ga.id, 1)]),
+    );
+
+    // Sessions with usage: AM's device has three, bound to GA (their team's goal), their private GP and no goal; AX's
+    // has one bound to their own GB.
+    const aDevice = (u, name) => {
+      const keys = newDeviceKeys();
+      const d = insertDevice(u.id, name);
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, AW));
+      return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
+    };
+    const DM = aDevice(AM, "Ari's laptop");
+    const DX = aDevice(AX, "Axel's laptop");
+    const aT0 = new Date(Date.now() - 3600_000).toISOString();
+    const aShare = async (dev, native, goalId, tokens, extra = {}) => {
+      const key = sessionKey(dev, AW, "claude-code", native);
+      await call(dev.who, "PUT", `/api/v2/workspaces/${AW}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, AW, `/src/${native}`), repo_alias: null, started_at: aT0, title: null } });
+      const ep = epochId();
+      const e = await call(dev.who, "POST", `/api/v2/workspaces/${AW}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: ep, goal_id: goalId, starts_at: aT0, root_turn: null, cause: "manual" } });
+      const up = await call(dev.who, "POST", `/api/v2/workspaces/${AW}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: [usageRow(dev, `${native}-1`, ep, { input: tokens, output: 0, cache_write_5m: 0, cache_read: 99_000, ...extra })] } });
+      return { key, ep, epoch: e.status, accepted: up.json?.accepted };
+    };
+    const SA = await aShare(DM, "alloc-a", ga.id, 6000);
+    const SB = await aShare(DX, "alloc-b", gb.id, 1500, { output: 500, est_list_usd_micros: null }); // unpriced still counts
+    const SP = await aShare(DM, "alloc-p", gp.id, 1000);
+    const SU = await aShare(DM, "alloc-u", null, 1000);
+    check("allocation setup: four sessions with usage (AM's bound to GA, the private GP and no goal; AX's bound to GB)", [SA, SB, SP, SU].every((s) => s.epoch === 200 && s.accepted === 1), JSON.stringify([SA, SB, SP, SU].map((s) => [s.epoch, s.accepted])));
+
+    // -- GET …/allocation: fresh tokens per goal against target; privacy as spend --
+    const allocOf = (u, q = "") => aa(u, "GET", `/allocation${q}`);
+    const al = await allocOf(AO);
+    const rowFor = (a, id) => a?.window.rows.find((r) => r.goal?.id === id);
+    const aFresh = withDb((d) => d.prepare("SELECT SUM(input + output + cache_write_5m + cache_write_1h + cache_write_unsplit) AS n FROM v2_usage WHERE ws_id = ?").get(AW).n);
+    const W = al.json?.window;
+    check(
+      "allocation: rows' fresh tokens (input, output and cache writes, every model, priced or not; cache reads left out) add up to the total, which matches the database (10,000); GA 60% against a 20% target (gap 40), GB 20% with its unpriced request counted",
+      al.status === 200 && W.total_fresh_tokens === 10_000 && aFresh === 10_000 && W.rows.reduce((n, r) => n + r.fresh_tokens, 0) === W.total_fresh_tokens && rowFor(al.json, ga.id)?.share === 60 && rowFor(al.json, ga.id).target_share === 20 && rowFor(al.json, ga.id).gap === 40 &&
+        rowFor(al.json, gb.id)?.share === 20 && rowFor(al.json, gb.id).unpriced_requests === 1 && W.unpriced_requests === 1,
+      JSON.stringify(W?.rows),
+    );
+    const priv = W?.rows.find((r) => r.kind === "private");
+    const unal = W?.rows.find((r) => r.kind === "unallocated");
+    check(
+      "allocation: another person's private goal is one unnamed row with no target (10%), work bound to no goal is its own row (10%); an active goal with a target and no usage is listed at 0% (the company goal: gap -10); no person, session or private title appears",
+      priv && priv.goal === null && priv.target_share === null && priv.share === 10 && unal?.share === 10 && rowFor(al.json, gc.id)?.share === 0 && rowFor(al.json, gc.id).gap === -10 && !rowFor(al.json, GN.json.id) &&
+        ![AO.id, AL.id, AM.id, AX.id, SA.key, SB.key, ACANARY].some((s) => al.text.includes(s)),
+      JSON.stringify(W?.rows.map((r) => [r.kind, r.goal?.title, r.share, r.target_share])),
+    );
+    const mine = await allocOf(AM);
+    const viewerAl = await allocOf(AV);
+    const bearerAl = await call("AM", "GET", `/api/v2/workspaces/${AW}/allocation`, { bearer: DM.access });
+    const outsider = await call("U1", "GET", `/api/v2/workspaces/${AW}/allocation`, { cookie: U1.cookie });
+    const badWeeks = await Promise.all(["?weeks=0", "?weeks=27", "?weeks=x", "?from=nope", `?from=${new Date().toISOString()}&to=${aT0}`].map((q) => allocOf(AO, q)));
+    check(
+      "allocation: the private goal's owner sees it named with its target; a viewer reads it too (spend.read); a device token works; a non-member -> 404; weeks outside 1..26, a bad time or from after to -> 400",
+      rowFor(mine.json, gp.id)?.target_share === 20 && rowFor(mine.json, gp.id).share === 10 && viewerAl.status === 200 && bearerAl.status === 200 && rowFor(bearerAl.json, gp.id) && outsider.status === 404 && badWeeks.every((r) => r.status === 400),
+      `${viewerAl.status} ${bearerAl.status} ${outsider.status} ${badWeeks.map((r) => r.status)}`,
+    );
+    check(
+      "allocation: six calendar weeks, oldest first, each starting Monday 00:00 UTC, together holding the workspace's usage; a steering count (off, 0 lines)",
+      al.json.weekly.length === 6 && al.json.weekly.every((w, i) => new Date(w.week_start).getUTCDay() === 1 && w.week_start.endsWith("T00:00:00.000Z") && (i === 0 || w.week_start > al.json.weekly[i - 1].week_start)) &&
+        al.json.weekly.reduce((n, w) => n + w.total_fresh_tokens, 0) === 10_000 && al.json.steering.steering === "off" && al.json.steering.total === 0,
+      JSON.stringify(al.json?.weekly.map((w) => [w.week_start, w.total_fresh_tokens])),
+    );
+
+    // -- the goals feed: each goal's target and 7-day allocation (whole percents) and the steering switch --
+    const feedAs = (dev, etag) => call(dev.who, "GET", `/api/v2/workspaces/${AW}/goals`, { bearer: dev.access, headers: etag ? { "if-none-match": etag } : {} });
+    const f1 = await feedAs(DM);
+    const fa = f1.json?.goals.find((g) => g.id === ga.id);
+    const fn = f1.json?.goals.find((g) => g.id === GN.json.id);
+    check(
+      "feed: each active goal carries target_share and allocation {target_share, share_7d, gap_7d, held} in whole percents (GA 60, gap 40; a goal with no target: gap null); the feed carries steering off; the private goal is in its owner's feed with its target",
+      f1.status === 200 && f1.json.steering === "off" && fa?.target_share === 20 && JSON.stringify(fa.allocation) === JSON.stringify({ target_share: 20, share_7d: 60, gap_7d: 40, held: false }) && fn?.allocation?.gap_7d === null && fn.allocation.share_7d === 0 &&
+        f1.json.goals.find((g) => g.id === gp.id)?.allocation?.share_7d === 10,
+      JSON.stringify(f1.json?.goals.map((g) => [g.title, g.allocation])),
+    );
+    const tiny = await call("AM", "POST", `/api/v2/workspaces/${AW}/sessions/${SA.key}/usage`, { bearer: DM.access, body: { rows: [usageRow(DM, "alloc-a-tiny", SA.ep, { input: 1, output: 0, cache_write_5m: 0 })] } });
+    const f2 = await feedAs(DM, f1.headers.get("etag"));
+    check("feed: usage too small to move any share a full point keeps the version (304)", tiny.json?.accepted === 1 && f2.status === 304, `${tiny.text} ${f2.status}`);
+
+    // -- the owner changes a target in a new version: a goal_version directive carries it --
+    const dirs = async (cursor = 0, dev = DM) => (await call(dev.who, "GET", `/api/v2/directives?cursor=${cursor}`, { bearer: dev.access })).json;
+    const c0 = (await dirs()).next_cursor;
+    const v2 = await aa(AL, "POST", `/goals/${ga.id}/versions`, { version: 1, target_share: 25 });
+    const notOwner = await aa(AX, "POST", `/goals/${ga.id}/versions`, { version: 2, target_share: 30 });
+    const same = await aa(AL, "POST", `/goals/${ga.id}/versions`, { version: 2, target_share: 25 });
+    const tooMuch = await aa(AL, "POST", `/goals/${ga.id}/versions`, { version: 2, target_share: 50 });
+    const d1 = (await dirs(c0)).directives;
+    const det = await aa(AX, "GET", `/goals/${ga.id}`);
+    check(
+      "targets: the owner saves a version with a new target (201, version 2) and the bound session gets a goal_version directive whose goal carries target_share 25; another member -> 403 not_goal_owner; the same target -> 409 no_change; one that would pass 100% -> 409 targets_over_100; the goal page lists each version's target",
+      v2.status === 201 && v2.json.version === 2 && v2.json.target_share === 25 && d1.some((d) => d.kind === "goal_version" && d.goal?.id === ga.id && d.goal.target_share === 25 && d.session_keys.includes(SA.key)) &&
+        notOwner.json?.error === "not_goal_owner" && same.json?.error === "no_change" && tooMuch.json?.error === "targets_over_100" && JSON.stringify(det.json?.versions.map((v) => v.target_share)) === "[25,20]",
+      `${v2.text.slice(0, 150)} ${notOwner.status} ${same.status} ${tooMuch.status} ${JSON.stringify(d1.map((d) => [d.kind, d.goal?.target_share]))}`,
+    );
+
+    // -- steering: the workspace owner's switch, and the lines agents report --
+    const stMember = await aa(AL, "PATCH", "", { steering: "on" });
+    const stViewer = await aa(AV, "PATCH", "", { steering: "on" });
+    const stBad = await aa(AO, "PATCH", "", { steering: "maybe" });
+    const stNone = await aa(AO, "PATCH", "", {});
+    const stOn = await aa(AO, "PATCH", "", { steering: "on" });
+    const wsDet = await aa(AM, "GET", "");
+    const f3 = await feedAs(DM, f1.headers.get("etag"));
+    const stAudit = withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = 'workspace.steering_on'").all(AW)).map((r) => r.actor_id);
+    const rename = await aa(AO, "PATCH", "", { name: "Allocation workspace (renamed)" });
+    check(
+      "steering: a member -> 403 owner_only, a viewer -> 403 read_only; a bad value or an empty body -> 400; the owner turns it on (audited workspace.steering_on), GET /workspaces/{ws} says on, and the feed gets a new version with steering on; renaming still works and keeps it on",
+      stMember.json?.error === "owner_only" && stViewer.json?.error === "read_only" && stBad.status === 400 && stNone.status === 400 && stOn.status === 200 && stOn.json.steering === "on" && wsDet.json?.workspace.steering === "on" &&
+        f3.status === 200 && f3.json.steering === "on" && stAudit.join() === AO.id && rename.json?.name === "Allocation workspace (renamed)" && rename.json.steering === "on",
+      `${stMember.text} ${stBad.status} ${stOn.text} ${f3.status} ${rename.text}`,
+    );
+    const ev = (over = {}) => ({ session_key: SA.key, goal_id: ga.id, suggested_goal_id: gb.id, share: 60, target: 25, at: new Date().toISOString(), ...over });
+    const postEv = (dev, events, extra = {}) => call(dev.who, "POST", `/api/v2/workspaces/${AW}/steering`, { bearer: dev.access, body: { events }, ...extra });
+    const dl = insertDevice(AL.id, "Abel's laptop");
+    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(dl.id, AW));
+    const DL = { who: "AL", access: dl.access };
+    const e1 = ev();
+    const s1 = await postEv(DM, [e1]);
+    const s2 = await postEv(DM, [e1]);
+    const sOld = await postEv(DM, [ev({ at: new Date(Date.now() - 20 * 86_400_000).toISOString() })]);
+    const sForeign = await postEv(DL, [ev({ at: new Date(Date.now() - 1000).toISOString() })]);
+    const sBad = await Promise.all([[ev({ share: 101 })], [ev({ goal_id: "not an id" })], [ev({ at: "yesterday" })], Array.from({ length: 101 }, (_, i) => ev({ at: new Date(Date.now() - i * 1000).toISOString() }))].map((e) => postEv(DM, e)));
+    const sCookie = await call("AM", "POST", `/api/v2/workspaces/${AW}/steering`, { cookie: AM.cookie, body: { events: [ev()] } });
+    const evRow = withDb((d) => d.prepare("SELECT * FROM v2_steering_events WHERE ws_id = ?").all(AW));
+    const stCount = (await allocOf(AO)).json?.steering;
+    check(
+      "steering events: this device's shared session -> accepted 1, the same line again -> 0, one older than 14 days -> skipped, another device's report about it -> skipped; a share over 100, a bad goal id, a bad time or 101 events -> 400; a cookie -> refused; stored as session key, goal ids and whole percents only; allocation counts 1 line today",
+      s1.json?.accepted === 1 && s2.json?.accepted === 0 && sOld.json?.accepted === 0 && sForeign.json?.accepted === 0 && sBad.every((r) => r.status === 400) && sCookie.status >= 400 &&
+        evRow.length === 1 && JSON.stringify(Object.keys(evRow[0]).sort()) === JSON.stringify(["at", "goal_id", "recorded_at", "session_key", "share", "suggested_goal_id", "target", "ws_id"]) &&
+        stCount?.steering === "on" && stCount.total === 1 && stCount.days.length === 1 && stCount.days[0].day === new Date().toISOString().slice(0, 10),
+      `${s1.text} ${s2.text} ${sOld.text} ${sForeign.text} ${sBad.map((r) => r.status)} ${sCookie.status} ${JSON.stringify(stCount)}`,
+    );
+
+    // -- a held goal is marked in the feed: agents never steer from or toward it --
+    const hold = await aa(AL, "PUT", `/goals/${ga.id}/hold`, { reason: "Alloc hold" });
+    const fHeld = await feedAs(DM);
+    await aa(AL, "DELETE", `/goals/${ga.id}/hold`);
+    const fFree = await feedAs(DM);
+    check(
+      "feed: a goal on hold carries allocation.held true (and a new feed version); released, false again",
+      hold.status === 201 && fHeld.json?.goals.find((g) => g.id === ga.id)?.allocation?.held === true && fHeld.json.version !== f3.json.version && fFree.json?.goals.find((g) => g.id === ga.id)?.allocation?.held === false,
+      `${hold.status} ${JSON.stringify(fHeld.json?.goals.find((g) => g.id === ga.id)?.allocation)}`,
+    );
+
+    // -- reallocations: new targets for several goals; each goal's approval set approves, then someone launches --
+    const rl = (u, body) => aa(u, "POST", "/reallocations", body);
+    const rlAct = (u, id, action, body = {}) => aa(u, "POST", `/reallocations/${id}/${action}`, body);
+    const rlGet = (u, id) => aa(u, "GET", `/reallocations/${id}`);
+    const tOf = (r, g) => r?.targets.find((t) => t.goal?.id === g);
+    const RNOTE = "Docs need more agent time this month";
+    const p1 = await rl(AM, { targets: [{ goal_id: ga.id, target_share: 15 }, { goal_id: gb.id, target_share: 40 }, { goal_id: gc.id, target_share: 10 }], note: RNOTE });
+    const P1 = p1.json;
+    check(
+      "reallocation: a member proposes new targets for two goals they don't own (a goal already at its target is left out) -> 201 pending, rl_ id, revision 1; each goal lists its from and proposed target and its approval set (GA: its owner and team lead AL; GB: AX), nothing approved; the requester can't approve",
+      p1.status === 201 && /^rl_[a-z2-7]{24}$/.test(P1?.id) && P1.state === "pending" && P1.revision === 1 && P1.targets.length === 2 && P1.note === RNOTE && P1.launch === null &&
+        tOf(P1, ga.id)?.from_share === 25 && tOf(P1, ga.id).target_share === 15 && JSON.stringify(tOf(P1, ga.id).approvers.map((a) => a.id)) === JSON.stringify([AL.id]) && JSON.stringify(tOf(P1, gb.id).approvers.map((a) => a.id)) === JSON.stringify([AX.id]) &&
+        P1.targets.every((t) => !t.approved) && P1.can.approve === false && P1.can.withdraw === true,
+      p1.text.slice(0, 400),
+    );
+    const pViewer = await rl(AV, { targets: [{ goal_id: ga.id, target_share: 10 }] });
+    const pOver = await rl(AM, { targets: [{ goal_id: gb.id, target_share: 80 }] });
+    const pSame = await rl(AM, { targets: [{ goal_id: ga.id, target_share: 25 }] });
+    const pPriv = await rl(AL, { targets: [{ goal_id: gp.id, target_share: 5 }] });
+    const pBad = await Promise.all([{ targets: [] }, { targets: [{ goal_id: ga.id, target_share: 12.5 }] }, { targets: [{ goal_id: ga.id, target_share: 10 }, { goal_id: ga.id, target_share: 11 }] }, { targets: [{ goal_id: ga.id, target_share: 10 }], note: "n".repeat(1001) }].map((b) => rl(AM, b)));
+    check(
+      "reallocation: a viewer -> 403 read_only; over 100% -> 409 targets_over_100; no change -> 409 no_change; a goal the proposer can't read -> 404; no targets, a fraction, a goal twice or a note over 1000 -> 400",
+      pViewer.json?.error === "read_only" && pOver.json?.error === "targets_over_100" && pSame.json?.error === "no_change" && pPriv.status === 404 && pBad.every((r) => r.status === 400),
+      `${pViewer.status} ${pOver.status} ${pSame.status} ${pPriv.status} ${pBad.map((r) => r.status)}`,
+    );
+    const asL = (await rlGet(AL, P1.id)).json;
+    const asV = await rlGet(AV, P1.id);
+    const asOut = await call("U1", "GET", `/api/v2/workspaces/${AW}/reallocations/${P1.id}`, { cookie: U1.cookie });
+    const listL = await aa(AL, "GET", "/reallocations");
+    check(
+      "reallocation: readable by everyone who can read one of its goals (a viewer too, who can't act), 404 to a non-member; it is waiting on GA's approver, who may approve and counter but not launch yet",
+      asL?.can.approve === true && asL.can.counter === true && asL.can.launch === false && asL.waiting_on_me === true && asV.status === 200 && Object.values(asV.json.can).every((v) => v === false) && asOut.status === 404 &&
+        listL.json?.waiting_on_me.some((r) => r.id === P1.id),
+      `${JSON.stringify(asL?.can)} ${asV.status} ${asOut.status}`,
+    );
+    const apL = await rlAct(AL, P1.id, "approve", { revision: 1 });
+    const apL2 = await rlAct(AL, P1.id, "approve", { revision: 1 });
+    const apStale = await rlAct(AX, P1.id, "approve", { revision: 2 });
+    const lnEarly = await rlAct(AO, P1.id, "launch");
+    const notApprover = await rlAct(AV, P1.id, "approve", { revision: 1 });
+    check(
+      "reallocation: GA's approver approves its part (still pending, GA approved by AL); approving again -> 409 already_approved; a wrong revision -> 409 stale_revision; launching before every goal is approved -> 409 wrong_state; a viewer -> 403",
+      apL.json?.state === "pending" && tOf(apL.json, ga.id)?.approved_by?.id === AL.id && !tOf(apL.json, gb.id).approved && apL2.json?.error === "already_approved" && apStale.json?.error === "stale_revision" && lnEarly.json?.error === "wrong_state" && notApprover.status === 403,
+      `${apL.text.slice(0, 200)} ${apL2.status} ${apStale.status} ${lnEarly.status}`,
+    );
+    const ctr = await rlAct(AX, P1.id, "counter", { revision: 1, targets: [{ goal_id: ga.id, target_share: 15 }, { goal_id: gb.id, target_share: 35 }], note: "Meet in the middle" });
+    const accept = await rlAct(AM, P1.id, "accept_counter", { revision: 2 });
+    check(
+      "reallocation: GB's approver counters (revision 2, countered; their own goal approved by writing it, GA's approval from revision 1 no longer counts); the requester accepts the counter -> pending again",
+      ctr.json?.state === "countered" && ctr.json.revision === 2 && tOf(ctr.json, gb.id)?.approved_by?.id === AX.id && !tOf(ctr.json, ga.id).approved && accept.json?.state === "pending",
+      `${ctr.text.slice(0, 300)} ${accept.status}`,
+    );
+    const etagBefore = (await feedAs(DM)).headers.get("etag");
+    const c1 = (await dirs()).next_cursor;
+    const c1x = (await dirs(0, DX)).next_cursor;
+    const ap2 = await rlAct(AL, P1.id, "approve", { revision: 2 });
+    const gaAfterApprove = (await aa(AL, "GET", `/goals/${ga.id}`)).json?.goal;
+    const fSame = await feedAs(DM, etagBefore);
+    const dNone = [...(await dirs(c1)).directives, ...(await dirs(c1x, DX)).directives];
+    const lnX = await rlAct(AX, P1.id, "launch");
+    const asO = (await rlGet(AO, P1.id)).json;
+    check(
+      "reallocation: once every goal is approved it is approved with launch pending: no goal version, no directive, the feed unchanged (304); AX, outside GA's launch set -> 403 not_a_launcher; the workspace owner may launch or say not yet, and it is waiting on them",
+      ap2.json?.state === "approved" && ap2.json.launch === "pending" && gaAfterApprove?.version === 2 && gaAfterApprove.target_share === 25 && fSame.status === 304 && dNone.length === 0 && lnX.json?.error === "not_a_launcher" &&
+        asO?.can.launch === true && asO.can.not_yet === true && asO.waiting_on_me === true,
+      `${ap2.text.slice(0, 200)} ${fSame.status} ${dNone.length} ${lnX.status} ${JSON.stringify(asO?.can)}`,
+    );
+    const ny = await rlAct(AO, P1.id, "not_yet");
+    const ln = await rlAct(AO, P1.id, "launch");
+    const ln2 = await rlAct(AO, P1.id, "launch");
+    const gaNow = (await aa(AL, "GET", `/goals/${ga.id}`)).json;
+    const gbNow = (await aa(AX, "GET", `/goals/${gb.id}`)).json;
+    const dLaunch = [...(await dirs(c1)).directives, ...(await dirs(c1x, DX)).directives];
+    const rlAudit = (action) => withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = ? AND object_id = ?").all(AW, action, P1.id)).map((r) => r.actor_id);
+    check(
+      "reallocation: not yet is recorded; the launch writes each goal's next version with its new target (GA 15, GB 35), authored by the person who approved that goal (AL, AX); the bound sessions get goal_version directives carrying the new targets; launching again -> 409; audited reallocation.not_yet and reallocation.launched by the owner",
+      ny.json?.launch === "not_yet" && ln.json?.launch === "launched" && ln.json.launch_decided_by?.id === AO.id && gaNow?.goal.target_share === 15 && gaNow.goal.version === 3 && gbNow?.goal.target_share === 35 &&
+        hashOf(ga.id, 3)?.created_by === AL.id && hashOf(gb.id, 2)?.created_by === AX.id && dLaunch.some((d) => d.kind === "goal_version" && d.goal?.id === ga.id && d.goal.target_share === 15) &&
+        dLaunch.some((d) => d.kind === "goal_version" && d.goal?.id === gb.id && d.goal.target_share === 35) && ln2.status === 409 && rlAudit("reallocation.not_yet").join() === AO.id && rlAudit("reallocation.launched").join() === AO.id,
+      `${ny.status} ${ln.text.slice(0, 200)} ${JSON.stringify(dLaunch.map((d) => [d.kind, d.goal?.id, d.goal?.target_share]))}`,
+    );
+
+    // superseded before launch, and while open; declined; withdrawn; the company goal; own goals; decreases first
+    const p2 = (await rl(AM, { targets: [{ goal_id: ga.id, target_share: 10 }] })).json;
+    await rlAct(AL, p2?.id, "approve", { revision: 1 });
+    const p3 = (await rl(AM, { targets: [{ goal_id: ga.id, target_share: 12 }, { goal_id: gb.id, target_share: 30 }] })).json;
+    const edit = await aa(AL, "POST", `/goals/${ga.id}/versions`, { version: 3, title: "Ship the importer (v2)" });
+    const [p2s, p3s] = await Promise.all([rlGet(AM, p2?.id), rlGet(AM, p3?.id)]);
+    const lnSup = await rlAct(AO, p2?.id, "launch");
+    check(
+      "reallocation: a newer version of one of its goals supersedes an approved, unlaunched proposal (launch superseded; launching it -> 409) and an open one (state superseded); neither reached agents",
+      edit.status === 201 && p2s.json?.state === "superseded" && p2s.json.launch === "superseded" && p3s.json?.state === "superseded" && p3s.json.launch === null && lnSup.status === 409 && (await aa(AL, "GET", `/goals/${ga.id}`)).json?.goal.target_share === 15,
+      `${p2s.text.slice(0, 160)} ${p3s.text.slice(0, 160)} ${lnSup.status}`,
+    );
+    const p4 = (await rl(AM, { targets: [{ goal_id: gb.id, target_share: 31 }] })).json;
+    const rejReq = await rlAct(AM, p4?.id, "reject", {});
+    const rej = await rlAct(AX, p4?.id, "reject", { reason: "Not this month" });
+    const rejLate = await rlAct(AX, p4?.id, "approve", { revision: 1 });
+    const p5 = (await rl(AM, { targets: [{ goal_id: gb.id, target_share: 32 }] })).json;
+    const wdOther = await rlAct(AX, p5?.id, "withdraw");
+    const wd = await rlAct(AM, p5?.id, "withdraw");
+    check(
+      "reallocation: the requester can't decline (403); an approver declines with a reason (rejected, shown with who); a decided proposal can't be approved (409); only the requester withdraws",
+      rejReq.status === 403 && rej.json?.state === "rejected" && rej.json.rejection_reason === "Not this month" && rej.json.rejected_by?.id === AX.id && rejLate.status === 409 && wdOther.status === 403 && wd.json?.state === "withdrawn",
+      `${rejReq.status} ${rej.text.slice(0, 160)} ${rejLate.status} ${wdOther.status} ${wd.status}`,
+    );
+    const p6 = (await rl(AM, { targets: [{ goal_id: gc.id, target_share: 5 }] })).json;
+    const p6v = (await rlGet(AO, p6?.id)).json;
+    const anl = await rlAct(AO, p6?.id, "approve_and_launch", { revision: 1 });
+    const own = (await rl(AX, { targets: [{ goal_id: gb.id, target_share: 25 }] })).json;
+    const ownLn = await rlAct(AX, own?.id, "launch");
+    check(
+      "reallocation: on the company goal the workspace owner (its approval set) approves and launches in one step (GC 5); a proposal on only your own goals is approved by asking and waits for your launch (GB 25)",
+      p6v?.can.approve_and_launch === true && anl.json?.state === "approved" && anl.json.launch === "launched" && (await aa(AO, "GET", `/goals/${gc.id}`)).json?.goal.target_share === 5 &&
+        own?.state === "approved" && own.launch === "pending" && ownLn.json?.launch === "launched" && (await aa(AX, "GET", `/goals/${gb.id}`)).json?.goal.target_share === 25,
+      `${JSON.stringify(p6v?.can)} ${anl.text.slice(0, 160)} ${JSON.stringify(own).slice(0, 160)} ${ownLn.status}`,
+    );
+    // Targets now: GA 15, GB 25, GP 20, GC 5 (65). The owner raises GC to 40 (100); then GC 40 -> 20 with GA 15 -> 30
+    // only fits if the launch lowers GC before it raises GA (raising GA first would make 115).
+    const gcFull = await aa(AO, "POST", `/goals/${gc.id}/versions`, { target_share: 40 });
+    const p7 = (await rl(AO, { targets: [{ goal_id: ga.id, target_share: 30 }, { goal_id: gc.id, target_share: 20 }] })).json;
+    await rlAct(AL, p7?.id, "approve", { revision: 1 });
+    const ln7 = await rlAct(AO, p7?.id, "launch");
+    const [ga7, gc7] = await Promise.all([aa(AL, "GET", `/goals/${ga.id}`), aa(AO, "GET", `/goals/${gc.id}`)]);
+    check(
+      "reallocation: with the workspace at 100%, a launch that lowers one goal by 20 and raises another by 15 writes the decrease first and succeeds (GA 30, GC 20)",
+      gcFull.status === 201 && ln7.json?.launch === "launched" && ga7.json?.goal.target_share === 30 && gc7.json?.goal.target_share === 20,
+      `${gcFull.text.slice(0, 120)} ${ln7.text.slice(0, 200)}`,
+    );
+    const lists = await aa(AM, "GET", "/reallocations");
+    check(
+      "reallocation: GET …/reallocations groups what I can read as waiting_on_me, mine and others",
+      lists.status === 200 && lists.json.mine.some((r) => r.id === P1.id) && lists.json.others.some((r) => r.id === own.id) && !lists.json.waiting_on_me.length,
+      lists.text.slice(0, 300),
+    );
+    const personCols = withDb((d) =>
+      [
+        ["v2_reallocations", ["requester_id", "launch_by", "decided_by"]],
+        ["v2_reallocation_revisions", ["author_id"]],
+        ["v2_reallocation_approvals", ["user_id"]],
+      ].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))),
+    );
+    const retention = await import(pathToFileURL(path.join(ROOT, "lib/v2/retention-core.mts")).href);
+    check(
+      "reallocation: every column that names a person is pseudonymised by the retention job (PERSON_COLUMNS)",
+      personCols && ["requester_id", "launch_by", "decided_by"].every((c) => retention.PERSON_COLUMNS.some(([t, x]) => t === "v2_reallocations" && x === c)) && retention.PERSON_COLUMNS.some(([t, x]) => t === "v2_reallocation_revisions" && x === "author_id") && retention.PERSON_COLUMNS.some(([t, x]) => t === "v2_reallocation_approvals" && x === "user_id"),
+      "",
+    );
+
+    // -- the screens: a target on a new goal, the Spend tab's allocation and switch, target changes on Alignments --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const pageAs = async (u, width = 1000) => {
+          const p = await browser.newPage();
+          p.on("pageerror", (e) => errors.push(e.message));
+          await p.setViewport({ width, height: 844 });
+          await p.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return p;
+        };
+        const page = await pageAs(AX);
+        await page.goto(`${BASE}/app/w/${AW}/goals`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => document.body.innerText.includes("New goal"), { timeout: 15000 });
+        const hint = await page.evaluate(() => document.body.innerText);
+        await page.type('main form input[required][maxlength="300"]', "Browser target goal");
+        await page.type('input[aria-label="Target share of agent time"]', "3");
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create goal")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("Browser target goal") && document.body.innerText.includes("target 3%"), { timeout: 15000 });
+        const goalsText = await page.evaluate(() => document.body.innerText);
+        check(
+          "ui (Chrome): the new-goal form has a target field that says how much the other goals you can see take (here 75%: GA 30, GB 25, GC 20; the private goal is not shown); the new goal is listed with target 3% and the goals list shows each goal's share of the last 7 days",
+          /Other active goals you can see already take 75%/.test(hint) && /target 3%/.test(goalsText) && /last 7 days \d+%/.test(goalsText),
+          hint.slice(0, 400),
+        );
+        const sp = await pageAs(AO);
+        await sp.goto(`${BASE}/app/w/${AW}/spend`, { waitUntil: "networkidle0" });
+        await sp.waitForFunction(() => document.body.innerText.includes("Agent time against targets") && document.body.innerText.includes("Steering is on"), { timeout: 15000 });
+        const spendText = await sp.evaluate(() => document.body.innerText);
+        await sp.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Turn steering off")?.click());
+        await sp.waitForFunction(() => document.body.innerText.includes("Steering is off"), { timeout: 15000 });
+        check(
+          "ui (Chrome): the Spend tab shows agent time against targets (share, target, points over or under, the unnamed private row, no person) and the owner turns steering off",
+          /Ship the importer \(v2\)/.test(spendText) && /60% of agent time · target 30%/.test(spendText) && /30 points over/.test(spendText) && /Goals you can't see/.test(spendText) && !spendText.includes(ACANARY) && !spendText.includes("Ari Member") && (await aa(AO, "GET", "")).json?.workspace.steering === "off",
+          spendText.slice(0, 600),
+        );
+        const memberSpend = await pageAs(AM);
+        await memberSpend.goto(`${BASE}/app/w/${AW}/spend`, { waitUntil: "networkidle0" });
+        await memberSpend.waitForFunction(() => document.body.innerText.includes("Steering is off"), { timeout: 15000 });
+        const noSwitch = await memberSpend.evaluate(() => ![...document.querySelectorAll("button")].some((b) => /Turn steering/.test(b.textContent || "")));
+        const ap = await pageAs(AX);
+        await ap.goto(`${BASE}/app/w/${AW}/alignments`, { waitUntil: "networkidle0" });
+        await ap.waitForFunction(() => document.body.innerText.includes("Target changes") && document.body.innerText.includes("Propose new targets"), { timeout: 15000 });
+        await ap.type('input[aria-label="New target for Browser target goal"]', "4");
+        await ap.evaluate(() => [...document.querySelectorAll("button")].find((b) => /^Propose 1 change/.test(b.textContent || ""))?.click());
+        await ap.waitForFunction(() => document.body.innerText.includes("3% → 4%") && document.body.innerText.includes("waiting for launch"), { timeout: 15000 });
+        await ap.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Launch")?.click());
+        await ap.waitForFunction(() => /Launched by Axel Other/.test(document.body.innerText), { timeout: 15000 });
+        const browserGoal = (await aa(AX, "GET", "/goals")).json?.goals.find((g) => g.title === "Browser target goal");
+        check(
+          "ui (Chrome): a member sees no steering switch; on the Alignments page a proposal on your own goal is approved by asking and waits for launch; Launch gives the goal its new target (4%)",
+          noSwitch && browserGoal?.target_share === 4 && browserGoal.version === 2,
+          JSON.stringify(browserGoal),
+        );
+        const gp7 = await pageAs(AL);
+        await gp7.goto(`${BASE}/app/w/${AW}/goals/${ga.id}`, { waitUntil: "networkidle0" });
+        await gp7.waitForFunction(() => document.body.innerText.includes("target 30% of agent time"), { timeout: 15000 });
+        const goalText = await gp7.evaluate(() => document.body.innerText);
+        const narrow = [];
+        for (const p of [`/app/w/${AW}/spend`, `/app/w/${AW}/alignments`]) {
+          const ph = await pageAs(AO, 390);
+          await ph.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+          await ph.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+          const m = await ph.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth, text: document.body.innerText }));
+          if (!(m.sw <= m.W)) narrow.push(`${p}: ${m.sw}>${m.W}`);
+          if (m.text.includes("—")) narrow.push(`${p}: em dash`);
+        }
+        check(
+          "ui (Chrome): the goal page shows the target pill and each version's target; at 390 px the Spend and Alignments tabs have no sideways scroll and no em dash; no page errors",
+          /, target 30%\)/.test(goalText) && /, target 20%\)/.test(goalText) && narrow.length === 0 && errors.length === 0,
+          `${narrow.join(" | ")} ${errors.join(" | ")}`,
+        );
+      } catch (e) {
+        check("ui (Chrome) allocation run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for allocation", false, `no Chrome at ${CHROME}`);
+
+    const aLeaks = seen.filter((s) => s.who !== "AM" && s.text.includes(ACANARY));
+    check("allocation canary: the private goal's title reached nobody but its owner (allocation, feeds, reallocations, refusals)", aLeaks.length === 0 && seen.some((s) => s.who === "AM" && s.text.includes(ACANARY)), aLeaks.map((s) => s.p).join(" "));
+  }
+  // ==== end port29:allocation ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));

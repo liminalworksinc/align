@@ -65,3 +65,22 @@ export const VISIBILITY_LABEL: Record<Goal["visibility"], string> = {
   team: "My team",
   workspace: "Everyone in the workspace",
 };
+
+/** "Target share of agent time": a whole percent or blank. `taken` is what the other active goals you can see hold. */
+export function TargetShareField({ value, onChange, taken }: { value: string; onChange: (v: string) => void; taken: number }) {
+  const n = value.trim() === "" ? 0 : Number(value);
+  return (
+    <Field
+      label="Target share of agent time (%)"
+      hint={`Optional. Other active goals you can see already take ${taken}%, so up to ${Math.max(0, 100 - taken)}% is left (goals you can't see count too). Steering compares this with the share shared agent sessions actually spend on the goal.`}
+    >
+      <Input type="number" min={0} max={100} step={1} inputMode="numeric" aria-label="Target share of agent time" value={value} onChange={(e) => onChange(e.target.value)} aria-invalid={value.trim() !== "" && (!Number.isInteger(n) || n < 0 || n > 100)} />
+    </Field>
+  );
+}
+
+/** A target field's value: blank is null (no target), else the number (the server refuses anything but 0 to 100). */
+export const targetOut = (v: string): number | null => (v.trim() === "" ? null : Number(v));
+
+/** The targets of the active goals in a list, leaving one goal out. */
+export const takenBy = (goals: Goal[] | undefined, except?: string) => (goals ?? []).filter((g) => g.id !== except && g.status === "active").reduce((a, g) => a + (g.target_share ?? 0), 0);

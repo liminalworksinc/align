@@ -945,6 +945,73 @@ const MIGRATIONS: string[] = [
   -- 14 (PORT2-001)
   ALTER TABLE v2_oauth_grants ADD COLUMN last_read_at TEXT;
   `,
+  // PORT29 (main #29, goal sessions: agent time follows priorities): a goal's target share of the workspace's agent
+  // time is versioned goal content (lib/v2/goals.ts); a workspace owner turns steering on or off; the steering lines
+  // agents showed are counted (goal ids and whole percents, no text, no person); and a reallocation proposes new
+  // targets for one or more goals, approved for each goal by its approval set and launched like a change request
+  // (lib/v2/reallocations.ts).
+  `
+  -- 15 (PORT29)
+  ALTER TABLE v2_goals ADD COLUMN target_share INTEGER CHECK (target_share IS NULL OR target_share BETWEEN 0 AND 100);
+  ALTER TABLE v2_goal_versions ADD COLUMN target_share INTEGER CHECK (target_share IS NULL OR target_share BETWEEN 0 AND 100);
+  ALTER TABLE v2_workspaces ADD COLUMN steering TEXT NOT NULL DEFAULT 'off' CHECK (steering IN ('off','on'));
+  -- One steering line a device's shared session showed. Goal ids and whole percents only; it goes with its session.
+  CREATE TABLE v2_steering_events (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    session_key TEXT NOT NULL,
+    goal_id TEXT NOT NULL,
+    suggested_goal_id TEXT NOT NULL,
+    share INTEGER NOT NULL CHECK (share BETWEEN 0 AND 100),
+    target INTEGER NOT NULL CHECK (target BETWEEN 0 AND 100),
+    at TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, session_key, at),
+    FOREIGN KEY (ws_id, session_key) REFERENCES v2_sessions(ws_id, session_key) ON DELETE CASCADE
+  );
+  CREATE INDEX v2_steering_events_at ON v2_steering_events(ws_id, at);
+  -- A reallocation: like a change request, approved then launched (launch null until approved; launch_by and
+  -- launch_at the latest not yet or launch); decided_by and decision_note on a rejection.
+  CREATE TABLE v2_reallocations (
+    id TEXT PRIMARY KEY,                       -- rl_<24 base32>
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    requester_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('pending','countered','approved','rejected','withdrawn','superseded')),
+    revision INTEGER NOT NULL,
+    launch TEXT CHECK (launch IS NULL OR launch IN ('pending','not_yet','launched','superseded')),
+    launch_by TEXT,
+    launch_at TEXT,
+    decided_by TEXT,
+    decision_note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    decided_at TEXT,
+    UNIQUE (ws_id, id)
+  );
+  CREATE INDEX v2_reallocations_ws ON v2_reallocations(ws_id, updated_at);
+  -- Each revision's targets: [{goal_id, base_version, from_share, target_share}], only goals whose target changes.
+  CREATE TABLE v2_reallocation_revisions (
+    ws_id TEXT NOT NULL,
+    reallocation_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    targets_json TEXT NOT NULL,
+    note TEXT CHECK (note IS NULL OR length(note) <= 1000),
+    author_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (reallocation_id, revision),
+    FOREIGN KEY (ws_id, reallocation_id) REFERENCES v2_reallocations(ws_id, id) ON DELETE CASCADE
+  );
+  -- One approval per goal of a revision, by someone in that goal's approval set.
+  CREATE TABLE v2_reallocation_approvals (
+    ws_id TEXT NOT NULL,
+    reallocation_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    goal_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (reallocation_id, revision, goal_id),
+    FOREIGN KEY (ws_id, reallocation_id) REFERENCES v2_reallocations(ws_id, id) ON DELETE CASCADE
+  );
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
