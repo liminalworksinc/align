@@ -27,13 +27,32 @@ THE CEO'S NEW REQUIREMENT
 No new requirement yet
 YOUR GOAL · V1
 Handle customer and security issues quickly and correctly.
-Your turn
+Know what needs you
 
 Nothing waiting on you.
 
+0
+Waiting on you
+0
+Waiting on others
+3
+Active goals
 WAITING ON YOU
 0
 Nothing is waiting on you.
+ACTIVE GOALS
+COMPANY
+v1
+Launch the beta of our new monitoring product.
+Open
+PRODUCT
+v3
+Ship the beta and clear anything blocking the launch.
+Open
+SECURITY
+v1
+Handle customer and security issues quickly and correctly.
+Open
 DETAILS
 CEO
 v1
