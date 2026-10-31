@@ -1,14 +1,17 @@
 "use client";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import FirstRun from "@/components/FirstRun";
 import { Button } from "@/components/ui";
 import { api } from "@/components/useAlign";
 import { claudeCodeLine, codexLine } from "@/lib/paste-lines";
 
-// "Your AI apps" in a custom workspace's sidebar: the one URL any AI app connects with (Align's read-only MCP
-// endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. An app shows as
-// connected only after its first successful read (last_used_at), never just because someone approved it. Each app
-// also shows whether it has read the plan as it stands now (on_current_plan, lib/plan-rev.ts): one that last read an
-// older plan may still be working on it. Align sees only what an app last read, never what it does.
+// "Connected AI apps" in a custom workspace's sidebar: the one URL any AI app connects with (Align's read-only MCP
+// endpoint, OAuth sign-in with a team passcode), the steps for each app, and the apps connected now. The signal is
+// last_used_at: when Align last saw the app make any authenticated MCP request (app/api/mcp/route.ts noteGrantUse),
+// stamped with the plan revision current at that moment (lib/plan-rev.ts). It says the app was seen while that plan
+// was current, not that it read the plan. An approved app Align hasn't seen yet is listed as "Approved, not seen by Align yet".
+// Align sees when an app connects, never what it does. The same poll feeds the first-run card (components/FirstRun.tsx).
 
 interface App {
   id: string;
@@ -126,17 +129,38 @@ function Steps({ tab, url }: { tab: Tab; url: string }) {
 
 const when = (iso: string) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export default function ConnectAI({ workspace, teamOf, actor }: { workspace: string; teamOf: (role: string) => string; actor: string }) {
+// `slot` is where Home wants the first-run card (components/FirstRun.tsx). It is rendered from here, so the card and this
+// sidebar share the one poll below.
+export default function ConnectAI({
+  workspace,
+  teamOf,
+  actor,
+  hosted = false,
+  slot = null,
+}: {
+  workspace: string;
+  teamOf: (role: string) => string;
+  actor: string;
+  hosted?: boolean;
+  slot?: HTMLElement | null;
+}) {
   const [data, setData] = useState<{ url: string; apps: App[]; plan?: { changed_at: string | null }; at: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("claude-code");
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(
     () =>
       api<{ url: string; apps: App[]; plan?: { changed_at: string | null } }>("/api/workspaces/connections", { workspace }).then(
-        (d) => setData({ ...d, at: Date.now() }),
-        () => setData(null),
+        (d) => {
+          setData({ ...d, at: Date.now() });
+          setFailed(false);
+        },
+        () => {
+          setData(null);
+          setFailed(true);
+        },
       ),
     [workspace],
   );
@@ -164,34 +188,57 @@ export default function ConnectAI({ workspace, teamOf, actor }: { workspace: str
   }
 
   const reading = data?.apps.filter((a) => a.last_used_at) ?? [];
-  // Just connected: approved in the last 15 minutes and has read the workspace. Then the dialog says so and suggests
+  // Just connected: approved in the last 15 minutes and seen by Align since. Then the dialog says so and suggests
   // a first question.
   const fresh = reading.filter((a) => data && data.at - Date.parse(a.approved_at) < 15 * 60 * 1000);
   return (
     <div className="mt-auto flex flex-col gap-2 rounded-[14px] border border-zinc-200 bg-white p-3.5 text-[14px]">
-      <span className="al-lbl !text-violet-700">Agents on this plan</span>
+      <span className="al-lbl !text-violet-700">Connected AI apps</span>
       {!data ? (
         <div className="text-[13px] text-zinc-600">{"\u00a0"}</div>
-      ) : reading.length === 0 ? (
-        <div className="text-[13px] text-zinc-600">None connected. Connect your AI agents and every session works from this one plan.</div>
+      ) : data.apps.length === 0 ? (
+        <div className="text-[13px] text-zinc-600">No AI app has connected yet.</div>
       ) : (
-        <ul aria-label="Connected agents" className="space-y-1">
+        <ul aria-label="Connected AI apps" className="space-y-1">
           {reading.map((a) => (
             <li key={a.id} className="flex items-start gap-1.5 text-[13px] leading-snug">
-              <span aria-hidden className={a.on_current_plan ? "text-emerald-700" : "text-amber-700"}>
+              <span aria-hidden className={a.on_current_plan ? "text-violet-700" : "text-amber-700"}>
                 {a.on_current_plan ? "✓" : "▲"}
               </span>
               <span className="min-w-0">
                 <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
-                <span className={a.on_current_plan ? "text-emerald-800" : "text-amber-800"}>{a.on_current_plan ? "on the latest plan" : "still on an older plan"}</span>
+                <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Seen on the current plan" : "Last seen on an older plan"}</span>
               </span>
             </li>
           ))}
+          {data.apps
+            .filter((a) => !a.last_used_at)
+            .map((a) => (
+              <li key={a.id} className="flex items-start gap-1.5 text-[13px] leading-snug text-zinc-500">
+                <span aria-hidden>○</span>
+                <span className="min-w-0">
+                  <span className="font-semibold text-zinc-700">{a.name}</span> Approved, not seen by Align yet
+                </span>
+              </li>
+            ))}
         </ul>
       )}
       <Button kind="secondary" onClick={() => setOpen(true)}>
         Connect an AI app
       </Button>
+      {slot &&
+        createPortal(
+          <FirstRun
+            workspace={workspace}
+            hosted={hosted}
+            url={data?.url ?? null}
+            apps={data?.apps ?? null}
+            failed={failed}
+            copy={(text) => <Copy value={text} />}
+            openConnect={() => setOpen(true)}
+          />,
+          slot,
+        )}
       {open && data && (
         <div role="dialog" aria-modal="true" aria-label="Connect an AI app" className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4" onClick={() => setOpen(false)}>
           <div className="max-h-[90vh] w-full max-w-[640px] overflow-y-auto rounded-[14px] bg-white p-6 text-[16px] text-zinc-900" onClick={(e) => e.stopPropagation()}>
@@ -220,11 +267,11 @@ export default function ConnectAI({ workspace, teamOf, actor }: { workspace: str
                 </div>
                 Ask it:
                 <Command text={TRY} />
-                After a goal changes here, send it another message and it will see the change.
+                Align sees when each app last contacted it, not what it read or does.
               </div>
             ) : (
               <p className="mb-5 rounded-[10px] bg-zinc-50 p-3 text-[15px] text-zinc-700">
-                Once it’s connected you’ll see it here. Then ask it: “{TRY}” Apps check Align each time you send a message.
+                Once it’s connected you’ll see it here. Then ask it: “{TRY}” Apps can check Align when you send them a message.
               </p>
             )}
             <h3 className="mb-2 text-[18px] font-semibold">Connected</h3>
@@ -239,13 +286,13 @@ export default function ConnectAI({ workspace, teamOf, actor }: { workspace: str
                         {a.name} <span className="font-normal text-zinc-500">({a.redirect_host})</span>
                       </div>
                       <div className="text-[14px] text-zinc-600">
-                        As {teamOf(a.role)} · {a.last_used_at ? `last read ${when(a.last_used_at)}` : "approved, hasn’t read anything yet"}
+                        As {teamOf(a.role)} · {a.last_used_at ? `last seen by Align ${when(a.last_used_at)}` : "Approved, not seen by Align yet"}
                       </div>
                       {a.last_used_at && (
-                        <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-emerald-800" : "text-amber-800"}`}>
+                        <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"}`}>
                           {a.on_current_plan
-                            ? "✓ On the latest plan."
-                            : `▲ Hasn’t read the plan since it changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}. It may still be working on the old plan. Send it a message to catch it up.`}
+                            ? "✓ Seen on the current plan."
+                            : `▲ Last seen on an older plan: Align hasn’t seen it since the plan changed${data.plan?.changed_at ? ` at ${when(data.plan.changed_at)}` : ""}.`}
                         </div>
                       )}
                     </div>
