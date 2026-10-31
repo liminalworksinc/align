@@ -313,7 +313,7 @@ export function waitingOnMe(
       me: true,
       title: "Suggested limit for your goal",
       quote: `${LIMIT_WORDS[l.type]}: ${l.text}`,
-      sub: `${limitSub(l)}. Agents follow it once you confirm.`,
+      sub: `${limitSub(l)}. Agents can read it once you confirm.`,
       cta: "",
       open: () => undefined,
       actions: [
