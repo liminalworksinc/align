@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, useAction, useApi } from "../../_ui/kit";
-import { AnchorsEditor, MeasuresEditor, VISIBILITY_LABEL, anchorsDraft, anchorsOut, measuresDraft, measuresOut } from "../../_ui/goalform";
+import { AnchorsEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, measuresDraft, measuresOut, takenBy, targetOut } from "../../_ui/goalform";
 import type { Me } from "../../_ui/server";
 import type { Goal, WsDetail } from "../../_ui/types";
 
@@ -16,6 +16,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
   const [pod, setPod] = useState("");
   const [measures, setMeasures] = useState(measuresDraft());
   const [anchors, setAnchors] = useState(anchorsDraft());
+  const [target, setTarget] = useState("");
   const act = useAction();
   const myPods = detail.data?.pods.filter((p) => p.my_role) ?? [];
   const canCreate = detail.data && detail.data.role !== "viewer";
@@ -38,6 +39,10 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
                 <Pill>{VISIBILITY_LABEL[g.visibility]}</Pill>
                 {g.pod && <Pill tone="violet">{g.pod.name}</Pill>}
                 {g.bindable ? <Pill tone="green">you can bind sessions</Pill> : <Pill tone="amber">needs alignment to bind</Pill>}
+                {g.target_share !== null && g.target_share !== undefined && <Pill tone="violet">target {g.target_share}%</Pill>}
+                {g.allocation && (g.allocation.share_7d > 0 || g.target_share !== null) && (
+                  <Pill tone={g.allocation.gap_7d !== null && Math.abs(g.allocation.gap_7d) >= 10 ? "amber" : "neutral"}>last 7 days {g.allocation.share_7d}%</Pill>
+                )}
               </div>
               <p className="text-[14px] text-zinc-500">
                 {g.owner.id === me.id ? "Yours" : g.owner.name}, version {g.version}
@@ -55,12 +60,13 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
               void act.run(
                 () =>
                   api(`/api/v2/workspaces/${ws}/goals`, {
-                    body: { title, visibility, pod_id: pod || null, measures: measuresOut(measures), anchors: anchorsOut(anchors) },
+                    body: { title, visibility, pod_id: pod || null, measures: measuresOut(measures), anchors: anchorsOut(anchors), target_share: targetOut(target) },
                   }),
                 () => {
                   setTitle("");
                   setMeasures(measuresDraft());
                   setAnchors(anchorsDraft());
+                  setTarget("");
                   feed.reload();
                 },
               );
@@ -98,6 +104,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
                 </Select>
               </Field>
             </div>
+            <TargetShareField value={target} onChange={setTarget} taken={takenBy(feed.data?.goals)} />
             <AnchorsEditor value={anchors} onChange={setAnchors} />
             <Btn type="submit" disabled={act.busy || !title.trim() || (visibility === "pod" && !pod)}>
               Create goal

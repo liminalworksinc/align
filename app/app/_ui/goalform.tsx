@@ -63,3 +63,21 @@ export const VISIBILITY_LABEL: Record<Goal["visibility"], string> = {
   pod: "My pod",
   workspace: "Everyone in the workspace",
 };
+
+/** "Target share of agent time": a whole percent or blank. `taken` is what the other goals you can see already hold. */
+export function TargetShareField({ value, onChange, taken }: { value: string; onChange: (v: string) => void; taken: number }) {
+  const n = value.trim() === "" ? 0 : Number(value);
+  const left = 100 - taken;
+  return (
+    <Field label="Target share of agent time (%)" hint={`Optional. Other goals you can see already take ${taken}%, so up to ${Math.max(0, left)}% is left. Steering compares this with the share agent sessions actually spend on the goal.`}>
+      <Input type="number" min={0} max={100} step={1} inputMode="numeric" value={value} onChange={(e) => onChange(e.target.value)} aria-invalid={value.trim() !== "" && (!Number.isInteger(n) || n < 0 || n > 100)} />
+    </Field>
+  );
+}
+
+/** Blank -> null, else the whole percent (the server rejects anything outside 0 to 100). */
+export const targetOut = (v: string): number | null => (v.trim() === "" ? null : Number(v));
+
+/** Sum of the targets of active goals in a list, leaving one goal out. */
+export const takenBy = (goals: Goal[] | undefined, except?: string) =>
+  (goals ?? []).filter((g) => g.id !== except && g.status === "active" && g.target_share !== null && g.target_share !== undefined).reduce((a, g) => a + (g.target_share ?? 0), 0);

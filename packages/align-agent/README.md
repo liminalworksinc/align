@@ -25,6 +25,8 @@ align stop-sharing <session>                          future usage stays local
 align delete-history <session> [--yes]                server hard delete; totals change
 align bind <session> --goal <ref|none>                takes effect at the next prompt (root turn)
 align latch status                                    stop latches (stop/resume come from the web)
+align allocation [--week YYYY-MM-DD] [--refresh] [--json]   agent time per goal against its target
+align steering status                                 steering switch and lines shown this week
 align install [--claude] [--codex] [--dry-run]
 align uninstall [--purge]
 align sync                                            one pass: spool, transcripts, outbox, directives, upload
@@ -64,6 +66,22 @@ So a goal change or stop issued from the web lands within one sync interval, at 
 - On this machine, an edit to a file another same-goal session changed in the last 20 minutes (and this session has not
   read since) is held once with the reason. Only hook-seen edits can hold an edit. Across people nothing is held; the next edit of an overlapping or claimed
   file gets one short note.
+
+## Allocation and steering
+
+- Goal owners set a target share of the workspace's agent time on each goal (web, or a new goal version). The goals
+  feed carries each goal's trailing-7-day share and gap, and the workspace's steering switch.
+- With steering on, a shared session that starts (or `/clear`s) on a goal at least 10 points over its target, while
+  another goal you can see is at least 10 points under, gets one line in context naming both goals and shares. Once per
+  session; never at resume or compaction; never names people. Each line shown is queued in `ALIGN_HOME/steering/` and
+  reported by the next sync (goal ids and whole percents only).
+- Once a week, at the first fresh session, a user-only note says how much of this machine's agent time in the last 7
+  days was in sessions not shared toward any goal, by folder. Computed by the sync pass from local transcripts into
+  `ALIGN_HOME/unshared-digest.json`; never uploaded.
+- `::align bind <goal>` binds the current session only (folder rules are separate), which is how work on a goal with no
+  folder of its own becomes measurable.
+- `align allocation [--week YYYY-MM-DD] [--refresh] [--json]` prints share, target and gap per goal (cached feed, or the
+  server for a past week) and the local unshared share. `align steering status` shows the switch and lines shown this week.
 
 ## What `align install` changes
 
