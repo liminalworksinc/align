@@ -4495,7 +4495,7 @@ try {
     const gc = GC.json;
     const gp = GP.json;
     const hashOf = (g, v) => withDb((d) => d.prepare("SELECT content_hash, target_share, created_by FROM v2_goal_versions WHERE goal_id = ? AND version = ?").get(g, v));
-    const plain = (t, v) => sha256hex(JSON.stringify({ title: t, measures: [], anchors: { repos: [], branch_patterns: [], issues: [] }, status: "active" }));
+    const plain = (t) => sha256hex(JSON.stringify({ title: t, measures: [], anchors: { repos: [], branch_patterns: [], issues: [] }, status: "active" }));
     check(
       "targets: target_share joins the version's content hash only when set (a goal with no target hashes as before targets existed) and is stored on the version row",
       hashOf(GN.json?.id, 1)?.content_hash === plain("No target here") && hashOf(ga.id, 1)?.content_hash !== plain("Ship the importer") && hashOf(ga.id, 1)?.target_share === 20,
