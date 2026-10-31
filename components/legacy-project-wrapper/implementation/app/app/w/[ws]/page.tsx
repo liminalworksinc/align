@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { requireUser } from "../../_ui/server";
-import Goals from "./view";
+import Home from "./view";
 
 export default function Page({ params }: PageProps<"/app/w/[ws]">) {
   return (
@@ -13,5 +13,5 @@ export default function Page({ params }: PageProps<"/app/w/[ws]">) {
 async function Inner({ params }: { params: PageProps<"/app/w/[ws]">["params"] }) {
   const { ws } = await params;
   const me = await requireUser(`/app/w/${ws}`);
-  return <Goals me={me} ws={ws} />;
+  return <Home me={me} ws={ws} />;
 }

@@ -2024,11 +2024,65 @@ try {
   check("device: authorize is limited to 10 per hour per client (then 429)", limited > 0, `${limited}`);
 
   // -- the web UI renders: pages need a session, then load --
-  const pagePaths = ["/app", "/app/account", "/app/device", "/app/devices", `/app/w/${A}`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/requests`, `/app/w/${A}/spend`, `/app/w/${A}/apps`, `/app/invite/${"x".repeat(43)}`];
+  const pagePaths = ["/app", "/app/account", "/app/device", "/app/devices", `/app/w/${A}`, `/app/w/${A}/goals`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/requests`, `/app/w/${A}/spend`, `/app/w/${A}/apps`, `/app/invite/${"x".repeat(43)}`];
   const anonPages = await Promise.all(pagePaths.map((p) => call("anon", "GET", p)));
   check("ui: every /app page without a session sends you to /app/sign-in", anonPages.every((r) => (r.status === 307 && /\/app\/sign-in/.test(r.headers.get("location") || "")) || (r.status === 200 && r.text.includes("/app/sign-in?next="))), anonPages.map((r) => r.status).join(","));
   const userPages = await Promise.all(pagePaths.map((p) => call("U1", "GET", p, { cookie: U1.cookie })));
   check("ui: every /app page renders for a signed-in user (200, no error page)", userPages.every((r) => r.status === 200 && !/Application error|Internal Server Error/.test(r.text)), userPages.map((r) => r.status).join(","));
+  // The Home's read for every member of A (owner, members, viewer): the canary check at the end of this phase covers it,
+  // so a private goal never reaches the Home of anyone but its owner.
+  const homesA = await Promise.all([U1, U2, U3, U4].map((u) => call(u.who, "GET", `/api/v2/workspaces/${A}/home`, { cookie: u.cookie })));
+  check("home: GET .../home -> 200 for the owner, members and the viewer of A, every section read (none null)", homesA.every((r) => r.status === 200 && ["change_requests", "asks", "alignments", "goals", "apps"].every((k) => r.json?.[k] !== null && r.json?.[k] !== undefined)), homesA.map((r) => `${r.status} ${r.text.slice(0, 120)}`).join(" | "));
+
+  // -- LIM-2452 (main #40) on v2: every main /app page fits a 390x844 phone with no sideways scrolling. Workspace A has
+  //    members, teams, goals, alignments, change requests and sessions by now; a connected app (one live grant with a
+  //    read, written straight in for the duration) puts a row in the Apps table and on the Home. --
+  if (existsSync(CHROME)) {
+    const core = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
+    const kid = core.hmac(core.serverSecret(onDir, {}), "align-grant-kid").slice(0, 16);
+    const at = new Date().toISOString();
+    withDb((d) =>
+      d
+        .prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, 'c-phone', ?, ?, ?, ?, 'h', ?, ?)")
+        .run("gr_PHONEPHONEPHONE1", A, U1.id, "An app with a fairly long client name", "a-rather-long-redirect-host.example.com", at, at, Date.now() + 86_400_000, kid),
+    );
+    const { default: puppeteer } = await import("puppeteer-core");
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    try {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.setCookie(...U1.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+      await page.setViewport({ width: 390, height: 844 });
+      const phonePaths = ["/app", "/app/account", "/app/device", "/app/devices", "/app/request-access", `/app/w/${A}`, `/app/w/${A}/goals`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/requests`, `/app/w/${A}/asks`, `/app/w/${A}/spend`, `/app/w/${A}/apps`];
+      const wide = [];
+      for (const p of phonePaths) {
+        await page.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await page.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+        // On a failure, name what runs past the edge: visible elements whose right side is beyond the width.
+        const m = await page.evaluate(() => {
+          const W = window.innerWidth;
+          const past = [...document.querySelectorAll("body *")]
+            .filter((e) => e.getBoundingClientRect().right > W + 1 && e.closest(".sr-only") === null)
+            .slice(0, 3)
+            .map((e) => `${e.tagName}.${String(e.className).slice(0, 60)}`);
+          return { sw: document.scrollingElement.scrollWidth, W, past };
+        });
+        if (!(m.sw <= m.W)) wide.push(`${p}: ${m.sw}>${m.W} ${m.past.join(", ")}`);
+      }
+      const appsRow = await page.evaluate(() => document.body.innerText);
+      check(
+        `ui (Chrome, 390x844): ${phonePaths.length} /app pages (workspaces, account, device, devices, request access, Home, Goals, a goal, People, Sessions, Alignments, Requests, Asks, Spend, Apps) each have document.scrollingElement.scrollWidth <= innerWidth; the Apps table stacks into labelled lines`,
+        wide.length === 0 && /Sends you back to/.test(appsRow) && /Last read/.test(appsRow) && errors.length === 0,
+        `${wide.join(" | ")} ${errors.join(" | ")}`,
+      );
+    } catch (e) {
+      check("ui (Chrome, 390x844) phone layout run", false, e?.stack ?? e);
+    } finally {
+      await browser.close();
+      withDb((d) => d.prepare("DELETE FROM v2_oauth_grants WHERE id = 'gr_PHONEPHONEPHONE1'").run());
+    }
+  } else check("ui (Chrome) available for the phone layout", false, `no Chrome at ${CHROME}`);
   const signInPage = await call("anon", "GET", "/app/sign-in");
   check("ui: the sign-in page offers the email code and the test sign-in (no Google or GitHub configured here)", signInPage.status === 200 && signInPage.text.includes("Test sign-in") && signInPage.text.includes("Send code") && !signInPage.text.includes("Continue with Google") && !signInPage.text.includes("Continue with GitHub"), `${signInPage.status}`);
   const accountPage = await call("U1", "GET", "/app/account", { cookie: U1.cookie });
@@ -2287,12 +2341,16 @@ try {
       await page.waitForFunction(() => document.body.innerText.includes("Northstar (sample)") && !document.body.innerText.includes("Create the Northstar sample"), { timeout: 15000 });
       await page.type("main form input", "UI workspace");
       await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create")?.click())]);
+      // A new workspace opens on its Home, which points to the Goals tab for the first goal.
+      await page.waitForFunction(() => document.body.innerText.includes("Know what needs you") && document.body.innerText.includes("No active goals you can see."), { timeout: 15000 });
+      const wsUrl = page.url();
+      await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.evaluate(() => [...document.querySelectorAll("a")].find((a) => a.textContent === "Create one on the Goals tab.")?.click())]);
+      check("ui (Chrome): a new workspace opens on its Home (\"Know what needs you\"); with no goals it links to the Goals tab at /app/w/<ws>/goals", new URL(page.url()).pathname === `${new URL(wsUrl).pathname}/goals`, page.url());
       await page.waitForFunction(() => document.body.innerText.includes("New goal") && document.body.innerText.includes("Level"), { timeout: 15000 });
       await page.type('main form input:not([aria-label])', "Browser goal");
       await page.type('input[aria-label="Measure 1"]', "Browser measure");
       await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create goal")?.click());
       await page.waitForFunction(() => document.body.innerText.includes("Browser goal") && document.body.innerText.includes("Browser measure"), { timeout: 15000 });
-      const wsUrl = page.url();
       await page.goto(`${wsUrl}/spend`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Estimated list cost") && document.body.innerText.includes("Total"), { timeout: 15000 });
       const spendText = await page.evaluate(() => document.body.innerText);
@@ -2701,7 +2759,7 @@ try {
         };
         const click = (page, text) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), text);
         const pasteNotes = async (page, notes) => {
-          await page.goto(`${BASE}/app/w/${LW}`, { waitUntil: "networkidle0" });
+          await page.goto(`${BASE}/app/w/${LW}/goals`, { waitUntil: "networkidle0" });
           await page.waitForFunction(() => document.body.innerText.includes("Ship the inference cluster"), { timeout: 15000 });
           await click(page, "Paste meeting notes");
           await page.waitForSelector("textarea");
@@ -3742,7 +3800,7 @@ try {
         const sentStatus = (await sentResp).status();
         await page.waitForFunction(() => document.body.innerText.includes("From the browser"), { timeout: 15000 });
         check("ui (Chrome): sending a replan from the card -> 201, and it is listed", sentStatus === 201 && errors.length === 0, `${sentStatus} ${errors.join(" | ")}`);
-        await page.goto(`${BASE}/app/w/${QW}`, { waitUntil: "networkidle0" });
+        await page.goto(`${BASE}/app/w/${QW}/goals`, { waitUntil: "networkidle0" });
         await page.waitForSelector(`[data-held-goal="${GR.id}"]`, { timeout: 15000 });
         await asUser(QM);
         await page.goto(`${BASE}/app/w/${QW}/sessions`, { waitUntil: "networkidle0" });
@@ -3848,6 +3906,215 @@ try {
     check("retention (dry run): requests are kept 12 months and deleted after 13 (requests_deleted counts every one)", dry12 === 0 && dry14 === reqN && reqN >= 4, `${dry12} ${dry14} ${reqN}`);
   }
   // ==== end req:requests ====
+
+  // ==== port2:home ====
+  // The workspace Home (PORT2-001, main #41/#42 on v2): GET .../home and the page at /app/w/<ws>. Its own workspace: HO
+  // owns it and the company goal; team Core has a lead (HL, owns its goal) and a member (HM, who proposes a change); HX is
+  // a member in no team (asks to align with the company goal); HV is a viewer.
+  {
+    const hc = await import(pathToFileURL(path.join(ROOT, "lib/v2/home-core.mts")).href);
+    const P = (id, name) => ({ id, name });
+    check(
+      "home rules: an app's read is a delivery receipt and no read is not observed; the three classes read \"Delivery receipt\", \"Agent reported\", \"Not observed\"",
+      hc.appEvidence("2026-10-31T00:00:00Z") === "delivery_receipt" && hc.appEvidence(null) === "not_observed" && hc.appEvidence(undefined) === "not_observed" && hc.appEvidence("") === "not_observed" &&
+        JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Delivery receipt|Agent reported|Not observed",
+      "",
+    );
+    const cw = (o) => hc.changeWaits({ requester: P("r", "Rae"), approvers: [P("a", "Ann")], behind: false, ...o });
+    check(
+      "home rules: a pending change request waits on its approvers to decide (nobody when the set is empty), behind its goal on the requester to update it, countered on the requester; a closed one waits on nobody",
+      JSON.stringify(cw({ state: "pending" })) === JSON.stringify({ next: "decide", waiting_on: [P("a", "Ann")] }) && JSON.stringify(cw({ state: "pending", approvers: [] })) === JSON.stringify({ next: "decide", waiting_on: [] }) &&
+        JSON.stringify(cw({ state: "pending", behind: true })) === JSON.stringify({ next: "rebase", waiting_on: [P("r", "Rae")] }) && JSON.stringify(cw({ state: "countered" })) === JSON.stringify({ next: "accept_counter", waiting_on: [P("r", "Rae")] }) &&
+        ["approved", "rejected", "withdrawn", "superseded"].every((st) => cw({ state: st }) === null),
+      "",
+    );
+    check(
+      "home rules: a pending alignment waits on everyone who could satisfy a requirement nobody satisfied yet, countered on its requester",
+      JSON.stringify(hc.alignmentWaits({ state: "pending", requester: P("r", "Rae"), requirements: [{ approvers: [P("b", "Bo"), P("a", "Ann")], approved_by: null }, { approvers: [P("c", "Cy")], approved_by: P("c", "Cy") }] })) === JSON.stringify({ next: "decide", waiting_on: [P("a", "Ann"), P("b", "Bo")] }) &&
+        JSON.stringify(hc.alignmentWaits({ state: "countered", requester: P("r", "Rae"), requirements: [] })) === JSON.stringify({ next: "accept_counter", waiting_on: [P("r", "Rae")] }) && hc.alignmentWaits({ state: "approved", requester: P("r", "Rae"), requirements: [] }) === null,
+      "",
+    );
+    const lw0 = hc.launchWaits;
+    check(
+      "home rules (LAUNCH-001 spot): an approved request waits on a launch only when its view says launch \"not_launched\" or \"not_yet\" (as a string or {state}); can.launch makes it the reader's; a view without the field, another value, or a request not approved is not waiting",
+      lw0({ state: "approved" }) === null && lw0({ state: "approved", launch: null }) === null && lw0({ state: "approved", launch: "launched" }) === null && lw0({ state: "approved", launch: 7 }) === null && lw0({ state: "pending", launch: "not_yet" }) === null && lw0(null) === null && lw0("x") === null &&
+        JSON.stringify(lw0({ state: "approved", launch: "not_yet" })) === JSON.stringify({ state: "not_yet", can_launch: false, launchers: null }) &&
+        JSON.stringify(lw0({ state: "approved", launch: { state: "not_launched", waiting_on: [P("a", "Ann"), { id: 1 }] }, can: { launch: true } })) === JSON.stringify({ state: "not_launched", can_launch: true, launchers: [P("a", "Ann")] }) &&
+        JSON.stringify(lw0({ state: "approved", launch: "not_launched", launchers: [P("b", "Bo")], can: { launch: "yes" } })) === JSON.stringify({ state: "not_launched", can_launch: false, launchers: [P("b", "Bo")] }),
+      "",
+    );
+
+    const hUsers = {};
+    for (const [who, name] of [
+      ["HO", "Hana Owner"],
+      ["HL", "Hugo Lead"],
+      ["HM", "Hedy Member"],
+      ["HX", "Hank Other"],
+      ["HV", "Hope Viewer"],
+      ["HN", "Hal Nonmember"],
+    ])
+      hUsers[who] = await signUp(who, name, `${who.toLowerCase()}@home.example.test`);
+    const { HO, HL, HM, HX, HV, HN } = hUsers;
+    const HW = (await call("HO", "POST", "/api/v2/workspaces", { cookie: HO.cookie, body: { name: "Home workspace" } })).json?.id;
+    const ha = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${HW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [HL, "member"],
+      [HM, "member"],
+      [HX, "member"],
+      [HV, "viewer"],
+    ]) {
+      const i = await ha(HO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const HT = (await ha(HO, "POST", "/teams", { name: "Core" })).json?.id;
+    await ha(HO, "POST", `/teams/${HT}/members`, { user_id: HL.id, role: "lead" });
+    await ha(HO, "POST", `/teams/${HT}/members`, { user_id: HM.id, role: "member" });
+    const GC = (await ha(HO, "POST", "/goals", { title: "Win the regulated market", level: "company" })).json;
+    const GT = (await ha(HL, "POST", "/goals", { title: "Ship the audit log", visibility: "workspace", team_id: HT })).json;
+    const GX = (await ha(HX, "POST", "/goals", { title: "Hank's side project", visibility: "workspace" })).json;
+    const home = async (u) => (await ha(u, "GET", "/home")).json;
+    const emptyHome = await home(HO);
+    check(
+      "home: a workspace with goals and nothing pending -> every section read, nothing waiting, its active goals, apps {everyone: true, items: []} for the owner",
+      !!HW && emptyHome?.change_requests?.waiting_on_me.length === 0 && emptyHome.change_requests.waiting_on_others.length === 0 && emptyHome.asks?.waiting_on_me.length === 0 && emptyHome.alignments?.waiting_on_me.length === 0 &&
+        emptyHome.goals?.length === 3 && emptyHome.goals[0].id === GC.id && emptyHome.goals[0].mine === true && emptyHome.apps?.everyone === true && emptyHome.apps.items.length === 0,
+      JSON.stringify(emptyHome).slice(0, 400),
+    );
+
+    // -- a change request, an ask and an alignment --
+    const crH = await ha(HM, "POST", `/goals/${GT.id}/change-requests`, { base_version: 1, changes: { title: "Ship the audit log with export" }, reason: "Home: auditors want an export" });
+    await ha(HO, "POST", "/asks", { team_id: HT, text: "Home: write the runbook", from_label: "Compliance", source: { kind: "manual", date: "2026-10-30" } });
+    const alH = await call("HX", "POST", `/api/v2/workspaces/${HW}/alignments`, { cookie: HX.cookie, body: { target_goal_id: GC.id, source_goal_id: GX.id, choice: "contribution", session_keys: [] } });
+    const [hO, hL, hM, hX, hV] = await Promise.all([HO, HL, HM, HX, HV].map(home));
+    const crOf = (h, list) => h?.change_requests?.[list]?.find((c) => c.id === crH.json?.id);
+    const alOf = (h, list) => h?.alignments?.[list]?.find((a) => a.id === alH.json?.id);
+    check(
+      "home: a pending change request is waiting on the goal's lead (next decide) and, for its requester, waiting on others with waiting_on [the lead]; it is on no one else's Home",
+      crH.status === 201 && crOf(hL, "waiting_on_me")?.next === "decide" && crOf(hL, "waiting_on_me").goal.title === "Ship the audit log" && crOf(hL, "waiting_on_me").reason === "Home: auditors want an export" &&
+        crOf(hM, "waiting_on_others")?.next === "decide" && JSON.stringify(crOf(hM, "waiting_on_others").waiting_on) === JSON.stringify([{ id: HL.id, name: "Hugo Lead" }]) && hM.change_requests.waiting_on_me.length === 0 &&
+        !crOf(hO, "waiting_on_me") && !crOf(hO, "waiting_on_others") && !crOf(hX, "waiting_on_others") && hV.change_requests.waiting_on_others.length === 0,
+      `${crH.status} ${JSON.stringify(hL?.change_requests)} ${JSON.stringify(hM?.change_requests)}`,
+    );
+    check(
+      "home: an open ask of a team is waiting on its lead (next accept), not on its other member; an alignment with the company goal waits on the workspace owner and, for its requester, on others with waiting_on [the owner]",
+      hL.asks?.waiting_on_me.length === 1 && hL.asks.waiting_on_me[0].next === "accept" && hL.asks.waiting_on_me[0].text === "Home: write the runbook" && hL.asks.waiting_on_me[0].team.name === "Core" && hM.asks?.waiting_on_me.length === 0 &&
+        alH.status === 201 && alOf(hO, "waiting_on_me")?.next === "decide" && alOf(hO, "waiting_on_me").target_goal?.title === "Win the regulated market" && alOf(hX, "waiting_on_others")?.waiting_on.some((p) => p.id === HO.id) && !alOf(hM, "waiting_on_others"),
+      `${alH.status} ${JSON.stringify(hL?.asks)} ${JSON.stringify(hO?.alignments)} ${JSON.stringify(hX?.alignments)}`,
+    );
+    check(
+      "home: active goals mark the reader's own (owned, their team's, or a company goal for a workspace owner) and list them first",
+      hM.goals?.find((g) => g.id === GT.id)?.mine === true && hM.goals.find((g) => g.id === GC.id)?.mine === false && hM.goals[0].id === GT.id && hX.goals?.[0].id === GX.id && hV.goals?.length === 3 && hV.goals.every((g) => !g.mine),
+      JSON.stringify(hM?.goals),
+    );
+    // Counter: the requester's turn. Accept, then the owner saves a new version: the request is behind, so it waits on
+    // the requester to update it, not on the lead (who can't approve it yet).
+    await ha(HL, "POST", `/goals/${GT.id}/change-requests/${crH.json?.id}/counter`, { revision: 1, changes: { title: "Ship the audit log with CSV export" }, note: "CSV only" });
+    const [cL, cM] = await Promise.all([HL, HM].map(home));
+    await ha(HM, "POST", `/goals/${GT.id}/change-requests/${crH.json?.id}/accept_counter`, { revision: 2 });
+    const v2 = await ha(HL, "POST", `/goals/${GT.id}/versions`, { version: 1, title: "Ship the audit log (v2)" });
+    const [bL, bM] = await Promise.all([HL, HM].map(home));
+    check(
+      "home: countered -> waiting on the requester (accept_counter) and, for the lead, on others with waiting_on [the requester]; pending behind a newer version -> the requester's to update (rebase), the lead's Home says it waits on the requester",
+      crOf(cM, "waiting_on_me")?.next === "accept_counter" && crOf(cL, "waiting_on_others")?.next === "accept_counter" && JSON.stringify(crOf(cL, "waiting_on_others").waiting_on) === JSON.stringify([{ id: HM.id, name: "Hedy Member" }]) &&
+        v2.status === 201 && crOf(bM, "waiting_on_me")?.next === "rebase" && crOf(bM, "waiting_on_me").goal.version === 2 && crOf(bL, "waiting_on_others")?.next === "rebase" && !crOf(bL, "waiting_on_me"),
+      `${v2.status} ${JSON.stringify(cM?.change_requests)} ${JSON.stringify(bL?.change_requests)}`,
+    );
+
+    // -- connected apps: what the Apps tab has (name, connected by, approved, last read), each with one evidence class --
+    const hcore = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
+    const hkid = hcore.hmac(hcore.serverSecret(onDir, {}), "align-grant-kid").slice(0, 16);
+    const readAt = new Date(Date.now() - 3 * 60_000).toISOString();
+    withDb((d) => {
+      const ins = d.prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, ?, ?, 'app.example', ?, ?, 'h', ?, ?)");
+      ins.run("gr_HOMEHOMEHOMEHOM1", HW, HM.id, "c-home-1", "Claude Code", readAt, readAt, Date.now() + 86_400_000, hkid);
+      ins.run("gr_HOMEHOMEHOMEHOM2", HW, HO.id, "c-home-2", "Codex", readAt, null, Date.now() + 86_400_000, hkid);
+    });
+    const [aO, aM, aV] = await Promise.all([HO, HM, HV].map(home));
+    check(
+      "home: connected apps -> a workspace owner sees every app (everyone: true), a member only their own, a viewer none; each has name, connected_by, approved_at, last_read_at and one evidence_class: delivery_receipt with a read, not_observed without; no plan-version claim",
+      aO.apps?.everyone === true && aO.apps.items.length === 2 && aO.apps.items[0].name === "Claude Code" && aO.apps.items[0].last_read_at === readAt && aO.apps.items[0].evidence_class === "delivery_receipt" && aO.apps.items[0].connected_by.name === "Hedy Member" &&
+        aO.apps.items[1].last_read_at === null && aO.apps.items[1].evidence_class === "not_observed" && aM.apps?.everyone === false && aM.apps.items.length === 1 && aM.apps.items[0].evidence_class === "delivery_receipt" && aV.apps?.items.length === 0 &&
+        aO.apps.items.every((a) => Object.keys(a).sort().join() === "approved_at,connected_by,evidence_class,id,last_read_at,name"),
+      JSON.stringify(aO?.apps),
+    );
+    const HD = insertDevice(HO.id, "Hana's laptop");
+    const [nonMember, anon, bearer] = await Promise.all([ha(HN, "GET", "/home"), call("anon", "GET", `/api/v2/workspaces/${HW}/home`), call("HO", "GET", `/api/v2/workspaces/${HW}/home`, { bearer: HD.access })]);
+    check("home: a non-member -> 404; no session -> 401; a device token -> 403 bearer_not_allowed", nonMember.status === 404 && anon.status === 401 && bearer.status === 403 && bearer.json?.error === "bearer_not_allowed", `${nonMember.status} ${anon.status} ${bearer.status}`);
+
+    // -- the page (Chrome) --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const pageAs = async (u, width = 1000) => {
+          const page = await browser.newPage();
+          page.on("pageerror", (e) => errors.push(e.message));
+          await page.setViewport({ width, height: 844 });
+          await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return page;
+        };
+        const tiles = (page) => page.$$eval("[data-tile]", (els) => Object.fromEntries(els.map((e) => [e.getAttribute("data-tile"), e.firstElementChild?.textContent ?? ""])));
+        const po = await pageAs(HO);
+        await po.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await po.waitForSelector("[data-home-app]", { timeout: 15000 });
+        const o = await po.evaluate(() => ({
+          text: document.body.innerText,
+          tab: [...document.querySelectorAll('nav[aria-label="Workspace"] a')].map((a) => [a.textContent, a.getAttribute("href")]),
+          apps: [...document.querySelectorAll("[data-home-app]")].map((e) => ({ classes: [...e.querySelectorAll("[data-evidence-class]")].map((c) => c.getAttribute("data-evidence-class")), text: e.innerText })),
+          appsSection: document.querySelector("#apps")?.innerText ?? "",
+          items: [...document.querySelectorAll("[data-home-item]")].map((e) => e.getAttribute("data-home-item")),
+        }));
+        const oT = await tiles(po);
+        check(
+          "ui (Chrome): the workspace opens on Home (\"Know what needs you\", the Home tab first, Goals at /goals): tiles Waiting on you 1, Waiting on others 0, Active goals 3, Connected apps with a read seen \"1 of 2\"; the alignment is waiting on the owner with Open",
+          /Know what needs you/.test(o.text) && /1 thing waiting on you\./.test(o.text) && o.tab[0]?.[0] === "Home" && o.tab[0][1] === `/app/w/${HW}` && o.tab[1]?.[0] === "Goals" && o.tab[1][1] === `/app/w/${HW}/goals` &&
+            oT["Waiting on you"] === "1" && oT["Waiting on others"] === "0" && oT["Active goals"] === "3" && oT["Connected apps with a read seen"] === "1 of 2" && o.items.includes(`alignment:${alH.json?.id}`) && /Hank Other asks to align with Win the regulated market/.test(o.text),
+          `${JSON.stringify(oT)} ${JSON.stringify(o.tab)} ${o.text.slice(0, 400)}`,
+        );
+        check(
+          "ui (Chrome, §E2): every connected app on Home shows exactly one evidence class (delivery receipt with its Last read; not observed with no read seen yet); the section says Align sees reads, not what an app does, and infers no working, stuck, blocked or diverged state",
+          o.apps.length === 2 && o.apps.every((a) => a.classes.length === 1) && o.apps[0].classes[0] === "delivery_receipt" && /delivery receipt/.test(o.apps[0].text) && /Last read /.test(o.apps[0].text) && /connected by Hedy Member/.test(o.apps[0].text) &&
+            o.apps[1].classes[0] === "not_observed" && /not observed/.test(o.apps[1].text) && /no read seen yet/.test(o.apps[1].text) && /not what it does with it/.test(o.appsSection) && !/\b(working|stuck|blocked|diverged|current plan)\b/i.test(o.appsSection) && errors.length === 0,
+          `${JSON.stringify(o.apps)} ${errors.join(" | ")}`,
+        );
+        const pl = await pageAs(HL);
+        await pl.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await pl.waitForSelector("[data-home-app]", { timeout: 15000 });
+        const l = await pl.evaluate(() => ({ text: document.body.innerText, waiting: document.querySelector("#waiting")?.innerText ?? "", others: document.querySelector("#others")?.innerText ?? "", none: document.querySelector('[data-home-app="none"]')?.innerText ?? "", noneClasses: [...document.querySelectorAll('[data-home-app="none"] [data-evidence-class]')].map((c) => c.getAttribute("data-evidence-class")) }));
+        check(
+          "ui (Chrome): the lead's Home lists the ask waiting on them (\"Compliance asked Core\", the quoted text) and, under Waiting on others, the change request waiting on Hedy Member to update it to version 2; with no app of their own, one \"not observed\" item",
+          /Compliance asked Core/.test(l.waiting) && /“Home: write the runbook”/.test(l.waiting) && /Hedy Member's request on Ship the audit log \(v2\)/.test(l.others) && /Waiting on Hedy Member to update it to version 2\./.test(l.others) &&
+            JSON.stringify(l.noneClasses) === JSON.stringify(["not_observed"]) && /Align has observed no agent reads/.test(l.none) && errors.length === 0,
+          `${l.waiting.slice(0, 300)} | ${l.others.slice(0, 300)} | ${l.none} ${errors.join(" | ")}`,
+        );
+        // A failed read of the Home: every count says unknown, never zero.
+        const pf = await pageAs(HO);
+        await pf.setRequestInterception(true);
+        pf.on("request", (r) => (r.url().endsWith(`/api/v2/workspaces/${HW}/home`) ? r.respond({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "server_error", message: "Server error" }) }) : r.continue()));
+        await pf.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await pf.waitForSelector("[data-tile]", { timeout: 15000 });
+        const fT = await tiles(pf);
+        const fText = await pf.evaluate(() => document.body.innerText);
+        check(
+          "ui (Chrome, §E2): when the Home's read fails every tile says unknown (never 0), the summary says how much is waiting is unknown, and the apps section says their reads are unknown",
+          Object.keys(fT).length === 4 && Object.values(fT).every((v) => v === "unknown") && /so how much is waiting is unknown/.test(fText) && /whether any of them read this workspace is unknown/.test(fText) && !/Nothing is waiting on you/.test(fText) && !/\bnot observed\b/.test(fText),
+          `${JSON.stringify(fT)} ${fText.slice(0, 500)}`,
+        );
+        // On a phone: the lead's Home with its queue fits 390 px.
+        const pp = await pageAs(HL, 390);
+        await pp.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await pp.waitForSelector("[data-home-app]", { timeout: 15000 });
+        const pm = await pp.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
+        check("ui (Chrome, 390x844): the Home with its queue has no sideways scroll", pm.sw <= pm.W && errors.length === 0, `${JSON.stringify(pm)} ${errors.join(" | ")}`);
+      } catch (e) {
+        check("ui (Chrome) home run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the Home", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end port2:home ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
