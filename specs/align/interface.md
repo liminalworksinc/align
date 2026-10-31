@@ -615,8 +615,8 @@ of others, and the follow-up link.
 
 #### Scenario: Viewed once it is seen
 
-- **WHEN** the card loads below the fold and the person scrolls until at least half of it is on screen (or it fills half the screen)
-- **THEN** the page posts `{action: "viewed"}` once (the server keeps one `value_card_viewed` per person per workspace); a card nobody scrolled to records nothing
+- **WHEN** the card loads below the fold and the person scrolls until at least 75% of its top 240 px is on screen (clipped by the window and any scroll column) and stays there for one second
+- **THEN** the page posts `{action: "viewed"}` once (the server keeps one `value_card_viewed` per person per workspace); a card nobody scrolled to, or whose top was seen for less than a second, records nothing. The card is taller than the screen, so its top, not half of it, is what a reader sees (LIM-2445, #38)
 
 #### Scenario: Follow-up link
 

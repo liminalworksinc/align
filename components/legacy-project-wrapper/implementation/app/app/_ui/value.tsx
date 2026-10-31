@@ -42,6 +42,13 @@ const PITCH = "Align keeps teams and their agents on one approved plan as priori
 const FOLLOW_UP = "Want to evaluate Align on a real workflow? Ask for a follow-up; it can end with an optional, non-binding letter of intent.";
 const FIELD_WORDS: Record<string, string> = { title: "Title", measures: "Measures", depends_on: "Depends on", status: "Status", limits: "Limits" };
 const viewedSent = new Set<string>(); // per page: workspace and person, so a second card on the page sends nothing
+// A view is the card's top seen for a second (LIM-2445, #38): the card is taller than the column it scrolls in, so a
+// person who scrolls to it sees its heading and first rows, not half of it. The top TOP_PX (heading, the accepted change
+// and who approved on a desktop; the heading and the change's first lines on a phone) must be mostly on screen
+// (TOP_SEEN_RATIO) for VIEW_DWELL_MS; a shorter glance is not a view.
+const TOP_PX = 240;
+const TOP_SEEN_RATIO = 0.75;
+const VIEW_DWELL_MS = 1000;
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -68,26 +75,39 @@ function post(ws: string, cr: ChangeRequest, body: Record<string, unknown>) {
 
 export function ValueCard({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: string }) {
   const v = useApi<ValueView>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}/value`);
-  const ref = useRef<HTMLElement>(null);
+  const top = useRef<HTMLDivElement>(null);
   const loaded = !!v.data;
 
   useEffect(() => {
     const key = `${ws}:${me}`;
-    const el = ref.current;
+    const el = top.current;
     if (!loaded || viewedSent.has(key) || !el || typeof IntersectionObserver === "undefined") return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stopTimer = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+    };
     const io = new IntersectionObserver(
       (entries) => {
-        // Half the card on screen, or (a card taller than two screens, as on a phone) half the screen filled by it.
-        const seen = (e: IntersectionObserverEntry) => e.isIntersecting && (e.intersectionRatio >= 0.5 || e.intersectionRect.height >= 0.5 * (e.rootBounds?.height ?? window.innerHeight));
-        if (!entries.some(seen) || viewedSent.has(key)) return;
-        viewedSent.add(key);
-        io.disconnect();
-        void post(ws, cr, { action: "viewed" }).catch(() => viewedSent.delete(key));
+        const e = entries[entries.length - 1];
+        // "Seen": most of the top region on screen (clipped by the scroll column as well as the window).
+        if (!e.isIntersecting || e.intersectionRatio < TOP_SEEN_RATIO) return stopTimer();
+        if (timer !== undefined) return;
+        timer = setTimeout(() => {
+          timer = undefined;
+          io.disconnect();
+          if (viewedSent.has(key)) return;
+          viewedSent.add(key);
+          void post(ws, cr, { action: "viewed" }).catch(() => viewedSent.delete(key));
+        }, VIEW_DWELL_MS);
       },
-      { threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1] },
+      { threshold: [0, 0.25, 0.5, TOP_SEEN_RATIO, 1] },
     );
     io.observe(el);
-    return () => io.disconnect();
+    return () => {
+      stopTimer();
+      io.disconnect();
+    };
   }, [loaded, ws, me, cr]);
 
   if (!v.data) return v.error ? <Err>{v.error}</Err> : null;
@@ -97,7 +117,8 @@ export function ValueCard({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: s
   const others = d.reports.filter((r) => r.person.id !== me);
 
   return (
-    <section ref={ref} aria-label="What this decision gave you" data-value-card={d.change_request_id} className="mt-3 flex flex-col gap-3 rounded-[12px] border border-violet-200 bg-violet-50/40 p-4">
+    <section aria-label="What this decision gave you" data-value-card={d.change_request_id} className="relative mt-3 flex flex-col gap-3 rounded-[12px] border border-violet-200 bg-violet-50/40 p-4">
+      <div ref={top} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0" style={{ height: TOP_PX }} />
       <h3 className="text-[17px] font-semibold text-zinc-900">What this decision gave you</h3>
 
       <Row label="Accepted change">

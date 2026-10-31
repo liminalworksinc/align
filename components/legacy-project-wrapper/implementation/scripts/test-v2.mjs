@@ -3363,8 +3363,9 @@ try {
       `${hostOk.status} ${hostOk.text.slice(0, 120)} | ${hostBad.status} ${hostBad.text.slice(0, 200)} | ${metaBad.text.slice(0, 120)} | ${prmBad.text.slice(0, 120)} | ${JSON.stringify(mcpBad)}`,
     );
 
-    // -- the web UI (Chrome): the card on the goal page, viewed only once at least half of it is on screen; the Apps
-    //    tab's terminal lines --
+    // -- the web UI (Chrome): the card on the goal page, viewed only once its top (240 px) has been mostly on screen for a
+    //    second (LIM-2445, #38: the card is taller than the screen, so "half of it" never happened); the Apps tab's
+    //    terminal lines --
     if (existsSync(CHROME)) {
       const { default: puppeteer } = await import("puppeteer-core");
       const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
@@ -3380,6 +3381,11 @@ try {
         await page.waitForSelector(`[data-value-card="${crP.json?.id}"]`, { timeout: 15000 });
         const card = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => ({ top: el.getBoundingClientRect().top, vh: window.innerHeight, text: el.innerText }));
         await sleep(1500);
+        // A glance: the card's top in view for 300 ms, then scrolled away; not a view.
+        await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => el.scrollIntoView({ block: "start" }));
+        await sleep(300);
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await sleep(2000);
         const belowFold = eventsIn("value_card_viewed").length;
         await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => el.scrollIntoView({ block: "start" }));
         let seenAfter = belowFold;
@@ -3388,11 +3394,42 @@ try {
           seenAfter = eventsIn("value_card_viewed").length;
         }
         check(
-          "ui (Chrome): an approved request's card shows the accepted change, the approver, 1 of 1 shared session with the new version in context, the measured spans and the reports of others; below the fold it records nothing, scrolled into view it records value_card_viewed once",
+          "ui (Chrome): an approved request's card shows the accepted change, the approver, 1 of 1 shared session with the new version in context, the measured spans and the reports of others; below the fold or glanced at for 300 ms it records nothing, its top in view for a second records value_card_viewed once",
           card.top > card.vh && /What this decision gave you/i.test(card.text) && /Who approved/i.test(card.text) && /1 of 1 shared session has it in context/.test(card.text) && /Proposal to approval/.test(card.text) && /What others said/i.test(card.text) && /Vic Two/.test(card.text) &&
             belowFold === before && seenAfter === before + 1 && errors.length === 0,
           `${JSON.stringify({ top: card.top, vh: card.vh, before, belowFold, seenAfter })} ${card.text.slice(0, 300)} ${errors.join(" | ")}`,
         );
+        // On a phone (390x844) the card is taller than the screen: its top seen for 1.5 s is a view, once; a second look
+        // adds nothing (V3, the approver, who has not viewed it yet).
+        {
+          const phone = await browser.newPage();
+          await phone.setViewport({ width: 390, height: 844 });
+          const [n3, ...v3] = V3.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+          await phone.setCookie({ name: n3, value: v3.join("="), url: BASE });
+          const byV3 = () => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_events WHERE name = 'value_card_viewed' AND ws_id = ? AND actor IS NOT NULL").get(W).n);
+          const start = byV3();
+          await phone.goto(`${BASE}/app/w/${W}/goals/${GV.id}`, { waitUntil: "networkidle0" });
+          await phone.waitForSelector(`[data-value-card="${crP.json?.id}"]`, { timeout: 15000 });
+          const tall = await phone.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => el.getBoundingClientRect().height > window.innerHeight * 0.5);
+          // Show about 380 px of the card's top at the bottom of the screen, as a person scrolling to it would.
+          await phone.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => window.scrollBy(0, el.getBoundingClientRect().top - (window.innerHeight - 380)));
+          await sleep(1500);
+          let one = byV3();
+          for (let i = 0; i < 15 && one === start; i++) {
+            await sleep(200);
+            one = byV3();
+          }
+          await phone.evaluate(() => window.scrollTo(0, 0));
+          await sleep(500);
+          await phone.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => window.scrollBy(0, el.getBoundingClientRect().top - (window.innerHeight - 380)));
+          await sleep(2000);
+          check(
+            "ui (Chrome, 390x844): a card taller than half the screen counts as viewed once its top has been seen for a second, and a second look adds nothing",
+            tall && one === start + 1 && byV3() === start + 1 && errors.length === 0,
+            `tall=${tall} start=${start} one=${one} after=${byV3()} ${errors.join(" | ")}`,
+          );
+          await phone.close();
+        }
         await page.setViewport({ width: 1000, height: 900 });
         await page.goto(`${BASE}/app/w/${W}/apps`, { waitUntil: "networkidle0" });
         await page.waitForFunction(() => document.body.innerText.includes("claude mcp add"), { timeout: 15000 });
