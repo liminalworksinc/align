@@ -11,7 +11,7 @@ to. Everyone signs in as a person (Google, GitHub, an email one-time code or a p
 shared passcode. `/` redirects to `/app`. Every path under `/app` is served in Mode L and when hosted.
 
 Each page reads the `/api/v2` endpoints it needs when it loads and reloads them after each of its own actions; pages
-do not poll. A page shows only the controls the server would accept from the signed-in person: their workspace role
+do not poll, except the Home's first-run card, which checks the Apps endpoint while it is shown. A page shows only the controls the server would accept from the signed-in person: their workspace role
 (`owner`, `member` or `viewer`), their team role (`lead` or `member`), whether they own a goal or are in its approval
 set, and the `can` flags the server returns on alignments and change requests. "Pod" is stored data only: every
 screen says "team".
@@ -434,7 +434,7 @@ you", "Waiting on others", "Active goals", and "Connected apps that read the goa
 section the server could not read SHALL say "unknown", never zero, and nothing on the page SHALL infer what an agent is
 doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version or is "on
 the current plan": Align keeps no per-app version). The page
-reads once when it opens and does not poll.
+reads once when it opens and does not poll (only its first-run card checks the apps while it is shown).
 
 The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
 bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`), `asks`
@@ -511,6 +511,62 @@ read returns the same item (`align_get_goal_activity`), it SHALL carry the same 
 - **WHEN** a goal has two bound sessions that reported activity, a checkpoint request one session's developer accepted and another declined, a launched change whose directive a session received, and a resumed session whose machine sent no receipt yet
 - **THEN** the Agent activity card shows "agent reported", each request answer "agent reported", the value card's delivery line "delivery receipt" and the Sessions tab's "Resume sent, not yet received" "not observed", one pill each
 
+### Requirement: Home first-run card
+
+The Home SHALL show, between its summary line and its count tiles, a first-run card ("Get started") while its read
+returned the apps section and none of those apps (a workspace owner's: every app; anyone else's: their own) has a
+`last_used_at` or `last_read_at`, that is, while Align has seen no app the person can see here make a request. It
+SHALL not show when the apps section is unknown. The card has a **Hide** button that hides it for that workspace in
+the browser's `localStorage` (key `align.firstRun.hidden:<ws>`; when storage is blocked it stays shown, and Hide hides
+it until the page reloads) and moves focus to the page heading.
+
+The card SHALL offer two paths when the person has a sample: **Explore a sample**, tagged "Fictional", and **Connect
+one agent**, tagged "Claude Code", titled "Two ways to start". A sample is a workspace named "Northstar (sample)" in
+`GET /api/v2/workspaces`. The card never creates one: the sample is offered on `/app` only to a person with no
+workspace who needs no creation code, in Mode L and hosted alike, so on any other Home the card links to the sample
+the person has ("Open the Northstar sample", labelled fictional), on the sample's own Home says the person is in it
+and that its company, teams, goals and change request are fictional, with a link to its Requests tab, and with no
+sample shows only the connect path, titled "Connect one agent".
+
+The connect path SHALL show the Claude Code line of the Apps tab (`lib/paste-lines.ts`, from the MCP URL that
+`GET /api/v2/workspaces/<ws>/apps` returns) with **Copy** above it, say that it adds Align to Claude Code for the
+person's user account and starts the sign-in and writes no hooks, list what a connected agent can read as the person,
+one line per read tool the server lists for a `goals:read` token (`lib/mcp/read-tools.ts`, the activity line marked
+agent-reported), say that it can't propose, approve, launch or change anything (and that, if allowed when connecting,
+it can add evidence links labelled agent-reported), and link to the Apps tab for other apps; for a viewer it says
+viewers can't connect apps instead of the line. Its status line (a polite live region) SHALL say only what Align has
+seen: no app connected yet (for anyone but an owner: they haven't connected one), or for each approved app with no
+request "<app>: approved <time>, Align hasn't seen it connect yet", or that the check failed and is retried; it
+explains that once an app connects, the Home and the Apps tab show when it last connected (any request) and,
+separately, when it last read the goals, and that connecting is not a read. While shown and the tab is visible, the
+card SHALL read `GET /api/v2/workspaces/<ws>/apps` every 5 seconds; once an app has a `last_used_at` or `last_read_at`
+it reads the Home again and yields to the "Connected AI apps" section.
+
+#### Scenario: Two paths
+
+- **WHEN** a person with the Northstar sample opens the Home of another workspace where nobody connected an app
+- **THEN** the card shows "Two ways to start", **Open the Northstar sample** (fictional) linking to the sample's Home, and the connect path with the Claude Code line and **Copy**, the read list with one line per read tool of the server's `tools/list`, what it can't do and "No AI app is connected to this workspace yet."
+
+#### Scenario: In the sample
+
+- **WHEN** the person opens the sample's own Home
+- **THEN** the explore path says they are in the Northstar sample and that it is fictional, and links to its Requests tab
+
+#### Scenario: No sample
+
+- **WHEN** a person with no sample workspace opens a Home with no app seen
+- **THEN** the card is titled "Connect one agent" and shows only the connect path
+
+#### Scenario: Status follows what Align sees
+
+- **WHEN** the person approves an app that has not made a request yet, and later the app makes one
+- **THEN** the status first says "<app>: approved <time>, Align hasn't seen it connect yet", and after the request the card is gone and the Home's "Connected AI apps" section shows the app as "Connected <time>, no goal read seen yet"
+
+#### Scenario: Hide
+
+- **WHEN** the person presses **Hide**
+- **THEN** the card is gone, focus is on the page heading, and it stays hidden on that workspace's Home after a reload in the same browser; with storage blocked, Hide still hides it and nothing fails
+
 ### Requirement: Web app fits a phone
 
 Every `/app` page SHALL fit a 390×844 screen with no sideways scrolling (`document.scrollingElement.scrollWidth` no
@@ -539,8 +595,8 @@ A page SHALL read the connected apps at most once (the Home through its one read
 
 #### Scenario: Phone
 
-- **WHEN** a signed-in person opens the workspace list, account, device, devices, request access, a workspace's Home, Goals tab, a goal page, People, Sessions, Alignments, Requests, Asks, Spend or Apps on a 390 px wide screen
-- **THEN** nothing scrolls sideways, and an Apps connection reads as its name, then "Sends you back to", "Connected by", "Approved", "Last connected" and "Last read the goals" lines, then **Disconnect**
+- **WHEN** a signed-in person opens the workspace list, account, device, devices, request access, a workspace's Home (with its first-run card), Goals tab, a goal page, People, Sessions, Alignments, Requests (an open request's decision and confirmation included), Asks, Spend or Apps on a 390 px wide screen
+- **THEN** nothing scrolls sideways, approved now and proposed stack, and an Apps connection reads as its name, then "Sends you back to", "Connected by", "Approved", "Last connected" and "Last read the goals" lines, then **Disconnect**
 
 ### Requirement: Workspace Goals tab
 
@@ -655,17 +711,45 @@ send the proposal with
 
 The goal page SHALL list the goal's change requests from `GET .../goals/<goal>/change-requests` to everyone who can
 read the goal, and SHALL show on each request only the actions its `can` flags allow, posting them to
-`POST .../goals/<goal>/change-requests/<id>/<action>`.
+`POST .../goals/<goal>/change-requests/<id>/<action>`. A decided request (approved, rejected, withdrawn or superseded)
+SHALL be its record. An open request (pending or countered) SHALL be shown to be understood, then decided, in this
+order: approved now beside proposed; what would change beside the evidence; the person's decision; a confirmation;
+and a closed "Details" disclosure.
 
 #### Scenario: Reading a request
 
 - **WHEN** a member opens a request in "Change requests"
-- **THEN** the card, built from the list response, shows the requester, a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"), the base version, the revision, the reason, a before and after view of each changed field, who can approve it while it is open, every revision with its author and note (under "Revisions" once there is more than one), and once decided who approved or rejected it and their note or reason; an open request with an empty approval set says "Nobody can approve this yet" instead of who can approve; a superseded request says "Closed because the goal was marked achieved or dropped."
+- **THEN** the card, built from the list response, shows the requester and a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"); a decided request shows the base version, the revision, the reason, a before and after view of each changed field, who approved or rejected it and their note or reason, and every revision with its author and note under "Revisions" once there is more than one; a superseded request says "Closed because the goal was marked achieved or dropped."
 
-#### Scenario: Approver acts
+#### Scenario: Understand an open request
 
-- **WHEN** a member of the goal's approval set (other than the requester, unless they own the goal) acts on a pending request
-- **THEN** **Approve** opens an optional note ("never sent to agents"), the line "Approving records the decision. Agents stay on version <n> until someone launches it." and **Approve as version <n+1> (agents switch at launch)**, which posts `{revision, note}` to `approve`, and **Approve and launch version <n+1>**, which posts the same to `approve_and_launch` (on a revision with no evidence links it first asks "Approve without evidence?" and the buttons read **Approve without evidence as version <n+1> (agents switch at launch)** and **Approve without evidence and launch version <n+1>**); **Reject** requires "Why you're rejecting" and posts `{reason}` to `reject`; and **Suggest a change** opens the pre-filled fields with a required note and **Send suggestion**, which posts `{revision, changes, note}` to `counter`
+- **WHEN** anyone who can read the goal opens a pending or countered request
+- **THEN** "Approved now · version <base>" and "Proposed · revision <r>" show each changed field side by side (stacked below 640 px), with the facts Version ("Goal at version <n>", and the request's base when the goal moved on), Requested by, Decides (who can approve, or "Nobody can approve this yet") and State; "What would change", tagged "the request's own text, not evidence", says field by field what the request would change, quotes the requester's reason "as written" and the latest counter's note, and shows any "Accept if…" condition with "Not confirmed yet" until acknowledged; beside it "Evidence for revision <r>" shows Align's snapshot and the links (self-reported or agent-reported, never verified) or "No evidence attached."; "Details", closed, lists the request, goal, requester and approver ids, the state, revision and base version, the evidence ids and the times
+
+#### Scenario: Choose a decision
+
+- **WHEN** a person with at least one decision flag opens an open request
+- **THEN** "Your decision" offers only the decisions their `can` flags allow, none selected: **Approve** (`approve`), **Approve and launch** (`approve_and_launch`), **Accept if…** and **Suggest a change** (`counter`), **Decline** (`reject`), **Accept the change** (`accept_counter`), **Confirm the condition is met** (`acknowledge`, with a condition) and **Withdraw** (`withdraw`); choosing one reveals only its input and moves focus to it (to **Review this decision** when it needs none): Approve and Approve and launch an optional note behind "Add a note (optional)" (with no evidence links, "Approve without evidence?" and that the record and the audit log will say so); Accept if… the condition and a note to the requester, both required; Suggest a change the request's fields pre-filled on the goal as it is now, a required note and an optional "Accept if… (optional condition the requester confirms)"; Decline "Why you're declining", required; the others "This needs no text."; a missing required input shows a focused error and sends nothing; someone with no decision sees whom the request waits on
+
+#### Scenario: Confirm before sending
+
+- **WHEN** the person presses **Review this decision**
+- **THEN** a focused "Confirm: <decision>" shows Acting as (their name and part), On (the exact revision, whose request on which goal, and its base version), Decision, what they entered (or "Nothing. This decision needs no text."), What happens (the expected state change) and Launch ("Approval is not launch. Agents stay on version <n> until someone who can launch it does.", or for Approve and launch that it does both, or for Decline and Withdraw that nothing goes to launch); **Back** returns with the input kept; **Confirm: <decision>** sends the same body as before (`{revision, note}` to `approve` or `approve_and_launch`; `{revision, changes, note, condition}` to `counter`, Accept if… sending the request's own changes; `{revision, reason}` to `reject`; `{revision}` to `accept_counter` and `withdraw`; `{revision}` of the condition to `acknowledge`) and then shows "Recorded: …" on the reloaded card
+
+#### Scenario: The request changed before sending
+
+- **WHEN** the request's revision or state changed after the person opened it and they confirm
+- **THEN** the page reads the request again first, sends nothing, and shows a focused alert "Not recorded. This request changed after you opened it: it is now “<state>” at revision <r>. Nothing was sent. Read it again and decide again." on the reloaded card
+
+#### Scenario: Refused by the server
+
+- **WHEN** the server answers a decision with 409 (for example `stale_version`, `wrong_state` or `stale_revision`)
+- **THEN** the card shows a focused alert "Not recorded. <the server's message>" and reloads; for `stale_version` that message is "The goal changed after this request was made. <requester> needs to update it before it can be approved." and the request stays pending
+
+#### Scenario: Decline while a counter waits
+
+- **WHEN** an approver opens a request they countered, while it waits on the requester to accept
+- **THEN** "Your decision" says "Waiting on <requester> to accept your suggested change. You can still decline instead of waiting." and offers only **Decline**, with a required reason, which posts `{revision, reason}` to `reject`; the requester sees no such line and is offered **Accept the change** and **Withdraw**
 
 #### Scenario: Approved, not launched
 
@@ -679,32 +763,28 @@ read the goal, and SHALL show on each request only the actions its `can` flags a
 
 #### Scenario: Accept if condition
 
-- **WHEN** an approver suggests a change, the form offers an optional "Accept if… (a condition the requester confirms)" field (at most 2000 characters) posted as `condition`
-- **THEN** the card shows "Accept if: <condition>" with "Not confirmed yet" until the requester acknowledges it, then "Acknowledged by <name>, <time>", next to the approval; the requester, when `can.acknowledge` is set, gets **Confirm the condition is met**, which posts `{revision}` to `acknowledge`; nothing says verified
-
-#### Scenario: Approval blocked by a newer version
-
-- **WHEN** **Approve** gets 409 `stale_version`
-- **THEN** the request shows "The goal changed after this request was made. <requester> needs to update it before it can be approved." and stays pending; this also happens to other open requests on a goal after one of them is approved
+- **WHEN** an approver chooses **Accept if…**, or adds the optional condition to **Suggest a change** (at most 2000 characters), and the request is countered with it
+- **THEN** the card shows "Accept if: <condition>" with "Not confirmed yet" until the requester acknowledges it, then "Acknowledged by <name>, <time>"; the requester, when `can.acknowledge` is set, gets **Confirm the condition is met**, a decision on an open request and a button on an approved one, which posts `{revision}` to `acknowledge`; nothing says verified
 
 #### Scenario: Requester acts
 
-- **WHEN** the requester views their own request
-- **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending); a pending or countered one offers **Withdraw** (`withdraw`), both posting `{revision}`; and one whose base version is behind the goal and whose `can.rebase` flag is set shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{revision, base_version:<n>}` to `rebase`
+- **WHEN** the requester views their own open request
+- **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending) and **Withdraw**; a pending one offers **Withdraw** (`withdraw`) and, with an unacknowledged condition, **Confirm the condition is met**; and one whose base version is behind the goal and whose `can.rebase` flag is set shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{revision, base_version:<n>}` to `rebase`
 
 #### Scenario: Viewer
 
 - **WHEN** a viewer opens the goal page
-- **THEN** the change requests are listed with no action buttons
+- **THEN** the change requests are listed with no decision and no action buttons; an open one says whom it waits on
 
 ### Requirement: Evidence on change request cards
 
-Every change request card (on the goal page and in the Requests tab) SHALL show, under "Evidence for revision <n>", the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days with its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence." or "Approved with <n> evidence link(s), none verified."
+Every change request card (on the goal page and in the Requests tab) SHALL show, under "Evidence for revision <n>"
+(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days with its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence." or "Approved with <n> evidence link(s), none verified."
 
 #### Scenario: Approve without evidence
 
-- **WHEN** an approver presses **Approve** on a revision with no evidence links
-- **THEN** the card asks "Approve without evidence?", explains that the decision record and the audit log will say so, and offers **Approve without evidence as version <n+1>**
+- **WHEN** an approver chooses **Approve** on a revision with no evidence links
+- **THEN** its input asks "Approve without evidence?" and explains that the decision record and the audit log will say so, and the confirmation's Evidence row says "None"; once approved the record says "Approved without evidence."
 
 #### Scenario: A link is added
 
@@ -1089,6 +1169,8 @@ active goal), neutral otherwise.
 - `app/app/_ui/goalform.tsx`
 - `app/app/_ui/limits.tsx`
 - `app/app/_ui/changes.tsx`
+- `app/app/_ui/crparts.tsx`
+- `app/app/_ui/decide.tsx`
 - `lib/v2/launch-words.ts`
 - `app/app/_ui/value.tsx`
 - `lib/v2/value-core.mts`
@@ -1120,6 +1202,8 @@ active goal), neutral otherwise.
 - `app/app/devices/view.tsx`
 - `app/app/invite/[token]/view.tsx`
 - `app/app/w/[ws]/view.tsx`
+- `app/app/w/[ws]/first-run.tsx`
+- `lib/mcp/read-tools.ts`
 - `app/app/w/[ws]/goals/view.tsx`
 - `app/api/v2/workspaces/[ws]/home/route.ts`
 - `lib/v2/home.ts`

@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode, type Ref } from "react";
 
 // Shared client pieces for the goal sessions web app: the API helper, a data hook, layout and form controls.
 
@@ -233,14 +233,29 @@ export function Card({ title, children, actions }: { title?: ReactNode; children
 /** An action button. A long label wraps between words instead of running past its container (max-w-full), at any
  *  width. Below 640px every button is at least 44px tall, a phone's tap target: the root font is 15px, so rem-based
  *  heights (min-h-11 is 41.25px here) fall short, and the height is in px (main #44). */
-export function Btn({ children, onClick, kind = "primary", disabled, type = "button" }: { children: ReactNode; onClick?: () => void; kind?: "primary" | "secondary" | "danger"; disabled?: boolean; type?: "button" | "submit" }) {
+export function Btn({
+  children,
+  onClick,
+  kind = "primary",
+  disabled,
+  type = "button",
+  ref,
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  kind?: "primary" | "secondary" | "danger";
+  disabled?: boolean;
+  type?: "button" | "submit";
+  /** For a page that moves focus to the button (the change request's "Review this decision"). */
+  ref?: Ref<HTMLButtonElement>;
+}) {
   const k = {
     primary: "border-violet-700 bg-violet-700 text-[var(--al-bg)] hover:opacity-90",
     secondary: "border-zinc-300 bg-zinc-50 text-zinc-800 hover:bg-zinc-100",
     danger: "border-red-700 bg-transparent text-red-700 hover:bg-red-50",
   }[kind];
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`max-w-full rounded-[10px] border px-3.5 py-2 text-[15px] font-medium transition [overflow-wrap:normal] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] ${k}`}>
+    <button ref={ref} type={type} onClick={onClick} disabled={disabled} className={`max-w-full rounded-[10px] border px-3.5 py-2 text-[15px] font-medium transition [overflow-wrap:normal] disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] ${k}`}>
       {children}
     </button>
   );

@@ -2670,12 +2670,12 @@ try {
       await page.goto(`${sampleUrl}/requests`, { waitUntil: "networkidle0" });
       await page.waitForFunction(() => document.body.innerText.includes("Waiting on you") && document.body.innerText.includes("waiting for approval") && document.body.innerText.includes("Pen test window booked"), { timeout: 15000 });
       const requestsText = await page.evaluate(() => document.body.innerText);
-      // With no evidence, Approve asks first ("Approve without evidence?"); then evidence is added and it approves plainly.
+      // With no evidence, choosing Approve asks first ("Approve without evidence?"); then evidence is added and the
+      // confirmation says what approving does: it records the decision, and agents switch only at launch.
       const clickButton = (label) => page.evaluate((t) => [...document.querySelectorAll("button")].find((b) => b.textContent === t)?.click(), label);
-      await clickButton("Approve");
-      await page.waitForFunction(() => document.body.innerText.includes("Approve without evidence?") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve without evidence as version 2 (agents switch at launch)") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve without evidence and launch version 2"), { timeout: 15000 });
+      await page.click('[data-decision="Approve"]');
+      await page.waitForFunction(() => document.body.innerText.includes("Approve without evidence?") && document.querySelector('[data-decision="Approve"]')?.getAttribute("aria-pressed") === "true", { timeout: 15000 });
       const approvePanel = await page.evaluate(() => document.body.innerText);
-      await clickButton("Approve");
       await clickButton("Add evidence");
       await page.waitForSelector('input[type="url"]');
       await page.type('input[type="url"]', "https://github.com/northstar/security/pull/7");
@@ -2687,20 +2687,23 @@ try {
         return { href: a?.getAttribute("href"), target: a?.getAttribute("target"), rel: a?.getAttribute("rel"), text: document.body.innerText };
       });
       check(
-        "ui (Chrome): approving a request with no evidence asks \"Approve without evidence?\"; an added link shows its kind, label, host, who added it and \"self-reported\", opens in a new tab with rel noopener noreferrer, beside \"Recorded by Align at revision 1\"",
-        evLink.href === "https://github.com/northstar/security/pull/7" && evLink.target === "_blank" && evLink.rel === "noopener noreferrer" && /self-reported/.test(evLink.text) && /Pull request/.test(evLink.text) && /github\.com/.test(evLink.text) && /by you/.test(evLink.text) && /Recorded by Align at revision 1/.test(evLink.text) && !/\bverified\b/.test(evLink.text),
+        "ui (Chrome): choosing Approve on a request with no evidence asks \"Approve without evidence?\"; an added link shows its kind, label, host, who added it and \"self-reported\", opens in a new tab with rel noopener noreferrer, beside \"Recorded by Align at revision 1\"",
+        approvePanel.includes("Approve without evidence?") && evLink.href === "https://github.com/northstar/security/pull/7" && evLink.target === "_blank" && evLink.rel === "noopener noreferrer" && /self-reported/.test(evLink.text) && /Pull request/.test(evLink.text) && /github\.com/.test(evLink.text) && /by you/.test(evLink.text) && /Recorded by Align at revision 1/.test(evLink.text) && !/\bverified\b/.test(evLink.text.replace("never verified", "")),
         JSON.stringify({ ...evLink, text: evLink.text.slice(0, 300) }),
       );
-      await clickButton("Approve");
-      await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve as version 2 (agents switch at launch)") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve and launch version 2"), { timeout: 15000 });
-      await clickButton("Approve as version 2 (agents switch at launch)");
+      await page.waitForFunction(() => !document.body.innerText.includes("Approve without evidence?"), { timeout: 15000 });
+      await clickButton("Review this decision");
+      await page.waitForFunction(() => document.activeElement?.textContent === "Confirm: Approve", { timeout: 15000 });
+      const confirmText = await page.$eval("[data-confirm]", (e) => e.innerText);
+      await clickButton("Confirm: Approve");
       await page.waitForFunction(() => document.body.innerText.includes("Approved, agents still on v1 until launch") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
       const approvedText = await page.evaluate(() => document.body.innerText);
       const launchButtons = await page.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.textContent));
       check(
-        "ui (Chrome): the approve panel says agents stay on version 1 until someone launches it and labels the buttons \"(agents switch at launch)\" and \"Approve and launch version 2\"; after approving the record reads \"Approved, agents still on v1 until launch\" (not \"It became version 2\", never \"agents on v2\") and offers Launch version 2 to agents and Not yet",
-        approvePanel.includes("Approving records the decision. Agents stay on version 1 until someone launches it.") && !approvedText.includes("It became version 2") && !/agents on v2/.test(approvedText) && launchButtons.includes("Launch version 2 to agents") && launchButtons.includes("Not yet"),
-        approvedText.slice(0, 600),
+        "ui (Chrome): the approve confirmation says approval is not launch (agents stay on version 1 until someone launches it) and what happens (version 2 recorded as approved); after confirming the record says \"Recorded: you approved revision 1 as version 2\" and reads \"Approved, agents still on v1 until launch\" (not \"It became version 2\", never \"agents on v2\") and offers Launch version 2 to agents and Not yet",
+        /Approval is not launch\. Agents stay on version 1 until someone who can launch it does\./.test(confirmText) && /waiting for approval → approved\. Version 2 is recorded as approved/.test(confirmText) && /Recorded: you approved revision 1 as version 2/.test(approvedText) &&
+          !approvedText.includes("It became version 2") && !/agents on v2/.test(approvedText) && launchButtons.includes("Launch version 2 to agents") && launchButtons.includes("Not yet"),
+        `${confirmText.slice(0, 600)} | ${approvedText.slice(0, 600)}`,
       );
       await clickButton("Launch version 2 to agents");
       await page.waitForFunction(() => document.body.innerText.includes("Launched, agents on v2") && document.body.innerText.includes("It became version 2") && document.body.innerText.includes("Approved with 1 evidence link, none verified."), { timeout: 15000 });
@@ -3981,6 +3984,418 @@ try {
     } else check("ui (Chrome) available for the value card", false, `no Chrome at ${CHROME}`);
   }
   // ==== end port:value ====
+
+  // ==== port:decide ====
+  // main #43 and #49 on v2: an open change request is understood, then decided. DO owns the workspace and the goal
+  // (its approval set); DR, a member, asks; DV is a viewer. Every step is driven with real clicks and typing.
+  {
+    const dUsers = {};
+    for (const [who, name] of [
+      ["DO", "Dana Owner"],
+      ["DR", "Drew Requester"],
+      ["DV", "Devi Viewer"],
+    ])
+      dUsers[who] = await signUp(who, name, `${who.toLowerCase()}@decide.example.test`);
+    const { DO, DR, DV } = dUsers;
+    const DW = (await call("DO", "POST", "/api/v2/workspaces", { cookie: DO.cookie, body: { name: "Decide workspace" } })).json?.id;
+    const da = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${DW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [DR, "member"],
+      [DV, "viewer"],
+    ]) {
+      const iv = await da(DO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${iv.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const DG = (await da(DO, "POST", "/goals", { title: "Cut checkout latency", visibility: "workspace", measures: [{ text: "p95 latency", target: "300ms" }] })).json;
+    const crs = `/goals/${DG?.id}/change-requests`;
+    const propose = (reason) => da(DR, "POST", crs, { base_version: 1, changes: { measures: [{ id: DG.measures[0].id, text: "p95 latency", target: "200ms" }, { text: "Checkout errors", target: "0" }] }, reason });
+    const read = (id) => da(DO, "GET", `${crs}/${id}`);
+    const cr1 = (await propose("Customers notice the slow checkout")).json;
+    check("decide setup: a pending request from a member on the owner's goal", cr1?.state === "pending" && cr1.can.withdraw === true, JSON.stringify(cr1)?.slice(0, 200));
+
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const pageAs = async (u, width = 1000) => {
+          const page = await browser.newPage();
+          page.on("pageerror", (e) => errors.push(e.message));
+          await page.setViewport({ width, height: 900 });
+          await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return page;
+        };
+        const card = (id) => `[data-cr="${id}"]`;
+        const open = async (page, id) => {
+          await page.goto(`${BASE}/app/w/${DW}/goals/${DG.id}`, { waitUntil: "networkidle0" });
+          await page.waitForSelector(card(id), { timeout: 15000 });
+        };
+        const choices = (page, id) => page.$$eval(`${card(id)} [data-decision]`, (els) => els.map((e) => [e.getAttribute("data-decision"), e.getAttribute("aria-pressed")]));
+        const press = (page, id, label) => page.$$eval(`${card(id)} button`, (els, t) => els.find((b) => b.textContent === t)?.click(), label);
+        const focused = (page) =>
+          page.evaluate(() => {
+            const a = document.activeElement;
+            return { tag: a?.tagName ?? "", label: a?.closest("label")?.innerText ?? "", text: a?.innerText ?? "", notice: a?.getAttribute("data-notice") ?? "", role: a?.getAttribute("role") ?? "" };
+          });
+        const wide = (page) => page.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth);
+
+        // Understand: approved now beside proposed, the facts, what would change (the request's text), no evidence, Details closed.
+        // One page at a time: a page left in the background may be frozen by Chrome, so each is closed when done.
+        let po = await pageAs(DO);
+        await open(po, cr1.id);
+        const u = await po.evaluate((sel) => {
+          const c = document.querySelector(sel);
+          const side = (k) => c.querySelector(`[data-side="${k}"]`)?.getBoundingClientRect();
+          const d = c.querySelector("[data-details]");
+          return {
+            text: c.innerText,
+            approved: c.querySelector('[data-side="approved"]')?.innerText ?? "",
+            proposed: c.querySelector('[data-side="proposed"]')?.innerText ?? "",
+            sideBySide: Math.abs(side("approved").top - side("proposed").top) < 2 && side("approved").right <= side("proposed").left,
+            what: c.querySelector("[data-what-would-change]")?.innerText ?? "",
+            evidence: c.querySelector("[data-evidence]")?.innerText ?? "",
+            detailsOpen: d?.open,
+            details: d?.textContent ?? "",
+            inputs: c.querySelectorAll("[data-decision-input]").length,
+          };
+        }, card(cr1.id));
+        check(
+          "ui (Chrome, decide): an open request shows \"Approved now · version 1\" beside \"Proposed · revision 1\" (side by side at 1000 px) with Version, Requested by, Decides and State; \"What would change\" is tagged as the request's own text, not evidence, names each change and quotes the reason as written; the evidence beside it says \"No evidence attached.\"; Details is closed and holds the ids",
+          /Approved now · version 1/i.test(u.approved) && /300ms/.test(u.approved) && /Proposed · revision 1/i.test(u.proposed) && /200ms/.test(u.proposed) && /Checkout errors/.test(u.proposed) && u.sideBySide &&
+            /Goal at version 1/.test(u.text) && /Requested by\s*Drew Requester/i.test(u.text) && /Decides\s*you/i.test(u.text) && /State\s*waiting for approval/i.test(u.text) &&
+            /the request's own text, not evidence/.test(u.what) && /Changes the target of “p95 latency” from 300ms to 200ms\./.test(u.what) && /Adds the measure “Checkout errors” \(target: 0\)\./.test(u.what) && /Drew Requester's reason, as written: “Customers notice the slow checkout”/.test(u.what) &&
+            /No evidence attached\./.test(u.evidence) && u.detailsOpen === false && u.details.includes(cr1.id) && u.details.includes(DG.id) && u.inputs === 0 && errors.length === 0,
+          `${JSON.stringify({ ...u, text: u.text.slice(0, 500) })} ${errors.join(" | ")}`,
+        );
+        const c0 = await choices(po, cr1.id);
+        check(
+          "ui (Chrome, decide): Your decision offers only what the approver's can flags allow (Approve, Approve and launch, Accept if…, Suggest a change, Decline), none selected and no input shown until one is chosen",
+          JSON.stringify(c0.map((x) => x[0])) === JSON.stringify(["Approve", "Approve and launch", "Accept if…", "Suggest a change", "Decline"]) && c0.every((x) => x[1] === "false"),
+          JSON.stringify(c0),
+        );
+
+        // Accept if…: only its inputs, focus on the condition; an empty review is a focused error and sends nothing.
+        await po.click(`${card(cr1.id)} [data-decision="Accept if…"]`);
+        await sleep(300);
+        const f1 = await focused(po);
+        const shown = await po.$eval(`${card(cr1.id)} [data-decision-input]`, (e) => ({ labels: [...e.querySelectorAll("label")].map((l) => l.firstChild?.textContent ?? ""), pressed: document.querySelector('[data-decision="Accept if…"]')?.getAttribute("aria-pressed") }));
+        await press(po, cr1.id, "Review this decision");
+        await sleep(300);
+        const fErr = await focused(po);
+        const still = await read(cr1.id);
+        check(
+          "ui (Chrome, decide): choosing Accept if… reveals only its two inputs (the condition and a note to the requester) and moves focus to the condition; reviewing with them empty moves focus to an alert and sends nothing",
+          f1.tag === "TEXTAREA" && /^Accept if… \(the condition Drew Requester acknowledges\)/.test(f1.label) && shown.labels.length === 2 && /^Note to Drew Requester/.test(shown.labels[1]) && shown.pressed === "true" &&
+            fErr.role === "alert" && /Write the condition Drew Requester acknowledges\./.test(fErr.text) && still.json?.state === "pending" && still.json.revision === 1,
+          `${JSON.stringify(f1)} ${JSON.stringify(shown)} ${JSON.stringify(fErr)} ${still.json?.state}`,
+        );
+        const COND = `Roll back if errors rise ${randomBytes(3).toString("hex")}`;
+        const areas = await po.$$(`${card(cr1.id)} [data-decision-input] textarea`);
+        await areas[0].type(COND);
+        await areas[1].type("Fine once a rollback is agreed");
+        await press(po, cr1.id, "Review this decision");
+        await sleep(300);
+        const fC = await focused(po);
+        const conf = await po.$eval(`${card(cr1.id)} [data-confirm]`, (e) => e.innerText);
+        await press(po, cr1.id, "Back");
+        await sleep(300);
+        const kept = await po.$$eval(`${card(cr1.id)} [data-decision-input] textarea`, (els) => els.map((e) => e.value));
+        const noWrite = (await read(cr1.id)).json;
+        check(
+          "ui (Chrome, decide): Review this decision moves focus to \"Confirm: Accept if…\", which shows who acts, the exact revision, the decision, the condition and note entered, the transition to revision 2 and that approval is not launch; Back keeps what was typed; nothing is sent before Confirm",
+          fC.text === "Confirm: Accept if…" && /Acting as\s*Dana Owner \(you, in this goal's approval set\)/i.test(conf) && /Revision 1 of Drew Requester's request on “Cut checkout latency”, made against version 1/.test(conf) && conf.includes(COND) && /Fine once a rollback is agreed/.test(conf) &&
+            /waiting for approval → approver suggested a change \(revision 2\)/.test(conf) && /Approval is not launch/.test(conf) && kept[0] === COND && noWrite?.revision === 1 && noWrite.state === "pending",
+          `${JSON.stringify(fC)} ${conf.slice(0, 700)} ${JSON.stringify(kept)}`,
+        );
+        await press(po, cr1.id, "Review this decision");
+        await sleep(300);
+        await press(po, cr1.id, "Confirm: Accept if");
+        await po.waitForFunction((sel) => /Recorded: you accepted revision 1 if Drew Requester acknowledges your condition/.test(document.querySelector(sel)?.innerText ?? ""), { timeout: 15000 }, card(cr1.id));
+        const afterIf = (await read(cr1.id)).json;
+        const ifText = await po.$eval(card(cr1.id), (e) => e.innerText);
+        check(
+          "ui (Chrome, decide): confirming Accept if… posts a counter with the request's own changes, the note and the condition (countered at revision 2, the condition stored apart from the note); the card says Recorded and shows \"Accept if: …\" with \"Not confirmed yet\"",
+          afterIf?.state === "countered" && afterIf.revision === 2 && afterIf.condition?.text === COND && afterIf.revisions[1].note === "Fine once a rollback is agreed" && JSON.stringify(afterIf.changes.measures.map((m) => m.target)) === JSON.stringify(["200ms", "0"]) &&
+            ifText.includes(`Accept if: ${COND}`) && ifText.includes("Not confirmed yet") && /Fine once a rollback is agreed/.test(ifText),
+          `${JSON.stringify(afterIf)?.slice(0, 400)} ${ifText.slice(0, 400)}`,
+        );
+
+        // #49: while the counter waits on the requester, the approver may only decline; the requester sees no such line.
+        await po.close();
+        const pr = await pageAs(DR);
+        await open(pr, cr1.id);
+        const cR = await choices(pr, cr1.id);
+        const rLine = await pr.$(`${card(cr1.id)} [data-countered-decline]`);
+        const pv = await pageAs(DV);
+        await open(pv, cr1.id);
+        const vText = await pv.$eval(card(cr1.id), (e) => ({ decide: !!e.querySelector("[data-decide]"), waiting: e.querySelector("[data-waiting]")?.innerText ?? "", buttons: e.querySelectorAll("[data-decision]").length }));
+        await pr.close();
+        await pv.close();
+        po = await pageAs(DO);
+        await open(po, cr1.id);
+        const c1 = await choices(po, cr1.id);
+        const waitLine = await po.$eval(`${card(cr1.id)} [data-countered-decline]`, (e) => e.innerText).catch(() => "");
+        check(
+          "ui (Chrome, decide, #49): on a countered request the approver is offered only Decline, under \"Waiting on Drew Requester to accept your suggested change. You can still decline instead of waiting.\"; the requester is offered Accept the change and Withdraw with no such line; a viewer gets no decision, only whom it waits on",
+          JSON.stringify(c1.map((x) => x[0])) === JSON.stringify(["Decline"]) && /Waiting on Drew Requester to accept your suggested change\. You can still decline instead of waiting\./.test(waitLine) &&
+            JSON.stringify(cR.map((x) => x[0])) === JSON.stringify(["Accept the change", "Withdraw"]) && rLine === null && !vText.decide && vText.buttons === 0 && /Waiting on Drew Requester to accept the suggested change\./.test(vText.waiting),
+          `${JSON.stringify(c1)} ${waitLine} ${JSON.stringify(cR)} ${JSON.stringify(vText)}`,
+        );
+        await po.click(`${card(cr1.id)} [data-decision="Decline"]`);
+        await po.waitForSelector(`${card(cr1.id)} [data-decision-input] textarea`, { timeout: 15000 });
+        await sleep(300);
+        const fD = await focused(po);
+        await po.type(`${card(cr1.id)} [data-decision-input] textarea`, "We will revisit after the freeze");
+        await press(po, cr1.id, "Review this decision");
+        await po.waitForSelector(`${card(cr1.id)} [data-confirm]`, { timeout: 15000 });
+        const confD = await po.$eval(`${card(cr1.id)} [data-confirm]`, (e) => e.innerText);
+        await press(po, cr1.id, "Confirm: Decline");
+        await po
+          .waitForFunction((sel) => document.querySelector(sel)?.getAttribute("data-cr-view") === "record", { timeout: 15000 }, card(cr1.id))
+          .catch(async (e) => {
+            throw new Error(`${e.message}: ${await po.$eval(card(cr1.id), (c) => c.innerText.slice(-800)).catch(() => "no card")}`);
+          });
+        const declined = (await read(cr1.id)).json;
+        const recText = await po.$eval(card(cr1.id), (e) => e.innerText);
+        const lateAccept = await da(DR, "POST", `${crs}/${cr1.id}/accept_counter`, { revision: 2 });
+        check(
+          "ui (Chrome, decide, #49): the approver declines the countered request with a typed reason (focus on \"Why you're declining\"; the confirmation says nothing goes to launch); it is rejected by them with that reason, the record says \"Recorded: you declined this request\" and \"Rejected by Dana Owner\", and the requester's accept_counter then gets 409 wrong_state",
+          fD.tag === "TEXTAREA" && /^Why you're declining/.test(fD.label) && /approver suggested a change → rejected/.test(confD) && /Nothing goes to launch\. The goal stays at version 1\./.test(confD) &&
+            declined?.state === "rejected" && declined.rejected_by?.id === DO.id && declined.rejection_reason === "We will revisit after the freeze" && /Recorded: you declined this request/.test(recText) && /Rejected by Dana Owner/.test(recText) &&
+            lateAccept.status === 409 && lateAccept.json?.error === "wrong_state",
+          `${JSON.stringify(fD)} ${confD.slice(0, 300)} ${JSON.stringify(declined)?.slice(0, 300)} ${recText.slice(0, 300)} ${lateAccept.text}`,
+        );
+
+        // Freshness, on a phone: the request is withdrawn after the approver opened it; confirming sends nothing.
+        const cr2 = (await propose("Second try")).json;
+        await po.close();
+        const pp = await pageAs(DO, 390);
+        await open(pp, cr2.id);
+        const stacked = await pp.evaluate((sel) => {
+          const c = document.querySelector(sel);
+          const a = c.querySelector('[data-side="approved"]').getBoundingClientRect();
+          const p = c.querySelector('[data-side="proposed"]').getBoundingClientRect();
+          return a.bottom <= p.top;
+        }, card(cr2.id));
+        await pp.click(`${card(cr2.id)} [data-decision="Decline"]`);
+        await sleep(300);
+        await pp.type(`${card(cr2.id)} [data-decision-input] textarea`, "Not now");
+        await press(pp, cr2.id, "Review this decision");
+        await sleep(300);
+        const phoneWide = await wide(pp);
+        await da(DR, "POST", `${crs}/${cr2.id}/withdraw`, { revision: 1 });
+        await press(pp, cr2.id, "Confirm: Decline");
+        await pp.waitForFunction(() => document.activeElement?.getAttribute("data-notice") === "stale", { timeout: 15000 });
+        const fS = await focused(pp);
+        const after2 = (await read(cr2.id)).json;
+        const rejectedRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE action = 'change_request.rejected' AND object_id = ?").get(cr2.id).n);
+        check(
+          "ui (Chrome 390x844, decide): approved now and proposed stack and the confirmation fits with no sideways scroll; a request withdrawn after it was opened is read again before sending: nothing is recorded (still withdrawn, no rejection audited) and a focused alert says \"Not recorded. This request changed after you opened it: it is now “withdrawn” at revision 1. Nothing was sent.\"",
+          stacked && phoneWide && fS.role === "alert" && /^Not recorded\. This request changed after you opened it: it is now “withdrawn” at revision 1\. Nothing was sent\./.test(fS.text) && after2?.state === "withdrawn" && rejectedRows === 0 && errors.length === 0,
+          `${stacked} ${phoneWide} ${JSON.stringify(fS)} ${after2?.state} ${rejectedRows} ${errors.join(" | ")}`,
+        );
+
+        // A refusal: the goal gets a new version after the approver reviewed an approval; the server's 409 is shown, focused.
+        const cr3 = (await propose("Third try")).json;
+        await pp.close();
+        po = await pageAs(DO);
+        await open(po, cr3.id);
+        await po.click(`${card(cr3.id)} [data-decision="Approve"]`);
+        await sleep(300);
+        const fA = await focused(po);
+        await press(po, cr3.id, "Review this decision");
+        await sleep(300);
+        const bump = await da(DO, "POST", `/goals/${DG.id}/versions`, { version: 1, title: "Cut checkout latency (v2)" });
+        await press(po, cr3.id, "Confirm: Approve");
+        await po.waitForFunction(() => document.activeElement?.getAttribute("data-notice") === "refused", { timeout: 15000 });
+        const fR = await focused(po);
+        const after3 = (await read(cr3.id)).json;
+        check(
+          "ui (Chrome, decide): choosing Approve (no input needed) moves focus to Review this decision; when the server refuses with 409 stale_version (the goal moved on), a focused alert says \"Not recorded. The goal changed after this request was made. Drew Requester needs to update it before it can be approved.\" and the request stays pending",
+          fA.tag === "BUTTON" && fA.text === "Review this decision" && bump.status === 201 && fR.role === "alert" && /^Not recorded\. The goal changed after this request was made\. Drew Requester needs to update it before it can be approved\./.test(fR.text) && after3?.state === "pending" && errors.length === 0,
+          `${JSON.stringify(fA)} ${bump.status} ${JSON.stringify(fR)} ${after3?.state} ${errors.join(" | ")}`,
+        );
+      } catch (e) {
+        check("ui (Chrome) decide run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the decision panel", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end port:decide ====
+
+  // ==== port:first-run ====
+  // main #47 on v2: the Home's first-run card. FO owns workspace FW and has the Northstar sample (SW); FM is a member
+  // with no sample; FV a viewer. The card shows until Align has seen an app make a request, then yields.
+  {
+    const fUsers = {};
+    for (const [who, name] of [
+      ["FO", "Fern Owner"],
+      ["FM", "Finn Member"],
+      ["FV", "Flo Viewer"],
+    ])
+      fUsers[who] = await signUp(who, name, `${who.toLowerCase()}@first-run.example.test`);
+    const { FO, FM, FV } = fUsers;
+    const SW = (await call("FO", "POST", "/api/v2/workspaces/sample", { cookie: FO.cookie, body: {} })).json?.id;
+    const FW = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "First run workspace" } })).json?.id;
+    for (const [u, role] of [
+      [FM, "member"],
+      [FV, "viewer"],
+    ]) {
+      const iv = await call("FO", "POST", `/api/v2/workspaces/${FW}/invites`, { cookie: FO.cookie, body: { email: u.email, role } });
+      await call(u.who, "POST", `/api/v2/invites/${iv.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    // The read tools the server lists for a goals:read token (a paired device's).
+    const FD = insertDevice(FO.id, "Fern's laptop");
+    const toolsList = await call("FO", "POST", "/api/mcp", { bearer: FD.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+    const serverTools = [...toolsList.text.matchAll(/"name":"(align_[a-z_]+)"/g)].map((m) => m[1]);
+    check("first run setup: the sample and a workspace for the owner; tools/list for a goals:read token names the read tools", !!SW && !!FW && toolsList.status === 200 && serverTools.length >= 9 && !serverTools.includes("align_add_change_request_evidence"), `${SW} ${FW} ${toolsList.status} ${serverTools}`);
+
+    if (existsSync(CHROME)) {
+      const fcore = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
+      const fkid = fcore.hmac(fcore.serverSecret(onDir, {}), "align-grant-kid").slice(0, 16);
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const errors = [];
+        const pageAs = async (u, width = 1000, blockStorage = false) => {
+          const page = await browser.newPage();
+          page.on("pageerror", (e) => errors.push(e.message));
+          if (blockStorage)
+            await page.evaluateOnNewDocument(() =>
+              Object.defineProperty(window, "localStorage", {
+                get() {
+                  throw new DOMException("blocked", "SecurityError");
+                },
+              }),
+            );
+          await page.setViewport({ width, height: 900 });
+          await page.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+          return page;
+        };
+        const home = async (page, ws) => {
+          await page.goto(`${BASE}/app/w/${ws}`, { waitUntil: "networkidle0" });
+          await page.waitForSelector("[data-home-summary]", { timeout: 15000 });
+          await page.waitForSelector("[data-first-run-status]:not([data-first-run-status=checking])", { timeout: 15000 }).catch(() => undefined);
+        };
+        const cardOf = (page) =>
+          page.evaluate(() => {
+            const c = document.querySelector("[data-first-run]");
+            if (!c) return null;
+            const btns = [...c.querySelectorAll("button")].map((b) => b.textContent);
+            const line = c.querySelector("[data-first-run-line]");
+            return {
+              kind: c.getAttribute("data-first-run"),
+              title: c.querySelector("h2")?.textContent ?? "",
+              text: c.innerText,
+              sample: c.querySelector("[data-sample-link]")?.getAttribute("href") ?? null,
+              sampleLabel: c.querySelector("[data-sample-link]")?.getAttribute("aria-label") ?? "",
+              paths: [...c.querySelectorAll("[data-first-run-path]")].map((p) => p.getAttribute("data-first-run-path")),
+              line: line?.textContent ?? null,
+              copyBeforeLine: !!line && btns.includes("Copy") && !!(c.querySelector("button")?.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING),
+              tools: [...c.querySelectorAll("[data-tool]")].map((t) => t.getAttribute("data-tool")),
+              status: c.querySelector("[data-first-run-status]")?.getAttribute("data-first-run-status") ?? "",
+              statusText: c.querySelector("[data-first-run-status]")?.textContent ?? "",
+              lineFits: !line || line.getBoundingClientRect().right <= window.innerWidth,
+            };
+          });
+
+        const po = await pageAs(FO);
+        await home(po, FW);
+        const a = await cardOf(po);
+        check(
+          "ui (Chrome, first run): on a workspace where no app was seen, the owner's Home shows \"Two ways to start\": Explore a sample (fictional), linking to their Northstar sample, and Connect one agent with Copy above the Claude Code line, what it can read (one line per read tool in the server's tools/list), what it can't do, \"No AI app is connected to this workspace yet.\" and that connecting is not a read",
+          a?.kind === "two" && a.title === "Two ways to start" && JSON.stringify(a.paths) === JSON.stringify(["sample", "connect"]) && a.sample === `/app/w/${SW}` && /fictional/i.test(a.sampleLabel) && /Fictional/.test(a.text) && /Nothing in it is real/.test(a.text) &&
+            a.line === `claude mcp add --transport http --scope user align 'http://127.0.0.1:${PORT}/api/mcp'; claude mcp login align` && a.copyBeforeLine && JSON.stringify([...a.tools].sort()) === JSON.stringify([...serverTools].sort()) &&
+            /can.t propose, approve, launch or change anything/.test(a.text) && a.status === "none" && a.statusText === "No AI app is connected to this workspace yet." && /Connecting is not a read/.test(a.text) && /last connected \(any request to Align\) and, separately, when it last read the goals/.test(a.text) && errors.length === 0,
+          `${JSON.stringify(a)} ${errors.join(" | ")}`,
+        );
+
+        // Live status: an approved app with no request yet, then its first request (a connection): the card yields.
+        const at = new Date().toISOString();
+        withDb((d) =>
+          d
+            .prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, 'c-first', 'Claude Code', 'localhost', ?, NULL, NULL, 'h', ?, ?)")
+            .run("gr_FIRSTRUNFIRSTRU1", FW, FO.id, at, Date.now() + 86_400_000, fkid),
+        );
+        await po.waitForSelector('[data-first-run-status="approved"]', { timeout: 15000 });
+        const st = await cardOf(po);
+        withDb((d) => d.prepare("UPDATE v2_oauth_grants SET last_used_at = ? WHERE id = 'gr_FIRSTRUNFIRSTRU1'").run(new Date().toISOString()));
+        await po.waitForFunction(() => !document.querySelector("[data-first-run]") && /Connected .+, no goal read seen yet/.test(document.querySelector("#apps")?.innerText ?? ""), { timeout: 20000 });
+        const appsNow = await po.$eval("#apps", (e) => e.innerText);
+        check(
+          "ui (Chrome, first run): the status follows what Align sees without a reload: an approved app with no request reads \"Claude Code: approved <time>, Align hasn't seen it connect yet\"; after its first request the card is gone and the Home's apps section shows \"Connected <time>, no goal read seen yet\" (not observed), never a read",
+          /^Claude Code: approved .+, Align hasn't seen it connect yet\.$/.test(st?.statusText ?? "") && /Connected .+, no goal read seen yet/.test(appsNow) && !/Read the goals /.test(appsNow) && errors.length === 0,
+          `${st?.statusText} | ${appsNow.slice(0, 300)} ${errors.join(" | ")}`,
+        );
+        withDb((d) => d.prepare("DELETE FROM v2_oauth_grants WHERE id = 'gr_FIRSTRUNFIRSTRU1'").run());
+
+        // Hide: per workspace, kept across a reload, focus back on the heading; blocked storage still hides it.
+        await home(po, FW);
+        await po.$$eval("[data-first-run] button", (els) => els.find((b) => b.textContent === "Hide")?.click());
+        await sleep(300);
+        const hid = await po.evaluate((ws) => ({ card: !!document.querySelector("[data-first-run]"), focus: document.activeElement?.tagName, stored: localStorage.getItem(`align.firstRun.hidden:${ws}`) }), FW);
+        await home(po, FW);
+        const stillHidden = !(await po.$("[data-first-run]"));
+        await home(po, SW);
+        const s = await cardOf(po);
+        await po.evaluate((ws) => localStorage.removeItem(`align.firstRun.hidden:${ws}`), FW);
+        await home(po, FW);
+        const back = !!(await po.$("[data-first-run]"));
+        const pb = await pageAs(FO, 1000, true);
+        await home(pb, FW);
+        const blockedShown = !!(await pb.$("[data-first-run]"));
+        await pb.$$eval("[data-first-run] button", (els) => els.find((b) => b.textContent === "Hide")?.click());
+        await sleep(300);
+        const blockedHidden = !(await pb.$("[data-first-run]"));
+        await pb.close(); // a page left in the background may be frozen by Chrome
+        await po.bringToFront();
+        check(
+          "ui (Chrome, first run): Hide removes the card, moves focus to the Home heading and keeps it hidden on that workspace after a reload (localStorage align.firstRun.hidden:<ws>), not on the sample's Home; with storage blocked the card shows and Hide still hides it with no page error",
+          !hid.card && hid.focus === "H1" && hid.stored === "1" && stillHidden && back && blockedShown && blockedHidden && s?.kind === "two" && errors.length === 0,
+          `${JSON.stringify(hid)} ${stillHidden} ${back} ${blockedShown} ${blockedHidden} ${errors.join(" | ")}`,
+        );
+        check(
+          "ui (Chrome, first run): on the sample's own Home the explore path says the person is in the Northstar sample, that it is fictional, and links to its change request on the Requests tab",
+          /You are in the Northstar sample/.test(s?.text ?? "") && /fictional/.test(s?.text ?? "") && s?.sample === null,
+          s?.text.slice(0, 400),
+        );
+        const sampleReq = await (async () => {
+          await home(po, SW);
+          return po.$$eval("[data-first-run] a", (els) => els.map((e) => [e.textContent, e.getAttribute("href")]));
+        })();
+        check("ui (Chrome, first run): the sample's explore link opens its Requests tab", sampleReq.some(([t, h]) => t === "Open the sample's change request" && h === `/app/w/${SW}/requests`), JSON.stringify(sampleReq));
+
+        // A member with no sample: one path; a viewer: no line, told viewers can't connect.
+        await po.close();
+        const pm = await pageAs(FM);
+        await home(pm, FW);
+        const m = await cardOf(pm);
+        await pm.close();
+        const pv = await pageAs(FV);
+        await home(pv, FW);
+        const v = await cardOf(pv);
+        await pv.close();
+        check(
+          "ui (Chrome, first run): a member with no sample sees only \"Connect one agent\" and \"You haven't connected an AI app to this workspace yet.\"; a viewer sees no command, only that viewers can't connect AI apps",
+          m?.kind === "connect" && m.title === "Connect one agent" && m.sample === null && !/Explore a sample/.test(m.text) && m.statusText === "You haven't connected an AI app to this workspace yet." && !!m.line &&
+            v?.line === null && /Viewers can.t connect AI apps to this workspace/.test(v?.text ?? "") && errors.length === 0,
+          `${JSON.stringify(m)?.slice(0, 300)} ${JSON.stringify(v)?.slice(0, 300)}`,
+        );
+        // On a phone the card and its long line fit.
+        const pp = await pageAs(FO, 390);
+        await home(pp, FW);
+        const ph = await cardOf(pp);
+        const fit = await pp.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth }));
+        check("ui (Chrome 390x844, first run): the Home with the first-run card has no sideways scroll and the setup line wraps inside it", !!ph && ph.lineFits && fit.sw <= fit.W && errors.length === 0, `${JSON.stringify(fit)} ${ph?.lineFits} ${errors.join(" | ")}`);
+      } catch (e) {
+        check("ui (Chrome) first-run run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the first-run card", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end port:first-run ====
 
   // ==== req:requests ====
   // Requests and goal holds (REQ-001), on a workspace of their own: QO owns it; team Core has a lead (QL) and a member
