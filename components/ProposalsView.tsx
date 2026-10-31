@@ -11,6 +11,7 @@ import { ProofStrip } from "./ProofStrip";
 import { SpartaProof } from "./SpartaProof";
 import { STALE_APPROVAL_NOTE, agreementStatus, approvedStale, launchLine } from "./launch";
 import { Chip, Collapsible, InkPill, Lbl, Msg, NumberedLines, Old, Option, conditionLines } from "./v6/thread";
+import { ReviewDecide, type ReviewNotice } from "./ReviewDecide";
 
 /** Mirrors lib/flow.ts MAX_CONDITIONS (the server refuses longer conditions). */
 const MAX_CONDITIONS = 1000;
@@ -144,6 +145,8 @@ export function ProposalsView(props: ViewProps) {
   const { s, me, selection } = props;
   const [composing, setComposing] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Custom review (lane C): a stale/refused/recorded notice outlives the remount a state change causes.
+  const [notice, setNotice] = useState<{ id: string; n: NonNullable<ReviewNotice> } | null>(null);
 
   const run = async <T,>(path: string, body: unknown = {}) => {
     setBusy(true);
@@ -226,7 +229,7 @@ export function ProposalsView(props: ViewProps) {
           <Composer {...props} busy={busy} run={run} onSent={() => { setComposing(false); props.setCompose?.(false); }} />
         ) : active ? (
           // Keyed on state and revision count so Detail's local state (the untested tick) never carries over to a new revision.
-          <Detail key={`${active.id}:${active.state}:${active.counter_versions.length}`} {...props} p={active} busy={busy} run={run} />
+          <Detail key={`${active.id}:${active.state}:${active.counter_versions.length}`} {...props} p={active} busy={busy} run={run} notice={notice?.id === active.id ? notice.n : null} setNotice={(n) => setNotice(n ? { id: active.id, n } : null)} />
         ) : (
           <Card tone="readonly">
             <p className="text-[18px] font-semibold text-zinc-900">No proposals to your goal yet.</p>
@@ -471,7 +474,7 @@ function runPill(r: SimulationRun, proposedPlan: string): { text: string; tone: 
 
 type Answer = "accept" | "acceptIf" | "counter" | "decline";
 
-function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
+function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run; notice: ReviewNotice; setNotice: (n: ReviewNotice) => void }) {
   const { s, me, p, busy } = props;
   const isSecurity = me.actor === "security";
   const isProduct = me.actor === "product";
@@ -512,6 +515,16 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
   }, [p.state, p.id, mark]);
 
   const footer = "flex flex-wrap items-center gap-3 border-t border-zinc-200 pt-4";
+
+  // Custom scenarios, while the proposal is open: understand the change, then decide (lane C). Same calls and bodies;
+  // the decided record (RATIFIED, REJECTED) and every Northstar screen keep the thread below.
+  if (!L.northstar && (p.state === "PENDING_SECURITY" || p.state === "COUNTERED" || p.state === "ACKNOWLEDGED_BY_PRODUCT"))
+    return (
+      <ReviewDecide
+        {...props}
+        tryApprove={(p.state === "PENDING_SECURITY" || p.state === "ACKNOWLEDGED_BY_PRODUCT") && <TryApprove key={`${p.id}:${p.state}`} p={p} owner={own} workspace={props.workspace} />}
+      />
+    );
 
   return (
     <div className="max-w-[880px] space-y-5">
@@ -818,7 +831,7 @@ function Detail(props: ViewProps & { p: Proposal; busy: boolean; run: Run }) {
           <span className="min-w-0 flex-[1_1_16rem] text-[15px] text-zinc-700">
             {who(p.recipient_owner)} asked for changes. Accept them to send the proposal back for final approval.
           </span>
-          <Button disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/acknowledge`, {})}>
+          <Button wrap disabled={busy} onClick={() => void props.run(`/api/proposals/${p.id}/acknowledge`, {})}>
             {busy ? "Working…" : L.northstar ? "Accept Security's changes and confirm what Product will do" : `Accept ${poss(own)} changes and confirm what ${ask} will do`}
           </Button>
         </div>
