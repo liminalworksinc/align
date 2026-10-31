@@ -494,13 +494,48 @@ read. A workspace owner sees every connected app and anyone else their own, as o
 - **WHEN** a workspace has no active goal the person can see
 - **THEN** "Active goals" says "No active goals you can see." with a link to the Goals tab
 
+### Requirement: Evidence class on every agent-status item
+
+Every item in the web app that says what agents or their sessions did, received or reported SHALL carry exactly one
+evidence class, shown as a plain pill with the words of the Home ("delivery receipt", "agent reported", "not
+observed", `lib/v2/home-core.mts`), and nothing SHALL be inferred past it (no working, stuck, blocked or diverged
+state): the Home's connected apps (see "Workspace Home"); the goal page's Agent activity card ("agent reported" from
+the align CLI's bindings, usage and work signals, else "not observed"); each session's answer on the Agents on this goal
+card ("delivery receipt" for a request received and not answered, "agent reported" for an answer, "not observed"
+otherwise); the value card's "Agents on the new version" line ("delivery receipt" once any receipt for the launched
+version arrived, else "not observed"); and the Sessions tab's stop or resume progress (the same rule). Where an MCP
+read returns the same item (`align_get_goal_activity`), it SHALL carry the same class as `evidence_class`.
+
+#### Scenario: One class per item
+
+- **WHEN** a goal has two bound sessions that reported activity, a checkpoint request one session's developer accepted and another declined, a launched change whose directive a session received, and a resumed session whose machine sent no receipt yet
+- **THEN** the Agent activity card shows "agent reported", each request answer "agent reported", the value card's delivery line "delivery receipt" and the Sessions tab's "Resume sent, not yet received" "not observed", one pill each
+
 ### Requirement: Web app fits a phone
 
 Every `/app` page SHALL fit a 390×844 screen with no sideways scrolling (`document.scrollingElement.scrollWidth` no
 wider than the window): the top bar, the workspace tabs and the passkey prompt wrap, padding narrows below 640 px, a
 word longer than its line (a link label, a URL, a host or a path) breaks instead of running off the side while button
 labels break only between words, and the Spend and Apps tables show each row as lines labelled with their column
-names.
+names. Below 640 px the chrome SHALL be compact: the top bar drops the person's name (the Account page has it), the
+passkey prompt is one short sentence ("Sign in with a passkey instead of an email code."), and the workspace tab row
+drops the workspace's name and role (the switcher shows the name), so a workspace page's heading starts above y=300 on
+a 390×844 screen; and every action button SHALL be at least 44 px tall (in px: the root font is 15 px, so a rem
+height falls short). At every width from 500 to 1440 px the Home, Goals, goal, Requests and Apps pages SHALL not
+scroll sideways (page or main column), and a long button label SHALL wrap inside its container. The workspace switcher
+SHALL be the browser's own select, listing only the person's workspaces, so its list never runs off a narrow window.
+A page SHALL read the connected apps at most once (the Home through its one read, the Apps tab through
+`GET .../apps`) and SHALL not poll.
+
+#### Scenario: Compact phone chrome
+
+- **WHEN** a signed-in person with the passkey prompt due opens a workspace's Home on a 390×844 screen
+- **THEN** the heading starts above y=300, the top bar has no person's name, the prompt reads "Sign in with a passkey instead of an email code." and the tab row has no workspace name; at 1000 px the name and the workspace show again
+
+#### Scenario: Tap targets and widths
+
+- **WHEN** the person opens Goals, a goal, Requests, Apps, Sessions, People, Account or Devices at 390 px, and the Home, Goals, a goal with its tree, Requests and Apps at 500, 600, 700, 768, 1100, 1268 and 1440 px
+- **THEN** every action button at 390 is at least 44 px tall, no page scrolls sideways, and at 700 px the workspace switcher is on screen and lists exactly the person's workspaces
 
 #### Scenario: Phone
 
@@ -572,7 +607,7 @@ tree and every version, and SHALL give a person the server lets edit it (`can_ed
 
 - **WHEN** the goal contributes to goals or depends on goals
 - **THEN** a "Goal tree" card links each parent with its version, a green "reviewed" or an amber "reviewed against version <n>" / "not reviewed yet" pill, and for an editor, on a parent not reviewed against
-  its current version, **Still fits version <n>**, which posts `{parent_id}` to `POST .../goals/<goal>/review`; dependencies are listed as links with their versions
+  its current version, **Still fits version <n>**, which posts `{parent_id}` to `POST .../goals/<goal>/review`; dependencies are listed as links with their versions. The review prompt ("A goal this one contributes to has a new version, and this goal hasn't changed. Check that it still fits: press Still fits, or save a new version.") is shown to the editor alone, and never says the sessions on the goal have the parent's new version
 
 ### Requirement: Ask to align from the goal page
 
@@ -592,7 +627,8 @@ is not a viewer, and SHALL send the request with `POST /api/v2/workspaces/<ws>/a
 ### Requirement: Propose a change from the goal page
 
 The goal page SHALL offer **Propose a change** on an `active` goal to every member who can read the goal, is not a
-viewer and does not own it, and SHALL send the proposal with
+viewer and does not own it, as the goal read's `can_propose` says (the page never works the rule out itself), and SHALL
+send the proposal with
 `POST /api/v2/workspaces/<ws>/goals/<goal>/change-requests`.
 
 #### Scenario: Propose a change
@@ -700,7 +736,9 @@ v<n> until launch"), "Who approved" (the approver and time, and "approved withou
 teams" (the goal and its team, the readable goals it contributes to and the readable goals that depend on or contribute
 to it), "Agents on the new version" (before the launch "Not launched yet: agents stay on v<n> until launch."; after it,
 of the bound sessions the launch's `goal_version` directive reached: how many have it in context, received but not used
-yet, and not reached; "No shared sessions work toward this goal yet." when none), "Measured in Align" (proposal to
+yet, and not reached; "No shared sessions work toward this goal yet." when none; marked "delivery receipt" when any of
+those sessions' machines sent a receipt for it, else "not observed", as in "Evidence class on every agent-status
+item"), "Measured in Align" (proposal to
 approval, approval to launch, and approval to the first `applied` receipt of the launch's directive, from server
 timestamps only; "not yet" while there is none), one optional question with a note, the reports
 of others, and the follow-up link.
@@ -798,7 +836,7 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 #### Scenario: Own sessions
 
 - **WHEN** a member opens the tab
-- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared"), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed"), the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
+- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared"), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
 
 #### Scenario: Confirmed actions
 
@@ -860,16 +898,18 @@ form and workspace owners an import.
 
 ### Requirement: Agent activity on the goal page
 
-The goal page SHALL show an "Agent activity" card from `GET /api/v2/workspaces/<ws>/goals/<goal>/activity`, saying
+The goal page SHALL show an "Agent activity" card from `GET /api/v2/workspaces/<ws>/goals/<goal>/activity`, marked
+with the response's one evidence class ("agent reported", or "not observed" with nothing in the window) and saying
 "Sessions people shared toward this goal, last 14 days. Counts come from bindings, not from what agents wrote.", with
 Sessions (and how many per harness, as "<n> Claude Code, <n> Codex"), Active now and Last activity ("None yet" when
-there is none), and, when the response has `detail`, "Files agents are working on" (its paths, then "and <n> more whose
-paths aren't shared") and "Your sessions" (harness, a state pill and the last activity).
+there is none), and, when the response has `detail`, "Files these sessions reported working on" (its paths, then "and
+<n> more whose paths aren't shared") and "Your sessions" (harness, a state pill and the last activity). Nothing on the
+card says what agents are doing: the files are what the sessions' align CLI reported.
 
 #### Scenario: Activity card
 
 - **WHEN** a member of the goal's team opens a goal with two bound sessions, one active, and work signals with paths
-- **THEN** the card shows "Sessions 2 (1 Claude Code, 1 Codex)", "Active now 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card says "No shared sessions worked toward this goal in the last 14 days."
+- **THEN** the card is marked "agent reported" and shows "Sessions 2 (1 Claude Code, 1 Codex)", "Active now 1", the paths and their own sessions; a reader without the detail sees only the counts, and with no sessions the card is marked "not observed" and says "No shared sessions worked toward this goal in the last 14 days."
 
 ### Requirement: Agents on this goal card
 
@@ -886,7 +926,10 @@ active goals, an optional note (at most 280 characters, "shown to the developer 
 to." when there is no session. Each request SHALL be listed with its type, a pill (waiting, answered, cancelled, or "expired: the goal closed"), its
 sender and time, the goal version it was sent at, the target goal ("a goal you can't see" when hidden), the quoted
 note, who cancelled it, the counts, and per visible session a pill: pending, accepted by the developer, done by the
-agent (an `auto_accepted` accept), declined or expired, with **Cancel** when its `can_cancel` is true.
+agent (an `auto_accepted` accept), declined or expired, each with one evidence class: "delivery receipt" for a request
+the session's machine received and has not answered, "agent reported" for an answer (accepted, done by the agent,
+declined: the developer's or the agent's own word, sent from their machine), "not observed" for one sent with nothing
+back or expired; with **Cancel** when its `can_cancel` is true.
 
 #### Scenario: Approver sends a replan
 
@@ -896,7 +939,7 @@ agent (an `auto_accepted` accept), declined or expired, with **Cancel** when its
 #### Scenario: Agent did the checkpoint
 
 - **WHEN** a session's agent accepted a checkpoint on its own and another session's developer accepted it
-- **THEN** the request's sessions show "done by the agent" and "accepted by the developer"
+- **THEN** the request's sessions show "done by the agent" and "accepted by the developer", each marked "agent reported", never "delivery receipt"
 
 ### Requirement: Hold banner
 
@@ -1079,6 +1122,7 @@ active goal), neutral otherwise.
 - `app/app/w/[ws]/asks/page.tsx`
 - `app/app/w/[ws]/asks/view.tsx`
 - `app/app/_ui/activity.tsx`
+- `app/app/_ui/evidence.tsx`
 - `app/app/_ui/requests.tsx`
 - `app/app/w/[ws]/spend/view.tsx`
 - `app/app/w/[ws]/apps/view.tsx`

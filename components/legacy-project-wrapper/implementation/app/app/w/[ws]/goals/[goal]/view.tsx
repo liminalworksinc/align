@@ -15,6 +15,8 @@ interface Detail {
   versions: { version: number; title: string; status: string; content_hash: string; created_at: string }[];
   contributions: { goal: { id: string; title: string } | null }[];
   can_edit: boolean;
+  /** The server's answer to "may this reader propose a change?" (not the owner, not a viewer, an active goal). */
+  can_propose: boolean;
 }
 
 function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () => void }) {
@@ -32,7 +34,7 @@ function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () =
   return (
     <section id="new-version">
       <Card title="New version">
-        <Note>Each change is a new version. Agents of sessions bound to this goal get the new version at their next turn.</Note>
+        <Note>Each change is a new version. Saving sends it to every session bound to this goal, for its agent to pick up at its next turn.</Note>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -187,17 +189,21 @@ function Tree({ ws, goal, canEdit, onDone }: { ws: string; goal: Goal; canEdit: 
           ))}
         </p>
       )}
-      {goal.contributes_to.some((p) => p.stale) && <Note>A goal this one contributes to has changed. Agents on this goal already have the new version; check that this goal still fits it.</Note>}
+      {/* The review prompt is the owner's alone (whoever can edit it); everyone else sees the amber pill. Sessions on this
+          goal are only told about the parent's new version by the align CLI, so nothing here says they have it. */}
+      {canEdit && goal.contributes_to.some((p) => p.stale) && (
+        <Note>A goal this one contributes to has a new version, and this goal hasn&apos;t changed. Check that it still fits: press Still fits, or save a new version.</Note>
+      )}
       <Err>{act.error}</Err>
     </Card>
   );
 }
 
-/** "Propose a change" (active goals, not the owner, not a viewer) and the goal's change requests (everyone who reads it). */
-function ChangeRequests({ ws, goal, me, role, onGoalChanged }: { ws: string; goal: Goal; me: Me; role: string | undefined; onGoalChanged: () => void }) {
+/** "Propose a change" (when the server says `can_propose`: active goals, not the owner, not a viewer) and the goal's
+ *  change requests (everyone who reads it). */
+function ChangeRequests({ ws, goal, me, canPropose, onGoalChanged }: { ws: string; goal: Goal; me: Me; canPropose: boolean; onGoalChanged: () => void }) {
   const list = useApi<{ change_requests: ChangeRequest[] }>(`/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests`);
   const titles = useGoalTitles(ws);
-  const canPropose = goal.status === "active" && goal.owner.id !== me.id && !!role && role !== "viewer";
   if (!canPropose && !list.data?.change_requests.length) return null;
   return (
     <section id="change-requests">
@@ -272,7 +278,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           <GoalActivityCard ws={ws} goal={g} me={me} />
           <AgentsOnGoalCard key={g.version} ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
           {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} onDone={d.reload} />}
-          {ws0.data && <ChangeRequests key={`${g.version}:${proposed}`} ws={ws} goal={g} me={me} role={ws0.data.role} onGoalChanged={d.reload} />}
+          <ChangeRequests key={`${g.version}:${proposed}`} ws={ws} goal={g} me={me} canPropose={d.data!.can_propose} onGoalChanged={d.reload} />
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}
           <Card title="Versions">
             <ul className="text-[14px] text-zinc-600">

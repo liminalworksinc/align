@@ -1,5 +1,6 @@
 import { all, get } from "./db";
 import { visibleGoals, visibleGoal, type GoalRow } from "./goals";
+import { activityEvidence, type EvidenceClass } from "./home-core.mts";
 import { nowIso } from "./ids";
 import type { PolicyPrincipal } from "./policy";
 
@@ -22,6 +23,9 @@ export interface GoalActivity {
   by_harness: { "claude-code": number; codex: number };
   /** The latest usage, epoch start or work signal on the goal, or null. */
   last_activity_at: string | null;
+  /** The checklist's §E2: all of the above comes from the align CLI on developers' machines, so agent_reported, or
+   *  not_observed when there is none (lib/v2/home-core.mts activityEvidence). Never a delivery receipt. */
+  evidence_class: EvidenceClass;
   /** Only for the readers named above, else null. */
   detail: {
     /** The top 4 repo-relative paths of unexpired work signals on the goal. */
@@ -117,7 +121,7 @@ function activityOf(pp: PolicyPrincipal, g: GoalRow, now = Date.now()): GoalActi
       )?.n ?? 0;
     detail = { files, files_hidden, mine };
   }
-  return { sessions: lines.length, active_now, by_harness, last_activity_at, detail };
+  return { sessions: lines.length, active_now, by_harness, last_activity_at, evidence_class: activityEvidence({ sessions: lines.length, last_activity_at }), detail };
 }
 
 /** One goal's activity for a reader of the goal (404 V2Error when they can't read it). */

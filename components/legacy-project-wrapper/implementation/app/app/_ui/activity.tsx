@@ -1,12 +1,15 @@
 "use client";
+import { EvidencePill } from "./evidence";
 import { Card, Note, Pill, useApi, when } from "./kit";
+import type { EvidenceClass } from "@/lib/v2/home-core.mts";
 import type { Me } from "./server";
 import type { Goal } from "./types";
 
 // The goal page's "Agent activity" card (PORT-003): sessions shared toward the goal in the last 14 days, how many are
 // active now, by harness, the last activity, and (for its owner, its team and workspace owners) the files and the
 // reader's own sessions. From bindings, usage times and work signals, never from what agents wrote
-// (GET .../goals/<goal>/activity).
+// (GET .../goals/<goal>/activity). All of it comes from the align CLI on developers' machines, so the card carries one
+// evidence class (the checklist's §E2): agent reported, or not observed when there is nothing.
 
 interface Activity {
   window_days: number;
@@ -14,6 +17,7 @@ interface Activity {
   active_now: number;
   by_harness: { "claude-code": number; codex: number };
   last_activity_at: string | null;
+  evidence_class: EvidenceClass;
   detail: {
     files: string[];
     files_hidden: number;
@@ -32,7 +36,10 @@ export function GoalActivityCard({ ws, goal, me }: { ws: string; goal: Goal; me:
   return (
     <Card title="Agent activity">
       <div id="goal-activity">
-        <p className="mb-2 text-[14px] text-zinc-500">Sessions people shared toward this goal, last {a.window_days} days. Counts come from bindings, not from what agents wrote.</p>
+        <p className="mb-2 flex flex-wrap items-center gap-2 text-[14px] text-zinc-500">
+          <EvidencePill c={a.evidence_class} />
+          <span>Sessions people shared toward this goal, last {a.window_days} days. Counts come from bindings, not from what agents wrote.</span>
+        </p>
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-[15px]">
           <dt className="text-zinc-500">Sessions</dt>
           <dd className="text-zinc-900">
@@ -48,7 +55,7 @@ export function GoalActivityCard({ ws, goal, me }: { ws: string; goal: Goal; me:
           <>
             {(a.detail.files.length > 0 || a.detail.files_hidden > 0) && (
               <div className="mt-3">
-                <p className="text-[14px] text-zinc-500">Files agents are working on</p>
+                <p className="text-[14px] text-zinc-500">Files these sessions reported working on</p>
                 <ul className="list-disc pl-5 font-mono text-[13px] text-zinc-700 [overflow-wrap:anywhere]">
                   {a.detail.files.map((f) => (
                     <li key={f}>{f}</li>

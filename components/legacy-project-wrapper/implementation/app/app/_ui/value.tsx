@@ -4,6 +4,8 @@ import { api, Btn, Err, useAction, useApi, when } from "./kit";
 import type { ChangeRequest } from "./types";
 import { ESTIMATE_WORDS, estimateSaid, VALUE_NOTE_MAX, VALUE_QUESTION, type EstimateId } from "@/lib/v2/value-core.mts";
 import { launchWords } from "@/lib/v2/launch-words";
+import { receiptEvidence } from "@/lib/v2/home-core.mts";
+import { EvidencePill } from "./evidence";
 
 // The decision value card on an approved change request (PORT-004): the accepted change, who approved it, the goals
 // and teams it affects, whether agents have the new version, the spans Align measured, the value reports (an estimate
@@ -157,7 +159,12 @@ export function ValueCard({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: s
         </ul>
       </Row>
 
+      {/* The checklist's §E2: the delivery line carries one evidence class, a delivery receipt only when a session's
+          machine sent a received or applied receipt for the launched version. */}
       <Row label="Agents on the new version">
+        <div className="mb-1">
+          <EvidencePill c={receiptEvidence(d.launch === "launched" && dl ? dl.received : 0)} />
+        </div>
         {d.launch !== "launched" ? (
           `Not launched yet: agents stay on v${d.goal.base_version} until launch.`
         ) : !dl || dl.sessions === 0 ? (

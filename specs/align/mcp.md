@@ -81,7 +81,12 @@ The MCP server SHALL serve MCP over Streamable HTTP at `/api/mcp` for the `GET`,
 
 ### Requirement: Nine read-only MCP tools
 
-The MCP server SHALL list exactly nine tools (`align_get_asks`, `align_get_brief`, `align_get_decision_record`, `align_get_directives`, `align_get_goal`, `align_get_goal_activity`, `align_get_limits`, `align_list_change_requests`, `align_list_goals`), the same set for both token kinds, to every token that does not hold `changes:evidence`. Each of them SHALL carry the annotations `readOnlyHint: true`, `idempotentHint: true` and `openWorldHint: false`, declare an `outputSchema`, and return both `structuredContent` and one `text` content item that summarizes it. The server SHALL register no MCP resources and no MCP prompts.
+The MCP server SHALL list exactly nine tools (`align_get_asks`, `align_get_brief`, `align_get_decision_record`, `align_get_directives`, `align_get_goal`, `align_get_goal_activity`, `align_get_limits`, `align_list_change_requests`, `align_list_goals`), the same set for both token kinds, to every token that does not hold `changes:evidence`. Each of them SHALL carry the annotations `readOnlyHint: true`, `idempotentHint: true` and `openWorldHint: false`, declare an `outputSchema`, and return both `structuredContent` and one `text` content item that summarizes it. Every object in every tool's `outputSchema` SHALL be closed (`additionalProperties: false`, or a value schema for a map such as `by_basis`), and every `structuredContent` SHALL validate against its tool's schema under a strict JSON Schema validator, so a new field reaches a client only once it is declared. The server SHALL register no MCP resources and no MCP prompts.
+
+#### Scenario: Strict client
+
+- **WHEN** a client that validates `structuredContent` strictly against each tool's listed `outputSchema` calls every tool, on a workspace of its own and on a fresh Northstar sample
+- **THEN** every object schema it lists has `additionalProperties: false` and every result validates
 
 #### Scenario: List tools
 
@@ -384,12 +389,17 @@ The MCP server SHALL return from `align_get_asks` (input `state?`, one of `open`
 
 ### Requirement: align_get_goal_activity output
 
-The MCP server SHALL return from `align_get_goal_activity` (input `goal_id?`) the fields `workspace`, `window_days` (14), `goals` and `unbound`. `goals` SHALL hold, for each active readable goal (or only `goal_id`, failing with `Goal not found` when it can't be read), the `workspaces` part's goal activity: `goal` (`{id, title, team}`), `sessions`, `active_now`, `by_harness` (`{claude-code, codex}`), `last_activity_at`, and `detail` (`{files, files_hidden, mine}`) only for the goal's owner, members and leads of its team and workspace owners, else `null`; goals with detail first. `unbound` SHALL count the person's own shared sessions whose current binding has no goal. File paths SHALL be `untrusted_text`. It SHALL never return prompts, replies, task labels, commit subjects, tokens or cost. The text summary SHALL be at most 2,400 characters.
+The MCP server SHALL return from `align_get_goal_activity` (input `goal_id?`) the fields `workspace`, `window_days` (14), `goals` and `unbound`. `goals` SHALL hold, for each active readable goal (or only `goal_id`, failing with `Goal not found` when it can't be read), the `workspaces` part's goal activity: `goal` (`{id, title, team}`), `sessions`, `active_now`, `by_harness` (`{claude-code, codex}`), `last_activity_at`, `evidence_class` (`agent_reported`, or `not_observed` when the goal has no session or activity in the window: the same class the goal page shows, since all of it comes from the align CLI on developers' machines), and `detail` (`{files, files_hidden, mine}`) only for the goal's owner, members and leads of its team and workspace owners, else `null`; goals with detail first. Each goal's line in the text summary SHALL name its class ("agent reported" or "not observed"). `unbound` SHALL count the person's own shared sessions whose current binding has no goal. File paths SHALL be `untrusted_text`. It SHALL never return prompts, replies, task labels, commit subjects, tokens or cost. The text summary SHALL be at most 2,400 characters.
 
 #### Scenario: Detail only for the goal's people
 
 - **WHEN** a member of Product reads activity in a workspace where a workspace-visible Security goal has bound sessions with work signals
 - **THEN** that goal's counts are returned with `detail: null`, and a Security member's call returns its `detail.files`
+
+#### Scenario: Activity evidence class
+
+- **WHEN** a workspace owner reads activity where one goal has a bound session and another has none in the window
+- **THEN** the first goal's `evidence_class` is `agent_reported` and its summary line says "(agent reported)", and the second's is `not_observed`
 
 ### Requirement: align_get_brief output
 

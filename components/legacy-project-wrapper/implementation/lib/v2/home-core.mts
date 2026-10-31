@@ -24,6 +24,20 @@ export const EVIDENCE_WORDS: Record<EvidenceClass, string> = {
  *  observed. Pass last_read_at, never last_used_at: a connection is not a read (main #48). */
 export const appEvidence = (lastReadAt: string | null | undefined): EvidenceClass => (typeof lastReadAt === "string" && lastReadAt ? "delivery_receipt" : "not_observed");
 
+/** A goal's agent activity (the goal page's "Agent activity" card and align_get_goal_activity): bindings, usage times
+ *  and work signals all come from the align CLI on each developer's machine, so any of it is agent reported; with none
+ *  in the window, not observed. */
+export const activityEvidence = (a: { sessions: number; last_activity_at: string | null }): EvidenceClass => (a.sessions > 0 || a.last_activity_at ? "agent_reported" : "not_observed");
+
+/** One session's answer to a request to agents: received is a delivery receipt; accepted (by the developer, or done by
+ *  the agent on its own) and declined are the session's own answer, agent reported; sent with nothing back, or expired,
+ *  is not observed. */
+export const answerEvidence = (state: string): EvidenceClass => (state === "received" ? "delivery_receipt" : state === "accepted" || state === "declined" ? "agent_reported" : "not_observed");
+
+/** A directive's delivery (a stop or resume on the Sessions tab, a launched version on the value card): any received,
+ *  applied or enforced receipt is a delivery receipt; none is not observed. */
+export const receiptEvidence = (receipts: number): EvidenceClass => (receipts > 0 ? "delivery_receipt" : "not_observed");
+
 /** What the Home says about a connected app, from what the server holds: when it last read the goals, else when it last
  *  connected with no goal read seen, else when it was approved. Never which version it has ("on the current plan"):
  *  Align keeps no per-app version (the checklist's §B). `at` formats a time. */

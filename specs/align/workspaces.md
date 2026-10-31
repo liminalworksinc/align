@@ -1210,10 +1210,13 @@ source date.
 ### Requirement: Goal activity counts
 
 The server SHALL serve `GET /api/v2/workspaces/{ws}/goals/{goal}/activity` (browser session) to readers of the goal
-(404 otherwise) as `{window_days:14, sessions, active_now, by_harness:{claude-code, codex}, last_activity_at, detail}`,
+(404 otherwise) as `{window_days:14, sessions, active_now, by_harness:{claude-code, codex}, last_activity_at, evidence_class, detail}`,
 counting the distinct shared sessions with an epoch bound to the goal (or governed by it) that overlaps the last 14
 days, of those the ones shared, with the agent not stopped, still on the goal and with usage or a binding in the last
-90 minutes (`active_now`), and the latest usage, epoch start or work signal on the goal; `detail` SHALL be
+90 minutes (`active_now`), and the latest usage, epoch start or work signal on the goal; `evidence_class` SHALL be
+`agent_reported` when there is any session or activity in the window (bindings, usage and work signals all come from
+the align CLI on developers' machines, so none of it is observed by Align) and `not_observed` otherwise, never
+`delivery_receipt`; `detail` SHALL be
 `{files, files_hidden, mine}` (the top 4 repo-relative paths of unexpired work signals on the goal, the number of
 distinct path hashes with no path, and the person's own counted sessions with harness, state and last activity) only
 for the goal's owner, members and leads of its team and workspace owners, else null; the response SHALL never hold
@@ -1222,7 +1225,7 @@ prompts, replies, task labels, commit subjects, claim reasons, session titles, t
 #### Scenario: Counts from bindings
 
 - **WHEN** two sessions are bound to the goal, a Claude Code one with usage 30 minutes ago and a Codex one with usage 3 hours ago, and a third was bound to it only 20 to 15 days ago
-- **THEN** a reader gets `sessions:2, active_now:1, by_harness:{claude-code:1, codex:1}`; stopping the first session's agent makes `active_now` 0
+- **THEN** a reader gets `sessions:2, active_now:1, by_harness:{claude-code:1, codex:1}, evidence_class:"agent_reported"`; stopping the first session's agent makes `active_now` 0, and a goal with nothing in the window reads `evidence_class:"not_observed"`
 
 #### Scenario: Detail only for the goal's team
 
