@@ -111,9 +111,14 @@ the code.
 
 ### Requirement: Email code send limits
 
-The server SHALL send at most 3 sign-in codes per email address per 10 minutes and at most 10 per client per hour
-and, when hosted, at most 5 per email address per hour, counted in the database (keyed by an HMAC of the address, never
-the address) so that a restart does not reset it, refusing further sends with 429 and sending nothing.
+The server SHALL send at most 3 sign-in codes per email address per 10 minutes and, when hosted, at most 10 per client
+per hour and at most 5 per email address per hour, counted in the database (keyed by an HMAC of the address, never the
+address) so that a restart does not reset it, refusing further sends with 429 `rate_limited` and sending nothing. In
+Mode L, where everyone on a small team signs in from the one machine (the server's only client), the limit SHALL be
+the per-address one, with only a machine-wide ceiling of `ALIGN_LOCAL_CODES_PER_HOUR` sends an hour (default 60)
+against a runaway script, so one person's sign-ins never use up another's. A refusal's message SHALL say how long to
+wait, from the real retry time (the moment the last full limit has room again, in whole minutes, at least 1): "Too
+many codes were sent. Try again in <n> minutes." ("1 minute" for one), with a `Retry-After` header in seconds.
 
 #### Scenario: Too many codes for one address
 
@@ -122,8 +127,18 @@ the address) so that a restart does not reset it, refusing further sends with 42
 
 #### Scenario: Too many codes from one client
 
-- **WHEN** one client (hosted: its `Fly-Client-IP`, IPv6 keyed by its /64) requests an 11th code within an hour, for any addresses
+- **WHEN** one hosted client (its `Fly-Client-IP`, IPv6 keyed by its /64) requests an 11th code within an hour, for any addresses
 - **THEN** the server responds 429 and sends nothing
+
+#### Scenario: A small team on one machine
+
+- **WHEN** in Mode L, within an hour, ten people each get a code and three of them get a second one, and then an eleventh person asks for one
+- **THEN** every send is printed, including the fourteenth; only the fourth code for one address within 10 minutes, or a send past the machine-wide ceiling, is refused
+
+#### Scenario: How long to wait
+
+- **WHEN** a fourth code for one address is requested 2 minutes after the first
+- **THEN** the response is 429 `rate_limited` with "Too many codes were sent. Try again in 8 minutes." and `Retry-After` of about 480 seconds, and the sign-in page shows that message
 
 #### Scenario: Hourly limit across a restart
 
@@ -231,7 +246,7 @@ through the ordinary send request, so the server prints the link.
 #### Scenario: Server not running
 
 - **WHEN** no server answers at that address, or it answers 429
-- **THEN** the script exits 1 with a message saying the server is not running or that too many codes were sent, and prints no code itself
+- **THEN** the script exits 1 with a message saying the server is not running at that address (and that another port is named with `PORT=<port> npm run sign-in-link`) or, for 429, the server's own message saying how long to wait, and prints no code itself
 
 ### Requirement: Explicit account linking
 
@@ -1221,7 +1236,9 @@ Each change records who made it (`decided_by`, `decided_at`), and a mention its 
 The server SHALL let workspace owners import asks on `POST /api/v2/workspaces/{ws}/asks/import {asks:[…]}` (members 403
 `owner_only`, viewers 403 `read_only`), at most 60 a call, each an ask as in "Asks between teams" plus an optional
 `state` (`open`, `accepted`, `done` or `declined`, recorded as decided by the importer) and up to 10 earlier `mentions`,
-all validated before anything is stored (400 naming the item); it SHALL append and merge, never replace: an item whose
+naming its team by `team_id` or, since people write imports by hand, by `team` (a team's name in the workspace, matched
+without regard to case; 400 when no team, or more than one, has that name), all validated before anything is stored
+(400 naming the item); it SHALL append and merge, never replace: an item whose
 team, text (ignoring case and runs of spaces) and source date equal an existing ask changes nothing, one whose team and
 text match an open or accepted ask with another date becomes a mention of it, and anything else is created, within the
 caps of "Asks between teams" (an import that would pass one stores nothing), answering 201 `{created, merged,
@@ -1231,6 +1248,11 @@ unchanged}`.
 
 - **WHEN** an owner imports an exact duplicate of an ask, the same text on a new date, and two new asks
 - **THEN** the response is `{created:2, merged:1, unchanged:1}`, the existing ask gains one mention dated the new date from the item's meeting, and the audit records `ask.imported` with object `3`
+
+#### Scenario: Import by team name
+
+- **WHEN** an owner imports `[{team: "growth", text: "Weekly trial numbers", source: {kind: "manual", date: "2026-10-30"}}]` in a workspace with a team named Growth, then the same with `team: "Nobody"`
+- **THEN** the first creates the ask for Growth; the second is 400 `asks[0].team: no team here is called "Nobody"`; an item with neither `team_id` nor `team` is 400 `asks[0].team_id (or asks[0].team, a team's name) is required`
 
 #### Scenario: Refused import
 

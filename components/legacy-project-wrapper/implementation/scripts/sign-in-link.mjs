@@ -17,11 +17,13 @@ try {
     signal: AbortSignal.timeout(15_000),
   });
 } catch {
-  console.error(`No Align server is running at ${base}. Start it with npm start, then try again.`);
+  console.error(`No Align server is running at ${base}. Start it with npm start, then try again. If it runs on another port, name it: PORT=<port> npm run sign-in-link`);
   process.exit(1);
 }
 if (res.status === 429) {
-  console.error("Too many codes were sent. Wait a few minutes, then try again.");
+  // The server's own words say how long to wait (from the real retry time).
+  const body = await res.json().catch(() => ({}));
+  console.error(body.message || "Too many codes were sent. Wait a few minutes, then try again.");
   process.exit(1);
 }
 if (!res.ok) {

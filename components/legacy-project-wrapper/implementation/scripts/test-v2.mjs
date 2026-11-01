@@ -434,7 +434,9 @@ if (build.status !== 0) {
 try {
   // ======== phase local: Mode L with no settings (v2 always on, the local owner, email codes) ========
   const localDir = path.join(tmpRoot, "local");
-  const localRun = await mustStart({ ALIGN_DATA_DIR: localDir });
+  // ALIGN_LOCAL_CODES_PER_HOUR=16: Mode L's machine-wide ceiling on code sends (default 60), low here so the test reaches it.
+  const LOCAL_CEILING = 16;
+  const localRun = await mustStart({ ALIGN_DATA_DIR: localDir, ALIGN_LOCAL_CODES_PER_HOUR: String(LOCAL_CEILING) });
   dbFile = path.join(localDir, "v2", "align.sqlite");
   const routes = v2Routes();
   const probes = await Promise.all(routes.flatMap((r) => [call("anon", "GET", r), call("anon", "POST", r, { body: {} })]));
@@ -577,27 +579,32 @@ try {
   const onlySignIn = await call("anon", "POST", SEND, { headers: { origin: BASE }, body: { email: "x@example.test", type: "forget-password" } });
   const resetRoute = await call("anon", "POST", "/api/v2/auth/email-otp/request-password-reset", { headers: { origin: BASE }, body: { email: "x@example.test" } });
   check("email code: only sign-in codes are sent (other types -> 400); the plugin's other routes are off (404)", onlySignIn.status === 400 && resetRoute.status === 404, `${onlySignIn.status} ${resetRoute.status}`);
-  // Send limits: 3 per email per 10 minutes, 10 per client per hour.
+  // Send limits: 3 per email per 10 minutes; in Mode L no per-client limit, only the machine-wide ceiling (B2).
   const lim = [];
   for (let i = 0; i < 4; i++) lim.push(await sendCode("anon", "limit@example.test"));
   clientSends += 3;
   const afterLimit = signInLine(localDir);
+  const waitSecs = Number(lim[3].headers.get("retry-after"));
   check(
-    "send limits: a 4th code for the same email within 10 minutes -> 429; nothing printed, the 3rd code stays",
-    lim.slice(0, 3).every((r) => r.status === 200) && lim[3].status === 429 && afterLimit.includes("limit%40example.test") && localRun.stdout().split("\n").filter((l) => l.includes("limit%40example.test")).length === 3,
-    lim.map((r) => r.status).join(","),
+    "send limits: a 4th code for the same email within 10 minutes -> 429 rate_limited saying how long to wait from the real retry time (\"Try again in 10 minutes.\", Retry-After about 600 s); nothing printed, the 3rd code stays",
+    lim.slice(0, 3).every((r) => r.status === 200) && lim[3].status === 429 && lim[3].json?.code === "rate_limited" && /^Too many codes were sent\. Try again in (9|10) minutes\.$/.test(lim[3].json?.message ?? "") && waitSecs > 540 && waitSecs <= 600 &&
+      afterLimit.includes("limit%40example.test") && localRun.stdout().split("\n").filter((l) => l.includes("limit%40example.test")).length === 3,
+    `${lim.map((r) => r.status).join(",")} ${lim[3].text} retry-after=${waitSecs}`,
   );
-  const clientLim = [];
-  for (let i = 0; clientSends + i < 10; i++) clientLim.push(await sendCode("anon", `c${i}@example.test`));
+  // A small team on one machine (B2): more than 10 people (and second codes for some) in an hour all get codes.
+  const team = [];
+  for (let i = 0; clientSends + team.length < LOCAL_CEILING; i++) team.push(await sendCode("anon", `c${i}@example.test`));
   const printedBefore = localRun.stdout().length;
-  const eleventh = await sendCode("anon", "c-last@example.test");
+  const pastCeiling = await sendCode("anon", "c-last@example.test");
+  const ceilingSecs = Number(pastCeiling.headers.get("retry-after"));
   check(
-    "send limits: the 11th code from one client within an hour, for any address -> 429, nothing printed",
-    clientLim.every((r) => r.status === 200) && eleventh.status === 429 && localRun.stdout().length === printedBefore && !signInLine(localDir).includes("c-last"),
-    `${clientLim.map((r) => r.status).join(",")} 11th:${eleventh.status}`,
+    `send limits (Mode L, B2): codes are limited per address, not per machine: ${LOCAL_CEILING} sends in an hour for different addresses (more than the hosted 10 per client) are all printed; only a send past ALIGN_LOCAL_CODES_PER_HOUR (${LOCAL_CEILING}) -> 429 with how long to wait (up to an hour), nothing printed`,
+    clientSends + team.length === LOCAL_CEILING && LOCAL_CEILING > 10 && team.every((r) => r.status === 200) && pastCeiling.status === 429 && /^Too many codes were sent\. Try again in \d+ minutes?\.$/.test(pastCeiling.json?.message ?? "") && ceilingSecs > 0 && ceilingSecs <= 3600 &&
+      localRun.stdout().length === printedBefore && !signInLine(localDir).includes("c-last"),
+    `${team.map((r) => r.status).join(",")} past:${pastCeiling.status} ${pastCeiling.text}`,
   );
   const scriptLimited = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT) } });
-  check("sign-in-link: when the server answers 429 it exits 1 saying too many codes were sent", scriptLimited.status === 1 && /Too many codes/.test(scriptLimited.stderr), `${scriptLimited.status} ${scriptLimited.stderr}`);
+  check("sign-in-link: when the server answers 429 it exits 1 with the server's message, which says how long to wait", scriptLimited.status === 1 && /Too many codes were sent\. Try again in \d+ minutes?\./.test(scriptLimited.stderr), `${scriptLimited.status} ${scriptLimited.stderr}`);
   // -- access requests (PRESEED-002): a public form, stored for the operator; durable limits, 5 per client per hour and
   //    3 per address per day; Mode L blocks no domain and shows no bot check --
   const raPage = await call("anon", "GET", "/app/request-access");
@@ -688,7 +695,7 @@ try {
   check("local owner: a later start makes no account and sends no code", !restarted.stdout().includes("Align sign-in for") && signInLine(localDir) === lineBefore && withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM ba_user WHERE name = 'Local owner'").get().n) === 1, restarted.stdout().slice(-300));
   await stopServer();
   const noServer = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT) } });
-  check("sign-in-link: with no server running it exits 1 saying so", noServer.status === 1 && /No Align server is running/.test(noServer.stderr), `${noServer.status} ${noServer.stderr}`);
+  check("sign-in-link: with no server running it exits 1 saying so, and how to name another port (PORT=<port> npm run sign-in-link: U2)", noServer.status === 1 && /No Align server is running/.test(noServer.stderr) && noServer.stderr.includes("PORT=<port> npm run sign-in-link"), `${noServer.status} ${noServer.stderr}`);
 
   // ======== phase on: Mode L with the test identity provider (ALIGN_TEST_IDP=1) ========
   const onDir = path.join(tmpRoot, "on");
@@ -723,7 +730,7 @@ try {
     res.end();
   });
   await new Promise((r) => oauthStub.listen(0, "127.0.0.1", r));
-  await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_OAUTH_URL: `http://127.0.0.1:${oauthStub.address().port}`, ...ignoredInModeL });
+  const onRun = await mustStart({ ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_OAUTH_URL: `http://127.0.0.1:${oauthStub.address().port}`, ...ignoredInModeL });
   dbFile = path.join(onDir, "v2", "align.sqlite");
   const mode = (p) => (statSync(p).mode & 0o777).toString(8);
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
@@ -2424,18 +2431,19 @@ try {
       const stops = [];
       for (let i = 0; i < 40; i++) {
         await page.keyboard.press("Tab");
-        stops.push(
-          await page.evaluate(() => {
-            const e = document.activeElement;
-            const cs = e ? getComputedStyle(e) : null;
-            return { tag: e?.tagName ?? "", text: (e?.textContent ?? "").trim().slice(0, 24), ring: !!cs && cs.outlineStyle === "solid" && parseFloat(cs.outlineWidth) >= 2 };
-          }),
-        );
+        const stop = await page.evaluate(() => {
+          const e = document.activeElement;
+          const cs = e ? getComputedStyle(e) : null;
+          return { tag: e?.tagName ?? "", text: (e?.textContent ?? "").trim().slice(0, 24), ring: !!cs && cs.outlineStyle === "solid" && parseFloat(cs.outlineWidth) >= 2 };
+        });
+        // Focus back on the body: the page's tab order ended (at 127.0.0.1 there is no passkey prompt to tab through).
+        if (stop.tag === "BODY" && stops.length >= 20) break;
+        stops.push(stop);
       }
       const offRing = stops.filter((x) => !x.ring || !["A", "BUTTON", "SELECT", "INPUT", "TEXTAREA", "SUMMARY"].includes(x.tag));
       check(
-        "ui (Chrome, LIM-2455 §H): keyboard: 40 Tab presses on a goal page land only on links, buttons, fields and disclosure summaries, each with the 2 px focus ring, and reach a button in main",
-        offRing.length === 0 && stops.some((x) => x.tag === "BUTTON"),
+        "ui (Chrome, LIM-2455 §H): keyboard: up to 40 Tab presses on a goal page (at least 20 before the tab order ends) land only on links, buttons, fields and disclosure summaries, each with the 2 px focus ring, and reach a button in main",
+        offRing.length === 0 && stops.length >= 20 && stops.some((x) => x.tag === "BUTTON"),
         JSON.stringify(offRing.slice(0, 5)),
       );
     } catch (e) {
@@ -2553,14 +2561,18 @@ try {
   const S9stale = { ...S9, cookie: await signIn9() };
   ageSession(S9stale.cookie, 20);
   const pkList = await call("U9", "GET", "/api/v2/account/passkeys", { cookie: S9.cookie });
-  const promptPage = await call("U9", "GET", "/app", { cookie: S9.cookie });
+  // The prompt shows only on the passkey host (Mode L: localhost); at 127.0.0.1, where a passkey can't work, it never does.
+  const atLocalhost = (p) => rawGet(p, { host: `localhost:${PORT}`, cookie: S9.cookie });
+  const promptPage = await atLocalhost("/app");
+  const promptLoopIp = await call("U9", "GET", "/app", { cookie: S9.cookie });
   const dismiss = await call("U9", "DELETE", "/api/v2/account/passkey-prompt", { cookie: S9.cookie });
   const pkList2 = await call("U9", "GET", "/api/v2/account/passkeys", { cookie: S9.cookie });
-  const promptPage2 = await call("U9", "GET", "/app", { cookie: S9.cookie });
+  const promptPage2 = await atLocalhost("/app");
   check(
-    "passkeys: GET /api/v2/account/passkeys -> {passkeys: [], prompt: true} and /app shows the add-a-passkey prompt; Not now (DELETE /api/v2/account/passkey-prompt -> 204) is remembered: prompt false, no prompt on /app",
-    pkList.status === 200 && JSON.stringify(pkList.json) === '{"passkeys":[],"prompt":true}' && promptPage.text.includes("Add a passkey to sign in with your fingerprint") && dismiss.status === 204 && pkList2.json?.prompt === false && !promptPage2.text.includes("Add a passkey to sign in with your fingerprint"),
-    `${pkList.text} ${dismiss.status} ${pkList2.text}`,
+    "passkeys: GET /api/v2/account/passkeys -> {passkeys: [], prompt: true} and /app at localhost shows the add-a-passkey prompt (never at 127.0.0.1, where passkeys can't work: U1); Not now (DELETE /api/v2/account/passkey-prompt -> 204) is remembered: prompt false, no prompt on /app",
+    pkList.status === 200 && JSON.stringify(pkList.json) === '{"passkeys":[],"prompt":true}' && promptPage.text.includes("Add a passkey to sign in with your fingerprint") && promptLoopIp.status === 200 && !promptLoopIp.text.includes("Add a passkey to sign in with your fingerprint") &&
+      dismiss.status === 204 && pkList2.json?.prompt === false && !promptPage2.text.includes("Add a passkey to sign in with your fingerprint"),
+    `${pkList.text} ${dismiss.status} ${pkList2.text} ${promptPage.status}`,
   );
   const regStale = await call("U9", "GET", "/api/v2/auth/passkey/generate-register-options", { cookie: S9stale.cookie });
   const regFresh = await call("U9", "GET", "/api/v2/auth/passkey/generate-register-options", { cookie: S9.cookie });
@@ -4038,6 +4050,14 @@ try {
             return { tag: a?.tagName ?? "", label: a?.closest("label")?.innerText ?? "", text: a?.innerText ?? "", notice: a?.getAttribute("data-notice") ?? "", role: a?.getAttribute("role") ?? "" };
           });
         const wide = (page) => page.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth);
+        // A decision's notice takes focus, and the reload after it remounts the card, whose notice takes focus again: read
+        // the focus once the page has settled (no request for half a second), so a read between the two finds no body.
+        const settledNotice = async (page, kind) => {
+          await page.waitForFunction((k) => document.activeElement?.getAttribute("data-notice") === k, { timeout: 15000 }, kind);
+          await page.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+          await page.waitForFunction((k) => document.activeElement?.getAttribute("data-notice") === k, { timeout: 15000 }, kind);
+          return focused(page);
+        };
 
         // Understand: approved now beside proposed, the facts, what would change (the request's text), no evidence, Details closed.
         // One page at a time: a page left in the background may be frozen by Chrome, so each is closed when done.
@@ -4159,9 +4179,9 @@ try {
         const recText = await po.$eval(card(cr1.id), (e) => e.innerText);
         const lateAccept = await da(DR, "POST", `${crs}/${cr1.id}/accept_counter`, { revision: 2 });
         check(
-          "ui (Chrome, decide, #49): the approver declines the countered request with a typed reason (focus on \"Why you're declining\"; the confirmation says nothing goes to launch); it is rejected by them with that reason, the record says \"Recorded: you declined this request\" and \"Rejected by Dana Owner\", and the requester's accept_counter then gets 409 wrong_state",
+          "ui (Chrome, decide, #49): the approver declines the countered request with a typed reason (focus on \"Why you're declining\"; the confirmation says nothing goes to launch); it is rejected by them with that reason, the record says \"Recorded: you declined this request\" and \"Rejected by you\" (B14: the reader is named one way on a card), and the requester's accept_counter then gets 409 wrong_state",
           fD.tag === "TEXTAREA" && /^Why you're declining/.test(fD.label) && /approver suggested a change → rejected/.test(confD) && /Nothing goes to launch\. The goal stays at version 1\./.test(confD) &&
-            declined?.state === "rejected" && declined.rejected_by?.id === DO.id && declined.rejection_reason === "We will revisit after the freeze" && /Recorded: you declined this request/.test(recText) && /Rejected by Dana Owner/.test(recText) &&
+            declined?.state === "rejected" && declined.rejected_by?.id === DO.id && declined.rejection_reason === "We will revisit after the freeze" && /Recorded: you declined this request/.test(recText) && /Rejected by you/.test(recText) &&
             lateAccept.status === 409 && lateAccept.json?.error === "wrong_state",
           `${JSON.stringify(fD)} ${confD.slice(0, 300)} ${JSON.stringify(declined)?.slice(0, 300)} ${recText.slice(0, 300)} ${lateAccept.text}`,
         );
@@ -4185,8 +4205,7 @@ try {
         const phoneWide = await wide(pp);
         await da(DR, "POST", `${crs}/${cr2.id}/withdraw`, { revision: 1 });
         await press(pp, cr2.id, "Confirm: Decline");
-        await pp.waitForFunction(() => document.activeElement?.getAttribute("data-notice") === "stale", { timeout: 15000 });
-        const fS = await focused(pp);
+        const fS = await settledNotice(pp, "stale");
         const after2 = (await read(cr2.id)).json;
         const rejectedRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE action = 'change_request.rejected' AND object_id = ?").get(cr2.id).n);
         check(
@@ -4207,8 +4226,7 @@ try {
         await sleep(300);
         const bump = await da(DO, "POST", `/goals/${DG.id}/versions`, { version: 1, title: "Cut checkout latency (v2)" });
         await press(po, cr3.id, "Confirm: Approve");
-        await po.waitForFunction(() => document.activeElement?.getAttribute("data-notice") === "refused", { timeout: 15000 });
-        const fR = await focused(po);
+        const fR = await settledNotice(po, "refused");
         const after3 = (await read(cr3.id)).json;
         check(
           "ui (Chrome, decide): choosing Approve (no input needed) moves focus to Review this decision; when the server refuses with 409 stale_version (the goal moved on), a focused alert says \"Not recorded. The goal changed after this request was made. Drew Requester needs to update it before it can be approved.\" and the request stays pending",
@@ -5519,6 +5537,419 @@ try {
   }
   // ==== end port29:allocation ====
 
+  // ==== fix:web-e2e ====
+  // Regression checks for the real-behaviour web walk (e2e-reports/web.md, B1–B22 and the "feels wrong" list), on a
+  // workspace of their own: FO owns it; team Platform has a lead (FA, owner of the CI goal) and a member (FB, who has a
+  // private goal and two sessions on the CI goal); team Growth has a lead (FC, owner of the Growth goals); FV is a
+  // viewer; FE is in no workspace here.
+  {
+    const fUsers = {};
+    for (const [who, name] of [
+      ["FO", "Fay Owner"],
+      ["FA", "Fran Lead"],
+      ["FB", "Finn Member"],
+      ["FC", "Flo Growth"],
+      ["FV", "Fox Viewer"],
+      ["FE", "Fen Outsider"],
+      ["FS", "Fia Sample"],
+    ])
+      fUsers[who] = await signUp(who, name, `${who.toLowerCase()}@webfix.example.test`);
+    const { FO, FA, FB, FC, FV, FE, FS } = fUsers;
+    const FW = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Web fix workspace" } })).json?.id;
+    const fa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${FW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const [u, role] of [
+      [FA, "member"],
+      [FB, "member"],
+      [FC, "member"],
+      [FV, "viewer"],
+    ]) {
+      const i = await fa(FO, "POST", "/invites", { email: u.email, role });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const PT = (await fa(FO, "POST", "/teams", { name: "Platform" })).json?.id;
+    const GT = (await fa(FO, "POST", "/teams", { name: "Growth" })).json?.id;
+    await fa(FO, "POST", `/teams/${PT}/members`, { user_id: FA.id, role: "lead" });
+    await fa(FO, "POST", `/teams/${PT}/members`, { user_id: FB.id, role: "member" });
+    await fa(FO, "POST", `/teams/${GT}/members`, { user_id: FC.id, role: "lead" });
+    const GCI = (await fa(FA, "POST", "/goals", { title: "Cut CI time in half", visibility: "workspace", team_id: PT, measures: [{ text: "p50 CI minutes", target: "10" }] })).json;
+    const GP = (await fa(FB, "POST", "/goals", { title: "Bob private experiment", visibility: "private" })).json;
+    const GG = (await fa(FC, "POST", "/goals", { title: "Grow trials 2x", visibility: "workspace", team_id: GT, measures: [{ text: "Arms shipped", target: "500" }] })).json;
+    const GGH = (await fa(FC, "POST", "/goals", { title: "Growth-only plan", visibility: "team", team_id: GT })).json;
+    const GGH2 = (await fa(FC, "POST", "/goals", { title: "Growth-only pricing", visibility: "team", team_id: GT })).json;
+    check("web fix setup: a workspace with teams Platform (lead, member) and Growth (lead), a viewer, and goals of each kind", !!FW && !!PT && !!GT && [GCI, GP, GG, GGH, GGH2].every((g) => !!g?.id), JSON.stringify([GCI, GP, GG, GGH, GGH2].map((g) => g?.id ?? g)));
+    const fcrs = (g) => `/goals/${g}/change-requests`;
+    const fAct = (u, g, id, action, body = {}) => fa(u, "POST", `${fcrs(g)}/${id}/${action}`, body);
+
+    // -- B1: a dependency someone deciding can't see is refused (server), never "Nothing → Nothing" (view) --
+    const hiddenProp = await fa(FB, "POST", fcrs(GCI.id), { base_version: GCI.version, changes: { depends_on: [GP.id] }, reason: "Our CI work depends on my prototype." });
+    const noneOpen = (await fa(FB, "GET", fcrs(GCI.id))).json?.change_requests ?? [];
+    check(
+      "B1: proposing a change that adds a dependency on the requester's private goal (which the goal's approval set can't read) -> 409 dependency_not_visible, naming neither the goal nor the approvers; no request is created",
+      hiddenProp.status === 409 && hiddenProp.json?.error === "dependency_not_visible" && !hiddenProp.text.includes(GP.title) && !hiddenProp.text.includes(FA.name) && !hiddenProp.text.includes(GP.id) && noneOpen.length === 0,
+      `${hiddenProp.status} ${hiddenProp.text}`,
+    );
+    // B4 and B14 first: a request that changes only a measure's target, approved and launched by the goal's owner.
+    const m0 = GG.measures[0];
+    const crT = (await fa(FB, "POST", fcrs(GG.id), { base_version: GG.version, changes: { measures: [{ id: m0.id, text: "Arms shipped", target: "600" }] }, reason: "Demand is up" })).json;
+    const crTDone = await fAct(FC, GG.id, crT?.id, "approve_and_launch", { revision: 1 });
+    check("B4 setup: a request that changes only the target of Arms shipped (500 -> 600) is approved and launched by the goal's owner", crTDone.status === 200 && crTDone.json?.launch === "launched", crTDone.text.slice(0, 200));
+    const cw = await import(pathToFileURL(path.join(ROOT, "lib/v2/change-words.mts")).href);
+    const valueDiff = (await fa(FC, "GET", `${fcrs(GG.id)}/${crT?.id}/value`)).json?.diff ?? {};
+    const words = cw.diffWords(valueDiff);
+    const moreWords = cw.diffWords({
+      title: { before: "A", after: "B" },
+      measures: { before: [{ id: "1", text: "x", target: null }, { id: "2", text: "y", target: "3" }], after: [{ id: "2", text: "y2", target: "3" }, { id: "3", text: "z", target: "9" }] },
+      limits: { before: [], after: [{ id: "l", type: "must_not", text: "touch prod" }] },
+      depends_on: { before: ["g1"], after: ["g1"] },
+    }, { title: (id) => `T${id}` });
+    check(
+      "B4: the accepted change reads field by field, from the value read's diff: \"Arms shipped target 500 → 600\" (never \"Measures: 1 → 1\"); renames, added and removed measures and limits, and a dependency change the reader can't see each get their own line",
+      JSON.stringify(words) === JSON.stringify(["Arms shipped target 500 → 600"]) &&
+        JSON.stringify(moreWords) === JSON.stringify(["Title A → B", "Measure y became y2", "Added measure z (target 9)", "Removed measure x", "Added limit Must not: touch prod", "Dependencies you can't see changed"]),
+      `${JSON.stringify(words)} ${JSON.stringify(moreWords)}`,
+    );
+    // The goal's owner adds a Growth-only dependency (a version of their own): Platform can't read it.
+    const ggNow = (await fa(FC, "GET", `/goals/${GG.id}`)).json?.goal;
+    const ggDep = await fa(FC, "POST", `/goals/${GG.id}/versions`, { version: ggNow?.version, depends_on: [GGH.id] });
+    // FB proposes a dependency on the CI goal (everyone can read it); the Growth-only one stays, unseen by FB.
+    const crD = await fa(FB, "POST", fcrs(GG.id), { base_version: ggDep.json?.version, changes: { depends_on: [GCI.id] }, reason: "Trials need faster CI" });
+    const asFB = (await fa(FB, "GET", `${fcrs(GG.id)}/${crD.json?.id}`)).json;
+    const asFC = (await fa(FC, "GET", `${fcrs(GG.id)}/${crD.json?.id}`)).json;
+    check(
+      "B1: a proposal that keeps an existing dependency the requester can't see is accepted; the requester's diff lists only what they can read and counts the rest (hidden_depends_on {before: 1, after: 1}); the approver, who reads both, sees them all and no hidden ones",
+      ggDep.status === 201 && crD.status === 201 && JSON.stringify(asFB?.diff?.before?.depends_on) === "[]" && JSON.stringify(asFB?.diff?.after?.depends_on) === JSON.stringify([GCI.id]) && asFB.diff.hidden_depends_on?.before === 1 && asFB.diff.hidden_depends_on.after === 1 &&
+        JSON.stringify([...(asFC?.diff?.after?.depends_on ?? [])].sort()) === JSON.stringify([GCI.id, GGH.id].sort()) && asFC.diff.hidden_depends_on?.before === 0 && asFC.diff.hidden_depends_on.after === 0 && !JSON.stringify(asFB).includes(GGH.title),
+      `${ggDep.status} ${crD.status} ${crD.text.slice(0, 200)} ${JSON.stringify(asFB?.diff)} ${JSON.stringify(asFC?.diff)}`,
+    );
+    const ctrHidden = await fAct(FC, GG.id, crD.json?.id, "counter", { revision: 1, changes: { depends_on: [GCI.id, GGH.id, GGH2.id] }, note: "Also the pricing plan" });
+    const crDAfter = (await fa(FB, "GET", `${fcrs(GG.id)}/${crD.json?.id}`)).json;
+    check(
+      "B1: a counter that adds a dependency the requester can't read -> 409 dependency_not_visible (naming neither goal nor person); the request stays pending at revision 1",
+      ctrHidden.status === 409 && ctrHidden.json?.error === "dependency_not_visible" && !ctrHidden.text.includes(GGH2.title) && !ctrHidden.text.includes(FB.name) && crDAfter?.state === "pending" && crDAfter.revision === 1,
+      `${ctrHidden.status} ${ctrHidden.text} ${crDAfter?.state} ${crDAfter?.revision}`,
+    );
+    // Saving through the goal form keeps a dependency the editor can't read: FA depends on a Growth-only goal while in
+    // Growth, then leaves the team.
+    await fa(FO, "POST", `/teams/${GT}/members`, { user_id: FA.id, role: "member" });
+    const gciDep = await fa(FA, "POST", `/goals/${GCI.id}/versions`, { version: GCI.version, depends_on: [GGH.id] });
+    const leave = await fa(FO, "DELETE", `/teams/${GT}/members/${FA.id}`);
+    const faDetail = (await fa(FA, "GET", `/goals/${GCI.id}`)).json;
+    const formSave = await fa(FA, "POST", `/goals/${GCI.id}/versions`, { version: faDetail?.goal?.version, title: "Cut CI time in half (p50)", depends_on: [] });
+    const foSees = (await fa(FO, "GET", `/goals/${GCI.id}`)).json?.goal;
+    const five = [];
+    for (let i = 0; i < 5; i++) five.push((await fa(FA, "POST", "/goals", { title: `Small goal ${i}`, visibility: "workspace" })).json?.id);
+    const sixDeps = await fa(FA, "POST", `/goals/${GCI.id}/versions`, { version: foSees?.version, depends_on: five });
+    check(
+      "B1: saving a new version through the goal form (depends_on as the editor sees it, without the goal they can't read) keeps that dependency: GET says hidden_depends_on 1 and the new version still depends on it; five visible plus the kept one -> 400 naming the goal they can't see",
+      gciDep.status === 201 && [200, 204].includes(leave.status) && JSON.stringify(faDetail?.goal?.depends_on) === "[]" && faDetail.hidden_depends_on === 1 && formSave.status === 201 && JSON.stringify(foSees?.depends_on) === JSON.stringify([GGH.id]) && foSees.title === "Cut CI time in half (p50)" &&
+        sixDeps.status === 400 && /goal you can't see/.test(sixDeps.json?.message ?? ""),
+      `${gciDep.status} ${leave.status} ${JSON.stringify(faDetail?.goal?.depends_on)} ${faDetail?.hidden_depends_on} ${formSave.status} ${formSave.text.slice(0, 200)} ${JSON.stringify(foSees?.depends_on)} ${sixDeps.status} ${sixDeps.text}`,
+    );
+
+    // -- B9: Home and the Requests tab agree on an approved change someone said "not yet" to --
+    const gciNow = (await fa(FA, "GET", `/goals/${GCI.id}`)).json?.goal;
+    const crN = (await fa(FB, "POST", fcrs(GCI.id), { base_version: gciNow?.version, changes: { title: "Cut CI time in half by May" }, reason: "A date makes it real" })).json;
+    // B19 / U5 come first on this request: the goal moves on, so the request is behind and FB updates it.
+    const bump = await fa(FA, "POST", `/goals/${GCI.id}/versions`, { version: gciNow?.version, measures: [{ id: gciNow?.measures?.[0]?.id, text: "p50 CI minutes", target: "8" }] });
+    const behindView = (await fa(FB, "GET", `${fcrs(GCI.id)}/${crN?.id}`)).json;
+    check("B19 setup: the goal's owner saves a newer version, so the requester's open request is behind and can be updated", bump.status === 201 && behindView?.behind === true && behindView.can.rebase === true, `${bump.status} ${JSON.stringify(behindView?.can)}`);
+
+    // -- B18: a work-toward alignment's card doesn't say "No usage moves" --
+    const fDevice = (u) => {
+      const keys = newDeviceKeys();
+      const d = insertDevice(u.id, `${u.who}'s laptop`);
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, FW));
+      return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
+    };
+    const DFB = fDevice(FB);
+    const fT0 = new Date(Date.now() - 3600_000).toISOString();
+    const fShare = async (dev, native, goalId) => {
+      const key = sessionKey(dev, FW, "claude-code", native);
+      // One repository, no title: two sessions with the same name, as in the walk.
+      await call(dev.who, "PUT", `/api/v2/workspaces/${FW}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, FW, "/src/ci"), repo_alias: "acme/ci", started_at: fT0 } });
+      const e = await call(dev.who, "POST", `/api/v2/workspaces/${FW}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: epochId(), goal_id: goalId, starts_at: fT0, root_turn: null, cause: "manual" } });
+      return { key, status: e.status };
+    };
+    const SB1 = await fShare(DFB, "ci-1", GCI.id);
+    const SB2 = await fShare(DFB, "ci-2", GCI.id);
+    const SB3 = await fShare(DFB, "ci-3", GCI.id);
+    const alW = await fa(FB, "POST", "/alignments", { target_goal_id: GG.id, choice: "work_toward", session_keys: [SB3.key], note: "My trial work" });
+    const alC = await fa(FB, "POST", "/alignments", { target_goal_id: GG.id, source_goal_id: GCI.id, choice: "contribution", note: "CI helps trials" });
+    const effW = (alW.json?.effects ?? []).map((e) => e.text);
+    const effC = (alC.json?.effects ?? []).map((e) => e.text);
+    check(
+      "B18: a work-toward alignment's contributes_to line doesn't say \"No usage moves\" (its usage does move, said on its own line); a contribution-only one still does",
+      SB1.status === 200 && SB2.status === 200 && SB3.status === 200 && alW.status === 201 && alC.status === 201 && effW.length === 3 && !effW.some((t) => /No usage moves/.test(t)) && effW.some((t) => /^Future usage from this session counts under/.test(t)) && effC.length === 1 && /No usage moves\.$/.test(effC[0]),
+      `${alW.status} ${alC.status} ${JSON.stringify(effW)} ${JSON.stringify(effC)}`,
+    );
+    // -- B16: the switch-goal picker tells two sessions of one person in one repository apart --
+    const picker = (await fa(FA, "GET", `/goals/${GCI.id}/requests`)).json?.sessions ?? [];
+    check(
+      "B16: GET …/requests gives a sender each session's start time (and a title only on their own sessions), so the picker can tell same-named sessions apart",
+      picker.length >= 2 && picker.every((s) => typeof s.started_at === "string" && s.title === null && s.mine === false) && new Set(picker.map((s) => s.session_key)).size === picker.length,
+      JSON.stringify(picker).slice(0, 300),
+    );
+
+    // -- B22: an import names its team by name --
+    const impOk = await fa(FO, "POST", "/asks/import", { asks: [{ team: "platform", text: "Imported by team name", source: { kind: "manual", date: "2026-10-30" } }] });
+    const impNone = await fa(FO, "POST", "/asks/import", { asks: [{ team: "Nobody", text: "x", source: { kind: "manual", date: "2026-10-30" } }] });
+    const impMissing = await fa(FO, "POST", "/asks/import", { asks: [{ text: "x", source: { kind: "manual", date: "2026-10-30" } }] });
+    const imported = ((await fa(FO, "GET", "/asks")).json?.asks ?? []).find((a) => a.text === "Imported by team name");
+    check(
+      "B22: an import may name its team by name (any case): {team: \"platform\"} -> 201 created for Platform; an unknown name -> 400 'asks[0].team: no team here is called \"Nobody\"'; neither team nor team_id -> 400 naming both",
+      impOk.status === 201 && impOk.json?.created === 1 && imported?.team?.id === PT && impNone.status === 400 && impNone.json?.message === 'asks[0].team: no team here is called "Nobody"' && impMissing.status === 400 && impMissing.json?.message === "asks[0].team_id (or asks[0].team, a team's name) is required",
+      `${impOk.status} ${impOk.text} ${impNone.text} ${impMissing.text}`,
+    );
+
+    // -- B3 setup: a deleted workspace (its owner is no longer "in it") --
+    const scratch = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Scratch to delete" } })).json?.id;
+    const delScratch = await call("FO", "DELETE", `/api/v2/workspaces/${scratch}`, { cookie: FO.cookie });
+    const notIn = /This workspace doesn(?:'|&#x27;|’)t exist or you(?:'|&#x27;|’)re not in it/;
+    const pages = ["", "/goals", `/goals/${GCI.id}`, "/requests", "/people"];
+    const outsider = await Promise.all(pages.map((p) => call("FE", "GET", `/app/w/${FW}${p}`, { cookie: FE.cookie })));
+    const deleted = await call("FO", "GET", `/app/w/${scratch}`, { cookie: FO.cookie });
+    const member = await call("FB", "GET", `/app/w/${FW}`, { cookie: FB.cookie });
+    check(
+      "B3: a signed-in person who isn't in the workspace (never in it, or it was deleted) gets, on every workspace page, \"This workspace doesn't exist or you're not in it\" with a link to /app, and no workspace tabs; a member gets the page",
+      delScratch.status === 204 &&
+        [...outsider, deleted].every((r) => r.status === 200 && notIn.test(r.text) && r.text.includes('href="/app"') && !r.text.includes('aria-label="Workspace"') && !/couldn(?:'|&#x27;)t read/.test(r.text)) &&
+        !notIn.test(member.text),
+      `${delScratch.status} ${[...outsider, deleted].map((r) => `${r.status}:${notIn.test(r.text)}`).join(",")} ${notIn.test(member.text)}`,
+    );
+
+    // -- B20: no prerender error in the server's output --
+    await call("anon", "GET", "/app/sign-in");
+    await call("FO", "GET", "/app", { cookie: FO.cookie });
+    await sleep(500);
+    check("B20: opening /app and /app/sign-in on a production server logs no \"unstable value Date.now() while prerendering\" error", !/unstable value|while prerendering/.test(onRun.stderr() + onRun.stdout()), (onRun.stderr() + onRun.stdout()).match(/.*while prerendering.*/)?.[0] ?? "");
+
+    // -- the browser: what each person sees --
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u, width = 1100, height = 900) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width, height });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const text = (pg, sel = "main") => pg.evaluate((s) => document.querySelector(s)?.innerText ?? "", sel);
+      const cardText = (pg, id) => pg.evaluate((i) => document.querySelector(`[data-cr="${i}"]`)?.innerText ?? "", id);
+      const press = (pg, scope, label) => pg.evaluate((s, t) => [...document.querySelectorAll(`${s} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      try {
+        // B1 (view): the requester's open request shows "a goal you can't see" on both sides, never "Nothing".
+        const pB = await as(FB);
+        await open(pB, `/app/w/${FW}/goals/${GG.id}`);
+        const dView = await pB.evaluate((id) => {
+          const c = document.querySelector(`[data-cr="${id}"]`);
+          return { approved: c?.querySelector('[data-side="approved"]')?.innerText ?? "", proposed: c?.querySelector('[data-side="proposed"]')?.innerText ?? "", what: c?.querySelector("[data-what-would-change]")?.innerText ?? "" };
+        }, crD.json?.id);
+        check(
+          "B1 (ui): a dependency the reader can't see reads \"a goal you can't see\" on the approved-now and proposed sides (never \"Nothing\"), and \"What would change\" names the one they can see",
+          /Depends on\s*a goal you can.t see/.test(dView.approved) && /Cut CI time in half \(p50\), a goal you can.t see/.test(dView.proposed) && !/Depends on\s*Nothing/.test(dView.approved + dView.proposed) && /Would depend on “Cut CI time in half \(p50\)”/.test(dView.what) && !dView.approved.includes(GGH.title),
+          JSON.stringify(dView),
+        );
+        // B1 (ui): the goal page and its New version form say a dependency the editor can't see is kept.
+        const pA = await as(FA);
+        await open(pA, `/app/w/${FW}/goals/${GCI.id}`);
+        const gciPage = await text(pA);
+        check(
+          "B1 (ui): the goal page's tree lists \"Depends on: a goal you can't see\", and the New version form says saving keeps it",
+          /Depends on:\s*a goal you can.t see/.test(gciPage) && /Also depends on a goal you can.t see\. Saving keeps it/.test(gciPage) && !gciPage.includes(GGH.title),
+          gciPage.slice(0, 400),
+        );
+        // B19 and U5: the requester's behind request, then Update to version n.
+        await open(pB, `/app/w/${FW}/goals/${GCI.id}`);
+        const behindLabel = await pB.evaluate((id) => document.querySelector(`[data-cr="${id}"] [data-side="approved"] .al-lbl`)?.textContent ?? "", crN?.id);
+        await press(pB, `[data-cr="${crN?.id}"]`, `Update to version ${gciNow?.version + 1}`);
+        await pB.waitForFunction((id) => /Recorded:/.test(document.querySelector(`[data-cr="${id}"]`)?.innerText ?? ""), { timeout: 15000 }, crN?.id).catch(() => undefined);
+        const rebased = await cardText(pB, crN?.id);
+        const crNRebased = (await fa(FB, "GET", `${fcrs(GCI.id)}/${crN?.id}`)).json;
+        check(
+          "B19 and U5: a behind request's left side reads \"Request made against version <b> · goal now at <n>\" (not \"Approved now\"); Update to version <n> rebases it and says \"Recorded: you updated your request to version <n> (revision 2). It waits for approval again.\"",
+          new RegExp(`^Request made against version ${gciNow?.version} · goal now at ${gciNow?.version + 1}$`, "i").test(behindLabel.trim()) &&
+            rebased.includes(`Recorded: you updated your request to version ${gciNow?.version + 1} (revision 2). It waits for approval again.`) && crNRebased?.base_version === gciNow?.version + 1 && crNRebased.revision === 2,
+          `${behindLabel} || ${rebased.slice(0, 300)} ${crNRebased?.base_version} ${crNRebased?.revision}`,
+        );
+        // B9: approved, then not yet: the workspace owner (a launcher) has it waiting on them on both pages.
+        const apN = await fAct(FA, GCI.id, crN?.id, "approve", { revision: 2 });
+        const nyN = await fAct(FA, GCI.id, crN?.id, "not_yet", {});
+        const groupsFO = (await fa(FO, "GET", "/change-requests")).json;
+        const homeFO = (await fa(FO, "GET", "/home")).json;
+        const pO = await as(FO);
+        await open(pO, `/app/w/${FW}/requests`);
+        const waitingUi = await pO.evaluate(() => [...document.querySelectorAll("main section")].find((s) => s.querySelector("h2")?.textContent === "Waiting on you")?.innerText ?? "");
+        check(
+          "B9: after approve then not yet, the workspace owner (who may launch) has it waiting on them on the Requests tab (waiting_on_me, under \"Waiting on you\") and on the Home (\"Approved, not launched\", next launch): the same rule",
+          apN.status === 200 && nyN.json?.launch === "not_yet" && groupsFO?.waiting_on_me?.some((c) => c.id === crN?.id && c.waiting_on_me) && !groupsFO.others.some((c) => c.id === crN?.id) &&
+            homeFO?.change_requests?.waiting_on_me?.some((c) => c.id === crN?.id && c.next === "launch") && waitingUi.includes("Cut CI time in half") && /Not launched yet: Fran Lead decided not yet/.test(waitingUi),
+          `${apN.status} ${nyN.json?.launch} ${JSON.stringify(groupsFO?.waiting_on_me?.map((c) => c.id))} ${waitingUi.slice(0, 200)}`,
+        );
+        // B5 and B13: the approver counters with a condition, reads their own note, then declines.
+        const ctr = await fAct(FC, GG.id, crD.json?.id, "counter", { revision: 1, changes: { title: "Grow trials 2x by Q3" }, note: "A shorter change", condition: "Finance agrees" });
+        const pC = await as(FC);
+        await open(pC, `/app/w/${FW}/goals/${GG.id}`);
+        const ownNote = await cardText(pC, crD.json?.id);
+        const rej = await fAct(FC, GG.id, crD.json?.id, "reject", { reason: "Not this quarter" });
+        await open(pB, `/app/w/${FW}/goals/${GG.id}`);
+        const declinedCard = await cardText(pB, crD.json?.id);
+        check(
+          "B5: the approver reads their own counter note as \"Your note on revision 2, as written\" (never \"you's note\")",
+          ctr.status === 200 && ownNote.includes("Your note on revision 2, as written: “A shorter change”") && !/you's note/.test(ownNote),
+          `${ctr.status} ${ownNote.slice(0, 400)}`,
+        );
+        check(
+          "B13: a declined request's \"Accept if…\" condition reads \"Never confirmed: the request was declined\", not \"Not confirmed yet\"",
+          rej.status === 200 && declinedCard.includes("Accept if: Finance agrees") && declinedCard.includes("Never confirmed: the request was declined") && !declinedCard.includes("Not confirmed yet"),
+          declinedCard.slice(0, 400),
+        );
+        // B4 and B14 on the launched target change: the goal owner who approved and launched it is "you" in every line.
+        const tCard = await cardText(pC, crT?.id);
+        check(
+          "B4 and B14 (ui): the value card's Accepted change reads \"Arms shipped target 500 → 600\" (no \"Measures: 1 → 1\"), and the person who approved and launched it reads \"Approved by you\", \"Launched by you\" and Who approved \"You\"",
+          tCard.includes("Arms shipped target 500 → 600") && !/Measures: 1 → 1/.test(tCard) && /Approved by you/.test(tCard) && /Launched by you/.test(tCard) && !tCard.includes(`Approved by ${FC.name}`) && /Who approved\s*You,/i.test(tCard),
+          tCard.slice(0, 600),
+        );
+        // B16 (ui): the switch-goal picker.
+        await open(pA, `/app/w/${FW}/goals/${GCI.id}`);
+        await pA.evaluate(() => document.querySelector('input[name="request-type"][value="switch_goal"]')?.click());
+        await pA.waitForFunction(() => document.body.innerText.includes("Sessions to move"), { timeout: 10000 }).catch(() => undefined);
+        const pickLabels = await pA.evaluate(() => [...document.querySelectorAll('#send-request label')].filter((l) => l.querySelector('input[type="checkbox"]')).map((l) => l.innerText.trim()));
+        check(
+          "B16 (ui): Switch goal lists each session with its start time and the end of its key, so two \"Finn Member's acme/ci session\" rows differ",
+          pickLabels.length >= 2 && pickLabels.every((l) => /^Finn Member's acme\/ci session · started .+ · …\S{6}$/.test(l)) && new Set(pickLabels).size === pickLabels.length,
+          JSON.stringify(pickLabels),
+        );
+        // B17: the Platform lead's Asks tab with the imported ask waiting on them.
+        await open(pA, `/app/w/${FW}/asks`);
+        const askCards = await pA.evaluate(() => Object.fromEntries([...document.querySelectorAll("main section")].map((s) => [s.querySelector("h2")?.textContent ?? "", s.innerText])));
+        check(
+          "B17: with the team's only ask waiting on the lead, \"Asked of your teams\" says the ones that need them are under Waiting on you, not \"No asks yet.\"",
+          (askCards["Waiting on you"] ?? "").includes("Imported by team name") && /No other asks of your teams\. The ones that need you are under Waiting on you\./.test(askCards["Asked of your teams"] ?? "") && !/No asks yet/.test(askCards["Asked of your teams"] ?? ""),
+          JSON.stringify(askCards).slice(0, 500),
+        );
+        // B22 (ui): the import help lists the teams with their ids.
+        await open(pO, `/app/w/${FW}/asks`);
+        const importHelp = await pO.evaluate(() => document.querySelector("[data-import-teams]")?.textContent ?? "");
+        check("B22 (ui): the import help lists \"Teams here: Growth (team_id …), Platform (team_id …)\"", importHelp.includes(`Growth (team_id ${GT})`) && importHelp.includes(`Platform (team_id ${PT})`), importHelp);
+        // B15: a select's accessible name is its label alone; U12: no team role without a team.
+        await open(pO, `/app/w/${FW}/people`);
+        const ax = await pO.accessibility.snapshot({ interestingOnly: true });
+        const named = [];
+        const walk = (n) => {
+          if (n.role === "combobox" || n.role === "textbox") named.push(n.name ?? "");
+          for (const c of n.children ?? []) walk(c);
+        };
+        walk(ax ?? {});
+        const teamRoleShown = await pO.evaluate(() => [...document.querySelectorAll("main label span")].some((s) => s.textContent === "Team role"));
+        check(
+          "B15 and U12: on the invite form the Role and Team selects are named \"Role\" and \"Team (optional)\" (never with their options), and \"Team role\" is not shown while No team is picked",
+          named.includes("Role") && named.includes("Team (optional)") && !named.some((n) => /Member Viewer|No team Growth/.test(n)) && !teamRoleShown,
+          JSON.stringify(named),
+        );
+        // U12: an http evidence link explains itself.
+        const crE = (await fa(FA, "POST", fcrs(GG.id), { base_version: (await fa(FC, "GET", `/goals/${GG.id}`)).json?.goal?.version, changes: { title: "Grow trials 3x" }, reason: "Ambition" })).json;
+        await open(pA, `/app/w/${FW}/goals/${GG.id}`);
+        await press(pA, `[data-cr="${crE?.id}"]`, "Add evidence");
+        await pA.waitForSelector(`[data-cr="${crE?.id}"] input[type="url"]`, { timeout: 10000 }).catch(() => undefined);
+        await pA.type(`[data-cr="${crE?.id}"] input[type="url"]`, "http://ci.example.com/run/1");
+        const httpHint = await cardText(pA, crE?.id);
+        check("U12: typing an http:// evidence link shows \"Use an https:// link: Align keeps only https links.\"", httpHint.includes("Use an https:// link: Align keeps only https links."), httpHint.slice(0, 300));
+        // B12: the sample's Requests tab doesn't contradict itself.
+        const sample = await call("FS", "POST", "/api/v2/workspaces/sample", { cookie: FS.cookie, body: {} });
+        const pS = await as(FS);
+        await open(pS, `/app/w/${sample.json?.id}/requests`);
+        const sampleReq = await text(pS);
+        check(
+          "B12: in the Northstar sample the Requests tab lists the person's request under Waiting on you and \"Your requests\" says so (\"No other requests of yours…\"), never \"You have not proposed a change\"",
+          sample.status === 201 && /You proposed a change/.test(sampleReq) && sampleReq.includes("No other requests of yours. Yours that need you are under Waiting on you.") && !sampleReq.includes("You have not proposed a change"),
+          sampleReq.slice(0, 400),
+        );
+        // U9: restoring says connected apps don't come back.
+        await open(pO, "/app");
+        const appPage = await text(pO);
+        check("U9: a deleted workspace on /app says restoring brings back members and history but not connected AI apps", appPage.includes("Restoring brings back its members and history, but not its connected AI apps: each one has to connect again."), appPage.slice(0, 400));
+        // U11: the wrong account on an invite page can sign out and use the invited address.
+        const inv = await fa(FO, "POST", "/invites", { email: "someone-else@webfix.example.test", role: "member" });
+        const pE = await as(FE);
+        await open(pE, `/app/invite/${inv.json?.token}`);
+        const invText = await text(pE);
+        const invBtn = await pE.evaluate(() => [...document.querySelectorAll("main button")].map((b) => b.textContent));
+        check(
+          "U11: an invite opened by another account says who is invited (not \"You are invited\") and offers \"Sign out and use <invited address>\"",
+          invText.includes("someone-else@webfix.example.test is invited to Web fix workspace as member.") && !invText.includes("You are invited") && invBtn.includes("Sign out and use someone-else@webfix.example.test"),
+          `${invText.slice(0, 300)} ${JSON.stringify(invBtn)}`,
+        );
+        // B3 (ui): the outsider's view of the workspace.
+        await open(pE, `/app/w/${FW}`);
+        const outsiderUi = await pE.evaluate(() => ({ text: document.body.innerText, tabs: !!document.querySelector('nav[aria-label="Workspace"]'), link: document.querySelector("main a")?.getAttribute("href") }));
+        check(
+          "B3 (ui): an outsider's /app/w/<ws> shows \"This workspace doesn't exist or you're not in it\" and a link to /app, with no tabs, tiles, \"unknown\" or \"Reload\"",
+          /This workspace doesn.t exist or you.re not in it/.test(outsiderUi.text) && outsiderUi.link === "/app" && !outsiderUi.tabs && !/unknown|Reload/.test(outsiderUi.text),
+          JSON.stringify(outsiderUi).slice(0, 300),
+        );
+
+        // B6 and B7: every button and select is a 44 px tap target at 390, and nothing scrolls sideways at 320.
+        const phone = await as(FA, 390, 844);
+        const short = [];
+        let counted = 0;
+        const phonePages = ["/app", `/app/w/${FW}`, `/app/w/${FW}/goals`, `/app/w/${FW}/goals/${GCI.id}`, `/app/w/${FW}/goals/${GG.id}`, `/app/w/${FW}/people`, `/app/w/${FW}/requests`, `/app/w/${FW}/asks`, `/app/w/${FW}/sessions`, `/app/w/${FW}/apps`, "/app/account"];
+        for (const p of phonePages) {
+          await open(phone, p);
+          // Open the folded "Paste meeting notes" control stays as is: it is the button measured.
+          const hs = await phone.evaluate(() =>
+            [...document.querySelectorAll("header button, header select, #passkey-prompt button, #passkey-prompt a, main button, main select")]
+              .filter((b) => b.getBoundingClientRect().height > 0 && getComputedStyle(b).visibility !== "hidden")
+              .map((b) => [b.textContent.trim().slice(0, 30) || b.getAttribute("aria-label") || b.tagName, Math.round(b.getBoundingClientRect().height * 100) / 100]),
+          );
+          counted += hs.length;
+          for (const [t, h] of hs) if (h < 44) short.push(`${p} "${t}" ${h}px`);
+        }
+        const prompt = await phone.evaluate(() => !!document.querySelector("#passkey-prompt"));
+        check(
+          "B6: at 390 px every button and select on the top bar, the page and the passkey prompt (Sign out, Not now, Paste meeting notes, Remove included) is at least 44 px tall",
+          counted >= 40 && short.length === 0,
+          `${counted} controls; prompt ${prompt}; ${short.slice(0, 8).join(" | ")}`,
+        );
+        const narrow = await as(FA, 320, 640);
+        const wide320 = [];
+        let measureW = 0;
+        for (const p of [...phonePages, `/app/w/${FW}/spend`]) {
+          await open(narrow, p);
+          const m = await narrow.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, W: window.innerWidth, measure: document.querySelector('input[aria-label="Measure 1"]')?.getBoundingClientRect().width ?? null }));
+          if (m.sw > m.W) wide320.push(`${p}: ${m.sw}>${m.W}`);
+          if (p === `/app/w/${FW}/goals/${GCI.id}` && m.measure) measureW = m.measure;
+        }
+        check(
+          "B7: at 320x640 no page scrolls sideways (the goal form's measure row included), and a measure field keeps its width (at least 200 px)",
+          wide320.length === 0 && measureW >= 200,
+          `${wide320.join(" | ")} measure ${measureW}`,
+        );
+        // U3: with something waiting on them and no app seen, the Home's first-run card follows the queue.
+        await open(pO, `/app/w/${FW}`);
+        const order = await pO.evaluate(() => {
+          const w = document.querySelector("#waiting");
+          const f = document.querySelector("[data-first-run]");
+          return { both: !!w && !!f, after: !!w && !!f && !!(w.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) };
+        });
+        check("U3: when something waits on the person, the Home's first-run card comes after \"Waiting on you\"", order.both && order.after, JSON.stringify(order));
+        check("web fix (ui): no page error in any of these pages", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:web-e2e ====
+
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
   const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));
@@ -6790,6 +7221,15 @@ try {
     "gate: after that a create without a code -> 403 creation_code_required (the sample too); /app now asks for a creation code and links to /app/request-access",
     opsSecond.status === 403 && opsSecond.json?.error === "creation_code_required" && /Request access/.test(opsSecond.json?.message) && opsSample.status === 403 && opsSample.json?.error === "creation_code_required" && opsHome2.text.includes('name="creation_code"') && opsHome2.text.includes('href="/app/request-access"'),
     `${opsSecond.status} ${opsSecond.text} ${opsSample.status}`,
+  );
+  // B8: /app's line for a person in no workspace names the sample only where its card is shown.
+  const wordsMod = await import(pathToFileURL(path.join(ROOT, "app/app/_ui/words.ts")).href);
+  check(
+    "B8: /app's first-run line offers the sample only where it is shown: a person who needs a creation code reads \"Create one with a creation code, or open an invite link someone sent you.\" and creation closed only the invite link; no sample is mentioned in either",
+    wordsMod.firstRunWords({ closed: false, needsCode: true }) === "You are not in a workspace yet. Create one with a creation code, or open an invite link someone sent you." &&
+      wordsMod.firstRunWords({ closed: true, needsCode: true }) === "You are not in a workspace yet. Open an invite link someone sent you." &&
+      /start from a sample/.test(wordsMod.firstRunWords({ closed: false, needsCode: false })),
+    "",
   );
   // -- request access (hosted: token required, disposable domains refused) --
   const reqBody = { email: "alice@example.test", name: "Alice Able", company: "Able Co", team_size: "11-50", use_case: "Goals for our agent fleet", interest: "evaluate" };

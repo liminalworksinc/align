@@ -65,7 +65,21 @@ async function route(req: Request): Promise<Response> {
   // challenge naming them (the MCP authorization spec's step-up answer).
   const scopes = (await callsEvidenceTool(req)) ? [SCOPE, EVIDENCE_SCOPE] : [SCOPE];
   const auth = withMcpAuth(byScope, verifyToken, { required: true, requiredScopes: scopes, resourceMetadataPath: PRM_PATH, resourceUrl: originOf(req) });
-  return auth(req);
+  return tokenRefused(req, await auth(req));
+}
+
+/** mcp-handler says "No authorization provided" for every 401, even when a token was sent: a client that got its token
+ *  minutes ago would look in the wrong place. When the request carried a bearer token, the challenge says the token
+ *  was refused instead (same 401, same error code invalid_token). */
+const TOKEN_REFUSED = "The access token is invalid, expired or revoked. Connect the app again.";
+async function tokenRefused(req: Request, res: Response): Promise<Response> {
+  if (res.status !== 401 || !/^bearer\s+\S/i.test(req.headers.get("authorization") ?? "")) return res;
+  const fix = (t: string) => t.replaceAll("No authorization provided", TOKEN_REFUSED);
+  const headers = new Headers(res.headers);
+  const www = headers.get("www-authenticate");
+  if (www) headers.set("www-authenticate", fix(www));
+  headers.delete("content-length");
+  return new Response(fix(await res.text()), { status: 401, headers });
 }
 
 export { route as GET, route as POST, route as DELETE };

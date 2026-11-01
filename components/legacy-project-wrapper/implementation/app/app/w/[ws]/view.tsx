@@ -207,8 +207,9 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           <p className="mb-5 mt-1 text-[16px] text-zinc-600" data-home-summary>
             {onMe === null ? "Align couldn't read everything that may be waiting on you, so how much is waiting is unknown." : onMe ? `${onMe} thing${onMe === 1 ? "" : "s"} waiting on you.` : "Nothing is waiting on you."}
           </p>
-          {/* First run (main #47): until Align has seen an app this person can see here; never when that is unknown. */}
-          {apps && !apps.items.some(seenApp) && <FirstRun ws={ws} onSeen={d.reload} />}
+          {/* First run (main #47): until Align has seen an app this person can see here; never when that is unknown. When
+              something waits on the person, it follows their queue, so a phone shows the queue first (U3). */}
+          {apps && !apps.items.some(seenApp) && !onMe && <FirstRun ws={ws} onSeen={d.reload} />}
           <div className="mb-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             <Tile n={onMe} label="Waiting on you" href="#waiting" hot={!!onMe} />
             <Tile n={onOthers} label="Waiting on others" href="#others" />
@@ -229,6 +230,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
               </ul>
             </Card>
           </section>
+          {apps && !apps.items.some(seenApp) && !!onMe && <FirstRun ws={ws} onSeen={d.reload} />}
 
           <section id="others" aria-label="Waiting on others" className="scroll-mt-4">
             <Card title="Waiting on others">

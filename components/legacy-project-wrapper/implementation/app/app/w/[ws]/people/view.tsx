@@ -247,12 +247,15 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
                         ))}
                       </Select>
                     </Field>
-                    <Field label="Team role">
-                      <Select value={inviteTeamRole} disabled={!inviteTeam} onChange={(e) => setInviteTeamRole(e.target.value as TeamRole)}>
-                        <option value="member">Member</option>
-                        <option value="lead">Lead</option>
-                      </Select>
-                    </Field>
+                    {/* A team role only means something with a team (U12). */}
+                    {inviteTeam && (
+                      <Field label="Team role">
+                        <Select value={inviteTeamRole} onChange={(e) => setInviteTeamRole(e.target.value as TeamRole)}>
+                          <option value="member">Member</option>
+                          <option value="lead">Lead</option>
+                        </Select>
+                      </Field>
+                    )}
                   </div>
                 )}
                 <Btn type="submit" disabled={act.busy}>
@@ -324,7 +327,7 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
           {owner && (
             <Card title="Delete this workspace">
               <p className="mb-3 text-[15px] text-zinc-600">
-                Deleting {wsName} closes it for everyone at once: members lose access, devices stop syncing it and connected apps are disconnected. Owners can restore it from Your workspaces for 30 days; after that everything in it is erased.
+                Deleting {wsName} closes it for everyone at once: members lose access, devices stop syncing it and connected apps are disconnected. Owners can restore it from Your workspaces for 30 days (connected apps stay disconnected and must connect again); after that everything in it is erased.
               </p>
               <Btn
                 kind="danger"

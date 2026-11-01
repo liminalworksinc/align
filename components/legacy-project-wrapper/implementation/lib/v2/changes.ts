@@ -3,9 +3,9 @@ import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso } from "./ids";
 import { effectiveSet, launchSet } from "./approval";
-import { contentOf, goalObj, goalRow, nextContent, sameContent, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
+import { contentOf, goalObj, goalRow, nextContent, sameContent, unreadableGoals, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
-import { memberName } from "./workspaces";
+import { memberName, memberPrincipal } from "./workspaces";
 import { nonNegInt, optStr, str, type Body } from "./validate";
 import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evidenceView, recordSnapshot, snapshotView, type EvidenceSource } from "./evidence";
 
@@ -26,6 +26,9 @@ import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evid
 //   accept_counter / acknowledge / withdraw / rebase: the requester only
 // A goal that becomes achieved or dropped supersedes every open request on it, and any newer version supersedes the
 // approved requests still waiting for launch (writeGoalVersion does both).
+// A revision may not add a dependency on a goal that someone who must decide on it can't read (409
+// dependency_not_visible): a proposal or rebase is decided by the effective approval set, a counter by the requester.
+// A reader still sees only the dependencies they can read, with the others counted (diff.hidden_depends_on).
 // Everyone who can read the goal can read its requests (viewers too); viewers can't act. A request is its own
 // decision record once approved or rejected.
 // Evidence (lib/v2/evidence.ts): each revision carries the snapshot Align recorded when it was written, and the
@@ -113,6 +116,23 @@ function changesIn(pp: PolicyPrincipal, goalId: string, base: GoalContent, v: un
 
 const applied = (base: GoalContent, c: Changes): GoalContent => ({ ...base, ...c });
 
+/** Who must be able to read a dependency a revision adds. A proposal (or a rebase) is decided by the goal's effective
+ *  approval set; a counter goes back to the requester, who accepts it or not. */
+const DEPENDENCY_READERS = {
+  proposal: "Someone who decides on this goal can't see a goal you added as a dependency, so they couldn't see what they approve. Remove it, or ask that goal's owner to share it with them first.",
+  counter: "The person who asked can't see a goal you added as a dependency, so they couldn't see what they accept. Remove it from your suggestion.",
+} as const;
+
+/** 409 dependency_not_visible when `changes` adds (relative to `base`) a dependency some of `readers` can't read. The
+ *  message names neither the goal nor the person. A dependency already on the base version is not added. */
+function assertDependenciesVisible(wsId: string, base: GoalContent, changes: Changes, readers: string[], who: keyof typeof DEPENDENCY_READERS) {
+  const added = (changes.depends_on ?? []).filter((id) => !base.depends_on.includes(id));
+  if (!added.length) return;
+  for (const u of readers) {
+    if (unreadableGoals(memberPrincipal(wsId, u), added).length) throw conflict("dependency_not_visible", DEPENDENCY_READERS[who]);
+  }
+}
+
 const crRow = (ws: string, id: string) => get<ChangeRequestRow>("SELECT * FROM v2_change_requests WHERE ws_id = ? AND id = ?", ws, id);
 
 const openRequestOf = (ws: string, goalId: string, userId: string) =>
@@ -188,6 +208,7 @@ export async function createChangeRequest(pp: PolicyPrincipal, goalId: string, b
     if (now.version !== g.version) throw conflict("stale_version", `This goal changed while you were editing. Reload to start from version ${now.version}.`);
     if (now.status !== "active") throw conflict("goal_not_active", "This goal is achieved or dropped, so it takes no change requests");
     if (openRequestOf(pp.wsId, g.id, pp.userId)) throw conflict("already_open", "You already have an open change request on this goal.");
+    assertDependenciesVisible(pp.wsId, contentOf(now), changes, effectiveSet(now, pp.userId), "proposal");
     const created = insertChangeRequest(pp, now, changes, reason, at);
     // Here, not in insertChangeRequest: the sample workspace's seeded request is nobody's first.
     event("first_change_request", { ws: pp.wsId, user: pp.userId, at });
@@ -323,6 +344,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         const condition = b.condition === undefined || b.condition === null ? null : str(b, "condition", TEXT_MAX);
         const base = versionContentOf(pp.wsId, g.id, r.base_version)!;
         const countered = changesIn(pp, g.id, base, b.changes);
+        assertDependenciesVisible(pp.wsId, base, countered, [r.requester_id], "counter");
         const next = r.revision + 1;
         writeRevision(pp.wsId, g.id, r.id, next, r.base_version, countered, note, me, at, condition);
         run("UPDATE v2_change_requests SET state = 'countered', revision = ?, changes_json = ?, updated_at = ? WHERE id = ?", next, JSON.stringify(countered), at, r.id);
@@ -353,6 +375,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         if (baseVersion !== g.version) throw conflict("stale_version", `This goal is at version ${g.version}; reload and try again`);
         // The changes as sent, or the request's own, checked again against the goal as it is now.
         const rebased = changesIn(pp, g.id, contentOf(g), b.changes === undefined ? changes : b.changes);
+        assertDependenciesVisible(pp.wsId, contentOf(g), rebased, effectiveSet(g, r.requester_id), "proposal");
         const next = r.revision + 1;
         writeRevision(pp.wsId, g.id, r.id, next, g.version, rebased, null, me, at);
         run("UPDATE v2_change_requests SET revision = ?, base_version = ?, changes_json = ?, updated_at = ? WHERE id = ?", next, g.version, JSON.stringify(rebased), at, r.id);
@@ -446,6 +469,7 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
       return !!d && canReadGoal(pp, goalObj(d));
     });
   const shown = (c: Changes): Changes => (c.depends_on ? { ...c, depends_on: readable(c.depends_on) } : c);
+  const hiddenOf = (ids: string[]) => ids.length - readable(ids).length;
   const changes = JSON.parse(r.changes_json) as Changes;
   const fields = CHANGE_KEYS.filter((k) => k in changes);
   const base = versionContentOf(r.ws_id, r.goal_id, r.base_version)!;
@@ -509,7 +533,13 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     changes: shown(changes),
     reason: r.reason,
     revisions,
-    diff: { before: pick(base), after: pick(after) },
+    /** depends_on lists only the goals the reader can read; hidden_depends_on counts the others on each side (never
+     *  which), so a diff never reads "Nothing → Nothing" while a dependency the reader can't see changes. */
+    diff: {
+      before: pick(base),
+      after: pick(after),
+      hidden_depends_on: fields.includes("depends_on") ? { before: hiddenOf(base.depends_on), after: hiddenOf(after.depends_on) } : null,
+    },
     approvers: approvers.map((id) => person(id)!),
     /** Who may launch it once approved: the approval set plus workspace owners. */
     launchers: launchers.map((id) => person(id)!),
@@ -532,7 +562,9 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     /** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
     approved_without_evidence: r.state === "approved" && r.approved_without_evidence !== null ? r.approved_without_evidence === 1 : null,
     can,
-    waiting_on_me: can.approve || can.accept_counter || (can.launch && r.launch === "pending"),
+    /** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
+     *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. */
+    waiting_on_me: can.approve || can.accept_counter || can.launch,
     created_at: r.created_at,
     updated_at: r.updated_at,
     decided_at: r.decided_at,
@@ -566,7 +598,7 @@ export function listChangeRequests(pp: PolicyPrincipal, opts: { state?: string |
   return rows.filter((r) => (!state || r.state === state) && canRead(r.goal_id)).map((r) => requestView(pp, r));
 }
 
-/** The workspace Requests tab: waiting on me (my approve or accept_counter flag, or launch while nobody decided), mine, others. */
+/** The workspace Requests tab: waiting on me (my approve, accept_counter or launch flag), mine, others. */
 export function changeRequestGroups(pp: PolicyPrincipal, state?: string | null) {
   const views = listChangeRequests(pp, { state });
   return {

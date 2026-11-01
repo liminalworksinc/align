@@ -30,7 +30,8 @@ export default function AuthorizeForm(props: {
   evidence: boolean;
 }) {
   const { params, here, clientName, selfNamed, redirectHost, loopback, provider, person, evidence } = props;
-  const [stale, setStale] = useState(!!person && !person.recent);
+  // Someone with no workspace to connect (a viewer everywhere) is told so at once, never asked to sign in again first (U7).
+  const [stale, setStale] = useState(!!person && !person.recent && person.workspaces.length > 0);
   const [ws, setWs] = useState(person?.workspaces.length === 1 ? person.workspaces[0].id : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

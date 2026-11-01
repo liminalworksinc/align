@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect, useState, type ReactNode, type Ref } from "react";
+import { cloneElement, isValidElement, useCallback, useEffect, useId, useState, type ReactNode, type Ref } from "react";
 
 // Shared client pieces for the goal sessions web app: the API helper, a data hook, layout and form controls.
 
@@ -115,7 +115,7 @@ function PasskeyPrompt() {
       {/* Below 640px (sm) the prompt is one short line, so it takes less of a phone's first screen. */}
       <span className="flex-1 max-sm:hidden">Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code. A passkey can&apos;t be phished.</span>
       <span className="flex-1 sm:hidden">Sign in with a passkey instead of an email code.</span>
-      <Link href="/app/account#passkeys" className="font-medium text-violet-700 hover:underline">
+      <Link href="/app/account#passkeys" className="font-medium text-violet-700 hover:underline max-sm:inline-flex max-sm:min-h-[44px] max-sm:items-center">
         Add a passkey
       </Link>
       <button type="button" onClick={notNow} className="text-zinc-600 hover:text-zinc-900">
@@ -263,12 +263,26 @@ export function Btn({
 
 const fieldClass = "w-full rounded-[10px] border border-zinc-300 bg-zinc-50 px-3 py-2 text-[15px] text-zinc-900";
 
+/** A labelled control. The label still wraps the control (a click on it focuses the control), but the control's
+ *  accessible name is the label's text alone (aria-labelledby) and the hint is its description: a <select> named by a
+ *  wrapping label would otherwise be read with every one of its options ("Role Member Viewer Owner"). */
 export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+  const id = useId();
+  const control =
+    isValidElement<{ "aria-label"?: string; "aria-labelledby"?: string; "aria-describedby"?: string }>(children) && !children.props["aria-label"] && !children.props["aria-labelledby"]
+      ? cloneElement(children, { "aria-labelledby": `${id}-l`, ...(hint ? { "aria-describedby": `${id}-h` } : {}) })
+      : children;
   return (
     <label className="mb-3 block">
-      <span className="mb-1 block text-[14px] text-zinc-600">{label}</span>
-      {children}
-      {hint && <span className="mt-1 block text-[13px] text-zinc-500">{hint}</span>}
+      <span id={`${id}-l`} className="mb-1 block text-[14px] text-zinc-600">
+        {label}
+      </span>
+      {control}
+      {hint && (
+        <span id={`${id}-h`} className="mt-1 block text-[13px] text-zinc-500">
+          {hint}
+        </span>
+      )}
     </label>
   );
 }

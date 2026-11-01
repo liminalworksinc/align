@@ -174,7 +174,7 @@ The server SHALL create a goal on `POST /api/v2/workspaces/{ws}/goals` (browser 
 
 ### Requirement: Goal content validation
 
-The server SHALL validate goal content the same way on creation, on a new version and in a change request: `title` 1 to 300 characters after trimming; `measures` a list of at most 10 objects with `text` (1 to 300 characters) and optional `target` (at most 100), each keeping a sent `id` only when the previous version had a measure with that id (otherwise a new `m_…` id); `anchors` an object of `repos`, `branch_patterns` and `issues` lists of at most 20 strings of at most 200 characters each, trimmed and de-duplicated; `depends_on` a list of at most 5 goal ids, none equal to the goal itself; `status` one of `active`, `achieved`, `dropped`; and `limits` a list of at most 5 objects with `type` one of `must`, `must_not`, `out_of_scope`, `text` (1 to 160 characters after control characters become spaces and runs of spaces one), and optional `source` (null, or `{kind: meeting|manual, title: at most 120 characters, date: YYYY-MM-DD}`), each keeping a sent `id` only when the previous version had a limit with that id, else reusing the id of a previous limit it repeats word for word (type, text and source), else a new `lim_<12 base32>` id. A `target_share` SHALL be a whole number from 0 to 100 or `null` (no target; on a new version, an absent `target_share` keeps the current one). A violation SHALL be 400 naming the field (`limits: at most 5`, `limits[i].text`, `limits[i].type`, `limits[i].source.date`, `target_share must be a whole percent from 0 to 100, or null`), and a `depends_on` id that does not exist or that the caller may not read SHALL be 404.
+The server SHALL validate goal content the same way on creation, on a new version and in a change request: `title` 1 to 300 characters after trimming; `measures` a list of at most 10 objects with `text` (1 to 300 characters) and optional `target` (at most 100), each keeping a sent `id` only when the previous version had a measure with that id (otherwise a new `m_…` id); `anchors` an object of `repos`, `branch_patterns` and `issues` lists of at most 20 strings of at most 200 characters each, trimmed and de-duplicated; `depends_on` a list of at most 5 goal ids, none equal to the goal itself (on a new version or a change request, the previous version's dependencies the caller may not read are kept whatever the caller sends, and count toward the 5); `status` one of `active`, `achieved`, `dropped`; and `limits` a list of at most 5 objects with `type` one of `must`, `must_not`, `out_of_scope`, `text` (1 to 160 characters after control characters become spaces and runs of spaces one), and optional `source` (null, or `{kind: meeting|manual, title: at most 120 characters, date: YYYY-MM-DD}`), each keeping a sent `id` only when the previous version had a limit with that id, else reusing the id of a previous limit it repeats word for word (type, text and source), else a new `lim_<12 base32>` id. A `target_share` SHALL be a whole number from 0 to 100 or `null` (no target; on a new version, an absent `target_share` keeps the current one). A violation SHALL be 400 naming the field (`limits: at most 5`, `limits[i].text`, `limits[i].type`, `limits[i].source.date`, `target_share must be a whole percent from 0 to 100, or null`), and a `depends_on` id that does not exist or that the caller may not read SHALL be 404.
 
 #### Scenario: Too many dependencies
 
@@ -185,6 +185,11 @@ The server SHALL validate goal content the same way on creation, on a new versio
 
 - **WHEN** `depends_on` names another person's `private` goal
 - **THEN** the response is 404 and nothing is written
+
+#### Scenario: Dependencies the editor can't see are kept
+
+- **WHEN** a goal depends on a goal its owner can read and on another person's `private` goal its owner can't, and the owner saves a new version through the goal form, which sends only the dependency they can see (or none)
+- **THEN** the new version still depends on the private goal; the owner's goal page lists "a goal you can't see" under Depends on, and the form says saving keeps it
 
 #### Scenario: Limit ids
 
@@ -315,7 +320,7 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/limits/suggest {notes, sou
 
 ### Requirement: One goal with its versions and contributions
 
-The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as `{goal, versions, contributions, can_edit, can_propose}`: `goal` as in the feed, `versions` every version newest first as `{version, title, status, content_hash, created_at}`, `contributions` the readable source goals of approved alignments targeting this goal as `{goal:{id, title}}`, `can_edit` true only for the goal's owner when not a viewer, and `can_propose` true exactly when "Proposing a change request" would not refuse the reader for who they are or the goal's status: not the goal's owner, not a viewer, and the goal `active`. A goal the caller may not read SHALL be 404.
+The server SHALL serve one goal on `GET /api/v2/workspaces/{ws}/goals/{goal}` (browser session) as `{goal, versions, contributions, can_edit, can_propose, hidden_depends_on}`: `goal` as in the feed, `versions` every version newest first as `{version, title, status, content_hash, created_at}`, `contributions` the readable source goals of approved alignments targeting this goal as `{goal:{id, title}}`, `can_edit` true only for the goal's owner when not a viewer, `can_propose` true exactly when "Proposing a change request" would not refuse the reader for who they are or the goal's status: not the goal's owner, not a viewer, and the goal `active`, and `hidden_depends_on` the number of the goal's dependencies the reader may not read (never which; `goal.depends_on` lists only the readable ones). A goal the caller may not read SHALL be 404.
 
 #### Scenario: Owner opens their goal
 
@@ -479,6 +484,11 @@ The server SHALL list the alignments the caller is involved in on `GET /api/v2/w
 - **WHEN** a member calls `GET /api/v2/workspaces/{ws}/alignments`
 - **THEN** requests where they can approve or accept a counter are under `waiting_on_me`, their other requests under `mine`, and other requests they are part of under `others`
 
+#### Scenario: Effects in words
+
+- **WHEN** a person reads a contribution-only alignment and a work-toward alignment with one session
+- **THEN** the first's `contributes_to` effect reads "Records that this session contributes to <goal>. No usage moves."; the second's reads "Records that this session contributes to <goal>." without "No usage moves", next to its "Future usage from this session counts under <goal>. Past usage stays where it is."
+
 ### Requirement: Proposing a change request
 
 The server SHALL let a workspace owner or member who can read a goal but does not own it propose a change on `POST /api/v2/workspaces/{ws}/goals/{goal}/change-requests {base_version, changes, reason}` (browser session, body at most 32 KB) and respond 201 with the change request (`id` `cr_…`, `state: "pending"`, `revision: 1`). It SHALL answer 404 for a goal the caller may not read, 403 `read_only` for a viewer, 403 `own_goal` for the goal's owner (who publishes a version instead), 409 `goal_not_active` for a goal that is `achieved` or `dropped`, 409 `stale_version` when `base_version` is not the goal's current version, and 400 when `reason` is missing or not 1 to 2000 characters after trimming.
@@ -501,6 +511,25 @@ The server SHALL accept in `changes` only the keys `title`, `measures`, `depends
 
 - **WHEN** a change request sends `changes: {anchors:{repos:["x"]}}`
 - **THEN** the response is 400
+
+### Requirement: Dependencies a decider can't see are refused
+
+The server SHALL refuse with 409 `dependency_not_visible` a change request, or a `rebase`, whose `changes` add to `depends_on` (relative to the version they are made against) a goal that some member of the goal's effective approval set (after the requester rule) may not read, and a `counter` whose changes add a goal that the requester may not read, so that nobody is asked to decide on, or accept, a dependency they can't see. The message SHALL name neither the goal nor the person, and nothing SHALL be written. A dependency already on the base version is not added. Where a reader of a request still can't read a dependency in its diff (the approval set changed later, or the base version already had it), `diff.hidden_depends_on` `{before, after}` SHALL count the dependencies on each side that the reader may not read (`null` when `depends_on` doesn't change), and the app SHALL show each as "a goal you can't see", so a diff never reads "Nothing → Nothing".
+
+#### Scenario: Proposing a dependency on a private goal
+
+- **WHEN** a member proposes on a team goal a change that adds a dependency on their own `private` goal
+- **THEN** the response is 409 `dependency_not_visible` with a message that names neither the goal nor the approvers, and no request is created
+
+#### Scenario: Countering with a goal the requester can't read
+
+- **WHEN** an approver counters a request with changes that add a dependency on a goal of a team the requester is not in
+- **THEN** the response is 409 `dependency_not_visible`, and the request stays `pending` at its revision
+
+#### Scenario: A dependency the reader can't see in a diff
+
+- **WHEN** a request's diff changes `depends_on` and one dependency on its after side is a goal the reader may not read
+- **THEN** `diff.after.depends_on` omits it, `diff.hidden_depends_on.after` is 1, and the app shows "a goal you can't see" on that side and in "What would change"
 
 ### Requirement: One open change request per goal and requester
 
@@ -601,7 +630,7 @@ The server SHALL accept `reject {reason}` (reason 1 to 2000 characters, 400 othe
 
 ### Requirement: Accept if conditions on a counter
 
-The server SHALL show a request's condition as `condition` `{revision, text, acknowledged_by, acknowledged_at}` (the condition of its latest counter revision, or `null` when that counter carries none or there is no counter) and on each revision as `condition`, `acknowledged_by` and `acknowledged_at`. Only the requester SHALL acknowledge it, with `POST .../change-requests/{id}/acknowledge {revision?}` (403 `not_requester` for anyone else, 403 `read_only` for a viewer), as a step separate from `accept_counter`: on a `pending` or `approved` request (409 `wrong_state` while `countered` and in every closed state), with a condition (409 `no_condition`), naming its revision when `revision` is sent (409 `stale_revision`), and only once per revision (409 `already_acknowledged`). It SHALL store who acknowledged and when on that revision, write audit `change_request.condition_acknowledged`, and change nothing else. A condition SHALL never gate approval or launch, SHALL never reach a directive, and nothing SHALL call it verified: until acknowledged the record shows it as not confirmed yet.
+The server SHALL show a request's condition as `condition` `{revision, text, acknowledged_by, acknowledged_at}` (the condition of its latest counter revision, or `null` when that counter carries none or there is no counter) and on each revision as `condition`, `acknowledged_by` and `acknowledged_at`. Only the requester SHALL acknowledge it, with `POST .../change-requests/{id}/acknowledge {revision?}` (403 `not_requester` for anyone else, 403 `read_only` for a viewer), as a step separate from `accept_counter`: on a `pending` or `approved` request (409 `wrong_state` while `countered` and in every closed state), with a condition (409 `no_condition`), naming its revision when `revision` is sent (409 `stale_revision`), and only once per revision (409 `already_acknowledged`). It SHALL store who acknowledged and when on that revision, write audit `change_request.condition_acknowledged`, and change nothing else. A condition SHALL never gate approval or launch, SHALL never reach a directive, and nothing SHALL call it verified: until acknowledged the record shows it as not confirmed yet, and once the request is declined, withdrawn or superseded without an acknowledgement, as never confirmed ("Never confirmed: the request was declined").
 
 #### Scenario: Condition acknowledged by the requester
 
@@ -620,7 +649,7 @@ The server SHALL let only the requester (403 `not_requester`) `withdraw` a `pend
 #### Scenario: Rebase after the goal moved
 
 - **WHEN** the goal moved from version 2 to 3 and the requester POSTs `rebase {base_version: 3}`
-- **THEN** the request has `base_version: 3` and a higher `revision`, and an approver can approve it
+- **THEN** the request has `base_version: 3` and a higher `revision`, and an approver can approve it; in the app, **Update to version 3** confirms "Recorded: you updated your request to version 3 (revision <n>). It waits for approval again."
 
 ### Requirement: Change requests are superseded when the goal is achieved or dropped
 
@@ -647,7 +676,7 @@ The server SHALL write an audit row naming its actor for every change request ac
 
 ### Requirement: Reading change requests and decision records
 
-The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, each list item being the same object as the single read below, with its `can` flags, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `waiting_on_me` holds the requests whose `waiting_on_me` is true, `mine` the caller's other requests, and `others` the rest. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title, version}`, `state`, `revision`, `base_version`, `behind` (true while the request is open and the goal has moved past `base_version`), `requester`, `changes`, `reason` (the requester's), `revisions` (each `{revision, base_version, changes, note, author, created_at, evidence, snapshot}`, with `evidence` and `snapshot` as "Evidence links on change request revisions" and "Align snapshot on each change request revision" describe), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; once launched, from the resulting version), `approvers` (the effective approval set after the requester rule), `launchers` (the launch set), `approved_by`, `rejected_by`, `decision_note` (the approval note or the rejection reason) also shown as `note` when approved and `rejection_reason` when rejected, `launch` (`pending`, `not_yet`, `launched`, `superseded` or `null`), `launch_decided_by` and `launch_decided_at` (the latest not yet or launch, or `null`), `version` (the goal version the launch created, `null` before it), `condition` (see "Accept if conditions on a counter"), `evidence_count` (the links on the current revision), `approved_without_evidence` (`true` or `false` once approved, else `null`), `can` flags `{approve, approve_and_launch, reject, counter, accept_counter, acknowledge, withdraw, rebase, add_evidence, launch, not_yet}` that are true exactly when the server would accept that action from the caller (`approve` false while `behind`; all false for a viewer), `waiting_on_me` (true when the caller's `approve` or `accept_counter` flag is, or their `launch` flag while `launch` is `pending`), `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read, or on a goal other than the one in the path, SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read.
+The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goal}/change-requests?state=` as `{change_requests}` and across the workspace on `GET /api/v2/workspaces/{ws}/change-requests?state=` as `{waiting_on_me, mine, others}`, each list item being the same object as the single read below, with its `can` flags, including only requests on goals the caller may read (viewers included) and answering 400 for a `state` that is not one of the six states. `waiting_on_me` holds the requests whose `waiting_on_me` is true, `mine` the caller's other requests, and `others` the rest. `GET .../goals/{goal}/change-requests/{id}` SHALL return one request: `id`, `goal:{id, title, version}`, `state`, `revision`, `base_version`, `behind` (true while the request is open and the goal has moved past `base_version`), `requester`, `changes`, `reason` (the requester's), `revisions` (each `{revision, base_version, changes, note, author, created_at, evidence, snapshot}`, with `evidence` and `snapshot` as "Evidence links on change request revisions" and "Align snapshot on each change request revision" describe), a `diff` `{before, after}` of the changed fields (before from the base version, after with the changes applied; once launched, from the resulting version), `approvers` (the effective approval set after the requester rule), `launchers` (the launch set), `approved_by`, `rejected_by`, `decision_note` (the approval note or the rejection reason) also shown as `note` when approved and `rejection_reason` when rejected, `launch` (`pending`, `not_yet`, `launched`, `superseded` or `null`), `launch_decided_by` and `launch_decided_at` (the latest not yet or launch, or `null`), `version` (the goal version the launch created, `null` before it), `condition` (see "Accept if conditions on a counter"), `evidence_count` (the links on the current revision), `approved_without_evidence` (`true` or `false` once approved, else `null`), `can` flags `{approve, approve_and_launch, reject, counter, accept_counter, acknowledge, withdraw, rebase, add_evidence, launch, not_yet}` that are true exactly when the server would accept that action from the caller (`approve` false while `behind`; all false for a viewer), `waiting_on_me` (true when the caller's `approve`, `accept_counter` or `launch` flag is: an approved request they may launch waits on them whether nobody decided the launch yet or someone said not yet, the same rule as the workspace Home), `created_at`, `updated_at` and `decided_at`. A decided request is its decision record. A request on a goal the caller may not read, or on a goal other than the one in the path, SHALL be 404, and `depends_on` in a diff SHALL list only goals the caller may read (`diff.hidden_depends_on` counts the others, see "Dependencies a decider can't see are refused").
 
 #### Scenario: Viewer reads but cannot act
 
@@ -658,6 +687,11 @@ The server SHALL list change requests on `GET /api/v2/workspaces/{ws}/goals/{goa
 
 - **WHEN** a team lead calls `GET /api/v2/workspaces/{ws}/change-requests`
 - **THEN** pending requests on their team's goals are under `waiting_on_me`, their own requests under `mine`, and the rest they can read under `others`
+
+#### Scenario: Not yet still waits on the launchers
+
+- **WHEN** an approver approves a request and says not yet, and a workspace owner (a launcher) opens the Requests tab and the Home
+- **THEN** both list it as waiting on them: `waiting_on_me` is true and the Home has it under "Waiting on you" as "Approved, not launched"
 
 ### Requirement: Proposing a reallocation
 
@@ -916,7 +950,7 @@ The server SHALL, in the transaction that gives a goal status `achieved` or `dro
 
 ### Requirement: Reading a goal's requests
 
-The server SHALL answer `GET /api/v2/workspaces/{ws}/goals/{goal}/requests` for anyone who can read the goal with `{requests, can_send, sessions, hold}`: the newest 50 requests on the goal, each `{id, type, goal:{id, title, version}, target_goal, note, sender: {id, name, role}, created_at, cancelled_at, cancelled_by, state, counts, sessions, can_cancel}` with `state` `open` (a session still pending), `cancelled`, `expired` (not cancelled, and every session expired because the goal closed before any answered) or `answered`, `counts` `{pending, accepted, declined, expired, done_by_agent}`, and `sessions` rows `{session_key, owner, mine, repo_alias, harness, title, state, auto_accepted, updated_at}` where `state` is `sent`, `received`, `accepted`, `declined` or `expired` and `title` is shown only on the reader's own sessions. The sender, the goal's approval set and workspace owners SHALL get every session's row; anyone else only their own sessions' rows, with the counts. `target_goal` SHALL be `{id: null, title: null, version: null, private: true}` for a reader who cannot read that goal. `can_send` SHALL be true only for a person who may send requests while the goal is active, `sessions` SHALL list the sessions on the goal (owner, repository alias, harness) for such a person and be null otherwise, and `hold` SHALL be as `GET …/hold` answers.
+The server SHALL answer `GET /api/v2/workspaces/{ws}/goals/{goal}/requests` for anyone who can read the goal with `{requests, can_send, sessions, hold}`: the newest 50 requests on the goal, each `{id, type, goal:{id, title, version}, target_goal, note, sender: {id, name, role}, created_at, cancelled_at, cancelled_by, state, counts, sessions, can_cancel}` with `state` `open` (a session still pending), `cancelled`, `expired` (not cancelled, and every session expired because the goal closed before any answered) or `answered`, `counts` `{pending, accepted, declined, expired, done_by_agent}`, and `sessions` rows `{session_key, owner, mine, repo_alias, harness, title, state, auto_accepted, updated_at}` where `state` is `sent`, `received`, `accepted`, `declined` or `expired` and `title` is shown only on the reader's own sessions. The sender, the goal's approval set and workspace owners SHALL get every session's row; anyone else only their own sessions' rows, with the counts. `target_goal` SHALL be `{id: null, title: null, version: null, private: true}` for a reader who cannot read that goal. `can_send` SHALL be true only for a person who may send requests while the goal is active, `sessions` SHALL list the sessions on the goal (`{session_key, owner, mine, repo_alias, harness, title, started_at}`, `title` only on the reader's own sessions) for such a person and be null otherwise, and `hold` SHALL be as `GET …/hold` answers.
 
 #### Scenario: A member who reads the goal but has no session on it
 
@@ -985,7 +1019,7 @@ The server SHALL write audit rows naming the actor for `request.sent`, `request.
 - `lib/v2/validate.ts`
 - `lib/v2/directives.ts` (`goalTargets`, `goalVersionDirective`, `writeDirective` only)
 - `lib/v2/sessions.ts` (`sessionRow`, `openEpoch`, the epoch binding check only)
-- `lib/v2/workspaces.ts` (`need`, `memberName`, `createWorkspace` only)
+- `lib/v2/workspaces.ts` (`need`, `memberName`, `memberPrincipal`, `createWorkspace` only)
 - `lib/v2/db.ts`
 - `lib/v2/errors.ts`
 - `lib/v2/http.ts`

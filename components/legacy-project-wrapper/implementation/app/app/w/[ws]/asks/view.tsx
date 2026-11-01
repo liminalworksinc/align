@@ -210,7 +210,7 @@ function RecordAsk({ ws, teams, goals, onDone }: { ws: string; teams: WsDetail["
   );
 }
 
-function ImportAsks({ ws, onDone }: { ws: string; onDone: () => void }) {
+function ImportAsks({ ws, teams, onDone }: { ws: string; teams: { id: string; name: string }[]; onDone: () => void }) {
   const [json, setJson] = useState("");
   const [result, setResult] = useState<string | null>(null);
   const act = useAction();
@@ -231,8 +231,13 @@ function ImportAsks({ ws, onDone }: { ws: string; onDone: () => void }) {
     <details id="import-asks">
       <summary className="cursor-pointer text-[15px] text-zinc-700">Import asks (JSON, at most 60)</summary>
       <p className="my-2 text-[14px] text-zinc-500">
-        Each ask: {"{"}team_id, text, from_label, goal_id, source: {"{"}kind: &quot;meeting&quot; or &quot;manual&quot;, title, date{"}"}, state, mentions{"}"}. An import adds to the asks here and never replaces them: an ask already recorded for that team with the same text and date is skipped, and one with a new date is recorded as having come up again.
+        Each ask: {"{"}team (the team&apos;s name) or team_id, text, from_label, goal_id, source: {"{"}kind: &quot;meeting&quot; or &quot;manual&quot;, title, date{"}"}, state, mentions{"}"}. An import adds to the asks here and never replaces them: an ask already recorded for that team with the same text and date is skipped, and one with a new date is recorded as having come up again.
       </p>
+      {teams.length > 0 && (
+        <p className="my-2 text-[14px] text-zinc-500" data-import-teams>
+          Teams here: {teams.map((t) => `${t.name} (team_id ${t.id})`).join(", ")}.
+        </p>
+      )}
       <TextArea rows={6} value={json} onChange={(e) => setJson(e.target.value)} />
       <div className="mt-2">
         <Btn kind="secondary" disabled={act.busy || !json.trim()} onClick={() => void run()}>
@@ -273,8 +278,9 @@ export default function Asks({ me, ws }: { me: Me; ws: string }) {
       {d.data && (
         <>
           <Card title="Waiting on you">{list(waiting, "Nothing is waiting on you.")}</Card>
-          <Card title="Asked of your teams">{list(ofTeams, "No asks yet.")}</Card>
-          <Card title="Your asks">{list(mine, "No asks yet.")}</Card>
+          {/* An ask that waits on this person is listed once, under Waiting on you: the sections below say so. */}
+          <Card title="Asked of your teams">{list(ofTeams, waiting.some((a) => myTeams.has(a.team.id)) ? "No other asks of your teams. The ones that need you are under Waiting on you." : "No asks yet.")}</Card>
+          <Card title="Your asks">{list(mine, waiting.some((a) => !myTeams.has(a.team.id) && a.requester.id === me.id) ? "No other asks of yours. The ones that need you are under Waiting on you." : "No asks yet.")}</Card>
           {role === "owner" && <Card title="Others">{list(others, "No asks yet.")}</Card>}
         </>
       )}
@@ -285,7 +291,7 @@ export default function Asks({ me, ws }: { me: Me; ws: string }) {
       )}
       {role === "owner" && (
         <Card>
-          <ImportAsks ws={ws} onDone={d.reload} />
+          <ImportAsks ws={ws} teams={w.data?.teams ?? []} onDone={d.reload} />
         </Card>
       )}
     </Shell>

@@ -24,7 +24,12 @@ export default function Requests({ me, ws }: { me: Me; ws: string }) {
       {d.data && (
         <>
           {section("Waiting on you", d.data.waiting_on_me, "Nothing is waiting on you.")}
-          {section("Your requests", d.data.mine, "You have not proposed a change. Open someone else's goal to propose one.")}
+          {section(
+            "Your requests",
+            d.data.mine,
+            // A request of yours that waits on you (a counter to accept, or a launch you may do) is listed above.
+            d.data.waiting_on_me.some((cr) => cr.requester.id === me.id) ? "No other requests of yours. Yours that need you are under Waiting on you." : "You have not proposed a change. Open someone else's goal to propose one.",
+          )}
           {section("Others", d.data.others, "None.")}
         </>
       )}

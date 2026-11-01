@@ -23,7 +23,7 @@ export default function InviteAccept({ me, token }: { me: Me; token: string }) {
         {p.data && (
           <>
             <p className="mb-3 text-[16px] text-zinc-700">
-              You are invited to <strong className="text-zinc-900">{p.data.workspace.name}</strong> as {p.data.role}
+              {p.data.email_matches ? "You are" : `${p.data.invited_email} is`} invited to <strong className="text-zinc-900">{p.data.workspace.name}</strong> as {p.data.role}
               {p.data.team ? (
                 <>
                   {" "}
@@ -46,9 +46,23 @@ export default function InviteAccept({ me, token }: { me: Me; token: string }) {
                 Join workspace
               </Btn>
             ) : (
-              <Note>
-                This invite is for {p.data.invited_email}. You are signed in as {me.email}. Sign in with the invited address to join.
-              </Note>
+              <>
+                <Note>
+                  This invite is for {p.data.invited_email}. You are signed in as {me.email}. Sign in with the invited address to join.
+                </Note>
+                {/* Not a dead end (U11): sign out, then the sign-in page opens with the invited address filled in and comes back here. */}
+                <Btn
+                  disabled={act.busy}
+                  onClick={() =>
+                    void act.run(async () => {
+                      await fetch("/api/v2/auth/sign-out", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
+                      go(`/app/sign-in?${new URLSearchParams({ next: `/app/invite/${token}`, email: p.data!.invited_email })}`);
+                    })
+                  }
+                >
+                  Sign out and use {p.data.invited_email}
+                </Btn>
+              </>
             )}
           </>
         )}

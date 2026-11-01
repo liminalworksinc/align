@@ -11,6 +11,8 @@ class AuthError extends Error {
     public status: number,
     public code: string,
     message: string,
+    /** Seconds until a refused (429) request may be tried again, when the server said. */
+    public retryAfter: number | null = null,
   ) {
     super(message);
   }
@@ -19,11 +21,20 @@ class AuthError extends Error {
 async function post(path: string, body: unknown, headers: Record<string, string> = {}) {
   const res = await fetch(`/api/v2/auth${path}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), credentials: "same-origin" });
   const data = (await res.json().catch(() => ({}))) as { url?: string; message?: string; code?: string };
-  if (!res.ok) throw new AuthError(res.status, data.code ?? "", data.message || "Sign-in failed");
+  if (!res.ok) {
+    const retry = Number(res.headers.get("retry-after") ?? res.headers.get("x-retry-after") ?? NaN);
+    throw new AuthError(res.status, data.code ?? "", data.message || "Sign-in failed", Number.isFinite(retry) ? retry : null);
+  }
   return data;
 }
 
-const TOO_MANY_SENDS = "Too many codes were sent. Wait a few minutes, then try again.";
+/** A refused send (429): Align's own limits say how long to wait (code rate_limited, from the real retry time); Better
+ *  Auth's per-minute limit gives only its retry header. */
+const tooManySends = (e: AuthError) => {
+  if (e.code === "rate_limited") return e.message;
+  const min = Math.max(1, Math.ceil((e.retryAfter ?? 60) / 60));
+  return `Too many codes were sent. Try again in ${min === 1 ? "1 minute" : `${min} minutes`}.`;
+};
 
 /** What the person reads when a code is refused (Better Auth's emailOtp codes, and ours from lib/v2/auth.ts). */
 function codeMessage(e: unknown): string {
@@ -109,7 +120,7 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
         setCode("");
         setStep("code");
       },
-      (e) => (e instanceof AuthError && e.status === 429 ? TOO_MANY_SENDS : e instanceof AuthError ? (captchaMessage(e) ?? e.message) : (e as Error).message),
+      (e) => (e instanceof AuthError && e.status === 429 ? tooManySends(e) : e instanceof AuthError ? (captchaMessage(e) ?? e.message) : (e as Error).message),
     );
 
   const signInWithCode = () =>
@@ -222,7 +233,7 @@ export default function SignIn({ next, options, email: email0, code: code0 }: { 
             {options.local && (
               <Note>
                 On this machine the code is not emailed: it is printed in the terminal running Align and saved in <code>&lt;data&gt;/v2/sign-in.txt</code>. Run <code>npm run sign-in-link</code> to get
-                a new one.
+                a new one (with <code>PORT=&lt;port&gt;</code> in front when Align runs on a port other than 3100).
               </Note>
             )}
           </form>

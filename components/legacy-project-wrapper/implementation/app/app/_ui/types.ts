@@ -152,7 +152,9 @@ export interface ChangeRequest {
     evidence: Evidence[];
     snapshot: AlignSnapshot | null;
   }[];
-  diff: { before: ChangeFields; after: ChangeFields };
+  /** depends_on lists only goals the reader can read; hidden_depends_on counts the others on each side (null when
+   *  depends_on doesn't change). */
+  diff: { before: ChangeFields; after: ChangeFields; hidden_depends_on?: { before: number; after: number } | null };
   approvers: { id: string; name: string }[];
   launchers: { id: string; name: string }[];
   approved_by: { id: string; name: string } | null;

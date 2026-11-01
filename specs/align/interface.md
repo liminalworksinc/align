@@ -165,8 +165,8 @@ SHALL sign in only on a POST that the person submits; opening a sign-in link SHA
 
 #### Scenario: Too many codes
 
-- **WHEN** sending is refused with 429 (more than 3 sends for that email in 10 minutes, or more than 10 from this client in an hour)
-- **THEN** the page shows "Too many codes were sent. Wait a few minutes, then try again." and sends nothing
+- **WHEN** sending is refused with 429 (more than 3 sends for that email in 10 minutes, or, hosted, more than 10 from this client in an hour; see "Email code send limits")
+- **THEN** the page shows the server's message, which says how long to wait ("Too many codes were sent. Try again in <n> minutes."), and sends nothing; for Better Auth's own per-minute limit it says the same from its retry header
 
 #### Scenario: Link from the email
 
@@ -176,7 +176,7 @@ SHALL sign in only on a POST that the person submits; opening a sign-in link SHA
 #### Scenario: Mode L hint
 
 - **WHEN** the page is served in Mode L
-- **THEN** the code step adds "On this machine the code is not emailed: it is printed in the terminal running Align and saved in `<data>/v2/sign-in.txt`. Run `npm run sign-in-link` to get a new one." Being on loopback never signs the person in
+- **THEN** the code step adds "On this machine the code is not emailed: it is printed in the terminal running Align and saved in `<data>/v2/sign-in.txt`. Run `npm run sign-in-link` to get a new one (with `PORT=<port>` in front when Align runs on a port other than 3100)." Being on loopback never signs the person in
 
 ### Requirement: Account screen and provider linking
 
@@ -222,8 +222,13 @@ let the person add, rename and delete passkeys.
 ### Requirement: Add-a-passkey prompt
 
 Every `/app` page with the top bar, except `/app/account`, SHALL show under it, to a person the server reports as due
-for the prompt, "Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code. A passkey
+for the prompt and only on the passkey host (Mode L: `localhost`, never `127.0.0.1`, where a passkey can't work), "Add a passkey to sign in with your fingerprint, face or device PIN instead of an email code. A passkey
 can't be phished." with an **Add a passkey** link to `/app/account#passkeys` and **Not now**.
+
+#### Scenario: No prompt where passkeys can't work
+
+- **WHEN** a person due for the prompt opens `/app` at `http://127.0.0.1:<port>` in Mode L
+- **THEN** no prompt is shown; at `http://localhost:<port>` it is
 
 #### Scenario: Not now
 
@@ -276,7 +281,7 @@ code from them, the Turnstile widget when the bot check is on, and only a note w
 #### Scenario: Deleted workspaces
 
 - **WHEN** the person owns workspaces deleted in the last 30 days
-- **THEN** a "Deleted workspaces" card lists each with "Deleted <time>. You can restore it until <time>; then it is erased." and **Restore**, which posts to `POST /api/v2/workspaces/<ws>/restore` and reloads the list, where the workspace is back among the links; 403 `reauth_required` shows the server's "Sign in again to restore a workspace. This needs a sign-in from the last 15 minutes." with **Sign in again** (coming back to `/app`); a hosted restore that would pass a workspace cap (409 `workspace_cap` or `owned_workspace_cap`) shows the server's message in red; the card is absent when there is nothing to restore
+- **THEN** a "Deleted workspaces" card lists each with "Deleted <time>. You can restore it until <time>; then it is erased. Restoring brings back its members and history, but not its connected AI apps: each one has to connect again." and **Restore**, which posts to `POST /api/v2/workspaces/<ws>/restore` and reloads the list, where the workspace is back among the links; 403 `reauth_required` shows the server's "Sign in again to restore a workspace. This needs a sign-in from the last 15 minutes." with **Sign in again** (coming back to `/app`); a hosted restore that would pass a workspace cap (409 `workspace_cap` or `owned_workspace_cap`) shows the server's message in red; the card is absent when there is nothing to restore
 
 #### Scenario: Create refused
 
@@ -286,12 +291,12 @@ code from them, the Turnstile widget when the bot check is on, and only a note w
 #### Scenario: Creation code
 
 - **WHEN** a hosted person who needs a code opens `/app`
-- **THEN** "Create a workspace" has Name, "Creation code" (hint: each code creates one workspace and came in the email that answered the access request), "No code yet? **Request access**", the widget when the bot check is on, and **Create**, disabled until the name, the code and the check are filled, posting `{name, creation_code}`; the sample card is not shown
+- **THEN** "Create a workspace" has Name, "Creation code" (hint: each code creates one workspace and came in the email that answered the access request), "No code yet? **Request access**", the widget when the bot check is on, and **Create**, disabled until the name, the code and the check are filled, posting `{name, creation_code}`; the sample card is not shown, and a person in no workspace reads "You are not in a workspace yet. Create one with a creation code, or open an invite link someone sent you." (no sample is mentioned)
 
 #### Scenario: Creation closed
 
 - **WHEN** a hosted server runs with `ALIGN_CREATION=closed`
-- **THEN** "Create a workspace" shows only "New workspaces can't be created on this server right now. Contact its operator."
+- **THEN** "Create a workspace" shows only "New workspaces can't be created on this server right now. Contact its operator.", and a person in no workspace reads "You are not in a workspace yet. Open an invite link someone sent you."
 
 ### Requirement: Request access page
 
@@ -417,7 +422,7 @@ email join with **Join workspace**.
 #### Scenario: Wrong account or unusable link
 
 - **WHEN** the signed-in email differs from the invited one, or the token is unknown, accepted, withdrawn or expired
-- **THEN** the page says "This invite is for <invited email>. You are signed in as <email>. Sign in with the invited address to join." with no button, or "This invite link is not valid. It may have been used, withdrawn or expired."
+- **THEN** the page says "<invited email> is invited to <workspace> as <role>." then "This invite is for <invited email>. You are signed in as <email>. Sign in with the invited address to join." with no **Join workspace** but **Sign out and use <invited email>**, which signs out and opens sign-in with that address filled in and `next` the invite page; or "This invite link is not valid. It may have been used, withdrawn or expired."
 
 #### Scenario: Invitee without an account
 
@@ -488,6 +493,16 @@ read. A workspace owner sees every connected app and anyone else their own, as o
 
 - **WHEN** the Home's read fails, or the server could not read one of its sections
 - **THEN** each affected tile says "unknown", the line says how much is waiting is unknown, and the section says Align couldn't read it just now, so it is unknown; nothing shows zero or "not observed" in its place
+
+#### Scenario: Not in the workspace
+
+- **WHEN** a signed-in person who is not a member opens `/app/w/<ws>` or any page under it: the workspace doesn't exist, was deleted, they were removed, or they were never in it
+- **THEN** the page shows only the top bar and "This workspace doesn't exist or you're not in it" with a link to `/app` ("Go to your workspaces"): no workspace tabs, no tiles, no "unknown" and no "Reload" (that is for a read that failed, not for a 404)
+
+#### Scenario: First-run card after the queue
+
+- **WHEN** the first-run card is shown and something waits on the person
+- **THEN** the card comes after "Waiting on you", so on a phone the queue is on the first screens; with nothing waiting it comes before the tiles
 
 #### Scenario: A workspace with no goals
 
@@ -576,8 +591,12 @@ labels break only between words, and the Spend and Apps tables show each row as 
 names. Below 640 px the chrome SHALL be compact: the top bar drops the person's name (the Account page has it), the
 passkey prompt is one short sentence ("Sign in with a passkey instead of an email code."), and the workspace tab row
 drops the workspace's name and role (the switcher shows the name), so a workspace page's heading starts above y=300 on
-a 390×844 screen; and every action button SHALL be at least 44 px tall (in px: the root font is 15 px, so a rem
-height falls short). At every width from 500 to 1440 px the Home, Goals, goal, Requests and Apps pages SHALL not
+a 390×844 screen; and every action control SHALL be at least 44 px tall below 640 px (in px: the root font is 15 px,
+so a rem height falls short): every button and select, the text-styled ones too (the top bar's **Sign out**, the
+passkey prompt's **Not now** and **Add a passkey**, **Paste meeting notes**, **Remove** on the People tab). At 320 px
+wide every page SHALL still not scroll sideways: a form row that holds several fields (a measure, its target and
+**Remove**; a limit's meeting, date and **Remove limit**) puts its first field on its own line below 640 px, so no
+field collapses. At every width from 500 to 1440 px the Home, Goals, goal, Requests and Apps pages SHALL not
 scroll sideways (page or main column), and a long button label SHALL wrap inside its container. The workspace switcher
 SHALL be the browser's own select, listing only the person's workspaces, so its list never runs off a narrow window.
 A page SHALL read the connected apps at most once (the Home through its one read, the Apps tab through
@@ -591,7 +610,12 @@ A page SHALL read the connected apps at most once (the Home through its one read
 #### Scenario: Tap targets and widths
 
 - **WHEN** the person opens Goals, a goal, Requests, Apps, Sessions, People, Account or Devices at 390 px, and the Home, Goals, a goal with its tree, Requests and Apps at 500, 600, 700, 768, 1100, 1268 and 1440 px
-- **THEN** every action button at 390 is at least 44 px tall, no page scrolls sideways, and at 700 px the workspace switcher is on screen and lists exactly the person's workspaces
+- **THEN** every button and select in the top bar, the passkey prompt and the page at 390 is at least 44 px tall, no page scrolls sideways, and at 700 px the workspace switcher is on screen and lists exactly the person's workspaces
+
+#### Scenario: A 320 px phone
+
+- **WHEN** the person opens the workspace list, Home, Goals (with the New goal form), a goal page (with its New version form), People, Requests, Asks, Spend, Apps and Account at 320×640
+- **THEN** none scrolls sideways, and each measure field is as wide as the form
 
 #### Scenario: Phone
 
@@ -724,7 +748,7 @@ and a closed "Details" disclosure.
 #### Scenario: Understand an open request
 
 - **WHEN** anyone who can read the goal opens a pending or countered request
-- **THEN** "Approved now · version <base>" and "Proposed · revision <r>" show each changed field side by side (stacked below 640 px), with the facts Version ("Goal at version <n>", and the request's base when the goal moved on), Requested by, Decides (who can approve, or "Nobody can approve this yet") and State; "What would change", tagged "the request's own text, not evidence", says field by field what the request would change, quotes the requester's reason "as written" and the latest counter's note, and shows any "Accept if…" condition with "Not confirmed yet" until acknowledged; beside it "Evidence for revision <r>" shows Align's snapshot and the links (self-reported or agent-reported, never verified) or "No evidence attached."; "Details", closed, lists the request, goal, requester and approver ids, the state, revision and base version, the evidence ids and the times
+- **THEN** "Approved now · version <base>" (or, when the goal moved on, "Request made against version <base> · goal now at <n>") and "Proposed · revision <r>" show each changed field side by side (stacked below 640 px), with the facts Version ("Goal at version <n>", and the request's base when the goal moved on), Requested by, Decides (who can approve, or "Nobody can approve this yet") and State; "What would change", tagged "the request's own text, not evidence", says field by field what the request would change (a dependency the reader can't read as "a goal you can't see", never left out), quotes the requester's reason "as written" and the latest counter's note ("Your note on revision <r>" when the reader wrote it, else "<name>'s note …"), and shows any "Accept if…" condition with "Not confirmed yet" until acknowledged; beside it "Evidence for revision <r>" shows Align's snapshot and the links (self-reported or agent-reported, never verified) or "No evidence attached."; "Details", closed, lists the request, goal, requester and approver ids, the state, revision and base version, the evidence ids and the times
 
 #### Scenario: Choose a decision
 
@@ -754,7 +778,7 @@ and a closed "Details" disclosure.
 #### Scenario: Approved, not launched
 
 - **WHEN** a request is approved and not launched
-- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}`
+- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}`. A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Rejected by you"), anyone else by name
 
 #### Scenario: Launched or superseded before launch
 
@@ -764,12 +788,12 @@ and a closed "Details" disclosure.
 #### Scenario: Accept if condition
 
 - **WHEN** an approver chooses **Accept if…**, or adds the optional condition to **Suggest a change** (at most 2000 characters), and the request is countered with it
-- **THEN** the card shows "Accept if: <condition>" with "Not confirmed yet" until the requester acknowledges it, then "Acknowledged by <name>, <time>"; the requester, when `can.acknowledge` is set, gets **Confirm the condition is met**, a decision on an open request and a button on an approved one, which posts `{revision}` to `acknowledge`; nothing says verified
+- **THEN** the card shows "Accept if: <condition>" with "Not confirmed yet" until the requester acknowledges it, then "Acknowledged by <name>, <time>" (a request declined, withdrawn or superseded first says "Never confirmed: the request was declined", "… withdrawn" or "… superseded"); the requester, when `can.acknowledge` is set, gets **Confirm the condition is met**, a decision on an open request and a button on an approved one, which posts `{revision}` to `acknowledge`; nothing says verified
 
 #### Scenario: Requester acts
 
 - **WHEN** the requester views their own open request
-- **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending) and **Withdraw**; a pending one offers **Withdraw** (`withdraw`) and, with an unacknowledged condition, **Confirm the condition is met**; and one whose base version is behind the goal and whose `can.rebase` flag is set shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{revision, base_version:<n>}` to `rebase`
+- **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending) and **Withdraw**; a pending one offers **Withdraw** (`withdraw`) and, with an unacknowledged condition, **Confirm the condition is met**; and one whose base version is behind the goal and whose `can.rebase` flag is set shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{revision, base_version:<n>}` to `rebase` and then shows "Recorded: you updated your request to version <n> (revision <r>). It waits for approval again." like every other decision
 
 #### Scenario: Viewer
 
@@ -779,12 +803,12 @@ and a closed "Details" disclosure.
 ### Requirement: Evidence on change request cards
 
 Every change request card (on the goal page and in the Requests tab) SHALL show, under "Evidence for revision <n>"
-(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days with its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence." or "Approved with <n> evidence link(s), none verified."
+(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days with its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence on the approved revision (<r>)." (links on earlier revisions are still listed under "From revision <n>") or "Approved with <n> evidence link(s), none verified." An **Add link** for a link that can no longer become an `https://` one (`http://…`) SHALL stay disabled with the hint "Use an https:// link: Align keeps only https links."
 
 #### Scenario: Approve without evidence
 
 - **WHEN** an approver chooses **Approve** on a revision with no evidence links
-- **THEN** its input asks "Approve without evidence?" and explains that the decision record and the audit log will say so, and the confirmation's Evidence row says "None"; once approved the record says "Approved without evidence."
+- **THEN** its input asks "Approve without evidence?" and explains that the decision record and the audit log will say so, and the confirmation's Evidence row says "None"; once approved the record says "Approved without evidence on the approved revision (<r>)."
 
 #### Scenario: A link is added
 
@@ -799,20 +823,23 @@ The Requests tab at `/app/w/<ws>/requests` SHALL show the change requests the pe
 #### Scenario: Sections
 
 - **WHEN** a member opens the tab
-- **THEN** "Waiting on you" holds the requests whose `waiting_on_me` is true for the person (pending requests they may approve, their own countered requests waiting for them to accept, and approved requests they may launch that nobody has launched or put off with not yet), "Your requests" holds the person's other requests, and "Others" holds every other request they can see; each card names the goal (a link to its goal page), the requester, the state pill, the reason and the changed fields, with the same actions as on the goal page
+- **THEN** "Waiting on you" holds the requests whose `waiting_on_me` is true for the person (pending requests they may approve, their own countered requests waiting for them to accept, and approved requests they may launch that nobody has launched yet, including ones someone put off with not yet: the same rule as the Home's "Approved, not launched"), "Your requests" holds the person's other requests, and "Others" holds every other request they can see; each card names the goal (a link to its goal page), the requester, the state pill, the reason and the changed fields, with the same actions as on the goal page
 
 #### Scenario: Empty sections
 
 - **WHEN** a section has nothing
-- **THEN** it shows "Nothing is waiting on you.", "You have not proposed a change. Open someone else's goal to propose one." or "None." respectively
+- **THEN** it shows "Nothing is waiting on you.", "You have not proposed a change. Open someone else's goal to propose one." or "None." respectively; when the person's own requests are all under "Waiting on you", "Your requests" says "No other requests of yours. Yours that need you are under Waiting on you." instead
 
 ### Requirement: Decision value card
 
 An approved change request's card, on the goal page and the Requests tab, SHALL show a "What this decision gave you"
 card for every reader of the request, from `GET /api/v2/workspaces/<ws>/goals/<goal>/change-requests/<id>/value`
 (`lib/v2/value.ts`; `409 not_approved` for any other state, `404` for a request the person can't read), with these
-rows: "Accepted change" (each changed field, and the version it became once launched, or "Approved, agents still on
-v<n> until launch"), "Who approved" (the approver and time, and "approved without evidence" when so), "Affected goals and
+rows: "Accepted change" (each change in words, one line each, the same lines as the MCP decision record: "<measure>
+target 500 → 600", "Added measure …", "Removed measure …", "Title … → …", "Status … → …", "Added limit …", "Now
+depends on <title>", never a count like "Measures: 1 → 1"; and the version it became once launched, or "Approved, agents
+still on v<n> until launch"), "Who approved" (the approver, "You" for the reader, and time, and "approved without
+evidence" when so), "Affected goals and
 teams" (the goal and its team, the readable goals it contributes to and the readable goals that depend on or contribute
 to it), "Agents on the new version" (before the launch "Not launched yet: agents stay on v<n> until launch."; after it,
 of the bound sessions the launch's `goal_version` directive reached: how many have it in context, received but not used
@@ -880,7 +907,7 @@ optionally naming a team, and lists and withdraws open invites.
 
 #### Scenario: Create an invite
 
-- **WHEN** an owner enters an email, picks a Role (Member, "Viewer (read only)", Owner), optionally a Team and a team role (Member by default, or Lead), and presses **Create invite link**
+- **WHEN** an owner enters an email, picks a Role (Member, "Viewer (read only)", Owner), optionally a Team and, once a team is picked, a team role (Member by default, or Lead; the field is not shown with "No team"), and presses **Create invite link**
 - **THEN** the page posts `{email, role, team_id, team_role}` to `POST /api/v2/workspaces/<ws>/invites` and shows "Send this link to them yourself. It works once, for that email address, for 7 days: <link>"
 
 #### Scenario: Open invites
@@ -964,7 +991,7 @@ form and workspace owners an import.
 #### Scenario: Ask card
 
 - **WHEN** a member opens the tab
-- **THEN** each card shows "<who asked> asked <team>" (the requester's name when nobody is named), the state pill (open amber, accepted violet, done green, declined and withdrawn neutral), the goal it concerns as a link when the person can read it, the text in quotes, "<meeting>, <date>" (just the date for an ask recorded by hand) followed by " · came up again <n> times, last on <date> (<where>)" when it has mentions, who recorded and who last decided it, the mentions under "When it came up again", and **Accept**, **Mark done**, **Decline**, **Reopen**, **Came up again** and **Withdraw**, which post to `.../asks/<id>/<action>`; with none in a section, "Nothing is waiting on you." or "No asks yet."
+- **THEN** each card shows "<who asked> asked <team>" (the requester's name when nobody is named), the state pill (open amber, accepted violet, done green, declined and withdrawn neutral), the goal it concerns as a link when the person can read it, the text in quotes, "<meeting>, <date>" (just the date for an ask recorded by hand) followed by " · came up again <n> times, last on <date> (<where>)" when it has mentions, who recorded and who last decided it, the mentions under "When it came up again", and **Accept**, **Mark done**, **Decline**, **Reopen**, **Came up again** and **Withdraw**, which post to `.../asks/<id>/<action>`; with none in a section, "Nothing is waiting on you." or "No asks yet.", except that "Asked of your teams" and "Your asks" say "No other asks of your teams. The ones that need you are under Waiting on you." (or "No other asks of yours. …") when the asks that would be theirs are all waiting on the person
 
 #### Scenario: Came up again
 
@@ -979,7 +1006,7 @@ form and workspace owners an import.
 #### Scenario: Import asks
 
 - **WHEN** a workspace owner opens "Import asks (JSON, at most 60)", pastes a list of asks (or `{"asks": [...]}`) and presses **Import**
-- **THEN** the page posts `{asks}` to `POST .../asks/import` and shows "Imported: <created> new, <merged> came up again, <unchanged> already recorded."
+- **THEN** the help names each field (a team by `team`, its name, or `team_id`) and lists "Teams here: <name> (team_id <id>), …", the page posts `{asks}` to `POST .../asks/import` and shows "Imported: <created> new, <merged> came up again, <unchanged> already recorded."
 
 ### Requirement: Agent activity on the goal page
 
@@ -1005,7 +1032,8 @@ optional reason (at most 280 characters, "shown to the developers") while the go
 **Release** while it is held, calling `PUT` and `DELETE /api/v2/workspaces/<ws>/goals/<goal>/hold` and showing
 **Sign in again** on 403 `reauth_required`. For a person who may send requests it SHALL offer "Send a request" with
 the type choices Replan, Checkpoint and Switch goal (each with a sentence saying what the agent does and whether the
-developer is asked first), for Switch goal a checkbox per session on the goal and a target-goal picker of the other
+developer is asked first), for Switch goal a checkbox per session on the goal (its name, then "started <time> · …<the
+key's last 6 characters>", so two sessions of one person in one repository can be told apart) and a target-goal picker of the other
 active goals, an optional note (at most 280 characters, "shown to the developer and the agent, quoted") and
 **Send** (`POST …/requests`), or "No shared session is working on this goal, so there is no one to send a request
 to." when there is no session. Each request SHALL be listed with its type, a pill (waiting, answered, cancelled, or "expired: the goal closed"), its
@@ -1105,7 +1133,7 @@ refuse requests it cannot trust without redirecting.
 #### Scenario: Viewer workspaces
 
 - **WHEN** the person is a viewer in some workspaces
-- **THEN** those workspaces are not offered; with no workspace they own or are a member of, the page shows "You have no workspace where you can connect an app. Viewers can't connect apps." and no **Allow** button
+- **THEN** those workspaces are not offered; with no workspace they own or are a member of, the page shows "You have no workspace where you can connect an app. Viewers can't connect apps." and no **Allow** button, at once: such a person is never first asked to sign in again
 
 #### Scenario: Loopback redirect
 
@@ -1135,6 +1163,28 @@ The app SHALL show a plain error page for any render error, without the error me
 
 - **WHEN** an `/app` page or the consent page is waiting for the server
 - **THEN** it shows "Loading Align…" (whole page) or "Loading…" (one card) instead of an empty screen, and an API error shows the server's message in red
+
+### Requirement: Form fields are named by their labels
+
+Every labelled field in the web app (a text field, a text area or a select under a visible label) SHALL have as its
+accessible name the label's text alone, and its hint, when it has one, as its description; a select's options SHALL
+never be part of its name.
+
+#### Scenario: A select in a form
+
+- **WHEN** a screen reader reaches the invite form's Role select or the Team select
+- **THEN** it reads "Role" or "Team (optional)", not "Role Member Viewer (read only) Owner"
+
+### Requirement: No prerender errors in the server log
+
+Pages that read the signed-in session SHALL wait for the request before reading it (the session read checks the
+time), so a production server (`next start`) logs no "encountered the unstable value `Date.now()` while prerendering"
+error for `/app`, `/app/sign-in` or any other page.
+
+#### Scenario: Opening the app
+
+- **WHEN** a production server starts and `/app` and `/app/sign-in` are opened
+- **THEN** both render, and the server's output holds no prerender error
 
 ### Requirement: Web app status pills
 
@@ -1172,6 +1222,8 @@ active goal), neutral otherwise.
 - `app/app/_ui/crparts.tsx`
 - `app/app/_ui/decide.tsx`
 - `lib/v2/launch-words.ts`
+- `lib/v2/change-words.mts`
+- `app/app/_ui/missing.tsx`
 - `app/app/_ui/value.tsx`
 - `lib/v2/value-core.mts`
 - `lib/paste-lines.ts`

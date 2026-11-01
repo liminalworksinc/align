@@ -111,7 +111,7 @@ function RequestRecord({ ws, cr, me, showGoal, titles, onDone, notice }: { ws: s
       {cr.state === "superseded" && cr.launch !== "superseded" && <Note>Closed because the goal was marked achieved or dropped.</Note>}
       {cr.state === "superseded" && cr.launch === "superseded" && (
         <Note>
-          Approved by {cr.approved_by?.name}
+          Approved by {said(cr.approved_by)}
           {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}, then superseded before launch: the goal got a newer version or was closed first. It never reached agents. {mine ? "You" : cr.requester.name} can propose it again.
         </Note>
       )}
@@ -119,9 +119,9 @@ function RequestRecord({ ws, cr, me, showGoal, titles, onDone, notice }: { ws: s
         <div className="text-[14px] text-zinc-600" data-launch={cr.launch ?? ""}>
           <p className="font-medium text-zinc-900">{words}.</p>
           <p>
-            Approved by {cr.approved_by?.name}
+            Approved by {said(cr.approved_by)}
             {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}.{cr.note ? ` Note: ${cr.note}` : ""}
-            {cr.approved_without_evidence === true && <> Approved without evidence.</>}
+            {cr.approved_without_evidence === true && <> Approved without evidence on the approved revision ({cr.revision}).</>}
             {cr.approved_without_evidence === false && <> Approved with {cr.evidence_count} evidence {cr.evidence_count === 1 ? "link" : "links"}, none verified.</>}
           </p>
           {cr.launch === "launched" && (
@@ -138,11 +138,11 @@ function RequestRecord({ ws, cr, me, showGoal, titles, onDone, notice }: { ws: s
           {(cr.launch === "pending" || cr.launch === "not_yet") && <p className="text-zinc-500">{cr.launchers.length ? `Can launch: ${names(cr.launchers)}` : "Nobody can launch this yet"}</p>}
         </div>
       )}
-      {cr.condition && <ConditionBox c={cr.condition} said={said} />}
-      {cr.state === "approved" && <ValueCard ws={ws} cr={cr} me={me} />}
+      {cr.condition && <ConditionBox c={cr.condition} said={said} closed={cr.state === "rejected" ? "declined" : cr.state === "withdrawn" ? "withdrawn" : cr.state === "superseded" ? "superseded" : undefined} />}
+      {cr.state === "approved" && <ValueCard ws={ws} cr={cr} me={me} titles={titles} />}
       {cr.state === "rejected" && (
         <p className="text-[14px] text-zinc-600">
-          Rejected by {cr.rejected_by?.name}
+          Rejected by {said(cr.rejected_by)}
           {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}. Reason: {cr.rejection_reason}
         </p>
       )}

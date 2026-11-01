@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { requireUser } from "../../../../_ui/server";
+import { inWorkspace, requireUser } from "../../../../_ui/server";
+import { NotInWorkspace } from "../../../../_ui/missing";
 import GoalPage from "./view";
 
 export default function Page({ params }: PageProps<"/app/w/[ws]/goals/[goal]">) {
@@ -13,5 +14,6 @@ export default function Page({ params }: PageProps<"/app/w/[ws]/goals/[goal]">) 
 async function Inner({ params }: { params: PageProps<"/app/w/[ws]/goals/[goal]">["params"] }) {
   const { ws, goal } = await params;
   const me = await requireUser(`/app/w/${ws}/goals/${goal}`);
+  if (!(await inWorkspace(me, ws))) return <NotInWorkspace me={me} />;
   return <GoalPage me={me} ws={ws} goal={goal} />;
 }

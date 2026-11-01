@@ -48,6 +48,11 @@ export const localOwnerEmail = (env: NodeJS.ProcessEnv = process.env) => (env.AL
  *  workspace deletion, passkeys, linking, signing out everywhere): 15 minutes. */
 export const RECENT_SIGN_IN_MS = 15 * 60 * 1000;
 
+/** Mode L's machine-wide ceiling on email-code sends per hour (ALIGN_LOCAL_CODES_PER_HOUR, default 60). Mode L limits
+ *  sends per address (3 per 10 minutes, as hosted); this ceiling only stops a runaway script. Hosted ignores it. */
+export const localCodesPerHour = (env: NodeJS.ProcessEnv = process.env) => posIntEnv(env.ALIGN_LOCAL_CODES_PER_HOUR) ?? 60;
+const posIntEnv = (v: string | undefined) => (v !== undefined && /^\s*[1-9]\d{0,8}\s*$/.test(v) ? Number(v) : null);
+
 // The absolute session cap (ALIGN_SESSION_MAX_DAYS: sessionMaxDays, validMaxDays) and the test identity provider
 // switch live in lib/v2/core.mts, so the operator script reads them exactly as the server does.
 

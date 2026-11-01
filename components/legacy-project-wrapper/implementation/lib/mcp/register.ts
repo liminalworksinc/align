@@ -5,6 +5,7 @@ import { asksForBrief, readableAsks, type AskState, type AskView } from "../v2/a
 import { addEvidence, LAUNCH_STATES, requestCondition } from "../v2/changes";
 import { CHANGE_REQUEST_STATES, getChangeRequest, listChangeRequests, type ChangeDiff, type ChangeRequestSummary, type Condition, type EvidenceLink } from "../v2/changes-read";
 import { launchWords } from "../v2/launch-words";
+import { diffWords, type FieldDiff } from "../v2/change-words.mts";
 import { noteGrantRead } from "../oauth/grants";
 import { EVIDENCE_SCOPE } from "../oauth/server";
 import { all, get } from "../v2/db";
@@ -215,8 +216,13 @@ function goalOut(pp: PolicyPrincipal, g: GoalRow, transfers: Set<string>): z.inf
   };
 }
 
+/** What kind of goal this is and who sees it, in words: a private goal is the reader's own ("personal goal, visible
+ *  only to you": only its owner reads it), never "team goal, visible to private". */
+const goalKindWords = (level: string, visibility: string) =>
+  visibility === "private" ? "personal goal, visible only to you" : `${level} goal, visible to ${visibility === "team" ? "its team" : "the whole workspace"}`;
+
 const goalLine = (g: z.infer<typeof GoalOut>) =>
-  `- ${g.id} v${g.version} (${g.status}, ${g.level} goal, visible to ${g.visibility}) ${tag(g.title.untrusted_text)}, owner ${tag(g.owner.name.untrusted_text)}${g.team ? `, team ${tag(g.team.name.untrusted_text)}` : ""}${g.parents.length ? `, contributes to ${g.parents.map((p) => p.id).join(", ")}` : ""}${g.depends_on.length ? `, depends on ${g.depends_on.join(", ")}` : ""}${g.bindable ? ", bindable" : ""}${g.limits?.length ? `, ${g.limits.length} limits (align_get_limits)` : ""}`;
+  `- ${g.id} v${g.version} (${g.status}, ${goalKindWords(g.level, g.visibility)}) ${tag(g.title.untrusted_text)}, owner ${tag(g.owner.name.untrusted_text)}${g.team ? `, team ${tag(g.team.name.untrusted_text)}` : ""}${g.parents.length ? `, contributes to ${g.parents.map((p) => p.id).join(", ")}` : ""}${g.depends_on.length ? `, depends on ${g.depends_on.join(", ")}` : ""}${g.bindable ? ", bindable" : ""}${g.limits?.length ? `, ${g.limits.length} limits (align_get_limits)` : ""}`;
 
 // ---------- align_get_goal ----------
 
@@ -729,7 +735,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
       };
       const m = out.goal.measures.map((x) => `- ${tag(x.text.untrusted_text)}${x.target ? `, target ${tag(x.target.untrusted_text)}` : ""}`);
       const lines = [
-        `Goal ${g.id} version ${v.version} of ${g.version} (${v.status}, ${cur.level} goal, visible to ${cur.visibility}): ${tag(v.title)}`,
+        `Goal ${g.id} version ${v.version} of ${g.version} (${v.status}, ${goalKindWords(cur.level, cur.visibility)}): ${tag(v.title)}`,
         `Owner ${tag(cur.owner.name.untrusted_text)}${cur.team ? `, team ${tag(cur.team.name.untrusted_text)}` : ""}${cur.bindable ? ", bindable" : ""}.`,
         m.length ? `Measures:\n${m.join("\n")}` : "No measures.",
         out.goal.limits === null ? "This goal's limits are not shared with your apps." : out.goal.limits.length ? `Limits:\n${out.goal.limits.map((l) => limitLine(l, "")).join("\n")}` : "No limits.",
@@ -807,10 +813,8 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         `Change request ${cr.id} on goal ${cr.goal.id} ${tag(cr.goal.title)} was ${cr.state}${record.decided_by ? ` by ${tag(cr.decided_by!.name)}` : ""}${cr.decided_at ? ` at ${cr.decided_at}` : ""}.`,
         `Asked by ${tag(cr.requested_by.name)} against version ${cr.base_version}: ${tag(cr.reason)}`,
         cr.decision_note !== null ? `Decision note: ${tag(cr.decision_note)}` : "No decision note.",
-        ...(record.diff.title ? [`Title: ${tag(record.diff.title.before.untrusted_text)} -> ${tag(record.diff.title.after.untrusted_text)}`] : []),
-        ...(record.diff.status ? [`Status: ${record.diff.status.before} -> ${record.diff.status.after}`] : []),
-        ...(record.diff.measures ? [`Measures: ${record.diff.measures.before.length} -> ${record.diff.measures.after.length}`] : []),
-        ...(record.diff.depends_on ? [`Depends on: ${record.diff.depends_on.before.join(", ") || "none"} -> ${record.diff.depends_on.after.join(", ") || "none"}`] : []),
+        // Each changed field in words, as the web app's value card says it ("<measure> target 500 -> 600").
+        ...diffWords(cr.diff as Record<string, FieldDiff | undefined>, { q: tag, arrow: "->" }),
         ...(cr.state === "superseded" ? [`Approved, then superseded before launch: it never reached agents. ${tag(cr.requested_by.name)} can propose it again.`] : []),
         ...(cr.state === "approved" ? [`${launchWords(cr.launch, cr.base_version, cr.resulting_version)}.${cr.launch === "not_yet" && record.launch_decided_by ? ` ${tag(cr.launch_decided_by!.name)} decided not yet at ${cr.launch_decided_at}.` : ""}${cr.launch === "launched" && record.launch_decided_by ? ` Launched by ${tag(cr.launch_decided_by!.name)} at ${cr.launch_decided_at}.` : ""}`] : []),
         ...(record.condition ? [conditionLine(record.condition, "")] : []),
@@ -1027,6 +1031,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
       const open = pending.filter((p) => p.state !== "approved");
       const unlaunched = pending.filter((p) => p.state === "approved");
       const versionOf = (id: string) => rows.find((g) => g.id === id)!.version;
+      const privateIds = new Set(rows.filter((g) => g.visibility === "private").map((g) => g.id));
       const b = asksForBrief(pp);
       const asks = b.asks.filter((a) => askReadable(pp, a)).slice(0, 5).map((a) => askOut(pp, a));
       const out = { workspace: workspaceOf(pp), goals, pending, asks, more_asks: b.more };
@@ -1037,7 +1042,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         "YOUR GOALS:",
         ...(goals.length
           ? goals.flatMap((g) => [
-              `- ${g.id} v${g.version} ${tag(clipped(g.title.untrusted_text, clip))}${g.team ? `, team ${tag(g.team.name.untrusted_text)}` : ` (${g.level} goal)`}${g.measures.length ? `. Measures: ${g.measures.map((m) => `${tag(clipped(m.text.untrusted_text, clip))}${m.target ? ` (target ${tag(clipped(m.target.untrusted_text, 40))})` : ""}`).join("; ")}` : ""}`,
+              `- ${g.id} v${g.version} ${tag(clipped(g.title.untrusted_text, clip))}${privateIds.has(g.id) ? " (personal goal, visible only to you)" : g.team ? `, team ${tag(g.team.name.untrusted_text)}` : ` (${g.level} goal)`}${g.measures.length ? `. Measures: ${g.measures.map((m) => `${tag(clipped(m.text.untrusted_text, clip))}${m.target ? ` (target ${tag(clipped(m.target.untrusted_text, 40))})` : ""}`).join("; ")}` : ""}`,
               ...(g.limits ?? []).map((l) => `  - ${LIMIT_WORDS[l.type]}: ${tag(clipped(l.text.untrusted_text, clip))}`),
             ])
           : ["- none"]),

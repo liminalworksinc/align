@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, Btn, Err, Field, Loading, Note, Pill, TextArea, useAction, useApi, when } from "./kit";
-import { AddEvidence, ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, EvidenceItem, FIELD_LABEL, FieldValue, NoticeBox, Revisions, SnapshotBox, STATUS_WORD, type Notice } from "./crparts";
+import { AddEvidence, ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, EvidenceItem, FIELD_LABEL, FieldValue, hiddenGoals, NoticeBox, Revisions, SnapshotBox, STATUS_WORD, type Notice } from "./crparts";
 import { LIMIT_WORDS } from "./limits";
 import type { ChangeFields, ChangeRequest, Goal, Limit } from "./types";
 
@@ -76,8 +76,14 @@ export function changeLines(cr: ChangeRequest, titles: Map<string, string>): str
     const name = (id: string) => quote(titles.get(id) ?? "a goal");
     const added = after.depends_on.filter((id) => !b.includes(id));
     const removed = b.filter((id) => !after.depends_on!.includes(id));
-    if (added.length) out.push(`Would depend on ${added.map(name).join(", ")}.`);
-    if (removed.length) out.push(`Would no longer depend on ${removed.map(name).join(", ")}.`);
+    // Dependencies the reader can't read are only counted (cr.diff.hidden_depends_on), never named.
+    const hid = cr.diff.hidden_depends_on ?? { before: 0, after: 0 };
+    const more = Math.max(0, hid.after - hid.before);
+    const fewer = Math.max(0, hid.before - hid.after);
+    const addedWords = [...added.map(name), ...(more ? [hiddenGoals(more)] : [])];
+    const removedWords = [...removed.map(name), ...(fewer ? [hiddenGoals(fewer)] : [])];
+    if (addedWords.length) out.push(`Would depend on ${addedWords.join(", ")}.`);
+    if (removedWords.length) out.push(`Would no longer depend on ${removedWords.join(", ")}.`);
   }
   return out;
 }
@@ -372,7 +378,7 @@ export function OpenRequest({
     }
     if (choice === "counter" && counter) {
       for (const k of (Object.keys(FIELD_LABEL) as (keyof ChangeFields)[]).filter((x) => x in counter.changes))
-        rows.push([`${FIELD_LABEL[k]} would be`, <FieldValue key={k} k={k} v={counter.changes[k]} titles={titles} />]);
+        rows.push([`${FIELD_LABEL[k]} would be`, <FieldValue key={k} k={k} v={counter.changes[k]} titles={titles} hidden={k === "depends_on" ? (cr.diff.hidden_depends_on?.before ?? 0) : 0} />]);
       rows.push(["Your note", counter.note]);
       if (counter.condition) rows.push(["Accept if", counter.condition]);
     }
@@ -413,11 +419,12 @@ export function OpenRequest({
       <section aria-label="Approved now and proposed" className="mt-3" data-compare>
         <div className="grid min-w-0 gap-3 sm:grid-cols-2">
           <div className="min-w-0 rounded-[10px] bg-zinc-50 p-3" data-side="approved">
-            <p className="al-lbl">Approved now · version {cr.base_version}</p>
+            {/* Behind: the left side is the version the request was made against, which is no longer the goal's. */}
+            <p className="al-lbl">{cr.behind ? `Request made against version ${cr.base_version} · goal now at ${n}` : `Approved now · version ${cr.base_version}`}</p>
             {fields.map((k) => (
               <div key={k} className="mt-1 text-[14px]">
                 <span className="block text-[12px] text-zinc-500">{FIELD_LABEL[k]}</span>
-                <FieldValue k={k} v={cr.diff.before[k]} titles={titles} />
+                <FieldValue k={k} v={cr.diff.before[k]} titles={titles} hidden={cr.diff.hidden_depends_on?.before} />
               </div>
             ))}
           </div>
@@ -426,7 +433,7 @@ export function OpenRequest({
             {fields.map((k) => (
               <div key={k} className="mt-1 text-[14px]">
                 <span className="block text-[12px] text-zinc-500">{FIELD_LABEL[k]}</span>
-                <FieldValue k={k} v={cr.diff.after[k]} titles={titles} />
+                <FieldValue k={k} v={cr.diff.after[k]} titles={titles} hidden={cr.diff.hidden_depends_on?.after} />
               </div>
             ))}
             <p className="mt-2 text-[13px] text-zinc-500">Not approved. Nothing changes until someone in the goal&apos;s approval set approves it, and agents get it only at launch.</p>
@@ -448,7 +455,19 @@ export function OpenRequest({
           <Note>
             Made against version {cr.base_version}. The goal is now at version {n}.
           </Note>
-          <Btn kind="secondary" disabled={act.busy} onClick={() => void act.run(() => api(`${path}/rebase`, { body: { revision: cr.revision, base_version: n } }), onDone)}>
+          <Btn
+            kind="secondary"
+            disabled={act.busy}
+            onClick={() =>
+              void act.run(
+                () => api(`${path}/rebase`, { body: { revision: cr.revision, base_version: n } }),
+                () => {
+                  setNotice({ kind: "done", text: `Recorded: you updated your request to version ${n} (revision ${cr.revision + 1}). It waits for approval again.` });
+                  onDone();
+                },
+              )
+            }
+          >
             Update to version {n}
           </Btn>
         </div>
@@ -471,7 +490,7 @@ export function OpenRequest({
           </p>
           {counterNote && (
             <p className="mt-1 text-[14px] text-zinc-700">
-              {said(counterNote.author)}&apos;s note on revision {counterNote.revision}, as written: {quote(counterNote.note!)}
+              {counterNote.author.id === me ? "Your" : `${counterNote.author.name}'s`} note on revision {counterNote.revision}, as written: {quote(counterNote.note!)}
             </p>
           )}
           {cr.condition && <ConditionBox c={cr.condition} said={said} />}
