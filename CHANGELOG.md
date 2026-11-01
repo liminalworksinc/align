@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- End-to-end test cycles 1 to 4 (real browsers, the hosted edge, MCP clients, and the real `align` CLI and hooks under
+  real Claude Code sessions). Every finding is fixed with a regression test, among them: directives fetched by cursor;
+  the server's clock used for every timestamp an agent sends; device sign-out, member removal and re-pairing end or
+  keep shares consistently, with pending revokes kept until the server confirms them; login, logout and sync passes
+  serialised on one lock and bound to one device; session ids that start with "-" accepted everywhere; a deletion of
+  shared history never reported as done when the server refused it, and allowed from any of the sharer's live
+  devices; requests to ended sessions expire with the reason shown; no decision offered that the server would refuse
+  (hidden dependencies, dependency loops); "Recorded:" confirmations on every decision; ingestion answers say what
+  was accepted and refused.
+- A re-invited person's paired devices can get the workspace back at invite accept (owner decision 2026-11-01): the
+  invite page lists their devices, none ticked, behind a recent sign-in, each grant audited; `align` picks the
+  workspace up at its next contact and says how to share again there.
+
 - Ported main's #29 onto v2 (PORT3-001): goals carry a target share of agent time (active targets add up to 100% or
   less); the Spend tab shows each goal's share of the last 7 days against its target; an owner can turn on steering,
   a local line in the session when its goal is off target (never in a stopped or held session); target changes between
