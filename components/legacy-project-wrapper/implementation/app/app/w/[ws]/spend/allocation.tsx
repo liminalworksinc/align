@@ -10,9 +10,9 @@ import type { AllocationResponse, AllocationRow, WsDetail } from "../../../_ui/t
 
 const rowLabel = (r: AllocationRow) => (r.kind === "goal" ? r.goal!.title : r.kind === "private" ? "Goals you can't see" : "Not bound to a goal");
 
-/** A gap in whole points, as the pill shows it: the label and its colour both read this number, so a 9.6-point gap
- *  labelled "10 points over" is amber too (C4-3). */
-const gapPoints = (gap: number) => Math.round(Math.abs(gap));
+/** A gap in whole points, as the pill shows it. It rounds toward zero, so the label and its colour agree with each
+ *  other and with steering's "at least 10 points" rule: a 9.6-point gap reads "9 points over" in grey (C4-3). */
+const gapPoints = (gap: number) => Math.floor(Math.abs(gap));
 
 function gapText(gap: number | null) {
   if (gap === null) return "no target";

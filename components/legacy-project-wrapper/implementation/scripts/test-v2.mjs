@@ -7196,7 +7196,7 @@ try {
       const press = (pg, scope, label) => pg.evaluate((s, t) => [...document.querySelectorAll(`${s} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
       try {
         const pO = await as(YO);
-        // C4-3 (ui): the pill's colour reads the same rounded gap as its label.
+        // C4-3 (ui): the pill's label and colour agree with each other and with steering's "at least 10 points" rule.
         await open(pO, `/app/w/${YW}/spend`);
         await pO.waitForSelector('[aria-label="Allocation by goal"]', { timeout: 15000 }).catch(() => undefined);
         const pill = await pO.evaluate(() => {
@@ -7204,7 +7204,7 @@ try {
           const span = [...(li?.querySelectorAll("span") ?? [])].find((x) => /points? (over|under)|on target/.test(x.textContent ?? ""));
           return { text: span?.textContent ?? "", cls: span?.className ?? "" };
         });
-        check("C4-3 (ui): a 9.6-point gap reads \"10 points over\" in an amber pill (the colour uses the same rounded gap as the label)", pill.text === "10 points over" && /amber/.test(pill.cls), JSON.stringify(pill));
+        check("C4-3 (ui): a 9.6-point gap reads \"9 points over\" in a neutral pill (below steering's 10-point threshold, label and colour agree)", pill.text === "9 points over" && !/amber/.test(pill.cls), JSON.stringify(pill));
 
         // X4 (ui): the request's rows on the goal page tell the two sessions apart.
         await open(pO, `/app/w/${YW}/goals/${GW?.id}`);
