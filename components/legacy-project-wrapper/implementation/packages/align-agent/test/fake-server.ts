@@ -106,7 +106,8 @@ export class FakeServer {
   pending = new Map<string, Pending>();
   devices = new Map<string, Device>();
   access = new Map<string, { device: string; exp: number }>();
-  sessions = new Map<string, { ws: string; device: string; body: any; state: string }>();
+  /** `ended`: why a stopped session ended when its person did not stop it (as `v2_sessions.ended_reason`). */
+  sessions = new Map<string, { ws: string; device: string; body: any; state: string; ended?: "member_removed" | "device_signed_out" | null }>();
   /** DELETE …/sessions/{key} that went through, and the device that sent each (audited with the acting device). */
   deletedBy: { key: string; device: string }[] = [];
   /** POST /activity items as received, plus items other people's machines "sent" (addRemoteActivity). */
@@ -118,6 +119,23 @@ export class FakeServer {
   usage = new Map<string, any>();
   /** Session keys whose history was deleted (on the web or by a device): a later DELETE gets 410 history_deleted. */
   deletedKeys = new Set<string>();
+
+  /** As lib/v2/lifecycle.ts: the session's person was removed from its workspace (its share ends, `member_removed`)
+   *  and let back in, all while this device did not look (`/me` lists the workspace throughout). */
+  removeAndReAdd(key: string): void {
+    const s = this.sessions.get(key)!;
+    s.state = "stopped";
+    s.ended = "member_removed";
+    for (const e of this.epochs.values()) if (e.session_key === key && !e.ends_at) e.ends_at = new Date().toISOString();
+  }
+
+  /** The person stops sharing the session on the web. */
+  stopOnWeb(key: string): void {
+    const s = this.sessions.get(key)!;
+    s.state = "stopped";
+    s.ended = null;
+    for (const e of this.epochs.values()) if (e.session_key === key && !e.ends_at) e.ends_at = new Date().toISOString();
+  }
 
   /** The person deletes a session's shared history on the web. */
   deleteOnWeb(key: string): void {
@@ -467,7 +485,9 @@ export class FakeServer {
         // A session its person stopped sharing (not one its device's revoke ended) stays stopped: 409 sharing_stopped to
         // any of their devices (C4-8). Its history may be deleted by any of their live devices (C4-1).
         const reshare = !sub && req.method === "PUT" && !!sess && sess.device !== dev.id && sess.state !== "stopped" && !!this.devices.get(sess.device)?.revoked;
-        if (sess && !sub && req.method === "PUT" && sess.state === "stopped") return send(409, { error: "sharing_stopped" });
+        // A session that ended when its person was removed is shared again by its own device once they are back.
+        const back = !!sess && !sub && req.method === "PUT" && sess.state === "stopped" && sess.ended === "member_removed" && sess.device === dev.id;
+        if (sess && !sub && req.method === "PUT" && sess.state === "stopped" && !back) return send(409, { error: "sharing_stopped" });
         const deleting = !sub && req.method === "DELETE";
         if (sess && sess.device !== dev.id && !reshare && !deleting) return send(404, { error: "not_found" });
         if (!sub && req.method === "PUT") {
@@ -525,7 +545,7 @@ export class FakeServer {
           return send(200, wire);
         }
         if (sub === "usage") {
-          if (sess.state !== "shared") return send(409, { error: sess.state === "stopped" ? "sharing_stopped" : "suspended" });
+          if (sess.state !== "shared") return send(409, sess.state === "stopped" ? { error: "sharing_stopped", ended_reason: sess.ended ?? null } : { error: "suspended" });
           const rows = Array.isArray(body?.rows) ? body.rows : [];
           if (rows.length > 500) return send(413, { error: "too_many_rows" });
           let accepted = 0;

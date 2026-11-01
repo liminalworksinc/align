@@ -112,6 +112,9 @@ Key owned by another user/device → 404. `started_at` more than 5 min ahead of 
 Rows whose epoch is unknown or belongs to another session → rejected per row (counted as conflicts).
 So are rows whose `ts` is at or after their epoch's end at a time no epoch of the session covers (made while the
 session was not shared, before it was shared again).
+A stopped session's usage (and epochs) → `409 { "error": "sharing_stopped", "ended_reason": "member_removed"|"device_signed_out"|null }`:
+`null` when its person stopped sharing it; `member_removed` when it ended because they left the workspace or were
+removed (once they are back, their device shares it again with a `PUT`).
 
 `POST /api/v2/workspaces/:ws/sessions/:session_key/stop-sharing` (Bearer or cookie by owner) → 200; no more uploads accepted.
 `DELETE /api/v2/workspaces/:ws/sessions/:session_key` (cookie by owner, or Bearer from any live device of the person who

@@ -7,7 +7,7 @@ import { kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
-import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, getShare, notePriorShare, renderEndedLatches, renderHot, sharedBefore, snapshot } from "./hot.ts";
+import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, endedState, getShare, notePriorShare, renderEndedLatches, renderHot, sharedBefore, snapshot } from "./hot.ts";
 
 export { notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
 import { loadCredentials } from "./api.ts";
@@ -270,9 +270,39 @@ function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, text: st
     endEpochs(ctx.db, lid, at);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch')").run(lid);
-    addNotice(ctx, lid, noticeId, `${text}${latched ? ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.` : ""}`);
+    // A session that can be shared there again at once (its person is back in the workspace) gets out the way its
+    // latch says: by sharing it again (C6-2).
+    const again = latched && endedState(ctx, getShare(ctx, lid))?.reshare;
+    const tail = !latched
+      ? ""
+      : again
+        ? " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked."
+        : ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+    addNotice(ctx, lid, noticeId, `${text}${tail}`);
   });
   renderHot(ctx, lid);
+}
+
+/**
+ * The server refused this session's usage as `sharing_stopped` because its person was removed from the workspace (or
+ * left it) and this device never saw it: `/me` lists the workspace again, as they are back (E2E-AGENT cycle 6 C6-3).
+ * Not a stop by its person: the share ends here as a lost workspace does, and the notice says `::align share` shares it
+ * there again (the server shares a `member_removed` session again for its own device).
+ */
+export function endShareRemoved(ctx: Ctx, lid: string): void {
+  const s = getShare(ctx, lid);
+  if (!s || (s.state !== "shared" && s.state !== "pending" && s.state !== "suspended")) return;
+  const goal = s.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
+  const at = nowIso();
+  endShare(
+    ctx,
+    lid,
+    ACCESS_LOST,
+    `access_lost_${s.workspace_id}_${at}`,
+    `Align: this session stopped sharing because you were removed from ${clean(s.workspace_name, 80)} in Align (or left it) while this machine was not in touch; its usage from then on stays on this machine. You are a member again, so to share it there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`,
+    at,
+  );
+  ctx.log(`usage refused: session ${lid.slice(0, 8)} ended on the server when its person was removed from ${s.workspace_name}; ended here too`);
 }
 
 /**

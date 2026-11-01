@@ -565,8 +565,18 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
     const share = getShare(ctx, s.local_id);
     const deleting = share && ctx.db.prepare("SELECT 1 FROM outbox WHERE local_id=? AND kind='delete_session'").get(s.local_id);
     const refused = deleting ? deleteRefused(ctx, s.local_id) : null;
+    // An ending this machine can undo now (signed in again, back in the workspace) says how, as the session's notice does.
+    const again = endedState(ctx, share)?.reshare;
     const why =
-      (share?.error === DEVICE_SIGNED_OUT ? "; this machine signed out" : share?.error === ACCESS_LOST ? "; no access to the workspace" : "") +
+      (share?.error === DEVICE_SIGNED_OUT
+        ? again
+          ? "; ended at a sign-out; `::align share` shares it again"
+          : "; this machine signed out"
+        : share?.error === ACCESS_LOST
+          ? again
+            ? "; ended while out of the workspace; `::align share` shares it again"
+            : "; no access to the workspace"
+          : "") +
       (refused ? `; history deletion refused (${refused})` : deleting ? "; history deletion queued" : "");
     return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name}${why})` : "private" };
   });

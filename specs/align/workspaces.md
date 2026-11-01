@@ -1262,6 +1262,15 @@ the end of the epoch it names, at a time no epoch of the session covers (its sha
 revoked device, and the session was shared again only later), was made while the session was not shared: it SHALL be a
 conflict, counted on the session and never stored, so a re-share never brings in the gap. A row from after its epoch
 ended while a later epoch of the session was open is the tail of a turn that started in its epoch, and is stored.
+Usage or an epoch for a stopped session SHALL be refused 409 `sharing_stopped` with `ended_reason`: `member_removed` when
+its sharing ended because its person was removed from the workspace or left it (they may be a member again, and their
+device that never saw the ending can then share it again), `device_signed_out` when its device signed out, and `null`
+when its person stopped sharing it, so the device words the refusal as what its user can do.
+
+#### Scenario: Why a stopped session's usage is refused
+
+- **WHEN** a session's person stops sharing it and its device uploads usage and opens an epoch; and a session that ended when its person was removed is uploaded to by its own device once they are back and it has the workspace again (`scripts/test-v2.mjs` "stop sharing (E2E-AGENT cycle 6 C6-3) ..." and "usage (E2E-AGENT cycle 6 C6-3) ...")
+- **THEN** the first two answers are 409 `sharing_stopped` with `ended_reason: null`, and the last 409 `sharing_stopped` with `ended_reason: "member_removed"`
 
 #### Scenario: Usage batch
 

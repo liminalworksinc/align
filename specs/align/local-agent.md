@@ -1123,9 +1123,20 @@ workspace, a goal that is unknown or not bindable, or a session that is not shar
 failed: <reason>`; an applied single-session `::align share` produces `Align: sharing this session with <workspace>
 ...`, `::align bind` recorded by an older hook (without a binding id) produces `Align: from your next prompt this
 session counts toward ...` (a current hook says so in its own reply) and `::align unshare`
-produces `Align: this session stopped sharing. ...`. A usage upload the server refuses with 404, `sharing_stopped` or
-`not_shared` produces `Align: the server no longer accepts this session's usage (<code>), so it stopped sharing; its
-usage stays on this machine from now on.` A share whose `PUT` the server refuses with 404 SHALL produce `Align: sharing
+produces `Align: this session stopped sharing. ...`. A usage upload the server refuses with 404 or `not_shared`
+produces `Align: the server no longer accepts this session's usage (<code>), so it stopped sharing; its usage stays on
+this machine from now on.` One refused `sharing_stopped` SHALL be worded by the answer's `ended_reason` (`workspaces`
+"Usage upload"): `member_removed` (its person was removed from the workspace, or left it, and is back, all while this
+device did not look, so `/me` still lists it) ends the share as a lost workspace does (`align sessions`: `stopped
+(<workspace>; ended while out of the workspace; \`::align share\` shares it again)`) with `Align: this session stopped
+sharing because you were removed from <workspace> in Align (or left it) while this machine was not in touch; its usage
+from then on stays on this machine. You are a member again, so to share it there again, type \`::align share\` here
+(it counts toward "<goal>" again).`, never as a stop for good; `null` (its person stopped it) `Align: this session's
+sharing was stopped (Stop sharing on the web, or \`align stop-sharing\` on another of your devices), so it stopped
+sharing here; its usage stays on this machine from now on.`, and a folder rule never shares it again; an answer
+without `ended_reason` (an older server) `Align: the server no longer accepts this session's usage (sharing_stopped),
+so it stopped sharing here; its usage stays on this machine from now on. If its sharing ended because you left its
+workspace or were removed and you are a member again, \`::align share\` here shares it again.` A share whose `PUT` the server refuses with 404 SHALL produce `Align: sharing
 failed (<code>): the server did not take this session from this machine. If it was shared before from this machine and
 that sign-in was never revoked, revoke the old device at <server>/app/devices, then type \`::align share\` here again.
 This session stays private.` (403: `... this machine may not share sessions in that workspace. ...`); one the server
@@ -1162,6 +1173,11 @@ is not one of them.
 
 - **WHEN** a session was stopped with `align unshare`, the machine pairs again, and the developer runs `align share <id> --yes` (test `findings4` "after a re-pair, the server answers sharing_stopped ...")
 - **THEN** it exits 1 with `... was not shared: sharing failed (sharing_stopped): this session's sharing was stopped ...` and nothing about revoking an old device
+
+#### Scenario: A removal this machine never saw
+
+- **WHEN** a shared session's person is removed from its workspace and let back in while the device does not look, a turn is made and a sync runs; the developer prompts, lists sessions and types `::align share confirm`; in another case its person stops sharing it on the web (tests `findings7` "removed and let back in while this machine did not look ..." and "stopped by its person on the web ...")
+- **THEN** the prompt shows the `you were removed from Acme in Align (or left it) while this machine was not in touch ... type \`::align share\` here` notice, never `sharing_stopped`, `align sessions` shows `stopped (Acme; ended while out of the workspace; \`::align share\` shares it again)`, and the share goes through (the session is shared again on the server); in the other case the prompt says `this session's sharing was stopped (Stop sharing on the web, ...)` and `::align share --dir confirm` leaves it private
 
 #### Scenario: No stale sign-out notice
 

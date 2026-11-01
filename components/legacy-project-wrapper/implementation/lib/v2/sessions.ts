@@ -189,7 +189,7 @@ const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
   const s = ownSession(pp, dev, key);
-  if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
+  if (s.state === "stopped") throw sharingStopped(s);
   const epochId = str(b, "epoch_id", 70);
   if (!EPOCH_ID.test(epochId)) throw badRequest("epoch_id must be ep_ followed by 22+ url-safe characters");
   const goalId = b.goal_id === null || b.goal_id === undefined ? null : str(b, "goal_id", 64);
@@ -306,11 +306,17 @@ function usageRowIn(v: unknown, i: number): UsageRow {
   }
 }
 
+/** 409 sharing_stopped, with why the session's sharing ended when its person did not stop it (`member_removed`: they
+ *  left the workspace or were removed, and may be back; `device_signed_out`), else `ended_reason: null`: a device
+ *  that never saw the ending can then say what its user can do (`::align share` once they are back), not that the
+ *  session was stopped for good (E2E-AGENT cycle 6 C6-3). */
+const sharingStopped = (s: SessionRow) => new V2Error(409, "sharing_stopped", "Sharing was stopped for this session", { ended_reason: s.ended_reason ?? null });
+
 /** Idempotent usage batch: INSERT OR IGNORE on (ws, session_key, request_key). The same key with different values is
  *  a conflict and never overwrites; a row whose epoch is unknown or another session's is a conflict too. */
 export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key: string, b: Body) {
   const s = ownSession(pp, dev, key);
-  if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
+  if (s.state === "stopped") throw sharingStopped(s);
   if (!Array.isArray(b.rows)) throw badRequest("rows must be a list");
   if (b.rows.length > 500) throw new V2Error(413, "too_many_rows", "At most 500 rows per batch");
   const rows = b.rows.map(usageRowIn);

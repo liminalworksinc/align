@@ -189,3 +189,44 @@ describe("C6-2: a stopped session whose share ended says the same thing everywhe
     assert.match(deny(t, A), /Its sharing ended \(this machine signed out of Align, and is signed in again now\), so the user can share it there again by typing `::align share` in this session/);
   });
 });
+
+describe("C6-3: a removal the device never saw is not worded as a stop for good", () => {
+  test("removed and let back in while this machine did not look: the refused upload ends the share as a lost workspace, the notice and `align sessions` offer `::align share`, and it works", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    turn(t, A, "req_r1_shared");
+    await sync(t);
+    fake.removeAndReAdd(A.key);
+    await sleep(20);
+    turn(t, A, "req_r1_during");
+    await sync(t);
+    const told = prompt(t, A.sid, "go on", A.cwd);
+    assert.equal(
+      told.systemMessage,
+      'Align: this session stopped sharing because you were removed from Acme in Align (or left it) while this machine was not in touch; its usage from then on stays on this machine. You are a member again, so to share it there again, type `::align share` here (it counts toward "Ship the v2 onboarding flow" again).',
+    );
+    assert.doesNotMatch(told.systemMessage, /sharing_stopped/);
+    const row = JSON.parse((await runCli(t, ["sessions", "--all", "--json"])).stdout).find((s: { native_id: string }) => s.native_id === A.sid);
+    assert.equal(row.shared, "stopped (Acme; ended while out of the workspace; `::align share` shares it again)");
+    assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested/);
+    await sync(t);
+    assert.equal(fake.sessions.get(A.key)!.state, "shared");
+    assert.equal(JSON.parse((await runCli(t, ["sessions", "--all", "--json"])).stdout).find((s: { native_id: string }) => s.native_id === A.sid).shared, "shared (Acme)");
+  });
+
+  test("stopped by its person on the web: the refused upload says so, and a folder rule never shares it again", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    turn(t, A, "req_r2_shared");
+    await sync(t);
+    fake.stopOnWeb(A.key);
+    turn(t, A, "req_r2_after", 50);
+    await sleep(80);
+    await sync(t);
+    assert.equal(
+      prompt(t, A.sid, "go on", A.cwd).systemMessage,
+      "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on.",
+    );
+    assert.match(prompt(t, A.sid, "::align share --dir confirm", A.cwd).reason, /This session stays private/);
+  });
+});

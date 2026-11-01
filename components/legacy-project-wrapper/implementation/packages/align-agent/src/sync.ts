@@ -28,7 +28,7 @@ import {
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { applyShare, bind, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
+import { applyShare, bind, endShareRemoved, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -513,14 +513,28 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
           ctx.log(`usage upload refused for ${s.local_id}: ${r.status} ${r.json?.error || ""}`);
           // This machine may have lost access to the workspace: that ends its shares there, with their own notice.
           if ((r.status === 403 || r.status === 404) && !(await hasWorkspace(ctx, s.workspace_id))) break;
-          if (r.json?.error === "sharing_stopped" || r.json?.error === "not_shared" || r.status === 404) {
+          const stopped = r.json?.error === "sharing_stopped";
+          if (stopped && r.json?.ended_reason === "member_removed") {
+            // Its person was removed (and is back: /me lists the workspace) while this device never saw it: not a stop
+            // for good, so it ends as a lost workspace does and `::align share` shares it again (C6-3).
+            endShareRemoved(ctx, s.local_id);
+          } else if (stopped || r.json?.error === "not_shared" || r.status === 404) {
             markStopped(ctx, s.local_id);
+            // A server that names why (`ended_reason`) says null when its person stopped it (on the web, or on another
+            // of their devices): stopped for good, and a folder rule never shares it again (C6-1). An older server
+            // doesn't say, so the words stay neutral.
+            const byPerson = stopped && r.json && "ended_reason" in r.json && r.json.ended_reason === null;
+            if (byPerson) notePriorShare(ctx, s.local_id, true);
             // Never silently: the session hears that its sharing ended and that usage now stays here.
             addNotice(
               ctx,
               s.local_id,
               `upload_refused_${r.status}`,
-              `Align: the server no longer accepts this session's usage (${r.json?.error || r.status}), so it stopped sharing; its usage stays on this machine from now on.`,
+              byPerson
+                ? "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on."
+                : stopped
+                  ? "Align: the server no longer accepts this session's usage (sharing_stopped), so it stopped sharing here; its usage stays on this machine from now on. If its sharing ended because you left its workspace or were removed and you are a member again, `::align share` here shares it again."
+                  : `Align: the server no longer accepts this session's usage (${r.json?.error || r.status}), so it stopped sharing; its usage stays on this machine from now on.`,
             );
             renderHot(ctx, s.local_id);
           }

@@ -2470,6 +2470,11 @@ try {
   const epochAfterStop = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString() });
   const strangerStop = await call("U1", "POST", `/api/v2/workspaces/${A}/sessions/${S3b}/stop-sharing`, { cookie: U1.cookie, body: {} });
   check("stop sharing: -> stopped; then usage, re-share and epochs -> 409 sharing_stopped; someone else's session -> 404", stopShare.json?.state === "stopped" && upAfterStop.status === 409 && upAfterStop.json?.error === "sharing_stopped" && putAfterStop.status === 409 && epochAfterStop.status === 409 && strangerStop.status === 404, `${stopShare.text} ${upAfterStop.status} ${putAfterStop.status} ${epochAfterStop.status} ${strangerStop.status}`);
+  check(
+    "stop sharing (E2E-AGENT cycle 6 C6-3): the 409 sharing_stopped for usage and epochs of a session its person stopped says ended_reason null",
+    "ended_reason" in (upAfterStop.json ?? {}) && upAfterStop.json.ended_reason === null && epochAfterStop.json?.error === "sharing_stopped" && epochAfterStop.json?.ended_reason === null,
+    `${upAfterStop.text} ${epochAfterStop.text}`,
+  );
   // -- E2E-AGENT B4/G2: a revoked device can't receive a stop or resume, so its sessions end with it ("device signed
   //    out"): the Sessions tab says so, Stop and Resume are refused (never reported as sent), and the same person's
   //    re-paired machine may share the session again --
@@ -2632,8 +2637,20 @@ try {
       `${cpB.status} ${stopB.status} ${rmB.status} ${JSON.stringify(rowB)} ${openB} ${stopAfter.text} ${resumeAfter.text} ${JSON.stringify(vB)} ${holdB.status} ${dirsB}/${dirCount(SB)}`,
     );
 
-    // Let back in, the same person's new pairing shares the session again (its keys come from the same local secret).
+    // Let back in, and the device that shared it given the workspace again before it looked (E2E-AGENT cycle 6 C6-3):
+    // its usage is refused 409 sharing_stopped naming ended_reason member_removed, so the device can say that sharing
+    // it again works, not that it was stopped for good.
     await invite();
+    withDb((d) => d.prepare("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DB2.id, CW));
+    const lastB = withDb((d) => d.prepare("SELECT epoch_id FROM v2_epochs WHERE ws_id = ? AND session_key = ? ORDER BY starts_at DESC LIMIT 1").get(CW, SB))?.epoch_id;
+    const upRemoved = await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DB2.access, body: { rows: [usageRow(DB2, "c63-removed", lastB, {})] } });
+    check(
+      "usage (E2E-AGENT cycle 6 C6-3): a session that ended when its person was removed, uploaded to by its own device once they are back -> 409 sharing_stopped with ended_reason member_removed",
+      upRemoved.status === 409 && upRemoved.json?.error === "sharing_stopped" && upRemoved.json?.ended_reason === "member_removed",
+      upRemoved.text,
+    );
+    withDb((d) => d.prepare("DELETE FROM v2_device_grants WHERE device_id = ? AND ws_id = ?").run(DB2.id, CW));
+    // Let back in, the same person's new pairing shares the session again (its keys come from the same local secret).
     const DC = cDevice({ pub: DB2.pub, privateKey: DB2.privateKey, secret: DB2.secret });
     const againB = await cPut(DC, SB);
     const rowC = cRow(SB);
