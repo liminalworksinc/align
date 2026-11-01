@@ -154,8 +154,10 @@ function reportApplied(home: string, lid: string, inj: InjectedState, ids: (stri
   spoolWrite(home, { type: "applied", local_id: lid, directive_ids: fresh, ts: new Date().toISOString() });
 }
 
-/** Notices about whether this session is shared (started, refused, ended): only the newest of them still holds. */
-const SHARE_STATE_NOTICES = ["share_started_", "share_err_", "upload_refused_", "signed_out_", "access_lost_"];
+/** Notices about whether this session is shared (started, refused, ended, or its lost workspace back so it can be shared
+ *  there again): only the newest of them still holds (C5-3). A workspace this device reaches for the first time is not
+ *  one: it says nothing about this session's own share, so a notice that its share ended is still told next to it. */
+const SHARE_STATE_NOTICES = ["share_started_", "share_err_", "upload_refused_", "signed_out_", "access_lost_", "workspace_back_"];
 
 /**
  * The notices still worth telling, of those the session has not seen: one about its share's state (the newest, the

@@ -1,6 +1,6 @@
 // Regressions for the cycle-5 agent-side E2E report: usage from turns made while a session's share had ended, uploaded
-// when it was shared again under an epoch that had closed (C5-1); and a lost workspace leaving the other one as a
-// hidden, sticky default (C5-2).
+// when it was shared again under an epoch that had closed (C5-1); a lost workspace leaving the other one as a hidden,
+// sticky default (C5-2); and the stale "no longer have access" notice told next to "can reach ... again" (C5-3).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -172,5 +172,18 @@ describe("C5-2: the default workspace follows the server's", () => {
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.equal(me().default_workspace, "ws_acme");
     assert.match((await runCli(t, ["config"])).stdout, /default_workspace Acme \(ws_acme\)/);
+  });
+});
+
+describe("C5-3: only the newest share-state notice", () => {
+  test("lost access and given the workspace back before the session's next prompt: that prompt tells only that it can reach the workspace again", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    fake.workspaces = [];
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    fake.workspaces = [ACME];
+    assert.equal((await runCli(t, ["sync", "--hook"])).code, 0);
+    const told = prompt(t, A.sid, "still there?", A.cwd);
+    assert.equal(told.systemMessage, 'Align: this machine can reach Acme in Align again. To share this session there again, type `::align share` here (it counts toward "Ship the v2 onboarding flow" again).');
   });
 });

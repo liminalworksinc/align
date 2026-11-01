@@ -1064,8 +1064,10 @@ session` notice if the session has not seen it yet. Notices SHALL be shown at th
 session again (`align share` or `::align share`) SHALL drop its notices about an earlier share that ended (signed out,
 workspace lost or given back) that it has not shown yet, so a later ending is never told next to a stale one. Of the
 notices a session has not seen yet, the hook SHALL tell only the newest about its share's state (sharing started, a
-refused share, a refused upload, signed out, workspace lost), a "resumed" notice only while that resume is still the
-session's latest stop or resume, and each text once; the others count as seen and are never told later.
+refused share, a refused upload, signed out, workspace lost, the lost workspace reached again), a "resumed" notice only
+while that resume is still the session's latest stop or resume, and each text once; the others count as seen and are
+never told later. A workspace this device reaches for the first time says nothing about the session's own share, so it
+is not one of them.
 
 #### Scenario: Share confirmed with no default workspace
 
@@ -1477,6 +1479,11 @@ workspaces SHALL be untouched.
 
 - **WHEN** a device shares one session in Acme and one in Side Co, its person is removed from Acme (a sync ends that share), re-invited, and accepts with this device ticked; then a hook-started pass runs, the developer prompts twice in the Acme session and types `::align share confirm`, and a sync runs (test `findings3` "removed, re-invited and accepted with this device ticked ..."; against the real server in `scripts/test-agent-live.mjs` "re-invite (owner decision 2026-11-01) ...")
 - **THEN** after the hook pass `me.json` lists both workspaces and Acme's goals are cached, the first prompt shows `Align: this machine can reach Acme in Align again. To share this session there again, type \`::align share\` here (it counts toward "Ship the v2 onboarding flow" again).` and the second nothing, the reply says `sharing requested toward "Ship the v2 onboarding flow"`, the session reads `shared (Acme)` on the server for the same device, the Side Co session is still `shared (Side Co)` there, and there was no new pairing
+
+#### Scenario: Given back before the session's next prompt
+
+- **WHEN** a shared session's person is removed from its workspace (a sync ends the share) and given it back before the session's next prompt (a hook-started pass), and the developer then prompts (test `findings5` "lost access and given the workspace back before the session's next prompt ...")
+- **THEN** the prompt shows only `Align: this machine can reach Acme in Align again. ...`, not the stale `... no longer have access to Acme ...` next to it
 
 #### Scenario: A workspace joined for the first time
 
