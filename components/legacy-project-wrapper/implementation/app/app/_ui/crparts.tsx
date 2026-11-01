@@ -94,7 +94,8 @@ const sameIds = (a: string[], b: string[]) => [...a].sort().join() === [...b].so
 /** Goal, measures, Status and Depends on, pre-filled from `start`. `onSend` gets only the fields that differ from
  *  `goal` (plus any in `keep`, for a counter that restates the request's fields). `hiddenDeps` counts the dependencies
  *  the person can't see, which the server keeps (the form says so); `choices`, when given, are the only goals offered
- *  as a new dependency (the ones everyone who decides can see), besides those already on the list. */
+ *  as a new dependency (the ones everyone who decides can see), besides those already on the list; `notOfferedWho`
+ *  names who can't see the others ("someone who decides on this goal", or for a counter the requester too). */
 export function ChangesForm({
   ws,
   goal,
@@ -102,6 +103,7 @@ export function ChangesForm({
   keep = [],
   hiddenDeps = 0,
   choices = null,
+  notOfferedWho = "someone who decides on this goal",
   noteLabel,
   noteRequired,
   withCondition = false,
@@ -115,6 +117,7 @@ export function ChangesForm({
   keep?: (keyof ChangeFields)[];
   hiddenDeps?: number;
   choices?: string[] | null;
+  notOfferedWho?: string;
   noteLabel: string;
   noteRequired: boolean;
   /** Offer the "Accept if…" condition (an approver's counter). */
@@ -182,7 +185,7 @@ export function ChangesForm({
           )}
           {notOffered > 0 && (
             <p className="text-[14px] text-zinc-500" data-deps-not-offered>
-              {notOffered === 1 ? "1 goal you can see isn't offered" : `${notOffered} goals you can see aren't offered`}: someone who decides on this goal can&apos;t see {them(notOffered)}.
+              {notOffered === 1 ? "1 goal you can see isn't offered" : `${notOffered} goals you can see aren't offered`}: {notOfferedWho} can&apos;t see {them(notOffered)}.
             </p>
           )}
         </div>

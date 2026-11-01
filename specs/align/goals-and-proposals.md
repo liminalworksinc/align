@@ -545,6 +545,25 @@ When a `rebase` that keeps the request's own changes is refused with 409 `depend
 - **WHEN** an approver's counter added a Hardware-only dependency while every approver could read it, the requester accepted it, a lead outside Hardware then joined the approval set, the goal moved on, and the requester presses Update to version <n>
 - **THEN** the response is 409 `dependency_not_visible` with "…can't see a goal that <approver>'s suggestion added as a dependency…", never "a goal you added", and the request stays `pending` and behind
 
+### Requirement: Nobody approves or launches a dependency they can't see
+
+The approval set of a goal, and what each of its members may read, can change after a request added a dependency (a lead outside the dependency's team joins, say). The server SHALL therefore refuse with 409 `dependency_not_visible` an `approve` or `approve_and_launch` from a decider who may not read a goal the request's changes add to `depends_on` (relative to its base version), and a `launch` from a launcher who may not read a goal the approved content adds to the base version's `depends_on`, so that nobody approves, or publishes to agents, a dependency they can't see. Nothing SHALL be written, and the message SHALL name no goal and nobody who can't read it. For an approval it SHALL be "This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask <requester> to withdraw it, or to rebase it without that dependency."; for a launch (an approved request can no longer be withdrawn or rebased) "This change adds a dependency on a goal you can't see, so you can't launch what it publishes. Ask someone who decides on this goal and can see it to launch it, or ask <requester> to propose the change again without that dependency.". A dependency already on the base version is not one the request adds, and a decider who can read every added dependency SHALL still approve and launch.
+
+#### Scenario: An approver who joined after the dependency was added
+
+- **WHEN** a member's request on a Platform goal adds a Hardware-only dependency while the goal's only approver can read it, a lead outside Hardware then joins Platform, and that lead presses Approve or Approve and launch
+- **THEN** the response is 409 `dependency_not_visible` ("…Ask <requester> to withdraw it, or to rebase it without that dependency."), naming no goal, and the request stays `pending` with the goal at its version
+
+#### Scenario: Launching an approved change with a hidden dependency
+
+- **WHEN** that request was approved by the approver who can read the dependency, and the lead outside Hardware presses Launch
+- **THEN** the response is 409 `dependency_not_visible` ("…Ask someone who decides on this goal and can see it to launch it…"), nothing launches, and the approver who can read it still launches it
+
+#### Scenario: A dependency on the base version
+
+- **WHEN** a goal's current version already depends on a goal an approver can't read, and that approver approves a request that changes only the title
+- **THEN** the request is approved
+
 ### Requirement: A counter keeps the dependencies its author can't see
 
 The server SHALL keep, on a `counter`, every dependency on the request's current revision (its changes applied to its base version) that the counterer may not read, as a new goal version keeps the dependencies its editor can't read: a `depends_on` sent lists only what the counterer can see, so it is never a request to drop the others, and a counter that doesn't send `depends_on` keeps them beside the base version's other dependencies. The counter form SHALL say "Also depends on a goal you can't see. Sending keeps it; only someone who can see it can remove it." (counted, never named), and its confirmation SHALL include the kept goal in "Depends on would be" and a "Kept" line saying so.
@@ -567,6 +586,15 @@ The server SHALL keep, on a `counter`, every dependency on the request's current
 
 - **WHEN** a member opens Propose a change on a Platform goal whose approval set can read neither the member's private goal nor a Hardware-only goal
 - **THEN** `dependency_choices` holds neither, Depends on lists neither, and the form says "2 goals you can see aren't offered: someone who decides on this goal can't see them."
+
+### Requirement: The counter form offers only dependencies a counter may add
+
+`GET /api/v2/workspaces/{ws}/goals/{goal}?counter={request}` SHALL give as `dependency_choices` the ids of the goals a `counter` from the reader on that request may add as a dependency: the goals the reader can read that the requester and every member of the request's effective approval set can also read; `null` when the reader may not counter it (it is not `pending`, the reader is not in its approval set, or the reader is a viewer), and 404 for a request not on that goal. The app's **Suggest a change** form SHALL read it and offer as a new dependency only goals in it (the request's dependencies stay listed), saying "<n> goals you can see aren't offered: <requester> or someone who decides on this goal can't see them." The server SHALL still check every counter.
+
+#### Scenario: Counter choices leave out what the requester or a co-approver can't see
+
+- **WHEN** a Platform goal's owner, who leads Platform beside a lead outside Hardware, chooses Suggest a change on a member's request, and the owner can read a Hardware-only goal and a goal private to them
+- **THEN** `dependency_choices` holds neither, Depends on lists neither, and the form says "2 goals you can see aren't offered: <requester> or someone who decides on this goal can't see them."
 
 ### Requirement: One open change request per goal and requester
 
