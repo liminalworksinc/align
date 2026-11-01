@@ -1142,12 +1142,17 @@ The server SHALL accept a shared session on `PUT /api/v2/workspaces/{ws}/session
 repo_alias?, started_at, title?}` only from a device granted that workspace (members and owners, never viewers), keep
 every session private to the device and person that shared it, let that person stop sharing on
 `POST .../sessions/{key}/stop-sharing` or hard-delete the history on `DELETE .../sessions/{key}`, and list sessions on
-`GET /api/v2/workspaces/{ws}/sessions` as `{mine, all}`. A session that ended because its device was revoked
+`GET /api/v2/workspaces/{ws}/sessions` as `{mine, all}`. The hard delete SHALL be allowed to the person on the web and
+from any of their live paired devices granted the workspace, not only the device that shared it (a re-pair would
+otherwise strand the history where only the web could delete it), and SHALL be audited `session.history_deleted` with
+the person as actor and, from a device, the device that did it as the object; every other call on the session (its
+epochs, usage, stop-sharing) stays with the device that shared it, and another person's device gets 404. A session that ended because its device was revoked
 (`ended_reason` `device_signed_out`) SHALL be shared again by a `PUT` from another device of the same person with the
 same harness and repo key (its device, state `shared`, `stopped_at` and `ended_reason` cleared, its stop flag kept,
 audited `session.shared_again`), and so SHALL one that ended because its person left the workspace (`member_removed`),
-from any device of theirs once they are a member again; any other stopped session stays 409 `sharing_stopped`, and
-another person's device still gets 404. A `started_at` more than 5 minutes ahead of the server's clock SHALL be
+from any device of theirs once they are a member again; any other stopped session stays 409 `sharing_stopped`, to the
+device that shared it and to the person's other devices alike (never a 404 that reads as another device holding it),
+and another person's device still gets 404. A `started_at` more than 5 minutes ahead of the server's clock SHALL be
 answered 400 `clock_skew` with the message `started_at is <n> minutes ahead of the server's clock; this device's clock
 is off` and `server_time`.
 
@@ -1160,6 +1165,11 @@ is off` and `server_time`.
 
 - **WHEN** a person's device was revoked while it shared a stopped session, another person's device PUTs that key, and then the person's newly paired device does (`scripts/test-v2.mjs` "sessions (E2E-AGENT B4/G2) ...")
 - **THEN** the other person's device gets 404, the person's new device gets `{state:"shared"}` and owns the session, which is still stopped, and a resume from the web reaches the new device
+
+#### Scenario: Deleting from another of the person's devices
+
+- **WHEN** one of a person's devices shared a session with usage, and later another of their live devices, then another person's device, deletes it; and the person's other device re-shares a session its person stopped sharing (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 4 C4-1) ..." and "sessions (E2E-AGENT cycle 4 C4-8) ...")
+- **THEN** the other person's device gets 404, the person's other device gets 204, the session and its usage are gone, the audit row `session.history_deleted` names the person and that device, uploads from it to a session it did not share stay 404, and the re-share gets 409 `sharing_stopped`
 
 #### Scenario: Stop sharing and delete
 
@@ -1536,6 +1546,7 @@ per-path limits apply only when hosted, since Mode L turns off its IP tracking, 
 - Unlinking a Google or GitHub account is out of scope (there is no control on `/app/account`, and Better Auth's `/unlink-account` is off); should a person be able to unlink a provider while another sign-in method remains?
 - Removing or leaving keeps a person's goals and sessions (as a former member after 30 days). Their open alignments, change requests and pending approvals, and goals they own that others depend on, are not reassigned; whether an owner can transfer goal ownership is not decided.
 - The retention periods are fixed in code (`lib/v2/retention-core.mts`); a per-workspace setting (for example a shorter audit log or longer spend history) waits for a customer who needs it.
+- Should deleting shared history stay open to any of the sharer's live devices, or only the device that shared it? (Implemented: any live device of the sharing account; a re-pair otherwise strands the history.)
 
 ## Sources
 
