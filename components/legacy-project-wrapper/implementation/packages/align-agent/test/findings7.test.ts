@@ -230,3 +230,40 @@ describe("C6-3: a removal the device never saw is not worded as a stop for good"
     assert.match(prompt(t, A.sid, "::align share --dir confirm", A.cwd).reason, /This session stays private/);
   });
 });
+
+describe("cycle 6, section 5: works, but would confuse a developer", () => {
+  test("held goal, fail closed: a folder session bound to a goal the cached feed says is held is denied at its first tool call, before any sync; a release that reached it wins over a stale feed; an unshared session is not held", async () => {
+    const { fake, t } = await world();
+    const g = fake.goals.get("ws_acme")!.find((x) => x.id === "g_ship")!;
+    g.allocation = { target_share: null, share_7d: 0, gap_7d: null, held: true };
+    const dir = path.join(t.root, "held-repo");
+    fs.mkdirSync(dir, { recursive: true });
+    assert.equal((await runCli(t, ["share", "--dir", dir, "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).code, 0);
+    const sid = "abcdabcd-1111-2222-3333-444444444444";
+    const start = json(runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup", cwd: dir }).stdout);
+    assert.match(start.hookSpecificOutput.additionalContext, /Ship the v2 onboarding flow/);
+    const use = (tool: string) => json(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: tool, tool_input: { command: "ls", file_path: path.join(dir, "a") }, cwd: dir }).stdout);
+    for (const tool of ["Bash", "Read"]) {
+      const d = use(tool);
+      assert.equal(d?.hookSpecificOutput?.permissionDecision, "deny", `${tool} before any sync`);
+      assert.equal(d.hookSpecificOutput.permissionDecisionReason, 'Align: all agents on goal "Ship the v2 onboarding flow" were paused from its Align workspace. Work resumes when the hold is released. Your work so far is saved.');
+    }
+    // The sync shares it; the server's hold and release reach it; the feed still says held (stale): the release wins.
+    await sync(t);
+    const ctx = ctxFor(t);
+    const key = sessionKey(ctx.secret, "ws_acme", "claude-code", sid);
+    ctx.db.close();
+    assert.equal(use("Bash")?.hookSpecificOutput?.permissionDecision, "deny", "shared and still not told: the feed holds it");
+    fake.holdGoal("ws_acme", "g_ship", [key]);
+    await sync(t);
+    assert.equal(use("Bash")?.hookSpecificOutput?.permissionDecision, "deny");
+    fake.releaseGoal("ws_acme", "g_ship", [key]);
+    await sync(t);
+    assert.equal(use("Bash"), null, "released: tools run although the cached feed still says held");
+    // A session in another folder, not shared, toward nothing: not held.
+    const other = path.join(t.root, "free-repo");
+    fs.mkdirSync(other, { recursive: true });
+    runHook(t, "claude", "SessionStart", { session_id: "efefefef-1111-2222-3333-444444444444", source: "startup", cwd: other });
+    assert.equal(json(runHook(t, "claude", "PreToolUse", { session_id: "efefefef-1111-2222-3333-444444444444", tool_name: "Bash", tool_input: { command: "ls" }, cwd: other }).stdout), null);
+  });
+});

@@ -1396,6 +1396,16 @@ reaches it (the server sends the release to every session its hold reached). The
 it, `resume` SHALL NOT lift a hold and `release` SHALL NOT lift a stop. At the end of a turn a held session behaves
 like a stopped one (the `Stop` hook prints nothing). Stopping sharing or deleting history SHALL lift a session's holds
 as it lifts its stop latch. `::align status` SHALL show `Goal hold: on goal "<title>" by <name> (all tools blocked)`.
+A hold SHALL also fail closed before its directive arrives: while a session's goal (its live share's, or, for a session
+a folder rule is sharing that has no share yet, the rule's goal it was given at its start) is held in the cached goals
+feed (`allocation.held`) and no hold or release of that goal has reached the session, the hook SHALL deny every
+`PreToolUse` with `Align: all agents on goal "<title>" were paused from its Align workspace. Work resumes when the hold
+is released. Your work so far is saved.`; a release that reached the session wins over a feed that still says held.
+
+#### Scenario: A held goal before its first sync
+
+- **WHEN** a goal is held and a session starts in a folder a rule shares toward it, then calls `Bash` and `Read` before any sync, then a sync shares it, the hold and its release reach it while the cached feed still says held, and a session in another, unshared folder calls `Bash` (test `findings7` "held goal, fail closed ...")
+- **THEN** both calls are denied with the hold wording, it stays denied after the sync and while held, its tools run after the release, and the unshared session's tools run
 
 #### Scenario: Hold, stop and release with no sync running
 

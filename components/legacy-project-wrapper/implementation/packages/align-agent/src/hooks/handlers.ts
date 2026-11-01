@@ -761,7 +761,35 @@ export function latchDeny(home: string, harness: Harness, input: HookInput): Hoo
     (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
     (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
   if (!allowed) return denyOutput(latch.state === "ok" ? stopReason(latch.value, lid) : DENY_REASON);
-  return holdDeny(home, lid);
+  return holdDeny(home, lid) || feedHoldDeny(home, lid, input.cwd || null);
+}
+
+/**
+ * A goal hold that has not reached this session yet (cycle 6): the server holds every session bound to a held goal, but
+ * a session learns it from a hold directive at a sync, so a folder-rule session bound to a held goal would run tools
+ * until its first sync. When the cached goals feed already says the session's goal is held (`allocation.held`) and no
+ * hold or release of that goal has reached the session, every tool is denied as a hold (fail closed). The goal is the
+ * live share's (the one this hook opened last, until the sync has it) or, for a session a folder rule is sharing that
+ * has no share yet, the rule's goal it was given at its start. A release the session got wins over a stale feed.
+ */
+function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput {
+  const hot = readHot(home, lid);
+  const inj = readInjected(home, lid);
+  let ws: string | null = null;
+  let goalId: string | null = null;
+  const share = hot?.share;
+  if (share && (share.state === "shared" || share.state === "pending")) {
+    ws = share.workspace_id;
+    goalId = inj.opened_epoch ? (inj.opened_epoch.goal?.id ?? null) : (hot!.goal?.id ?? null);
+  } else if (!share && inj.share_state === "shared" && inj.goal_id) {
+    const rule = matchRule(readRules(home), cwd || hot?.cwd || null);
+    if (rule && rule.goal_id === inj.goal_id) [ws, goalId] = [rule.workspace_id, rule.goal_id];
+  }
+  if (!ws || !goalId) return null;
+  const g = readJson<FeedFile>(layout.feed(home, ws))?.goals?.find((x) => x.id === goalId);
+  if (!g?.allocation?.held) return null;
+  if ((hot?.released_holds || []).some((r) => r.goal_id === goalId)) return null;
+  return denyOutput(`Align: all agents on goal "${clean(g.title, 100)}" were paused from its Align workspace. Work resumes when the hold is released. Your work so far is saved.`);
 }
 
 /**

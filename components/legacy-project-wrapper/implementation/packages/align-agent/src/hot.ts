@@ -102,11 +102,11 @@ function hotRequests(ctx: Ctx, lid: string): HotRequest[] {
 
 /** Holds a release lifted on this session (newest 10). */
 function releasedHolds(ctx: Ctx, lid: string): NonNullable<HotState["released_holds"]> {
-  const rows = ctx.db.prepare("SELECT json, directive_id FROM holds WHERE local_id=? AND held=0 ORDER BY seq DESC LIMIT 10").all(lid) as { json: string; directive_id: string }[];
+  const rows = ctx.db.prepare("SELECT goal_id, json, directive_id FROM holds WHERE local_id=? AND held=0 ORDER BY seq DESC LIMIT 10").all(lid) as { goal_id: string; json: string; directive_id: string }[];
   return rows
-    .map((r) => ({ ...(JSON.parse(r.json) as { goal_title: string; by: string; released?: boolean }), directive_id: r.directive_id }))
+    .map((r) => ({ ...(JSON.parse(r.json) as { goal_title: string; by: string; released?: boolean }), directive_id: r.directive_id, goal_id: r.goal_id }))
     .filter((r) => r.released)
-    .map((r) => ({ directive_id: r.directive_id, goal_title: r.goal_title, by: r.by }));
+    .map((r) => ({ directive_id: r.directive_id, goal_id: r.goal_id, goal_title: r.goal_title, by: r.by }));
 }
 
 /** The resume that lifted this session's stop, while no later stop replaced it. */

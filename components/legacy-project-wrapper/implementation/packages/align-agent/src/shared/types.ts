@@ -91,7 +91,7 @@ export interface HotState {
   /** This session's newest epochs as the sync recorded them, so a hook can tell whether the epoch it opened is in. */
   epochs_seen?: string[];
   /** Goal holds on this session that were released (the release directive, who released it, the goal's title). */
-  released_holds?: { directive_id: string; goal_title: string; by: string }[];
+  released_holds?: { directive_id: string; goal_id?: string; goal_title: string; by: string }[];
   /** The resume directive that lifted this session's stop from the web, while it is the latest word on its latch. */
   resumed?: string | null;
   /** Set when the session was shared from this machine before (its history may be deleted since): a share counts from
