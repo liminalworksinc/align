@@ -6109,6 +6109,15 @@ try {
       SB1.status === 200 && SB2.status === 200 && SB3.status === 200 && alW.status === 201 && alC.status === 201 && effW.length === 3 && !effW.some((t) => /No usage moves/.test(t)) && effW.some((t) => /^Future usage from this session counts under/.test(t)) && effC.length === 1 && /No usage moves\.$/.test(effC[0]),
       `${alW.status} ${alC.status} ${JSON.stringify(effW)} ${JSON.stringify(effC)}`,
     );
+    // -- C5-5: an alignment of several sessions agrees in number ("these 2 sessions contribute to") --
+    const alC2 = await fa(FB, "POST", "/alignments", { target_goal_id: GG.id, choice: "contribution", session_keys: [SB1.key, SB2.key], note: "Both CI sessions help trials" });
+    const effC2 = (alC2.json?.effects ?? []).map((e) => e.text);
+    const alC2Off = await fa(FB, "POST", `/alignments/${alC2.json?.id}/withdraw`, {});
+    check(
+      "C5-5: a contribution alignment of 2 sessions reads \"Records that these 2 sessions contribute to …\" (never \"contributes\"), and one of a single session or a source goal still \"contributes\"",
+      alC2.status === 201 && effC2.length === 1 && /^Records that these 2 sessions contribute to /.test(effC2[0]) && !/contributes/.test(effC2[0]) && /^Records that .* contributes to /.test(effC[0] ?? "") && /^Records that this session contributes to /.test(effW[0] ?? "") && alC2Off.status === 200,
+      `${alC2.status} ${JSON.stringify(effC2)} ${JSON.stringify(effC)} ${JSON.stringify(effW)} ${alC2Off.status}`,
+    );
     // -- B16: the switch-goal picker tells two sessions of one person in one repository apart --
     const picker = (await fa(FA, "GET", `/goals/${GCI.id}/requests`)).json?.sessions ?? [];
     check(

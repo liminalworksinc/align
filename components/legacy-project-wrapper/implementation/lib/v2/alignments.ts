@@ -389,7 +389,7 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
     kind,
     text:
       kind === "contributes_to"
-        ? `Records that ${a.source_goal_id ? named(source) : who} contributes to ${named(target)}.${movesUsage ? "" : " No usage moves."}`
+        ? `Records that ${a.source_goal_id ? `${named(source)} contributes` : `${who} ${sessions.length === 1 ? "contributes" : "contribute"}`} to ${named(target)}.${movesUsage ? "" : " No usage moves."}`
         : kind === "governing_goal"
           ? sessions.length === 1
             ? `This session follows ${named(target)}: its agent gets that goal and its changes.`

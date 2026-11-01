@@ -510,7 +510,7 @@ The server SHALL list the alignments the caller is involved in on `GET /api/v2/w
 #### Scenario: Effects in words
 
 - **WHEN** a person reads a contribution-only alignment and a work-toward alignment with one session
-- **THEN** the first's `contributes_to` effect reads "Records that this session contributes to <goal>. No usage moves."; the second's reads "Records that this session contributes to <goal>." without "No usage moves", next to its "Future usage from this session counts under <goal>. Past usage stays where it is."
+- **THEN** the first's `contributes_to` effect reads "Records that this session contributes to <goal>. No usage moves."; the second's reads "Records that this session contributes to <goal>." without "No usage moves", next to its "Future usage from this session counts under <goal>. Past usage stays where it is."; with several sessions the verb agrees, "Records that these 3 sessions contribute to <goal>." (`scripts/test-v2.mjs` "C5-5: ...")
 
 ### Requirement: Proposing a change request
 
