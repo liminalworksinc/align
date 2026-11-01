@@ -344,4 +344,23 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     assert.equal(u.code, 2);
     assert.equal(u.stderr.trim(), 'align: unknown workspace "Nope Co"');
   });
+
+  test("a sync cut short by `align logout` says this machine is signed out now, never that the next sync goes on as a device signed in", async () => {
+    const { fake, t } = await world();
+    await shared(t);
+    let release!: () => void;
+    fake.holdCalls = { match: (m, p) => m === "GET" && p === "/api/v2/directives", release: new Promise<void>((r) => (release = r)), left: 1 };
+    const pass = runCli(t, ["sync"]);
+    await waitFor(() => fake.log.some((l) => l.method === "GET" && l.path === "/api/v2/directives"), 10_000, "the held directives call");
+    assert.equal((await runCli(t, ["logout"])).code, 0);
+    fake.holdCalls = null;
+    release();
+    const r = await pass;
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(
+      r.stdout,
+      /This machine's Align pairing changed during this sync \(`align login` or `align logout`\), so it stopped there; nothing more was sent as the earlier device\. This machine is signed out now, so nothing more is uploaded until you run `align login`\./,
+    );
+    assert.doesNotMatch(r.stdout, /goes on as the device signed in now/);
+  });
 });

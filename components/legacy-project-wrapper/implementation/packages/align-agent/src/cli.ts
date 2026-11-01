@@ -1058,7 +1058,15 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   if (r.skipped) return out("Another sync is running.");
   out(`Local: ${r.spooled} hook records, ${r.tail.files} files scanned (${r.tail.bytes} new bytes).`);
   if (r.revoked) revokeLines(r.revoked, "sync").forEach((l) => out(l));
-  if (r.aborted) out("This machine's Align pairing changed during this sync (`align login` or `align logout`), so it stopped there; nothing more was sent as the earlier device. The next sync goes on as the device signed in now.");
+  if (r.aborted) {
+    // What comes next, as things are now: another device signed in, or none (an `align logout`, cycle 6).
+    const now = loadCredentials(ctx.home);
+    const next =
+      now && !now.signed_out && now.refresh_token
+        ? `The next sync goes on as the device signed in now (${deviceTag(now.device_id)}).`
+        : "This machine is signed out now, so nothing more is uploaded until you run `align login`.";
+    out(`This machine's Align pairing changed during this sync (\`align login\` or \`align logout\`), so it stopped there; nothing more was sent as the earlier device. ${next}`);
+  }
   if (!signedIn(ctx.home)) {
     // Cut short by `align logout`: the line above says so, not that it ran signed out (C5-4).
     if (!r.aborted) out("Signed out: nothing uploaded.");

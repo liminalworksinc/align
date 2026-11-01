@@ -108,6 +108,7 @@ describe("C4-2: a sync pass is one device's", () => {
     const r = await sync;
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /pairing changed during this sync/);
+    assert.match(r.stdout, new RegExp(`The next sync goes on as the device signed in now \\(dv_…${now.slice(-6)}\\)\\.`));
     assert.equal(fake.refreshes, refreshes, "the pass did not refresh the new device");
     assert.ok(!fake.log.some((l) => l.path.endsWith("/usage") && l.device === now), "nothing went up as the new device");
     const notices = hot(t, s.lid).notices.map((x) => x.text);

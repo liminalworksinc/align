@@ -321,8 +321,9 @@ A sync pass, and the flush a CLI command does after queuing calls, SHALL be boun
 started: when the credentials on disk belong to another device (or none, or the same device signed out by `align
 logout`; one the server signed out is reported as a sign-out) at its next call (a login or logout committed
 meanwhile), it SHALL stop there, with `align sync` printing `This machine's Align pairing changed during this sync
-(\`align login\` or \`align logout\`), so it stopped there; nothing more was sent as the earlier device. The next sync
-goes on as the device signed in now.` and logging it, and SHALL NOT refresh the new pairing, send queued uploads,
+(\`align login\` or \`align logout\`), so it stopped there; nothing more was sent as the earlier device.` followed by
+what holds now: `The next sync goes on as the device signed in now (dv_…<last 6>).` when another device is signed in,
+`This machine is signed out now, so nothing more is uploaded until you run \`align login\`.` when none is, and logging it, and SHALL NOT refresh the new pairing, send queued uploads,
 shares or retries with its tokens, nor leave a second, contradictory notice for a session. After pairing, `align
 login` SHALL print `Signed in as ...` only under the lock and only while its own device is still the one signed in;
 when another `align login` (or `align logout`) replaced or signed out its pairing before then, it SHALL exit 1 with
@@ -338,12 +339,12 @@ which.`
 #### Scenario: An upload in flight while a login replaces the device
 
 - **WHEN** a sync pass's usage upload is held in flight while `align login` pairs a new device and revokes the old one, and the upload is then refused (test `findings4` "an upload held in flight while `align login` replaces the device ...")
-- **THEN** the pass refreshes nothing and sends nothing as the new device, `align sync` says the pairing changed during the sync, and the session has only the one sign-out notice
+- **THEN** the pass refreshes nothing and sends nothing as the new device, `align sync` says the pairing changed during the sync and `The next sync goes on as the device signed in now (dv_…<last 6 of the new device>).`, and the session has only the one sign-out notice
 
 #### Scenario: A sync cut short by a logout
 
-- **WHEN** a sync pass's directives call is held in flight while `align logout` revokes the device, and the call is then refused (test `findings5` "says the pairing changed during the sync, not ...")
-- **THEN** `align sync` exits 0 printing the pairing-changed line and not `Signed out: nothing uploaded.`, `align.log` has the pairing-changed line, the next `align sync` says `Signed out: nothing uploaded.`, and `align status` still says the machine signed out because `align logout` ran
+- **WHEN** a sync pass's directives call is held in flight while `align logout` revokes the device, and the call is then refused (tests `findings5` "says the pairing changed during the sync, not ..." and `findings7` "a sync cut short by `align logout` says this machine is signed out now ...")
+- **THEN** `align sync` exits 0 printing the pairing-changed line ending `This machine is signed out now, so nothing more is uploaded until you run \`align login\`.`, never `goes on as the device signed in now`, and not `Signed out: nothing uploaded.`, `align.log` has the pairing-changed line, the next `align sync` says `Signed out: nothing uploaded.`, and `align status` still says the machine signed out because `align logout` ran
 
 #### Scenario: A share made while the old device's revoke is in flight
 
