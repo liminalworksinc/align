@@ -1510,6 +1510,13 @@ try {
   const rjo = await act(U1, rj.json.id, "reject");
   const afterReject = await act(U1, rj.json.id, "approve", { revision: 1 });
   check("alignment: withdraw by the requester; reject by an approver (not the requester); a decided request can't be approved", wdo.json?.state === "withdrawn" && rjByRequester.status === 403 && rjo.json?.state === "rejected" && afterReject.status === 409, `${wdo.status} ${rjByRequester.status} ${rjo.status} ${afterReject.status}`);
+  const afterWithdraw = await act(U3, wd.json.id, "withdraw");
+  check(
+    "Y5: a decision on a closed alignment says what happened in the app's words and who did it: \"This request was declined by Una One, so nothing changes.\" (never \"is rejected\"), \"This request was withdrawn by <requester>, so nothing changes.\"",
+    afterReject.json?.error === "wrong_state" && afterReject.json?.message === `This request was declined by ${U1.name}, so nothing changes.` &&
+      afterWithdraw.status === 409 && afterWithdraw.json?.message === `This request was withdrawn by ${U3.name}, so nothing changes.`,
+    `${afterReject.text} ${afterWithdraw.status} ${afterWithdraw.text}`,
+  );
   const otherSessions = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S2a] });
   const privTarget = await al(U3, { target_goal_id: GP.id, choice: "contribution", session_keys: [S3b] });
   check("alignment: listing someone else's session -> 404; a private goal as target -> 404", otherSessions.status === 404 && privTarget.status === 404, `${otherSessions.status} ${privTarget.status}`);
