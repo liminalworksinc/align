@@ -176,6 +176,19 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
 }
 
 // ---------- outbox ----------
+/** The server refused a call that must not be dropped (a history deletion, C4-1): it stays queued and is tried again
+ *  after `retryMs`, or at once by the developer's next `align delete-history`. */
+class KeepQueued extends Error {
+  retryMs: number;
+  constructor(message: string, retryMs: number) {
+    super(message);
+    this.retryMs = retryMs;
+  }
+}
+
+/** How long a refused history deletion waits before it is tried again on its own (a new pairing may be allowed). */
+const REFUSED_DELETE_RETRY_MS = 3_600_000;
+
 interface OutboxRow {
   id: number;
   local_id: string;
@@ -207,6 +220,11 @@ export async function flushOutbox(ctx: Ctx): Promise<{ sent: number; deferred: n
         res.sent++;
       } catch (e) {
         if (e instanceof SignedOut) return res;
+        if (e instanceof KeepQueued) {
+          ctx.db.prepare("UPDATE outbox SET attempts=attempts+1, next_at=?, last_error=? WHERE id=?").run(Date.now() + e.retryMs, e.message, item.id);
+          res.deferred++;
+          break;
+        }
         if (e instanceof NetworkError || (e instanceof HttpError && (e.status >= 500 || e.status === 429))) {
           ctx.db.prepare("UPDATE outbox SET attempts=attempts+1, next_at=?, last_error=? WHERE id=?").run(Date.now() + backoff(ctx, item.attempts + 1), String((e as Error).message), item.id);
           res.deferred++;
@@ -342,9 +360,16 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
     }
     case "delete_session": {
       const r = await api(ctx, "DELETE", base);
-      if (r.status === 204 || r.status === 200 || r.status === 404) {
+      if (r.status === 204 || r.status === 200) {
         forgetShare(ctx, lid);
         return;
+      }
+      if (r.status === 404 || r.status === 403) {
+        // Not deleted: the share and the queued deletion stay, and `align delete-history` says so (C4-1). The server
+        // lets any live device of the account that shared it delete its history, so this is a device of another
+        // account, one without access to the workspace now, or history that is not there (deleted on the web, say).
+        kvSet(ctx.db, `delete_refused:${lid}`, r.json?.error || `http_${r.status}`);
+        throw new KeepQueued(`history deletion refused: ${r.status} ${r.json?.error || ""}`.trim(), REFUSED_DELETE_RETRY_MS);
       }
       throw new HttpError(r.status, r.json?.error ?? null, r.json);
     }

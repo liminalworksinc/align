@@ -3,7 +3,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import type { Ctx } from "./context.ts";
-import { nowIso, tx } from "./db.ts";
+import { kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { getSession, sessionCwds, type SessionRow } from "./ledger.ts";
@@ -11,9 +11,10 @@ import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, getShare, renderHot, snapsho
 import { loadCredentials } from "./api.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { clean } from "./shared/envelope.ts";
-import { randomId, readJson, removeFile } from "./shared/fsx.ts";
+import { randomId, readJson, removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { layout } from "./shared/layout.ts";
 import type { FeedFile, Goal, GoalSnapshot, MeFile } from "./shared/types.ts";
+import type { PodFeed } from "./hooks/siblings.ts";
 
 export function enqueue(ctx: Ctx, lid: string, kind: string, payload: unknown): void {
   ctx.db.prepare("INSERT INTO outbox(local_id, kind, payload, created_at) VALUES(?,?,?,?)").run(lid, kind, JSON.stringify(payload), nowIso());
@@ -173,19 +174,40 @@ export function deleteHistory(ctx: Ctx, lid: string): void {
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
+    // Asked again: one deletion, tried now (a refused one waits an hour on its own).
+    ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind='delete_session'").run(lid);
+    ctx.db.prepare("DELETE FROM kv WHERE key=?").run(`delete_refused:${lid}`);
     enqueue(ctx, lid, "delete_session", { ws: share.workspace_id, session_key: share.session_key });
   });
   renderHot(ctx, lid);
 }
 
-/** Local cleanup after the server confirmed a hard delete: local metering stays, server links go. */
+/** Why the server last refused to delete this session's shared history (its error code), or null (C4-1). */
+export function deleteRefused(ctx: Ctx, lid: string): string | null {
+  return kvGet(ctx.db, `delete_refused:${lid}`);
+}
+
+/**
+ * Local cleanup after the server confirmed a hard delete: local metering stays, server links go. The session is
+ * remembered as deleted, so `align share --dir --past` never offers it again, and its items in the cached team activity
+ * go too (the server deleted them with it), so it never shows as "you, on another machine" (C4-1).
+ */
 export function forgetShare(ctx: Ctx, lid: string): void {
+  const share = getShare(ctx, lid);
   tx(ctx.db, () => {
     ctx.db.prepare("UPDATE requests SET uploaded=0, epoch_id=NULL WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM epochs WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM shares WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM notices WHERE local_id=?").run(lid);
+    ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind='delete_session'").run(lid);
+    ctx.db.prepare("DELETE FROM kv WHERE key=?").run(`delete_refused:${lid}`);
+    kvSet(ctx.db, `history_deleted:${lid}`, nowIso());
   });
+  if (share) {
+    const file = layout.podFeed(ctx.home, share.workspace_id);
+    const feed = readJson<PodFeed>(file);
+    if (feed?.items.some((i) => i.session_key === share.session_key)) writeJsonAtomic(file, { ...feed, items: feed.items.filter((i) => i.session_key !== share.session_key) });
+  }
   renderHot(ctx, lid);
 }
 
@@ -336,21 +358,28 @@ export function insideDir(cwd: string, dir: string): boolean {
  * Already-metered local sessions active in the last `days` days whose own recorded folders (the first one and every
  * one they reported later) are all `dir` (a realpath) or inside it. A session with no folder is left out. One that was
  * ever shared (shared, pending, suspended, stopped or failed) or has epochs is skipped: sharing it from its start
- * could backdate history a live hook already reported, which the server refuses anyway (`epoch_overlap`).
+ * could backdate history a live hook already reported, which the server refuses anyway (`epoch_overlap`). One whose
+ * shared history the developer deleted (`align delete-history`) is skipped too and counted in `deleted`: deleting it
+ * was a choice, never undone by a later `--past`.
  */
-export function pastSessions(ctx: Ctx, dir: string, days: number, now = Date.now()): { take: SessionRow[]; already: number } {
+export function pastSessions(ctx: Ctx, dir: string, days: number, now = Date.now()): { take: SessionRow[]; already: number; deleted: number } {
   const since = new Date(now - days * 86_400_000).toISOString();
   const rows = ctx.db
     .prepare("SELECT * FROM sessions WHERE COALESCE(last_active, started_at, created_at) >= ? ORDER BY COALESCE(started_at, created_at), local_id")
     .all(since) as unknown as SessionRow[];
   const take: SessionRow[] = [];
   let already = 0;
+  let deleted = 0;
   for (const s of rows) {
     if (!s.cwd) continue;
     if (!sessionCwds(ctx.db, s.local_id, s.cwd).every((c) => insideDir(c, dir))) continue;
+    if (kvGet(ctx.db, `history_deleted:${s.local_id}`)) {
+      deleted++;
+      continue;
+    }
     const shared = ctx.db.prepare("SELECT 1 FROM shares WHERE local_id=?").get(s.local_id) || ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=?").get(s.local_id);
     if (shared) already++;
     else take.push(s);
   }
-  return { take, already };
+  return { take, already, deleted };
 }

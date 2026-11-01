@@ -226,3 +226,88 @@ describe("cycle 4: two `align login`s at once", () => {
   });
 });
 
+describe("C4-1: deleting shared history", () => {
+  test("after a re-pair, `align delete-history` deletes the history on the server from the new device (which the server audits), and the session's own activity no longer comes back as \"you, on another machine\"", async () => {
+    const { fake, t } = await world();
+    const s = await shared(t);
+    turn(t, s, "req_del_1");
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal([...fake.usage.values()].filter((u) => u.session_key === s.key).length, 1);
+    // The session's own work, as the team feed returns it to this person's devices.
+    fake.addRemoteActivity("ws_acme", { session_key: s.key, mine: true, user: { id: fake.user.id, name: fake.user.name }, kind: "edit", repo_id: "r".repeat(32), path_hash: "h".repeat(32) });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.ok(readJson<PodFeed>(layout.podFeed(t.home, "ws_acme"))!.items.some((i) => i.session_key === s.key), "cached");
+    await relogin(t);
+    const device = loadCredentials(t.home)!.device_id;
+    const del = await runCli(t, ["delete-history", s.lid.slice(0, 8), "--yes"]);
+    assert.equal(del.code, 0, del.stderr);
+    assert.match(del.stdout, /Shared history deleted\./);
+    assert.ok(!fake.sessions.has(s.key), "the server deleted the session");
+    assert.equal([...fake.usage.values()].filter((u) => u.session_key === s.key).length, 0, "and its usage");
+    assert.deepEqual(fake.deletedBy, [{ key: s.key, device }], "by the new device");
+    assert.ok(!readJson<PodFeed>(layout.podFeed(t.home, "ws_acme"))!.items.some((i) => i.session_key === s.key), "its cached activity went with it");
+  });
+
+  test("a deletion the server refuses is never reported as done: the share and the queued deletion stay, stderr says why and exit 1; asked again once the server takes it, it is deleted", async () => {
+    const { fake, t } = await world();
+    const s = await shared(t);
+    turn(t, s, "req_del_2");
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    fake.refuseDeletes = true;
+    const del = await runCli(t, ["delete-history", s.lid.slice(0, 8), "--yes"]);
+    assert.equal(del.code, 1, del.stdout);
+    assert.doesNotMatch(del.stdout, /Shared history deleted/);
+    assert.match(del.stderr, new RegExp(`the shared history of session ${s.lid.slice(0, 8)} was not deleted: the server refused \\(not_found\\)\\..*The deletion stays queued here and is tried again; you can also delete it on the web at http://127\\.0\\.0\\.1:\\d+/app/w/ws_acme/sessions\\.`));
+    assert.ok(fake.sessions.has(s.key));
+    assert.equal(shareRow(t, s.lid)?.state, "stopped", "the share is kept, not forgotten");
+    const ctx = ctxFor(t);
+    assert.equal((ctx.db.prepare("SELECT COUNT(*) AS n FROM outbox WHERE local_id=? AND kind='delete_session'").get(s.lid) as { n: number }).n, 1, "the deletion stays queued");
+    ctx.db.close();
+    assert.match((await runCli(t, ["sessions"])).stdout, /stopped \(Acme; history deletion refused \(not_found\)\)/);
+    fake.refuseDeletes = false;
+    const again = await runCli(t, ["delete-history", s.lid.slice(0, 8), "--yes"]);
+    assert.equal(again.code, 0, again.stderr);
+    assert.match(again.stdout, /Shared history deleted\./);
+    assert.ok(!fake.sessions.has(s.key));
+  });
+});
+
+describe("cycle 4: CLI arguments and `--past`", () => {
+  test("an unknown dash-prefixed session reference says no session matches, with the `--` hint", async () => {
+    const { t } = await world();
+    const r = await runCli(t, ["stop-sharing", "-Zzzzzzz"]);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /^align: no session matches "-Zzzzzzz", and it is not an option of `align stop-sharing`\. A session id that starts with "-" can also follow `--`, as in `align stop-sharing -- -Zzzzzzz`\./);
+  });
+
+  test("`align requests --session <id>` lists only that session's requests", async () => {
+    const { fake, t } = await world();
+    const a = await shared(t);
+    const b = await shared(t);
+    fake.sendRequest("ws_acme", { type: "checkpoint", goal_id: "g_ship", session_keys: [a.key], note: "for A" });
+    fake.sendRequest("ws_acme", { type: "checkpoint", goal_id: "g_ship", session_keys: [b.key], note: "for B" });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const all = (await runCli(t, ["requests"])).stdout;
+    assert.match(all, /for A/);
+    assert.match(all, /for B/);
+    const onlyA = await runCli(t, ["requests", "--session", a.lid.slice(0, 8)]);
+    assert.equal(onlyA.code, 0, onlyA.stderr);
+    assert.match(onlyA.stdout, /for A/);
+    assert.doesNotMatch(onlyA.stdout, /for B/);
+  });
+
+  test("`align share --dir --past` skips a session whose shared history the user deleted", async () => {
+    const { t } = await world();
+    const folder = path.join(t.root, "repo-past");
+    const s = await shared(t, folder);
+    turn(t, s, "req_past_1");
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const del = await runCli(t, ["delete-history", s.lid.slice(0, 8), "--yes"]);
+    assert.match(del.stdout, /Shared history deleted\./);
+    const r = await runCli(t, ["share", "--dir", folder, "--past", "3", "--workspace", "Acme", "--goal", "none"]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /0 session\(s\) in .* from the last 3 days/);
+    assert.match(r.stdout, /Skipped 1 whose shared history you deleted/);
+    assert.doesNotMatch(r.stdout, new RegExp(s.lid.slice(0, 8)));
+  });
+});

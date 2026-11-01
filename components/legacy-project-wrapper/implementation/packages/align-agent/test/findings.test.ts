@@ -200,10 +200,12 @@ describe("E2E findings: server side of the agent", () => {
     }
     const bind = await runCli(t, ["bind", id8, "--goal", "none"]);
     assert.match(bind.stderr, /session is not shared/, "the id resolves to the session (which signed out)");
-    // An option the command doesn't have is still refused as one.
+    // An argument that is neither an option of the command nor a session here is refused: no session matches it, and
+    // the message says how to pass an id that starts with "-" (not Node's bare "Unknown option").
     const bogus = await runCli(t, ["stop-sharing", "--bogus"]);
-    assert.equal(bogus.code, 1);
-    assert.match(bogus.stderr, /Unknown option '--bogus'/);
+    assert.equal(bogus.code, 2);
+    assert.match(bogus.stderr, /no session matches "--bogus", and it is not an option of `align stop-sharing`\. A session id that starts with "-" can also follow `--`, as in `align stop-sharing -- --bogus`/);
+    assert.doesNotMatch(bogus.stderr, /Unknown option/);
     const out = await runCli(t, ["stop-sharing", id8]);
     assert.equal(out.code, 0, `${out.stdout}\n${out.stderr}`);
     assert.match(out.stdout, /Stopped sharing\./);

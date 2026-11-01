@@ -49,7 +49,7 @@ seconds (always at the end of a turn) a hook starts a detached `align sync --hoo
 | `align stop-sharing <session>` / `align unshare <session>` | Stop uploading a session's usage | no (queued) |
 | `align delete-history <session> [--yes]` | Hard-delete a session's shared history on the server | no (queued) |
 | `align bind <session> --goal <ref\|none>` | Rebind a shared session at its next prompt | no |
-| `align requests [--all] [--json]` | Requests sent to this device's sessions and their answers (offline) | no |
+| `align requests [--all] [--json] [--session <session>]` | Requests sent to this device's sessions (or to one session) and their answers (offline) | no |
 | `align requests accept\|decline <id> [--session <session>]` | Answer a request; the receipt is queued for the sender | no (queued) |
 | `align latch status` | List stop latches and goal holds | no |
 | `align allocation [--workspace <name\|id>] [--week YYYY-MM-DD] [--refresh] [--json]` | Agent time per goal against its target (cached feed; `--week` asks the server) and this machine's unshared share | for `--refresh` and `--week` |
@@ -135,7 +135,10 @@ commands that take a `<session>` (`align share`, `align stop-sharing`, `align un
 `align bind` and `align requests --session`) SHALL read an argument that is not one of their own options but is the id,
 or an id prefix, of a session this machine metered (one the hooks have only spooled included) as that session, not as
 an unknown option, and SHALL accept such a reference as a string option's value (`--session -AbC1234`). Any other
-argument that starts with `-` and is not one of the command's options SHALL still be refused as an unknown option.
+argument that starts with `-` and is not one of the command's options SHALL be refused, with exit code 2, as `align: no
+session matches "<arg>", and it is not an option of \`align <command>\`. A session id that starts with "-" can also
+follow \`--\`, as in \`align <command> -- <arg>\`.` (a mistyped session prefix is likelier than a mistyped option, and
+Node's own "Unknown option" message does not say how to pass such an id).
 
 #### Scenario: Stop sharing a session whose id starts with a dash
 
@@ -143,10 +146,10 @@ argument that starts with `-` and is not one of the command's options SHALL stil
   runs the `align stop-sharing -puOFSTx` that its deny reason names
 - **THEN** the share stops, the stop latch is lifted, and the exit code is 0
 
-#### Scenario: An unknown option is still refused
+#### Scenario: An unknown dash reference is refused with a hint
 
-- **WHEN** the user runs `align stop-sharing --bogus` and no session's id starts with `--bogus`
-- **THEN** stderr names the unknown option `--bogus` and the exit code is 1
+- **WHEN** the user runs `align stop-sharing --bogus`, then `align stop-sharing -Zzzzzzz`, and no session's id starts with either (test `findings` "a session whose id starts with \"-\" ..."; test `findings4` "an unknown dash-prefixed session reference ...")
+- **THEN** each exits 2 with `align: no session matches "<arg>", and it is not an option of \`align stop-sharing\`. A session id that starts with "-" can also follow \`--\`, as in \`align stop-sharing -- <arg>\`.` and never Node's `Unknown option`
 
 ### Requirement: Private, owner-only state directory
 
@@ -620,12 +623,19 @@ share, each from its own start, the sessions already metered on this machine and
 recorded working folders (the first one and every other one the session later reported, from transcripts, rollouts
 and hooks) are all the folder's realpath or inside it (`cwd === dir` or starting with `dir + "/"`, so
 `/work/app-secret` and `/work/app.v2` are not inside `/work/app`). It SHALL skip sessions with no recorded folder and
-sessions that were ever shared or have epochs, print `<n> session(s) in <dir> from the last <d> days: <a> Claude Code,
+sessions that were ever shared or have epochs, and sessions whose shared history the developer deleted with `align
+delete-history` (`Skipped <n> whose shared history you deleted (\`align delete-history\`); \`align share <session>\`
+shares one again if you want.`), print `<n> session(s) in <dir> from the last <d> days: <a> Claude Code,
 <b> Codex` and one line per session (start time, harness, local id) and never any prompt text, and change nothing
 without `--yes` or a `y` answer. It SHALL report sessions the server refused because an epoch may not start before
 history it already holds (`409 epoch_overlap`) as skipped, and upload no usage under a refused epoch. This replaces
 the v1 import script: no `import`/`at` backdating exists, so an import can never backdate a session a live hook
 already reported on.
+
+#### Scenario: Deleted history is not offered again
+
+- **WHEN** a session in the folder was shared, its history deleted with `align delete-history`, and the developer previews `align share --dir <folder> --past 3` (test `findings4` "`align share --dir --past` skips a session whose shared history the user deleted")
+- **THEN** the preview lists no session and says `Skipped 1 whose shared history you deleted`
 
 #### Scenario: Only the folder, from session start, never backdated
 
@@ -638,7 +648,27 @@ The `align stop-sharing <session>` command (alias `align unshare <session>`) SHA
 any pending binding and stop latch, queue `POST .../stop-sharing`, and print `Stopped sharing. Future usage stays on
 this machine. Already shared history stays until you run \`align delete-history\`.` No usage SHALL be uploaded for
 the session afterwards. `align delete-history <session>` SHALL require `--yes` (or a TTY confirmation), queue
-`DELETE .../sessions/<session_key>`, and on 204/200/404 forget the share locally while keeping all local ledger rows.
+`DELETE .../sessions/<session_key>` (sent by whichever device is signed in now: the server lets any live device of the
+account that shared it delete it, so a re-pair never strands the history), and only on 204/200 forget the share
+locally (keeping all local ledger rows), remember the session's history as deleted, drop the session's items from the
+cached team activity, and print `Shared history deleted.` A refusal (404, 403) SHALL never be reported as done: the
+share and the queued deletion SHALL stay (tried again after an hour, or at once by the next `align delete-history`),
+`align sessions` SHALL show `stopped (<workspace>; history deletion refused (<code>))`, and the command SHALL exit 1 with
+`align: the shared history of session <id> was not deleted: the server refused (<code>). Only the account that shared it
+can delete it, from a device that still has access to <workspace>; if it was deleted on the web already, nothing is
+left there. The deletion stays queued here and is tried again; you can also delete it on the web at
+<server>/app/w/<ws>/sessions.` While the server can't be reached it prints `Deletion queued; the next sync retries when
+online.` (signed out: `... it is sent once you run \`align login\` ...`).
+
+#### Scenario: Deleting after a re-pair
+
+- **WHEN** a session shared under an earlier pairing has usage and cached team activity of its own, the machine logs out and in again, and the developer runs `align delete-history <id> --yes` (test `findings4` "after a re-pair, `align delete-history` deletes the history ..."; against the real server in `scripts/test-agent-live.mjs` "delete-history after a re-pair (E2E-AGENT cycle 4 C4-1) ...")
+- **THEN** the server deletes the session and its usage, from the new device, stdout says `Shared history deleted.`, the session's items are gone from the cached team activity (so they never show as "you, on another machine"), and `align share --dir --past` no longer offers it
+
+#### Scenario: A refused deletion
+
+- **WHEN** the server answers the deletion 404, then later accepts it and the developer runs `align delete-history` again (test `findings4` "a deletion the server refuses is never reported as done ...")
+- **THEN** the first run exits 1 with the refusal on stderr, never `Shared history deleted.`, the share and the queued deletion stay and `align sessions` says the deletion was refused; the second run deletes it and says so
 
 #### Scenario: Nothing after stop, then hard delete
 
@@ -1156,7 +1186,8 @@ so it can't be <accepted|declined> now.` (from the terminal `align: request <id>
 ... now`, exit 2), and the answer is spooled for the next sync. A request is open to `accept` while it waits for an answer or is
 a replan delivered to the agent and not declined, and open to `decline` while it waits or was delivered and not declined. `align requests accept|decline <id> [--session <session>]` SHALL
 record the answer directly and flush the outbox, and exit 2 when no open request matches. `align requests` SHALL list,
-offline, the requests waiting for an answer or delivered and not declined (shown as `delivered to the agent, not declined`; `--all` also answered and withdrawn ones; `--json`
+offline, the requests waiting for an answer or delivered and not declined (shown as `delivered to the agent, not declined`; `--all` also answered and withdrawn ones; `--session <session>`
+only that session's; `--json`
 with `id`, `short_id`, `session`, `type`, `state`, `goal`, `target_goal`, `sender`, `note`, `created_at` and
 `answered_at`). Each answer SHALL queue an `accepted` or `declined` receipt to the request's directive. Accepting a
 `switch_goal` SHALL queue a pending binding toward the target goal with cause `directive:<request directive id>`,
@@ -1167,6 +1198,11 @@ first prompt after the next sync); declining SHALL change nothing else. At the n
 `... to replan toward goal "<goal>": follow the updated plan.`) or `[Align] The developer declined the request;
 continue as before.` `::align status` SHALL list the open requests and `::align requests` this session's requests with
 their state.
+
+#### Scenario: Requests of one session
+
+- **WHEN** two shared sessions each have a checkpoint request and the developer runs `align requests --session <first session>` (test `findings4` "`align requests --session <id>` lists only that session's requests")
+- **THEN** only the first session's request is listed
 
 #### Scenario: switch_goal accepted end to end
 

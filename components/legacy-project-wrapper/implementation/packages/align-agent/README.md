@@ -30,9 +30,9 @@ align team [--cwd <dir>]                              work in flight toward this
 align asks [--workspace W] [--all] [--json]           asks of your teams and your own asks, from the cache (offline)
 align config [drift on|off]                           local settings; drift notice on by default
 align stop-sharing <session>                          future usage stays local
-align delete-history <session> [--yes]                server hard delete; totals change
+align delete-history <session> [--yes]                server hard delete (from any of your paired devices); totals change
 align bind <session> --goal <ref|none>                takes effect at the next prompt (root turn)
-align requests [--all] [--json]                       requests sent to your sessions and their answers (offline)
+align requests [--all] [--json] [--session <s>]      requests sent to your sessions and their answers (offline)
 align requests accept|decline <id> [--session S]      answer one; the receipt goes to the sender
 align latch status                                    stop latches and goal holds (they come from the web)
 align allocation [--workspace W] [--week YYYY-MM-DD] [--refresh] [--json]

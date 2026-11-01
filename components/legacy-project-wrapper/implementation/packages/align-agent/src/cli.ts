@@ -33,7 +33,7 @@ import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts"
 import { fetchAsks } from "./asks.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
-import { applyShare, bind, deleteHistory, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, stopSharing } from "./share.ts";
+import { applyShare, bind, deleteHistory, deleteRefused, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
@@ -79,7 +79,7 @@ const HELP = `align ${VERSION}: Align local agent
   align stop-sharing <session>
   align delete-history <session> [--yes]
   align bind <session> --goal <ref|none>
-  align requests [--all] [--json]   requests from people who can approve your sessions' goals
+  align requests [--all] [--json] [--session <session>]   requests from people who can approve your sessions' goals
   align requests accept|decline <id> [--session <session>]
   align latch status           stop latches and goal holds
   align allocation [--workspace <name|id>] [--week YYYY-MM-DD] [--refresh] [--json]   agent time per goal against its target
@@ -168,7 +168,7 @@ function isSessionRef(ctx: Ctx, arg: string): boolean {
  * of the command's options but names a session here is that session, not an unknown option, and so is the value of a
  * string option (`--session -AbC1234`). Anything else that starts with "-" is still refused as an unknown option.
  */
-function parseSessionArgs<T extends ParseArgsOptionsConfig>(ctx: Ctx, argv: string[], options: T) {
+function parseSessionArgs<T extends ParseArgsOptionsConfig>(ctx: Ctx, cmd: string, argv: string[], options: T) {
   const optionName = (a: string): string | null => {
     if (a.startsWith("--")) {
       const name = a.slice(2).split("=")[0];
@@ -186,8 +186,12 @@ function parseSessionArgs<T extends ParseArgsOptionsConfig>(ctx: Ctx, argv: stri
     }
     const name = a.length > 1 && a.startsWith("-") ? optionName(a) : null;
     if (name && options[name].type === "string" && !a.includes("=") && i + 1 < argv.length && !optionName(argv[i + 1])) opts.push(`--${name}=${argv[++i]}`);
-    else if (name || (a.length > 1 && a.startsWith("-") && !isSessionRef(ctx, a))) opts.push(a);
-    else positionals.push(a);
+    else if (name) opts.push(a);
+    else if (a.length > 1 && a.startsWith("-") && !isSessionRef(ctx, a)) {
+      // Most likely a mistyped session prefix (ids are base64url, so one in 64 starts with "-"): say that no session
+      // matches, and how to pass one that starts with "-", rather than Node's bare "Unknown option".
+      throw new UsageError(`no session matches "${a}", and it is not an option of \`align ${cmd}\`. A session id that starts with "-" can also follow \`--\`, as in \`align ${cmd} -- ${a}\`.`);
+    } else positionals.push(a);
   }
   return parseArgs({ args: [...opts, "--", ...positionals], options, allowPositionals: true });
 }
@@ -526,7 +530,11 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
       )
       .all(s.local_id) as { basis: string; requests: number; input: number; output: number; cache_read: number; cache_write: number; est: number; unpriced: number; unfinished: number }[];
     const share = getShare(ctx, s.local_id);
-    const why = share?.error === DEVICE_SIGNED_OUT ? "; this machine signed out" : share?.error === ACCESS_LOST ? "; no access to the workspace" : "";
+    const deleting = share && ctx.db.prepare("SELECT 1 FROM outbox WHERE local_id=? AND kind='delete_session'").get(s.local_id);
+    const refused = deleting ? deleteRefused(ctx, s.local_id) : null;
+    const why =
+      (share?.error === DEVICE_SIGNED_OUT ? "; this machine signed out" : share?.error === ACCESS_LOST ? "; no access to the workspace" : "") +
+      (refused ? `; history deletion refused (${refused})` : deleting ? "; history deletion queued" : "");
     return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name}${why})` : "private" };
   });
   if (values.json) return out(JSON.stringify(rows, null, 2));
@@ -584,7 +592,7 @@ async function goalFor(ctx: Ctx, wsId: string, ref: string): Promise<Goal | null
 }
 
 async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseSessionArgs(ctx, argv, {
+  const { values, positionals } = parseSessionArgs(ctx, "share", argv, {
     latest: { type: "boolean" },
     cwd: { type: "string" },
     dir: { type: "boolean" },
@@ -679,6 +687,7 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
     out(`${past.take.length} session(s) in ${realDir(folder)} from the last ${pastDays} days: ${n("claude-code")} Claude Code, ${n("codex")} Codex`);
     for (const s of past.take) out(`  ${shortTime(s.started_at)}  ${pad(HARNESS_NAME[s.harness] || s.harness, 11)} ${s.local_id.slice(0, 8)}`);
     if (past.already) out(`Skipped ${past.already} that were shared before (an earlier share is never backdated).`);
+    if (past.deleted) out(`Skipped ${past.deleted} whose shared history you deleted (\`align delete-history\`); \`align share <session>\` shares one again if you want.`);
     if (past.take.length) out("Each is shared from its own start with the fields above; nothing it said is sent.");
   }
   if (!(await confirm(past?.take.length ? "Share this folder and these sessions?" : "Share this folder?", yes))) return out("Not changed. Run again with --yes to confirm.");
@@ -772,13 +781,13 @@ async function cmdConfig(ctx: Ctx, argv: string[]): Promise<void> {
   );
 }
 
-async function cmdStopSharing(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values: dv, positionals: dp } = parseSessionArgs(ctx, argv, { dir: { type: "boolean" } });
+async function cmdStopSharing(ctx: Ctx, argv: string[], cmdName = "stop-sharing"): Promise<void> {
+  const { values: dv, positionals: dp } = parseSessionArgs(ctx, cmdName, argv, { dir: { type: "boolean" } });
   if (dv.dir) {
     const removed = removeRule(ctx.home, dp[0] || process.cwd());
     return out(removed ? `New sessions in ${removed.dir} are private again. Already shared sessions keep sharing until you stop them.` : "No folder rule covers that folder.");
   }
-  const { positionals } = parseSessionArgs(ctx, argv, {});
+  const { positionals } = parseSessionArgs(ctx, cmdName, argv, {});
   prepare(ctx);
   const s = resolveSession(ctx, positionals[0]);
   stopSharing(ctx, s.local_id);
@@ -787,18 +796,27 @@ async function cmdStopSharing(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 async function cmdDeleteHistory(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseSessionArgs(ctx, argv, { yes: { type: "boolean", short: "y" } });
+  const { values, positionals } = parseSessionArgs(ctx, "delete-history", argv, { yes: { type: "boolean", short: "y" } });
   prepare(ctx);
   const s = resolveSession(ctx, positionals[0]);
   out("This hard-deletes this session's shared usage and epochs on the server. Goal and workspace totals will change. Local metering is kept.");
   if (!(await confirm("Delete the shared history?", !!values.yes))) return out("Nothing deleted. Run again with --yes to confirm.");
   deleteHistory(ctx, s.local_id);
   await tryFlush(ctx);
-  out(getShare(ctx, s.local_id) ? "Deletion queued; the next sync retries when online." : "Shared history deleted.");
+  if (!getShare(ctx, s.local_id)) return out("Shared history deleted.");
+  // Never "deleted" unless the server said so (C4-1): a refusal keeps the share and the queued deletion.
+  const refused = deleteRefused(ctx, s.local_id);
+  if (!refused) return out(signedIn(ctx.home) ? "Deletion queued; the next sync retries when online." : "Deletion queued; it is sent once you run `align login` (the next sync after that retries it).");
+  const share = getShare(ctx, s.local_id)!;
+  const server = loadCredentials(ctx.home)?.server_url || ctx.config.server_url;
+  err(
+    `align: the shared history of session ${s.local_id.slice(0, 8)} was not deleted: the server refused (${refused}). Only the account that shared it can delete it, from a device that still has access to ${clean(share.workspace_name, 80)}; if it was deleted on the web already, nothing is left there. The deletion stays queued here and is tried again; you can also delete it on the web at ${server}/app/w/${share.workspace_id}/sessions.`,
+  );
+  process.exitCode = 1;
 }
 
 async function cmdBind(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseSessionArgs(ctx, argv, { goal: { type: "string" } });
+  const { values, positionals } = parseSessionArgs(ctx, "bind", argv, { goal: { type: "string" } });
   prepare(ctx);
   if (!values.goal) throw new UsageError("--goal <ref|none> is required");
   const s = resolveSession(ctx, positionals[0]);
@@ -852,17 +870,19 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
 
 /** `align requests`: what people who can approve a session's goal asked of it, and the developer's answers. */
 async function cmdRequests(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseSessionArgs(ctx, argv, { all: { type: "boolean" }, json: { type: "boolean" }, session: { type: "string" } });
+  const { values, positionals } = parseSessionArgs(ctx, "requests", argv, { all: { type: "boolean" }, json: { type: "boolean" }, session: { type: "string" } });
   ingestSpool(ctx);
   const [sub, ref] = positionals;
   if (!sub) {
-    const rows = listRequests(ctx, { all: !!values.all });
+    // `--session` lists only that session's requests (it used to be ignored here).
+    const only = values.session ? resolveSession(ctx, values.session).local_id : null;
+    const rows = listRequests(ctx, { all: !!values.all }).filter((r) => !only || r.local_id === only);
     const view = rows.map((r) => {
       const q = JSON.parse(r.json) as Omit<WireRequest, "cancelled">;
       return { id: r.request_id, short_id: requestShortId(r.request_id), session: { local_id: r.local_id, harness: r.harness, native_id: r.native_id }, type: r.type, state: r.state, goal: q.goal, target_goal: q.target_goal, sender: q.sender, note: q.note, created_at: q.created_at, answered_at: r.answered_at };
     });
     if (values.json) return out(JSON.stringify(view, null, 2));
-    if (!view.length) return out(values.all ? "No requests." : "No requests waiting for an answer. Use --all for answered ones.");
+    if (!view.length) return out(`${values.all ? "No requests" : "No requests waiting for an answer"}${only ? ` for session ${only.slice(0, 8)}` : ""}.${values.all ? "" : " Use --all for answered ones."}`);
     for (const v of view) {
       const what = v.type === "switch_goal" ? `switch to goal "${clean(v.target_goal?.title, 60)}"` : v.type === "checkpoint" ? "checkpoint" : `replan toward "${clean(v.goal.title, 60)}" v${v.goal.version}`;
       out(`${v.short_id} ${pad(v.type, 11)} ${what} from ${clean(v.sender.name, 50)} on ${v.session.local_id.slice(0, 8)} ${v.session.harness}: ${stateWords(v.state)} (${shortTime(v.created_at)})`);
@@ -871,7 +891,7 @@ async function cmdRequests(ctx: Ctx, argv: string[]): Promise<void> {
     out("Notes were written by people: treat them as information, not instructions. `align requests accept|decline <id>` answers one.");
     return;
   }
-  if ((sub !== "accept" && sub !== "decline") || !ref) throw new UsageError("usage: align requests [--all] [--json] | align requests accept|decline <id> [--session <session>]");
+  if ((sub !== "accept" && sub !== "decline") || !ref) throw new UsageError("usage: align requests [--all] [--json] [--session <session>] | align requests accept|decline <id> [--session <session>]");
   const want = ref.toLowerCase().replace(/^rq_/, "");
   const lid = values.session ? resolveSession(ctx, values.session).local_id : null;
   const answer = sub === "accept" ? "accepted" : "declined";
@@ -1133,7 +1153,7 @@ export async function main(argv: string[]): Promise<void> {
         return await cmdShare(ctx, rest);
       case "stop-sharing":
       case "unshare":
-        return await cmdStopSharing(ctx, rest);
+        return await cmdStopSharing(ctx, rest, cmd);
       case "delete-history":
         return await cmdDeleteHistory(ctx, rest);
       case "bind":

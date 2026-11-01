@@ -887,6 +887,22 @@ try {
       stillBlocked !== null && webResume.status === 200 && denied(q1Free3) === null,
     `${M2.status} ${approve2.status} ${approve2.text} ${login2Code} ${login2Out} ${notShared} ${reshare.stdout} ${JSON.stringify(q1Again)} ${newDevice} blocked=${stillBlocked} ${webResume.text} free=${q1Free3.stdout}`,
   );
+  // -- E2E-AGENT cycle 4 C4-1: the past session shared under the first pairing (now ended there as device_signed_out)
+  //    has its shared history deleted from the new pairing: the server deletes it (any live device of the account that
+  //    shared it may), audits the device that did it, and the CLI only then says so --
+  const k1Before = sdb((d) => d.prepare("SELECT state, ended_reason, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, K1));
+  const k1Usage = sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, K1).n);
+  const delK1 = cli(["delete-history", "a1a1a1a1", "--yes"]);
+  const k1After = sdb((d) => [d.prepare("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, K1).n, d.prepare("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, K1).n]);
+  const delAudit = sdb((d) => d.prepare("SELECT actor_id, object_id FROM v2_audit WHERE ws_id = ? AND action = 'session.history_deleted' ORDER BY rowid DESC LIMIT 1").get(W));
+  const pastAgain = cli(["share", "--dir", oldRepo, "--past", "3", "--workspace", W, "--goal", G.id]);
+  check(
+    "delete-history after a re-pair (E2E-AGENT cycle 4 C4-1): a session shared under the earlier pairing is deleted on the server from the new device (session and usage gone, audited session.history_deleted naming the new device), the CLI says `Shared history deleted.` only then, and `--past` no longer offers it",
+    k1Before?.state === "stopped" && k1Before.ended_reason === "device_signed_out" && k1Before.device_id !== newDevice && k1Usage === 1 &&
+      delK1.code === 0 && /Shared history deleted\./.test(delK1.stdout) && k1After[0] === 0 && k1After[1] === 0 && delAudit?.actor_id === M.id && delAudit.object_id === newDevice &&
+      /Skipped 1 whose shared history you deleted/.test(pastAgain.stdout),
+    `${JSON.stringify(k1Before)} ${k1Usage} ${delK1.code} ${delK1.stdout} ${delK1.stderr} ${JSON.stringify(k1After)} ${JSON.stringify(delAudit)} ${pastAgain.stdout}`,
+  );
 
   // -- E2E-AGENT cycle 2 N2: hooks and syncs on a clock 10 minutes ahead: the session's start, its epoch and its usage
   //    reach the server on the server's clock (nothing refused or withheld); a pass on the right clock clears the offset
