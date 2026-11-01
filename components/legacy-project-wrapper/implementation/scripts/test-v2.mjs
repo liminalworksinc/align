@@ -1151,6 +1151,28 @@ try {
     d.prepare("DELETE FROM v2_devices WHERE id = ?").run(notMine.id);
   });
   check("device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices gets a distinguishing suffix (\"reuse test (2)\"), so no two live devices share a name, also when the poll names another person's device as the one it replaces", drName === "reuse test (2)", String(drName));
+  // E2E-AGENT cycle 6: two logins approved together. The first's device ("race mac") is replaced by the second's ("race
+  // mac (2)", named while the first was live); the first's revoke names its replacement, which takes the plain name.
+  // Not while another live device of the person has it, never for another person's device, and never without the name.
+  const raceA = insertDevice(U1.id, "race mac");
+  const raceB = insertDevice(U1.id, "race mac (2)");
+  const raceOther = insertDevice(U2.id, "race mac (3)");
+  const raceKeep = insertDevice(U1.id, "race mac (4)");
+  const nameOf = (id) => withDb((d) => d.prepare("SELECT name, revoked_at FROM v2_devices WHERE id = ?").get(id));
+  const raceStranger = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${raceOther.id}`, { bearer: insertDevice(U1.id, "race mac").access });
+  const strangerName = nameOf(raceOther.id)?.name;
+  const raceRevoke = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${raceB.id}`, { bearer: raceA.access });
+  const raceAfter = [nameOf(raceA.id), nameOf(raceB.id)];
+  const raceTaken = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${raceKeep.id}`, { bearer: insertDevice(U1.id, "race mac").access });
+  check(
+    "device (E2E-AGENT cycle 6): a self-revoke naming the device that replaced it (two logins approved together) gives that device its plain name (\"race mac (2)\" -> \"race mac\") and is revoked; never another person's device, and not while another live device of the person has the plain name",
+    raceRevoke.status === 204 && !!raceAfter[0]?.revoked_at && raceAfter[1]?.name === "race mac" && !raceAfter[1]?.revoked_at &&
+      raceStranger.status === 204 && strangerName === "race mac (3)" && raceTaken.status === 204 && nameOf(raceKeep.id)?.name === "race mac (4)",
+    `${raceRevoke.status} ${JSON.stringify(raceAfter)} ${raceStranger.status} ${strangerName} ${raceTaken.status} ${JSON.stringify(nameOf(raceKeep.id))}`,
+  );
+  withDb((d) => {
+    for (const x of [raceB, raceOther, raceKeep]) d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
+  });
   const ts3 = new Date().toISOString();
   const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
   const rrReuse = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });

@@ -37,7 +37,9 @@ The user signs in at `/app/device`, types the code, sees device name + request a
   `{ "error": "clock_skew", "message", "server_time": "<ISO>" }` when the signature is valid but `ts` is more than 5 min
   off the server's clock: nothing is rotated and the device stays paired; sign again with the server's time.
 
-`DELETE /api/v2/devices/self` (Bearer) → 204. Revokes this device's tokens (logout). Any revocation also ends the
+`DELETE /api/v2/devices/self[?replaced_by=<dv_id>]` (Bearer) → 204. Revokes this device's tokens (logout). With
+`replaced_by` (the device that replaced it on this machine, `align login`), that device of the same person takes this
+one's name when it is named `<this name> (<n>)` and no other live device has the plain name. Any revocation also ends the
 device's sessions: `stopped` with `ended_reason: "device_signed_out"`. Removing a member from a workspace (or their
 leaving it) ends their sessions there the same way, with `ended_reason: "member_removed"`; requests still waiting on
 an ended session expire.

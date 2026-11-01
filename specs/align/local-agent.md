@@ -177,7 +177,10 @@ save `credentials.json`, persist `--server` as `server_url` in `config.json`, fe
 `Signed in as <name> <<email>> on device <device name>.` plus one `workspace <name> (<id>), role <role>` line per
 workspace, and cache each workspace's goal feed. Its token polls SHALL name, as `replaces`, the device of the
 credentials this machine holds for the same server (signed in or not), so the server keeps the new device's plain name
-rather than adding `(2)` for the device this login replaces. The device name is `--name`, else `device_name` from
+rather than adding `(2)` for the device this login replaces. The revoke of the device a login replaced SHALL name the
+device that replaced it (`DELETE /api/v2/devices/self?replaced_by=<id>`, `workspaces` "Device pairing flow"), so when two
+logins approved together leave this machine on the second one's `<name> (2)`, revoking the first one's `<name>` gives
+the plain name back and `Signed in as ...` says it. The device name is `--name`, else `device_name` from
 `config.json`, else `<username>'s <hostname>` (without a `.local` suffix). On macOS
 it opens the verification URL in the browser unless `ALIGN_NO_BROWSER` is set. The code is approved at `/app/device` by
 a person signed in with their own account, and only when that sign-in is no older than 15 minutes; otherwise the page
@@ -194,7 +197,8 @@ paired with no machine behind it (an Align folder deleted without `align logout`
 name are told apart, as the Devices page names them. It SHALL leave out this device, this machine's own earlier
 devices (revoked by this login, or waiting in `revoke.json` to be), and devices paired after this one (a second `align
 login` on this machine may replace this pairing a moment later), so it never names the device signed in now, or about
-to be, as one to revoke; and it SHALL say it only while this pairing is still the one signed in. When the server refuses to start pairing with 429 `rate_limited`, `align login`
+to be, as one to revoke; and it SHALL say it only while this pairing is still the one signed in, after the
+`workspace ...` lines (which belong with `Signed in as ...`). When the server refuses to start pairing with 429 `rate_limited`, `align login`
 SHALL exit 1 with `align: could not start pairing this device: <the server's message>` when that message says how
 long to wait, else `... too many device pairings were started recently. Try again in <n> minutes.` from `Retry-After`.
 
@@ -222,6 +226,16 @@ long to wait, else `... too many device pairings were started recently. Try agai
 
 - **WHEN** `align login` can't revoke the device it replaced, which has the same name, alone (test `findings6` "a re-login keeps the plain name ..."), and again when the account also has another machine's device of that name, a device paired after this one and an old laptop (test `findings6` "login names devices unambiguously ...")
 - **THEN** alone, the poll names the replaced device in `replaces` and the new device keeps `Test Mac`, and no other device is named; with the other machine's, the new device is `Test Mac (2)` on the server and in `Signed in as ...`, and the line names only the old laptop, the other machine and this machine, never the replaced device or the later one
+
+#### Scenario: Two logins approved together
+
+- **WHEN** one `align login --name "Test Mac"` reads this machine's pairing and starts, a second pairs, commits and finishes before the first one's device is made (so it is `Test Mac (2)`), and the first then replaces the second's device (test `findings7` "two logins approved together ...")
+- **THEN** the second's device is revoked naming the first's as its replacement, the first's device is `Test Mac` on the server and in `Signed in as ...`, and it is the only live device
+
+#### Scenario: Line order
+
+- **WHEN** an account with another paired device runs `align login` (test `findings7` "`align login` prints the other-devices line after the workspace lines")
+- **THEN** the `workspace ...` lines come right after `Signed in as ...`, and `Your account has 1 other paired device ...` after them
 
 #### Scenario: Denied or expired code
 

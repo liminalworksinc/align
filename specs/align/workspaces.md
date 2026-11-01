@@ -1104,6 +1104,17 @@ login at once), it gets the first free `<name> (2)`, `<name> (3)`, ..., so the D
 two live devices of one name. The token poll MAY name the device the pairing replaces on the same machine (`replaces`,
 a device id; malformed is 400); that device, counted only when it is the approving person's own, is left out of the
 check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with `<name> (2)`.
+A device that revokes itself because a newer pairing on the same machine replaced it (`DELETE
+/api/v2/devices/self?replaced_by=<device id>`) SHALL pass its name on: when the named device is the same person's, live,
+and named `<its name> (<n>)`, and no other live device of the person has the plain name once it is revoked, the named
+device SHALL take the plain name in the same transaction. Two logins approved together on one machine (the second
+named while the first's device was live, then replacing it) so end with the plain name, never `<name> (2)` next to no
+`<name>`; another person's device, or a name still taken, is left as it is.
+
+#### Scenario: A replaced device passes its name on
+
+- **WHEN** a person's device `race mac` revokes itself naming their live `race mac (2)` as its replacement; a device of theirs names another person's `race mac (3)`; and one names their `race mac (4)` while `race mac` is taken (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 6): a self-revoke naming the device that replaced it ...")
+- **THEN** each revoke is 204, `race mac (2)` becomes `race mac`, and the other two keep their names
 
 #### Scenario: Starting a pairing
 

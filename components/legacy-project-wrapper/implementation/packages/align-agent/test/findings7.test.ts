@@ -6,10 +6,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
+import { loadCredentials } from "../src/api.ts";
 import { sessionKey } from "../src/keys.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import { FakeServer } from "./fake-server.ts";
-import { claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runHook, usage, writeLines, type TestEnv } from "./helpers.ts";
+import { claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runHook, usage, waitFor, writeLines, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 after(async () => {
@@ -294,5 +295,38 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     fs.mkdirSync(other, { recursive: true });
     runHook(t, "claude", "SessionStart", { session_id: "efefefef-1111-2222-3333-444444444444", source: "startup", cwd: other });
     assert.equal(json(runHook(t, "claude", "PreToolUse", { session_id: "efefefef-1111-2222-3333-444444444444", tool_name: "Bash", tool_input: { command: "ls" }, cwd: other }).stdout), null);
+  });
+
+  test("`align login` prints the other-devices line after the workspace lines", async () => {
+    const { fake, t } = await world();
+    fake.devices.set("dv_oldlaptop", { id: "dv_oldlaptop", name: "Old laptop", publicKey: "x", revoked: false, refresh: null, oldRefresh: new Set(), createdAt: "2026-10-01T09:00:00.000Z" });
+    const r = await runCli(t, ["login", "--name", "Test Mac"]);
+    assert.equal(r.code, 0, r.stderr);
+    const lines = r.stdout.split("\n");
+    const signed = lines.findIndex((l) => l.startsWith("Signed in as"));
+    const ws = lines.findIndex((l) => l.startsWith("  workspace Acme (ws_acme)"));
+    const others = lines.findIndex((l) => l.startsWith("Your account has 1 other paired device"));
+    assert.ok(signed >= 0 && ws === signed + 1 && others > ws, r.stdout);
+  });
+
+  test("two logins approved together: the machine ends on the plain name, as the device the other login paired is revoked and names its replacement", async () => {
+    const { fake, t } = await world();
+    // The slow login reads this machine's pairing first; the fast one pairs, commits and finishes before the slow one's
+    // device is made (so it is "Test Mac (2)" next to the fast one's live "Test Mac"), then the slow one replaces it.
+    const from = fake.log.length;
+    const slow = runCli(t, ["login", "--name", "Test Mac"], { ALIGN_DEVICE_POLL_SCALE_MS: "300" });
+    await waitFor(() => fake.log.slice(from).some((l) => l.path === "/api/v2/device/authorize"), 10_000, "the slow login's authorize");
+    const fast = await runCli(t, ["login", "--name", "Test Mac"]);
+    assert.equal(fast.code, 0, fast.stderr);
+    const fastDevice = loadCredentials(t.home)!.device_id;
+    const r = await slow;
+    assert.equal(r.code, 0, r.stderr);
+    const now = loadCredentials(t.home)!.device_id;
+    assert.notEqual(now, fastDevice);
+    assert.ok(fake.devices.get(fastDevice)!.revoked, "the fast login's device is revoked");
+    assert.deepEqual(fake.revokesSeen.find((x) => x.device === fastDevice), { device: fastDevice, replaced_by: now });
+    assert.equal(fake.devices.get(now)!.name, "Test Mac", "the plain name, not \"Test Mac (2)\"");
+    assert.match(r.stdout, /Signed in as Sean <sean@example\.test> on device Test Mac\./);
+    assert.deepEqual([...fake.devices.values()].filter((d) => !d.revoked).map((d) => d.name), ["Test Mac"]);
   });
 });

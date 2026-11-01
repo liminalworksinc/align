@@ -90,6 +90,8 @@ export class FakeServer {
   log: { method: string; path: string; status: number; auth: boolean; origin: boolean; device?: string }[] = [];
   /** `replaces` of each token poll that created a device (null when the poll named none). */
   replacesSeen: (string | null)[] = [];
+  /** Each self-revoke, with the device it named as its replacement (`replaced_by`, null when none). */
+  revokesSeen: { device: string; replaced_by: string | null }[] = [];
   /** Hold matching calls (before the server looks at them) until `release` settles; `left` of them, when set (C4). */
   holdCalls: { match: (method: string, path: string) => boolean; release: Promise<void>; left?: number } | null = null;
   /** Answer matching calls 503 without processing them (a proxy in front of a failing route, C4-3). */
@@ -447,6 +449,12 @@ export class FakeServer {
       if (req.method === "DELETE" && p === "/api/v2/devices/self") {
         dev.revoked = true;
         dev.revokedReason = "logout";
+        // As lib/v2/devices.ts passNameOn: the device that replaced it on this machine takes its name when it got
+        // "<name> (n)" only because this one was live.
+        const next = this.devices.get(url.searchParams.get("replaced_by") ?? "");
+        const m = next && !next.revoked ? /^(.*) \((\d+)\)$/.exec(next.name) : null;
+        if (next && m && m[1] === dev.name && ![...this.devices.values()].some((x) => !x.revoked && x.name === dev.name)) next.name = dev.name;
+        this.revokesSeen.push({ device: dev.id, replaced_by: url.searchParams.get("replaced_by") });
         return send(204);
       }
       if (req.method === "GET" && p === "/api/v2/me") return send(200, { user: this.user, device: { id: dev.id, name: dev.name }, workspaces: this.workspaces });

@@ -371,7 +371,6 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   // committed meanwhile revoked it, and this one must not report a revoked device as signed in.
   const name = me.device?.name || deviceName;
   if (!(await whileSignedInAs(ctx, pairedAs!, () => out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`)))) return replacedMeanwhile(ctx, pairedAs!);
-  await mentionOtherDevices(ctx, server, pairedAs!);
   for (const w of me.workspaces) {
     out(`  workspace ${w.name} (${w.id}), role ${w.role}`);
     try {
@@ -382,6 +381,8 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
       /* feed later */
     }
   }
+  // After the workspace lines, which belong with "Signed in as" (cycle 6).
+  await mentionOtherDevices(ctx, server, pairedAs!);
 }
 
 /** Another `align login` committed after this one and replaced (and revoked) its device: say so, and which device this
