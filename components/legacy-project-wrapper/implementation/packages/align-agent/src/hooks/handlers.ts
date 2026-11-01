@@ -683,20 +683,32 @@ const ENDED_WHY = {
   sharing_ended: "the Align server no longer has this session's share",
 } as const;
 
-/** The way out of a latch nothing can lift from the web any more (B6): `align stop-sharing <id>` in a terminal. */
-function endedNote(ended: keyof typeof ENDED_WHY, lid: string): string {
+/** Why a share ended, when this machine can share the session there again now (C6-2). */
+const ENDED_AGAIN: Partial<Record<keyof typeof ENDED_WHY, string>> = {
+  device_signed_out: "this machine signed out of Align, and is signed in again now",
+  access_lost: "this machine lost access to its Align workspace, and can reach it again now",
+};
+
+/**
+ * The way out of a latch nothing can lift from the web any more (B6): `align stop-sharing <id>` in a terminal. When the
+ * session can be shared there again now (`reshare`), the way the session's own notice gives instead: `::align share`,
+ * after which the web can lift it (C6-2). Never both: following `align stop-sharing` makes re-sharing impossible.
+ */
+function endedNote(ended: keyof typeof ENDED_WHY, lid: string, reshare = false): string {
+  const again = reshare ? ENDED_AGAIN[ended] : undefined;
+  if (again) return `Its sharing ended (${again}), so the user can share it there again by typing \`::align share\` in this session; once it is shared again, this can be lifted from the web. Until then tools stay blocked.`;
   return `Its sharing has since ended (${ENDED_WHY[ended] ?? ENDED_WHY.sharing_ended}), so this can no longer be lifted from the web: tools stay blocked until the user runs \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
 }
 
 /** The stop deny: the plain wording, or, when the session's sharing ended, how the user gets out. */
 export function stopReason(latch: Latch | null, lid: string): string {
   if (!latch?.ended) return DENY_REASON;
-  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid)} Tell the user and wait for instructions.`;
+  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare)} Tell the user and wait for instructions.`;
 }
 
 function holdDenyReason(h: HoldLatch | null, lid: string): string {
   const base = holdReason(h);
-  return h?.ended ? `${base} ${endedNote(h.ended, lid)}` : base;
+  return h?.ended ? `${base} ${endedNote(h.ended, lid, !!h.reshare)}` : base;
 }
 
 /** The goal-hold latch: a hold file that names a hold, or one that can't be read, blocks every tool (read-only ones too). */
@@ -908,7 +920,8 @@ function holdLine(home: string, lid: string): string {
   if (h.state === "absent" || (h.state === "ok" && Array.isArray(h.value?.holds) && !h.value.holds.length)) return "  Goal hold: off";
   if (h.state !== "ok" || !Array.isArray(h.value?.holds)) return "  Goal hold: unreadable (tools blocked)";
   const out = h.value.holds.map((x) => `  Goal hold: on goal "${clean(x.goal_title, 80)}" by ${clean(x.by, 50) || "someone"} (all tools blocked)`);
-  if (h.value.ended) out.push(`  Sharing ended, so no release can reach it: run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it`);
+  if (h.value.ended && h.value.reshare) out.push("  Sharing ended; `::align share` here shares it again, after which the hold can be released from the web");
+  else if (h.value.ended) out.push(`  Sharing ended, so no release can reach it: run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it`);
   return out.join("\n");
 }
 
@@ -971,9 +984,11 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
           latch.state === "absent"
             ? "off"
             : latch.state === "ok" && latch.value.stopped
-              ? latch.value.ended
-                ? `on (tools blocked; sharing ended, so run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it)`
-                : "on (tools blocked)"
+              ? latch.value.ended && latch.value.reshare
+                ? "on (tools blocked; sharing ended: `::align share` here shares it again, after which it can be resumed from the web)"
+                : latch.value.ended
+                  ? `on (tools blocked; sharing ended, so run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it)`
+                  : "on (tools blocked)"
               : "unreadable (tools blocked)"
         }`,
         holdLine(home, lid),

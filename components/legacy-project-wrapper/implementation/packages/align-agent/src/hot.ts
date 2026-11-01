@@ -1,12 +1,14 @@
 // Hot files are a projection of the database, rewritten whole after every change, so the CLI, the sync job and the hooks can all
 // update state without racing on the files. Hooks read only these files.
 import type { Ctx } from "./context.ts";
+import { signedIn } from "./api.ts";
 import { kvGet, kvSet, nowIso } from "./db.ts";
 import { getSession } from "./ledger.ts";
 import { layout } from "./shared/layout.ts";
 import { removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { contextGoals, snapshot } from "./shared/goaltree.ts";
-import type { EndedWhy, GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, RequestState, ShareState } from "./shared/types.ts";
+import { readJson } from "./shared/fsx.ts";
+import type { EndedWhy, GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, MeFile, RequestState, ShareState } from "./shared/types.ts";
 
 export { snapshot };
 
@@ -155,11 +157,14 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   };
   writeJsonAtomic(layout.hot(ctx.home, lid), hot);
   // A latch whose share has ended (this machine signed out, or the server no longer has the share) can't be lifted from
-  // the web any more: the latch says so, so the deny tells the user how to get out (`align stop-sharing`).
-  const ended = endedReason(share);
+  // the web any more: the latch says so, so the deny tells the user how to get out (`align stop-sharing`). When the
+  // session can be shared there again now (signed in again, its workspace in reach again), the latch says that instead,
+  // so the deny gives the same advice as the session's notice: `::align share` (C6-2).
+  const end = endedState(ctx, share);
+  const ended = end ? { ended: end.why, ...(end.reshare ? { reshare: true as const } : {}) } : {};
   const latch = ctx.db.prepare("SELECT * FROM latches WHERE local_id=?").get(lid) as { stopped: number; directive_id: string; seq: number; at: string } | undefined;
   if (latch && latch.stopped) {
-    const l: Latch = { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...(ended ? { ended } : {}) };
+    const l: Latch = { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...ended };
     writeJsonAtomic(layout.latch(ctx.home, lid), l);
   } else {
     removeFile(layout.latch(ctx.home, lid));
@@ -175,7 +180,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   if (holds.length) {
     const h: HoldLatch = {
       v: 1,
-      ...(ended ? { ended } : {}),
+      ...ended,
       holds: holds.map((r) => {
         const j = JSON.parse(r.json) as { goal_title: string; by: string; reason: string | null };
         return { goal_id: r.goal_id, goal_title: j.goal_title, by: j.by, reason: j.reason, directive_id: r.directive_id, seq: r.seq, at: r.at };
@@ -192,6 +197,33 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
 export function endedReason(share: ShareRow | null): EndedWhy | null {
   if (!share || (share.state !== "stopped" && share.state !== "error")) return null;
   return share.error === DEVICE_SIGNED_OUT ? "device_signed_out" : share.error === ACCESS_LOST ? "access_lost" : "sharing_ended";
+}
+
+/**
+ * Why a share ended so nothing from the web can lift its latches, and whether this machine can share it there again now
+ * (`reshare`): for a share that ended because this machine signed out or lost the workspace, once it is signed in and
+ * reaches that workspace again (`::align share` shares it again, and then the web can resume or release it). Null while
+ * the share lasts. Read afresh from the credentials and `me.json` each time, so the latch, `align latch status` and the
+ * notices all say what is true now (C6-2).
+ */
+export function endedState(ctx: Ctx, share: ShareRow | null): { why: EndedWhy; reshare: boolean } | null {
+  const why = endedReason(share);
+  if (!why || !share) return null;
+  if (why === "sharing_ended" || !signedIn(ctx.home)) return { why, reshare: false };
+  const me = readJson<MeFile>(layout.me(ctx.home));
+  return { why, reshare: !!me && !me.signed_out && me.workspaces.some((w) => w.id === share.workspace_id) };
+}
+
+/** Rewrite the latch files of every stopped or held session whose share ended, after this machine's sign-in or reach
+ *  changed (a new `/me`, a sign-out), so their deny reasons follow (C6-2). */
+export function renderEndedLatches(ctx: Ctx): void {
+  const rows = ctx.db
+    .prepare(
+      `SELECT DISTINCT s.local_id FROM shares s WHERE s.state IN ('stopped','error')
+         AND (EXISTS (SELECT 1 FROM latches l WHERE l.local_id=s.local_id AND l.stopped=1) OR EXISTS (SELECT 1 FROM holds h WHERE h.local_id=s.local_id AND h.held=1))`,
+    )
+    .all() as { local_id: string }[];
+  for (const r of rows) renderHot(ctx, r.local_id);
 }
 
 /** `shares.error` of a share ended because this machine signed out of Align (logout, or the device was revoked). */

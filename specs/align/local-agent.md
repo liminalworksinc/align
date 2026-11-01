@@ -1180,7 +1180,21 @@ since ended (this machine signed out of Align), so this can no longer be lifted 
 the user runs \`align stop-sharing <lid8>\` in a terminal. Tell the user and wait for instructions.` (`this machine no
 longer has access to its Align workspace` when it ended because the workspace is out of reach, `the Align server no
 longer has this session's share` otherwise); a goal hold's
-reason SHALL end with the same `Its sharing has since ended ...` sentence, and `::align status` SHALL name the command. A latch file that exists but cannot be
+reason SHALL end with the same `Its sharing has since ended ...` sentence, and `::align status` SHALL name the command.
+Whether the session can be shared there again SHALL be worked out afresh from this machine's sign-in and the
+workspaces its `/me` lists, each time they change (each `/me` read, each sign-out), and written into the latch and
+hold files (`reshare`), so the deny, `align latch status`, `::align status`, `align status` and the session's
+notices give the same advice: when a share that ended because this machine signed out or lost the workspace can be
+shared again now (signed in again, the workspace in reach again), the reason SHALL instead read `... Its sharing ended
+(this machine lost access to its Align workspace, and can reach it again now), so the user can share it there again by
+typing \`::align share\` in this session; once it is shared again, this can be lifted from the web. Until then tools
+stay blocked. Tell the user and wait for instructions.` (`this machine signed out of Align, and is signed in again
+now` for a sign-out), and never name `align stop-sharing` as the only way out, since a session its person stopped
+sharing can never be shared again; `align latch status` SHALL end `; sharing ended (<why>, and can reach it again
+now): \`::align share\` in the session shares it there again, after which it can be resumed or released from the
+web`, `::align status` `on (tools blocked; sharing ended: \`::align share\` here shares it again, after which it can be
+resumed from the web)`, and `align status` count those as `<n> can be shared again (\`::align share\` in the session),
+after which the web can lift it`. Shared again, the latch reads as before the share ended (the plain reason). A latch file that exists but cannot be
 parsed SHALL deny every tool, and input without a session id SHALL deny when any latch exists; one session's latch
 SHALL never deny another session's tools. A `resume` directive SHALL remove the latch file and, when it lifted a stop,
 be told once at the session's next prompt: to the user as `Align: this session was resumed from its Align workspace, so
@@ -1208,6 +1222,16 @@ work again while they are blocked.
 
 - **WHEN** the server issues `stop` and later `resume` for a shared session (test `e2e` "login, share, usage, ...")
 - **THEN** an `enforced` receipt is posted and `PreToolUse` denies, and after `resume` the latch file disappears and tools are allowed again
+
+#### Scenario: A stopped session whose lost workspace came back
+
+- **WHEN** a shared session is stopped from the web, its workspace goes out of reach (a sync), comes back (a sync), goes out of reach again and comes back once more, and the developer then types `::align share confirm` (a sync after each) (test `findings7` "stopped from the web, its workspace lost and given back ...")
+- **THEN** while the workspace is back the session's notice offers `::align share` and says its tools stay blocked until the stop is lifted once it is shared again, the deny reads `... Its sharing ended (this machine lost access to its Align workspace, and can reach it again now), so the user can share it there again by typing \`::align share\` in this session; ...` with no `align stop-sharing`, `align latch status`, `::align status` and `align status` say the same; while it is out of reach they name `align stop-sharing <lid8>` again; and once shared again the deny is the plain stop reason
+
+#### Scenario: Signed out and in again
+
+- **WHEN** a session stopped from the web is on a machine that runs `align logout` and then `align login` (test `findings7` "stopped from the web, then this machine signed out and in again ...")
+- **THEN** after the logout the deny names `align stop-sharing <lid8>`, and after the login it reads `Its sharing ended (this machine signed out of Align, and is signed in again now), so the user can share it there again by typing \`::align share\` in this session; ...`
 
 ### Requirement: Directive intake and receipts
 
@@ -1543,7 +1567,8 @@ read, which `align login` lists), log `workspace added: this device can now reac
 invite or on your Devices page). \`align share\`, or \`::align share\` in a session, shares sessions there.`; each session whose share there
 ended because the workspace was lost gets the notice `Align: this machine can reach <workspace> in Align again. To
 share this session there again, type \`::align share\` here (it counts toward "<goal>" again).` (without the
-parenthesis when it had no goal); and each other session active in the last hour that is not shared and that an
+parenthesis when it had no goal; for a session stopped or held from the web, followed by `It was stopped or held from
+the web: once it is shared again, that can be lifted there; until then its tools stay blocked.`); and each other session active in the last hour that is not shared and that an
 earlier pass recorded (one this pass recorded first started with it, its own `SessionStart` spooling it, and already
 starts out with the workspace in reach, so it is not told) gets `Align: this
 machine can now reach <workspace> in Align. To share this session there, type \`::align share <goal>\` here.` when the

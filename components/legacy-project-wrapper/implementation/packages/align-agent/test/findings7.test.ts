@@ -135,3 +135,57 @@ describe("C6-1: a session whose shared history was deleted is shared again from 
     assert.match(past.stdout, /Skipped 1 whose shared history was deleted \(on the web or with `align delete-history`\); `align share <session>` shares one again, counting from now, if you want\./);
   });
 });
+
+describe("C6-2: a stopped session whose share ended says the same thing everywhere, from what is true now", () => {
+  const PLAIN = "Align: this session was stopped from its Align workspace. Tools are blocked until it is resumed there. Tell the user and wait for instructions.";
+  const deny = (t: TestEnv, s: { sid: string; cwd: string }) =>
+    json(runHook(t, "claude", "PreToolUse", { session_id: s.sid, tool_name: "Bash", tool_input: { command: "echo G2CHECK" }, cwd: s.cwd }).stdout)?.hookSpecificOutput?.permissionDecisionReason as string;
+
+  test("stopped from the web, its workspace lost and given back: the deny, `align latch status`, `::align status` and `align status` offer `::align share` as its notice does; lost again, `align stop-sharing`; shared again, the plain stop", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [A.key], goal: null, binding: null });
+    await sync(t);
+    const acme = fake.workspaces[0];
+    fake.workspaces = [];
+    await sync(t);
+    assert.match(deny(t, A), /no longer has access to its Align workspace\), so this can no longer be lifted from the web: tools stay blocked until the user runs `align stop-sharing /);
+
+    fake.workspaces = [acme];
+    await sync(t);
+    const start = json(runHook(t, "claude", "SessionStart", { session_id: A.sid, source: "resume", cwd: A.cwd }).stdout);
+    assert.match(start.systemMessage, /can reach Acme in Align again\. To share this session there again, type `::align share` here \(it counts toward "Ship the v2 onboarding flow" again\)\. It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked\./);
+    const d = deny(t, A);
+    assert.equal(
+      d,
+      "Align: this session was stopped from its Align workspace. Its sharing ended (this machine lost access to its Align workspace, and can reach it again now), so the user can share it there again by typing `::align share` in this session; once it is shared again, this can be lifted from the web. Until then tools stay blocked. Tell the user and wait for instructions.",
+    );
+    const latch = (await runCli(t, ["latch", "status"])).stdout;
+    assert.match(latch, /sharing ended \(this machine lost access to its Align workspace, and can reach it again now\): `::align share` in the session shares it there again, after which it can be resumed or released from the web/);
+    assert.doesNotMatch(latch, /only `align stop-sharing/);
+    assert.match(prompt(t, A.sid, "::align status", A.cwd).reason, /Stop latch: on \(tools blocked; sharing ended: `::align share` here shares it again, after which it can be resumed from the web\)/);
+    assert.match((await runCli(t, ["status"])).stdout, /Stop latch: 1 session\(s\) stopped; 1 can be shared again \(`::align share` in the session\), after which the web can lift it; see/);
+
+    fake.workspaces = [];
+    await sync(t);
+    assert.match(deny(t, A), /no longer has access to its Align workspace\), so this can no longer be lifted from the web/);
+    assert.match((await runCli(t, ["latch", "status"])).stdout, /so only `align stop-sharing /);
+
+    fake.workspaces = [acme];
+    await sync(t);
+    prompt(t, A.sid, "::align share confirm", A.cwd);
+    await sync(t);
+    assert.equal(deny(t, A), PLAIN, "shared again: the web can resume it");
+  });
+
+  test("stopped from the web, then this machine signed out and in again: the deny offers `::align share`, not only `align stop-sharing`", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [A.key], goal: null, binding: null });
+    await sync(t);
+    assert.equal((await runCli(t, ["logout"])).code, 0);
+    assert.match(deny(t, A), /this machine signed out of Align\), so this can no longer be lifted from the web: tools stay blocked until the user runs `align stop-sharing /);
+    assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    assert.match(deny(t, A), /Its sharing ended \(this machine signed out of Align, and is signed in again now\), so the user can share it there again by typing `::align share` in this session/);
+  });
+});

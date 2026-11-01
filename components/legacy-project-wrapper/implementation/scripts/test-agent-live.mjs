@@ -1060,6 +1060,9 @@ try {
   const rmGoal = openEpochOf(Q1.key)?.goal_id;
   const rmReq = await ws(O2, "POST", `/goals/${rmGoal}/requests`, { type: "checkpoint", session_keys: [Q1.key] });
   const rmStop = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
+  // E2E-AGENT cycle 6 C6-2: a second session stopped from the web goes through the removal and the re-invite stopped.
+  const Q3 = startQ("q3");
+  const q3Stop = await ws(M, "POST", `/sessions/${Q3.key}/stop`, {});
   sync();
   const rm = await ws(O2, "DELETE", `/members/${M.id}`);
   const rmRow = sdb((d) => d.prepare("SELECT state, ended_reason FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, Q1.key));
@@ -1072,6 +1075,7 @@ try {
     `${rmReq.text.slice(0, 200)} ${rmStop.status} ${rm.status} ${rm.text} ${JSON.stringify(rmRow)} ${rmTarget} ${rmStopAgain.text}`,
   );
   const rmSync = sync();
+  const q3Lost = denied(tool(Q3, "Bash")) ?? "";
   const rmTold = prompt(Q1, "still there?");
   const rmDeny = denied(tool(Q1, "Bash")) ?? "";
   const rmGoals = cli(["goals"]);
@@ -1124,6 +1128,27 @@ try {
       scRow()?.state === "shared" && scRow()?.device_id === deviceBefore && scLocal() === "shared (Side Co)" && liveDevice() === deviceBefore && miloDevices === 1,
     `${reInv.status} ${rePreview.text} ${reAccept.text} ${JSON.stringify(reAudit)} ${reHook.stderr} ${reMe} told=${reTold.stdout} told2=${reTold2.stdout} share=${reShare.stdout} ${JSON.stringify(q1Back)} ${q1Local} ${JSON.stringify(scRow())} ${scLocal()} ${miloDevices}`,
   );
+  // C6-2: the session stopped from the web whose workspace came back: its deny gives the advice its notice gives
+  // (`::align share`), never "only `align stop-sharing`"; shared again, the plain stop, which a web resume lifts.
+  const q3Back = denied(tool(Q3, "Bash")) ?? "";
+  const q3Latch = cli(["latch", "status"]).stdout;
+  const q3Lid = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === Q3.sid)?.local_id ?? "none";
+  const q3Share = prompt(Q3, "::align share confirm");
+  sync();
+  const q3Shared = denied(tool(Q3, "Bash")) ?? "";
+  const q3Resume = await ws(M, "POST", `/sessions/${Q3.key}/resume`, {});
+  sync();
+  const q3Free = denied(tool(Q3, "Bash"));
+  check(
+    "stopped, removed and re-invited (E2E-AGENT cycle 6 C6-2): while the workspace is out of reach the deny names `align stop-sharing`; once it is back the deny and `align latch status` offer `::align share` instead, as the session's notice does; `::align share confirm` shares it again, the deny becomes the plain stop, and a web resume frees its tools",
+    q3Stop.status === 200 && q3Lost.includes("no longer has access to its Align workspace") && q3Lost.includes("`align stop-sharing ") &&
+      q3Back.includes("can reach it again now), so the user can share it there again by typing `::align share` in this session") && !q3Back.includes("align stop-sharing") &&
+      q3Latch.includes(`${q3Lid.slice(0, 8)} claude-code STOPPED`) && !new RegExp(`${q3Lid.slice(0, 8)}[^\n]*only \`align stop-sharing`).test(q3Latch) &&
+      /sharing requested/.test(q3Share.json?.reason ?? "") && q3Shared === "Align: this session was stopped from its Align workspace. Tools are blocked until it is resumed there. Tell the user and wait for instructions." &&
+      q3Resume.status === 200 && q3Free === null,
+    `${q3Stop.status} lost=${q3Lost} back=${q3Back} latch=${q3Latch} share=${q3Share.stdout} shared=${q3Shared} ${q3Resume.text} free=${q3Free}`,
+  );
+
   // C5-1 and C5-2: shared again, the session counts from the re-share; the turn made while it was not shared never goes
   // up, and the next one goes up under the new epoch. The device reaches two workspaces again, so it has no default.
   const backAt = Date.now() + 200;

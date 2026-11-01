@@ -7,7 +7,7 @@ import { kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
-import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, getShare, notePriorShare, renderHot, sharedBefore, snapshot } from "./hot.ts";
+import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, getShare, notePriorShare, renderEndedLatches, renderHot, sharedBefore, snapshot } from "./hot.ts";
 
 export { notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
 import { loadCredentials } from "./api.ts";
@@ -254,6 +254,9 @@ export function endSharesSignedOut(ctx: Ctx): number {
     );
   }
   if (live.length) ctx.log(`signed out: ${live.length} shares ended on this machine`);
+  // A stopped session whose share had ended already (its workspace lost, say) can no longer be shared again from here
+  // either: its deny says so (C6-2).
+  renderEndedLatches(ctx);
   return live.length;
 }
 
@@ -332,7 +335,14 @@ export function noticeWorkspacesAdded(ctx: Ctx, me: MeFile, added: { id: string;
     for (const s of ended) {
       const goal = s.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
       told.add(s.local_id);
-      notify(ctx, s.local_id, `workspace_back_${w.id}_${at}`, `Align: this machine can reach ${name} in Align again. To share this session there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`);
+      // Stopped or held from the web: sharing it again is also how the web gets to lift that (C6-2).
+      const latched = ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(s.local_id) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(s.local_id);
+      notify(
+        ctx,
+        s.local_id,
+        `workspace_back_${w.id}_${at}`,
+        `Align: this machine can reach ${name} in Align again. To share this session there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.${latched ? " It was stopped or held from the web: once it is shared again, that can be lifted there; until then its tools stay blocked." : ""}`,
+      );
     }
     const since = new Date(Date.now() - 3_600_000).toISOString();
     // A session this pass recorded first started with it (its own SessionStart spooled it and started the pass): it

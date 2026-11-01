@@ -30,7 +30,7 @@ import {
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
-import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts";
+import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedState, getShare } from "./hot.ts";
 import { fetchAsks } from "./asks.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
@@ -527,9 +527,16 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   const unpriced = ctx.db.prepare("SELECT unpriced, COUNT(*) AS n FROM requests WHERE unpriced IS NOT NULL GROUP BY unpriced").all() as { unpriced: string; n: number }[];
   out(`  Unpriced:   ${unpriced.length ? unpriced.map((u) => `${u.n} ${u.unpriced}`).join(", ") : "0"}`);
   const latched = (ctx.db.prepare("SELECT COUNT(*) AS n FROM latches WHERE stopped=1").get() as { n: number }).n;
-  const stuck = (n: number) => (n ? `; ${n} can't be lifted from the web any more (sharing ended): \`align stop-sharing <session>\` unblocks each` : "");
-  const endedOf = (table: "latches" | "holds", flag: "stopped" | "held") =>
-    (ctx.db.prepare(`SELECT COUNT(DISTINCT x.local_id) AS n FROM ${table} x JOIN shares s ON s.local_id=x.local_id WHERE x.${flag}=1 AND s.state IN ('stopped','error')`).get() as { n: number }).n;
+  // Of those whose share ended: the ones that can be shared there again now (`::align share`, then the web lifts it), and
+  // the ones only `align stop-sharing` unblocks (C6-2).
+  const stuck = (e: { stuck: number; again: number }) =>
+    (e.again ? `; ${e.again} can be shared again (\`::align share\` in the session), after which the web can lift it` : "") +
+    (e.stuck ? `; ${e.stuck} can't be lifted from the web any more (sharing ended): \`align stop-sharing <session>\` unblocks each` : "");
+  const endedOf = (table: "latches" | "holds", flag: "stopped" | "held") => {
+    const lids = (ctx.db.prepare(`SELECT DISTINCT x.local_id AS lid FROM ${table} x JOIN shares s ON s.local_id=x.local_id WHERE x.${flag}=1 AND s.state IN ('stopped','error')`).all() as { lid: string }[]).map((r) => r.lid);
+    const again = lids.filter((lid) => endedState(ctx, getShare(ctx, lid))?.reshare).length;
+    return { stuck: lids.length - again, again };
+  };
   if (latched) out(`  Stop latch: ${latched} session(s) stopped${stuck(endedOf("latches", "stopped"))}; see \`align latch status\``);
   const holds = ctx.db.prepare("SELECT json FROM holds WHERE held=1").all() as { json: string }[];
   if (holds.length) {
@@ -886,9 +893,14 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
   if (!rows.length && !holds.length) return out("No stop latches or goal holds.");
   /** A latch or hold whose share ended can't be lifted from the web: say how to get out. */
   const way = (lid: string) => {
-    const ended = endedReason(getShare(ctx, lid));
+    const ended = endedState(ctx, getShare(ctx, lid));
     if (!ended) return "";
-    const why = ended === "device_signed_out" ? "this machine signed out" : ended === "access_lost" ? "this machine no longer has access to its Align workspace" : "the Align server no longer has this session's share";
+    // Shareable there again now: the way the session's notice and its deny give (C6-2).
+    if (ended.reshare) {
+      const why = ended.why === "device_signed_out" ? "this machine signed out, and is signed in again now" : "this machine lost access to its Align workspace, and can reach it again now";
+      return `; sharing ended (${why}): \`::align share\` in the session shares it there again, after which it can be resumed or released from the web`;
+    }
+    const why = ended.why === "device_signed_out" ? "this machine signed out" : ended.why === "access_lost" ? "this machine no longer has access to its Align workspace" : "the Align server no longer has this session's share";
     return `; sharing ended (${why}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it`;
   };
   for (const r of rows) {

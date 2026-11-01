@@ -148,6 +148,8 @@ export interface HoldLatch {
   v: 1;
   /** As on the stop latch: the release can no longer reach this session. */
   ended?: EndedWhy;
+  /** As on the stop latch: `::align share` can share it again now, after which a release reaches it. */
+  reshare?: true;
   holds: { goal_id: string; goal_title: string; by: string; reason: string | null; directive_id: string; seq: number; at: string }[];
 }
 
@@ -210,6 +212,9 @@ export interface Latch {
   /** Set when the session's sharing ended (this machine signed out, or the server no longer has the share), so no
    *  resume can reach it: only `align stop-sharing <session>` lifts the latch. */
   ended?: EndedWhy;
+  /** With `ended`: this machine can share the session there again now (signed in again, its workspace in reach again),
+   *  so `::align share` shares it again, after which the web can resume it (C6-2). */
+  reshare?: true;
 }
 
 /** Why a share ended so that nothing from the web can lift its latches any more. */
