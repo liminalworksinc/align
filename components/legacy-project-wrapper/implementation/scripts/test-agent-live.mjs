@@ -1071,6 +1071,10 @@ try {
       rmGoals.code === 0 && rmGoals.stdout.includes("Side Co") && !rmGoals.stdout.includes("Ledger Co") && rmOut.code === 0 && denied(rmFree) === null,
     `${rmSync.stderr} ${JSON.stringify(rmLocal)} told=${rmTold.stdout} deny=${rmDeny} goals=${rmGoals.code} ${rmGoals.stdout} ${rmGoals.stderr} ${rmOut.stderr} free=${rmFree.stdout}`,
   );
+  // C5-1: a turn made now, while the session's share has ended ("its usage stays on this machine from now on").
+  const gapAt = Date.now();
+  appendLines(Q1.tr, [userLine(Q1.sid, "q1-gap", new Date(gapAt).toISOString(), repoQ), assistantLine(Q1.sid, "req_q1_gap", new Date(gapAt + 50).toISOString(), repoQ)]);
+  sync();
   const scLocal = () => JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === SC.sid)?.shared;
   check(
     "member removed: the share in the other workspace (Side Co) is untouched, on the server and here",
@@ -1105,6 +1109,20 @@ try {
       q1Back?.state === "shared" && q1Back.ended_reason === null && q1Back.device_id === deviceBefore && q1Local === "shared (Ledger Co)" &&
       scRow()?.state === "shared" && scRow()?.device_id === deviceBefore && scLocal() === "shared (Side Co)" && liveDevice() === deviceBefore && miloDevices === 1,
     `${reInv.status} ${rePreview.text} ${reAccept.text} ${JSON.stringify(reAudit)} ${reHook.stderr} ${reMe} told=${reTold.stdout} told2=${reTold2.stdout} share=${reShare.stdout} ${JSON.stringify(q1Back)} ${q1Local} ${JSON.stringify(scRow())} ${scLocal()} ${miloDevices}`,
+  );
+  // C5-1 and C5-2: shared again, the session counts from the re-share; the turn made while it was not shared never goes
+  // up, and the next one goes up under the new epoch. The device reaches two workspaces again, so it has no default.
+  const backAt = Date.now() + 200;
+  appendLines(Q1.tr, [userLine(Q1.sid, "q1-back", new Date(backAt).toISOString(), repoQ), assistantLine(Q1.sid, "req_q1_back", new Date(backAt + 50).toISOString(), repoQ)]);
+  await new Promise((r) => setTimeout(r, 400));
+  sync();
+  const q1Usage = sdb((d) => d.prepare("SELECT u.ts, u.epoch_id, e.ends_at FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id WHERE u.ws_id = ? AND u.session_key = ?").all(W, Q1.key));
+  const inRange = (r, from) => Date.parse(r.ts) >= from && Date.parse(r.ts) <= from + 1000;
+  const reDefault = JSON.parse(readFileSync(path.join(alignHome, "me.json"), "utf8")).default_workspace ?? null;
+  check(
+    "re-invite (C5-1, C5-2): the turn made while the session's share had ended is never uploaded when it is shared again (no stored row from then); the turn after the re-share is stored under the open epoch; me.json has no default workspace once the device reaches two again",
+    !q1Usage.some((r) => inRange(r, gapAt)) && q1Usage.some((r) => inRange(r, backAt) && r.ends_at === null) && reDefault === null,
+    `${JSON.stringify(q1Usage.slice(-4))} gap=${new Date(gapAt).toISOString()} back=${new Date(backAt).toISOString()} default=${reDefault}`,
   );
 
   // -- canaries: people's words reach the model only inside Align's quoted-data wording --
