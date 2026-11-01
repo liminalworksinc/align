@@ -736,7 +736,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 16, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 16 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 17, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 17 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -761,6 +761,43 @@ try {
     d.close();
     return out;
   })();
+  const upgraded17 = (() => {
+    const src = readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8");
+    const migrations = new Function(`return [${src.slice(src.indexOf("[", src.indexOf("const MIGRATIONS")) + 1, src.indexOf("];\n\n// The operator script"))}];`)();
+    const d = new DatabaseSync(":memory:");
+    d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT)");
+    migrations.slice(0, 16).forEach((m) => d.exec(m));
+    d.exec(`INSERT INTO ba_user VALUES ('u_up', 'Up'); INSERT INTO v2_workspaces (id, name, created_by, created_at) VALUES ('ws_up', 'Before', 'u_up', 'x');
+      INSERT INTO v2_members VALUES ('ws_up', 'u_up', 'owner', 'x');`);
+    d.exec(`INSERT INTO v2_sessions (ws_id, session_key, user_id, device_id, harness, repo_key, started_at, state, created_at, updated_at, ended_reason)
+      VALUES ('ws_up', 'key-up', 'u_up', NULL, 'claude-code', 'repo-up', 'x', 'stopped', 'x', 'x', 'device_signed_out')`);
+    let before = "";
+    try {
+      d.exec("UPDATE v2_sessions SET ended_reason = 'member_removed'");
+    } catch (e) {
+      before = String(e?.message);
+    }
+    d.exec("BEGIN");
+    d.exec(migrations[16]);
+    const broken = d.prepare("PRAGMA foreign_key_check").all().length;
+    d.exec("COMMIT");
+    const kept = d.prepare("SELECT ended_reason FROM v2_sessions").get()?.ended_reason;
+    d.exec("UPDATE v2_sessions SET ended_reason = 'member_removed'");
+    const after = d.prepare("SELECT ended_reason FROM v2_sessions").get()?.ended_reason;
+    let other = "";
+    try {
+      d.exec("UPDATE v2_sessions SET ended_reason = 'other'");
+    } catch (e) {
+      other = String(e?.message);
+    }
+    d.close();
+    return { n: migrations.length, broken, before, kept, after, other };
+  })();
+  check(
+    "storage (E2E-AGENT cycle 2): migration 17 lets ended_reason be member_removed (refused before it) and keeps a version 16 database's ended sessions; any other reason is still refused",
+    upgraded17.n === SCHEMA_VERSION && /CHECK/.test(upgraded17.before) && upgraded17.broken === 0 && upgraded17.kept === "device_signed_out" && upgraded17.after === "member_removed" && /CHECK/.test(upgraded17.other),
+    JSON.stringify(upgraded17),
+  );
   check(
     "storage (PORT29): migration 15 adds target_share to goals and their versions, steering (default off) to workspaces, and the steering-event and reallocation tables; a version 14 database upgrades in place, its workspace and goal kept with steering off and no target",
     port29Cols && ["v2_steering_events", "v2_reallocations", "v2_reallocation_revisions", "v2_reallocation_approvals"].every((t) => pragmas.tables.includes(t)) && upgraded.n === SCHEMA_VERSION && upgraded.broken === 0 &&
@@ -2282,6 +2319,115 @@ try {
         withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE action = 'session.shared_again' AND actor_id = ?").get(U3.id)).n === 1 &&
         resumeY.status === 200 && gotResume.json?.directives?.some((d) => d.kind === "resume" && d.session_keys.includes(SX)) && plainStopped.status === 409 && plainStopped.json?.error === "sharing_stopped",
       `${takeover.status} ${again.text} ${JSON.stringify(rowY)} ${resumeY.text} ${plainStopped.status}`,
+    );
+  }
+  // -- E2E-AGENT cycle 2 (and web F2): a session nothing can reach any more ends, whether its device signed out or its
+  //    person was removed from the workspace; requests still waiting on it expire in the same transaction, and new
+  //    requests and holds never target it. A device's clock that runs ahead is named (clock_skew), and a session start
+  //    stored in the future is moved back by the next epoch instead of waiting for real time --
+  {
+    const cu = {};
+    for (const [who, name] of [
+      ["CO", "Cleo Owner"],
+      ["CM", "Cato Member"],
+    ])
+      cu[who] = await signUp(who, name, `${who.toLowerCase()}@ended.example.test`);
+    const { CO, CM } = cu;
+    const CW = (await call("CO", "POST", "/api/v2/workspaces", { cookie: CO.cookie, body: { name: "Ended sessions" } })).json?.id;
+    const ca = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${CW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    const invite = async () => {
+      const i = await ca(CO, "POST", "/invites", { email: CM.email, role: "member" });
+      return call("CM", "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: CM.cookie, body: {} });
+    };
+    await invite();
+    const CG = (await ca(CM, "POST", "/goals", { title: "Cato's scheduler goal", visibility: "workspace" })).json;
+    const cDevice = (keys = newDeviceKeys()) => {
+      const d = insertDevice(CM.id, "Cato's laptop");
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, CW));
+      return { ...keys, who: "CM", user: CM, id: d.id, access: d.access };
+    };
+    const cT0 = new Date(Date.now() - 3600_000).toISOString();
+    const cPut = (dev, key, startedAt = cT0) =>
+      call("CM", "PUT", `/api/v2/workspaces/${CW}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, CW, "/src/ended"), repo_alias: null, started_at: startedAt, title: null } });
+    const cEpoch = (dev, key, startsAt, goalId = CG.id) =>
+      call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: epochId(), goal_id: goalId, starts_at: startsAt, root_turn: null, cause: "manual" } });
+    const cShare = async (dev, native) => {
+      const key = sessionKey(dev, CW, "claude-code", native);
+      await cPut(dev, key);
+      await cEpoch(dev, key, cT0);
+      return key;
+    };
+    const target = (rid, key) => withDb((d) => d.prepare("SELECT state FROM v2_request_targets WHERE request_id = ? AND session_key = ?").get(rid ?? "", key))?.state;
+    const cRow = (key) => withDb((d) => d.prepare("SELECT state, ended_reason, started_at, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(CW, key));
+    const dirCount = (key) => withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_directive_targets WHERE ws_id = ? AND session_key = ?").get(CW, key)).n;
+    const view = async (rid) => (await ca(CO, "GET", `/goals/${CG.id}/requests`)).json?.requests?.find((r) => r.id === rid);
+
+    // The device signs out (web F2).
+    const DA = cDevice();
+    const SA = await cShare(DA, "ended-a");
+    const cpA = await ca(CO, "POST", `/goals/${CG.id}/requests`, { type: "checkpoint" });
+    const logoutA = await call("CM", "DELETE", "/api/v2/devices/self", { bearer: DA.access });
+    const vA = await view(cpA.json?.request?.id);
+    const dirsA = dirCount(SA);
+    const againA = await ca(CO, "POST", `/goals/${CG.id}/requests`, { type: "replan" });
+    const holdA = await ca(CO, "PUT", `/goals/${CG.id}/hold`, { reason: "Ended sessions hold" });
+    const relA = await ca(CO, "DELETE", `/goals/${CG.id}/hold`);
+    check(
+      "sessions (E2E-AGENT cycle 2, web F2): revoking a device expires, in the same transaction, a request still waiting on its session (no longer \"pending, not observed\" for ever: the request reads expired); a new request finds no session (409 no_sessions) and a hold writes it no directive",
+      cpA.status === 201 && logoutA.status === 204 && cRow(SA)?.ended_reason === "device_signed_out" && target(cpA.json.request.id, SA) === "expired" && vA?.counts.pending === 0 && vA.state === "expired" &&
+        againA.status === 409 && againA.json?.error === "no_sessions" && holdA.status === 201 && relA.status === 200 && dirCount(SA) === dirsA,
+      `${cpA.status} ${logoutA.status} ${JSON.stringify(cRow(SA))} ${JSON.stringify(vA)} ${againA.text} ${holdA.status} ${dirsA}/${dirCount(SA)}`,
+    );
+
+    // The member is removed while a session of theirs is shared and stopped.
+    const DB2 = cDevice();
+    const SB = await cShare(DB2, "ended-b");
+    const cpB = await ca(CO, "POST", `/goals/${CG.id}/requests`, { type: "checkpoint" });
+    const stopB = await ca(CO, "POST", `/sessions/${SB}/stop`, {});
+    const rmB = await ca(CO, "DELETE", `/members/${CM.id}`);
+    const rowB = cRow(SB);
+    const openB = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").get(CW, SB)).n;
+    const dirsB = dirCount(SB);
+    const stopAfter = await ca(CO, "POST", `/sessions/${SB}/stop`, {});
+    const resumeAfter = await ca(CO, "POST", `/sessions/${SB}/resume`, {});
+    const vB = await view(cpB.json?.request?.id);
+    const allB = (await ca(CO, "GET", "/sessions")).json?.all ?? [];
+    const holdB = await ca(CO, "PUT", `/goals/${CG.id}/hold`, {});
+    await ca(CO, "DELETE", `/goals/${CG.id}/hold`);
+    check(
+      "members (E2E-AGENT cycle 2): removing a member ends their live sessions in that workspace in the same transaction (stopped, ended_reason member_removed, open epoch closed) and expires the requests waiting on them; Stop and Resume then -> 409 member_removed with a clear reason and no directive; the owner's list drops the session; a hold no longer reaches it",
+      cpB.status === 201 && stopB.status === 200 && rmB.status === 204 && rowB?.state === "stopped" && rowB.ended_reason === "member_removed" && openB === 0 && target(cpB.json.request.id, SB) === "expired" && vB?.state === "expired" &&
+        stopAfter.status === 409 && stopAfter.json?.error === "member_removed" && /no longer a member of this workspace/.test(stopAfter.json?.message ?? "") && /align stop-sharing/.test(stopAfter.json?.message ?? "") &&
+        resumeAfter.status === 409 && resumeAfter.json?.error === "member_removed" && !allB.some((s) => s.session_key === SB) && holdB.status === 201 && dirCount(SB) === dirsB,
+      `${cpB.status} ${stopB.status} ${rmB.status} ${JSON.stringify(rowB)} ${openB} ${stopAfter.text} ${resumeAfter.text} ${JSON.stringify(vB)} ${holdB.status} ${dirsB}/${dirCount(SB)}`,
+    );
+
+    // Let back in, the same person's new pairing shares the session again (its keys come from the same local secret).
+    await invite();
+    const DC = cDevice({ pub: DB2.pub, privateKey: DB2.privateKey, secret: DB2.secret });
+    const againB = await cPut(DC, SB);
+    const rowC = cRow(SB);
+    check(
+      "members (E2E-AGENT cycle 2): once the person is a member again, their re-paired device shares the ended session again (200 shared on the new device, no ended_reason)",
+      againB.status === 200 && againB.json?.state === "shared" && rowC?.state === "shared" && rowC.ended_reason === null && rowC.device_id === DC.id,
+      `${againB.text} ${JSON.stringify(rowC)}`,
+    );
+
+    // A clock that runs ahead: named, with the server's time; a start stored in the future is moved back.
+    const ahead = (ms) => new Date(Date.now() + ms).toISOString();
+    const KF = sessionKey(DC, CW, "claude-code", "clock-far");
+    const putFar = await cPut(DC, KF, ahead(10 * 60_000));
+    const KN = sessionKey(DC, CW, "claude-code", "clock-near");
+    const putNear = await cPut(DC, KN, ahead(4 * 60_000));
+    const epFar = await cEpoch(DC, KN, ahead(10 * 60_000));
+    const nowAt = new Date().toISOString();
+    const epNow = await cEpoch(DC, KN, nowAt);
+    check(
+      "sessions (E2E-AGENT cycle 2 N2): a started_at or an epoch's starts_at more than 5 min ahead of the server -> 400 clock_skew naming it, with server_time (never a bare bad_request); a start stored up to 5 min in the future no longer refuses an epoch from a corrected clock: the epoch opens and moves the session's start back to it",
+      putFar.status === 400 && putFar.json?.error === "clock_skew" && /started_at is 10 minutes ahead/.test(putFar.json?.message ?? "") && Math.abs(Date.parse(putFar.json?.server_time) - Date.now()) < 60_000 &&
+        putNear.status === 200 && epFar.status === 400 && epFar.json?.error === "clock_skew" && /starts_at is 10 minutes ahead/.test(epFar.json?.message ?? "") && !!epFar.json?.server_time &&
+        epNow.status === 200 && cRow(KN)?.started_at === nowAt,
+      `${putFar.text} ${putNear.status} ${epFar.text} ${epNow.text} ${JSON.stringify(cRow(KN))}`,
     );
   }
   const totalBefore = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json.total.requests;
@@ -4603,8 +4749,8 @@ try {
       `${r4a.text} ${r4.text} ${r4again.text} ${JSON.stringify(acceptRows)}`,
     );
     check(
-      "request receipts: received -> request_state received; accepted with auto_accepted -> accepted, counted as delivered and not declined (E2E-AGENT G1); a later decline overrides it; the developer's accept stays (a later decline changes nothing); counts follow",
-      r1.json?.fresh === true && r1.json.request_state === "received" && r2.json?.request_state === "accepted" && midView?.counts.not_declined === 1 && midView.counts.done_by_agent === undefined && midView.sessions.find((s) => s.session_key === SM1.key)?.auto_accepted === true &&
+      "request receipts: received -> request_state received; accepted with auto_accepted -> accepted, counted as delivered and not declined (E2E-AGENT G1) and never in counts.accepted (the developer's own accepts only: E2E-AGENT cycle 2); a later decline overrides it; the developer's accept stays (a later decline changes nothing); counts follow",
+      r1.json?.fresh === true && r1.json.request_state === "received" && r2.json?.request_state === "accepted" && midView?.counts.not_declined === 1 && midView.counts.accepted === 0 && midView.counts.done_by_agent === undefined && midView.sessions.find((s) => s.session_key === SM1.key)?.auto_accepted === true &&
         r3.json?.request_state === "declined" && r4.json?.request_state === "accepted" && r5.json?.request_state === "accepted" && s1?.state === "declined" && !s1.auto_accepted && s2?.state === "accepted" && !s2.auto_accepted &&
         cpView.state === "answered" && cpView.counts.accepted === 1 && cpView.counts.declined === 1 && cpView.counts.pending === 0 && cpView.can_cancel === false,
       `${r1.text} ${r2.text} ${r3.text} ${r4.text} ${r5.text} ${JSON.stringify(cpView?.sessions)}`,

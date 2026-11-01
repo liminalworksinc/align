@@ -15,7 +15,8 @@ Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 align login [--server <url>] [--name <device name>]   device flow; key-bound tokens
 align logout                                          revokes this device, wipes tokens and the device key; this
                                                       machine's shares stop (sessions stopped from the web stay
-                                                      blocked until `align stop-sharing`)
+                                                      blocked until `align stop-sharing`). If the server can't be
+                                                      reached, the next `align sync` or `align login` revokes it
 align status                                          identity, last sync, hooks + hash, outbox, unpriced
 align sessions [--all] [--json]                       local sessions, tokens, basis, list-price estimate (offline)
 align goals [--workspace <name|id>] [--refresh]       cached goal feed
@@ -169,7 +170,10 @@ what was added.
 
 ## State (`ALIGN_HOME`, default `~/.align`, 0700, must be owned by you)
 
-`config.json`, `credentials.json` (0600), `device_key` (Ed25519 PKCS#8, 0600), `device_secret` (32 random bytes,
+`config.json`, `credentials.json` (0600; `clock_offset_ms` while this computer's clock is a minute or more off the
+server's, measured from its answers' `Date` header: every time the CLI sends is put on the server's clock),
+`revoke.json` (0600, only while a logout's revoke waits for the server: the old device's tokens and key),
+`device_key` (Ed25519 PKCS#8, 0600), `device_secret` (32 random bytes,
 0600, never sent), `align.db` (SQLite WAL: sessions, root turns, epochs, request ledger, file offsets, outbox,
 directives, requests, holds, shares, aliases), `rules.json` folder share rules, `hot/` and `injected/` per-session JSON for hooks,
 `latch/` stop latches and goal holds, `spool/` hook records for the next sync, `feeds/` cached goals (`<ws>.json`), team activity

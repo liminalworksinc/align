@@ -921,9 +921,10 @@ prefix, and SHALL answer the old `/api/v2/workspaces/{ws}/pods…` paths as alia
 
 The server SHALL let a workspace owner change a member's role on `POST /api/v2/workspaces/{ws}/members/{user} {role}`
 and remove a member on `DELETE .../members/{user}`, let any member (viewers included) leave by deleting their own
-membership, and on removal or leaving delete the person's team memberships and revoke their device grants and OAuth
-grants for that workspace while keeping their goals, sessions and history attributed to them until the retention job
-makes them a former member 30 days later; `DELETE .../members/{user}?delete_sessions=1` also deletes the person's
+membership, and on removal or leaving delete the person's team memberships, revoke their device grants and OAuth
+grants for that workspace and, in the same transaction, end their live shared sessions there (`ended_reason`
+`member_removed`, as "Sessions no device can reach end with their requests" in the directives part says), while keeping
+their goals, sessions and history attributed to them until the retention job makes them a former member 30 days later; `DELETE .../members/{user}?delete_sessions=1` also deletes the person's
 shared sessions in that workspace at once.
 
 #### Scenario: Change a role
@@ -934,7 +935,7 @@ shared sessions in that workspace at once.
 #### Scenario: Remove a member
 
 - **WHEN** an owner DELETEs another member who has a paired device granted this workspace and an approved MCP app for it
-- **THEN** the server responds 204, the person is in no team of the workspace, their device gets 404 for the workspace while keeping its other grants, their MCP app's tokens for the workspace stop working, their goals and shared sessions remain under their name, and the audit records `member.removed`
+- **THEN** the server responds 204, the person is in no team of the workspace, their device gets 404 for the workspace while keeping its other grants, their MCP app's tokens for the workspace stop working, their goals and shared sessions remain under their name (each live one now `stopped` with `ended_reason` `member_removed`), and the audit records `member.removed`
 
 #### Scenario: Remove and delete their sessions now
 
@@ -1039,8 +1040,8 @@ than 5 minutes off the server's clock SHALL be answered 400 `clock_skew` with th
 minutes ahead of|behind the server's` and `server_time`, rotating nothing and leaving the device paired (the window
 is unchanged, so a captured signed message still expires within 5 minutes). Revoking a device, for any reason
 (logout, its owner on the web, signing out everywhere, refresh-token reuse), SHALL in the same transaction end each of
-its sessions that is not stopped: close its open epoch, clear its governing goal, and set it `stopped` with
-`ended_reason` `device_signed_out`, keeping its history.
+its sessions that is not stopped: close its open epoch, clear its governing goal, set it `stopped` with
+`ended_reason` `device_signed_out`, keeping its history, and expire the request targets still waiting on it.
 
 #### Scenario: Approving a code
 
@@ -1076,8 +1077,11 @@ every session private to the device and person that shared it, let that person s
 `GET /api/v2/workspaces/{ws}/sessions` as `{mine, all}`. A session that ended because its device was revoked
 (`ended_reason` `device_signed_out`) SHALL be shared again by a `PUT` from another device of the same person with the
 same harness and repo key (its device, state `shared`, `stopped_at` and `ended_reason` cleared, its stop flag kept,
-audited `session.shared_again`); any other stopped session stays 409 `sharing_stopped`, and another person's device
-still gets 404.
+audited `session.shared_again`), and so SHALL one that ended because its person left the workspace (`member_removed`),
+from any device of theirs once they are a member again; any other stopped session stays 409 `sharing_stopped`, and
+another person's device still gets 404. A `started_at` more than 5 minutes ahead of the server's clock SHALL be
+answered 400 `clock_skew` with the message `started_at is <n> minutes ahead of the server's clock; this device's clock
+is off` and `server_time`.
 
 #### Scenario: Sharing
 
@@ -1103,7 +1107,12 @@ still gets 404.
 
 The server SHALL let the sharing device open a binding epoch on `POST .../sessions/{key}/epochs {epoch_id, goal_id,
 starts_at, root_turn?, cause}`, closing the previous epoch at `starts_at`, only toward a goal the person has authority
-to bind (as defined in `goals-and-proposals`).
+to bind (as defined in `goals-and-proposals`). A `starts_at` more than 5 minutes ahead of the server's clock SHALL be
+answered 400 `clock_skew` (`starts_at is <n> minutes ahead of the server's clock; this device's clock is off`, with
+`server_time`), never a bare `bad_request`. A session whose stored `started_at` lies in the future on the server's clock
+(it came from a device clock that ran ahead) SHALL take an epoch that starts before it, and that epoch SHALL move the
+session's `started_at` back to its own `starts_at` in the same transaction, so a corrected clock need not wait for real
+time to catch up.
 
 #### Scenario: Opening an epoch
 
@@ -1113,7 +1122,12 @@ to bind (as defined in `goals-and-proposals`).
 #### Scenario: Epoch refusals
 
 - **WHEN** the epoch id is reused with other values, `starts_at` is before the open epoch's start or the last epoch's end, `starts_at` is more than 5 minutes ahead or before the session started, the goal cannot be bound, the goal is not active, `cause` names a directive not sent to this session, or sharing stopped
-- **THEN** the server responds 409 `epoch_conflict`, 409 `epoch_overlap`, 400, 403 `alignment_required`, 409 `goal_not_active`, 400, or 409 `sharing_stopped` respectively; the same epoch sent again returns it unchanged
+- **THEN** the server responds 409 `epoch_conflict`, 409 `epoch_overlap`, 400 `clock_skew` or 400, 403 `alignment_required`, 409 `goal_not_active`, 400, or 409 `sharing_stopped` respectively; the same epoch sent again returns it unchanged
+
+#### Scenario: A device clock that ran ahead
+
+- **WHEN** a device shares one session with a `started_at` 10 minutes ahead, another 4 minutes ahead, opens an epoch on the second 10 minutes ahead, then one at the server's now (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 2 N2): ...")
+- **THEN** the first `PUT` and the first epoch get 400 `clock_skew` naming the field with `server_time`, the second `PUT` is accepted, and the epoch at now opens and moves the session's `started_at` to its `starts_at`
 
 ### Requirement: Usage upload
 

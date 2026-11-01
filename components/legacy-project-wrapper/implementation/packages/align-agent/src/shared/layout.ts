@@ -31,6 +31,8 @@ export function localId(harness: Harness, nativeId: string): string {
 export const layout = {
   config: (h: string) => path.join(h, "config.json"),
   credentials: (h: string) => path.join(h, "credentials.json"),
+  /** A device this machine signed out of while the server could not be reached, kept until it is revoked (0600). */
+  pendingRevoke: (h: string) => path.join(h, "revoke.json"),
   deviceKey: (h: string) => path.join(h, "device_key"),
   deviceSecret: (h: string) => path.join(h, "device_secret"),
   db: (h: string) => path.join(h, "align.db"),

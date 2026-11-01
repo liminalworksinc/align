@@ -57,7 +57,13 @@ export function applyHold(ctx: Ctx, directiveId: string, h: WireHold | undefined
   if (!h || !h.goal || !str(h.goal.id, 64)) return "stale";
   const cur = ctx.db.prepare("SELECT seq, held FROM holds WHERE local_id=? AND goal_id=?").get(lid, h.goal.id) as { seq: number; held: number } | undefined;
   if (cur && cur.seq >= seq) return "stale";
-  const json = { goal_title: String(h.goal.title || ""), by: String((held ? h.held_by?.name : h.released_by?.name) || ""), reason: held && typeof h.reason === "string" ? h.reason : null };
+  // `released`: this release lifted a hold the session had, so the model (which saw its tools blocked) is told once.
+  const json = {
+    goal_title: String(h.goal.title || ""),
+    by: String((held ? h.held_by?.name : h.released_by?.name) || ""),
+    reason: held && typeof h.reason === "string" ? h.reason : null,
+    ...(!held && cur?.held ? { released: true } : {}),
+  };
   ctx.db
     .prepare(
       `INSERT INTO holds(local_id, goal_id, held, json, directive_id, seq, at) VALUES(?,?,?,?,?,?,?)

@@ -1,11 +1,13 @@
 // Device API client for docs/v2/WIRE.md. Bearer access tokens (1 h), rotating refresh tokens bound to the device
 // Ed25519 key. A file lock serializes refresh between concurrent CLI and sync processes, because reusing an old refresh token
 // revokes the device.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import type { Ctx } from "./context.ts";
 import { loadDeviceKey, refreshMessage } from "./keys.ts";
 import { layout } from "./shared/layout.ts";
-import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
+import { b64url, readJson, writeJsonAtomic } from "./shared/fsx.ts";
+import type { MeFile } from "./shared/types.ts";
 
 export interface Credentials {
   server_url: string;
@@ -16,9 +18,29 @@ export interface Credentials {
   user: { id: string; name: string; email: string } | null;
   signed_out?: boolean;
   signed_out_reason?: string;
-  /** How far the server's clock is ahead of this computer's (ms), learned from a `clock_skew` answer; refreshes sign
-   *  their timestamp with it. Absent when the clocks agree. */
+  /** How far the server's clock is ahead of this computer's (ms), learned from a `clock_skew` answer or measured from
+   *  the `Date` header of the server's answers; refreshes sign their timestamp with it and every time the CLI sends is
+   *  put on the server's clock with it. Absent when the clocks agree (within a minute). */
   clock_offset_ms?: number;
+}
+
+/** Offsets under a minute count as the clocks agreeing (the server allows 5 minutes either way). */
+export const CLOCK_TOLERANCE_MS = 60_000;
+/** A measured offset replaces the saved one only when they differ by more than this, so the offset stays stable. */
+const CLOCK_DRIFT_MS = 30_000;
+
+/** The saved offset of the server's clock from this computer's (0 when they agree). */
+export function clockOffset(home: string): number {
+  return Number(loadCredentials(home)?.clock_offset_ms) || 0;
+}
+
+/** A local time as the server's clock reads it (a time the CLI sends). Unchanged when the clocks agree. With `clamp`,
+ *  never later than the server's now: a start or a turn is never in the future. */
+export function serverIso(iso: string, offset: number, clamp = false): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t) || (!offset && !clamp)) return iso;
+  const at = clamp ? Math.min(t + offset, Date.now() + offset) : t + offset;
+  return at === t ? iso : new Date(at).toISOString();
 }
 
 export class SignedOut extends Error {}
@@ -51,6 +73,15 @@ export function saveCredentials(home: string, c: Credentials): void {
   writeJsonAtomic(layout.credentials(home), c, 0o600);
 }
 
+/** Why this machine is signed out, in words for `align status` (the stored reason is the server's error code). */
+export function signedOutWords(reason: string | undefined): string {
+  if (!reason) return "signed out";
+  if (reason === "logout") return "you ran `align logout`";
+  if (reason === "invalid_grant" || reason === "access rejected") return "this device was unpaired on the web (Devices page, or signing out everywhere), or its sign-in expired";
+  if (reason === "device key missing") return "this machine's device key is missing";
+  return reason;
+}
+
 export function signedIn(home: string): boolean {
   const c = loadCredentials(home);
   return !!(c && !c.signed_out && c.refresh_token);
@@ -60,6 +91,8 @@ export interface Resp {
   status: number;
   json: any;
   headers: Headers;
+  /** The server's clock minus this computer's (ms), from the answer's `Date` header; null without one. */
+  clockOffsetMs: number | null;
 }
 
 const TIMEOUT_MS = 15_000;
@@ -91,6 +124,7 @@ export async function rawRequest(base: string, method: string, path: string, opt
   let res: Response;
   const server = base.replace(/\/$/, "");
   const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
+  const t0 = Date.now();
   try {
     res = await fetch(server + path, {
       method,
@@ -104,6 +138,9 @@ export async function rawRequest(base: string, method: string, path: string, opt
     throw new NetworkError(msg);
   }
   if (res.status >= 500) trouble ??= `the Align server at ${server} answered HTTP ${res.status}`;
+  // The Date header has whole seconds: the server's time lies within the second it names, read at mid-request.
+  const date = Date.parse(res.headers.get("date") || "");
+  const clockOffsetMs = Number.isNaN(date) ? null : date + 500 - Math.round((t0 + Date.now()) / 2);
   const text = await res.text().catch(() => "");
   let json: any = null;
   if (text) {
@@ -113,7 +150,7 @@ export async function rawRequest(base: string, method: string, path: string, opt
       json = null;
     }
   }
-  return { status: res.status, json, headers: res.headers };
+  return { status: res.status, json, headers: res.headers, clockOffsetMs };
 }
 
 function withLock<T>(home: string, fn: () => Promise<T>): Promise<T> {
@@ -151,6 +188,38 @@ export function markSignedOut(home: string, reason: string): void {
   const c = loadCredentials(home);
   if (!c) return;
   saveCredentials(home, { ...c, access_token: null, access_expires_at: null, refresh_token: null, signed_out: true, signed_out_reason: reason });
+  // The hooks read me.json, never credentials: it says so, so `::align share` is refused instead of claimed (N4). The
+  // next `align login` writes a fresh one.
+  const me = readJson<MeFile>(layout.me(home));
+  if (me && !me.signed_out) writeJsonAtomic(layout.me(home), { ...me, signed_out: true });
+}
+
+/** Save (or, with 0, clear) the clock offset, under the refresh lock so it never races a token rotation. */
+export async function saveClockOffset(ctx: Ctx, offset: number): Promise<void> {
+  await withLock(ctx.home, async () => {
+    const c = loadCredentials(ctx.home);
+    if (!c || c.signed_out) return;
+    const upd: Credentials = { ...c };
+    if (offset) upd.clock_offset_ms = offset;
+    else delete upd.clock_offset_ms;
+    saveCredentials(ctx.home, upd);
+  }).catch(() => undefined);
+}
+
+/**
+ * Keep the saved clock offset in step with what the server's answers say (their `Date` header): saved when it is a
+ * minute or more, replaced when it moved by more than 30 s, and cleared without a warning once the clocks agree again.
+ * Written under the refresh lock, so it never races a token rotation.
+ */
+async function noteClock(ctx: Ctx, measured: number | null): Promise<void> {
+  if (measured === null || !Number.isFinite(measured)) return;
+  const saved = clockOffset(ctx.home);
+  const next = Math.abs(measured) < CLOCK_TOLERANCE_MS ? 0 : measured;
+  if (next === 0 ? saved === 0 : Math.abs(next - saved) <= CLOCK_DRIFT_MS) return;
+  await saveClockOffset(ctx, next);
+  if (!next) return ctx.log("clock: this computer's clock agrees with the Align server's again; the saved offset is cleared");
+  ctx.log(`clock: this computer's clock is ${clockWords(next)} the server's; Align sends times on the server's clock`);
+  process.stderr.write(`align: this computer's clock is ${clockWords(next)} the Align server's. Align puts what it sends on the server's time; set the system clock to update automatically.\n`);
 }
 
 /** Refresh the access token if it is missing or within 2 minutes of expiry (or `force`). */
@@ -183,9 +252,18 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
       if (Number.isNaN(server)) throw new ClockSkew(`this computer's clock is off from the Align server's; fix the system clock (you are still signed in)`);
       offset = server - Date.now();
       const words = clockWords(offset);
-      ctx.log(`refresh: this computer's clock is ${words} the server's; signing with the server's time`);
-      process.stderr.write(`align: this computer's clock is ${words} the Align server's. Align used the server's time and you stay signed in; set the system clock to update automatically.\n`);
-      saveCredentials(ctx.home, { ...c, clock_offset_ms: offset });
+      if (Math.abs(offset) < CLOCK_TOLERANCE_MS) {
+        // The clock is right and the saved offset was stale (the clock was fixed since): drop it, no warning (N3).
+        offset = 0;
+        ctx.log("refresh: this computer's clock agrees with the server's again; the saved offset is cleared");
+        const fixed: Credentials = { ...c };
+        delete fixed.clock_offset_ms;
+        saveCredentials(ctx.home, fixed);
+      } else {
+        ctx.log(`refresh: this computer's clock is ${words} the server's; signing with the server's time`);
+        process.stderr.write(`align: this computer's clock is ${words} the Align server's. Align used the server's time and you stay signed in; set the system clock to update automatically.\n`);
+        saveCredentials(ctx.home, { ...c, clock_offset_ms: offset });
+      }
       r = await attempt(offset);
       if (r.status === 400 && r.json?.error === "clock_skew") throw new ClockSkew(`this computer's clock is ${words} the Align server's; fix the system clock (you are still signed in)`);
     }
@@ -196,8 +274,10 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
         access_expires_at: new Date(Date.now() + Number(r.json.expires_in || 3600) * 1000).toISOString(),
         refresh_token: r.json.refresh_token,
       };
-      // Within a minute counts as agreeing (the server allows 5); a bigger offset is kept for the next refresh.
-      if (Math.abs(offset) >= 60_000) next.clock_offset_ms = offset;
+      // Within a minute counts as agreeing (the server allows 5); a bigger offset is kept for the next refresh. The
+      // answer's own Date header says what the offset is now, so a stale one is replaced or cleared (N3).
+      const now = r.clockOffsetMs ?? offset;
+      if (Math.abs(now) >= CLOCK_TOLERANCE_MS) next.clock_offset_ms = Math.abs(now - offset) <= CLOCK_DRIFT_MS && offset ? offset : now;
       else delete next.clock_offset_ms;
       saveCredentials(ctx.home, next);
       return next;
@@ -214,6 +294,7 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
 export async function api(ctx: Ctx, method: string, path: string, opts: { body?: unknown; headers?: Record<string, string>; timeoutMs?: number } = {}): Promise<Resp> {
   let c = await refreshIfNeeded(ctx);
   let r = await rawRequest(c.server_url, method, path, { ...opts, headers: { ...(opts.headers || {}), authorization: `Bearer ${c.access_token}` } });
+  await noteClock(ctx, r.clockOffsetMs);
   if (r.status === 401) {
     c = await refreshIfNeeded(ctx, true);
     r = await rawRequest(c.server_url, method, path, { ...opts, headers: { ...(opts.headers || {}), authorization: `Bearer ${c.access_token}` } });
@@ -229,4 +310,69 @@ export async function apiOk(ctx: Ctx, method: string, path: string, opts: { body
   const r = await api(ctx, method, path, opts);
   if (r.status >= 200 && r.status < 300) return r.json;
   throw new HttpError(r.status, r.json?.error ?? null, r.json);
+}
+
+// ---------- a revoke that waits for the server (logout while it could not be reached) ----------
+/** What `align logout` keeps when it could not reach the server, so the old device is still revoked later. */
+export interface PendingRevoke {
+  server_url: string;
+  device_id: string;
+  access_token: string | null;
+  access_expires_at: string | null;
+  refresh_token: string | null;
+  /** The old device key (PKCS#8 PEM), to sign a refresh when the access token has expired. */
+  key_pem: string | null;
+  since: string;
+}
+
+export function loadPendingRevoke(home: string): PendingRevoke | null {
+  return readJson<PendingRevoke>(layout.pendingRevoke(home));
+}
+
+export function savePendingRevoke(home: string, p: PendingRevoke): void {
+  writeJsonAtomic(layout.pendingRevoke(home), p, 0o600);
+}
+
+/**
+ * Revoke a device this machine signed out of while the server could not be reached (`align logout` offline), so its
+ * sessions end on the server instead of staying shared forever. Runs before anything else at the next contact: the
+ * next `align login` and every sync pass. Uses the old access token, or, when it has expired, signs a refresh with
+ * the old key first. "revoked" once the server has revoked it (or no longer accepts it at all), "pending" while the
+ * server can't be reached (it is kept for the next contact), "none" when nothing waits.
+ */
+export async function revokePending(ctx: Ctx): Promise<"none" | "revoked" | "pending"> {
+  const p = loadPendingRevoke(ctx.home);
+  if (!p) return "none";
+  const del = (token: string) => rawRequest(p.server_url, "DELETE", "/api/v2/devices/self", { headers: { authorization: `Bearer ${token}` } });
+  try {
+    let done = false;
+    if (p.access_token && (!p.access_expires_at || Date.parse(p.access_expires_at) - Date.now() > 30_000)) {
+      const r = await del(p.access_token);
+      if (r.status >= 500) return "pending";
+      done = r.status === 204 || r.status === 200;
+    }
+    if (!done && p.refresh_token && p.key_pem) {
+      const priv = crypto.createPrivateKey(p.key_pem);
+      const refresh = (offset: number) => {
+        const ts = new Date(Date.now() + offset).toISOString();
+        const sig = b64url(crypto.sign(null, Buffer.from(refreshMessage(p.device_id, p.refresh_token!, ts), "utf8"), priv));
+        return rawRequest(p.server_url, "POST", "/api/v2/device/refresh", { body: { device_id: p.device_id, refresh_token: p.refresh_token, ts, sig } });
+      };
+      let r = await refresh(clockOffset(ctx.home));
+      if (r.status === 400 && r.json?.error === "clock_skew" && !Number.isNaN(Date.parse(String(r.json?.server_time)))) r = await refresh(Date.parse(String(r.json.server_time)) - Date.now());
+      if (r.status >= 500) return "pending";
+      if (r.status === 200 && r.json?.access_token) {
+        const d = await del(r.json.access_token);
+        if (d.status >= 500) return "pending";
+      }
+      // Otherwise (400/401) the server no longer accepts this device: it was revoked on the web meanwhile.
+    }
+    // Revoked now, or already (an access token the server refuses and no refresh it accepts).
+    fs.rmSync(layout.pendingRevoke(ctx.home), { force: true });
+    ctx.log(`revoked device ${p.device_id}, which this machine signed out of at ${p.since} while ${p.server_url} could not be reached`);
+    return "revoked";
+  } catch (e) {
+    if (e instanceof NetworkError) return "pending";
+    throw e;
+  }
 }

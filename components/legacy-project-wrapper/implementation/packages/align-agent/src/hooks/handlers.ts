@@ -186,6 +186,12 @@ function recentSharedSibling(home: string, cwd: string | null, selfLid: string):
   return null;
 }
 
+/** This machine signed out of Align (me.json says so; hooks never read credentials). */
+function signedOut(home: string): boolean {
+  const me = readJson<MeFile>(layout.me(home));
+  return !me || me.signed_out === true;
+}
+
 function feedGoal(home: string, ws: string, goalId: string): GoalSnapshot | null {
   const g = readJson<FeedFile>(layout.feed(home, ws))?.goals.find((x) => x.id === goalId);
   if (!g || !g.bindable || g.status !== "active") return null;
@@ -196,6 +202,11 @@ function feedGoal(home: string, ws: string, goalId: string): GoalSnapshot | null
 function autoShare(home: string, harness: Harness, sid: string, cwd: string | null, inj: InjectedState, messages: string[]): boolean {
   const rule = matchRule(readRules(home), cwd);
   if (!rule) return false;
+  if (signedOut(home)) {
+    // Nothing could reach the server: the session stays private, and the developer hears why (N4).
+    messages.push(`Align: this folder is shared with ${rule.workspace_name}, but this machine is signed out of Align, so this session stays private. Run \`align login\` in a terminal, then type \`::align share\` here.`);
+    return false;
+  }
   spoolWrite(home, {
     type: "command",
     harness,
@@ -450,6 +461,34 @@ function markContext(inj: InjectedState, ctx: HotState["context_goals"]): void {
 }
 
 // ---------- UserPromptSubmit ----------
+/**
+ * The binding the next prompt opens: one chosen in this session (`::align bind`, `::align accept` of a switch_goal)
+ * applies before any sync has recorded it (the sync records the same id); otherwise the one the sync recorded (CLI,
+ * directive), unless the developer replaced it in the session since (N1: the sync may not have caught up yet).
+ */
+function nextBinding(hot: HotState | null, inj: InjectedState): InjectedState["local_binding"] | HotState["pending_binding"] {
+  const local = inj.local_binding && inj.consumed_binding !== inj.local_binding.id ? inj.local_binding : null;
+  if (local) return local;
+  const synced = hot?.pending_binding;
+  return synced && !(inj.superseded_bindings || []).includes(synced.id) ? synced : null;
+}
+
+/** Record a binding chosen in this session; whatever binding was waiting for the next prompt is replaced by it. */
+function chooseBinding(hot: HotState | null, inj: InjectedState, b: NonNullable<InjectedState["local_binding"]>): void {
+  const replaced = [nextBinding(hot, inj)?.id, hot?.pending_binding?.id].filter((id): id is string => !!id && id !== inj.consumed_binding);
+  inj.superseded_bindings = [...new Set([...(inj.superseded_bindings || []), ...replaced])].slice(-20);
+  inj.local_binding = b;
+}
+
+/** One context line per hold released since the model saw it blocked (it would otherwise go on thinking it paused). */
+function releaseLines(hot: HotState, inj: InjectedState): string[] {
+  const told = inj.releases_told || [];
+  const fresh = (hot.released_holds || []).filter((r) => !told.includes(r.directive_id));
+  if (!fresh.length) return [];
+  inj.releases_told = [...told, ...fresh.map((r) => r.directive_id)].slice(-50);
+  return fresh.map((r) => `[Align] ${clean(r.by, 50) || "Someone"} released the hold on goal "${clean(r.goal_title, 100)}", so it no longer blocks tools.`);
+}
+
 export function userPromptSubmit(home: string, harness: Harness, input: HookInput): HookOutput {
   const sid = input.session_id;
   if (!sid) return null;
@@ -462,24 +501,38 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   const rootTurn = (harness === "claude-code" ? input.prompt_id : input.turn_id) || input.prompt_id || input.turn_id || `ts:${ts}`;
   spoolWrite(home, { type: "root_turn", harness, native_id: sid, root_turn: rootTurn, cwd: input.cwd || null, ts });
   const hot = readHot(home, lid);
-  if (!hot || !hot.share) return null;
+  if (!hot) return null;
+  if (!hot.share) {
+    // A session whose share failed (or ended) still hears the sync's notices at its next prompt (N5).
+    const inj = readInjected(home, lid);
+    const notices = takeNotices(hot, inj);
+    if (!notices) return null;
+    writeInjected(home, lid, inj);
+    return { systemMessage: notices };
+  }
   const inj = readInjected(home, lid);
   let goal: GoalSnapshot | null = hot.goal;
   const applied: (string | null)[] = [];
-  // A binding chosen in this session (`::align bind`, `::align accept` of a switch_goal) applies now, before any sync
-  // has recorded it; the sync records the same binding id. Otherwise the binding the sync recorded (CLI, directive).
-  const local = inj.local_binding && inj.consumed_binding !== inj.local_binding.id ? inj.local_binding : null;
-  const pending = local || hot.pending_binding;
+  const pending = nextBinding(hot, inj);
   // A suspended share takes a new binding too: `::align bind <goal>` is how its user resumes uploading (sync turns
   // the share back to shared when the epoch opens).
+  // The epoch this hook opened at an earlier prompt that the sync has not recorded yet: its goal, not the hot file's
+  // older one, is the session's goal until then.
+  // Dropped once the sync has it, once the share is no longer live (the sync drops the epoch then), or after 10 minutes.
+  const opened = inj.opened_epoch;
+  if (opened && ((hot.epochs_seen || []).includes(opened.epoch_id) || (hot.share.state !== "shared" && hot.share.state !== "suspended") || Date.now() - Date.parse(opened.at) > 10 * 60_000)) delete inj.opened_epoch;
+  else if (opened && hot.share.state === "shared") goal = opened.goal;
   if ((hot.share.state === "shared" || hot.share.state === "suspended") && pending) {
     if (inj.consumed_binding !== pending.id) {
+      const epochId = randomId("ep_");
+      if (pending.goal || !pending.goal_id) inj.opened_epoch = { epoch_id: epochId, goal: pending.goal, at: ts };
+      else delete inj.opened_epoch;
       spoolWrite(home, {
         type: "epoch_open",
         harness,
         native_id: sid,
         local_id: lid,
-        epoch_id: randomId("ep_"),
+        epoch_id: epochId,
         goal_id: pending.goal_id,
         starts_at: ts,
         root_turn: rootTurn,
@@ -528,6 +581,8 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   }
   const req = requestParts(hot, inj, hot.share.state === "shared" && goal ? goal.id : null);
   if (req.context.length) context = [context, ...req.context].filter(Boolean).join("\n");
+  const released = releaseLines(hot, inj);
+  if (released.length) context = [context, ...released].filter(Boolean).join("\n");
   const notices = [takeNotices(hot, inj), ...req.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   writeInjected(home, lid, inj);
   if (!context && !notices) return null;
@@ -585,7 +640,11 @@ export function denyOutput(reason = DENY_REASON): Record<string, unknown> {
   return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
 }
 
-const ENDED_WHY = { device_signed_out: "this machine signed out of Align", sharing_ended: "the Align server no longer has this session's share" } as const;
+const ENDED_WHY = {
+  device_signed_out: "this machine signed out of Align",
+  access_lost: "this machine no longer has access to its Align workspace",
+  sharing_ended: "the Align server no longer has this session's share",
+} as const;
 
 /** The way out of a latch nothing can lift from the web any more (B6): `align stop-sharing <id>` in a terminal. */
 function endedNote(ended: keyof typeof ENDED_WHY, lid: string): string {
@@ -627,14 +686,8 @@ export function preToolUse(home: string, harness: Harness, input: HookInput): Ho
   const sid = input.session_id;
   if (!sid) return anyLatch(home) ? denyOutput() : null;
   const lid = localId(harness, sid);
-  const latch = readJsonStrict<Latch>(layout.latch(home, lid));
-  const allowed =
-    latch.state === "absent" ||
-    (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
-    (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
-  if (!allowed) return denyOutput(latch.state === "ok" ? stopReason(latch.value, lid) : DENY_REASON);
-  const held = holdDeny(home, lid);
-  if (held) return held;
+  const blocked = latchDeny(home, harness, input);
+  if (blocked) return blocked;
   const sib = siblingEdits(home, harness, lid, input);
   if (sib.held) return sib.held;
   // Context from a subagent's tool call reaches only that subagent, so the delta waits for the main agent.
@@ -642,6 +695,24 @@ export function preToolUse(home: string, harness: Harness, input: HookInput): Ho
   if (!sib.note) return delta;
   const prev = (delta?.hookSpecificOutput as { additionalContext?: string } | undefined)?.additionalContext;
   return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: prev ? `${prev}\n${sib.note}` : sib.note } };
+}
+
+/**
+ * The stop latch and the goal hold, nothing else: a stopped session may still read (read-only tools), a held one may
+ * not; a latch file that can't be read denies. Also what the hooks enforce on an unsupported Node, so a stopped
+ * session behaves the same there.
+ */
+export function latchDeny(home: string, harness: Harness, input: HookInput): HookOutput {
+  const sid = input.session_id;
+  if (!sid) return anyLatch(home) ? denyOutput() : null;
+  const lid = localId(harness, sid);
+  const latch = readJsonStrict<Latch>(layout.latch(home, lid));
+  const allowed =
+    latch.state === "absent" ||
+    (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
+    (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
+  if (!allowed) return denyOutput(latch.state === "ok" ? stopReason(latch.value, lid) : DENY_REASON);
+  return holdDeny(home, lid);
 }
 
 /**
@@ -821,6 +892,13 @@ function willShare(home: string, hot: HotState | null, cwd: string | null): bool
   return !!matchRule(readRules(home), cwd);
 }
 
+/** No cached goal matches: say when the goals were fetched, and that a goal created moments ago arrives with the next
+ *  sync (this command starts one), so trying again shortly works. */
+function noCachedGoal(arg: string, feed: FeedFile | null): string {
+  const when = feed?.fetched_at ? ` (goals fetched ${Math.max(0, Math.round((Date.now() - Date.parse(feed.fetched_at)) / 1000))} s ago)` : "";
+  return `Align: no cached goal matches "${arg}"${when}. A goal created just now arrives with the next sync, which starts now: try again in a few seconds, or run \`align goals --refresh\` in a terminal. \`::align goals\` lists the cached ones.`;
+}
+
 export function command(home: string, harness: Harness, sid: string, cwd: string | null, line: string): string {
   const lid = localId(harness, sid);
   const hot = readHot(home, lid);
@@ -846,7 +924,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
               : "none"
         }`,
         (() => {
-          const next = inj.local_binding && inj.consumed_binding !== inj.local_binding.id ? inj.local_binding : hot?.pending_binding;
+          const next = nextBinding(hot, inj);
           return next && inj.consumed_binding !== next.id ? `  Next prompt switches to: ${next.goal ? next.goal.title : "no goal"}` : "";
         })(),
         `  In context: ${inj.goal_id ? `goal v${inj.goal_version}` : "nothing from Align"}`,
@@ -898,7 +976,11 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       });
       const ref = arg.toLowerCase().replace(/^rq_/, "");
       const hits = ref ? open.filter((r) => r.id.toLowerCase().replace(/^rq_/, "").startsWith(ref)) : open;
-      if (!hits.length) return ref ? `Align: no open request matches "${arg}". Type \`::align requests\` to list them.` : "Align: no request is waiting for an answer.";
+      if (!hits.length) {
+        const known = ref ? (hot?.requests || []).filter((r) => r.id.toLowerCase().replace(/^rq_/, "").startsWith(ref)) : [];
+        if (known.length === 1) return `Align: the request ${requestShortId(known[0].id)} is already ${stateLabel(requestState(known[0], inj.requests_seen?.[known[0].id]))}, so it can't be ${answer} now.`;
+        return ref ? `Align: no open request matches "${arg}". Type \`::align requests\` to list them.` : "Align: no request is waiting for an answer.";
+      }
       if (hits.length > 1) return `Align: ${hits.length} requests match; use one of the ids: ${hits.map((r) => requestShortId(r.id)).join(", ")}.`;
       const r = hits[0];
       const who = clean(r.sender?.name, 50) || "the sender";
@@ -911,7 +993,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         if (cached && (!cached.bindable || cached.status !== "active")) return `Align: goal "${clean(cached.title, 100)}" can no longer be bound; \`::align decline ${requestShortId(r.id)}\` instead.`;
         if (cached && r.directive_id) {
           pendingId = randomId("pb_");
-          inj.local_binding = { id: pendingId, goal_id: cached.id, goal: snapshot(cached), cause: `directive:${r.directive_id}`, directive_id: null };
+          chooseBinding(hot, inj, { id: pendingId, goal_id: cached.id, goal: snapshot(cached), cause: `directive:${r.directive_id}`, directive_id: null });
         } else later = true;
       }
       spoolWrite(home, { type: "request_answer", local_id: lid, request_id: r.id, answer, auto: false, ...(pendingId ? { pending_id: pendingId } : {}), ts });
@@ -927,7 +1009,8 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       const feed = feedFor(home, hot);
       if (!feed) return "Align: no cached goals. Run `align goals --refresh` in a terminal.";
       const list = feed.goals.slice(0, 12).map((g) => `  ${g.bindable ? "*" : " "} ${g.title} (${g.id}, v${g.version}, ${g.status})`);
-      return [`Align goals in ${feed.workspace_name} (* = you can bind to it now):`, ...list].join("\n");
+      const age = feed.fetched_at ? `, fetched ${Math.max(0, Math.round((Date.now() - Date.parse(feed.fetched_at)) / 1000))} s ago` : "";
+      return [`Align goals in ${feed.workspace_name} (* = you can bind to it now${age}; each sync fetches them again):`, ...list].join("\n");
     }
     case "share": {
       const dirMode = /(^|\s)--dir(\s|$)/.test(arg);
@@ -939,10 +1022,13 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       const confirm = /\s*(confirm|--yes|-y)$/i.test(arg);
       arg = arg.replace(/\s*(confirm|--yes|-y)$/i, "").trim();
       const me = readJson<MeFile>(layout.me(home));
-      if (!me) return "Align: not signed in on this machine. Run `align login` in a terminal first.";
+      if (!me || me.signed_out) return "Align: not signed in on this machine. Run `align login` in a terminal first.";
       const feed = feedFor(home, hot);
-      const goal = arg && feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) : null;
-      if (arg && !goal) return `Align: no cached goal matches "${arg}". Type \`::align goals\` to list them.`;
+      // Shared before (its share ended, say by a sign-out): with no goal named it shares toward the goal it had, while
+      // that goal can still be bound (N8).
+      const before = !arg && !dirMode && hot?.goal ? feed?.goals.find((g) => g.id === hot.goal!.id && g.bindable && g.status === "active") || null : null;
+      const goal = arg && feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) || null : before;
+      if (arg && !goal) return noCachedGoal(arg, feed);
       if (dirMode) {
         if (!feed) return "Align: no cached workspace. Run `align goals --refresh` in a terminal.";
         if (!cwd) return "Align: this session has no working folder to share.";
@@ -969,14 +1055,16 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         return [
           `Align share preview for this session (nothing uploaded yet):`,
           `  Workspace: ${feed?.workspace_name || "your default workspace"}`,
-          `  Goal: ${goal ? goal.title : "none (unallocated)"}; counts from session start.`,
+          `  Goal: ${goal ? `${goal.title}${before ? " (the goal it had before)" : ""}` : "none (unallocated)"}; counts from session start.`,
           `  Sent: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
           `  Never sent: prompts, responses, tool input or output, paths, branch names.`,
           `Type \`::align share ${arg ? `${arg} ` : ""}confirm\` to share.`,
         ].join("\n");
       }
       spool("share", goal ? goal.id : null);
-      return "Align: sharing requested. It takes effect within a few seconds; your next prompt carries the goal.";
+      return goal
+        ? `Align: sharing requested toward "${goal.title}". It takes effect within a few seconds; your next prompt carries the goal.`
+        : "Align: sharing requested with no goal (its usage counts as unallocated; `::align bind <goal>` picks one). It takes effect within a few seconds.";
     }
     case "unshare":
     case "stop":
@@ -993,12 +1081,12 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (!arg) return "Align: usage is `::align bind <goal>`.";
       const feed = feedFor(home, hot);
       const goal = feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) : null;
-      if (!goal) return `Align: no cached goal matches "${arg}". Type \`::align goals\` to list them.`;
+      if (!goal) return noCachedGoal(arg, feed);
       if (!goal.bindable) return `Align: "${goal.title}" needs an approved alignment before this session can count toward it.`;
       // Recorded here, so the very next prompt opens the epoch even before a sync runs (as `align bind` does).
       const inj = readInjected(home, lid);
       const id = randomId("pb_");
-      inj.local_binding = { id, goal_id: goal.id, goal: snapshot(goal), cause: "manual", directive_id: null };
+      chooseBinding(hot, inj, { id, goal_id: goal.id, goal: snapshot(goal), cause: "manual", directive_id: null });
       writeInjected(home, lid, inj);
       spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "bind", arg: goal.id, pending_id: id, ts });
       return `Align: from your next prompt this session counts toward "${goal.title}".`;

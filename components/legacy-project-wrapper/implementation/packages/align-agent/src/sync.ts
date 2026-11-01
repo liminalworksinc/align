@@ -3,12 +3,28 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Ctx } from "./context.ts";
-import { api, HttpError, NetworkError, resetServerTrouble, serverTrouble, SignedOut, signedIn } from "./api.ts";
+import {
+  api,
+  clockOffset,
+  clockWords,
+  CLOCK_TOLERANCE_MS,
+  HttpError,
+  loadCredentials,
+  NetworkError,
+  resetServerTrouble,
+  revokePending,
+  saveClockOffset,
+  serverIso,
+  serverTrouble,
+  SignedOut,
+  signedIn,
+  type Resp,
+} from "./api.ts";
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
 import { applyShare, bind, endSharesIfSignedOut, enqueue, forgetShare, planShare, stopSharing } from "./share.ts";
-import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
+import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
 import { kvGet, kvSet } from "./db.ts";
@@ -125,20 +141,28 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       if (!share) throw new Error("this session is not shared");
       const goal = r.arg ? resolveGoal(loadFeed(ctx.home, share.workspace_id), r.arg) : null;
       if (goal && !goal.bindable) throw new Error(`goal "${goal.title}" needs an approved alignment before it can be bound`);
-      // The hook already applied this binding at a prompt (same id): don't queue it a second time.
+      // The hook already applied this binding at a prompt (same id): don't queue it a second time, and drop a pending
+      // binding recorded before this command, which the developer replaced (N1).
       if (!r.pending_id || kvGet(ctx.db, `binding_consumed:${lid}`) !== r.pending_id) bind(ctx, lid, goal, "manual", null, r.pending_id);
+      else ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=? AND id<>? AND created_at<?").run(lid, r.pending_id, r.ts);
       // A hook that recorded the binding itself already told the user; an older record is confirmed here.
       if (!r.pending_id) say(`Align: from your next prompt this session counts toward ${goal ? `"${goal.title}"` : "no goal (unallocated)"}.`);
     } else if (r.command === "share") {
       const existing = getShare(ctx, lid);
       if (existing && existing.state !== "stopped" && existing.state !== "error") return lid;
+      // Signed out: nothing could reach the server, so the share is refused rather than applied and ended at once (N4).
+      // A folder rule's share at a session start stays quiet (the hook already said the session stays private).
+      if (!signedIn(ctx.home)) {
+        if (r.rule_dir) return lid;
+        throw new Error("this machine is signed out of Align. Run `align login` in a terminal, then type `::align share` here");
+      }
       const ws = resolveWorkspace(ctx.home, r.workspace || ctx.config.default_workspace);
       if (!ws) throw new Error(r.workspace ? "the folder rule's workspace is no longer available on this device" : "no default workspace; run `align share --latest --workspace <name>` in a terminal");
       const goal = r.arg ? resolveGoal(loadFeed(ctx.home, ws.id), r.arg) : null;
       if (goal && !goal.bindable) throw new Error(`goal "${goal.title}" needs an approved alignment before it can be bound`);
       const hasEpochs = ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=?").get(lid);
       applyShare(ctx, planShare(ctx, lid, ws, goal, null, hasEpochs ? "now" : "start"));
-      if (!r.rule_dir) say(`Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${hasEpochs ? "now" : "session start"}.`);
+      if (!r.rule_dir) addNotice(ctx, lid, `share_started_${r.ts}`, `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${hasEpochs ? "now" : "session start"}.`);
     }
   } catch (e) {
     say(`Align: ${r.command} failed: ${(e as Error).message}`);
@@ -191,13 +215,56 @@ export async function flushOutbox(ctx: Ctx): Promise<{ sent: number; deferred: n
   return res;
 }
 
+/**
+ * The body a session or epoch call sends: its local times on the server's clock (never in the future), worked out once
+ * and kept in the queued call, so a retry sends the same values (the server answers a repeated epoch with other values
+ * 409 epoch_conflict).
+ */
+function wireBody(ctx: Ctx, item: OutboxRow, p: any, field: "started_at" | "starts_at", fresh = false): any {
+  if (p.wire && !fresh) return p.wire;
+  const offset = clockOffset(ctx.home);
+  p.wire = { ...p.body, [field]: serverIso(p.body[field], offset, true) };
+  p.wire_offset = offset;
+  ctx.db.prepare("UPDATE outbox SET payload=? WHERE id=?").run(JSON.stringify(p), item.id);
+  return p.wire;
+}
+
+/**
+ * The server refused a time as `clock_skew` (this computer's clock runs ahead and Align did not know yet when it put
+ * the time on the server's clock): save the offset to its `server_time` (the answer's Date header may already have).
+ * True when the call is worth sending again: the offset now differs from the one its times were put on.
+ */
+async function learnClock(ctx: Ctx, r: Resp, p: any): Promise<boolean> {
+  if (r.status !== 400 || r.json?.error !== "clock_skew") return false;
+  const offset = Date.parse(String(r.json?.server_time ?? "")) - Date.now();
+  if (!Number.isNaN(offset) && Math.abs(offset) >= CLOCK_TOLERANCE_MS && Math.abs(offset - clockOffset(ctx.home)) >= CLOCK_TOLERANCE_MS) {
+    await saveClockOffset(ctx, offset);
+    ctx.log(`clock: the server refused a time as clock_skew; this computer's clock is ${clockWords(offset)} the server's`);
+  }
+  return Math.abs(clockOffset(ctx.home) - (Number(p.wire_offset) || 0)) >= CLOCK_TOLERANCE_MS;
+}
+
+/** A share the server refused takes back its "sharing this session" notice if the session has not seen it yet, so
+ *  the next prompt does not say both. */
+function dropShareStarted(ctx: Ctx, lid: string): void {
+  ctx.db.prepare("DELETE FROM notices WHERE local_id=? AND id LIKE ?").run(lid, `${lid}/share_started_%`);
+}
+
+/** Why the server refused a session's share, and what to do, for its notice (N5). */
+function shareRefusal(ctx: Ctx, status: number, code: string | null): string {
+  const server = loadCredentials(ctx.home)?.server_url || "the Align server";
+  if (status === 403) return `Align: sharing failed (${code || status}): this machine may not share sessions in that workspace. This session stays private.`;
+  return `Align: sharing failed (${code || status}): the server did not take this session from this machine. If it was shared before from this machine and that sign-in was never revoked, revoke the old device at ${server}/app/devices, then type \`::align share\` here again. This session stays private.`;
+}
+
 async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
   const p = JSON.parse(item.payload);
   const lid = item.local_id;
   const base = p.ws ? `/api/v2/workspaces/${enc(p.ws)}/sessions/${enc(p.session_key)}` : "";
   switch (item.kind) {
     case "put_session": {
-      const r = await api(ctx, "PUT", base, { body: p.body });
+      let r = await api(ctx, "PUT", base, { body: wireBody(ctx, item, p, "started_at") });
+      if (await learnClock(ctx, r, p)) r = await api(ctx, "PUT", base, { body: wireBody(ctx, item, p, "started_at", true) });
       if (r.status === 200) {
         const state = r.json?.state === "suspended" ? "suspended" : "shared";
         ctx.db.prepare("UPDATE shares SET state=CASE WHEN state IN ('stopped','error') THEN state ELSE ? END, error=NULL WHERE local_id=?").run(state, lid);
@@ -210,17 +277,30 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
         renderHot(ctx, lid);
         return;
       }
+      if (r.status === 400 && r.json?.error === "clock_skew") {
+        ctx.db.prepare("UPDATE shares SET state='error', error=? WHERE local_id=?").run("clock_skew", lid);
+        ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
+        dropShareStarted(ctx, lid);
+        addNotice(ctx, lid, `share_err_${item.id}`, `Align: sharing failed because this computer's clock is off (${String(r.json?.message || "clock_skew").replace(/\.$/, "")}). Set the system clock to update automatically, then type \`::align share\` here again. This session stays private.`);
+        renderHot(ctx, lid);
+        return;
+      }
       if (r.status === 404 || r.status === 403) {
+        // Perhaps this machine lost access to the workspace (its person was removed): that ends the share with its own
+        // notice. Otherwise say why the server refused it, and what to do.
+        if (!(await hasWorkspace(ctx, p.ws))) return;
         ctx.db.prepare("UPDATE shares SET state='error', error=? WHERE local_id=?").run(r.json?.error || `http_${r.status}`, lid);
         ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
-        addNotice(ctx, lid, `share_err_${item.id}`, `Align: sharing failed (${r.json?.error || r.status}). This session stays private.`);
+        dropShareStarted(ctx, lid);
+        addNotice(ctx, lid, `share_err_${item.id}`, shareRefusal(ctx, r.status, r.json?.error ?? null));
         renderHot(ctx, lid);
         return;
       }
       throw new HttpError(r.status, r.json?.error ?? null, r.json);
     }
     case "post_epoch": {
-      const r = await api(ctx, "POST", `${base}/epochs`, { body: p.body });
+      let r = await api(ctx, "POST", `${base}/epochs`, { body: wireBody(ctx, item, p, "starts_at") });
+      if (await learnClock(ctx, r, p)) r = await api(ctx, "POST", `${base}/epochs`, { body: wireBody(ctx, item, p, "starts_at", true) });
       if (r.status === 200) {
         ctx.db.prepare("UPDATE epochs SET synced=1, goal_version_at_start=? WHERE epoch_id=?").run(r.json?.goal_version_at_start ?? null, p.body.epoch_id);
         return;
@@ -233,7 +313,9 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
           `epoch_err_${p.body.epoch_id}`,
           r.json?.error === "alignment_required"
             ? "Align: that goal needs an approved alignment before this session can count toward it. Usage for this period stays private."
-            : `Align: the server refused this binding (${r.json?.error || r.status}). Usage for this period stays private.`,
+            : r.json?.error === "clock_skew"
+              ? `Align: the server refused this binding because this computer's clock is off (${String(r.json?.message || "clock_skew").replace(/\.$/, "")}). Set the system clock to update automatically. Usage for this period stays private.`
+              : `Align: the server refused this binding (${r.json?.error || r.status}). Usage for this period stays private.`,
         );
         renderHot(ctx, lid);
         return;
@@ -241,7 +323,7 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       throw new HttpError(r.status, r.json?.error ?? null, r.json);
     }
     case "receipt": {
-      const r = await api(ctx, "POST", `/api/v2/directives/${enc(p.directive_id)}/receipts`, { body: p.body });
+      const r = await api(ctx, "POST", `/api/v2/directives/${enc(p.directive_id)}/receipts`, { body: { ...p.body, at: serverIso(p.body.at, clockOffset(ctx.home)) } });
       if (r.status === 200 || r.status === 404) return;
       throw new HttpError(r.status, r.json?.error ?? null, r.json);
     }
@@ -328,6 +410,8 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
   if (!signedIn(ctx.home)) return res;
   const shares = ctx.db.prepare("SELECT local_id, workspace_id, session_key FROM shares WHERE state='shared'").all() as { local_id: string; workspace_id: string; session_key: string }[];
   promoteSettled(ctx);
+  // Rows go up with their times on the server's clock.
+  const offset = clockOffset(ctx.home);
   for (const s of shares) {
     assignEpochs(ctx, s.local_id);
     const pendingOutbox = ctx.db.prepare("SELECT 1 FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch') LIMIT 1").get(s.local_id);
@@ -343,7 +427,7 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
       if (!rows.length) break;
       const wire = rows.map((r) => ({
         request_key: r.request_key,
-        ts: r.ts || r.created_at,
+        ts: serverIso(r.ts || r.created_at, offset),
         epoch_id: r.epoch_id,
         model: r.model,
         query_source: r.query_source,
@@ -369,6 +453,8 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
       if (r.status !== 200) {
         if (r.status === 403 || r.status === 404 || r.status === 409) {
           ctx.log(`usage upload refused for ${s.local_id}: ${r.status} ${r.json?.error || ""}`);
+          // This machine may have lost access to the workspace: that ends its shares there, with their own notice.
+          if ((r.status === 403 || r.status === 404) && !(await hasWorkspace(ctx, s.workspace_id))) break;
           if (r.json?.error === "sharing_stopped" || r.json?.error === "not_shared" || r.status === 404) {
             ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=COALESCE(stopped_at, ?) WHERE local_id=?").run(nowIso(), s.local_id);
             // Never silently: the session hears that its sharing ended and that usage now stays here.
@@ -417,6 +503,8 @@ export interface SyncResult {
   steering?: number;
   /** The first time this pass could not reach the server or got a 5xx (null when every call got through). */
   serverError?: string | null;
+  /** A revoke left waiting by `align logout` while the server was unreachable: done this pass, still waiting, or none. */
+  revoked?: "none" | "revoked" | "pending";
 }
 
 /** last-sync.json: when the last pass ran, and whether the server could be reached (B5). */
@@ -461,6 +549,8 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
   const t0 = Date.now();
   resetServerTrouble();
   try {
+    // A device this machine signed out of while the server was unreachable is revoked before anything else.
+    res.revoked = await revokePending(ctx).catch(() => "pending" as const);
     res.spooled += ingestSpool(ctx);
     res.tail = tailAll(ctx, opts.tailBudgetMs);
     res.spooled += ingestSpool(ctx);

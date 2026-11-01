@@ -259,7 +259,15 @@ function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers =
     cancelled_by: r.cancelled_by ? person(r.cancelled_by) : null,
     // expired: its goal closed before any session answered (lib/v2/goals.ts writeGoalVersion).
     state: r.cancelled_at ? ("cancelled" as const) : pending ? ("open" as const) : rows.length && count("expired") === rows.length ? ("expired" as const) : ("answered" as const),
-    counts: { pending, accepted: count("accepted"), declined: count("declined"), expired: count("expired"), not_declined: rows.filter((t) => t.state === "accepted" && t.auto_accepted).length },
+    // accepted: the developer's own accepts; not_declined: delivered to the agent and not declined (auto_accepted),
+    // never counted as accepted.
+    counts: {
+      pending,
+      accepted: rows.filter((t) => t.state === "accepted" && !t.auto_accepted).length,
+      declined: count("declined"),
+      expired: count("expired"),
+      not_declined: rows.filter((t) => t.state === "accepted" && t.auto_accepted).length,
+    },
     sessions: rows
       .filter((t) => everyone || t.user_id === pp.userId)
       .map((t) => ({

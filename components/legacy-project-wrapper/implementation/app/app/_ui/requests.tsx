@@ -214,7 +214,7 @@ function RequestRow({ ws, r, onDone }: { ws: string; r: RequestView; onDone: () 
       {r.note && <p className="text-[14px] text-zinc-600">Note: &ldquo;{r.note}&rdquo;</p>}
       {r.cancelled_by && <p className="text-[14px] text-zinc-500">Cancelled by {r.cancelled_by.name}, {when(r.cancelled_at)}</p>}
       <p className="text-[14px] text-zinc-500">
-        {c.pending} pending, {c.accepted - c.not_declined} accepted by the developer{c.not_declined ? `, ${c.not_declined} delivered and not declined` : ""}, {c.declined} declined
+        {c.pending} pending, {c.accepted} accepted by the developer{c.not_declined ? `, ${c.not_declined} delivered and not declined` : ""}, {c.declined} declined
         {c.expired ? `, ${c.expired} expired` : ""}
       </p>
       {r.sessions.map((s) => (

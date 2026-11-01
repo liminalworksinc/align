@@ -7,11 +7,13 @@ import { nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { getSession, sessionCwds, type SessionRow } from "./ledger.ts";
-import { addNotice, DEVICE_SIGNED_OUT, getShare, renderHot, snapshot } from "./hot.ts";
+import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, getShare, renderHot, snapshot } from "./hot.ts";
 import { loadCredentials } from "./api.ts";
 import { gitInfo } from "./shared/anchors.ts";
-import { randomId } from "./shared/fsx.ts";
-import type { Goal } from "./shared/types.ts";
+import { clean } from "./shared/envelope.ts";
+import { randomId, readJson, removeFile } from "./shared/fsx.ts";
+import { layout } from "./shared/layout.ts";
+import type { FeedFile, Goal, GoalSnapshot, MeFile } from "./shared/types.ts";
 
 export function enqueue(ctx: Ctx, lid: string, kind: string, payload: unknown): void {
   ctx.db.prepare("INSERT INTO outbox(local_id, kind, payload, created_at) VALUES(?,?,?,?)").run(lid, kind, JSON.stringify(payload), nowIso());
@@ -188,26 +190,77 @@ export function forgetShare(ctx: Ctx, lid: string): void {
  * session stays blocked until the developer runs `align stop-sharing`. Returns how many shares ended.
  */
 export function endSharesSignedOut(ctx: Ctx): number {
-  const live = ctx.db.prepare("SELECT local_id FROM shares WHERE state IN ('shared','pending','suspended')").all() as { local_id: string }[];
+  const live = ctx.db.prepare("SELECT local_id, goal_json FROM shares WHERE state IN ('shared','pending','suspended')").all() as { local_id: string; goal_json: string | null }[];
   const at = nowIso();
-  for (const { local_id: lid } of live) {
-    const latched = ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid);
-    tx(ctx.db, () => {
-      ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=?, error=? WHERE local_id=?").run(at, DEVICE_SIGNED_OUT, lid);
-      ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
-      ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch')").run(lid);
-      addNotice(
-        ctx,
-        lid,
-        `signed_out_${at}`,
-        `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here.${
-          latched ? ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.` : ""
-        }`,
-      );
-    });
-    renderHot(ctx, lid);
+  for (const { local_id: lid, goal_json } of live) {
+    // Typed in the session after a new `align login`, `::align share` shares it toward the goal it had (N8).
+    const goal = goal_json ? (JSON.parse(goal_json) as GoalSnapshot) : null;
+    endShare(
+      ctx,
+      lid,
+      DEVICE_SIGNED_OUT,
+      `signed_out_${at}`,
+      `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`,
+      at,
+    );
   }
   if (live.length) ctx.log(`signed out: ${live.length} shares ended on this machine`);
+  return live.length;
+}
+
+/** End one live share here (the server already ended it, or can no longer be reached for it): stopped with `why`,
+ *  its pending binding and queued session and epoch calls dropped, one notice. Its stop latch and goal holds stay, so
+ *  it fails closed, and the notice says how to get out. */
+function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, text: string, at = nowIso()): void {
+  const latched = ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid);
+  tx(ctx.db, () => {
+    ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=?, error=? WHERE local_id=?").run(at, why, lid);
+    ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
+    ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch')").run(lid);
+    addNotice(ctx, lid, noticeId, `${text}${latched ? ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.` : ""}`);
+  });
+  renderHot(ctx, lid);
+}
+
+/**
+ * This device can no longer reach a workspace (`/me` no longer lists it: its person was removed from it or left, or a
+ * new pairing did not include it). The server ended those sessions (`member_removed`), so each live share in it ends
+ * here too, with one notice; its cached goals and asks go, so no envelope or `::align goals` shows them. Stop latches
+ * and goal holds stay until `align stop-sharing`. Returns how many shares ended.
+ */
+export function endSharesWithoutAccess(ctx: Ctx, me: MeFile): number {
+  const reach = new Set(me.workspaces.map((w) => w.id));
+  const live = (ctx.db.prepare("SELECT local_id, workspace_id, workspace_name FROM shares WHERE state IN ('shared','pending','suspended')").all() as {
+    local_id: string;
+    workspace_id: string;
+    workspace_name: string;
+  }[]).filter((s) => !reach.has(s.workspace_id));
+  const at = nowIso();
+  for (const s of live) {
+    endShare(
+      ctx,
+      s.local_id,
+      ACCESS_LOST,
+      `access_lost_${s.workspace_id}`,
+      `Align: this session stopped sharing because you no longer have access to ${clean(s.workspace_name, 80)} in Align (you were removed from it or left it); its usage stays on this machine from now on.`,
+      at,
+    );
+  }
+  // Cached feeds of every workspace out of reach go too (with or without a live share in it).
+  const gone = new Set(live.map((s) => s.workspace_id));
+  try {
+    for (const f of fs.readdirSync(layout.feeds(ctx.home))) {
+      if (!f.endsWith(".json") || f.startsWith("activity-") || f.startsWith("asks-")) continue;
+      const ws = readJson<FeedFile>(path.join(layout.feeds(ctx.home), f))?.workspace_id;
+      if (ws && !reach.has(ws)) gone.add(ws);
+    }
+  } catch {
+    /* no feeds yet */
+  }
+  for (const ws of gone) {
+    for (const f of [layout.feed(ctx.home, ws), layout.asksFeed(ctx.home, ws), layout.podFeed(ctx.home, ws)]) removeFile(f);
+  }
+  if (live.length) ctx.log(`workspace access lost: ${live.length} shares ended on this machine`);
   return live.length;
 }
 
