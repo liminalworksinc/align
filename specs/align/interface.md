@@ -1313,6 +1313,12 @@ active goal), neutral otherwise.
   such goals (409 `goal_not_active`), so this spec offers **Propose a change** only on active goals.
 - Should the account page also let a person unlink a provider? The owner's decision names only linking, so this
   spec offers no unlink.
+- Who should the requester's Home and card name as able to launch (or decide on) a request when someone in the launch
+  set can't see a dependency it adds? Today "Waiting on …" and "Can launch: …" list the whole set (only that person's
+  own views leave them out), so the requester may be told it waits on someone the server will always refuse. Leaving
+  that person out would tell the requester, who can see the dependency and the people, exactly who can't see it, which
+  "Nobody approves or launches a dependency they can't see" forbids; an unnamed "someone who can see every goal it
+  depends on" says the same thing whenever the set is small. No safe wording is chosen yet, so the full set stays.
 
 ## Sources
 
