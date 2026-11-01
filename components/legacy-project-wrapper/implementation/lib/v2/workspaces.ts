@@ -323,6 +323,17 @@ export function previewInvite(token: string, user: { id: string; email: string }
   };
 }
 
+/** 409 already_member (with workspace_id) when this person already accepted this invite and is still a member: a second
+ *  tab's Join says so, instead of a bare 404 (Y1). Anyone else, and an invite they accepted before being removed, gets
+ *  the invite's usual 404. */
+function alreadyJoinedWith(token: string, userId: string) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return;
+  const used = get<{ ws_id: string }>("SELECT ws_id FROM v2_invites WHERE token_hash = ? AND accepted_at IS NOT NULL AND accepted_by = ?", sha256hex(token), userId);
+  if (used && get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, used.ws_id, userId)) {
+    throw new V2Error(409, "already_member", "You already joined this workspace with this invite, in another tab or window.", { workspace_id: used.ws_id });
+  }
+}
+
 /**
  * Join by invite. `deviceIds` are paired devices of the person's own (not revoked) that get this workspace too, in the
  * same transaction: a re-invited person's devices lost it when they were removed, and a pairing grants only the
@@ -331,6 +342,7 @@ export function previewInvite(token: string, user: { id: string; email: string }
  * and nothing is joined.
  */
 export async function acceptInvite(token: string, user: { id: string; email: string }, emailVerified: boolean, deviceIds: string[] = [], requireRecent: () => void = () => undefined) {
+  alreadyJoinedWith(token, user.id);
   const r = inviteByToken(token);
   if (r.email !== user.email.toLowerCase()) throw new V2Error(403, "email_mismatch", "This invite is for a different email address");
   // When hosted, the sign-in method (Google, GitHub or an email code) must have verified the address.

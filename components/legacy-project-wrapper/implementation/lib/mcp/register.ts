@@ -6,6 +6,7 @@ import { addEvidence, LAUNCH_STATES, requestCondition } from "../v2/changes";
 import { CHANGE_REQUEST_STATES, getChangeRequest, listChangeRequests, type ChangeDiff, type ChangeRequestSummary, type Condition, type EvidenceLink } from "../v2/changes-read";
 import { launchWords } from "../v2/launch-words";
 import { diffWords, type FieldDiff } from "../v2/change-words.mts";
+import { count } from "../v2/plural.mts";
 import { noteGrantRead } from "../oauth/grants";
 import { EVIDENCE_SCOPE } from "../oauth/server";
 import { all, get } from "../v2/db";
@@ -99,8 +100,6 @@ type UT = z.infer<typeof UT>;
 const ut = (s: string): UT => ({ untrusted_text: s });
 /** For the text summary: < and > escaped, so the text can't close its tag. */
 const tag = (s: string) => `<untrusted-text>${s.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</untrusted-text>`;
-/** "1 session", "2 sessions": a count with its noun, singular for one (C4-4). */
-const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function result<T extends Record<string, unknown>>(structured: T, summary: string) {
   return { content: [{ type: "text" as const, text: summary }], structuredContent: structured };
@@ -368,7 +367,8 @@ const changeOut = (cr: ChangeRequestSummary): z.infer<typeof ChangeRequestOut> =
 const DiffOut = z.object({
   title: z.object({ before: UT, after: UT }).optional(),
   measures: z.object({ before: z.array(MeasureOut), after: z.array(MeasureOut) }).optional(),
-  depends_on: z.object({ before: z.array(z.string()), after: z.array(z.string()) }).optional(),
+  /** `hidden`: how many dependencies on each side the caller can't read (left out of the lists), or null. */
+  depends_on: z.object({ before: z.array(z.string()), after: z.array(z.string()), hidden: z.object({ before: z.number(), after: z.number() }).nullable() }).optional(),
   status: z.object({ before: StatusOut, after: StatusOut }).optional(),
 });
 const RecordOut = ChangeRequestOut.omit({ revision: true, created_at: true, updated_at: true }).extend({
@@ -387,7 +387,7 @@ function diffOut(pp: PolicyPrincipal, d: ChangeDiff): z.infer<typeof DiffOut> {
   const out: z.infer<typeof DiffOut> = {};
   if (d.title) out.title = { before: ut(d.title.before), after: ut(d.title.after) };
   if (d.measures) out.measures = { before: measuresOut(d.measures.before), after: measuresOut(d.measures.after) };
-  if (d.depends_on) out.depends_on = { before: readableIds(pp, d.depends_on.before), after: readableIds(pp, d.depends_on.after) };
+  if (d.depends_on) out.depends_on = { before: readableIds(pp, d.depends_on.before), after: readableIds(pp, d.depends_on.after), hidden: d.depends_on.hidden };
   if (d.status) out.status = { before: d.status.before, after: d.status.after };
   return out;
 }

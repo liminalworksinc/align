@@ -208,9 +208,10 @@ Additive fields; older agents ignore them. Spec: `goals-and-proposals`, `workspa
   launched version (the `goal_version` snapshot carries `target_share`; older snapshots read as null). Active targets in a
   workspace, private goals included, sum to 100 or less, else `409 targets_over_100` (the message names only sums).
 - Goals feed: `{ version, goals, steering: "off"|"on" }`; each goal also carries `"allocation": { "target_share",
-  "share_7d", "gap_7d", "held" } | null` (active goals only; whole percents over the trailing 7 days; `gap_7d` null without
-  a target or without usage; `held` while the goal is on hold). `version` hashes goals and switch; shares are whole
-  percents, so usage moves it only when a share moves a full point.
+  "share_7d", "gap_7d", "held" } | null` (active goals only, over the trailing 7 days; `share_7d` a whole percent,
+  `gap_7d` the allocation report's gap to one decimal, so steering's 10 points match the Spend tab; `gap_7d` null without
+  a target or without usage; `held` while the goal is on hold). `version` hashes goals and switch, so usage moves it
+  only when a share moves a full point or a gap a tenth of one.
 - Agent time = fresh tokens: `input + output + cache_write_5m + cache_write_1h + cache_write_unsplit`, every model, priced
   or not; cache reads left out. Shares are of all shared usage in the workspace in the window.
 - `GET /api/v2/workspaces/:ws/allocation?from&to&weeks` (Bearer or cookie; every member) → `{ "window": { "from", "to",

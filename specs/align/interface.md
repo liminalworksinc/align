@@ -416,9 +416,17 @@ email join with **Join workspace**. When the invitee has paired devices that are
 "Your paired devices" (each with a checkbox, its name and "(last seen <time>)", none ticked) with "Tick the devices
 that should reach <workspace> too. Each one picks it up the next time it syncs, without signing in again; its other
 workspaces stay as they are." (owner decision 2026-11-01; `workspaces` "Invites give paired devices the workspace").
-Ticking needs a sign-in from the last 15 minutes: with an older one the boxes are disabled and the page says "Giving a
-device this workspace needs a sign-in from the last 15 minutes. **Sign in again** to choose devices, or join without
-them."; joining without devices needs no recent sign-in.
+The devices are listed by name (`last_seen_at` moves at most every 5 minutes, so an order by it could contradict what
+the person just did). Ticking needs a sign-in from the last 15 minutes: with an older one the boxes are disabled and the
+page says "Giving a device this workspace needs a sign-in from the last 15 minutes. **Sign in again** to choose
+devices, or join without them."; **Sign in again** signs out and opens sign-in at once (one press), with the email
+filled in and `next` the invite page, and **Join workspace** stays on the page; joining without devices needs no
+recent sign-in. A refused Join SHALL say what happened, never a bare "Not found": a ticked device that is no longer one
+of the person's paired devices (signed out in another tab) gives the server's message and "Your devices are listed
+again: choose again, or join without them.", with the list read again and nothing ticked; an invite the person already
+accepted in another tab gives "You already joined <workspace>, in another tab or window." with a link to it; an
+invite that is gone otherwise gives "This invite can't be used any more: it was withdrawn, it expired, or it was
+already used. You have not joined. …".
 
 #### Scenario: Accept an invite
 
@@ -428,7 +436,12 @@ them."; joining without devices needs no recent sign-in.
 #### Scenario: Accept and give a paired device the workspace
 
 - **WHEN** an invitee with one paired device and one revoked device opens the page with a sign-in 20 minutes old, then with a fresh one ticks the device and presses **Join workspace and give it to this device** (`scripts/test-v2.mjs` "invite (ui, owner decision 2026-11-01) ...")
-- **THEN** the first view lists only the live device, unticked and disabled, with the recent sign-in sentence; the second lists it unticked and enabled; the page posts `{device_ids:[<id>]}`, the device gains the workspace (audited `device.workspace_added`) and the workspace opens; when the server answers 403 `reauth_required` the page shows its message with "You have not joined yet." and **Sign in again**, which comes back to the invite
+- **THEN** the first view lists only the live device, unticked and disabled, with the recent sign-in sentence; the second lists it unticked and enabled; the page posts `{device_ids:[<id>]}`, the device gains the workspace (audited `device.workspace_added`) and the workspace opens; when the server answers 403 `reauth_required` the page shows its message with "You have not joined yet." in place, unticks and disables the devices and keeps **Join workspace**, and one press of **Sign in again** opens sign-in, which comes back to the invite (`scripts/test-v2.mjs` "Y2 (ui): ...")
+
+#### Scenario: A device signed out, or the invite used, in another tab
+
+- **WHEN** an invitee ticks two devices, one is signed out in another tab, and they press Join; then they join in another tab and press Join here again (`scripts/test-v2.mjs` "Y1 (ui): ..." and "Y1: accepting an invite the same person already accepted ...")
+- **THEN** the first press says "A device you chose is not one of your paired devices any more (it may have been signed out), so nothing was joined. Your devices are listed again: choose again, or join without them." with only the other device listed, unticked; the second says "You already joined <workspace>, in another tab or window." with a link to the workspace
 
 #### Scenario: Wrong account or unusable link
 
@@ -458,8 +471,12 @@ bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `w
 each `null` when the server could not read it. Every queue item SHALL carry `next` (what it needs) and `waiting_on`
 (the people it waits on). An open change request waits on its approvers to decide (`waiting_on` is the effective
 approval set, and empty when nobody can approve it yet); pending behind the goal's current version, on its requester to
-update it (`rebase`); countered, on its requester to accept the change (`accept_counter`). It is waiting on the person
-when their `approve` or `accept_counter` flag is set or it is their own request to update; otherwise it is listed under
+update it (`rebase`); countered, on its requester to accept the change (`accept_counter`); pending with a dependency that
+would now close a loop (`dependency_loop`), on its approval set to suggest a change without it or decline it
+(`resolve_loop`: "Approving it would now make a dependency loop: suggest a change without that dependency, or decline
+it." for the person, "Approving it would now make a dependency loop. Waiting on <names> to suggest a change or decline
+it." for others). It is waiting on the person when their `waiting_on_me` flag is set or it is their own request to
+update; otherwise it is listed under
 waiting on others when the person asked for it, is in its approval set, or the goal is theirs, their team's, or (for a
 workspace owner) a company goal. An ask waits on the person when its `waiting_on_me` is set (`accept` while open,
 `done` once accepted). An alignment the person is part of waits on its requester when countered and, when pending, on
@@ -468,7 +485,8 @@ person's own (owned, their team's, or a company goal for a workspace owner) firs
 not launched (`launch` `pending` or `not_yet`) SHALL be listed with `next: "launch"` as "Approved, not launched": waiting
 on the person when their `can.launch` flag is set, otherwise under waiting on others, with `waiting_on` its `launchers`,
 when the person asked for it or the goal is theirs, their team's, or (for a workspace owner) a company goal. A launched
-or superseded request is on no Home.
+or superseded request is on no Home, nor is an approved one that would now close a dependency loop (`dependency_loop`):
+nobody can launch it as it stands.
 
 Every agent-status item SHALL show exactly one evidence class, "delivery receipt" (a `received`, `applied` or
 `enforced` receipt, or a goal read Align served), "agent reported" (the agent's own claim or evidence link) or "not
@@ -816,6 +834,11 @@ and a closed "Details" disclosure.
 - **WHEN** someone who decides on a request opens it after it added a dependency they can't read (their approval set changed since), so its `dependency_not_visible` is set
 - **THEN** the card offers neither **Approve** nor **Approve and launch** (on an approved request, no **Launch version <n+1> to agents**) and says "You can't approve this. This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask <requester> to withdraw it, or to rebase it without that dependency." (for a launch, "You can't launch this. This change adds a dependency on a goal you can't see, so you can't launch what it publishes. …"), naming no goal; "Decides", "Waiting on …" and "Can launch" leave them out; the Home doesn't list it under "Waiting on you" ("Approve it, suggest a change or decline it.", "… until you launch it."); and if they decided before the read changed (they could see it when they opened the card), the refusal reads "Not recorded. <that message>", the Confirm panel closes and nothing is recorded (`scripts/test-v2.mjs` "C4-1 (ui): ...")
 
+#### Scenario: A request that would now close a dependency loop
+
+- **WHEN** anyone opens a request whose `dependency_loop` is set (a goal it adds as a dependency has come to depend on its goal since it was made)
+- **THEN** an open request offers neither **Approve** nor **Approve and launch** and says "This can't be approved as it stands. <dependency_loop>", its waiting line reads "Waiting on <names> to suggest a change or decline it.", and **Suggest a change** and **Decline** stay for its deciders; an approved one offers no **Launch version <n+1> to agents** and, instead of "Can launch: …", says "Nobody can launch this as it stands. <dependency_loop>" (`scripts/test-v2.mjs` "C5-1 (ui): ...")
+
 #### Scenario: Launched or superseded before launch
 
 - **WHEN** a request is launched, or superseded after its approval
@@ -844,7 +867,7 @@ and a closed "Details" disclosure.
 ### Requirement: Evidence on change request cards
 
 Every change request card (on the goal page and in the Requests tab) SHALL show, under "Evidence for revision <n>"
-(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days with its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence on the approved revision (<r>)." (links on earlier revisions are still listed under "From revision <n>") or "Approved with <n> evidence link(s), none verified." An **Add link** for a link that can no longer become an `https://` one (`http://…`) SHALL stay disabled with the hint "Use an https:// link: Align keeps only https links."
+(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days with its request count, "1 request" for one as in the MCP snapshot line (one count-and-noun helper, `lib/v2/plural.mts`, for both: `scripts/test-v2.mjs` "C5-4: ..."), and its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence on the approved revision (<r>)." (links on earlier revisions are still listed under "From revision <n>") or "Approved with <n> evidence link(s), none verified." An **Add link** for a link that can no longer become an `https://` one (`http://…`) SHALL stay disabled with the hint "Use an https:// link: Align keeps only https links."
 
 #### Scenario: Approve without evidence
 
@@ -878,7 +901,9 @@ card for every reader of the request, from `GET /api/v2/workspaces/<ws>/goals/<g
 (`lib/v2/value.ts`; `409 not_approved` for any other state, `404` for a request the person can't read), with these
 rows: "Accepted change" (each change in words, one line each, the same lines as the MCP decision record: "<measure>
 target 500 → 600", "Added measure …", "Removed measure …", "Title … → …", "Status … → …", "Added limit …", "Now
-depends on <title>", never a count like "Measures: 1 → 1"; and the version it became once launched, or "Approved, agents
+depends on <title>", never a count like "Measures: 1 → 1"; a dependency the reader can't read counted after the named
+ones, as on the rest of the card, "Now depends on <title> and 1 other goal you can't see" ("Now depends on a goal you
+can't see" when it is the only one), never left out: `scripts/test-v2.mjs` "C5-3: ..."; and the version it became once launched, or "Approved, agents
 still on v<n> until launch"), "Who approved" (the approver, "You" for the reader, and time, and "approved without
 evidence" when so), "Affected goals and
 teams" (the goal and its team, the readable goals it contributes to and the readable goals that depend on or contribute
@@ -1160,7 +1185,7 @@ sessions.
 #### Scenario: Agent time against targets
 
 - **WHEN** a member (viewers included) opens the tab
-- **THEN** above the usage table an "Agent time against targets" card (pill "steering on" or "steering off") reads `GET /api/v2/workspaces/<ws>/allocation?weeks=6` and shows, for the last 7 days, one line per row ("<goal>", "Goals you can't see" or "Not bound to a goal") with "<share>% of agent time · target <n>%", a pill "<n> points over", "<n> points under" ("1 point over", "1 point under" for one), "on target" or "no target" (the number of points rounds toward zero, and the pill is amber at 10 points or more, the same threshold steering uses, so a 9.6-point gap reads "9 points over" in grey), a bar with the target marked, and its fresh tokens, list price, unpriced requests and sessions; a table of each goal's share per week (weeks start Monday, UTC); "Steering is <on|off>. …" with how many lines were shown in the last 7 days; a "Propose new targets" link to the Alignments tab's target changes; and, for a workspace owner only, **Turn steering on** / **Turn steering off**, which PATCHes `{steering}` to `/api/v2/workspaces/<ws>`
+- **THEN** above the usage table an "Agent time against targets" card (pill "steering on" or "steering off") reads `GET /api/v2/workspaces/<ws>/allocation?weeks=6` and shows, for the last 7 days, one line per row ("<goal>", "Goals you can't see" or "Not bound to a goal") with "<share>% of agent time · target <n>%", a pill "<n> points over", "<n> points under" ("1 point over", "1 point under" for one), "on target" or "no target" (the number of points rounds toward zero, and the pill is amber at 10 points or more, the same threshold steering uses on the same one-decimal gap the goals feed sends devices as `allocation.gap_7d`, so a 9.6-point gap reads "9 points over" in grey and no agent is steered from that goal, while 10.0 reads "10 points over" in amber and is: `scripts/test-v2.mjs` "C5-2: ..."), a bar with the target marked, and its fresh tokens, list price, unpriced requests ("1 unpriced request" for one) and sessions ("1 session"); a table of each goal's share per week (weeks start Monday, UTC); "Steering is <on|off>. …" with how many lines were shown in the last 7 days; a "Propose new targets" link to the Alignments tab's target changes; and, for a workspace owner only, **Turn steering on** / **Turn steering off**, which PATCHes `{steering}` to `/api/v2/workspaces/<ws>`
 
 #### Scenario: One point from the target
 
@@ -1288,6 +1313,12 @@ active goal), neutral otherwise.
   such goals (409 `goal_not_active`), so this spec offers **Propose a change** only on active goals.
 - Should the account page also let a person unlink a provider? The owner's decision names only linking, so this
   spec offers no unlink.
+- Who should the requester's Home and card name as able to launch (or decide on) a request when someone in the launch
+  set can't see a dependency it adds? Today "Waiting on …" and "Can launch: …" list the whole set (only that person's
+  own views leave them out), so the requester may be told it waits on someone the server will always refuse. Leaving
+  that person out would tell the requester, who can see the dependency and the people, exactly who can't see it, which
+  "Nobody approves or launches a dependency they can't see" forbids; an unnamed "someone who can see every goal it
+  depends on" says the same thing whenever the set is small. No safe wording is chosen yet, so the full set stays.
 
 ## Sources
 
@@ -1307,6 +1338,7 @@ active goal), neutral otherwise.
 - `app/app/_ui/decide.tsx`
 - `lib/v2/launch-words.ts`
 - `lib/v2/change-words.mts`
+- `lib/v2/plural.mts`
 - `app/app/_ui/missing.tsx`
 - `app/app/_ui/value.tsx`
 - `lib/v2/value-core.mts`

@@ -892,7 +892,12 @@ try {
   const acc = await Promise.all([U2, U3, U4].map((u) => call(u.who, "POST", `/api/v2/invites/${inv[u.who]}/accept`, { cookie: u.cookie, body: {} })));
   check("invites: U2, U3 join A as members, U4 as viewer", acc.every((r) => r.status === 200) && acc[2].json.role === "viewer", acc.map((r) => r.status).join(","));
   const reuse = await call("U2", "POST", `/api/v2/invites/${inv.U2}/accept`, { cookie: U2.cookie, body: {} });
-  check("invites: an invite works once (reuse -> 404)", reuse.status === 404, `${reuse.status}`);
+  const reuseOther = await call("U3", "POST", `/api/v2/invites/${inv.U2}/accept`, { cookie: U3.cookie, body: {} });
+  check(
+    "invites: an invite works once: reused by the person who accepted it -> 409 already_member (Y1: \"You already joined …\"), by anyone else -> 404",
+    reuse.status === 409 && reuse.json?.error === "already_member" && reuseOther.status === 404,
+    `${reuse.status} ${reuse.text} ${reuseOther.status}`,
+  );
   const memberInvite = await call("U3", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U3.cookie, body: { email: "z@example.test", role: "member" } });
   check("rbac: a member creating an invite -> 403 owner_only", memberInvite.status === 403 && memberInvite.json?.error === "owner_only", memberInvite.text);
   const pod = await call("U1", "POST", `/api/v2/workspaces/${A}/teams`, { cookie: U1.cookie, body: { name: "Platform team" } });
@@ -1505,6 +1510,13 @@ try {
   const rjo = await act(U1, rj.json.id, "reject");
   const afterReject = await act(U1, rj.json.id, "approve", { revision: 1 });
   check("alignment: withdraw by the requester; reject by an approver (not the requester); a decided request can't be approved", wdo.json?.state === "withdrawn" && rjByRequester.status === 403 && rjo.json?.state === "rejected" && afterReject.status === 409, `${wdo.status} ${rjByRequester.status} ${rjo.status} ${afterReject.status}`);
+  const afterWithdraw = await act(U3, wd.json.id, "withdraw");
+  check(
+    "Y5: a decision on a closed alignment says what happened in the app's words and who did it: \"This request was declined by Una One, so nothing changes.\" (never \"is rejected\"), \"This request was withdrawn by <requester>, so nothing changes.\"",
+    afterReject.json?.error === "wrong_state" && afterReject.json?.message === `This request was declined by ${U1.name}, so nothing changes.` &&
+      afterWithdraw.status === 409 && afterWithdraw.json?.message === `This request was withdrawn by ${U3.name}, so nothing changes.`,
+    `${afterReject.text} ${afterWithdraw.status} ${afterWithdraw.text}`,
+  );
   const otherSessions = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S2a] });
   const privTarget = await al(U3, { target_goal_id: GP.id, choice: "contribution", session_keys: [S3b] });
   check("alignment: listing someone else's session -> 404; a private goal as target -> 404", otherSessions.status === 404 && privTarget.status === 404, `${otherSessions.status} ${privTarget.status}`);
@@ -2273,6 +2285,9 @@ try {
   const accRevoked = await accept5(U5, [D5old.id]);
   const accUnknown = await accept5(U5, ["dv_aaaaaaaaaaaaaaaaaaaaaaaa"]);
   const accBadId = await accept5(U5, ["not an id"]);
+  // C5-6: a blank id is malformed too, never dropped into a join without devices.
+  const accBlank = await accept5(U5, [""]);
+  const accBlank2 = await accept5(U5, [D5.id, "  "]);
   const U5stale = await staleOf(U5);
   const accStale = await accept5(U5stale, [D5.id]);
   const out5 = withDb((d) => ({
@@ -2281,11 +2296,12 @@ try {
     d2: d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ? ORDER BY ws_id").all(D2.id).map((r) => r.ws_id).join(),
   }));
   check(
-    "re-invite: accepting with another person's device -> 404, with a revoked or unknown device -> 404, with a malformed id -> 400, with a device and a sign-in older than 15 minutes -> 403 reauth_required (\"Sign in again to give a device this workspace. ...\"); each joins nothing and grants nothing",
-    accOthers.status === 404 && accRevoked.status === 404 && accUnknown.status === 404 && accBadId.status === 400 &&
+    "re-invite: accepting with another person's device -> 404, with a revoked or unknown device -> 404 (the same message for each, saying nothing was joined: Y1), with a malformed id -> 400 (C5-6: a blank one [\"\"] too), with a device and a sign-in older than 15 minutes -> 403 reauth_required (\"Sign in again to give a device this workspace. ...\"); each joins nothing and grants nothing",
+    accOthers.status === 404 && accRevoked.status === 404 && accUnknown.status === 404 && accBadId.status === 400 && accBlank.status === 400 && accBlank2.status === 400 &&
+      accRevoked.json?.message === "A device you chose is not one of your paired devices any more (it may have been signed out), so nothing was joined." && accOthers.json?.message === accRevoked.json?.message &&
       accStale.status === 403 && accStale.json?.error === "reauth_required" && accStale.json?.message === "Sign in again to give a device this workspace. This needs a sign-in from the last 15 minutes." &&
       out5.member === null && out5.grants === 0 && out5.d2 === A && dirs5Before.json?.workspaces?.length === 0,
-    `${accOthers.status} ${accRevoked.status} ${accUnknown.status} ${accBadId.status} ${accStale.text} ${JSON.stringify(out5)} ${dirs5Before.text}`,
+    `${accOthers.status} ${accRevoked.status} ${accRevoked.text} ${accUnknown.status} ${accBadId.status} ${accBlank.status} ${accBlank.text} ${accBlank2.status} ${accStale.text} ${JSON.stringify(out5)} ${dirs5Before.text}`,
   );
   const rejoin = await accept5(U5, [D5.id]);
   const d5MeBack = await call("U5", "GET", "/api/v2/me", { bearer: D5.access });
@@ -5603,7 +5619,7 @@ try {
     );
     const tiny = await call("AM", "POST", `/api/v2/workspaces/${AW}/sessions/${SA.key}/usage`, { bearer: DM.access, body: { rows: [usageRow(DM, "alloc-a-tiny", SA.ep, { input: 1, output: 0, cache_write_5m: 0 })] } });
     const f2 = await feedAs(DM, f1.headers.get("etag"));
-    check("feed: usage too small to move any share a full point keeps the version (304)", tiny.json?.accepted === 1 && f2.status === 304, `${tiny.text} ${f2.status}`);
+    check("feed: usage too small to move any share a full point, or any gap a tenth of one, keeps the version (304)", tiny.json?.accepted === 1 && f2.status === 304, `${tiny.text} ${f2.status}`);
 
     // -- the owner changes a target in a new version: a goal_version directive carries it --
     const dirs = async (cursor = 0, dev = DM) => (await call(dev.who, "GET", `/api/v2/directives?cursor=${cursor}`, { bearer: dev.access })).json;
@@ -5686,6 +5702,48 @@ try {
       hold.status === 201 && fHeld.json?.goals.find((g) => g.id === ga.id)?.allocation?.held === true && fHeld.json.version !== f3.json.version && fFree.json?.goals.find((g) => g.id === ga.id)?.allocation?.held === false,
       `${hold.status} ${JSON.stringify(fHeld.json?.goals.find((g) => g.id === ga.id)?.allocation)}`,
     );
+
+    // -- C5-2: the feed's gap is the Spend tab's (one decimal), so steering acts exactly where the pill turns amber --
+    {
+      const AW2 = (await call("AO", "POST", "/api/v2/workspaces", { cookie: AO.cookie, body: { name: "Steering gap" } })).json?.id;
+      const g2 = async (title, target) => (await call("AO", "POST", `/api/v2/workspaces/${AW2}/goals`, { cookie: AO.cookie, body: { title, level: "company", target_share: target } })).json;
+      const OVER2 = await g2("Cut CI time in half", 30);
+      const UNDER2 = await g2("Ship 1000 robot arms", 40);
+      const keys = newDeviceKeys();
+      const d = insertDevice(AO.id, "Owner gap laptop");
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, AW2));
+      const DO2 = { ...keys, who: "AO", user: AO, id: d.id, access: d.access };
+      const share2 = async (native, goalId, tokens) => {
+        const key = sessionKey(DO2, AW2, "claude-code", native);
+        await call("AO", "PUT", `/api/v2/workspaces/${AW2}/sessions/${key}`, { bearer: DO2.access, body: { harness: "claude-code", repo_key: repoKey(DO2, AW2, `/src/${native}`), repo_alias: null, started_at: aT0, title: null } });
+        const ep = epochId();
+        await call("AO", "POST", `/api/v2/workspaces/${AW2}/sessions/${key}/epochs`, { bearer: DO2.access, body: { epoch_id: ep, goal_id: goalId, starts_at: aT0, root_turn: null, cause: "manual" } });
+        const up = await call("AO", "POST", `/api/v2/workspaces/${AW2}/sessions/${key}/usage`, { bearer: DO2.access, body: { rows: [usageRow(DO2, `${native}-1`, ep, { input: tokens, output: 0, cache_write_5m: 0 })] } });
+        return { key, ep, accepted: up.json?.accepted };
+      };
+      // 396 + 289 + 315 = 1000 fresh tokens: CI 39.6% of a 30% target (9.6 over), arms 28.9% of 40% (11.1 under).
+      const sOver = await share2("gap-ci", OVER2?.id, 396);
+      const sUnder = await share2("gap-arms", UNDER2?.id, 289);
+      const sNone = await share2("gap-none", null, 315);
+      const feed2 = (await call("AO", "GET", `/api/v2/workspaces/${AW2}/goals`, { bearer: DO2.access })).json;
+      const page2 = (await call("AO", "GET", `/api/v2/workspaces/${AW2}/allocation`, { cookie: AO.cookie })).json;
+      const fOf = (f, id) => f?.goals.find((g) => g.id === id)?.allocation;
+      const pOf = (id) => page2?.window.rows.find((r) => r.goal?.id === id);
+      const { steeringLine } = await import(pathToFileURL(path.join(ROOT, "packages/align-agent/src/shared/steering.ts")).href);
+      const line9 = steeringLine(OVER2?.id, { ...feed2, steering: "on" });
+      // 10 more tokens on CI: 406 of 1010 is 40.2% (10.2 over), arms 28.6% (11.4 under): now steering speaks.
+      const more = await call("AO", "POST", `/api/v2/workspaces/${AW2}/sessions/${sOver.key}/usage`, { bearer: DO2.access, body: { rows: [usageRow(DO2, "gap-ci-2", sOver.ep, { input: 10, output: 0, cache_write_5m: 0 })] } });
+      const feed3 = (await call("AO", "GET", `/api/v2/workspaces/${AW2}/goals`, { bearer: DO2.access })).json;
+      const line10 = steeringLine(OVER2?.id, { ...feed3, steering: "on" });
+      check(
+        "C5-2: the goals feed's gap_7d is the Spend tab's gap to one decimal (CI 39.6% of 30%: share_7d 40, gap_7d 9.6, the page's gap 9.6 \"9 points over\" in grey; arms gap_7d -11.1), so the agent's steeringLine gives no line at 9.6 points; at 10.2 points over (gap_7d 10.2) it gives one",
+        [sOver, sUnder, sNone].every((x) => x.accepted === 1) && more.json?.accepted === 1 &&
+          JSON.stringify(fOf(feed2, OVER2?.id)) === JSON.stringify({ target_share: 30, share_7d: 40, gap_7d: 9.6, held: false }) && fOf(feed2, UNDER2?.id)?.gap_7d === -11.1 && fOf(feed2, UNDER2?.id)?.share_7d === 29 &&
+          pOf(OVER2?.id)?.gap === fOf(feed2, OVER2?.id)?.gap_7d && pOf(UNDER2?.id)?.gap === fOf(feed2, UNDER2?.id)?.gap_7d &&
+          line9 === null && fOf(feed3, OVER2?.id)?.gap_7d === 10.2 && line10?.goal_id === OVER2?.id && line10.suggested_goal_id === UNDER2?.id && line10.share === 40 && line10.target === 30,
+        `${JSON.stringify([fOf(feed2, OVER2?.id), fOf(feed2, UNDER2?.id), pOf(OVER2?.id)?.gap, pOf(UNDER2?.id)?.gap, line9, fOf(feed3, OVER2?.id), line10])}`,
+      );
+    }
 
     // -- reallocations: new targets for several goals; each goal's approval set approves, then someone launches --
     const rl = (u, body) => aa(u, "POST", "/reallocations", body);
@@ -6067,6 +6125,15 @@ try {
       SB1.status === 200 && SB2.status === 200 && SB3.status === 200 && alW.status === 201 && alC.status === 201 && effW.length === 3 && !effW.some((t) => /No usage moves/.test(t)) && effW.some((t) => /^Future usage from this session counts under/.test(t)) && effC.length === 1 && /No usage moves\.$/.test(effC[0]),
       `${alW.status} ${alC.status} ${JSON.stringify(effW)} ${JSON.stringify(effC)}`,
     );
+    // -- C5-5: an alignment of several sessions agrees in number ("these 2 sessions contribute to") --
+    const alC2 = await fa(FB, "POST", "/alignments", { target_goal_id: GG.id, choice: "contribution", session_keys: [SB1.key, SB2.key], note: "Both CI sessions help trials" });
+    const effC2 = (alC2.json?.effects ?? []).map((e) => e.text);
+    const alC2Off = await fa(FB, "POST", `/alignments/${alC2.json?.id}/withdraw`, {});
+    check(
+      "C5-5: a contribution alignment of 2 sessions reads \"Records that these 2 sessions contribute to …\" (never \"contributes\"), and one of a single session or a source goal still \"contributes\"",
+      alC2.status === 201 && effC2.length === 1 && /^Records that these 2 sessions contribute to /.test(effC2[0]) && !/contributes/.test(effC2[0]) && /^Records that .* contributes to /.test(effC[0] ?? "") && /^Records that this session contributes to /.test(effW[0] ?? "") && alC2Off.status === 200,
+      `${alC2.status} ${JSON.stringify(effC2)} ${JSON.stringify(effC)} ${JSON.stringify(effW)} ${alC2Off.status}`,
+    );
     // -- B16: the switch-goal picker tells two sessions of one person in one repository apart --
     const picker = (await fa(FA, "GET", `/goals/${GCI.id}/requests`)).json?.sessions ?? [];
     check(
@@ -6309,6 +6376,79 @@ try {
             JSON.stringify(freshInv.boxes) === JSON.stringify([{ checked: false, disabled: false }]) && !freshInv.text.includes("needs a sign-in from the last 15 minutes") &&
             feGrant === IW && feAudit === FE.id && new URL(pI.url()).pathname === `/app/w/${IW}`,
           `${ivD.status} ${JSON.stringify(staleInv).slice(0, 500)} ${JSON.stringify(freshInv).slice(0, 300)} ${feGrant} ${feAudit} ${pI.url()}`,
+        );
+
+        // Y1, Y2 and Y4 (E2E-WEB cycle 5): the device list is by name; a ticked device signed out meanwhile, and an invite
+        // already used in another tab, each say what happened; Sign in again is one step and Join stays on the page.
+        const FY = await signUp("FY", "Fay Invitee", "fy@webfix.example.test");
+        const IWY = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite Y" } })).json?.id;
+        const ivY = await call("FO", "POST", `/api/v2/workspaces/${IWY}/invites`, { cookie: FO.cookie, body: { email: FY.email, role: "member" } });
+        const fyZ = insertDevice(FY.id, "Fay zeta laptop");
+        const fyA = insertDevice(FY.id, "Fay alpha desktop");
+        // zeta was seen last: a last-seen order would put it first.
+        withDb((d) => {
+          d.prepare("UPDATE v2_devices SET last_seen_at = ? WHERE id = ?").run(new Date(Date.now() - 3600_000).toISOString(), fyA.id);
+          d.prepare("UPDATE v2_devices SET last_seen_at = ? WHERE id = ?").run(new Date().toISOString(), fyZ.id);
+        });
+        const prevY = await call("FY", "GET", `/api/v2/invites/${ivY.json?.token}`, { cookie: FY.cookie });
+        check(
+          "Y4: the invite preview lists the invitee's devices by name (\"Fay alpha desktop\" before \"Fay zeta laptop\", although zeta was seen last), since last seen moves at most every 5 minutes",
+          JSON.stringify(prevY.json?.devices?.map((d) => d.name)) === JSON.stringify(["Fay alpha desktop", "Fay zeta laptop"]),
+          prevY.text.slice(0, 300),
+        );
+        const pY = await as(FY);
+        await open(pY, `/app/invite/${ivY.json?.token}`);
+        await pY.$$eval('main input[type="checkbox"]', (bs) => bs.forEach((b) => b.click()));
+        await pY.waitForFunction(() => [...document.querySelectorAll("main button")].some((b) => b.textContent?.trim() === "Join workspace and give it to these 2 devices"), { timeout: 5000 }).catch(() => undefined);
+        // zeta is signed out in another tab, then Join.
+        withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), fyZ.id));
+        await press(pY, "main", "Join workspace and give it to these 2 devices");
+        await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("Your devices are listed again"), { timeout: 15000 }).catch(() => undefined);
+        await pY.waitForFunction(() => document.querySelectorAll('main input[type="checkbox"]').length === 1, { timeout: 15000 }).catch(() => undefined);
+        const yRevoked = await boxesOf(pY);
+        const yMember = withDb((d) => d.prepare("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?").get(IWY, FY.id) ?? null);
+        check(
+          "Y1 (ui): a ticked device signed out in another tab before Join -> \"A device you chose is not one of your paired devices any more (it may have been signed out), so nothing was joined. Your devices are listed again: …\" (never a bare \"Not found\"); the list is read again (only the device still paired, unticked) and nothing is joined",
+          /A device you chose is not one of your paired devices any more \(it may have been signed out\), so nothing was joined\. Your devices are listed again: choose again, or join without them\./.test(yRevoked.text) && !/Not found/.test(yRevoked.text) &&
+            JSON.stringify(yRevoked.boxes) === JSON.stringify([{ checked: false, disabled: false }]) && yRevoked.text.includes("Fay alpha desktop") && !yRevoked.text.includes("Fay zeta laptop") && yMember === null,
+          `${JSON.stringify(yRevoked).slice(0, 600)} ${JSON.stringify(yMember)}`,
+        );
+        // Joined in another tab first (through the API here), then Join on this page.
+        const yOther = await call("FY", "POST", `/api/v2/invites/${ivY.json?.token}/accept`, { cookie: FY.cookie, body: {} });
+        const yAgain = await call("FY", "POST", `/api/v2/invites/${ivY.json?.token}/accept`, { cookie: FY.cookie, body: {} });
+        const yOtherPerson = await call("FO", "POST", `/api/v2/invites/${ivY.json?.token}/accept`, { cookie: FO.cookie, body: {} });
+        await press(pY, "main", "Join workspace");
+        await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("You already joined"), { timeout: 15000 }).catch(() => undefined);
+        const yJoined = await pY.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", link: document.querySelector('main a[href^="/app/w/"]')?.getAttribute("href") ?? null }));
+        check(
+          "Y1: accepting an invite the same person already accepted (another tab) -> 409 already_member \"You already joined this workspace with this invite, in another tab or window.\" with workspace_id; anyone else still gets 404; the page says \"You already joined Invite Y, in another tab or window.\" and links to the workspace instead of \"Not found\"",
+          yOther.status === 200 && yAgain.status === 409 && yAgain.json?.error === "already_member" && yAgain.json?.message === "You already joined this workspace with this invite, in another tab or window." && yAgain.json?.workspace_id === IWY &&
+            yOtherPerson.status === 404 && yJoined.text.includes("You already joined Invite Y, in another tab or window.") && yJoined.link === `/app/w/${IWY}` && !/Not found/.test(yJoined.text),
+          `${yOther.status} ${yAgain.status} ${yAgain.text} ${yOtherPerson.status} ${JSON.stringify(yJoined).slice(0, 400)}`,
+        );
+        // A 403 reauth_required on Join (the sign-in aged while the page was open) says so in place: the devices are
+        // unticked and disabled, and Join (without them) stays; then Sign in again is one step to the sign-in page.
+        const IWY2 = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite Y two" } })).json?.id;
+        const ivY2 = await call("FO", "POST", `/api/v2/workspaces/${IWY2}/invites`, { cookie: FO.cookie, body: { email: FY.email, role: "member" } });
+        await open(pY, `/app/invite/${ivY2.json?.token}`);
+        await pY.click('main input[type="checkbox"]');
+        ageSession(FY.cookie, 16);
+        await pY.waitForFunction(() => [...document.querySelectorAll("main button")].some((b) => b.textContent?.trim() === "Join workspace and give it to this device"), { timeout: 5000 }).catch(() => undefined);
+        await press(pY, "main", "Join workspace and give it to this device");
+        await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("You have not joined yet"), { timeout: 15000 }).catch(() => undefined);
+        const yReauth = await pY.evaluate(() => ({
+          text: document.querySelector("main")?.innerText ?? "",
+          boxes: [...document.querySelectorAll('main input[type="checkbox"]')].map((b) => ({ checked: b.checked, disabled: b.disabled })),
+          buttons: [...document.querySelectorAll("main button")].map((b) => b.textContent?.trim()),
+        }));
+        await Promise.all([pY.waitForNavigation({ waitUntil: "networkidle0" }).catch(() => undefined), pY.click("[data-sign-in-again]")]);
+        const ySignIn = new URL(pY.url());
+        check(
+          "Y2 (ui): a 403 reauth_required on Join says \"Sign in again to give a device this workspace. … You have not joined yet.\" in place, unticks and disables the devices and keeps \"Join workspace\" on the page; one press of Sign in again opens /app/sign-in with the email and next=the invite",
+          yReauth.text.includes("Sign in again to give a device this workspace. This needs a sign-in from the last 15 minutes. You have not joined yet.") &&
+            JSON.stringify(yReauth.boxes) === JSON.stringify([{ checked: false, disabled: true }]) && yReauth.buttons.includes("Join workspace") && yReauth.buttons.includes("Sign in again") &&
+            ySignIn.pathname === "/app/sign-in" && ySignIn.searchParams.get("next") === `/app/invite/${ivY2.json?.token}` && ySignIn.searchParams.get("email") === FY.email,
+          `${JSON.stringify(yReauth).slice(0, 600)} ${pY.url()}`,
         );
 
         // B6 and B7: every button and select is a 44 px tap target at 390, and nothing scrolls sideways at 320.
@@ -6579,6 +6719,121 @@ try {
       `${JSON.stringify(qOwnerPlain?.version_loops)} ${JSON.stringify(qMemberPlain?.version_loops)} ${loopVersion.status} ${loopVersion.text.slice(0, 200)}`,
     );
 
+    // -- C5-1: two requests that each add the other's goal as a dependency: once one launches, the other would loop --
+    const KL1 = await kGoal(KA, { title: "Loop dashboard", visibility: "workspace", team_id: KPT });
+    const KL2 = await kGoal(KA, { title: "Loop funnel", visibility: "workspace", team_id: KPT });
+    const KL3 = await kGoal(KA, { title: "Loop docs", visibility: "workspace", team_id: KPT });
+    const KL4 = await kGoal(KA, { title: "Loop site", visibility: "workspace", team_id: KPT });
+    const lr1 = await ka(KB, "POST", kcrs(KL1.id), { base_version: 1, changes: { depends_on: [KL2.id] }, reason: "The dashboard reads the funnel" });
+    const lr2 = await ka(KB, "POST", kcrs(KL2.id), { base_version: 1, changes: { depends_on: [KL1.id] }, reason: "The funnel reads the dashboard" });
+    const lr1Done = await kAct(KA, KL1.id, lr1.json?.id, "approve_and_launch", { revision: 1 });
+    const lr2AsKA = await kRead(KA, KL2.id, lr2.json?.id);
+    const lr2AsKB = await kRead(KB, KL2.id, lr2.json?.id);
+    const LOOP_APPROVE = `A goal this request adds as a dependency has since come to depend on this goal, so approving it would make a loop. Someone who decides on this goal can suggest a change without that dependency or decline it, and ${KB.name} can withdraw it.`;
+    check(
+      "C5-1: both requests are created (neither goal depends on the other yet); once the first launches, the second reads can.approve and can.approve_and_launch false (counter and reject still true) and dependency_loop = the refusal, naming no goal, for every reader; its deciders are waited on to suggest a change or decline it (waiting_on_me true for KA, false for the requester)",
+      lr1.status === 201 && lr2.status === 201 && lr1Done.status === 200 && lr1Done.json?.launch === "launched" &&
+        lr2AsKA?.can?.approve === false && lr2AsKA.can.approve_and_launch === false && lr2AsKA.can.counter === true && lr2AsKA.can.reject === true && lr2AsKA.dependency_loop === LOOP_APPROVE && lr2AsKA.waiting_on_me === true &&
+        lr2AsKB?.dependency_loop === LOOP_APPROVE && lr2AsKB.waiting_on_me === false && lr2AsKB.can.withdraw === true && !LOOP_APPROVE.includes(KL1.title),
+      `${lr1.status} ${lr2.status} ${lr1Done.status} ${JSON.stringify(lr2AsKA?.can)} ${lr2AsKA?.dependency_loop} ${lr2AsKA?.waiting_on_me} ${lr2AsKB?.waiting_on_me}`,
+    );
+    const lr2Ap = await kAct(KA, KL2.id, lr2.json?.id, "approve", { revision: 1 });
+    const lr2ApL = await kAct(KA, KL2.id, lr2.json?.id, "approve_and_launch", { revision: 1 });
+    const lr2After = await kRead(KA, KL2.id, lr2.json?.id);
+    const kaHomeLoop = (await ka(KA, "GET", "/home")).json?.change_requests;
+    const kbHomeLoop = (await ka(KB, "GET", "/home")).json?.change_requests;
+    const kaGroupsLoop = (await ka(KA, "GET", "/change-requests")).json;
+    const homeItem = (h, list, id) => (h?.[list] ?? []).find((c) => c.id === id);
+    check(
+      "C5-1: approve and approve and launch of that request -> 409 cycle with the same words (goals-and-proposals: approval of a request that would close a loop is refused); it stays pending and the goal at version 1; it is under the decider's \"Waiting on you\" (Requests tab and Home, next resolve_loop) and on the requester's Home as waiting on others to suggest a change or decline it",
+      lr2Ap.status === 409 && lr2Ap.json?.error === "cycle" && lr2Ap.json?.message === LOOP_APPROVE && lr2ApL.status === 409 && lr2ApL.json?.error === "cycle" && lr2ApL.json?.message === LOOP_APPROVE &&
+        lr2After?.state === "pending" && lr2After.goal.version === 1 && (kaGroupsLoop?.waiting_on_me ?? []).some((c) => c.id === lr2.json?.id) &&
+        homeItem(kaHomeLoop, "waiting_on_me", lr2.json?.id)?.next === "resolve_loop" && homeItem(kbHomeLoop, "waiting_on_others", lr2.json?.id)?.next === "resolve_loop" &&
+        homeItem(kbHomeLoop, "waiting_on_others", lr2.json?.id).waiting_on.some((p) => p.id === KA.id) && !homeItem(kbHomeLoop, "waiting_on_others", lr2.json?.id).waiting_on.some((p) => p.id === KB.id),
+      `${lr2Ap.status} ${lr2Ap.text} ${lr2ApL.status} ${lr2After?.state} ${lr2After?.goal?.version} ${JSON.stringify(homeItem(kaHomeLoop, "waiting_on_me", lr2.json?.id))} ${JSON.stringify(homeItem(kbHomeLoop, "waiting_on_others", lr2.json?.id))}`,
+    );
+    const lr2Ctr = await kAct(KA, KL2.id, lr2.json?.id, "counter", { revision: 1, changes: { title: "Loop funnel, measured", depends_on: [] }, note: "The dashboard already reads the funnel" });
+    const lr2Acc = await kAct(KB, KL2.id, lr2.json?.id, "accept_counter", { revision: 2 });
+    const lr2Ok = await kRead(KA, KL2.id, lr2.json?.id);
+    check(
+      "C5-1: a counter without that dependency, once accepted, can be approved again (dependency_loop null, can.approve true)",
+      lr2Ctr.status === 200 && lr2Acc.status === 200 && lr2Ok?.dependency_loop === null && lr2Ok.can.approve === true && lr2Ok.waiting_on_me === true,
+      `${lr2Ctr.status} ${lr2Ctr.text.slice(0, 200)} ${lr2Acc.status} ${lr2Ok?.dependency_loop} ${JSON.stringify(lr2Ok?.can)}`,
+    );
+    // Both approved before either launched, then one launches: the other can't.
+    const lr3 = await ka(KB, "POST", kcrs(KL3.id), { base_version: 1, changes: { depends_on: [KL4.id] }, reason: "The docs link the site" });
+    const lr4 = await ka(KB, "POST", kcrs(KL4.id), { base_version: 1, changes: { depends_on: [KL3.id] }, reason: "The site embeds the docs" });
+    const lr3Ap = await kAct(KA, KL3.id, lr3.json?.id, "approve", { revision: 1 });
+    const lr4Ap = await kAct(KA, KL4.id, lr4.json?.id, "approve", { revision: 1 });
+    const lr3L = await kAct(KA, KL3.id, lr3.json?.id, "launch", { revision: 1 });
+    const lr4AsKA = await kRead(KA, KL4.id, lr4.json?.id);
+    const lr4L = await kAct(KA, KL4.id, lr4.json?.id, "launch", { revision: 1 });
+    const LOOP_LAUNCH = `A goal this change adds as a dependency has since come to depend on this goal, so launching it would make a loop. It can launch once that loop is gone; a newer version of this goal supersedes it, and ${KB.name} can propose the change again without that dependency.`;
+    const kaHome4 = (await ka(KA, "GET", "/home")).json?.change_requests;
+    const kbHome4 = (await ka(KB, "GET", "/home")).json?.change_requests;
+    const kaGroups4 = (await ka(KA, "GET", "/change-requests")).json;
+    const koHome4 = (await ka(KO, "GET", "/home")).json?.change_requests;
+    const inHome = (h, id) => [...(h?.waiting_on_me ?? []), ...(h?.waiting_on_others ?? [])].some((c) => c.id === id);
+    check(
+      "C5-1: two requests approved before either launched: once one launches, the other reads can.launch false (not_yet still true), waiting_on_me false and dependency_loop = the launch refusal; launch -> 409 cycle with those words; it waits on nobody (in no one's Home queue, not under the launcher's \"Waiting on you\")",
+      lr3.status === 201 && lr4.status === 201 && lr3Ap.status === 200 && lr4Ap.status === 200 && lr3L.status === 200 && lr3L.json?.launch === "launched" &&
+        lr4AsKA?.can?.launch === false && lr4AsKA.can.not_yet === true && lr4AsKA.waiting_on_me === false && lr4AsKA.dependency_loop === LOOP_LAUNCH &&
+        lr4L.status === 409 && lr4L.json?.error === "cycle" && lr4L.json?.message === LOOP_LAUNCH &&
+        !(kaGroups4?.waiting_on_me ?? []).some((c) => c.id === lr4.json?.id) && !inHome(kaHome4, lr4.json?.id) && !inHome(kbHome4, lr4.json?.id) && !inHome(koHome4, lr4.json?.id),
+      `${lr3.status} ${lr4.status} ${lr3Ap.status} ${lr4Ap.status} ${lr3L.status} ${JSON.stringify(lr4AsKA?.can)} ${lr4AsKA?.waiting_on_me} ${lr4AsKA?.dependency_loop} ${lr4L.status} ${lr4L.text}`,
+    );
+    const hcLoop = await import(pathToFileURL(path.join(ROOT, "lib/v2/home-core.mts")).href);
+    check(
+      "C5-1 (home rules): a pending request with dependency_loop waits on its approvers to suggest a change or decline it (next resolve_loop); behind still waits on the requester first",
+      JSON.stringify(hcLoop.changeWaits({ state: "pending", behind: false, requester: { id: "r", name: "Rae" }, approvers: [{ id: "a", name: "Ann" }], dependency_loop: "loop" })) === JSON.stringify({ next: "resolve_loop", waiting_on: [{ id: "a", name: "Ann" }] }) &&
+        hcLoop.changeWaits({ state: "pending", behind: true, requester: { id: "r", name: "Rae" }, approvers: [], dependency_loop: "loop" })?.next === "rebase",
+      "",
+    );
+
+    // -- C5-3: a request adding a dependency the reader can see and one they can't: the value card and the MCP record
+    // count the hidden one ("… and 1 other goal you can't see"), as the rest of the card does --
+    const KHV = await kGoal(KH, { title: "Hardware visible plan", visibility: "workspace" });
+    const hvCr = await ka(KB, "POST", kcrs(KHV.id), { base_version: 1, changes: { depends_on: [KGV.id, KHW.id] }, reason: "Both feed the plan" });
+    const hvDone = await kAct(KH, KHV.id, hvCr.json?.id, "approve_and_launch", { revision: 1 });
+    const hvValue = (await ka(KC, "GET", `${kcrs(KHV.id)}/${hvCr.json?.id}/value`)).json?.diff ?? {};
+    const cwHidden = await import(pathToFileURL(path.join(ROOT, "lib/v2/change-words.mts")).href);
+    const hvWords = cwHidden.diffWords(hvValue, { title: (id) => (id === KGV.id ? KGV.title : "a goal") });
+    const onlyHidden = cwHidden.diffWords({ depends_on: { before: [], after: [], hidden: { before: 0, after: 2 } } });
+    const kcDev = insertDevice(KC.id, "KC's laptop");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(kcDev.id, KW));
+    const mcpR = await call("KC", "POST", "/api/mcp", { bearer: kcDev.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "align_get_decision_record", arguments: { change_request_id: hvCr.json?.id, workspace: KW } } } });
+    const mcpLine = mcpR.text.includes("data:") ? mcpR.text.split("\n").find((l) => l.startsWith("data:"))?.slice(5) : mcpR.text;
+    let mcpRec = null;
+    try {
+      mcpRec = JSON.parse(mcpLine ?? "")?.result;
+    } catch {}
+    const mcpText = mcpRec?.content?.[0]?.text ?? "";
+    check(
+      "C5-3: for a reader who can't see one of two added dependencies, the value card's diff counts it (hidden {before 0, after 1}) and its words read \"Now depends on Faster builds for everyone and 1 other goal you can't see\"; with only hidden ones, \"Now depends on 2 goals you can't see\"; the MCP decision record says \"… and 1 other goal you can't see\" too and its diff carries the count; the hidden goal is never named",
+      hvCr.status === 201 && hvDone.status === 200 && JSON.stringify(hvValue.depends_on?.hidden) === JSON.stringify({ before: 0, after: 1 }) &&
+        JSON.stringify(hvWords) === JSON.stringify([`Now depends on ${KGV.title} and 1 other goal you can't see`]) && JSON.stringify(onlyHidden) === JSON.stringify(["Now depends on 2 goals you can't see"]) &&
+        new RegExp(`Now depends on <untrusted-text>${KGV.id}</untrusted-text> and 1 other goal you can't see`).test(mcpText) && JSON.stringify(mcpRec?.structuredContent?.record?.diff?.depends_on?.hidden) === JSON.stringify({ before: 0, after: 1 }) &&
+        !mcpText.includes(KHW.id) && !mcpText.includes(KHW.title) && !JSON.stringify(hvValue).includes(KHW.id),
+      `${hvCr.status} ${hvCr.text.slice(0, 200)} ${hvDone.status} ${JSON.stringify(hvValue.depends_on)} ${JSON.stringify(hvWords)} ${JSON.stringify(onlyHidden)} ${mcpText.slice(0, 600)}`,
+    );
+
+    // -- C5-4: one count-and-noun helper for the MCP text and the web app --
+    const plural = await import(pathToFileURL(path.join(ROOT, "lib/v2/plural.mts")).href).catch(() => null);
+    const slips = [];
+    const walk = (dir) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const f = path.join(dir, e.name);
+        if (e.isDirectory()) walk(f);
+        else if (f.endsWith(".tsx")) for (const [i, l] of readFileSync(f, "utf8").split("\n").entries()) if (/num\([^)]*\)\}?\s*(unpriced )?(requests|sessions)\b/.test(l)) slips.push(`${path.relative(ROOT, f)}:${i + 1}`);
+      }
+    };
+    walk(path.join(ROOT, "app"));
+    check(
+      "C5-4: count(1, \"request\") is \"1 request\", count(2, \"request\") \"2 requests\" (with a formatter: \"1,200 requests\"); no web view writes a formatted count followed by a fixed plural (\"{num(n)} requests\"), so the snapshot never says \"1 requests\"",
+      plural?.count(1, "request") === "1 request" && plural.count(2, "request") === "2 requests" && plural.count(1200, "request", undefined, (n) => n.toLocaleString("en-US")) === "1,200 requests" && plural.count(1, "bound session") === "1 bound session" && slips.length === 0,
+      `${plural ? "" : "no lib/v2/plural.mts; "}${slips.join(", ")}`,
+    );
+
     // -- N5: launch and not yet check the revision they are sent --
     const crS = (await ka(KB, "POST", kcrs(KGS.id), { base_version: 1, changes: { title: "Stale launch, checked" }, reason: "Check it" })).json;
     await kAct(KA, KGS.id, crS?.id, "approve", { revision: 1 });
@@ -6633,6 +6888,21 @@ try {
         return true;
       };
       try {
+        // C5-1 (ui): an approved change that would now close a loop offers no Launch and says why; the open request
+        // offers no Approve and says why, with Suggest a change and Decline still there.
+        const pL = await as(KA, 1000, 900);
+        await open(pL, `/app/w/${KW}/goals/${KL4.id}`);
+        await pL.waitForSelector(`[data-cr="${lr4.json?.id}"] [data-dependency-loop]`, { timeout: 15000 }).catch(() => undefined);
+        const lr4Ui = await pL.evaluate((id) => {
+          const c = document.querySelector(`[data-cr="${id}"]`);
+          return { text: c?.innerText ?? "", buttons: [...(c?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()) };
+        }, lr4.json?.id);
+        check(
+          "C5-1 (ui): the approved change that would close a loop shows \"Nobody can launch this as it stands. A goal this change adds as a dependency has since come to depend on this goal, …\" and no Launch button, nor \"Can launch: …\"",
+          lr4Ui.text.includes(`Nobody can launch this as it stands. ${LOOP_LAUNCH}`) && !lr4Ui.buttons.some((t) => /^Launch version/.test(t ?? "")) && !/Can launch:/.test(lr4Ui.text),
+          JSON.stringify(lr4Ui).slice(0, 800),
+        );
+
         // N3, N5 and F4: Not yet, then Launch, from the goal page. Every fetch and every "Loading…" in the change-request
         // section is recorded from the first click.
         const pA = await as(KA, 1000, 900);

@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { api, Btn, Card, Err, Loading, Note, Pill, num, usd, useAction, useApi } from "../../../_ui/kit";
 import type { AllocationResponse, AllocationRow, WsDetail } from "../../../_ui/types";
+import { count, plural } from "@/lib/v2/plural.mts";
 
 // Allocation (lib/v2/allocation.ts): where the workspace's shared agent time went against each goal's target, a
 // six-week trend and the steering switch (workspace owners). Targets are versioned goal fields: a goal's owner sets one
@@ -56,13 +57,13 @@ export function AllocationCard({ ws, detail }: { ws: string; detail: WsDetail | 
                 </div>
                 <Bar share={r.share} target={r.target_share} />
                 <p className="mt-1 text-[13px] text-zinc-500">
-                  {num(r.fresh_tokens)} fresh tokens · {usd(r.est_list_usd_micros)} at list price{r.unpriced_requests ? ` · ${num(r.unpriced_requests)} unpriced requests` : ""} · {r.sessions} {r.sessions === 1 ? "session" : "sessions"}
+                  {num(r.fresh_tokens)} fresh tokens · {usd(r.est_list_usd_micros)} at list price{r.unpriced_requests ? ` · ${count(r.unpriced_requests, "unpriced request", undefined, num)}` : ""} · {count(r.sessions, "session")}
                 </p>
               </li>
             ))}
           </ul>
           {d.data.window.unpriced_requests > 0 && (
-            <p className="mt-2 text-[14px] text-amber-700">{num(d.data.window.unpriced_requests)} requests used a model with no list price. They count in agent time (tokens) but not in the list price.</p>
+            <p className="mt-2 text-[14px] text-amber-700">{count(d.data.window.unpriced_requests, "request", undefined, num)} used a model with no list price. {plural(d.data.window.unpriced_requests, "It counts", "They count")} in agent time (tokens) but not in the list price.</p>
           )}
           {weekGoals.length > 0 && (
             <div className="mt-4 overflow-x-auto">

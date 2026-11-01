@@ -197,14 +197,19 @@ export function Shell({ me, ws, tab, children }: { me: { name: string; email: st
   );
 }
 
+/** Sign out, then open the sign-in page with `email` filled in, coming back to `next` afterwards. */
+export async function signInAgain(next: string, email: string) {
+  await fetch("/api/v2/auth/sign-out", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
+  go(`/app/sign-in?${new URLSearchParams({ next, email })}`);
+}
+
 /** The recent-sign-in prompt (device approval, app consent, and any action answered 403 reauth_required): sign out,
  *  then sign in again and come back to `next`. */
 export function SignInAgain({ me, next, children }: { me: { email: string }; next: string; children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const again = async () => {
     setBusy(true);
-    await fetch("/api/v2/auth/sign-out", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
-    go(`/app/sign-in?${new URLSearchParams({ next, email: me.email })}`);
+    await signInAgain(next, me.email);
   };
   return (
     <Card>

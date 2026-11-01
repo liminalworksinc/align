@@ -132,8 +132,8 @@ call.
 
 - Each goal can carry a target share of the workspace's agent time. It is versioned goal content: the owner sets it in
   a new version, and anyone else proposes new targets (for one goal or several at once) that each goal's approvers
-  approve and someone launches, on the web. The goals feed carries each active goal's trailing-7-day share and gap
-  (whole percents), whether it is on hold, and the workspace's steering switch (owners turn it on or off on the web).
+  approve and someone launches, on the web. The goals feed carries each active goal's trailing-7-day share (a whole
+  percent) and gap (to one decimal, as the Spend tab shows it), whether it is on hold, and the workspace's steering switch (owners turn it on or off on the web).
 - With steering on, a shared session that starts (or `/clear`s) on a goal at least 10 points over its target, while
   another goal you can see is at least 10 points under, gets one line in context naming both goals and shares. Once
   per session; never at resume or compaction, never while the session is stopped or held, never from or toward a goal

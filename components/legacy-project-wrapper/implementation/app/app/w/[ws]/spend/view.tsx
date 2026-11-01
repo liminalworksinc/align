@@ -4,6 +4,7 @@ import { Card, Err, Loading, Note, PHONE_TABLE, Select, Shell, num, usd, useApi 
 import type { Me } from "../../../_ui/server";
 import type { WsDetail } from "../../../_ui/types";
 import { AllocationCard } from "./allocation";
+import { count } from "@/lib/v2/plural.mts";
 
 type Nums = { requests: number; input: number; output: number; cache_read: number; cache_write_5m: number; cache_write_1h: number; cache_write_unsplit: number; est_list_usd_micros: number; unpriced_requests: number };
 type Sums = Nums & { by_basis: Record<string, Nums> };
@@ -33,7 +34,7 @@ function Row({ label, s, strong }: { label: string; s: Sums; strong?: boolean })
         {label}
         {bases.length > 0 && (
           <div className="text-[13px] font-normal text-zinc-500">
-            {bases.map(([b, v]) => `${BASIS_LABEL[b] ?? b}: ${num(v.requests)} requests`).join(", ")}
+            {bases.map(([b, v]) => `${BASIS_LABEL[b] ?? b}: ${count(v.requests, "request", undefined, num)}`).join(", ")}
           </div>
         )}
       </td>

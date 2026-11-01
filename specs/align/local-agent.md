@@ -1457,8 +1457,10 @@ workspaces SHALL be untouched.
 The `align` hook SHALL, on `SessionStart` with source `startup` or `clear` for a shared session bound to a goal (or a
 session a folder rule shares at that start), add at most one line to `additionalContext`, once per session (kept as
 `steering_at` in `~/.align/injected/<lid>.json`), when the cached feed's `steering` is `on`, the bound goal is active,
-not held and at least 10 points over its target (`allocation.gap_7d` of 10 or more), and another active goal in the
-feed that is not held, has a target above 0 and is at least 10 points under it exists; it names the goal furthest under
+not held and at least 10 points over its target (`allocation.gap_7d` of 10 or more, the server's one-decimal gap
+compared as is, never recomputed from the whole-percent `share_7d`, so 39.6% of a 30% target, `gap_7d` 9.6, gets no
+line, as the Spend tab shows it "9 points over" in grey), and another active goal in the feed that is not held, has a
+target above 0 and is at least 10 points under it (`gap_7d` of -10 or less) exists; it names the goal furthest under
 target: `[Align] Last 7 days: "<goal>" had <share>% of the workspace's agent time (target <t>%); "<other>" has <share>%
 of its <t>% target. Tell the user once if relevant; don't switch tasks on your own.`, titles cleaned and cut to 60
 characters, at most 320 characters, never naming a person. There SHALL be no line on `resume`, `compact` or `fork`,
@@ -1475,6 +1477,11 @@ workspace, the two goal ids, the share, the target and the time.
 
 - **WHEN** the only goal under target is held, or the bound goal is held, or the session has a stop latch or a goal hold (tests `allocation` "a goal on hold is never steered from or toward ..." and "a stopped or held session gets no steering line")
 - **THEN** no line is shown or queued; with another goal under target that is not held, that goal is named instead
+
+#### Scenario: Just under 10 points by the exact gap
+
+- **WHEN** the bound goal's feed allocation is `{target_share:30, share_7d:40, gap_7d:9.6}` and another goal's `gap_7d` is -11.1, then the bound goal's `gap_7d` is 10 (test `allocation` "the feed's exact gap decides, never the rounded share ..."; against the server in `scripts/test-v2.mjs` "C5-2: ...")
+- **THEN** there is no line at 9.6 and one at 10, still naming whole percents ("had 40% … (target 30%)"); a goal at `gap_7d` -9.6 is not one to steer toward
 
 ### Requirement: Steering lines are reported by the sync pass
 
