@@ -1081,7 +1081,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
             `Align folder share preview (nothing changes yet):`,
             `  Folder: ${dir} (stays on this machine)`,
             `  Every new session started in it is shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : " with no goal"}, from its start.`,
-            `  ${already ? "This session is already shared." : "This session is shared too."} Forks stay private. \`::align unshare\` keeps one session private.`,
+            `  ${already ? "This session is already shared." : hot?.prior_share?.stopped ? "This session stays private: its sharing was stopped (or its history deleted)." : "This session is shared too."} Forks stay private. \`::align unshare\` keeps one session private.`,
             `  Sent per session: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
             signals
               ? `  Work signals on: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who can read the goal, kept 24 hours. Never sent: prompts, responses, tool output, file contents.`
@@ -1090,12 +1090,17 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
           ].join("\n");
         }
         setRule(home, { dir, workspace_id: feed.workspace_id, workspace_name: feed.workspace_name, goal_id: goal ? goal.id : null, goal_title: goal ? goal.title : null, signals });
-        if (!already) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
-        return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${already ? "" : " This session too; your next prompt carries the goal."} \`::align unshare --dir\` turns it off.`;
+        // A session its person stopped sharing (or whose history was deleted) stays private: only `::align share` or
+        // `align share` shares it again (C6-1).
+        const kept = !already && !!hot?.prior_share?.stopped;
+        if (!already && !kept) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
+        const self = already ? "" : kept ? " This session stays private: its sharing was stopped (or its history deleted)." : " This session too; your next prompt carries the goal.";
+        return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${self} \`::align unshare --dir\` turns it off.`;
       }
       if (!confirm) {
-        // Shared before (its share ended): the new share counts from now, as the sync then shares it (C5-1).
-        const from = hot?.share ? "now" : "session start";
+        // Shared before (its share ended, or its history was deleted since): the new share counts from now, as the sync
+        // then shares it (C5-1, C6-1).
+        const from = hot?.share || hot?.prior_share ? "now" : "session start";
         return [
           `Align share preview for this session (nothing uploaded yet):`,
           `  Workspace: ${feed?.workspace_name || "your default workspace"}`,

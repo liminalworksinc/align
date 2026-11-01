@@ -79,6 +79,7 @@ describe("align share --dir --past", () => {
       const lid = localId("claude-code", "c1c1c1c1-0000-0000-0000-000000000001");
       for (const table of ["shares", "epochs", "outbox"]) ctx.db.prepare(`DELETE FROM ${table} WHERE local_id=?`).run(lid);
       ctx.db.prepare("UPDATE requests SET uploaded=0, epoch_id=NULL WHERE local_id=?").run(lid);
+      ctx.db.prepare("DELETE FROM kv WHERE key=?").run(`shared_before:${lid}`);
       ctx.db.close();
     }
     const liveEpochs = [...fake.epochs.values()].length;

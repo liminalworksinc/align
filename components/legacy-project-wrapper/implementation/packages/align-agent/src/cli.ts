@@ -34,7 +34,7 @@ import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts"
 import { fetchAsks } from "./asks.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { newDeviceKey } from "./keys.ts";
-import { applyShare, bind, deleteHistory, deleteRefused, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, stopSharing } from "./share.ts";
+import { applyShare, bind, deleteHistory, deleteRefused, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, sharedBefore, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
@@ -652,8 +652,8 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   const share = getShare(ctx, session.local_id);
   if (share && (share.state === "shared" || share.state === "pending" || share.state === "suspended")) throw new UsageError(`session is already ${share.state} with ${share.workspace_name}`);
   const goal = await goalFor(ctx, ws.id, values.goal);
-  const priorEpochs = ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=?").get(session.local_id);
-  const effectiveFrom = priorEpochs && from === "start" ? "now" : from;
+  // Shared before, also when its shared history was deleted since: this share counts from now (C6-1).
+  const effectiveFrom = from === "start" && sharedBefore(ctx, session.local_id) ? "now" : from;
   const plan = planShare(ctx, session.local_id, ws, goal, values.alias ?? null, effectiveFrom);
   out(renderPreview(plan));
   out(signalsPreview(!!values.signals));
@@ -713,7 +713,7 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
     out(`${past.take.length} session(s) in ${realDir(folder)} from the last ${pastDays} days: ${n("claude-code")} Claude Code, ${n("codex")} Codex`);
     for (const s of past.take) out(`  ${shortTime(s.started_at)}  ${pad(HARNESS_NAME[s.harness] || s.harness, 11)} ${s.local_id.slice(0, 8)}`);
     if (past.already) out(`Skipped ${past.already} that were shared before (an earlier share is never backdated).`);
-    if (past.deleted) out(`Skipped ${past.deleted} whose shared history you deleted (\`align delete-history\`); \`align share <session>\` shares one again if you want.`);
+    if (past.deleted) out(`Skipped ${past.deleted} whose shared history was deleted (on the web or with \`align delete-history\`); \`align share <session>\` shares one again, counting from now, if you want.`);
     if (past.take.length) out("Each is shared from its own start with the fields above; nothing it said is sent.");
   }
   if (!(await confirm(past?.take.length ? "Share this folder and these sessions?" : "Share this folder?", yes))) return out("Not changed. Run again with --yes to confirm.");

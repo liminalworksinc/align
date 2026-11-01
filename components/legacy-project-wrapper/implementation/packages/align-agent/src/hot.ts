@@ -1,7 +1,7 @@
 // Hot files are a projection of the database, rewritten whole after every change, so the CLI, the sync job and the hooks can all
 // update state without racing on the files. Hooks read only these files.
 import type { Ctx } from "./context.ts";
-import { kvGet } from "./db.ts";
+import { kvGet, kvSet, nowIso } from "./db.ts";
 import { getSession } from "./ledger.ts";
 import { layout } from "./shared/layout.ts";
 import { removeFile, writeJsonAtomic } from "./shared/fsx.ts";
@@ -33,6 +33,54 @@ export interface ShareRow {
 
 export function getShare(ctx: Ctx, lid: string): ShareRow | null {
   return (ctx.db.prepare("SELECT * FROM shares WHERE local_id=?").get(lid) as unknown as ShareRow) || null;
+}
+
+// ---------- shared before ----------
+/**
+ * The local record that a session was shared from this machine before, kept apart from its share and its epochs (both go
+ * when its shared history is deleted, on the web or with `align delete-history`), and whether its person stopped that
+ * share (`align stop-sharing`, `::align unshare`, Stop sharing on the web) or deleted its history. So a later share
+ * counts from now, never from the session's start, and only an explicit share (`align share <session>`, `::align share`
+ * in it) shares a stopped one again (C6-1).
+ */
+interface PriorShare {
+  at: string;
+  stopped_at: string | null;
+}
+
+const priorKey = (lid: string) => `shared_before:${lid}`;
+
+function priorShare(ctx: Ctx, lid: string): PriorShare | null {
+  const v = kvGet(ctx.db, priorKey(lid));
+  if (!v) return null;
+  try {
+    return JSON.parse(v) as PriorShare;
+  } catch {
+    return { at: v, stopped_at: null };
+  }
+}
+
+/** Record that `lid` is shared now (`stopped` false) or that its person stopped it (`stopped` true). */
+export function notePriorShare(ctx: Ctx, lid: string, stopped: boolean, at = nowIso()): void {
+  const prev = priorShare(ctx, lid);
+  kvSet(ctx.db, priorKey(lid), JSON.stringify({ at: prev?.at ?? at, stopped_at: stopped ? (prev?.stopped_at ?? at) : null } satisfies PriorShare));
+}
+
+/** Was `lid` ever shared from this machine (a share, an epoch, the record, or history it deleted)? */
+export function sharedBefore(ctx: Ctx, lid: string): boolean {
+  return !!(
+    priorShare(ctx, lid) ||
+    kvGet(ctx.db, `history_deleted:${lid}`) ||
+    ctx.db.prepare("SELECT 1 FROM shares WHERE local_id=?").get(lid) ||
+    ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=?").get(lid)
+  );
+}
+
+/** Did its person stop sharing `lid`, or delete its shared history, with no explicit share since? */
+export function stoppedByPerson(ctx: Ctx, lid: string): boolean {
+  if (priorShare(ctx, lid)?.stopped_at) return true;
+  const share = getShare(ctx, lid);
+  return !share && !!kvGet(ctx.db, `history_deleted:${lid}`);
 }
 
 const CONTEXT_KINDS = new Set(["goal_version", "binding_changed", "binding_suspended"]);
@@ -101,6 +149,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     requests: live ? hotRequests(ctx, lid) : [],
     released_holds: live ? releasedHolds(ctx, lid) : [],
     resumed: resumedBy(ctx, lid),
+    prior_share: sharedBefore(ctx, lid) ? { stopped: stoppedByPerson(ctx, lid) } : null,
     epochs_seen: (ctx.db.prepare("SELECT epoch_id FROM epochs WHERE local_id=? ORDER BY rowid DESC LIMIT 10").all(lid) as { epoch_id: string }[]).map((e) => e.epoch_id),
     updated_at: new Date().toISOString(),
   };

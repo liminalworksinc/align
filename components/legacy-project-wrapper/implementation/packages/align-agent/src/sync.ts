@@ -28,7 +28,7 @@ import {
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { applyShare, bind, endSharesIfSignedOut, enqueue, forgetShare, markStopped, planShare, stopSharing } from "./share.ts";
+import { applyShare, bind, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -165,9 +165,16 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       if (!ws) throw new Error(r.workspace ? `${r.rule_dir ? "the folder rule's" : "that"} workspace is no longer available on this device` : "no default workspace; run `align share --latest --workspace <name>` in a terminal");
       const goal = r.arg ? resolveGoal(loadFeed(ctx.home, ws.id), r.arg) : null;
       if (goal && !goal.bindable) throw new Error(`goal "${goal.title}" needs an approved alignment before it can be bound`);
-      const hasEpochs = ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=?").get(lid);
-      applyShare(ctx, planShare(ctx, lid, ws, goal, null, hasEpochs ? "now" : "start"));
-      if (!r.rule_dir) addNotice(ctx, lid, `share_started_${r.ts}`, `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${hasEpochs ? "now" : "session start"}.`);
+      // A folder rule never shares again a session its person stopped sharing (or whose history was deleted): only an
+      // explicit share does (C6-1).
+      if (r.rule_dir && stoppedByPerson(ctx, lid)) {
+        ctx.log(`folder rule: session ${lid.slice(0, 8)} was stopped by its person (or its history deleted), so it stays private`);
+        return lid;
+      }
+      // Shared before (its history deleted since, too): this share counts from now (C6-1).
+      const before = sharedBefore(ctx, lid);
+      applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start"));
+      if (!r.rule_dir) addNotice(ctx, lid, `share_started_${r.ts}`, `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${before ? "now" : "session start"}.`);
     }
   } catch (e) {
     say(`Align: ${r.command} failed: ${(e as Error).message}`);
@@ -299,6 +306,7 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       }
       if (r.status === 409 && r.json?.error === "sharing_stopped") {
         markStopped(ctx, lid);
+        notePriorShare(ctx, lid, true);
         ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
         // Its sharing was stopped (by the developer, or on the web): the server never shares a stopped session again,
         // whichever of the account's devices asks, so no "revoke the old device" here (C4-8).

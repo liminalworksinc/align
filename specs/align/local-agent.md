@@ -602,7 +602,11 @@ prefix, refuse goals that are not `bindable`, refuse a session that is already `
 print a preview (`Share preview. Nothing has been uploaded yet.`) listing every field that will be sent and the
 line `Never sent: prompts, responses, tool input or output, file paths, repo path, branch names, transcript
 text.`, and share only after `--yes` or a `y` answer on a TTY. Sharing SHALL count from the session start by
-default (`--from now` counts from now) and from now when the session was shared before. `--alias` SHALL be sent as
+default (`--from now` counts from now) and from now when the session was shared before, also when its shared history
+was deleted since (on the web or with `align delete-history`): this machine SHALL keep a record that the session was
+shared, and whether its person stopped that share or deleted its history, apart from its share and its epochs (which
+go with the deletion), and the preview SHALL then say `Counting:   from now (<time>)` and `This session was shared
+before, so this share counts from now.` `--alias` SHALL be sent as
 `repo_alias` and remembered for that repo. When the server refuses the share, the command SHALL print `align: session
 <id8> was not shared: <why and what to do>` on stderr (the words of the session's own `sharing failed` notice) and exit
 1, never `Session <id8> is error.`
@@ -657,6 +661,11 @@ now.` for a session shared before (`counts from session start.` otherwise), as t
 - **WHEN** a shared session's machine runs `align logout`, a turn is made, `align login` runs and the developer types `::align share confirm`, also when the ended share's epochs were left with no end by an earlier agent (test `findings5` "logout, a turn, login and `::align share confirm` ...")
 - **THEN** the turn made while signed out is never uploaded, and the next turn is uploaded
 
+#### Scenario: Shared again after its history was deleted
+
+- **WHEN** a shared session's machine signs out for a turn, the session is shared again, its shared history is deleted (`align delete-history`, 204), and the developer runs `align share <id> --yes` (test `findings7` "shared, signed out for a turn, shared again, its history deleted (204) ...")
+- **THEN** the preview says `Counting:   from now`, `0 finalized request rows now` and `This session was shared before, so this share counts from now.`, no row made before the re-share is uploaded (nor given an epoch locally), and the next turn goes up under the new epoch
+
 ### Requirement: Folder share rules
 
 The `align share --dir [<folder>]` command SHALL store, after confirmation, a local rule in `~/.align/rules.json`
@@ -684,9 +693,9 @@ share, each from its own start, the sessions already metered on this machine and
 recorded working folders (the first one and every other one the session later reported, from transcripts, rollouts
 and hooks) are all the folder's realpath or inside it (`cwd === dir` or starting with `dir + "/"`, so
 `/work/app-secret` and `/work/app.v2` are not inside `/work/app`). It SHALL skip sessions with no recorded folder and
-sessions that were ever shared or have epochs, and sessions whose shared history the developer deleted with `align
-delete-history` (`Skipped <n> whose shared history you deleted (\`align delete-history\`); \`align share <session>\`
-shares one again if you want.`), print `<n> session(s) in <dir> from the last <d> days: <a> Claude Code,
+sessions that were ever shared or have epochs, and sessions whose shared history was deleted (on the web or with `align
+delete-history`; `Skipped <n> whose shared history was deleted (on the web or with \`align delete-history\`); \`align
+share <session>\` shares one again, counting from now, if you want.`), print `<n> session(s) in <dir> from the last <d> days: <a> Claude Code,
 <b> Codex` and one line per session (start time, harness, local id) and never any prompt text, and change nothing
 without `--yes` or a `y` answer. It SHALL report sessions the server refused because an epoch may not start before
 history it already holds (`409 epoch_overlap`) as skipped, and upload no usage under a refused epoch. This replaces
@@ -696,7 +705,7 @@ already reported on.
 #### Scenario: Deleted history is not offered again
 
 - **WHEN** a session in the folder was shared, its history deleted with `align delete-history`, and the developer previews `align share --dir <folder> --past 3` (test `findings4` "`align share --dir --past` skips a session whose shared history the user deleted")
-- **THEN** the preview lists no session and says `Skipped 1 whose shared history you deleted`
+- **THEN** the preview lists no session and says `Skipped 1 whose shared history was deleted (on the web or with \`align delete-history\`)`
 
 #### Scenario: Only the folder, from session start, never backdated
 
@@ -1074,7 +1083,11 @@ tool calls fire their hooks together only the hook that creates `~/.align/inject
 The `align` hook SHALL answer any prompt that starts with `::align` (case-insensitive) with `{"decision": "block",
 "reason": <text>}` and no `additionalContext`, so the text is shown to the user and never reaches the model.
 `::align share` and `::align share --dir` SHALL only preview until repeated with `confirm` (or `--yes`/`-y`); the
-confirmed command SHALL be spooled for the next sync, and `--dir` SHALL also write the folder rule. `--signals` takes
+confirmed command SHALL be spooled for the next sync, and `--dir` SHALL also write the folder rule and share the
+session it was typed in, except one its person stopped sharing or whose shared history was deleted: that one stays
+private (`This session stays private: its sharing was stopped (or its history deleted).`), as the sync also never
+shares such a session for a folder rule; only `::align share` or `align share` shares it again, counting from now.
+`::align share`'s preview says `counts from now.` for any session shared before. `--signals` takes
 effect only together with `--dir` (it sets the rule's work-signals choice); a single-session `::align share
 --signals` is accepted but records no work-signals consent. `::align bind`
 SHALL refuse goals that are not bindable and SHALL be accepted for a `suspended` share, which is how its user resumes
@@ -1090,6 +1103,11 @@ SHALL show `::align status`.
 
 - **WHEN** `::align status` is typed in a private and in a shared session (test `hooks` "::align status blocks the prompt locally and never adds model context")
 - **THEN** both outputs have `decision: "block"`, a `reason` starting `Align status`, and no `additionalContext`
+
+#### Scenario: A folder rule never shares a stopped session again
+
+- **WHEN** a shared session is stopped with `align stop-sharing`, its history is deleted on the web, `align delete-history` hears 410, and the developer types `::align share --dir confirm`, then `::align share`, and previews `align share --dir <folder> --past 3` (test `findings7` "stopped, then its history deleted on the web (410) ...")
+- **THEN** the first reply says `This session stays private: its sharing was stopped (or its history deleted).` and the next sync sends nothing for it, the second previews `counts from now.`, and the third says `Skipped 1 whose shared history was deleted (on the web or with \`align delete-history\`)`
 
 #### Scenario: Share needs confirm
 

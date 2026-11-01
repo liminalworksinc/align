@@ -900,8 +900,22 @@ try {
     "delete-history after a re-pair (E2E-AGENT cycle 4 C4-1): a session shared under the earlier pairing is deleted on the server from the new device (session and usage gone, audited session.history_deleted naming the new device), the CLI says `Shared history deleted.` only then, and `--past` no longer offers it",
     k1Before?.state === "stopped" && k1Before.ended_reason === "device_signed_out" && k1Before.device_id !== newDevice && k1Usage === 1 &&
       delK1.code === 0 && /Shared history deleted\./.test(delK1.stdout) && k1After[0] === 0 && k1After[1] === 0 && delAudit?.actor_id === M.id && delAudit.object_id === newDevice &&
-      /Skipped 1 whose shared history you deleted/.test(pastAgain.stdout),
+      /Skipped 1 whose shared history was deleted \(on the web or with `align delete-history`\)/.test(pastAgain.stdout),
     `${JSON.stringify(k1Before)} ${k1Usage} ${delK1.code} ${delK1.stdout} ${delK1.stderr} ${JSON.stringify(k1After)} ${JSON.stringify(delAudit)} ${pastAgain.stdout}`,
+  );
+
+  // -- E2E-AGENT cycle 6 C6-1: shared again after its history was deleted, a session counts from now: none of its usage
+  //    from before (shared, or made while it was not) goes up again --
+  const reshareAt = Date.now();
+  const reK1 = cli(["share", "a1a1a1a1", "--workspace", W, "--goal", G.id, "--yes"]);
+  cli(["sync"]);
+  const reK1Epochs = sdb((d) => d.prepare("SELECT starts_at FROM v2_epochs WHERE ws_id = ? AND session_key = ?").all(W, K1));
+  const reK1Usage = sdb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(W, K1).n);
+  check(
+    "shared again after its history was deleted (E2E-AGENT cycle 6 C6-1): the preview counts from now, the server's one epoch starts at the re-share, and none of the session's earlier usage goes up again",
+    reK1.code === 0 && /Counting: {3}from now/.test(reK1.stdout) && /This session was shared before, so this share counts from now\./.test(reK1.stdout) &&
+      reK1Epochs.length === 1 && Date.parse(reK1Epochs[0].starts_at) >= reshareAt - 2000 && reK1Usage === 0,
+    `${reK1.code} ${reK1.stdout} ${reK1.stderr} ${JSON.stringify(reK1Epochs)} ${reK1Usage}`,
   );
 
   // -- E2E-AGENT cycle 2 N2: hooks and syncs on a clock 10 minutes ahead: the session's start, its epoch and its usage

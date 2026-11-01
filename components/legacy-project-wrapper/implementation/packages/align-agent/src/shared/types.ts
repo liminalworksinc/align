@@ -94,6 +94,9 @@ export interface HotState {
   released_holds?: { directive_id: string; goal_title: string; by: string }[];
   /** The resume directive that lifted this session's stop from the web, while it is the latest word on its latch. */
   resumed?: string | null;
+  /** Set when the session was shared from this machine before (its history may be deleted since): a share counts from
+   *  now. `stopped` when its person stopped that share or deleted its history: a folder rule never shares it again. */
+  prior_share?: { stopped: boolean } | null;
   updated_at: string;
 }
 

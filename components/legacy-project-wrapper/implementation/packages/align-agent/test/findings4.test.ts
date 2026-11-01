@@ -307,7 +307,7 @@ describe("cycle 4: CLI arguments and `--past`", () => {
     const r = await runCli(t, ["share", "--dir", folder, "--past", "3", "--workspace", "Acme", "--goal", "none"]);
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /0 session\(s\) in .* from the last 3 days/);
-    assert.match(r.stdout, /Skipped 1 whose shared history you deleted/);
+    assert.match(r.stdout, /Skipped 1 whose shared history was deleted \(on the web or with `align delete-history`\)/);
     assert.doesNotMatch(r.stdout, new RegExp(s.lid.slice(0, 8)));
   });
 });
