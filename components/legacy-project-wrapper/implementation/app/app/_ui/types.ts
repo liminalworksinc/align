@@ -89,7 +89,8 @@ export interface Alignment {
   requester: { id: string; name: string };
   target_goal: { id: string | null; title: string | null; visible: boolean } | null;
   source_goal: { id: string | null; title: string | null; visible: boolean } | null;
-  sessions: { ref: number; session_key: string | null; owner: { id: string; name: string }; label: string; current_goal: { id: string | null; title: string | null; visible: boolean } | null }[];
+  /** started_at and key_end (the key's last 6 characters) tell two sessions of one person in one repository apart. */
+  sessions: { ref: number; session_key: string | null; owner: { id: string; name: string }; label: string; started_at: string | null; key_end: string; current_goal: { id: string | null; title: string | null; visible: boolean } | null }[];
   effects: { kind: string; text: string }[];
   requirements: { for: string | null; approvers: { id: string; name: string }[]; approved_by: { id: string; name: string } | null }[];
   approvers: { id: string; name: string; approved: boolean }[];
@@ -174,6 +175,9 @@ export interface ChangeRequest {
   evidence_count: number;
   approved_without_evidence: boolean | null;
   can: Record<"approve" | "approve_and_launch" | "reject" | "counter" | "accept_counter" | "acknowledge" | "withdraw" | "rebase" | "add_evidence" | "launch" | "not_yet", boolean>;
+  /** Why the reader, who decides on it, may not approve (pending) or launch (approved) it: it adds a dependency on a
+   *  goal they can't see. The server's refusal, naming no goal; null otherwise (C4-1). */
+  dependency_not_visible?: string | null;
   waiting_on_me: boolean;
   created_at: string;
   updated_at: string;

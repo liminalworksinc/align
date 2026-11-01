@@ -224,7 +224,7 @@ Additive fields; older agents ignore them. Spec: `goals-and-proposals`, `workspa
 - `POST /api/v2/workspaces/:ws/steering` (Bearer) `{ "events": [ { "session_key", "goal_id", "suggested_goal_id",
   "share", "target", "at" } ] }`, at most 100 → `{ "accepted", "refused": [ { "index", "reason" } ], "server_time" }`.
   Only this device's own shared sessions count; others (`not_shared`), and times more than 5 minutes ahead
-  (`clock_skew`) or 14 days back (`too_old`), are skipped and listed in `refused`; a repeat is stored once.
+  (`clock_skew`) or 14 days back (`too_old`), are skipped and listed in `refused`; a repeat is stored once and counted in `accepted`, so `accepted + refused.length` is the batch's length.
 - Steering rule (agent, `packages/align-agent/src/shared/steering.ts`): with steering on, a shared session at
   `SessionStart` (`startup` or `clear`), not stopped or held, bound to a goal at least 10 points over its target and not
   held, while another active goal it can read is not held, has a target above 0 and is at least 10 points under, gets one

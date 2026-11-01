@@ -25,6 +25,15 @@ export const STATUS_WORD: Record<Goal["status"], string> = { active: "Active", a
 /** "a goal you can't see" / "2 goals you can't see": dependencies the reader can't read, never named. */
 export const hiddenGoals = (n: number) => (n === 1 ? "a goal you can't see" : `${n} goals you can't see`);
 
+/** Named dependencies, then the ones the reader can't see, counted after "and": "Growth dashboard and 1 other goal you
+ *  can't see", never "Growth dashboard, a goal you can't see", which reads as if the named goal were the hidden one
+ *  (X1). With nothing named, just the count ("a goal you can't see"). */
+export function withHidden(names: string[], hidden: number): string {
+  if (!hidden) return names.join(", ");
+  if (!names.length) return hiddenGoals(hidden);
+  return `${names.join(", ")} and ${hidden === 1 ? "1 other goal" : `${hidden} other goals`} you can't see`;
+}
+
 /** One field's value in plain words (dependencies by title when the person can see them; `hidden` counts the ones they
  *  can't, so a dependency they can't see never reads as "Nothing"). */
 export function FieldValue({ k, v, titles, hidden = 0 }: { k: keyof ChangeFields; v: ChangeFields[keyof ChangeFields]; titles: Map<string, string>; hidden?: number }) {
@@ -45,8 +54,7 @@ export function FieldValue({ k, v, titles, hidden = 0 }: { k: keyof ChangeFields
   }
   if (k === "depends_on") {
     const names = (v as string[]).map((id) => titles.get(id) ?? "a goal");
-    if (hidden > 0) names.push(hiddenGoals(hidden));
-    return <span>{names.length ? names.join(", ") : "Nothing"}</span>;
+    return <span>{names.length || hidden > 0 ? withHidden(names, hidden) : "Nothing"}</span>;
   }
   if (k === "status") return <span>{STATUS_WORD[v as Goal["status"]] ?? String(v)}</span>;
   if (k === "limits") {

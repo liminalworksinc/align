@@ -10,10 +10,14 @@ import type { AllocationResponse, AllocationRow, WsDetail } from "../../../_ui/t
 
 const rowLabel = (r: AllocationRow) => (r.kind === "goal" ? r.goal!.title : r.kind === "private" ? "Goals you can't see" : "Not bound to a goal");
 
+/** A gap in whole points, as the pill shows it. It rounds toward zero, so the label and its colour agree with each
+ *  other and with steering's "at least 10 points" rule: a 9.6-point gap reads "9 points over" in grey (C4-3). */
+const gapPoints = (gap: number) => Math.floor(Math.abs(gap));
+
 function gapText(gap: number | null) {
   if (gap === null) return "no target";
   if (Math.abs(gap) < 1) return "on target";
-  const n = Math.round(Math.abs(gap));
+  const n = gapPoints(gap);
   return `${n} ${n === 1 ? "point" : "points"} ${gap > 0 ? "over" : "under"}`;
 }
 
@@ -48,7 +52,7 @@ export function AllocationCard({ ws, detail }: { ws: string; detail: WsDetail | 
                   <span className="ml-auto text-zinc-700">
                     {r.share}% of agent time{r.target_share !== null ? ` · target ${r.target_share}%` : ""}
                   </span>
-                  {r.kind === "goal" && <Pill tone={r.gap !== null && Math.abs(r.gap) >= 10 ? "amber" : "neutral"}>{gapText(r.gap)}</Pill>}
+                  {r.kind === "goal" && <Pill tone={r.gap !== null && gapPoints(r.gap) >= 10 ? "amber" : "neutral"}>{gapText(r.gap)}</Pill>}
                 </div>
                 <Bar share={r.share} target={r.target_share} />
                 <p className="mt-1 text-[13px] text-zinc-500">

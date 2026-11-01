@@ -691,7 +691,7 @@ tree and every version, and SHALL give a person the server lets edit it (`can_ed
 
 #### Scenario: Save a new version
 
-- **WHEN** the owner edits Goal, measures, limits (kind "Must", "Must not" or "Out of scope", text up to 160 characters, an optional meeting and date; at most 5), Status (Active, Achieved, Dropped), "Target share of agent time (%)" (blank for none), anchors and "Depends on" (other active goals) and presses **Save version <n+1>**
+- **WHEN** the owner edits Goal, measures, limits (kind "Must", "Must not" or "Out of scope", text up to 160 characters, an optional meeting and date; at most 5), Status (Active, Achieved, Dropped), "Target share of agent time (%)" (blank for none), anchors and "Depends on" (other active goals, less those in the goal read's `version_loops`, which it counts: "<n> goals aren't offered: they already depend on this goal, so adding them would make a loop.") and presses **Save version <n+1>**
 - **THEN** the page posts them with `version` to `POST .../goals/<goal>/versions`; a 409 `cycle` shows "That would make these goals depend on each other in a loop." and other errors show the server's message
 
 #### Scenario: Goal tree
@@ -764,7 +764,7 @@ and a closed "Details" disclosure.
 #### Scenario: Understand an open request
 
 - **WHEN** anyone who can read the goal opens a pending or countered request
-- **THEN** "Approved now · version <base>" (or, when the goal moved on, "Request made against version <base> · goal now at <n>") and "Proposed · revision <r>" show each changed field side by side (stacked below 640 px), with the facts Version ("Goal at version <n>", and the request's base when the goal moved on), Requested by, Decides (who can approve, or "Nobody can approve this yet") and State; "What would change", tagged "the request's own text, not evidence", says field by field what the request would change (a dependency the reader can't read as "a goal you can't see", never left out), quotes the requester's reason "as written" and the latest counter's note ("Your note on revision <r>" when the reader wrote it, else "<name>'s note …"), and shows any "Accept if…" condition with "Not confirmed yet" until acknowledged; beside it "Evidence for revision <r>" shows Align's snapshot and the links (self-reported or agent-reported, never verified) or "No evidence attached."; "Details", closed, lists the request, goal, requester and approver ids, the state, revision and base version, the evidence ids and the times
+- **THEN** "Approved now · version <base>" (or, when the goal moved on, "Request made against version <base> · goal now at <n>") and "Proposed · revision <r>" show each changed field side by side (stacked below 640 px), with the facts Version ("Goal at version <n>", and the request's base when the goal moved on), Requested by, Decides (who can approve, or "Nobody can approve this yet") and State; "What would change", tagged "the request's own text, not evidence", says field by field what the request would change (a dependency the reader can't read as "a goal you can't see", never left out; after named ones as "<names> and 1 other goal you can't see" ("… and <n> other goals you can't see"), never "<name>, a goal you can't see", which reads as if the named goal were the hidden one; the same on both sides, in "Depends on would be" and in the goal tree), quotes the requester's reason "as written" and the latest counter's note ("Your note on revision <r>" when the reader wrote it, else "<name>'s note …"), and shows any "Accept if…" condition with "Not confirmed yet" until acknowledged; beside it "Evidence for revision <r>" shows Align's snapshot and the links (self-reported or agent-reported, never verified) or "No evidence attached."; "Details", closed, lists the request, goal, requester and approver ids, the state, revision and base version, the evidence ids and the times
 
 #### Scenario: Choose a decision
 
@@ -784,7 +784,7 @@ and a closed "Details" disclosure.
 #### Scenario: Refused by the server
 
 - **WHEN** the server answers a decision with 409 (for example `stale_version`, `wrong_state` or `stale_revision`)
-- **THEN** the card shows a focused alert "Not recorded. <the server's message>" and reloads; for `stale_version` that message is "The goal changed after this request was made. <requester> needs to update it before it can be approved." and the request stays pending
+- **THEN** the card shows a focused alert "Not recorded. <the server's message>", closes the "Confirm: <decision>" panel (even when the reload leaves the request's revision and state as they were) and reloads, so it offers only the decisions the request now allows (`scripts/test-v2.mjs` "C4-1 (ui): a refused Approve closes the Confirm panel ..."); for `stale_version` that message is "The goal changed after this request was made. <requester> needs to update it before it can be approved." and the request stays pending
 
 #### Scenario: Decline while a counter waits
 
@@ -804,17 +804,17 @@ and a closed "Details" disclosure.
 #### Scenario: Suggest a change keeps dependencies the approver can't see
 
 - **WHEN** an approver chooses **Suggest a change** on a request that depends on a goal they can't see
-- **THEN** the form says "Also depends on a goal you can't see. Sending keeps it; only someone who can see it can remove it.", the confirmation shows it in "Depends on would be" ("…, a goal you can't see") with a "Kept" line "A goal you can't see stays a dependency: your suggestion keeps it, and only someone who can see it can remove it.", and the counter keeps it
+- **THEN** the form says "Also depends on a goal you can't see. Sending keeps it; only someone who can see it can remove it.", the confirmation shows it in "Depends on would be" ("<names> and 1 other goal you can't see") with a "Kept" line "A goal you can't see stays a dependency: your suggestion keeps it, and only someone who can see it can remove it.", and the counter keeps it
 
 #### Scenario: Suggest a change offers only dependencies a counter may add
 
 - **WHEN** an approver chooses **Suggest a change** on a request, and can read goals that the requester or someone else who decides on the goal can't (another team's team-only goal, their own private goal)
-- **THEN** the form reads the goal with `?counter=<request id>` and "Depends on" offers as new dependencies only the goals in its `dependency_choices` (the request's dependencies stay listed), saying "<n> goals you can see aren't offered: <requester> or someone who decides on this goal can't see them." ("1 goal you can see isn't offered" for one), so the form never offers what the server would refuse
+- **THEN** the form reads the goal with `?counter=<request id>` and "Depends on" offers as new dependencies only the goals in its `dependency_choices` (the request's dependencies stay listed), saying "<n> goals you can see aren't offered: <requester> or someone who decides on this goal can't see them." ("1 goal you can see isn't offered" for one), and counts the goals in its `dependency_loops` on their own ("<n> goals aren't offered: they already depend on this goal, so adding them would make a loop.", for the goal's owner too), so the form never offers what the server would refuse
 
-#### Scenario: Approving a dependency the decider can't see
+#### Scenario: A dependency the decider can't see
 
-- **WHEN** an approver whose approval set changed after a request added a dependency they can't read presses **Approve**, **Approve and launch** or, on an approved request, **Launch version <n+1> to agents**
-- **THEN** the card shows a focused alert "Not recorded. This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask <requester> to withdraw it, or to rebase it without that dependency." (for a launch, "Not recorded. This change adds a dependency on a goal you can't see, so you can't launch what it publishes. …"), naming no goal, and nothing is recorded
+- **WHEN** someone who decides on a request opens it after it added a dependency they can't read (their approval set changed since), so its `dependency_not_visible` is set
+- **THEN** the card offers neither **Approve** nor **Approve and launch** (on an approved request, no **Launch version <n+1> to agents**) and says "You can't approve this. This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask <requester> to withdraw it, or to rebase it without that dependency." (for a launch, "You can't launch this. This change adds a dependency on a goal you can't see, so you can't launch what it publishes. …"), naming no goal; "Decides", "Waiting on …" and "Can launch" leave them out; the Home doesn't list it under "Waiting on you" ("Approve it, suggest a change or decline it.", "… until you launch it."); and if they decided before the read changed (they could see it when they opened the card), the refusal reads "Not recorded. <that message>", the Confirm panel closes and nothing is recorded (`scripts/test-v2.mjs` "C4-1 (ui): ...")
 
 #### Scenario: Launched or superseded before launch
 
@@ -1020,7 +1020,12 @@ only the actions the server allows.
 #### Scenario: Alignment card
 
 - **WHEN** a member opens the tab
-- **THEN** each card shows "<requester> asks to align with <goal>" (goals the person can't read show as "a goal you can't see"), the state, the choice, the revision, its effects, its sessions, each approval requirement with the people who can satisfy it and whether it is satisfied, the note and the history, and the buttons its `can` flags allow: **Approve**, **Suggest a change**, **Accept the change**, **Decline**, **Withdraw**, **Revoke**
+- **THEN** each card shows "<requester> asks to align with <goal>" (goals the person can't read show as "a goal you can't see"), the state, the choice, the revision, its effects, its sessions (each with "started <time> · …<the key's last 6 characters>", so two sessions of one person in one repository can be told apart), each approval requirement with the people who can satisfy it and whether it is satisfied, the note and the history, and the buttons its `can` flags allow: **Approve**, **Suggest a change**, **Accept the change**, **Decline**, **Withdraw**, **Revoke**
+
+#### Scenario: Alignment decisions are confirmed
+
+- **WHEN** a person decides on an alignment from its card (`scripts/test-v2.mjs` "X2 (ui): approving an alignment request leaves a \"Recorded: …\" line ...")
+- **THEN** the card shows a "Recorded: …" line as change-request and target-change decisions do, kept when the reload moves the card to another section: "Recorded: you approved revision <r>. Every approval it needs is in, so it takes effect now." (or "… It still needs another approval before it takes effect."); "Recorded: you suggested a change to <requester>. They accept it, then it needs approval again."; "Recorded: you accepted the suggested change. It waits for approval again." (or "… Every approval it needs is in, so it takes effect now."); "Recorded: you declined this request. Nothing changes."; "Recorded: you withdrew your request. Nothing changes."; "Recorded: you revoked this alignment. It has no effect from now on; past usage does not move."; a refusal reads "Not recorded. <the server's message>", and a 409 reloads the card
 
 #### Scenario: Counter and revoke
 
@@ -1030,7 +1035,7 @@ only the actions the server allows.
 #### Scenario: Target changes
 
 - **WHEN** a member opens the tab
-- **THEN** a "Target changes" card (anchor `#target-changes`) lists the reallocations from `GET /api/v2/workspaces/<ws>/reallocations` the person can read, each as "<requester or You> proposed new targets", its state ("waiting for approval", "approver suggested other targets", "approved", "declined", "withdrawn", "superseded"), each goal as "<title>: <from> → <to>" ("A goal you can't see: changes" otherwise) with "(approved by <name>)" or "(needs one of: <names>)", the note, where the launch stands ("Approved, waiting for launch. Agents still have the old targets.", "Approved, not launched yet: …", "Launched by <name>, <time>. Agents on these goals hear the new targets at their next turn.", or why it was superseded), and the buttons its `can` flags allow: **Approve (agents switch at launch)**, **Approve and launch**, **Launch**, **Not yet**, **Accept the counter**, **Counter** (a target field per goal and a note), **Decline**, **Withdraw**; for everyone but viewers a "Propose new targets" form lists each active goal ("<title> (now <n>% | no target)") with a blank field meaning unchanged, an optional "Why", and **Propose <n> change(s)**, which posts `{targets, note}` to `POST /api/v2/workspaces/<ws>/reallocations`
+- **THEN** a "Target changes" card (anchor `#target-changes`) lists the reallocations from `GET /api/v2/workspaces/<ws>/reallocations` the person can read, each as "<requester or You> proposed new targets", its state ("waiting for approval", "approver suggested other targets", "approved", "declined", "withdrawn", "superseded"), each goal as "<title>: <from> → <to>" ("A goal you can't see: changes" otherwise) with "(approved by <name>)" or "(needs one of: <names>)", the requester's reason ("<requester>'s reason: “…”", from their first revision, kept whatever a counter says or leaves out) and the latest counter's note ("<name>'s note on revision <r>: “…”") (`scripts/test-v2.mjs` "X3 (ui): ..."), where the launch stands ("Approved, waiting for launch. Agents still have the old targets.", "Approved, not launched yet: …", "Launched by <name>, <time>. Agents on these goals hear the new targets at their next turn.", or why it was superseded), and the buttons its `can` flags allow: **Approve (agents switch at launch)**, **Approve and launch**, **Launch**, **Not yet**, **Accept the counter**, **Counter** (a target field per goal and a note), **Decline**, **Withdraw**; for everyone but viewers a "Propose new targets" form lists each active goal ("<title> (now <n>% | no target)") with a blank field meaning unchanged, an optional "Why", and **Propose <n> change(s)**, which posts `{targets, note}` to `POST /api/v2/workspaces/<ws>/reallocations`
 
 #### Scenario: Target-change decisions are confirmed
 
@@ -1040,7 +1045,7 @@ only the actions the server allows.
 #### Scenario: Approval would make a loop
 
 - **WHEN** **Approve** gets 409 `cycle`
-- **THEN** the card shows "Approving this would make these goals contribute to each other in a loop." and the request stays pending
+- **THEN** the card shows "Not recorded. Approving this would make these goals contribute to each other in a loop." and the request stays pending
 
 ### Requirement: Workspace Asks tab
 
@@ -1100,7 +1105,8 @@ active goals, an optional note (at most 280 characters, "shown to the developer 
 to." when there is no session. Each request SHALL be listed with its type, a pill (waiting, answered, cancelled, "expired: the goal closed", or "expired: its sessions ended" when its `expired_reason` is `sessions_ended`), its
 sender and time, the goal version it was sent at, the target goal ("a goal you can't see" when hidden), the quoted
 note, who cancelled it, the counts ("<n> accepted by the developer, <n> delivered and not declined"), and per visible
-session a pill: pending, accepted by the developer, "delivered, not declined" (an `auto_accepted` accept: the request
+session its name, "started <time> · …<the key's last 6 characters>" (so two sessions of one person in one repository
+can be told apart) and a pill: pending, accepted by the developer, "delivered, not declined" (an `auto_accepted` accept: the request
 reached the agent and the developer did not decline it by the end of that turn; it never says the agent did it),
 declined, expired, or for a session that ended before it answered "ended: device signed out" or "ended: left the workspace" (its row's `ended_reason`), each with one evidence class: "delivery receipt" for a request the session's machine received and
 has not answered and for one delivered and not declined, "agent reported" for the developer's answer (accepted or
@@ -1154,7 +1160,7 @@ sessions.
 #### Scenario: Agent time against targets
 
 - **WHEN** a member (viewers included) opens the tab
-- **THEN** above the usage table an "Agent time against targets" card (pill "steering on" or "steering off") reads `GET /api/v2/workspaces/<ws>/allocation?weeks=6` and shows, for the last 7 days, one line per row ("<goal>", "Goals you can't see" or "Not bound to a goal") with "<share>% of agent time · target <n>%", a pill "<n> points over", "<n> points under" ("1 point over", "1 point under" for one), "on target" or "no target" (amber at 10 points or more), a bar with the target marked, and its fresh tokens, list price, unpriced requests and sessions; a table of each goal's share per week (weeks start Monday, UTC); "Steering is <on|off>. …" with how many lines were shown in the last 7 days; a "Propose new targets" link to the Alignments tab's target changes; and, for a workspace owner only, **Turn steering on** / **Turn steering off**, which PATCHes `{steering}` to `/api/v2/workspaces/<ws>`
+- **THEN** above the usage table an "Agent time against targets" card (pill "steering on" or "steering off") reads `GET /api/v2/workspaces/<ws>/allocation?weeks=6` and shows, for the last 7 days, one line per row ("<goal>", "Goals you can't see" or "Not bound to a goal") with "<share>% of agent time · target <n>%", a pill "<n> points over", "<n> points under" ("1 point over", "1 point under" for one), "on target" or "no target" (the number of points rounds toward zero, and the pill is amber at 10 points or more, the same threshold steering uses, so a 9.6-point gap reads "9 points over" in grey), a bar with the target marked, and its fresh tokens, list price, unpriced requests and sessions; a table of each goal's share per week (weeks start Monday, UTC); "Steering is <on|off>. …" with how many lines were shown in the last 7 days; a "Propose new targets" link to the Alignments tab's target changes; and, for a workspace owner only, **Turn steering on** / **Turn steering off**, which PATCHes `{steering}` to `/api/v2/workspaces/<ws>`
 
 #### Scenario: One point from the target
 
