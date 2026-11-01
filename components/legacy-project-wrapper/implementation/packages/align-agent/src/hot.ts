@@ -132,6 +132,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     .filter((r) => CONTEXT_KINDS.has(r.kind))
     .map((r) => r.id);
   const live = share && share.state !== "error" ? share : null;
+  const since = kvGet(ctx.db, `share_since:${lid}`);
   const hot: HotState = {
     v: 1,
     local_id: lid,
@@ -144,7 +145,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
           workspace_name: live.workspace_name,
           session_key: live.session_key,
           state: live.state as ShareState,
-          ...(kvGet(ctx.db, `share_since:${lid}`) ? { since: kvGet(ctx.db, `share_since:${lid}`)! } : {}),
+          ...(since ? { since } : {}),
         }
       : null,
     goal: live && live.goal_json ? (JSON.parse(live.goal_json) as GoalSnapshot) : null,
