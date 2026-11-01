@@ -3,7 +3,7 @@ import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso } from "./ids";
 import { effectiveSet, launchSet } from "./approval";
-import { contentOf, goalObj, goalRow, goalsDependingOn, nextContent, sameContent, unreadableGoals, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
+import { contentOf, dependencyCycle, goalObj, goalRow, goalsDependingOn, nextContent, sameContent, unreadableGoals, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName, memberPrincipal } from "./workspaces";
 import { nonNegInt, optStr, str, type Body } from "./validate";
@@ -36,6 +36,12 @@ import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evid
 // launch are refused (409 dependency_not_visible) for a decider who can't read a dependency the request adds, so
 // nobody approves or publishes what they can't see (C3). The same predicate (hiddenDependencyRefusal) clears their
 // `can` flags and `waiting_on_me`, and the view says why (dependency_not_visible), so they are never offered it (C4-1).
+// Two open requests can each add the other's goal as a dependency: either alone is fine, but once one launches the other
+// would close a loop. Approve, approve_and_launch and launch are refused (409 cycle) for a request whose dependencies
+// would loop against the goals as they stand at decision time, and the same predicate (dependencyLoop) clears the
+// `can` flags and says why (dependency_loop) to every reader (C5-1). A pending one stays open for a counter without that
+// dependency, a decline or a withdrawal, and waits on its deciders for that; an approved one can't launch until the
+// loop is gone, waits on nobody, and a newer version of its goal supersedes it.
 // A reader still sees only the dependencies they can read, with the others counted (diff.hidden_depends_on).
 // Everyone who can read the goal can read its requests (viewers too); viewers can't act. A request is its own
 // decision record once approved or rejected.
@@ -152,6 +158,31 @@ function hiddenDependencyRefusal(pp: PolicyPrincipal, r: ChangeRequestRow, kind:
   const base = versionContentOf(r.ws_id, r.goal_id, r.base_version)!;
   if (!unreadableGoals(pp, deps.filter((d) => !base.depends_on.includes(d))).length) return null;
   return kind === "approve" ? decisionRefusedFor(r.requester_id) : launchRefusedFor(r.requester_id);
+}
+
+/** Why a request can't be approved (pending) or launched (approved) as it stands: a goal it adds as a dependency has come
+ *  to depend on this goal since (another request launched, or an owner saved a version), so publishing it would close a
+ *  loop. Names no goal; the same words for every reader. */
+const loopRefusalFor = (r: ChangeRequestRow) =>
+  r.state === "approved"
+    ? `A goal this change adds as a dependency has since come to depend on this goal, so launching it would make a loop. It can launch once that loop is gone; a newer version of this goal supersedes it, and ${memberName(r.requester_id)} can propose the change again without that dependency.`
+    : `A goal this request adds as a dependency has since come to depend on this goal, so approving it would make a loop. Someone who decides on this goal can suggest a change without that dependency or decline it, and ${memberName(r.requester_id)} can withdraw it.`;
+
+/** The refusal (409 cycle) for approving a pending request, or launching an approved one, whose dependencies would close
+ *  a loop against the goals as they stand now, or null. Only for a request on a goal still at its base version (else it
+ *  is behind, or superseded, and refused for that). One predicate for the action, the `can` flags, `waiting_on_me` and
+ *  the Home (C5-1), so nobody is offered, or queued for, a decision the server refuses for a loop. */
+function dependencyLoop(r: ChangeRequestRow, g: GoalRow): string | null {
+  if (g.version !== r.base_version) return null;
+  let deps: string[];
+  if (r.state === "pending") {
+    const c = JSON.parse(r.changes_json) as Changes;
+    if (!c.depends_on) return null;
+    deps = c.depends_on;
+  } else if (r.state === "approved" && (r.launch === "pending" || r.launch === "not_yet") && r.approved_json) {
+    deps = (JSON.parse(r.approved_json) as GoalContent).depends_on;
+  } else return null;
+  return deps.length && dependencyCycle(r.ws_id, r.goal_id, deps) ? loopRefusalFor(r) : null;
 }
 
 /** The first dependency `changes` adds (one not in `already`) that one of `readers` can't read, or null. */
@@ -358,6 +389,11 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
       const refusal = hiddenDependencyRefusal(pp, r, kind);
       if (refusal) throw conflict("dependency_not_visible", refusal);
     };
+    /** 409 cycle when the request's dependencies would close a loop against the goals as they stand now (C5-1). */
+    const assertNoLoop = () => {
+      const refusal = dependencyLoop(r, g);
+      if (refusal) throw conflict("cycle", refusal);
+    };
     /** Record the approval and keep the resulting content on the request, approved but unlaunched (no version, no
      *  directive). Returns that content. */
     const approve = (): GoalContent => {
@@ -369,6 +405,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         throw conflict("stale_version", `The goal changed after this request was made. ${memberName(r.requester_id)} needs to update it before it can be approved.`);
       }
       assertDecidable("approve");
+      assertNoLoop();
       const next = applied(contentOf(g), changes);
       if (sameContent(next, contentOf(g))) throw conflict("no_change", "This request no longer changes anything");
       // Advisory evidence: approving a revision with no links is allowed, and recorded on the decision and in the audit.
@@ -422,6 +459,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         expectRevision(false);
         const content = JSON.parse(r.approved_json!) as GoalContent;
         assertDecidable("launch");
+        assertNoLoop();
         launch(content, r.approved_by!);
         break;
       }
@@ -633,9 +671,11 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
   const approvable = r.state === "pending" && isApprover && r.base_version === g.version && pp.wsRole !== "viewer";
   const launchable = unlaunched && launchers.includes(me) && r.base_version === g.version && pp.wsRole !== "viewer";
   const hiddenRefusal = approvable ? hiddenDependencyRefusal(pp, r, "approve") : launchable ? hiddenDependencyRefusal(pp, r, "launch") : null;
+  // A request whose dependencies would close a loop against the goals as they stand: refused 409 cycle (C5-1).
+  const loop = dependencyLoop(r, g);
   const can = {
-    approve: approvable && !hiddenRefusal,
-    approve_and_launch: approvable && !hiddenRefusal,
+    approve: approvable && !hiddenRefusal && !loop,
+    approve_and_launch: approvable && !hiddenRefusal && !loop,
     reject: open && isApprover,
     counter: r.state === "pending" && isApprover,
     accept_counter: r.state === "countered" && isRequester,
@@ -643,7 +683,7 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     withdraw: open && isRequester,
     rebase: r.state === "pending" && isRequester,
     add_evidence: mayAddEvidence(pp, r, approvers),
-    launch: launchable && !hiddenRefusal,
+    launch: launchable && !hiddenRefusal && !loop,
     not_yet: launchable,
   };
   if (pp.wsRole === "viewer") for (const k of Object.keys(can) as (keyof typeof can)[]) can[k] = false;
@@ -708,9 +748,13 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     /** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
      *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
     dependency_not_visible: hiddenRefusal,
+    /** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop
+     *  (409 cycle), naming no goal; the same for every reader. null otherwise (C5-1). */
+    dependency_loop: loop,
     /** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
-     *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. */
-    waiting_on_me: can.approve || can.accept_counter || can.launch,
+     *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. A pending
+     *  request that would close a loop waits on its deciders to suggest a change or decline it (C5-1). */
+    waiting_on_me: can.approve || can.accept_counter || can.launch || (!!loop && r.state === "pending" && can.counter),
     created_at: r.created_at,
     updated_at: r.updated_at,
     decided_at: r.decided_at,

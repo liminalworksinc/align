@@ -4,6 +4,7 @@ import type { Me } from "../../../_ui/server";
 import { EvidencePill } from "../../../_ui/evidence";
 import { HoldBanner } from "../../../_ui/requests";
 import { receiptEvidence } from "@/lib/v2/home-core.mts";
+import { count } from "@/lib/v2/plural.mts";
 import type { AnySession, GoalLabel, MySession, StopStatus } from "../../../_ui/types";
 
 const goalText = (g: GoalLabel | null | undefined) => (!g ? "no goal" : g.private ? "a goal you can't see" : g.title);
@@ -62,7 +63,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
               </div>
               <p className="text-[14px] text-zinc-500">
                 Started {when(s.started_at)}. Counting under: {goalText(s.current_epoch?.goal)}
-                {s.governing_goal ? `. Follows: ${goalText(s.governing_goal)}` : ""}. {num(s.usage.requests)} requests, {num(s.usage.input + s.usage.output)} input and output tokens.
+                {s.governing_goal ? `. Follows: ${goalText(s.governing_goal)}` : ""}. {count(s.usage.requests, "request", undefined, num)}, {num(s.usage.input + s.usage.output)} input and output tokens.
               </p>
               {s.state === "suspended" && <Note>The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads.</Note>}
               {s.ended_reason === "device_signed_out" && (

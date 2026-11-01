@@ -197,7 +197,13 @@ function RequestRecord({
               Not launched yet: {said(cr.launch_decided_by)} decided not yet{cr.launch_decided_at ? `, ${when(cr.launch_decided_at)}` : ""}.
             </p>
           )}
-          {(cr.launch === "pending" || cr.launch === "not_yet") && <p className="text-zinc-500">{canLaunch.length ? `Can launch: ${names(canLaunch)}` : "Nobody can launch this yet"}</p>}
+          {(cr.launch === "pending" || cr.launch === "not_yet") && !cr.dependency_loop && <p className="text-zinc-500">{canLaunch.length ? `Can launch: ${names(canLaunch)}` : "Nobody can launch this yet"}</p>}
+          {/* Why nobody can launch it as it stands: a dependency it adds would now close a loop (C5-1). */}
+          {cr.dependency_loop && (
+            <p className="text-zinc-700" data-dependency-loop>
+              Nobody can launch this as it stands. {cr.dependency_loop}
+            </p>
+          )}
           {/* Why Launch isn't offered to someone who may launch it: a dependency they can't see (C4-1). */}
           {cr.dependency_not_visible && (
             <p className="text-zinc-700" data-dependency-not-visible>

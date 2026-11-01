@@ -430,9 +430,11 @@ export function OpenRequest({
       ? `Waiting on ${ask} to accept the suggested change.`
       : cr.behind
         ? `Waiting on ${ask} to update it to version ${n}.`
-        : deciders.length
-          ? `Waiting on ${names(deciders)} to decide.`
-          : "Nobody can approve this yet.";
+        : cr.dependency_loop
+          ? `Waiting on ${names(deciders) || "nobody yet"} to suggest a change or decline it.`
+          : deciders.length
+            ? `Waiting on ${names(deciders)} to decide.`
+            : "Nobody can approve this yet.";
 
   return (
     <div className="mb-4 min-w-0 rounded-[12px] border border-zinc-200 p-4" data-cr={cr.id} data-cr-view="open">
@@ -555,6 +557,13 @@ export function OpenRequest({
       {cr.dependency_not_visible && (
         <p className="mt-4 text-[15px] text-zinc-700" data-dependency-not-visible>
           You can&apos;t approve this. {cr.dependency_not_visible}
+        </p>
+      )}
+
+      {/* Why nobody can approve it as it stands: a dependency it adds would now close a loop (C5-1). */}
+      {cr.dependency_loop && (
+        <p className="mt-4 text-[15px] text-zinc-700" data-dependency-loop>
+          This can&apos;t be approved as it stands. {cr.dependency_loop}
         </p>
       )}
 

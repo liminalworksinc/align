@@ -121,6 +121,11 @@ function changeNeed(c: Change, mine: boolean, me: string) {
       return mine ? "Approve it, suggest a change or decline it." : c.waiting_on.length ? `Waiting on ${who} to decide.` : "Nobody can approve this yet.";
     case "accept_counter":
       return mine ? "An approver suggested a change: accept it or withdraw your request." : `Waiting on ${who} to accept the suggested change.`;
+    case "resolve_loop":
+      // C5-1: a dependency it adds has since come to depend on this goal, so nobody can approve it as it stands.
+      return mine
+        ? "Approving it would now make a dependency loop: suggest a change without that dependency, or decline it."
+        : `Approving it would now make a dependency loop. Waiting on ${who || "nobody yet"} to suggest a change or decline it.`;
     case "rebase":
       return mine ? `The goal moved on: update your request to version ${c.goal.version} before anyone can approve it.` : `Waiting on ${who} to update it to version ${c.goal.version}.`;
     case "launch":

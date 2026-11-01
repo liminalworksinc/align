@@ -312,7 +312,7 @@ function dependsIn(pp: PolicyPrincipal, v: unknown, self: string | null, prev: s
 }
 
 /** Would `goalId` depending on `deps` close a loop? Follows every goal's depends_on in the workspace, readable or not. */
-function dependencyCycle(wsId: string, goalId: string, deps: string[]): boolean {
+export function dependencyCycle(wsId: string, goalId: string, deps: string[]): boolean {
   const edges = new Map(all<{ id: string; depends_on_json: string }>("SELECT id, depends_on_json FROM v2_goals WHERE ws_id = ?", wsId).map((r) => [r.id, JSON.parse(r.depends_on_json || "[]") as string[]]));
   edges.set(goalId, deps);
   const seen = new Set<string>();

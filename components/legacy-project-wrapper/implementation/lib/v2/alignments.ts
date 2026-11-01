@@ -244,6 +244,29 @@ function visibleAlignment(pp: PolicyPrincipal, id: string): AlignmentRow {
   return a;
 }
 
+/** Who closed an alignment, from its audit row (the alignment keeps only revoked_by), or null. */
+const closedBy = (a: AlignmentRow, action: string) => get<{ actor_id: string | null }>("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND object_id = ? AND action = ? ORDER BY at DESC LIMIT 1", a.ws_id, a.id, action)?.actor_id ?? null;
+
+/** Why a decision on an alignment in another state is refused (409 wrong_state), in the app's words ("declined", never
+ *  "rejected") and naming who closed it: everyone who may act on it is involved in it and sees its approvers (Y5). */
+function stateRefusal(a: AlignmentRow): string {
+  const by = (id: string | null) => (id ? ` by ${memberName(id)}` : "");
+  switch (a.state) {
+    case "pending":
+      return "This request is waiting for approval; reload to see it.";
+    case "countered":
+      return `An approver suggested a change to this request; it waits on ${memberName(a.requester_id)} to accept it. Reload to see it.`;
+    case "approved":
+      return "This request is already approved; reload to see it.";
+    case "rejected":
+      return `This request was declined${by(closedBy(a, "alignment.rejected"))}, so nothing changes.`;
+    case "withdrawn":
+      return `This request was withdrawn by ${memberName(a.requester_id)}, so nothing changes.`;
+    case "revoked":
+      return `This alignment was revoked${by(get<{ revoked_by: string | null }>("SELECT revoked_by FROM v2_alignments WHERE id = ?", a.id)?.revoked_by ?? null)}.`;
+  }
+}
+
 export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: AlignmentAction, b: Body) {
   const a0 = visibleAlignment(pp, id);
   if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
@@ -260,7 +283,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
       if (b.revision !== a.revision) throw conflict("stale_revision", `This request is at revision ${a.revision}; reload and try again`);
     };
     const inState = (...s: AlignmentState[]) => {
-      if (!s.includes(a.state)) throw conflict("wrong_state", `This request is ${a.state}`);
+      if (!s.includes(a.state)) throw conflict("wrong_state", stateRefusal(a));
     };
     switch (action) {
       case "approve": {
@@ -389,7 +412,7 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
     kind,
     text:
       kind === "contributes_to"
-        ? `Records that ${a.source_goal_id ? named(source) : who} contributes to ${named(target)}.${movesUsage ? "" : " No usage moves."}`
+        ? `Records that ${a.source_goal_id ? `${named(source)} contributes` : `${who} ${sessions.length === 1 ? "contributes" : "contribute"}`} to ${named(target)}.${movesUsage ? "" : " No usage moves."}`
         : kind === "governing_goal"
           ? sessions.length === 1
             ? `This session follows ${named(target)}: its agent gets that goal and its changes.`

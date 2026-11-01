@@ -155,13 +155,16 @@ export function weeklyAllocation(pp: PolicyPrincipal, weeks = 6, now = Date.now(
 export interface FeedAllocation {
   target_share: number | null;
   share_7d: number;
-  /** null without a target, or with no shared usage in the window. */
+  /** Points over (+) or under (-) the target, to one decimal: the Spend tab's gap, never the rounded share's, so steering
+   *  (at 10 points or more) acts exactly where the page's pill turns amber (C5-2). null without a target, or with no
+   *  shared usage in the window. */
   gap_7d: number | null;
   /** The goal is on hold (lib/v2/requests.ts): agents never steer from or toward it. */
   held: boolean;
 }
 
-/** Trailing-7-day share and gap per active goal the caller can read, as whole percents, for the goals feed. */
+/** Trailing-7-day share (a whole percent) and gap (to one decimal, as `allocation` gives it) per active goal the caller
+ *  can read, for the goals feed. */
 export function feedAllocation(pp: PolicyPrincipal, now = Date.now()): Map<string, FeedAllocation> {
   const rows = sums(pp.wsId, new Date(now - 7 * DAY).toISOString(), null);
   const total = rows.reduce((a, r) => a + r.fresh, 0);
@@ -170,9 +173,9 @@ export function feedAllocation(pp: PolicyPrincipal, now = Date.now()): Map<strin
   const out = new Map<string, FeedAllocation>();
   for (const g of all<GoalRow>("SELECT * FROM v2_goals WHERE ws_id = ? AND status = 'active'", pp.wsId)) {
     if (!canReadGoal(pp, goalObj(g))) continue;
-    const share = Math.round(pct(byGoal.get(g.id) ?? 0, total, 0));
+    const exact = pct(byGoal.get(g.id) ?? 0, total);
     const target = g.target_share ?? null;
-    out.set(g.id, { target_share: target, share_7d: share, gap_7d: target === null || total === 0 ? null : share - target, held: held.has(g.id) });
+    out.set(g.id, { target_share: target, share_7d: Math.round(exact), gap_7d: target === null || total === 0 ? null : Math.round((exact - target) * 10) / 10, held: held.has(g.id) });
   }
   return out;
 }

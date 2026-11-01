@@ -55,23 +55,27 @@ export interface HomePerson {
 }
 
 /** What an open item needs next: an approver decides, the requester accepts (or withdraws) a counter, the requester
- *  updates the request to the goal's current version, someone who may launch launches it (LAUNCH-001), a team lead
- *  accepts an ask, the team marks an accepted ask done. */
-export type HomeNext = "decide" | "accept_counter" | "rebase" | "launch" | "accept" | "done";
+ *  updates the request to the goal's current version, an approver suggests a change to (or declines) a request that
+ *  would close a dependency loop (C5-1), someone who may launch launches it (LAUNCH-001), a team lead accepts an ask,
+ *  the team marks an accepted ask done. */
+export type HomeNext = "decide" | "accept_counter" | "rebase" | "resolve_loop" | "launch" | "accept" | "done";
 
 /** Where an open change request stands, from the fields every change-request view has: who it waits on and for what.
  *  Pending and behind the goal's version: the requester has to update it first (no approver can approve it yet).
- *  Pending: its approvers (the effective approval set; empty means nobody can approve it yet). Countered: the
- *  requester. Anything else is not open: null. */
+ *  Pending with a dependency that would now close a loop (`dependency_loop`, C5-1): its approvers, to suggest a change
+ *  without it or decline it (nobody can approve it as it stands). Pending: its approvers (the effective approval set;
+ *  empty means nobody can approve it yet). Countered: the requester. Anything else is not open: null. */
 export function changeWaits(v: {
   state: string;
   behind: boolean;
   requester: HomePerson;
   approvers: HomePerson[];
+  dependency_loop?: string | null;
 }): { next: HomeNext; waiting_on: HomePerson[] } | null {
   if (v.state === "countered") return { next: "accept_counter", waiting_on: [v.requester] };
   if (v.state !== "pending") return null;
   if (v.behind) return { next: "rebase", waiting_on: [v.requester] };
+  if (v.dependency_loop) return { next: "resolve_loop", waiting_on: v.approvers };
   return { next: "decide", waiting_on: v.approvers };
 }
 

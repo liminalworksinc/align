@@ -334,8 +334,9 @@ export function listDevices(userId: string) {
 /** This person's paired devices that are not revoked, most recently seen first: what an invite's accept page offers to
  *  give the workspace. */
 export function liveDevicesOf(userId: string) {
+  // By name: last_seen_at moves at most every 5 minutes, so ordering by it could contradict what the person just did (Y4).
   return all<{ id: string; name: string; created_at: string; last_seen_at: string | null }>(
-    "SELECT id, name, created_at, last_seen_at FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY COALESCE(last_seen_at, created_at) DESC, id",
+    "SELECT id, name, created_at, last_seen_at FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY name COLLATE NOCASE, id",
     userId,
   );
 }
@@ -343,9 +344,12 @@ export function liveDevicesOf(userId: string) {
 /** Give each of these devices workspace `wsId`, inside the caller's tx() (accepting an invite; the person is a member
  *  by then). Each must be the person's own and not revoked, else 404 and the caller's transaction rolls back. Audited
  *  in the workspace as `device.workspace_added` (the device as object). */
+export const DEVICE_NOT_YOURS = "A device you chose is not one of your paired devices any more (it may have been signed out), so nothing was joined.";
+
 export function addWorkspaceToDevices(userId: string, wsId: string, deviceIds: string[], at: string): string[] {
   for (const id of deviceIds) {
-    if (!get("SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL", id, userId)) throw notFound();
+    // The same 404 for another person's, a revoked and an unknown device; it says what happened, never whose it is (Y1).
+    if (!get("SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL", id, userId)) throw new V2Error(404, "not_found", DEVICE_NOT_YOURS);
     run("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)", id, wsId);
     audit(wsId, userId, "device.workspace_added", id, at);
   }

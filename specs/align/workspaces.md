@@ -877,7 +877,7 @@ days that only the invited email address can accept.
 #### Scenario: Accepting an invite
 
 - **WHEN** a signed-in person POSTs `/api/v2/invites/{token}/accept`
-- **THEN** they join with the invited role and the response is `{workspace_id, role, team_id, device_ids}`; another email is 403 `email_mismatch`, an unverified email when hosted 403 `email_unverified`, an existing member 409 `already_member`, and an unknown, accepted or expired token 404 `not_found`
+- **THEN** they join with the invited role and the response is `{workspace_id, role, team_id, device_ids}`; another email is 403 `email_mismatch`, an unverified email when hosted 403 `email_unverified`, an existing member 409 `already_member`, the person who already accepted this invite and is still a member 409 `already_member` ("You already joined this workspace with this invite, in another tab or window.", with `workspace_id`), and an unknown, expired or (for anyone else) accepted token 404 `not_found`
 
 ### Requirement: Invites give paired devices the workspace
 
@@ -886,14 +886,16 @@ granted when it was paired, and removing a member deletes their devices' grants 
 re-invited person's devices never reached it again, and `align login` (the only way back) ended their shares in every
 other workspace too. The invite preview SHALL list, only when the signed-in email is the invited one, the person's own
 paired devices that are not revoked as `devices: [{id, name, last_seen_at}]` (`last_seen_at` the device's last use, or
-when it was paired if never used since; most recently seen first; `[]` otherwise). `POST
+when it was paired if never used since; by name, since `last_seen_at` moves at most every 5 minutes; `[]` otherwise). `POST
 /api/v2/invites/{token}/accept` SHALL take an optional `device_ids` (at most 20 device ids, nothing preselected by the
 server) and, in the transaction that adds the membership, grant each of those devices the workspace and write one
 audit row `device.workspace_added` per device in that workspace's audit (the person as actor, the device as object).
 Giving devices a workspace SHALL need a sign-in from the last 15 minutes (403 `reauth_required` with `Sign in again to
 give a device this workspace. This needs a sign-in from the last 15 minutes.`), as approving a device does; joining
-without devices does not. A device that is another person's, revoked or unknown SHALL be 404 `not_found` and a
-malformed id 400, and any refusal SHALL join nothing and grant nothing. The same applies to someone joining a
+without devices does not. A device that is another person's, revoked or unknown SHALL be 404 `not_found` with the same
+message for each, "A device you chose is not one of your paired devices any more (it may have been signed out), so
+nothing was joined.", and a malformed id 400, a blank one (`""`) included, never dropped into a join without devices;
+any refusal SHALL join nothing and grant nothing. The same applies to someone joining a
 workspace for the first time who already has paired devices. A device learns its new workspace at its next pass
 (`local-agent`).
 
@@ -904,8 +906,8 @@ workspace for the first time who already has paired devices. A device learns its
 
 #### Scenario: Devices that are not theirs to give
 
-- **WHEN** the invitee accepts with another person's device, a revoked or unknown device id, a malformed id, or a device and a sign-in older than 15 minutes (`scripts/test-v2.mjs` "re-invite: accepting with another person's device -> 404 ...")
-- **THEN** the answers are 404, 404, 400 and 403 `reauth_required`, they are not a member, no device gained the workspace, and someone else opening the invite link sees no devices
+- **WHEN** the invitee accepts with another person's device, a revoked or unknown device id, a malformed id (`"not an id"`, `""`, or a valid id beside `"  "`), or a device and a sign-in older than 15 minutes (`scripts/test-v2.mjs` "re-invite: accepting with another person's device -> 404 ...")
+- **THEN** the answers are 404, 404 (the same message), 400 and 403 `reauth_required`, they are not a member, no device gained the workspace, and someone else opening the invite link sees no devices
 
 #### Scenario: Joining for the first time
 
@@ -1300,8 +1302,9 @@ epoch it was uploaded with, rolled-up days by goal as in the spend report. `wind
 7 days before `to`, or before now) as `{from, to, total_fresh_tokens, total_est_list_usd_micros, unpriced_requests,
 rows, note}`, where each row is `{kind, goal, fresh_tokens, share, target_share, gap, est_list_usd_micros,
 unpriced_requests, sessions}`: one `goal` row per goal the caller can read that had usage or is active with a target
-(its `share` of the total in percent to one decimal, its target while active, and `gap` = share minus target, `null`
-without a target), one unnamed `private` row for goals the caller cannot read (no target shown), and one `unallocated`
+(its `share` of the total in percent to one decimal, its target while active, and `gap` = share minus target, to one
+decimal, `null` without a target; the goals feed sends devices this same gap for the trailing 7 days as
+`allocation.gap_7d`, so the Spend tab's pill and the agents' steering agree on 10 points), one unnamed `private` row for goals the caller cannot read (no target shown), and one `unallocated`
 row for usage bound to no goal, so that the rows' fresh tokens add up to the total. `weekly` holds the last `weeks`
 calendar weeks (default 6, 1 to 26; weeks start Monday 00:00 UTC), oldest first, each `{week_start,
 total_fresh_tokens, rows:[{kind, goal, share, target_share}]}`; `steering` is `{steering, total, days:[{day, n}]}`, the

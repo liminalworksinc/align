@@ -16,6 +16,21 @@ interface LimitLike {
 export interface FieldDiff {
   before: unknown;
   after: unknown;
+  /** depends_on only: how many dependencies on each side the reader can't read (they are left out of before and
+   *  after), so the words still count them (C5-3). */
+  hidden?: { before: number; after: number } | null;
+}
+
+/** "a goal you can't see" / "2 goals you can't see": dependencies the reader can't read, never named. */
+export const hiddenGoals = (n: number) => (n === 1 ? "a goal you can't see" : `${n} goals you can't see`);
+
+/** Named dependencies, then the ones the reader can't see, counted after "and": "Growth dashboard and 1 other goal you
+ *  can't see", never "Growth dashboard, a goal you can't see", which reads as if the named goal were the hidden one
+ *  (X1). With nothing named, just the count ("a goal you can't see"). */
+export function withHidden(names: string[], hidden: number): string {
+  if (!hidden) return names.join(", ");
+  if (!names.length) return hiddenGoals(hidden);
+  return `${names.join(", ")} and ${hidden === 1 ? "1 other goal" : `${hidden} other goals`} you can't see`;
 }
 
 const LIMIT_WORDS: Record<string, string> = { must: "Must", must_not: "Must not", out_of_scope: "Out of scope" };
@@ -68,10 +83,13 @@ export function changeWords(field: string, d: FieldDiff, o: ChangeWordsOptions =
     const a = list<string>(d.after);
     const added = a.filter((id) => !b.includes(id));
     const removed = b.filter((id) => !a.includes(id));
+    // The ones the reader can't read are counted, never named, after any named ones, as on the rest of the card (C5-3).
+    const more = Math.max(0, (d.hidden?.after ?? 0) - (d.hidden?.before ?? 0));
+    const fewer = Math.max(0, (d.hidden?.before ?? 0) - (d.hidden?.after ?? 0));
     const out: string[] = [];
-    if (added.length) out.push(`Now depends on ${added.map((id) => q(title(id))).join(", ")}`);
-    if (removed.length) out.push(`No longer depends on ${removed.map((id) => q(title(id))).join(", ")}`);
-    // The reader sees only the dependencies they can read: the change was to one they can't.
+    if (added.length || more) out.push(`Now depends on ${withHidden(added.map((id) => q(title(id))), more)}`);
+    if (removed.length || fewer) out.push(`No longer depends on ${withHidden(removed.map((id) => q(title(id))), fewer)}`);
+    // The reader sees only the dependencies they can read: the change was to one they can't (one swapped for another).
     return out.length ? out : ["Dependencies you can't see changed"];
   }
   if (field === "title") return [`Title ${q(String(d.before ?? ""))} ${arrow} ${q(String(d.after ?? ""))}`];
