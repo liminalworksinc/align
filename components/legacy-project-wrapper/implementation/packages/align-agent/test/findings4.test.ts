@@ -336,3 +336,78 @@ describe("C4-5: an edit approved after a pass read it", () => {
     assert.equal(edits[0].session_key, A.key, "credited to the session that made it");
   });
 });
+
+describe("C4-6: stop, resume, stop", () => {
+  test("a stop that follows a resume before the next prompt withdraws the \"resumed\" notice; the tools stay blocked", async () => {
+    const { fake, t } = await world();
+    const s = await shared(t);
+    for (const kind of ["stop", "resume", "stop"] as const) {
+      fake.pushDirective({ ws: "ws_acme", kind, session_keys: [s.key], goal: null, binding: null });
+      assert.equal((await runCli(t, ["sync"])).code, 0);
+    }
+    const told = prompt(t, s.sid, "next", s.cwd);
+    assert.doesNotMatch(JSON.stringify(told ?? {}), /resumed/);
+    const deny = json(runHook(t, "claude", "PreToolUse", { session_id: s.sid, tool_name: "Bash", cwd: s.cwd }).stdout);
+    assert.equal(deny.hookSpecificOutput.permissionDecision, "deny");
+  });
+});
+
+describe("C4-7: `::align share <goal>` on a two-workspace device", () => {
+  test("a session with no workspace of its own on a device with two workspaces and no default gets the multi-workspace answer, goal or no goal", async () => {
+    const { t } = await world({ side: true });
+    const sid = "77777777-1111-2222-3333-444444444444";
+    const cwd = path.join(t.root, "repo-b");
+    fs.mkdirSync(cwd, { recursive: true });
+    runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup", cwd });
+    const multi = "Align: this machine reaches more than one workspace and none is the default, so `::align share` can't tell which. Run `align share --latest --workspace <name>` in a terminal.";
+    assert.equal(prompt(t, sid, "::align share Ship confirm", cwd).reason, multi);
+    assert.equal(prompt(t, sid, "::align share confirm", cwd).reason, multi);
+  });
+});
+
+describe("C4-8: re-sharing a session the user stopped", () => {
+  test("after a re-pair, the server answers sharing_stopped and the CLI says the session's sharing was stopped, not to revoke an old device", async () => {
+    const { t } = await world();
+    const s = await shared(t);
+    assert.equal((await runCli(t, ["unshare", s.lid.slice(0, 8)])).code, 0);
+    await relogin(t);
+    const r = await runCli(t, ["share", s.lid.slice(0, 8), "--workspace", "Acme", "--goal", "none", "--yes"]);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /was not shared: sharing failed \(sharing_stopped\): this session's sharing was stopped/);
+    assert.doesNotMatch(r.stderr, /revoke the old device/);
+  });
+});
+
+describe("cycle 4: notices and the unshared-time note", () => {
+  test("after a re-pair, the usage a session shared under the earlier pairing does not count as unshared time", async () => {
+    const { t } = await world();
+    const s = await shared(t);
+    turn(t, s, "req_un_1");
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    await relogin(t);
+    const ctx = ctxFor(t);
+    const d = computeUnsharedDigest(ctx, Date.now(), true)!;
+    ctx.db.close();
+    assert.ok(d.total_tokens > 0);
+    assert.equal(d.unshared_tokens, 0, JSON.stringify(d));
+  });
+
+  test("stale notices are not stacked: of the share-state notices only the newest is told, a resume a later stop replaced is not, and a repeated text once", async () => {
+    const { t } = await world();
+    const s = await shared(t);
+    const ctx = ctxFor(t);
+    const signedOut = "Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on.";
+    addNotice(ctx, s.lid, "signed_out_1", signedOut);
+    addNotice(ctx, s.lid, "signed_out_2", signedOut);
+    addNotice(ctx, s.lid, "share_err_9", "Align: sharing failed (not_found): the server did not take this session from this machine. If it was shared before ...");
+    addNotice(ctx, s.lid, "resumed_dir_old", "Align: this session was resumed from its Align workspace, so its tools work again.");
+    addNotice(ctx, s.lid, "cmd_1", "Align: bind failed: no such goal.");
+    addNotice(ctx, s.lid, "cmd_2", "Align: bind failed: no such goal.");
+    addNotice(ctx, s.lid, "access_lost_ws_acme_1", "Align: this session stopped sharing because you no longer have access to Acme in Align (you were removed from it or left it); its usage stays on this machine from now on.");
+    renderHot(ctx, s.lid);
+    ctx.db.close();
+    const start = json(runHook(t, "claude", "SessionStart", { session_id: s.sid, source: "resume", cwd: s.cwd }).stdout);
+    const said = String(start.systemMessage).split("\n").filter((x) => x.startsWith("Align: ") && !/^Align: (shared with|sharing this session)/.test(x));
+    assert.deepEqual(said, ["Align: bind failed: no such goal.", "Align: this session stopped sharing because you no longer have access to Acme in Align (you were removed from it or left it); its usage stays on this machine from now on."]);
+  });
+});

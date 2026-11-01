@@ -154,12 +154,33 @@ function reportApplied(home: string, lid: string, inj: InjectedState, ids: (stri
   spoolWrite(home, { type: "applied", local_id: lid, directive_ids: fresh, ts: new Date().toISOString() });
 }
 
+/** Notices about whether this session is shared (started, refused, ended): only the newest of them still holds. */
+const SHARE_STATE_NOTICES = ["share_started_", "share_err_", "upload_refused_", "signed_out_", "access_lost_"];
+
+/**
+ * The notices still worth telling, of those the session has not seen: one about its share's state (the newest, the
+ * earlier ones are stale), a "resumed" one only while that resume still holds (a later stop withdrew it, C4-6), and each
+ * text once. All of them count as seen.
+ */
+export function currentNotices(hot: HotState, fresh: HotState["notices"]): HotState["notices"] {
+  const kind = (n: { id: string }) => n.id.slice(n.id.indexOf("/") + 1);
+  const lastState = fresh.filter((n) => SHARE_STATE_NOTICES.some((k) => kind(n).startsWith(k))).pop();
+  const kept = fresh.filter((n) => {
+    const k = kind(n);
+    if (k.startsWith("resumed_")) return !!hot.resumed && k === `resumed_${hot.resumed}`;
+    if (SHARE_STATE_NOTICES.some((p) => k.startsWith(p))) return n === lastState;
+    return true;
+  });
+  return kept.filter((n, i) => !kept.slice(i + 1).some((m) => m.text === n.text));
+}
+
 function takeNotices(hot: HotState | null, inj: InjectedState): string | null {
   if (!hot) return null;
   const fresh = hot.notices.filter((n) => !inj.notices_shown.includes(n.id));
   if (!fresh.length) return null;
   inj.notices_shown.push(...fresh.map((n) => n.id));
-  return fresh.map((n) => n.text).join("\n");
+  const told = currentNotices(hot, fresh);
+  return told.length ? told.map((n) => n.text).join("\n") : null;
 }
 
 function feeds(home: string): FeedFile[] {
@@ -906,6 +927,8 @@ function willShare(home: string, hot: HotState | null, cwd: string | null): bool
   return !!matchRule(readRules(home), cwd);
 }
 
+const MULTI_WORKSPACE = "Align: this machine reaches more than one workspace and none is the default, so `::align share` can't tell which. Run `align share --latest --workspace <name>` in a terminal.";
+
 /** No cached goal matches: say when the goals were fetched, and that a goal created moments ago arrives with the next
  *  sync (this command starts one), so trying again shortly works. */
 function noCachedGoal(arg: string, feed: FeedFile | null): string {
@@ -1038,6 +1061,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       const me = readJson<MeFile>(layout.me(home));
       if (!me || me.signed_out) return "Align: not signed in on this machine. Run `align login` in a terminal first.";
       const feed = feedFor(home, hot);
+      // With no workspace of its own, no default and more than one in reach, no goal can be looked up either: say why
+      // first, whatever goal was named, rather than that the goal is not cached (C4-7).
+      if (!dirMode && !feed && (me.workspaces?.length ?? 0) > 1) return MULTI_WORKSPACE;
       // Shared before (its share ended, say by a sign-out): with no goal named it shares toward the goal it had, while
       // that goal can still be bound (N8).
       const before = !arg && !dirMode && hot?.goal ? feed?.goals.find((g) => g.id === hot.goal!.id && g.bindable && g.status === "active") || null : null;
@@ -1065,7 +1091,6 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         if (!already) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
         return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${already ? "" : " This session too; your next prompt carries the goal."} \`::align unshare --dir\` turns it off.`;
       }
-      if (!feed && (me.workspaces?.length ?? 0) > 1) return "Align: this machine reaches more than one workspace and none is the default, so `::align share` can't tell which. Run `align share --latest --workspace <name>` in a terminal.";
       if (!confirm) {
         return [
           `Align share preview for this session (nothing uploaded yet):`,

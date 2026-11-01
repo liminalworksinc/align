@@ -300,6 +300,10 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       if (r.status === 409 && r.json?.error === "sharing_stopped") {
         ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=COALESCE(stopped_at, ?) WHERE local_id=?").run(nowIso(), lid);
         ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
+        // Its sharing was stopped (by the developer, or on the web): the server never shares a stopped session again,
+        // whichever of the account's devices asks, so no "revoke the old device" here (C4-8).
+        dropShareStarted(ctx, lid);
+        addNotice(ctx, lid, `share_err_${item.id}`, "Align: sharing failed (sharing_stopped): this session's sharing was stopped (`align stop-sharing`, `::align unshare` or Stop sharing on the web), and a session whose sharing was stopped is not shared again. This session stays private.");
         renderHot(ctx, lid);
         return;
       }

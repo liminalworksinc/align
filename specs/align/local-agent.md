@@ -456,7 +456,8 @@ named SHALL share such a session toward the goal it had while that goal can stil
 it had before)`), in the workspace whose goals it read (the session's own, else the default), which the spooled share
 names, so a device that reaches several workspaces with no default shares it there; a session with no workspace of its
 own on such a device SHALL get `Align: this machine reaches more than one workspace and none is the default, so \`::align
-share\` can't tell which. Run \`align share --latest --workspace <name>\` in a terminal.` and spool nothing. It SHALL reply `Align: sharing requested toward "<goal>". It takes effect within a few seconds; your next
+share\` can't tell which. Run \`align share --latest --workspace <name>\` in a terminal.` and spool nothing, whether or not
+it names a goal (no goal can be looked up without a workspace, so never `no cached goal matches`). It SHALL reply `Align: sharing requested toward "<goal>". It takes effect within a few seconds; your next
 prompt carries the goal.`, or, with no goal, `Align: sharing requested with no goal (its usage counts as unallocated;
 \`::align bind <goal>\` picks one). It takes effect within a few seconds.` While this machine is signed out, `::align
 share` SHALL be refused with `Align: not signed in on this machine. Run \`align login\` in a terminal first.` and
@@ -484,6 +485,11 @@ this machine is signed out of Align ...`, nothing for a folder rule's), never ap
 
 - **WHEN** the device reaches two workspaces and has no default, and after logout and login the developer types `::align share confirm` in a session that was shared toward a goal in one of them (test `findings2` "C3-6: on a device with two workspaces and no default ...")
 - **THEN** the reply names that goal, the next sync shares the session in that workspace (`shared (Acme)`), and no `share failed` notice follows
+
+#### Scenario: A goal named on a two-workspace device
+
+- **WHEN** the device reaches two workspaces and has no default, and in a session with no workspace of its own the developer types `::align share Ship confirm`, then `::align share confirm` (test `findings4` "a session with no workspace of its own on a device with two workspaces ...")
+- **THEN** both replies are the multi-workspace message
 
 #### Scenario: Shared again after a new pairing
 
@@ -1026,11 +1032,18 @@ produces `Align: this session stopped sharing. ...`. A usage upload the server r
 usage stays on this machine from now on.` A share whose `PUT` the server refuses with 404 SHALL produce `Align: sharing
 failed (<code>): the server did not take this session from this machine. If it was shared before from this machine and
 that sign-in was never revoked, revoke the old device at <server>/app/devices, then type \`::align share\` here again.
-This session stays private.` (403: `... this machine may not share sessions in that workspace. ...`), and takes back
-the `sharing this session` notice if the session has not seen it yet. Notices SHALL be shown at the session's next
+This session stays private.` (403: `... this machine may not share sessions in that workspace. ...`); one the server
+refuses with 409 `sharing_stopped` (its sharing was stopped, which the server never undoes, from whichever of the
+account's devices) SHALL produce `Align: sharing failed (sharing_stopped): this session's sharing was stopped (\`align
+stop-sharing\`, \`::align unshare\` or Stop sharing on the web), and a session whose sharing was stopped is not shared
+again. This session stays private.`, never the advice to revoke an old device; each takes back the `sharing this
+session` notice if the session has not seen it yet. Notices SHALL be shown at the session's next
 `UserPromptSubmit` (or `SessionStart`), whatever its share's state, also when it has none or its share failed. Sharing a
 session again (`align share` or `::align share`) SHALL drop its notices about an earlier share that ended (signed out,
-workspace lost or given back) that it has not shown yet, so a later ending is never told next to a stale one.
+workspace lost or given back) that it has not shown yet, so a later ending is never told next to a stale one. Of the
+notices a session has not seen yet, the hook SHALL tell only the newest about its share's state (sharing started, a
+refused share, a refused upload, signed out, workspace lost), a "resumed" notice only while that resume is still the
+session's latest stop or resume, and each text once; the others count as seen and are never told later.
 
 #### Scenario: Share confirmed with no default workspace
 
@@ -1041,6 +1054,16 @@ workspace lost or given back) that it has not shown yet, so a later ending is ne
 
 - **WHEN** another device holds the session's key on the server, the developer types `::align share confirm`, a sync runs, and the developer submits two prompts (test `findings2` "N5: a share the server refuses tells the session at its next prompt ...")
 - **THEN** the first prompt shows only the `sharing failed (not_found)` notice with the way to revoke the old device, and the second prints nothing
+
+#### Scenario: Stacked notices
+
+- **WHEN** a session has, unseen, the same sign-out notice twice, a refused share, a "resumed" notice a later stop replaced, the same failed-command notice twice and a workspace-lost notice, and it starts again (test `findings4` "stale notices are not stacked ...")
+- **THEN** its `SessionStart` tells only the failed command once and the workspace-lost notice
+
+#### Scenario: Re-sharing a session its person stopped
+
+- **WHEN** a session was stopped with `align unshare`, the machine pairs again, and the developer runs `align share <id> --yes` (test `findings4` "after a re-pair, the server answers sharing_stopped ...")
+- **THEN** it exits 1 with `... was not shared: sharing failed (sharing_stopped): this session's sharing was stopped ...` and nothing about revoking an old device
 
 #### Scenario: No stale sign-out notice
 
@@ -1064,7 +1087,9 @@ parsed SHALL deny every tool, and input without a session id SHALL deny when any
 SHALL never deny another session's tools. A `resume` directive SHALL remove the latch file and, when it lifted a stop,
 be told once at the session's next prompt: to the user as `Align: this session was resumed from its Align workspace, so
 its tools work again.` and to the model as `[Align] This session was resumed from its Align workspace, so its tools are
-no longer blocked. Continue the user's task.`, which otherwise goes on believing its tools are blocked.
+no longer blocked. Continue the user's task.`, which otherwise goes on believing its tools are blocked. A `stop` that
+arrives after the resume, before the session was told, SHALL withdraw that notice: the next prompt never says the tools
+work again while they are blocked.
 
 #### Scenario: Latched with no sync running
 
@@ -1075,6 +1100,11 @@ no longer blocked. Continue the user's task.`, which otherwise goes on believing
 
 - **WHEN** a shared session is stopped from the web, then resumed, and the developer prompts twice (test `findings2` "a stop lifted from the web is told at the next prompt ...")
 - **THEN** the first prompt carries the user notice and the model's context line, the second carries nothing, and tools run
+
+#### Scenario: Stop, resume, stop before the next prompt
+
+- **WHEN** a shared session is stopped, resumed and stopped again from the web, with a sync after each, and then the developer prompts (test `findings4` "a stop that follows a resume before the next prompt ...")
+- **THEN** the prompt says nothing about a resume and `Bash` is denied
 
 #### Scenario: Stop and resume from the web
 
@@ -1463,11 +1493,19 @@ and be deleted unsent once it is more than a day old.
 
 The sync pass SHALL compute, from the local ledger and at most every 6 hours, this machine's fresh tokens (input,
 output and cache writes) of the last 7 days and the part in sessions not shared toward a goal, grouped by folder (top
-5), into `~/.align/unshared-digest.json`, which SHALL never be uploaded. The `align` hook SHALL, on `SessionStart` with
+5), into `~/.align/unshared-digest.json`, which SHALL never be uploaded. Usage that went up to the server SHALL count as
+shared even after its session's share ended (this machine signed out, or a new pairing replaced the device), so a
+re-pair never turns what was shared into "not shared"; usage of a session whose history was deleted counts as not
+shared. The `align` hook SHALL, on `SessionStart` with
 source `startup` (shared or not), show once per calendar week (Monday, UTC), as `systemMessage` only and never
 `additionalContext`, `Align: <n>% of this machine's agent time in the last 7 days was in sessions not shared toward any
 goal (mostly <up to 3 folder names>). Run \`align share --dir <folder> --workspace <workspace> --goal <goal>\` to count a
 folder toward a goal. This stays on this machine.` when that part is more than 3%.
+
+#### Scenario: After a re-pair
+
+- **WHEN** a session's usage was uploaded and the machine then logs out and in again (test `findings4` "after a re-pair, the usage a session shared under the earlier pairing ...")
+- **THEN** the digest counts none of that session's usage as not shared
 
 #### Scenario: Digest and note
 

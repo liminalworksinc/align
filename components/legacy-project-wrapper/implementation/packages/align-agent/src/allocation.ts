@@ -55,23 +55,27 @@ export function computeUnsharedDigest(ctx: Ctx, now = Date.now(), force = false)
   const last = Number(kvGet(ctx.db, "unshared_digest_at") || 0);
   if (!force && now - last < 6 * 3600_000) return readJson<UnsharedDigest>(layout.unsharedDigest(ctx.home));
   const since = new Date(now - 7 * DAY).toISOString();
+  // A request counts as shared when it went up (`uploaded` 1), or its session is shared now and it waits to go up. A
+  // session whose share ended (this machine signed out, or a new pairing replaced the device) keeps what it shared:
+  // only its later, private usage counts as not shared (and a session whose history was deleted, none of it).
   const rows = ctx.db
     .prepare(
       `SELECT s.local_id, s.cwd, COALESCE(SUM(${fresh}), 0) AS tokens,
-              (SELECT state FROM shares sh WHERE sh.local_id = s.local_id) AS share_state
-       FROM requests r JOIN sessions s ON s.local_id = r.local_id
+              COALESCE(SUM(CASE WHEN r.uploaded = 1 OR sh.state IN ('shared','pending') THEN ${fresh} ELSE 0 END), 0) AS shared_tokens
+       FROM requests r JOIN sessions s ON s.local_id = r.local_id LEFT JOIN shares sh ON sh.local_id = s.local_id
        WHERE COALESCE(r.ts, r.created_at) >= ?
        GROUP BY s.local_id`,
     )
-    .all(since) as { local_id: string; cwd: string | null; tokens: number; share_state: string | null }[];
+    .all(since) as { local_id: string; cwd: string | null; tokens: number; shared_tokens: number }[];
   const total = rows.reduce((a, r) => a + r.tokens, 0);
   const byDir = new Map<string, number>();
   let unshared = 0;
   for (const r of rows) {
-    if (r.share_state === "shared" || r.share_state === "pending") continue;
-    unshared += r.tokens;
+    const own = r.tokens - r.shared_tokens;
+    if (own <= 0) continue;
+    unshared += own;
     const dir = r.cwd || "(unknown folder)";
-    byDir.set(dir, (byDir.get(dir) ?? 0) + r.tokens);
+    byDir.set(dir, (byDir.get(dir) ?? 0) + own);
   }
   const top = [...byDir.entries()]
     .sort((a, b) => b[1] - a[1])
