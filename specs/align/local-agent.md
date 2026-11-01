@@ -559,7 +559,9 @@ when the workspace went out of reach, as the deny says; `the Align server no lon
 otherwise) when its share ended, print `No stop latches or goal holds.` when there
 are none, and reject any other subcommand with `usage: align latch status (stop and resume come from the web)`. `align doctor` SHALL print one `OK`, `WARN` or `FAIL` line per check (node >= 24,
 `ALIGN_HOME` mode, 0600 file modes, Claude and Codex hooks, hook file hash, recorded node path, hook latency over
-10 probe runs with `p95 < 150 ms` as OK, outbox under 100, sign-in) and exit 1 when any check is `FAIL`.
+10 probe runs with `p95 < 150 ms` as OK, outbox under 100, sign-in) and exit 1 when any check is `FAIL`. Its sign-in
+line SHALL give the access token's expiry on the server's clock: with a saved clock offset, `access token expires
+<time + offset> (on the server's clock)`.
 
 #### Scenario: Who, as the server says now
 
@@ -570,6 +572,11 @@ are none, and reject any other subcommand with `usage: align latch status (stop 
 
 - **WHEN** the account behind the device is deleted (the server forgets the device) and a refresh is due; in another case the device is revoked on the Devices page; in a third a stopped session's workspace goes out of reach (tests `findings3` "account deletion reason: ..." and "latch wording: ...")
 - **THEN** `align status` reads `Identity:   signed out (the Align server no longer knows this device: its account was deleted (or the server's data was reset)); local metering only`, then `signed out (this device was revoked on the web (Devices page))`, and `align latch status` ends `; sharing ended (this machine no longer has access to its Align workspace), so only \`align stop-sharing <lid8>\` unblocks it`
+
+#### Scenario: Token expiry when this computer's clock is off
+
+- **WHEN** the saved clock offset is -10 minutes and the access token expires in an hour by this computer's clock, and the developer runs `align doctor` (test `findings7` "`align doctor` shows the access token's expiry on the server's clock ...")
+- **THEN** the `sign-in` line says `access token expires <that time minus 10 minutes> (on the server's clock)`
 
 #### Scenario: Status after install
 

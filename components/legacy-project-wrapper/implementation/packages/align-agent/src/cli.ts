@@ -19,6 +19,7 @@ import {
   rawRequest,
   revokePending,
   SignedOut,
+  serverIso,
   signedIn,
   revokeState,
   whileSignedInAs,
@@ -1134,7 +1135,9 @@ async function cmdDoctor(ctx: Ctx): Promise<void> {
   add("hook latency", p95 < 150 ? "OK" : "WARN", `p50 ${times[Math.floor(times.length / 2)].toFixed(0)} ms, p95 ${p95.toFixed(0)} ms (internal deadline 300 ms)`);
   add("outbox", outboxDepth(ctx) < 100 ? "OK" : "WARN", `${outboxDepth(ctx)} queued`);
   const c = loadCredentials(ctx.home);
-  add("sign-in", c && !c.signed_out ? "OK" : "WARN", c && !c.signed_out ? `access token expires ${c.access_expires_at}` : "signed out (local metering only)");
+  // The expiry on the server's clock (this computer's clock may be off; the saved offset puts it right, cycle 6).
+  const expires = c?.access_expires_at ? serverIso(c.access_expires_at, Number(c.clock_offset_ms) || 0) : null;
+  add("sign-in", c && !c.signed_out ? "OK" : "WARN", c && !c.signed_out ? `access token expires ${expires}${c.clock_offset_ms ? " (on the server's clock)" : ""}` : "signed out (local metering only)");
   for (const [n, l, dtl] of checks) out(`${pad(l, 5)} ${pad(n, 16)} ${dtl}`);
   if (checks.some((c) => c[1] === "FAIL")) process.exitCode = 1;
 }

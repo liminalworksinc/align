@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { computeUnsharedDigest } from "../src/allocation.ts";
-import { loadCredentials } from "../src/api.ts";
+import { loadCredentials, saveCredentials } from "../src/api.ts";
 import { sessionKey } from "../src/keys.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import { FakeServer } from "./fake-server.ts";
@@ -386,5 +386,15 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     assert.deepEqual(rows.map((r) => r.uploaded), [1, 2], "the refused gap row stays on this machine");
     assert.equal(d.total_tokens, 30);
     assert.equal(d.unshared_tokens, 15, "and is not shared time");
+  });
+
+  test("`align doctor` shows the access token's expiry on the server's clock when this computer's clock is off", async () => {
+    const { t } = await world();
+    const c = loadCredentials(t.home)!;
+    const local = new Date(Date.now() + 3_600_000);
+    local.setUTCMilliseconds(0);
+    saveCredentials(t.home, { ...c, access_expires_at: local.toISOString(), clock_offset_ms: -600_000 });
+    const r = await runCli(t, ["doctor"]);
+    assert.match(r.stdout, new RegExp(`sign-in +access token expires ${new Date(local.getTime() - 600_000).toISOString().replace(/[.]/g, "\\.")} \\(on the server's clock\\)`), r.stdout);
   });
 });
