@@ -9,6 +9,8 @@ import { acceptInvite } from "@/lib/v2/workspaces";
 export const POST = route<{ token: string }>(async (req, { token }) => {
   const p = await webWrite(req);
   const b = await readJson(req, 4096);
+  // A blank id is a malformed one (400), not "no device": it would otherwise be dropped and the person join without it.
+  if (Array.isArray(b.device_ids) && b.device_ids.some((x) => typeof x === "string" && !x.trim())) throw badRequest("device_ids must be device ids");
   const deviceIds = strList(b, "device_ids", { max: 20, itemMax: 64 });
   if (deviceIds.some((id) => !ID_RE.test(id))) throw badRequest("device_ids must be device ids");
   return acceptInvite(token, p.user, p.emailVerified, deviceIds, () => requireRecentSignIn(p, "give a device this workspace"));

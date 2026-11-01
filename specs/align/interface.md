@@ -416,9 +416,17 @@ email join with **Join workspace**. When the invitee has paired devices that are
 "Your paired devices" (each with a checkbox, its name and "(last seen <time>)", none ticked) with "Tick the devices
 that should reach <workspace> too. Each one picks it up the next time it syncs, without signing in again; its other
 workspaces stay as they are." (owner decision 2026-11-01; `workspaces` "Invites give paired devices the workspace").
-Ticking needs a sign-in from the last 15 minutes: with an older one the boxes are disabled and the page says "Giving a
-device this workspace needs a sign-in from the last 15 minutes. **Sign in again** to choose devices, or join without
-them."; joining without devices needs no recent sign-in.
+The devices are listed by name (`last_seen_at` moves at most every 5 minutes, so an order by it could contradict what
+the person just did). Ticking needs a sign-in from the last 15 minutes: with an older one the boxes are disabled and the
+page says "Giving a device this workspace needs a sign-in from the last 15 minutes. **Sign in again** to choose
+devices, or join without them."; **Sign in again** signs out and opens sign-in at once (one press), with the email
+filled in and `next` the invite page, and **Join workspace** stays on the page; joining without devices needs no
+recent sign-in. A refused Join SHALL say what happened, never a bare "Not found": a ticked device that is no longer one
+of the person's paired devices (signed out in another tab) gives the server's message and "Your devices are listed
+again: choose again, or join without them.", with the list read again and nothing ticked; an invite the person already
+accepted in another tab gives "You already joined <workspace>, in another tab or window." with a link to it; an
+invite that is gone otherwise gives "This invite can't be used any more: it was withdrawn, it expired, or it was
+already used. You have not joined. …".
 
 #### Scenario: Accept an invite
 
@@ -428,7 +436,12 @@ them."; joining without devices needs no recent sign-in.
 #### Scenario: Accept and give a paired device the workspace
 
 - **WHEN** an invitee with one paired device and one revoked device opens the page with a sign-in 20 minutes old, then with a fresh one ticks the device and presses **Join workspace and give it to this device** (`scripts/test-v2.mjs` "invite (ui, owner decision 2026-11-01) ...")
-- **THEN** the first view lists only the live device, unticked and disabled, with the recent sign-in sentence; the second lists it unticked and enabled; the page posts `{device_ids:[<id>]}`, the device gains the workspace (audited `device.workspace_added`) and the workspace opens; when the server answers 403 `reauth_required` the page shows its message with "You have not joined yet." and **Sign in again**, which comes back to the invite
+- **THEN** the first view lists only the live device, unticked and disabled, with the recent sign-in sentence; the second lists it unticked and enabled; the page posts `{device_ids:[<id>]}`, the device gains the workspace (audited `device.workspace_added`) and the workspace opens; when the server answers 403 `reauth_required` the page shows its message with "You have not joined yet." in place, unticks and disables the devices and keeps **Join workspace**, and one press of **Sign in again** opens sign-in, which comes back to the invite (`scripts/test-v2.mjs` "Y2 (ui): ...")
+
+#### Scenario: A device signed out, or the invite used, in another tab
+
+- **WHEN** an invitee ticks two devices, one is signed out in another tab, and they press Join; then they join in another tab and press Join here again (`scripts/test-v2.mjs` "Y1 (ui): ..." and "Y1: accepting an invite the same person already accepted ...")
+- **THEN** the first press says "A device you chose is not one of your paired devices any more (it may have been signed out), so nothing was joined. Your devices are listed again: choose again, or join without them." with only the other device listed, unticked; the second says "You already joined <workspace>, in another tab or window." with a link to the workspace
 
 #### Scenario: Wrong account or unusable link
 

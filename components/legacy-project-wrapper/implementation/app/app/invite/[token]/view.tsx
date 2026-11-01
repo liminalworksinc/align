@@ -1,6 +1,7 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
-import { api, go, Btn, Card, Err, Loading, Note, Shell, SignInAgain, useAction, useApi, when } from "../../_ui/kit";
+import { api, ApiError, go, Btn, Card, Err, Loading, Note, Shell, signInAgain, useAction, useApi, when } from "../../_ui/kit";
 import type { Me } from "../../_ui/server";
 
 interface Preview {
@@ -16,21 +17,45 @@ interface Preview {
 
 // The owner decision of 2026-11-01: someone joining (or rejoining after being removed) picks which of their paired
 // devices get this workspace. Nothing is ticked for them; ticking needs a recent sign-in, like any device grant.
+// "Sign in again" goes straight to the sign-in page and back here, and a 403 reauth_required on Join says so in place,
+// unticking the devices, so Join (without them) stays on the page (Y2). A refusal says what happened: a ticked device
+// signed out meanwhile (the list is read again), the invite gone, or already joined in another tab (Y1).
 export default function InviteAccept({ me, token, recent }: { me: Me; token: string; recent: boolean }) {
-  const p = useApi<Preview>(`/api/v2/invites/${encodeURIComponent(token)}`);
+  const previewPath = `/api/v2/invites/${encodeURIComponent(token)}`;
+  const p = useApi<Preview>(previewPath);
   const act = useAction();
   const [chosen, setChosen] = useState<string[]>([]);
+  const [joined, setJoined] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const here = `/app/invite/${token}`;
-  if (act.reauth) {
-    return (
-      <Shell me={me}>
-        <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Workspace invite</h1>
-        <SignInAgain me={me} next={here}>
-          {act.reauth} You have not joined yet.
-        </SignInAgain>
-      </Shell>
-    );
-  }
+  // Devices can be ticked only with a sign-in the server still takes as recent.
+  const fresh = recent && !act.reauth;
+  const again = () => {
+    setLeaving(true);
+    void signInAgain(here, me.email);
+  };
+  const join = () =>
+    void act.run(async () => {
+      try {
+        const r = await api<{ workspace_id: string }>(`${previewPath}/accept`, { body: chosen.length ? { device_ids: chosen } : {} });
+        go(`/app/w/${r.workspace_id}`);
+      } catch (e) {
+        if (e instanceof ApiError && e.code === "reauth_required") setChosen([]);
+        if (e instanceof ApiError && e.code === "already_member") {
+          setJoined(true);
+          return;
+        }
+        if (e instanceof ApiError && e.status === 404) {
+          // The invite is still there, so a ticked device was the refusal (signed out meanwhile): list them again.
+          const still = await api<Preview>(previewPath).catch(() => null);
+          setChosen([]);
+          p.reload();
+          if (still && chosen.length) throw new Error(`${e.message} Your devices are listed again: choose again, or join without them.`);
+          throw new Error("This invite can't be used any more: it was withdrawn, it expired, or it was already used. You have not joined. Ask a workspace owner for a new invite if you should be in it.");
+        }
+        throw e;
+      }
+    });
   return (
     <Shell me={me}>
       <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Workspace invite</h1>
@@ -58,10 +83,10 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                     <p className="mb-2 text-[15px] text-zinc-600">
                       Tick the devices that should reach {p.data.workspace.name} too. Each one picks it up the next time it syncs, without signing in again; its other workspaces stay as they are.
                     </p>
-                    {!recent && (
+                    {!fresh && (
                       <Note>
-                        Giving a device this workspace needs a sign-in from the last 15 minutes.{" "}
-                        <button type="button" className="underline" onClick={() => act.setReauth("Sign in again to give a device this workspace. This needs a sign-in from the last 15 minutes.")}>
+                        {act.reauth ? `${act.reauth} You have not joined yet.` : "Giving a device this workspace needs a sign-in from the last 15 minutes."}{" "}
+                        <button type="button" className="underline disabled:opacity-50" disabled={leaving} onClick={again} data-sign-in-again>
                           Sign in again
                         </button>{" "}
                         to choose devices, or join without them.
@@ -71,7 +96,7 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                       <label key={d.id} className="mb-1 flex items-center gap-2 text-[15px]">
                         <input
                           type="checkbox"
-                          disabled={!recent}
+                          disabled={!fresh}
                           checked={chosen.includes(d.id)}
                           onChange={(e) => setChosen((c) => (e.target.checked ? [...c, d.id] : c.filter((x) => x !== d.id)))}
                         />
@@ -82,17 +107,18 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                     ))}
                   </fieldset>
                 )}
-                <Btn
-                  disabled={act.busy}
-                  onClick={() =>
-                    void act.run(async () => {
-                      const r = await api<{ workspace_id: string }>(`/api/v2/invites/${encodeURIComponent(token)}/accept`, { body: chosen.length ? { device_ids: chosen } : {} });
-                      go(`/app/w/${r.workspace_id}`);
-                    })
-                  }
-                >
-                  {chosen.length ? `Join workspace and give it to ${chosen.length === 1 ? "this device" : `these ${chosen.length} devices`}` : "Join workspace"}
-                </Btn>
+                {joined ? (
+                  <Note>
+                    You already joined {p.data.workspace.name}, in another tab or window.{" "}
+                    <Link href={`/app/w/${p.data.workspace.id}`} className="underline">
+                      Open {p.data.workspace.name}
+                    </Link>
+                  </Note>
+                ) : (
+                  <Btn disabled={act.busy || leaving} onClick={join}>
+                    {chosen.length ? `Join workspace and give it to ${chosen.length === 1 ? "this device" : `these ${chosen.length} devices`}` : "Join workspace"}
+                  </Btn>
+                )}
               </>
             ) : (
               <>

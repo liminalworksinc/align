@@ -892,7 +892,12 @@ try {
   const acc = await Promise.all([U2, U3, U4].map((u) => call(u.who, "POST", `/api/v2/invites/${inv[u.who]}/accept`, { cookie: u.cookie, body: {} })));
   check("invites: U2, U3 join A as members, U4 as viewer", acc.every((r) => r.status === 200) && acc[2].json.role === "viewer", acc.map((r) => r.status).join(","));
   const reuse = await call("U2", "POST", `/api/v2/invites/${inv.U2}/accept`, { cookie: U2.cookie, body: {} });
-  check("invites: an invite works once (reuse -> 404)", reuse.status === 404, `${reuse.status}`);
+  const reuseOther = await call("U3", "POST", `/api/v2/invites/${inv.U2}/accept`, { cookie: U3.cookie, body: {} });
+  check(
+    "invites: an invite works once: reused by the person who accepted it -> 409 already_member (Y1: \"You already joined …\"), by anyone else -> 404",
+    reuse.status === 409 && reuse.json?.error === "already_member" && reuseOther.status === 404,
+    `${reuse.status} ${reuse.text} ${reuseOther.status}`,
+  );
   const memberInvite = await call("U3", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U3.cookie, body: { email: "z@example.test", role: "member" } });
   check("rbac: a member creating an invite -> 403 owner_only", memberInvite.status === 403 && memberInvite.json?.error === "owner_only", memberInvite.text);
   const pod = await call("U1", "POST", `/api/v2/workspaces/${A}/teams`, { cookie: U1.cookie, body: { name: "Platform team" } });
@@ -2273,6 +2278,9 @@ try {
   const accRevoked = await accept5(U5, [D5old.id]);
   const accUnknown = await accept5(U5, ["dv_aaaaaaaaaaaaaaaaaaaaaaaa"]);
   const accBadId = await accept5(U5, ["not an id"]);
+  // C5-6: a blank id is malformed too, never dropped into a join without devices.
+  const accBlank = await accept5(U5, [""]);
+  const accBlank2 = await accept5(U5, [D5.id, "  "]);
   const U5stale = await staleOf(U5);
   const accStale = await accept5(U5stale, [D5.id]);
   const out5 = withDb((d) => ({
@@ -2281,11 +2289,12 @@ try {
     d2: d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ? ORDER BY ws_id").all(D2.id).map((r) => r.ws_id).join(),
   }));
   check(
-    "re-invite: accepting with another person's device -> 404, with a revoked or unknown device -> 404, with a malformed id -> 400, with a device and a sign-in older than 15 minutes -> 403 reauth_required (\"Sign in again to give a device this workspace. ...\"); each joins nothing and grants nothing",
-    accOthers.status === 404 && accRevoked.status === 404 && accUnknown.status === 404 && accBadId.status === 400 &&
+    "re-invite: accepting with another person's device -> 404, with a revoked or unknown device -> 404 (the same message for each, saying nothing was joined: Y1), with a malformed id -> 400 (C5-6: a blank one [\"\"] too), with a device and a sign-in older than 15 minutes -> 403 reauth_required (\"Sign in again to give a device this workspace. ...\"); each joins nothing and grants nothing",
+    accOthers.status === 404 && accRevoked.status === 404 && accUnknown.status === 404 && accBadId.status === 400 && accBlank.status === 400 && accBlank2.status === 400 &&
+      accRevoked.json?.message === "A device you chose is not one of your paired devices any more (it may have been signed out), so nothing was joined." && accOthers.json?.message === accRevoked.json?.message &&
       accStale.status === 403 && accStale.json?.error === "reauth_required" && accStale.json?.message === "Sign in again to give a device this workspace. This needs a sign-in from the last 15 minutes." &&
       out5.member === null && out5.grants === 0 && out5.d2 === A && dirs5Before.json?.workspaces?.length === 0,
-    `${accOthers.status} ${accRevoked.status} ${accUnknown.status} ${accBadId.status} ${accStale.text} ${JSON.stringify(out5)} ${dirs5Before.text}`,
+    `${accOthers.status} ${accRevoked.status} ${accRevoked.text} ${accUnknown.status} ${accBadId.status} ${accBlank.status} ${accBlank.text} ${accBlank2.status} ${accStale.text} ${JSON.stringify(out5)} ${dirs5Before.text}`,
   );
   const rejoin = await accept5(U5, [D5.id]);
   const d5MeBack = await call("U5", "GET", "/api/v2/me", { bearer: D5.access });
@@ -6360,6 +6369,79 @@ try {
             JSON.stringify(freshInv.boxes) === JSON.stringify([{ checked: false, disabled: false }]) && !freshInv.text.includes("needs a sign-in from the last 15 minutes") &&
             feGrant === IW && feAudit === FE.id && new URL(pI.url()).pathname === `/app/w/${IW}`,
           `${ivD.status} ${JSON.stringify(staleInv).slice(0, 500)} ${JSON.stringify(freshInv).slice(0, 300)} ${feGrant} ${feAudit} ${pI.url()}`,
+        );
+
+        // Y1, Y2 and Y4 (E2E-WEB cycle 5): the device list is by name; a ticked device signed out meanwhile, and an invite
+        // already used in another tab, each say what happened; Sign in again is one step and Join stays on the page.
+        const FY = await signUp("FY", "Fay Invitee", "fy@webfix.example.test");
+        const IWY = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite Y" } })).json?.id;
+        const ivY = await call("FO", "POST", `/api/v2/workspaces/${IWY}/invites`, { cookie: FO.cookie, body: { email: FY.email, role: "member" } });
+        const fyZ = insertDevice(FY.id, "Fay zeta laptop");
+        const fyA = insertDevice(FY.id, "Fay alpha desktop");
+        // zeta was seen last: a last-seen order would put it first.
+        withDb((d) => {
+          d.prepare("UPDATE v2_devices SET last_seen_at = ? WHERE id = ?").run(new Date(Date.now() - 3600_000).toISOString(), fyA.id);
+          d.prepare("UPDATE v2_devices SET last_seen_at = ? WHERE id = ?").run(new Date().toISOString(), fyZ.id);
+        });
+        const prevY = await call("FY", "GET", `/api/v2/invites/${ivY.json?.token}`, { cookie: FY.cookie });
+        check(
+          "Y4: the invite preview lists the invitee's devices by name (\"Fay alpha desktop\" before \"Fay zeta laptop\", although zeta was seen last), since last seen moves at most every 5 minutes",
+          JSON.stringify(prevY.json?.devices?.map((d) => d.name)) === JSON.stringify(["Fay alpha desktop", "Fay zeta laptop"]),
+          prevY.text.slice(0, 300),
+        );
+        const pY = await as(FY);
+        await open(pY, `/app/invite/${ivY.json?.token}`);
+        await pY.$$eval('main input[type="checkbox"]', (bs) => bs.forEach((b) => b.click()));
+        await pY.waitForFunction(() => [...document.querySelectorAll("main button")].some((b) => b.textContent?.trim() === "Join workspace and give it to these 2 devices"), { timeout: 5000 }).catch(() => undefined);
+        // zeta is signed out in another tab, then Join.
+        withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), fyZ.id));
+        await press(pY, "main", "Join workspace and give it to these 2 devices");
+        await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("Your devices are listed again"), { timeout: 15000 }).catch(() => undefined);
+        await pY.waitForFunction(() => document.querySelectorAll('main input[type="checkbox"]').length === 1, { timeout: 15000 }).catch(() => undefined);
+        const yRevoked = await boxesOf(pY);
+        const yMember = withDb((d) => d.prepare("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?").get(IWY, FY.id) ?? null);
+        check(
+          "Y1 (ui): a ticked device signed out in another tab before Join -> \"A device you chose is not one of your paired devices any more (it may have been signed out), so nothing was joined. Your devices are listed again: …\" (never a bare \"Not found\"); the list is read again (only the device still paired, unticked) and nothing is joined",
+          /A device you chose is not one of your paired devices any more \(it may have been signed out\), so nothing was joined\. Your devices are listed again: choose again, or join without them\./.test(yRevoked.text) && !/Not found/.test(yRevoked.text) &&
+            JSON.stringify(yRevoked.boxes) === JSON.stringify([{ checked: false, disabled: false }]) && yRevoked.text.includes("Fay alpha desktop") && !yRevoked.text.includes("Fay zeta laptop") && yMember === null,
+          `${JSON.stringify(yRevoked).slice(0, 600)} ${JSON.stringify(yMember)}`,
+        );
+        // Joined in another tab first (through the API here), then Join on this page.
+        const yOther = await call("FY", "POST", `/api/v2/invites/${ivY.json?.token}/accept`, { cookie: FY.cookie, body: {} });
+        const yAgain = await call("FY", "POST", `/api/v2/invites/${ivY.json?.token}/accept`, { cookie: FY.cookie, body: {} });
+        const yOtherPerson = await call("FO", "POST", `/api/v2/invites/${ivY.json?.token}/accept`, { cookie: FO.cookie, body: {} });
+        await press(pY, "main", "Join workspace");
+        await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("You already joined"), { timeout: 15000 }).catch(() => undefined);
+        const yJoined = await pY.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", link: document.querySelector('main a[href^="/app/w/"]')?.getAttribute("href") ?? null }));
+        check(
+          "Y1: accepting an invite the same person already accepted (another tab) -> 409 already_member \"You already joined this workspace with this invite, in another tab or window.\" with workspace_id; anyone else still gets 404; the page says \"You already joined Invite Y, in another tab or window.\" and links to the workspace instead of \"Not found\"",
+          yOther.status === 200 && yAgain.status === 409 && yAgain.json?.error === "already_member" && yAgain.json?.message === "You already joined this workspace with this invite, in another tab or window." && yAgain.json?.workspace_id === IWY &&
+            yOtherPerson.status === 404 && yJoined.text.includes("You already joined Invite Y, in another tab or window.") && yJoined.link === `/app/w/${IWY}` && !/Not found/.test(yJoined.text),
+          `${yOther.status} ${yAgain.status} ${yAgain.text} ${yOtherPerson.status} ${JSON.stringify(yJoined).slice(0, 400)}`,
+        );
+        // A 403 reauth_required on Join (the sign-in aged while the page was open) says so in place: the devices are
+        // unticked and disabled, and Join (without them) stays; then Sign in again is one step to the sign-in page.
+        const IWY2 = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite Y two" } })).json?.id;
+        const ivY2 = await call("FO", "POST", `/api/v2/workspaces/${IWY2}/invites`, { cookie: FO.cookie, body: { email: FY.email, role: "member" } });
+        await open(pY, `/app/invite/${ivY2.json?.token}`);
+        await pY.click('main input[type="checkbox"]');
+        ageSession(FY.cookie, 16);
+        await pY.waitForFunction(() => [...document.querySelectorAll("main button")].some((b) => b.textContent?.trim() === "Join workspace and give it to this device"), { timeout: 5000 }).catch(() => undefined);
+        await press(pY, "main", "Join workspace and give it to this device");
+        await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("You have not joined yet"), { timeout: 15000 }).catch(() => undefined);
+        const yReauth = await pY.evaluate(() => ({
+          text: document.querySelector("main")?.innerText ?? "",
+          boxes: [...document.querySelectorAll('main input[type="checkbox"]')].map((b) => ({ checked: b.checked, disabled: b.disabled })),
+          buttons: [...document.querySelectorAll("main button")].map((b) => b.textContent?.trim()),
+        }));
+        await Promise.all([pY.waitForNavigation({ waitUntil: "networkidle0" }).catch(() => undefined), pY.click("[data-sign-in-again]")]);
+        const ySignIn = new URL(pY.url());
+        check(
+          "Y2 (ui): a 403 reauth_required on Join says \"Sign in again to give a device this workspace. … You have not joined yet.\" in place, unticks and disables the devices and keeps \"Join workspace\" on the page; one press of Sign in again opens /app/sign-in with the email and next=the invite",
+          yReauth.text.includes("Sign in again to give a device this workspace. This needs a sign-in from the last 15 minutes. You have not joined yet.") &&
+            JSON.stringify(yReauth.boxes) === JSON.stringify([{ checked: false, disabled: true }]) && yReauth.buttons.includes("Join workspace") && yReauth.buttons.includes("Sign in again") &&
+            ySignIn.pathname === "/app/sign-in" && ySignIn.searchParams.get("next") === `/app/invite/${ivY2.json?.token}` && ySignIn.searchParams.get("email") === FY.email,
+          `${JSON.stringify(yReauth).slice(0, 600)} ${pY.url()}`,
         );
 
         // B6 and B7: every button and select is a 44 px tap target at 390, and nothing scrolls sideways at 320.
