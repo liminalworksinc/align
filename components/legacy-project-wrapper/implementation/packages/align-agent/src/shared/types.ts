@@ -92,6 +92,8 @@ export interface HotState {
   epochs_seen?: string[];
   /** Goal holds on this session that were released (the release directive, who released it, the goal's title). */
   released_holds?: { directive_id: string; goal_title: string; by: string }[];
+  /** The resume directive that lifted this session's stop from the web, while it is the latest word on its latch. */
+  resumed?: string | null;
   updated_at: string;
 }
 
@@ -191,6 +193,8 @@ export interface InjectedState {
   opened_epoch?: { epoch_id: string; goal: GoalSnapshot | null; at: string };
   /** Release directives already told to the model as a context line. */
   releases_told?: string[];
+  /** The resume the model was last told about. */
+  resume_told?: string;
   at: string;
 }
 

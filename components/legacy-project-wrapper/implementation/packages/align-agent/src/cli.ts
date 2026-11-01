@@ -552,6 +552,14 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   kvSet(ctx.db, `signals:${session.local_id}`, values.signals ? "1" : "0");
   await tryFlush(ctx);
   const after = getShare(ctx, session.local_id);
+  if (after?.state === "error" || after?.state === "stopped") {
+    // The server refused it: say why and what to do (the session's own notice has the same words), never "is error." (C3-8).
+    const notice = ctx.db.prepare("SELECT text FROM notices WHERE local_id=? AND id LIKE ? ORDER BY created_at DESC LIMIT 1").get(session.local_id, `${session.local_id}/share_err_%`) as { text: string } | undefined;
+    const why = notice ? notice.text.replace(/^Align: /, "") : `the server refused it (${after.error || after.state}). This session stays private.`;
+    err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${why}`);
+    process.exitCode = 1;
+    return;
+  }
   out(`Session ${session.local_id.slice(0, 8)} is ${after?.state === "pending" ? "queued to share (offline; the next sync retries)" : after?.state}.`);
 }
 
@@ -1070,6 +1078,14 @@ const invokedDirectly = (() => {
 })();
 
 if (invokedDirectly) {
+  // Output into a pipe that closed (`align status | head -3`): stop quietly, as other command-line tools do, instead of
+  // an unhandled EPIPE stack trace (C3-7).
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (e: NodeJS.ErrnoException) => {
+      if (e.code === "EPIPE") process.exit(process.exitCode ?? 0);
+      throw e;
+    });
+  }
   main(process.argv.slice(2)).catch((e) => {
     err(`align: ${(e as Error).message}`);
     process.exitCode = e instanceof UsageError ? 2 : 1;

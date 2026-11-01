@@ -153,11 +153,17 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
       return "enforced";
     }
     case "resume": {
-      const cur = ctx.db.prepare("SELECT seq FROM latches WHERE local_id=?").get(lid) as { seq: number } | undefined;
+      const cur = ctx.db.prepare("SELECT seq, stopped FROM latches WHERE local_id=?").get(lid) as { seq: number; stopped: number } | undefined;
       if (cur && cur.seq >= seq) return "stale";
       ctx.db
         .prepare("INSERT INTO latches(local_id, stopped, directive_id, seq, at) VALUES(?,0,?,?,?) ON CONFLICT(local_id) DO UPDATE SET stopped=0, directive_id=excluded.directive_id, seq=excluded.seq, at=excluded.at")
         .run(lid, d.id, seq, at);
+      // A stop lifted from the web is told at the next prompt, to the user and to the model, which otherwise goes on
+      // believing its tools are blocked.
+      if (cur?.stopped) {
+        kvSet(ctx.db, `resumed:${lid}`, d.id);
+        addNotice(ctx, lid, `resumed_${d.id}`, "Align: this session was resumed from its Align workspace, so its tools work again.");
+      }
       return "applied";
     }
     case "request":

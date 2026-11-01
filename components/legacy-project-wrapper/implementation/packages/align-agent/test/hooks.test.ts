@@ -531,6 +531,23 @@ describe("limits in the envelope and deltas", () => {
 });
 
 describe("accepted asks in context (D3)", () => {
+  test("C3-10: losing membership of the goal's team is not told as accepted asks closing", () => {
+    const { t, ctx } = setup();
+    writeAsksWorld(t, [{ text: "Keep the old flow readable" }]);
+    const sid = "sess-asks-left";
+    shareSession(ctx, "claude-code", sid, LIMITED);
+    assert.match(ctxOf(runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup" }, {}, BLOCK_NET))!, /Keep the old flow readable/);
+    // Taken out of team Core: /me no longer lists it, and the asks feed (kept to the person's teams) drops its asks.
+    const me = JSON.parse(fs.readFileSync(layout.me(t.home), "utf8"));
+    me.workspaces[0].teams = [];
+    writeJsonAtomic(layout.me(t.home), me);
+    writeJsonAtomic(layout.asksFeed(t.home, "ws_1"), { workspace_id: "ws_1", version: "2", etag: '"2"', fetched_at: nowIso(), asks: [] });
+    const note = ctxOf(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "l1", prompt: "go" }, {}, BLOCK_NET))!;
+    assert.equal(note, `[Align] Team "Core": you are no longer in this team, so its accepted asks are no longer shown here; they were not closed. No added authority.`);
+    assert.doesNotMatch(note, /closed \(done/);
+    assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "l2", prompt: "go" }, {}, BLOCK_NET).stdout, "", "told once");
+  });
+
   test("the envelope quotes the accepted asks of the goal's team with attribution, newest first, at most 5 of at most 280 characters; nothing else ever reaches context", () => {
     const { t, ctx } = setup();
     const long = `Keep the onboarding flow working for faculty accounts ${"with care ".repeat(40)}`.slice(0, 400);

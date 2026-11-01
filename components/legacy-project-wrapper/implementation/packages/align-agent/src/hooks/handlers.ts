@@ -15,6 +15,7 @@ import {
   limitsSeen,
   measureKey,
   renderAsksDelta,
+  renderAsksGone,
   renderCard,
   renderContextDelta,
   renderDelta,
@@ -27,7 +28,7 @@ import {
   SAFE_REQUESTS,
   type DeltaKind,
 } from "../shared/envelope.ts";
-import { teamAsks } from "../shared/asks.ts";
+import { myTeams, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
@@ -112,6 +113,10 @@ function asksNote(home: string, ws: string, goalId: string, inj: InjectedState):
   // Closed (done, declined, reopened, withdrawn), not merely pushed past the first five by newer ones.
   const removed = prev.filter((id) => !ids.includes(id) && !(ta.accepted_ids || ids).includes(id)).length;
   inj.asks_seen = { team_id: ta.team.id, ids };
+  // The person left the goal's team (or was taken out of it): its asks are no longer in this machine's feed, which is
+  // not the same as closed (C3-10).
+  const member = myTeams(readJson<MeFile>(layout.me(home)), ws).some((t) => t.id === ta.team.id);
+  if (removed && !member && !added.length) return renderAsksGone(ta);
   return added.length || removed ? renderAsksDelta(ta, added, removed) : null;
 }
 
@@ -489,6 +494,13 @@ function releaseLines(hot: HotState, inj: InjectedState): string[] {
   return fresh.map((r) => `[Align] ${clean(r.by, 50) || "Someone"} released the hold on goal "${clean(r.goal_title, 100)}", so it no longer blocks tools.`);
 }
 
+/** A stop lifted from the web since the model was told it was blocked: one context line, once. */
+function resumeLine(hot: HotState, inj: InjectedState): string | null {
+  if (!hot.resumed || inj.resume_told === hot.resumed) return null;
+  inj.resume_told = hot.resumed;
+  return "[Align] This session was resumed from its Align workspace, so its tools are no longer blocked. Continue the user's task.";
+}
+
 export function userPromptSubmit(home: string, harness: Harness, input: HookInput): HookOutput {
   const sid = input.session_id;
   if (!sid) return null;
@@ -583,6 +595,8 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   if (req.context.length) context = [context, ...req.context].filter(Boolean).join("\n");
   const released = releaseLines(hot, inj);
   if (released.length) context = [context, ...released].filter(Boolean).join("\n");
+  const resumed = resumeLine(hot, inj);
+  if (resumed) context = [context, resumed].filter(Boolean).join("\n");
   const notices = [takeNotices(hot, inj), ...req.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   writeInjected(home, lid, inj);
   if (!context && !notices) return null;

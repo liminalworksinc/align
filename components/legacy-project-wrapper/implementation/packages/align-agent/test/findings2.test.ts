@@ -4,6 +4,7 @@
 // reaches the next prompt, no workspaces is not an error, login survives a transient 5xx, a re-share keeps its goal, a
 // logout while the server is unreachable still revokes the device later, and losing a workspace ends its shares here.
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -24,7 +25,7 @@ import { record } from "../src/hooks/siblings.ts";
 import type { FeedFile, Goal, GoalSnapshot, SpoolRecord, WireRequest } from "../src/shared/types.ts";
 import { ingestSpool } from "../src/sync.ts";
 import { FakeServer } from "./fake-server.ts";
-import { claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runHook, touch, usage, writeLines, type TestEnv } from "./helpers.ts";
+import { CLI, claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runHook, touch, usage, writeLines, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 after(async () => {
@@ -395,6 +396,51 @@ describe("E2E cycle 3: times on the server's clock", () => {
     ctx.db.close();
     const started = Date.parse(fake.sessions.get(skey)!.body.started_at);
     assert.ok(started > Date.now() - 2 * 60_000, `started_at on the server's clock, not 7 minutes early (${new Date(started).toISOString()})`);
+  });
+});
+
+describe("E2E cycle 3: CLI output", () => {
+  test("C3-7: output into a pipe that closed ends quietly (no EPIPE stack trace)", async () => {
+    const { t } = await sharedWorld();
+    const p = spawn(process.execPath, [CLI, "status"], { env: t.env, stdio: ["ignore", "pipe", "pipe"] });
+    p.stdout.destroy(); // `| head -0`: the reader is gone before the first line
+    let stderr = "";
+    p.stderr.on("data", (d) => (stderr += d));
+    const code = await new Promise<number | null>((r) => p.on("close", r));
+    assert.doesNotMatch(stderr, /EPIPE|at out \(/, stderr);
+    assert.equal(code, 0, stderr);
+  });
+
+  test("C3-8: `align share <session> --yes` that the server refuses says why and what to do on stderr and exits 1, never \"is error.\"", async () => {
+    const { fake, t, cwd } = await sharedWorld();
+    const SID = "c3c3c3c3-8888-2222-3333-444444444444";
+    runHook(t, "claude", "SessionStart", { session_id: SID, source: "startup", cwd });
+    const ctx = ctxFor(t);
+    const key = sessionKey(ctx.secret, "ws_acme", "claude-code", SID);
+    ctx.db.close();
+    // Another (never revoked) device holds this session key.
+    fake.sessions.set(key, { ws: "ws_acme", device: "dv_old", body: { harness: "claude-code", started_at: nowIso() }, state: "shared" });
+    const r = await runCli(t, ["share", SID.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"]);
+    assert.equal(r.code, 1, `${r.stdout}\n${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /is error/);
+    assert.match(r.stderr, /^align: session [\w-]{8} was not shared: sharing failed \(not_found\): the server did not take this session from this machine\. .*revoke the old device at http:\/\/127\.0\.0\.1:\d+\/app\/devices/m);
+  });
+});
+
+describe("E2E cycle 3: a web Resume is told", () => {
+  test("a stop lifted from the web is told at the next prompt, once: the user gets a notice and the model a context line", async () => {
+    const { fake, t, SID, cwd, skey } = await sharedWorld();
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [skey], goal: null, binding: null });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(json(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout).hookSpecificOutput.permissionDecision, "deny");
+    prompt(t, SID, "still there?", cwd);
+    fake.pushDirective({ ws: "ws_acme", kind: "resume", session_keys: [skey], goal: null, binding: null });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const told = prompt(t, SID, "go on", cwd);
+    assert.match(told.systemMessage, /Align: this session was resumed from its Align workspace, so its tools work again\./);
+    assert.match(told.hookSpecificOutput.additionalContext, /\[Align\] This session was resumed from its Align workspace, so its tools are no longer blocked\./);
+    assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p-res", prompt: "again", cwd }).stdout, "", "once");
+    assert.equal(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout, "", "tools run");
   });
 });
 
