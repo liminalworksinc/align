@@ -5603,7 +5603,7 @@ try {
     );
     const tiny = await call("AM", "POST", `/api/v2/workspaces/${AW}/sessions/${SA.key}/usage`, { bearer: DM.access, body: { rows: [usageRow(DM, "alloc-a-tiny", SA.ep, { input: 1, output: 0, cache_write_5m: 0 })] } });
     const f2 = await feedAs(DM, f1.headers.get("etag"));
-    check("feed: usage too small to move any share a full point keeps the version (304)", tiny.json?.accepted === 1 && f2.status === 304, `${tiny.text} ${f2.status}`);
+    check("feed: usage too small to move any share a full point, or any gap a tenth of one, keeps the version (304)", tiny.json?.accepted === 1 && f2.status === 304, `${tiny.text} ${f2.status}`);
 
     // -- the owner changes a target in a new version: a goal_version directive carries it --
     const dirs = async (cursor = 0, dev = DM) => (await call(dev.who, "GET", `/api/v2/directives?cursor=${cursor}`, { bearer: dev.access })).json;
@@ -5686,6 +5686,48 @@ try {
       hold.status === 201 && fHeld.json?.goals.find((g) => g.id === ga.id)?.allocation?.held === true && fHeld.json.version !== f3.json.version && fFree.json?.goals.find((g) => g.id === ga.id)?.allocation?.held === false,
       `${hold.status} ${JSON.stringify(fHeld.json?.goals.find((g) => g.id === ga.id)?.allocation)}`,
     );
+
+    // -- C5-2: the feed's gap is the Spend tab's (one decimal), so steering acts exactly where the pill turns amber --
+    {
+      const AW2 = (await call("AO", "POST", "/api/v2/workspaces", { cookie: AO.cookie, body: { name: "Steering gap" } })).json?.id;
+      const g2 = async (title, target) => (await call("AO", "POST", `/api/v2/workspaces/${AW2}/goals`, { cookie: AO.cookie, body: { title, level: "company", target_share: target } })).json;
+      const OVER2 = await g2("Cut CI time in half", 30);
+      const UNDER2 = await g2("Ship 1000 robot arms", 40);
+      const keys = newDeviceKeys();
+      const d = insertDevice(AO.id, "Owner gap laptop");
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, AW2));
+      const DO2 = { ...keys, who: "AO", user: AO, id: d.id, access: d.access };
+      const share2 = async (native, goalId, tokens) => {
+        const key = sessionKey(DO2, AW2, "claude-code", native);
+        await call("AO", "PUT", `/api/v2/workspaces/${AW2}/sessions/${key}`, { bearer: DO2.access, body: { harness: "claude-code", repo_key: repoKey(DO2, AW2, `/src/${native}`), repo_alias: null, started_at: aT0, title: null } });
+        const ep = epochId();
+        await call("AO", "POST", `/api/v2/workspaces/${AW2}/sessions/${key}/epochs`, { bearer: DO2.access, body: { epoch_id: ep, goal_id: goalId, starts_at: aT0, root_turn: null, cause: "manual" } });
+        const up = await call("AO", "POST", `/api/v2/workspaces/${AW2}/sessions/${key}/usage`, { bearer: DO2.access, body: { rows: [usageRow(DO2, `${native}-1`, ep, { input: tokens, output: 0, cache_write_5m: 0 })] } });
+        return { key, ep, accepted: up.json?.accepted };
+      };
+      // 396 + 289 + 315 = 1000 fresh tokens: CI 39.6% of a 30% target (9.6 over), arms 28.9% of 40% (11.1 under).
+      const sOver = await share2("gap-ci", OVER2?.id, 396);
+      const sUnder = await share2("gap-arms", UNDER2?.id, 289);
+      const sNone = await share2("gap-none", null, 315);
+      const feed2 = (await call("AO", "GET", `/api/v2/workspaces/${AW2}/goals`, { bearer: DO2.access })).json;
+      const page2 = (await call("AO", "GET", `/api/v2/workspaces/${AW2}/allocation`, { cookie: AO.cookie })).json;
+      const fOf = (f, id) => f?.goals.find((g) => g.id === id)?.allocation;
+      const pOf = (id) => page2?.window.rows.find((r) => r.goal?.id === id);
+      const { steeringLine } = await import(pathToFileURL(path.join(ROOT, "packages/align-agent/src/shared/steering.ts")).href);
+      const line9 = steeringLine(OVER2?.id, { ...feed2, steering: "on" });
+      // 10 more tokens on CI: 406 of 1010 is 40.2% (10.2 over), arms 28.6% (11.4 under): now steering speaks.
+      const more = await call("AO", "POST", `/api/v2/workspaces/${AW2}/sessions/${sOver.key}/usage`, { bearer: DO2.access, body: { rows: [usageRow(DO2, "gap-ci-2", sOver.ep, { input: 10, output: 0, cache_write_5m: 0 })] } });
+      const feed3 = (await call("AO", "GET", `/api/v2/workspaces/${AW2}/goals`, { bearer: DO2.access })).json;
+      const line10 = steeringLine(OVER2?.id, { ...feed3, steering: "on" });
+      check(
+        "C5-2: the goals feed's gap_7d is the Spend tab's gap to one decimal (CI 39.6% of 30%: share_7d 40, gap_7d 9.6, the page's gap 9.6 \"9 points over\" in grey; arms gap_7d -11.1), so the agent's steeringLine gives no line at 9.6 points; at 10.2 points over (gap_7d 10.2) it gives one",
+        [sOver, sUnder, sNone].every((x) => x.accepted === 1) && more.json?.accepted === 1 &&
+          JSON.stringify(fOf(feed2, OVER2?.id)) === JSON.stringify({ target_share: 30, share_7d: 40, gap_7d: 9.6, held: false }) && fOf(feed2, UNDER2?.id)?.gap_7d === -11.1 && fOf(feed2, UNDER2?.id)?.share_7d === 29 &&
+          pOf(OVER2?.id)?.gap === fOf(feed2, OVER2?.id)?.gap_7d && pOf(UNDER2?.id)?.gap === fOf(feed2, UNDER2?.id)?.gap_7d &&
+          line9 === null && fOf(feed3, OVER2?.id)?.gap_7d === 10.2 && line10?.goal_id === OVER2?.id && line10.suggested_goal_id === UNDER2?.id && line10.share === 40 && line10.target === 30,
+        `${JSON.stringify([fOf(feed2, OVER2?.id), fOf(feed2, UNDER2?.id), pOf(OVER2?.id)?.gap, pOf(UNDER2?.id)?.gap, line9, fOf(feed3, OVER2?.id), line10])}`,
+      );
+    }
 
     // -- reallocations: new targets for several goals; each goal's approval set approves, then someone launches --
     const rl = (u, body) => aa(u, "POST", "/reallocations", body);

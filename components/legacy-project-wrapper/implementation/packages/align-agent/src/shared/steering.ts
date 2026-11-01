@@ -2,7 +2,10 @@
 // Steering: when the workspace has it on, a shared session that starts on a goal at least STEER_GAP points over its
 // target, while another goal it can see is at least STEER_GAP points under, gets one line naming both shares, once.
 // Targets are launched goal content (the cached feed has only launched versions); a goal on hold is never steered
-// from or toward, and a stopped or held session gets no line. It names goals and whole percents, never people. Each
+// from or toward, and a stopped or held session gets no line. The gap is the feed's `gap_7d` as the server sends it, to
+// one decimal (the web app's Spend tab gap), compared as is: never recomputed from the whole-percent share_7d, which
+// would make 39.6% of a 30% target read as 10 points over while the Spend tab says "9 points over" (E2E-WEB cycle 5,
+// C5-2). It names goals and whole percents, never people. Each
 // line shown is queued as a small file and reported by the next sync pass (src/allocation.ts) so the workspace can
 // count them.
 import crypto from "node:crypto";
@@ -26,7 +29,8 @@ export interface SteeringPick {
   target: number;
 }
 
-/** The one steering line for a session bound to `goalId`, or null. Pure: same feed in, same answer out. */
+/** The one steering line for a session bound to `goalId`, or null: the bound goal at least STEER_GAP points over its
+ *  target and another at least STEER_GAP under, by the feed's exact gap_7d. Pure: same feed in, same answer out. */
 export function steeringLine(goalId: string, feed: FeedFile | null): SteeringPick | null {
   if (!feed || feed.steering !== "on") return null;
   const goal = feed.goals.find((g) => g.id === goalId);

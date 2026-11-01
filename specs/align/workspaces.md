@@ -1254,8 +1254,9 @@ epoch it was uploaded with, rolled-up days by goal as in the spend report. `wind
 7 days before `to`, or before now) as `{from, to, total_fresh_tokens, total_est_list_usd_micros, unpriced_requests,
 rows, note}`, where each row is `{kind, goal, fresh_tokens, share, target_share, gap, est_list_usd_micros,
 unpriced_requests, sessions}`: one `goal` row per goal the caller can read that had usage or is active with a target
-(its `share` of the total in percent to one decimal, its target while active, and `gap` = share minus target, `null`
-without a target), one unnamed `private` row for goals the caller cannot read (no target shown), and one `unallocated`
+(its `share` of the total in percent to one decimal, its target while active, and `gap` = share minus target, to one
+decimal, `null` without a target; the goals feed sends devices this same gap for the trailing 7 days as
+`allocation.gap_7d`, so the Spend tab's pill and the agents' steering agree on 10 points), one unnamed `private` row for goals the caller cannot read (no target shown), and one `unallocated`
 row for usage bound to no goal, so that the rows' fresh tokens add up to the total. `weekly` holds the last `weeks`
 calendar weeks (default 6, 1 to 26; weeks start Monday 00:00 UTC), oldest first, each `{week_start,
 total_fresh_tokens, rows:[{kind, goal, share, target_share}]}`; `steering` is `{steering, total, days:[{day, n}]}`, the

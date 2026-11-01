@@ -74,6 +74,19 @@ describe("steering decision (pure)", () => {
     assert.equal(steeringLine(OVER.id, feedOf([OVER])), null, "nothing under target");
   });
 
+  test("the feed's exact gap decides, never the rounded share (C5-2): 9.6 points over is no line, 10 is one", () => {
+    // 39.6% of a 30% target: share_7d rounds to 40, but the gap the server sends (and the Spend tab shows) is 9.6.
+    const nearly = goal("g_ci", "Cut CI time in half", { target_share: 30, share_7d: 40, gap_7d: 9.6 });
+    const arms = goal("g_arms", "Ship 1000 robot arms", { target_share: 40, share_7d: 29, gap_7d: -11.1 });
+    assert.equal(steeringLine(nearly.id, feedOf([nearly, arms])), null, "9.6 points over is under the 10-point threshold");
+    const at10 = goal("g_ci", "Cut CI time in half", { target_share: 30, share_7d: 40, gap_7d: 10 });
+    const pick = steeringLine(at10.id, feedOf([at10, arms]));
+    assert.equal(pick?.suggested_goal_id, "g_arms");
+    assert.equal(pick?.share, 40, "the line and the report still carry whole percents");
+    const barelyUnder = goal("g_arms", "Ship 1000 robot arms", { target_share: 40, share_7d: 30, gap_7d: -9.6 });
+    assert.equal(steeringLine(at10.id, feedOf([at10, barelyUnder])), null, "9.6 points under is not a goal to steer toward");
+  });
+
   test("a goal on hold is never steered from or toward; the next goal under target is named instead", () => {
     const held = (g: Goal): Goal => ({ ...g, allocation: { ...g.allocation!, held: true } });
     assert.equal(steeringLine(OVER.id, feedOf([held(OVER), UNDER])), null, "the bound goal is held");
