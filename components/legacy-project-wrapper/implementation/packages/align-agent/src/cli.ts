@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
+import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import {
   api,
   clockWords,
@@ -137,13 +137,55 @@ function resolveSession(ctx: Ctx, ref: string | undefined, opts: { latest?: bool
   }
   if (!ref) throw new UsageError("missing <session>; use a session id, a prefix, or --latest");
   const rows = ctx.db
-    .prepare("SELECT * FROM sessions WHERE local_id=? OR native_id=? OR local_id LIKE ? OR native_id LIKE ? ORDER BY last_active DESC")
-    .all(ref, ref, `${ref}%`, `${ref}%`) as unknown as SessionListRow[];
+    .prepare(`SELECT * FROM sessions WHERE ${PREFIX_MATCH} ORDER BY last_active DESC`)
+    .all({ ref }) as unknown as SessionListRow[];
   const exact = rows.filter((r) => r.local_id === ref || r.native_id === ref);
   if (exact.length === 1) return exact[0];
   if (rows.length === 1) return rows[0];
   if (!rows.length) throw new UsageError(`no session matches "${ref}"`);
   throw new UsageError(`"${ref}" matches ${rows.length} sessions; use more characters`);
+}
+
+/** A session whose local or native id starts with `:ref`, compared exactly: LIKE would ignore case, which base64url
+ *  ids need, and read their `_` as any character. */
+const PREFIX_MATCH = "substr(local_id, 1, length(:ref)) = :ref OR substr(native_id, 1, length(:ref)) = :ref";
+
+/** Is `arg` an id or id prefix of a session this machine metered (one the hooks only spooled so far included)? */
+function isSessionRef(ctx: Ctx, arg: string): boolean {
+  const known = () => !!ctx.db.prepare(`SELECT 1 FROM sessions WHERE ${PREFIX_MATCH} LIMIT 1`).get({ ref: arg });
+  if (known()) return true;
+  ingestSpool(ctx);
+  return known();
+}
+
+/**
+ * parseArgs for a command that takes a session. Local ids are base64url, so one session in 64 has an id, and so the
+ * 8-character prefix every hint prints (`align stop-sharing <id>`), that starts with "-": an argument that is not one
+ * of the command's options but names a session here is that session, not an unknown option, and so is the value of a
+ * string option (`--session -AbC1234`). Anything else that starts with "-" is still refused as an unknown option.
+ */
+function parseSessionArgs<T extends ParseArgsOptionsConfig>(ctx: Ctx, argv: string[], options: T) {
+  const optionName = (a: string): string | null => {
+    if (a.startsWith("--")) {
+      const name = a.slice(2).split("=")[0];
+      return Object.hasOwn(options, name) ? name : null;
+    }
+    return Object.keys(options).find((k) => options[k].short && a === `-${options[k].short}`) ?? null;
+  };
+  const opts: string[] = [];
+  const positionals: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--") {
+      positionals.push(...argv.slice(i + 1));
+      break;
+    }
+    const name = a.length > 1 && a.startsWith("-") ? optionName(a) : null;
+    if (name && options[name].type === "string" && !a.includes("=") && i + 1 < argv.length && !optionName(argv[i + 1])) opts.push(`--${name}=${argv[++i]}`);
+    else if (name || (a.length > 1 && a.startsWith("-") && !isSessionRef(ctx, a))) opts.push(a);
+    else positionals.push(a);
+  }
+  return parseArgs({ args: [...opts, "--", ...positionals], options, allowPositionals: true });
 }
 
 function realpath(p: string): string {
@@ -477,21 +519,17 @@ async function goalFor(ctx: Ctx, wsId: string, ref: string): Promise<Goal | null
 }
 
 async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      latest: { type: "boolean" },
-      cwd: { type: "string" },
-      dir: { type: "boolean" },
-      workspace: { type: "string" },
-      goal: { type: "string" },
-      alias: { type: "string" },
-      from: { type: "string" },
-      signals: { type: "boolean" },
-      past: { type: "string" },
-      yes: { type: "boolean", short: "y" },
-    },
+  const { values, positionals } = parseSessionArgs(ctx, argv, {
+    latest: { type: "boolean" },
+    cwd: { type: "string" },
+    dir: { type: "boolean" },
+    workspace: { type: "string" },
+    goal: { type: "string" },
+    alias: { type: "string" },
+    from: { type: "string" },
+    signals: { type: "boolean" },
+    past: { type: "string" },
+    yes: { type: "boolean", short: "y" },
   });
   await needLogin(ctx);
   if (!values.goal) throw new UsageError("--goal <ref|none> is required");
@@ -662,12 +700,12 @@ async function cmdConfig(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 async function cmdStopSharing(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values: dv, positionals: dp } = parseArgs({ args: argv, allowPositionals: true, options: { dir: { type: "boolean" } } });
+  const { values: dv, positionals: dp } = parseSessionArgs(ctx, argv, { dir: { type: "boolean" } });
   if (dv.dir) {
     const removed = removeRule(ctx.home, dp[0] || process.cwd());
     return out(removed ? `New sessions in ${removed.dir} are private again. Already shared sessions keep sharing until you stop them.` : "No folder rule covers that folder.");
   }
-  const { positionals } = parseArgs({ args: argv, allowPositionals: true, options: {} });
+  const { positionals } = parseSessionArgs(ctx, argv, {});
   prepare(ctx);
   const s = resolveSession(ctx, positionals[0]);
   stopSharing(ctx, s.local_id);
@@ -676,7 +714,7 @@ async function cmdStopSharing(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 async function cmdDeleteHistory(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { yes: { type: "boolean", short: "y" } } });
+  const { values, positionals } = parseSessionArgs(ctx, argv, { yes: { type: "boolean", short: "y" } });
   prepare(ctx);
   const s = resolveSession(ctx, positionals[0]);
   out("This hard-deletes this session's shared usage and epochs on the server. Goal and workspace totals will change. Local metering is kept.");
@@ -687,7 +725,7 @@ async function cmdDeleteHistory(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 async function cmdBind(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { goal: { type: "string" } } });
+  const { values, positionals } = parseSessionArgs(ctx, argv, { goal: { type: "string" } });
   prepare(ctx);
   if (!values.goal) throw new UsageError("--goal <ref|none> is required");
   const s = resolveSession(ctx, positionals[0]);
@@ -740,7 +778,7 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
 
 /** `align requests`: what people who can approve a session's goal asked of it, and the developer's answers. */
 async function cmdRequests(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { all: { type: "boolean" }, json: { type: "boolean" }, session: { type: "string" } } });
+  const { values, positionals } = parseSessionArgs(ctx, argv, { all: { type: "boolean" }, json: { type: "boolean" }, session: { type: "string" } });
   ingestSpool(ctx);
   const [sub, ref] = positionals;
   if (!sub) {

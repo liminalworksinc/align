@@ -31,7 +31,7 @@ const FAST = { ALIGN_DEVICE_POLL_SCALE_MS: "10", ALIGN_OUTBOX_MAX_BACKOFF_MS: "2
 const json = (s: string) => (s ? JSON.parse(s) : null);
 
 /** A signed-in device with one session shared toward g_ship on the fake server. */
-async function sharedWorld() {
+async function sharedWorld(sid?: string) {
   const fake = new FakeServer();
   await fake.start();
   const t = makeEnv({ ALIGN_SERVER: fake.url, ...FAST });
@@ -39,7 +39,7 @@ async function sharedWorld() {
   cleanups.push(() => fake.stop());
   const login = await runCli(t, ["login", "--name", "Test Mac"]);
   assert.equal(login.code, 0, login.stderr);
-  const SID = `cccccccc-1111-2222-3333-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
+  const SID = sid ?? `cccccccc-1111-2222-3333-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
   const cwd = path.join(t.root, "repo");
   fs.mkdirSync(cwd, { recursive: true });
   runHook(t, "claude", "SessionStart", { session_id: SID, source: "startup", cwd });
@@ -51,6 +51,14 @@ async function sharedWorld() {
   const skey = sessionKey(ctx.secret, "ws_acme", "claude-code", SID);
   ctx.db.close();
   return { fake, t, SID, cwd, skey, lid: localId("claude-code", SID) };
+}
+
+/** A Claude Code session id whose local id starts with `prefix` (base64url: one in 64 starts with "-"). */
+function sidWithLocalPrefix(prefix: string): string {
+  for (let i = 0; ; i++) {
+    const sid = `dddddddd-1111-2222-3333-${i.toString(16).padStart(12, "0")}`;
+    if (localId("claude-code", sid).startsWith(prefix)) return sid;
+  }
 }
 
 const directiveGets = (fake: FakeServer) => fake.log.filter((l) => l.method === "GET" && l.path === "/api/v2/directives").length;
@@ -160,11 +168,45 @@ describe("E2E findings: server side of the agent", () => {
     assert.match((await runCli(t, ["status"])).stdout, /Stop latch: 1 session\(s\) stopped; 1 can't be lifted from the web any more/);
     assert.match(json(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p10", prompt: "::align status", cwd }).stdout).reason, new RegExp(`sharing ended, so run \`align stop-sharing ${id8}\``));
     // Signing in again does not bring the old share back as shared.
-    assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    const relogin = await runCli(t, ["login", "--name", "Test Mac"]);
+    assert.equal(relogin.code, 0, `${relogin.stdout}\n${relogin.stderr}`);
     assert.doesNotMatch((await runCli(t, ["sessions"])).stdout, /shared \(Acme\)/);
     // The way out works.
     assert.equal((await runCli(t, ["stop-sharing", id8])).code, 0);
     assert.equal(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout, "");
+  });
+
+  test("a session whose id starts with \"-\": the `align stop-sharing <id>` the deny names works, and so do the other commands that take a session", async () => {
+    // The B4/G2/B6 flake: its random session id gave a local id starting with "-" one run in 64, and the CLI read the
+    // printed prefix as an unknown option (exit 1).
+    const { fake, t, SID, cwd, skey, lid } = await sharedWorld(sidWithLocalPrefix("-"));
+    const id8 = lid.slice(0, 8);
+    assert.ok(id8.startsWith("-"), id8);
+    // "--" too, and a session the hooks only spooled so far: `share` reads it as the session, not an unknown option.
+    const SID2 = sidWithLocalPrefix("--");
+    runHook(t, "claude", "SessionStart", { session_id: SID2, source: "startup", cwd });
+    const two = await runCli(t, ["share", localId("claude-code", SID2).slice(0, 8), "--workspace", "Acme", "--goal", "none", "--yes"]);
+    assert.equal(two.code, 0, `${two.stdout}\n${two.stderr}`);
+    assert.match(two.stdout, /is shared\./);
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [skey], goal: null, binding: null });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal((await runCli(t, ["logout"])).code, 0);
+    const deny = json(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout);
+    assert.ok(deny.hookSpecificOutput.permissionDecisionReason.includes(`runs \`align stop-sharing ${id8}\``));
+    for (const args of [["requests", "--session", id8], ["requests", `--session=${id8}`], ["delete-history", id8, "--yes"]]) {
+      const r = await runCli(t, args);
+      assert.equal(r.code, 0, `${args.join(" ")}: ${r.stdout}\n${r.stderr}`);
+    }
+    const bind = await runCli(t, ["bind", id8, "--goal", "none"]);
+    assert.match(bind.stderr, /session is not shared/, "the id resolves to the session (which signed out)");
+    // An option the command doesn't have is still refused as one.
+    const bogus = await runCli(t, ["stop-sharing", "--bogus"]);
+    assert.equal(bogus.code, 1);
+    assert.match(bogus.stderr, /Unknown option '--bogus'/);
+    const out = await runCli(t, ["stop-sharing", id8]);
+    assert.equal(out.code, 0, `${out.stdout}\n${out.stderr}`);
+    assert.match(out.stdout, /Stopped sharing\./);
+    assert.equal(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout, "", "unblocked");
   });
 
   test("B4: a new `align login` over a live pairing revokes the old device and ends its shares", async () => {

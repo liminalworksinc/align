@@ -59,7 +59,8 @@ seconds (always at the end of a turn) a hook starts a detached `align sync --hoo
 | `align sync [--hook] [--settle <ms>]` | One pass: spool, transcripts, outbox, directives, usage, feeds, activity | uploads need it |
 | `align doctor` | Health checks and hook latency | no |
 
-`<session>` is a local id, a native session id, a unique prefix of either, or `latest`.
+`<session>` is a local id, a native session id, a unique prefix of either, or `latest`. Prefixes match exactly, case
+included.
 
 In a session the user can type `::align status`, `::align goals`, `::align share [--dir] [--signals] [goal]
 [confirm]`, `::align bind <goal>`, `::align unshare [--dir]`, `::align task <label>`, `::align claim <file> [why]`,
@@ -119,6 +120,27 @@ option given without its value (so `--cwd` needs a folder argument, or `--cwd=` 
 
 - **WHEN** the user runs `align bind ab --goal g_x` and the prefix `ab` matches two local sessions
 - **THEN** stderr reads `align: "ab" matches 2 sessions; use more characters` and the exit code is 2
+
+### Requirement: Session references that start with a dash
+
+Local ids are base64url, so about one session in 64 has a local id, and so the 8-character prefix that the hooks'
+notices, the deny reasons and `align latch status` print in `align stop-sharing <session>`, that starts with `-`. The
+commands that take a `<session>` (`align share`, `align stop-sharing`, `align unshare`, `align delete-history`,
+`align bind` and `align requests --session`) SHALL read an argument that is not one of their own options but is the id,
+or an id prefix, of a session this machine metered (one the hooks have only spooled included) as that session, not as
+an unknown option, and SHALL accept such a reference as a string option's value (`--session -AbC1234`). Any other
+argument that starts with `-` and is not one of the command's options SHALL still be refused as an unknown option.
+
+#### Scenario: Stop sharing a session whose id starts with a dash
+
+- **WHEN** a session's local id starts with `-`, it was stopped from the web, this machine signed out, and the user
+  runs the `align stop-sharing -puOFSTx` that its deny reason names
+- **THEN** the share stops, the stop latch is lifted, and the exit code is 0
+
+#### Scenario: An unknown option is still refused
+
+- **WHEN** the user runs `align stop-sharing --bogus` and no session's id starts with `--bogus`
+- **THEN** stderr names the unknown option `--bogus` and the exit code is 1
 
 ### Requirement: Private, owner-only state directory
 
