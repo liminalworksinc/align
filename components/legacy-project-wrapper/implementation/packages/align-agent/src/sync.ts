@@ -26,9 +26,9 @@ import {
   type RevokeOutcome,
 } from "./api.ts";
 import { bumpGap, nowIso, tx } from "./db.ts";
-import { ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
+import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { applyShare, bind, endSharesIfSignedOut, enqueue, forgetShare, planShare, stopSharing } from "./share.ts";
+import { applyShare, bind, endSharesIfSignedOut, enqueue, forgetShare, markStopped, planShare, stopSharing } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -298,7 +298,7 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
         return;
       }
       if (r.status === 409 && r.json?.error === "sharing_stopped") {
-        ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=COALESCE(stopped_at, ?) WHERE local_id=?").run(nowIso(), lid);
+        markStopped(ctx, lid);
         ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
         // Its sharing was stopped (by the developer, or on the web): the server never shares a stopped session again,
         // whichever of the account's devices asks, so no "revoke the old device" here (C4-8).
@@ -309,6 +309,7 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       }
       if (r.status === 400 && r.json?.error === "clock_skew") {
         ctx.db.prepare("UPDATE shares SET state='error', error=? WHERE local_id=?").run("clock_skew", lid);
+        endEpochs(ctx.db, lid, nowIso());
         ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
         dropShareStarted(ctx, lid);
         addNotice(ctx, lid, `share_err_${item.id}`, `Align: sharing failed because this computer's clock is off (${String(r.json?.message || "clock_skew").replace(/\.$/, "")}). Set the system clock to update automatically, then type \`::align share\` here again. This session stays private.`);
@@ -320,6 +321,7 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
         // notice. Otherwise say why the server refused it, and what to do.
         if (!(await hasWorkspace(ctx, p.ws))) return;
         ctx.db.prepare("UPDATE shares SET state='error', error=? WHERE local_id=?").run(r.json?.error || `http_${r.status}`, lid);
+        endEpochs(ctx.db, lid, nowIso());
         ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
         dropShareStarted(ctx, lid);
         addNotice(ctx, lid, `share_err_${item.id}`, shareRefusal(ctx, r.status, r.json?.error ?? null));
@@ -496,7 +498,7 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
           // This machine may have lost access to the workspace: that ends its shares there, with their own notice.
           if ((r.status === 403 || r.status === 404) && !(await hasWorkspace(ctx, s.workspace_id))) break;
           if (r.json?.error === "sharing_stopped" || r.json?.error === "not_shared" || r.status === 404) {
-            ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=COALESCE(stopped_at, ?) WHERE local_id=?").run(nowIso(), s.local_id);
+            markStopped(ctx, s.local_id);
             // Never silently: the session hears that its sharing ended and that usage now stays here.
             addNotice(
               ctx,

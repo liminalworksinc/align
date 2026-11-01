@@ -1210,12 +1210,21 @@ time to catch up.
 ### Requirement: Usage upload
 
 The server SHALL accept usage from the sharing device on `POST .../sessions/{key}/usage {rows}` (at most 500 rows and
-256 KB), store each row once by its `request_key`, and never overwrite a stored row.
+256 KB), store each row once by its `request_key`, and never overwrite a stored row. A row whose `ts` is at or after
+the end of the epoch it names, at a time no epoch of the session covers (its share had ended, by a stop, a removal or a
+revoked device, and the session was shared again only later), was made while the session was not shared: it SHALL be a
+conflict, counted on the session and never stored, so a re-share never brings in the gap. A row from after its epoch
+ended while a later epoch of the session was open is the tail of a turn that started in its epoch, and is stored.
 
 #### Scenario: Usage batch
 
 - **WHEN** a device POSTs rows for its session
 - **THEN** the response is `{accepted, duplicates, conflicts}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for an epoch this session does not have is a conflict that is counted on the session and never stored
+
+#### Scenario: Usage from while a session was not shared
+
+- **WHEN** a member's session ends when they are removed, they are let back in, their device shares it again with a new epoch starting 2 seconds after the old one ended, and uploads rows naming the old epoch from 1 second before its end, 1 second after it and 2.5 seconds after it, and one naming the new epoch from 2.5 seconds after (`scripts/test-v2.mjs` "usage (C5-1): a row naming an epoch that ended ...")
+- **THEN** the response is `{accepted: 3, conflicts: 1}`, the session's conflicts grow by one, and only the row from the gap is not stored
 
 #### Scenario: Oversized batch
 

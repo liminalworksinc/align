@@ -1092,10 +1092,12 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${already ? "" : " This session too; your next prompt carries the goal."} \`::align unshare --dir\` turns it off.`;
       }
       if (!confirm) {
+        // Shared before (its share ended): the new share counts from now, as the sync then shares it (C5-1).
+        const from = hot?.share ? "now" : "session start";
         return [
           `Align share preview for this session (nothing uploaded yet):`,
           `  Workspace: ${feed?.workspace_name || "your default workspace"}`,
-          `  Goal: ${goal ? `${goal.title}${before ? " (the goal it had before)" : ""}` : "none (unallocated)"}; counts from session start.`,
+          `  Goal: ${goal ? `${goal.title}${before ? " (the goal it had before)" : ""}` : "none (unallocated)"}; counts from ${from}.`,
           `  Sent: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
           `  Never sent: prompts, responses, tool input or output, paths, branch names.`,
           `Type \`::align share ${arg ? `${arg} ` : ""}confirm\` to share.`,

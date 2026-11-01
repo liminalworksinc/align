@@ -266,25 +266,37 @@ export interface EpochRow {
   root_turn: string | null;
   cause: string;
   synced: number;
+  /** When the share ended (null while it lasts, or when a later epoch of the same share took over). */
+  ends_at: string | null;
 }
 
 /**
  * The epoch active at a request's root turn. Root turn time comes from the hook spool or transcript prompts; when the
  * root turn is unknown the request's own timestamp is used. Epochs opened at a root turn start at that turn's time.
+ * An epoch whose share ended holds nothing from its end on: a request whose root turn or own time is at or after that
+ * end was made while the session was not shared, so it has no epoch and stays on this machine, also after the session
+ * is shared again (that share counts from its own start, C5-1).
  */
 export function epochFor(db: Db, lid: string, rootTurn: string | null, ts: string | null): EpochRow | null {
   let at: string | null = null;
+  let e: EpochRow | null = null;
   if (rootTurn) {
-    const e = db.prepare("SELECT * FROM epochs WHERE local_id=? AND root_turn=? ORDER BY rowid DESC LIMIT 1").get(lid, rootTurn) as unknown as EpochRow | undefined;
-    if (e) return e;
-    const r = db.prepare("SELECT ts FROM root_turns WHERE local_id=? AND root_turn=?").get(lid, rootTurn) as { ts: string } | undefined;
-    if (r) at = r.ts;
+    e = (db.prepare("SELECT * FROM epochs WHERE local_id=? AND root_turn=? ORDER BY rowid DESC LIMIT 1").get(lid, rootTurn) as unknown as EpochRow | undefined) || null;
+    if (!e) {
+      const r = db.prepare("SELECT ts FROM root_turns WHERE local_id=? AND root_turn=?").get(lid, rootTurn) as { ts: string } | undefined;
+      if (r) at = r.ts;
+    }
   }
-  if (!at) at = ts;
-  if (!at) return null;
-  return (
-    (db
-      .prepare("SELECT * FROM epochs WHERE local_id=? AND starts_at<=? ORDER BY starts_at DESC, rowid DESC LIMIT 1")
-      .get(lid, at) as unknown as EpochRow | undefined) || null
-  );
+  if (!e) {
+    if (!at) at = ts;
+    if (!at) return null;
+    e = (db.prepare("SELECT * FROM epochs WHERE local_id=? AND starts_at<=? ORDER BY starts_at DESC, rowid DESC LIMIT 1").get(lid, at) as unknown as EpochRow | undefined) || null;
+  }
+  if (e?.ends_at && ((at && at >= e.ends_at) || (ts && ts >= e.ends_at))) return null;
+  return e;
+}
+
+/** The share of session `lid` ended at `at`: its epochs still open end there (C5-1). */
+export function endEpochs(db: Db, lid: string, at: string): void {
+  db.prepare("UPDATE epochs SET ends_at=? WHERE local_id=? AND ends_at IS NULL").run(at, lid);
 }

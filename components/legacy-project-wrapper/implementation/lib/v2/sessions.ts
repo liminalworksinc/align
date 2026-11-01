@@ -316,12 +316,24 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
   const rows = b.rows.map(usageRowIn);
   const at = nowIso();
   return tx(() => {
-    const epochs = new Set(all<{ epoch_id: string }>("SELECT epoch_id FROM v2_epochs WHERE ws_id = ? AND session_key = ?", pp.wsId, key).map((e) => e.epoch_id));
+    const list = all<{ epoch_id: string; starts_at: string; ends_at: string | null }>("SELECT epoch_id, starts_at, ends_at FROM v2_epochs WHERE ws_id = ? AND session_key = ?", pp.wsId, key);
+    const epochs = new Map(list.map((e) => [e.epoch_id, e]));
+    // Whether some epoch of this session was open at `t`, i.e. the session was shared then.
+    const shared = (t: number) => list.some((e) => Date.parse(e.starts_at) <= t && (e.ends_at === null || t < Date.parse(e.ends_at)));
     let accepted = 0;
     let duplicates = 0;
     let conflicts = 0;
     for (const r of rows) {
-      if (!epochs.has(r.epoch_id as string)) {
+      const e = epochs.get(r.epoch_id as string);
+      if (!e) {
+        conflicts++;
+        continue;
+      }
+      // A row from after its epoch ended, at a time no epoch of this session covers, was made while the session was not
+      // shared (its share had ended and it was shared again later): it is never stored (C5-1). A row from after its
+      // epoch ended while a later epoch was open is the tail of a turn that started in its epoch, and counts there.
+      const t = Date.parse(r.ts as string);
+      if (e.ends_at !== null && t >= Date.parse(e.ends_at) && !shared(t)) {
         conflicts++;
         continue;
       }

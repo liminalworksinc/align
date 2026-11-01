@@ -602,6 +602,28 @@ default (`--from now` counts from now) and from now when the session was shared 
 - **WHEN** the user runs `align share --latest --workspace Acme --goal "Ship the v2" --yes` (test `e2e` "login, share, usage, ...")
 - **THEN** the server receives `PUT .../sessions/<session_key>` with `harness` and a 43-character `repo_key` but no path, an epoch for goal `g_ship`, and the session's existing finalized usage rows, and stdout ends with `Session <id8> is shared.` (or `queued to share (offline; the next sync retries)`)
 
+### Requirement: Usage from while a session was not shared stays on this machine
+
+When a session's share ends on this machine (stopped, its sharing stopped on the server, signed out, its workspace lost,
+or the share refused), its epochs SHALL end there at the time it ended (an epoch from before this was kept ends when
+the session is shared again, at the time its share stopped). A request SHALL be assigned only to an epoch whose
+interval holds both its root turn's time and its own time; one made at or after its epoch's end, while the session was
+not shared, SHALL be assigned to none and stay on this machine for good, also after the session is shared again: that
+share counts from its own start (now, as for every session shared before), never from the earlier epoch. So the notices
+that say a session's usage `stays on this machine from now on` hold. `::align share`'s preview SHALL say `counts from
+now.` for a session shared before (`counts from session start.` otherwise), as the share's confirmation notice
+(`..., counting from now.`) does.
+
+#### Scenario: A turn made after the workspace was lost
+
+- **WHEN** a shared session's person is removed from its workspace (a sync ends the share), a turn is made, the workspace is given back, and the developer types `::align share`, `::align share confirm`, and makes another turn, with a sync after each (test `findings5` "lost access, a turn, the workspace given back and `::align share confirm` ...")
+- **THEN** the preview says `counts from now.`, the turn made in between is never uploaded and has no epoch locally, and the turn after the re-share goes up under the new epoch
+
+#### Scenario: A turn made while signed out
+
+- **WHEN** a shared session's machine runs `align logout`, a turn is made, `align login` runs and the developer types `::align share confirm`, also when the ended share's epochs were left with no end by an earlier agent (test `findings5` "logout, a turn, login and `::align share confirm` ...")
+- **THEN** the turn made while signed out is never uploaded, and the next turn is uploaded
+
 ### Requirement: Folder share rules
 
 The `align share --dir [<folder>]` command SHALL store, after confirmation, a local rule in `~/.align/rules.json`

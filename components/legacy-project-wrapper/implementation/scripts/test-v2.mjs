@@ -2552,6 +2552,26 @@ try {
       `${againB.text} ${JSON.stringify(rowC)}`,
     );
 
+    // C5-1: shared again, it counts from the new epoch on. Usage from after the old epoch ended (at the removal) and
+    // before the new one started was made while the session was not shared: a conflict, never stored. Usage from before
+    // the end, or from a time the new epoch covers (the tail of a turn that started before the end), is stored.
+    const oldB = withDb((d) => d.prepare("SELECT epoch_id, ends_at FROM v2_epochs WHERE ws_id = ? AND session_key = ? ORDER BY starts_at DESC LIMIT 1").get(CW, SB));
+    const endB = Date.parse(oldB?.ends_at ?? "");
+    const isoAt = (ms) => new Date(endB + ms).toISOString();
+    const newB = epochId();
+    const reEp = await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/epochs`, { bearer: DC.access, body: { epoch_id: newB, goal_id: CG.id, starts_at: isoAt(2000), root_turn: null, cause: "manual" } });
+    const conflictsB = () => withDb((d) => d.prepare("SELECT conflicts FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(CW, SB))?.conflicts ?? -1;
+    const cBefore = conflictsB();
+    const gapRows = [usageRow(DC, "c51-before-end", oldB?.epoch_id, { ts: isoAt(-1000) }), usageRow(DC, "c51-gap", oldB?.epoch_id, { ts: isoAt(1000) }), usageRow(DC, "c51-tail", oldB?.epoch_id, { ts: isoAt(2500) }), usageRow(DC, "c51-new", newB, { ts: isoAt(2500) })];
+    const upGap = await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DC.access, body: { rows: gapRows } });
+    const stored = (id) => !!withDb((d) => d.prepare("SELECT 1 AS x FROM v2_usage WHERE ws_id = ? AND session_key = ? AND request_key = ?").get(CW, SB, reqKey(DC, id)));
+    check(
+      "usage (C5-1): a row naming an epoch that ended, from a time no epoch of the session covers (after its share ended and before it was shared again), is a conflict counted on the session and never stored; rows from before the end, from a time a later epoch covers, and in the new epoch are stored",
+      !!oldB?.ends_at && reEp.status === 200 && upGap.status === 200 && upGap.json?.accepted === 3 && upGap.json.conflicts === 1 && conflictsB() === cBefore + 1 &&
+        stored("c51-before-end") && !stored("c51-gap") && stored("c51-tail") && stored("c51-new"),
+      `${JSON.stringify(oldB)} ${reEp.text} ${upGap.text} ${cBefore}/${conflictsB()}`,
+    );
+
     // A clock that runs ahead: named, with the server's time; a start stored in the future is moved back.
     const ahead = (ms) => new Date(Date.now() + ms).toISOString();
     const KF = sessionKey(DC, CW, "claude-code", "clock-far");
