@@ -10,16 +10,15 @@ import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import {
   api,
   clockWords,
+  commitPairing,
   loadCredentials,
   loadPendingRevoke,
-  markSignedOut,
   NetworkError,
   rawRequest,
   revokePending,
-  saveCredentials,
-  savePendingRevoke,
   SignedOut,
   signedIn,
+  signOutLocally,
   signedOutWords,
   type Credentials,
 } from "./api.ts";
@@ -28,7 +27,7 @@ import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts";
 import { fetchAsks } from "./asks.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
-import { generateDeviceKey } from "./keys.ts";
+import { newDeviceKey } from "./keys.ts";
 import { applyShare, bind, deleteHistory, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
@@ -266,14 +265,15 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { server: { type: "string" }, name: { type: "string" } }, allowPositionals: false });
   const server = (values.server || ctx.config.server_url).replace(/\/$/, "");
   const deviceName = values.name || ctx.config.device_name || `${os.userInfo().username}'s ${os.hostname().replace(/\.local$/, "")}`;
-  const before = loadCredentials(ctx.home);
   // A device this machine signed out of while the server was unreachable is revoked first, so its sessions end there
   // and can be shared again from the new pairing.
   if (loadPendingRevoke(ctx.home)) {
     const was = loadPendingRevoke(ctx.home)!.device_id;
     if ((await revokePending(ctx)) === "revoked") out(`Revoked device ${was}, which this machine signed out of while the server could not be reached; its sessions stopped sharing there.`);
   }
-  const key = generateDeviceKey(ctx.home);
+  // The new key stays in memory until the device is paired: the pairing in use (key, tokens) is untouched until then,
+  // so an aborted, denied or expired login changes nothing (C3-2).
+  const key = newDeviceKey();
   const a = await rawRequest(server, "POST", "/api/v2/device/authorize", { body: { device_name: deviceName, public_key: key.publicKeyB64 } });
   if (a.status !== 200 || !a.json?.device_code) throw new Error(`device authorize failed: ${a.status} ${a.json?.error || ""}`);
   const { device_code, user_code, verification_uri } = a.json;
@@ -303,13 +303,16 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
         refresh_token: t.json.refresh_token,
         user: t.json.user || null,
       };
-      saveCredentials(ctx.home, creds);
+      // Key and credentials together, under the refresh lock (a sync's refresh in flight finishes first and can't
+      // write the old device's tokens back, C3-1), keeping what revokes the device this pairing replaces.
+      const replaced = await commitPairing(ctx, creds, key.pem);
       saveConfig(ctx.home, { server_url: server });
       ctx.config.server_url = server;
-      // A new pairing replaces the old device: revoke it while its access token still works (so the server ends its
-      // shares), and end its shares here; each session is told how to share it again.
-      if (before && !before.signed_out && before.access_token && before.device_id !== creds.device_id) {
-        await rawRequest(before.server_url, "DELETE", "/api/v2/devices/self", { headers: { authorization: `Bearer ${before.access_token}` } }).catch(() => undefined);
+      // The replaced device is revoked now (with its access token, or a refresh signed with its key when that has
+      // expired, C3-3), so the server ends its shares; when the server can't be told, the next contact does it. Its
+      // shares end here too; each session is told how to share it again.
+      if (replaced && (await revokePending(ctx)) === "pending") {
+        err(`align: could not revoke this machine's earlier device ${replaced}. Align revokes it the next time it reaches the server (the next \`align sync\`); until then its sessions still show as shared there.`);
       }
       const ended = endSharesSignedOut(ctx);
       if (ended) out(`${ended} session(s) shared from this machine's earlier sign-in stopped sharing; \`::align share\` in a session shares it again.`);
@@ -352,28 +355,10 @@ async function cmdLogout(ctx: Ctx): Promise<void> {
       revoked = e instanceof SignedOut;
     }
   }
-  // The server could not be told: keep what revokes the device later (its tokens and key, in a 0600 file of their
-  // own), so the next contact (a sync pass, or the next `align login`) revokes it before anything else.
-  const latest = loadCredentials(ctx.home) || c;
-  if (!revoked) {
-    let keyPem: string | null = null;
-    try {
-      keyPem = fs.readFileSync(layout.deviceKey(ctx.home), "utf8");
-    } catch {
-      keyPem = null;
-    }
-    savePendingRevoke(ctx.home, {
-      server_url: latest.server_url,
-      device_id: latest.device_id,
-      access_token: latest.access_token,
-      access_expires_at: latest.access_expires_at,
-      refresh_token: latest.refresh_token,
-      key_pem: keyPem,
-      since: new Date().toISOString(),
-    });
-  }
-  markSignedOut(ctx.home, "logout");
-  fs.rmSync(layout.deviceKey(ctx.home), { force: true });
+  // The server could not be told: keep what revokes the device later (its latest tokens and key, in a 0600 file of
+  // their own), so the next contact (a sync pass, or the next `align login`) revokes it before anything else. Under the
+  // refresh lock, so a refresh in flight can't write tokens back afterwards.
+  await signOutLocally(ctx, c.device_id, revoked);
   const ended = endSharesSignedOut(ctx);
   out("Signed out. Tokens and the device key were removed; local metering continues.");
   if (ended) out(`${ended} shared session(s) stopped sharing. Sessions stopped from the web stay blocked until you run \`align stop-sharing <session>\`.`);

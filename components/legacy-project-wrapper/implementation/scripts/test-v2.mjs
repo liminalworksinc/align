@@ -1413,6 +1413,13 @@ try {
   ];
   const ap = await actPost(D3, okItems);
   check("activity: a device posts its own sessions' items; another device's session and items older than 24 h are skipped", ap.status === 200 && ap.json.accepted === 3, ap.text);
+  const apAhead = await actPost(D3, [{ ...okItems[1], at: new Date(Date.now() + 10 * 60_000).toISOString() }]);
+  check(
+    "C3-4: activity lists what it skips in refused, by index with why (another device's session -> not_shared, older than 24 h -> too_old, 10 minutes ahead -> clock_skew), with the server's time, so a device never loses items silently",
+    JSON.stringify(ap.json?.refused) === JSON.stringify([{ index: 3, reason: "not_shared" }, { index: 4, reason: "too_old" }]) &&
+      apAhead.status === 200 && apAhead.json?.accepted === 0 && JSON.stringify(apAhead.json?.refused) === JSON.stringify([{ index: 0, reason: "clock_skew" }]) && Math.abs(Date.parse(apAhead.json?.server_time) - Date.now()) < 60_000,
+    `${JSON.stringify(ap.json)} ${apAhead.text}`,
+  );
   const ag1 = await actGet(D1);
   const mineRows = ag1.json?.items?.filter((i) => i.session_key === S3a) ?? [];
   const aClaim = mineRows.find((i) => i.kind === "claim");
@@ -5531,6 +5538,13 @@ try {
     const sForeign = await postEv(DL, [ev({ at: new Date(Date.now() - 1000).toISOString() })]);
     const sBad = await Promise.all([[ev({ share: 101 })], [ev({ goal_id: "not an id" })], [ev({ at: "yesterday" })], Array.from({ length: 101 }, (_, i) => ev({ at: new Date(Date.now() - i * 1000).toISOString() }))].map((e) => postEv(DM, e)));
     const sCookie = await call("AM", "POST", `/api/v2/workspaces/${AW}/steering`, { cookie: AM.cookie, body: { events: [ev()] } });
+    const sAhead = await postEv(DM, [ev({ at: new Date(Date.now() + 10 * 60_000).toISOString() })]);
+    check(
+      "C3-4: steering lists what it skips in refused (older than 14 days -> too_old, another device's report -> not_shared, 10 minutes ahead -> clock_skew, with server_time); a repeat is not a refusal",
+      JSON.stringify(sOld.json?.refused) === JSON.stringify([{ index: 0, reason: "too_old" }]) && JSON.stringify(sForeign.json?.refused) === JSON.stringify([{ index: 0, reason: "not_shared" }]) &&
+        JSON.stringify(sAhead.json?.refused) === JSON.stringify([{ index: 0, reason: "clock_skew" }]) && !!sAhead.json?.server_time && JSON.stringify(s2.json?.refused) === "[]",
+      `${sOld.text} ${sForeign.text} ${sAhead.text} ${s2.text}`,
+    );
     const evRow = withDb((d) => d.prepare("SELECT * FROM v2_steering_events WHERE ws_id = ?").all(AW));
     const stCount = (await allocOf(AO)).json?.steering;
     check(

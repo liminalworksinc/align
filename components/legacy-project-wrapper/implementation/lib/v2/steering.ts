@@ -33,8 +33,9 @@ const MAX_EVENTS = 100;
 const pctOk = (x: unknown): x is number => typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= 100;
 
 /** POST …/steering { events }: steering lines this device's own shared sessions showed. Events for another device's,
- *  an unknown or a stopped session, or dated more than 5 minutes ahead or 14 days back, are skipped; a repeat (same
- *  session and time) is accepted once. */
+ *  an unknown or a stopped session (`not_shared`), or dated more than 5 minutes ahead (`clock_skew`, with `server_time`)
+ *  or 14 days back (`too_old`), are skipped and listed in `refused` by index, so a device never loses them silently
+ *  (C3-4); a repeat (same session and time) is accepted once. */
 export async function ingestSteering(pp: PolicyPrincipal, dev: DevicePrincipal, b: Body) {
   need(pp, "session.share");
   const events = b.events;
@@ -53,11 +54,18 @@ export async function ingestSteering(pp: PolicyPrincipal, dev: DevicePrincipal, 
   const now = Date.now();
   const recorded = nowIso();
   let accepted = 0;
+  const refused: { index: number; reason: "clock_skew" | "too_old" | "not_shared" }[] = [];
   await tx(() => {
-    for (const e of parsed) {
-      if (e.at > now + 5 * 60_000 || e.at < now - 14 * 86_400_000) continue;
+    for (const [index, e] of parsed.entries()) {
+      if (e.at > now + 5 * 60_000 || e.at < now - 14 * 86_400_000) {
+        refused.push({ index, reason: e.at > now ? "clock_skew" : "too_old" });
+        continue;
+      }
       const s = get<{ device_id: string; user_id: string; state: string }>("SELECT device_id, user_id, state FROM v2_sessions WHERE ws_id = ? AND session_key = ?", pp.wsId, e.session_key);
-      if (!s || s.device_id !== dev.deviceId || s.user_id !== dev.user.id || s.state !== "shared") continue;
+      if (!s || s.device_id !== dev.deviceId || s.user_id !== dev.user.id || s.state !== "shared") {
+        refused.push({ index, reason: "not_shared" });
+        continue;
+      }
       accepted += run(
         "INSERT OR IGNORE INTO v2_steering_events (ws_id, session_key, goal_id, suggested_goal_id, share, target, at, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         pp.wsId,
@@ -71,7 +79,7 @@ export async function ingestSteering(pp: PolicyPrincipal, dev: DevicePrincipal, 
       );
     }
   });
-  return { accepted };
+  return { accepted, refused, server_time: new Date(now).toISOString() };
 }
 
 /** How many steering lines were shown, per UTC day, in [from, to), and the switch. No goal, session or person. */

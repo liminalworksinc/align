@@ -205,12 +205,26 @@ export function openDb(alignHome: string): Db {
   const db = new (sqlite().DatabaseSync)(file, { timeout: 5000 });
   db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=OFF;");
   db.exec(SCHEMA);
+  addColumns(db);
   try {
     fs.chmodSync(file, 0o600);
   } catch {
     /* best effort */
   }
   return db;
+}
+
+/** Columns added after a table was first created (CREATE TABLE IF NOT EXISTS leaves an existing table as it is). */
+const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
+  // The offset of the server's clock that the epoch's start was sent with: its usage rows go up on the same one (C3-5).
+  ["epochs", "wire_offset", "INTEGER"],
+];
+
+function addColumns(db: Db): void {
+  for (const [table, column, type] of ADDED_COLUMNS) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
 }
 
 export function kvGet(db: Db, key: string): string | null {

@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { after, describe, test } from "node:test";
 import { loadCredentials, saveCredentials } from "../src/api.ts";
@@ -20,7 +21,7 @@ import { layout, listSpool, localId } from "../src/shared/layout.ts";
 import type { FeedFile, Goal, GoalSnapshot, HotState, SpoolRecord, WireRequest } from "../src/shared/types.ts";
 import { ingestSpool } from "../src/sync.ts";
 import { FakeServer } from "./fake-server.ts";
-import { ctxFor, makeEnv, runCli, runHook, type TestEnv } from "./helpers.ts";
+import { CLI, ctxFor, makeEnv, runCli, runHook, waitFor, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 after(async () => {
@@ -218,6 +219,93 @@ describe("E2E findings: server side of the agent", () => {
     assert.ok(fake.devices.get(old)!.revoked, "the old device is revoked on the server");
     assert.notEqual(loadCredentials(t.home)!.device_id, old);
     assert.doesNotMatch((await runCli(t, ["sessions"])).stdout, /shared \(Acme\)/);
+  });
+});
+
+// ---------- cycle 3: a new pairing never loses to a refresh in flight, and an aborted one changes nothing ----------
+describe("E2E cycle 3: login against a sync's refresh", () => {
+  const expireLocally = (t: TestEnv) => {
+    const c = loadCredentials(t.home)!;
+    saveCredentials(t.home, { ...c, access_expires_at: new Date(Date.now() - 60_000).toISOString() });
+  };
+
+  for (const phase of ["answer", "request"] as const) {
+    test(`C3-1: \`align login\` while a sync's refresh is in flight (${phase} held) ends signed in on the new device, with the old one revoked`, async () => {
+      const { fake, t } = await sharedWorld();
+      const old = loadCredentials(t.home)!;
+      expireLocally(t);
+      let release!: () => void;
+      fake.holdRefresh = { phase, release: new Promise<void>((r) => (release = r)) };
+      const sync = runCli(t, ["sync"]);
+      await waitFor(() => fake.log.some((l) => l.method === "POST" && l.path === "/api/v2/device/refresh"), 10_000, "the sync's refresh");
+      const login = runCli(t, ["login", "--name", "Test Mac"]);
+      await waitFor(() => fake.log.some((l) => l.path === "/api/v2/device/token" && l.status === 200), 10_000, "the new pairing");
+      // The window in which a login used to save, revoke the old device and finish before the refresh came back.
+      await new Promise((r) => setTimeout(r, 500));
+      fake.holdRefresh = null;
+      release();
+      const [s, l] = await Promise.all([sync, login]);
+      assert.equal(l.code, 0, `${l.stdout}\n${l.stderr}`);
+      assert.match(l.stdout, /Signed in as Sean/);
+      const now = loadCredentials(t.home)!;
+      assert.ok(!now.signed_out && now.refresh_token, `signed in (${now.signed_out_reason}); sync: ${s.stdout} ${s.stderr}`);
+      assert.notEqual(now.device_id, old.device_id, "the new device's credentials, not the old device's rotated ones");
+      assert.ok(fake.devices.get(old.device_id)!.revoked, "the replaced device is revoked");
+      assert.ok(!fake.devices.get(now.device_id)!.revoked, "the new device is live");
+      assert.ok(!fs.existsSync(layout.pendingRevoke(t.home)), "nothing left to revoke");
+      // And it keeps working: a forced refresh signs with the new key.
+      expireLocally(t);
+      const goals = await runCli(t, ["goals", "--refresh"]);
+      assert.equal(goals.code, 0, goals.stderr);
+      assert.ok(!loadCredentials(t.home)!.signed_out);
+    });
+  }
+
+  test("C3-2: a denied or interrupted `align login` leaves the pairing in use as it was: same key, same tokens, refreshes still work, the old device and its shares untouched", async () => {
+    const { fake, t } = await sharedWorld();
+    const key = fs.readFileSync(layout.deviceKey(t.home), "utf8");
+    const before = loadCredentials(t.home)!;
+    fake.denyLogins = true;
+    const denied = await runCli(t, ["login", "--name", "Test Mac"]);
+    assert.equal(denied.code, 1);
+    assert.match(denied.stderr, /denied in the browser/);
+    fake.denyLogins = false;
+    // Ctrl-C while it polls (the token endpoint keeps answering 502, so it would poll on).
+    fake.failTokenPolls = 1_000_000;
+    const p = spawn(process.execPath, [CLI, "login", "--name", "Test Mac"], { env: t.env, stdio: "ignore" });
+    const authorizes = fake.log.filter((l) => l.path === "/api/v2/device/authorize").length;
+    await waitFor(() => fake.log.filter((l) => l.path === "/api/v2/device/authorize").length > authorizes, 10_000, "the second authorize");
+    await waitFor(() => fake.log.some((l) => l.path === "/api/v2/device/token" && l.status === 502), 10_000, "a poll");
+    p.kill("SIGINT");
+    await new Promise((r) => p.on("close", r));
+    fake.failTokenPolls = 0;
+    assert.equal(fs.readFileSync(layout.deviceKey(t.home), "utf8"), key, "the device key is untouched");
+    assert.deepEqual(loadCredentials(t.home), before, "the credentials are untouched");
+    expireLocally(t);
+    const refreshes = fake.refreshes;
+    const r = await runCli(t, ["goals", "--refresh"]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(fake.refreshes, refreshes + 1, "the refresh is signed with the key in use and accepted");
+    assert.ok(!loadCredentials(t.home)!.signed_out);
+    assert.ok(!fake.devices.get(before.device_id)!.revoked);
+    assert.match((await runCli(t, ["sessions"])).stdout, /shared \(Acme\)/);
+  });
+
+  test("C3-3: `align login` over a pairing whose access token expired revokes the old device (a refresh signed with its key first), so its shares end on the server", async () => {
+    const { fake, t } = await sharedWorld();
+    const old = loadCredentials(t.home)!;
+    // An hour idle: the server no longer takes the old access token, and the local copy says so too.
+    for (const a of fake.access.values()) if (a.device === old.device_id) a.exp = Date.now() - 1000;
+    expireLocally(t);
+    const before = fake.log.length;
+    const again = await runCli(t, ["login", "--name", "Test Mac"]);
+    assert.equal(again.code, 0, again.stderr);
+    assert.match(again.stdout, /1 session\(s\) shared from this machine's earlier sign-in stopped sharing/);
+    assert.ok(fake.devices.get(old.device_id)!.revoked, "the old device is revoked on the server");
+    const calls = fake.log.slice(before).map((l) => `${l.method} ${l.path} ${l.status}`);
+    assert.ok(calls.indexOf("POST /api/v2/device/refresh 200") < calls.indexOf("DELETE /api/v2/devices/self 204"), calls.join(", "));
+    assert.ok(!fs.existsSync(layout.pendingRevoke(t.home)));
+    assert.ok(!loadCredentials(t.home)!.signed_out);
   });
 });
 

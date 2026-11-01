@@ -1221,7 +1221,9 @@ ever named. `weeks` outside 1 to 26, a time that does not parse, or `from` not b
 
 The server SHALL accept on `POST /api/v2/workspaces/{ws}/steering {events}` (device token only; workspace owners and
 members) up to 100 events `{session_key, goal_id, suggested_goal_id, share, target, at}`, the steering lines this
-device's shared sessions showed (see `local-agent`), and respond `{accepted}`. A malformed session key or goal id, a
+device's shared sessions showed (see `local-agent`), and respond `{accepted, refused, server_time}`: `refused` lists
+each skipped event as `{index, reason}` (`clock_skew` for one more than 5 minutes ahead of `server_time`, the server's
+clock; `too_old`; `not_shared`), so a device never loses one silently. A malformed session key or goal id, a
 share or target that is not a whole number from 0 to 100, an `at` that does not parse, or more than 100 events SHALL be
 400 and store nothing; an event for a session that is not this device's and this person's, is not `shared`, or is dated
 more than 5 minutes ahead or 14 days back SHALL be skipped, and a repeat (same session and time) stored once. Only the
@@ -1231,12 +1233,14 @@ session is deleted or rolled up.
 #### Scenario: Another device's session
 
 - **WHEN** a member's device reports a line for its own shared session, then again, and another member's device reports one for the same session
-- **THEN** the responses are `{accepted:1}`, `{accepted:0}` and `{accepted:0}`, and the allocation report counts one line that day
+- **THEN** the responses accept 1, 0 and 0 (the third refused as `not_shared`), and the allocation report counts one line that day
 
 ### Requirement: Activity signals
 
 The server SHALL accept in-flight work signals from a device on `POST /api/v2/workspaces/{ws}/activity {items}` (at
-most 200 items and 128 KB; kinds `edit`, `commit`, `task`, `claim`) and serve unexpired ones to devices on
+most 200 items and 128 KB; kinds `edit`, `commit`, `task`, `claim`), answering `{accepted, refused, server_time}` with
+each skipped item in `refused` as `{index, reason}` (`clock_skew`: more than 5 minutes ahead of `server_time`;
+`too_old`: more than a day back; `not_shared`: not this device's shared session), and serve unexpired ones to devices on
 `GET .../activity?after=<seq>` (at most 500, oldest first) only for goals the caller may read and, for unbound
 sessions, only the caller's own.
 

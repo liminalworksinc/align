@@ -51,7 +51,10 @@ function shortText(v: unknown): string | null {
   return t ? t.slice(0, 120) : null;
 }
 
-/** A batch of this device's activity for its own shared sessions. Unknown or foreign sessions are skipped. */
+/** A batch of this device's activity for its own shared sessions. Items it doesn't take are listed in `refused` by
+ *  index with why: `clock_skew` (more than 5 minutes ahead of this server's clock; `server_time` says what it reads),
+ *  `too_old` (more than a day back) or `not_shared` (an unknown, foreign or no longer shared session), so a device
+ *  never loses them silently (C3-4). */
 export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, b: Body) {
   need(pp, "session.share");
   const items = b.items;
@@ -59,8 +62,9 @@ export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, 
   if (items.length > MAX_ITEMS) throw badRequest(`items: at most ${MAX_ITEMS}`);
   const now = Date.now();
   let accepted = 0;
+  const refused: { index: number; reason: "clock_skew" | "too_old" | "not_shared" }[] = [];
   await tx(() => {
-    for (const raw of items) {
+    for (const [index, raw] of items.entries()) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw badRequest("each item must be an object");
       const it = raw as Body;
       const key = typeof it.session_key === "string" && SESSION_KEY_RE.test(it.session_key) ? it.session_key : null;
@@ -74,9 +78,15 @@ export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, 
       if (it.path_hash != null && !pathHash) throw badRequest("path_hash must be a hex hash");
       const path = relPath(it.path);
       const text = shortText(it.text);
-      if (at > now + 5 * 60_000 || at < now - 24 * HOUR) continue;
+      if (at > now + 5 * 60_000 || at < now - 24 * HOUR) {
+        refused.push({ index, reason: at > now ? "clock_skew" : "too_old" });
+        continue;
+      }
       const s = sessionRow(pp.wsId, key);
-      if (!s || s.device_id !== dev.deviceId || s.state !== "shared") continue;
+      if (!s || s.device_id !== dev.deviceId || s.state !== "shared") {
+        refused.push({ index, reason: "not_shared" });
+        continue;
+      }
       const life = kind === "claim" ? HOUR : 24 * HOUR;
       run(
         `INSERT INTO v2_activity (ws_id, session_key, user_id, goal_id, repo_id, kind, path_hash, path, text, at, expires_at)
@@ -97,7 +107,7 @@ export async function ingestActivity(pp: PolicyPrincipal, dev: DevicePrincipal, 
     }
     run("DELETE FROM v2_activity WHERE ws_id = ? AND expires_at < ?", pp.wsId, nowIso());
   });
-  return { accepted };
+  return { accepted, refused, server_time: new Date(now).toISOString() };
 }
 
 /** Unexpired activity after `after` (a seq cursor) on goals this caller may read; unbound sessions only their own. */

@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Ctx } from "./context.ts";
 import {
   api,
+  clockMeasured,
   clockOffset,
   clockWords,
   CLOCK_TOLERANCE_MS,
@@ -157,7 +158,7 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
         throw new Error("this machine is signed out of Align. Run `align login` in a terminal, then type `::align share` here");
       }
       const ws = resolveWorkspace(ctx.home, r.workspace || ctx.config.default_workspace);
-      if (!ws) throw new Error(r.workspace ? "the folder rule's workspace is no longer available on this device" : "no default workspace; run `align share --latest --workspace <name>` in a terminal");
+      if (!ws) throw new Error(r.workspace ? `${r.rule_dir ? "the folder rule's" : "that"} workspace is no longer available on this device` : "no default workspace; run `align share --latest --workspace <name>` in a terminal");
       const goal = r.arg ? resolveGoal(loadFeed(ctx.home, ws.id), r.arg) : null;
       if (goal && !goal.bindable) throw new Error(`goal "${goal.title}" needs an approved alignment before it can be bound`);
       const hasEpochs = ctx.db.prepare("SELECT 1 FROM epochs WHERE local_id=?").get(lid);
@@ -220,8 +221,11 @@ export async function flushOutbox(ctx: Ctx): Promise<{ sent: number; deferred: n
  * and kept in the queued call, so a retry sends the same values (the server answers a repeated epoch with other values
  * 409 epoch_conflict).
  */
-function wireBody(ctx: Ctx, item: OutboxRow, p: any, field: "started_at" | "starts_at", fresh = false): any {
+async function wireBody(ctx: Ctx, item: OutboxRow, p: any, field: "started_at" | "starts_at", fresh = false): Promise<any> {
   if (p.wire && !fresh) return p.wire;
+  // The first time this process sends a time, it measures the server's clock first (one cheap read): a clock that
+  // runs slow is never refused, so without this a session's first start would go up on a stale offset (C3-5).
+  if (!clockMeasured()) await api(ctx, "GET", "/api/v2/me").catch(() => null);
   const offset = clockOffset(ctx.home);
   p.wire = { ...p.body, [field]: serverIso(p.body[field], offset, true) };
   p.wire_offset = offset;
@@ -263,8 +267,8 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
   const base = p.ws ? `/api/v2/workspaces/${enc(p.ws)}/sessions/${enc(p.session_key)}` : "";
   switch (item.kind) {
     case "put_session": {
-      let r = await api(ctx, "PUT", base, { body: wireBody(ctx, item, p, "started_at") });
-      if (await learnClock(ctx, r, p)) r = await api(ctx, "PUT", base, { body: wireBody(ctx, item, p, "started_at", true) });
+      let r = await api(ctx, "PUT", base, { body: await wireBody(ctx, item, p, "started_at") });
+      if (await learnClock(ctx, r, p)) r = await api(ctx, "PUT", base, { body: await wireBody(ctx, item, p, "started_at", true) });
       if (r.status === 200) {
         const state = r.json?.state === "suspended" ? "suspended" : "shared";
         ctx.db.prepare("UPDATE shares SET state=CASE WHEN state IN ('stopped','error') THEN state ELSE ? END, error=NULL WHERE local_id=?").run(state, lid);
@@ -299,10 +303,10 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       throw new HttpError(r.status, r.json?.error ?? null, r.json);
     }
     case "post_epoch": {
-      let r = await api(ctx, "POST", `${base}/epochs`, { body: wireBody(ctx, item, p, "starts_at") });
-      if (await learnClock(ctx, r, p)) r = await api(ctx, "POST", `${base}/epochs`, { body: wireBody(ctx, item, p, "starts_at", true) });
+      let r = await api(ctx, "POST", `${base}/epochs`, { body: await wireBody(ctx, item, p, "starts_at") });
+      if (await learnClock(ctx, r, p)) r = await api(ctx, "POST", `${base}/epochs`, { body: await wireBody(ctx, item, p, "starts_at", true) });
       if (r.status === 200) {
-        ctx.db.prepare("UPDATE epochs SET synced=1, goal_version_at_start=? WHERE epoch_id=?").run(r.json?.goal_version_at_start ?? null, p.body.epoch_id);
+        ctx.db.prepare("UPDATE epochs SET synced=1, goal_version_at_start=?, wire_offset=? WHERE epoch_id=?").run(r.json?.goal_version_at_start ?? null, Number(p.wire_offset) || 0, p.body.epoch_id);
         return;
       }
       if (r.status === 403 || r.status === 404 || r.status === 409 || r.status === 400) {
@@ -400,6 +404,7 @@ interface UploadRow {
   est_list_usd_micros: number | null;
   price_table_version: string;
   source: string;
+  epoch_offset: number | null;
 }
 
 const MAX_ROWS = 500;
@@ -410,7 +415,9 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
   if (!signedIn(ctx.home)) return res;
   const shares = ctx.db.prepare("SELECT local_id, workspace_id, session_key FROM shares WHERE state='shared'").all() as { local_id: string; workspace_id: string; session_key: string }[];
   promoteSettled(ctx);
-  // Rows go up with their times on the server's clock.
+  // Rows go up with their times on the server's clock, on the offset their epoch's start went up on: a clock corrected
+  // between recording and sending (an offline machine whose clock ran ahead) keeps each row inside its epoch (C3-5).
+  // Epochs sent before that offset was kept use the one known now.
   const offset = clockOffset(ctx.home);
   for (const s of shares) {
     assignEpochs(ctx, s.local_id);
@@ -419,7 +426,7 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
     for (;;) {
       const rows = ctx.db
         .prepare(
-          `SELECT r.* FROM requests r JOIN epochs e ON e.epoch_id=r.epoch_id
+          `SELECT r.*, e.wire_offset AS epoch_offset FROM requests r JOIN epochs e ON e.epoch_id=r.epoch_id
            WHERE r.local_id=? AND r.uploaded=0 AND r.finalized=1 AND e.synced=1
            ORDER BY COALESCE(r.ts, r.created_at) LIMIT ?`,
         )
@@ -427,7 +434,7 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
       if (!rows.length) break;
       const wire = rows.map((r) => ({
         request_key: r.request_key,
-        ts: serverIso(r.ts || r.created_at, offset),
+        ts: serverIso(r.ts || r.created_at, r.epoch_offset ?? offset),
         epoch_id: r.epoch_id,
         model: r.model,
         query_source: r.query_source,

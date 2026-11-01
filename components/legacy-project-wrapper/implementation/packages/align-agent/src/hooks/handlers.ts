@@ -1051,6 +1051,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         if (!already) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
         return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${already ? "" : " This session too; your next prompt carries the goal."} \`::align unshare --dir\` turns it off.`;
       }
+      if (!feed && (me.workspaces?.length ?? 0) > 1) return "Align: this machine reaches more than one workspace and none is the default, so `::align share` can't tell which. Run `align share --latest --workspace <name>` in a terminal.";
       if (!confirm) {
         return [
           `Align share preview for this session (nothing uploaded yet):`,
@@ -1061,7 +1062,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
           `Type \`::align share ${arg ? `${arg} ` : ""}confirm\` to share.`,
         ].join("\n");
       }
-      spool("share", goal ? goal.id : null);
+      // The workspace whose goals it read (the one the session had, or the default): a device with two workspaces and
+      // no default would otherwise not know which (C3-6).
+      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed?.workspace_id, ts });
       return goal
         ? `Align: sharing requested toward "${goal.title}". It takes effect within a few seconds; your next prompt carries the goal.`
         : "Align: sharing requested with no goal (its usage counts as unallocated; `::align bind <goal>` picks one). It takes effect within a few seconds.";
