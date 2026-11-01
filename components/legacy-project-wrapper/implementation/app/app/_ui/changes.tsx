@@ -13,8 +13,10 @@ import { launchWords } from "@/lib/v2/launch-words";
 // allow: approving records the decision, and agents switch only at launch (LAUNCH-001). Used by the goal page and the
 // workspace Requests tab.
 
-/** "Propose a change": for a member who can read an active goal but doesn't own it. */
-export function ProposeChange({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () => void }) {
+/** "Propose a change": for a member who can read an active goal but doesn't own it. `choices` are the goals the
+ *  server would accept as a new dependency (the goal read's dependency_choices); `hiddenDeps` counts the goal's
+ *  dependencies the person can't see, which a proposal keeps. */
+export function ProposeChange({ ws, goal, choices = null, hiddenDeps = 0, onDone }: { ws: string; goal: Goal; choices?: string[] | null; hiddenDeps?: number; onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const act = useAction();
@@ -34,6 +36,8 @@ export function ProposeChange({ ws, goal, onDone }: { ws: string; goal: Goal; on
         ws={ws}
         goal={goal}
         start={{}}
+        choices={choices}
+        hiddenDeps={hiddenDeps}
         noteLabel="Why this change"
         noteRequired
         sendLabel="Send for approval"
@@ -70,14 +74,55 @@ export function ChangeRequestCard(props: { ws: string; cr: ChangeRequest; me: st
   // A decision's outcome (recorded, or not recorded and why) outlives the remount its reload causes.
   const [notice, setNotice] = useNotice(props.cr.id);
   if (props.cr.state === "pending" || props.cr.state === "countered") return <OpenRequest {...props} notice={notice} setNotice={setNotice} />;
-  return <RequestRecord {...props} notice={notice} />;
+  return <RequestRecord {...props} notice={notice} setNotice={setNotice} />;
 }
 
-/** A decided request (approved, rejected, withdrawn or superseded): its decision record. */
-function RequestRecord({ ws, cr, me, showGoal, titles, onDone, notice }: { ws: string; cr: ChangeRequest; me: string; showGoal?: boolean; titles: Map<string, string>; onDone: () => void; notice: Notice | null }) {
+/** A decided request (approved, rejected, withdrawn or superseded): its decision record. Launch and Not yet post the
+ *  revision on screen (a stale one is refused, 409) and say "Recorded: …" like every other decision (C2 N5, F4). */
+function RequestRecord({
+  ws,
+  cr,
+  me,
+  showGoal,
+  titles,
+  onDone,
+  notice,
+  setNotice,
+}: {
+  ws: string;
+  cr: ChangeRequest;
+  me: string;
+  showGoal?: boolean;
+  titles: Map<string, string>;
+  onDone: () => void;
+  notice: Notice | null;
+  setNotice: (n: Notice | null) => void;
+}) {
   const act = useAction();
   const path = `/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}`;
   const doIt = (action: string, body: Record<string, unknown>) => act.run(() => api(`${path}/${action}`, { body }), onDone);
+  const next = cr.goal.version + 1;
+  /** Launch or not yet: the decision's outcome is a notice, which outlives the reload (and remount) that follows. */
+  const decideLaunch = (action: "launch" | "not_yet") =>
+    void act.run(async () => {
+      setNotice(null);
+      try {
+        await api(`${path}/${action}`, { body: { revision: cr.revision } });
+      } catch (e) {
+        if (!(e instanceof ApiError) || e.status !== 409) throw e;
+        setNotice({ kind: "refused", text: `Not recorded. ${e.message}` });
+        onDone(); // the request moved on: show it as it is now
+        return;
+      }
+      setNotice({
+        kind: "done",
+        text:
+          action === "launch"
+            ? `Recorded: you launched version ${next} to agents. They get it at their next turn.`
+            : `Recorded: you decided not yet. Agents stay on version ${cr.goal.version} until someone launches version ${next}.`,
+      });
+      onDone();
+    });
   const mine = cr.requester.id === me;
   const current = cr.revisions.find((r) => r.revision === cr.revision);
   const earlier = cr.revisions.filter((r) => r.revision !== cr.revision && r.evidence.length > 0);
@@ -85,7 +130,6 @@ function RequestRecord({ ws, cr, me, showGoal, titles, onDone, notice }: { ws: s
   const names = (ps: { id: string; name: string }[]) => ps.map((a) => (a.id === me ? "you" : a.name)).join(" or ");
   const said = (p: { id: string; name: string } | null) => (p ? (p.id === me ? "you" : p.name) : "someone");
   const words = launchWords(cr.launch, cr.base_version, cr.version);
-  const next = cr.goal.version + 1;
   return (
     <div className="mb-4 rounded-[12px] border border-zinc-200 p-4" data-cr={cr.id} data-cr-view="record">
       {notice && <NoticeBox notice={notice} />}
@@ -177,12 +221,12 @@ function RequestRecord({ ws, cr, me, showGoal, titles, onDone, notice }: { ws: s
           </Btn>
         )}
         {cr.can.launch && (
-          <Btn disabled={act.busy} onClick={() => void doIt("launch", {})}>
+          <Btn disabled={act.busy} onClick={() => decideLaunch("launch")}>
             Launch version {next} to agents
           </Btn>
         )}
         {cr.can.not_yet && cr.launch !== "not_yet" && (
-          <Btn kind="secondary" disabled={act.busy} onClick={() => void doIt("not_yet", {})}>
+          <Btn kind="secondary" disabled={act.busy} onClick={() => decideLaunch("not_yet")}>
             Not yet
           </Btn>
         )}

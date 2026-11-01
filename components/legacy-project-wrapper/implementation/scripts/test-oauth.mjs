@@ -1304,10 +1304,18 @@ async function local(env) {
   const noTok = await mcp(null, "tools/list");
   const descOf = (r) => /error_description="([^"]*)"/.exec(r.headers["www-authenticate"] ?? "")?.[1] ?? "";
   check(
-    "B10: a revoked alm. token and a garbage one get 401 invalid_token described \"The access token is invalid, expired or revoked. Connect the app again.\"; a request with no token still gets \"No authorization provided\"",
+    "B10: a revoked alm. token and a garbage one get 401 invalid_token described \"The access token is invalid, expired or revoked. Connect the app again.\"; a request with no token still gets \"No authorization provided\" (in its body)",
     u4After.status === 401 && /error="invalid_token"/.test(u4After.headers["www-authenticate"] ?? "") && descOf(u4After) === "The access token is invalid, expired or revoked. Connect the app again." &&
-      garbage.status === 401 && descOf(garbage) === descOf(u4After) && noTok.status === 401 && descOf(noTok) === "No authorization provided",
-    `${u4After.headers["www-authenticate"]} | ${garbage.headers["www-authenticate"]} | ${noTok.headers["www-authenticate"]}`,
+      garbage.status === 401 && descOf(garbage) === descOf(u4After) && noTok.status === 401 && noTok.json?.error_description === "No authorization provided",
+    `${u4After.headers["www-authenticate"]} | ${garbage.headers["www-authenticate"]} | ${noTok.headers["www-authenticate"]} ${noTok.text}`,
+  );
+  // C2 F6: RFC 6750 section 3.1: a request with no credentials gets a challenge with no error code or description, only
+  // where to get a token (resource_metadata) and the scope.
+  const noTokWww = noTok.headers["www-authenticate"] ?? "";
+  check(
+    "C2 F6: a request with no token gets a WWW-Authenticate challenge with no error=\"invalid_token\" and no error_description (RFC 6750 3.1), still naming the scope and the resource metadata URL",
+    noTok.status === 401 && /^Bearer /.test(noTokWww) && !/error=/.test(noTokWww) && !/error_description=/.test(noTokWww) && /scope="goals:read"/.test(noTokWww) && /resource_metadata="[^"]+\/\.well-known\/oauth-protected-resource\/api\/mcp"/.test(noTokWww),
+    noTokWww,
   );
 
   const again404 = await web(U1, "DELETE", `/api/v2/workspaces/${A}/apps/${u4Grant}`);

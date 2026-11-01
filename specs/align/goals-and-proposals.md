@@ -514,7 +514,7 @@ The server SHALL accept in `changes` only the keys `title`, `measures`, `depends
 
 ### Requirement: Dependencies a decider can't see are refused
 
-The server SHALL refuse with 409 `dependency_not_visible` a change request, or a `rebase`, whose `changes` add to `depends_on` (relative to the version they are made against) a goal that some member of the goal's effective approval set (after the requester rule) may not read, and a `counter` whose changes add a goal that the requester may not read, so that nobody is asked to decide on, or accept, a dependency they can't see. The message SHALL name neither the goal nor the person, and nothing SHALL be written. A dependency already on the base version is not added. Where a reader of a request still can't read a dependency in its diff (the approval set changed later, or the base version already had it), `diff.hidden_depends_on` `{before, after}` SHALL count the dependencies on each side that the reader may not read (`null` when `depends_on` doesn't change), and the app SHALL show each as "a goal you can't see", so a diff never reads "Nothing → Nothing".
+The server SHALL refuse with 409 `dependency_not_visible` a change request, or a `rebase`, whose `changes` add to `depends_on` (relative to the version they are made against) a goal that some member of the goal's effective approval set (after the requester rule) may not read, and a `counter` whose changes add a goal (one on neither the base version nor the request's current revision) that the requester, or some member of the effective approval set, may not read: a counter goes to the requester to accept and then back to that set to decide, so the same visibility rule as a proposal applies to it. This is so that nobody is asked to decide on, or accept, a dependency they can't see. The message SHALL name neither the goal nor the person, and nothing SHALL be written. A dependency already on the base version is not added. The messages SHALL be, for a proposal or the requester's own rebase, "Someone who decides on this goal can't see a goal you added as a dependency, so they couldn't see what they approve. Remove it, or ask that goal's owner to share it with them first."; for a counter the requester can't read, "The person who asked can't see a goal you added as a dependency, so they couldn't see what they accept. Remove it from your suggestion."; and for a counter someone in the approval set can't read, "Someone who decides on this goal can't see a goal you added as a dependency, so they couldn't see what they approve once it is accepted. Remove it from your suggestion, or ask that goal's owner to share it with them first.". Where a reader of a request still can't read a dependency in its diff (the approval set changed later, or the base version already had it), `diff.hidden_depends_on` `{before, after}` SHALL count the dependencies on each side that the reader may not read (`null` when `depends_on` doesn't change), and the app SHALL show each as "a goal you can't see", so a diff never reads "Nothing → Nothing".
 
 #### Scenario: Proposing a dependency on a private goal
 
@@ -526,10 +526,47 @@ The server SHALL refuse with 409 `dependency_not_visible` a change request, or a
 - **WHEN** an approver counters a request with changes that add a dependency on a goal of a team the requester is not in
 - **THEN** the response is 409 `dependency_not_visible`, and the request stays `pending` at its revision
 
+#### Scenario: Countering with a goal a co-approver can't read
+
+- **WHEN** a team goal's approval set is its owner and a lead who is not in the Hardware team, and the owner counters a request with changes that add a dependency on a Hardware-only goal that the owner and the requester can both read
+- **THEN** the response is 409 `dependency_not_visible` ("…so they couldn't see what they approve once it is accepted…"), naming neither the goal nor the lead, and the request stays `pending` at its revision
+
 #### Scenario: A dependency the reader can't see in a diff
 
 - **WHEN** a request's diff changes `depends_on` and one dependency on its after side is a goal the reader may not read
 - **THEN** `diff.after.depends_on` omits it, `diff.hidden_depends_on.after` is 1, and the app shows "a goal you can't see" on that side and in "What would change"
+
+### Requirement: A rebase refusal names who added the dependency
+
+When a `rebase` that keeps the request's own changes is refused with 409 `dependency_not_visible` (the approval set changed since the dependency was added, so a member of it can no longer read it), and the dependency was added by someone other than the requester (the author of the earliest revision in the latest unbroken run of revisions whose changes depend on it, normally an approver's counter the requester accepted), the server SHALL say so instead of "you added": "Someone who decides on this goal can't see a goal that <name>'s suggestion added as a dependency, so they couldn't see what they approve. Withdraw this request and propose the change again without it, or ask that goal's owner to share it with them first." The rebase itself SHALL still be refused, so that nobody decides on a dependency they can't see. A rebase that sends its own `changes`, or whose dependency the requester added, SHALL keep the proposal's message.
+
+#### Scenario: Rebasing a counter's dependency
+
+- **WHEN** an approver's counter added a Hardware-only dependency while every approver could read it, the requester accepted it, a lead outside Hardware then joined the approval set, the goal moved on, and the requester presses Update to version <n>
+- **THEN** the response is 409 `dependency_not_visible` with "…can't see a goal that <approver>'s suggestion added as a dependency…", never "a goal you added", and the request stays `pending` and behind
+
+### Requirement: A counter keeps the dependencies its author can't see
+
+The server SHALL keep, on a `counter`, every dependency on the request's current revision (its changes applied to its base version) that the counterer may not read, as a new goal version keeps the dependencies its editor can't read: a `depends_on` sent lists only what the counterer can see, so it is never a request to drop the others, and a counter that doesn't send `depends_on` keeps them beside the base version's other dependencies. The counter form SHALL say "Also depends on a goal you can't see. Sending keeps it; only someone who can see it can remove it." (counted, never named), and its confirmation SHALL include the kept goal in "Depends on would be" and a "Kept" line saying so.
+
+#### Scenario: Counter by an approver who can't see a dependency
+
+- **WHEN** a request depends on a Hardware-only goal and a shared goal, and an approver outside Hardware counters with a new title and `depends_on` listing only the shared goal
+- **THEN** the counter's revision depends on both goals, and the approver's read counts the hidden one (`diff.hidden_depends_on.after` 1)
+
+#### Scenario: Counter that doesn't restate depends_on
+
+- **WHEN** a request adds a dependency the counterer can't read, and the counterer sends a counter with only a new title
+- **THEN** the counter's revision still depends on that goal
+
+### Requirement: The propose form offers only dependencies the server accepts
+
+`GET /api/v2/workspaces/{ws}/goals/{goal}` SHALL include `dependency_choices`: the ids of the goals a change request from the reader may add as a dependency, that is the goals the reader can read that every member of the goal's effective approval set (with the reader as requester) can also read; `null` when the reader may not propose (a viewer, the goal's owner, or a goal that is not active). The app's **Propose a change** form SHALL offer as a new dependency only goals in `dependency_choices` (the goal's current dependencies stay listed), and SHALL say how many goals the person can see aren't offered: "<n> goals you can see aren't offered: someone who decides on this goal can't see them." The server SHALL still check every request.
+
+#### Scenario: A private goal and a team-only goal are not offered
+
+- **WHEN** a member opens Propose a change on a Platform goal whose approval set can read neither the member's private goal nor a Hardware-only goal
+- **THEN** `dependency_choices` holds neither, Depends on lists neither, and the form says "2 goals you can see aren't offered: someone who decides on this goal can't see them."
 
 ### Requirement: One open change request per goal and requester
 
@@ -565,12 +602,17 @@ The server SHALL compute, at the time it is needed, the launch set of a change r
 
 ### Requirement: Launching an approved change request
 
-The server SHALL accept `POST .../change-requests/{id}/launch {revision?}` only from a member of the request's launch set (403 `read_only` for a viewer, 403 `not_a_launcher` with "Only someone who can approve for this goal, or a workspace owner, can launch it" otherwise), only for an `approved` request whose `launch` is `pending` or `not_yet` (409 `wrong_state`: "This change is already launched as version <n>." when launched, "This change was superseded before launch. <requester> can propose it again." when superseded before launch, "This request is <state>" otherwise), and only while the goal is still at the request's `base_version` (409 `stale_version`). On success it SHALL, in one transaction, write the approved-unlaunched version as the goal's next version through the single write path every goal version takes (the same as an owner's new version: content hash, `created_by` the approver who confirmed it, audit `goal.versioned` by the launcher, parent review, one `goal_version` directive for every non-stopped session bound to or governed by the goal, and, when the version makes the goal achieved or dropped, the closing steps of "Change requests are superseded when the goal is achieved or dropped" and "Requests expire when their goal is achieved or dropped" and the hold release), set the request's `launch` to `launched` with `launch_decided_by` the launcher, `launch_decided_at` and `version` the new goal version, write audit action `change_request.launched`, record the content-free event `first_launch`, and respond with the request. A refused launch SHALL write nothing.
+The server SHALL accept `POST .../change-requests/{id}/launch {revision?}` only from a member of the request's launch set (403 `read_only` for a viewer, 403 `not_a_launcher` with "Only someone who can approve for this goal, or a workspace owner, can launch it" otherwise), only for an `approved` request whose `launch` is `pending` or `not_yet` (409 `wrong_state`: "This change is already launched as version <n>." when launched, "This change was superseded before launch. <requester> can propose it again." when superseded before launch, "This request is <state>" otherwise), and only while the goal is still at the request's `base_version` (409 `stale_version`), and, when `revision` is sent, only at the request's current revision (409 `stale_revision`, as for every other decision; the app always sends it). On success it SHALL, in one transaction, write the approved-unlaunched version as the goal's next version through the single write path every goal version takes (the same as an owner's new version: content hash, `created_by` the approver who confirmed it, audit `goal.versioned` by the launcher, parent review, one `goal_version` directive for every non-stopped session bound to or governed by the goal, and, when the version makes the goal achieved or dropped, the closing steps of "Change requests are superseded when the goal is achieved or dropped" and "Requests expire when their goal is achieved or dropped" and the hold release), set the request's `launch` to `launched` with `launch_decided_by` the launcher, `launch_decided_at` and `version` the new goal version, write audit action `change_request.launched`, record the content-free event `first_launch`, and respond with the request. A refused launch SHALL write nothing.
 
 #### Scenario: Approve without launching, then launch
 
 - **WHEN** a goal is at version 2 with a bound session, an approver approves a request on it, and a workspace owner then launches it
 - **THEN** after the approval the goal is at version 2 and the session's directive cursor has nothing new; after the launch the goal is at version 3 with `created_by` the approver, the session gets exactly one `goal_version` directive carrying version 3, and the request reads `launch: "launched"`, `version: 3`, `launch_decided_by` the owner
+
+#### Scenario: Launch with a stale revision
+
+- **WHEN** a launcher posts `launch` or `not_yet` with a `revision` that is not the approved request's
+- **THEN** the response is 409 `stale_revision` and nothing is recorded: `launch` stays `pending` and the goal keeps its version
 
 #### Scenario: Launch twice
 
@@ -579,7 +621,7 @@ The server SHALL accept `POST .../change-requests/{id}/launch {revision?}` only 
 
 ### Requirement: Not yet keeps agents on the launched version
 
-The server SHALL accept `POST .../change-requests/{id}/not_yet {revision?}` from the launch set (403 `not_a_launcher` otherwise) on an `approved` request whose `launch` is `pending` or `not_yet` (409 `wrong_state` otherwise), and SHALL record the decision (`launch: "not_yet"`, `launch_decided_by`, `launch_decided_at`, audit `change_request.not_yet`) and publish nothing: no goal version, no directive. A later `not_yet` or `launch` SHALL replace the earlier decision.
+The server SHALL accept `POST .../change-requests/{id}/not_yet {revision?}` from the launch set (403 `not_a_launcher` otherwise) on an `approved` request whose `launch` is `pending` or `not_yet` (409 `wrong_state` otherwise) and, when `revision` is sent, at its current revision (409 `stale_revision`), and SHALL record the decision (`launch: "not_yet"`, `launch_decided_by`, `launch_decided_at`, audit `change_request.not_yet`) and publish nothing: no goal version, no directive. A later `not_yet` or `launch` SHALL replace the earlier decision.
 
 #### Scenario: Not yet, then launch
 

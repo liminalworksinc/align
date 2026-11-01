@@ -92,12 +92,16 @@ const sameMeasures = (a: { id?: string; text: string; target: string | null }[],
 const sameIds = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
 
 /** Goal, measures, Status and Depends on, pre-filled from `start`. `onSend` gets only the fields that differ from
- *  `goal` (plus any in `keep`, for a counter that restates the request's fields). */
+ *  `goal` (plus any in `keep`, for a counter that restates the request's fields). `hiddenDeps` counts the dependencies
+ *  the person can't see, which the server keeps (the form says so); `choices`, when given, are the only goals offered
+ *  as a new dependency (the ones everyone who decides can see), besides those already on the list. */
 export function ChangesForm({
   ws,
   goal,
   start,
   keep = [],
+  hiddenDeps = 0,
+  choices = null,
   noteLabel,
   noteRequired,
   withCondition = false,
@@ -109,6 +113,8 @@ export function ChangesForm({
   goal: Goal;
   start: ChangeFields;
   keep?: (keyof ChangeFields)[];
+  hiddenDeps?: number;
+  choices?: string[] | null;
   noteLabel: string;
   noteRequired: boolean;
   /** Offer the "Accept if…" condition (an approver's counter). */
@@ -121,11 +127,17 @@ export function ChangesForm({
   const [title, setTitle] = useState(start.title ?? goal.title);
   const [status, setStatus] = useState<Goal["status"]>(start.status ?? goal.status);
   const [measures, setMeasures] = useState<MeasureDraft[]>(measuresDraft({ ...goal, measures: start.measures ?? goal.measures }));
-  const [deps, setDeps] = useState<string[]>(start.depends_on ?? goal.depends_on ?? []);
+  const [startDeps] = useState<string[]>(start.depends_on ?? goal.depends_on ?? []);
+  const [deps, setDeps] = useState<string[]>(startDeps);
   const [limits, setLimits] = useState<LimitDraft[]>(limitsDraft(start.limits ?? goal.limits ?? []));
   const [note, setNote] = useState("");
   const [condition, setCondition] = useState("");
-  const others = feed.data?.goals.filter((g) => g.id !== goal.id && (g.status === "active" || deps.includes(g.id))) ?? [];
+  const listed = feed.data?.goals.filter((g) => g.id !== goal.id && (g.status === "active" || deps.includes(g.id))) ?? [];
+  // A goal someone who decides can't see would be refused as a new dependency, so it isn't offered (C2 F5).
+  const offered = (id: string) => !choices || choices.includes(id) || startDeps.includes(id);
+  const others = listed.filter((g) => offered(g.id));
+  const notOffered = listed.length - others.length;
+  const them = (n: number) => (n === 1 ? "it" : "them");
   const out = measuresOut(measures);
   const changes: ChangeFields = {};
   if (title.trim() !== goal.title || keep.includes("title")) changes.title = title.trim();
@@ -154,7 +166,7 @@ export function ChangesForm({
           <option value="dropped">Dropped</option>
         </Select>
       </Field>
-      {others.length > 0 && (
+      {(others.length > 0 || hiddenDeps > 0 || notOffered > 0) && (
         <div className="mb-3">
           <p className="mb-1 text-[14px] text-zinc-600">Depends on</p>
           {others.map((g) => (
@@ -163,6 +175,16 @@ export function ChangesForm({
               {g.title}
             </label>
           ))}
+          {hiddenDeps > 0 && (
+            <p className="text-[14px] text-zinc-500" data-hidden-deps>
+              Also depends on {hiddenGoals(hiddenDeps)}. Sending keeps {them(hiddenDeps)}; only someone who can see {them(hiddenDeps)} can remove {them(hiddenDeps)}.
+            </p>
+          )}
+          {notOffered > 0 && (
+            <p className="text-[14px] text-zinc-500" data-deps-not-offered>
+              {notOffered === 1 ? "1 goal you can see isn't offered" : `${notOffered} goals you can see aren't offered`}: someone who decides on this goal can&apos;t see {them(notOffered)}.
+            </p>
+          )}
         </div>
       )}
       <Field label={noteLabel} hint="Never sent to agents. 1 to 2000 characters.">

@@ -292,9 +292,10 @@ export function unreadableGoals(pp: PolicyPrincipal, ids: string[]): string[] {
 }
 
 /** A depends_on list from a body. Every goal sent must be one the caller can read (404 otherwise). The dependencies in
- *  `prev` the caller can't read are kept: they never saw them, so a list without them is not a request to drop them
- *  (a goal form only lists what its reader can see). At most 5 in all. */
-function dependsIn(pp: PolicyPrincipal, v: unknown, self: string | null, prev: string[] = []): string[] {
+ *  `keepFrom` (by default `prev`) the caller can't read are kept: they never saw them, so a list without them is not a
+ *  request to drop them (a goal form only lists what its reader can see). A counter keeps them from the request it
+ *  counters, not the goal (C2 N2). At most 5 in all. */
+function dependsIn(pp: PolicyPrincipal, v: unknown, self: string | null, prev: string[] = [], keepFrom: string[] = prev): string[] {
   if (v === undefined) return prev;
   if (!Array.isArray(v)) throw badRequest("depends_on must be a list of goal ids");
   if (v.length > 5) throw badRequest("depends_on: at most 5");
@@ -305,7 +306,7 @@ function dependsIn(pp: PolicyPrincipal, v: unknown, self: string | null, prev: s
     if (!d || !canReadGoal(pp, goalObj(d))) throw notFound();
     if (!out.includes(id)) out.push(id);
   }
-  const kept = unreadableGoals(pp, prev).filter((id) => !out.includes(id));
+  const kept = unreadableGoals(pp, keepFrom).filter((id) => !out.includes(id));
   if (out.length + kept.length > 5) throw badRequest(`depends_on: at most 5, and ${kept.length === 1 ? "1 goal you can't see stays" : `${kept.length} goals you can't see stay`} on the list`);
   return [...out, ...kept];
 }
@@ -386,8 +387,9 @@ export function versionContentOf(wsId: string, goalId: string, version: number):
 }
 
 /** Validate a version body against `prev` (the same rules for a new version and a change request): the fields sent
- *  replace prev's, then 409 cycle when depends_on would loop and 409 no_change when nothing changed. */
-export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalContent, b: Body): GoalContent {
+ *  replace prev's, then 409 cycle when depends_on would loop and 409 no_change when nothing changed. A depends_on sent
+ *  keeps the dependencies in `keepDepsFrom` (by default prev's) that the caller can't read. */
+export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalContent, b: Body, keepDepsFrom: string[] = prev.depends_on): GoalContent {
   const status = (b.status ?? prev.status) as GoalStatus;
   if (!GOAL_STATUSES.includes(status)) throw badRequest("status must be active, achieved or dropped");
   const next: GoalContent = {
@@ -395,7 +397,7 @@ export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalConte
     measures: measuresIn(b.measures, prev.measures),
     anchors: anchorsIn(b.anchors, prev.anchors),
     status,
-    depends_on: dependsIn(pp, b.depends_on, goalId, prev.depends_on),
+    depends_on: dependsIn(pp, b.depends_on, goalId, prev.depends_on, keepDepsFrom),
     limits: limitsIn(b.limits, prev.limits),
     target_share: targetIn(b.target_share, prev.target_share),
   };

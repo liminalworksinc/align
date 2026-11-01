@@ -349,7 +349,8 @@ confirm, `409 last_owner` while the only owner of a workspace with other members
 newest 200 `{ at, actor: {id, name}|null, action, object_id }`), `GET/POST .../invites` (`{ email, role, team_id?,
 team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST .../accept`, `POST .../teams`,
 `POST .../teams/:team/members`, `DELETE .../teams/:team/members/:user` (the `/pods` paths are aliases), `POST .../goals`
-(`{ title, level?, visibility?, team_id?, measures?, anchors?, depends_on?, limits? }`), `GET .../goals/:goal`,
+(`{ title, level?, visibility?, team_id?, measures?, anchors?, depends_on?, limits? }`), `GET .../goals/:goal` (with
+`dependency_choices`: the goal ids a change request from the reader may add as a dependency, `null` when they can't propose),
 `POST .../goals/:goal/versions` (`{ version, title?, measures?, anchors?, status?, limits? }`, `409 stale_version` /
 `no_change`), `POST .../limits/suggest` (`{ notes (≤20,000), source: { title?, date }, prefer_goal_id? }`, owners and
 members, 20 a minute per person and 120 an hour per workspace → `{ suggestions: [ { goal: { id, title, version },
@@ -361,7 +362,7 @@ see `lib/v2/limit-suggest.ts`), `GET .../sessions`, `GET .../alignments`, `GET .
 `POST .../change-requests/:id/{approve|approve_and_launch|launch|not_yet|reject|counter|accept_counter|acknowledge|withdraw|rebase}`
 (approve records the decision and keeps the version unlaunched, `launch: "pending"`; `launch` publishes it as the goal's
 next version with its `goal_version` directives, from the approval set or a workspace owner, 403 `not_a_launcher`;
-`not_yet` publishes nothing; a newer goal version or a closed goal first makes it `superseded` with `launch:
+`not_yet` publishes nothing; both take `{ revision }`, 409 `stale_revision` when it isn't current; a newer goal version or a closed goal first makes it `superseded` with `launch:
 "superseded"`; `counter` takes an optional `condition` (1 to 2000) that only the requester `acknowledge`s, 403
 `not_requester`, 409 `already_acknowledged`, never a gate), each request reading `launch`, `launch_decided_by`,
 `launch_decided_at`, `launchers`, `condition` and `can.{approve_and_launch, launch, not_yet, acknowledge}`, and the

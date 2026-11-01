@@ -61,7 +61,8 @@ The server prints the new link in its own terminal. Any address can sign in by e
 printed, never sent), so you can add people by inviting them from a workspace's People tab. Codes are limited per
 address: 3 for one address in 10 minutes. Everyone signs in from this one machine, so there is no per-client limit in
 Mode L, only a machine-wide ceiling of `ALIGN_LOCAL_CODES_PER_HOUR` (default 60) an hour against a runaway script. A
-refused send says how long to wait.
+refused send says how long to wait; past the ceiling it says the whole machine is out of codes, and a restart clears
+it. The local owner's address is outside the ceiling, so `npm run sign-in-link` always gets you back in.
 
 **Passkeys.** Once signed in, add a passkey on `/app/account`; then **Sign in with a passkey** (or pick it from the
 email field's suggestions) signs you in. In Mode L passkeys work only at `http://localhost:3100`, not
