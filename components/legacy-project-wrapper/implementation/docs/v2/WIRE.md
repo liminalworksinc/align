@@ -53,7 +53,8 @@ usage `ts`, receipt `at`, activity and steering `at`) on the server's clock.
 → `{ "user": { "id", "name", "email" }, "device": { "id", "name" } | null, "workspaces": [ { "id", "name", "role": "owner"|"member"|"viewer", "teams": [ { "id", "name", "role": "lead"|"member" } ] } ] }`
 Only workspaces the device was granted (device) or the user belongs to (cookie). A device gains a workspace when its
 person accepts an invite with it ticked (`POST /api/v2/invites/:token/accept { device_ids }`); the directives answer's
-`workspaces` tells it at its next pass.
+`workspaces` tells it at its next pass. A device also gets `"other_workspaces": [ { "id", "name" } ]`: its person's
+workspaces it was not given (the Devices page gives one; the CLI points there).
 
 `GET /api/v2/devices` (cookie, or Bearer) → `{ "devices": [ { "id", "name", "created_at", "last_seen_at", "revoked_at",
 "revoked_reason", "workspaces": [ { "id", "name" } ], "current"?: bool } ] }`: the person's devices; with a device token

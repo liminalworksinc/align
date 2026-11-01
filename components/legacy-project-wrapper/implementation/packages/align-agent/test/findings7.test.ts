@@ -329,4 +329,19 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     assert.match(r.stdout, /Signed in as Sean <sean@example\.test> on device Test Mac\./);
     assert.deepEqual([...fake.devices.values()].filter((d) => !d.revoked).map((d) => d.name), ["Test Mac"]);
   });
+
+  test("a member whose device was not given the workspace: `align goals --workspace` (and `align share`) say so and point to the Devices page; a name the person can't see stays unknown", async () => {
+    const { fake, t } = await world();
+    fake.otherWorkspaces = [{ id: "ws_ledger", name: "Ledger Co" }];
+    const want = `align: this device has not been given the workspace Ledger Co: you are a member, but this device was not ticked when you joined it. Give it this workspace on your Devices page (${fake.url}/app/devices, "Give this device the workspace"), then run \`align goals --refresh\`.`;
+    const r = await runCli(t, ["goals", "--workspace", "Ledger Co"]);
+    assert.equal(r.code, 2);
+    assert.equal(r.stderr.trim(), want);
+    const s = await runCli(t, ["share", "--latest", "--workspace", "ledger co", "--goal", "none", "--yes"]);
+    assert.equal(s.code, 2);
+    assert.equal(s.stderr.trim(), want);
+    const u = await runCli(t, ["goals", "--workspace", "Nope Co"]);
+    assert.equal(u.code, 2);
+    assert.equal(u.stderr.trim(), 'align: unknown workspace "Nope Co"');
+  });
 });

@@ -851,7 +851,12 @@ credential the caller's identity on `GET /api/v2/me`.
 #### Scenario: Who am I
 
 - **WHEN** a device token or a browser session calls `GET /api/v2/me`
-- **THEN** the response is `{user:{id, name, email}, device, workspaces}`, where `device` is `{id, name}` only for a device token, and for a device `workspaces` lists only the workspaces granted to it while the person is still a member
+- **THEN** the response is `{user:{id, name, email}, device, workspaces}`, where `device` is `{id, name}` only for a device token, and for a device `workspaces` lists only the workspaces granted to it while the person is still a member, and `other_workspaces` (`{id, name}`, device tokens only) the person's other workspaces, the ones this device was not given, so the CLI can point to the Devices page
+
+#### Scenario: A device's workspaces it was not given
+
+- **WHEN** a device of a member of A, never given A, calls `GET /api/v2/me`, is then given A on the Devices page and calls it again, and the person's browser calls it (`scripts/test-v2.mjs` "devices (E2E-AGENT cycle 6): a device's GET /me lists as other_workspaces ...")
+- **THEN** the first lists A under `other_workspaces` (never a workspace they are not a member of) and none under `workspaces`, the second no longer lists A under `other_workspaces`, and the browser's answer has no `other_workspaces`
 
 #### Scenario: Devices list
 

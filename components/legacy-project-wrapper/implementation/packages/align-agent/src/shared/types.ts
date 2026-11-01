@@ -294,6 +294,9 @@ export interface MeFile {
   /** Each workspace's teams for this person (`teams`; servers before teams were renamed sent `pods`). */
   workspaces: { id: string; name: string; role: string; teams?: { id: string; name: string; role: string }[]; pods?: { id: string; name: string; role: string }[] }[];
   default_workspace?: string | null;
+  /** The person's workspaces this device was not given (servers from cycle 6 on): named so `--workspace` can point to
+   *  the Devices page grant instead of saying "unknown workspace". */
+  other_workspaces?: { id: string; name: string }[];
   /** Set when this machine signed out (logout, or the server revoked the device), so hooks refuse to share. */
   signed_out?: boolean;
 }

@@ -604,8 +604,7 @@ async function cmdGoals(ctx: Ctx, argv: string[]): Promise<void> {
   const me = loadMe(ctx.home);
   if (!me) throw new UsageError("no cached workspaces; run `align login`");
   if (!values.workspace && !me.workspaces.length) return out(NO_WORKSPACES);
-  const targets = values.workspace ? [resolveWorkspace(ctx.home, values.workspace)].filter(Boolean) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
-  if (!targets.length) throw new UsageError(`unknown workspace "${values.workspace}"`);
+  const targets = values.workspace ? [await workspaceOrExplain(ctx, values.workspace)] : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
   const all: { ws: string; goals: Goal[]; fetched: string | null }[] = [];
   for (const w of targets as { id: string; name: string }[]) {
     if (values.refresh) await refreshFeed(ctx, w.id);
@@ -618,6 +617,31 @@ async function cmdGoals(ctx: Ctx, argv: string[]): Promise<void> {
     for (const g of a.goals) out(`  ${g.bindable ? "*" : " "} ${pad(g.id, 14)} v${pad(String(g.version), 3)} ${pad(g.status, 9)} ${pad(g.visibility === "pod" ? "team" : g.visibility, 10)} ${g.title}`);
   }
   out("* = you can bind a session to it now.");
+}
+
+/**
+ * The workspace `--workspace` names, from the cached `/me`, read again when it is not there and this machine is signed
+ * in. One this device can't reach is explained: when its person is a member but the device was never given it
+ * (`other_workspaces`), say so and where to give it, the Devices page (cycle 6); otherwise "unknown workspace".
+ */
+async function workspaceOrExplain(ctx: Ctx, ref: string): Promise<{ id: string; name: string }> {
+  let ws = resolveWorkspace(ctx.home, ref);
+  if (!ws && signedIn(ctx.home)) {
+    await refreshMe(ctx).catch(() => undefined);
+    ws = resolveWorkspace(ctx.home, ref);
+  }
+  if (ws) return ws;
+  throw unknownWorkspace(ctx, ref);
+}
+
+function unknownWorkspace(ctx: Ctx, ref: string): UsageError {
+  const q = ref.toLowerCase();
+  const other = (loadMe(ctx.home)?.other_workspaces || []).find((w) => w.id === ref || w.name.toLowerCase() === q);
+  if (!other) return new UsageError(`unknown workspace "${ref}"`);
+  const server = (loadCredentials(ctx.home)?.server_url || ctx.config.server_url).replace(/\/$/, "");
+  return new UsageError(
+    `this device has not been given the workspace ${clean(other.name, 80)}: you are a member, but this device was not ticked when you joined it. Give it this workspace on your Devices page (${server}/app/devices, "Give this device the workspace"), then run \`align goals --refresh\`.`,
+  );
 }
 
 /** No workspace in this device's reach (its person was removed from the only one, say): not an error (N6). */
@@ -665,7 +689,7 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
     await refreshMe(ctx).catch(() => undefined);
     ws = resolveWorkspace(ctx.home, values.workspace);
   }
-  if (!ws) throw new UsageError(values.workspace ? `unknown workspace "${values.workspace}"` : "--workspace is required (no default workspace)");
+  if (!ws) throw values.workspace ? unknownWorkspace(ctx, values.workspace) : new UsageError("--workspace is required (no default workspace)");
   const session = resolveSession(ctx, positionals[0], { latest: values.latest, cwd: values.cwd === undefined ? null : values.cwd || process.cwd() });
   const share = getShare(ctx, session.local_id);
   if (share && (share.state === "shared" || share.state === "pending" || share.state === "suspended")) throw new UsageError(`session is already ${share.state} with ${share.workspace_name}`);
@@ -710,7 +734,7 @@ async function shareDir(ctx: Ctx, folder: string, wsRef: string | undefined, goa
     await refreshMe(ctx).catch(() => undefined);
     ws = resolveWorkspace(ctx.home, wsRef);
   }
-  if (!ws) throw new UsageError(wsRef ? `unknown workspace "${wsRef}"` : "--workspace is required (no default workspace)");
+  if (!ws) throw wsRef ? unknownWorkspace(ctx, wsRef) : new UsageError("--workspace is required (no default workspace)");
   if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) throw new UsageError(`${folder} is not a folder`);
   const dir = gitInfo(realDir(folder))?.toplevel || realDir(folder);
   const goal = await goalFor(ctx, ws.id, goalRef);
@@ -788,7 +812,7 @@ async function cmdAsks(ctx: Ctx, argv: string[]): Promise<void> {
   if (!me) throw new UsageError("no cached workspaces; run `align login`");
   if (!values.workspace && !me.workspaces.length) return out(NO_WORKSPACES);
   const targets = values.workspace ? [resolveWorkspace(ctx.home, values.workspace)].filter((w): w is { id: string; name: string } => !!w) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
-  if (!targets.length) throw new UsageError(`unknown workspace "${values.workspace}"`);
+  if (!targets.length) throw unknownWorkspace(ctx, values.workspace!);
   const all = targets.map((w) => {
     const f = readAsks(ctx.home, w.id);
     const asks = (f?.asks || []).filter((a) => values.all || a.state === "open" || a.state === "accepted").sort(askOrder);
@@ -1113,7 +1137,7 @@ function allocationTargets(ctx: Ctx, ref: string | undefined): { id: string; nam
   if (!me) throw new UsageError("no cached workspaces; run `align login`");
   if (!ref && !me.workspaces.length) return [];
   const list = ref ? [resolveWorkspace(ctx.home, ref)].filter((w): w is { id: string; name: string } => !!w) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
-  if (!list.length) throw new UsageError(`unknown workspace "${ref}"`);
+  if (!list.length) throw unknownWorkspace(ctx, ref!);
   return list;
 }
 

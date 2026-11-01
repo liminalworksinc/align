@@ -100,6 +100,8 @@ export class FakeServer {
   refuseDeletes = false;
   user = { id: "u_sean", name: "Sean", email: "sean@example.test" };
   workspaces = [{ id: "ws_acme", name: "Acme", role: "owner", teams: [{ id: "pod_core", name: "Core", role: "lead" }] }];
+  /** The person's workspaces this device was not given (`/me`'s `other_workspaces`). */
+  otherWorkspaces: { id: string; name: string }[] = [];
   goals = new Map<string, Goal[]>();
   /** Workspace steering switch, as the goals feed reports it. */
   steering = new Map<string, "on" | "off">();
@@ -457,7 +459,7 @@ export class FakeServer {
         this.revokesSeen.push({ device: dev.id, replaced_by: url.searchParams.get("replaced_by") });
         return send(204);
       }
-      if (req.method === "GET" && p === "/api/v2/me") return send(200, { user: this.user, device: { id: dev.id, name: dev.name }, workspaces: this.workspaces });
+      if (req.method === "GET" && p === "/api/v2/me") return send(200, { user: this.user, device: { id: dev.id, name: dev.name }, workspaces: this.workspaces, other_workspaces: this.otherWorkspaces });
       if (req.method === "GET" && p === "/api/v2/devices") {
         const list = [...this.devices.values()].map((d) => ({ id: d.id, name: d.name, created_at: d.createdAt ?? new Date(0).toISOString(), last_seen_at: d.createdAt ?? null, revoked_at: d.revoked ? new Date().toISOString() : null, revoked_reason: d.revoked ? d.revokedReason || "revoked_on_web" : null, workspaces: [], current: d.id === dev.id }));
         return send(200, { devices: list });

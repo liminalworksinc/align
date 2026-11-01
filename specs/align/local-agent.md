@@ -601,7 +601,17 @@ yet; use --refresh)` followed by one line per goal (`*` when bindable, id, `v<ve
 `private`, `team` or `workspace`, title) and the legend `* = you can bind a session to it now.` `--refresh` SHALL require sign-in and refetch
 `/api/v2/me` and each feed. Feeds SHALL be fetched with `If-None-Match` and a 304 SHALL only update `fetched_at`; a
 fetched feed SHALL keep each goal's `target_share` and `allocation` and the feed's `steering` (`off` when the server sends
-none).
+none). A `--workspace` this device can't reach (also for `align share`, `align asks` and `align allocation`) SHALL be
+read again from `/me` when signed in, and, when it is one of the person's workspaces this device was not given (`/me`'s
+`other_workspaces`, `workspaces` "Workspace and account read views"), SHALL exit 2 with `align: this device has not been given the workspace
+<name>: you are a member, but this device was not ticked when you joined it. Give it this workspace on your Devices
+page (<server>/app/devices, "Give this device the workspace"), then run \`align goals --refresh\`.`; otherwise with
+`align: unknown workspace "<ref>"`.
+
+#### Scenario: A workspace this device was not given
+
+- **WHEN** the person is a member of Ledger Co but this device was not given it, and the user runs `align goals --workspace "Ledger Co"`, `align share --latest --workspace "ledger co" ...`, and `align goals --workspace "Nope Co"` (test `findings7` "a member whose device was not given the workspace ...")
+- **THEN** the first two exit 2 with `align: this device has not been given the workspace Ledger Co: ... Devices page (<server>/app/devices, "Give this device the workspace") ...`, and the third with `align: unknown workspace "Nope Co"`
 
 #### Scenario: Not signed in yet
 

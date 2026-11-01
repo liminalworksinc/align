@@ -2386,6 +2386,7 @@ try {
   const gBearer = await call("U5", "POST", `/api/v2/devices/${desk.id}/workspaces`, { bearer: D5.access, body: { workspace_id: A } });
   const deskGrants = () => withDb((d) => d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ?").all(desk.id).map((r) => r.ws_id).join());
   const refusedGrants = deskGrants();
+  const deskMeBefore = await call("U5", "GET", "/api/v2/me", { bearer: desk.access });
   const gOk = await give(U5, desk.id, A);
   const gAgain = await give(U5, desk.id, A);
   const deskMe = await call("U5", "GET", "/api/v2/me", { bearer: desk.access });
@@ -2399,6 +2400,14 @@ try {
       gOk.status === 200 && gOk.json?.device_id === desk.id && gOk.json?.workspace_id === A && gAgain.status === 409 && gAgain.json?.error === "already_granted" &&
       deskMe.json?.workspaces?.map((w) => w.id).join() === A && JSON.stringify(deskDirs.json?.workspaces) === JSON.stringify([A]) && audDesk.length === 1 && audDesk[0].actor?.id === U5.id,
     `${gStale.text} ${gOther.status} ${gNotMember.status} ${gRevoked.status} ${gBadWs.status} ${gBearer.status} [${refusedGrants}] ${gOk.text} ${gAgain.text} ${deskMe.text} ${deskDirs.text} ${JSON.stringify(audDesk)}`,
+  );
+  const webMe = await call("U5", "GET", "/api/v2/me", { cookie: U5.cookie });
+  check(
+    "devices (E2E-AGENT cycle 6): a device's GET /me lists as other_workspaces ({id, name}) its person's workspaces it was not given, never one they are not a member of; given one, it moves to workspaces; the web's /me has no other_workspaces",
+    JSON.stringify(deskMeBefore.json?.workspaces) === "[]" && deskMeBefore.json?.other_workspaces?.some((w) => w.id === A && typeof w.name === "string") &&
+      !deskMeBefore.json.other_workspaces.some((w) => w.id === B) && Array.isArray(deskMe.json?.other_workspaces) && !deskMe.json.other_workspaces.some((w) => w.id === A) &&
+      webMe.status === 200 && !("other_workspaces" in (webMe.json ?? {})),
+    `${deskMeBefore.text} ${deskMe.text} ${webMe.text}`,
   );
   if (existsSync(CHROME)) {
     const { default: puppeteer } = await import("puppeteer-core");
