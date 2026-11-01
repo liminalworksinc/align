@@ -1,6 +1,7 @@
 // Device API client for docs/v2/WIRE.md. Bearer access tokens (1 h), rotating refresh tokens bound to the device
 // Ed25519 key. A file lock serializes refresh between concurrent CLI and sync processes, because reusing an old refresh token
 // revokes the device.
+import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import type { Ctx } from "./context.ts";
@@ -44,6 +45,9 @@ export function serverIso(iso: string, offset: number, clamp = false): string {
 }
 
 export class SignedOut extends Error {}
+/** The credentials now on disk are another device's than the one this pass or command is bound to (an `align login`
+ *  or `align logout` committed meanwhile): it stops instead of going on as the new device (C4-2). */
+export class DeviceChanged extends SignedOut {}
 export class NetworkError extends Error {}
 /** The server refused a refresh because this computer's clock is off: the device stays signed in and retries later. */
 export class ClockSkew extends NetworkError {}
@@ -160,9 +164,15 @@ export async function rawRequest(base: string, method: string, path: string, opt
   return { status: res.status, json, headers: res.headers, clockOffsetMs };
 }
 
+/** The ALIGN_HOMEs whose refresh lock the current async call chain holds, so a call made while holding it (a logout's
+ *  own refresh) does not wait for itself. */
+const lockHeld = new AsyncLocalStorage<Set<string>>();
+
 /** Run `fn` holding the refresh lock: every write of the credentials and the device key happens under it (a refresh, a
- *  clock offset, a new pairing from `align login`, `align logout`), so none of them is lost to another process. */
+ *  clock offset, a new pairing from `align login`, `align logout`), so none of them is lost to another process. Calls
+ *  made inside `fn` that take the lock again run at once (the lock is already theirs). */
 export function withLock<T>(home: string, fn: () => Promise<T>, waitMs = 15_000): Promise<T> {
+  if (lockHeld.getStore()?.has(home)) return fn();
   const file = layout.refreshLock(home);
   const deadline = Date.now() + waitMs;
   const attempt = async (): Promise<T> => {
@@ -179,9 +189,19 @@ export function withLock<T>(home: string, fn: () => Promise<T>, waitMs = 15_000)
       await new Promise((r) => setTimeout(r, 100));
       return attempt();
     }
+    // Kept fresh while held, so a holder that waits on the network (a logout's revoke) is never taken for a stale lock.
+    const beat = setInterval(() => {
+      try {
+        fs.utimesSync(file, new Date(), new Date());
+      } catch {
+        /* gone */
+      }
+    }, 5_000);
+    beat.unref();
     try {
-      return await fn();
+      return await lockHeld.run(new Set([...(lockHeld.getStore() ?? []), home]), fn);
     } finally {
+      clearInterval(beat);
       fs.closeSync(fd);
       try {
         fs.unlinkSync(file);
@@ -191,6 +211,39 @@ export function withLock<T>(home: string, fn: () => Promise<T>, waitMs = 15_000)
     }
   };
   return attempt();
+}
+
+/**
+ * Bind `ctx` to one device identity (C4-2): `deviceId`, or the device signed in now (null when none). Until the returned
+ * function undoes it, every authenticated call through `ctx` checks the credentials it would use are still that
+ * device's and throws `DeviceChanged` otherwise, so a sync pass or command that started under one pairing never sends
+ * its queued uploads, shares or retries with a newer pairing's tokens (nor refreshes the newer pairing).
+ */
+export function bindDevice(ctx: Ctx, deviceId?: string | null): () => void {
+  const prev = ctx.boundDevice;
+  const c = loadCredentials(ctx.home);
+  ctx.boundDevice = deviceId !== undefined ? deviceId : c && !c.signed_out ? c.device_id : null;
+  return () => {
+    ctx.boundDevice = prev;
+  };
+}
+
+/** Credentials `c` belong to the device `ctx` is bound to (or `ctx` is unbound). Signed out counts as the same device:
+ *  a refusal for it is reported as a sign-out, not as a change of pairing. */
+function boundTo(ctx: Ctx, c: Credentials | null): boolean {
+  if (ctx.boundDevice === undefined) return true;
+  if (ctx.boundDevice === null) return !c || !!c.signed_out;
+  return !!c && c.device_id === ctx.boundDevice;
+}
+
+/** Whether the credentials on disk are still those of the device `ctx` is bound to (always true when unbound). */
+export function stillBound(ctx: Ctx): boolean {
+  return boundTo(ctx, loadCredentials(ctx.home));
+}
+
+function checkBound(ctx: Ctx, c: Credentials | null): void {
+  if (boundTo(ctx, c)) return;
+  throw new DeviceChanged(`this machine's Align pairing changed (now ${c && !c.signed_out ? `device ${c.device_id}` : "signed out"}) while this ran as ${ctx.boundDevice ? `device ${ctx.boundDevice}` : "a signed-out machine"}`);
 }
 
 /** Mark this machine signed out, unless `deviceId` is given and the credentials are now another device's: a refresh or
@@ -291,11 +344,13 @@ async function noteClock(ctx: Ctx, measured: number | null): Promise<void> {
 /** Refresh the access token if it is missing or within 2 minutes of expiry (or `force`). */
 export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credentials> {
   const initial = loadCredentials(ctx.home);
+  checkBound(ctx, initial);
   if (!initial || initial.signed_out || !initial.refresh_token) throw new SignedOut("not signed in");
   const fresh = (c: Credentials) => c.access_token && c.access_expires_at && Date.parse(c.access_expires_at) - Date.now() > 120_000;
   if (!force && fresh(initial)) return initial;
   return withLock(ctx.home, async () => {
     const c = loadCredentials(ctx.home);
+    checkBound(ctx, c);
     if (!c || c.signed_out || !c.refresh_token) throw new SignedOut("not signed in");
     // Someone else refreshed while we waited.
     if (c.refresh_token !== initial.refresh_token && fresh(c)) return c;
@@ -380,8 +435,9 @@ export async function apiOk(ctx: Ctx, method: string, path: string, opts: { body
   throw new HttpError(r.status, r.json?.error ?? null, r.json);
 }
 
-// ---------- a revoke that waits for the server (logout while it could not be reached) ----------
-/** What `align logout` keeps when it could not reach the server, so the old device is still revoked later. */
+// ---------- revokes that wait for the server (a logout it did not hear, a device a login replaced) ----------
+/** One device this machine no longer uses and still has to revoke on the server, kept in `revoke.json` until the
+ *  server confirms it (or no longer accepts the device at all). */
 export interface PendingRevoke {
   server_url: string;
   device_id: string;
@@ -391,18 +447,37 @@ export interface PendingRevoke {
   /** The old device key (PKCS#8 PEM), to sign a refresh when the access token has expired. */
   key_pem: string | null;
   since: string;
+  /** Why it waits: `align logout` could not reach the server, or `align login` replaced it (C4-9). Absent in files
+   *  written before this was kept: a logout. */
+  reason?: "logout" | "replaced";
 }
 
-export function loadPendingRevoke(home: string): PendingRevoke | null {
-  return readJson<PendingRevoke>(layout.pendingRevoke(home));
+/** `revoke.json`: every device still to revoke (C4-3). An older file held a single device. */
+interface PendingRevokeFile {
+  v: 2;
+  devices: PendingRevoke[];
 }
 
-export function savePendingRevoke(home: string, p: PendingRevoke): void {
-  writeJsonAtomic(layout.pendingRevoke(home), p, 0o600);
+export function loadPendingRevokes(home: string): PendingRevoke[] {
+  const j = readJson<PendingRevokeFile | PendingRevoke>(layout.pendingRevoke(home));
+  if (!j) return [];
+  if ("devices" in j && Array.isArray(j.devices)) return j.devices.filter((p) => p && typeof p.device_id === "string");
+  return "device_id" in j && typeof j.device_id === "string" ? [j as PendingRevoke] : [];
+}
+
+function savePendingRevokes(home: string, list: PendingRevoke[]): void {
+  if (!list.length) return fs.rmSync(layout.pendingRevoke(home), { force: true });
+  writeJsonAtomic(layout.pendingRevoke(home), { v: 2, devices: list } satisfies PendingRevokeFile, 0o600);
+}
+
+/** Add a device to revoke (under the refresh lock), keeping every other one that still waits: a second login or an
+ *  offline logout never drops an earlier pending revoke (C4-3). */
+function addPendingRevoke(home: string, p: PendingRevoke): void {
+  savePendingRevokes(home, [...loadPendingRevokes(home).filter((x) => x.device_id !== p.device_id), p]);
 }
 
 /** What revokes the device of credentials `c` later: its tokens and the device key now on disk. */
-export function pendingRevokeFor(home: string, c: Credentials): PendingRevoke {
+export function pendingRevokeFor(home: string, c: Credentials, reason: "logout" | "replaced"): PendingRevoke {
   let keyPem: string | null = null;
   try {
     keyPem = fs.readFileSync(layout.deviceKey(home), "utf8");
@@ -417,7 +492,14 @@ export function pendingRevokeFor(home: string, c: Credentials): PendingRevoke {
     refresh_token: c.refresh_token,
     key_pem: keyPem,
     since: new Date().toISOString(),
+    reason,
   };
+}
+
+/** How a pending revoke came about, in words for `align status` and the log (C4-9). */
+export function pendingRevokeWords(p: PendingRevoke): string {
+  const at = p.since.slice(0, 16).replace("T", " ");
+  return p.reason === "replaced" ? `replaced by \`align login\` at ${at} UTC` : `signed out at ${at} UTC while ${p.server_url} could not be reached`;
 }
 
 /** How long `align login` and `align logout` wait for a refresh in flight (longer than a refresh's own timeout). */
@@ -426,58 +508,127 @@ const PAIRING_LOCK_MS = 40_000;
 /**
  * Commit a new pairing (`align login`, after the token answer): under the refresh lock, so a sync's refresh in flight
  * finishes first and can't write the old device's tokens over the new ones, keep what revokes the device it replaces
- * (its latest tokens and its key, in `revoke.json`, the same mechanism as an offline logout), then write the new key and
- * credentials together. Until then the old pairing, key included, is untouched: an aborted login changes nothing
- * (C3-1, C3-2, C3-3). The caller then revokes the old device with `revokePending`. Returns the replaced device's id.
+ * (its latest tokens and its key, added to `revoke.json`, the same mechanism as an offline logout), run `onCommit`
+ * (which ends the shares of the replaced pairing: only those, since none of the new pairing's exist yet, C4-2), then
+ * write the new key and credentials together. Until then the old pairing, key included, is untouched: an aborted login
+ * changes nothing (C3-1, C3-2, C3-3). The caller then revokes the old device with `revokePending`.
  */
-export async function commitPairing(ctx: Ctx, creds: Credentials, keyPem: string): Promise<string | null> {
+export async function commitPairing<T>(ctx: Ctx, creds: Credentials, keyPem: string, onCommit: () => T): Promise<{ replaced: string | null; committed: T }> {
   return withLock(
     ctx.home,
     async () => {
       const before = loadCredentials(ctx.home);
       const replaced = before && !before.signed_out && before.refresh_token && before.device_id !== creds.device_id ? before : null;
-      if (replaced) savePendingRevoke(ctx.home, pendingRevokeFor(ctx.home, replaced));
+      if (replaced) addPendingRevoke(ctx.home, pendingRevokeFor(ctx.home, replaced, "replaced"));
+      const committed = onCommit();
       writeFileAtomic(layout.deviceKey(ctx.home), keyPem, 0o600);
       const next: Credentials = { ...creds };
       if (before?.clock_offset_ms) next.clock_offset_ms = before.clock_offset_ms;
       saveCredentials(ctx.home, next);
-      return replaced?.device_id ?? null;
+      return { replaced: replaced?.device_id ?? null, committed };
     },
     PAIRING_LOCK_MS,
   );
 }
 
-/**
- * `align logout`, locally, under the refresh lock (so a refresh in flight can't write tokens back afterwards): keep what
- * revokes the device when the server could not be told (`revoked` false), mark the credentials signed out and remove
- * the device key. Only for the device `deviceId` the caller signed out; a pairing that replaced it meanwhile is kept.
- */
-export async function signOutLocally(ctx: Ctx, deviceId: string, revoked: boolean): Promise<boolean> {
+/** `align login`'s last step: run `fn` under the refresh lock only while device `deviceId` is still the one signed in,
+ *  so it never reports a pairing another login replaced meanwhile as signed in. False when it was replaced. */
+export async function whileSignedInAs(ctx: Ctx, deviceId: string, fn: () => void): Promise<boolean> {
   return withLock(
     ctx.home,
     async () => {
-      const latest = loadCredentials(ctx.home);
-      if (!latest || latest.device_id !== deviceId) return false;
-      if (!revoked && !latest.signed_out) savePendingRevoke(ctx.home, pendingRevokeFor(ctx.home, latest));
-      markSignedOut(ctx.home, "logout", deviceId);
-      fs.rmSync(layout.deviceKey(ctx.home), { force: true });
+      const c = loadCredentials(ctx.home);
+      if (!c || c.signed_out || c.device_id !== deviceId) return false;
+      fn();
       return true;
     },
     PAIRING_LOCK_MS,
   );
 }
 
+/** What `align logout` did: the device it signed out (null when there were no credentials), whether the server
+ *  revoked it, and what `onSignedOut` returned. */
+export interface LogoutResult<T> {
+  device: Credentials | null;
+  revoked: boolean;
+  after: T | null;
+}
+
 /**
- * Revoke a device this machine signed out of while the server could not be reached (`align logout` offline), so its
- * sessions end on the server instead of staying shared forever. Runs before anything else at the next contact: the
- * next `align login` and every sync pass. Uses the old access token, or, when it has expired, signs a refresh with
- * the old key first. "revoked" once the server has revoked it, "already" when the server no longer accepted it at all
- * (it was revoked on the web meanwhile), "pending" while the server can't be reached (it is kept for the next contact),
- * "none" when nothing waits.
+ * `align logout`, entirely under the refresh lock, which `align login` also commits under (C4-4): the device it reads
+ * is the device it revokes and signs out, so a login can't commit between the two and leave its new pairing revoked
+ * on the server yet signed in here. Revokes the device (`DELETE /api/v2/devices/self`, refreshing first when needed,
+ * inside the same lock), keeps what revokes it later when the server could not be told, marks the credentials signed
+ * out, removes the device key and runs `onSignedOut` (which ends this machine's shares).
  */
-export async function revokePending(ctx: Ctx): Promise<"none" | "revoked" | "already" | "pending"> {
-  const p = loadPendingRevoke(ctx.home);
-  if (!p) return "none";
+export async function logoutLocked<T>(ctx: Ctx, onSignedOut: () => T): Promise<LogoutResult<T>> {
+  return withLock(
+    ctx.home,
+    async () => {
+      const c = loadCredentials(ctx.home);
+      if (!c) return { device: null, revoked: false, after: null };
+      const unbind = bindDevice(ctx, c.device_id);
+      let revoked = !!c.signed_out;
+      try {
+        if (!c.signed_out) {
+          try {
+            const r = await api(ctx, "DELETE", "/api/v2/devices/self");
+            revoked = r.status === 204 || r.status === 200 || r.status === 401;
+          } catch (e) {
+            // The tokens are wiped locally either way; a refusal means the server no longer accepts this device.
+            revoked = e instanceof SignedOut;
+          }
+        }
+      } finally {
+        unbind();
+      }
+      const latest = loadCredentials(ctx.home);
+      if (!revoked && latest && !latest.signed_out) addPendingRevoke(ctx.home, pendingRevokeFor(ctx.home, latest, "logout"));
+      markSignedOut(ctx.home, "logout", c.device_id);
+      fs.rmSync(layout.deviceKey(ctx.home), { force: true });
+      return { device: c, revoked, after: onSignedOut() };
+    },
+    PAIRING_LOCK_MS,
+  );
+}
+
+/** What a pass of `revokePending` did with each device that waited. */
+export interface RevokeOutcome {
+  /** Revoked now. */
+  revoked: PendingRevoke[];
+  /** The server no longer accepted it at all: someone revoked it already (on the web, say). */
+  already: PendingRevoke[];
+  /** Still waiting: the server could not be reached. */
+  pending: PendingRevoke[];
+}
+
+/** One word for an outcome: "pending" while any device still waits, else what happened, "none" when nothing waited. */
+export function revokeState(o: RevokeOutcome): "none" | "revoked" | "already" | "pending" {
+  return o.pending.length ? "pending" : o.revoked.length ? "revoked" : o.already.length ? "already" : "none";
+}
+
+/**
+ * Revoke every device this machine no longer uses that the server has not revoked yet (`revoke.json`: one `align logout`
+ * offline, or `align login` replaced and could not revoke), so their sessions end on the server instead of staying
+ * shared forever. Runs before anything else at the next contact: the next `align login` and every sync pass. Each
+ * device uses its old access token, or, when that has expired, signs a refresh with its old key first. Each one stays
+ * in the file until the server confirms it (revoked now, or no longer accepted at all); one the server can't be reached
+ * for stays for the next contact, the others go (C4-3).
+ */
+export async function revokePending(ctx: Ctx): Promise<RevokeOutcome> {
+  const out: RevokeOutcome = { revoked: [], already: [], pending: [] };
+  for (const p of loadPendingRevokes(ctx.home)) {
+    const how = await revokeOne(ctx, p);
+    out[how].push(p);
+    if (how === "pending") continue;
+    // Taken out under the refresh lock, so a login or logout adding a device meanwhile is never lost. When the lock is
+    // busy it stays in the file: the next contact finds it already revoked.
+    await withLock(ctx.home, async () => savePendingRevokes(ctx.home, loadPendingRevokes(ctx.home).filter((x) => x.device_id !== p.device_id))).catch(() => undefined);
+  }
+  return out;
+}
+
+async function revokeOne(ctx: Ctx, p: PendingRevoke): Promise<"revoked" | "already" | "pending"> {
   const del = (token: string) => rawRequest(p.server_url, "DELETE", "/api/v2/devices/self", { headers: { authorization: `Bearer ${token}` } });
   const seen: string[] = [];
   try {
@@ -510,13 +661,12 @@ export async function revokePending(ctx: Ctx): Promise<"none" | "revoked" | "alr
       // say). Any other reason: someone revoked it on the web meanwhile.
       if (r.status === 401 && r.json?.reason === "logout") done = true;
     }
-    fs.rmSync(layout.pendingRevoke(ctx.home), { force: true });
     if (!done) {
       // An access token the server refuses and no refresh it accepts: someone revoked it already.
-      ctx.log(`device ${p.device_id}, which this machine signed out of at ${p.since} while ${p.server_url} could not be reached, was already revoked (${seen.join(", ") || "no token left to use"})`);
+      ctx.log(`device ${p.device_id}, ${pendingRevokeWords(p)}, was already revoked (${seen.join(", ") || "no token left to use"})`);
       return "already";
     }
-    ctx.log(`revoked device ${p.device_id}, which this machine signed out of at ${p.since} while ${p.server_url} could not be reached`);
+    ctx.log(`revoked device ${p.device_id}, ${pendingRevokeWords(p)}`);
     return "revoked";
   } catch (e) {
     if (e instanceof NetworkError) return "pending";

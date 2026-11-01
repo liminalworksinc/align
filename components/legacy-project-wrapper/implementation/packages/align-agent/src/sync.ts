@@ -5,10 +5,12 @@ import path from "node:path";
 import type { Ctx } from "./context.ts";
 import {
   api,
+  bindDevice,
   clockMeasured,
   clockOffset,
   clockWords,
   CLOCK_TOLERANCE_MS,
+  DeviceChanged,
   HttpError,
   loadCredentials,
   NetworkError,
@@ -19,7 +21,9 @@ import {
   serverTrouble,
   SignedOut,
   signedIn,
+  stillBound,
   type Resp,
+  type RevokeOutcome,
 } from "./api.ts";
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
@@ -172,6 +176,19 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
 }
 
 // ---------- outbox ----------
+/** The server refused a call that must not be dropped (a history deletion, C4-1): it stays queued and is tried again
+ *  after `retryMs`, or at once by the developer's next `align delete-history`. */
+class KeepQueued extends Error {
+  retryMs: number;
+  constructor(message: string, retryMs: number) {
+    super(message);
+    this.retryMs = retryMs;
+  }
+}
+
+/** How long a refused history deletion waits before it is tried again on its own (a new pairing may be allowed). */
+const REFUSED_DELETE_RETRY_MS = 3_600_000;
+
 interface OutboxRow {
   id: number;
   local_id: string;
@@ -203,6 +220,11 @@ export async function flushOutbox(ctx: Ctx): Promise<{ sent: number; deferred: n
         res.sent++;
       } catch (e) {
         if (e instanceof SignedOut) return res;
+        if (e instanceof KeepQueued) {
+          ctx.db.prepare("UPDATE outbox SET attempts=attempts+1, next_at=?, last_error=? WHERE id=?").run(Date.now() + e.retryMs, e.message, item.id);
+          res.deferred++;
+          break;
+        }
         if (e instanceof NetworkError || (e instanceof HttpError && (e.status >= 500 || e.status === 429))) {
           ctx.db.prepare("UPDATE outbox SET attempts=attempts+1, next_at=?, last_error=? WHERE id=?").run(Date.now() + backoff(ctx, item.attempts + 1), String((e as Error).message), item.id);
           res.deferred++;
@@ -278,6 +300,10 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
       if (r.status === 409 && r.json?.error === "sharing_stopped") {
         ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=COALESCE(stopped_at, ?) WHERE local_id=?").run(nowIso(), lid);
         ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
+        // Its sharing was stopped (by the developer, or on the web): the server never shares a stopped session again,
+        // whichever of the account's devices asks, so no "revoke the old device" here (C4-8).
+        dropShareStarted(ctx, lid);
+        addNotice(ctx, lid, `share_err_${item.id}`, "Align: sharing failed (sharing_stopped): this session's sharing was stopped (`align stop-sharing`, `::align unshare` or Stop sharing on the web), and a session whose sharing was stopped is not shared again. This session stays private.");
         renderHot(ctx, lid);
         return;
       }
@@ -338,9 +364,16 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
     }
     case "delete_session": {
       const r = await api(ctx, "DELETE", base);
-      if (r.status === 204 || r.status === 200 || r.status === 404) {
+      if (r.status === 204 || r.status === 200) {
         forgetShare(ctx, lid);
         return;
+      }
+      if (r.status === 404 || r.status === 403) {
+        // Not deleted: the share and the queued deletion stay, and `align delete-history` says so (C4-1). The server
+        // lets any live device of the account that shared it delete its history, so this is a device of another
+        // account, one without access to the workspace now, or history that is not there (deleted on the web, say).
+        kvSet(ctx.db, `delete_refused:${lid}`, r.json?.error || `http_${r.status}`);
+        throw new KeepQueued(`history deletion refused: ${r.status} ${r.json?.error || ""}`.trim(), REFUSED_DELETE_RETRY_MS);
       }
       throw new HttpError(r.status, r.json?.error ?? null, r.json);
     }
@@ -510,8 +543,11 @@ export interface SyncResult {
   steering?: number;
   /** The first time this pass could not reach the server or got a 5xx (null when every call got through). */
   serverError?: string | null;
-  /** A revoke left waiting by `align logout` while the server was unreachable: done this pass, still waiting, or none. */
-  revoked?: "none" | "revoked" | "already" | "pending";
+  /** Devices left to revoke (`align logout` offline, or one `align login` replaced): what this pass did with each. */
+  revoked?: RevokeOutcome;
+  /** The pass stopped because this machine's pairing changed under it (an `align login` or `align logout` committed):
+   *  nothing more went to the server as the device it started as, nor as the new one (C4-2). */
+  aborted?: boolean;
 }
 
 /** last-sync.json: when the last pass ran, and whether the server could be reached (B5). */
@@ -555,9 +591,16 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
   }
   const t0 = Date.now();
   resetServerTrouble();
+  // The whole pass is one device's (C4-2): if `align login` or `align logout` commits while it runs, its next call to
+  // the server refuses to go on as the new pairing (or none), and the pass stops there.
+  const unbind = bindDevice(ctx);
+  /** Stop the pass when the pairing changed under it: steps that swallow their own errors would otherwise go on. */
+  const guard = () => {
+    if (!stillBound(ctx)) throw new DeviceChanged("pairing changed during the pass");
+  };
   try {
     // A device this machine signed out of while the server was unreachable is revoked before anything else.
-    res.revoked = await revokePending(ctx).catch(() => "pending" as const);
+    res.revoked = await revokePending(ctx).catch(() => ({ revoked: [], already: [], pending: [] }));
     res.spooled += ingestSpool(ctx);
     res.tail = tailAll(ctx, opts.tailBudgetMs);
     res.spooled += ingestSpool(ctx);
@@ -570,13 +613,19 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
       endSharesIfSignedOut(ctx);
       return res;
     }
+    guard();
     const refresh = new Set<string>();
     let reach: string[] | null = null;
     res.sent += (await flushOutbox(ctx)).sent;
+    guard();
     res.directives = await pollDirectives(ctx, (ws) => refresh.add(ws), (ws) => (reach = ws)).catch(() => 0);
+    guard();
     res.sent += (await flushOutbox(ctx)).sent;
+    guard();
     res.uploaded = (await uploadUsage(ctx)).uploaded;
+    guard();
     res.sent += (await flushOutbox(ctx)).sent;
+    guard();
     // Workspaces and grants change rarely; goals can change any time, and a new session reads its envelope from the
     // cached feed, so every pass revalidates the feeds (a 304 when nothing changed).
     let me = loadMe(ctx.home);
@@ -588,10 +637,12 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
       kvSet(ctx.db, "me_refreshed_at", String(Date.now()));
       me = await refreshMe(ctx).catch(() => me);
     }
+    guard();
     for (const w of me?.workspaces || []) refresh.add(w.id);
     for (const ws of refresh) await refreshFeed(ctx, ws).catch(() => undefined);
     // Asks between teams (a 304 when nothing changed): read by `align asks`, `align team` and the envelope.
     for (const ws of refresh) await fetchAsks(ctx, ws).catch(() => false);
+    guard();
     // Team activity: this machine's in-flight work up, other machines' down (a few hundred bytes when quiet).
     try {
       detectGitEdits(ctx);
@@ -599,10 +650,18 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
       /* best effort */
     }
     res.activity = await uploadActivity(ctx).catch(() => 0);
+    guard();
     for (const ws of refresh) await fetchPod(ctx, ws).catch(() => 0);
     res.steering = await uploadSteering(ctx).catch(() => 0);
+    guard();
+    return res;
+  } catch (e) {
+    if (!(e instanceof DeviceChanged)) throw e;
+    res.aborted = true;
+    ctx.log("sync: this machine's pairing changed during the pass (align login or logout); the pass stopped, and the next one goes on as the device signed in now");
     return res;
   } finally {
+    unbind();
     res.serverError = serverTrouble();
     try {
       const at = nowIso();

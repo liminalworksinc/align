@@ -30,9 +30,9 @@ align team [--cwd <dir>]                              work in flight toward this
 align asks [--workspace W] [--all] [--json]           asks of your teams and your own asks, from the cache (offline)
 align config [drift on|off]                           local settings; drift notice on by default
 align stop-sharing <session>                          future usage stays local
-align delete-history <session> [--yes]                server hard delete; totals change
+align delete-history <session> [--yes]                server hard delete (from any of your paired devices); totals change
 align bind <session> --goal <ref|none>                takes effect at the next prompt (root turn)
-align requests [--all] [--json]                       requests sent to your sessions and their answers (offline)
+align requests [--all] [--json] [--session <s>]      requests sent to your sessions and their answers (offline)
 align requests accept|decline <id> [--session S]      answer one; the receipt goes to the sender
 align latch status                                    stop latches and goal holds (they come from the web)
 align allocation [--workspace W] [--week YYYY-MM-DD] [--refresh] [--json]
@@ -177,7 +177,8 @@ shares in your other workspaces carry on.
 
 `config.json`, `credentials.json` (0600; `clock_offset_ms` while this computer's clock is a minute or more off the
 server's, measured from its answers' `Date` header: every time the CLI sends is put on the server's clock),
-`revoke.json` (0600, only while a logout's revoke waits for the server: the old device's tokens and key),
+`revoke.json` (0600, only while a revoke waits for the server: each device an offline logout signed out or a login
+replaced and could not revoke, with its tokens and key, kept until the server confirms it),
 `device_key` (Ed25519 PKCS#8, 0600), `device_secret` (32 random bytes,
 0600, never sent), `align.db` (SQLite WAL: sessions, root turns, epochs, request ledger, file offsets, outbox,
 directives, requests, holds, shares, aliases), `rules.json` folder share rules, `hot/` and `injected/` per-session JSON for hooks,

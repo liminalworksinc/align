@@ -608,7 +608,8 @@ describe("E2E cycle 2: sign-out, sharing and workspaces", () => {
     assert.equal((await runCli(t, ["logout"])).code, 0);
     fake.setOffline(false);
     const p = JSON.parse(fs.readFileSync(layout.pendingRevoke(t.home), "utf8"));
-    fs.writeFileSync(layout.pendingRevoke(t.home), JSON.stringify({ ...p, access_expires_at: new Date(Date.now() - 60_000).toISOString() }), { mode: 0o600 });
+    p.devices[0].access_expires_at = new Date(Date.now() - 60_000).toISOString();
+    fs.writeFileSync(layout.pendingRevoke(t.home), JSON.stringify(p), { mode: 0o600 });
     const before = fake.log.length;
     const login = await runCli(t, ["login", "--name", "Test Mac"]);
     assert.equal(login.code, 0, login.stderr);

@@ -49,7 +49,7 @@ seconds (always at the end of a turn) a hook starts a detached `align sync --hoo
 | `align stop-sharing <session>` / `align unshare <session>` | Stop uploading a session's usage | no (queued) |
 | `align delete-history <session> [--yes]` | Hard-delete a session's shared history on the server | no (queued) |
 | `align bind <session> --goal <ref\|none>` | Rebind a shared session at its next prompt | no |
-| `align requests [--all] [--json]` | Requests sent to this device's sessions and their answers (offline) | no |
+| `align requests [--all] [--json] [--session <session>]` | Requests sent to this device's sessions (or to one session) and their answers (offline) | no |
 | `align requests accept\|decline <id> [--session <session>]` | Answer a request; the receipt is queued for the sender | no (queued) |
 | `align latch status` | List stop latches and goal holds | no |
 | `align allocation [--workspace <name\|id>] [--week YYYY-MM-DD] [--refresh] [--json]` | Agent time per goal against its target (cached feed; `--week` asks the server) and this machine's unshared share | for `--refresh` and `--week` |
@@ -135,7 +135,10 @@ commands that take a `<session>` (`align share`, `align stop-sharing`, `align un
 `align bind` and `align requests --session`) SHALL read an argument that is not one of their own options but is the id,
 or an id prefix, of a session this machine metered (one the hooks have only spooled included) as that session, not as
 an unknown option, and SHALL accept such a reference as a string option's value (`--session -AbC1234`). Any other
-argument that starts with `-` and is not one of the command's options SHALL still be refused as an unknown option.
+argument that starts with `-` and is not one of the command's options SHALL be refused, with exit code 2, as `align: no
+session matches "<arg>", and it is not an option of \`align <command>\`. A session id that starts with "-" can also
+follow \`--\`, as in \`align <command> -- <arg>\`.` (a mistyped session prefix is likelier than a mistyped option, and
+Node's own "Unknown option" message does not say how to pass such an id).
 
 #### Scenario: Stop sharing a session whose id starts with a dash
 
@@ -143,10 +146,10 @@ argument that starts with `-` and is not one of the command's options SHALL stil
   runs the `align stop-sharing -puOFSTx` that its deny reason names
 - **THEN** the share stops, the stop latch is lifted, and the exit code is 0
 
-#### Scenario: An unknown option is still refused
+#### Scenario: An unknown dash reference is refused with a hint
 
-- **WHEN** the user runs `align stop-sharing --bogus` and no session's id starts with `--bogus`
-- **THEN** stderr names the unknown option `--bogus` and the exit code is 1
+- **WHEN** the user runs `align stop-sharing --bogus`, then `align stop-sharing -Zzzzzzz`, and no session's id starts with either (test `findings` "a session whose id starts with \"-\" ..."; test `findings4` "an unknown dash-prefixed session reference ...")
+- **THEN** each exits 2 with `align: no session matches "<arg>", and it is not an option of \`align stop-sharing\`. A session id that starts with "-" can also follow \`--\`, as in \`align stop-sharing -- <arg>\`.` and never Node's `Unknown option`
 
 ### Requirement: Private, owner-only state directory
 
@@ -238,7 +241,9 @@ out ends this machine's shares" says), and print `Signed out. Tokens and the dev
 continues.`; when the server could not be told it SHALL keep what revokes the device later (as "A logout the server did
 not hear is finished later" says) and print `align: could not reach <server> to revoke this device. Align revokes it
 the next time it reaches the server (the next \`align sync\` or \`align login\`); until then its sessions still show
-as shared there. You can also revoke it at <server>/app/devices.` on stderr. Signing out SHALL also mark the cached
+as shared there. You can also revoke it at <server>/app/devices.` on stderr. `align logout` SHALL print `Signed out.
+...` only when the credentials it leaves are marked signed out and the device key is gone; otherwise it SHALL exit 1
+saying the machine still holds a sign-in and to run it again. Signing out SHALL also mark the cached
 `me.json` `signed_out`, which the hooks read (they never read credentials), until the next `align login` replaces it. Local metering
 SHALL continue while signed out.
 
@@ -276,13 +281,53 @@ told, it SHALL print `align: could not revoke this machine's earlier device <id>
 reaches the server (the next \`align sync\`); until then its sessions still show as shared there.` and the next sync
 pass revokes it. A refresh SHALL write credentials only while they are still its device's, and a refusal (a refresh's
 400 or 401, a second 401) SHALL sign out only the device it was made for: a sync's refresh in flight never writes the
-old device's tokens over a new pairing, nor signs it out. `align logout` SHALL likewise mark the credentials signed out
-and remove the key under the refresh lock.
+old device's tokens over a new pairing, nor signs it out. In the same locked step that writes the new pairing, before
+it is written, login SHALL end the shares of the pairing it replaces (as "Signing out ends this machine's shares"
+says), so a session the new pairing shares while the old device's revoke is still in flight keeps its share.
+
+`align logout` SHALL run entirely under the same refresh lock (waiting up to 40 seconds for it; when it can't get it,
+exit 1 saying another Align command is changing the sign-in and nothing was changed): it reads the credentials, revokes
+that device (refreshing first inside the lock when needed), keeps what revokes it later when the server could not be
+told, marks the credentials signed out, removes the key and ends the shares. A logout and a login on one machine
+therefore never interleave: whichever takes the lock second acts on what the first left, so the machine never stays
+signed in as a device the server revoked.
+
+A sync pass, and the flush a CLI command does after queuing calls, SHALL be bound to the device signed in when it
+started: when the credentials on disk belong to another device (or none) at its next call (a login or logout committed
+meanwhile), it SHALL stop there, with `align sync` printing `This machine's Align pairing changed during this sync
+(\`align login\` or \`align logout\`), so it stopped there; nothing more was sent as the earlier device. The next sync
+goes on as the device signed in now.` and logging it, and SHALL NOT refresh the new pairing, send queued uploads,
+shares or retries with its tokens, nor leave a second, contradictory notice for a session. After pairing, `align
+login` SHALL print `Signed in as ...` only under the lock and only while its own device is still the one signed in;
+when another `align login` (or `align logout`) replaced or signed out its pairing before then, it SHALL exit 1 with
+`align: another \`align login\` (or \`align logout\`) on this machine finished while this one did, so device <id> it
+paired is replaced and revoked; it is signed in as device <id>|it is signed out now. Run \`align status\` to see
+which.`
 
 #### Scenario: Login while a sync's refresh is in flight
 
 - **WHEN** a sync pass's refresh of the old device is held in flight (its request, or its answer after the server rotated) while `align login` pairs a new device (test `findings` "C3-1: `align login` while a sync's refresh is in flight ...")
 - **THEN** login prints `Signed in as …` and exits 0, `credentials.json` holds the new device signed in, the old device is revoked on the server, the new one is live, no `revoke.json` is left, and a later forced refresh succeeds
+
+#### Scenario: An upload in flight while a login replaces the device
+
+- **WHEN** a sync pass's usage upload is held in flight while `align login` pairs a new device and revokes the old one, and the upload is then refused (test `findings4` "an upload held in flight while `align login` replaces the device ...")
+- **THEN** the pass refreshes nothing and sends nothing as the new device, `align sync` says the pairing changed during the sync, and the session has only the one sign-out notice
+
+#### Scenario: A share made while the old device's revoke is in flight
+
+- **WHEN** `align login` has written the new pairing and its revoke of the old device is held in flight, and a new session is shared meanwhile (test `findings4` "a session the new pairing shares while `align login` is still revoking ...")
+- **THEN** the new session stays `shared` on the new device, the old pairing's share ends as `device_signed_out`, and login says `1 session(s) shared from this machine's earlier sign-in stopped sharing`
+
+#### Scenario: Logout during a login
+
+- **WHEN** something holds the refresh lock while `align login` waits to commit a new pairing and `align logout` starts, and the first revoke the server sees is held for a while (test `findings4` "`align logout` while `align login` waits to commit ...")
+- **THEN** the first device is revoked, and the machine ends either signed out (no device key) or signed in as a device the server has not revoked, never signed in as a revoked one
+
+#### Scenario: Two logins at once
+
+- **WHEN** a first `align login` has written its pairing and its read of `/me` is held while a second `align login` pairs and revokes the first one's device (test `findings4` "two `align login`s at once ...")
+- **THEN** the second prints `Signed in as ... on device Laptop 2.`, and the first prints no `Signed in`, exits 1 and names the device it is signed in as now
 
 #### Scenario: An interrupted login
 
@@ -353,9 +398,11 @@ share\` here again. This session stays private.`
 
 ### Requirement: A logout the server did not hear is finished later
 
-When `align logout` cannot reach the server, the `align` CLI SHALL keep, in `~/.align/revoke.json` (mode 0600), the
-server URL, the device id, its access and refresh tokens and its device key, and SHALL revoke that device at the next
-contact with the server, before anything else: every sync pass (signed in or not) and the next `align login`, before it
+When `align logout` cannot reach the server, or `align login` could not revoke the device its new pairing replaced,
+the `align` CLI SHALL keep, in `~/.align/revoke.json` (mode 0600), the server URL, the device id, its access and refresh
+tokens, its device key, when, and why (`logout` or `replaced`), and SHALL revoke that device at the next contact with
+the server, before anything else. The file SHALL hold every device still waiting (a later login or offline logout adds
+one and never drops another), each kept until the server confirms it, and each contact SHALL try them all: every sync pass (signed in or not) and the next `align login`, before it
 asks for a code. The revoke SHALL use `DELETE /api/v2/devices/self` with the old access token, or, when it has
 expired, first sign a refresh with the old key; when the server no longer accepts the device at all (it was revoked
 on the web meanwhile) there is nothing left to do. Once done the file SHALL be deleted and it SHALL be logged, `align
@@ -364,13 +411,23 @@ which only this machine's own revoke causes, that it `was already revoked (on th
 never `Revoked`), and the server ends that device's sessions (`device_signed_out`), so
 `::align share` after the new pairing shares them again as after an online logout. While it waits, the file SHALL be
 kept through any number of unreachable passes (a signed-out `align sync` that could not reach the server for it exits 1,
-as any unreachable pass does), and `align status` SHALL show `Revoke:     pending for device <id>,
-signed out <time> while <server> could not be reached; the next \`align sync\` or \`align login\` revokes it`.
+as any unreachable pass does), and `align status` SHALL show one line per device, `Revoke:     pending for device <id>,
+signed out <time> while <server> could not be reached; the next \`align sync\` or \`align login\` revokes it`, or for a
+device a login replaced `Revoke:     pending for device <id>, replaced by \`align login\` <time> and not revoked yet
+(<server> could not be told); ...`. A replaced device SHALL be said and logged as replaced by \`align login\` (`Revoked
+device <id>, which \`align login\` replaced on this machine; its sessions stopped sharing there.`, logged `revoked device
+<id>, replaced by \`align login\` at <time> UTC`), never as a sign-out while the server could not be reached. An older
+`revoke.json` holding a single device SHALL still be read.
 
 #### Scenario: Revoked at the next sync
 
 - **WHEN** `align logout` runs while the server is unreachable, `align sync` runs while it still is, then again once it is back (test `findings2` "logout while the server is unreachable: the device is revoked at the next sync ...")
 - **THEN** logout says Align revokes it at the next contact, `revoke.json` is 0600 and `device_key` is gone, `align status` shows the pending revoke, the first sync keeps it (and exits 1), the second revokes the device on the server, says so and deletes the file, and `align status` no longer shows it
+
+#### Scenario: A failed login revoke, then an offline logout
+
+- **WHEN** `align login` can't revoke the device it replaced (the server answers 503), then the network drops and the developer runs `align logout`, then `align sync` once the server is back (test `findings4` "a revoke `align login` could not do survives an offline logout ...")
+- **THEN** `align status` lists both devices, the first as replaced by `align login`, the sync revokes both on the server and says so per device, the log names the first as replaced, and `revoke.json` is gone
 
 #### Scenario: Already revoked on the web
 
@@ -399,7 +456,8 @@ named SHALL share such a session toward the goal it had while that goal can stil
 it had before)`), in the workspace whose goals it read (the session's own, else the default), which the spooled share
 names, so a device that reaches several workspaces with no default shares it there; a session with no workspace of its
 own on such a device SHALL get `Align: this machine reaches more than one workspace and none is the default, so \`::align
-share\` can't tell which. Run \`align share --latest --workspace <name>\` in a terminal.` and spool nothing. It SHALL reply `Align: sharing requested toward "<goal>". It takes effect within a few seconds; your next
+share\` can't tell which. Run \`align share --latest --workspace <name>\` in a terminal.` and spool nothing, whether or not
+it names a goal (no goal can be looked up without a workspace, so never `no cached goal matches`). It SHALL reply `Align: sharing requested toward "<goal>". It takes effect within a few seconds; your next
 prompt carries the goal.`, or, with no goal, `Align: sharing requested with no goal (its usage counts as unallocated;
 \`::align bind <goal>\` picks one). It takes effect within a few seconds.` While this machine is signed out, `::align
 share` SHALL be refused with `Align: not signed in on this machine. Run \`align login\` in a terminal first.` and
@@ -427,6 +485,11 @@ this machine is signed out of Align ...`, nothing for a folder rule's), never ap
 
 - **WHEN** the device reaches two workspaces and has no default, and after logout and login the developer types `::align share confirm` in a session that was shared toward a goal in one of them (test `findings2` "C3-6: on a device with two workspaces and no default ...")
 - **THEN** the reply names that goal, the next sync shares the session in that workspace (`shared (Acme)`), and no `share failed` notice follows
+
+#### Scenario: A goal named on a two-workspace device
+
+- **WHEN** the device reaches two workspaces and has no default, and in a session with no workspace of its own the developer types `::align share Ship confirm`, then `::align share confirm` (test `findings4` "a session with no workspace of its own on a device with two workspaces ...")
+- **THEN** both replies are the multi-workspace message
 
 #### Scenario: Shared again after a new pairing
 
@@ -566,12 +629,19 @@ share, each from its own start, the sessions already metered on this machine and
 recorded working folders (the first one and every other one the session later reported, from transcripts, rollouts
 and hooks) are all the folder's realpath or inside it (`cwd === dir` or starting with `dir + "/"`, so
 `/work/app-secret` and `/work/app.v2` are not inside `/work/app`). It SHALL skip sessions with no recorded folder and
-sessions that were ever shared or have epochs, print `<n> session(s) in <dir> from the last <d> days: <a> Claude Code,
+sessions that were ever shared or have epochs, and sessions whose shared history the developer deleted with `align
+delete-history` (`Skipped <n> whose shared history you deleted (\`align delete-history\`); \`align share <session>\`
+shares one again if you want.`), print `<n> session(s) in <dir> from the last <d> days: <a> Claude Code,
 <b> Codex` and one line per session (start time, harness, local id) and never any prompt text, and change nothing
 without `--yes` or a `y` answer. It SHALL report sessions the server refused because an epoch may not start before
 history it already holds (`409 epoch_overlap`) as skipped, and upload no usage under a refused epoch. This replaces
 the v1 import script: no `import`/`at` backdating exists, so an import can never backdate a session a live hook
 already reported on.
+
+#### Scenario: Deleted history is not offered again
+
+- **WHEN** a session in the folder was shared, its history deleted with `align delete-history`, and the developer previews `align share --dir <folder> --past 3` (test `findings4` "`align share --dir --past` skips a session whose shared history the user deleted")
+- **THEN** the preview lists no session and says `Skipped 1 whose shared history you deleted`
 
 #### Scenario: Only the folder, from session start, never backdated
 
@@ -584,7 +654,27 @@ The `align stop-sharing <session>` command (alias `align unshare <session>`) SHA
 any pending binding and stop latch, queue `POST .../stop-sharing`, and print `Stopped sharing. Future usage stays on
 this machine. Already shared history stays until you run \`align delete-history\`.` No usage SHALL be uploaded for
 the session afterwards. `align delete-history <session>` SHALL require `--yes` (or a TTY confirmation), queue
-`DELETE .../sessions/<session_key>`, and on 204/200/404 forget the share locally while keeping all local ledger rows.
+`DELETE .../sessions/<session_key>` (sent by whichever device is signed in now: the server lets any live device of the
+account that shared it delete it, so a re-pair never strands the history), and only on 204/200 forget the share
+locally (keeping all local ledger rows), remember the session's history as deleted, drop the session's items from the
+cached team activity, and print `Shared history deleted.` A refusal (404, 403) SHALL never be reported as done: the
+share and the queued deletion SHALL stay (tried again after an hour, or at once by the next `align delete-history`),
+`align sessions` SHALL show `stopped (<workspace>; history deletion refused (<code>))`, and the command SHALL exit 1 with
+`align: the shared history of session <id> was not deleted: the server refused (<code>). Only the account that shared it
+can delete it, from a device that still has access to <workspace>; if it was deleted on the web already, nothing is
+left there. The deletion stays queued here and is tried again; you can also delete it on the web at
+<server>/app/w/<ws>/sessions.` While the server can't be reached it prints `Deletion queued; the next sync retries when
+online.` (signed out: `... it is sent once you run \`align login\` ...`).
+
+#### Scenario: Deleting after a re-pair
+
+- **WHEN** a session shared under an earlier pairing has usage and cached team activity of its own, the machine logs out and in again, and the developer runs `align delete-history <id> --yes` (test `findings4` "after a re-pair, `align delete-history` deletes the history ..."; against the real server in `scripts/test-agent-live.mjs` "delete-history after a re-pair (E2E-AGENT cycle 4 C4-1) ...")
+- **THEN** the server deletes the session and its usage, from the new device, stdout says `Shared history deleted.`, the session's items are gone from the cached team activity (so they never show as "you, on another machine"), and `align share --dir --past` no longer offers it
+
+#### Scenario: A refused deletion
+
+- **WHEN** the server answers the deletion 404, then later accepts it and the developer runs `align delete-history` again (test `findings4` "a deletion the server refuses is never reported as done ...")
+- **THEN** the first run exits 1 with the refusal on stderr, never `Shared history deleted.`, the share and the queued deletion stay and `align sessions` says the deletion was refused; the second run deletes it and says so
 
 #### Scenario: Nothing after stop, then hard delete
 
@@ -771,7 +861,8 @@ queued calls sent, <n> usage rows uploaded, <n> directives, <n> still queued.` (
 stored, not replays), then `This machine can now reach <workspace> in Align (given to this device when you accepted an
 invite). ...` once per workspace the pass found added, or `Another sync is running.`; when the pass could not reach the server it SHALL print, instead
 of the `Server:` line, `align: <error>. <n> usage rows and <n> queued calls stay on this machine; the next sync
-retries.` on stderr and exit 1.
+retries.` on stderr and exit 1. A pass whose pairing changed under it stops (as "A new pairing replaces the old one only
+once it exists" says) and prints that line after `Local:`.
 
 #### Scenario: Unreachable server
 
@@ -941,11 +1032,18 @@ produces `Align: this session stopped sharing. ...`. A usage upload the server r
 usage stays on this machine from now on.` A share whose `PUT` the server refuses with 404 SHALL produce `Align: sharing
 failed (<code>): the server did not take this session from this machine. If it was shared before from this machine and
 that sign-in was never revoked, revoke the old device at <server>/app/devices, then type \`::align share\` here again.
-This session stays private.` (403: `... this machine may not share sessions in that workspace. ...`), and takes back
-the `sharing this session` notice if the session has not seen it yet. Notices SHALL be shown at the session's next
+This session stays private.` (403: `... this machine may not share sessions in that workspace. ...`); one the server
+refuses with 409 `sharing_stopped` (its sharing was stopped, which the server never undoes, from whichever of the
+account's devices) SHALL produce `Align: sharing failed (sharing_stopped): this session's sharing was stopped (\`align
+stop-sharing\`, \`::align unshare\` or Stop sharing on the web), and a session whose sharing was stopped is not shared
+again. This session stays private.`, never the advice to revoke an old device; each takes back the `sharing this
+session` notice if the session has not seen it yet. Notices SHALL be shown at the session's next
 `UserPromptSubmit` (or `SessionStart`), whatever its share's state, also when it has none or its share failed. Sharing a
 session again (`align share` or `::align share`) SHALL drop its notices about an earlier share that ended (signed out,
-workspace lost or given back) that it has not shown yet, so a later ending is never told next to a stale one.
+workspace lost or given back) that it has not shown yet, so a later ending is never told next to a stale one. Of the
+notices a session has not seen yet, the hook SHALL tell only the newest about its share's state (sharing started, a
+refused share, a refused upload, signed out, workspace lost), a "resumed" notice only while that resume is still the
+session's latest stop or resume, and each text once; the others count as seen and are never told later.
 
 #### Scenario: Share confirmed with no default workspace
 
@@ -956,6 +1054,16 @@ workspace lost or given back) that it has not shown yet, so a later ending is ne
 
 - **WHEN** another device holds the session's key on the server, the developer types `::align share confirm`, a sync runs, and the developer submits two prompts (test `findings2` "N5: a share the server refuses tells the session at its next prompt ...")
 - **THEN** the first prompt shows only the `sharing failed (not_found)` notice with the way to revoke the old device, and the second prints nothing
+
+#### Scenario: Stacked notices
+
+- **WHEN** a session has, unseen, the same sign-out notice twice, a refused share, a "resumed" notice a later stop replaced, the same failed-command notice twice and a workspace-lost notice, and it starts again (test `findings4` "stale notices are not stacked ...")
+- **THEN** its `SessionStart` tells only the failed command once and the workspace-lost notice
+
+#### Scenario: Re-sharing a session its person stopped
+
+- **WHEN** a session was stopped with `align unshare`, the machine pairs again, and the developer runs `align share <id> --yes` (test `findings4` "after a re-pair, the server answers sharing_stopped ...")
+- **THEN** it exits 1 with `... was not shared: sharing failed (sharing_stopped): this session's sharing was stopped ...` and nothing about revoking an old device
 
 #### Scenario: No stale sign-out notice
 
@@ -979,7 +1087,9 @@ parsed SHALL deny every tool, and input without a session id SHALL deny when any
 SHALL never deny another session's tools. A `resume` directive SHALL remove the latch file and, when it lifted a stop,
 be told once at the session's next prompt: to the user as `Align: this session was resumed from its Align workspace, so
 its tools work again.` and to the model as `[Align] This session was resumed from its Align workspace, so its tools are
-no longer blocked. Continue the user's task.`, which otherwise goes on believing its tools are blocked.
+no longer blocked. Continue the user's task.`, which otherwise goes on believing its tools are blocked. A `stop` that
+arrives after the resume, before the session was told, SHALL withdraw that notice: the next prompt never says the tools
+work again while they are blocked.
 
 #### Scenario: Latched with no sync running
 
@@ -990,6 +1100,11 @@ no longer blocked. Continue the user's task.`, which otherwise goes on believing
 
 - **WHEN** a shared session is stopped from the web, then resumed, and the developer prompts twice (test `findings2` "a stop lifted from the web is told at the next prompt ...")
 - **THEN** the first prompt carries the user notice and the model's context line, the second carries nothing, and tools run
+
+#### Scenario: Stop, resume, stop before the next prompt
+
+- **WHEN** a shared session is stopped, resumed and stopped again from the web, with a sync after each, and then the developer prompts (test `findings4` "a stop that follows a resume before the next prompt ...")
+- **THEN** the prompt says nothing about a resume and `Bash` is denied
 
 #### Scenario: Stop and resume from the web
 
@@ -1101,7 +1216,8 @@ so it can't be <accepted|declined> now.` (from the terminal `align: request <id>
 ... now`, exit 2), and the answer is spooled for the next sync. A request is open to `accept` while it waits for an answer or is
 a replan delivered to the agent and not declined, and open to `decline` while it waits or was delivered and not declined. `align requests accept|decline <id> [--session <session>]` SHALL
 record the answer directly and flush the outbox, and exit 2 when no open request matches. `align requests` SHALL list,
-offline, the requests waiting for an answer or delivered and not declined (shown as `delivered to the agent, not declined`; `--all` also answered and withdrawn ones; `--json`
+offline, the requests waiting for an answer or delivered and not declined (shown as `delivered to the agent, not declined`; `--all` also answered and withdrawn ones; `--session <session>`
+only that session's; `--json`
 with `id`, `short_id`, `session`, `type`, `state`, `goal`, `target_goal`, `sender`, `note`, `created_at` and
 `answered_at`). Each answer SHALL queue an `accepted` or `declined` receipt to the request's directive. Accepting a
 `switch_goal` SHALL queue a pending binding toward the target goal with cause `directive:<request directive id>`,
@@ -1112,6 +1228,11 @@ first prompt after the next sync); declining SHALL change nothing else. At the n
 `... to replan toward goal "<goal>": follow the updated plan.`) or `[Align] The developer declined the request;
 continue as before.` `::align status` SHALL list the open requests and `::align requests` this session's requests with
 their state.
+
+#### Scenario: Requests of one session
+
+- **WHEN** two shared sessions each have a checkpoint request and the developer runs `align requests --session <first session>` (test `findings4` "`align requests --session <id>` lists only that session's requests")
+- **THEN** only the first session's request is listed
 
 #### Scenario: switch_goal accepted end to end
 
@@ -1372,11 +1493,19 @@ and be deleted unsent once it is more than a day old.
 
 The sync pass SHALL compute, from the local ledger and at most every 6 hours, this machine's fresh tokens (input,
 output and cache writes) of the last 7 days and the part in sessions not shared toward a goal, grouped by folder (top
-5), into `~/.align/unshared-digest.json`, which SHALL never be uploaded. The `align` hook SHALL, on `SessionStart` with
+5), into `~/.align/unshared-digest.json`, which SHALL never be uploaded. Usage that went up to the server SHALL count as
+shared even after its session's share ended (this machine signed out, or a new pairing replaced the device), so a
+re-pair never turns what was shared into "not shared"; usage of a session whose history was deleted counts as not
+shared. The `align` hook SHALL, on `SessionStart` with
 source `startup` (shared or not), show once per calendar week (Monday, UTC), as `systemMessage` only and never
 `additionalContext`, `Align: <n>% of this machine's agent time in the last 7 days was in sessions not shared toward any
 goal (mostly <up to 3 folder names>). Run \`align share --dir <folder> --workspace <workspace> --goal <goal>\` to count a
 folder toward a goal. This stays on this machine.` when that part is more than 3%.
+
+#### Scenario: After a re-pair
+
+- **WHEN** a session's usage was uploaded and the machine then logs out and in again (test `findings4` "after a re-pair, the usage a session shared under the earlier pairing ...")
+- **THEN** the digest counts none of that session's usage as not shared
 
 #### Scenario: Digest and note
 
@@ -1495,8 +1624,11 @@ The `align sync` pass SHALL upload new lines of each shared session's activity f
 /api/v2/workspaces/:ws/activity` in batches of 200, advancing its offset only on success. The hook records an edit at
 `PreToolUse`, before the harness's own permission check, so an edit SHALL count, for the upload and for the sibling
 card and hold, only if its file changed at or after the time it was recorded (one second of slack); an edit the user
-refused leaves the file as it was and is never reported as made. Edits the sync pass finds in the working tree count
-as they are. Each item SHALL carry the
+refused leaves the file as it was and is never reported as made. An edit whose file has not changed yet when a pass
+reads it (the user is still on the permission prompt) SHALL wait, for up to an hour, and go up for its own session once
+its file changes, exactly once; after an hour unchanged it counts as refused. Edits the sync pass finds in the working
+tree count as they are, except a change some session's hook recorded (since the last pass, or waiting so): that is
+that session's edit, never credited to the session most recently active in the repo. Each item SHALL carry the
 session key, its kind (`edit`, `commit`, `task` or `claim`), a time and a `repo_id` (hash of the workspace and
 normalized git remote, or the local folder when there is none), and `edit` and `claim` items also a `path_hash`
 (file reads stay local); repo-relative `path`, commit subjects, task labels, claim reasons and a `branch <name>` task (except
@@ -1507,6 +1639,11 @@ without `--signals` SHALL include `(Add --signals to share file paths and task l
 single-session `::align share` preview does not mention work signals). The pass SHALL fetch `GET
 .../activity?after=<cursor>` into `~/.align/feeds/activity-<ws>.json`, keeping items from the last 6 hours (at most
 1,000).
+
+#### Scenario: An edit approved after a pass read it
+
+- **WHEN** session A's `Write` is recorded at `PreToolUse` and a sync runs before its file exists, then session B in the same repo prompts, the file is written, and two syncs run (test `findings4` "is reported once, for its own session ...")
+- **THEN** exactly one edit item goes up, with session A's key
 
 #### Scenario: A refused edit
 

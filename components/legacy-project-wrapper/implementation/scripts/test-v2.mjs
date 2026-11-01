@@ -2428,6 +2428,37 @@ try {
         resumeY.status === 200 && gotResume.json?.directives?.some((d) => d.kind === "resume" && d.session_keys.includes(SX)) && plainStopped.status === 409 && plainStopped.json?.error === "sharing_stopped",
       `${takeover.status} ${again.text} ${JSON.stringify(rowY)} ${resumeY.text} ${plainStopped.status}`,
     );
+    // E2E-AGENT cycle 4 C4-8: the same person's other device gets the same 409 for a session its person stopped sharing,
+    // not a 404 that reads as "another device holds it".
+    const stoppedFromOther = await put(DY, S3b);
+    check(
+      "sessions (E2E-AGENT cycle 4 C4-8): re-sharing a session its person stopped sharing, from another of their devices -> 409 sharing_stopped (as from the device that shared it), never 404",
+      stoppedFromOther.status === 409 && stoppedFromOther.json?.error === "sharing_stopped",
+      stoppedFromOther.text,
+    );
+    // E2E-AGENT cycle 4 C4-1: the history of a session shared by one device of a person may be deleted from any of their
+    // live devices (a re-pair would otherwise strand it), audited with the device that did it; another person's device
+    // still gets 404, and only the session's other calls stay with the device that shared it.
+    const DZ1 = asDev(insertDevice(U3.id, "C4-1 first laptop"));
+    grantA(DZ1);
+    const SZ = sessionKey(D3, A, "claude-code", "native-c41");
+    const putZ = await put(DZ1, SZ);
+    const EZ = epochId();
+    const epZ = await epoch(DZ1, SZ, { epoch_id: EZ, goal_id: null, starts_at: new Date(Date.now() - 60 * 60_000).toISOString() });
+    const upZ = await upload(DZ1, SZ, [usageRow(DZ1, "c41-1", EZ)]);
+    const DZ2 = asDev(insertDevice(U3.id, "C4-1 second laptop"));
+    grantA(DZ2);
+    const usageFromOther = await upload(DZ2, SZ, [usageRow(DZ2, "c41-2", EZ)]);
+    const delStranger = await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${SZ}`, { bearer: DO.access });
+    const delSecond = await call("U3", "DELETE", `/api/v2/workspaces/${A}/sessions/${SZ}`, { bearer: DZ2.access });
+    const leftZ = withDb((d) => [d.prepare("SELECT COUNT(*) AS n FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(A, SZ).n, d.prepare("SELECT COUNT(*) AS n FROM v2_usage WHERE ws_id = ? AND session_key = ?").get(A, SZ).n]);
+    const auditZ = withDb((d) => d.prepare("SELECT actor_id, object_id FROM v2_audit WHERE ws_id = ? AND action = 'session.history_deleted' ORDER BY rowid DESC LIMIT 1").get(A));
+    check(
+      "sessions (E2E-AGENT cycle 4 C4-1): another live device of the person who shared a session deletes its history -> 204 (session and usage gone), audited session.history_deleted with that device as the object; another person's device -> 404; uploads from the other device are still 404",
+      putZ.status === 200 && epZ.status === 200 && upZ.json?.accepted === 1 && usageFromOther.status === 404 && delStranger.status === 404 && delSecond.status === 204 &&
+        leftZ[0] === 0 && leftZ[1] === 0 && auditZ?.actor_id === U3.id && auditZ?.object_id === DZ2.id,
+      `${putZ.status} ${epZ.status} ${upZ.text} ${usageFromOther.status} ${delStranger.status} ${delSecond.status} ${JSON.stringify(leftZ)} ${JSON.stringify(auditZ)}`,
+    );
   }
   // -- E2E-AGENT cycle 2 (and web F2): a session nothing can reach any more ends, whether its device signed out or its
   //    person was removed from the workspace; requests still waiting on it expire in the same transaction, and new

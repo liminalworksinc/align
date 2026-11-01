@@ -150,6 +150,9 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
       ctx.db
         .prepare("INSERT INTO latches(local_id, stopped, directive_id, seq, at) VALUES(?,1,?,?,?) ON CONFLICT(local_id) DO UPDATE SET stopped=1, directive_id=excluded.directive_id, seq=excluded.seq, at=excluded.at")
         .run(lid, d.id, seq, at);
+      // A later stop withdraws a "resumed" notice the session has not been told yet: the next prompt must not say the
+      // tools work again while they are blocked (C4-6).
+      ctx.db.prepare("DELETE FROM notices WHERE local_id=? AND substr(id, 1, length(?))=?").run(lid, `${lid}/resumed_`, `${lid}/resumed_`);
       return "enforced";
     }
     case "resume": {

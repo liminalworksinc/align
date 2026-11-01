@@ -104,8 +104,9 @@ Key owned by another user/device → 404. `started_at` more than 5 min ahead of 
 Rows whose epoch is unknown or belongs to another session → rejected per row (counted as conflicts).
 
 `POST /api/v2/workspaces/:ws/sessions/:session_key/stop-sharing` (Bearer or cookie by owner) → 200; no more uploads accepted.
-`DELETE /api/v2/workspaces/:ws/sessions/:session_key` (Bearer or cookie by owner) → 204; hard-deletes session, epochs,
-usage, deliveries; rollups change (the UI says so).
+`DELETE /api/v2/workspaces/:ws/sessions/:session_key` (cookie by owner, or Bearer from any live device of the person who
+shared it, not only the device that shared it) → 204; hard-deletes session, epochs, usage, deliveries; rollups change
+(the UI says so). Audited `session.history_deleted` with the acting device as the object. Another person → 404.
 
 ## Directives
 Only structured content reaches agents: ratified goal fields, enumerated states and Align's typed requests (REQ-001).
@@ -280,7 +281,8 @@ Errors and credentials
 - `GET /workspaces/:ws/goals` also accepts the cookie (the web app reads the same feed).
 
 Sessions and epochs
-- `PUT` on a session after stop-sharing is `409 sharing_stopped` (stopping is sticky; re-sharing needs delete first).
+- `PUT` on a session after stop-sharing is `409 sharing_stopped` (stopping is sticky; re-sharing needs delete first),
+  from the device that shared it and from the same person's other devices alike.
   The exception is a session that ended because its device was revoked (`ended_reason: "device_signed_out"`): a `PUT`
   from another device of the same person (same harness and `repo_key`) shares it again on that device; and one that
   ended because its person left the workspace (`ended_reason: "member_removed"`), shared again by a device of theirs

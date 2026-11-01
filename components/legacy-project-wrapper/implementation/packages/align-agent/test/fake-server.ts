@@ -87,7 +87,13 @@ export class FakeServer {
   server: http.Server;
   opts: Required<FakeOptions>;
   offline = false;
-  log: { method: string; path: string; status: number; auth: boolean; origin: boolean }[] = [];
+  log: { method: string; path: string; status: number; auth: boolean; origin: boolean; device?: string }[] = [];
+  /** Hold matching calls (before the server looks at them) until `release` settles; `left` of them, when set (C4). */
+  holdCalls: { match: (method: string, path: string) => boolean; release: Promise<void>; left?: number } | null = null;
+  /** Answer matching calls 503 without processing them (a proxy in front of a failing route, C4-3). */
+  failCalls: ((method: string, path: string) => boolean) | null = null;
+  /** Refuse every session DELETE with 404 not_found (history this device may not delete, C4-1). */
+  refuseDeletes = false;
   user = { id: "u_sean", name: "Sean", email: "sean@example.test" };
   workspaces = [{ id: "ws_acme", name: "Acme", role: "owner", teams: [{ id: "pod_core", name: "Core", role: "lead" }] }];
   goals = new Map<string, Goal[]>();
@@ -99,6 +105,8 @@ export class FakeServer {
   devices = new Map<string, Device>();
   access = new Map<string, { device: string; exp: number }>();
   sessions = new Map<string, { ws: string; device: string; body: any; state: string }>();
+  /** DELETE …/sessions/{key} that went through, and the device that sent each (audited with the acting device). */
+  deletedBy: { key: string; device: string }[] = [];
   /** POST /activity items as received, plus items other people's machines "sent" (addRemoteActivity). */
   activity: any[] = [];
   activitySeq = 0;
@@ -338,6 +346,9 @@ export class FakeServer {
       res.destroy();
       return;
     }
+    const held = this.holdCalls;
+    if (held && held.match(entry.method, p) && (held.left === undefined || held.left-- > 0)) await held.release;
+    if (this.failCalls?.(entry.method, p)) return send(503, { error: "unavailable" });
     if (req.headers.origin) return send(403, { error: "origin_forbidden" });
     try {
       const body = req.method === "GET" || req.method === "DELETE" ? null : await this.body(req);
@@ -396,8 +407,10 @@ export class FakeServer {
       // ---- authenticated device routes ----
       const dev = this.auth(req);
       if (!dev) return send(401, { error: "unauthorized" });
+      entry.device = dev.id;
       if (req.method === "DELETE" && p === "/api/v2/devices/self") {
         dev.revoked = true;
+        dev.revokedReason = "logout";
         return send(204);
       }
       if (req.method === "GET" && p === "/api/v2/me") return send(200, { user: this.user, device: { id: dev.id, name: dev.name }, workspaces: this.workspaces });
@@ -433,8 +446,12 @@ export class FakeServer {
         };
         // As lib/v2/sessions.ts: a session whose device signed out (was revoked) is shared again by the same person's new
         // pairing; any other device's session is not this one's.
-        const reshare = !sub && req.method === "PUT" && !!sess && sess.device !== dev.id && !!this.devices.get(sess.device)?.revoked;
-        if (sess && sess.device !== dev.id && !reshare) return send(404, { error: "not_found" });
+        // A session its person stopped sharing (not one its device's revoke ended) stays stopped: 409 sharing_stopped to
+        // any of their devices (C4-8). Its history may be deleted by any of their live devices (C4-1).
+        const reshare = !sub && req.method === "PUT" && !!sess && sess.device !== dev.id && sess.state !== "stopped" && !!this.devices.get(sess.device)?.revoked;
+        if (sess && !sub && req.method === "PUT" && sess.state === "stopped") return send(409, { error: "sharing_stopped" });
+        const deleting = !sub && req.method === "DELETE";
+        if (sess && sess.device !== dev.id && !reshare && !deleting) return send(404, { error: "not_found" });
         if (!sub && req.method === "PUT") {
           if (!/^[A-Za-z0-9_-]{43}$/.test(key) || !/^[A-Za-z0-9_-]{43}$/.test(body.repo_key)) return send(400, { error: "bad_key" });
           if (ahead(body.started_at)) return skewed();
@@ -446,7 +463,11 @@ export class FakeServer {
         }
         if (!sess) return send(404, { error: "not_found" });
         if (!sub && req.method === "DELETE") {
+          if (this.refuseDeletes) return send(404, { error: "not_found" });
           this.sessions.delete(key);
+          this.deletedBy.push({ key, device: dev.id });
+          // As the server: the session's activity goes with it.
+          this.activity = this.activity.filter((i) => i.session_key !== key);
           for (const [k, e] of this.epochs) if (e.session_key === key) this.epochs.delete(k);
           for (const [k, u] of this.usage) if (u.session_key === key) this.usage.delete(k);
           return send(204);

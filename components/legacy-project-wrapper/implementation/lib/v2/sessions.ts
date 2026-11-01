@@ -16,7 +16,8 @@ import { personName } from "./retention";
 import { b64url, iso, nonNegInt, oneOf, optInt, optStr, str, type Body } from "./validate";
 
 // Shared sessions, binding epochs and usage. docs/v2/WIRE.md "Shared sessions".
-// A session belongs to the device (and user) that shared it: any other caller gets 404 for its key.
+// A session belongs to the device (and user) that shared it: any other caller gets 404 for its key, except that any
+// live device of that user may delete its history (deleteSession).
 // Audit rows for session actions name the actor but not the session key, so deleting a session's history leaves no
 // row that mentions it.
 
@@ -146,8 +147,11 @@ export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key:
       );
       audit(pp.wsId, dev.user.id, "session.shared_again", null, at);
     } else if (s) {
-      if (s.user_id !== dev.user.id || s.device_id !== dev.deviceId) throw notFound();
+      if (s.user_id !== dev.user.id) throw notFound();
+      // A session its person stopped sharing stays stopped, whichever of their devices asks (C4-8): the same answer the
+      // device that shared it gets, not a 404 that reads as "another device holds it".
       if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
+      if (s.device_id !== dev.deviceId) throw notFound();
       if (s.harness !== harness || s.repo_key !== repoKey) throw conflict("session_conflict", "This session key was shared with a different harness or repo");
       run("UPDATE v2_sessions SET repo_alias = ?, title = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?", alias, title, at, pp.wsId, key);
     } else {
@@ -362,13 +366,17 @@ export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string
 }
 
 /** Delete shared history: the session, its epochs, usage, directive deliveries and receipts, hard-deleted.
- *  Spend totals change. Directives left with no recipient are removed too. */
+ *  Spend totals change. Directives left with no recipient are removed too. Unlike the session's other calls, any live
+ *  device of the person who shared it may do this, not only the device that shared it (C4-1): a re-pair would
+ *  otherwise strand the history where only the web could delete it. The audit row names the device that did it. */
 export async function deleteSession(pp: PolicyPrincipal, p: Principal, key: string) {
-  ownSession(pp, p, key);
+  const s = sessionRow(pp.wsId, key);
+  if (!s) throw notFound();
+  need(pp, "session.manage", { kind: "session", ownerId: s.user_id });
   await tx(() => {
     run("DELETE FROM v2_sessions WHERE ws_id = ? AND session_key = ?", pp.wsId, key);
     run("DELETE FROM v2_directives WHERE ws_id = ? AND NOT EXISTS (SELECT 1 FROM v2_directive_targets t WHERE t.directive_id = v2_directives.id)", pp.wsId);
-    audit(pp.wsId, pp.userId, "session.history_deleted", null, nowIso());
+    audit(pp.wsId, pp.userId, "session.history_deleted", p.kind === "device" ? p.deviceId : null, nowIso());
   });
 }
 
