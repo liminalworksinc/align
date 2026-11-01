@@ -1099,9 +1099,11 @@ device a workspace at an invite (`device.workspace_added`) is recorded in that w
 The server SHALL pair a device by a key-bound device-code flow: `POST /api/v2/device/authorize {device_name,
 public_key}` (a 32-byte base64url Ed25519 key, name at most 100 characters) returns a code for the person to approve,
 and `POST /api/v2/device/token` returns the tokens exactly once after approval. The device SHALL get a name none of
-the person's live devices has: when one already has the requested name (a new `align login` on a machine whose
-earlier device is still being revoked, say), it gets the first free `<name> (2)`, `<name> (3)`, ..., so the Devices
-page and `align login` never show two live devices of one name.
+the person's live devices has: when one already has the requested name (another machine of that name, or a second
+login at once), it gets the first free `<name> (2)`, `<name> (3)`, ..., so the Devices page and `align login` never show
+two live devices of one name. The token poll MAY name the device the pairing replaces on the same machine (`replaces`,
+a device id; malformed is 400); that device, counted only when it is the approving person's own, is left out of the
+check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with `<name> (2)`.
 
 #### Scenario: Starting a pairing
 
@@ -1111,7 +1113,12 @@ page and `align login` never show two live devices of one name.
 #### Scenario: A second device of one name
 
 - **WHEN** a person with a live device named `reuse test` pairs another device with that name (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices ...")
-- **THEN** the new device is named `reuse test (2)`
+- **THEN** the new device is named `reuse test (2)`, also when its poll names another person's device as the one it replaces
+
+#### Scenario: A re-login keeps its name
+
+- **WHEN** a person with a live device named `Una's MacBook` pairs another of that name whose token poll names the live one in `replaces`, after a poll with a malformed `replaces` (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 5): a token poll naming the device it replaces ..."; against the real CLI in `scripts/test-agent-live.mjs` "re-login (E2E-AGENT cycle 5) ...")
+- **THEN** the malformed poll is 400 and the new device is named `Una's MacBook`
 
 #### Scenario: Polling before and after a decision
 

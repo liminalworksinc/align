@@ -175,7 +175,9 @@ device name and public key, print `To connect this device, open <verification_ur
 <user_code>`, poll `POST /api/v2/device/token` every `interval` seconds (adding 5 s on `slow_down`), and on success
 save `credentials.json`, persist `--server` as `server_url` in `config.json`, fetch `GET /api/v2/me`, print
 `Signed in as <name> <<email>> on device <device name>.` plus one `workspace <name> (<id>), role <role>` line per
-workspace, and cache each workspace's goal feed. The device name is `--name`, else `device_name` from
+workspace, and cache each workspace's goal feed. Its token polls SHALL name, as `replaces`, the device of the
+credentials this machine holds for the same server (signed in or not), so the server keeps the new device's plain name
+rather than adding `(2)` for the device this login replaces. The device name is `--name`, else `device_name` from
 `config.json`, else `<username>'s <hostname>` (without a `.local` suffix). On macOS
 it opens the verification URL in the browser unless `ALIGN_NO_BROWSER` is set. The code is approved at `/app/device` by
 a person signed in with their own account, and only when that sign-in is no older than 15 minutes; otherwise the page
@@ -214,12 +216,12 @@ long to wait, else `... too many device pairings were started recently. Try agai
 #### Scenario: Other paired devices are named
 
 - **WHEN** the account has another paired device and the developer runs `align login` again on this machine (test `findings3` "orphan devices: ...")
-- **THEN** the device this pairing replaced is revoked and not named, and stdout says `Your account has 1 other paired device: Old laptop (dv_…laptop, paired <time>, last seen <time>). This machine is Test Mac (2) (dv_…<last 6>). Revoke any other you no longer use at <server>/app/devices.` (the server named the new device `Test Mac (2)` because the one it replaced was still live)
+- **THEN** the device this pairing replaced is revoked and not named, and stdout says `Your account has 1 other paired device: Old laptop (dv_…laptop, paired <time>, last seen <time>). This machine is Test Mac (dv_…<last 6>). Revoke any other you no longer use at <server>/app/devices.` (a re-login keeps the plain name)
 
 #### Scenario: A replaced device whose revoke waits, and a device paired later
 
-- **WHEN** `align login` can't revoke the device it replaced, which has the same name, and the account also has a device paired after this one and an old laptop (test `findings6` "login names devices unambiguously ...")
-- **THEN** the new device is `Test Mac (2)` on the server and in `Signed in as ...`, and the line names only the old laptop and this machine, never the replaced device or the later one
+- **WHEN** `align login` can't revoke the device it replaced, which has the same name, alone (test `findings6` "a re-login keeps the plain name ..."), and again when the account also has another machine's device of that name, a device paired after this one and an old laptop (test `findings6` "login names devices unambiguously ...")
+- **THEN** alone, the poll names the replaced device in `replaces` and the new device keeps `Test Mac`, and no other device is named; with the other machine's, the new device is `Test Mac (2)` on the server and in `Signed in as ...`, and the line names only the old laptop, the other machine and this machine, never the replaced device or the later one
 
 #### Scenario: Denied or expired code
 

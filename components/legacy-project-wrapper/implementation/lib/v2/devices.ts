@@ -131,7 +131,7 @@ function issueTokens(deviceId: string, nowMs: number) {
   return { access, refresh };
 }
 
-export async function token(deviceCode: string) {
+export async function token(deviceCode: string, replaces: string | null = null) {
   const nowMs = Date.now();
   const at = new Date(nowMs).toISOString();
   // The poll bookkeeping (last poll, slow_down's longer interval) must commit even when the answer is an error,
@@ -152,7 +152,7 @@ export async function token(deviceCode: string) {
     const user = r.user_id ? userById(r.user_id) : undefined;
     if (!user) return { error: "access_denied" };
     const deviceId = newId("dv");
-    run("INSERT INTO v2_devices (id, user_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)", deviceId, user.id, distinctName(user.id, r.device_name), r.public_key, at, at);
+    run("INSERT INTO v2_devices (id, user_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)", deviceId, user.id, distinctName(user.id, r.device_name, replaces), r.public_key, at, at);
     const granted: string[] = [];
     for (const ws of JSON.parse(r.ws_ids_json || "[]") as string[]) {
       if (get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, user.id)) {
@@ -171,11 +171,12 @@ export async function token(deviceCode: string) {
   return out.ok;
 }
 
-/** A name none of this person's live devices has: a second "Milo's laptop" (a new pairing on a machine that has one,
- *  while the old one is still being revoked, say) becomes "Milo's laptop (2)", so the Devices page and `align login`
- *  never show two live devices of one name (E2E cycle 5). */
-function distinctName(userId: string, name: string): string {
-  const taken = new Set(all<{ name: string }>("SELECT name FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL", userId).map((d) => d.name));
+/** A name none of this person's live devices has: a second "Milo's laptop" (another machine of that name, or a second
+ *  login at once) becomes "Milo's laptop (2)", so the Devices page and `align login` never show two live devices of one
+ *  name (E2E cycle 5). The device this pairing replaces on the same machine (`replaces`, counted only when it is this
+ *  person's: the query reads only theirs) does not count, as it is revoked a moment later: a re-login keeps its name. */
+function distinctName(userId: string, name: string, replaces: string | null): string {
+  const taken = new Set(all<{ name: string }>("SELECT name FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND id <> ?", userId, replaces ?? "").map((d) => d.name));
   if (!taken.has(name)) return name;
   for (let n = 2; ; n++) if (!taken.has(`${name} (${n})`)) return `${name} (${n})`;
 }

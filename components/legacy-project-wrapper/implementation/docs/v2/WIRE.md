@@ -56,7 +56,9 @@ person accepts an invite with it ticked (`POST /api/v2/invites/:token/accept { d
 `GET /api/v2/devices` (cookie, or Bearer) → `{ "devices": [ { "id", "name", "created_at", "last_seen_at", "revoked_at",
 "revoked_reason", "workspaces": [ { "id", "name" } ], "current"?: bool } ] }`: the person's devices; with a device token
 `current` marks that device (`align login` names the other paired ones). A new device gets a name none of the person's
-live devices has (`<name> (2)`, ... when one has it already).
+live devices has (`<name> (2)`, ... when one has it already); a token poll may send `"replaces": "<device id>"`, the
+device the pairing replaces on the same machine, which (when it is the person's own) does not count, so a re-login
+keeps its name.
 
 `POST /api/v2/devices/:id/workspaces` (cookie; a sign-in from the last 15 minutes, else `403 reauth_required`)
 `{ "workspace_id" }` → `{ "device_id", "workspace_id" }`: gives one of my live devices a workspace I am a member of,

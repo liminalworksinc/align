@@ -204,13 +204,13 @@ describe("E2E cycle 3 leftovers", () => {
     const r = await runCli(t, ["login", "--name", "Test Mac"]);
     assert.equal(r.code, 0, r.stderr);
     assert.ok(fake.devices.get(first)!.revoked, "the replaced device is revoked, so not listed");
-    // Named with the end of its id and when it was paired, beside this machine's own, which the server named "Test Mac (2)"
-    // while the device it replaced, also "Test Mac", was still live (cycle 5).
+    // Named with the end of its id and when it was paired, beside this machine's own; a re-login keeps the plain name
+    // (it told the server which device it replaces, cycle 5).
     const tag = (id: string) => `dv_…${id.slice(-6)}`;
     assert.match(
       r.stdout,
       new RegExp(
-        `Your account has 1 other paired device: Old laptop \\(dv_…laptop, paired \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d, last seen [^)]+\\)\\. This machine is Test Mac \\(2\\) \\(${tag(loadCredentials(t.home)!.device_id)}\\)\\. Revoke any other you no longer use at ${fake.url.replace(/[.]/g, "\\.")}/app/devices\\.`,
+        `Your account has 1 other paired device: Old laptop \\(dv_…laptop, paired \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d, last seen [^)]+\\)\\. This machine is Test Mac \\(${tag(loadCredentials(t.home)!.device_id)}\\)\\. Revoke any other you no longer use at ${fake.url.replace(/[.]/g, "\\.")}/app/devices\\.`,
       ),
     );
     const current = loadCredentials(t.home)!.device_id;

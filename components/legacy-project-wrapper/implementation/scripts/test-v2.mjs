@@ -296,13 +296,13 @@ function refreshSig(dev, deviceId, refreshToken, ts) {
 
 /** The whole device flow for one user, granted `wsIds`. The poll interval is skipped by clearing last_poll_at in
  *  the database (the test has file access, like a host admin), so the run doesn't wait 5 s per poll. */
-async function pairDevice(who, user, wsIds, name = `${who}'s laptop`) {
+async function pairDevice(who, user, wsIds, name = `${who}'s laptop`, replaces = null) {
   const keys = newDeviceKeys();
   const a = await call(who, "POST", "/api/v2/device/authorize", { body: { device_name: name, public_key: keys.pub } });
   if (a.status !== 200) throw new Error(`authorize ${a.status} ${a.text}`);
   const ap = await call(who, "POST", "/api/v2/device/approve", { cookie: user.cookie, body: { user_code: a.json.user_code, workspace_ids: wsIds } });
   if (ap.status !== 200) throw new Error(`approve ${ap.status} ${ap.text}`);
-  const t = await call(who, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: a.json.device_code } });
+  const t = await call(who, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: a.json.device_code, ...(replaces ? { replaces } : {}) } });
   if (t.status !== 200) throw new Error(`token ${t.status} ${t.text}`);
   return { ...keys, who, user, id: t.json.device_id, access: t.json.access_token, refresh: t.json.refresh_token };
 }
@@ -1034,7 +1034,7 @@ try {
   );
   const badKey = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "x", public_key: "AAAA" } });
   check("device: a malformed public key -> 400", badKey.status === 400, `${badKey.status}`);
-  const poll = (code) => call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: code } });
+  const poll = (code, extra = {}) => call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: code, ...extra } });
   const p1 = await poll(auth1.json.device_code);
   const p2 = await poll(auth1.json.device_code);
   const interval = withDb((d) => d.prepare("SELECT interval_s FROM v2_device_requests WHERE user_code = ?").get(auth1.json.user_code).interval_s);
@@ -1064,7 +1064,19 @@ try {
   check("device: approving a workspace you are not in (B) -> 404", approveB.status === 404, `${approveB.status}`);
   const approve = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: auth1.json.user_code, workspace_ids: [A] } });
   withDb((d) => d.prepare("UPDATE v2_device_requests SET last_poll_at = NULL WHERE user_code = ?").run(auth1.json.user_code));
-  const tok = await poll(auth1.json.device_code);
+  // A re-login names the device it replaces on this machine (still live, its revoke not through yet): the new device
+  // keeps the plain name (E2E-AGENT cycle 5). A malformed `replaces` is refused before anything is spent.
+  const unaOld = insertDevice(U1.id, "Una's MacBook");
+  const badReplaces = await poll(auth1.json.device_code, { replaces: "not a device" });
+  withDb((d) => d.prepare("UPDATE v2_device_requests SET last_poll_at = NULL WHERE user_code = ?").run(auth1.json.user_code));
+  const tok = await poll(auth1.json.device_code, { replaces: unaOld.id });
+  const unaName = withDb((d) => d.prepare("SELECT name FROM v2_devices WHERE id = ?").get(tok.json?.device_id ?? "")?.name);
+  withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'logout' WHERE id = ?").run(new Date().toISOString(), unaOld.id));
+  check(
+    "device (E2E-AGENT cycle 5): a token poll naming the device it replaces (`replaces`, the same person's live device of the same name) keeps the plain name (Una's MacBook, no (2)); a malformed replaces -> 400",
+    unaName === "Una's MacBook" && badReplaces.status === 400,
+    `${unaName} ${badReplaces.status} ${badReplaces.text}`,
+  );
   check("device: after approval (a recent sign-in), token -> 200 dv_ id, alnd_ access (3600 s), alnr_ refresh, user", approve.status === 200 && tok.status === 200 && /^dv_/.test(tok.json.device_id) && /^alnd_/.test(tok.json.access_token) && tok.json.expires_in === 3600 && /^alnr_/.test(tok.json.refresh_token) && tok.json.user.id === U1.id, tok.text);
   withDb((d) => d.prepare("UPDATE v2_device_requests SET last_poll_at = NULL WHERE user_code = ?").run(auth1.json.user_code));
   const tokAgain = await poll(auth1.json.device_code);
@@ -1129,10 +1141,16 @@ try {
   // A dedicated device for the reuse test, so D1 stays usable. A live device of U1's already has its name, so the new
   // pairing gets a distinguishing suffix (E2E-AGENT cycle 5).
   const twin = insertDevice(U1.id, "reuse test");
-  const DR = await pairDevice("U1", U1, [A], "reuse test");
+  // Naming another person's device as the one it replaces changes nothing: the suffix still comes.
+  const notMine = insertDevice(U2.id, "reuse test");
+  const DR = await pairDevice("U1", U1, [A], "reuse test", notMine.id);
   const drName = withDb((d) => d.prepare("SELECT name FROM v2_devices WHERE id = ?").get(DR.id))?.name;
   withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), twin.id));
-  check("device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices gets a distinguishing suffix (\"reuse test (2)\"), so no two live devices share a name", drName === "reuse test (2)", String(drName));
+  withDb((d) => {
+    d.prepare("DELETE FROM v2_device_tokens WHERE device_id = ?").run(notMine.id);
+    d.prepare("DELETE FROM v2_devices WHERE id = ?").run(notMine.id);
+  });
+  check("device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices gets a distinguishing suffix (\"reuse test (2)\"), so no two live devices share a name, also when the poll names another person's device as the one it replaces", drName === "reuse test (2)", String(drName));
   const ts3 = new Date().toISOString();
   const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
   const rrReuse = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });

@@ -285,6 +285,10 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   // The new key stays in memory until the device is paired: the pairing in use (key, tokens) is untouched until then,
   // so an aborted, denied or expired login changes nothing (C3-2).
   const key = newDeviceKey();
+  // The device this pairing replaces (this machine's own, on this server): the server leaves it out when it makes the
+  // new device's name unique, so a re-login keeps the plain name instead of "<name> (2)" (cycle 5).
+  const before = loadCredentials(ctx.home);
+  const replaces = before && before.server_url.replace(/\/$/, "") === server ? before.device_id : null;
   const a = await rawRequest(server, "POST", "/api/v2/device/authorize", { body: { device_name: deviceName, public_key: key.publicKeyB64 } });
   if (a.status === 429) {
     // The server says how long to wait; an older one only sends Retry-After (or nothing).
@@ -306,7 +310,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     await new Promise((r) => setTimeout(r, interval * scale));
     let t;
     try {
-      t = await rawRequest(server, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code } });
+      t = await rawRequest(server, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code, ...(replaces ? { replaces } : {}) } });
     } catch (e) {
       // A dropped connection (the server restarting, say) is retried until the code expires, like a pending answer (N7).
       if (e instanceof NetworkError) continue;

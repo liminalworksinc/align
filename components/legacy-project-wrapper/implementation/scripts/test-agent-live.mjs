@@ -1146,6 +1146,31 @@ try {
     `${laterAccept.text} ${laterBefore} ${laterGive.text} ${laterSync.stdout} ${laterSync.stderr} ${meIds()} ${JSON.stringify(laterAudit)}`,
   );
 
+  // -- E2E-AGENT cycle 5: `align login` on a machine still signed in pairs a new device while the one it replaces is
+  //    live; it names that device to the server, so the new one keeps the plain name (no "(2)" flip-flop) --
+  const MR2 = await freshMilo();
+  const login4 = spawn(process.execPath, [CLI, "login", "--name", "Milo's laptop"], { env: agentEnv, stdio: ["ignore", "pipe", "pipe"] });
+  let login4Out = "";
+  login4.stdout.on("data", (d) => (login4Out += d));
+  const login4Done = new Promise((r) => login4.on("close", r));
+  let code4 = "";
+  for (let i = 0; i < 100 && !code4; i++) {
+    code4 = /enter the code (\S+)/.exec(login4Out)?.[1] ?? "";
+    if (!code4) await sleep(100);
+  }
+  const approve4 = await call("POST", "/api/v2/device/approve", { cookie: MR2.cookie, body: { user_code: code4, workspace_ids: [W] } });
+  const login4Code = await Promise.race([login4Done, sleep(60_000).then(() => "timeout")]);
+  if (login4Code === "timeout") login4.kill();
+  outputs.push(login4Out);
+  const fourth = liveDevice();
+  const names4 = sdb((d) => d.prepare("SELECT id, name, revoked_at FROM v2_devices WHERE user_id = ? AND id IN (?, ?)").all(M.id, fourth, deviceBefore));
+  check(
+    "re-login (E2E-AGENT cycle 5): `align login` on a machine still signed in keeps the device's plain name (the poll names the device it replaces, live until the login revokes it); the old device is revoked and the login names no other device",
+    approve4.status === 200 && login4Code === 0 && fourth !== deviceBefore && names4.find((r) => r.id === fourth)?.name === "Milo's laptop" && !!names4.find((r) => r.id === deviceBefore)?.revoked_at &&
+      /Signed in as .* on device Milo's laptop\./.test(login4Out) && !/other paired device/.test(login4Out),
+    `${approve4.status} ${login4Code} ${JSON.stringify(names4)} ${login4Out}`,
+  );
+
   // -- canaries: people's words reach the model only inside Align's quoted-data wording --
   const modelText = outputs
     .map((o) => {

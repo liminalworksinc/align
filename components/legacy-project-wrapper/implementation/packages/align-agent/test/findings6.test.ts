@@ -102,11 +102,26 @@ describe("C5-1 follow-up: what counts as waiting to upload, and as shared time",
 });
 
 describe("cycle 5, section 5: works, but would confuse a developer", () => {
-  test("login names devices unambiguously: a new pairing next to a live one of the same name gets a suffix; the device it replaced (its revoke waiting) and a device paired after it are never named as ones to revoke", async () => {
+  test("a re-login keeps the plain name, even while the device it replaces is still live (its revoke waiting): `align login` tells the server which device it replaces", async () => {
+    const { fake, t } = await world();
+    const first = loadCredentials(t.home)!.device_id;
+    fake.failCalls = (m, p) => m === "DELETE" && p === "/api/v2/devices/self";
+    const r = await runCli(t, ["login", "--name", "Test Mac"]);
+    assert.equal(r.code, 0, r.stderr);
+    fake.failCalls = null;
+    const now = loadCredentials(t.home)!.device_id;
+    assert.ok(!fake.devices.get(first)!.revoked, "the replaced device is still live");
+    assert.equal(fake.devices.get(now)!.name, "Test Mac", "no (2) for the device a re-login replaces");
+    assert.equal(fake.replacesSeen.at(-1), first, "the poll named the device it replaces");
+    assert.doesNotMatch(r.stdout, /other paired device/, "the replaced device is not named as one to revoke");
+  });
+
+  test("login names devices unambiguously: another machine's device of the same name makes the new one \"(2)\"; the device it replaced (its revoke waiting) and a device paired after it are never named as ones to revoke", async () => {
     const { fake, t } = await world();
     const first = loadCredentials(t.home)!.device_id;
     // The replaced device's revoke can't get through, so it is still live on the server, with the same name.
     fake.failCalls = (m, p) => m === "DELETE" && p === "/api/v2/devices/self";
+    fake.devices.set("dv_othermachine", { id: "dv_othermachine", name: "Test Mac", publicKey: "x", revoked: false, refresh: null, oldRefresh: new Set(), createdAt: "2026-10-02T09:00:00.000Z" });
     fake.devices.set("dv_laterpairing", { id: "dv_laterpairing", name: "Test Mac (3)", publicKey: "x", revoked: false, refresh: null, oldRefresh: new Set(), createdAt: new Date(Date.now() + 3_600_000).toISOString() });
     fake.devices.set("dv_oldlaptop", { id: "dv_oldlaptop", name: "Old laptop", publicKey: "x", revoked: false, refresh: null, oldRefresh: new Set(), createdAt: "2026-10-01T09:00:00.000Z" });
     const r = await runCli(t, ["login", "--name", "Test Mac"]);
@@ -114,9 +129,12 @@ describe("cycle 5, section 5: works, but would confuse a developer", () => {
     fake.failCalls = null;
     const now = loadCredentials(t.home)!.device_id;
     assert.ok(!fake.devices.get(first)!.revoked && loadPendingRevokes(t.home).some((p) => p.device_id === first), "the replaced device waits to be revoked");
-    assert.equal(fake.devices.get(now)!.name, "Test Mac (2)", "two live devices never share a name");
+    assert.equal(fake.devices.get(now)!.name, "Test Mac (2)", "two live devices of other machines never share a name");
     assert.match(r.stdout, /Signed in as Sean <sean@example\.test> on device Test Mac \(2\)\./);
-    assert.match(r.stdout, new RegExp(`Your account has 1 other paired device: Old laptop \\(dv_…laptop, paired [^)]+\\)\\. This machine is Test Mac \\(2\\) \\(dv_…${now.slice(-6)}\\)\\.`));
+    assert.match(r.stdout, /Your account has 2 other paired devices: /);
+    assert.match(r.stdout, /Old laptop \(dv_…laptop, paired [^)]+\)/);
+    assert.match(r.stdout, /Test Mac \(dv_…achine, paired [^)]+\)/);
+    assert.match(r.stdout, new RegExp(`This machine is Test Mac \\(2\\) \\(dv_…${now.slice(-6)}\\)\\.`));
     assert.doesNotMatch(r.stdout, /Test Mac \(3\)|dv_…airing/, "a device paired after this one is not named");
     assert.doesNotMatch(r.stdout, new RegExp(`dv_…${first.slice(-6)}`), "nor this machine's own earlier device");
   });
