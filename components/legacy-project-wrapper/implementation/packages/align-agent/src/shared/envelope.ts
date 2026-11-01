@@ -405,12 +405,17 @@ export function requestNotice(r: HotRequest): string {
     r.type === "switch_goal"
       ? `move this session from goal "${goalTitle(r)}" to goal "${targetTitle(r)}". Nothing changes unless you accept`
       : r.type === "checkpoint"
-        ? "at the end of the current step, commit the work and summarize where things stand. The agent does this on its own"
-        : `re-read goal "${goalTitle(r)}" (v${v}) and update the plan. The agent drafts an updated plan for you and keeps its current course until you agree`;
+        ? `at the end of the current step, commit the work and summarize where things stand. ${DELIVERED}`
+        : `re-read goal "${goalTitle(r)}" (v${v}) and update the plan. The agent is asked to draft an updated plan for you and to keep its current course until you agree. ${DELIVERED}`;
   const note = noteOf(r);
   const id = requestShortId(r.id);
-  return `Align: ${senderName(r)} (${role}) asks: ${ask}.${note ? ` Note: ${note}.` : ""} Run \`::align accept ${id}\` or \`::align decline ${id}\`, or tell the agent.`;
+  // A checkpoint has nothing to agree to: it is only declined. A replan's draft is accepted (agreed) or declined.
+  const answer = r.type === "checkpoint" ? `Run \`::align decline ${id}\` if you don't want it, or tell the agent.` : `Run \`::align accept ${id}\` or \`::align decline ${id}\`, or tell the agent.`;
+  return `Align: ${senderName(r)} (${role}) asks: ${ask}.${note ? ` Note: ${note}.` : ""} ${answer}`;
 }
+
+/** What a safe request's notice says Align reports: delivery, never that the agent did it (Align can't tell). */
+const DELIVERED = "It goes to the agent now as a safe step that needs no answer; unless you decline it by the end of this turn, Align reports it delivered to the agent and not declined (not that the agent did it)";
 
 /** The model context for a request: fixed wording per type. `boundGoalId` says whether the goal is already in context. */
 export function requestContext(r: HotRequest, boundGoalId: string | null): string {

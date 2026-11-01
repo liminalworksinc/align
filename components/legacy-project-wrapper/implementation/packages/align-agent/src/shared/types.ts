@@ -88,6 +88,10 @@ export interface HotState {
   context_goals?: ContextGoal[];
   /** Requests sent to this session (REQ-002): pending ones, and recently answered or withdrawn ones the hooks still tell. */
   requests?: HotRequest[];
+  /** This session's newest epochs as the sync recorded them, so a hook can tell whether the epoch it opened is in. */
+  epochs_seen?: string[];
+  /** Goal holds on this session that were released (the release directive, who released it, the goal's title). */
+  released_holds?: { directive_id: string; goal_title: string; by: string }[];
   updated_at: string;
 }
 
@@ -138,7 +142,7 @@ export interface HotRequest extends Omit<WireRequest, "cancelled"> {
 export interface HoldLatch {
   v: 1;
   /** As on the stop latch: the release can no longer reach this session. */
-  ended?: "device_signed_out" | "sharing_ended";
+  ended?: EndedWhy;
   holds: { goal_id: string; goal_title: string; by: string; reason: string | null; directive_id: string; seq: number; at: string }[];
 }
 
@@ -180,6 +184,13 @@ export interface InjectedState {
    * carries the same id, so the sync records the same binding.
    */
   local_binding?: { id: string; goal_id: string | null; goal: GoalSnapshot | null; cause: string; directive_id: string | null };
+  /** Pending bindings the developer replaced in the session before the sync caught up: never opened (N1). */
+  superseded_bindings?: string[];
+  /** The epoch this hook opened last, and its goal, until the sync has recorded it (hot `epochs_seen`): until then the
+   *  hot file's goal is the one before it, which must not read as another switch (N1). */
+  opened_epoch?: { epoch_id: string; goal: GoalSnapshot | null; at: string };
+  /** Release directives already told to the model as a context line. */
+  releases_told?: string[];
   at: string;
 }
 
@@ -191,8 +202,11 @@ export interface Latch {
   at: string;
   /** Set when the session's sharing ended (this machine signed out, or the server no longer has the share), so no
    *  resume can reach it: only `align stop-sharing <session>` lifts the latch. */
-  ended?: "device_signed_out" | "sharing_ended";
+  ended?: EndedWhy;
 }
+
+/** Why a share ended so that nothing from the web can lift its latches any more. */
+export type EndedWhy = "device_signed_out" | "access_lost" | "sharing_ended";
 
 export interface FeedFile {
   workspace_id: string;
@@ -264,6 +278,8 @@ export interface MeFile {
   /** Each workspace's teams for this person (`teams`; servers before teams were renamed sent `pods`). */
   workspaces: { id: string; name: string; role: string; teams?: { id: string; name: string; role: string }[]; pods?: { id: string; name: string; role: string }[] }[];
   default_workspace?: string | null;
+  /** Set when this machine signed out (logout, or the server revoked the device), so hooks refuse to share. */
+  signed_out?: boolean;
 }
 
 export type SpoolRecord =

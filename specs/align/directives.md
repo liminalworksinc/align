@@ -221,6 +221,11 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/sessions/{key}/stop` and `
 - **WHEN** the owner calls `.../stop` or `.../resume` for a session whose device was revoked (`ended_reason` `device_signed_out`) (`scripts/test-v2.mjs` "sessions (E2E-AGENT B4/G2) ...")
 - **THEN** the response is HTTP 409 `device_signed_out` with a message saying the machine signed out of Align so a stop or resume can't reach it, and that a stopped session stays stopped until its developer runs `align stop-sharing`, and no directive is written
 
+#### Scenario: The session's person left the workspace
+
+- **WHEN** the owner calls `.../stop` or `.../resume` for a session that ended because its person was removed from the workspace (`ended_reason` `member_removed`) (`scripts/test-v2.mjs` "members (E2E-AGENT cycle 2): removing a member ends their live sessions ...")
+- **THEN** the response is HTTP 409 `member_removed` with a message saying the session's developer is no longer a member of this workspace, so a stop or resume can't reach it, and that a stopped one stays stopped until they run `align stop-sharing` on their machine, and no directive is written
+
 #### Scenario: Wrong credential or origin
 
 - **WHEN** the request carries an `Authorization` header, or no signed-in session cookie, or an `Origin` of another site
@@ -233,7 +238,7 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/sessions/{key}/stop` and `
 
 ### Requirement: Stop status on the sessions page
 
-The server SHALL include, for every session returned by `GET /api/v2/workspaces/{ws}/sessions` (the caller's own sessions, and for workspace owners every session whose sharing is not stopped), `agent_stopped` and `stop_status`, which is null or `{ directive_id, kind, created_at, receipts: [{ state, at }] }` for the session's latest `stop` or `resume` directive, with the Sessions tab showing **Stop agent** or **Resume agent** and a status label derived from it: "Stop requested", "Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received" or "Resumed". The caller's own sessions SHALL also carry `ended_reason` (`device_signed_out` or null); a session that ended because its device signed out SHALL never read "sent": its label is "Stopped; can't be resumed from here" when its agent was stopped, and none otherwise.
+The server SHALL include, for every session returned by `GET /api/v2/workspaces/{ws}/sessions` (the caller's own sessions, and for workspace owners every session whose sharing is not stopped), `agent_stopped` and `stop_status`, which is null or `{ directive_id, kind, created_at, receipts: [{ state, at }] }` for the session's latest `stop` or `resume` directive, with the Sessions tab showing **Stop agent** or **Resume agent** and a status label derived from it: "Stop requested", "Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received" or "Resumed". The caller's own sessions SHALL also carry `ended_reason` (`device_signed_out`, `member_removed` or null); a session that ended because its device signed out or its person left the workspace SHALL never read "sent": its label is "Stopped; can't be resumed from here" when its agent was stopped, and none otherwise, and its state reads "ended: device signed out" or "ended: left the workspace".
 
 #### Scenario: Stop confirmed by the device
 
@@ -280,8 +285,22 @@ The server SHALL stop serving a workspace's directives and accepting receipts fo
 
 #### Scenario: Removed member's device
 
-- **WHEN** a workspace owner removes a member and a goal version then reaches one of that member's still-recorded sessions
-- **THEN** the member's device fetch returns no directive from that workspace, and a receipt it posts for an earlier directive of that workspace is answered HTTP 404 `not_found`
+- **WHEN** a workspace owner removes a member and a new version of the goal one of that member's sessions was bound to is then saved
+- **THEN** no directive targets that ended session, the member's device fetch returns no directive from that workspace, and a receipt it posts for an earlier directive of that workspace is answered HTTP 404 `not_found`
+
+### Requirement: Sessions no device can reach end with their requests
+
+The server SHALL end, in the transaction that makes them unreachable, every live (shared or suspended) session that no device can fetch directives for any more: a revoked device's sessions (`ended_reason` `device_signed_out`), and the sessions of a member removed from a workspace, or leaving it (by their own choice or by deleting their account), in that workspace (`ended_reason` `member_removed`). Each ends as stop-sharing ends a session (state `stopped`, its open epoch closed, no governing goal), its history stays, and every request target of it still `sent` or `received` SHALL become `expired` in the same transaction, so a request no device can answer never stays pending and "not observed". Goal versions, requests (`409 no_sessions` when no other session is on the goal) and holds SHALL never target an ended session, and Stop and Resume SHALL be refused (409 `device_signed_out` or `member_removed`). A stop latch or goal hold already set on the machine SHALL stay until the developer runs `align stop-sharing` there; the device learns the end at its next contact (its sync is refused, or `GET /api/v2/me` no longer lists the workspace) and ends its local share with a notice. The same person's machine SHALL be able to share such a session again: a re-paired device after `device_signed_out`, and any of their devices once they are a member again after `member_removed`.
+
+#### Scenario: A request waiting on a signed-out session
+
+- **WHEN** a checkpoint waits on a session and that session's device is revoked, then the owner sends a replan and holds the goal (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 2, web F2): revoking a device expires ...")
+- **THEN** the session's target reads `expired` and the request `expired` with nothing pending, the replan is refused 409 `no_sessions`, and the hold writes no directive for the ended session
+
+#### Scenario: A member removed while their session is shared and stopped
+
+- **WHEN** a workspace owner stops a member's shared session, a checkpoint waits on it, and the owner removes the member (`scripts/test-v2.mjs` "members (E2E-AGENT cycle 2): removing a member ends their live sessions ..."; against the real server and the CLI in `scripts/test-agent-live.mjs` "member removed (E2E-AGENT cycle 2) ...")
+- **THEN** the session is `stopped` with `ended_reason` `member_removed` and no open epoch, the checkpoint's target is `expired`, Stop and Resume answer 409 `member_removed`, the owner's list of everyone's sessions no longer has it, a later hold writes it no directive, and once the person is a member again their re-paired device shares it again
 
 ### Requirement: Directive receipts are idempotent
 
@@ -422,7 +441,6 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 ## Open questions
 
 - Waking idle agents is out of scope (Owner decision 2026-10-30 keeps it open): a stop or a new goal version takes effect only when the session's next hook starts a sync, so an idle agent learns nothing until someone uses it again, and the Sessions tab shows "Stop sent, not yet received" until then.
-- A removed member's sessions stay recorded and keep their `shared` state (unlike a revoked device's sessions, which end with `ended_reason` `device_signed_out`; see the workspaces part), so goal versions and an owner's stop still write directives for them that no device can fetch any more. Whether removal should stop sharing for those sessions (and so write nothing) is not decided.
 
 ## Sources
 

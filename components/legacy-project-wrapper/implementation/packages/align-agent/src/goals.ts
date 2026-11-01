@@ -1,5 +1,6 @@
 import type { Ctx } from "./context.ts";
 import { renderHot, snapshot } from "./hot.ts";
+import { endSharesWithoutAccess } from "./share.ts";
 import { api, apiOk, HttpError } from "./api.ts";
 import { layout } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
@@ -12,9 +13,23 @@ export function loadMe(home: string): MeFile | null {
 export async function refreshMe(ctx: Ctx): Promise<MeFile> {
   const me = (await apiOk(ctx, "GET", "/api/v2/me")) as MeFile;
   const prev = loadMe(ctx.home);
-  const next: MeFile = { ...me, default_workspace: prev?.default_workspace ?? ctx.config.default_workspace ?? (me.workspaces.length === 1 ? me.workspaces[0].id : null) };
+  // A default workspace this device can no longer reach is no default.
+  const def = prev?.default_workspace ?? ctx.config.default_workspace ?? null;
+  const next: MeFile = { ...me, default_workspace: def && me.workspaces.some((w) => w.id === def) ? def : me.workspaces.length === 1 ? me.workspaces[0].id : null };
   writeJsonAtomic(layout.me(ctx.home), next);
+  // A workspace this device can no longer reach (its person was removed or left): its shares here end now.
+  endSharesWithoutAccess(ctx, next);
   return next;
+}
+
+/** Is workspace `ws` still in this device's reach? Asks the server (`/me`), which also ends this machine's shares in
+ *  any workspace it can no longer reach. True when the server can't say (unreachable), so nothing ends on a guess. */
+export async function hasWorkspace(ctx: Ctx, ws: string): Promise<boolean> {
+  try {
+    return (await refreshMe(ctx)).workspaces.some((w) => w.id === ws);
+  } catch {
+    return true;
+  }
 }
 
 export function loadFeed(home: string, ws: string): FeedFile | null {

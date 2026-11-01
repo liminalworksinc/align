@@ -5,6 +5,7 @@ import { V2Error, badRequest, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { take } from "./limits";
+import { endSessions } from "./sessions";
 
 // Device pairing (RFC 8628 style, key-bound) and device credentials. docs/v2/WIRE.md "Device pairing".
 // Access tokens (alnd_) last 1 h; refresh tokens (alnr_) rotate on every use and last 30 days. Only SHA-256 hashes
@@ -211,23 +212,11 @@ function revokeInTx(deviceId: string, reason: string, actor: string | null) {
 
 /**
  * A revoked device can no longer fetch directives, so none of its sessions can be stopped, resumed or released any
- * more: each one still shared (or suspended) ends now, as stop-sharing would end it (open epoch closed, no governing
- * goal), marked `device_signed_out` so the Sessions tab can say why and refuse Stop and Resume. Its history stays. A
- * stop latch already set on the machine stays until the developer runs `align stop-sharing` there.
+ * more: each one still shared (or suspended) ends now (lib/v2/sessions.ts endSessions), marked `device_signed_out` so
+ * the Sessions tab can say why and refuse Stop and Resume. Its history stays.
  */
 function endDeviceSessions(deviceId: string, at: string) {
-  const live = all<{ ws_id: string; session_key: string }>("SELECT ws_id, session_key FROM v2_sessions WHERE device_id = ? AND state <> 'stopped'", deviceId);
-  for (const s of live) {
-    run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", at, s.ws_id, s.session_key);
-    run(
-      `UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), ended_reason = 'device_signed_out', governing_goal_id = NULL,
-         governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?`,
-      at,
-      at,
-      s.ws_id,
-      s.session_key,
-    );
-  }
+  endSessions(all<{ ws_id: string; session_key: string }>("SELECT ws_id, session_key FROM v2_sessions WHERE device_id = ? AND state <> 'stopped'", deviceId), "device_signed_out", at);
 }
 
 export async function revokeDevice(deviceId: string, reason: string, actor: string) {

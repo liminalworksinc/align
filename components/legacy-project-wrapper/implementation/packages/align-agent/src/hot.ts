@@ -5,7 +5,7 @@ import { getSession } from "./ledger.ts";
 import { layout } from "./shared/layout.ts";
 import { removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { contextGoals, snapshot } from "./shared/goaltree.ts";
-import type { GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, RequestState, ShareState } from "./shared/types.ts";
+import type { EndedWhy, GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, RequestState, ShareState } from "./shared/types.ts";
 
 export { snapshot };
 
@@ -49,6 +49,15 @@ function hotRequests(ctx: Ctx, lid: string): HotRequest[] {
     .map((r) => ({ ...(JSON.parse(r.json) as Omit<HotRequest, "state" | "answered_at">), state: r.state, answered_at: r.answered_at, directive_id: r.directive_id }));
 }
 
+/** Holds a release lifted on this session (newest 10). */
+function releasedHolds(ctx: Ctx, lid: string): NonNullable<HotState["released_holds"]> {
+  const rows = ctx.db.prepare("SELECT json, directive_id FROM holds WHERE local_id=? AND held=0 ORDER BY seq DESC LIMIT 10").all(lid) as { json: string; directive_id: string }[];
+  return rows
+    .map((r) => ({ ...(JSON.parse(r.json) as { goal_title: string; by: string; released?: boolean }), directive_id: r.directive_id }))
+    .filter((r) => r.released)
+    .map((r) => ({ directive_id: r.directive_id, goal_title: r.goal_title, by: r.by }));
+}
+
 export function renderHot(ctx: Ctx, lid: string): HotState | null {
   const s = getSession(ctx.db, lid);
   if (!s) return null;
@@ -82,6 +91,8 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     notices,
     context_goals: live && live.goal_json ? contextGoals(ctx.home, live.workspace_id, (JSON.parse(live.goal_json) as GoalSnapshot).id) : [],
     requests: live ? hotRequests(ctx, lid) : [],
+    released_holds: live ? releasedHolds(ctx, lid) : [],
+    epochs_seen: (ctx.db.prepare("SELECT epoch_id FROM epochs WHERE local_id=? ORDER BY rowid DESC LIMIT 10").all(lid) as { epoch_id: string }[]).map((e) => e.epoch_id),
     updated_at: new Date().toISOString(),
   };
   writeJsonAtomic(layout.hot(ctx.home, lid), hot);
@@ -120,13 +131,16 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
 }
 
 /** Why a share can no longer receive directives (a resume or a release), or null while it can. */
-export function endedReason(share: ShareRow | null): "device_signed_out" | "sharing_ended" | null {
+export function endedReason(share: ShareRow | null): EndedWhy | null {
   if (!share || (share.state !== "stopped" && share.state !== "error")) return null;
-  return share.error === DEVICE_SIGNED_OUT ? "device_signed_out" : "sharing_ended";
+  return share.error === DEVICE_SIGNED_OUT ? "device_signed_out" : share.error === ACCESS_LOST ? "access_lost" : "sharing_ended";
 }
 
 /** `shares.error` of a share ended because this machine signed out of Align (logout, or the device was revoked). */
 export const DEVICE_SIGNED_OUT = "device_signed_out";
+/** `shares.error` of a share ended because this device can no longer reach its workspace (its person was removed from
+ *  it or left, or a new pairing did not include it). */
+export const ACCESS_LOST = "workspace_access_lost";
 
 /** A user notice for one session, once per `id` and session: one directive that reaches several sessions (a release,
  *  a suspension) leaves each its own notice, so the stored id is scoped to the session. */

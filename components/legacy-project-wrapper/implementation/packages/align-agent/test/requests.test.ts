@@ -93,7 +93,12 @@ describe("requests", () => {
     const out = json(prompt(t, sid).stdout);
     const id = requestShortId(q.id);
     assert.match(out.systemMessage, /^Align: Dana Lee \(approver of "Ship the v2 onboarding flow"\) asks: at the end of the current step, commit the work/);
-    assert.ok(out.systemMessage.includes(`Run \`::align accept ${id}\` or \`::align decline ${id}\`, or tell the agent.`), out.systemMessage);
+    // E2E-AGENT cycle 2: a checkpoint is only declined (there is nothing to agree to), and the notice never claims the
+    // agent does it: Align reports delivery, not declined.
+    assert.ok(out.systemMessage.endsWith(`Run \`::align decline ${id}\` if you don't want it, or tell the agent.`), out.systemMessage);
+    assert.ok(!out.systemMessage.includes("::align accept"), out.systemMessage);
+    assert.match(out.systemMessage, /unless you decline it by the end of this turn, Align reports it delivered to the agent and not declined \(not that the agent did it\)/);
+    assert.doesNotMatch(out.systemMessage, /The agent does this|on its own/);
     const c = out.hookSpecificOutput.additionalContext as string;
     assert.match(c, /^\[Align\] A request from Dana Lee, who can approve goal "Ship the v2 onboarding flow": at the end of the current step, commit your work and summarize where you are for the developer, then continue\./);
     assert.match(c, /safe step you take without waiting for an answer/);
@@ -115,8 +120,8 @@ describe("requests", () => {
     assert.match(c, /re-read goal v3 \(in your Align goal context\) and draft an updated plan for the developer\. Drafting is safe to do now, but keep working as before until the developer agrees to the new plan\./);
     assert.ok(!c.split("\n")[0].includes("Their note"), "no note, no note sentence");
     assert.match(c, /move this session to goal "Cut hook latency"\. This takes effect only if the developer accepts \(`::align accept [a-z0-9]{6}`\)\. Ask the developer; until then keep working toward the current goal\./);
-    assert.match(out.systemMessage, /keeps its current course until you agree/);
-    assert.match(out.systemMessage, /The agent does this on its own/);
+    assert.match(out.systemMessage, /asked to draft an updated plan for you and to keep its current course until you agree/);
+    assert.doesNotMatch(out.systemMessage, /The agent does this on its own|The agent drafts/);
     assert.match(out.systemMessage, /move this session from goal "Ship the v2 onboarding flow" to goal "Cut hook latency"\. Nothing changes unless you accept/);
     assert.equal(out.systemMessage.split("\n").length, 3, "one notice per request");
 
@@ -205,7 +210,7 @@ describe("requests", () => {
     assert.equal(gone.hookSpecificOutput, undefined, "dropped silently for the model");
     assert.equal(prompt(t, sid).stdout, "");
     assert.ok(!(runHook(t, "claude", "SessionStart", { session_id: sid, source: "compact" }).stdout || "").includes("Cut hook latency"));
-    assert.match(json(prompt(t, sid, `::align accept ${requestShortId(sw.id)}`).stdout).reason, /no open request matches/);
+    assert.match(json(prompt(t, sid, `::align accept ${requestShortId(sw.id)}`).stdout).reason, /is already withdrawn, so it can't be accepted now/);
 
     // Withdrawn before it reached the session: nothing at all.
     const cp = request("checkpoint");
@@ -232,7 +237,7 @@ describe("requests", () => {
     runHook(t, "claude", "Stop", { session_id: sid });
     ingestSpool(ctx);
     assert.equal(receipts(ctx).filter((r) => r.body.state === "accepted").length, 0, "the agent does not do a request whose goal closed");
-    assert.match(json(prompt(t, sid, `::align accept ${requestShortId(cp.id)}`).stdout).reason, /no open request matches/);
+    assert.match(json(prompt(t, sid, `::align accept ${requestShortId(cp.id)}`).stdout).reason, /is already withdrawn, so it can't be accepted now/);
   });
 
   test("a request from a workspace owner outside the goal's approval set names them as workspace owner", () => {
@@ -306,7 +311,8 @@ describe("requests", () => {
     assert.equal(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: "Read" }).stdout, "");
     const rel = json(prompt(t, sid).stdout);
     assert.equal(rel.systemMessage, `Align: Dana Lee released the hold on "Ship the v2 onboarding flow".`);
-    assert.equal(rel.hookSpecificOutput, undefined);
+    // The model saw its tools blocked by the hold: it hears once that the hold no longer blocks them (E2E-AGENT cycle 2).
+    assert.equal(rel.hookSpecificOutput.additionalContext, `[Align] Dana Lee released the hold on goal "Ship the v2 onboarding flow", so it no longer blocks tools.`);
     assert.deepEqual(
       receipts(c2).slice(2).map((r) => r.body.state),
       ["received", "enforced", "received", "applied"],

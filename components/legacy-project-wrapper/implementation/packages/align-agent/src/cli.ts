@@ -7,10 +7,26 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { api, clockWords, loadCredentials, markSignedOut, rawRequest, saveCredentials, SignedOut, signedIn, type Credentials } from "./api.ts";
+import {
+  api,
+  clockWords,
+  loadCredentials,
+  loadPendingRevoke,
+  markSignedOut,
+  NetworkError,
+  rawRequest,
+  revokePending,
+  saveCredentials,
+  savePendingRevoke,
+  SignedOut,
+  signedIn,
+  signedOutWords,
+  type Credentials,
+} from "./api.ts";
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
-import { DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts";
+import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts";
+import { fetchAsks } from "./asks.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { generateDeviceKey } from "./keys.ts";
 import { applyShare, bind, deleteHistory, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, stopSharing } from "./share.ts";
@@ -209,6 +225,12 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const server = (values.server || ctx.config.server_url).replace(/\/$/, "");
   const deviceName = values.name || ctx.config.device_name || `${os.userInfo().username}'s ${os.hostname().replace(/\.local$/, "")}`;
   const before = loadCredentials(ctx.home);
+  // A device this machine signed out of while the server was unreachable is revoked first, so its sessions end there
+  // and can be shared again from the new pairing.
+  if (loadPendingRevoke(ctx.home)) {
+    const was = loadPendingRevoke(ctx.home)!.device_id;
+    if ((await revokePending(ctx)) === "revoked") out(`Revoked device ${was}, which this machine signed out of while the server could not be reached; its sessions stopped sharing there.`);
+  }
   const key = generateDeviceKey(ctx.home);
   const a = await rawRequest(server, "POST", "/api/v2/device/authorize", { body: { device_name: deviceName, public_key: key.publicKeyB64 } });
   if (a.status !== 200 || !a.json?.device_code) throw new Error(`device authorize failed: ${a.status} ${a.json?.error || ""}`);
@@ -221,7 +243,15 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   for (;;) {
     if (Date.now() > expiresAt) throw new Error("the code expired; run `align login` again");
     await new Promise((r) => setTimeout(r, interval * scale));
-    const t = await rawRequest(server, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code } });
+    let t;
+    try {
+      t = await rawRequest(server, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code } });
+    } catch (e) {
+      // A dropped connection (the server restarting, say) is retried until the code expires, like a pending answer (N7).
+      if (e instanceof NetworkError) continue;
+      throw e;
+    }
+    if (t.status >= 500) continue;
     if (t.status === 200 && t.json?.access_token) {
       const creds: Credentials = {
         server_url: server,
@@ -259,6 +289,8 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     out(`  workspace ${w.name} (${w.id}), role ${w.role}`);
     try {
       await refreshFeed(ctx, w.id);
+      // The asks feed too, so the first session after pairing gets its team's accepted asks in its envelope.
+      await fetchAsks(ctx, w.id);
     } catch {
       /* feed later */
     }
@@ -274,16 +306,40 @@ async function cmdLogout(ctx: Ctx): Promise<void> {
       const r = await api(ctx, "DELETE", "/api/v2/devices/self");
       revoked = r.status === 204 || r.status === 200 || r.status === 401;
     } catch (e) {
-      /* best effort; tokens are wiped locally either way */
+      /* tokens are wiped locally either way */
       revoked = e instanceof SignedOut;
     }
+  }
+  // The server could not be told: keep what revokes the device later (its tokens and key, in a 0600 file of their
+  // own), so the next contact (a sync pass, or the next `align login`) revokes it before anything else.
+  const latest = loadCredentials(ctx.home) || c;
+  if (!revoked) {
+    let keyPem: string | null = null;
+    try {
+      keyPem = fs.readFileSync(layout.deviceKey(ctx.home), "utf8");
+    } catch {
+      keyPem = null;
+    }
+    savePendingRevoke(ctx.home, {
+      server_url: latest.server_url,
+      device_id: latest.device_id,
+      access_token: latest.access_token,
+      access_expires_at: latest.access_expires_at,
+      refresh_token: latest.refresh_token,
+      key_pem: keyPem,
+      since: new Date().toISOString(),
+    });
   }
   markSignedOut(ctx.home, "logout");
   fs.rmSync(layout.deviceKey(ctx.home), { force: true });
   const ended = endSharesSignedOut(ctx);
   out("Signed out. Tokens and the device key were removed; local metering continues.");
   if (ended) out(`${ended} shared session(s) stopped sharing. Sessions stopped from the web stay blocked until you run \`align stop-sharing <session>\`.`);
-  if (!revoked) err(`align: could not reach ${c.server_url} to revoke this device; revoke it at ${c.server_url}/app/devices so its sessions stop showing as shared.`);
+  if (!revoked) {
+    err(
+      `align: could not reach ${c.server_url} to revoke this device. Align revokes it the next time it reaches the server (the next \`align sync\` or \`align login\`); until then its sessions still show as shared there. You can also revoke it at ${c.server_url}/app/devices.`,
+    );
+  }
 }
 
 function installState(ctx: Ctx): { claude: string; codex: string; hash: string } {
@@ -314,10 +370,16 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   const st = installState(ctx);
   const last = readJson<LastSync>(layout.lastSync(ctx.home));
   out(`Align ${VERSION}  home ${ctx.home}`);
-  if (c && !c.signed_out) out(`  Identity:   ${c.user?.name || "?"} <${c.user?.email || "?"}> device ${c.device_id} on ${c.server_url}`);
-  else out(`  Identity:   signed out${c?.signed_out_reason ? ` (${c.signed_out_reason})` : ""}; local metering only`);
+  // The name and email as the server last said (`/me`, refreshed by each sync), not as they were at pairing (N9).
+  const who = loadMe(ctx.home)?.user || c?.user;
+  if (c && !c.signed_out) out(`  Identity:   ${who?.name || "?"} <${who?.email || "?"}> device ${c.device_id} on ${c.server_url}`);
+  else out(`  Identity:   signed out${c?.signed_out_reason ? ` (${signedOutWords(c.signed_out_reason)})` : ""}; local metering only`);
   if (c && !c.signed_out && c.clock_offset_ms) {
-    out(`  Clock:      this computer's clock is ${clockWords(c.clock_offset_ms)} the server's; Align signs in with the server's time. Set the system clock to update automatically.`);
+    out(`  Clock:      this computer's clock is ${clockWords(c.clock_offset_ms)} the server's; Align sends times on the server's clock. Set the system clock to update automatically.`);
+  }
+  const pendingRevoke = loadPendingRevoke(ctx.home);
+  if (pendingRevoke) {
+    out(`  Revoke:     pending for device ${pendingRevoke.device_id}, signed out ${shortTime(pendingRevoke.since)} while ${pendingRevoke.server_url} could not be reached; the next \`align sync\` or \`align login\` revokes it`);
   }
   out(`  Last sync:  ${last ? `${shortTime(last.at)} (${last.ms} ms)` : "never"}`);
   if (last?.error) out(`  Server:     unreachable since ${shortTime(last.error_since || last.at)}: ${last.error}; ${unuploadedRows(ctx)} usage rows wait to upload`);
@@ -357,7 +419,7 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
       )
       .all(s.local_id) as { basis: string; requests: number; input: number; output: number; cache_read: number; cache_write: number; est: number; unpriced: number; unfinished: number }[];
     const share = getShare(ctx, s.local_id);
-    const why = share?.error === DEVICE_SIGNED_OUT ? "; this machine signed out" : "";
+    const why = share?.error === DEVICE_SIGNED_OUT ? "; this machine signed out" : share?.error === ACCESS_LOST ? "; no access to the workspace" : "";
     return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name}${why})` : "private" };
   });
   if (values.json) return out(JSON.stringify(rows, null, 2));
@@ -382,6 +444,7 @@ async function cmdGoals(ctx: Ctx, argv: string[]): Promise<void> {
   }
   const me = loadMe(ctx.home);
   if (!me) throw new UsageError("no cached workspaces; run `align login`");
+  if (!values.workspace && !me.workspaces.length) return out(NO_WORKSPACES);
   const targets = values.workspace ? [resolveWorkspace(ctx.home, values.workspace)].filter(Boolean) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
   if (!targets.length) throw new UsageError(`unknown workspace "${values.workspace}"`);
   const all: { ws: string; goals: Goal[]; fetched: string | null }[] = [];
@@ -397,6 +460,9 @@ async function cmdGoals(ctx: Ctx, argv: string[]): Promise<void> {
   }
   out("* = you can bind a session to it now.");
 }
+
+/** No workspace in this device's reach (its person was removed from the only one, say): not an error (N6). */
+const NO_WORKSPACES = "No workspaces on this device: this device can't reach any Align workspace (you may have been removed from it). Local metering continues; `align login` pairs this machine again with the workspaces you choose.";
 
 async function goalFor(ctx: Ctx, wsId: string, ref: string): Promise<Goal | null> {
   if (ref === "none") return null;
@@ -556,6 +622,7 @@ async function cmdAsks(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { workspace: { type: "string" }, all: { type: "boolean" }, json: { type: "boolean" } } });
   const me = loadMe(ctx.home);
   if (!me) throw new UsageError("no cached workspaces; run `align login`");
+  if (!values.workspace && !me.workspaces.length) return out(NO_WORKSPACES);
   const targets = values.workspace ? [resolveWorkspace(ctx.home, values.workspace)].filter((w): w is { id: string; name: string } => !!w) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
   if (!targets.length) throw new UsageError(`unknown workspace "${values.workspace}"`);
   const all = targets.map((w) => {
@@ -700,7 +767,12 @@ async function cmdRequests(ctx: Ctx, argv: string[]): Promise<void> {
     (r) => r.request_id.toLowerCase().replace(/^rq_/, "").startsWith(want) && (!lid || r.local_id === lid) && answerable(r.type, r.state, answer),
   );
   const ids = [...new Set(open.map((r) => r.request_id))];
-  if (!ids.length) throw new UsageError(`no open request matches "${ref}"; run \`align requests\``);
+  if (!ids.length) {
+    // Known but answered already (say, accepted in the session a moment ago): say so rather than "no match".
+    const known = listRequests(ctx, { all: true }).filter((r) => r.request_id.toLowerCase().replace(/^rq_/, "").startsWith(want) && (!lid || r.local_id === lid));
+    if (new Set(known.map((r) => r.request_id)).size === 1) throw new UsageError(`request ${requestShortId(known[0].request_id)} is already ${stateWords(known[0].state)}, so it can't be ${answer} now`);
+    throw new UsageError(`no open request matches "${ref}"; run \`align requests\``);
+  }
   if (ids.length > 1) throw new UsageError(`"${ref}" matches ${ids.length} requests; use more characters`);
   const msgs: string[] = [];
   for (const r of open) {
@@ -748,8 +820,14 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   if (hook) return;
   if (r.skipped) return out("Another sync is running.");
   out(`Local: ${r.spooled} hook records, ${r.tail.files} files scanned (${r.tail.bytes} new bytes).`);
-  if (!signedIn(ctx.home)) return out("Signed out: nothing uploaded.");
-  out(`Server: ${r.sent} queued calls sent, ${r.uploaded} usage rows uploaded, ${r.directives} directives, ${outboxDepth(ctx)} still queued.`);
+  if (r.revoked === "revoked") out("Revoked the device this machine signed out of while the server could not be reached; its sessions stopped sharing there.");
+  if (!signedIn(ctx.home)) {
+    out("Signed out: nothing uploaded.");
+    if (r.revoked === "pending") err(`align: ${r.serverError || "the server could not be reached"}; the device this machine signed out of is revoked at the next sync that reaches it.`);
+    return;
+  }
+  // Nothing got through, so no "0 sent" line above the error (it reads as if the pass had worked).
+  if (!r.serverError) out(`Server: ${r.sent} queued calls sent, ${r.uploaded} usage rows uploaded, ${r.directives} directives, ${outboxDepth(ctx)} still queued.`);
   if (r.serverError) {
     const waiting = unuploadedRows(ctx);
     err(`align: ${r.serverError}. ${waiting} usage rows and ${outboxDepth(ctx)} queued calls stay on this machine; the next sync retries.`);
@@ -813,6 +891,7 @@ async function cmdDoctor(ctx: Ctx): Promise<void> {
 function allocationTargets(ctx: Ctx, ref: string | undefined): { id: string; name: string }[] {
   const me = loadMe(ctx.home);
   if (!me) throw new UsageError("no cached workspaces; run `align login`");
+  if (!ref && !me.workspaces.length) return [];
   const list = ref ? [resolveWorkspace(ctx.home, ref)].filter((w): w is { id: string; name: string } => !!w) : me.workspaces.map((w) => ({ id: w.id, name: w.name }));
   if (!list.length) throw new UsageError(`unknown workspace "${ref}"`);
   return list;
@@ -823,6 +902,7 @@ const gapWords = (gap: number | null) => (gap === null ? "" : Math.abs(gap) < 1 
 async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { workspace: { type: "string" }, week: { type: "string" }, refresh: { type: "boolean" }, json: { type: "boolean" } } });
   const targets = allocationTargets(ctx, values.workspace);
+  if (!targets.length) return out(NO_WORKSPACES);
   prepare(ctx);
   const digest = computeUnsharedDigest(ctx, Date.now(), true);
   if (values.week) {
@@ -873,7 +953,9 @@ async function cmdSteering(ctx: Ctx, argv: string[]): Promise<void> {
   if (sub !== "status") throw new UsageError("usage: align steering status [--workspace <name|id>]");
   const { values } = parseArgs({ args: rest, options: { workspace: { type: "string" } } });
   const queued = listSteering(ctx.home).length;
-  for (const w of allocationTargets(ctx, values.workspace)) {
+  const targets = allocationTargets(ctx, values.workspace);
+  if (!targets.length) out(NO_WORKSPACES);
+  for (const w of targets) {
     const feed = loadFeed(ctx.home, w.id);
     let shown = "";
     if (signedIn(ctx.home)) {

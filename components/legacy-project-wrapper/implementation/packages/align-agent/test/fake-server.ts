@@ -111,6 +111,14 @@ export class FakeServer {
   refreshes = 0;
   /** Refreshes refused as clock_skew. */
   skewRefusals = 0;
+  /** Session and epoch times refused as clock_skew (more than 5 min ahead of this server's clock). */
+  timeRefusals = 0;
+  /** The next n polls of /device/token answer 502 (a server restarting behind a proxy). */
+  failTokenPolls = 0;
+  /** Answer without a Date header, so a device can learn its clock offset only from a clock_skew answer. */
+  noDate = false;
+  /** Refuse every epoch as clock_skew, whatever time it carries (a clock the device can't correct). */
+  skewEpochs = false;
   private streams = new Set<{ res: http.ServerResponse; device: string }>();
   private seq = 0;
 
@@ -276,6 +284,7 @@ export class FakeServer {
   }
 
   private send(res: http.ServerResponse, status: number, body?: unknown, headers: Record<string, string> = {}): void {
+    if (this.noDate) res.sendDate = false;
     res.writeHead(status, { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers });
     res.end(body !== undefined ? JSON.stringify(body) : undefined);
   }
@@ -329,6 +338,10 @@ export class FakeServer {
         return send(200, { device_code: pend.device_code, user_code: pend.user_code, verification_uri: `${this.url}/app/device`, expires_in: 600, interval: 1 });
       }
       if (req.method === "POST" && p === "/api/v2/device/token") {
+        if (this.failTokenPolls > 0) {
+          this.failTokenPolls--;
+          return send(502, { error: "bad_gateway" });
+        }
         const pend = this.pending.get(body?.device_code);
         if (!pend || pend.issued) return send(400, { error: "expired_token" });
         pend.polls++;
@@ -385,10 +398,18 @@ export class FakeServer {
       m = /^\/api\/v2\/workspaces\/([^/]+)\/sessions\/([^/]+)(\/(epochs|usage|stop-sharing))?$/.exec(p);
       if (m) {
         const [, ws, key, , sub] = m;
+        // As the server: a workspace this device's person is no longer a member of is out of reach.
+        if (!this.workspaces.some((w) => w.id === ws)) return send(404, { error: "not_found" });
         const sess = this.sessions.get(key);
+        const ahead = (t: unknown) => Date.parse(String(t)) > Date.now() + 5 * 60_000;
+        const skewed = () => {
+          this.timeRefusals++;
+          return send(400, { error: "clock_skew", message: "the time is ahead of the server's clock", server_time: new Date().toISOString() });
+        };
         if (sess && sess.device !== dev.id) return send(404, { error: "not_found" });
         if (!sub && req.method === "PUT") {
           if (!/^[A-Za-z0-9_-]{43}$/.test(key) || !/^[A-Za-z0-9_-]{43}$/.test(body.repo_key)) return send(400, { error: "bad_key" });
+          if (ahead(body.started_at)) return skewed();
           const state = sess?.state === "suspended" ? "suspended" : "shared";
           // A re-PUT never changes started_at.
           this.sessions.set(key, { ws, device: dev.id, body: sess ? { ...body, started_at: sess.body.started_at } : body, state });
@@ -408,6 +429,13 @@ export class FakeServer {
         }
         if (sub === "epochs") {
           if (this.epochs.has(body.epoch_id)) return send(200, this.epochs.get(body.epoch_id));
+          if (this.skewEpochs) {
+            this.timeRefusals++;
+            return send(400, { error: "clock_skew", message: "starts_at is 10 minutes ahead of the server's clock; this device's clock is off", server_time: new Date().toISOString() });
+          }
+          if (ahead(body.starts_at)) return skewed();
+          // A start stored in the future came from a clock that ran ahead: the epoch moves it back.
+          if (Date.parse(sess.body.started_at) > Date.now() && body.starts_at < sess.body.started_at) sess.body.started_at = body.starts_at;
           // As the server: "manual", or a directive that was sent to this session.
           const cause = String(body.cause || "");
           if (cause !== "manual" && !(cause.startsWith("directive:") && this.directives.some((d) => d.id === cause.slice(10) && d.session_keys.includes(key)))) {

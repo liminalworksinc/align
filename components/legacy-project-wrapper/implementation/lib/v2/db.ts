@@ -1019,6 +1019,39 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE v2_sessions ADD COLUMN ended_reason TEXT CHECK (ended_reason IS NULL OR ended_reason = 'device_signed_out');
   `,
+  // E2E-AGENT cycle 2: removing a member (or their leaving) ends their live sessions in that workspace the way a
+  // revoked device ends its own, with ended_reason 'member_removed' (lib/v2/lifecycle.ts onMemberRemoved): nothing can
+  // deliver a stop, a resume or a release to them any more. v2_sessions is rebuilt to widen the CHECK.
+  `
+  CREATE TABLE v2_sessions_new (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    session_key TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    device_id TEXT REFERENCES v2_devices(id) ON DELETE SET NULL,
+    harness TEXT NOT NULL CHECK (harness IN ('claude-code','codex')),
+    repo_key TEXT NOT NULL,
+    repo_alias TEXT,
+    title TEXT,
+    started_at TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('shared','suspended','stopped')),
+    stopped_at TEXT,
+    governing_goal_id TEXT,
+    governing_alignment_id TEXT,
+    agent_stopped INTEGER NOT NULL DEFAULT 0,
+    conflicts INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    ended_reason TEXT CHECK (ended_reason IS NULL OR ended_reason IN ('device_signed_out','member_removed')),
+    PRIMARY KEY (ws_id, session_key),
+    FOREIGN KEY (ws_id, governing_goal_id) REFERENCES v2_goals(ws_id, id),
+    FOREIGN KEY (ws_id, governing_alignment_id) REFERENCES v2_alignments(ws_id, id)
+  );
+  INSERT INTO v2_sessions_new SELECT ws_id, session_key, user_id, device_id, harness, repo_key, repo_alias, title, started_at, state, stopped_at, governing_goal_id, governing_alignment_id, agent_stopped, conflicts, created_at, updated_at, ended_reason FROM v2_sessions;
+  DROP TABLE v2_sessions;
+  ALTER TABLE v2_sessions_new RENAME TO v2_sessions;
+  CREATE INDEX v2_sessions_device ON v2_sessions(device_id);
+  CREATE INDEX v2_sessions_user ON v2_sessions(ws_id, user_id);
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

@@ -56,7 +56,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                 <span className="text-[16px] text-zinc-900">{s.title || s.repo_alias || `${s.harness} session`}</span>
                 <Pill>{s.harness}</Pill>
                 <Pill tone={s.state === "shared" ? "green" : s.state === "suspended" ? "amber" : s.ended_reason ? "red" : "neutral"}>
-                  {s.ended_reason === "device_signed_out" ? "ended: device signed out" : s.state === "stopped" ? "not shared" : s.state}
+                  {s.ended_reason === "device_signed_out" ? "ended: device signed out" : s.ended_reason === "member_removed" ? "ended: left the workspace" : s.state === "stopped" ? "not shared" : s.state}
                 </Pill>
                 <StopStatusPills s={s.stop_status} stopped={s.agent_stopped} ended={!!s.ended_reason} />
               </div>
@@ -70,6 +70,12 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                   The machine that shared this session signed out of Align, so sharing ended and Stop or Resume can&apos;t reach it.
                   {s.agent_stopped ? " It stays stopped on that machine until you run align stop-sharing there." : ""} To share it again, run align login on that machine, then
                   ::align share in the session.
+                </Note>
+              )}
+              {s.ended_reason === "member_removed" && (
+                <Note>
+                  Sharing ended when you left this workspace (or were removed from it), so Stop or Resume can&apos;t reach it.
+                  {s.agent_stopped ? " It stays stopped on your machine until you run align stop-sharing there." : ""}
                 </Note>
               )}
               <div className="mt-2 flex flex-wrap gap-2">

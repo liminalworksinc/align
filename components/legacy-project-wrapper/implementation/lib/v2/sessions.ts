@@ -32,8 +32,9 @@ export interface SessionRow {
   started_at: string;
   state: "shared" | "suspended" | "stopped";
   stopped_at: string | null;
-  /** Why a stopped session ended when its person did not stop it: its device signed out (lib/v2/devices.ts). */
-  ended_reason: "device_signed_out" | null;
+  /** Why a stopped session ended when its person did not stop it: its device signed out (lib/v2/devices.ts), or its
+   *  person was removed from the workspace or left it (lib/v2/lifecycle.ts). Nothing can reach it any more. */
+  ended_reason: EndedReason | null;
   governing_goal_id: string | null;
   governing_alignment_id: string | null;
   agent_stopped: number;
@@ -54,6 +55,40 @@ interface EpochRow {
   cause: string;
   authority: "none" | "own" | "pod" | "alignment";
   alignment_id: string | null;
+}
+
+export type EndedReason = "device_signed_out" | "member_removed";
+
+/**
+ * End sessions nothing can deliver a stop, a resume or a release to any more (inside the caller's tx()): each one still
+ * shared (or suspended) is stopped as stop-sharing would stop it (open epoch closed, no governing goal), marked with
+ * why, and the requests still waiting on it expire (a request no device can answer never stays open). Its history
+ * stays. A stop latch or goal hold already set on the machine stays until the developer runs `align stop-sharing`.
+ * Used when a device is revoked (lib/v2/devices.ts) and when a member leaves or is removed (lib/v2/lifecycle.ts).
+ * Returns how many ended.
+ */
+export function endSessions(live: { ws_id: string; session_key: string }[], reason: EndedReason, at: string): number {
+  for (const s of live) {
+    run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", at, s.ws_id, s.session_key);
+    run(
+      `UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), ended_reason = ?, governing_goal_id = NULL,
+         governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?`,
+      at,
+      reason,
+      at,
+      s.ws_id,
+      s.session_key,
+    );
+    run("UPDATE v2_request_targets SET state = 'expired', updated_at = ? WHERE ws_id = ? AND session_key = ? AND state IN ('sent','received')", at, s.ws_id, s.session_key);
+  }
+  return live.length;
+}
+
+/** The refusal for a time a device sent that lies too far ahead of the server's clock: its clock is off (400
+ *  clock_skew with the server's time, as a refresh gets), never a bare bad_request. */
+function clockSkew(field: string, sent: string) {
+  const minutes = Math.round((Date.parse(sent) - Date.now()) / 60_000);
+  return new V2Error(400, "clock_skew", `${field} is ${minutes} minutes ahead of the server's clock; this device's clock is off`, { server_time: nowIso() });
 }
 
 const epochOut = (e: EpochRow) => ({ epoch_id: e.epoch_id, goal_id: e.goal_id, goal_version_at_start: e.goal_version_at_start, starts_at: e.starts_at, ends_at: e.ends_at });
@@ -81,13 +116,16 @@ export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key:
   const repoKey = b64url(b, "repo_key", 43, 43);
   const alias = optStr(b, "repo_alias", 100);
   const startedAt = iso(b, "started_at");
+  if (Date.parse(startedAt) > Date.now() + FUTURE_SKEW_MS) throw clockSkew("started_at", startedAt);
   const title = optStr(b, "title", 200);
   const at = nowIso();
   const out = await tx(() => {
     const s = sessionRow(pp.wsId, key);
-    if (s && s.user_id === dev.user.id && s.device_id !== dev.deviceId && s.state === "stopped" && s.ended_reason === "device_signed_out") {
-      // The session ended because the machine that shared it signed out; the same person's machine, paired again (it
-      // still derives the same session key from its local secret), shares it again from now on.
+    const ended = s?.state === "stopped" && (s.ended_reason === "device_signed_out" ? s.device_id !== dev.deviceId : s.ended_reason === "member_removed");
+    if (s && ended && s.user_id === dev.user.id) {
+      // The session ended because the machine that shared it signed out, or because its person left the workspace (and
+      // has been let back in): the same person's machine, paired again (it still derives the same session key from its
+      // local secret), shares it again from now on.
       if (s.harness !== harness || s.repo_key !== repoKey) throw conflict("session_conflict", "This session key was shared with a different harness or repo");
       run(
         "UPDATE v2_sessions SET device_id = ?, state = 'shared', stopped_at = NULL, ended_reason = NULL, repo_alias = ?, title = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?",
@@ -150,8 +188,11 @@ export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal
   if (cause !== "manual" && !get("SELECT 1 AS x FROM v2_directive_targets WHERE ws_id = ? AND directive_id = ? AND session_key = ?", pp.wsId, cause.slice(10), key)) {
     throw badRequest("cause names a directive that was not sent to this session");
   }
-  if (Date.parse(startsAt) > Date.now() + FUTURE_SKEW_MS) throw badRequest("starts_at is in the future");
-  if (Date.parse(startsAt) < Date.parse(s.started_at)) throw badRequest("starts_at is before the session started");
+  if (Date.parse(startsAt) > Date.now() + FUTURE_SKEW_MS) throw clockSkew("starts_at", startsAt);
+  // A start stored in the future came from a clock that ran ahead: an epoch from the corrected clock moves it back
+  // (below, in the transaction) instead of waiting for real time to catch up.
+  const futureStart = Date.parse(s.started_at) > Date.now();
+  if (Date.parse(startsAt) < Date.parse(s.started_at) && !futureStart) throw badRequest("starts_at is before the session started");
 
   // Idempotent: the same epoch again returns it; the same id with other values is a conflict.
   const same = get<EpochRow>("SELECT * FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", pp.wsId, key, epochId);
@@ -183,6 +224,7 @@ export async function openBindingEpoch(pp: PolicyPrincipal, dev: DevicePrincipal
     if (open && startsAt < open.starts_at) throw conflict("epoch_overlap", "starts_at is before the current epoch started");
     if (lastEnd && startsAt < lastEnd) throw conflict("epoch_overlap", "starts_at is before the last epoch ended");
     if (open) run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND epoch_id = ?", startsAt, pp.wsId, key, open.epoch_id);
+    if (startsAt < s.started_at) run("UPDATE v2_sessions SET started_at = ? WHERE ws_id = ? AND session_key = ?", startsAt, pp.wsId, key);
     run(
       `INSERT INTO v2_epochs (ws_id, session_key, epoch_id, goal_id, goal_version_at_start, starts_at, root_turn, cause, authority, alignment_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -332,6 +374,12 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
     throw conflict(
       "device_signed_out",
       "The machine that shared this session signed out of Align, so its sharing ended and a stop or resume can't reach it. If it was stopped, it stays stopped until its developer runs align stop-sharing there.",
+    );
+  }
+  if (s.ended_reason === "member_removed") {
+    throw conflict(
+      "member_removed",
+      "This session's developer is no longer a member of this workspace, so its sharing ended and a stop or resume can't reach it. If it was stopped, it stays stopped until they run align stop-sharing on their machine.",
     );
   }
   if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");

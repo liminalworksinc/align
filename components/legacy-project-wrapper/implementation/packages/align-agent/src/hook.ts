@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { alignHomeForHook } from "./shared/layout.ts";
 import type { Harness } from "./shared/types.ts";
 import { kickSync } from "./hooks/autostart.ts";
-import { denyOutput, failureDeny, latchedOnFailure, preToolUse, sessionStart, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
+import { denyOutput, failureDeny, latchDeny, latchedOnFailure, preToolUse, sessionStart, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
 import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 
 const DEADLINE_MS = Number(process.env.ALIGN_HOOK_DEADLINE_MS || 300);
@@ -132,7 +132,9 @@ function oldNode(why: string, input: HookInput): HookOutput {
   if (event === "UserPromptSubmit" && typeof input.prompt === "string" && /^\s*::align\b/i.test(input.prompt)) return { decision: "block", reason: `Align: ${why}. ${fix}` };
   if (event === "PreToolUse" && harness) {
     sessionId = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
-    if (latchedOnFailure(home, harness, sessionId)) return failureDeny(home, harness, sessionId);
+    // The same latch rules as on a supported Node (a stopped session may still read; a held one may not), so the
+    // session behaves the same; anything that can't be read still denies (failure()).
+    if (latchedOnFailure(home, harness, sessionId)) return latchDeny(home, harness, input);
   }
   return null;
 }

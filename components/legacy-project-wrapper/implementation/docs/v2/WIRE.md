@@ -34,7 +34,13 @@ The user signs in at `/app/device`, types the code, sees device name + request a
   off the server's clock: nothing is rotated and the device stays paired; sign again with the server's time.
 
 `DELETE /api/v2/devices/self` (Bearer) → 204. Revokes this device's tokens (logout). Any revocation also ends the
-device's sessions: `stopped` with `ended_reason: "device_signed_out"`.
+device's sessions: `stopped` with `ended_reason: "device_signed_out"`. Removing a member from a workspace (or their
+leaving it) ends their sessions there the same way, with `ended_reason: "member_removed"`; requests still waiting on
+an ended session expire.
+
+Clock: every device response carries the HTTP `Date` header. The agent measures its offset from it, keeps it in
+`credentials.json` as `clock_offset_ms` while it is a minute or more, and sends every time (`started_at`, `starts_at`,
+usage `ts`, receipt `at`, activity and steering `at`) on the server's clock.
 
 ## Identity and workspaces (device view)
 `GET /api/v2/me` (Bearer or cookie)
@@ -72,7 +78,8 @@ version's author.
 `PUT /api/v2/workspaces/:ws/sessions/:session_key` (Bearer) — share or update
 → req `{ "harness": "claude-code"|"codex", "repo_key", "repo_alias": string|null, "started_at", "title": string|null }`
 → 200 `{ "session_key", "state": "shared"|"suspended", "current_epoch": Epoch|null }`
-Key owned by another user/device → 404.
+Key owned by another user/device → 404. `started_at` more than 5 min ahead of the server's clock → 400
+`{ "error": "clock_skew", "message", "server_time" }` (as a refresh gets).
 
 `POST /api/v2/workspaces/:ws/sessions/:session_key/epochs` (Bearer) — open a binding epoch
 → req `{ "epoch_id": "ep_...", "goal_id": "g_..."|null, "starts_at": "<ISO>", "root_turn": string|null, "cause": "manual"|"directive:<dir_id>" }`
@@ -263,11 +270,15 @@ Errors and credentials
 Sessions and epochs
 - `PUT` on a session after stop-sharing is `409 sharing_stopped` (stopping is sticky; re-sharing needs delete first).
   The exception is a session that ended because its device was revoked (`ended_reason: "device_signed_out"`): a `PUT`
-  from another device of the same person (same harness and `repo_key`) shares it again on that device.
+  from another device of the same person (same harness and `repo_key`) shares it again on that device; and one that
+  ended because its person left the workspace (`ended_reason: "member_removed"`), shared again by a device of theirs
+  once they are a member again.
   So are epochs and usage. The same key with a different `harness` or `repo_key` is `409 session_conflict`.
 - Epochs: same `epoch_id` with the same values returns it (idempotent); with other values `409 epoch_conflict`.
   `starts_at` before the open epoch's start or the last epoch's end is `409 epoch_overlap`; before the session's
-  `started_at` or more than 5 min in the future is `400`. A goal the caller can't see is `404`; a goal that isn't
+  `started_at` is `400` (unless that start lies in the future on the server's clock: it came from a clock that ran
+  ahead, and the epoch moves the session's start back to its own `starts_at`); more than 5 min in the future is
+  `400 clock_skew` with `server_time`. A goal the caller can't see is `404`; a goal that isn't
   `active` is `409 goal_not_active`. `cause: "directive:<id>"` must name a directive sent to this session (`400`).
 - `bindable` also requires `status: "active"`.
 - Binding a session to a goal other than its governing goal (manual) ends that governing goal.
@@ -282,7 +293,8 @@ Directives
   `goal` is `null` if that user can no longer see the goal.
 - Stop/resume are issued with `POST /api/v2/workspaces/:ws/sessions/:session_key/stop` and `.../resume` (cookie; the
   session's owner or a workspace owner) → `{ directive_id, agent_stopped }`; `409 sharing_stopped` for a stopped
-  session, and `409 device_signed_out` for one whose device was revoked (nothing could deliver it).
+  session, `409 device_signed_out` for one whose device was revoked and `409 member_removed` for one whose person
+  left the workspace (nothing could deliver it).
 
 Alignment (web)
 - Who may act: `approve` a required approver of the current revision, state `pending`, `revision` must equal the
