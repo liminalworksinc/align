@@ -86,6 +86,8 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
     });
   const doIt = decide;
   const line = launchLine(r);
+  const reason = r.history.find((h) => h.revision === 1)?.note ?? null;
+  const counterNote = [...r.history].reverse().find((h) => h.revision > 1 && h.author.id !== r.requester.id && h.note) ?? null;
   return (
     <li className="py-3" data-reallocation={r.id}>
       {notice && <NoticeBox notice={notice} />}
@@ -105,7 +107,18 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
           </li>
         ))}
       </ul>
-      {r.note && <p className="text-[14px] text-zinc-600">“{r.note}”</p>}
+      {/* The requester's reason (their first revision's note) stays on the card whatever a counter says or leaves out, as a
+          change request keeps "<requester>'s reason, as written" next to a counter's note (X3). */}
+      {reason && (
+        <p className="text-[14px] text-zinc-600" data-reallocation-reason>
+          {r.requester.id === me.id ? "Your" : `${r.requester.name}'s`} reason: “{reason}”
+        </p>
+      )}
+      {counterNote && (
+        <p className="text-[14px] text-zinc-600" data-reallocation-counter-note>
+          {counterNote.author.id === me.id ? "Your" : `${counterNote.author.name}'s`} note on revision {counterNote.revision}: “{counterNote.note}”
+        </p>
+      )}
       {r.rejection_reason && <p className="text-[14px] text-zinc-600">Declined by {r.rejected_by?.name}: “{r.rejection_reason}”</p>}
       {line && <p className="text-[14px] text-zinc-600">{line}</p>}
       <div className="mt-2 flex flex-wrap gap-2">

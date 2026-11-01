@@ -1957,6 +1957,11 @@ try {
     mcpA?.evidence?.length === 2 && mcpA.evidence.map((e) => e.reported_as).sort().join() === "agent-reported,self-reported" && mcpA.evidence.every((e) => e.revision === 1 && typeof e.added_by.name.untrusted_text === "string") && mcpA.snapshot?.revision === 1 && mcpA.snapshot.recorded_by === "align" && typeof mcpA.snapshot.spend?.total?.est_list_usd_micros === "number" && /Recorded by Align at revision 1/.test(mcpList.text),
     JSON.stringify(mcpA).slice(0, 400),
   );
+  check(
+    "C4-4: the MCP snapshot line puts each count with its noun: \"… in 2 requests, 1 bound session, …\", never \"1 bound sessions\"",
+    /in 2 requests, 1 bound session, last activity/.test(mcpList.text) && !/\b1 bound sessions\b/.test(mcpList.text) && !/\b1 requests\b/.test(mcpList.text),
+    (mcpList.text ?? "").slice(0, 900),
+  );
   const evEventText = withDb((d) => d.prepare("SELECT * FROM v2_events").all()).map((r) => Object.values(r).join(" ")).join("\n");
   const evRowsAll = withDb((d) => d.prepare("SELECT url, label FROM v2_change_request_evidence").all());
   check(
@@ -5623,11 +5628,21 @@ try {
     const evRow = withDb((d) => d.prepare("SELECT * FROM v2_steering_events WHERE ws_id = ?").all(AW));
     const stCount = (await allocOf(AO)).json?.steering;
     check(
-      "steering events: this device's shared session -> accepted 1, the same line again -> 0, one older than 14 days -> skipped, another device's report about it -> skipped; a share over 100, a bad goal id, a bad time or 101 events -> 400; a cookie -> refused; stored as session key, goal ids and whole percents only; allocation counts 1 line today",
-      s1.json?.accepted === 1 && s2.json?.accepted === 0 && sOld.json?.accepted === 0 && sForeign.json?.accepted === 0 && sBad.every((r) => r.status === 400) && sCookie.status >= 400 &&
+      "steering events: this device's shared session -> accepted 1, the same line again -> accepted 1 too (X6: stored once, never lost from the answer), one older than 14 days -> skipped, another device's report about it -> skipped; a share over 100, a bad goal id, a bad time or 101 events -> 400; a cookie -> refused; stored as session key, goal ids and whole percents only; allocation counts 1 line today",
+      s1.json?.accepted === 1 && s2.json?.accepted === 1 && sOld.json?.accepted === 0 && sForeign.json?.accepted === 0 && sBad.every((r) => r.status === 400) && sCookie.status >= 400 &&
         evRow.length === 1 && JSON.stringify(Object.keys(evRow[0]).sort()) === JSON.stringify(["at", "goal_id", "recorded_at", "session_key", "share", "suggested_goal_id", "target", "ws_id"]) &&
         stCount?.steering === "on" && stCount.total === 1 && stCount.days.length === 1 && stCount.days[0].day === new Date().toISOString().slice(0, 10),
       `${s1.text} ${s2.text} ${sOld.text} ${sForeign.text} ${sBad.map((r) => r.status)} ${sCookie.status} ${JSON.stringify(stCount)}`,
+    );
+
+    // X6: the same line twice in one batch, beside one refused: the answer adds up to the batch.
+    const eTwice = ev({ at: new Date(Date.now() - 2000).toISOString() });
+    const sTwice = await postEv(DM, [eTwice, eTwice, ev({ at: new Date(Date.now() - 20 * 86_400_000).toISOString() })]);
+    check(
+      "X6: a repeated steering line (twice in one batch, or again in a later one) is counted in accepted, stored once, so accepted + refused.length is the batch's length (as activity counts every item it takes)",
+      sTwice.json?.accepted === 2 && JSON.stringify(sTwice.json?.refused) === JSON.stringify([{ index: 2, reason: "too_old" }]) && s2.json?.accepted === 1 &&
+        withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_steering_events WHERE ws_id = ? AND at = ?").get(AW, new Date(Date.parse(eTwice.at)).toISOString()))?.n === 1,
+      `${sTwice.text} ${s2.text}`,
     );
 
     // -- a held goal is marked in the feed: agents never steer from or toward it --
@@ -6091,8 +6106,8 @@ try {
           return { approved: c?.querySelector('[data-side="approved"]')?.innerText ?? "", proposed: c?.querySelector('[data-side="proposed"]')?.innerText ?? "", what: c?.querySelector("[data-what-would-change]")?.innerText ?? "" };
         }, crD.json?.id);
         check(
-          "B1 (ui): a dependency the reader can't see reads \"a goal you can't see\" on the approved-now and proposed sides (never \"Nothing\"), and \"What would change\" names the one they can see",
-          /Depends on\s*a goal you can.t see/.test(dView.approved) && /Cut CI time in half \(p50\), a goal you can.t see/.test(dView.proposed) && !/Depends on\s*Nothing/.test(dView.approved + dView.proposed) && /Would depend on “Cut CI time in half \(p50\)”/.test(dView.what) && !dView.approved.includes(GGH.title),
+          "B1 and X1 (ui): a dependency the reader can't see reads \"a goal you can't see\" on the approved-now side and, after a named one, \"Cut CI time in half (p50) and 1 other goal you can't see\" on the proposed side (never \"…, a goal you can't see\", never \"Nothing\"), and \"What would change\" names the one they can see",
+          /Depends on\s*a goal you can.t see/.test(dView.approved) && /Cut CI time in half \(p50\) and 1 other goal you can.t see/.test(dView.proposed) && !/\(p50\), a goal you can.t see/.test(dView.proposed) && !/Depends on\s*Nothing/.test(dView.approved + dView.proposed) && /Would depend on “Cut CI time in half \(p50\)”/.test(dView.what) && !dView.approved.includes(GGH.title),
           JSON.stringify(dView),
         );
         // B1 (ui): the goal page and its New version form say a dependency the editor can't see is kept.
@@ -6461,6 +6476,38 @@ try {
         !launchHidden.text.includes(KHW.title) && !launchHidden.text.includes(KHW.id) && h2After?.launch === "pending" && h2After.goal.version === 1,
       `${launchHidden.status} ${launchHidden.text} ${h2After?.launch} ${h2After?.goal?.version}`,
     );
+    // -- C4-1: the read offers KC neither decision the server refuses, and doesn't queue it for KC (one predicate) --
+    const hAsKC = await kRead(KC, KCI5.id, crH?.id);
+    const hAsKA = await kRead(KA, KCI5.id, crH?.id);
+    const h2AsKC = await kRead(KC, KCI6.id, crH2?.id);
+    const h2AsKA = await kRead(KA, KCI6.id, crH2?.id);
+    check(
+      "C4-1: a decider who can't read a dependency the request adds reads can.approve and can.approve_and_launch false (counter and reject still true), waiting_on_me false and dependency_not_visible = the server's refusal; the approver who can read it reads them true, waiting_on_me true and dependency_not_visible null",
+      hAsKC?.can?.approve === false && hAsKC.can.approve_and_launch === false && hAsKC.can.counter === true && hAsKC.can.reject === true && hAsKC.waiting_on_me === false &&
+        hAsKC.dependency_not_visible === apHidden.json?.message && !hAsKC.dependency_not_visible?.includes(KHW.title) &&
+        hAsKA?.can?.approve === true && hAsKA.can.approve_and_launch === true && hAsKA.waiting_on_me === true && hAsKA.dependency_not_visible === null,
+      `${JSON.stringify(hAsKC?.can)} ${hAsKC?.waiting_on_me} ${hAsKC?.dependency_not_visible} | ${JSON.stringify(hAsKA?.can)} ${hAsKA?.waiting_on_me} ${hAsKA?.dependency_not_visible}`,
+    );
+    check(
+      "C4-1: on an approved change, a launcher who can't read a dependency it adds reads can.launch false (not_yet still true), waiting_on_me false and dependency_not_visible = the launch refusal; the approver who can read it reads can.launch true and waiting_on_me true",
+      h2AsKC?.can?.launch === false && h2AsKC.can.not_yet === true && h2AsKC.waiting_on_me === false && h2AsKC.dependency_not_visible === launchHidden.json?.message &&
+        h2AsKA?.can?.launch === true && h2AsKA.waiting_on_me === true && h2AsKA.dependency_not_visible === null,
+      `${JSON.stringify(h2AsKC?.can)} ${h2AsKC?.waiting_on_me} ${h2AsKC?.dependency_not_visible} | ${JSON.stringify(h2AsKA?.can)} ${h2AsKA?.waiting_on_me}`,
+    );
+    const kcGroups = (await ka(KC, "GET", "/change-requests")).json;
+    const kcHome = (await ka(KC, "GET", "/home")).json?.change_requests;
+    const kaHome = (await ka(KA, "GET", "/home")).json?.change_requests;
+    const inList = (l, id) => (l ?? []).some((c) => c.id === id);
+    const homeOthers = (id) => (kcHome?.waiting_on_others ?? []).find((c) => c.id === id);
+    check(
+      "C4-1: neither request is under the decider's \"Waiting on you\" (Requests tab or Home); the Home lists them as waiting on others, never on that decider (on Kim Lead to decide, and on those who can launch); the approver who can read them has both waiting on them",
+      !inList(kcGroups?.waiting_on_me, crH?.id) && !inList(kcGroups?.waiting_on_me, crH2?.id) && inList(kcGroups?.others, crH?.id) &&
+        !inList(kcHome?.waiting_on_me, crH?.id) && !inList(kcHome?.waiting_on_me, crH2?.id) &&
+        homeOthers(crH?.id)?.next === "decide" && JSON.stringify(homeOthers(crH?.id)?.waiting_on.map((p) => p.id)) === JSON.stringify([KA.id]) &&
+        homeOthers(crH2?.id)?.next === "launch" && homeOthers(crH2?.id).waiting_on.length > 0 && !homeOthers(crH2?.id).waiting_on.some((p) => p.id === KC.id) &&
+        inList(kaHome?.waiting_on_me, crH?.id) && inList(kaHome?.waiting_on_me, crH2?.id),
+      `${JSON.stringify(kcGroups?.waiting_on_me?.map((c) => c.id))} ${JSON.stringify(kcHome)} ${JSON.stringify(kaHome?.waiting_on_me?.map((c) => c.id))}`,
+    );
     const apB7 = await kAct(KC, KCI7.id, crB7?.id, "approve", { revision: 1 });
     const apH = await kAct(KA, KCI5.id, crH?.id, "approve_and_launch", { revision: 1 });
     const launchH2 = await kAct(KA, KCI6.id, crH2?.id, "launch", { revision: 1 });
@@ -6477,6 +6524,28 @@ try {
       "C3: GET a goal with ?counter=<request> gives dependency_choices for a counter on it from the reader (an approver, KA, who owns the goal): goals the requester and everyone deciding can read (Faster builds), never Robot firmware (KC can't read it) or KA's private goal (KB can't); null for the requester; 404 for a request on another goal",
       Array.isArray(qChoices) && qChoices.includes(KGV.id) && !qChoices.includes(KHW.id) && !qChoices.includes(KAP.id) && !qChoices.includes(KGP.id) && !qChoices.includes(KCI8.id) && qAsRequester === null && qWrongGoal.status === 404,
       `${JSON.stringify(qChoices)} ${JSON.stringify(qAsRequester)} ${qWrongGoal.status}`,
+    );
+
+    // -- C4-2: dependency_loops follows dependency_choices' audience, ?counter= included (the goal's owner countering) --
+    const KLP = await kGoal(KA, { title: "Cut CI waits report", visibility: "workspace", team_id: KPT, depends_on: [KCI8.id] });
+    const qOwner = (await ka(KA, "GET", `/goals/${KCI8.id}?counter=${crQ?.id}`)).json;
+    const qRequester = (await ka(KB, "GET", `/goals/${KCI8.id}?counter=${crQ?.id}`)).json;
+    const qOwnerPlain = (await ka(KA, "GET", `/goals/${KCI8.id}`)).json;
+    const qMemberPlain = (await ka(KB, "GET", `/goals/${KCI8.id}`)).json;
+    check(
+      "C4-2: GET a goal with ?counter= gives the goal's owner dependency_loops (the goal that depends on it) beside dependency_choices, which leaves it out; the requester's ?counter= read has both null; without ?counter= the owner's are both null (they can't propose) and a member's both lists",
+      !!KLP?.id && Array.isArray(qOwner?.dependency_choices) && !qOwner.dependency_choices.includes(KLP.id) && JSON.stringify(qOwner.dependency_loops) === JSON.stringify([KLP.id]) &&
+        qRequester?.dependency_choices === null && qRequester.dependency_loops === null &&
+        qOwnerPlain?.dependency_choices === null && qOwnerPlain.dependency_loops === null &&
+        Array.isArray(qMemberPlain?.dependency_choices) && JSON.stringify(qMemberPlain.dependency_loops) === JSON.stringify([KLP.id]),
+      `${KLP?.id} ${JSON.stringify([qOwner?.dependency_choices, qOwner?.dependency_loops, qRequester?.dependency_choices, qRequester?.dependency_loops, qOwnerPlain?.dependency_loops, qMemberPlain?.dependency_loops])}`,
+    );
+    // -- X5: the New version form's loop goals --
+    const loopVersion = await ka(KA, "POST", `/goals/${KCI8.id}/versions`, { version: 1, depends_on: [KLP?.id] });
+    check(
+      "X5: GET a goal gives its owner version_loops (the goals that already depend on it, which the New version form leaves out) and null to a member who can't edit it; saving one anyway is still refused 409 cycle",
+      JSON.stringify(qOwnerPlain?.version_loops) === JSON.stringify([KLP?.id]) && qMemberPlain?.version_loops === null && loopVersion.status === 409 && loopVersion.json?.error === "cycle",
+      `${JSON.stringify(qOwnerPlain?.version_loops)} ${JSON.stringify(qMemberPlain?.version_loops)} ${loopVersion.status} ${loopVersion.text.slice(0, 200)}`,
     );
 
     // -- N5: launch and not yet check the revision they are sent --
@@ -6605,7 +6674,7 @@ try {
         check(
           "C2 N2 (ui): the counter form says the request also depends on a goal the counterer can't see and that sending keeps it; the confirmation lists it in \"Depends on would be\" and says it is kept",
           /Also depends on a goal you can.t see\. Sending keeps it; only someone who can see it can remove it\./.test(formText) &&
-            /Depends on would be\s*Faster builds for everyone, a goal you can.t see/i.test(confirmText) && /Kept\s*A goal you can.t see stays a dependency: your suggestion keeps it, and only someone who can see it can remove it\./i.test(confirmText) && !confirmText.includes(KHW.title),
+            /Depends on would be\s*Faster builds for everyone and 1 other goal you can.t see/i.test(confirmText) && /Kept\s*A goal you can.t see stays a dependency: your suggestion keeps it, and only someone who can see it can remove it\./i.test(confirmText) && !confirmText.includes(KHW.title),
           `${formText.slice(0, 600)} || ${confirmText.slice(0, 600)}`,
         );
         check(
@@ -6648,6 +6717,61 @@ try {
           "C3 (ui): the counter form's Depends on lists the goals the requester and everyone deciding can see (Faster builds for everyone), never Robot firmware or the counterer's private goal, and says \"2 goals you can see aren't offered: Kai Member or someone who decides on this goal can't see them.\"",
           counterForm.includes("Faster builds for everyone") && !counterForm.includes(KHW.title) && !counterForm.includes(KAP.title) && counterForm.includes(`2 goals you can see aren't offered: ${KB.name} or someone who decides on this goal can't see them.`),
           counterForm.slice(0, 600),
+        );
+
+        // C4-2 (ui): the owner's counter form counts the goal that would make a loop on its own line.
+        check(
+          "C4-2 (ui): the goal owner's Suggest a change form doesn't offer the goal that already depends on it and says \"1 goal isn't offered: it already depends on this goal, so adding it would make a loop.\", never counting it among the goals someone can't see",
+          !counterForm.includes(KLP?.title ?? "Cut CI waits report") && counterForm.includes("1 goal isn't offered: it already depends on this goal, so adding it would make a loop."),
+          counterForm.slice(0, 700),
+        );
+
+        // X5 (ui): the owner's New version form leaves out the goal that would make a loop, and says why.
+        await open(pA8, `/app/w/${KW}/goals/${KCI8.id}`);
+        await pA8.waitForSelector("#new-version form", { timeout: 15000 }).catch(() => undefined);
+        await pA8.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const nvForm = await pA8.evaluate(() => document.querySelector("#new-version form")?.innerText ?? "");
+        check(
+          "X5 (ui): the New version form's Depends on doesn't offer the goal that already depends on this one and says \"1 goal isn't offered: it already depends on this goal, so adding it would make a loop.\"",
+          nvForm.includes("Faster builds for everyone") && !nvForm.includes("Cut CI waits report") && nvForm.includes("1 goal isn't offered: it already depends on this goal, so adding it would make a loop."),
+          nvForm.slice(0, 900),
+        );
+
+        // C4-1 (ui): KC, able to see Robot firmware when the card opens, confirms Approve after losing that; the refusal
+        // closes the Confirm panel, and the reloaded card no longer offers Approve and says why.
+        const kcHw = await ka(KO, "POST", `/teams/${KHT}/members`, { user_id: KC.id, role: "member" });
+        const KCI9 = await kGoal(KA, { title: "Cut CI logs", visibility: "workspace", team_id: KPT });
+        const crV = (await ka(KB, "POST", kcrs(KCI9?.id), { base_version: 1, changes: { depends_on: [KHW.id] }, reason: "Firmware logs are most of it" })).json;
+        const pC9 = await as(KC);
+        await open(pC9, `/app/w/${KW}/goals/${KCI9?.id}`);
+        const vCard = `[data-cr="${crV?.id}"]`;
+        await pC9.waitForSelector(`${vCard} [data-decision="Approve"]`, { timeout: 15000 }).catch(() => undefined);
+        await pC9.click(`${vCard} [data-decision="Approve"]`).catch(() => undefined);
+        await press(pC9, `${vCard} [data-decision-input="approve"]`, "Review this decision");
+        await pC9.waitForSelector(`${vCard} [data-confirm="approve"]`, { timeout: 15000 }).catch(() => undefined);
+        const confirmOpen = await pC9.evaluate((s) => !!document.querySelector(`${s} [data-confirm="approve"]`), vCard);
+        const kcOut = await ka(KO, "DELETE", `/teams/${KHT}/members/${KC.id}`);
+        await press(pC9, `${vCard} [data-confirm="approve"]`, "Confirm: Approve");
+        await pC9.waitForFunction((s) => /Not recorded\./.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, vCard).catch(() => undefined);
+        await pC9.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        const v = await pC9.evaluate(
+          (s) => ({
+            text: document.querySelector(s)?.innerText ?? "",
+            confirm: !!document.querySelector(`${s} [data-confirm]`),
+            notice: document.querySelector(`${s} [data-notice]`)?.getAttribute("data-notice") ?? null,
+            decisions: [...document.querySelectorAll(`${s} [data-decision]`)].map((b) => b.getAttribute("data-decision")),
+            why: document.querySelector(`${s} [data-dependency-not-visible]`)?.textContent ?? "",
+          }),
+          vCard,
+        );
+        const vAfter = await kRead(KA, KCI9?.id, crV?.id);
+        check(
+          "C4-1 (ui): a refused Approve closes the Confirm panel and reloads the card: \"Not recorded. This request adds a dependency on a goal you can't see, …\", no Confirm panel, no Approve or Approve and launch, and \"You can't approve this. …\" naming no goal; nothing recorded",
+          [200, 201].includes(kcHw.status) && !!crV?.id && confirmOpen && kcOut.status === 204 && v.notice === "refused" &&
+            v.text.includes("Not recorded. This request adds a dependency on a goal you can't see, so you can't approve what it asks.") && !v.confirm &&
+            !v.decisions.includes("Approve") && !v.decisions.includes("Approve and launch") && v.decisions.includes("Suggest a change") &&
+            v.why.startsWith("You can't approve this. This request adds a dependency on a goal you can't see") && !v.text.includes(KHW.title) && vAfter?.state === "pending",
+          `${kcHw.status} ${crV?.id} ${confirmOpen} ${kcOut.status} ${JSON.stringify(v).slice(0, 900)} ${vAfter?.state}`,
         );
 
         // F3: removing someone from a team asks first.
@@ -6991,6 +7115,142 @@ try {
     } else check("ui (Chrome) available for the c3 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c3-web ====
+
+  // ==== fix:c4-web ====
+  // Regression checks for the cycle-4 web walk (e2e-reports/cycle4/web.md: C4-3, X2, X3, X4; C4-1, C4-2 and X5 are in
+  // the c2 web block, C4-4 and X6 beside the MCP and steering checks), on a workspace of their own. YO owns it; YS shares
+  // two sessions in one repository and spends; YA proposes new targets.
+  {
+    const yUsers = {};
+    for (const [who, name] of [
+      ["YO", "Yul Owner"],
+      ["YA", "Yan Asker"],
+      ["YS", "Yes Sharer"],
+    ])
+      yUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c4web.example.test`);
+    const { YO, YA, YS } = yUsers;
+    const YW = (await call("YO", "POST", "/api/v2/workspaces", { cookie: YO.cookie, body: { name: "C4 web fix workspace" } })).json?.id;
+    const ya = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${YW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [YA, YS]) {
+      const i = await ya(YO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const yGoal = async (u, body) => (await ya(u, "POST", "/goals", { visibility: "workspace", ...body })).json;
+    const keys = newDeviceKeys();
+    const dv = insertDevice(YS.id, "Yes's laptop");
+    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(dv.id, YW));
+    const YD = { ...keys, who: "YS", user: YS, id: dv.id, access: dv.access };
+    const yShare = async (native, goalId, { startedAt, tokens = 0 } = {}) => {
+      const key = sessionKey(YD, YW, "claude-code", native);
+      const put = await call("YS", "PUT", `/api/v2/workspaces/${YW}/sessions/${key}`, { bearer: YD.access, body: { harness: "claude-code", repo_key: repoKey(YD, YW, "/src/acme-ys"), repo_alias: "acme/ys", started_at: startedAt, title: null } });
+      const ep = epochId();
+      const e = await call("YS", "POST", `/api/v2/workspaces/${YW}/sessions/${key}/epochs`, { bearer: YD.access, body: { epoch_id: ep, goal_id: goalId, starts_at: startedAt, root_turn: null, cause: "manual" } });
+      const up = tokens ? await call("YS", "POST", `/api/v2/workspaces/${YW}/sessions/${key}/usage`, { bearer: YD.access, body: { rows: [usageRow(YD, `${native}-1`, ep, { input: tokens, output: 0, cache_write_5m: 0, cache_read: 0 })] } }) : null;
+      return { key, ok: put.status === 200 && e.status === 200 && (!up || up.json?.accepted === 1) };
+    };
+    // C4-3: 3,960 of 10,000 fresh tokens on a goal with target 30 is a 9.6-point gap.
+    const GY = await yGoal(YS, { title: "Spend near ten", target_share: 30 });
+    const GW = await yGoal(YS, { title: "Two sessions here" });
+    const GT = await yGoal(YO, { title: "Owner roadmap", target_share: 10 });
+    const s1 = await yShare("c4-a", GW?.id, { startedAt: new Date(Date.now() - 2 * 3600_000).toISOString() });
+    const s2 = await yShare("c4-b", GW?.id, { startedAt: new Date(Date.now() - 3 * 3600_000).toISOString(), tokens: 6040 });
+    const s3 = await yShare("c4-spend", GY?.id, { startedAt: new Date(Date.now() - 4 * 3600_000).toISOString(), tokens: 3960 });
+    const yRow = ((await ya(YO, "GET", "/allocation")).json?.window?.rows ?? []).find((r) => r.goal?.id === GY?.id);
+    check("c4 web fix setup (C4-3): a goal 9.6 points over its target; two of YS's sessions in one repository", !!YW && s1.ok && s2.ok && s3.ok && yRow?.gap === 9.6, JSON.stringify([YW, s1.ok, s2.ok, s3.ok, yRow]));
+
+    // X4 setup: a checkpoint waits on both sessions; YS asks that both count as contributing to YO's goal.
+    const yReq = (await ya(YO, "POST", `/goals/${GW?.id}/requests`, { type: "checkpoint" })).json?.request;
+    const al = await ya(YS, "POST", "/alignments", { target_goal_id: GT?.id, choice: "contribution", session_keys: [s1.key, s2.key], note: "Both help" });
+    const alView = (await ya(YO, "GET", `/alignments/${al.json?.id}`)).json;
+    const reqView = (await ya(YO, "GET", `/goals/${GW?.id}/requests`)).json?.requests?.find((r) => r.id === yReq?.id);
+    check(
+      "X4: request rows carry each session's started_at, and alignment sessions carry started_at and key_end (the key's last 6 characters, never another person's whole key), so two sessions in one repository differ",
+      reqView?.sessions?.length === 2 && reqView.sessions.every((r) => typeof r.started_at === "string") && reqView.sessions[0].started_at !== reqView.sessions[1].started_at &&
+        al.status === 201 && alView?.sessions?.length === 2 && alView.sessions.every((x) => typeof x.started_at === "string" && x.session_key === null && /^[A-Za-z0-9_-]{6}$/.test(x.key_end)) &&
+        JSON.stringify(alView.sessions.map((x) => x.key_end).sort()) === JSON.stringify([s1.key.slice(-6), s2.key.slice(-6)].sort()),
+      `${JSON.stringify(reqView?.sessions)} ${al.status} ${al.text.slice(0, 200)} ${JSON.stringify(alView?.sessions)}`,
+    );
+
+    // X3 setup: YA proposes a new target for YO's goal with a reason; YO counters without a note.
+    const rl = await ya(YA, "POST", "/reallocations", { targets: [{ goal_id: GT?.id, target_share: 15 }], note: "Docs need more time" });
+    const rlCtr = await ya(YO, "POST", `/reallocations/${rl.json?.id}/counter`, { revision: 1, targets: [{ goal_id: GT?.id, target_share: 12 }] });
+    check("c4 web fix setup (X3): a proposal with a reason, countered with no note", rl.status === 201 && rlCtr.status === 200 && rlCtr.json?.state === "countered" && rlCtr.json.note === null, `${rl.status} ${rl.text.slice(0, 200)} ${rlCtr.status} ${rlCtr.text.slice(0, 200)}`);
+
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u, width = 1100, height = 900) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width, height });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const textOf = (pg, sel) => pg.evaluate((s) => document.querySelector(s)?.innerText ?? "", sel);
+      const press = (pg, scope, label) => pg.evaluate((s, t) => [...document.querySelectorAll(`${s} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      try {
+        const pO = await as(YO);
+        // C4-3 (ui): the pill's colour reads the same rounded gap as its label.
+        await open(pO, `/app/w/${YW}/spend`);
+        await pO.waitForSelector('[aria-label="Allocation by goal"]', { timeout: 15000 }).catch(() => undefined);
+        const pill = await pO.evaluate(() => {
+          const li = [...document.querySelectorAll('[aria-label="Allocation by goal"] li')].find((x) => x.innerText.startsWith("Spend near ten"));
+          const span = [...(li?.querySelectorAll("span") ?? [])].find((x) => /points? (over|under)|on target/.test(x.textContent ?? ""));
+          return { text: span?.textContent ?? "", cls: span?.className ?? "" };
+        });
+        check("C4-3 (ui): a 9.6-point gap reads \"10 points over\" in an amber pill (the colour uses the same rounded gap as the label)", pill.text === "10 points over" && /amber/.test(pill.cls), JSON.stringify(pill));
+
+        // X4 (ui): the request's rows on the goal page tell the two sessions apart.
+        await open(pO, `/app/w/${YW}/goals/${GW?.id}`);
+        await pO.waitForSelector("#agents-on-goal", { timeout: 15000 }).catch(() => undefined);
+        const rows = await pO.evaluate(() => [...document.querySelectorAll("#agents-on-goal p")].map((x) => x.innerText).filter((t) => t.includes("acme/ys session") && t.includes("started ")));
+        check(
+          "X4 (ui): a request's rows read \"Yes Sharer's acme/ys session · started <time> · …<key end>\", so two sessions in one repository differ",
+          rows.length === 2 && rows[0] !== rows[1] && [s1.key, s2.key].every((k) => rows.some((t) => t.includes(`…${k.slice(-6)}`))),
+          JSON.stringify(rows),
+        );
+
+        // X4 (ui) and X2: the alignment card tells the sessions apart; approving it leaves a "Recorded: …" line.
+        await open(pO, `/app/w/${YW}/alignments`);
+        const aSel = `[data-alignment="${al.json?.id}"]`;
+        await pO.waitForSelector(aSel, { timeout: 15000 }).catch(() => undefined);
+        const aSessions = await textOf(pO, `${aSel} [data-alignment-sessions]`);
+        check(
+          "X4 (ui): the alignment card lists each session with \"started <time> · …<key end>\", so two in one repository differ",
+          (aSessions.match(/acme\/ys \(claude-code\) · started /g) ?? []).length === 2 && [s1.key, s2.key].every((k) => aSessions.includes(`…${k.slice(-6)}`)),
+          aSessions,
+        );
+        await press(pO, aSel, "Approve");
+        await pO.waitForFunction((s) => /Recorded:/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, aSel).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const aAfter = await textOf(pO, aSel);
+        const alNow = (await ya(YO, "GET", `/alignments/${al.json?.id}`)).json;
+        check(
+          "X2 (ui): approving an alignment request leaves a \"Recorded: …\" line, as change requests and target changes do (\"Recorded: you approved revision 1. Every approval it needs is in, so it takes effect now.\"), kept when the card moves to another section",
+          alNow?.state === "approved" && aAfter.includes("Recorded: you approved revision 1. Every approval it needs is in, so it takes effect now."),
+          `${alNow?.state} ${aAfter.slice(0, 500)}`,
+        );
+
+        // X3 (ui): the requester's reason stays on the card after a counter with no note.
+        const rSel = `[data-reallocation="${rl.json?.id}"]`;
+        await pO.waitForSelector(rSel, { timeout: 15000 }).catch(() => undefined);
+        const rText = await textOf(pO, rSel);
+        check("X3 (ui): a target change countered without a note still shows the requester's reason (\"Yan Asker's reason: “Docs need more time”\")", rText.includes("Yan Asker's reason: “Docs need more time”") && /12%/.test(rText), rText.slice(0, 500));
+        check("c4 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c4 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c4 web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:c4-web ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));

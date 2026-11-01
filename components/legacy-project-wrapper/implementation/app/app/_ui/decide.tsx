@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, Btn, Err, Field, Loading, Note, Pill, TextArea, useAction, useApi, when } from "./kit";
-import { AddEvidence, ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, EvidenceItem, FIELD_LABEL, FieldValue, hiddenGoals, NoticeBox, Revisions, SnapshotBox, STATUS_WORD, type Notice } from "./crparts";
+import { AddEvidence, ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, EvidenceItem, FIELD_LABEL, FieldValue, NoticeBox, Revisions, SnapshotBox, STATUS_WORD, withHidden, type Notice } from "./crparts";
 import { LIMIT_WORDS } from "./limits";
 import type { ChangeFields, ChangeRequest, Goal, Limit } from "./types";
 
@@ -80,10 +80,8 @@ export function changeLines(cr: ChangeRequest, titles: Map<string, string>): str
     const hid = cr.diff.hidden_depends_on ?? { before: 0, after: 0 };
     const more = Math.max(0, hid.after - hid.before);
     const fewer = Math.max(0, hid.before - hid.after);
-    const addedWords = [...added.map(name), ...(more ? [hiddenGoals(more)] : [])];
-    const removedWords = [...removed.map(name), ...(fewer ? [hiddenGoals(fewer)] : [])];
-    if (addedWords.length) out.push(`Would depend on ${addedWords.join(", ")}.`);
-    if (removedWords.length) out.push(`Would no longer depend on ${removedWords.join(", ")}.`);
+    if (added.length || more) out.push(`Would depend on ${withHidden(added.map(name), more)}.`);
+    if (removed.length || fewer) out.push(`Would no longer depend on ${withHidden(removed.map(name), fewer)}.`);
   }
   return out;
 }
@@ -197,6 +195,8 @@ export function OpenRequest({
   // Who acts: the requester, or someone in the approval set (only they get decisions).
   const meName = mine ? cr.requester.name : (cr.approvers.find((a) => a.id === me)?.name ?? "you");
   const myPart = mine ? "the requester" : cr.approvers.some((a) => a.id === me) ? "in this goal's approval set" : "";
+  // Who can approve it: the approval set, less the reader when the server would refuse their approval (C4-1).
+  const deciders = cr.dependency_not_visible ? cr.approvers.filter((a) => a.id !== me) : cr.approvers;
 
   const [choice, setChoice] = useState<Decision | null>(null);
   const [step, setStep] = useState<"input" | "confirm">("input");
@@ -336,7 +336,13 @@ export function OpenRequest({
     } catch (e) {
       const conflict = e instanceof ApiError && e.status === 409;
       setNotice({ kind: "refused", text: `Not recorded. ${(e as Error).message}${conflict ? "" : " Nothing changed."}` });
-      if (conflict) onDone(); // the request moved on: show it as it is now
+      if (conflict) {
+        // The refusal is the answer: close the confirmation (a reload that leaves the request's revision and state as
+        // they were keeps this card mounted) and show the request as it is now, with the decisions it now allows (C4-1).
+        setChoice(null);
+        setStep("input");
+        onDone();
+      }
     } finally {
       setSending(false);
     }
@@ -424,8 +430,8 @@ export function OpenRequest({
       ? `Waiting on ${ask} to accept the suggested change.`
       : cr.behind
         ? `Waiting on ${ask} to update it to version ${n}.`
-        : cr.approvers.length
-          ? `Waiting on ${names(cr.approvers)} to decide.`
+        : deciders.length
+          ? `Waiting on ${names(deciders)} to decide.`
           : "Nobody can approve this yet.";
 
   return (
@@ -477,7 +483,7 @@ export function OpenRequest({
             {cr.behind ? `; request made against version ${cr.base_version}` : ""}
           </Fact>
           <Fact k="Requested by">{mine ? "You" : cr.requester.name}</Fact>
-          <Fact k="Decides">{cr.approvers.length ? names(cr.approvers) : "Nobody can approve this yet"}</Fact>
+          <Fact k="Decides">{deciders.length ? names(deciders) : "Nobody can approve this yet"}</Fact>
           <Fact k="State">{stateWord}</Fact>
         </dl>
       </section>
@@ -544,6 +550,13 @@ export function OpenRequest({
         </section>
       </div>
       <Err>{act.error}</Err>
+
+      {/* Why Approve isn't offered to someone who decides on it: a dependency they can't see (C4-1). */}
+      {cr.dependency_not_visible && (
+        <p className="mt-4 text-[15px] text-zinc-700" data-dependency-not-visible>
+          You can&apos;t approve this. {cr.dependency_not_visible}
+        </p>
+      )}
 
       {/* 3-4. Your decision: choose, give that choice's input, confirm. */}
       {decisions.length > 0 ? (

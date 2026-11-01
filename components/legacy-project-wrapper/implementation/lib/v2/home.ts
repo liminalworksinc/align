@@ -112,18 +112,21 @@ export function workspaceHome(pp: PolicyPrincipal) {
         waiting_on,
         updated_at: v.updated_at,
       });
+      // Waiting on others: never on the reader, who is in the set only when the server would refuse them (a dependency
+      // they can't see, C4-1).
+      const notMe = (ps: HomePerson[]) => ps.filter((p) => p.id !== me);
       const launch = launchWaits(v);
       if (launch) {
         // LAUNCH-001: an approved change agents don't have yet (see lib/v2/home-core.mts).
         if (launch.can_launch) onMe.push(item("launch", [{ id: me, name: memberName(me) }]));
-        else if (v.requester.id === me || ours(v.goal.id)) onOthers.push(item("launch", byName(launch.launchers)));
+        else if (v.requester.id === me || ours(v.goal.id)) onOthers.push(item("launch", notMe(byName(launch.launchers))));
         continue;
       }
       const w = changeWaits(v);
       if (!w) continue;
       const mineToAct = v.waiting_on_me || (w.next === "rebase" && v.can.rebase);
       if (mineToAct) onMe.push(item(w.next, w.waiting_on));
-      else if (v.requester.id === me || ours(v.goal.id) || v.approvers.some((a) => a.id === me)) onOthers.push(item(w.next, w.waiting_on));
+      else if (v.requester.id === me || ours(v.goal.id) || v.approvers.some((a) => a.id === me)) onOthers.push(item(w.next, w.next === "decide" ? notMe(w.waiting_on) : w.waiting_on));
     }
     return { waiting_on_me: onMe, waiting_on_others: onOthers };
   });

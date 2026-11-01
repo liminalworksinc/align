@@ -236,13 +236,14 @@ interface TargetRow {
   repo_alias: string | null;
   harness: string;
   title: string | null;
+  started_at: string;
 }
 
 /** A request as the goal page shows it. The sender, the goal's approvers and workspace owners see every session's
  *  row (owner, repository alias, state); anyone else who reads the goal sees their own sessions' rows and the counts. */
 function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers = approvalSet(g)) {
   const rows = all<TargetRow>(
-    `SELECT t.session_key, t.state, t.ended_reason, t.auto_accepted, t.updated_at, s.user_id, s.repo_alias, s.harness, s.title
+    `SELECT t.session_key, t.state, t.ended_reason, t.auto_accepted, t.updated_at, s.user_id, s.repo_alias, s.harness, s.title, s.started_at
      FROM v2_request_targets t JOIN v2_sessions s ON s.ws_id = t.ws_id AND s.session_key = t.session_key
      WHERE t.request_id = ? ORDER BY t.session_key`,
     r.id,
@@ -285,6 +286,8 @@ function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers =
         repo_alias: t.repo_alias,
         harness: t.harness,
         title: t.user_id === pp.userId ? t.title : null,
+        /** When the session started: with the key's end, it tells two of one person's sessions in one repository apart (X4). */
+        started_at: t.started_at,
         state: t.state,
         ended_reason: t.state === "expired" ? t.ended_reason : null,
         auto_accepted: !!t.auto_accepted,
