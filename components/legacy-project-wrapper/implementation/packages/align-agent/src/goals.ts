@@ -13,9 +13,7 @@ export function loadMe(home: string): MeFile | null {
 export async function refreshMe(ctx: Ctx): Promise<MeFile> {
   const me = (await apiOk(ctx, "GET", "/api/v2/me")) as MeFile;
   const prev = loadMe(ctx.home);
-  // A default workspace this device can no longer reach is no default.
-  const def = prev?.default_workspace ?? ctx.config.default_workspace ?? null;
-  const next: MeFile = { ...me, default_workspace: def && me.workspaces.some((w) => w.id === def) ? def : me.workspaces.length === 1 ? me.workspaces[0].id : null };
+  const next: MeFile = { ...me, default_workspace: defaultWorkspace(ctx, me) };
   writeJsonAtomic(layout.me(ctx.home), next);
   // A workspace this device can no longer reach (its person was removed or left): its shares here end now.
   endSharesWithoutAccess(ctx, next);
@@ -27,6 +25,18 @@ export async function refreshMe(ctx: Ctx): Promise<MeFile> {
     if (added.length) workspacesAdded.push(...noticeWorkspacesAdded(ctx, next, added));
   }
   return next;
+}
+
+/**
+ * The device's default workspace, worked out afresh from each `/me`, never carried over from the last one (C5-2): the
+ * server's, else `default_workspace` in config.json, while the device reaches it; else the only workspace it reaches;
+ * else none. A device that reached one workspace and reaches several again has no default, as the server says.
+ */
+export function defaultWorkspace(ctx: Ctx, me: MeFile): string | null {
+  const reach = (id: string | null | undefined): id is string => !!id && me.workspaces.some((w) => w.id === id);
+  if (reach(me.default_workspace)) return me.default_workspace;
+  if (reach(ctx.config.default_workspace)) return ctx.config.default_workspace;
+  return me.workspaces.length === 1 ? me.workspaces[0].id : null;
 }
 
 /** Workspaces this process saw added to the device (by refreshMe), for `align sync` to print once. */

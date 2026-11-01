@@ -770,6 +770,12 @@ async function cmdConfig(ctx: Ctx, argv: string[]): Promise<void> {
   if (!key) {
     out(`drift  ${ctx.config.drift === false ? "off" : "on"}   (a user-only note when the agent's reply may conflict with its goal's limits)`);
     out(`server ${ctx.config.server_url}`);
+    // The only default workspace besides a device's single one, so it is never a hidden one (C5-2).
+    const def = ctx.config.default_workspace;
+    if (def) {
+      const w = loadMe(ctx.home)?.workspaces.find((x) => x.id === def);
+      out(`default_workspace ${w ? `${clean(w.name, 80)} (${def})` : `${def} (not reached by this device, so not used)`}   (from config.json: \`::align share\` shares there)`);
+    }
     return;
   }
   if (key !== "drift" || (value !== "on" && value !== "off")) throw new UsageError("usage: align config drift on|off");

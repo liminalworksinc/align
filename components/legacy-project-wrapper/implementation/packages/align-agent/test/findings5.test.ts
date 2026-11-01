@@ -1,11 +1,14 @@
 // Regressions for the cycle-5 agent-side E2E report: usage from turns made while a session's share had ended, uploaded
-// when it was shared again under an epoch that had closed (C5-1).
+// when it was shared again under an epoch that had closed (C5-1); and a lost workspace leaving the other one as a
+// hidden, sticky default (C5-2).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { sessionKey } from "../src/keys.ts";
+import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
+import type { MeFile } from "../src/shared/types.ts";
 import { FakeServer } from "./fake-server.ts";
 import { claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runHook, usage, waitFor, writeLines, type TestEnv } from "./helpers.ts";
 
@@ -138,5 +141,36 @@ describe("C5-1: turns made while a session's share had ended stay on this machin
     turn(t, A, "req_c51_l_after");
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.equal(fake.usage.size, 2, "the turn after the re-share went up");
+  });
+});
+
+describe("C5-2: the default workspace follows the server's", () => {
+  test("a device that reached one workspace and reaches two again has no default, so a session with no workspace of its own gets the multi-workspace answer; a default set in config.json shows in `align config`", async () => {
+    const { fake, t } = await world({ side: true });
+    const me = () => readJson<MeFile>(layout.me(t.home))!;
+    assert.equal(me().default_workspace, null, "two workspaces, no default");
+    fake.workspaces = [SIDE];
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(me().default_workspace, "ws_side", "the only workspace it reaches");
+    fake.workspaces = [SIDE, ACME];
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.deepEqual(me().workspaces.map((w) => w.id).sort(), ["ws_acme", "ws_side"]);
+    assert.equal(me().default_workspace, null, "no default carried over from when it reached one");
+
+    const sid = "c5c5c5c5-1111-2222-3333-444444444444";
+    const cwd = path.join(t.root, "repo-c");
+    fs.mkdirSync(cwd, { recursive: true });
+    runHook(t, "claude", "SessionStart", { session_id: sid, source: "startup", cwd });
+    const multi = /^Align: this machine reaches more than one workspace and none is the default/;
+    assert.match(prompt(t, sid, "::align share Ship confirm", cwd).reason, multi);
+    assert.match(prompt(t, sid, "::align share confirm", cwd).reason, multi);
+    assert.ok(!fs.existsSync(layout.spool(t.home)) || !fs.readdirSync(layout.spool(t.home)).some((f) => fs.readFileSync(path.join(layout.spool(t.home), f), "utf8").includes('"command"')), "nothing spooled");
+
+    // A default chosen in config.json is used while the device reaches it, and `align config` shows it.
+    const cfg = readJson<Record<string, unknown>>(layout.config(t.home))!;
+    writeJsonAtomic(layout.config(t.home), { ...cfg, default_workspace: "ws_acme" });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(me().default_workspace, "ws_acme");
+    assert.match((await runCli(t, ["config"])).stdout, /default_workspace Acme \(ws_acme\)/);
   });
 });

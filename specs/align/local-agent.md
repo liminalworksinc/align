@@ -1424,7 +1424,11 @@ and epoch calls dropped, and the notice `Align: this session stopped sharing bec
 `align stop-sharing <lid8>` sentence for a stopped or held session). Its stop latch and goal holds SHALL stay until
 `align stop-sharing`, their denies naming that command; the cached goal, asks and team activity feeds of every
 workspace out of reach SHALL be deleted, so no envelope or `::align goals` shows them, and a default workspace out of
-reach is no default any more. `align sessions` SHALL show such a share as `stopped (<workspace>; no access to the
+reach is no default any more. The device's default workspace (in `me.json`) SHALL be worked out afresh from each `/me`,
+never carried over from the previous one: the server's, else `default_workspace` in `config.json` (which `align config`
+shows), while the device reaches it; else the only workspace it reaches; else none. A device that reached one workspace
+and reaches several again (given one back at an invite) therefore has no default, and a session with no workspace of
+its own gets the multi-workspace answer to `::align share`. `align sessions` SHALL show such a share as `stopped (<workspace>; no access to the
 workspace)`. With no workspace in reach `align goals`, `align allocation`, `align asks` and `align steering status`
 SHALL exit 0 printing `No workspaces on this device: ...`, never an error. Local metering of those sessions SHALL
 continue, and shares in the person's other workspaces SHALL be unaffected.
@@ -1443,6 +1447,11 @@ continue, and shares in the person's other workspaces SHALL be unaffected.
 
 - **WHEN** the device's only workspace is out of reach and the user runs `align goals`, `align allocation`, `align asks` and `align steering status` (test `findings2` "N6: with no workspace in reach ...")
 - **THEN** each exits 0 printing `No workspaces on this device`, and nothing says `undefined`; the line says that ticking this device when accepting an invite gives it that workspace
+
+#### Scenario: Back to two workspaces, no default
+
+- **WHEN** a device reaching Acme and Side Co with no default loses Acme (a sync), is given it back (a sync), and in a session with no workspace of its own the developer types `::align share Ship confirm` and `::align share confirm`; then `default_workspace` is set to Acme in `config.json` and a sync runs (test `findings5` "a device that reached one workspace and reaches two again has no default ...")
+- **THEN** `me.json`'s default is Side Co while it is the only one and none once both are reached, both replies are the multi-workspace message and nothing is spooled, and after the config change the default is Acme and `align config` shows `default_workspace Acme (ws_acme)`
 
 ### Requirement: A workspace given back at an invite reaches this device
 
