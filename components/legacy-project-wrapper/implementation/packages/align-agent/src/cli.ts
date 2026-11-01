@@ -1090,7 +1090,14 @@ function allocationTargets(ctx: Ctx, ref: string | undefined): { id: string; nam
   return list;
 }
 
-const gapWords = (gap: number | null) => (gap === null ? "" : Math.abs(gap) < 1 ? "on target" : gap > 0 ? `${gap} over` : `${-gap} under`);
+/** A gap as the web's Spend tab words it (app/app/w/[ws]/spend/allocation.tsx): whole points, rounded toward zero, so a
+ *  9.6-point gap reads "9 points over", agreeing with steering's "at least 10 points" (which compares the exact gap). */
+export function gapWords(gap: number | null): string {
+  if (gap === null) return "no target";
+  if (Math.abs(gap) < 1) return "on target";
+  const n = Math.floor(Math.abs(gap));
+  return `${n} ${n === 1 ? "point" : "points"} ${gap > 0 ? "over" : "under"}`;
+}
 
 async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { workspace: { type: "string" }, week: { type: "string" }, refresh: { type: "boolean" }, json: { type: "boolean" } } });
@@ -1114,7 +1121,7 @@ async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
       out(`${a.workspace}, week of ${from.toISOString().slice(0, 10)} (steering ${a.steering.steering}, ${a.steering.total} lines shown)`);
       for (const r of a.window.rows) {
         const label = r.kind === "goal" ? r.goal!.title : r.kind === "private" ? "Goals you can't see" : "Not bound to a goal";
-        out(`  ${pad(`${r.share}%`, 7)} ${pad(r.target_share === null ? "-" : `${r.target_share}%`, 6)} ${pad(gapWords(r.gap === null ? null : Math.round(r.gap)), 10)} ${label}`);
+        out(`  ${pad(`${r.share}%`, 7)} ${pad(r.target_share === null ? "-" : `${r.target_share}%`, 6)} ${pad(gapWords(r.gap), 16)} ${label}`);
       }
     }
     return;
@@ -1127,11 +1134,11 @@ async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
   if (values.json) return out(JSON.stringify({ workspaces: feeds.map((f) => ({ workspace: f.workspace, steering: f.feed?.steering ?? "off", fetched_at: f.feed?.fetched_at ?? null, goals: (f.feed?.goals ?? []).map((g) => ({ id: g.id, title: g.title, ...(g.allocation ?? {}) })) })), unshared: digest }, null, 2));
   for (const f of feeds) {
     out(`${f.workspace}, last 7 days${f.feed ? ` (cached ${shortTime(f.feed.fetched_at)}, steering ${f.feed.steering ?? "off"})` : " (not fetched yet; use --refresh)"}`);
-    out(`  ${pad("SHARE", 7)} ${pad("TARGET", 6)} ${pad("GAP", 10)} GOAL`);
+    out(`  ${pad("SHARE", 7)} ${pad("TARGET", 6)} ${pad("GAP", 16)} GOAL`);
     const goals = [...(f.feed?.goals ?? [])].filter((g) => g.status === "active").sort((a, b) => (b.allocation?.share_7d ?? 0) - (a.allocation?.share_7d ?? 0));
     for (const g of goals) {
       const a = g.allocation;
-      out(`  ${pad(a ? `${a.share_7d}%` : "-", 7)} ${pad(a?.target_share === null || a?.target_share === undefined ? "-" : `${a.target_share}%`, 6)} ${pad(gapWords(a?.gap_7d ?? null), 10)} ${g.title}`);
+      out(`  ${pad(a ? `${a.share_7d}%` : "-", 7)} ${pad(a?.target_share === null || a?.target_share === undefined ? "-" : `${a.target_share}%`, 6)} ${pad(gapWords(a ? a.gap_7d : null), 16)} ${g.title}`);
     }
   }
   if (digest && digest.total_tokens) {

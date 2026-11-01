@@ -264,13 +264,26 @@ describe("reporting steering lines", () => {
     envs.push(t);
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
     const ws = fake.workspaces[0].id;
-    fake.goals.set(ws, [goal("g_a", "Alpha goal", alloc(10, 40)), goal("g_b", "Beta goal", alloc(30, 5)), goal("g_c", "Gamma goal", null)]);
+    fake.goals.set(ws, [
+      goal("g_a", "Alpha goal", alloc(10, 40)),
+      goal("g_b", "Beta goal", alloc(30, 5)),
+      goal("g_c", "Gamma goal", null),
+      // One-decimal gaps (the feed's gap_7d) read as the web's Spend tab reads them: whole points, toward zero (C5-2).
+      goal("g_d", "Delta goal", alloc(10, 19.6)),
+      goal("g_e", "Epsilon goal", alloc(20, 18.7)),
+      goal("g_f", "Zeta goal", alloc(15, 15.4)),
+      goal("g_g", "Eta goal", alloc(null, 2)),
+    ]);
     fake.steering.set(ws, "on");
     const r = await runCli(t, ["allocation", "--refresh"]);
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /steering on/);
-    assert.match(r.stdout, /40%\s+10%\s+30 over\s+Alpha goal/);
-    assert.match(r.stdout, /5%\s+30%\s+25 under\s+Beta goal/);
+    assert.match(r.stdout, /40%\s+10%\s+30 points over\s+Alpha goal/);
+    assert.match(r.stdout, /5%\s+30%\s+25 points under\s+Beta goal/);
+    assert.match(r.stdout, /19\.6%\s+10%\s+9 points over\s+Delta goal/, "9.6 over reads 9 points over, as on the web");
+    assert.match(r.stdout, /18\.7%\s+20%\s+1 point under\s+Epsilon goal/);
+    assert.match(r.stdout, /15\.4%\s+15%\s+on target\s+Zeta goal/);
+    assert.match(r.stdout, /2%\s+-\s+no target\s+Eta goal/);
     const j = await runCli(t, ["allocation", "--json"]);
     const parsed = JSON.parse(j.stdout);
     assert.equal(parsed.workspaces[0].steering, "on");

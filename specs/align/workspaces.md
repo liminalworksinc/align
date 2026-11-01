@@ -925,7 +925,8 @@ again. It SHALL make the same grant, with the same audit row `device.workspace_a
 actor, the device as object), as accepting an invite with the device ticked, need a sign-in from the last 15 minutes
 (403 `reauth_required` with `Sign in again to give a device this workspace. This needs a sign-in from the last 15
 minutes.`), answer `{device_id, workspace_id}`, 409 `already_granted` when the device has it already, 404 for a device
-that is another person's, revoked or unknown or a workspace they are not a member of, and 400 for a malformed
+that is another person's, revoked or unknown (all alike: `This device is not one of your paired devices any more (it may
+have been signed out), so it was given nothing.`) or a workspace they are not a member of, and 400 for a malformed
 workspace id, and grant nothing on any refusal. A device token SHALL never do it. The device learns the workspace at
 its next pass, as after an invite (`local-agent`).
 
