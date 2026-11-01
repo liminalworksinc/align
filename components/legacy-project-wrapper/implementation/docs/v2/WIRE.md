@@ -55,7 +55,15 @@ person accepts an invite with it ticked (`POST /api/v2/invites/:token/accept { d
 
 `GET /api/v2/devices` (cookie, or Bearer) → `{ "devices": [ { "id", "name", "created_at", "last_seen_at", "revoked_at",
 "revoked_reason", "workspaces": [ { "id", "name" } ], "current"?: bool } ] }`: the person's devices; with a device token
-`current` marks that device (`align login` names the other paired ones).
+`current` marks that device (`align login` names the other paired ones). A new device gets a name none of the person's
+live devices has (`<name> (2)`, ... when one has it already); a token poll may send `"replaces": "<device id>"`, the
+device the pairing replaces on the same machine, which (when it is the person's own) does not count, so a re-login
+keeps its name.
+
+`POST /api/v2/devices/:id/workspaces` (cookie; a sign-in from the last 15 minutes, else `403 reauth_required`)
+`{ "workspace_id" }` → `{ "device_id", "workspace_id" }`: gives one of my live devices a workspace I am a member of,
+as accepting an invite with it ticked does (audited `device.workspace_added`); the device's next pass picks it up. 404
+for a device or workspace that is not mine, 409 `already_granted`.
 
 ## Goals feed
 `GET /api/v2/workspaces/:ws/goals` (Bearer; `If-None-Match` supported → 304)
@@ -102,11 +110,15 @@ Key owned by another user/device → 404. `started_at` more than 5 min ahead of 
 `UsageRow = { "request_key" (b64url HMAC of provider request id), "ts", "epoch_id", "model", "query_source": "main"|"subagent"|"auxiliary"|"unknown", "input", "output", "cache_read", "cache_write_5m", "cache_write_1h", "cache_write_unsplit", "basis": "api_usd"|"subscription_included"|"workspace_credits"|"estimated_list_usd"|"unknown", "est_list_usd_micros": int|null, "price_table_version", "source": "otel"|"transcript"|"rollout" }`
 → 200 `{ "accepted": n, "duplicates": n, "conflicts": n }`. Same key with different values = conflict, never overwritten.
 Rows whose epoch is unknown or belongs to another session → rejected per row (counted as conflicts).
+So are rows whose `ts` is at or after their epoch's end at a time no epoch of the session covers (made while the
+session was not shared, before it was shared again).
 
 `POST /api/v2/workspaces/:ws/sessions/:session_key/stop-sharing` (Bearer or cookie by owner) → 200; no more uploads accepted.
 `DELETE /api/v2/workspaces/:ws/sessions/:session_key` (cookie by owner, or Bearer from any live device of the person who
 shared it, not only the device that shared it) → 204; hard-deletes session, epochs, usage, deliveries; rollups change
 (the UI says so). Audited `session.history_deleted` with the acting device as the object. Another person → 404.
+Deleted already (on the web, say) → `410 history_deleted` to the person who shared it (a marker with a hash of them
+and the key is kept 13 months), 404 to anyone else.
 
 ## Directives
 Only structured content reaches agents: ratified goal fields, enumerated states and Align's typed requests (REQ-001).
@@ -408,7 +420,7 @@ the server couldn't read is `null`; see `lib/v2/home.ts`),
 `GET /api/v2/device/requests/:code`,
 `POST /api/v2/device/approve` (`{ user_code, workspace_ids }`; needs a sign-in from the last 15 minutes, else
 `403 reauth_required`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,
-`DELETE /api/v2/devices/:id`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,
+`DELETE /api/v2/devices/:id`, `POST /api/v2/devices/:id/workspaces`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,
 `__Secure-` prefixed when hosted).
 
 Hosted creation gate (`specs/align/workspaces.md`; Mode L skips it): `POST /api/v2/workspaces` and `.../sample` take

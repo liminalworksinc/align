@@ -77,5 +77,11 @@ pairs the machine again and so ends the person's shares in their other workspace
   `::align share` a session there, with no new pairing and nothing changed in other workspaces.
 - The same choice is offered to someone joining a workspace for the first time who already has paired devices.
 
-Cited in `specs/align/workspaces.md` ("Invites give paired devices the workspace"), `specs/align/local-agent.md` ("A
-workspace given back at an invite reaches this device") and `specs/align/interface.md` ("Invite acceptance page").
+- **Later, too (added after the cycle-5 agent E2E report).** The same grant is available later from the Devices page
+  (`/app/devices`, `POST /api/v2/devices/{id}/workspaces`): a person who joined without ticking a device, or wants a
+  device paired for one workspace to reach another of theirs, gives it the workspace there, with the same recent
+  sign-in, the same `device.workspace_added` audit row and the same pick-up at the device's next contact.
+
+Cited in `specs/align/workspaces.md` ("Invites give paired devices the workspace", "Giving a device a workspace
+later"), `specs/align/local-agent.md` ("A workspace given back at an invite reaches this device") and
+`specs/align/interface.md` ("Invite acceptance page", "Devices screen").

@@ -296,13 +296,13 @@ function refreshSig(dev, deviceId, refreshToken, ts) {
 
 /** The whole device flow for one user, granted `wsIds`. The poll interval is skipped by clearing last_poll_at in
  *  the database (the test has file access, like a host admin), so the run doesn't wait 5 s per poll. */
-async function pairDevice(who, user, wsIds, name = `${who}'s laptop`) {
+async function pairDevice(who, user, wsIds, name = `${who}'s laptop`, replaces = null) {
   const keys = newDeviceKeys();
   const a = await call(who, "POST", "/api/v2/device/authorize", { body: { device_name: name, public_key: keys.pub } });
   if (a.status !== 200) throw new Error(`authorize ${a.status} ${a.text}`);
   const ap = await call(who, "POST", "/api/v2/device/approve", { cookie: user.cookie, body: { user_code: a.json.user_code, workspace_ids: wsIds } });
   if (ap.status !== 200) throw new Error(`approve ${ap.status} ${ap.text}`);
-  const t = await call(who, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: a.json.device_code } });
+  const t = await call(who, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: a.json.device_code, ...(replaces ? { replaces } : {}) } });
   if (t.status !== 200) throw new Error(`token ${t.status} ${t.text}`);
   return { ...keys, who, user, id: t.json.device_id, access: t.json.access_token, refresh: t.json.refresh_token };
 }
@@ -771,7 +771,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 18, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 18 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 19, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds and deleted-session markers included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 19 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -1034,7 +1034,7 @@ try {
   );
   const badKey = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "x", public_key: "AAAA" } });
   check("device: a malformed public key -> 400", badKey.status === 400, `${badKey.status}`);
-  const poll = (code) => call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: code } });
+  const poll = (code, extra = {}) => call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: code, ...extra } });
   const p1 = await poll(auth1.json.device_code);
   const p2 = await poll(auth1.json.device_code);
   const interval = withDb((d) => d.prepare("SELECT interval_s FROM v2_device_requests WHERE user_code = ?").get(auth1.json.user_code).interval_s);
@@ -1064,7 +1064,19 @@ try {
   check("device: approving a workspace you are not in (B) -> 404", approveB.status === 404, `${approveB.status}`);
   const approve = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: auth1.json.user_code, workspace_ids: [A] } });
   withDb((d) => d.prepare("UPDATE v2_device_requests SET last_poll_at = NULL WHERE user_code = ?").run(auth1.json.user_code));
-  const tok = await poll(auth1.json.device_code);
+  // A re-login names the device it replaces on this machine (still live, its revoke not through yet): the new device
+  // keeps the plain name (E2E-AGENT cycle 5). A malformed `replaces` is refused before anything is spent.
+  const unaOld = insertDevice(U1.id, "Una's MacBook");
+  const badReplaces = await poll(auth1.json.device_code, { replaces: "not a device" });
+  withDb((d) => d.prepare("UPDATE v2_device_requests SET last_poll_at = NULL WHERE user_code = ?").run(auth1.json.user_code));
+  const tok = await poll(auth1.json.device_code, { replaces: unaOld.id });
+  const unaName = withDb((d) => d.prepare("SELECT name FROM v2_devices WHERE id = ?").get(tok.json?.device_id ?? "")?.name);
+  withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'logout' WHERE id = ?").run(new Date().toISOString(), unaOld.id));
+  check(
+    "device (E2E-AGENT cycle 5): a token poll naming the device it replaces (`replaces`, the same person's live device of the same name) keeps the plain name (Una's MacBook, no (2)); a malformed replaces -> 400",
+    unaName === "Una's MacBook" && badReplaces.status === 400,
+    `${unaName} ${badReplaces.status} ${badReplaces.text}`,
+  );
   check("device: after approval (a recent sign-in), token -> 200 dv_ id, alnd_ access (3600 s), alnr_ refresh, user", approve.status === 200 && tok.status === 200 && /^dv_/.test(tok.json.device_id) && /^alnd_/.test(tok.json.access_token) && tok.json.expires_in === 3600 && /^alnr_/.test(tok.json.refresh_token) && tok.json.user.id === U1.id, tok.text);
   withDb((d) => d.prepare("UPDATE v2_device_requests SET last_poll_at = NULL WHERE user_code = ?").run(auth1.json.user_code));
   const tokAgain = await poll(auth1.json.device_code);
@@ -1126,8 +1138,19 @@ try {
   const ts2 = new Date().toISOString();
   const r2 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: r1.json.refresh_token, ts: ts2, sig: refreshSig(D1, D1.id, r1.json.refresh_token, ts2) } });
   check("refresh: the rotated token refreshes again", r2.status === 200, r2.text);
-  // A dedicated device for the reuse test, so D1 stays usable.
-  const DR = await pairDevice("U1", U1, [A], "reuse test");
+  // A dedicated device for the reuse test, so D1 stays usable. A live device of U1's already has its name, so the new
+  // pairing gets a distinguishing suffix (E2E-AGENT cycle 5).
+  const twin = insertDevice(U1.id, "reuse test");
+  // Naming another person's device as the one it replaces changes nothing: the suffix still comes.
+  const notMine = insertDevice(U2.id, "reuse test");
+  const DR = await pairDevice("U1", U1, [A], "reuse test", notMine.id);
+  const drName = withDb((d) => d.prepare("SELECT name FROM v2_devices WHERE id = ?").get(DR.id))?.name;
+  withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), twin.id));
+  withDb((d) => {
+    d.prepare("DELETE FROM v2_device_tokens WHERE device_id = ?").run(notMine.id);
+    d.prepare("DELETE FROM v2_devices WHERE id = ?").run(notMine.id);
+  });
+  check("device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices gets a distinguishing suffix (\"reuse test (2)\"), so no two live devices share a name, also when the poll names another person's device as the one it replaces", drName === "reuse test (2)", String(drName));
   const ts3 = new Date().toISOString();
   const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
   const rrReuse = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
@@ -2328,6 +2351,58 @@ try {
       d2Me.json?.workspaces?.map((w) => w.id).sort().join() === [A, B].sort().join(),
     `${invU2B.status} ${prevU2B.text} ${accU2B.text} ${d2Me.text}`,
   );
+  // E2E-AGENT cycle 5, ADR 0003 section 6: a device can be given a workspace later, on the Devices page, as at an invite.
+  const desk = insertDevice(U5.id, "U5's desk");
+  const desk2 = insertDevice(U5.id, "U5's desk 2");
+  const give = (u, dev, workspace_id, extra = {}) => call(u.who, "POST", `/api/v2/devices/${dev}/workspaces`, { cookie: u.cookie, body: { workspace_id }, ...extra });
+  const U5stale2 = await staleOf(U5);
+  const gStale = await give(U5stale2, desk.id, A);
+  const gOther = await give(U5, D2.id, A);
+  const gNotMember = await give(U5, desk.id, B);
+  const gRevoked = await give(U5, D5old.id, A);
+  const gBadWs = await give(U5, desk.id, "not a workspace");
+  const gBearer = await call("U5", "POST", `/api/v2/devices/${desk.id}/workspaces`, { bearer: D5.access, body: { workspace_id: A } });
+  const deskGrants = () => withDb((d) => d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ?").all(desk.id).map((r) => r.ws_id).join());
+  const refusedGrants = deskGrants();
+  const gOk = await give(U5, desk.id, A);
+  const gAgain = await give(U5, desk.id, A);
+  const deskMe = await call("U5", "GET", "/api/v2/me", { bearer: desk.access });
+  const deskDirs = await call("U5", "GET", "/api/v2/directives?cursor=0", { bearer: desk.access });
+  const audDesk = ((await call("U1", "GET", `/api/v2/workspaces/${A}/audit`, { cookie: U1.cookie })).json?.audit ?? []).filter((r) => r.action === "device.workspace_added" && r.object_id === desk.id);
+  check(
+    "devices (E2E-AGENT cycle 5, ADR 0003 section 6): POST /devices/{id}/workspaces gives one of my live devices a workspace I am a member of, as accepting an invite with it ticked does: 200 {device_id, workspace_id}, its /me and directives answer list it, audited device.workspace_added (me as actor, the device as object); again -> 409 already_granted; a sign-in older than 15 minutes -> 403 reauth_required, another person's or a revoked device -> 404 (alike: not one of your paired devices any more ... given nothing), a workspace I am not a member of -> 404, a malformed workspace id -> 400, a device token -> refused; none of those grants anything",
+    gStale.status === 403 && gStale.json?.error === "reauth_required" && gStale.json?.message === "Sign in again to give a device this workspace. This needs a sign-in from the last 15 minutes." &&
+      gOther.status === 404 && gOther.json?.message === "This device is not one of your paired devices any more (it may have been signed out), so it was given nothing." && gRevoked.json?.message === gOther.json?.message &&
+      gNotMember.status === 404 && gRevoked.status === 404 && gBadWs.status === 400 && gBearer.status >= 400 && refusedGrants === "" &&
+      gOk.status === 200 && gOk.json?.device_id === desk.id && gOk.json?.workspace_id === A && gAgain.status === 409 && gAgain.json?.error === "already_granted" &&
+      deskMe.json?.workspaces?.map((w) => w.id).join() === A && JSON.stringify(deskDirs.json?.workspaces) === JSON.stringify([A]) && audDesk.length === 1 && audDesk[0].actor?.id === U5.id,
+    `${gStale.text} ${gOther.status} ${gNotMember.status} ${gRevoked.status} ${gBadWs.status} ${gBearer.status} [${refusedGrants}] ${gOk.text} ${gAgain.text} ${deskMe.text} ${deskDirs.text} ${JSON.stringify(audDesk)}`,
+  );
+  if (existsSync(CHROME)) {
+    const { default: puppeteer } = await import("puppeteer-core");
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    try {
+      const page = await browser.newPage();
+      await page.setCookie(...U5.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      const row = `li[data-device="${desk2.id}"]`;
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, row);
+      const before = await page.$eval(row, (li) => li.textContent);
+      await page.$eval(row, (li) => [...li.querySelectorAll("button")].find((b) => b.textContent === "Give this device the workspace")?.click());
+      const wsName = withDb((d) => d.prepare("SELECT name FROM v2_workspaces WHERE id = ?").get(A).name);
+      await page.waitForFunction((sel, name) => document.querySelector(sel)?.textContent?.includes(`Workspaces: ${name}`), { timeout: 15000 }, row, wsName);
+      const after = await page.$eval(row, (li) => li.textContent);
+      const deskRow = await page.$eval(`li[data-device="${desk.id}"]`, (li) => li.textContent);
+      const granted2 = withDb((d) => d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ?").all(desk2.id).map((r) => r.ws_id).join());
+      check(
+        "ui (Chrome, E2E-AGENT cycle 5): the Devices page names each device with the end of its id (dv_…) and offers a live device the workspaces it lacks; \"Give this device the workspace\" gives it one (it then lists it and offers it no more), and a device that has every workspace of mine is offered none",
+        before.includes(`dv_…${desk2.id.slice(-6)}`) && after.includes(`Workspaces: ${wsName}`) && !after.includes("Give this device the workspace") && granted2 === A && !deskRow.includes("Give this device the workspace"),
+        `${before} | ${after} | ${deskRow} | ${granted2}`,
+      );
+    } finally {
+      await browser.close();
+    }
+  } else check("ui (Chrome) available for the Devices page", false, `no Chrome at ${CHROME}`);
   const invW = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "withdrawn@example.test", role: "member" } });
   await call("U1", "DELETE", `/api/v2/workspaces/${A}/invites/${invW.json.id}`, { cookie: U1.cookie });
 
@@ -2568,6 +2643,26 @@ try {
       `${againB.text} ${JSON.stringify(rowC)}`,
     );
 
+    // C5-1: shared again, it counts from the new epoch on. Usage from after the old epoch ended (at the removal) and
+    // before the new one started was made while the session was not shared: a conflict, never stored. Usage from before
+    // the end, or from a time the new epoch covers (the tail of a turn that started before the end), is stored.
+    const oldB = withDb((d) => d.prepare("SELECT epoch_id, ends_at FROM v2_epochs WHERE ws_id = ? AND session_key = ? ORDER BY starts_at DESC LIMIT 1").get(CW, SB));
+    const endB = Date.parse(oldB?.ends_at ?? "");
+    const isoAt = (ms) => new Date(endB + ms).toISOString();
+    const newB = epochId();
+    const reEp = await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/epochs`, { bearer: DC.access, body: { epoch_id: newB, goal_id: CG.id, starts_at: isoAt(2000), root_turn: null, cause: "manual" } });
+    const conflictsB = () => withDb((d) => d.prepare("SELECT conflicts FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(CW, SB))?.conflicts ?? -1;
+    const cBefore = conflictsB();
+    const gapRows = [usageRow(DC, "c51-before-end", oldB?.epoch_id, { ts: isoAt(-1000) }), usageRow(DC, "c51-gap", oldB?.epoch_id, { ts: isoAt(1000) }), usageRow(DC, "c51-tail", oldB?.epoch_id, { ts: isoAt(2500) }), usageRow(DC, "c51-new", newB, { ts: isoAt(2500) })];
+    const upGap = await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DC.access, body: { rows: gapRows } });
+    const stored = (id) => !!withDb((d) => d.prepare("SELECT 1 AS x FROM v2_usage WHERE ws_id = ? AND session_key = ? AND request_key = ?").get(CW, SB, reqKey(DC, id)));
+    check(
+      "usage (C5-1): a row naming an epoch that ended, from a time no epoch of the session covers (after its share ended and before it was shared again), is a conflict counted on the session and never stored; rows from before the end, from a time a later epoch covers, and in the new epoch are stored",
+      !!oldB?.ends_at && reEp.status === 200 && upGap.status === 200 && upGap.json?.accepted === 3 && upGap.json.conflicts === 1 && conflictsB() === cBefore + 1 &&
+        stored("c51-before-end") && !stored("c51-gap") && stored("c51-tail") && stored("c51-new"),
+      `${JSON.stringify(oldB)} ${reEp.text} ${upGap.text} ${cBefore}/${conflictsB()}`,
+    );
+
     // A clock that runs ahead: named, with the server's time; a start stored in the future is moved back.
     const ahead = (ms) => new Date(Date.now() + ms).toISOString();
     const KF = sessionKey(DC, CW, "claude-code", "clock-far");
@@ -2603,6 +2698,15 @@ try {
   check("delete: someone else -> 404; the owner (Bearer and cookie) -> 204", delOther.status === 404 && del.status === 204 && delWeb.status === 204, `${delOther.status} ${del.status} ${delWeb.status}`);
   check("delete: zero rows anywhere in the v2 tables still mention the deleted sessions (read from the database file)", Object.keys(leftovers).length === 0, JSON.stringify(leftovers));
   check("delete: spend totals change (and the invariant still holds)", totalAfter.total.requests < totalBefore && invariantHolds(totalAfter), `${totalBefore} -> ${totalAfter.total.requests}`);
+  const delSessAgain = await call("U3", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { bearer: D3.access });
+  const delWebAgain = await call("U3", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3b}`, { cookie: U3.cookie });
+  const delOtherAgain = await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { cookie: U1.cookie });
+  const markers = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_deleted_sessions WHERE ws_id = ?").get(A).n);
+  check(
+    "delete (E2E-AGENT cycle 5): deleting history that is already deleted -> 410 history_deleted for the account that shared it (its device or the web), so a deletion queued on a device is done; anyone else -> 404; the marker it leaves names neither the session nor the person (the check above found no row with the key)",
+    delSessAgain.status === 410 && delSessAgain.json?.error === "history_deleted" && delWebAgain.status === 410 && delWebAgain.json?.error === "history_deleted" && delOtherAgain.status === 404 && markers >= 2,
+    `${delSessAgain.text} ${delWebAgain.text} ${delOtherAgain.status} ${markers}`,
+  );
 
   // -- the device authorize limit (10 per hour per client), last so earlier pairings aren't affected --
   let limited = 0;
@@ -5205,6 +5309,21 @@ try {
     const dry12 = dry(12);
     const dry14 = dry(14);
     check("retention (dry run): requests are kept 12 months and deleted after 13 (requests_deleted counts every one)", dry12 === 0 && dry14 === reqN && reqN >= 4, `${dry12} ${dry14} ${reqN}`);
+    // The markers deleted sessions leave (E2E-AGENT cycle 5) keep 13 months too.
+    const markerN = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_deleted_sessions").get().n);
+    const dryMarkers = (months) => {
+      const t = new Date();
+      t.setUTCMonth(t.getUTCMonth() + months);
+      const r = admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: t.toISOString() });
+      try {
+        return JSON.parse(r.out.trim().split("\n").pop()).deleted_session_markers_deleted;
+      } catch {
+        return `${r.status} ${r.out} ${r.err}`;
+      }
+    };
+    const m12 = dryMarkers(12);
+    const m14 = dryMarkers(14);
+    check("retention (dry run, E2E-AGENT cycle 5): the markers deleted sessions leave are kept 12 months and deleted after 13 (deleted_session_markers_deleted counts every one)", m12 === 0 && m14 === markerN && markerN >= 3, `${m12} ${m14} ${markerN}`);
   }
   // ==== end req:requests ====
 

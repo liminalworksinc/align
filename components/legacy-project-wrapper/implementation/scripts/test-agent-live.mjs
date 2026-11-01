@@ -1071,6 +1071,10 @@ try {
       rmGoals.code === 0 && rmGoals.stdout.includes("Side Co") && !rmGoals.stdout.includes("Ledger Co") && rmOut.code === 0 && denied(rmFree) === null,
     `${rmSync.stderr} ${JSON.stringify(rmLocal)} told=${rmTold.stdout} deny=${rmDeny} goals=${rmGoals.code} ${rmGoals.stdout} ${rmGoals.stderr} ${rmOut.stderr} free=${rmFree.stdout}`,
   );
+  // C5-1: a turn made now, while the session's share has ended ("its usage stays on this machine from now on").
+  const gapAt = Date.now();
+  appendLines(Q1.tr, [userLine(Q1.sid, "q1-gap", new Date(gapAt).toISOString(), repoQ), assistantLine(Q1.sid, "req_q1_gap", new Date(gapAt + 50).toISOString(), repoQ)]);
+  sync();
   const scLocal = () => JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === SC.sid)?.shared;
   check(
     "member removed: the share in the other workspace (Side Co) is untouched, on the server and here",
@@ -1105,6 +1109,66 @@ try {
       q1Back?.state === "shared" && q1Back.ended_reason === null && q1Back.device_id === deviceBefore && q1Local === "shared (Ledger Co)" &&
       scRow()?.state === "shared" && scRow()?.device_id === deviceBefore && scLocal() === "shared (Side Co)" && liveDevice() === deviceBefore && miloDevices === 1,
     `${reInv.status} ${rePreview.text} ${reAccept.text} ${JSON.stringify(reAudit)} ${reHook.stderr} ${reMe} told=${reTold.stdout} told2=${reTold2.stdout} share=${reShare.stdout} ${JSON.stringify(q1Back)} ${q1Local} ${JSON.stringify(scRow())} ${scLocal()} ${miloDevices}`,
+  );
+  // C5-1 and C5-2: shared again, the session counts from the re-share; the turn made while it was not shared never goes
+  // up, and the next one goes up under the new epoch. The device reaches two workspaces again, so it has no default.
+  const backAt = Date.now() + 200;
+  appendLines(Q1.tr, [userLine(Q1.sid, "q1-back", new Date(backAt).toISOString(), repoQ), assistantLine(Q1.sid, "req_q1_back", new Date(backAt + 50).toISOString(), repoQ)]);
+  await new Promise((r) => setTimeout(r, 400));
+  sync();
+  const q1Usage = sdb((d) => d.prepare("SELECT u.ts, u.epoch_id, e.ends_at FROM v2_usage u JOIN v2_epochs e ON e.ws_id = u.ws_id AND e.session_key = u.session_key AND e.epoch_id = u.epoch_id WHERE u.ws_id = ? AND u.session_key = ?").all(W, Q1.key));
+  const inRange = (r, from) => Date.parse(r.ts) >= from && Date.parse(r.ts) <= from + 1000;
+  const reDefault = JSON.parse(readFileSync(path.join(alignHome, "me.json"), "utf8")).default_workspace ?? null;
+  check(
+    "re-invite (C5-1, C5-2): the turn made while the session's share had ended is never uploaded when it is shared again (no stored row from then); the turn after the re-share is stored under the open epoch; me.json has no default workspace once the device reaches two again",
+    !q1Usage.some((r) => inRange(r, gapAt)) && q1Usage.some((r) => inRange(r, backAt) && r.ends_at === null) && reDefault === null,
+    `${JSON.stringify(q1Usage.slice(-4))} gap=${new Date(gapAt).toISOString()} back=${new Date(backAt).toISOString()} default=${reDefault}`,
+  );
+
+  // -- ADR 0003 section 6, extended (E2E-AGENT cycle 5): Milo joins Later Co without ticking this device, so it does not
+  //    reach it; later, on the Devices page, he gives the device the workspace, and its next sync reaches it, said once --
+  const LATER_W = (await call("POST", "/api/v2/workspaces", { cookie: O2.cookie, body: { name: "Later Co" } })).json?.id;
+  const laterInv = (await call("POST", `/api/v2/workspaces/${LATER_W}/invites`, { cookie: O2.cookie, body: { email: M.email, role: "member" } })).json?.token;
+  const ML = await freshMilo();
+  const laterAccept = await call("POST", `/api/v2/invites/${laterInv}/accept`, { cookie: ML.cookie, body: {} });
+  const laterNone = sync();
+  const laterBefore = meIds();
+  const laterGive = await call("POST", `/api/v2/devices/${deviceBefore}/workspaces`, { cookie: ML.cookie, body: { workspace_id: LATER_W } });
+  const laterSync = sync();
+  const laterAgain = sync();
+  const laterAudit = ((await call("GET", `/api/v2/workspaces/${LATER_W}/audit`, { cookie: O2.cookie })).json?.audit ?? []).filter((a) => a.action === "device.workspace_added" && a.object_id === deviceBefore).map((a) => a.actor?.id);
+  check(
+    "devices page (ADR 0003 section 6, E2E-AGENT cycle 5): a workspace joined without ticking this device is not reached; given to the device later on the Devices page (audited device.workspace_added), the next `align sync` reaches it, says so once after its Server: line, and /me lists it, with no new pairing",
+    laterAccept.status === 200 && laterNone.code === 0 && !laterBefore.includes(LATER_W) && laterGive.status === 200 &&
+      laterSync.code === 0 && laterSync.stdout.includes("This machine can now reach Later Co in Align (given to this device when you accepted an invite or on your Devices page)") &&
+      laterSync.stdout.indexOf("Server:") < laterSync.stdout.indexOf("can now reach Later Co") && !laterAgain.stdout.includes("can now reach") &&
+      meIds().includes(LATER_W) && laterAudit.join() === M.id && liveDevice() === deviceBefore,
+    `${laterAccept.text} ${laterBefore} ${laterGive.text} ${laterSync.stdout} ${laterSync.stderr} ${meIds()} ${JSON.stringify(laterAudit)}`,
+  );
+
+  // -- E2E-AGENT cycle 5: `align login` on a machine still signed in pairs a new device while the one it replaces is
+  //    live; it names that device to the server, so the new one keeps the plain name (no "(2)" flip-flop) --
+  const MR2 = await freshMilo();
+  const login4 = spawn(process.execPath, [CLI, "login", "--name", "Milo's laptop"], { env: agentEnv, stdio: ["ignore", "pipe", "pipe"] });
+  let login4Out = "";
+  login4.stdout.on("data", (d) => (login4Out += d));
+  const login4Done = new Promise((r) => login4.on("close", r));
+  let code4 = "";
+  for (let i = 0; i < 100 && !code4; i++) {
+    code4 = /enter the code (\S+)/.exec(login4Out)?.[1] ?? "";
+    if (!code4) await sleep(100);
+  }
+  const approve4 = await call("POST", "/api/v2/device/approve", { cookie: MR2.cookie, body: { user_code: code4, workspace_ids: [W] } });
+  const login4Code = await Promise.race([login4Done, sleep(60_000).then(() => "timeout")]);
+  if (login4Code === "timeout") login4.kill();
+  outputs.push(login4Out);
+  const fourth = liveDevice();
+  const names4 = sdb((d) => d.prepare("SELECT id, name, revoked_at FROM v2_devices WHERE user_id = ? AND id IN (?, ?)").all(M.id, fourth, deviceBefore));
+  check(
+    "re-login (E2E-AGENT cycle 5): `align login` on a machine still signed in keeps the device's plain name (the poll names the device it replaces, live until the login revokes it); the old device is revoked and the login names no other device",
+    approve4.status === 200 && login4Code === 0 && fourth !== deviceBefore && names4.find((r) => r.id === fourth)?.name === "Milo's laptop" && !!names4.find((r) => r.id === deviceBefore)?.revoked_at &&
+      /Signed in as .* on device Milo's laptop\./.test(login4Out) && !/other paired device/.test(login4Out),
+    `${approve4.status} ${login4Code} ${JSON.stringify(names4)} ${login4Out}`,
   );
 
   // -- canaries: people's words reach the model only inside Align's quoted-data wording --

@@ -2,7 +2,7 @@ import { createPublicKey, verify } from "node:crypto";
 import { randomInt } from "node:crypto";
 import { config } from "../config";
 import { all, audit, get, LIVE_WS, run, tx } from "./db";
-import { V2Error, badRequest, notFound } from "./errors";
+import { V2Error, badRequest, conflict, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { retryAfterMs, take, takeAll } from "./limits";
@@ -131,7 +131,7 @@ function issueTokens(deviceId: string, nowMs: number) {
   return { access, refresh };
 }
 
-export async function token(deviceCode: string) {
+export async function token(deviceCode: string, replaces: string | null = null) {
   const nowMs = Date.now();
   const at = new Date(nowMs).toISOString();
   // The poll bookkeeping (last poll, slow_down's longer interval) must commit even when the answer is an error,
@@ -152,7 +152,7 @@ export async function token(deviceCode: string) {
     const user = r.user_id ? userById(r.user_id) : undefined;
     if (!user) return { error: "access_denied" };
     const deviceId = newId("dv");
-    run("INSERT INTO v2_devices (id, user_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)", deviceId, user.id, r.device_name, r.public_key, at, at);
+    run("INSERT INTO v2_devices (id, user_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)", deviceId, user.id, distinctName(user.id, r.device_name, replaces), r.public_key, at, at);
     const granted: string[] = [];
     for (const ws of JSON.parse(r.ws_ids_json || "[]") as string[]) {
       if (get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, user.id)) {
@@ -169,6 +169,16 @@ export async function token(deviceCode: string) {
   });
   if ("error" in out) throw oauthError(out.error);
   return out.ok;
+}
+
+/** A name none of this person's live devices has: a second "Milo's laptop" (another machine of that name, or a second
+ *  login at once) becomes "Milo's laptop (2)", so the Devices page and `align login` never show two live devices of one
+ *  name (E2E cycle 5). The device this pairing replaces on the same machine (`replaces`, counted only when it is this
+ *  person's: the query reads only theirs) does not count, as it is revoked a moment later: a re-login keeps its name. */
+function distinctName(userId: string, name: string, replaces: string | null): string {
+  const taken = new Set(all<{ name: string }>("SELECT name FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND id <> ?", userId, replaces ?? "").map((d) => d.name));
+  if (!taken.has(name)) return name;
+  for (let n = 2; ; n++) if (!taken.has(`${name} (${n})`)) return `${name} (${n})`;
 }
 
 /** The exact bytes a device signs to refresh (docs/v2/WIRE.md). */
@@ -345,6 +355,27 @@ export function addWorkspaceToDevices(userId: string, wsId: string, deviceIds: s
     audit(wsId, userId, "device.workspace_added", id, at);
   }
   return deviceIds;
+}
+
+/**
+ * Give one of this person's own live devices a workspace they are a member of, later than at an invite (the Devices
+ * page, an extension of owner decision 2026-11-01, ADR 0003 section 6): the same grant and the same
+ * `device.workspace_added` audit row as accepting an invite with the device ticked. 404 for a device that is not theirs
+ * or is revoked, or a workspace they are not a member of; 409 `already_granted` when the device has it already.
+ */
+export async function grantWorkspace(userId: string, deviceId: string, wsId: string) {
+  const at = nowIso();
+  await tx(() => {
+    // Another person's, a revoked and an unknown device read alike, as at an invite (Y1), in this page's words.
+    if (!get("SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL", deviceId, userId)) {
+      throw new V2Error(404, "not_found", "This device is not one of your paired devices any more (it may have been signed out), so it was given nothing.");
+    }
+    if (!get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, wsId, userId)) throw notFound();
+    if (get("SELECT 1 AS x FROM v2_device_grants WHERE device_id = ? AND ws_id = ?", deviceId, wsId)) throw conflict("already_granted", "This device already has this workspace");
+    // The invite path's grant and audit row, as it stands.
+    addWorkspaceToDevices(userId, wsId, [deviceId], at);
+  });
+  return { device_id: deviceId, workspace_id: wsId };
 }
 
 export function deviceOwnedBy(deviceId: string, userId: string): boolean {

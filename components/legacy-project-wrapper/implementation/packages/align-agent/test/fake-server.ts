@@ -88,6 +88,8 @@ export class FakeServer {
   opts: Required<FakeOptions>;
   offline = false;
   log: { method: string; path: string; status: number; auth: boolean; origin: boolean; device?: string }[] = [];
+  /** `replaces` of each token poll that created a device (null when the poll named none). */
+  replacesSeen: (string | null)[] = [];
   /** Hold matching calls (before the server looks at them) until `release` settles; `left` of them, when set (C4). */
   holdCalls: { match: (method: string, path: string) => boolean; release: Promise<void>; left?: number } | null = null;
   /** Answer matching calls 503 without processing them (a proxy in front of a failing route, C4-3). */
@@ -114,6 +116,16 @@ export class FakeServer {
   /** AskView per workspace, as `GET /api/v2/workspaces/:ws/asks` returns them (the reader's `can` flags included). */
   asks = new Map<string, (Ask & { can: Record<string, boolean> })[]>();
   usage = new Map<string, any>();
+  /** Session keys whose history was deleted (on the web or by a device): a later DELETE gets 410 history_deleted. */
+  deletedKeys = new Set<string>();
+
+  /** The person deletes a session's shared history on the web. */
+  deleteOnWeb(key: string): void {
+    this.sessions.delete(key);
+    this.deletedKeys.add(key);
+    for (const [k, e] of this.epochs) if (e.session_key === key) this.epochs.delete(k);
+    for (const [k, u] of this.usage) if (u.session_key === key) this.usage.delete(k);
+  }
   directives: FakeDirective[] = [];
   receipts: { id: string; session_key: string; state: string; at: string; auto_accepted?: boolean }[] = [];
   requests = new Map<string, FakeRequest>();
@@ -375,7 +387,13 @@ export class FakeServer {
         if (pend.polls === 1 && this.opts.slowDownFirst) return send(400, { error: "slow_down" });
         if (pend.polls < this.opts.approveAfterPolls) return send(400, { error: "authorization_pending" });
         pend.issued = true;
-        const d: Device = { id: rid("dv_"), name: pend.name, publicKey: pend.publicKey, revoked: false, refresh: null, oldRefresh: new Set(), createdAt: new Date().toISOString() };
+        // As lib/v2/devices.ts: a name none of the person's live devices has ("Test Mac (2)" next to a live "Test Mac").
+        // The device this pairing replaces (`replaces`) does not count: a re-login keeps its name.
+        this.replacesSeen.push(body?.replaces ?? null);
+        const taken = new Set([...this.devices.values()].filter((x) => !x.revoked && x.id !== body?.replaces).map((x) => x.name));
+        let name = pend.name;
+        for (let n = 2; taken.has(name); n++) name = `${pend.name} (${n})`;
+        const d: Device = { id: rid("dv_"), name, publicKey: pend.publicKey, revoked: false, refresh: null, oldRefresh: new Set(), createdAt: new Date().toISOString() };
         this.devices.set(d.id, d);
         return send(200, { device_id: d.id, ...this.issue(d), user: this.user });
       }
@@ -461,10 +479,13 @@ export class FakeServer {
           const open = [...this.epochs.values()].find((e) => e.session_key === key && !e.ends_at) || null;
           return send(200, { session_key: key, state, current_epoch: open });
         }
+        // As lib/v2/sessions.ts: history deleted already (on the web, say) -> 410 history_deleted to its own account.
+        if (!sess && !sub && req.method === "DELETE" && this.deletedKeys.has(key)) return send(410, { error: "history_deleted" });
         if (!sess) return send(404, { error: "not_found" });
         if (!sub && req.method === "DELETE") {
           if (this.refuseDeletes) return send(404, { error: "not_found" });
           this.sessions.delete(key);
+          this.deletedKeys.add(key);
           this.deletedBy.push({ key, device: dev.id });
           // As the server: the session's activity goes with it.
           this.activity = this.activity.filter((i) => i.session_key !== key);

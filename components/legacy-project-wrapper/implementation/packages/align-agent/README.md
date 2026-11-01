@@ -189,7 +189,7 @@ agent time outside shared sessions, by folder, and the week its note was shown; 
 `last-sync.json`, `logs/`.
 
 Set `"default_workspace": "<ws id>"` in `config.json` if you belong to several workspaces and want `::align share`
-without `--dir`.
+without `--dir`; `align config` shows it. Otherwise the default is the only workspace this device reaches, or none.
 
 ## Privacy rules in code
 

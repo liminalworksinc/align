@@ -914,6 +914,27 @@ workspace for the first time who already has paired devices. A device learns its
 - **WHEN** a person with a device paired for one workspace accepts an invite to another with that device ticked (`scripts/test-v2.mjs` "invites: someone joining a workspace for the first time is offered their paired devices too ...")
 - **THEN** the device's `/me` lists both workspaces
 
+### Requirement: Giving a device a workspace later
+
+An extension of owner decision 2026-11-01 (`docs/decisions/0003-owner-decisions-v2.md` section 6, "Invites give paired
+devices the workspace"): a person who accepted an invite without ticking a device, or who pairs a device for one
+workspace and later wants another, SHALL be able to give one of their own live paired devices a workspace they are a
+member of on `POST /api/v2/devices/{id}/workspaces {workspace_id}` (browser session; the Devices page), without
+`align login` (which would end the device's shares in every other workspace) and without being removed and invited
+again. It SHALL make the same grant, with the same audit row `device.workspace_added` in that workspace (the person as
+actor, the device as object), as accepting an invite with the device ticked, need a sign-in from the last 15 minutes
+(403 `reauth_required` with `Sign in again to give a device this workspace. This needs a sign-in from the last 15
+minutes.`), answer `{device_id, workspace_id}`, 409 `already_granted` when the device has it already, 404 for a device
+that is another person's, revoked or unknown (all alike: `This device is not one of your paired devices any more (it may
+have been signed out), so it was given nothing.`) or a workspace they are not a member of, and 400 for a malformed
+workspace id, and grant nothing on any refusal. A device token SHALL never do it. The device learns the workspace at
+its next pass, as after an invite (`local-agent`).
+
+#### Scenario: Given on the Devices page
+
+- **WHEN** a member gives one of their devices that lacks it a workspace with a recent sign-in, again, and with a stale sign-in, another person's or a revoked device, a workspace they are not a member of, a malformed workspace id and a device token (`scripts/test-v2.mjs` "devices (E2E-AGENT cycle 5, ADR 0003 section 6) ..."; against the real CLI in `scripts/test-agent-live.mjs` "devices page (ADR 0003 section 6, E2E-AGENT cycle 5) ...")
+- **THEN** the first answers `{device_id, workspace_id}`, the device's `/me` and directives answer list the workspace and the audit has `device.workspace_added` by them; the second is 409 `already_granted`; the others are 403 `reauth_required`, 404, 404, 404, 400 and refused, and grant nothing
+
 ### Requirement: Invites that name a team
 
 The server SHALL accept an optional `team_id` and `team_role` (`lead` or `member`, default `member`) on an invite and,
@@ -1077,12 +1098,27 @@ device a workspace at an invite (`device.workspace_added`) is recorded in that w
 
 The server SHALL pair a device by a key-bound device-code flow: `POST /api/v2/device/authorize {device_name,
 public_key}` (a 32-byte base64url Ed25519 key, name at most 100 characters) returns a code for the person to approve,
-and `POST /api/v2/device/token` returns the tokens exactly once after approval.
+and `POST /api/v2/device/token` returns the tokens exactly once after approval. The device SHALL get a name none of
+the person's live devices has: when one already has the requested name (another machine of that name, or a second
+login at once), it gets the first free `<name> (2)`, `<name> (3)`, ..., so the Devices page and `align login` never show
+two live devices of one name. The token poll MAY name the device the pairing replaces on the same machine (`replaces`,
+a device id; malformed is 400); that device, counted only when it is the approving person's own, is left out of the
+check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with `<name> (2)`.
 
 #### Scenario: Starting a pairing
 
 - **WHEN** the CLI POSTs `/api/v2/device/authorize`
 - **THEN** the response is `{device_code, user_code:"XXXX-XXXX", verification_uri:"<origin>/app/device", expires_in:600, interval:5}`, where the user code uses only the letters `BCDFGHJKLMNPQRSTVWXZ`; more than 10 requests per client per hour get 429 `rate_limited` with `retry_after` (seconds, also sent as `Retry-After`) and a message that says how long to wait: in Mode L, where every pairing on the computer is one client, `Align on this computer has started 10 device pairings in the last hour, its limit for everyone who pairs here. Try again in <n> minutes, or restart Align to clear it.`, and when hosted `Too many device pairings were started from this network in the last hour (the limit is 10). Try again in <n> minutes.` (`scripts/test-v2.mjs` "device: authorize is limited to 10 per hour per client ...")
+
+#### Scenario: A second device of one name
+
+- **WHEN** a person with a live device named `reuse test` pairs another device with that name (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices ...")
+- **THEN** the new device is named `reuse test (2)`, also when its poll names another person's device as the one it replaces
+
+#### Scenario: A re-login keeps its name
+
+- **WHEN** a person with a live device named `Una's MacBook` pairs another of that name whose token poll names the live one in `replaces`, after a poll with a malformed `replaces` (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 5): a token poll naming the device it replaces ..."; against the real CLI in `scripts/test-agent-live.mjs` "re-login (E2E-AGENT cycle 5) ...")
+- **THEN** the malformed poll is 400 and the new device is named `Una's MacBook`
 
 #### Scenario: Polling before and after a decision
 
@@ -1147,7 +1183,11 @@ every session private to the device and person that shared it, let that person s
 `GET /api/v2/workspaces/{ws}/sessions` as `{mine, all}`. The hard delete SHALL be allowed to the person on the web and
 from any of their live paired devices granted the workspace, not only the device that shared it (a re-pair would
 otherwise strand the history where only the web could delete it), and SHALL be audited `session.history_deleted` with
-the person as actor and, from a device, the device that did it as the object; every other call on the session (its
+the person as actor and, from a device, the device that did it as the object. A deleted session SHALL leave a marker
+holding only its workspace, when, and a hash of the person who shared it and its key (never either one); while the
+marker lasts (13 months, "Data retention"), deleting it again SHALL answer 410 `history_deleted` to that person (from
+the web or any of their devices granted the workspace), so a deletion queued on a device while the history was deleted
+on the web is done, and 404 to anyone else; every other call on the session (its
 epochs, usage, stop-sharing) stays with the device that shared it, and another person's device gets 404. A session that ended because its device was revoked
 (`ended_reason` `device_signed_out`) SHALL be shared again by a `PUT` from another device of the same person with the
 same harness and repo key (its device, state `shared`, `stopped_at` and `ended_reason` cleared, its stop flag kept,
@@ -1172,6 +1212,11 @@ is off` and `server_time`.
 
 - **WHEN** one of a person's devices shared a session with usage, and later another of their live devices, then another person's device, deletes it; and the person's other device re-shares a session its person stopped sharing (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 4 C4-1) ..." and "sessions (E2E-AGENT cycle 4 C4-8) ...")
 - **THEN** the other person's device gets 404, the person's other device gets 204, the session and its usage are gone, the audit row `session.history_deleted` names the person and that device, uploads from it to a session it did not share stay 404, and the re-share gets 409 `sharing_stopped`
+
+#### Scenario: Deleting history that is already deleted
+
+- **WHEN** a person's device, then the person on the web, delete again a history already deleted, and the workspace owner deletes it again too (`scripts/test-v2.mjs` "delete (E2E-AGENT cycle 5): deleting history that is already deleted ...")
+- **THEN** the person gets 410 `history_deleted` both times and the owner 404, and no row of the v2 tables holds the deleted session's key
 
 #### Scenario: Stop sharing and delete
 
@@ -1212,12 +1257,21 @@ time to catch up.
 ### Requirement: Usage upload
 
 The server SHALL accept usage from the sharing device on `POST .../sessions/{key}/usage {rows}` (at most 500 rows and
-256 KB), store each row once by its `request_key`, and never overwrite a stored row.
+256 KB), store each row once by its `request_key`, and never overwrite a stored row. A row whose `ts` is at or after
+the end of the epoch it names, at a time no epoch of the session covers (its share had ended, by a stop, a removal or a
+revoked device, and the session was shared again only later), was made while the session was not shared: it SHALL be a
+conflict, counted on the session and never stored, so a re-share never brings in the gap. A row from after its epoch
+ended while a later epoch of the session was open is the tail of a turn that started in its epoch, and is stored.
 
 #### Scenario: Usage batch
 
 - **WHEN** a device POSTs rows for its session
 - **THEN** the response is `{accepted, duplicates, conflicts}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for an epoch this session does not have is a conflict that is counted on the session and never stored
+
+#### Scenario: Usage from while a session was not shared
+
+- **WHEN** a member's session ends when they are removed, they are let back in, their device shares it again with a new epoch starting 2 seconds after the old one ended, and uploads rows naming the old epoch from 1 second before its end, 1 second after it and 2.5 seconds after it, and one naming the new epoch from 2.5 seconds after (`scripts/test-v2.mjs` "usage (C5-1): a row naming an epoch that ended ...")
+- **THEN** the response is `{accepted: 3, conflicts: 1}`, the session's conflicts grow by one, and only the row from the gap is not stored
 
 #### Scenario: Oversized batch
 
@@ -1471,8 +1525,10 @@ step in its own transaction, logging counts only; it purges a workspace with the
 `workspaces delete --purge`, deletes product events (`v2_events`, specified in `metrics`) after 13 months, deletes
 asks that are `done`, `declined` or `withdrawn` with their mentions 13 months after their last change (`asks_deleted`),
 deletes value reports on approved change requests 13 months after their last change
-(`value_reports_deleted`), and deletes requests to agents (the `goals-and-proposals` part) 13 months after they were
-sent, with their per-session states and the directives that carried them (`requests_deleted`); a goal hold has no
+(`value_reports_deleted`), deletes requests to agents (the `goals-and-proposals` part) 13 months after they were
+sent, with their per-session states and the directives that carried them (`requests_deleted`), and deletes the
+markers deleted sessions leave ("Shared session ownership") 13 months after the deletion
+(`deleted_session_markers_deleted`); a goal hold has no
 expiry and ends only when it is released.
 
 #### Scenario: Deleted workspaces
@@ -1519,6 +1575,11 @@ expiry and ends only when it is released.
 
 - **WHEN** a dry run of the job runs 12 months, and then 14 months, after requests were sent to a goal's agents
 - **THEN** the first reports `requests_deleted` 0 and the second counts every one of them
+
+#### Scenario: Deleted-session markers
+
+- **WHEN** a dry run of the job runs 12 months, and then 14 months, after sessions' histories were deleted (`scripts/test-v2.mjs` "retention (dry run, E2E-AGENT cycle 5) ...")
+- **THEN** the first reports `deleted_session_markers_deleted` 0 and the second counts every marker
 
 #### Scenario: Operator run and dry run
 

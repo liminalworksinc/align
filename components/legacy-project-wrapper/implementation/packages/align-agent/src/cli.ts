@@ -28,6 +28,7 @@ import {
   type Credentials,
 } from "./api.ts";
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
+import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts";
 import { fetchAsks } from "./asks.ts";
@@ -44,7 +45,7 @@ import { flushOutbox, ingestSpool, outboxDepth, syncOnce, uploadUsage, type Last
 import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
 import { MIN_NODE, unsupportedNode } from "./node-version.ts";
-import { kvSet } from "./db.ts";
+import { kvGet, kvSet } from "./db.ts";
 import { podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
 import { clean, requestShortId } from "./shared/envelope.ts";
@@ -284,6 +285,10 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   // The new key stays in memory until the device is paired: the pairing in use (key, tokens) is untouched until then,
   // so an aborted, denied or expired login changes nothing (C3-2).
   const key = newDeviceKey();
+  // The device this pairing replaces (this machine's own, on this server): the server leaves it out when it makes the
+  // new device's name unique, so a re-login keeps the plain name instead of "<name> (2)" (cycle 5).
+  const before = loadCredentials(ctx.home);
+  const replaces = before && before.server_url.replace(/\/$/, "") === server ? before.device_id : null;
   const a = await rawRequest(server, "POST", "/api/v2/device/authorize", { body: { device_name: deviceName, public_key: key.publicKeyB64 } });
   if (a.status === 429) {
     // The server says how long to wait; an older one only sends Retry-After (or nothing).
@@ -305,7 +310,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     await new Promise((r) => setTimeout(r, interval * scale));
     let t;
     try {
-      t = await rawRequest(server, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code } });
+      t = await rawRequest(server, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code, ...(replaces ? { replaces } : {}) } });
     } catch (e) {
       // A dropped connection (the server restarting, say) is retried until the code expires, like a pending answer (N7).
       if (e instanceof NetworkError) continue;
@@ -366,7 +371,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   // committed meanwhile revoked it, and this one must not report a revoked device as signed in.
   const name = me.device?.name || deviceName;
   if (!(await whileSignedInAs(ctx, pairedAs!, () => out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`)))) return replacedMeanwhile(ctx, pairedAs!);
-  await mentionOtherDevices(ctx, server);
+  await mentionOtherDevices(ctx, server, pairedAs!);
   for (const w of me.workspaces) {
     out(`  workspace ${w.name} (${w.id}), role ${w.role}`);
     try {
@@ -405,22 +410,43 @@ function revokeLines(o: RevokeOutcome, style: "login" | "sync"): string[] {
   ];
 }
 
+/** The devices still to revoke, each as what it is: "the device this machine signed out of is revoked", "device
+ *  <id>, which `align login` replaced, is revoked", or "2 devices this machine no longer uses (…) are revoked". */
+function waitingRevokes(list: PendingRevoke[]): string {
+  const what = (p: PendingRevoke) => (p.reason === "replaced" ? `${p.device_id}, which \`align login\` replaced` : `${p.device_id}, which this machine signed out of`);
+  if (list.length === 1) return list[0].reason === "replaced" ? `device ${what(list[0])}, is revoked` : "the device this machine signed out of is revoked";
+  return `the ${list.length} devices this machine no longer uses (${list.map(what).join("; ")}) are revoked`;
+}
+
 /**
  * After pairing: name the person's other devices that are still paired (not this one), so one left behind (a machine
- * whose Align home was deleted without `align logout`, say) is seen and can be revoked on the web. Best effort.
+ * whose Align home was deleted without `align logout`, say) is seen and can be revoked on the web. Best effort. Each is
+ * named with the end of its id and when it was paired, as the Devices page shows them, so two devices of one name are
+ * told apart (cycle 5). Never named as one to revoke: this machine's own earlier devices (revoked here, or waiting in
+ * revoke.json to be), and a device paired after this one (a second `align login` on this machine, which replaces this
+ * pairing, may be the device signed in a moment later). Said only while this pairing is still the one signed in.
  */
-async function mentionOtherDevices(ctx: Ctx, server: string): Promise<void> {
+async function mentionOtherDevices(ctx: Ctx, server: string, pairedAs: string): Promise<void> {
   try {
     const r = await api(ctx, "GET", "/api/v2/devices");
     if (r.status !== 200 || !Array.isArray(r.json?.devices)) return;
-    const others = (r.json.devices as { name: string; created_at: string; last_seen_at: string | null; revoked_at: string | null; current?: boolean }[]).filter((d) => !d.revoked_at && !d.current);
+    const list = r.json.devices as { id: string; name: string; created_at: string; last_seen_at: string | null; revoked_at: string | null; current?: boolean }[];
+    const mine = list.find((d) => d.current);
+    const earlier = new Set(loadPendingRevokes(ctx.home).map((p) => p.device_id));
+    const others = list.filter((d) => !d.revoked_at && !d.current && !earlier.has(d.id) && (!mine || d.created_at < mine.created_at));
     if (!others.length) return;
-    const named = others.slice(0, 5).map((d) => `${clean(d.name, 60)} (last seen ${shortTime(d.last_seen_at || d.created_at)})`);
+    const named = others.slice(0, 5).map((d) => `${clean(d.name, 60)} (${deviceTag(d.id)}, paired ${shortTime(d.created_at)}, last seen ${shortTime(d.last_seen_at || d.created_at)})`);
     const more = others.length > 5 ? ` and ${others.length - 5} more` : "";
-    out(`Your account has ${others.length} other paired device${others.length === 1 ? "" : "s"}: ${named.join(", ")}${more}. Revoke any you no longer use at ${server}/app/devices.`);
+    const line = `Your account has ${others.length} other paired device${others.length === 1 ? "" : "s"}: ${named.join(", ")}${more}. This machine is ${mine ? `${clean(mine.name, 60)} (${deviceTag(mine.id)})` : `device ${pairedAs}`}. Revoke any other you no longer use at ${server}/app/devices.`;
+    await whileSignedInAs(ctx, pairedAs, () => out(line));
   } catch {
     /* only a hint */
   }
+}
+
+/** A device as the Devices page and `align status` show it: `dv_…` and the last 6 characters of its id. */
+export function deviceTag(id: string): string {
+  return `dv_…${id.slice(-6)}`;
 }
 
 async function cmdLogout(ctx: Ctx): Promise<void> {
@@ -770,6 +796,12 @@ async function cmdConfig(ctx: Ctx, argv: string[]): Promise<void> {
   if (!key) {
     out(`drift  ${ctx.config.drift === false ? "off" : "on"}   (a user-only note when the agent's reply may conflict with its goal's limits)`);
     out(`server ${ctx.config.server_url}`);
+    // The only default workspace besides a device's single one, so it is never a hidden one (C5-2).
+    const def = ctx.config.default_workspace;
+    if (def) {
+      const w = loadMe(ctx.home)?.workspaces.find((x) => x.id === def);
+      out(`default_workspace ${w ? `${clean(w.name, 80)} (${def})` : `${def} (not reached by this device, so not used)`}   (from config.json: \`::align share\` shares there)`);
+    }
     return;
   }
   if (key !== "drift" || (value !== "on" && value !== "off")) throw new UsageError("usage: align config drift on|off");
@@ -803,7 +835,11 @@ async function cmdDeleteHistory(ctx: Ctx, argv: string[]): Promise<void> {
   if (!(await confirm("Delete the shared history?", !!values.yes))) return out("Nothing deleted. Run again with --yes to confirm.");
   deleteHistory(ctx, s.local_id);
   await tryFlush(ctx);
-  if (!getShare(ctx, s.local_id)) return out("Shared history deleted.");
+  if (!getShare(ctx, s.local_id)) {
+    const gone = kvGet(ctx.db, `history_gone:${s.local_id}`);
+    if (gone) ctx.db.prepare("DELETE FROM kv WHERE key=?").run(`history_gone:${s.local_id}`);
+    return out(gone ? "This session's shared history was already deleted on the server (on the web, say); nothing is left there. Nothing more is queued." : "Shared history deleted.");
+  }
   // Never "deleted" unless the server said so (C4-1): a refusal keeps the share and the queued deletion.
   const refused = deleteRefused(ctx, s.local_id);
   if (!refused) return out(signedIn(ctx.home) ? "Deletion queued; the next sync retries when online." : "Deletion queued; it is sent once you run `align login` (the next sync after that retries it).");
@@ -944,7 +980,10 @@ async function cmdUninstall(ctx: Ctx, argv: string[]): Promise<void> {
 
 async function revokeBeforePurge(ctx: Ctx): Promise<void> {
   const c = loadCredentials(ctx.home);
-  const left = loadPendingRevokes(ctx.home).length ? (await revokePending(ctx).catch(() => null))?.pending ?? loadPendingRevokes(ctx.home) : [];
+  // Every device revoked here is named, not only this one (cycle 5): a device an earlier login replaced goes too.
+  const o = loadPendingRevokes(ctx.home).length ? await revokePending(ctx).catch(() => null) : null;
+  if (o) revokeLines(o, "login").forEach((l) => out(l));
+  const left = o ? o.pending : loadPendingRevokes(ctx.home);
   for (const p of left) err(`align: could not revoke device ${p.device_id}, which this machine no longer uses; revoke it at ${p.server_url}/app/devices.`);
   if (!c || c.signed_out || !c.refresh_token) return;
   let revoked = false;
@@ -974,17 +1013,19 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   if (r.revoked) revokeLines(r.revoked, "sync").forEach((l) => out(l));
   if (r.aborted) out("This machine's Align pairing changed during this sync (`align login` or `align logout`), so it stopped there; nothing more was sent as the earlier device. The next sync goes on as the device signed in now.");
   if (!signedIn(ctx.home)) {
-    out("Signed out: nothing uploaded.");
+    // Cut short by `align logout`: the line above says so, not that it ran signed out (C5-4).
+    if (!r.aborted) out("Signed out: nothing uploaded.");
     if (r.revoked && revokeState(r.revoked) === "pending") {
       // The server could not be reached for the revoke: an unreachable server exits 1, as every other pass does.
-      err(`align: ${r.serverError || "the server could not be reached"}; the device this machine signed out of is revoked at the next sync that reaches it.`);
+      err(`align: ${r.serverError || "the server could not be reached"}; ${waitingRevokes(r.revoked.pending)} at the next sync that reaches it.`);
       process.exitCode = 1;
     }
     return;
   }
-  for (const w of takeWorkspacesAdded()) out(`This machine can now reach ${clean(w.name, 80)} in Align (given to this device when you accepted an invite). \`align share\`, or \`::align share\` in a session, shares sessions there.`);
   // Nothing got through, so no "0 sent" line above the error (it reads as if the pass had worked).
   if (!r.serverError) out(`Server: ${r.sent} queued calls sent, ${r.uploaded} usage rows uploaded, ${r.directives} directives, ${outboxDepth(ctx)} still queued.`);
+  // After the `Server:` line, as the spec orders them (cycle 5).
+  for (const w of takeWorkspacesAdded()) out(`This machine can now reach ${clean(w.name, 80)} in Align (given to this device when you accepted an invite or on your Devices page). \`align share\`, or \`::align share\` in a session, shares sessions there.`);
   if (r.serverError) {
     const waiting = unuploadedRows(ctx);
     err(`align: ${r.serverError}. ${waiting} usage rows and ${outboxDepth(ctx)} queued calls stay on this machine; the next sync retries.`);
@@ -992,17 +1033,16 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   }
 }
 
-/** Finalized usage rows of shared sessions, from their first epoch on, not uploaded yet. */
+/** Finalized usage rows of shared sessions that will upload and have not yet: never one made while the session was not
+ *  shared, which stays on this machine (C5-1). */
 function unuploadedRows(ctx: Ctx): number {
-  return (
-    ctx.db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM requests r JOIN shares s ON s.local_id=r.local_id
-         WHERE s.state='shared' AND r.uploaded=0 AND r.finalized=1
-           AND COALESCE(r.ts, r.created_at) >= (SELECT MIN(e.starts_at) FROM epochs e WHERE e.local_id=r.local_id)`,
-      )
-      .get() as { n: number }
-  ).n;
+  const rows = ctx.db
+    .prepare(
+      `SELECT r.local_id, r.root_turn, r.ts, r.created_at, r.epoch_id, r.uploaded FROM requests r JOIN shares s ON s.local_id=r.local_id
+       WHERE s.state='shared' AND r.uploaded=0 AND r.finalized=1`,
+    )
+    .all() as unknown as PendingRow[];
+  return rows.filter((r) => willUpload(ctx.db, r)).length;
 }
 
 async function cmdDoctor(ctx: Ctx): Promise<void> {
@@ -1054,7 +1094,14 @@ function allocationTargets(ctx: Ctx, ref: string | undefined): { id: string; nam
   return list;
 }
 
-const gapWords = (gap: number | null) => (gap === null ? "" : Math.abs(gap) < 1 ? "on target" : gap > 0 ? `${gap} over` : `${-gap} under`);
+/** A gap as the web's Spend tab words it (app/app/w/[ws]/spend/allocation.tsx): whole points, rounded toward zero, so a
+ *  9.6-point gap reads "9 points over", agreeing with steering's "at least 10 points" (which compares the exact gap). */
+export function gapWords(gap: number | null): string {
+  if (gap === null) return "no target";
+  if (Math.abs(gap) < 1) return "on target";
+  const n = Math.floor(Math.abs(gap));
+  return `${n} ${n === 1 ? "point" : "points"} ${gap > 0 ? "over" : "under"}`;
+}
 
 async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { workspace: { type: "string" }, week: { type: "string" }, refresh: { type: "boolean" }, json: { type: "boolean" } } });
@@ -1078,7 +1125,7 @@ async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
       out(`${a.workspace}, week of ${from.toISOString().slice(0, 10)} (steering ${a.steering.steering}, ${a.steering.total} lines shown)`);
       for (const r of a.window.rows) {
         const label = r.kind === "goal" ? r.goal!.title : r.kind === "private" ? "Goals you can't see" : "Not bound to a goal";
-        out(`  ${pad(`${r.share}%`, 7)} ${pad(r.target_share === null ? "-" : `${r.target_share}%`, 6)} ${pad(gapWords(r.gap === null ? null : Math.round(r.gap)), 10)} ${label}`);
+        out(`  ${pad(`${r.share}%`, 7)} ${pad(r.target_share === null ? "-" : `${r.target_share}%`, 6)} ${pad(gapWords(r.gap), 16)} ${label}`);
       }
     }
     return;
@@ -1091,11 +1138,11 @@ async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
   if (values.json) return out(JSON.stringify({ workspaces: feeds.map((f) => ({ workspace: f.workspace, steering: f.feed?.steering ?? "off", fetched_at: f.feed?.fetched_at ?? null, goals: (f.feed?.goals ?? []).map((g) => ({ id: g.id, title: g.title, ...(g.allocation ?? {}) })) })), unshared: digest }, null, 2));
   for (const f of feeds) {
     out(`${f.workspace}, last 7 days${f.feed ? ` (cached ${shortTime(f.feed.fetched_at)}, steering ${f.feed.steering ?? "off"})` : " (not fetched yet; use --refresh)"}`);
-    out(`  ${pad("SHARE", 7)} ${pad("TARGET", 6)} ${pad("GAP", 10)} GOAL`);
+    out(`  ${pad("SHARE", 7)} ${pad("TARGET", 6)} ${pad("GAP", 16)} GOAL`);
     const goals = [...(f.feed?.goals ?? [])].filter((g) => g.status === "active").sort((a, b) => (b.allocation?.share_7d ?? 0) - (a.allocation?.share_7d ?? 0));
     for (const g of goals) {
       const a = g.allocation;
-      out(`  ${pad(a ? `${a.share_7d}%` : "-", 7)} ${pad(a?.target_share === null || a?.target_share === undefined ? "-" : `${a.target_share}%`, 6)} ${pad(gapWords(a?.gap_7d ?? null), 10)} ${g.title}`);
+      out(`  ${pad(a ? `${a.share_7d}%` : "-", 7)} ${pad(a?.target_share === null || a?.target_share === undefined ? "-" : `${a.target_share}%`, 6)} ${pad(gapWords(a ? a.gap_7d : null), 16)} ${g.title}`);
     }
   }
   if (digest && digest.total_tokens) {

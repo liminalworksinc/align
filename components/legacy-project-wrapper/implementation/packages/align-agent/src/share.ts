@@ -6,7 +6,7 @@ import type { Ctx } from "./context.ts";
 import { kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
-import { getSession, sessionCwds, type SessionRow } from "./ledger.ts";
+import { endEpochs, getSession, sessionCwds, type SessionRow } from "./ledger.ts";
 import { ACCESS_LOST, addNotice, DEVICE_SIGNED_OUT, getShare, renderHot, snapshot } from "./hot.ts";
 import { loadCredentials } from "./api.ts";
 import { gitInfo } from "./shared/anchors.ts";
@@ -110,6 +110,10 @@ export function applyShare(ctx: Ctx, p: SharePlan): void {
     if (other && other.workspace_id !== p.workspace.id && (other.state === "shared" || other.state === "pending" || other.state === "suspended")) {
       throw new Error("this session is already shared with another workspace; stop sharing it there first");
     }
+    // Shared before: its earlier epochs end where that share ended (when it was stopped, or now for one that never
+    // took), so usage from the time it was not shared never falls into them (C5-1).
+    const ended = ctx.db.prepare("SELECT stopped_at FROM shares WHERE local_id=?").get(lid) as { stopped_at: string | null } | undefined;
+    endEpochs(ctx.db, lid, ended?.stopped_at || nowIso());
     const goalJson = p.goal ? JSON.stringify(snapshot(p.goal)) : null;
     ctx.db
       .prepare(
@@ -156,8 +160,10 @@ export function bind(ctx: Ctx, lid: string, goal: Goal | null, cause = "manual",
 export function stopSharing(ctx: Ctx, lid: string): void {
   const share = getShare(ctx, lid);
   if (!share) throw new Error("session is not shared");
+  const at = nowIso();
   tx(ctx.db, () => {
-    ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=? WHERE local_id=?").run(nowIso(), lid);
+    ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=? WHERE local_id=?").run(at, lid);
+    endEpochs(ctx.db, lid, at);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
@@ -166,11 +172,19 @@ export function stopSharing(ctx: Ctx, lid: string): void {
   renderHot(ctx, lid);
 }
 
+/** The share of `lid` is stopped (here, or the server says so), from when it first stopped: its epochs end there, so
+ *  usage after it stays on this machine (C5-1). */
+export function markStopped(ctx: Ctx, lid: string): void {
+  ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=COALESCE(stopped_at, ?) WHERE local_id=?").run(nowIso(), lid);
+  const row = ctx.db.prepare("SELECT stopped_at FROM shares WHERE local_id=?").get(lid) as { stopped_at: string } | undefined;
+  if (row) endEpochs(ctx.db, lid, row.stopped_at);
+}
+
 export function deleteHistory(ctx: Ctx, lid: string): void {
   const share = getShare(ctx, lid);
   if (!share) throw new Error("session was never shared");
   tx(ctx.db, () => {
-    ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=COALESCE(stopped_at, ?) WHERE local_id=?").run(nowIso(), lid);
+    markStopped(ctx, lid);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM latches WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM holds WHERE local_id=?").run(lid);
@@ -243,6 +257,7 @@ function endShare(ctx: Ctx, lid: string, why: string, noticeId: string, text: st
   const latched = ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid);
   tx(ctx.db, () => {
     ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=?, error=? WHERE local_id=?").run(at, why, lid);
+    endEpochs(ctx.db, lid, at);
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch')").run(lid);
     addNotice(ctx, lid, noticeId, `${text}${latched ? ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.` : ""}`);
@@ -313,9 +328,14 @@ export function noticeWorkspacesAdded(ctx: Ctx, me: MeFile, added: { id: string;
       notify(ctx, s.local_id, `workspace_back_${w.id}_${at}`, `Align: this machine can reach ${name} in Align again. To share this session there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`);
     }
     const since = new Date(Date.now() - 3_600_000).toISOString();
+    // A session this pass recorded first started with it (its own SessionStart spooled it and started the pass): it
+    // starts out with the workspace in reach, so it is not told (cycle 5).
+    const fresh = new Date(ctx.passStartedAt ?? Date.now()).toISOString();
     const recent = ctx.db
-      .prepare("SELECT s.local_id FROM sessions s LEFT JOIN shares h ON h.local_id=s.local_id WHERE COALESCE(s.last_active, s.created_at) >= ? AND (h.local_id IS NULL OR h.state IN ('stopped','error'))")
-      .all(since) as { local_id: string }[];
+      .prepare(
+        "SELECT s.local_id FROM sessions s LEFT JOIN shares h ON h.local_id=s.local_id WHERE COALESCE(s.last_active, s.created_at) >= ? AND s.created_at < ? AND (h.local_id IS NULL OR h.state IN ('stopped','error'))",
+      )
+      .all(since, fresh) as { local_id: string }[];
     for (const { local_id: lid } of recent) {
       if (told.has(lid)) continue;
       told.add(lid);

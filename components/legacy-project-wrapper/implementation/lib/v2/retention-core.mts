@@ -36,6 +36,7 @@ export const EVENT_MONTHS = 13;
 export const CLOSED_ASK_MONTHS = 13;
 export const VALUE_REPORT_MONTHS = 13;
 export const REQUEST_MONTHS = 13;
+export const DELETED_SESSION_MONTHS = 13;
 export const RETENTION_INTERVAL_MS = 24 * 3600 * 1000;
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -202,6 +203,7 @@ export interface RetentionCounts {
   asks_deleted: number;
   value_reports_deleted: number;
   requests_deleted: number;
+  deleted_session_markers_deleted: number;
 }
 
 interface StepOptions {
@@ -294,6 +296,10 @@ const STEPS: ((db: Sql, now: Date, c: RetentionCounts, o: StepOptions) => void)[
   (db, now, c) => {
     c.value_reports_deleted += db.run("DELETE FROM v2_value_reports WHERE updated_at < ?", monthsBefore(now, VALUE_REPORT_MONTHS));
   },
+  // 10. The markers deleted sessions leave (lib/v2/sessions.ts deleteSession) keep 13 months.
+  (db, now, c) => {
+    if (tableExists(db, "v2_deleted_sessions")) c.deleted_session_markers_deleted += db.run("DELETE FROM v2_deleted_sessions WHERE deleted_at < ?", monthsBefore(now, DELETED_SESSION_MONTHS));
+  },
 ];
 
 const ROLLBACK = Symbol("dry run");
@@ -326,6 +332,7 @@ export async function runRetention(
     asks_deleted: 0,
     value_reports_deleted: 0,
     requests_deleted: 0,
+    deleted_session_markers_deleted: 0,
   };
   if (dryRun) {
     try {

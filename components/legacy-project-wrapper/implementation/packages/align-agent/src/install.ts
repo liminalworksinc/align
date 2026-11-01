@@ -119,6 +119,35 @@ function backupsOf(file: string): string[] {
 
 const jsonText = (value: unknown) => JSON.stringify(value, null, 2) + "\n";
 
+/** JSON with keys sorted and an empty `hooks` object left out: the same content whatever its order or layout. */
+function canonical(value: unknown): string {
+  const norm = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(norm) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, norm((v as Record<string, unknown>)[k])])) : v;
+  const top = { ...(value as Record<string, unknown>) };
+  if (top.hooks && typeof top.hooks === "object" && !Object.keys(top.hooks).length) delete top.hooks;
+  return JSON.stringify(norm(top));
+}
+
+/**
+ * Write `doc` (a file with Align's handlers taken out) back to `file`. When a backup Align made on install holds no
+ * Align handler and the same content, its bytes are written instead, so the user's file comes back byte for byte, its
+ * own layout and indentation included (cycle 5); otherwise it is written as JSON with two-space indents.
+ */
+function writeRestored(file: string, doc: Record<string, unknown>, backups: string[], home: string): void {
+  const want = canonical(doc);
+  for (const b of [...backups].sort()) {
+    try {
+      const text = fs.readFileSync(b, "utf8");
+      const v = text.trim() ? (JSON.parse(text) as Record<string, unknown>) : {};
+      if (!v || typeof v !== "object" || Array.isArray(v) || stripHooks(v.hooks as Record<string, unknown>, home)) continue;
+      if (canonical(v) === want) return writeFileAtomic(file, fs.readFileSync(b), fs.existsSync(file) ? fs.statSync(file).mode & 0o777 : 0o600);
+    } catch {
+      /* not a usable backup */
+    }
+  }
+  writeJsonFile(file, doc);
+}
+
 function readJsonFile(file: string): Record<string, unknown> {
   if (!fs.existsSync(file)) return {};
   const text = fs.readFileSync(file, "utf8");
@@ -257,7 +286,7 @@ export function uninstall(paths: Paths, opts: { purge: boolean }): string[] {
     const removed = stripHooks(s.hooks as Record<string, unknown>, home);
     if (s.hooks && !Object.keys(s.hooks as object).length) delete s.hooks;
     if (removed) {
-      writeJsonFile(claudeFile, s);
+      writeRestored(claudeFile, s, backupsOf(claudeFile), home);
       lines.push(`Removed ${removed} Align hook handlers from ${claudeFile}.`);
     }
   }
@@ -269,7 +298,7 @@ export function uninstall(paths: Paths, opts: { purge: boolean }): string[] {
       const createdByUs = !!rec?.codex?.hooks_created;
       const empty = Object.keys(d).every((k) => k === "hooks") && !Object.keys((d.hooks as object) || {}).length;
       if (createdByUs && empty) fs.rmSync(codexHooks, { force: true });
-      else writeJsonFile(codexHooks, d);
+      else writeRestored(codexHooks, d, backupsOf(codexHooks), home);
       lines.push(`Removed ${removed} Align hook handlers from ${codexHooks}${createdByUs && empty ? " (file deleted; Align created it)" : ""}.`);
     }
   }

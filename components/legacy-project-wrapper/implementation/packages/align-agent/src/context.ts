@@ -36,6 +36,8 @@ export interface Ctx {
   /** The device this pass or command is bound to (`bindDevice` in api.ts): authenticated calls refuse to go on as
    *  another one. Undefined when unbound. */
   boundDevice?: string | null;
+  /** When the sync pass running in this process started (ms), for what it tells sessions that started with it. */
+  passStartedAt?: number;
 }
 
 export function loadConfig(alignHome: string, env: NodeJS.ProcessEnv = process.env): Config {

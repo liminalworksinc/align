@@ -218,6 +218,8 @@ export function openDb(alignHome: string): Db {
 const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
   // The offset of the server's clock that the epoch's start was sent with: its usage rows go up on the same one (C3-5).
   ["epochs", "wire_offset", "INTEGER"],
+  // When the share the epoch belongs to ended (stopped, signed out, access lost): usage after it stays here (C5-1).
+  ["epochs", "ends_at", "TEXT"],
 ];
 
 function addColumns(db: Db): void {
