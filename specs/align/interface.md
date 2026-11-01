@@ -412,12 +412,23 @@ active one.
 ### Requirement: Invite acceptance page
 
 The `/app/invite/<token>` page SHALL preview an invite with `GET /api/v2/invites/<token>` and let only the invited
-email join with **Join workspace**.
+email join with **Join workspace**. When the invitee has paired devices that are not revoked, it SHALL list them under
+"Your paired devices" (each with a checkbox, its name and "(last seen <time>)", none ticked) with "Tick the devices
+that should reach <workspace> too. Each one picks it up the next time it syncs, without signing in again; its other
+workspaces stay as they are." (owner decision 2026-11-01; `workspaces` "Invites give paired devices the workspace").
+Ticking needs a sign-in from the last 15 minutes: with an older one the boxes are disabled and the page says "Giving a
+device this workspace needs a sign-in from the last 15 minutes. **Sign in again** to choose devices, or join without
+them."; joining without devices needs no recent sign-in.
 
 #### Scenario: Accept an invite
 
 - **WHEN** the signed-in person's email matches the invite and they press **Join workspace**
 - **THEN** the page shows "You are invited to <workspace> as <role>." (adding "and to the team <team> as <team role>." when the invite names a team), posts to `POST /api/v2/invites/<token>/accept` and opens `/app/w/<ws>`
+
+#### Scenario: Accept and give a paired device the workspace
+
+- **WHEN** an invitee with one paired device and one revoked device opens the page with a sign-in 20 minutes old, then with a fresh one ticks the device and presses **Join workspace and give it to this device** (`scripts/test-v2.mjs` "invite (ui, owner decision 2026-11-01) ...")
+- **THEN** the first view lists only the live device, unticked and disabled, with the recent sign-in sentence; the second lists it unticked and enabled; the page posts `{device_ids:[<id>]}`, the device gains the workspace (audited `device.workspace_added`) and the workspace opens; when the server answers 403 `reauth_required` the page shows its message with "You have not joined yet." and **Sign in again**, which comes back to the invite
 
 #### Scenario: Wrong account or unusable link
 
@@ -1319,6 +1330,7 @@ active goal), neutral otherwise.
 - `app/app/account/view.tsx`
 - `app/app/device/view.tsx`
 - `app/app/devices/view.tsx`
+- `app/app/invite/[token]/page.tsx`
 - `app/app/invite/[token]/view.tsx`
 - `app/app/w/[ws]/view.tsx`
 - `app/app/w/[ws]/first-run.tsx`

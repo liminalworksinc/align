@@ -23,7 +23,7 @@ import {
   type Credentials,
 } from "./api.ts";
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
-import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
+import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts";
 import { fetchAsks } from "./asks.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
@@ -269,12 +269,21 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   // and can be shared again from the new pairing.
   if (loadPendingRevoke(ctx.home)) {
     const was = loadPendingRevoke(ctx.home)!.device_id;
-    if ((await revokePending(ctx)) === "revoked") out(`Revoked device ${was}, which this machine signed out of while the server could not be reached; its sessions stopped sharing there.`);
+    const done = await revokePending(ctx);
+    if (done === "revoked") out(`Revoked device ${was}, which this machine signed out of while the server could not be reached; its sessions stopped sharing there.`);
+    if (done === "already") out(`Device ${was}, which this machine signed out of while the server could not be reached, was already revoked (on the web, say); nothing was left to do.`);
   }
   // The new key stays in memory until the device is paired: the pairing in use (key, tokens) is untouched until then,
   // so an aborted, denied or expired login changes nothing (C3-2).
   const key = newDeviceKey();
   const a = await rawRequest(server, "POST", "/api/v2/device/authorize", { body: { device_name: deviceName, public_key: key.publicKeyB64 } });
+  if (a.status === 429) {
+    // The server says how long to wait; an older one only sends Retry-After (or nothing).
+    const secs = Number(a.headers.get("retry-after") ?? a.json?.retry_after);
+    const said = typeof a.json?.message === "string" && /try again in/i.test(a.json.message) ? clean(a.json.message, 300) : "";
+    const wait = Number.isFinite(secs) && secs > 0 ? ` Try again in ${Math.max(1, Math.ceil(secs / 60))} minute${Math.ceil(secs / 60) > 1 ? "s" : ""}.` : " Try again later.";
+    throw new Error(`could not start pairing this device: ${said || `too many device pairings were started recently.${wait}`}`);
+  }
   if (a.status !== 200 || !a.json?.device_code) throw new Error(`device authorize failed: ${a.status} ${a.json?.error || ""}`);
   const { device_code, user_code, verification_uri } = a.json;
   let interval = Number(a.json.interval || 5);
@@ -330,6 +339,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   }
   const me = await refreshMe(ctx);
   out(`Signed in as ${me.user.name} <${me.user.email}> on device ${me.device?.name || deviceName}.`);
+  await mentionOtherDevices(ctx, server);
   for (const w of me.workspaces) {
     out(`  workspace ${w.name} (${w.id}), role ${w.role}`);
     try {
@@ -339,6 +349,24 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     } catch {
       /* feed later */
     }
+  }
+}
+
+/**
+ * After pairing: name the person's other devices that are still paired (not this one), so one left behind (a machine
+ * whose Align home was deleted without `align logout`, say) is seen and can be revoked on the web. Best effort.
+ */
+async function mentionOtherDevices(ctx: Ctx, server: string): Promise<void> {
+  try {
+    const r = await api(ctx, "GET", "/api/v2/devices");
+    if (r.status !== 200 || !Array.isArray(r.json?.devices)) return;
+    const others = (r.json.devices as { name: string; created_at: string; last_seen_at: string | null; revoked_at: string | null; current?: boolean }[]).filter((d) => !d.revoked_at && !d.current);
+    if (!others.length) return;
+    const named = others.slice(0, 5).map((d) => `${clean(d.name, 60)} (last seen ${shortTime(d.last_seen_at || d.created_at)})`);
+    const more = others.length > 5 ? ` and ${others.length - 5} more` : "";
+    out(`Your account has ${others.length} other paired device${others.length === 1 ? "" : "s"}: ${named.join(", ")}${more}. Revoke any you no longer use at ${server}/app/devices.`);
+  } catch {
+    /* only a hint */
   }
 }
 
@@ -489,7 +517,7 @@ async function cmdGoals(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 /** No workspace in this device's reach (its person was removed from the only one, say): not an error (N6). */
-const NO_WORKSPACES = "No workspaces on this device: this device can't reach any Align workspace (you may have been removed from it). Local metering continues; `align login` pairs this machine again with the workspaces you choose.";
+const NO_WORKSPACES = "No workspaces on this device: this device can't reach any Align workspace (you may have been removed from it). Local metering continues. When you accept an invite to a workspace, tick this device there to give it that workspace; `align login` pairs this machine again with the workspaces you choose.";
 
 async function goalFor(ctx: Ctx, wsId: string, ref: string): Promise<Goal | null> {
   if (ref === "none") return null;
@@ -754,7 +782,8 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
   const way = (lid: string) => {
     const ended = endedReason(getShare(ctx, lid));
     if (!ended) return "";
-    return `; sharing ended (${ended === "device_signed_out" ? "this machine signed out" : "the server no longer has the share"}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it`;
+    const why = ended === "device_signed_out" ? "this machine signed out" : ended === "access_lost" ? "this machine no longer has access to its Align workspace" : "the Align server no longer has this session's share";
+    return `; sharing ended (${why}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it`;
   };
   for (const r of rows) {
     const file = fs.existsSync(layout.latch(ctx.home, r.local_id));
@@ -834,8 +863,29 @@ async function cmdInstall(ctx: Ctx, argv: string[]): Promise<void> {
 
 async function cmdUninstall(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { purge: { type: "boolean" } } });
+  // --purge deletes the device key and tokens, so nothing could revoke this device later: revoke it now (and a device
+  // a past logout left waiting), or say where to, so no device is left paired with no machine behind it.
+  if (values.purge) await revokeBeforePurge(ctx);
   ctx.db.close();
   uninstall(ctx.paths, { purge: !!values.purge }).forEach((l) => out(l));
+}
+
+async function revokeBeforePurge(ctx: Ctx): Promise<void> {
+  const c = loadCredentials(ctx.home);
+  const pending = loadPendingRevoke(ctx.home);
+  if (pending && (await revokePending(ctx).catch(() => "pending" as const)) === "pending") {
+    err(`align: could not revoke device ${pending.device_id}, which this machine signed out of earlier; revoke it at ${pending.server_url}/app/devices.`);
+  }
+  if (!c || c.signed_out || !c.refresh_token) return;
+  let revoked = false;
+  try {
+    const r = await api(ctx, "DELETE", "/api/v2/devices/self");
+    revoked = r.status === 204 || r.status === 200 || r.status === 401;
+  } catch (e) {
+    revoked = e instanceof SignedOut;
+  }
+  if (revoked) out(`Revoked this device (${c.device_id}) on ${c.server_url}; its shared sessions stopped sharing there.`);
+  else err(`align: could not reach ${c.server_url} to revoke this device (${c.device_id}). Its key is deleted now, so revoke it at ${c.server_url}/app/devices.`);
 }
 
 async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
@@ -852,11 +902,17 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   if (r.skipped) return out("Another sync is running.");
   out(`Local: ${r.spooled} hook records, ${r.tail.files} files scanned (${r.tail.bytes} new bytes).`);
   if (r.revoked === "revoked") out("Revoked the device this machine signed out of while the server could not be reached; its sessions stopped sharing there.");
+  if (r.revoked === "already") out("The device this machine signed out of while the server could not be reached was already revoked (on the web, say); nothing was left to do.");
   if (!signedIn(ctx.home)) {
     out("Signed out: nothing uploaded.");
-    if (r.revoked === "pending") err(`align: ${r.serverError || "the server could not be reached"}; the device this machine signed out of is revoked at the next sync that reaches it.`);
+    if (r.revoked === "pending") {
+      // The server could not be reached for the revoke: an unreachable server exits 1, as every other pass does.
+      err(`align: ${r.serverError || "the server could not be reached"}; the device this machine signed out of is revoked at the next sync that reaches it.`);
+      process.exitCode = 1;
+    }
     return;
   }
+  for (const w of takeWorkspacesAdded()) out(`This machine can now reach ${clean(w.name, 80)} in Align (given to this device when you accepted an invite). \`align share\`, or \`::align share\` in a session, shares sessions there.`);
   // Nothing got through, so no "0 sent" line above the error (it reads as if the pass had worked).
   if (!r.serverError) out(`Server: ${r.sent} queued calls sent, ${r.uploaded} usage rows uploaded, ${r.directives} directives, ${outboxDepth(ctx)} still queued.`);
   if (r.serverError) {

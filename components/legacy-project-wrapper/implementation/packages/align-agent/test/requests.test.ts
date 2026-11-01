@@ -97,7 +97,7 @@ describe("requests", () => {
     // agent does it: Align reports delivery, not declined.
     assert.ok(out.systemMessage.endsWith(`Run \`::align decline ${id}\` if you don't want it, or tell the agent.`), out.systemMessage);
     assert.ok(!out.systemMessage.includes("::align accept"), out.systemMessage);
-    assert.match(out.systemMessage, /unless you decline it by the end of this turn, Align reports it delivered to the agent and not declined \(not that the agent did it\)/);
+    assert.match(out.systemMessage, /needs no answer\. Align reports it delivered to the agent and not declined \(not that the agent did it\) until you decline it, which you can do now or later/);
     assert.doesNotMatch(out.systemMessage, /The agent does this|on its own/);
     const c = out.hookSpecificOutput.additionalContext as string;
     assert.match(c, /^\[Align\] A request from Dana Lee, who can approve goal "Ship the v2 onboarding flow": at the end of the current step, commit your work and summarize where you are for the developer, then continue\./);

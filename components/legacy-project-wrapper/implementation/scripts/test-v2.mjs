@@ -1129,10 +1129,15 @@ try {
   const afterReuse = await call("U1", "GET", "/api/v2/me", { bearer: rr1.json?.access_token });
   const newRefreshDead = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: rr1.json?.refresh_token, ts: ts3, sig: refreshSig(DR, DR.id, rr1.json?.refresh_token ?? "", ts3) } });
   const drRow = withDb((d) => d.prepare("SELECT revoked_at, revoked_reason FROM v2_devices WHERE id = ?").get(DR.id));
+  const ts4 = new Date().toISOString();
+  const badSigRevoked = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: rr1.json?.refresh_token, ts: ts4, sig: refreshSig(D1, DR.id, rr1.json?.refresh_token ?? "", ts4) } });
+  const unknownDevice = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: "dv_aaaaaaaaaaaaaaaaaaaaaaaa", refresh_token: DR.refresh, ts: ts4, sig: refreshSig(DR, "dv_aaaaaaaaaaaaaaaaaaaaaaaa", DR.refresh, ts4) } });
   check(
-    "refresh: reusing an old refresh token revokes the device (new access 401, new refresh 401, revoked_reason refresh_reuse)",
-    rr1.status === 200 && rrReuse.status === 401 && afterReuse.status === 401 && newRefreshDead.status === 401 && drRow.revoked_at && drRow.revoked_reason === "refresh_reuse",
-    `${rr1.status} ${rrReuse.status} ${afterReuse.status} ${newRefreshDead.status} ${JSON.stringify(drRow)}`,
+    "refresh: reusing an old refresh token revokes the device (new access 401, new refresh 401, revoked_reason refresh_reuse); a correctly signed refresh of the revoked device says why (reason refresh_reuse), a badly signed one says nothing more, and an unknown device (only deleting an account deletes devices) gets reason unknown_device",
+    rr1.status === 200 && rrReuse.status === 401 && afterReuse.status === 401 && newRefreshDead.status === 401 && drRow.revoked_at && drRow.revoked_reason === "refresh_reuse" &&
+      newRefreshDead.json?.error === "invalid_grant" && newRefreshDead.json?.reason === "refresh_reuse" &&
+      badSigRevoked.status === 401 && badSigRevoked.json?.reason === undefined && unknownDevice.status === 401 && unknownDevice.json?.error === "invalid_grant" && unknownDevice.json?.reason === "unknown_device",
+    `${rr1.status} ${rrReuse.status} ${afterReuse.status} ${newRefreshDead.text} ${JSON.stringify(drRow)} ${badSigRevoked.text} ${unknownDevice.text}`,
   );
   D1.access = r2.json.access_token;
   D1.refresh = r2.json.refresh_token;
@@ -2244,8 +2249,64 @@ try {
   const u6Gone = await call("U6", "GET", `/api/v2/workspaces/${A}`, { cookie: U6.cookie });
   check("members: a viewer leaves (DELETE their own id) -> 204, then the workspace is 404 for them", leave6.status === 204 && u6Gone.status === 404, `${leave6.status} ${leave6.text} ${u6Gone.status}`);
   const inv5b = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: U5.email, role: "member" } });
-  const rejoin = await call("U5", "POST", `/api/v2/invites/${inv5b.json?.token}/accept`, { cookie: U5.cookie, body: {} });
-  check("members: a removed person can be invited back", inv5b.status === 201 && rejoin.status === 200, `${inv5b.status} ${rejoin.text}`);
+  // Re-invite (owner decision 2026-11-01): the accept page lists the person's own paired devices that are not revoked,
+  // and accepting may give the ones they tick this workspace again (D5 lost it when U5 was removed).
+  const tok5b = inv5b.json?.token;
+  const D5old = insertDevice(U5.id, "U5's old laptop");
+  withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), D5old.id));
+  const prev5b = await call("U5", "GET", `/api/v2/invites/${tok5b}`, { cookie: U5.cookie });
+  const prev5bOther = await call("U2", "GET", `/api/v2/invites/${tok5b}`, { cookie: U2.cookie });
+  const d5Seen = withDb((d) => d.prepare("SELECT last_seen_at FROM v2_devices WHERE id = ?").get(D5.id)).last_seen_at;
+  check(
+    "re-invite: the invite preview lists the invitee's own paired devices that are not revoked ({id, name, last_seen_at}; a revoked one and other people's are left out); someone else opening the link gets no devices",
+    prev5b.status === 200 && JSON.stringify(prev5b.json?.devices) === JSON.stringify([{ id: D5.id, name: "U5's laptop", last_seen_at: d5Seen }]) && prev5bOther.status === 200 && prev5bOther.json?.email_matches === false && prev5bOther.json?.devices?.length === 0,
+    `${prev5b.text} ${prev5bOther.text}`,
+  );
+  const accept5 = (u, device_ids) => call(u.who, "POST", `/api/v2/invites/${tok5b}/accept`, { cookie: u.cookie, body: device_ids ? { device_ids } : {} });
+  const dirs5Before = await call("U5", "GET", "/api/v2/directives?cursor=0", { bearer: D5.access });
+  const accOthers = await accept5(U5, [D5.id, D2.id]);
+  const accRevoked = await accept5(U5, [D5old.id]);
+  const accUnknown = await accept5(U5, ["dv_aaaaaaaaaaaaaaaaaaaaaaaa"]);
+  const accBadId = await accept5(U5, ["not an id"]);
+  const U5stale = await staleOf(U5);
+  const accStale = await accept5(U5stale, [D5.id]);
+  const out5 = withDb((d) => ({
+    member: d.prepare("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?").get(A, U5.id) ?? null,
+    grants: d.prepare("SELECT COUNT(*) AS n FROM v2_device_grants WHERE ws_id = ? AND device_id IN (?, ?)").get(A, D5.id, D5old.id).n,
+    d2: d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ? ORDER BY ws_id").all(D2.id).map((r) => r.ws_id).join(),
+  }));
+  check(
+    "re-invite: accepting with another person's device -> 404, with a revoked or unknown device -> 404, with a malformed id -> 400, with a device and a sign-in older than 15 minutes -> 403 reauth_required (\"Sign in again to give a device this workspace. ...\"); each joins nothing and grants nothing",
+    accOthers.status === 404 && accRevoked.status === 404 && accUnknown.status === 404 && accBadId.status === 400 &&
+      accStale.status === 403 && accStale.json?.error === "reauth_required" && accStale.json?.message === "Sign in again to give a device this workspace. This needs a sign-in from the last 15 minutes." &&
+      out5.member === null && out5.grants === 0 && out5.d2 === A && dirs5Before.json?.workspaces?.length === 0,
+    `${accOthers.status} ${accRevoked.status} ${accUnknown.status} ${accBadId.status} ${accStale.text} ${JSON.stringify(out5)} ${dirs5Before.text}`,
+  );
+  const rejoin = await accept5(U5, [D5.id]);
+  const d5MeBack = await call("U5", "GET", "/api/v2/me", { bearer: D5.access });
+  const dirs5After = await call("U5", "GET", "/api/v2/directives?cursor=0", { bearer: D5.access });
+  const aud5 = ((await call("U1", "GET", `/api/v2/workspaces/${A}/audit`, { cookie: U1.cookie })).json?.audit ?? []).filter((r) => r.action === "device.workspace_added");
+  const reshare5 = await put(D5, S5);
+  const s5Row = withDb((d) => d.prepare("SELECT state, ended_reason, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(A, S5));
+  check(
+    "members: a removed person can be invited back; accepting with their own device ticked (a recent sign-in) gives it the workspace again ({..., device_ids}): its /me lists it, the directives answer's `workspaces` names it, the workspace's audit records device.workspace_added (the person as actor, the device as object), and the device shares the session the removal ended again (shared, no ended_reason)",
+    inv5b.status === 201 && rejoin.status === 200 && JSON.stringify(rejoin.json?.device_ids) === JSON.stringify([D5.id]) &&
+      d5MeBack.json?.workspaces?.map((w) => w.id).join() === A && JSON.stringify(dirs5After.json?.workspaces) === JSON.stringify([A]) &&
+      aud5.length === 1 && aud5[0].actor?.id === U5.id && aud5[0].object_id === D5.id &&
+      reshare5.status === 200 && s5Row?.state === "shared" && s5Row.ended_reason === null && s5Row.device_id === D5.id,
+    `${inv5b.status} ${rejoin.text} ${d5MeBack.text} ${dirs5After.text} ${JSON.stringify(aud5)} ${reshare5.text} ${JSON.stringify(s5Row)}`,
+  );
+  // The same flow for someone joining a workspace for the first time who already has a paired device.
+  const invU2B = await call("U4", "POST", `/api/v2/workspaces/${B}/invites`, { cookie: U4.cookie, body: { email: U2.email, role: "member" } });
+  const prevU2B = await call("U2", "GET", `/api/v2/invites/${invU2B.json?.token}`, { cookie: U2.cookie });
+  const accU2B = await call("U2", "POST", `/api/v2/invites/${invU2B.json?.token}/accept`, { cookie: U2.cookie, body: { device_ids: [D2.id] } });
+  const d2Me = await call("U2", "GET", "/api/v2/me", { bearer: D2.access });
+  check(
+    "invites: someone joining a workspace for the first time is offered their paired devices too; the device they tick reaches the new workspace and keeps the one it had",
+    invU2B.status === 201 && prevU2B.json?.devices?.some((d) => d.id === D2.id) && accU2B.status === 200 && JSON.stringify(accU2B.json?.device_ids) === JSON.stringify([D2.id]) &&
+      d2Me.json?.workspaces?.map((w) => w.id).sort().join() === [A, B].sort().join(),
+    `${invU2B.status} ${prevU2B.text} ${accU2B.text} ${d2Me.text}`,
+  );
   const invW = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "withdrawn@example.test", role: "member" } });
   await call("U1", "DELETE", `/api/v2/workspaces/${A}/invites/${invW.json.id}`, { cookie: U1.cookie });
 
@@ -2493,8 +2554,22 @@ try {
 
   // -- the device authorize limit (10 per hour per client), last so earlier pairings aren't affected --
   let limited = 0;
-  for (let i = 0; i < 12; i++) if ((await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "x", public_key: k1.pub } })).status === 429) limited++;
-  check("device: authorize is limited to 10 per hour per client (then 429)", limited > 0, `${limited}`);
+  let refusedPairing = null;
+  for (let i = 0; i < 12; i++) {
+    const r = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "x", public_key: k1.pub } });
+    if (r.status === 429) {
+      limited++;
+      refusedPairing = r;
+    }
+  }
+  const pairWait = Number(refusedPairing?.headers.get("retry-after"));
+  check(
+    "device: authorize is limited to 10 per hour per client (then 429 rate_limited saying how long to wait, and that in Mode L it counts every pairing on this computer: \"Align on this computer has started 10 device pairings in the last hour, ... Try again in <n> minutes, or restart Align to clear it.\", with retry_after and Retry-After in seconds)",
+    limited > 0 && refusedPairing?.json?.error === "rate_limited" &&
+      /^Align on this computer has started 10 device pairings in the last hour, its limit for everyone who pairs here\. Try again in \d+ minutes?, or restart Align to clear it\.$/.test(refusedPairing?.json?.message ?? "") &&
+      pairWait > 0 && pairWait <= 3600 && refusedPairing.json.retry_after === pairWait,
+    `${limited} ${refusedPairing?.text} ${pairWait}`,
+  );
 
   // -- the web UI renders: pages need a session, then load --
   const pagePaths = ["/app", "/app/account", "/app/device", "/app/devices", `/app/w/${A}`, `/app/w/${A}/goals`, `/app/w/${A}/goals/${G1.id}`, `/app/w/${A}/people`, `/app/w/${A}/sessions`, `/app/w/${A}/alignments`, `/app/w/${A}/requests`, `/app/w/${A}/spend`, `/app/w/${A}/apps`, `/app/invite/${"x".repeat(43)}`];
@@ -6160,6 +6235,36 @@ try {
           JSON.stringify(outsiderUi).slice(0, 300),
         );
 
+        // Owner decision 2026-11-01: an invite's accept page lists the invitee's paired devices that are not revoked
+        // (name, last seen), none ticked; ticking needs a recent sign-in; joining with one ticked gives it the workspace.
+        const IW = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite devices" } })).json?.id;
+        const ivD = await call("FO", "POST", `/api/v2/workspaces/${IW}/invites`, { cookie: FO.cookie, body: { email: FE.email, role: "member" } });
+        const feDev = insertDevice(FE.id, "Fen's laptop");
+        const feOld = insertDevice(FE.id, "Fen's old laptop");
+        withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), feOld.id));
+        const boxesOf = (pg) => pg.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", boxes: [...document.querySelectorAll('main input[type="checkbox"]')].map((b) => ({ checked: b.checked, disabled: b.disabled })) }));
+        ageSession(FE.cookie, 20);
+        const pI = await as(FE);
+        await open(pI, `/app/invite/${ivD.json?.token}`);
+        const staleInv = await boxesOf(pI);
+        ageSession(FE.cookie, 0);
+        await open(pI, `/app/invite/${ivD.json?.token}`);
+        const freshInv = await boxesOf(pI);
+        await pI.click('main input[type="checkbox"]');
+        await pI.waitForFunction(() => [...document.querySelectorAll("main button")].some((b) => b.textContent?.trim() === "Join workspace and give it to this device"), { timeout: 5000 }).catch(() => undefined);
+        await press(pI, "main", "Join workspace and give it to this device");
+        await pI.waitForFunction((ws) => location.pathname === `/app/w/${ws}`, { timeout: 15000 }, IW).catch(() => undefined);
+        const feGrant = withDb((d) => d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ?").all(feDev.id).map((r) => r.ws_id).join());
+        const feAudit = withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND action = 'device.workspace_added' AND object_id = ?").all(IW, feDev.id).map((r) => r.actor_id).join());
+        check(
+          "invite (ui, owner decision 2026-11-01): the accept page lists the invitee's paired device that is not revoked with when it was last seen (not the revoked one), unticked; with a sign-in older than 15 minutes the box is disabled and the page says ticking needs a recent sign-in; with a fresh one ticking it and pressing \"Join workspace and give it to this device\" joins, gives that device the workspace (audited device.workspace_added) and opens the workspace",
+          ivD.status === 201 && /Fen's laptop\s+\(last seen /.test(staleInv.text) && !staleInv.text.includes("Fen's old laptop") &&
+            JSON.stringify(staleInv.boxes) === JSON.stringify([{ checked: false, disabled: true }]) && staleInv.text.includes("Giving a device this workspace needs a sign-in from the last 15 minutes.") &&
+            JSON.stringify(freshInv.boxes) === JSON.stringify([{ checked: false, disabled: false }]) && !freshInv.text.includes("needs a sign-in from the last 15 minutes") &&
+            feGrant === IW && feAudit === FE.id && new URL(pI.url()).pathname === `/app/w/${IW}`,
+          `${ivD.status} ${JSON.stringify(staleInv).slice(0, 500)} ${JSON.stringify(freshInv).slice(0, 300)} ${feGrant} ${feAudit} ${pI.url()}`,
+        );
+
         // B6 and B7: every button and select is a 44 px tap target at 390, and nothing scrolls sideways at 320.
         const phone = await as(FA, 390, 844);
         const short = [];
@@ -7086,6 +7191,8 @@ try {
     const named2Before = named2();
     const del2 = await call("R2", "DELETE", "/api/v2/me", { cookie: r2.cookie, body: { email: r2.email } });
     const d2Me = await call("R2", "GET", "/api/v2/me", { bearer: D2.access });
+    const d2Ts = new Date().toISOString();
+    const d2Refresh = await call("R2", "POST", "/api/v2/device/refresh", { body: { device_id: D2.id, refresh_token: D2.refresh, ts: d2Ts, sig: refreshSig(D2, D2.id, D2.refresh, d2Ts) } });
     const g2Seen = (await ws(r1, "GET", W1, `/goals/${G2.id}`)).json?.goal;
     const crSeen = (await ws(r1, "GET", W1, `/goals/${G1.id}/change-requests/${cr.json?.id}`)).json;
     const crReq = (crSeen?.change_request ?? crSeen)?.requester;
@@ -7100,8 +7207,8 @@ try {
     );
     const w1Audit = (await ws(r1, "GET", W1, "/audit")).json?.audit ?? [];
     check(
-      "account deletion: a member's goals, change requests and session spend stay for the others as \"Former member #1\" (no device on the session); their device is unpaired; no row anywhere holds their id or email; the workspace audit shows member.account_deleted by the former member",
-      del2.status === 204 && d2Me.status === 401 && g2Seen?.owner?.id === "fm_1" && g2Seen.owner.name === "Former member #1" && crReq?.name === "Former member #1" && spend1?.total?.requests === 6 && s2Row?.user_id === "fm_1" && s2Row.device_id === null && Object.keys(r2Left).length === 0 && w1Audit.some((a) => a.action === "member.account_deleted" && a.actor?.name === "Former member #1"),
+      "account deletion: a member's goals, change requests and session spend stay for the others as \"Former member #1\" (no device on the session); their device is unpaired (its refresh: 401 invalid_grant, reason unknown_device, so it can say its account was deleted); no row anywhere holds their id or email; the workspace audit shows member.account_deleted by the former member",
+      del2.status === 204 && d2Me.status === 401 && d2Refresh.status === 401 && d2Refresh.json?.reason === "unknown_device" && g2Seen?.owner?.id === "fm_1" && g2Seen.owner.name === "Former member #1" && crReq?.name === "Former member #1" && spend1?.total?.requests === 6 && s2Row?.user_id === "fm_1" && s2Row.device_id === null && Object.keys(r2Left).length === 0 && w1Audit.some((a) => a.action === "member.account_deleted" && a.actor?.name === "Former member #1"),
       `${del2.status} ${d2Me.status} ${JSON.stringify(g2Seen?.owner)} ${JSON.stringify(crReq)} ${spend1?.total?.requests} ${JSON.stringify(s2Row)} ${JSON.stringify(r2Left)}`,
     );
 

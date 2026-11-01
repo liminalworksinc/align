@@ -18,6 +18,8 @@ The agent generates an Ed25519 keypair locally (`~/.align/device_key`, 0600; pub
 `POST /api/v2/device/authorize` (no auth; 10/h per IP)
 → req `{ "device_name": "Sean's MacBook", "public_key": "<b64url 32B>" }`
 → 200 `{ "device_code": "<43+ chars>", "user_code": "BCDF-GHJK", "verification_uri": "<origin>/app/device", "expires_in": 600, "interval": 5 }`
+→ 429 `{ "error": "rate_limited", "message": "... Try again in <n> minutes ...", "retry_after": <s> }` with `Retry-After: <s>`
+  (in Mode L every pairing on the computer counts as one client, and a restart clears the in-memory count)
 
 The user signs in at `/app/device`, types the code, sees device name + request age, ticks workspaces, approves.
 
@@ -29,7 +31,9 @@ The user signs in at `/app/device`, types the code, sees device name + request a
 `POST /api/v2/device/refresh` (proof of possession; rotating; reuse of an old refresh token revokes the device)
 → req `{ "device_id", "refresh_token", "ts": "<ISO>", "sig": "<b64url Ed25519 signature>" }`
    signed message (UTF-8): `align-refresh\n<device_id>\n<sha256hex(refresh_token)>\n<ts>`; ts within ±5 min.
-→ 200 `{ "access_token", "expires_in": 3600, "refresh_token" }` · 401 `{ "error": "invalid_grant" }` · 400
+→ 200 `{ "access_token", "expires_in": 3600, "refresh_token" }` · 401 `{ "error": "invalid_grant", "reason"? }` (`reason`:
+  `unknown_device` for a device the server does not know, which only account deletion causes; for a correctly signed
+  refresh of a revoked device, why it was revoked: `revoked_on_web`, `signed_out_everywhere`, `logout`, `refresh_reuse`) · 400
   `{ "error": "clock_skew", "message", "server_time": "<ISO>" }` when the signature is valid but `ts` is more than 5 min
   off the server's clock: nothing is rotated and the device stays paired; sign again with the server's time.
 
@@ -45,7 +49,13 @@ usage `ts`, receipt `at`, activity and steering `at`) on the server's clock.
 ## Identity and workspaces (device view)
 `GET /api/v2/me` (Bearer or cookie)
 → `{ "user": { "id", "name", "email" }, "device": { "id", "name" } | null, "workspaces": [ { "id", "name", "role": "owner"|"member"|"viewer", "teams": [ { "id", "name", "role": "lead"|"member" } ] } ] }`
-Only workspaces the device was granted (device) or the user belongs to (cookie).
+Only workspaces the device was granted (device) or the user belongs to (cookie). A device gains a workspace when its
+person accepts an invite with it ticked (`POST /api/v2/invites/:token/accept { device_ids }`); the directives answer's
+`workspaces` tells it at its next pass.
+
+`GET /api/v2/devices` (cookie, or Bearer) → `{ "devices": [ { "id", "name", "created_at", "last_seen_at", "revoked_at",
+"revoked_reason", "workspaces": [ { "id", "name" } ], "current"?: bool } ] }`: the person's devices; with a device token
+`current` marks that device (`align login` names the other paired ones).
 
 ## Goals feed
 `GET /api/v2/workspaces/:ws/goals` (Bearer; `If-None-Match` supported → 304)
@@ -125,7 +135,7 @@ plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absen
   `enforced`. A session that binds to a held goal later gets its own `hold` directive.
 - `release`: `"hold": { "goal": { "id", "title"|null }, "released_by": { "id", "name" }, "at" }`: lift that goal's hold.
 
-`GET /api/v2/directives?cursor=<seq>` (Bearer) → `{ "directives": [Directive], "next_cursor": "<seq>" }` (≤100, this device's sessions only).
+`GET /api/v2/directives?cursor=<seq>` (Bearer) → `{ "directives": [Directive], "next_cursor": "<seq>", "workspaces": [ "<ws id>" ] }` (≤100, this device's sessions only; `workspaces`: the ids, sorted, of the workspaces this device reaches now, so it re-reads `/me` when they changed).
 The device moves its cursor to `next_cursor` after each page, also past directives it had already stored.
 There is no push channel: the local agent has no daemon, and each hook-started sync pass fetches by cursor.
 `POST /api/v2/directives/:id/receipts` (Bearer) → req `{ "session_key", "state": "received"|"applied"|"enforced"|"accepted"|"declined", "at", "auto_accepted"?: bool }` → 200 `{ "fresh": bool }`, plus `"request_state": "sent"|"received"|"accepted"|"declined"|"expired"` on a `request` directive (idempotent, ≤2 KB).
@@ -349,7 +359,11 @@ confirm, `409 last_owner` while the only owner of a workspace with other members
 `DELETE .../members/:user[?delete_sessions=1]` (owners remove; anyone leaves with their own id; `409 last_owner`;
 `delete_sessions=1` also deletes the person's shared sessions there now), `GET .../audit` (owners,
 newest 200 `{ at, actor: {id, name}|null, action, object_id }`), `GET/POST .../invites` (`{ email, role, team_id?,
-team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST .../accept`, `POST .../teams`,
+team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token` (→ `{ workspace, role, team, team_role, email_matches,
+invited_email, devices: [ { id, name, last_seen_at } ] }`, the devices only for the invitee: their paired devices that
+are not revoked), `POST .../accept` (`{ device_ids? }`: those of the invitee's devices also get the workspace, audited
+`device.workspace_added`; needs a sign-in from the last 15 minutes when not empty, `403 reauth_required`; another
+person's, a revoked or an unknown device `404`; → `{ workspace_id, role, team_id, device_ids }`), `POST .../teams`,
 `POST .../teams/:team/members`, `DELETE .../teams/:team/members/:user` (the `/pods` paths are aliases), `POST .../goals`
 (`{ title, level?, visibility?, team_id?, measures?, anchors?, depends_on?, limits? }`), `GET .../goals/:goal` (with
 `dependency_choices`: the goal ids a change request from the reader may add as a dependency, `null` when they can't propose;

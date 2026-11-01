@@ -67,7 +67,7 @@ delete their account (every membership ends and their rows become "Former member
 **Device lifecycle.** `POST /api/v2/device/authorize` → the person approves the user code at `/app/device` (with a
 recent sign-in) → the device polls `POST /api/v2/device/token` and receives tokens once → it refreshes with a
 signature → it is revoked by itself, by its owner, by refresh-token reuse, or loses a workspace when its owner leaves
-that workspace.
+that workspace → it gains a workspace when its owner accepts an invite to it and ticks the device on the accept page.
 
 ## Requirements
 
@@ -331,6 +331,7 @@ refuses to start with `ALIGN_TEST_OAUTH_URL` set.
 The server SHALL require a sign-in no older than 15 minutes, and otherwise refuse with 403 `reauth_required` and change
 nothing, for: approving a device on `POST /api/v2/device/approve`; approving an MCP app at `/oauth/authorize`; an
 owner changing a member's role (making someone an owner included) on `POST /api/v2/workspaces/{ws}/members/{user}`;
+giving paired devices a workspace when accepting an invite (`device_ids` on `POST /api/v2/invites/{token}/accept`);
 an owner removing another member; an owner creating an invite with role `owner`; an owner deleting a workspace or
 restoring a deleted one; a person deleting their account (`DELETE /api/v2/me`); adding a passkey (`/api/v2/auth/passkey/generate-register-options` and `/verify-registration`); deleting a passkey;
 linking a Google or GitHub account (`/api/v2/auth/link-social`); and signing out everywhere. Better Auth's own
@@ -871,12 +872,45 @@ days that only the invited email address can accept.
 #### Scenario: Previewing an invite
 
 - **WHEN** a signed-in person calls `GET /api/v2/invites/{token}`
-- **THEN** the response is `{workspace:{id, name}, role, team, team_role, email_matches, invited_email}` (`team` is `{id, name}` or null), or 404 `not_found` for an unknown, accepted, withdrawn or expired token
+- **THEN** the response is `{workspace:{id, name}, role, team, team_role, email_matches, invited_email, devices}` (`team` is `{id, name}` or null; `devices` as "Invites give paired devices the workspace" says), or 404 `not_found` for an unknown, accepted, withdrawn or expired token
 
 #### Scenario: Accepting an invite
 
 - **WHEN** a signed-in person POSTs `/api/v2/invites/{token}/accept`
-- **THEN** they join with the invited role and the response is `{workspace_id, role, team_id}`; another email is 403 `email_mismatch`, an unverified email when hosted 403 `email_unverified`, an existing member 409 `already_member`, and an unknown, accepted or expired token 404 `not_found`
+- **THEN** they join with the invited role and the response is `{workspace_id, role, team_id, device_ids}`; another email is 403 `email_mismatch`, an unverified email when hosted 403 `email_unverified`, an existing member 409 `already_member`, and an unknown, accepted or expired token 404 `not_found`
+
+### Requirement: Invites give paired devices the workspace
+
+Owner decision 2026-11-01 (`docs/decisions/0003-owner-decisions-v2.md`): a device reaches only the workspaces it was
+granted when it was paired, and removing a member deletes their devices' grants for that workspace, so without this a
+re-invited person's devices never reached it again, and `align login` (the only way back) ended their shares in every
+other workspace too. The invite preview SHALL list, only when the signed-in email is the invited one, the person's own
+paired devices that are not revoked as `devices: [{id, name, last_seen_at}]` (`last_seen_at` the device's last use, or
+when it was paired if never used since; most recently seen first; `[]` otherwise). `POST
+/api/v2/invites/{token}/accept` SHALL take an optional `device_ids` (at most 20 device ids, nothing preselected by the
+server) and, in the transaction that adds the membership, grant each of those devices the workspace and write one
+audit row `device.workspace_added` per device in that workspace's audit (the person as actor, the device as object).
+Giving devices a workspace SHALL need a sign-in from the last 15 minutes (403 `reauth_required` with `Sign in again to
+give a device this workspace. This needs a sign-in from the last 15 minutes.`), as approving a device does; joining
+without devices does not. A device that is another person's, revoked or unknown SHALL be 404 `not_found` and a
+malformed id 400, and any refusal SHALL join nothing and grant nothing. The same applies to someone joining a
+workspace for the first time who already has paired devices. A device learns its new workspace at its next pass
+(`local-agent`).
+
+#### Scenario: Re-invited with a device ticked
+
+- **WHEN** a member with a paired device and a shared session is removed, re-invited, and accepts with that device in `device_ids` and a recent sign-in (`scripts/test-v2.mjs` "members: a removed person can be invited back; accepting with their own device ticked ...")
+- **THEN** the preview listed that device (and not a revoked one of theirs), the response's `device_ids` names it, its `GET /api/v2/me` and the directives answer's `workspaces` list the workspace again, the workspace's audit has `device.workspace_added` by them for that device, and the device's `PUT` of the session the removal ended shares it again (`shared`, no `ended_reason`)
+
+#### Scenario: Devices that are not theirs to give
+
+- **WHEN** the invitee accepts with another person's device, a revoked or unknown device id, a malformed id, or a device and a sign-in older than 15 minutes (`scripts/test-v2.mjs` "re-invite: accepting with another person's device -> 404 ...")
+- **THEN** the answers are 404, 404, 400 and 403 `reauth_required`, they are not a member, no device gained the workspace, and someone else opening the invite link sees no devices
+
+#### Scenario: Joining for the first time
+
+- **WHEN** a person with a device paired for one workspace accepts an invite to another with that device ticked (`scripts/test-v2.mjs` "invites: someone joining a workspace for the first time is offered their paired devices too ...")
+- **THEN** the device's `/me` lists both workspaces
 
 ### Requirement: Invites that name a team
 
@@ -1019,7 +1053,8 @@ deletion, agent stop and resume), with actor null only for system actions and th
 deletion, show a former member as `{id:"fm_<n>", name:"Former member #<n>"}`, and serve the newest 200 rows of that
 workspace to workspace owners only on `GET /api/v2/workspaces/{ws}/audit`. Device uploads (sharing a session, opening an
 epoch, usage, activity and steering reports) write no audit row, and device pairing and revocation, passkeys added and deleted, and
-signing out everywhere are recorded without a workspace, so they never appear in a workspace's audit.
+signing out everywhere are recorded without a workspace, so they never appear in a workspace's audit; giving a paired
+device a workspace at an invite (`device.workspace_added`) is recorded in that workspace's audit.
 
 #### Scenario: Reading the audit
 
@@ -1045,7 +1080,7 @@ and `POST /api/v2/device/token` returns the tokens exactly once after approval.
 #### Scenario: Starting a pairing
 
 - **WHEN** the CLI POSTs `/api/v2/device/authorize`
-- **THEN** the response is `{device_code, user_code:"XXXX-XXXX", verification_uri:"<origin>/app/device", expires_in:600, interval:5}`, where the user code uses only the letters `BCDFGHJKLMNPQRSTVWXZ`; more than 10 requests per client per hour get 429 `rate_limited`
+- **THEN** the response is `{device_code, user_code:"XXXX-XXXX", verification_uri:"<origin>/app/device", expires_in:600, interval:5}`, where the user code uses only the letters `BCDFGHJKLMNPQRSTVWXZ`; more than 10 requests per client per hour get 429 `rate_limited` with `retry_after` (seconds, also sent as `Retry-After`) and a message that says how long to wait: in Mode L, where every pairing on the computer is one client, `Align on this computer has started 10 device pairings in the last hour, its limit for everyone who pairs here. Try again in <n> minutes, or restart Align to clear it.`, and when hosted `Too many device pairings were started from this network in the last hour (the limit is 10). Try again in <n> minutes.` (`scripts/test-v2.mjs` "device: authorize is limited to 10 per hour per client ...")
 
 #### Scenario: Polling before and after a decision
 
@@ -1066,7 +1101,12 @@ signature from the paired key, and revoke a device on `DELETE /api/v2/devices/se
 `DELETE /api/v2/devices/{id}` (its owner's browser session). A refresh whose signature is valid but whose `ts` is more
 than 5 minutes off the server's clock SHALL be answered 400 `clock_skew` with the message `This device's clock is <n>
 minutes ahead of|behind the server's` and `server_time`, rotating nothing and leaving the device paired (the window
-is unchanged, so a captured signed message still expires within 5 minutes). Revoking a device, for any reason
+is unchanged, so a captured signed message still expires within 5 minutes). A refused refresh SHALL say why when
+that is safe to say, as `reason` beside `invalid_grant`: `unknown_device` for a device id the server does not know
+(only deleting an account deletes devices), and, for a correctly signed refresh of a revoked device, its revocation
+reason (`revoked_on_web`, `signed_out_everywhere`, `logout`, `refresh_reuse`); a badly signed one gets no `reason`.
+`GET /api/v2/devices` SHALL also answer a device's own token, with the same list plus `current: true` on that device,
+so `align login` can name the person's other paired devices. Revoking a device, for any reason
 (logout, its owner on the web, signing out everywhere, refresh-token reuse), SHALL in the same transaction end each of
 its sessions that is not stopped: close its open epoch, clear its governing goal, set it `stopped` with
 `ended_reason` `device_signed_out`, keeping its history, and expire the request targets still waiting on it.
@@ -1079,7 +1119,7 @@ its sessions that is not stopped: close its open epoch, clear its governing goal
 #### Scenario: Refresh token reuse
 
 - **WHEN** a device presents, with a valid signature, a refresh token that was already rotated
-- **THEN** the server responds 401 `invalid_grant` and revokes the whole device; a bad signature, an expired token or a revoked device also get 401 `invalid_grant`
+- **THEN** the server responds 401 `invalid_grant` and revokes the whole device; a bad signature, an expired token or a revoked device also get 401 `invalid_grant`, a correctly signed refresh of the revoked device with `reason` `refresh_reuse`, a badly signed one with no `reason`, and an unknown device id with `reason` `unknown_device` (`scripts/test-v2.mjs` "refresh: reusing an old refresh token revokes the device ...")
 
 #### Scenario: A device clock that is off
 
@@ -1385,7 +1425,7 @@ they added and their value reports) without their name or email.
 #### Scenario: Delete my account
 
 - **WHEN** a member with goals, a change request, a paired device, shared sessions with usage and a passkey, who once signed out everywhere and dismissed the passkey prompt, and who has an access request and creation codes bound to their email, DELETEs `/api/v2/me` with their email
-- **THEN** the response is 204, their cookie and device tokens are refused with 401, their goals, change requests, sessions, asks (as requester or decider), mentions and value reports show `{id:"fm_<n>", name:"Former member #<n>"}`, their sessions keep their usage but no device, spend totals are unchanged, no row in any table holds their id or email (a used creation code stays, with neither), no rate-limit counter is keyed by their email, each workspace's audit records `member.account_deleted` by the former member, and one audit row with no workspace, actor or object records `account.deleted`
+- **THEN** the response is 204, their cookie and device tokens are refused with 401 (the device's refresh with `reason` `unknown_device`), their goals, change requests, sessions, asks (as requester or decider), mentions and value reports show `{id:"fm_<n>", name:"Former member #<n>"}`, their sessions keep their usage but no device, spend totals are unchanged, no row in any table holds their id or email (a used creation code stays, with neither), no rate-limit counter is keyed by their email, each workspace's audit records `member.account_deleted` by the former member, and one audit row with no workspace, actor or object records `account.deleted`
 
 #### Scenario: Only owner with other members
 

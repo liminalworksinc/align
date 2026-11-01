@@ -1,11 +1,11 @@
-# ADR 0003: Owner Decisions for Align v2 (2026-10-30 and 2026-10-31)
+# ADR 0003: Owner Decisions for Align v2 (2026-10-30 to 2026-11-01)
 
 - Status: Accepted, for review with the founders on LIM-2454
-- Date: 2026-10-30 (decisions 1 to 4), 2026-10-31 (decision 5)
+- Date: 2026-10-30 (decisions 1 to 4), 2026-10-31 (decision 5), 2026-11-01 (decision 6)
 - Decision owner: Sean Nejad, author of PR #37, in the session that built it
 - Where they apply: `specs/align/`, `docs/roadmap/active-work.md`, `CHANGELOG.md`
 
-The spec, the roadmap and the changelog cite "owner decision 2026-10-30" (or 2026-10-31). This record lists
+The spec, the roadmap and the changelog cite "owner decision 2026-10-30" (or 2026-10-31, or 2026-11-01). This record lists
 what each one decided, so a citation can be checked. Founder rulings on LIM-2454 are cited by their
 comment id and are not restated here.
 
@@ -58,3 +58,24 @@ A stop or a new version takes effect at the session's next hook. Cited in `specs
   step from accepting the counter. It never gates approval or launch, and nothing is called verified.
 
 Cited by LAUNCH-001 and LAUNCH-002.
+
+## 6. A re-invited person's devices get the workspace back at invite accept (2026-11-01)
+
+**Before.** A device reaches only the workspaces chosen when it was paired. Removing a member deletes their devices'
+access to that workspace, and accepting a new invite never restored it. The only way back was `align login`, which
+pairs the machine again and so ends the person's shares in their other workspaces too (cycle-3 agent E2E report,
+"Regaining a workspace re-pairs the whole machine").
+
+**Decided.**
+
+- The invite's accept page lists the person's paired devices that are not revoked, with each one's name and when it was
+  last seen, and a checkbox. They tick the devices that get this workspace. Nothing is preselected.
+- Giving a device a workspace there needs a recent sign-in (15 minutes), like approving a device. Joining without
+  devices does not.
+- Each device given the workspace is audited in that workspace as `device.workspace_added`.
+- The device picks the workspace up at its next contact: its `/me` lists it, and it says so once. The developer can then
+  `::align share` a session there, with no new pairing and nothing changed in other workspaces.
+- The same choice is offered to someone joining a workspace for the first time who already has paired devices.
+
+Cited in `specs/align/workspaces.md` ("Invites give paired devices the workspace"), `specs/align/local-agent.md` ("A
+workspace given back at an invite reaches this device") and `specs/align/interface.md` ("Invite acceptance page").

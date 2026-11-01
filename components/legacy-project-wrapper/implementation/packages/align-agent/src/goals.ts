@@ -1,6 +1,6 @@
 import type { Ctx } from "./context.ts";
 import { renderHot, snapshot } from "./hot.ts";
-import { endSharesWithoutAccess } from "./share.ts";
+import { endSharesWithoutAccess, noticeWorkspacesAdded } from "./share.ts";
 import { api, apiOk, HttpError } from "./api.ts";
 import { layout } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
@@ -19,7 +19,21 @@ export async function refreshMe(ctx: Ctx): Promise<MeFile> {
   writeJsonAtomic(layout.me(ctx.home), next);
   // A workspace this device can no longer reach (its person was removed or left): its shares here end now.
   endSharesWithoutAccess(ctx, next);
+  // One this same device could not reach at the last read and can now (given to it when an invite was accepted): said
+  // once, here and in the sessions it matters to. A new pairing's first read says nothing (its login lists them).
+  if (prev && !prev.signed_out && prev.device?.id && prev.device.id === next.device?.id) {
+    const before = new Set(prev.workspaces.map((w) => w.id));
+    const added = next.workspaces.filter((w) => !before.has(w.id));
+    if (added.length) workspacesAdded.push(...noticeWorkspacesAdded(ctx, next, added));
+  }
   return next;
+}
+
+/** Workspaces this process saw added to the device (by refreshMe), for `align sync` to print once. */
+const workspacesAdded: { id: string; name: string }[] = [];
+
+export function takeWorkspacesAdded(): { id: string; name: string }[] {
+  return workspacesAdded.splice(0);
 }
 
 /** Is workspace `ws` still in this device's reach? Asks the server (`/me`), which also ends this machine's shares in

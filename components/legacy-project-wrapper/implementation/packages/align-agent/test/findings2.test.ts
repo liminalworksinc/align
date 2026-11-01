@@ -194,7 +194,7 @@ describe("E2E cycle 2: in-session binds and requests", () => {
     const out = prompt(t, sid, "go");
     assert.equal(
       out.systemMessage,
-      `Align: Dana Lee (approver of "${SHIP.title}") asks: at the end of the current step, commit the work and summarize where things stand. It goes to the agent now as a safe step that needs no answer; unless you decline it by the end of this turn, Align reports it delivered to the agent and not declined (not that the agent did it). Run \`::align decline ${requestShortId(q.id)}\` if you don't want it, or tell the agent.`,
+      `Align: Dana Lee (approver of "${SHIP.title}") asks: at the end of the current step, commit the work and summarize where things stand. It goes to the agent now as a safe step that needs no answer. Align reports it delivered to the agent and not declined (not that the agent did it) until you decline it, which you can do now or later. Run \`::align decline ${requestShortId(q.id)}\` if you don't want it, or tell the agent.`,
     );
   });
 
@@ -588,7 +588,9 @@ describe("E2E cycle 2: sign-out, sharing and workspaces", () => {
     assert.ok(!fs.existsSync(layout.deviceKey(t.home)), "the device key is gone from its usual place");
     assert.match((await runCli(t, ["status"])).stdout, new RegExp(`Revoke: {5}pending for device ${old}, signed out .* the next \`align sync\` or \`align login\` revokes it`));
     const still = await runCli(t, ["sync"]);
-    assert.equal(still.code, 0);
+    // An unreachable server exits 1, signed out or not (cycle 3, section 3b).
+    assert.equal(still.code, 1);
+    assert.match(still.stderr, /the device this machine signed out of is revoked at the next sync that reaches it/);
     assert.ok(fs.existsSync(layout.pendingRevoke(t.home)), "kept while the server is unreachable");
     fake.setOffline(false);
     assert.ok(!fake.devices.get(old)!.revoked);
