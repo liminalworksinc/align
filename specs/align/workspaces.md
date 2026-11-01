@@ -116,9 +116,16 @@ per hour and at most 5 per email address per hour, counted in the database (keye
 address) so that a restart does not reset it, refusing further sends with 429 `rate_limited` and sending nothing. In
 Mode L, where everyone on a small team signs in from the one machine (the server's only client), the limit SHALL be
 the per-address one, with only a machine-wide ceiling of `ALIGN_LOCAL_CODES_PER_HOUR` sends an hour (default 60)
-against a runaway script, so one person's sign-ins never use up another's. A refusal's message SHALL say how long to
+against a runaway script, so one person's sign-ins never use up another's. Sends for the local owner's address
+(`ALIGN_LOCAL_OWNER_EMAIL`, default `owner@align.localhost`), including the server's own send at startup and
+`npm run sign-in-link`, SHALL be outside that ceiling (neither refused by it nor counted toward it), so the local owner
+can always get back in; the per-address limit still applies to them. A refusal's message SHALL say how long to
 wait, from the real retry time (the moment the last full limit has room again, in whole minutes, at least 1): "Too
-many codes were sent. Try again in <n> minutes." ("1 minute" for one), with a `Retry-After` header in seconds.
+many codes were sent. Try again in <n> minutes." ("1 minute" for one), with a `Retry-After` header in seconds. When
+the machine-wide ceiling is what keeps a send waiting longest, the message SHALL say that the whole machine is out of
+codes and what lifts it: "Align on this computer has sent <max> sign-in codes in the last hour, its limit for everyone
+who signs in here. Try again in <n> minutes, or restart Align to clear it (ALIGN_LOCAL_CODES_PER_HOUR sets the
+limit)." (Mode L's counters live in memory, so a restart clears them.)
 
 #### Scenario: Too many codes for one address
 
@@ -135,6 +142,16 @@ many codes were sent. Try again in <n> minutes." ("1 minute" for one), with a `R
 - **WHEN** in Mode L, within an hour, ten people each get a code and three of them get a second one, and then an eleventh person asks for one
 - **THEN** every send is printed, including the fourteenth; only the fourth code for one address within 10 minutes, or a send past the machine-wide ceiling, is refused
 
+#### Scenario: The machine's ceiling
+
+- **WHEN** in Mode L with `ALIGN_LOCAL_CODES_PER_HOUR=16`, 16 codes were sent within an hour for different addresses and someone else asks for one
+- **THEN** the response is 429 `rate_limited` with "Align on this computer has sent 16 sign-in codes in the last hour, its limit for everyone who signs in here. Try again in <n> minutes, or restart Align to clear it (ALIGN_LOCAL_CODES_PER_HOUR sets the limit).", never the per-address words
+
+#### Scenario: The local owner at the ceiling
+
+- **WHEN** the machine-wide ceiling is reached and the local owner runs `npm run sign-in-link`
+- **THEN** the script exits 0 and the server prints a fresh code for the owner, and the next send for anyone else is still refused
+
 #### Scenario: How long to wait
 
 - **WHEN** a fourth code for one address is requested 2 minutes after the first
@@ -144,6 +161,17 @@ many codes were sent. Try again in <n> minutes." ("1 minute" for one), with a `R
 
 - **WHEN** a hosted server sent 3 codes to one address, restarts within the hour, and is then asked for 3 more for that address
 - **THEN** the first two are sent and the third is refused with 429, and the stored counter keys hold no email address
+
+### Requirement: Sign-in refusals are not logged as errors
+
+The server SHALL NOT log a refusal Better Auth answers with a 4xx status (a send limit, a wrong, expired or used-up
+code, a refused account) as an error, in Mode L or hosted: such a refusal is an answer the person reads, not a server
+failure. A 5xx, or an error that is not an API error, SHALL still be logged.
+
+#### Scenario: A send limit in Mode L
+
+- **WHEN** a fourth code is requested for one address within 10 minutes in Mode L, and a send passes the machine-wide ceiling
+- **THEN** both are refused with 429, and the server's output has no `ERROR [Better Auth]` line for either
 
 ### Requirement: Email code delivery when hosted
 

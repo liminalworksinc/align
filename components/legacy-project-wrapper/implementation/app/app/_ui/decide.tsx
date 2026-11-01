@@ -123,15 +123,19 @@ function Choice({ on, title, sub, onPick }: { on: boolean; title: string; sub: s
 }
 
 /** The counter's input: the request's fields pre-filled on the goal as it is now, a required note and an optional
- *  "Accept if…" condition. Its button goes to the confirmation; nothing is sent from here. */
-function CounterInput({ ws, cr, focus, onReview }: { ws: string; cr: ChangeRequest; focus: boolean; onReview: (changes: ChangeFields, note: string, condition: string) => void }) {
-  const g = useApi<{ goal: Goal }>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}`);
+ *  "Accept if…" condition. Its button goes to the confirmation; nothing is sent from here. The request's dependencies
+ *  the counterer can't see stay on it (the server keeps them, C2 N2): the form counts them and says so, and passes the
+ *  count to the confirmation. */
+function CounterInput({ ws, cr, focus, onReview }: { ws: string; cr: ChangeRequest; focus: boolean; onReview: (changes: ChangeFields, note: string, condition: string, hidden: number) => void }) {
+  const g = useApi<{ goal: Goal; hidden_depends_on?: number }>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}`);
   const box = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (g.data && focus) box.current?.querySelector<HTMLElement>("input, textarea, select")?.focus();
   }, [g.data, focus]);
   if (g.loading) return <Loading />;
   if (!g.data) return <Err>{g.error}</Err>;
+  // The request's own count when it changes depends_on, else the goal's.
+  const hidden = cr.diff.hidden_depends_on ? cr.diff.hidden_depends_on.after : (g.data.hidden_depends_on ?? 0);
   return (
     <div ref={box}>
       <p className="mb-2 text-[15px] text-zinc-700">Edit what should change. {cr.requester.name} can accept your suggestion, and then it can be approved.</p>
@@ -140,12 +144,13 @@ function CounterInput({ ws, cr, focus, onReview }: { ws: string; cr: ChangeReque
         goal={g.data.goal}
         start={cr.changes}
         keep={Object.keys(cr.changes) as (keyof ChangeFields)[]}
+        hiddenDeps={hidden}
         noteLabel="Note"
         noteRequired
         withCondition
         sendLabel="Review this decision"
         busy={false}
-        onSend={onReview}
+        onSend={(changes, note, condition) => onReview(changes, note, condition, hidden)}
       />
     </div>
   );
@@ -196,7 +201,7 @@ export function OpenRequest({
   const [condition, setCondition] = useState("");
   const [ifNote, setIfNote] = useState("");
   const [reason, setReason] = useState("");
-  const [counter, setCounter] = useState<{ changes: ChangeFields; note: string; condition: string } | null>(null);
+  const [counter, setCounter] = useState<{ changes: ChangeFields; note: string; condition: string; hidden: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const panel = useRef<HTMLDivElement | null>(null);
@@ -378,7 +383,11 @@ export function OpenRequest({
     }
     if (choice === "counter" && counter) {
       for (const k of (Object.keys(FIELD_LABEL) as (keyof ChangeFields)[]).filter((x) => x in counter.changes))
-        rows.push([`${FIELD_LABEL[k]} would be`, <FieldValue key={k} k={k} v={counter.changes[k]} titles={titles} hidden={k === "depends_on" ? (cr.diff.hidden_depends_on?.before ?? 0) : 0} />]);
+        rows.push([`${FIELD_LABEL[k]} would be`, <FieldValue key={k} k={k} v={counter.changes[k]} titles={titles} hidden={k === "depends_on" ? counter.hidden : 0} />]);
+      if (counter.hidden > 0) {
+        const it = counter.hidden === 1 ? "it" : "them";
+        rows.push(["Kept", `${counter.hidden === 1 ? "A goal you can't see stays a dependency" : `${counter.hidden} goals you can't see stay dependencies`}: your suggestion keeps ${it}, and only someone who can see ${it} can remove ${it}.`]);
+      }
       rows.push(["Your note", counter.note]);
       if (counter.condition) rows.push(["Accept if", counter.condition]);
     }
@@ -581,8 +590,8 @@ export function OpenRequest({
                   ws={ws}
                   cr={cr}
                   focus={step === "input"}
-                  onReview={(changes, cNote, cCond) => {
-                    setCounter({ changes, note: cNote, condition: cCond });
+                  onReview={(changes, cNote, cCond, hidden) => {
+                    setCounter({ changes, note: cNote, condition: cCond, hidden });
                     setErr(null);
                     setStep("confirm");
                   }}

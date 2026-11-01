@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi, when } from "../../../../_ui/kit";
 import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, limitsDraft, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../../_ui/goalform";
 import type { Me } from "../../../../_ui/server";
@@ -20,6 +20,8 @@ interface Detail {
   can_propose: boolean;
   /** How many dependencies the reader can't see (never which); a new version keeps them. */
   hidden_depends_on?: number;
+  /** The goals a change request from the reader may add as a dependency (null when they can't propose). */
+  dependency_choices?: string[] | null;
 }
 
 function NewVersion({ ws, goal, hiddenDeps, onDone }: { ws: string; goal: Goal; hiddenDeps: number; onDone: () => void }) {
@@ -211,28 +213,63 @@ function Tree({ ws, goal, canEdit, hiddenDeps, onDone }: { ws: string; goal: Goa
 }
 
 /** "Propose a change" (when the server says `can_propose`: active goals, not the owner, not a viewer) and the goal's
- *  change requests (everyone who reads it). */
-function ChangeRequests({ ws, goal, me, canPropose, onGoalChanged }: { ws: string; goal: Goal; me: Me; canPropose: boolean; onGoalChanged: () => void }) {
+ *  change requests (everyone who reads it). A decision on a card reloads the list once, then the goal: the list's own
+ *  reload already shows the version its launch made, so that version doesn't reload it again (C2 N3). Only a version
+ *  the list hasn't seen (a new version saved above) reloads it, keeping what is on screen meanwhile (never a remount
+ *  and its "Loading…"). */
+function ChangeRequests({
+  ws,
+  goal,
+  me,
+  canPropose,
+  choices,
+  hiddenDeps,
+  onGoalChanged,
+}: {
+  ws: string;
+  goal: Goal;
+  me: Me;
+  canPropose: boolean;
+  choices: string[] | null;
+  hiddenDeps: number;
+  onGoalChanged: () => void;
+}) {
   const list = useApi<{ change_requests: ChangeRequest[] }>(`/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests`);
   const titles = useGoalTitles(ws);
+  const { reload } = list;
+  // After a decision: the list first, then the goal, once the list has answered.
+  const goalAfterList = useRef(false);
+  const decided = useCallback(() => {
+    goalAfterList.current = true;
+    reload();
+  }, [reload]);
+  useEffect(() => {
+    if (!goalAfterList.current || (!list.data && !list.error)) return;
+    goalAfterList.current = false;
+    onGoalChanged();
+  }, [list.data, list.error, onGoalChanged]);
+  // A goal version the list doesn't reflect yet (its requests carry the goal's version as they read it).
+  const seenVersion = useRef(goal.version);
+  const listVersion = list.data?.change_requests[0]?.goal.version;
+  useEffect(() => {
+    if (seenVersion.current === goal.version) return;
+    seenVersion.current = goal.version;
+    if (listVersion !== undefined && listVersion !== goal.version) reload();
+  }, [goal.version, listVersion, reload]);
   if (!canPropose && !list.data?.change_requests.length) return null;
   return (
     <section id="change-requests">
       <Card title="Change requests">
         {canPropose && (
           <div className="mb-4">
-            <ProposeChange ws={ws} goal={goal} onDone={list.reload} />
+            <ProposeChange ws={ws} goal={goal} choices={choices} hiddenDeps={hiddenDeps} onDone={reload} />
           </div>
         )}
         {list.loading && <Loading />}
         <Err>{list.error}</Err>
         {list.data?.change_requests.length === 0 && <Note>No change requests yet.</Note>}
         {list.data?.change_requests.map((cr) => (
-          <ChangeRequestCard key={`${cr.id}:${cr.revision}:${cr.state}:${cr.goal.version}`} ws={ws} cr={cr} me={me.id} titles={titles} onDone={() => {
-              list.reload();
-              onGoalChanged();
-            }}
-          />
+          <ChangeRequestCard key={`${cr.id}:${cr.revision}:${cr.state}:${cr.goal.version}`} ws={ws} cr={cr} me={me.id} titles={titles} onDone={decided} />
         ))}
       </Card>
     </section>
@@ -290,7 +327,18 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           <GoalActivityCard ws={ws} goal={g} me={me} />
           <AgentsOnGoalCard key={g.version} ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
           {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} onDone={d.reload} />}
-          <ChangeRequests key={`${g.version}:${proposed}`} ws={ws} goal={g} me={me} canPropose={d.data!.can_propose} onGoalChanged={d.reload} />
+          {/* Keyed by limit proposals only (a new request to list): a goal version, a launch's included, reloads the list
+              in place (C2 N3). */}
+          <ChangeRequests
+            key={proposed}
+            ws={ws}
+            goal={g}
+            me={me}
+            canPropose={d.data!.can_propose}
+            choices={d.data!.dependency_choices ?? null}
+            hiddenDeps={d.data!.hidden_depends_on ?? 0}
+            onGoalChanged={d.reload}
+          />
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}
           <Card title="Versions">
             <ul className="text-[14px] text-zinc-600">

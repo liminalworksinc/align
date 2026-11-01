@@ -66,10 +66,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let pass = 0;
 let fail = 0;
+/** A failure's detail: its start and, when long, its end too, so the part that explains a failure is never cut off. */
+const clip = (detail) => {
+  const d = String(detail);
+  return d.length <= 1200 ? d : `${d.slice(0, 600)} … ${d.slice(-600)}`;
+};
 function check(name, ok, detail = "") {
   if (ok) pass++;
   else fail++;
-  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `  ${String(detail).slice(0, 400)}`}`);
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `  ${clip(detail)}`}`);
 }
 
 // ---- HTTP: every response is kept per caller, so the private-goal canary can be checked across all of them ----
@@ -547,18 +552,23 @@ try {
     linkScript.status === 0 && scriptCode && scriptCode !== firstCode && ownerLine.test(signInLine(localDir)) && localRun.stdout().includes(signInLine(localDir).trim()) && !linkScript.stdout.includes(scriptCode) && /printed in the terminal/.test(linkScript.stdout),
     `${linkScript.status} ${linkScript.stdout} ${linkScript.stderr}`,
   );
-  let clientSends = 1; // the script's send; the server's own send for the local owner has no client
+  // The local owner's sends (the server's own at startup, and sign-in-link's) never count toward the machine-wide
+  // ceiling (C2 F1); the owner's address is sent no more codes here than the per-address limit allows (3 in 10 minutes:
+  // startup, the script above, and the script at the ceiling below).
+  let clientSends = 0;
   // A new address in Mode L: the code is printed for any email, and signing in makes the account.
   const anaSend = await sendCode("anon", "Ana@Example.test");
   clientSends++;
-  const ownerSend = await sendCode("anon", "owner@align.localhost");
-  clientSends++;
-  check("email code: the send answer is the same for an address with no account as for one with an account (no disclosure)", anaSend.status === 200 && ownerSend.status === 200 && anaSend.text === ownerSend.text && anaSend.text === '{"success":true}', `${anaSend.status} ${anaSend.text} | ${ownerSend.status} ${ownerSend.text}`);
   const lastCodeFor = (email) => codeIn(stdout.split("\n").filter((l) => l.includes(`?email=${encodeURIComponent(email)}&`)).pop() ?? "");
   const anaCode = lastCodeFor("ana@example.test");
   const anaIn = await codeSignIn("anon", "ana@example.test", anaCode);
   const ana = withDb((d) => d.prepare("SELECT name, emailVerified FROM ba_user WHERE email = ?").get("ana@example.test"));
-  check("accounts: in Mode L a valid code for a new address creates its account (email verified, named from the address) and signs in", anaIn.status === 200 && ana?.emailVerified === 1 && ana?.name === "ana" && cookieOf(anaIn.setCookies).includes("align_v2.session_token"), `${anaIn.status} ${anaIn.text} ${JSON.stringify(ana)}`);
+  check("accounts: in Mode L a valid code for a new address creates its account (email verified, named from the address) and signs in", anaSend.status === 200 && anaIn.status === 200 && ana?.emailVerified === 1 && ana?.name === "ana" && cookieOf(anaIn.setCookies).includes("align_v2.session_token"), `${anaIn.status} ${anaIn.text} ${JSON.stringify(ana)}`);
+  const anaAgain = await sendCode("anon", "ana@example.test");
+  clientSends++;
+  const nobodySend = await sendCode("anon", "nobody@example.test");
+  clientSends++;
+  check("email code: the send answer is the same for an address with no account as for one with an account (no disclosure)", anaAgain.status === 200 && nobodySend.status === 200 && anaAgain.text === nobodySend.text && anaAgain.text === '{"success":true}', `${anaAgain.status} ${anaAgain.text} | ${nobodySend.status} ${nobodySend.text}`);
   // Expired and used-up codes.
   withDb((d) => d.prepare("UPDATE ba_verification SET expiresAt = ? WHERE identifier = ?").run(new Date(Date.now() - 1000).toISOString(), "sign-in-otp-owner@align.localhost"));
   const ownerCode2 = lastCodeFor("owner@align.localhost");
@@ -599,10 +609,35 @@ try {
   const ceilingSecs = Number(pastCeiling.headers.get("retry-after"));
   check(
     `send limits (Mode L, B2): codes are limited per address, not per machine: ${LOCAL_CEILING} sends in an hour for different addresses (more than the hosted 10 per client) are all printed; only a send past ALIGN_LOCAL_CODES_PER_HOUR (${LOCAL_CEILING}) -> 429 with how long to wait (up to an hour), nothing printed`,
-    clientSends + team.length === LOCAL_CEILING && LOCAL_CEILING > 10 && team.every((r) => r.status === 200) && pastCeiling.status === 429 && /^Too many codes were sent\. Try again in \d+ minutes?\.$/.test(pastCeiling.json?.message ?? "") && ceilingSecs > 0 && ceilingSecs <= 3600 &&
+    clientSends + team.length === LOCAL_CEILING && LOCAL_CEILING > 10 && team.every((r) => r.status === 200) && pastCeiling.status === 429 && pastCeiling.json?.code === "rate_limited" && /Try again in \d+ minutes?/.test(pastCeiling.json?.message ?? "") && ceilingSecs > 0 && ceilingSecs <= 3600 &&
       localRun.stdout().length === printedBefore && !signInLine(localDir).includes("c-last"),
     `${team.map((r) => r.status).join(",")} past:${pastCeiling.status} ${pastCeiling.text}`,
   );
+  // ==== fix:c2-web (local) ====
+  // C2 F1: the machine-wide ceiling says it is the whole machine's, in words of its own (never the per-address "Too many
+  // codes were sent"), and what lifts it; the local owner's sign-in-link is never blocked by it.
+  check(
+    "C2 F1: a send past the machine-wide ceiling says so in its own words: \"Align on this computer has sent <n> sign-in codes in the last hour, its limit for everyone who signs in here. Try again in <m> minutes, or restart Align to clear it (ALIGN_LOCAL_CODES_PER_HOUR sets the limit).\"",
+    new RegExp(`^Align on this computer has sent ${LOCAL_CEILING} sign-in codes in the last hour, its limit for everyone who signs in here\\. Try again in \\d+ minutes?, or restart Align to clear it \\(ALIGN_LOCAL_CODES_PER_HOUR sets the limit\\)\\.$`).test(pastCeiling.json?.message ?? "") && !/Too many codes were sent/.test(pastCeiling.json?.message ?? ""),
+    pastCeiling.text,
+  );
+  const ownerAtCeiling = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT), ALIGN_LOCAL_OWNER_EMAIL: "" } });
+  for (let i = 0; i < 20 && !localRun.stdout().includes(signInLine(localDir).trim()); i++) await sleep(100);
+  const stillFull = await sendCode("anon", "c-later@example.test");
+  check(
+    "C2 F1: at the machine-wide ceiling the local owner's npm run sign-in-link still works (exit 0, a fresh owner code printed and in sign-in.txt) and isn't counted: another address is still refused",
+    ownerAtCeiling.status === 0 && ownerLine.test(signInLine(localDir)) && localRun.stdout().includes(signInLine(localDir).trim()) && localRun.stdout().length > printedBefore && stillFull.status === 429,
+    `${ownerAtCeiling.status} ${ownerAtCeiling.stdout} ${ownerAtCeiling.stderr} | ${stillFull.status}`,
+  );
+  // C2 N4: a refusal (the per-address limit, the ceiling, a wrong code, an unknown type) is an answer, not a server
+  // error: Better Auth logs none of them as ERROR.
+  const localLog = localRun.stderr() + localRun.stdout();
+  check(
+    "C2 N4: Mode L logs no limit refusal (or any other refusal this phase made: wrong, expired or used-up codes) as \"ERROR [Better Auth]\"",
+    !/ERROR.*Better Auth/.test(localLog) && !/Too many codes were sent|Align on this computer has sent/.test(localLog),
+    (localLog.match(/.*(?:ERROR.*Better Auth|Too many codes).*/g) ?? []).slice(0, 3).join(" | "),
+  );
+  // ==== end fix:c2-web (local) ====
   const scriptLimited = spawnSync(process.execPath, ["scripts/sign-in-link.mjs"], { cwd: ROOT, encoding: "utf8", env: { ...process.env, PORT: String(PORT) } });
   check("sign-in-link: when the server answers 429 it exits 1 with the server's message, which says how long to wait", scriptLimited.status === 1 && /Too many codes were sent\. Try again in \d+ minutes?\./.test(scriptLimited.stderr), `${scriptLimited.status} ${scriptLimited.stderr}`);
   // -- access requests (PRESEED-002): a public form, stored for the operator; durable limits, 5 per client per hour and
@@ -4013,7 +4048,16 @@ try {
           const afterNotYet = await textOf();
           const v1Feed = (await call("V1", "GET", `/api/v2/workspaces/${W}/goals/${GL2.id}`, { cookie: V1.cookie })).json?.goal?.version;
           await btn("Launch version 2 to agents");
-          await page.waitForFunction(() => document.body.innerText.includes("Launched, agents on v2"), { timeout: 15000 });
+          // The settled state, not the first frame that says launched: "Launched by you", the goal's own "version 2" pill,
+          // and no "Loading…" (a reload in flight) anywhere on the page.
+          await page.waitForFunction(
+            () => {
+              const t = document.body.innerText;
+              const pills = document.querySelector("h1")?.nextElementSibling?.textContent ?? "";
+              return t.includes("Launched, agents on v2") && t.includes("Launched by you") && /version 2/.test(pills) && !t.includes("Loading…");
+            },
+            { timeout: 15000 },
+          );
           const afterLaunch = await textOf();
           const v2Feed = (await call("V1", "GET", `/api/v2/workspaces/${W}/goals/${GL2.id}`, { cookie: V1.cookie })).json?.goal?.version;
           check(
@@ -6009,6 +6053,300 @@ try {
     } else check("ui (Chrome) available for the web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:web-e2e ====
+
+  // ==== fix:c2-web ====
+  // Regression checks for the cycle-2 web walk (e2e-reports/cycle2/web.md: N1-N5, F1-F6 and the launch flake), on a
+  // workspace of their own. KO owns it. Team Platform: KA (lead; owns the CI goals) and KB (member; has a private goal).
+  // Team Hardware: KH (lead; owns the Hardware-only "Robot firmware"), KA and KB (members). KC joins Platform as a lead
+  // part-way, so Platform's approval set gains someone who can't read Robot firmware.
+  {
+    const kUsers = {};
+    for (const [who, name] of [
+      ["KO", "Kit Owner"],
+      ["KA", "Kim Lead"],
+      ["KB", "Kai Member"],
+      ["KC", "Kat Approver"],
+      ["KH", "Kev Hardware"],
+    ])
+      kUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c2web.example.test`);
+    const { KO, KA, KB, KC, KH } = kUsers;
+    const KW = (await call("KO", "POST", "/api/v2/workspaces", { cookie: KO.cookie, body: { name: "C2 web fix workspace" } })).json?.id;
+    const ka = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${KW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [KA, KB, KC, KH]) {
+      const i = await ka(KO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const KPT = (await ka(KO, "POST", "/teams", { name: "Platform" })).json?.id;
+    const KHT = (await ka(KO, "POST", "/teams", { name: "Hardware" })).json?.id;
+    for (const [t, u, role] of [
+      [KPT, KA, "lead"],
+      [KPT, KB, "member"],
+      [KHT, KH, "lead"],
+      [KHT, KA, "member"],
+      [KHT, KB, "member"],
+    ])
+      await ka(KO, "POST", `/teams/${t}/members`, { user_id: u.id, role });
+    const kGoal = async (u, body) => (await ka(u, "POST", "/goals", body)).json;
+    const KCI = await kGoal(KA, { title: "Cut CI", visibility: "workspace", team_id: KPT });
+    const KCI2 = await kGoal(KA, { title: "Cut CI flakes", visibility: "workspace", team_id: KPT });
+    const KCI3 = await kGoal(KA, { title: "Cut CI cost", visibility: "workspace", team_id: KPT });
+    const KCI4 = await kGoal(KA, { title: "Cut CI queue", visibility: "workspace", team_id: KPT });
+    const KHW = await kGoal(KH, { title: "Robot firmware", visibility: "team", team_id: KHT });
+    const KGV = await kGoal(KH, { title: "Faster builds for everyone", visibility: "workspace" });
+    const KGP = await kGoal(KB, { title: "Kai private prototype", visibility: "private" });
+    const KGL = await kGoal(KA, { title: "Launch notes", visibility: "workspace" });
+    const KGS = await kGoal(KA, { title: "Stale launch", visibility: "workspace" });
+    check("c2 web fix setup: teams Platform and Hardware, the CI goals, a Hardware-only goal, a shared one and a private one", !!KW && !!KPT && !!KHT && [KCI, KCI2, KCI3, KCI4, KHW, KGV, KGP, KGL, KGS].every((g) => !!g?.id), JSON.stringify([KCI, KHW, KGP].map((g) => g?.id ?? g)));
+    const kcrs = (g) => `/goals/${g}/change-requests`;
+    const kAct = (u, g, id, action, body = {}) => ka(u, "POST", `${kcrs(g)}/${id}/${action}`, body);
+    const kRead = (u, g, id) => ka(u, "GET", `${kcrs(g)}/${id}`).then((r) => r.json);
+
+    // -- F5: the goal read says which dependencies a change request from the reader may add --
+    const choicesBefore = (await ka(KB, "GET", `/goals/${KCI.id}`)).json?.dependency_choices;
+    // Before KC leads Platform (the approval set is KA alone, who reads Robot firmware):
+    const crR = (await ka(KB, "POST", kcrs(KCI.id), { base_version: 1, changes: { title: "Cut CI by half" }, reason: "Half is the goal" })).json;
+    const ctrR = await kAct(KA, KCI.id, crR?.id, "counter", { revision: 1, changes: { title: "Cut CI by half", depends_on: [KHW.id] }, note: "Firmware builds count" });
+    const accR = await kAct(KB, KCI.id, crR?.id, "accept_counter", { revision: 2 });
+    const crK = await ka(KB, "POST", kcrs(KCI2.id), { base_version: 1, changes: { title: "Cut CI flakes to zero", depends_on: [KHW.id, KGV.id] }, reason: "Firmware tests flake most" });
+    const crK2 = await ka(KB, "POST", kcrs(KCI4.id), { base_version: 1, changes: { depends_on: [KHW.id] }, reason: "The queue is mostly firmware" });
+    const crN1 = (await ka(KB, "POST", kcrs(KCI3.id), { base_version: 1, changes: { title: "Cut CI cost by a third" }, reason: "Budget" })).json;
+    const kcLead = await ka(KO, "POST", `/teams/${KPT}/members`, { user_id: KC.id, role: "lead" });
+    const choicesAfter = (await ka(KB, "GET", `/goals/${KCI.id}`)).json?.dependency_choices;
+    const ownerChoices = (await ka(KA, "GET", `/goals/${KCI.id}`)).json?.dependency_choices;
+    check(
+      "c2 setup: an approver's counter adds Robot firmware while only KA decides (accepted), and KB's own requests add it; then KC becomes a Platform lead (an approver who can't read it)",
+      ctrR.status === 200 && accR.status === 200 && crK.status === 201 && crK2.status === 201 && !!crN1?.id && [200, 201].includes(kcLead.status),
+      `${ctrR.status} ${ctrR.text.slice(0, 200)} ${accR.status} ${crK.status} ${crK.text.slice(0, 200)} ${crK2.status} ${kcLead.status}`,
+    );
+    check(
+      "C2 F5: GET a goal gives dependency_choices, the goals a change request from the reader may add as a dependency (readable by every member of the goal's effective approval set): never the reader's private goal, and Robot firmware only while nobody deciding is unable to read it; null for the goal's owner",
+      Array.isArray(choicesBefore) && choicesBefore.includes(KHW.id) && choicesBefore.includes(KGV.id) && !choicesBefore.includes(KGP.id) && !choicesBefore.includes(KCI.id) &&
+        Array.isArray(choicesAfter) && !choicesAfter.includes(KHW.id) && choicesAfter.includes(KGV.id) && !choicesAfter.includes(KGP.id) && ownerChoices === null,
+      `${JSON.stringify(choicesBefore)} ${JSON.stringify(choicesAfter)} ${JSON.stringify(ownerChoices)}`,
+    );
+
+    // -- N1: a counter's new dependency must be readable by the requester and by the approval set --
+    const ctrHidden = await kAct(KA, KCI3.id, crN1?.id, "counter", { revision: 1, changes: { title: "Cut CI cost by a third", depends_on: [KHW.id] }, note: "Firmware runners cost most" });
+    const n1After = await kRead(KB, KCI3.id, crN1?.id);
+    check(
+      "C2 N1: a counter adding a dependency the requester can read but an approver (KC) can't -> 409 dependency_not_visible \"Someone who decides on this goal can't see a goal you added as a dependency, so they couldn't see what they approve once it is accepted. …\", naming neither the goal nor the person; the request stays pending at revision 1",
+      ctrHidden.status === 409 && ctrHidden.json?.error === "dependency_not_visible" &&
+        ctrHidden.json?.message === "Someone who decides on this goal can't see a goal you added as a dependency, so they couldn't see what they approve once it is accepted. Remove it from your suggestion, or ask that goal's owner to share it with them first." &&
+        !ctrHidden.text.includes(KHW.title) && !ctrHidden.text.includes(KC.name) && !ctrHidden.text.includes(KHW.id) && n1After?.state === "pending" && n1After.revision === 1,
+      `${ctrHidden.status} ${ctrHidden.text} ${n1After?.state} ${n1After?.revision}`,
+    );
+    const ctrOk = await kAct(KA, KCI3.id, crN1?.id, "counter", { revision: 1, changes: { title: "Cut CI cost by a third", depends_on: [KGV.id] }, note: "Builds first" });
+    check("C2 N1: a counter adding a dependency everyone deciding can read is still recorded (countered, revision 2)", ctrOk.status === 200 && ctrOk.json?.state === "countered" && ctrOk.json.revision === 2, `${ctrOk.status} ${ctrOk.text.slice(0, 200)}`);
+    // The requester rebases a request whose dependency came from KA's counter (accepted while KA alone decided).
+    const bumpCI = await ka(KA, "POST", `/goals/${KCI.id}/versions`, { version: 1, measures: [{ text: "p50 CI minutes", target: "10" }] });
+    const rebR = await kAct(KB, KCI.id, crR?.id, "rebase", { revision: 2, base_version: 2 });
+    check(
+      "C2 N1: the requester's rebase refused for a dependency an approver's counter added says whose suggestion added it (\"…can't see a goal that Kim Lead's suggestion added as a dependency…\"), never \"you added\", and names neither the goal nor who can't see it",
+      bumpCI.status === 201 && rebR.status === 409 && rebR.json?.error === "dependency_not_visible" &&
+        rebR.json?.message === `Someone who decides on this goal can't see a goal that ${KA.name}'s suggestion added as a dependency, so they couldn't see what they approve. Withdraw this request and propose the change again without it, or ask that goal's owner to share it with them first.` &&
+        !/you added/.test(rebR.text) && !rebR.text.includes(KHW.title) && !rebR.text.includes(KC.name),
+      `${bumpCI.status} ${rebR.status} ${rebR.text}`,
+    );
+
+    // -- N2: a counter keeps the request's dependencies its author can't read --
+    const ctrKeep2 = await kAct(KC, KCI4.id, crK2.json?.id, "counter", { revision: 1, changes: { title: "Cut CI queue in half" }, note: "Name the target" });
+    const k2AsKA = await kRead(KA, KCI4.id, crK2.json?.id);
+    const k2AsKC = await kRead(KC, KCI4.id, crK2.json?.id);
+    check(
+      "C2 N2: a counter by an approver who can't read one of the request's dependencies, not restating depends_on, keeps it (the stored revision still depends on Robot firmware; the counterer's read counts it, hidden_depends_on.after 1)",
+      ctrKeep2.status === 200 && JSON.stringify(k2AsKA?.revisions?.[1]?.changes?.depends_on) === JSON.stringify([KHW.id]) && k2AsKA.changes.title === "Cut CI queue in half" && k2AsKC?.diff?.hidden_depends_on?.after === 1 && !JSON.stringify(k2AsKC).includes(KHW.title),
+      `${ctrKeep2.status} ${ctrKeep2.text.slice(0, 200)} ${JSON.stringify(k2AsKA?.revisions?.map((r) => r.changes))} ${JSON.stringify(k2AsKC?.diff?.hidden_depends_on)}`,
+    );
+
+    // -- N5: launch and not yet check the revision they are sent --
+    const crS = (await ka(KB, "POST", kcrs(KGS.id), { base_version: 1, changes: { title: "Stale launch, checked" }, reason: "Check it" })).json;
+    await kAct(KA, KGS.id, crS?.id, "approve", { revision: 1 });
+    const staleLaunch = await kAct(KA, KGS.id, crS?.id, "launch", { revision: 7 });
+    const staleNotYet = await kAct(KA, KGS.id, crS?.id, "not_yet", { revision: 7 });
+    const sAfter = await kRead(KA, KGS.id, crS?.id);
+    check(
+      "C2 N5: launch and not yet with a revision that isn't the request's -> 409 stale_revision, and nothing is recorded (launch still pending, the goal at version 1)",
+      staleLaunch.status === 409 && staleLaunch.json?.error === "stale_revision" && staleNotYet.status === 409 && staleNotYet.json?.error === "stale_revision" && sAfter?.launch === "pending" && sAfter.goal.version === 1,
+      `${staleLaunch.status} ${staleLaunch.text} ${staleNotYet.status} ${sAfter?.launch}`,
+    );
+
+    // -- the browser --
+    const crL = (await ka(KB, "POST", kcrs(KGL.id), { base_version: 1, changes: { title: "Launch notes, shorter" }, reason: "Shorter is better" })).json;
+    const apLaunch = await kAct(KA, KGL.id, crL?.id, "approve", { revision: 1 });
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u, width = 1100, height = 900) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width, height });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const cardText = (pg, id) => pg.evaluate((i) => document.querySelector(`[data-cr="${i}"]`)?.innerText ?? "", id);
+      const press = (pg, scope, label) => pg.evaluate((s, t) => [...document.querySelectorAll(`${s} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      /** Type into the field labelled `label` inside `scope` (replacing what is there), as a person would. */
+      const typeIn = async (pg, scope, label, value) => {
+        const ok = await pg.evaluate(
+          (s, l) => {
+            const f = [...document.querySelectorAll(`${s} label`)].find((x) => x.querySelector("span")?.textContent?.trim() === l)?.querySelector("input, textarea");
+            if (!f) return false;
+            document.querySelectorAll("[data-typing]").forEach((e) => e.removeAttribute("data-typing"));
+            f.setAttribute("data-typing", "1");
+            return true;
+          },
+          scope,
+          label,
+        );
+        if (!ok) return false;
+        await pg.focus("[data-typing]");
+        await pg.$eval("[data-typing]", (el) => el.select());
+        await pg.keyboard.press("Backspace");
+        await pg.type("[data-typing]", value);
+        return true;
+      };
+      try {
+        // N3, N5 and F4: Not yet, then Launch, from the goal page. Every fetch and every "Loading…" in the change-request
+        // section is recorded from the first click.
+        const pA = await as(KA, 1000, 900);
+        await open(pA, `/app/w/${KW}/goals/${KGL.id}`);
+        await pA.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Not yet"), { timeout: 15000 });
+        await pA.evaluate(() => {
+          window.__calls = [];
+          const f = window.fetch;
+          window.fetch = (input, init) => {
+            window.__calls.push({ url: String(input instanceof Request ? input.url : input), method: init?.method ?? "GET", body: typeof init?.body === "string" ? init.body : null });
+            return f(input, init);
+          };
+          window.__loading = 0;
+          new MutationObserver(() => {
+            if ((document.querySelector("#change-requests")?.innerText ?? "").includes("Loading…") || !document.querySelector("#change-requests")) window.__loading++;
+          }).observe(document.body, { childList: true, subtree: true, characterData: true });
+        });
+        const calls = () => pA.evaluate(() => window.__calls);
+        const listPath = `/api/v2/workspaces/${KW}/goals/${KGL.id}/change-requests`;
+        const listGets = (cs) => cs.filter((c) => c.method === "GET" && new URL(c.url, "http://x").pathname === listPath).length;
+        await press(pA, `[data-cr="${crL?.id}"]`, "Not yet");
+        // Waits that time out don't stop the run: each check below then says what it saw.
+        await pA.waitForFunction(() => document.body.innerText.includes("Not launched yet: you decided not yet") && document.body.innerText.includes("Recorded: you decided not yet"), { timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        const afterNotYet = { text: await cardText(pA, crL?.id), calls: await calls(), loading: await pA.evaluate(() => window.__loading) };
+        await pA.evaluate(() => (window.__calls = []));
+        await press(pA, `[data-cr="${crL?.id}"]`, "Launch version 2 to agents");
+        await pA.waitForFunction(
+          () => {
+            const t = document.body.innerText;
+            const pills = document.querySelector("h1")?.nextElementSibling?.textContent ?? "";
+            return t.includes("Launched by you") && t.includes("Recorded: you launched version 2 to agents") && /version 2/.test(pills) && !t.includes("Loading…");
+          },
+          { timeout: 15000 },
+        ).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        const afterLaunch = { text: await cardText(pA, crL?.id), calls: await calls(), loading: await pA.evaluate(() => window.__loading) };
+        const posted = (cs, action) => cs.filter((c) => c.method === "POST" && c.url.endsWith(`/${crL?.id}/${action}`)).map((c) => c.body);
+        check(
+          "C2 N5: Not yet and Launch version 2 to agents post {revision} (the revision on screen), as the interface spec says",
+          JSON.stringify(posted(afterNotYet.calls, "not_yet")) === JSON.stringify([JSON.stringify({ revision: 1 })]) && JSON.stringify(posted(afterLaunch.calls, "launch")) === JSON.stringify([JSON.stringify({ revision: 1 })]),
+          `${JSON.stringify(posted(afterNotYet.calls, "not_yet"))} ${JSON.stringify(posted(afterLaunch.calls, "launch"))}`,
+        );
+        check(
+          "C2 F4: Not yet and Launch each leave a \"Recorded: …\" line like every other decision (\"Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.\", \"Recorded: you launched version 2 to agents. They get it at their next turn.\")",
+          afterNotYet.text.includes("Recorded: you decided not yet. Agents stay on version 1 until someone launches version 2.") && afterLaunch.text.includes("Recorded: you launched version 2 to agents. They get it at their next turn."),
+          `${afterNotYet.text.slice(0, 300)} | ${afterLaunch.text.slice(0, 300)}`,
+        );
+        check(
+          "C2 N3: after Not yet and after Launch the change-request list is fetched once each, in place: no \"Loading…\" and no moment without the list (no remount when the launch moves the goal to version 2)",
+          listGets(afterNotYet.calls) === 1 && listGets(afterLaunch.calls) === 1 && afterNotYet.loading === 0 && afterLaunch.loading === 0 && apLaunch.status === 200,
+          `gets ${listGets(afterNotYet.calls)}/${listGets(afterLaunch.calls)} loading ${afterNotYet.loading}/${afterLaunch.loading} ${afterLaunch.calls.map((c) => `${c.method} ${c.url}`).join(" ")}`,
+        );
+
+        // N2 (ui): KC counters KB's request on Cut CI flakes, which depends on a goal KC can't see.
+        const pC = await as(KC);
+        await open(pC, `/app/w/${KW}/goals/${KCI2.id}`);
+        const kCard = `[data-cr="${crK.json?.id}"]`;
+        await pC.click(`${kCard} [data-decision="Suggest a change"]`);
+        await pC.waitForSelector(`${kCard} [data-decision-input="counter"] form`, { timeout: 15000 });
+        const formText = await pC.evaluate((s) => document.querySelector(`${s} [data-decision-input="counter"]`)?.innerText ?? "", kCard);
+        await typeIn(pC, `${kCard} [data-decision-input="counter"]`, "Goal", "Cut CI flakes by 90%");
+        await typeIn(pC, `${kCard} [data-decision-input="counter"]`, "Note", "Zero is not realistic");
+        await press(pC, `${kCard} [data-decision-input="counter"]`, "Review this decision");
+        await pC.waitForSelector(`${kCard} [data-confirm="counter"]`, { timeout: 15000 });
+        const confirmText = await pC.evaluate((s) => document.querySelector(`${s} [data-confirm="counter"]`)?.innerText ?? "", kCard);
+        await press(pC, `${kCard} [data-confirm="counter"]`, "Confirm: Suggest a change");
+        await pC.waitForFunction((s) => /Recorded: you suggested a change/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, kCard).catch(() => undefined);
+        const kAsKA = await kRead(KA, KCI2.id, crK.json?.id);
+        check(
+          "C2 N2 (ui): the counter form says the request also depends on a goal the counterer can't see and that sending keeps it; the confirmation lists it in \"Depends on would be\" and says it is kept",
+          /Also depends on a goal you can.t see\. Sending keeps it; only someone who can see it can remove it\./.test(formText) &&
+            /Depends on would be\s*Faster builds for everyone, a goal you can.t see/i.test(confirmText) && /Kept\s*A goal you can.t see stays a dependency: your suggestion keeps it, and only someone who can see it can remove it\./i.test(confirmText) && !confirmText.includes(KHW.title),
+          `${formText.slice(0, 600)} || ${confirmText.slice(0, 600)}`,
+        );
+        check(
+          "C2 N2 (ui): the counter sent from that form is stored with the dependency the counterer can't see (revision 2 depends on Faster builds and Robot firmware), and the new title",
+          kAsKA?.state === "countered" && kAsKA.revision === 2 && JSON.stringify([...(kAsKA.revisions?.[1]?.changes?.depends_on ?? [])].sort()) === JSON.stringify([KHW.id, KGV.id].sort()) && kAsKA.changes.title === "Cut CI flakes by 90%",
+          `${kAsKA?.state} ${kAsKA?.revision} ${JSON.stringify(kAsKA?.revisions?.map((r) => r.changes))}`,
+        );
+        // The requester accepts; the goal moves on; their rebase is refused for a dependency they added themselves.
+        await kAct(KB, KCI2.id, crK.json?.id, "accept_counter", { revision: 2 });
+        const bumpCI2 = await ka(KA, "POST", `/goals/${KCI2.id}/versions`, { version: 1, measures: [{ text: "Flaky runs a week", target: "5" }] });
+        const rebK = await kAct(KB, KCI2.id, crK.json?.id, "rebase", { revision: 2, base_version: 2 });
+        check(
+          "C2 N1: a rebase refused for a dependency the requester added themselves (kept through someone's counter) still says \"a goal you added\"",
+          bumpCI2.status === 201 && rebK.status === 409 && rebK.json?.error === "dependency_not_visible" && /^Someone who decides on this goal can't see a goal you added as a dependency/.test(rebK.json?.message ?? ""),
+          `${bumpCI2.status} ${rebK.status} ${rebK.text}`,
+        );
+
+        // F5 (ui): the propose form offers only goals everyone deciding can see, and says some aren't offered.
+        const pB = await as(KB);
+        await open(pB, `/app/w/${KW}/goals/${KCI3.id}`);
+        await press(pB, "#change-requests", "Propose a change");
+        await pB.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 });
+        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const proposeForm = await pB.evaluate(() => document.querySelector("#change-requests form")?.innerText ?? "");
+        check(
+          "C2 F5 (ui): the propose form's Depends on lists the goals everyone deciding can see (Faster builds for everyone), never the proposer's private goal or the Hardware-only one, and says \"2 goals you can see aren't offered: someone who decides on this goal can't see them.\"",
+          proposeForm.includes("Faster builds for everyone") && !proposeForm.includes(KGP.title) && !proposeForm.includes(KHW.title) && proposeForm.includes("2 goals you can see aren't offered: someone who decides on this goal can't see them."),
+          proposeForm.slice(0, 600),
+        );
+
+        // F3: removing someone from a team asks first.
+        const pO = await as(KO);
+        await open(pO, `/app/w/${KW}/people`);
+        const team = `[data-team="${KPT}"]`;
+        const kbRow = (pg) => pg.evaluate((t, n) => [...document.querySelectorAll(`${t} li`)].findIndex((li) => li.innerText.startsWith(n)), team, KB.name);
+        await pO.evaluate((t, n) => [...document.querySelectorAll(`${t} li`)].find((li) => li.innerText.startsWith(n))?.querySelector("button")?.click(), team, KB.name);
+        await pO.waitForSelector(`${team} [data-team-remove="${KB.id}"]`, { timeout: 10000 }).catch(() => undefined);
+        const panel = await pO.evaluate((t, id) => document.querySelector(`${t} [data-team-remove="${id}"]`)?.innerText ?? "", team, KB.id);
+        const stillIn = async () => ((await ka(KO, "GET", "")).json?.teams ?? []).find((t) => t.id === KPT)?.members.some((m) => m.id === KB.id);
+        const inAfterFirst = await stillIn();
+        await press(pO, `${team} [data-team-remove="${KB.id}"]`, "Cancel");
+        await sleep(300);
+        const panelGone = await pO.evaluate((t, id) => !document.querySelector(`${t} [data-team-remove="${id}"]`), team, KB.id);
+        await pO.evaluate((t, n) => [...document.querySelectorAll(`${t} li`)].find((li) => li.innerText.startsWith(n))?.querySelector("button")?.click(), team, KB.name);
+        await pO.waitForSelector(`${team} [data-team-remove="${KB.id}"]`, { timeout: 10000 }).catch(() => undefined);
+        await press(pO, `${team} [data-team-remove="${KB.id}"]`, `Remove ${KB.name}`);
+        await pO.waitForFunction((t, n) => ![...document.querySelectorAll(`${t} li`)].some((li) => li.innerText.startsWith(n)), { timeout: 15000 }, team, KB.name).catch(() => undefined);
+        const inAfterConfirm = await stillIn();
+        check(
+          "C2 F3: Remove on a team member asks first (\"Remove Kai Member from Platform? They stop seeing the goals only Platform's members can see. Their goals, sessions and history stay, and they stay in the workspace.\") and removes nothing; Cancel closes it; Remove <name> removes them",
+          (await kbRow(pO)) === -1 && panel.includes(`Remove ${KB.name} from Platform? They stop seeing the goals only Platform's members can see. Their goals, sessions and history stay, and they stay in the workspace.`) && inAfterFirst === true && panelGone && inAfterConfirm === false,
+          `${panel} | ${inAfterFirst} ${panelGone} ${inAfterConfirm}`,
+        );
+        check("c2 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c2 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c2 web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:c2-web ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));

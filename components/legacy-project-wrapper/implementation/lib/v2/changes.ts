@@ -27,7 +27,11 @@ import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evid
 // A goal that becomes achieved or dropped supersedes every open request on it, and any newer version supersedes the
 // approved requests still waiting for launch (writeGoalVersion does both).
 // A revision may not add a dependency on a goal that someone who must decide on it can't read (409
-// dependency_not_visible): a proposal or rebase is decided by the effective approval set, a counter by the requester.
+// dependency_not_visible): a proposal or rebase is decided by the effective approval set; a counter goes to the
+// requester and then back to that set, so it must be readable by both (C2 N1). A rebase refused for a dependency an
+// approver's counter added says whose suggestion added it, never "you added". A counter keeps the request's
+// dependencies its author can't read, as the goal form does (C2 N2). The propose form offers only the goals the set
+// can read (dependencyChoices, C2 F5).
 // A reader still sees only the dependencies they can read, with the others counted (diff.hidden_depends_on).
 // Everyone who can read the goal can read its requests (viewers too); viewers can't act. A request is its own
 // decision record once approved or rejected.
@@ -96,15 +100,16 @@ const sortedIds = (ids: string[]) => [...ids].sort().join(",");
 
 /** Validate `changes` against the content it would change (the base version): only title, measures, depends_on,
  *  status and limits, each checked like a new goal version (400, 404 for a dependency the caller can't read, 409 cycle,
- *  409 no_change). Keeps only the fields that differ from the base. */
-function changesIn(pp: PolicyPrincipal, goalId: string, base: GoalContent, v: unknown): Changes {
+ *  409 no_change). Keeps only the fields that differ from the base. A depends_on sent keeps the dependencies in
+ *  `keepDepsFrom` (by default the base's) the caller can't read. */
+function changesIn(pp: PolicyPrincipal, goalId: string, base: GoalContent, v: unknown, keepDepsFrom: string[] = base.depends_on): Changes {
   if (!v || typeof v !== "object" || Array.isArray(v)) throw badRequest("changes must be an object with title, measures, depends_on, status or limits");
   const b = v as Body;
   const keys = Object.keys(b);
   if (!keys.length) throw badRequest("changes must name at least one of title, measures, depends_on, status or limits");
   const other = keys.find((k) => !(CHANGE_KEYS as readonly string[]).includes(k));
   if (other) throw badRequest(`changes: ${other} can't be proposed (only title, measures, depends_on, status and limits)`);
-  const next = nextContent(pp, goalId, base, b);
+  const next = nextContent(pp, goalId, base, b, keepDepsFrom);
   const out: Changes = {};
   if (next.title !== base.title) out.title = next.title;
   if (JSON.stringify(next.measures) !== JSON.stringify(base.measures)) out.measures = next.measures;
@@ -116,21 +121,56 @@ function changesIn(pp: PolicyPrincipal, goalId: string, base: GoalContent, v: un
 
 const applied = (base: GoalContent, c: Changes): GoalContent => ({ ...base, ...c });
 
-/** Who must be able to read a dependency a revision adds. A proposal (or a rebase) is decided by the goal's effective
- *  approval set; a counter goes back to the requester, who accepts it or not. */
+/** Who must be able to read a dependency a revision adds, and what the refusal says. A proposal (or a rebase) is
+ *  decided by the goal's effective approval set; a counter goes back to the requester, who accepts it or not, and then
+ *  to that set again. No message names the goal or the person who can't read it. */
 const DEPENDENCY_READERS = {
   proposal: "Someone who decides on this goal can't see a goal you added as a dependency, so they couldn't see what they approve. Remove it, or ask that goal's owner to share it with them first.",
   counter: "The person who asked can't see a goal you added as a dependency, so they couldn't see what they accept. Remove it from your suggestion.",
+  counter_approvers: "Someone who decides on this goal can't see a goal you added as a dependency, so they couldn't see what they approve once it is accepted. Remove it from your suggestion, or ask that goal's owner to share it with them first.",
 } as const;
+/** A rebase refused for a dependency someone else's counter added (the approval set changed since): whose it was. */
+const rebaseRefusedFor = (author: string) =>
+  `Someone who decides on this goal can't see a goal that ${memberName(author)}'s suggestion added as a dependency, so they couldn't see what they approve. Withdraw this request and propose the change again without it, or ask that goal's owner to share it with them first.`;
 
-/** 409 dependency_not_visible when `changes` adds (relative to `base`) a dependency some of `readers` can't read. The
- *  message names neither the goal nor the person. A dependency already on the base version is not added. */
-function assertDependenciesVisible(wsId: string, base: GoalContent, changes: Changes, readers: string[], who: keyof typeof DEPENDENCY_READERS) {
-  const added = (changes.depends_on ?? []).filter((id) => !base.depends_on.includes(id));
-  if (!added.length) return;
+/** The first dependency `changes` adds (one not in `already`) that one of `readers` can't read, or null. */
+function hiddenAddedDependency(wsId: string, already: string[], changes: Changes, readers: string[]): string | null {
+  const added = (changes.depends_on ?? []).filter((id) => !already.includes(id));
+  if (!added.length) return null;
   for (const u of readers) {
-    if (unreadableGoals(memberPrincipal(wsId, u), added).length) throw conflict("dependency_not_visible", DEPENDENCY_READERS[who]);
+    const hidden = unreadableGoals(memberPrincipal(wsId, u), added);
+    if (hidden.length) return hidden[0];
   }
+  return null;
+}
+
+/** 409 dependency_not_visible when `changes` adds (relative to `base`, or to `already` when given) a dependency some
+ *  of `readers` can't read. A dependency already on the base version is not added. */
+function assertDependenciesVisible(wsId: string, base: GoalContent, changes: Changes, readers: string[], who: keyof typeof DEPENDENCY_READERS, already: string[] = base.depends_on) {
+  if (hiddenAddedDependency(wsId, already, changes, readers)) throw conflict("dependency_not_visible", DEPENDENCY_READERS[who]);
+}
+
+/** Who put `dep` on the request: the author of the first revision of the latest unbroken run of revisions whose changes
+ *  depend on it (a rebase keeps it, so it doesn't count as adding it). */
+function dependencyAddedBy(revs: RevisionRow[], dep: string): string | null {
+  let who: string | null = null;
+  for (const v of revs) {
+    if ((JSON.parse(v.changes_json) as Changes).depends_on?.includes(dep)) who ??= v.author_id;
+    else who = null;
+  }
+  return who;
+}
+
+/** The goals a change request from this reader on `goalId` may add as a dependency: the goals they can read that every
+ *  member of the goal's effective approval set (for them as the requester) can read too, so the propose form offers
+ *  only what the server accepts (C2 F5). null when they may not propose (a viewer, the owner, a closed goal). */
+export function dependencyChoices(pp: PolicyPrincipal, goalId: string): string[] | null {
+  const g = visibleGoal(pp, goalId);
+  if (pp.wsRole === "viewer" || g.owner_id === pp.userId || g.status !== "active") return null;
+  const deciders = effectiveSet(g, pp.userId).map((u) => memberPrincipal(pp.wsId, u));
+  return all<GoalRow>("SELECT * FROM v2_goals WHERE ws_id = ? AND id != ? ORDER BY id", pp.wsId, g.id)
+    .filter((d) => canReadGoal(pp, goalObj(d)) && deciders.every((dp) => canReadGoal(dp, goalObj(d))))
+    .map((d) => d.id);
 }
 
 const crRow = (ws: string, id: string) => get<ChangeRequestRow>("SELECT * FROM v2_change_requests WHERE ws_id = ? AND id = ?", ws, id);
@@ -343,8 +383,22 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         const note = str(b, "note", TEXT_MAX);
         const condition = b.condition === undefined || b.condition === null ? null : str(b, "condition", TEXT_MAX);
         const base = versionContentOf(pp.wsId, g.id, r.base_version)!;
-        const countered = changesIn(pp, g.id, base, b.changes);
-        assertDependenciesVisible(pp.wsId, base, countered, [r.requester_id], "counter");
+        // The request's dependencies the counterer can't read stay as the request has them (C2 N2): a form lists only
+        // what its reader can see, so a list without them is not a request to drop them. A counter that doesn't
+        // restate depends_on keeps them too, beside the base's other dependencies.
+        const current = applied(base, changes);
+        const hiddenNow = unreadableGoals(pp, current.depends_on);
+        let sent = b.changes;
+        if (sent && typeof sent === "object" && !Array.isArray(sent) && (sent as Body).depends_on === undefined && sortedIds(hiddenNow) !== sortedIds(unreadableGoals(pp, base.depends_on))) {
+          const hiddenBase = unreadableGoals(pp, base.depends_on);
+          sent = { ...(sent as Body), depends_on: base.depends_on.filter((id) => !hiddenBase.includes(id)) };
+        }
+        const countered = changesIn(pp, g.id, base, sent, current.depends_on);
+        // A dependency already on the request or its base was checked when it was added; one this counter adds must be
+        // readable by the requester, who accepts it, and by the approval set, who then decide on it (C2 N1).
+        const already = [...base.depends_on, ...current.depends_on];
+        assertDependenciesVisible(pp.wsId, base, countered, [r.requester_id], "counter", already);
+        assertDependenciesVisible(pp.wsId, base, countered, effectiveSet(g, r.requester_id), "counter_approvers", already);
         const next = r.revision + 1;
         writeRevision(pp.wsId, g.id, r.id, next, r.base_version, countered, note, me, at, condition);
         run("UPDATE v2_change_requests SET state = 'countered', revision = ?, changes_json = ?, updated_at = ? WHERE id = ?", next, JSON.stringify(countered), at, r.id);
@@ -375,7 +429,13 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         if (baseVersion !== g.version) throw conflict("stale_version", `This goal is at version ${g.version}; reload and try again`);
         // The changes as sent, or the request's own, checked again against the goal as it is now.
         const rebased = changesIn(pp, g.id, contentOf(g), b.changes === undefined ? changes : b.changes);
-        assertDependenciesVisible(pp.wsId, contentOf(g), rebased, effectiveSet(g, r.requester_id), "proposal");
+        const hidden = hiddenAddedDependency(pp.wsId, contentOf(g).depends_on, rebased, effectiveSet(g, r.requester_id));
+        if (hidden) {
+          // The request's own changes, kept: the dependency may have come from an approver's counter, accepted before
+          // the approval set changed. The refusal says whose suggestion it was, never "you added" (C2 N1).
+          const author = b.changes === undefined ? dependencyAddedBy(revisionRows(r.id), hidden) : null;
+          throw conflict("dependency_not_visible", author && author !== r.requester_id ? rebaseRefusedFor(author) : DEPENDENCY_READERS.proposal);
+        }
         const next = r.revision + 1;
         writeRevision(pp.wsId, g.id, r.id, next, g.version, rebased, null, me, at);
         run("UPDATE v2_change_requests SET revision = ?, base_version = ?, changes_json = ?, updated_at = ? WHERE id = ?", next, g.version, JSON.stringify(rebased), at, r.id);

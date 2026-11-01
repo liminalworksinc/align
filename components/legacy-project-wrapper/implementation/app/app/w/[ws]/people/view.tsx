@@ -20,18 +20,27 @@ interface Invite {
 
 const ROLE_LABEL: Record<WsRole, string> = { owner: "Owner", member: "Member", viewer: "Viewer" };
 
+/** What removing `m` from a team ends (a workspace owner still sees every team goal), and what stays. */
+function teamRemoveWords(team: string, m: { name: string; role: TeamRole }, self: boolean, wsOwner: boolean): string {
+  const ends = [!wsOwner && `seeing the goals only ${team}'s members can see`, m.role === "lead" && `deciding on ${team}'s goals`].filter(Boolean);
+  const who = self ? "You" : "They";
+  return `${self ? `Leave ${team}?` : `Remove ${m.name} from ${team}?`} ${ends.length ? `${who} stop ${ends.join(" and ")}. ` : ""}${self ? "Your" : "Their"} goals, sessions and history stay, and ${who.toLowerCase()} stay in the workspace.`;
+}
+
 /** One team: its members and, for a workspace owner or the team's lead, the controls they may use. Only a workspace
- *  owner makes someone a lead, changes a lead's role or removes another lead. */
+ *  owner makes someone a lead, changes a lead's role or removes another lead. Remove asks first, like removing someone
+ *  from the workspace (C2 F3). */
 function TeamMembers({ ws, team, members, owner, me, onDone }: { ws: string; team: WsDetail["teams"][number]; members: WsDetail["members"]; owner: boolean; me: string; onDone: () => void }) {
   const [user, setUser] = useState("");
   const [role, setRole] = useState<TeamRole>("member");
+  const [removing, setRemoving] = useState<string | null>(null);
   const act = useAction();
   const lead = team.my_role === "lead";
   const canManage = owner || lead;
   const outside = members.filter((m) => !team.members.some((x) => x.id === m.id));
   const base = `/api/v2/workspaces/${ws}/teams/${team.id}/members`;
   return (
-    <div className="mb-4 rounded-[12px] border border-zinc-200 p-4">
+    <div className="mb-4 rounded-[12px] border border-zinc-200 p-4" data-team={team.id}>
       <p className="mb-2 text-[16px] text-zinc-900">
         {team.name} {team.my_role && <Pill tone="violet">you: {team.my_role}</Pill>}
       </p>
@@ -52,10 +61,32 @@ function TeamMembers({ ws, team, members, owner, me, onDone }: { ws: string; tea
               ) : (
                 <Pill>{m.role}</Pill>
               )}
-              {(controls || (lead && m.id === me)) && (
-                <button type="button" className="ml-auto text-[14px] text-red-700" onClick={() => void act.run(() => api(`${base}/${m.id}`, { method: "DELETE" }), onDone)}>
+              {(controls || (lead && m.id === me)) && removing !== m.id && (
+                <button type="button" className="ml-auto text-[14px] text-red-700" onClick={() => setRemoving(m.id)}>
                   Remove
                 </button>
+              )}
+              {removing === m.id && (
+                <div className="mt-2 w-full rounded-[10px] border border-red-200 bg-red-50 p-3" role="group" aria-label={`Remove ${m.name} from ${team.name}`} data-team-remove={m.id}>
+                  <p className="mb-2 text-[15px] text-zinc-800">{teamRemoveWords(team.name, m, m.id === me, members.find((x) => x.id === m.id)?.role === "owner")}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Btn
+                      kind="danger"
+                      disabled={act.busy}
+                      onClick={() =>
+                        void act.run(() => api(`${base}/${m.id}`, { method: "DELETE" }), () => {
+                          setRemoving(null);
+                          onDone();
+                        })
+                      }
+                    >
+                      {m.id === me ? `Leave ${team.name}` : `Remove ${m.name}`}
+                    </Btn>
+                    <Btn kind="secondary" onClick={() => setRemoving(null)}>
+                      Cancel
+                    </Btn>
+                  </div>
+                </div>
               )}
             </li>
           );

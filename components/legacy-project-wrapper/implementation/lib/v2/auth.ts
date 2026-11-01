@@ -3,13 +3,13 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { passkey } from "@better-auth/passkey";
 import { betterAuth, type BetterAuthOptions, type BetterAuthPlugin } from "better-auth";
-import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
 import { emailOTP, genericOAuth } from "better-auth/plugins";
 import { config, hostAllowed } from "../config";
 import { clientNet } from "../ratelimit";
 import { captchaPlugin } from "./captcha";
-import { emailSignInEnabled, githubConfigured, googleConfigured, localCodesPerHour, publicOrigin, RECENT_SIGN_IN_MS, sessionMaxDays, testIdpEnabled, testOAuthUrl } from "./config";
+import { emailSignInEnabled, githubConfigured, googleConfigured, localCodesPerHour, localOwnerEmail, publicOrigin, RECENT_SIGN_IN_MS, sessionMaxDays, testIdpEnabled, testOAuthUrl } from "./config";
 import { liveCodeFor } from "./core.mts";
 import { audit, authDb, dbDir, get, LIVE_WS, run, sql, tx } from "./db";
 import { nowIso, rand32 } from "./ids";
@@ -23,8 +23,11 @@ import { sendSignInCode } from "./mail";
 //     the email API settings. 6 digits, 5 minutes, 3 attempts, stored hashed. Sends are limited to 3 per email per
 //     10 minutes and, hosted, 10 per client per hour, 5 per email per hour (durable, keyed by an HMAC of the address)
 //     and 3 per client per minute (Better Auth's limit, durable); in Mode L, where everyone signs in from the one
-//     machine, only a machine-wide ceiling (ALIGN_LOCAL_CODES_PER_HOUR, default 60) adds to the per-email limit. A
-//     refusal says how long to wait, from the limit that frees up last. The send answer never says whether an
+//     machine, only a machine-wide ceiling (ALIGN_LOCAL_CODES_PER_HOUR, default 60) adds to the per-email limit; the
+//     local owner's address (ALIGN_LOCAL_OWNER_EMAIL) is outside that ceiling, so `npm run sign-in-link` always gets
+//     the owner back in. A refusal says how long to wait, from the limit that frees up last, and the ceiling's
+//     refusal says it is the whole machine's (C2 F1). A refusal is an answer, not a server error: Better Auth logs
+//     only 5xx (onAPIError below, C2 N4). The send answer never says whether an
 //     account exists. A code signs in the account with that verified email; a new account is made only for a pending
 //     invite, in Mode L, or (hosted) for an address with a usable creation code bound to it (lib/v2/creation.ts) or
 //     for ALIGN_FIRST_OWNER_EMAIL while the server has no account. When Turnstile is on (lib/v2/captcha.ts), sending
@@ -147,13 +150,21 @@ async function endCappedSessions(ctx: HookCtx) {
   }
 }
 
+const minutes = (waitMs: number) => {
+  const min = Math.max(1, Math.ceil(waitMs / 60_000));
+  return min === 1 ? "1 minute" : `${min} minutes`;
+};
 /** "Too many codes" with the real wait, from the limit that frees up last (whole minutes, at least 1), and Retry-After. */
 export function tooManyCodesMessage(waitMs: number): string {
-  const min = Math.max(1, Math.ceil(waitMs / 60_000));
-  return `Too many codes were sent. Try again in ${min === 1 ? "1 minute" : `${min} minutes`}.`;
+  return `Too many codes were sent. Try again in ${minutes(waitMs)}.`;
 }
-const tooMany = (waitMs: number) =>
-  new APIError("TOO_MANY_REQUESTS", { code: "rate_limited", message: tooManyCodesMessage(waitMs) }, { "Retry-After": String(Math.max(1, Math.ceil(waitMs / 1000))) });
+/** Mode L's machine-wide ceiling: nobody on this machine can get a code until it frees up, so it says so, with what
+ *  lifts it (the limits are in memory, so a restart clears them). */
+export function machineCeilingMessage(waitMs: number, max: number): string {
+  return `Align on this computer has sent ${max} sign-in codes in the last hour, its limit for everyone who signs in here. Try again in ${minutes(waitMs)}, or restart Align to clear it (ALIGN_LOCAL_CODES_PER_HOUR sets the limit).`;
+}
+const tooMany = (waitMs: number, message = tooManyCodesMessage(waitMs)) =>
+  new APIError("TOO_MANY_REQUESTS", { code: "rate_limited", message }, { "Retry-After": String(Math.max(1, Math.ceil(waitMs / 1000))) });
 
 /** Before every Better Auth request (and server-side api call): the absolute session cap, a recent sign-in for adding a
  *  passkey or linking an account, email-code send limits, and the unverified-email refusal. */
@@ -174,12 +185,15 @@ const beforeHook = createAuthMiddleware(async (ctx) => {
     if (body.type !== "sign-in") throw new APIError("BAD_REQUEST", { code: "bad_request", message: "Only sign-in codes are sent" });
     if (!email) return;
     const limits = [{ key: `otp-email:${email}`, max: 3, windowMs: 10 * 60 * 1000 }];
+    let ceiling: { key: string; max: number; windowMs: number } | null = null;
     // A code the server sends itself (the Mode L local owner, an in-process call with no request) has no client.
     if (ctx.request) {
       // Hosted: 10 per client per hour. Mode L has one client (the machine) and everyone on it signs in from there, so
-      // its limit is per address (above) with only a generous machine-wide ceiling against a runaway script.
+      // its limit is per address (above) with only a generous machine-wide ceiling against a runaway script. The local
+      // owner's address is outside the ceiling: its code is printed only in the terminal running Align, and it is how
+      // the owner gets back in (npm run sign-in-link), so a ceiling others used up never locks the owner out.
       if (config().hosted) limits.push({ key: `otp-client:ip:${clientNet(ctx.request.headers.get("fly-client-ip") ?? "unknown")}`, max: 10, windowMs: 60 * 60 * 1000 });
-      else limits.push({ key: "otp-client:local", max: localCodesPerHour(), windowMs: 60 * 60 * 1000 });
+      else if (email !== localOwnerEmail()) limits.push((ceiling = { key: "otp-client:local", max: localCodesPerHour(), windowMs: 60 * 60 * 1000 }));
     }
     // Hosted, also 5 per address per hour, stored so a restart doesn't reset it. Keyed by an HMAC of the address, so
     // the table holds no email. All of these count only if all of them allow the send.
@@ -189,7 +203,11 @@ const beforeHook = createAuthMiddleware(async (ctx) => {
       durableCount(durable);
       return 0;
     });
-    if (wait > 0) throw tooMany(wait);
+    if (wait > 0) {
+      // The machine's ceiling, when it is what keeps this send waiting longest, says so in its own words.
+      const ceilingWait = ceiling ? retryAfterMs([ceiling]) : 0;
+      throw tooMany(wait, ceiling && ceilingWait > 0 && ceilingWait >= wait ? machineCeilingMessage(wait, ceiling.max) : undefined);
+    }
     return;
   }
   if (ctx.path === OTP_SIGN_IN && email && typeof body.otp === "string") {
@@ -390,6 +408,14 @@ export function authOptions(): BetterAuthOptions {
       database: { generateId: ({ model }) => (/user$/.test(model) ? `u_${rand32(15)}` : rand32(20)) },
     },
     logger: { level: "error" },
+    // Better Auth logs every error answer as ERROR, a refusal too (a wrong code, a send limit). Those are answers the
+    // person reads, not failures, so only a server error (5xx, or anything that isn't an API error) is logged.
+    onAPIError: {
+      onError(e, ctx) {
+        if (isAPIError(e) && e.statusCode < 500) return;
+        ctx.logger.error(e instanceof Error ? e.message : "API error", e);
+      },
+    },
   } satisfies BetterAuthOptions;
 }
 

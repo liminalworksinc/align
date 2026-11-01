@@ -716,6 +716,11 @@ send the proposal with
 - **WHEN** a member presses **Propose a change**, edits the pre-filled Goal, measures, limits, Status and "Depends on", writes "Why this change" (required, 1 to 2000 characters) and presses **Send for approval**
 - **THEN** the page posts `{base_version:<current version>, changes:<only the fields that differ>, reason}` and the new request appears in the goal's "Change requests" list as "waiting for approval"; **Send for approval** stays disabled while nothing differs or the reason is empty
 
+#### Scenario: Only dependencies the deciders can see are offered
+
+- **WHEN** a member opens **Propose a change** on a goal whose effective approval set can't read some goals the member can (their private goal, another team's team-only goal)
+- **THEN** "Depends on" offers as new dependencies only the goals in the goal read's `dependency_choices` (the goal's current dependencies stay listed), and says "<n> goals you can see aren't offered: someone who decides on this goal can't see them." ("1 goal you can see isn't offered" for one), so the form never offers what the server would refuse; dependencies on the goal the member can't see read "Also depends on a goal you can't see. Sending keeps it; only someone who can see it can remove it."
+
 #### Scenario: Suggest a limit
 
 - **WHEN** a member who can propose a change presses **Suggest a limit** in the goal's "Limits" card, adds a limit to the editor (pre-filled with the goal's limits), writes "Why this limit" and presses **Send for approval**
@@ -778,7 +783,17 @@ and a closed "Details" disclosure.
 #### Scenario: Approved, not launched
 
 - **WHEN** a request is approved and not launched
-- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}`. A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Rejected by you"), anyone else by name
+- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>"). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1> to agents. They get it at their next turn." or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Rejected by you"), anyone else by name
+
+#### Scenario: The list after a launch
+
+- **WHEN** a person presses **Not yet** or **Launch version <n+1> to agents** (or decides any request) on the goal page
+- **THEN** the "Change requests" list is fetched again once, in place, and the goal is read again after it: the list never shows "Loading…" or disappears, and a goal version the launch itself made does not reload or remount the list again (only a version the list doesn't reflect, such as one saved in the New version form, reloads it, in place)
+
+#### Scenario: Suggest a change keeps dependencies the approver can't see
+
+- **WHEN** an approver chooses **Suggest a change** on a request that depends on a goal they can't see
+- **THEN** the form says "Also depends on a goal you can't see. Sending keeps it; only someone who can see it can remove it.", the confirmation shows it in "Depends on would be" ("…, a goal you can't see") with a "Kept" line "A goal you can't see stays a dependency: your suggestion keeps it, and only someone who can see it can remove it.", and the counter keeps it
 
 #### Scenario: Launched or superseded before launch
 
@@ -929,6 +944,11 @@ teams, and let owners and team leads manage team members, with lead changes rese
 
 - **WHEN** an owner or the team's lead picks a workspace member under "Add someone", a role and presses **Add**
 - **THEN** the page posts `{user_id, role}` to `POST .../teams/<team>/members`; a person can be in several teams, so "Add someone" lists every member not already in this team
+
+#### Scenario: Remove someone from a team
+
+- **WHEN** an owner or the team's lead presses **Remove** next to a team member
+- **THEN** a panel under the person asks first: "Remove <name> from <team>? They stop seeing the goals only <team>'s members can see (for a lead, "and deciding on <team>'s goals"; for a workspace owner, who sees every team goal, neither). Their goals, sessions and history stay, and they stay in the workspace." ("Leave <team>?" … for oneself), with **Remove <name>** (or **Leave <team>**) and **Cancel**; nothing is removed until **Remove <name>**, which calls `DELETE .../teams/<team>/members/<user>`
 
 #### Scenario: Leads are owner-only
 
