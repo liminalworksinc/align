@@ -2312,6 +2312,57 @@ try {
       d2Me.json?.workspaces?.map((w) => w.id).sort().join() === [A, B].sort().join(),
     `${invU2B.status} ${prevU2B.text} ${accU2B.text} ${d2Me.text}`,
   );
+  // E2E-AGENT cycle 5, ADR 0003 section 6: a device can be given a workspace later, on the Devices page, as at an invite.
+  const desk = insertDevice(U5.id, "U5's desk");
+  const desk2 = insertDevice(U5.id, "U5's desk 2");
+  const give = (u, dev, workspace_id, extra = {}) => call(u.who, "POST", `/api/v2/devices/${dev}/workspaces`, { cookie: u.cookie, body: { workspace_id }, ...extra });
+  const U5stale2 = await staleOf(U5);
+  const gStale = await give(U5stale2, desk.id, A);
+  const gOther = await give(U5, D2.id, A);
+  const gNotMember = await give(U5, desk.id, B);
+  const gRevoked = await give(U5, D5old.id, A);
+  const gBadWs = await give(U5, desk.id, "not a workspace");
+  const gBearer = await call("U5", "POST", `/api/v2/devices/${desk.id}/workspaces`, { bearer: D5.access, body: { workspace_id: A } });
+  const deskGrants = () => withDb((d) => d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ?").all(desk.id).map((r) => r.ws_id).join());
+  const refusedGrants = deskGrants();
+  const gOk = await give(U5, desk.id, A);
+  const gAgain = await give(U5, desk.id, A);
+  const deskMe = await call("U5", "GET", "/api/v2/me", { bearer: desk.access });
+  const deskDirs = await call("U5", "GET", "/api/v2/directives?cursor=0", { bearer: desk.access });
+  const audDesk = ((await call("U1", "GET", `/api/v2/workspaces/${A}/audit`, { cookie: U1.cookie })).json?.audit ?? []).filter((r) => r.action === "device.workspace_added" && r.object_id === desk.id);
+  check(
+    "devices (E2E-AGENT cycle 5, ADR 0003 section 6): POST /devices/{id}/workspaces gives one of my live devices a workspace I am a member of, as accepting an invite with it ticked does: 200 {device_id, workspace_id}, its /me and directives answer list it, audited device.workspace_added (me as actor, the device as object); again -> 409 already_granted; a sign-in older than 15 minutes -> 403 reauth_required, another person's or a revoked device -> 404, a workspace I am not a member of -> 404, a malformed workspace id -> 400, a device token -> refused; none of those grants anything",
+    gStale.status === 403 && gStale.json?.error === "reauth_required" && gStale.json?.message === "Sign in again to give a device this workspace. This needs a sign-in from the last 15 minutes." &&
+      gOther.status === 404 && gNotMember.status === 404 && gRevoked.status === 404 && gBadWs.status === 400 && gBearer.status >= 400 && refusedGrants === "" &&
+      gOk.status === 200 && gOk.json?.device_id === desk.id && gOk.json?.workspace_id === A && gAgain.status === 409 && gAgain.json?.error === "already_granted" &&
+      deskMe.json?.workspaces?.map((w) => w.id).join() === A && JSON.stringify(deskDirs.json?.workspaces) === JSON.stringify([A]) && audDesk.length === 1 && audDesk[0].actor?.id === U5.id,
+    `${gStale.text} ${gOther.status} ${gNotMember.status} ${gRevoked.status} ${gBadWs.status} ${gBearer.status} [${refusedGrants}] ${gOk.text} ${gAgain.text} ${deskMe.text} ${deskDirs.text} ${JSON.stringify(audDesk)}`,
+  );
+  if (existsSync(CHROME)) {
+    const { default: puppeteer } = await import("puppeteer-core");
+    const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+    try {
+      const page = await browser.newPage();
+      await page.setCookie(...U5.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      const row = `li[data-device="${desk2.id}"]`;
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, row);
+      const before = await page.$eval(row, (li) => li.textContent);
+      await page.$eval(row, (li) => [...li.querySelectorAll("button")].find((b) => b.textContent === "Give this device the workspace")?.click());
+      const wsName = withDb((d) => d.prepare("SELECT name FROM v2_workspaces WHERE id = ?").get(A).name);
+      await page.waitForFunction((sel, name) => document.querySelector(sel)?.textContent?.includes(`Workspaces: ${name}`), { timeout: 15000 }, row, wsName);
+      const after = await page.$eval(row, (li) => li.textContent);
+      const deskRow = await page.$eval(`li[data-device="${desk.id}"]`, (li) => li.textContent);
+      const granted2 = withDb((d) => d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ?").all(desk2.id).map((r) => r.ws_id).join());
+      check(
+        "ui (Chrome, E2E-AGENT cycle 5): the Devices page names each device with the end of its id (dv_…) and offers a live device the workspaces it lacks; \"Give this device the workspace\" gives it one (it then lists it and offers it no more), and a device that has every workspace of mine is offered none",
+        before.includes(`dv_…${desk2.id.slice(-6)}`) && after.includes(`Workspaces: ${wsName}`) && !after.includes("Give this device the workspace") && granted2 === A && !deskRow.includes("Give this device the workspace"),
+        `${before} | ${after} | ${deskRow} | ${granted2}`,
+      );
+    } finally {
+      await browser.close();
+    }
+  } else check("ui (Chrome) available for the Devices page", false, `no Chrome at ${CHROME}`);
   const invW = await call("U1", "POST", `/api/v2/workspaces/${A}/invites`, { cookie: U1.cookie, body: { email: "withdrawn@example.test", role: "member" } });
   await call("U1", "DELETE", `/api/v2/workspaces/${A}/invites/${invW.json.id}`, { cookie: U1.cookie });
 

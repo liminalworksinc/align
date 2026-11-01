@@ -55,7 +55,13 @@ person accepts an invite with it ticked (`POST /api/v2/invites/:token/accept { d
 
 `GET /api/v2/devices` (cookie, or Bearer) → `{ "devices": [ { "id", "name", "created_at", "last_seen_at", "revoked_at",
 "revoked_reason", "workspaces": [ { "id", "name" } ], "current"?: bool } ] }`: the person's devices; with a device token
-`current` marks that device (`align login` names the other paired ones).
+`current` marks that device (`align login` names the other paired ones). A new device gets a name none of the person's
+live devices has (`<name> (2)`, ... when one has it already).
+
+`POST /api/v2/devices/:id/workspaces` (cookie; a sign-in from the last 15 minutes, else `403 reauth_required`)
+`{ "workspace_id" }` → `{ "device_id", "workspace_id" }`: gives one of my live devices a workspace I am a member of,
+as accepting an invite with it ticked does (audited `device.workspace_added`); the device's next pass picks it up. 404
+for a device or workspace that is not mine, 409 `already_granted`.
 
 ## Goals feed
 `GET /api/v2/workspaces/:ws/goals` (Bearer; `If-None-Match` supported → 304)
@@ -411,7 +417,7 @@ the server couldn't read is `null`; see `lib/v2/home.ts`),
 `GET /api/v2/device/requests/:code`,
 `POST /api/v2/device/approve` (`{ user_code, workspace_ids }`; needs a sign-in from the last 15 minutes, else
 `403 reauth_required`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,
-`DELETE /api/v2/devices/:id`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,
+`DELETE /api/v2/devices/:id`, `POST /api/v2/devices/:id/workspaces`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,
 `__Secure-` prefixed when hosted).
 
 Hosted creation gate (`specs/align/workspaces.md`; Mode L skips it): `POST /api/v2/workspaces` and `.../sample` take

@@ -2,7 +2,7 @@ import { createPublicKey, verify } from "node:crypto";
 import { randomInt } from "node:crypto";
 import { config } from "../config";
 import { all, audit, get, LIVE_WS, run, tx } from "./db";
-import { V2Error, badRequest, notFound } from "./errors";
+import { V2Error, badRequest, conflict, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { retryAfterMs, take, takeAll } from "./limits";
@@ -341,6 +341,24 @@ export function addWorkspaceToDevices(userId: string, wsId: string, deviceIds: s
     audit(wsId, userId, "device.workspace_added", id, at);
   }
   return deviceIds;
+}
+
+/**
+ * Give one of this person's own live devices a workspace they are a member of, later than at an invite (the Devices
+ * page, an extension of owner decision 2026-11-01, ADR 0003 section 6): the same grant and the same
+ * `device.workspace_added` audit row as accepting an invite with the device ticked. 404 for a device that is not theirs
+ * or is revoked, or a workspace they are not a member of; 409 `already_granted` when the device has it already.
+ */
+export async function grantWorkspace(userId: string, deviceId: string, wsId: string) {
+  const at = nowIso();
+  await tx(() => {
+    if (!get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, wsId, userId)) throw notFound();
+    if (get("SELECT 1 AS x FROM v2_device_grants WHERE device_id = ? AND ws_id = ?", deviceId, wsId)) {
+      if (get("SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL", deviceId, userId)) throw conflict("already_granted", "This device already has this workspace");
+    }
+    addWorkspaceToDevices(userId, wsId, [deviceId], at);
+  });
+  return { device_id: deviceId, workspace_id: wsId };
 }
 
 export function deviceOwnedBy(deviceId: string, userId: string): boolean {

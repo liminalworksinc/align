@@ -912,6 +912,26 @@ workspace for the first time who already has paired devices. A device learns its
 - **WHEN** a person with a device paired for one workspace accepts an invite to another with that device ticked (`scripts/test-v2.mjs` "invites: someone joining a workspace for the first time is offered their paired devices too ...")
 - **THEN** the device's `/me` lists both workspaces
 
+### Requirement: Giving a device a workspace later
+
+An extension of owner decision 2026-11-01 (`docs/decisions/0003-owner-decisions-v2.md` section 6, "Invites give paired
+devices the workspace"): a person who accepted an invite without ticking a device, or who pairs a device for one
+workspace and later wants another, SHALL be able to give one of their own live paired devices a workspace they are a
+member of on `POST /api/v2/devices/{id}/workspaces {workspace_id}` (browser session; the Devices page), without
+`align login` (which would end the device's shares in every other workspace) and without being removed and invited
+again. It SHALL make the same grant, with the same audit row `device.workspace_added` in that workspace (the person as
+actor, the device as object), as accepting an invite with the device ticked, need a sign-in from the last 15 minutes
+(403 `reauth_required` with `Sign in again to give a device this workspace. This needs a sign-in from the last 15
+minutes.`), answer `{device_id, workspace_id}`, 409 `already_granted` when the device has it already, 404 for a device
+that is another person's, revoked or unknown or a workspace they are not a member of, and 400 for a malformed
+workspace id, and grant nothing on any refusal. A device token SHALL never do it. The device learns the workspace at
+its next pass, as after an invite (`local-agent`).
+
+#### Scenario: Given on the Devices page
+
+- **WHEN** a member gives one of their devices that lacks it a workspace with a recent sign-in, again, and with a stale sign-in, another person's or a revoked device, a workspace they are not a member of, a malformed workspace id and a device token (`scripts/test-v2.mjs` "devices (E2E-AGENT cycle 5, ADR 0003 section 6) ..."; against the real CLI in `scripts/test-agent-live.mjs` "devices page (ADR 0003 section 6, E2E-AGENT cycle 5) ...")
+- **THEN** the first answers `{device_id, workspace_id}`, the device's `/me` and directives answer list the workspace and the audit has `device.workspace_added` by them; the second is 409 `already_granted`; the others are 403 `reauth_required`, 404, 404, 404, 400 and refused, and grant nothing
+
 ### Requirement: Invites that name a team
 
 The server SHALL accept an optional `team_id` and `team_role` (`lead` or `member`, default `member`) on an invite and,

@@ -24,7 +24,7 @@ screen says "team".
 | `/app` | Your workspaces | A signed-in person | List and create workspaces, restore a deleted one; first run offers the Northstar sample |
 | `/app/account` | Your account | A signed-in person | See the account, link Google or GitHub, manage passkeys, sign out everywhere, delete the account |
 | `/app/device` | Connect a device | A signed-in person (recent sign-in) | Approve the code that `align login` printed |
-| `/app/devices` | Your devices | A signed-in person | List and revoke paired devices |
+| `/app/devices` | Your devices | A signed-in person | List and revoke paired devices, and give one a workspace |
 | `/app/invite/<token>` | Workspace invite | The invited person | Join a workspace (and team) from an invite link |
 | `/app/w/<ws>` | Home | Workspace members | What waits on the person and on others, the active goals, and when connected AI apps last read the goals or connected |
 | `/app/w/<ws>/goals` | Goals tab | Workspace members | Goals the person can read; create a goal |
@@ -397,7 +397,17 @@ when an action there is refused with 403 `reauth_required`.
 ### Requirement: Devices screen
 
 The `/app/devices` page SHALL list the person's paired devices from `GET /api/v2/devices` and let them revoke an
-active one.
+active one. Each row SHALL name the device with the end of its id (`dv_…` and its last 6 characters, as `align login`
+names devices), so two devices of one name are told apart. An active device that does not reach every workspace the
+person is a member of SHALL offer those workspaces in a list with **Give this device the workspace**, which calls
+`POST /api/v2/devices/<id>/workspaces` (`workspaces` "Giving a device a workspace later", an extension of owner decision
+2026-11-01 in `docs/decisions/0003-owner-decisions-v2.md` section 6); a 403 `reauth_required` shows the server's message
+with **Sign in again** (back to `/app/devices`), and a note says the device picks the workspace up at its next sync.
+
+#### Scenario: Give a device a workspace
+
+- **WHEN** a person with a recent sign-in opens the page with a device that lacks one of their workspaces and presses **Give this device the workspace** (`scripts/test-v2.mjs` "ui (Chrome, E2E-AGENT cycle 5): the Devices page names each device ...")
+- **THEN** the row showed the device's `dv_…` tag, now lists the workspace and offers it no more, the device has the grant on the server, and a device that has every workspace of theirs is offered none
 
 #### Scenario: Revoke a device
 
