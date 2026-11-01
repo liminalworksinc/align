@@ -293,7 +293,8 @@ therefore never interleave: whichever takes the lock second acts on what the fir
 signed in as a device the server revoked.
 
 A sync pass, and the flush a CLI command does after queuing calls, SHALL be bound to the device signed in when it
-started: when the credentials on disk belong to another device (or none) at its next call (a login or logout committed
+started: when the credentials on disk belong to another device (or none, or the same device signed out by `align
+logout`; one the server signed out is reported as a sign-out) at its next call (a login or logout committed
 meanwhile), it SHALL stop there, with `align sync` printing `This machine's Align pairing changed during this sync
 (\`align login\` or \`align logout\`), so it stopped there; nothing more was sent as the earlier device. The next sync
 goes on as the device signed in now.` and logging it, and SHALL NOT refresh the new pairing, send queued uploads,
@@ -313,6 +314,11 @@ which.`
 
 - **WHEN** a sync pass's usage upload is held in flight while `align login` pairs a new device and revokes the old one, and the upload is then refused (test `findings4` "an upload held in flight while `align login` replaces the device ...")
 - **THEN** the pass refreshes nothing and sends nothing as the new device, `align sync` says the pairing changed during the sync, and the session has only the one sign-out notice
+
+#### Scenario: A sync cut short by a logout
+
+- **WHEN** a sync pass's directives call is held in flight while `align logout` revokes the device, and the call is then refused (test `findings5` "says the pairing changed during the sync, not ...")
+- **THEN** `align sync` exits 0 printing the pairing-changed line and not `Signed out: nothing uploaded.`, `align.log` has the pairing-changed line, the next `align sync` says `Signed out: nothing uploaded.`, and `align status` still says the machine signed out because `align logout` ran
 
 #### Scenario: A share made while the old device's revoke is in flight
 
@@ -884,7 +890,8 @@ stored, not replays), then `This machine can now reach <workspace> in Align (giv
 invite). ...` once per workspace the pass found added, or `Another sync is running.`; when the pass could not reach the server it SHALL print, instead
 of the `Server:` line, `align: <error>. <n> usage rows and <n> queued calls stay on this machine; the next sync
 retries.` on stderr and exit 1. A pass whose pairing changed under it stops (as "A new pairing replaces the old one only
-once it exists" says) and prints that line after `Local:`.
+once it exists" says) and prints that line after `Local:`, instead of `Signed out: nothing uploaded.` when it was a
+logout.
 
 #### Scenario: Unreachable server
 

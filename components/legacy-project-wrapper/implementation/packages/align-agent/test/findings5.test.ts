@@ -1,10 +1,12 @@
 // Regressions for the cycle-5 agent-side E2E report: usage from turns made while a session's share had ended, uploaded
 // when it was shared again under an epoch that had closed (C5-1); a lost workspace leaving the other one as a hidden,
-// sticky default (C5-2); and the stale "no longer have access" notice told next to "can reach ... again" (C5-3).
+// sticky default (C5-2); the stale "no longer have access" notice told next to "can reach ... again" (C5-3); and an
+// `align sync` cut short by `align logout` saying "Signed out: nothing uploaded." (C5-4).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
+import { loadCredentials } from "../src/api.ts";
 import { sessionKey } from "../src/keys.ts";
 import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
@@ -185,5 +187,31 @@ describe("C5-3: only the newest share-state notice", () => {
     assert.equal((await runCli(t, ["sync", "--hook"])).code, 0);
     const told = prompt(t, A.sid, "still there?", A.cwd);
     assert.equal(told.systemMessage, 'Align: this machine can reach Acme in Align again. To share this session there again, type `::align share` here (it counts toward "Ship the v2 onboarding flow" again).');
+  });
+});
+
+describe("C5-4: `align sync` cut short by `align logout`", () => {
+  test("says the pairing changed during the sync, not \"Signed out: nothing uploaded.\", and logs it", async () => {
+    const { fake, t } = await world();
+    await shared(t);
+    const device = loadCredentials(t.home)!.device_id;
+    let release!: () => void;
+    fake.holdCalls = { match: (m, p) => m === "GET" && p === "/api/v2/directives", release: new Promise<void>((r) => (release = r)), left: 1 };
+    const sync = runCli(t, ["sync"]);
+    await waitFor(() => fake.log.some((l) => l.method === "GET" && l.path === "/api/v2/directives"), 10_000, "the held directives call");
+    const out = await runCli(t, ["logout"]);
+    assert.equal(out.code, 0, out.stderr);
+    assert.ok(fake.devices.get(device)!.revoked);
+    fake.holdCalls = null;
+    release();
+    const r = await sync;
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /This machine's Align pairing changed during this sync \(`align login` or `align logout`\), so it stopped there/);
+    assert.doesNotMatch(r.stdout, /Signed out: nothing uploaded\./);
+    assert.match(fs.readFileSync(path.join(t.home, "logs", "align.log"), "utf8"), /sync: this machine's pairing changed during the pass/);
+    // A sync run signed out says so as before.
+    assert.match((await runCli(t, ["sync"])).stdout, /Signed out: nothing uploaded\./);
+    // The logout's reason stands.
+    assert.match((await runCli(t, ["status"])).stdout, /Identity: {3}signed out \(you ran `align logout`\)/);
   });
 });

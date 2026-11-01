@@ -228,12 +228,13 @@ export function bindDevice(ctx: Ctx, deviceId?: string | null): () => void {
   };
 }
 
-/** Credentials `c` belong to the device `ctx` is bound to (or `ctx` is unbound). Signed out counts as the same device:
- *  a refusal for it is reported as a sign-out, not as a change of pairing. */
+/** Credentials `c` belong to the device `ctx` is bound to (or `ctx` is unbound). Signed out by the server counts as the
+ *  same device: a refusal for it is reported as a sign-out, not as a change of pairing. Signed out by `align logout` does
+ *  not: the pairing it was bound to was ended under it, as a new `align login` would have replaced it (C5-4). */
 function boundTo(ctx: Ctx, c: Credentials | null): boolean {
   if (ctx.boundDevice === undefined) return true;
   if (ctx.boundDevice === null) return !c || !!c.signed_out;
-  return !!c && c.device_id === ctx.boundDevice;
+  return !!c && c.device_id === ctx.boundDevice && !(c.signed_out && c.signed_out_reason === "logout");
 }
 
 /** Whether the credentials on disk are still those of the device `ctx` is bound to (always true when unbound). */

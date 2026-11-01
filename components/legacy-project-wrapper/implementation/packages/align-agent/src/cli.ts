@@ -980,7 +980,8 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   if (r.revoked) revokeLines(r.revoked, "sync").forEach((l) => out(l));
   if (r.aborted) out("This machine's Align pairing changed during this sync (`align login` or `align logout`), so it stopped there; nothing more was sent as the earlier device. The next sync goes on as the device signed in now.");
   if (!signedIn(ctx.home)) {
-    out("Signed out: nothing uploaded.");
+    // Cut short by `align logout`: the line above says so, not that it ran signed out (C5-4).
+    if (!r.aborted) out("Signed out: nothing uploaded.");
     if (r.revoked && revokeState(r.revoked) === "pending") {
       // The server could not be reached for the revoke: an unreachable server exits 1, as every other pass does.
       err(`align: ${r.serverError || "the server could not be reached"}; the device this machine signed out of is revoked at the next sync that reaches it.`);
