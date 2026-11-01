@@ -6461,6 +6461,38 @@ try {
         !launchHidden.text.includes(KHW.title) && !launchHidden.text.includes(KHW.id) && h2After?.launch === "pending" && h2After.goal.version === 1,
       `${launchHidden.status} ${launchHidden.text} ${h2After?.launch} ${h2After?.goal?.version}`,
     );
+    // -- C4-1: the read offers KC neither decision the server refuses, and doesn't queue it for KC (one predicate) --
+    const hAsKC = await kRead(KC, KCI5.id, crH?.id);
+    const hAsKA = await kRead(KA, KCI5.id, crH?.id);
+    const h2AsKC = await kRead(KC, KCI6.id, crH2?.id);
+    const h2AsKA = await kRead(KA, KCI6.id, crH2?.id);
+    check(
+      "C4-1: a decider who can't read a dependency the request adds reads can.approve and can.approve_and_launch false (counter and reject still true), waiting_on_me false and dependency_not_visible = the server's refusal; the approver who can read it reads them true, waiting_on_me true and dependency_not_visible null",
+      hAsKC?.can?.approve === false && hAsKC.can.approve_and_launch === false && hAsKC.can.counter === true && hAsKC.can.reject === true && hAsKC.waiting_on_me === false &&
+        hAsKC.dependency_not_visible === apHidden.json?.message && !hAsKC.dependency_not_visible?.includes(KHW.title) &&
+        hAsKA?.can?.approve === true && hAsKA.can.approve_and_launch === true && hAsKA.waiting_on_me === true && hAsKA.dependency_not_visible === null,
+      `${JSON.stringify(hAsKC?.can)} ${hAsKC?.waiting_on_me} ${hAsKC?.dependency_not_visible} | ${JSON.stringify(hAsKA?.can)} ${hAsKA?.waiting_on_me} ${hAsKA?.dependency_not_visible}`,
+    );
+    check(
+      "C4-1: on an approved change, a launcher who can't read a dependency it adds reads can.launch false (not_yet still true), waiting_on_me false and dependency_not_visible = the launch refusal; the approver who can read it reads can.launch true and waiting_on_me true",
+      h2AsKC?.can?.launch === false && h2AsKC.can.not_yet === true && h2AsKC.waiting_on_me === false && h2AsKC.dependency_not_visible === launchHidden.json?.message &&
+        h2AsKA?.can?.launch === true && h2AsKA.waiting_on_me === true && h2AsKA.dependency_not_visible === null,
+      `${JSON.stringify(h2AsKC?.can)} ${h2AsKC?.waiting_on_me} ${h2AsKC?.dependency_not_visible} | ${JSON.stringify(h2AsKA?.can)} ${h2AsKA?.waiting_on_me}`,
+    );
+    const kcGroups = (await ka(KC, "GET", "/change-requests")).json;
+    const kcHome = (await ka(KC, "GET", "/home")).json?.change_requests;
+    const kaHome = (await ka(KA, "GET", "/home")).json?.change_requests;
+    const inList = (l, id) => (l ?? []).some((c) => c.id === id);
+    const homeOthers = (id) => (kcHome?.waiting_on_others ?? []).find((c) => c.id === id);
+    check(
+      "C4-1: neither request is under the decider's \"Waiting on you\" (Requests tab or Home); the Home lists them as waiting on others, never on that decider (on Kim Lead to decide, and on those who can launch); the approver who can read them has both waiting on them",
+      !inList(kcGroups?.waiting_on_me, crH?.id) && !inList(kcGroups?.waiting_on_me, crH2?.id) && inList(kcGroups?.others, crH?.id) &&
+        !inList(kcHome?.waiting_on_me, crH?.id) && !inList(kcHome?.waiting_on_me, crH2?.id) &&
+        homeOthers(crH?.id)?.next === "decide" && JSON.stringify(homeOthers(crH?.id)?.waiting_on.map((p) => p.id)) === JSON.stringify([KA.id]) &&
+        homeOthers(crH2?.id)?.next === "launch" && homeOthers(crH2?.id).waiting_on.length > 0 && !homeOthers(crH2?.id).waiting_on.some((p) => p.id === KC.id) &&
+        inList(kaHome?.waiting_on_me, crH?.id) && inList(kaHome?.waiting_on_me, crH2?.id),
+      `${JSON.stringify(kcGroups?.waiting_on_me?.map((c) => c.id))} ${JSON.stringify(kcHome)} ${JSON.stringify(kaHome?.waiting_on_me?.map((c) => c.id))}`,
+    );
     const apB7 = await kAct(KC, KCI7.id, crB7?.id, "approve", { revision: 1 });
     const apH = await kAct(KA, KCI5.id, crH?.id, "approve_and_launch", { revision: 1 });
     const launchH2 = await kAct(KA, KCI6.id, crH2?.id, "launch", { revision: 1 });
@@ -6477,6 +6509,28 @@ try {
       "C3: GET a goal with ?counter=<request> gives dependency_choices for a counter on it from the reader (an approver, KA, who owns the goal): goals the requester and everyone deciding can read (Faster builds), never Robot firmware (KC can't read it) or KA's private goal (KB can't); null for the requester; 404 for a request on another goal",
       Array.isArray(qChoices) && qChoices.includes(KGV.id) && !qChoices.includes(KHW.id) && !qChoices.includes(KAP.id) && !qChoices.includes(KGP.id) && !qChoices.includes(KCI8.id) && qAsRequester === null && qWrongGoal.status === 404,
       `${JSON.stringify(qChoices)} ${JSON.stringify(qAsRequester)} ${qWrongGoal.status}`,
+    );
+
+    // -- C4-2: dependency_loops follows dependency_choices' audience, ?counter= included (the goal's owner countering) --
+    const KLP = await kGoal(KA, { title: "Cut CI waits report", visibility: "workspace", team_id: KPT, depends_on: [KCI8.id] });
+    const qOwner = (await ka(KA, "GET", `/goals/${KCI8.id}?counter=${crQ?.id}`)).json;
+    const qRequester = (await ka(KB, "GET", `/goals/${KCI8.id}?counter=${crQ?.id}`)).json;
+    const qOwnerPlain = (await ka(KA, "GET", `/goals/${KCI8.id}`)).json;
+    const qMemberPlain = (await ka(KB, "GET", `/goals/${KCI8.id}`)).json;
+    check(
+      "C4-2: GET a goal with ?counter= gives the goal's owner dependency_loops (the goal that depends on it) beside dependency_choices, which leaves it out; the requester's ?counter= read has both null; without ?counter= the owner's are both null (they can't propose) and a member's both lists",
+      !!KLP?.id && Array.isArray(qOwner?.dependency_choices) && !qOwner.dependency_choices.includes(KLP.id) && JSON.stringify(qOwner.dependency_loops) === JSON.stringify([KLP.id]) &&
+        qRequester?.dependency_choices === null && qRequester.dependency_loops === null &&
+        qOwnerPlain?.dependency_choices === null && qOwnerPlain.dependency_loops === null &&
+        Array.isArray(qMemberPlain?.dependency_choices) && JSON.stringify(qMemberPlain.dependency_loops) === JSON.stringify([KLP.id]),
+      `${KLP?.id} ${JSON.stringify([qOwner?.dependency_choices, qOwner?.dependency_loops, qRequester?.dependency_choices, qRequester?.dependency_loops, qOwnerPlain?.dependency_loops, qMemberPlain?.dependency_loops])}`,
+    );
+    // -- X5: the New version form's loop goals --
+    const loopVersion = await ka(KA, "POST", `/goals/${KCI8.id}/versions`, { version: 1, depends_on: [KLP?.id] });
+    check(
+      "X5: GET a goal gives its owner version_loops (the goals that already depend on it, which the New version form leaves out) and null to a member who can't edit it; saving one anyway is still refused 409 cycle",
+      JSON.stringify(qOwnerPlain?.version_loops) === JSON.stringify([KLP?.id]) && qMemberPlain?.version_loops === null && loopVersion.status === 409 && loopVersion.json?.error === "cycle",
+      `${JSON.stringify(qOwnerPlain?.version_loops)} ${JSON.stringify(qMemberPlain?.version_loops)} ${loopVersion.status} ${loopVersion.text.slice(0, 200)}`,
     );
 
     // -- N5: launch and not yet check the revision they are sent --
@@ -6648,6 +6702,61 @@ try {
           "C3 (ui): the counter form's Depends on lists the goals the requester and everyone deciding can see (Faster builds for everyone), never Robot firmware or the counterer's private goal, and says \"2 goals you can see aren't offered: Kai Member or someone who decides on this goal can't see them.\"",
           counterForm.includes("Faster builds for everyone") && !counterForm.includes(KHW.title) && !counterForm.includes(KAP.title) && counterForm.includes(`2 goals you can see aren't offered: ${KB.name} or someone who decides on this goal can't see them.`),
           counterForm.slice(0, 600),
+        );
+
+        // C4-2 (ui): the owner's counter form counts the goal that would make a loop on its own line.
+        check(
+          "C4-2 (ui): the goal owner's Suggest a change form doesn't offer the goal that already depends on it and says \"1 goal isn't offered: it already depends on this goal, so adding it would make a loop.\", never counting it among the goals someone can't see",
+          !counterForm.includes(KLP?.title ?? "Cut CI waits report") && counterForm.includes("1 goal isn't offered: it already depends on this goal, so adding it would make a loop."),
+          counterForm.slice(0, 700),
+        );
+
+        // X5 (ui): the owner's New version form leaves out the goal that would make a loop, and says why.
+        await open(pA8, `/app/w/${KW}/goals/${KCI8.id}`);
+        await pA8.waitForSelector("#new-version form", { timeout: 15000 }).catch(() => undefined);
+        await pA8.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const nvForm = await pA8.evaluate(() => document.querySelector("#new-version form")?.innerText ?? "");
+        check(
+          "X5 (ui): the New version form's Depends on doesn't offer the goal that already depends on this one and says \"1 goal isn't offered: it already depends on this goal, so adding it would make a loop.\"",
+          nvForm.includes("Faster builds for everyone") && !nvForm.includes("Cut CI waits report") && nvForm.includes("1 goal isn't offered: it already depends on this goal, so adding it would make a loop."),
+          nvForm.slice(0, 900),
+        );
+
+        // C4-1 (ui): KC, able to see Robot firmware when the card opens, confirms Approve after losing that; the refusal
+        // closes the Confirm panel, and the reloaded card no longer offers Approve and says why.
+        const kcHw = await ka(KO, "POST", `/teams/${KHT}/members`, { user_id: KC.id, role: "member" });
+        const KCI9 = await kGoal(KA, { title: "Cut CI logs", visibility: "workspace", team_id: KPT });
+        const crV = (await ka(KB, "POST", kcrs(KCI9?.id), { base_version: 1, changes: { depends_on: [KHW.id] }, reason: "Firmware logs are most of it" })).json;
+        const pC9 = await as(KC);
+        await open(pC9, `/app/w/${KW}/goals/${KCI9?.id}`);
+        const vCard = `[data-cr="${crV?.id}"]`;
+        await pC9.waitForSelector(`${vCard} [data-decision="Approve"]`, { timeout: 15000 }).catch(() => undefined);
+        await pC9.click(`${vCard} [data-decision="Approve"]`).catch(() => undefined);
+        await press(pC9, `${vCard} [data-decision-input="approve"]`, "Review this decision");
+        await pC9.waitForSelector(`${vCard} [data-confirm="approve"]`, { timeout: 15000 }).catch(() => undefined);
+        const confirmOpen = await pC9.evaluate((s) => !!document.querySelector(`${s} [data-confirm="approve"]`), vCard);
+        const kcOut = await ka(KO, "DELETE", `/teams/${KHT}/members/${KC.id}`);
+        await press(pC9, `${vCard} [data-confirm="approve"]`, "Confirm: Approve");
+        await pC9.waitForFunction((s) => /Not recorded\./.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, vCard).catch(() => undefined);
+        await pC9.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        const v = await pC9.evaluate(
+          (s) => ({
+            text: document.querySelector(s)?.innerText ?? "",
+            confirm: !!document.querySelector(`${s} [data-confirm]`),
+            notice: document.querySelector(`${s} [data-notice]`)?.getAttribute("data-notice") ?? null,
+            decisions: [...document.querySelectorAll(`${s} [data-decision]`)].map((b) => b.getAttribute("data-decision")),
+            why: document.querySelector(`${s} [data-dependency-not-visible]`)?.textContent ?? "",
+          }),
+          vCard,
+        );
+        const vAfter = await kRead(KA, KCI9?.id, crV?.id);
+        check(
+          "C4-1 (ui): a refused Approve closes the Confirm panel and reloads the card: \"Not recorded. This request adds a dependency on a goal you can't see, …\", no Confirm panel, no Approve or Approve and launch, and \"You can't approve this. …\" naming no goal; nothing recorded",
+          [200, 201].includes(kcHw.status) && !!crV?.id && confirmOpen && kcOut.status === 204 && v.notice === "refused" &&
+            v.text.includes("Not recorded. This request adds a dependency on a goal you can't see, so you can't approve what it asks.") && !v.confirm &&
+            !v.decisions.includes("Approve") && !v.decisions.includes("Approve and launch") && v.decisions.includes("Suggest a change") &&
+            v.why.startsWith("You can't approve this. This request adds a dependency on a goal you can't see") && !v.text.includes(KHW.title) && vAfter?.state === "pending",
+          `${kcHw.status} ${crV?.id} ${confirmOpen} ${kcOut.status} ${JSON.stringify(v).slice(0, 900)} ${vAfter?.state}`,
         );
 
         // F3: removing someone from a team asks first.

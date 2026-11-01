@@ -34,7 +34,8 @@ import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evid
 // can read (dependencyChoices, C2 F5), and the counter form only the goals the requester and the set can read.
 // The approval set can change after a dependency was added (someone joins as a lead): approve, approve_and_launch and
 // launch are refused (409 dependency_not_visible) for a decider who can't read a dependency the request adds, so
-// nobody approves or publishes what they can't see (C3).
+// nobody approves or publishes what they can't see (C3). The same predicate (hiddenDependencyRefusal) clears their
+// `can` flags and `waiting_on_me`, and the view says why (dependency_not_visible), so they are never offered it (C4-1).
 // A reader still sees only the dependencies they can read, with the others counted (diff.hidden_depends_on).
 // Everyone who can read the goal can read its requests (viewers too); viewers can't act. A request is its own
 // decision record once approved or rejected.
@@ -143,6 +144,16 @@ const launchRefusedFor = (requester: string) =>
 const rebaseRefusedFor = (author: string) =>
   `Someone who decides on this goal can't see a goal that ${memberName(author)}'s suggestion added as a dependency, so they couldn't see what they approve. Withdraw this request and propose the change again without it, or ask that goal's owner to share it with them first.`;
 
+/** The refusal `pp` gets (409 dependency_not_visible) for deciding to publish `deps` on request `r`, or null: they can't
+ *  read a goal `deps` adds to the request's base version. One predicate for the action and for the reader's `can` flags
+ *  and `waiting_on_me` (C4-1), so a decider is never offered, or queued for, a decision the server refuses. */
+function hiddenDependencyRefusal(pp: PolicyPrincipal, r: ChangeRequestRow, kind: "approve" | "launch"): string | null {
+  const deps = kind === "approve" ? ((JSON.parse(r.changes_json) as Changes).depends_on ?? []) : r.approved_json ? (JSON.parse(r.approved_json) as GoalContent).depends_on : [];
+  const base = versionContentOf(r.ws_id, r.goal_id, r.base_version)!;
+  if (!unreadableGoals(pp, deps.filter((d) => !base.depends_on.includes(d))).length) return null;
+  return kind === "approve" ? decisionRefusedFor(r.requester_id) : launchRefusedFor(r.requester_id);
+}
+
 /** The first dependency `changes` adds (one not in `already`) that one of `readers` can't read, or null. */
 function hiddenAddedDependency(wsId: string, already: string[], changes: Changes, readers: string[]): string | null {
   const added = (changes.depends_on ?? []).filter((id) => !already.includes(id));
@@ -171,6 +182,34 @@ function dependencyAddedBy(revs: RevisionRow[], dep: string): string | null {
   return who;
 }
 
+/** Who must be able to read a dependency the reader may add on `g`: for a change request from them, the goal's
+ *  effective approval set (with them as the requester); with `counterOf` (a request on that goal), for a counter from
+ *  them on it, its requester and its approval set (404 for a request not on the goal). null when they may do neither
+ *  (a viewer, a goal that is not active, the goal's owner proposing, someone outside the set countering, a request
+ *  that is not pending). The one audience rule for dependency_choices and dependency_loops (C4-2). */
+function dependencyReaders(pp: PolicyPrincipal, g: GoalRow, counterOf?: string): string[] | null {
+  if (pp.wsRole === "viewer" || g.status !== "active") return null;
+  if (counterOf) {
+    // A counter on that request: what it adds goes to the requester, who accepts it, and then to the approval set.
+    const r = crRow(pp.wsId, counterOf);
+    if (!r || r.goal_id !== g.id) throw notFound();
+    const set = effectiveSet(g, r.requester_id);
+    if (r.state !== "pending" || !set.includes(pp.userId)) return null;
+    return [r.requester_id, ...set];
+  }
+  if (g.owner_id === pp.userId) return null;
+  return effectiveSet(g, pp.userId);
+}
+
+/** The goals this reader can read that already depend on `goalId`, directly or through others: adding one as a
+ *  dependency would close a loop. */
+function readableLoops(pp: PolicyPrincipal, goalId: string): string[] {
+  return [...goalsDependingOn(pp.wsId, goalId)].filter((id) => {
+    const d = goalRow(pp.wsId, id);
+    return !!d && canReadGoal(pp, goalObj(d));
+  });
+}
+
 /** The goals a change request from this reader on `goalId` may add as a dependency: the goals they can read that every
  *  member of the goal's effective approval set (for them as the requester) can read too, so the propose form offers
  *  only what the server accepts (C2 F5), leaving out goals that already depend on this goal, which would close a loop
@@ -179,19 +218,8 @@ function dependencyAddedBy(revs: RevisionRow[], dep: string): string | null {
  *  and the request's approval set (404 for a request not on the goal; null when they may not counter it). */
 export function dependencyChoices(pp: PolicyPrincipal, goalId: string, counterOf?: string): string[] | null {
   const g = visibleGoal(pp, goalId);
-  if (pp.wsRole === "viewer" || g.status !== "active") return null;
-  let readers: string[];
-  if (counterOf) {
-    // A counter on that request: what it adds goes to the requester, who accepts it, and then to the approval set.
-    const r = crRow(pp.wsId, counterOf);
-    if (!r || r.goal_id !== g.id) throw notFound();
-    const set = effectiveSet(g, r.requester_id);
-    if (r.state !== "pending" || !set.includes(pp.userId)) return null;
-    readers = [r.requester_id, ...set];
-  } else {
-    if (g.owner_id === pp.userId) return null;
-    readers = effectiveSet(g, pp.userId);
-  }
+  const readers = dependencyReaders(pp, g, counterOf);
+  if (!readers) return null;
   const deciders = readers.map((u) => memberPrincipal(pp.wsId, u));
   const loops = goalsDependingOn(pp.wsId, g.id);
   return all<GoalRow>("SELECT * FROM v2_goals WHERE ws_id = ? AND id != ? ORDER BY id", pp.wsId, g.id)
@@ -200,14 +228,18 @@ export function dependencyChoices(pp: PolicyPrincipal, goalId: string, counterOf
 }
 
 /** The goals this reader can read that already depend on `goalId` (so dependencyChoices leaves them out: adding one
- *  would close a loop), for the propose form to say why they aren't offered (C3-3). null when they may not propose. */
-export function dependencyLoops(pp: PolicyPrincipal, goalId: string): string[] | null {
+ *  would close a loop), for the propose or counter form to say why they aren't offered (C3-3). The same audience as
+ *  dependencyChoices, `counterOf` included: null exactly when it is (C4-2). */
+export function dependencyLoops(pp: PolicyPrincipal, goalId: string, counterOf?: string): string[] | null {
   const g = visibleGoal(pp, goalId);
-  if (pp.wsRole === "viewer" || g.owner_id === pp.userId || g.status !== "active") return null;
-  return [...goalsDependingOn(pp.wsId, g.id)].filter((id) => {
-    const d = goalRow(pp.wsId, id);
-    return !!d && canReadGoal(pp, goalObj(d));
-  });
+  return dependencyReaders(pp, g, counterOf) ? readableLoops(pp, g.id) : null;
+}
+
+/** The goals the New version form leaves out of Depends on because they already depend on `goalId` (saving one would
+ *  be refused 409 cycle), for a reader who may save a version (`canEdit`); null otherwise (X5). */
+export function versionLoops(pp: PolicyPrincipal, goalId: string, canEdit: boolean): string[] | null {
+  const g = visibleGoal(pp, goalId);
+  return canEdit ? readableLoops(pp, g.id) : null;
 }
 
 const crRow = (ws: string, id: string) => get<ChangeRequestRow>("SELECT * FROM v2_change_requests WHERE ws_id = ? AND id = ?", ws, id);
@@ -320,10 +352,11 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
     const expectRevision = (required: boolean) => {
       if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", `This request is at revision ${r.revision}; reload and try again`);
     };
-    /** 409 dependency_not_visible when the caller can't read a dependency the request adds to its base version. */
-    const assertDecidable = (deps: string[], message: string) => {
-      const base = versionContentOf(pp.wsId, g.id, r.base_version)!;
-      if (unreadableGoals(pp, deps.filter((d) => !base.depends_on.includes(d))).length) throw conflict("dependency_not_visible", message);
+    /** 409 dependency_not_visible when the caller can't read a dependency the request (approve) or its approved content
+     *  (launch) adds to its base version. */
+    const assertDecidable = (kind: "approve" | "launch") => {
+      const refusal = hiddenDependencyRefusal(pp, r, kind);
+      if (refusal) throw conflict("dependency_not_visible", refusal);
     };
     /** Record the approval and keep the resulting content on the request, approved but unlaunched (no version, no
      *  directive). Returns that content. */
@@ -335,7 +368,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
       if (g.version !== r.base_version) {
         throw conflict("stale_version", `The goal changed after this request was made. ${memberName(r.requester_id)} needs to update it before it can be approved.`);
       }
-      assertDecidable(changes.depends_on ?? [], decisionRefusedFor(r.requester_id));
+      assertDecidable("approve");
       const next = applied(contentOf(g), changes);
       if (sameContent(next, contentOf(g))) throw conflict("no_change", "This request no longer changes anything");
       // Advisory evidence: approving a revision with no links is allowed, and recorded on the decision and in the audit.
@@ -388,7 +421,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         launchable();
         expectRevision(false);
         const content = JSON.parse(r.approved_json!) as GoalContent;
-        assertDecidable(content.depends_on, launchRefusedFor(r.requester_id));
+        assertDecidable("launch");
         launch(content, r.approved_by!);
         break;
       }
@@ -595,9 +628,14 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
   const condition = counter?.condition
     ? { revision: counter.revision, text: counter.condition, acknowledged_by: person(counter.acknowledged_by), acknowledged_at: counter.acknowledged_at }
     : null;
+  // A decider who can't read a dependency the request adds would be refused (409 dependency_not_visible): not offered
+  // the decision, not waited on, and told why (C4-1). Computed only where the flag would otherwise be true.
+  const approvable = r.state === "pending" && isApprover && r.base_version === g.version && pp.wsRole !== "viewer";
+  const launchable = unlaunched && launchers.includes(me) && r.base_version === g.version && pp.wsRole !== "viewer";
+  const hiddenRefusal = approvable ? hiddenDependencyRefusal(pp, r, "approve") : launchable ? hiddenDependencyRefusal(pp, r, "launch") : null;
   const can = {
-    approve: r.state === "pending" && isApprover && r.base_version === g.version,
-    approve_and_launch: r.state === "pending" && isApprover && r.base_version === g.version,
+    approve: approvable && !hiddenRefusal,
+    approve_and_launch: approvable && !hiddenRefusal,
     reject: open && isApprover,
     counter: r.state === "pending" && isApprover,
     accept_counter: r.state === "countered" && isRequester,
@@ -605,8 +643,8 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     withdraw: open && isRequester,
     rebase: r.state === "pending" && isRequester,
     add_evidence: mayAddEvidence(pp, r, approvers),
-    launch: unlaunched && launchers.includes(me) && r.base_version === g.version,
-    not_yet: unlaunched && launchers.includes(me) && r.base_version === g.version,
+    launch: launchable && !hiddenRefusal,
+    not_yet: launchable,
   };
   if (pp.wsRole === "viewer") for (const k of Object.keys(can) as (keyof typeof can)[]) can[k] = false;
   const evidence = evidenceRows(r.id);
@@ -667,6 +705,9 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     /** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
     approved_without_evidence: r.state === "approved" && r.approved_without_evidence !== null ? r.approved_without_evidence === 1 : null,
     can,
+    /** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
+     *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
+    dependency_not_visible: hiddenRefusal,
     /** The reader's turn: they may approve it, accept its counter, or launch it (approved and not launched, whether
      *  nobody decided the launch yet or someone said not yet): the same rule as the workspace Home's queue. */
     waiting_on_me: can.approve || can.accept_counter || can.launch,

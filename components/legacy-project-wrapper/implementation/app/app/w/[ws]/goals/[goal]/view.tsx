@@ -24,9 +24,13 @@ interface Detail {
   dependency_choices?: string[] | null;
   /** Goals left out of dependency_choices because they already depend on this goal (adding one would make a loop). */
   dependency_loops?: string[] | null;
+  /** The same goals for the New version form (null for anyone who can't save a version). */
+  version_loops?: string[] | null;
 }
 
-function NewVersion({ ws, goal, hiddenDeps, onDone }: { ws: string; goal: Goal; hiddenDeps: number; onDone: () => void }) {
+/** The owner's New version form. Depends on leaves out the goals that already depend on this one (`loops`, the goal
+ *  read's version_loops: saving one would be refused as a loop) and says so, as the propose form does (X5). */
+function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal: Goal; hiddenDeps: number; loops: string[] | null; onDone: () => void }) {
   const [title, setTitle] = useState(goal.title);
   const [status, setStatus] = useState(goal.status);
   const [measures, setMeasures] = useState(measuresDraft(goal));
@@ -37,7 +41,10 @@ function NewVersion({ ws, goal, hiddenDeps, onDone }: { ws: string; goal: Goal; 
   // "Add to a new version" from suggested limits fills this form in.
   useStashedLimits(goal.id, useCallback((d: LimitDraft[]) => setLimits(d), []));
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
-  const others = feed.data?.goals.filter((g) => g.id !== goal.id && g.status === "active") ?? [];
+  const listed = feed.data?.goals.filter((g) => g.id !== goal.id && g.status === "active") ?? [];
+  const others = listed.filter((g) => !loops?.includes(g.id) || (goal.depends_on ?? []).includes(g.id));
+  const looping = listed.length - others.length;
+  const them = (n: number) => (n === 1 ? "it" : "them");
   const act = useAction();
   return (
     <section id="new-version">
@@ -66,7 +73,7 @@ function NewVersion({ ws, goal, hiddenDeps, onDone }: { ws: string; goal: Goal; 
           </Field>
           <TargetShareField value={target} onChange={setTarget} taken={takenBy(feed.data?.goals, goal.id)} />
           <AnchorsEditor value={anchors} onChange={setAnchors} />
-          {(others.length > 0 || hiddenDeps > 0) && (
+          {(others.length > 0 || hiddenDeps > 0 || looping > 0) && (
             <div className="mb-3">
               <p className="mb-1 text-[14px] text-zinc-600">Depends on (agents on this goal hear when these change)</p>
               {others.map((g) => (
@@ -78,6 +85,11 @@ function NewVersion({ ws, goal, hiddenDeps, onDone }: { ws: string; goal: Goal; 
               {hiddenDeps > 0 && (
                 <p className="text-[14px] text-zinc-500" data-hidden-deps>
                   Also depends on {hiddenGoals(hiddenDeps)}. Saving keeps {hiddenDeps === 1 ? "it" : "them"}; only someone who can see {hiddenDeps === 1 ? "it" : "them"} can remove {hiddenDeps === 1 ? "it" : "them"}.
+                </p>
+              )}
+              {looping > 0 && (
+                <p className="text-[14px] text-zinc-500" data-deps-looping>
+                  {looping === 1 ? "1 goal isn't offered: it already depends on this goal" : `${looping} goals aren't offered: they already depend on this goal`}, so adding {them(looping)} would make a loop.
                 </p>
               )}
             </div>
@@ -332,7 +344,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           {/* Not keyed by the goal's version: a new version reloads the card in place (C3-4). Keyed, it shared its key with
               the New version form below, and a launch left a second card beside the first. */}
           <AgentsOnGoalCard ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
-          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} onDone={d.reload} />}
+          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} loops={d.data!.version_loops ?? null} onDone={d.reload} />}
           {/* Keyed by limit proposals only (a new request to list): a goal version, a launch's included, reloads the list
               in place (C2 N3). */}
           <ChangeRequests

@@ -174,6 +174,9 @@ export interface ChangeRequest {
   evidence_count: number;
   approved_without_evidence: boolean | null;
   can: Record<"approve" | "approve_and_launch" | "reject" | "counter" | "accept_counter" | "acknowledge" | "withdraw" | "rebase" | "add_evidence" | "launch" | "not_yet", boolean>;
+  /** Why the reader, who decides on it, may not approve (pending) or launch (approved) it: it adds a dependency on a
+   *  goal they can't see. The server's refusal, naming no goal; null otherwise (C4-1). */
+  dependency_not_visible?: string | null;
   waiting_on_me: boolean;
   created_at: string;
   updated_at: string;

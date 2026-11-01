@@ -691,7 +691,7 @@ tree and every version, and SHALL give a person the server lets edit it (`can_ed
 
 #### Scenario: Save a new version
 
-- **WHEN** the owner edits Goal, measures, limits (kind "Must", "Must not" or "Out of scope", text up to 160 characters, an optional meeting and date; at most 5), Status (Active, Achieved, Dropped), "Target share of agent time (%)" (blank for none), anchors and "Depends on" (other active goals) and presses **Save version <n+1>**
+- **WHEN** the owner edits Goal, measures, limits (kind "Must", "Must not" or "Out of scope", text up to 160 characters, an optional meeting and date; at most 5), Status (Active, Achieved, Dropped), "Target share of agent time (%)" (blank for none), anchors and "Depends on" (other active goals, less those in the goal read's `version_loops`, which it counts: "<n> goals aren't offered: they already depend on this goal, so adding them would make a loop.") and presses **Save version <n+1>**
 - **THEN** the page posts them with `version` to `POST .../goals/<goal>/versions`; a 409 `cycle` shows "That would make these goals depend on each other in a loop." and other errors show the server's message
 
 #### Scenario: Goal tree
@@ -784,7 +784,7 @@ and a closed "Details" disclosure.
 #### Scenario: Refused by the server
 
 - **WHEN** the server answers a decision with 409 (for example `stale_version`, `wrong_state` or `stale_revision`)
-- **THEN** the card shows a focused alert "Not recorded. <the server's message>" and reloads; for `stale_version` that message is "The goal changed after this request was made. <requester> needs to update it before it can be approved." and the request stays pending
+- **THEN** the card shows a focused alert "Not recorded. <the server's message>", closes the "Confirm: <decision>" panel (even when the reload leaves the request's revision and state as they were) and reloads, so it offers only the decisions the request now allows (`scripts/test-v2.mjs` "C4-1 (ui): a refused Approve closes the Confirm panel ..."); for `stale_version` that message is "The goal changed after this request was made. <requester> needs to update it before it can be approved." and the request stays pending
 
 #### Scenario: Decline while a counter waits
 
@@ -809,12 +809,12 @@ and a closed "Details" disclosure.
 #### Scenario: Suggest a change offers only dependencies a counter may add
 
 - **WHEN** an approver chooses **Suggest a change** on a request, and can read goals that the requester or someone else who decides on the goal can't (another team's team-only goal, their own private goal)
-- **THEN** the form reads the goal with `?counter=<request id>` and "Depends on" offers as new dependencies only the goals in its `dependency_choices` (the request's dependencies stay listed), saying "<n> goals you can see aren't offered: <requester> or someone who decides on this goal can't see them." ("1 goal you can see isn't offered" for one), so the form never offers what the server would refuse
+- **THEN** the form reads the goal with `?counter=<request id>` and "Depends on" offers as new dependencies only the goals in its `dependency_choices` (the request's dependencies stay listed), saying "<n> goals you can see aren't offered: <requester> or someone who decides on this goal can't see them." ("1 goal you can see isn't offered" for one), and counts the goals in its `dependency_loops` on their own ("<n> goals aren't offered: they already depend on this goal, so adding them would make a loop.", for the goal's owner too), so the form never offers what the server would refuse
 
-#### Scenario: Approving a dependency the decider can't see
+#### Scenario: A dependency the decider can't see
 
-- **WHEN** an approver whose approval set changed after a request added a dependency they can't read presses **Approve**, **Approve and launch** or, on an approved request, **Launch version <n+1> to agents**
-- **THEN** the card shows a focused alert "Not recorded. This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask <requester> to withdraw it, or to rebase it without that dependency." (for a launch, "Not recorded. This change adds a dependency on a goal you can't see, so you can't launch what it publishes. …"), naming no goal, and nothing is recorded
+- **WHEN** someone who decides on a request opens it after it added a dependency they can't read (their approval set changed since), so its `dependency_not_visible` is set
+- **THEN** the card offers neither **Approve** nor **Approve and launch** (on an approved request, no **Launch version <n+1> to agents**) and says "You can't approve this. This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask <requester> to withdraw it, or to rebase it without that dependency." (for a launch, "You can't launch this. This change adds a dependency on a goal you can't see, so you can't launch what it publishes. …"), naming no goal; "Decides", "Waiting on …" and "Can launch" leave them out; the Home doesn't list it under "Waiting on you" ("Approve it, suggest a change or decline it.", "… until you launch it."); and if they decided before the read changed (they could see it when they opened the card), the refusal reads "Not recorded. <that message>", the Confirm panel closes and nothing is recorded (`scripts/test-v2.mjs` "C4-1 (ui): ...")
 
 #### Scenario: Launched or superseded before launch
 

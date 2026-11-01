@@ -146,6 +146,8 @@ function RequestRecord({
   const names = (ps: { id: string; name: string }[]) => ps.map((a) => (a.id === me ? "you" : a.name)).join(" or ");
   const said = (p: { id: string; name: string } | null) => (p ? (p.id === me ? "you" : p.name) : "someone");
   const words = launchWords(cr.launch, cr.base_version, cr.version);
+  // The launch set, less the reader when the server would refuse their launch (C4-1).
+  const canLaunch = cr.dependency_not_visible ? cr.launchers.filter((a) => a.id !== me) : cr.launchers;
   return (
     <div className="mb-4 rounded-[12px] border border-zinc-200 p-4" data-cr={cr.id} data-cr-view="record">
       {notice && <NoticeBox notice={notice} />}
@@ -195,7 +197,13 @@ function RequestRecord({
               Not launched yet: {said(cr.launch_decided_by)} decided not yet{cr.launch_decided_at ? `, ${when(cr.launch_decided_at)}` : ""}.
             </p>
           )}
-          {(cr.launch === "pending" || cr.launch === "not_yet") && <p className="text-zinc-500">{cr.launchers.length ? `Can launch: ${names(cr.launchers)}` : "Nobody can launch this yet"}</p>}
+          {(cr.launch === "pending" || cr.launch === "not_yet") && <p className="text-zinc-500">{canLaunch.length ? `Can launch: ${names(canLaunch)}` : "Nobody can launch this yet"}</p>}
+          {/* Why Launch isn't offered to someone who may launch it: a dependency they can't see (C4-1). */}
+          {cr.dependency_not_visible && (
+            <p className="text-zinc-700" data-dependency-not-visible>
+              You can&apos;t launch this. {cr.dependency_not_visible}
+            </p>
+          )}
         </div>
       )}
       {cr.condition && <ConditionBox c={cr.condition} said={said} closed={cr.state === "rejected" ? "declined" : cr.state === "withdrawn" ? "withdrawn" : cr.state === "superseded" ? "superseded" : undefined} />}

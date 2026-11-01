@@ -197,6 +197,8 @@ export function OpenRequest({
   // Who acts: the requester, or someone in the approval set (only they get decisions).
   const meName = mine ? cr.requester.name : (cr.approvers.find((a) => a.id === me)?.name ?? "you");
   const myPart = mine ? "the requester" : cr.approvers.some((a) => a.id === me) ? "in this goal's approval set" : "";
+  // Who can approve it: the approval set, less the reader when the server would refuse their approval (C4-1).
+  const deciders = cr.dependency_not_visible ? cr.approvers.filter((a) => a.id !== me) : cr.approvers;
 
   const [choice, setChoice] = useState<Decision | null>(null);
   const [step, setStep] = useState<"input" | "confirm">("input");
@@ -336,7 +338,13 @@ export function OpenRequest({
     } catch (e) {
       const conflict = e instanceof ApiError && e.status === 409;
       setNotice({ kind: "refused", text: `Not recorded. ${(e as Error).message}${conflict ? "" : " Nothing changed."}` });
-      if (conflict) onDone(); // the request moved on: show it as it is now
+      if (conflict) {
+        // The refusal is the answer: close the confirmation (a reload that leaves the request's revision and state as
+        // they were keeps this card mounted) and show the request as it is now, with the decisions it now allows (C4-1).
+        setChoice(null);
+        setStep("input");
+        onDone();
+      }
     } finally {
       setSending(false);
     }
@@ -424,8 +432,8 @@ export function OpenRequest({
       ? `Waiting on ${ask} to accept the suggested change.`
       : cr.behind
         ? `Waiting on ${ask} to update it to version ${n}.`
-        : cr.approvers.length
-          ? `Waiting on ${names(cr.approvers)} to decide.`
+        : deciders.length
+          ? `Waiting on ${names(deciders)} to decide.`
           : "Nobody can approve this yet.";
 
   return (
@@ -477,7 +485,7 @@ export function OpenRequest({
             {cr.behind ? `; request made against version ${cr.base_version}` : ""}
           </Fact>
           <Fact k="Requested by">{mine ? "You" : cr.requester.name}</Fact>
-          <Fact k="Decides">{cr.approvers.length ? names(cr.approvers) : "Nobody can approve this yet"}</Fact>
+          <Fact k="Decides">{deciders.length ? names(deciders) : "Nobody can approve this yet"}</Fact>
           <Fact k="State">{stateWord}</Fact>
         </dl>
       </section>
@@ -544,6 +552,13 @@ export function OpenRequest({
         </section>
       </div>
       <Err>{act.error}</Err>
+
+      {/* Why Approve isn't offered to someone who decides on it: a dependency they can't see (C4-1). */}
+      {cr.dependency_not_visible && (
+        <p className="mt-4 text-[15px] text-zinc-700" data-dependency-not-visible>
+          You can&apos;t approve this. {cr.dependency_not_visible}
+        </p>
+      )}
 
       {/* 3-4. Your decision: choose, give that choice's input, confirm. */}
       {decisions.length > 0 ? (
