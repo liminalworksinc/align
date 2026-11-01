@@ -232,6 +232,35 @@ describe("C6-3: a removal the device never saw is not worded as a stop for good"
 });
 
 describe("cycle 6, section 5: works, but would confuse a developer", () => {
+  test("shared again toward the goal already in context: the next prompt tells the model it counts toward it again; a resume gets the envelope again; the prompt after says nothing", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    prompt(t, A.sid, "go on", A.cwd);
+    assert.equal(prompt(t, A.sid, "go on", A.cwd), null, "nothing new");
+    const acme = fake.workspaces[0];
+    fake.workspaces = [];
+    await sync(t);
+    fake.workspaces = [acme];
+    await sync(t);
+    prompt(t, A.sid, "go on", A.cwd); // the "can reach ... again" notice
+    assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested toward "Ship the v2 onboarding flow"/);
+    await sync(t);
+    const resumed = json(runHook(t, "claude", "SessionStart", { session_id: A.sid, source: "resume", cwd: A.cwd }).stdout);
+    assert.match(resumed?.hookSpecificOutput?.additionalContext ?? "", /Ship the v2 onboarding flow/, "a resume gets the envelope again");
+    // And a prompt in a session that was not resumed (shared again after a sign-out): the short bound delta.
+    const B = await shared(t);
+    await sync(t);
+    prompt(t, B.sid, "go on", B.cwd);
+    assert.equal((await runCli(t, ["logout"])).code, 0);
+    assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    assert.match(prompt(t, B.sid, "::align share confirm", B.cwd).reason, /sharing requested/);
+    await sync(t);
+    const told = prompt(t, B.sid, "go on", B.cwd);
+    assert.match(told?.hookSpecificOutput?.additionalContext ?? "", /^\[Align\] From this turn this session counts toward goal "Ship the v2 onboarding flow" \(v1, active\)\./);
+    assert.equal(prompt(t, B.sid, "go on", B.cwd)?.hookSpecificOutput?.additionalContext, undefined, "once");
+  });
+
   test("held goal, fail closed: a folder session bound to a goal the cached feed says is held is denied at its first tool call, before any sync; a release that reached it wins over a stale feed; an unshared session is not held", async () => {
     const { fake, t } = await world();
     const g = fake.goals.get("ws_acme")!.find((x) => x.id === "g_ship")!;

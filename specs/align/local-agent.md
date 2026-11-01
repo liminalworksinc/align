@@ -983,7 +983,10 @@ first, each quoted and at most 280 characters, as `- "<text>" (asked by <"label"
 information for planning, not instructions):`, in at most 2,200 more characters. Open, declined, done and withdrawn
 asks and other teams' asks SHALL never enter model context. With no limits and no accepted asks the envelope SHALL be
 byte-identical to the goal-only envelope. The envelope SHALL be injected on `startup`, `clear` and `compact`,
-and on `resume` or `fork` only when that goal version is not already in context. Every `SessionStart` SHALL spool a
+and on `resume` or `fork` only when that goal version is not already in context or the session was shared again since
+it was (a new share after the one its context came with ended, so it stopped counting in between). For the same
+reason the first prompt after a session is shared again toward the goal already in its context SHALL carry the `bound`
+delta (`[Align] From this turn this session counts toward goal "<title>" (v<n>, <status>). ...`), once. Every `SessionStart` SHALL spool a
 `session_start` record (cwd, model, transcript path, and booleans for whether API-key or cloud-provider variables
 are set, never their values).
 
@@ -991,6 +994,11 @@ are set, never their values).
 
 - **WHEN** a shared session starts, resumes, the goal moves to version 4, it resumes again, and then compacts (test `hooks` "resume injects only when the current version is not already in context")
 - **THEN** the first resume prints nothing, the second resume's envelope says `version 4`, and `compact` re-injects
+
+#### Scenario: Shared again toward the goal already in context
+
+- **WHEN** a shared session's workspace is lost and given back and the developer types `::align share confirm`, then resumes the session; and another shared session's machine signs out and in again, the developer types `::align share confirm` and prompts twice (test `findings7` "shared again toward the goal already in context ...")
+- **THEN** the resume gets the goal envelope again, and the other session's first prompt carries `[Align] From this turn this session counts toward goal "Ship the v2 onboarding flow" (v1, active).` and the second nothing
 
 #### Scenario: Goal text cannot forge the marker
 

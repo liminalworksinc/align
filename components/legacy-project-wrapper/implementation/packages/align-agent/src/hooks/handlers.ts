@@ -354,7 +354,11 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
   const messages: string[] = [];
   if (hot?.share?.state === "shared" && hot.goal) {
     const full = source === "startup" || source === "clear" || source === "compact";
-    const need = full || ((source === "resume" || source === "fork") && !sameAsInjected(inj, hot.goal, "shared"));
+    // A resumed session shared again since its context was given (cycle 6) gets the envelope again, as a new goal would.
+    const since = hot.share.since;
+    const again = !!since && !!inj.share_since && inj.share_since !== since;
+    const need = full || ((source === "resume" || source === "fork") && (!sameAsInjected(inj, hot.goal, "shared") || again));
+    if (since) inj.share_since = since;
     if (need) {
       const ta = teamAsks(home, hot.share.workspace_id, hot.goal.id);
       context = renderEnvelope(hot.goal, hot.context_goals || [], ta);
@@ -593,6 +597,12 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
     if (inj.goal_id || inj.share_state === "shared") kind = "unbound";
     goal = null;
   }
+  // Shared again (a new share, after the one the model knew ended) toward the goal already in its context: it was
+  // never told the session stopped counting, so it is told it counts again (cycle 6). A share the model's context
+  // predates the record of is taken as the one it knows.
+  const since = hot.share.since;
+  if (!kind && hot.share.state === "shared" && goal && since && inj.share_since && inj.share_since !== since) kind = "bound";
+  if (hot.share.state === "shared" && since) inj.share_since = since;
   let context: string | null = null;
   if (kind) {
     // A newly bound goal comes with all its limits, as the envelope words them; a version whose limits changed names

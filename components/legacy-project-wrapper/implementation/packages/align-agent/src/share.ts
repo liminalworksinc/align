@@ -135,6 +135,8 @@ export function applyShare(ctx: Ctx, p: SharePlan): void {
       .run(p.epoch_body.epoch_id, lid, p.workspace.id, p.epoch_body.goal_id, p.starts_at, null, "manual", nowIso());
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
     notePriorShare(ctx, lid, false);
+    // Which share this is: a share made again after an earlier one ended is told to the model as bound (cycle 6).
+    kvSet(ctx.db, `share_since:${lid}`, p.epoch_body.epoch_id);
     // Notices about an earlier share that ended (and how to share again) are stale once it is shared again: one the
     // session has not seen yet would otherwise show after this share, next to whatever ends it later.
     for (const kind of ["signed_out_", "access_lost_", "workspace_back_", "workspace_added_"]) {

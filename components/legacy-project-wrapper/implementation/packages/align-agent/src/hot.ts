@@ -138,7 +138,15 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     harness: s.harness,
     native_session_id: s.native_id,
     cwd: s.cwd,
-    share: live ? { workspace_id: live.workspace_id, workspace_name: live.workspace_name, session_key: live.session_key, state: live.state as ShareState } : null,
+    share: live
+      ? {
+          workspace_id: live.workspace_id,
+          workspace_name: live.workspace_name,
+          session_key: live.session_key,
+          state: live.state as ShareState,
+          ...(kvGet(ctx.db, `share_since:${lid}`) ? { since: kvGet(ctx.db, `share_since:${lid}`)! } : {}),
+        }
+      : null,
     goal: live && live.goal_json ? (JSON.parse(live.goal_json) as GoalSnapshot) : null,
     binding: live && live.binding_epoch ? { epoch_id: live.binding_epoch, goal_id: live.binding_goal } : null,
     pending_binding:

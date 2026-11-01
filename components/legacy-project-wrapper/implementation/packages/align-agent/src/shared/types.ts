@@ -69,7 +69,8 @@ export interface HotState {
   harness: Harness;
   native_session_id: string;
   cwd: string | null;
-  share: { workspace_id: string; workspace_name: string; session_key: string; state: ShareState } | null;
+  /** `since`: the first epoch of this share, which a share made again after an earlier one ended changes (cycle 6). */
+  share: { workspace_id: string; workspace_name: string; session_key: string; state: ShareState; since?: string } | null;
   goal: GoalSnapshot | null;
   binding: { epoch_id: string; goal_id: string | null } | null;
   /** Opened by the next UserPromptSubmit hook (a root-turn boundary). */
@@ -200,6 +201,9 @@ export interface InjectedState {
   releases_told?: string[];
   /** The resume the model was last told about. */
   resume_told?: string;
+  /** The share (its `since`) the model was last told it counts in: a share made again later is told as `bound` even
+   *  toward the goal already in context, since it stopped counting in between (cycle 6). */
+  share_since?: string;
   at: string;
 }
 
