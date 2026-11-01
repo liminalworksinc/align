@@ -561,10 +561,15 @@ export class FakeServer {
           let accepted = 0;
           let duplicates = 0;
           let conflicts = 0;
+          const refused: string[] = [];
+          // As lib/v2/sessions.ts: a row from after its epoch ended, at a time no epoch of the session covers, was made
+          // while the session was not shared: a conflict, never stored, named in `refused` like an unknown epoch's.
+          const covered = (t: number) => [...this.epochs.values()].some((x) => x.session_key === key && Date.parse(x.starts_at) <= t && (!x.ends_at || t < Date.parse(x.ends_at)));
           for (const r of rows) {
             const e = this.epochs.get(r.epoch_id);
-            if (!e || e.session_key !== key) {
+            if (!e || e.session_key !== key || (e.ends_at && Date.parse(r.ts) >= Date.parse(e.ends_at) && !covered(Date.parse(r.ts)))) {
               conflicts++;
+              refused.push(r.request_key);
               continue;
             }
             const prev = this.usage.get(r.request_key);
@@ -577,7 +582,7 @@ export class FakeServer {
             this.usage.set(r.request_key, { ...r, session_key: key });
             accepted++;
           }
-          return send(200, { accepted, duplicates, conflicts });
+          return send(200, { accepted, duplicates, conflicts, refused });
         }
       }
       if (req.method === "GET" && p === "/api/v2/directives") {

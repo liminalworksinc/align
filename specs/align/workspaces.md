@@ -1291,12 +1291,12 @@ when its person stopped sharing it, so the device words the refusal as what its 
 #### Scenario: Usage batch
 
 - **WHEN** a device POSTs rows for its session
-- **THEN** the response is `{accepted, duplicates, conflicts}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for an epoch this session does not have is a conflict that is counted on the session and never stored
+- **THEN** the response is `{accepted, duplicates, conflicts, refused}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for an epoch this session does not have is a conflict that is counted on the session and never stored; `refused` lists the `request_key` of each conflict that was not stored (an unknown epoch, or made while the session was not shared), so the device counts it as not shared, never a key stored earlier with other values
 
 #### Scenario: Usage from while a session was not shared
 
 - **WHEN** a member's session ends when they are removed, they are let back in, their device shares it again with a new epoch starting 2 seconds after the old one ended, and uploads rows naming the old epoch from 1 second before its end, 1 second after it and 2.5 seconds after it, and one naming the new epoch from 2.5 seconds after (`scripts/test-v2.mjs` "usage (C5-1): a row naming an epoch that ended ...")
-- **THEN** the response is `{accepted: 3, conflicts: 1}`, the session's conflicts grow by one, and only the row from the gap is not stored
+- **THEN** the response is `{accepted: 3, conflicts: 1}` with `refused` naming the gap row's key (`scripts/test-v2.mjs` "usage (E2E-AGENT cycle 6): the answer names the conflicts it did not store ..."), the session's conflicts grow by one, and only the row from the gap is not stored
 
 #### Scenario: Oversized batch
 

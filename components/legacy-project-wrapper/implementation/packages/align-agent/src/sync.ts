@@ -542,9 +542,13 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
         break;
       }
       const keys = wire.map((w) => w.request_key);
+      // Rows the server did not store (made while the session was not shared, by its clock: the C5-1 backstop) stay on
+      // this machine and count as not shared, as rows withheld here do (cycle 6).
+      const refused = new Set(Array.isArray(r.json?.refused) ? (r.json.refused as unknown[]).filter((k): k is string => typeof k === "string") : []);
       tx(ctx.db, () => {
-        const mark = ctx.db.prepare("UPDATE requests SET uploaded=1 WHERE request_key=?");
-        for (const k of keys) mark.run(k);
+        const mark = ctx.db.prepare("UPDATE requests SET uploaded=? WHERE request_key=?");
+        for (const k of keys) mark.run(refused.has(k) ? 2 : 1, k);
+        if (refused.size) ctx.log(`usage: the server did not store ${refused.size} row(s) of ${s.local_id.slice(0, 8)} (made while it was not shared); they stay on this machine`);
         ctx.db
           .prepare("UPDATE shares SET accepted=accepted+?, duplicates=duplicates+?, conflicts=conflicts+? WHERE local_id=?")
           .run(Number(r.json?.accepted || 0), Number(r.json?.duplicates || 0), Number(r.json?.conflicts || 0), s.local_id);

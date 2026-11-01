@@ -2710,6 +2710,12 @@ try {
         stored("c51-before-end") && !stored("c51-gap") && stored("c51-tail") && stored("c51-new"),
       `${JSON.stringify(oldB)} ${reEp.text} ${upGap.text} ${cBefore}/${conflictsB()}`,
     );
+    check(
+      "usage (E2E-AGENT cycle 6): the answer names the conflicts it did not store (`refused`: the gap row's request_key, and a row naming an unknown epoch), so the device counts them as not shared; a stored row is not named",
+      JSON.stringify(upGap.json?.refused) === JSON.stringify([reqKey(DC, "c51-gap")]) &&
+        (await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DC.access, body: { rows: [usageRow(DC, "c63-unknown", epochId(), { ts: isoAt(2600) })] } })).json?.refused?.join() === reqKey(DC, "c63-unknown"),
+      upGap.text,
+    );
 
     // A clock that runs ahead: named, with the server's time; a start stored in the future is moved back.
     const ahead = (ms) => new Date(Date.now() + ms).toISOString();

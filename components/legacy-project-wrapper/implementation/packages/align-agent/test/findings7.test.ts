@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
+import { computeUnsharedDigest } from "../src/allocation.ts";
 import { loadCredentials } from "../src/api.ts";
 import { sessionKey } from "../src/keys.ts";
 import { layout, localId } from "../src/shared/layout.ts";
@@ -362,5 +363,28 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
       /This machine's Align pairing changed during this sync \(`align login` or `align logout`\), so it stopped there; nothing more was sent as the earlier device\. This machine is signed out now, so nothing more is uploaded until you run `align login`\./,
     );
     assert.doesNotMatch(r.stdout, /goes on as the device signed in now/);
+  });
+
+  test("a row the server refused as made while the session was not shared (its clock: removed while this machine did not look) is not counted as shared here", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    turn(t, A, "req_g1_shared");
+    await sync(t);
+    fake.removeAndReAdd(A.key); // the server's epoch ends now; this machine's stays open until it hears
+    await sleep(30);
+    turn(t, A, "req_g1_gap");
+    await sleep(80);
+    await sync(t); // the upload is refused: the share ends here, later than on the server
+    prompt(t, A.sid, "::align share confirm", A.cwd);
+    await sync(t);
+    await sync(t);
+    const ctx = ctxFor(t);
+    const rows = ctx.db.prepare("SELECT ts, uploaded FROM requests WHERE local_id=? ORDER BY ts").all(A.lid) as { uploaded: number }[];
+    const d = computeUnsharedDigest(ctx, Date.now(), true)!;
+    ctx.db.close();
+    assert.equal(serverRows(fake, A.key).length, 1, "the server stored only the turn made while shared");
+    assert.deepEqual(rows.map((r) => r.uploaded), [1, 2], "the refused gap row stays on this machine");
+    assert.equal(d.total_tokens, 30);
+    assert.equal(d.unshared_tokens, 15, "and is not shared time");
   });
 });

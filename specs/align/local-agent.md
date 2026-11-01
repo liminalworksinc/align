@@ -666,7 +666,10 @@ not shared, SHALL be assigned to none and stay on this machine for good, also af
 share counts from its own start (now, as for every session shared before), never from the earlier epoch. So the notices
 that say a session's usage `stays on this machine from now on` hold. Such usage SHALL not count among the usage rows
 waiting to upload (`align sync`'s `<n> usage rows ... stay on this machine` and `align status`'s `<n> usage rows wait
-to upload` count only rows that will go up), and the weekly note's digest SHALL count it as not shared. `::align
+to upload` count only rows that will go up), and the weekly note's digest SHALL count it as not shared. A row the server did not store because, by its
+clock, it was made while the session was not shared (its answer's `refused`, `workspaces` "Usage upload": a share that
+ended on the server before this machine heard, say) SHALL likewise stay on this machine and count as not shared, never
+as uploaded. `::align
 share`'s preview SHALL say `counts from
 now.` for a session shared before (`counts from session start.` otherwise), as the share's confirmation notice
 (`..., counting from now.`) does.
@@ -680,6 +683,11 @@ now.` for a session shared before (`counts from session start.` otherwise), as t
 
 - **WHEN** after such a re-share only the turn made while the share had ended is not uploaded, the server is unreachable, and `align sync`, `align status` and the digest run (test `findings6` "a turn made while the share had ended is not a row waiting to upload ...")
 - **THEN** both say `0 usage rows`, and the digest counts that turn's tokens as not shared
+
+#### Scenario: A row the server refused
+
+- **WHEN** a shared session's person is removed and let back in while the machine does not look, a turn is made, a sync ends the share (later than the server did), the developer types `::align share confirm` and syncs (test `findings7` "a row the server refused as made while the session was not shared ...")
+- **THEN** the server stores only the turn made while shared, the refused turn's local row is kept as not uploaded (`uploaded` 2), and the digest counts its tokens as not shared
 
 #### Scenario: A turn made while signed out
 

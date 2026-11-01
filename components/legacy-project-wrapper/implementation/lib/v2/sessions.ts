@@ -329,10 +329,14 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
     let accepted = 0;
     let duplicates = 0;
     let conflicts = 0;
+    // The conflicts that were never stored (an unknown epoch, or made while the session was not shared), by key, so the
+    // device counts them as not shared (E2E-AGENT cycle 6); a key stored before with other values is not one of them.
+    const refused: string[] = [];
     for (const r of rows) {
       const e = epochs.get(r.epoch_id as string);
       if (!e) {
         conflicts++;
+        refused.push(r.request_key as string);
         continue;
       }
       // A row from after its epoch ended, at a time no epoch of this session covers, was made while the session was not
@@ -341,6 +345,7 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
       const t = Date.parse(r.ts as string);
       if (e.ends_at !== null && t >= Date.parse(e.ends_at) && !shared(t)) {
         conflicts++;
+        refused.push(r.request_key as string);
         continue;
       }
       const n = run(
@@ -361,7 +366,7 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
       else conflicts++;
     }
     if (conflicts) run("UPDATE v2_sessions SET conflicts = conflicts + ? WHERE ws_id = ? AND session_key = ?", conflicts, pp.wsId, key);
-    return { accepted, duplicates, conflicts };
+    return { accepted, duplicates, conflicts, refused };
   });
 }
 
