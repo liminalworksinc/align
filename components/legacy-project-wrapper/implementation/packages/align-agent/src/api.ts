@@ -16,10 +16,21 @@ export interface Credentials {
   user: { id: string; name: string; email: string } | null;
   signed_out?: boolean;
   signed_out_reason?: string;
+  /** How far the server's clock is ahead of this computer's (ms), learned from a `clock_skew` answer; refreshes sign
+   *  their timestamp with it. Absent when the clocks agree. */
+  clock_offset_ms?: number;
 }
 
 export class SignedOut extends Error {}
 export class NetworkError extends Error {}
+/** The server refused a refresh because this computer's clock is off: the device stays signed in and retries later. */
+export class ClockSkew extends NetworkError {}
+
+/** "10 minutes ahead of" / "3 minutes behind" for an offset (server minus local, ms). */
+export function clockWords(offsetMs: number): string {
+  const min = Math.max(1, Math.round(Math.abs(offsetMs) / 60_000));
+  return `${min} minute${min === 1 ? "" : "s"} ${offsetMs < 0 ? "ahead of" : "behind"}`;
+}
 export class HttpError extends Error {
   status: number;
   code: string | null;
@@ -53,18 +64,46 @@ export interface Resp {
 
 const TIMEOUT_MS = 15_000;
 
+/** The first time, in this process since the last reset, the server could not be reached or answered 5xx. The sync
+ *  pass reports it (`align sync`, `align status`, `logs/align.log`), so an unreachable server is never silent. */
+let trouble: string | null = null;
+
+export function resetServerTrouble(): void {
+  trouble = null;
+}
+
+export function serverTrouble(): string | null {
+  return trouble;
+}
+
+/** Why a fetch failed, in words: the error code under "fetch failed", or a timeout. */
+function failureWords(e: unknown, timeoutMs: number): string {
+  const err = e as Error & { cause?: { code?: string; message?: string } };
+  if (err?.name === "TimeoutError" || /due to timeout/.test(String(err?.message))) return `no answer within ${Math.round(timeoutMs / 1000)} s`;
+  const code = err?.cause?.code;
+  if (code === "ECONNREFUSED") return "connection refused";
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "host not found";
+  if (code === "ECONNRESET" || code === "UND_ERR_SOCKET") return "connection reset";
+  return code || err?.cause?.message || err?.message || "fetch failed";
+}
+
 export async function rawRequest(base: string, method: string, path: string, opts: { body?: unknown; headers?: Record<string, string>; timeoutMs?: number } = {}): Promise<Resp> {
   let res: Response;
+  const server = base.replace(/\/$/, "");
+  const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
   try {
-    res = await fetch(base.replace(/\/$/, "") + path, {
+    res = await fetch(server + path, {
       method,
       headers: { ...(opts.body !== undefined ? { "content-type": "application/json" } : {}), accept: "application/json", ...(opts.headers || {}) },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-      signal: AbortSignal.timeout(opts.timeoutMs ?? TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
-    throw new NetworkError((e as Error).message);
+    const msg = `could not reach the Align server at ${server} (${failureWords(e, timeoutMs)})`;
+    trouble ??= msg;
+    throw new NetworkError(msg);
   }
+  if (res.status >= 500) trouble ??= `the Align server at ${server} answered HTTP ${res.status}`;
   const text = await res.text().catch(() => "");
   let json: any = null;
   if (text) {
@@ -130,9 +169,26 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
       markSignedOut(ctx.home, "device key missing");
       throw new SignedOut("device key missing");
     }
-    const ts = new Date().toISOString();
-    const sig = key.sign(refreshMessage(c.device_id, c.refresh_token, ts));
-    const r = await rawRequest(c.server_url, "POST", "/api/v2/device/refresh", { body: { device_id: c.device_id, refresh_token: c.refresh_token, ts, sig } });
+    const attempt = (offset: number) => {
+      const ts = new Date(Date.now() + offset).toISOString();
+      const sig = key.sign(refreshMessage(c.device_id, c.refresh_token!, ts));
+      return rawRequest(c.server_url, "POST", "/api/v2/device/refresh", { body: { device_id: c.device_id, refresh_token: c.refresh_token, ts, sig } });
+    };
+    let offset = Number(c.clock_offset_ms) || 0;
+    let r = await attempt(offset);
+    if (r.status === 400 && r.json?.error === "clock_skew") {
+      // This computer's clock is off by more than the server allows. That is not a revocation: keep the tokens, say so,
+      // and sign again with the server's time (the server still checks the timestamp against its own clock).
+      const server = Date.parse(String(r.json?.server_time ?? ""));
+      if (Number.isNaN(server)) throw new ClockSkew(`this computer's clock is off from the Align server's; fix the system clock (you are still signed in)`);
+      offset = server - Date.now();
+      const words = clockWords(offset);
+      ctx.log(`refresh: this computer's clock is ${words} the server's; signing with the server's time`);
+      process.stderr.write(`align: this computer's clock is ${words} the Align server's. Align used the server's time and you stay signed in; set the system clock to update automatically.\n`);
+      saveCredentials(ctx.home, { ...c, clock_offset_ms: offset });
+      r = await attempt(offset);
+      if (r.status === 400 && r.json?.error === "clock_skew") throw new ClockSkew(`this computer's clock is ${words} the Align server's; fix the system clock (you are still signed in)`);
+    }
     if (r.status === 200 && r.json?.access_token && r.json?.refresh_token) {
       const next: Credentials = {
         ...c,
@@ -140,6 +196,9 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
         access_expires_at: new Date(Date.now() + Number(r.json.expires_in || 3600) * 1000).toISOString(),
         refresh_token: r.json.refresh_token,
       };
+      // Within a minute counts as agreeing (the server allows 5); a bigger offset is kept for the next refresh.
+      if (Math.abs(offset) >= 60_000) next.clock_offset_ms = offset;
+      else delete next.clock_offset_ms;
       saveCredentials(ctx.home, next);
       return next;
     }

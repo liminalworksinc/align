@@ -729,7 +729,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 15, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 15 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 16, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 16 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -756,7 +756,7 @@ try {
   })();
   check(
     "storage (PORT29): migration 15 adds target_share to goals and their versions, steering (default off) to workspaces, and the steering-event and reallocation tables; a version 14 database upgrades in place, its workspace and goal kept with steering off and no target",
-    port29Cols && ["v2_steering_events", "v2_reallocations", "v2_reallocation_revisions", "v2_reallocation_approvals"].every((t) => pragmas.tables.includes(t)) && upgraded.n === 15 && upgraded.broken === 0 &&
+    port29Cols && ["v2_steering_events", "v2_reallocations", "v2_reallocation_revisions", "v2_reallocation_approvals"].every((t) => pragmas.tables.includes(t)) && upgraded.n === SCHEMA_VERSION && upgraded.broken === 0 &&
       upgraded.g?.title === "Kept goal" && upgraded.g.target_share === null && upgraded.w?.name === "Before" && upgraded.w.steering === "off",
     JSON.stringify(upgraded),
   );
@@ -1024,9 +1024,19 @@ try {
   const stillOk = await call("U1", "GET", "/api/v2/me", { bearer: D1.access });
   check("refresh: a signature from another key -> 401 invalid_grant, and the device keeps working", badSig.status === 401 && badSig.json?.error === "invalid_grant" && stillOk.status === 200, `${badSig.text} ${stillOk.status}`);
   const oldTs = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+  const aheadTs = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const stale = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: D1.refresh, ts: oldTs, sig: refreshSig(D1, D1.id, D1.refresh, oldTs) } });
+  const ahead = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: D1.refresh, ts: aheadTs, sig: refreshSig(D1, D1.id, D1.refresh, aheadTs) } });
+  const skewBadSig = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: D1.refresh, ts: aheadTs, sig: refreshSig(kExp, D1.id, D1.refresh, aheadTs) } });
   const tamper = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: D1.refresh, ts, sig: refreshSig(D1, D1.id, D1.refresh, new Date(Date.now() + 1000).toISOString()) } });
-  check("refresh: ts outside +-5 min -> 401; a signature over a different message -> 401", stale.status === 401 && tamper.status === 401, `${stale.status} ${tamper.status}`);
+  const afterSkew = await call("U1", "GET", "/api/v2/me", { bearer: D1.access });
+  check(
+    "refresh (E2E-AGENT B3): a correctly signed ts outside +-5 min -> 400 clock_skew with the server's time, saying how far off (the device stays paired and the refresh token is not spent); with a bad signature it stays 401 invalid_grant; a signature over a different message -> 401",
+    stale.status === 400 && stale.json?.error === "clock_skew" && /6 minutes behind/.test(stale.json?.message ?? "") && Math.abs(Date.parse(stale.json?.server_time) - Date.now()) < 60_000 &&
+      ahead.status === 400 && ahead.json?.error === "clock_skew" && /10 minutes ahead of/.test(ahead.json?.message ?? "") &&
+      skewBadSig.status === 401 && skewBadSig.json?.error === "invalid_grant" && tamper.status === 401 && afterSkew.status === 200,
+    `${stale.status} ${stale.text} ${ahead.text} ${skewBadSig.status} ${tamper.status} ${afterSkew.status}`,
+  );
   const r1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: D1.refresh, ts, sig: refreshSig(D1, D1.id, D1.refresh, ts) } });
   check("refresh: a valid signature -> 200 new access and a rotated refresh token", r1.status === 200 && /^alnd_/.test(r1.json.access_token) && r1.json.refresh_token !== D1.refresh && r1.json.expires_in === 3600, r1.text);
   const ts2 = new Date().toISOString();
@@ -2217,6 +2227,56 @@ try {
   const epochAfterStop = await epoch(D3, S3b, { epoch_id: epochId(), goal_id: G3.id, starts_at: new Date().toISOString() });
   const strangerStop = await call("U1", "POST", `/api/v2/workspaces/${A}/sessions/${S3b}/stop-sharing`, { cookie: U1.cookie, body: {} });
   check("stop sharing: -> stopped; then usage, re-share and epochs -> 409 sharing_stopped; someone else's session -> 404", stopShare.json?.state === "stopped" && upAfterStop.status === 409 && upAfterStop.json?.error === "sharing_stopped" && putAfterStop.status === 409 && epochAfterStop.status === 409 && strangerStop.status === 404, `${stopShare.text} ${upAfterStop.status} ${putAfterStop.status} ${epochAfterStop.status} ${strangerStop.status}`);
+  // -- E2E-AGENT B4/G2: a revoked device can't receive a stop or resume, so its sessions end with it ("device signed
+  //    out"): the Sessions tab says so, Stop and Resume are refused (never reported as sent), and the same person's
+  //    re-paired machine may share the session again --
+  {
+    const grantA = (dv) => withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(dv.id, A));
+    const asDev = (dv) => ({ ...D3, id: dv.id, access: dv.access });
+    const DX = asDev(insertDevice(U3.id, "B4 laptop"));
+    grantA(DX);
+    const SX = sessionKey(D3, A, "claude-code", "native-b4");
+    const shareX = await put(DX, SX);
+    const epX = await epoch(DX, SX, { epoch_id: epochId(), goal_id: null, starts_at: new Date(Date.now() - 60_000).toISOString() });
+    const stopX = await call("U3", "POST", `/api/v2/workspaces/${A}/sessions/${SX}/stop`, { cookie: U3.cookie, body: {} });
+    const gotStop = await call("U3", "GET", "/api/v2/directives?cursor=0", { bearer: DX.access });
+    const logoutX = await call("U3", "DELETE", "/api/v2/devices/self", { bearer: DX.access });
+    const rowX = withDb((d) => d.prepare("SELECT state, ended_reason, stopped_at, agent_stopped FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(A, SX));
+    const openX = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").get(A, SX)).n;
+    const dirsBefore = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_directive_targets WHERE ws_id = ? AND session_key = ?").get(A, SX)).n;
+    const stopAgain = await call("U3", "POST", `/api/v2/workspaces/${A}/sessions/${SX}/stop`, { cookie: U3.cookie, body: {} });
+    const resumeX = await call("U1", "POST", `/api/v2/workspaces/${A}/sessions/${SX}/resume`, { cookie: U1.cookie, body: {} });
+    const dirsAfter = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_directive_targets WHERE ws_id = ? AND session_key = ?").get(A, SX)).n;
+    const mineX = (await call("U3", "GET", `/api/v2/workspaces/${A}/sessions`, { cookie: U3.cookie })).json?.mine?.find((s) => s.session_key === SX);
+    const allX = (await call("U1", "GET", `/api/v2/workspaces/${A}/sessions`, { cookie: U1.cookie })).json?.all ?? [];
+    check(
+      "sessions (E2E-AGENT B4/G2): revoking a device (logout) ends its shared sessions as stopped with ended_reason device_signed_out and closes the open epoch; Stop and Resume then -> 409 device_signed_out saying it can't reach the machine and that a stopped one stays stopped until align stop-sharing, with no directive written; the owner's list of everyone's sessions drops it and the person's own shows why",
+      shareX.status === 200 && epX.status === 200 && stopX.status === 200 && gotStop.json?.directives?.some((d) => d.kind === "stop" && d.session_keys.includes(SX)) && logoutX.status === 204 &&
+        rowX?.state === "stopped" && rowX.ended_reason === "device_signed_out" && !!rowX.stopped_at && rowX.agent_stopped === 1 && openX === 0 &&
+        stopAgain.status === 409 && stopAgain.json?.error === "device_signed_out" && /signed out of Align/.test(stopAgain.json?.message ?? "") && /align stop-sharing/.test(stopAgain.json?.message ?? "") &&
+        resumeX.status === 409 && resumeX.json?.error === "device_signed_out" && dirsAfter === dirsBefore &&
+        mineX?.state === "stopped" && mineX.ended_reason === "device_signed_out" && mineX.agent_stopped === true && !allX.some((s) => s.session_key === SX),
+      `${shareX.status} ${epX.status} ${stopX.status} ${logoutX.status} ${JSON.stringify(rowX)} ${openX} ${stopAgain.text} ${resumeX.text} ${dirsBefore}/${dirsAfter} ${JSON.stringify(mineX)}`,
+    );
+    // Another person's device can't take the session over; the same person's re-paired machine shares it again.
+    const DO = { ...asDev(insertDevice(U1.id, "not theirs")), who: "U1" };
+    grantA(DO);
+    const takeover = await call("U1", "PUT", `/api/v2/workspaces/${A}/sessions/${SX}`, { bearer: DO.access, body: { harness: "claude-code", repo_key: repoKey(D3, A, "/src/U3"), started_at: T0, title: null } });
+    const DY = asDev(insertDevice(U3.id, "B4 laptop again"));
+    grantA(DY);
+    const again = await put(DY, SX);
+    const rowY = withDb((d) => d.prepare("SELECT state, ended_reason, device_id, agent_stopped FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(A, SX));
+    const resumeY = await call("U3", "POST", `/api/v2/workspaces/${A}/sessions/${SX}/resume`, { cookie: U3.cookie, body: {} });
+    const gotResume = await call("U3", "GET", "/api/v2/directives?cursor=0", { bearer: DY.access });
+    const plainStopped = await put(D3, S3b);
+    check(
+      "sessions (E2E-AGENT B4/G2): another person's device can't take a signed-out session (404); the same person's re-paired device shares it again (200 shared, its device now, still stopped, audited session.shared_again), so a resume from the web reaches it; a session its person stopped sharing stays 409 sharing_stopped",
+      takeover.status === 404 && again.status === 200 && again.json?.state === "shared" && rowY?.device_id === DY.id && rowY.ended_reason === null && rowY.agent_stopped === 1 &&
+        withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE action = 'session.shared_again' AND actor_id = ?").get(U3.id)).n === 1 &&
+        resumeY.status === 200 && gotResume.json?.directives?.some((d) => d.kind === "resume" && d.session_keys.includes(SX)) && plainStopped.status === 409 && plainStopped.json?.error === "sharing_stopped",
+      `${takeover.status} ${again.text} ${JSON.stringify(rowY)} ${resumeY.text} ${plainStopped.status}`,
+    );
+  }
   const totalBefore = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json.total.requests;
   const delOther = await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { cookie: U1.cookie });
   const del = await call("U3", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { bearer: D3.access });
@@ -4519,14 +4579,14 @@ try {
     const s2 = cpView?.sessions.find((s) => s.session_key === SM2.key);
     const acceptRows = withDb((d) => d.prepare("SELECT auto_accepted FROM v2_receipts WHERE directive_id = ? AND session_key = ? AND state = 'accepted' ORDER BY auto_accepted").all(cpDir.id, SM2.key)).map((r) => r.auto_accepted);
     check(
-      "request receipts: the developer's accept after the agent's own is recorded as a receipt of its own (fresh true, both kept), turns the session into accepted by the developer and is audited request.accepted by the session's person; the agent's accepts are audited request.done_by_agent and the decline request.declined; the same accept again -> fresh false",
+      "request receipts: the developer's accept after the agent's own is recorded as a receipt of its own (fresh true, both kept), turns the session into accepted by the developer and is audited request.accepted by the session's person; the agent's auto accepts are audited request.not_declined (delivered, not declined; never done by the agent) and the decline request.declined; the same accept again -> fresh false",
       r4a.json?.request_state === "accepted" && r4.json?.fresh === true && r4.json.request_state === "accepted" && r4again.json?.fresh === false && JSON.stringify(acceptRows) === "[0,1]" &&
-        qAudit("request.accepted", CP.id).join() === QM.id && qAudit("request.done_by_agent", CP.id).length === 2 && qAudit("request.declined", CP.id).join() === QM.id,
+        qAudit("request.accepted", CP.id).join() === QM.id && qAudit("request.not_declined", CP.id).length === 2 && qAudit("request.declined", CP.id).join() === QM.id,
       `${r4a.text} ${r4.text} ${r4again.text} ${JSON.stringify(acceptRows)}`,
     );
     check(
-      "request receipts: received -> request_state received; accepted with auto_accepted -> accepted, shown as done by the agent; a later decline overrides it; the developer's accept stays (a later decline changes nothing); counts follow",
-      r1.json?.fresh === true && r1.json.request_state === "received" && r2.json?.request_state === "accepted" && midView?.counts.done_by_agent === 1 && midView.sessions.find((s) => s.session_key === SM1.key)?.auto_accepted === true &&
+      "request receipts: received -> request_state received; accepted with auto_accepted -> accepted, counted as delivered and not declined (E2E-AGENT G1); a later decline overrides it; the developer's accept stays (a later decline changes nothing); counts follow",
+      r1.json?.fresh === true && r1.json.request_state === "received" && r2.json?.request_state === "accepted" && midView?.counts.not_declined === 1 && midView.counts.done_by_agent === undefined && midView.sessions.find((s) => s.session_key === SM1.key)?.auto_accepted === true &&
         r3.json?.request_state === "declined" && r4.json?.request_state === "accepted" && r5.json?.request_state === "accepted" && s1?.state === "declined" && !s1.auto_accepted && s2?.state === "accepted" && !s2.auto_accepted &&
         cpView.state === "answered" && cpView.counts.accepted === 1 && cpView.counts.declined === 1 && cpView.counts.pending === 0 && cpView.can_cancel === false,
       `${r1.text} ${r2.text} ${r3.text} ${r4.text} ${r5.text} ${JSON.stringify(cpView?.sessions)}`,
@@ -4814,8 +4874,8 @@ try {
     const hc = await import(pathToFileURL(path.join(ROOT, "lib/v2/home-core.mts")).href);
     const P = (id, name) => ({ id, name });
     check(
-      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Delivery receipt\", \"Agent reported\", \"Not observed\"",
-      hc.appEvidence("2026-10-31T00:00:00Z") === "delivery_receipt" && hc.appEvidence(null) === "not_observed" && hc.appEvidence(undefined) === "not_observed" && hc.appEvidence("") === "not_observed" &&
+      "home rules: an app's goal read (last_read_at) is a delivery receipt and no goal read is not observed; the three classes read \"Delivery receipt\", \"Agent reported\", \"Not observed\"; a request answer is agent reported, but an auto_accepted one (delivered, not declined: E2E-AGENT G1) is a delivery receipt",
+      hc.appEvidence("2026-10-31T00:00:00Z") === "delivery_receipt" && hc.answerEvidence("accepted", true) === "delivery_receipt" && hc.answerEvidence("accepted") === "agent_reported" && hc.answerEvidence("declined") === "agent_reported" && hc.answerEvidence("received") === "delivery_receipt" && hc.appEvidence(null) === "not_observed" && hc.appEvidence(undefined) === "not_observed" && hc.appEvidence("") === "not_observed" &&
         JSON.stringify(hc.EVIDENCE_CLASSES) === JSON.stringify(["delivery_receipt", "agent_reported", "not_observed"]) && Object.values(hc.EVIDENCE_WORDS).join("|") === "Delivery receipt|Agent reported|Not observed",
       "",
     );

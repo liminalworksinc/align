@@ -10,8 +10,11 @@ import { layout } from "../shared/layout.ts";
  * usage up even if the session then sits idle.
  */
 const SYNC_EVERY_MS: Record<string, number> = { SessionStart: 0, UserPromptSubmit: 10_000, PreToolUse: 30_000 };
-const TURN_END = new Set(["Stop", "StopFailure"]);
-const STOP_SETTLE_MS = 1_500;
+/** A turn end, or an `::align` command the hook answered (a blocked prompt has no turn end): always a pass, which
+ *  waits for a running one, so what the command spooled (a share, an answer) reaches the server without waiting for
+ *  the next turn. */
+const TURN_END = new Set(["Stop", "StopFailure", "Command"]);
+const SETTLE_MS: Record<string, number> = { Stop: 1_500, StopFailure: 1_500, Command: 0 };
 const SPAWN_GAP_MS = 3_000;
 
 function ageMs(file: string): number {
@@ -41,6 +44,6 @@ export async function kickSync(home: string, hookScript: string, env: NodeJS.Pro
   } catch {
     /* no log */
   }
-  const args = [cli, "sync", "--hook", ...(TURN_END.has(event) ? ["--settle", String(STOP_SETTLE_MS)] : [])];
+  const args = [cli, "sync", "--hook", ...(TURN_END.has(event) ? ["--settle", String(SETTLE_MS[event] ?? 0)] : [])];
   spawn(process.execPath, args, { detached: true, cwd: home, stdio: ["ignore", logFd, logFd], env: { ...env, ALIGN_HOME: home } }).unref();
 }

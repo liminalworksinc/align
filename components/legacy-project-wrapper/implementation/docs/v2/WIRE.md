@@ -29,9 +29,12 @@ The user signs in at `/app/device`, types the code, sees device name + request a
 `POST /api/v2/device/refresh` (proof of possession; rotating; reuse of an old refresh token revokes the device)
 → req `{ "device_id", "refresh_token", "ts": "<ISO>", "sig": "<b64url Ed25519 signature>" }`
    signed message (UTF-8): `align-refresh\n<device_id>\n<sha256hex(refresh_token)>\n<ts>`; ts within ±5 min.
-→ 200 `{ "access_token", "expires_in": 3600, "refresh_token" }` · 401 `{ "error": "invalid_grant" }`
+→ 200 `{ "access_token", "expires_in": 3600, "refresh_token" }` · 401 `{ "error": "invalid_grant" }` · 400
+  `{ "error": "clock_skew", "message", "server_time": "<ISO>" }` when the signature is valid but `ts` is more than 5 min
+  off the server's clock: nothing is rotated and the device stays paired; sign again with the server's time.
 
-`DELETE /api/v2/devices/self` (Bearer) → 204. Revokes this device's tokens (logout).
+`DELETE /api/v2/devices/self` (Bearer) → 204. Revokes this device's tokens (logout). Any revocation also ends the
+device's sessions: `stopped` with `ended_reason: "device_signed_out"`.
 
 ## Identity and workspaces (device view)
 `GET /api/v2/me` (Bearer or cookie)
@@ -106,8 +109,9 @@ plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absen
   can no longer read. A cancellation is a second `request` directive with the same `request.id` and `cancelled: true`,
   sent to the sessions that had not answered: `cancel_reason` is `withdrawn` when its sender (or a workspace owner)
   cancelled it and `goal_closed` when its goal, or a switch_goal's target goal, was achieved or dropped (null while not
-  cancelled). checkpoint and drafting a replan are safe (the agent may accept them
-  itself, `auto_accepted`); a switch_goal takes effect only on the developer's accept, through the usual epoch path
+  cancelled). checkpoint and drafting a replan are safe (when the developer has not declined by the end of the turn
+  they reached, the machine accepts them itself, `auto_accepted`: delivered to the agent and not declined, never a
+  report that the agent did it); a switch_goal takes effect only on the developer's accept, through the usual epoch path
   (`cause: "directive:<this directive id>"`).
 - `hold` (`goal` and `binding` null): `"hold": { "goal": { "id", "title"|null }, "held_by": { "id", "name" }, "reason":
   string|null, "at" }`: block every tool of sessions on that goal until a `release`. Acknowledge with `received`, then
@@ -115,6 +119,7 @@ plus `request` on kind `request` and `hold` on kinds `hold` and `release` (absen
 - `release`: `"hold": { "goal": { "id", "title"|null }, "released_by": { "id", "name" }, "at" }`: lift that goal's hold.
 
 `GET /api/v2/directives?cursor=<seq>` (Bearer) → `{ "directives": [Directive], "next_cursor": "<seq>" }` (≤100, this device's sessions only).
+The device moves its cursor to `next_cursor` after each page, also past directives it had already stored.
 There is no push channel: the local agent has no daemon, and each hook-started sync pass fetches by cursor.
 `POST /api/v2/directives/:id/receipts` (Bearer) → req `{ "session_key", "state": "received"|"applied"|"enforced"|"accepted"|"declined", "at", "auto_accepted"?: bool }` → 200 `{ "fresh": bool }`, plus `"request_state": "sent"|"received"|"accepted"|"declined"|"expired"` on a `request` directive (idempotent, ≤2 KB).
 `accepted`/`declined` only on a `request` directive (else 400); `auto_accepted: true` only with `accepted` and never on a
@@ -257,6 +262,8 @@ Errors and credentials
 
 Sessions and epochs
 - `PUT` on a session after stop-sharing is `409 sharing_stopped` (stopping is sticky; re-sharing needs delete first).
+  The exception is a session that ended because its device was revoked (`ended_reason: "device_signed_out"`): a `PUT`
+  from another device of the same person (same harness and `repo_key`) shares it again on that device.
   So are epochs and usage. The same key with a different `harness` or `repo_key` is `409 session_conflict`.
 - Epochs: same `epoch_id` with the same values returns it (idempotent); with other values `409 epoch_conflict`.
   `starts_at` before the open epoch's start or the last epoch's end is `409 epoch_overlap`; before the session's
@@ -274,7 +281,8 @@ Directives
 - A directive's `goal` is the version ratified when it was written, plus `bindable` computed for the receiving user;
   `goal` is `null` if that user can no longer see the goal.
 - Stop/resume are issued with `POST /api/v2/workspaces/:ws/sessions/:session_key/stop` and `.../resume` (cookie; the
-  session's owner or a workspace owner) → `{ directive_id, agent_stopped }`.
+  session's owner or a workspace owner) → `{ directive_id, agent_stopped }`; `409 sharing_stopped` for a stopped
+  session, and `409 device_signed_out` for one whose device was revoked (nothing could deliver it).
 
 Alignment (web)
 - Who may act: `approve` a required approver of the current revision, state `pending`, `revision` must equal the

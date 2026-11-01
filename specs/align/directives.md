@@ -16,8 +16,10 @@ conditions, approved change requests that nobody has launched, alignment notes a
 Align reaches agents at three levels (owner decision, 2026-10-30). **Inform**: facts the agent works under (goal
 versions with their limits, bindings, accepted asks). **Request**: one of a fixed set of typed requests (`replan`,
 `checkpoint`, `switch_goal`) from someone who can approve for the goal or a workspace owner; Align writes the wording,
-the sender is named, and their note is passed on quoted, as data. Safe requests run on their own: the agent does a
-checkpoint, or drafts an updated plan for a replan, without asking, and the developer can still decline; anything
+the sender is named, and their note is passed on quoted, as data. Safe requests run on their own: a checkpoint, or
+drafting an updated plan for a replan, reaches the agent without waiting for the developer, who can still decline,
+and the machine reports such a request as delivered and not declined (never as done: Align has no agent-reported
+completion); anything
 that changes direction asks first, so a replan's new plan and a `switch_goal` take effect only when the developer
 accepts. The developer is always told, and every answer is a receipt. **Enforce**: Align blocks tools itself without
 asking the model: the per-session `stop`, and a goal hold that pauses every session on a goal until it is released.
@@ -214,6 +216,11 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/sessions/{key}/stop` and `
 - **WHEN** the owner calls `.../stop` or `.../resume` for a session whose sharing was stopped
 - **THEN** the response is HTTP 409 `sharing_stopped` with message "Sharing was stopped for this session"
 
+#### Scenario: The session's device signed out
+
+- **WHEN** the owner calls `.../stop` or `.../resume` for a session whose device was revoked (`ended_reason` `device_signed_out`) (`scripts/test-v2.mjs` "sessions (E2E-AGENT B4/G2) ...")
+- **THEN** the response is HTTP 409 `device_signed_out` with a message saying the machine signed out of Align so a stop or resume can't reach it, and that a stopped session stays stopped until its developer runs `align stop-sharing`, and no directive is written
+
 #### Scenario: Wrong credential or origin
 
 - **WHEN** the request carries an `Authorization` header, or no signed-in session cookie, or an `Origin` of another site
@@ -226,7 +233,7 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/sessions/{key}/stop` and `
 
 ### Requirement: Stop status on the sessions page
 
-The server SHALL include, for every session returned by `GET /api/v2/workspaces/{ws}/sessions` (the caller's own sessions, and for workspace owners every session whose sharing is not stopped), `agent_stopped` and `stop_status`, which is null or `{ directive_id, kind, created_at, receipts: [{ state, at }] }` for the session's latest `stop` or `resume` directive, with the Sessions tab showing **Stop agent** or **Resume agent** and a status label derived from it: "Stop requested", "Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received" or "Resumed".
+The server SHALL include, for every session returned by `GET /api/v2/workspaces/{ws}/sessions` (the caller's own sessions, and for workspace owners every session whose sharing is not stopped), `agent_stopped` and `stop_status`, which is null or `{ directive_id, kind, created_at, receipts: [{ state, at }] }` for the session's latest `stop` or `resume` directive, with the Sessions tab showing **Stop agent** or **Resume agent** and a status label derived from it: "Stop requested", "Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received" or "Resumed". The caller's own sessions SHALL also carry `ended_reason` (`device_signed_out` or null); a session that ended because its device signed out SHALL never read "sent": its label is "Stopped; can't be resumed from here" when its agent was stopped, and none otherwise.
 
 #### Scenario: Stop confirmed by the device
 
@@ -316,17 +323,17 @@ The server SHALL serve a request, and its cancellation, to the targeted sessions
 
 ### Requirement: Request answers move a session's request state
 
-The server SHALL treat receipts `accepted` and `declined` on a `request` directive as the answer for that session (the developer's, or with `auto_accepted: true` the agent's own accept of a safe request: a `checkpoint`, or drafting a `replan`) and update `v2_request_targets` in the receipt's transaction: `received` moves `sent` to `received`; `accepted` moves a pending session (`sent` or `received`) to `accepted` and records `auto_accepted`; the developer's own `accepted` clears `auto_accepted` on an accepted session; `declined` moves a pending session, or one the agent accepted on its own, to `declined`; any other answer, and any answer for an `expired` session, leaves the state unchanged. Receipts SHALL be idempotent per directive, session, state and `auto_accepted`, so the developer's `accepted` after the agent's own is recorded as a receipt of its own (`fresh: true`). Each answer that changes the state SHALL be audited with the session's person as actor and the request id as object: `request.accepted` (the developer's accept, including one that confirms the agent's own), `request.done_by_agent` (an `auto_accepted` accept) or `request.declined`. The response SHALL add `request_state` (the session's state after the receipt). The server SHALL answer 400 for `accepted` or `declined` on a directive of another kind, for `auto_accepted` with a state other than `accepted` or not a boolean, and for `auto_accepted` on a `switch_goal` request, which takes effect only when the developer accepts; a refused receipt SHALL record nothing.
+The server SHALL treat receipts `accepted` and `declined` on a `request` directive as the answer for that session (the developer's, or with `auto_accepted: true` the agent's own accept of a safe request: a `checkpoint`, or drafting a `replan`) and update `v2_request_targets` in the receipt's transaction: `received` moves `sent` to `received`; `accepted` moves a pending session (`sent` or `received`) to `accepted` and records `auto_accepted`; the developer's own `accepted` clears `auto_accepted` on an accepted session; `declined` moves a pending session, or one the agent accepted on its own, to `declined`; any other answer, and any answer for an `expired` session, leaves the state unchanged. Receipts SHALL be idempotent per directive, session, state and `auto_accepted`, so the developer's `accepted` after the agent's own is recorded as a receipt of its own (`fresh: true`). Each answer that changes the state SHALL be audited with the session's person as actor and the request id as object: `request.accepted` (the developer's accept, including one that confirms the agent's own), `request.not_declined` (an `auto_accepted` accept: the request reached the agent and the developer did not decline it by the end of that turn, which says nothing about what the agent did) or `request.declined`. The response SHALL add `request_state` (the session's state after the receipt). The server SHALL answer 400 for `accepted` or `declined` on a directive of another kind, for `auto_accepted` with a state other than `accepted` or not a boolean, and for `auto_accepted` on a `switch_goal` request, which takes effect only when the developer accepts; a refused receipt SHALL record nothing.
 
 #### Scenario: The agent does a checkpoint, then the developer declines
 
 - **WHEN** the agent posts `accepted` with `auto_accepted: true` for a checkpoint and the developer later declines it
-- **THEN** the first response has `request_state` `accepted` and the request shows that session as done by the agent, and the second has `request_state` `declined`
+- **THEN** the first response has `request_state` `accepted` and the request shows that session as delivered and not declined, and the second has `request_state` `declined`
 
 #### Scenario: The developer agrees after the agent drafted the plan
 
 - **WHEN** the agent posts `accepted` with `auto_accepted: true` for a replan and the developer later posts `accepted` without it
-- **THEN** both receipts are recorded (the second answers `fresh: true`), the session reads accepted by the developer (`auto_accepted` false), and the audit has `request.done_by_agent` then `request.accepted` by the session's person
+- **THEN** both receipts are recorded (the second answers `fresh: true`), the session reads accepted by the developer (`auto_accepted` false), and the audit has `request.not_declined` then `request.accepted` by the session's person
 
 #### Scenario: Switch goal is never auto-accepted
 
@@ -372,12 +379,12 @@ The server SHALL, when a session owner deletes a session's shared history, delet
 
 ### Requirement: Local agent applies each v2 directive once and in sequence order
 
-The local agent SHALL, during a sync, page `GET /api/v2/directives` from its stored cursor (at most 20 pages, stopping on a non-200 or empty page), skip a malformed directive, one whose `id` it already stored or one whose `seq` is not above its cursor (counting `directive_malformed`, `directive_replay` or `directive_out_of_order`), store each new directive and advance the cursor in one local transaction, apply it only to session keys this device shares in the directive's workspace, and queue a `received` receipt for each such session.
+The local agent SHALL, during a sync, page `GET /api/v2/directives` from its stored cursor (at most 20 pages, stopping on a non-200 page, a page of fewer than 100 directives, or one after which the cursor did not move), skip a malformed directive, one whose `id` it already stored or one whose `seq` is not above its cursor (counting `directive_malformed`, `directive_replay` or `directive_out_of_order`), store each new directive and advance the cursor in one local transaction, apply it only to session keys this device shares in the directive's workspace, and queue a `received` receipt for each such session. A replay SHALL still move the cursor past its `seq`, and after each page the cursor SHALL move to the answer's `next_cursor` when that is higher, so a page of already-stored directives is never fetched again.
 
 #### Scenario: Replayed directive
 
 - **WHEN** a fetch returns a directive id the agent already stored
-- **THEN** the agent records a `directive_replay` gap and does not re-apply it or send new receipts
+- **THEN** the agent records a `directive_replay` gap and does not re-apply it or send new receipts, and its cursor moves past it
 
 #### Scenario: Directive for a session this device does not share
 
@@ -415,7 +422,7 @@ The server SHALL serve directives only through `/api/v2/directives`, `/api/v2/di
 ## Open questions
 
 - Waking idle agents is out of scope (Owner decision 2026-10-30 keeps it open): a stop or a new goal version takes effect only when the session's next hook starts a sync, so an idle agent learns nothing until someone uses it again, and the Sessions tab shows "Stop sent, not yet received" until then.
-- A removed member's sessions stay recorded and keep their `shared` state, so goal versions and an owner's stop still write directives for them that no device can fetch any more. Whether removal should stop sharing for those sessions (and so write nothing) is not decided.
+- A removed member's sessions stay recorded and keep their `shared` state (unlike a revoked device's sessions, which end with `ended_reason` `device_signed_out`; see the workspaces part), so goal versions and an owner's stop still write directives for them that no device can fetch any more. Whether removal should stop sharing for those sessions (and so write nothing) is not decided.
 
 ## Sources
 

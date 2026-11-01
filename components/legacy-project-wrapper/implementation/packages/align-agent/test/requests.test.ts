@@ -138,7 +138,7 @@ describe("requests", () => {
     const dec = json(prompt(t, sid, `::align decline ${requestShortId(checkpoint.id)}`).stdout);
     assert.equal(dec.decision, "block");
     assert.match(dec.reason, /you declined Dana Lee's request/);
-    assert.match(json(prompt(t, sid, "::align status").stdout).reason, /plan drafted by the agent, `::align accept [a-z0-9]{6}` to agree/);
+    assert.match(json(prompt(t, sid, "::align status").stdout).reason, /delivered to the agent to draft a plan, not declined; `::align accept [a-z0-9]{6}` to agree to its plan/);
     assert.match(json(prompt(t, sid, `::align accept ${requestShortId(replan.id)}`).stdout).reason, /you accepted Dana Lee's request/);
     const next = json(prompt(t, sid).stdout);
     assert.equal(
@@ -400,7 +400,9 @@ describe("requests e2e", () => {
     const all = JSON.parse((await runCli(t, ["requests", "--all", "--json"])).stdout);
     assert.deepEqual(all.map((r: { type: string; state: string }) => `${r.type}:${r.state}`).sort(), ["checkpoint:auto_accepted", "switch_goal:accepted"]);
     const human = await runCli(t, ["requests"]);
-    assert.match(human.stdout, /checkpoint .* from Dana Lee .*: done by the agent/);
+    // G1: the auto receipt claims delivery and no decline, never that the agent did the work.
+    assert.match(human.stdout, /checkpoint .* from Dana Lee .*: delivered to the agent, not declined/);
+    assert.doesNotMatch(human.stdout, /done by the agent/);
     const dec = await runCli(t, ["requests", "decline", requestShortId(cp.wire.id)]);
     assert.equal(dec.code, 0, dec.stderr);
     await waitFor(() => has(cp.directive_id, "declined"), 5000, "checkpoint declined");

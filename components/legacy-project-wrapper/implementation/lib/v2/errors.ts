@@ -1,9 +1,11 @@
-/** A v2 error: `{ "error": "<code>", "message": "<human text>" }` with this HTTP status (docs/v2/WIRE.md). */
+/** A v2 error: `{ "error": "<code>", "message": "<human text>" }` with this HTTP status (docs/v2/WIRE.md), plus any
+ *  `extra` fields a route documents (such as `server_time` on `clock_skew`). */
 export class V2Error extends Error {
   constructor(
     public status: number,
     public code: string,
     message?: string,
+    public extra?: Record<string, unknown>,
   ) {
     super(message ?? code);
   }

@@ -7,7 +7,8 @@ import { nowIso, tx } from "./db.ts";
 import { repoKey, sessionKey } from "./keys.ts";
 import path from "node:path";
 import { getSession, sessionCwds, type SessionRow } from "./ledger.ts";
-import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
+import { addNotice, DEVICE_SIGNED_OUT, getShare, renderHot, snapshot } from "./hot.ts";
+import { loadCredentials } from "./api.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { randomId } from "./shared/fsx.ts";
 import type { Goal } from "./shared/types.ts";
@@ -178,6 +179,41 @@ export function forgetShare(ctx: Ctx, lid: string): void {
     ctx.db.prepare("DELETE FROM notices WHERE local_id=?").run(lid);
   });
   renderHot(ctx, lid);
+}
+
+/**
+ * This machine signed out (logout, a revoked device, or a new pairing that replaced the old device): the server can no
+ * longer reach its shares, so each live one ends here too and its session is told once how to share it again. Queued
+ * share and epoch calls are dropped (they belonged to the old device). Stop latches and goal holds stay: a stopped
+ * session stays blocked until the developer runs `align stop-sharing`. Returns how many shares ended.
+ */
+export function endSharesSignedOut(ctx: Ctx): number {
+  const live = ctx.db.prepare("SELECT local_id FROM shares WHERE state IN ('shared','pending','suspended')").all() as { local_id: string }[];
+  const at = nowIso();
+  for (const { local_id: lid } of live) {
+    const latched = ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid);
+    tx(ctx.db, () => {
+      ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=?, error=? WHERE local_id=?").run(at, DEVICE_SIGNED_OUT, lid);
+      ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
+      ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('put_session','post_epoch')").run(lid);
+      addNotice(
+        ctx,
+        lid,
+        `signed_out_${at}`,
+        `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here.${
+          latched ? ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.` : ""
+        }`,
+      );
+    });
+    renderHot(ctx, lid);
+  }
+  if (live.length) ctx.log(`signed out: ${live.length} shares ended on this machine`);
+  return live.length;
+}
+
+/** `endSharesSignedOut` when the credentials say this machine is signed out (a revocation the server reported). */
+export function endSharesIfSignedOut(ctx: Ctx): number {
+  return loadCredentials(ctx.home)?.signed_out ? endSharesSignedOut(ctx) : 0;
 }
 
 export function notify(ctx: Ctx, lid: string, id: string, text: string): void {

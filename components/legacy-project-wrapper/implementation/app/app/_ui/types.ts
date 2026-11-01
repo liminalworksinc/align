@@ -59,6 +59,8 @@ export interface MySession {
   started_at: string;
   state: "shared" | "suspended" | "stopped";
   stopped_at: string | null;
+  /** "device_signed_out": sharing ended because the machine that shared it signed out (no stop or resume reaches it). */
+  ended_reason: "device_signed_out" | null;
   current_epoch: { epoch_id: string; goal_id: string | null; starts_at: string; goal: GoalLabel | null } | null;
   governing_goal: GoalLabel | null;
   agent_stopped: boolean;

@@ -2,7 +2,7 @@
 // acknowledged with a `received` receipt (plus `enforced` once a stop latch or a goal hold is set, `applied` once a
 // resume or release lifts it). Requests (REQ-002) get `accepted` or `declined` later, when they are answered.
 import type { Ctx } from "./context.ts";
-import { api } from "./api.ts";
+import { api, HttpError } from "./api.ts";
 import { bumpGap, kvGet, kvSet, nowIso, tx } from "./db.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
 import { enqueue } from "./share.ts";
@@ -32,21 +32,31 @@ export function cursor(ctx: Ctx): number {
   return Number(kvGet(ctx.db, "directive_cursor") || 0);
 }
 
+/** The cursor only moves forward. */
+function advanceCursor(ctx: Ctx, seq: number): void {
+  if (Number.isSafeInteger(seq) && seq > cursor(ctx)) kvSet(ctx.db, "directive_cursor", String(seq));
+}
+
 export interface HandleResult {
+  /** New and stored (not a replay, out of order or malformed). */
+  stored: boolean;
   accepted: boolean;
   sessions: string[];
   refreshWorkspaces: string[];
 }
 
 export function handleDirective(ctx: Ctx, d: Directive): HandleResult {
-  const res: HandleResult = { accepted: false, sessions: [], refreshWorkspaces: [] };
+  const res: HandleResult = { stored: false, accepted: false, sessions: [], refreshWorkspaces: [] };
   if (!d || typeof d.id !== "string" || !Number.isSafeInteger(Number(d.seq)) || !Array.isArray(d.session_keys)) {
     bumpGap(ctx.db, "directive_malformed");
     return res;
   }
   const seq = Number(d.seq);
+  // A replay (a restored database, a cursor that went back) is dropped, but the cursor still moves past it, so intake
+  // makes progress past already-stored directives instead of fetching the same page again.
   if (ctx.db.prepare("SELECT 1 FROM directives WHERE id=?").get(d.id)) {
     bumpGap(ctx.db, "directive_replay");
+    advanceCursor(ctx, seq);
     return res;
   }
   if (seq <= cursor(ctx)) {
@@ -74,6 +84,7 @@ export function handleDirective(ctx: Ctx, d: Directive): HandleResult {
     }
   });
   for (const s of owned) renderHot(ctx, s.local_id);
+  res.stored = true;
   res.accepted = owned.length > 0;
   res.sessions = owned.map((s) => s.local_id);
   if (d.kind === "goal_version" && d.ws) res.refreshWorkspaces.push(d.ws);
@@ -159,18 +170,32 @@ function applyOne(ctx: Ctx, d: Directive, lid: string, seq: number, at: string):
   }
 }
 
+/** Directives per page the server sends at most (docs/v2/WIRE.md); a shorter page is the last one. */
+const PAGE = 100;
+
+/**
+ * Fetch directives by cursor, up to 20 pages a pass. After each page the cursor moves to the server's `next_cursor`
+ * (never backwards), so a page of replays or malformed directives is never fetched again. Returns how many directives
+ * were new and stored (replays and out-of-order ones are not counted).
+ */
 export async function pollDirectives(ctx: Ctx, onRefresh: (ws: string) => void): Promise<number> {
   let n = 0;
   for (let i = 0; i < 20; i++) {
-    const r = await api(ctx, "GET", `/api/v2/directives?cursor=${cursor(ctx)}`);
-    if (r.status !== 200) return n;
+    const from = cursor(ctx);
+    const r = await api(ctx, "GET", `/api/v2/directives?cursor=${from}`);
+    if (r.status !== 200) {
+      if (r.status >= 500 || r.status === 429) throw new HttpError(r.status, r.json?.error ?? null, r.json);
+      return n;
+    }
     const list: Directive[] = Array.isArray(r.json?.directives) ? r.json.directives : [];
     for (const d of list) {
       const h = handleDirective(ctx, d);
       h.refreshWorkspaces.forEach(onRefresh);
-      n++;
+      if (h.stored) n++;
     }
-    if (!list.length) return n;
+    const next = Number(r.json?.next_cursor);
+    if (/^\d{1,15}$/.test(String(r.json?.next_cursor ?? ""))) advanceCursor(ctx, next);
+    if (list.length < PAGE || cursor(ctx) <= from) return n;
   }
   return n;
 }

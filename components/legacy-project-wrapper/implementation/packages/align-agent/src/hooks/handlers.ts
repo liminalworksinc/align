@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { gitInfo, matchAnchors } from "../shared/anchors.ts";
 import {
+  boundLimits,
   clean,
   collisionReason,
   crossNote,
@@ -232,10 +233,16 @@ function requestParts(hot: HotState, inj: InjectedState, boundGoalId: string | n
   const out = { context: [] as string[], notices: [] as string[] };
   if (!hot.share || hot.share.state === "stopped") return out;
   const seen = (inj.requests_seen = inj.requests_seen || {});
+  // An accepted switch_goal is told only once the session has moved to its target goal, never ahead of the binding.
+  const moved = (r: HotRequest) => r.type !== "switch_goal" || (!!r.target_goal && boundGoalId === r.target_goal.id);
   for (const r of hot.requests || []) {
     const s = seen[r.id] || {};
     const state = requestState(r, s);
     if (s.told && s.told === state) continue;
+    if (state === "accepted" && !moved(r)) {
+      seen[r.id] = { ...s, shown: true };
+      continue;
+    }
     if (state === "withdrawn") {
       if (s.shown) out.notices.push(requestWithdrawnNotice(r));
       seen[r.id] = { ...s, shown: true, told: "withdrawn" };
@@ -266,7 +273,9 @@ function pendingRequestContext(hot: HotState | null, inj: InjectedState, boundGo
   return (hot.requests || []).filter((r) => inj.requests_seen?.[r.id]?.shown && requestState(r, inj.requests_seen[r.id]) === "pending").map((r) => requestContext(r, boundGoalId));
 }
 
-/** Stop: a checkpoint or replan draft the developer has not declined by the end of the turn it arrived in is accepted by the agent. */
+/** Stop: a checkpoint or replan draft the developer has not declined by the end of the turn it arrived in is reported
+ *  as delivered to the agent and not declined (an `accepted` receipt with `auto_accepted`). That says nothing about
+ *  what the agent did with it; Align has no agent-reported completion. */
 function autoAccept(home: string, lid: string, hot: HotState | null): void {
   if (!hot?.share || !hot.requests?.length) return;
   const inj = readInjected(home, lid);
@@ -457,7 +466,10 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   const inj = readInjected(home, lid);
   let goal: GoalSnapshot | null = hot.goal;
   const applied: (string | null)[] = [];
-  const pending = hot.pending_binding;
+  // A binding chosen in this session (`::align bind`, `::align accept` of a switch_goal) applies now, before any sync
+  // has recorded it; the sync records the same binding id. Otherwise the binding the sync recorded (CLI, directive).
+  const local = inj.local_binding && inj.consumed_binding !== inj.local_binding.id ? inj.local_binding : null;
+  const pending = local || hot.pending_binding;
   // A suspended share takes a new binding too: `::align bind <goal>` is how its user resumes uploading (sync turns
   // the share back to shared when the epoch opens).
   if ((hot.share.state === "shared" || hot.share.state === "suspended") && pending) {
@@ -477,6 +489,7 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
         ts,
       });
       inj.consumed_binding = pending.id;
+      if (inj.local_binding?.id === pending.id) delete inj.local_binding;
     }
     if (pending.goal || !pending.goal_id) {
       goal = pending.goal;
@@ -494,10 +507,12 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   }
   let context: string | null = null;
   if (kind) {
-    // A newly bound goal's limits, or a version whose limits changed, are named in the note (the rest come with the
-    // next envelope).
-    const limits = goal && kind === "bound" ? limitChange(goal, []) : goal && kind === "updated" ? limitChange(goal, inj.limits_seen) : null;
+    // A newly bound goal comes with all its limits, as the envelope words them; a version whose limits changed names
+    // the first change in the note (the rest come with the next envelope).
+    const limits = goal && kind === "updated" ? limitChange(goal, inj.limits_seen) : null;
     context = renderDelta(kind, goal, limits);
+    const all = goal && kind === "bound" ? boundLimits(goal) : null;
+    if (all) context = `${context}\n${all}`;
     markInjected(inj, kind === "unbound" ? null : goal, hot.share.state);
   }
   if (hot.share.state === "shared" && goal) {
@@ -570,20 +585,38 @@ export function denyOutput(reason = DENY_REASON): Record<string, unknown> {
   return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
 }
 
+const ENDED_WHY = { device_signed_out: "this machine signed out of Align", sharing_ended: "the Align server no longer has this session's share" } as const;
+
+/** The way out of a latch nothing can lift from the web any more (B6): `align stop-sharing <id>` in a terminal. */
+function endedNote(ended: keyof typeof ENDED_WHY, lid: string): string {
+  return `Its sharing has since ended (${ENDED_WHY[ended] ?? ENDED_WHY.sharing_ended}), so this can no longer be lifted from the web: tools stay blocked until the user runs \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+}
+
+/** The stop deny: the plain wording, or, when the session's sharing ended, how the user gets out. */
+export function stopReason(latch: Latch | null, lid: string): string {
+  if (!latch?.ended) return DENY_REASON;
+  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid)} Tell the user and wait for instructions.`;
+}
+
+function holdDenyReason(h: HoldLatch | null, lid: string): string {
+  const base = holdReason(h);
+  return h?.ended ? `${base} ${endedNote(h.ended, lid)}` : base;
+}
+
 /** The goal-hold latch: a hold file that names a hold, or one that can't be read, blocks every tool (read-only ones too). */
 function holdDeny(home: string, lid: string): HookOutput {
   const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
   if (h.state === "absent") return null;
   if (h.state === "ok" && h.value && Array.isArray(h.value.holds) && !h.value.holds.length) return null;
-  return denyOutput(holdReason(h.state === "ok" ? h.value : null));
+  return denyOutput(holdDenyReason(h.state === "ok" ? h.value : null, lid));
 }
 
 /** The deny a crashed PreToolUse emits: the stop wording unless only a goal hold is known for this session. */
 export function failureDeny(home: string, harness: Harness, sessionId: string | null): Record<string, unknown> {
   if (!sessionId) return denyOutput();
   const lid = localId(harness, sessionId);
-  if (!fs.existsSync(layout.latch(home, lid)) && fs.existsSync(layout.hold(home, lid))) return denyOutput(holdReason(readJson<HoldLatch>(layout.hold(home, lid))));
-  return denyOutput();
+  if (!fs.existsSync(layout.latch(home, lid)) && fs.existsSync(layout.hold(home, lid))) return denyOutput(holdDenyReason(readJson<HoldLatch>(layout.hold(home, lid)), lid));
+  return denyOutput(stopReason(readJson<Latch>(layout.latch(home, lid)), lid));
 }
 
 /**
@@ -599,7 +632,7 @@ export function preToolUse(home: string, harness: Harness, input: HookInput): Ho
     latch.state === "absent" ||
     (latch.state === "ok" && latch.value && latch.value.stopped !== true) ||
     (latch.state === "ok" && !!input.tool_name && READ_ONLY[harness].has(input.tool_name));
-  if (!allowed) return denyOutput();
+  if (!allowed) return denyOutput(latch.state === "ok" ? stopReason(latch.value, lid) : DENY_REASON);
   const held = holdDeny(home, lid);
   if (held) return held;
   const sib = siblingEdits(home, harness, lid, input);
@@ -741,7 +774,7 @@ export function anyLatch(home: string): boolean {
 const STATE_LABELS: Record<RequestState, string> = {
   pending: "waiting for your answer",
   accepted: "accepted by you",
-  auto_accepted: "done by the agent",
+  auto_accepted: "delivered, not declined",
   declined: "declined",
   withdrawn: "withdrawn",
 };
@@ -754,7 +787,7 @@ function requestLine(r: HotRequest): string {
   return `${what}, from ${clean(r.sender?.name, 50) || "someone"}${r.note ? ` (note: "${clean(r.note, 80)}")` : ""}`;
 }
 
-/** Requests still open for an answer: waiting, or done by the agent and still declinable. */
+/** Requests still open for an answer: waiting, or delivered to the agent, not declined, and still declinable. */
 function openRequests(hot: HotState | null, inj: InjectedState): HotRequest[] {
   return (hot?.requests || []).filter((r) => {
     const st = requestState(r, inj.requests_seen?.[r.id]);
@@ -766,7 +799,9 @@ function holdLine(home: string, lid: string): string {
   const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
   if (h.state === "absent" || (h.state === "ok" && Array.isArray(h.value?.holds) && !h.value.holds.length)) return "  Goal hold: off";
   if (h.state !== "ok" || !Array.isArray(h.value?.holds)) return "  Goal hold: unreadable (tools blocked)";
-  return h.value.holds.map((x) => `  Goal hold: on goal "${clean(x.goal_title, 80)}" by ${clean(x.by, 50) || "someone"} (all tools blocked)`).join("\n");
+  const out = h.value.holds.map((x) => `  Goal hold: on goal "${clean(x.goal_title, 80)}" by ${clean(x.by, 50) || "someone"} (all tools blocked)`);
+  if (h.value.ended) out.push(`  Sharing ended, so no release can reach it: run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it`);
+  return out.join("\n");
 }
 
 function lastSync(home: string): string {
@@ -810,16 +845,27 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
               ? `${hot.goal.title} (v${hot.goal.version}, ${hot.goal.status})`
               : "none"
         }`,
-        hot?.pending_binding ? `  Next prompt switches to: ${hot.pending_binding.goal ? hot.pending_binding.goal.title : "no goal"}` : "",
+        (() => {
+          const next = inj.local_binding && inj.consumed_binding !== inj.local_binding.id ? inj.local_binding : hot?.pending_binding;
+          return next && inj.consumed_binding !== next.id ? `  Next prompt switches to: ${next.goal ? next.goal.title : "no goal"}` : "";
+        })(),
         `  In context: ${inj.goal_id ? `goal v${inj.goal_version}` : "nothing from Align"}`,
-        `  Stop latch: ${latch.state === "absent" ? "off" : latch.state === "ok" && latch.value.stopped ? "on (tools blocked)" : "unreadable (tools blocked)"}`,
+        `  Stop latch: ${
+          latch.state === "absent"
+            ? "off"
+            : latch.state === "ok" && latch.value.stopped
+              ? latch.value.ended
+                ? `on (tools blocked; sharing ended, so run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it)`
+                : "on (tools blocked)"
+              : "unreadable (tools blocked)"
+        }`,
         holdLine(home, lid),
         ...openRequests(hot, inj).map((r) =>
           requestState(r, inj.requests_seen?.[r.id]) === "pending"
             ? `  Request:  ${requestLine(r)}; \`::align accept ${requestShortId(r.id)}\` or \`::align decline ${requestShortId(r.id)}\``
             : r.type === "replan"
-              ? `  Request:  ${requestLine(r)}; plan drafted by the agent, \`::align accept ${requestShortId(r.id)}\` to agree or \`::align decline ${requestShortId(r.id)}\``
-              : `  Request:  ${requestLine(r)}; done by the agent, \`::align decline ${requestShortId(r.id)}\` to decline it`,
+              ? `  Request:  ${requestLine(r)}; delivered to the agent to draft a plan, not declined; \`::align accept ${requestShortId(r.id)}\` to agree to its plan or \`::align decline ${requestShortId(r.id)}\``
+              : `  Request:  ${requestLine(r)}; delivered to the agent, not declined; \`::align decline ${requestShortId(r.id)}\` to decline it`,
         ),
         `  Last sync: ${lastSync(home)}`,
         hot?.goal?.limits?.length ? `  Limits:   ${hot.goal.limits.length} on this goal; drift notice ${driftOn(home) ? "on" : "off"} (\`align config drift on|off\`)` : "",
@@ -855,12 +901,25 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (!hits.length) return ref ? `Align: no open request matches "${arg}". Type \`::align requests\` to list them.` : "Align: no request is waiting for an answer.";
       if (hits.length > 1) return `Align: ${hits.length} requests match; use one of the ids: ${hits.map((r) => requestShortId(r.id)).join(", ")}.`;
       const r = hits[0];
-      spoolWrite(home, { type: "request_answer", local_id: lid, request_id: r.id, answer, auto: false, ts });
+      const who = clean(r.sender?.name, 50) || "the sender";
+      // Accepting a switch_goal moves the session at the very next prompt, like `::align bind`: the binding is recorded
+      // here from the cached goal, and the sync records the same one with the request's directive as its cause.
+      let pendingId: string | undefined;
+      let later = false;
+      if (answer === "accepted" && r.type === "switch_goal" && r.target_goal && hot?.share) {
+        const cached = readJson<FeedFile>(layout.feed(home, hot.share.workspace_id))?.goals.find((g) => g.id === r.target_goal!.id);
+        if (cached && (!cached.bindable || cached.status !== "active")) return `Align: goal "${clean(cached.title, 100)}" can no longer be bound; \`::align decline ${requestShortId(r.id)}\` instead.`;
+        if (cached && r.directive_id) {
+          pendingId = randomId("pb_");
+          inj.local_binding = { id: pendingId, goal_id: cached.id, goal: snapshot(cached), cause: `directive:${r.directive_id}`, directive_id: null };
+        } else later = true;
+      }
+      spoolWrite(home, { type: "request_answer", local_id: lid, request_id: r.id, answer, auto: false, ...(pendingId ? { pending_id: pendingId } : {}), ts });
       const seen = (inj.requests_seen = inj.requests_seen || {});
       seen[r.id] = { ...(seen[r.id] || {}), answer };
       writeInjected(home, lid, inj);
-      const who = clean(r.sender?.name, 50) || "the sender";
       if (answer === "declined") return `Align: you declined ${who}'s request; ${who} will see that.${seen[r.id].shown ? " The agent hears it at your next prompt." : ""}`;
+      if (r.type === "switch_goal" && later) return `Align: you accepted ${who}'s request. This session moves to "${clean(r.target_goal?.title, 100)}" at the first prompt after Align has fetched that goal (the next sync).`;
       if (r.type === "switch_goal") return `Align: you accepted ${who}'s request. From your next prompt this session counts toward "${clean(r.target_goal?.title, 100)}".`;
       return `Align: you accepted ${who}'s request; ${who} will see that. The agent hears it at your next prompt.`;
     }
@@ -930,12 +989,18 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       return "Align: this session will stop sharing. Usage from now on stays on this machine. Shared history is kept until you run `align delete-history`.";
     case "bind": {
       if (!hot?.share) return "Align: this session is not shared. Type `::align share <goal>` first.";
+      if (hot.share.state === "stopped") return "Align: this session is no longer shared. Type `::align share <goal>` to share it again.";
       if (!arg) return "Align: usage is `::align bind <goal>`.";
       const feed = feedFor(home, hot);
       const goal = feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) : null;
       if (!goal) return `Align: no cached goal matches "${arg}". Type \`::align goals\` to list them.`;
       if (!goal.bindable) return `Align: "${goal.title}" needs an approved alignment before this session can count toward it.`;
-      spool("bind", goal.id);
+      // Recorded here, so the very next prompt opens the epoch even before a sync runs (as `align bind` does).
+      const inj = readInjected(home, lid);
+      const id = randomId("pb_");
+      inj.local_binding = { id, goal_id: goal.id, goal: snapshot(goal), cause: "manual", directive_id: null };
+      writeInjected(home, lid, inj);
+      spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "bind", arg: goal.id, pending_id: id, ts });
       return `Align: from your next prompt this session counts toward "${goal.title}".`;
     }
     case "task": {

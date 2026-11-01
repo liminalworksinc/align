@@ -916,7 +916,7 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 #### Scenario: Own sessions
 
 - **WHEN** a member opens the tab
-- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared"), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
+- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", or "ended: device signed out" with the note "The machine that shared this session signed out of Align, so sharing ended and Stop or Resume can't reach it. ... To share it again, run align login on that machine, then ::align share in the session." and no **Stop agent** or **Resume agent**), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
 
 #### Scenario: Confirmed actions
 
@@ -1010,21 +1010,23 @@ active goals, an optional note (at most 280 characters, "shown to the developer 
 **Send** (`POST …/requests`), or "No shared session is working on this goal, so there is no one to send a request
 to." when there is no session. Each request SHALL be listed with its type, a pill (waiting, answered, cancelled, or "expired: the goal closed"), its
 sender and time, the goal version it was sent at, the target goal ("a goal you can't see" when hidden), the quoted
-note, who cancelled it, the counts, and per visible session a pill: pending, accepted by the developer, done by the
-agent (an `auto_accepted` accept), declined or expired, each with one evidence class: "delivery receipt" for a request
-the session's machine received and has not answered, "agent reported" for an answer (accepted, done by the agent,
-declined: the developer's or the agent's own word, sent from their machine), "not observed" for one sent with nothing
-back or expired; with **Cancel** when its `can_cancel` is true.
+note, who cancelled it, the counts ("<n> accepted by the developer, <n> delivered and not declined"), and per visible
+session a pill: pending, accepted by the developer, "delivered, not declined" (an `auto_accepted` accept: the request
+reached the agent and the developer did not decline it by the end of that turn; it never says the agent did it),
+declined or expired, each with one evidence class: "delivery receipt" for a request the session's machine received and
+has not answered and for one delivered and not declined, "agent reported" for the developer's answer (accepted or
+declined, sent from their machine), "not observed" for one sent with nothing back or expired; with **Cancel** when its
+`can_cancel` is true.
 
 #### Scenario: Approver sends a replan
 
 - **WHEN** a goal's lead picks Replan, types a note and presses **Send** while sessions work on the goal
 - **THEN** the request is created (201) and listed with "waiting", the lead as sender and the quoted note
 
-#### Scenario: Agent did the checkpoint
+#### Scenario: A checkpoint delivered and not declined
 
-- **WHEN** a session's agent accepted a checkpoint on its own and another session's developer accepted it
-- **THEN** the request's sessions show "done by the agent" and "accepted by the developer", each marked "agent reported", never "delivery receipt"
+- **WHEN** a checkpoint reached one session's agent and its developer did not decline it by the end of that turn, and another session's developer accepted it
+- **THEN** the request's sessions show "delivered, not declined" marked "delivery receipt" and "accepted by the developer" marked "agent reported"; nothing reads "done by the agent"
 
 ### Requirement: Hold banner
 

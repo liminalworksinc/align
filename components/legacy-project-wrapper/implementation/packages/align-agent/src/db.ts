@@ -1,4 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import { layout } from "./shared/layout.ts";
 
@@ -181,9 +181,28 @@ CREATE TABLE IF NOT EXISTS gaps (reason TEXT PRIMARY KEY, n INTEGER NOT NULL);
 
 export type Db = DatabaseSync;
 
+/**
+ * node:sqlite, loaded on first use rather than by a static import, so an unsupported Node gets the CLI's own message
+ * (src/node-version.ts) instead of a module error, and without the "SQLite is an experimental feature" warning Node
+ * prints on loading it (the only warning silenced).
+ */
+function sqlite(): typeof import("node:sqlite") {
+  const emit = process.emitWarning;
+  process.emitWarning = function (this: unknown, warning: string | Error, ...rest: unknown[]) {
+    const type = typeof rest[0] === "string" ? rest[0] : (rest[0] as { type?: string } | undefined)?.type;
+    if (type === "ExperimentalWarning" && /SQLite/i.test(typeof warning === "string" ? warning : warning.message)) return;
+    return (emit as (...a: unknown[]) => void).call(process, warning, ...rest);
+  } as typeof process.emitWarning;
+  try {
+    return process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+  } finally {
+    process.emitWarning = emit;
+  }
+}
+
 export function openDb(alignHome: string): Db {
   const file = layout.db(alignHome);
-  const db = new DatabaseSync(file, { timeout: 5000 });
+  const db = new (sqlite().DatabaseSync)(file, { timeout: 5000 });
   db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=OFF;");
   db.exec(SCHEMA);
   try {

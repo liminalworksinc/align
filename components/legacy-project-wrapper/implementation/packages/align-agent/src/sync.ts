@@ -3,11 +3,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Ctx } from "./context.ts";
-import { api, HttpError, NetworkError, SignedOut, signedIn } from "./api.ts";
+import { api, HttpError, NetworkError, resetServerTrouble, serverTrouble, SignedOut, signedIn } from "./api.ts";
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { applyShare, bind, enqueue, forgetShare, planShare, stopSharing } from "./share.ts";
+import { applyShare, bind, endSharesIfSignedOut, enqueue, forgetShare, planShare, stopSharing } from "./share.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -70,7 +70,9 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
         ctx.db
           .prepare("INSERT INTO epochs(epoch_id, local_id, workspace_id, goal_id, starts_at, root_turn, cause, created_at) VALUES(?,?,?,?,?,?,?,?)")
           .run(r.epoch_id, lid, share.workspace_id, r.goal_id, r.starts_at, r.root_turn, r.cause, nowIso());
-        let goalJson = pending && pending.id === r.pending_id ? pending.goal_json : share.goal_json;
+        // The goal comes from the binding the hook applied; a binding the hook recorded itself (InjectedState.local_binding)
+        // may reach this pass before its command did, so otherwise the share's own goal only when it is the same one.
+        let goalJson = pending && pending.id === r.pending_id ? pending.goal_json : share.binding_goal === r.goal_id ? share.goal_json : null;
         if (!goalJson && r.goal_id) {
           const g = loadFeed(ctx.home, share.workspace_id)?.goals.find((x) => x.id === r.goal_id);
           goalJson = g ? JSON.stringify(snapshot(g)) : null;
@@ -79,6 +81,7 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
           .prepare("UPDATE shares SET binding_epoch=?, binding_goal=?, goal_id=?, goal_json=?, state=CASE WHEN state='suspended' THEN 'shared' ELSE state END WHERE local_id=?")
           .run(r.epoch_id, r.goal_id, r.goal_id, goalJson, lid);
         ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=? AND id=?").run(lid, r.pending_id);
+        kvSet(ctx.db, `binding_consumed:${lid}`, r.pending_id);
         enqueue(ctx, lid, "post_epoch", {
           ws: share.workspace_id,
           session_key: share.session_key,
@@ -92,7 +95,7 @@ function applySpool(ctx: Ctx, r: SpoolRecord): string | null {
       return r.local_id;
     }
     case "request_answer": {
-      const res = answerRequest(ctx, r.local_id, r.request_id, r.answer, r.auto, r.ts);
+      const res = answerRequest(ctx, r.local_id, r.request_id, r.answer, r.auto, r.ts, r.pending_id);
       // The agent's own auto-accept loses quietly to an earlier answer; the developer hears why theirs failed.
       if (!res.ok && !r.auto) addNotice(ctx, r.local_id, `ans_${r.request_id}_${Date.parse(r.ts) || 0}`, `Align: ${r.answer === "accepted" ? "accept" : "decline"} failed: ${res.why}.`);
       return r.local_id;
@@ -122,8 +125,10 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       if (!share) throw new Error("this session is not shared");
       const goal = r.arg ? resolveGoal(loadFeed(ctx.home, share.workspace_id), r.arg) : null;
       if (goal && !goal.bindable) throw new Error(`goal "${goal.title}" needs an approved alignment before it can be bound`);
-      bind(ctx, lid, goal);
-      say(`Align: from your next prompt this session counts toward ${goal ? `"${goal.title}"` : "no goal (unallocated)"}.`);
+      // The hook already applied this binding at a prompt (same id): don't queue it a second time.
+      if (!r.pending_id || kvGet(ctx.db, `binding_consumed:${lid}`) !== r.pending_id) bind(ctx, lid, goal, "manual", null, r.pending_id);
+      // A hook that recorded the binding itself already told the user; an older record is confirmed here.
+      if (!r.pending_id) say(`Align: from your next prompt this session counts toward ${goal ? `"${goal.title}"` : "no goal (unallocated)"}.`);
     } else if (r.command === "share") {
       const existing = getShare(ctx, lid);
       if (existing && existing.state !== "stopped" && existing.state !== "error") return lid;
@@ -366,6 +371,13 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
           ctx.log(`usage upload refused for ${s.local_id}: ${r.status} ${r.json?.error || ""}`);
           if (r.json?.error === "sharing_stopped" || r.json?.error === "not_shared" || r.status === 404) {
             ctx.db.prepare("UPDATE shares SET state='stopped', stopped_at=COALESCE(stopped_at, ?) WHERE local_id=?").run(nowIso(), s.local_id);
+            // Never silently: the session hears that its sharing ended and that usage now stays here.
+            addNotice(
+              ctx,
+              s.local_id,
+              `upload_refused_${r.status}`,
+              `Align: the server no longer accepts this session's usage (${r.json?.error || r.status}), so it stopped sharing; its usage stays on this machine from now on.`,
+            );
             renderHot(ctx, s.local_id);
           }
         }
@@ -403,6 +415,19 @@ export interface SyncResult {
   directives: number;
   activity?: number;
   steering?: number;
+  /** The first time this pass could not reach the server or got a 5xx (null when every call got through). */
+  serverError?: string | null;
+}
+
+/** last-sync.json: when the last pass ran, and whether the server could be reached (B5). */
+export interface LastSync {
+  at: string;
+  ms: number;
+  pid: number;
+  /** Why the server could not be reached in the last pass; absent when it could. */
+  error?: string;
+  /** Since when passes have failed to reach the server. */
+  error_since?: string;
 }
 
 /**
@@ -434,6 +459,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     }
   }
   const t0 = Date.now();
+  resetServerTrouble();
   try {
     res.spooled += ingestSpool(ctx);
     res.tail = tailAll(ctx, opts.tailBudgetMs);
@@ -443,7 +469,10 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     } catch {
       /* best effort; the note just doesn't show */
     }
-    if (!signedIn(ctx.home)) return res;
+    if (!signedIn(ctx.home)) {
+      endSharesIfSignedOut(ctx);
+      return res;
+    }
     const refresh = new Set<string>();
     res.sent += (await flushOutbox(ctx)).sent;
     res.directives = await pollDirectives(ctx, (ws) => refresh.add(ws)).catch(() => 0);
@@ -472,8 +501,17 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     res.steering = await uploadSteering(ctx).catch(() => 0);
     return res;
   } finally {
+    res.serverError = serverTrouble();
     try {
-      writeJsonAtomic(layout.lastSync(ctx.home), { at: nowIso(), ms: Date.now() - t0, pid: process.pid });
+      const at = nowIso();
+      const prev = readJson<LastSync>(layout.lastSync(ctx.home));
+      const rec: LastSync = { at, ms: Date.now() - t0, pid: process.pid };
+      if (res.serverError) {
+        rec.error = res.serverError;
+        rec.error_since = prev?.error ? prev.error_since || prev.at : at;
+        ctx.log(`sync: ${res.serverError}; queued work stays on this machine until a pass gets through`);
+      } else if (prev?.error) ctx.log("sync: the server is reachable again");
+      writeJsonAtomic(layout.lastSync(ctx.home), rec);
       fs.unlinkSync(lock);
     } catch {
       /* ignore */

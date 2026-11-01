@@ -1012,6 +1012,13 @@ const MIGRATIONS: string[] = [
     FOREIGN KEY (ws_id, reallocation_id) REFERENCES v2_reallocations(ws_id, id) ON DELETE CASCADE
   );
   `,
+  // E2E-AGENT B4/G2: a revoked device (logout, removal on the web, signing out everywhere, refresh-token reuse) can't
+  // receive a stop, a resume or a release any more, so its sessions end with it: state 'stopped' and ended_reason
+  // 'device_signed_out' (lib/v2/devices.ts endDeviceSessions). The Sessions tab says so and refuses stop and resume;
+  // the same person's re-paired machine may share such a session again (lib/v2/sessions.ts putSession).
+  `
+  ALTER TABLE v2_sessions ADD COLUMN ended_reason TEXT CHECK (ended_reason IS NULL OR ended_reason = 'device_signed_out');
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

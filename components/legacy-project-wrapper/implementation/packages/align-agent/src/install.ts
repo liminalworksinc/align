@@ -103,6 +103,22 @@ function backup(file: string, dryRun: boolean): string | null {
   return dest;
 }
 
+/** The backups Align wrote of `file` (`<file>.align-backup-<timestamp>`). */
+function backupsOf(file: string): string[] {
+  const dir = path.dirname(file);
+  const prefix = `${path.basename(file)}.align-backup-`;
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.startsWith(prefix))
+      .map((f) => path.join(dir, f));
+  } catch {
+    return [];
+  }
+}
+
+const jsonText = (value: unknown) => JSON.stringify(value, null, 2) + "\n";
+
 function readJsonFile(file: string): Record<string, unknown> {
   if (!fs.existsSync(file)) return {};
   const text = fs.readFileSync(file, "utf8");
@@ -114,7 +130,7 @@ function readJsonFile(file: string): Record<string, unknown> {
 
 function writeJsonFile(file: string, value: unknown): void {
   const mode = fs.existsSync(file) ? fs.statSync(file).mode & 0o777 : 0o600;
-  writeFileAtomic(file, JSON.stringify(value, null, 2) + "\n", mode);
+  writeFileAtomic(file, jsonText(value), mode);
 }
 
 function copyDir(src: string, dest: string): void {
@@ -200,14 +216,17 @@ export function install(paths: Paths, o: InstallOptions): { lines: string[]; rec
     const hooks = (doc.hooks && typeof doc.hooks === "object" ? doc.hooks : {}) as Record<string, unknown>;
     mergeHooks(hooks, home, o.nodePath, "codex");
     doc.hooks = hooks;
-    const hb = backup(hooksFile, o.dryRun);
-    say(`${o.dryRun ? "Would merge" : "Merged"} Codex hooks (SessionStart, UserPromptSubmit, PreToolUse matcher "*", Stop) into ${hooksFile}${hb ? `; backup ${hb}` : ""}.`);
+    // A reinstall that changes nothing writes nothing, so it leaves no backup either.
+    const same = existedBefore && fs.readFileSync(hooksFile, "utf8") === jsonText(doc);
+    const hb = same ? null : backup(hooksFile, o.dryRun);
+    if (same) say(`Codex hooks in ${hooksFile} are already up to date.`);
+    else say(`${o.dryRun ? "Would merge" : "Merged"} Codex hooks (SessionStart, UserPromptSubmit, PreToolUse matcher "*", Stop) into ${hooksFile}${hb ? `; backup ${hb}` : ""}.`);
     say("  Codex will list the new hooks as needing review. Open /hooks in Codex and trust them; Align never writes trust entries.");
     const configFile = path.join(paths.codexHome, "config.toml");
     if (fs.existsSync(configFile) && /^\s*hooks\s*=\s*false/m.test(fs.readFileSync(configFile, "utf8"))) {
       say("  Warning: config.toml sets hooks = false under [features]; Codex will not run any hooks until that is removed.");
     }
-    if (!o.dryRun) {
+    if (!o.dryRun && !same) {
       fs.mkdirSync(paths.codexHome, { recursive: true });
       writeJsonFile(hooksFile, doc);
     }
@@ -230,15 +249,16 @@ export function uninstall(paths: Paths, opts: { purge: boolean }): string[] {
     fs.rmSync(pluginDir(paths), { recursive: true, force: true });
     lines.push(`Removed the Align plugin for Claude Code (${pluginDir(paths)}).`);
   }
+  // Uninstall removes only Align's own handlers, so the files end as the user's own again: the backups Align made of
+  // them on install are no longer needed and go too (no new backup is written).
   const claudeFile = path.join(paths.claudeDir, "settings.json");
   if (fs.existsSync(claudeFile)) {
     const s = readJsonFile(claudeFile);
     const removed = stripHooks(s.hooks as Record<string, unknown>, home);
     if (s.hooks && !Object.keys(s.hooks as object).length) delete s.hooks;
     if (removed) {
-      const b = backup(claudeFile, false);
       writeJsonFile(claudeFile, s);
-      lines.push(`Removed ${removed} Align hook handlers from ${claudeFile} (backup ${b}).`);
+      lines.push(`Removed ${removed} Align hook handlers from ${claudeFile}.`);
     }
   }
   const codexHooks = rec?.codex?.hooks || path.join(paths.codexHome, "hooks.json");
@@ -246,14 +266,16 @@ export function uninstall(paths: Paths, opts: { purge: boolean }): string[] {
     const d = readJsonFile(codexHooks);
     const removed = stripHooks(d.hooks as Record<string, unknown>, home);
     if (removed) {
-      const b = backup(codexHooks, false);
       const createdByUs = !!rec?.codex?.hooks_created;
       const empty = Object.keys(d).every((k) => k === "hooks") && !Object.keys((d.hooks as object) || {}).length;
       if (createdByUs && empty) fs.rmSync(codexHooks, { force: true });
       else writeJsonFile(codexHooks, d);
-      lines.push(`Removed ${removed} Align hook handlers from ${codexHooks}${createdByUs && empty ? " (file deleted; Align created it)" : ""} (backup ${b}).`);
+      lines.push(`Removed ${removed} Align hook handlers from ${codexHooks}${createdByUs && empty ? " (file deleted; Align created it)" : ""}.`);
     }
   }
+  const backups = [...backupsOf(claudeFile), ...backupsOf(codexHooks)];
+  for (const b of backups) fs.rmSync(b, { force: true });
+  if (backups.length) lines.push(`Removed ${backups.length} backup file(s) Align made when installing (${backups.map((b) => path.basename(b)).join(", ")}).`);
   if (opts.purge) {
     fs.rmSync(home, { recursive: true, force: true });
     lines.push(`Deleted ${home} (local ledger, keys and tokens).`);

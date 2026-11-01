@@ -2,7 +2,7 @@
 // session's next prompt by the hooks; the developer's answer (or the agent's own, for a safe request) goes back as an
 // `accepted` or `declined` receipt. A `hold` directive sets a per-goal latch that blocks every tool until `release`.
 import type { Ctx } from "./context.ts";
-import { nowIso, tx } from "./db.ts";
+import { kvGet, nowIso, tx } from "./db.ts";
 import { loadFeed } from "./goals.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
 import { enqueue } from "./share.ts";
@@ -74,7 +74,7 @@ export interface AnswerResult {
   row?: RequestRow;
 }
 
-/** The developer may still answer after the agent did a safe request: decline either, or agree to a drafted replan. */
+/** The developer may still answer a safe request delivered and not declined: decline either, or agree to a replan's draft. */
 export function answerable(type: string, state: RequestState, answer: "accepted" | "declined"): boolean {
   if (state === "pending") return true;
   return state === "auto_accepted" && (answer === "declined" || type === "replan");
@@ -85,7 +85,7 @@ export function answerable(type: string, state: RequestState, answer: "accepted"
  * (the developer agreeing to the updated plan); `declined` from pending or after the agent auto-accepted. A switch_goal
  * is never auto-accepted; accepting it queues the binding change for the next root turn, like `align bind`.
  */
-export function answerRequest(ctx: Ctx, lid: string, requestId: string, answer: "accepted" | "declined", auto: boolean, at = nowIso()): AnswerResult {
+export function answerRequest(ctx: Ctx, lid: string, requestId: string, answer: "accepted" | "declined", auto: boolean, at = nowIso(), pendingId?: string): AnswerResult {
   const row = ctx.db.prepare("SELECT * FROM goal_requests WHERE request_id=? AND local_id=?").get(requestId, lid) as unknown as RequestRow | undefined;
   if (!row) return { ok: false, why: "no such request for this session" };
   const share = getShare(ctx, lid);
@@ -103,7 +103,10 @@ export function answerRequest(ctx: Ctx, lid: string, requestId: string, answer: 
   tx(ctx.db, () => {
     ctx.db.prepare("UPDATE goal_requests SET state=?, answered_at=? WHERE request_id=? AND local_id=?").run(state, at, requestId, lid);
     enqueue(ctx, lid, "receipt", { directive_id: row.directive_id, body: { session_key: share.session_key, state: answer, at, ...(auto ? { auto_accepted: true } : {}) } });
-    if (answer === "accepted" && row.type === "switch_goal" && q.target_goal) {
+    // `pendingId`: the binding the hook already applied at a prompt (`::align accept`); once its epoch is open it is not
+    // queued again.
+    const consumed = !!pendingId && kvGet(ctx.db, `binding_consumed:${lid}`) === pendingId;
+    if (answer === "accepted" && row.type === "switch_goal" && q.target_goal && !consumed) {
       // The existing binding path: a pending binding the next UserPromptSubmit opens as a new epoch. The cause names
       // the request's directive, which the server sent to this session. A goal the feed has not cached yet gets its
       // snapshot from the next feed refresh (syncSnapshots).
@@ -113,7 +116,7 @@ export function answerRequest(ctx: Ctx, lid: string, requestId: string, answer: 
            ON CONFLICT(local_id) DO UPDATE SET id=excluded.id, goal_id=excluded.goal_id, goal_json=excluded.goal_json, cause=excluded.cause,
              directive_id=excluded.directive_id, created_at=excluded.created_at`,
         )
-        .run(lid, randomId("pb_"), q.target_goal.id, target ? JSON.stringify(snapshot(target)) : null, `directive:${row.directive_id}`, null, at);
+        .run(lid, pendingId || randomId("pb_"), q.target_goal.id, target ? JSON.stringify(snapshot(target)) : null, `directive:${row.directive_id}`, null, at);
     }
   });
   renderHot(ctx, lid);
@@ -121,7 +124,7 @@ export function answerRequest(ctx: Ctx, lid: string, requestId: string, answer: 
 }
 
 export function stateWords(s: RequestState): string {
-  return s === "auto_accepted" ? "done by the agent" : s === "pending" ? "waiting for an answer" : s;
+  return s === "auto_accepted" ? "delivered to the agent, not declined" : s === "pending" ? "waiting for an answer" : s;
 }
 
 /** Requests on this device, newest first (`align requests`). */

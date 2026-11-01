@@ -10,8 +10,8 @@ const goalText = (g: GoalLabel | null | undefined) => (!g ? "no goal" : g.privat
 
 /** How far a stop or resume got, with its evidence class (the checklist's §E2): a delivery receipt once the machine
  *  sent any receipt, else not observed. */
-function StopStatusPills({ s, stopped }: { s: StopStatus | null; stopped: boolean }) {
-  const text = stopText(s, stopped);
+function StopStatusPills({ s, stopped, ended = false }: { s: StopStatus | null; stopped: boolean; ended?: boolean }) {
+  const text = stopText(s, stopped, ended);
   if (!text) return null;
   return (
     <>
@@ -21,8 +21,10 @@ function StopStatusPills({ s, stopped }: { s: StopStatus | null; stopped: boolea
   );
 }
 
-/** Plain words for how far a stop or resume got: sent, received by the machine, active there. */
-function stopText(s: StopStatus | null, stopped: boolean) {
+/** Plain words for how far a stop or resume got: sent, received by the machine, active there. A session whose machine
+ *  signed out can't get either, so it never reads "sent". */
+function stopText(s: StopStatus | null, stopped: boolean, ended = false) {
+  if (ended) return stopped ? "Stopped; can't be resumed from here" : null;
   if (!s) return stopped ? "Stop requested" : null;
   const has = (x: string) => s.receipts.some((r) => r.state === x);
   if (s.kind === "stop") return has("enforced") ? "Local stop active" : has("received") ? "Stop received by the machine" : "Stop sent, not yet received";
@@ -53,14 +55,23 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[16px] text-zinc-900">{s.title || s.repo_alias || `${s.harness} session`}</span>
                 <Pill>{s.harness}</Pill>
-                <Pill tone={s.state === "shared" ? "green" : s.state === "suspended" ? "amber" : "neutral"}>{s.state === "stopped" ? "not shared" : s.state}</Pill>
-                <StopStatusPills s={s.stop_status} stopped={s.agent_stopped} />
+                <Pill tone={s.state === "shared" ? "green" : s.state === "suspended" ? "amber" : s.ended_reason ? "red" : "neutral"}>
+                  {s.ended_reason === "device_signed_out" ? "ended: device signed out" : s.state === "stopped" ? "not shared" : s.state}
+                </Pill>
+                <StopStatusPills s={s.stop_status} stopped={s.agent_stopped} ended={!!s.ended_reason} />
               </div>
               <p className="text-[14px] text-zinc-500">
                 Started {when(s.started_at)}. Counting under: {goalText(s.current_epoch?.goal)}
                 {s.governing_goal ? `. Follows: ${goalText(s.governing_goal)}` : ""}. {num(s.usage.requests)} requests, {num(s.usage.input + s.usage.output)} input and output tokens.
               </p>
               {s.state === "suspended" && <Note>The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads.</Note>}
+              {s.ended_reason === "device_signed_out" && (
+                <Note>
+                  The machine that shared this session signed out of Align, so sharing ended and Stop or Resume can&apos;t reach it.
+                  {s.agent_stopped ? " It stays stopped on that machine until you run align stop-sharing there." : ""} To share it again, run align login on that machine, then
+                  ::align share in the session.
+                </Note>
+              )}
               <div className="mt-2 flex flex-wrap gap-2">
                 {s.state !== "stopped" &&
                   (s.agent_stopped ? (

@@ -13,7 +13,9 @@ Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 
 ```
 align login [--server <url>] [--name <device name>]   device flow; key-bound tokens
-align logout                                          revokes this device, wipes tokens and the device key
+align logout                                          revokes this device, wipes tokens and the device key; this
+                                                      machine's shares stop (sessions stopped from the web stay
+                                                      blocked until `align stop-sharing`)
 align status                                          identity, last sync, hooks + hash, outbox, unpriced
 align sessions [--all] [--json]                       local sessions, tokens, basis, list-price estimate (offline)
 align goals [--workspace <name|id>] [--refresh]       cached goal feed
@@ -38,7 +40,8 @@ align allocation [--workspace W] [--week YYYY-MM-DD] [--refresh] [--json]
 align steering status [--workspace W]                 steering switch, lines shown this week, lines waiting to report
 align install [--claude] [--codex] [--dry-run]
 align uninstall [--purge]
-align sync                                            one pass: spool, transcripts, outbox, directives, upload
+align sync                                            one pass: spool, transcripts, outbox, directives, upload;
+                                                      exits 1 naming the server when it can't be reached
 align doctor                                          checks plus hook latency
 ```
 
@@ -64,9 +67,10 @@ call.
 - **Requests.** Someone who can approve a goal (or a workspace owner) can send its sessions a `replan`, `checkpoint`
   or `switch_goal` request. The sync stores it and posts `received`. At the session's next prompt (never mid-turn,
   once) you see a notice naming the sender, and the model gets fixed Align wording for that type, with the sender's
-  note quoted as data. A checkpoint and drafting an updated plan are safe: the agent does them on its own, and if you
-  have not declined by the end of that turn, the Stop hook marks the request done by the agent (an `accepted` receipt
-  with `auto_accepted: true`); you can still decline. A replan never changes course until you agree (tell the agent,
+  note quoted as data. A checkpoint and drafting an updated plan are safe: they reach the agent without waiting for
+  you, and if you have not declined by the end of that turn, the Stop hook reports the request as delivered to the
+  agent and not declined (an `accepted` receipt with `auto_accepted: true`). That is not a report that the agent did
+  it: Align has no agent-reported completion. You can still decline. A replan never changes course until you agree (tell the agent,
   or `::align accept <id>`, which tells it to follow the updated plan), and a
   `switch_goal` waits for `::align accept <id>` (or `align requests accept <id>`), which moves the session to the
   target goal at its next prompt like `align bind`. Your answer goes back as an `accepted` or `declined` receipt and
@@ -159,8 +163,9 @@ what was added.
   `SessionStart`, `UserPromptSubmit`, `PreToolUse` and `Stop` with `codex`, after a
   `hooks.json.align-backup-<timestamp>` copy. Codex lists new hooks for review; trust them in Codex `/hooks`.
   `config.toml` is not edited.
-- `--dry-run` prints the plan and writes nothing. `align uninstall` deletes the plugin folder, removes only Align's
-  Codex handlers and keeps `ALIGN_HOME` unless `--purge`.
+- `--dry-run` prints the plan and writes nothing. A reinstall that changes nothing writes no backup. `align uninstall`
+  deletes the plugin folder, removes only Align's Codex handlers (and the backups Align made of those files) and keeps
+  `ALIGN_HOME` unless `--purge`.
 
 ## State (`ALIGN_HOME`, default `~/.align`, 0700, must be owned by you)
 
@@ -203,4 +208,6 @@ npm test          # build, then node --test test/*.test.ts (temp dirs and a loca
 ```
 
 Every location is overridable for tests and dry runs: `HOME`, `ALIGN_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
-`ALIGN_SERVER`. `ALIGN_NO_AUTOSTART=1` stops hooks from starting syncs.
+`ALIGN_SERVER`. `ALIGN_NO_AUTOSTART=1` stops hooks from starting syncs. Below Node 24 the CLI refuses to run (one
+line on stderr, exit 1) and the hooks do nothing but keep stop latches and goal holds closed;
+`ALIGN_ALLOW_UNSUPPORTED_NODE=1` skips that check (the tests set it, since a test machine may run an older Node).

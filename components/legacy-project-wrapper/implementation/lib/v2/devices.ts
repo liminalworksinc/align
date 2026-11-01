@@ -163,7 +163,7 @@ export async function refresh(input: { device_id: string; refresh_token: string;
   const device = get<{ id: string; public_key: string; revoked_at: string | null }>("SELECT id, public_key, revoked_at FROM v2_devices WHERE id = ?", input.device_id);
   if (!device || device.revoked_at) throw invalid();
   const tsMs = Date.parse(input.ts);
-  if (Number.isNaN(tsMs) || Math.abs(nowMs - tsMs) > REFRESH_SKEW_MS) throw invalid();
+  if (Number.isNaN(tsMs)) throw invalid();
   let ok = false;
   try {
     ok = verify(null, Buffer.from(refreshMessage(input.device_id, input.refresh_token, input.ts), "utf8"), publicKeyOf(device.public_key), Buffer.from(input.sig, "base64url"));
@@ -171,6 +171,13 @@ export async function refresh(input: { device_id: string; refresh_token: string;
     ok = false;
   }
   if (!ok) throw invalid();
+  // A correctly signed request whose clock is off is not a bad grant: the device stays paired, nothing is rotated, and
+  // the answer carries the server's time so the device can say how far off its clock is and sign again with a
+  // timestamp the server accepts. The window itself is unchanged, so a captured signed message still expires in 5 min.
+  if (Math.abs(nowMs - tsMs) > REFRESH_SKEW_MS) {
+    const minutes = Math.round((tsMs - nowMs) / 60_000);
+    throw new V2Error(400, "clock_skew", `This device's clock is ${Math.abs(minutes)} minutes ${minutes > 0 ? "ahead of" : "behind"} the server's`, { server_time: new Date(nowMs).toISOString() });
+  }
   const out = await tx(() => {
     const t = get<{ rotated_at: string | null; expires_at: string }>(
       "SELECT rotated_at, expires_at FROM v2_device_tokens WHERE token_hash = ? AND device_id = ? AND kind = 'refresh'",
@@ -198,7 +205,29 @@ function revokeInTx(deviceId: string, reason: string, actor: string | null) {
   const at = nowIso();
   run("UPDATE v2_devices SET revoked_at = COALESCE(revoked_at, ?), revoked_reason = COALESCE(revoked_reason, ?) WHERE id = ?", at, reason, deviceId);
   run("DELETE FROM v2_device_tokens WHERE device_id = ?", deviceId);
+  endDeviceSessions(deviceId, at);
   audit(null, actor, "device.revoked", deviceId, at);
+}
+
+/**
+ * A revoked device can no longer fetch directives, so none of its sessions can be stopped, resumed or released any
+ * more: each one still shared (or suspended) ends now, as stop-sharing would end it (open epoch closed, no governing
+ * goal), marked `device_signed_out` so the Sessions tab can say why and refuse Stop and Resume. Its history stays. A
+ * stop latch already set on the machine stays until the developer runs `align stop-sharing` there.
+ */
+function endDeviceSessions(deviceId: string, at: string) {
+  const live = all<{ ws_id: string; session_key: string }>("SELECT ws_id, session_key FROM v2_sessions WHERE device_id = ? AND state <> 'stopped'", deviceId);
+  for (const s of live) {
+    run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", at, s.ws_id, s.session_key);
+    run(
+      `UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), ended_reason = 'device_signed_out', governing_goal_id = NULL,
+         governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?`,
+      at,
+      at,
+      s.ws_id,
+      s.session_key,
+    );
+  }
 }
 
 export async function revokeDevice(deviceId: string, reason: string, actor: string) {

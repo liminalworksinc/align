@@ -155,6 +155,8 @@ const agentEnv = {
   ALIGN_NO_BROWSER: "1",
   ALIGN_NO_AUTOSTART: "1",
   ALIGN_SERVER: BASE,
+  // The agent refuses a Node below 24 (packages/align-agent/src/node-version.ts); a test machine may run an older one.
+  ALIGN_ALLOW_UNSUPPORTED_NODE: "1",
 };
 const outputs = []; // every CLI and hook output, for the canary checks
 function cli(args) {
@@ -582,10 +584,10 @@ try {
   const cpView = await reqView(CPQ?.id);
   const cpDir = reqDirId(CPQ?.id, false);
   check(
-    "request (checkpoint): with no answer by the end of the turn the Stop hook prints nothing and the agent accepts it itself; after `align sync` the server shows the session accepted and done by the agent (auto_accepted, counts.done_by_agent), one accepted receipt with auto_accepted, and the audit row request.done_by_agent by the developer",
-    cpStop.stdout === "" && reqRow(cpView, Q1.key)?.state === "accepted" && reqRow(cpView, Q1.key).auto_accepted === true && cpView.counts.done_by_agent === 1 && cpView.state === "answered" &&
-      JSON.stringify(receipts(cpDir, Q1.key, "accepted")) === "[1]" && JSON.stringify(await auditOf("request.done_by_agent", CPQ?.id)) === JSON.stringify([M.id]) &&
-      localRequests().find((r) => r.id === CPQ?.id)?.state === "auto_accepted",
+    "request (checkpoint): with no answer by the end of the turn the Stop hook prints nothing and reports it delivered and not declined; after `align sync` the server shows the session accepted with auto_accepted (counts.not_declined, never \"done by the agent\": E2E-AGENT G1), one accepted receipt with auto_accepted, and the audit row request.not_declined by the developer; `align requests` says delivered to the agent, not declined",
+    cpStop.stdout === "" && reqRow(cpView, Q1.key)?.state === "accepted" && reqRow(cpView, Q1.key).auto_accepted === true && cpView.counts.not_declined === 1 && cpView.counts.done_by_agent === undefined && cpView.state === "answered" &&
+      JSON.stringify(receipts(cpDir, Q1.key, "accepted")) === "[1]" && JSON.stringify(await auditOf("request.not_declined", CPQ?.id)) === JSON.stringify([M.id]) &&
+      localRequests().find((r) => r.id === CPQ?.id)?.state === "auto_accepted" && /: delivered to the agent, not declined \(/.test(cli(["requests"]).stdout),
     `${cpStop.stdout} ${JSON.stringify(cpView)}`,
   );
 
@@ -680,13 +682,15 @@ try {
   const swWaiting = reqRow(await reqView(SW?.id), Q1.key)?.state;
   const swNoAccept = receipts(swDir, Q1.key, "accepted").length === 0;
   const swAccept = prompt(Q1, `::align accept ${short(SW?.id)}`);
+  const swEpochBefore = openEpochOf(Q1.key);
+  // No sync between the accept and the next prompt (E2E-AGENT B2): the hook itself moves the session there.
+  const swNext = prompt(Q1, "carry on");
+  const swNextId = `q${qn}`;
+  sync();
   sync();
   const swAccepted = reqRow(await reqView(SW?.id), Q1.key);
-  const swEpochBefore = openEpochOf(Q1.key);
-  const swNext = prompt(Q1, "carry on");
-  sync();
-  sync();
   const swEpoch = openEpochOf(Q1.key);
+  const swRootTurn = sdb((d) => d.prepare("SELECT root_turn FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").get(W, Q1.key))?.root_turn;
   const swApi = (await ws(M, "GET", "/sessions")).json?.mine?.find((s) => s.session_key === Q1.key);
   check(
     "request (switch_goal): the developer and the model hear that it takes effect only on the developer's accept; at turn end the agent does not accept it (the server keeps it received, no accepted receipt)",
@@ -699,11 +703,11 @@ try {
     `${sw.text.slice(0, 300)} shown=${swShown.stdout} stop=${swStop.stdout} waiting=${swWaiting} ${swNoAccept}`,
   );
   check(
-    "request (switch_goal): `::align accept <id>` -> after `align sync` the server shows it accepted by the developer; nothing moves until the next root turn, which opens an epoch on the target goal on the server with cause directive:<the request directive's id> and tells the model",
+    "request (switch_goal): `::align accept <id>`; with no sync in between, the very next root turn moves the session (E2E-AGENT B2): its context names the target goal and says the developer accepted, and after `align sync` the server shows it accepted by the developer and an epoch on the target goal opened at that prompt with cause directive:<the request directive's id>",
     swAccept.json?.reason === `Align: you accepted Lena Lead's request. From your next prompt this session counts toward "${SW_TITLE}".` && swAccepted?.state === "accepted" && swAccepted.auto_accepted === false &&
-      swEpochBefore?.goal_id === GQ?.id && swEpoch?.goal_id === GT?.id && swEpoch.cause === `directive:${swDir}` && swApi?.current_epoch?.goal?.id === GT?.id &&
+      swEpochBefore?.goal_id === GQ?.id && swEpoch?.goal_id === GT?.id && swEpoch.cause === `directive:${swDir}` && swRootTurn === swNextId && swApi?.current_epoch?.goal?.id === GT?.id &&
       (swNext.context ?? "").includes(SW_TITLE) && (swNext.context ?? "").includes(`[Align] The developer accepted Lena Lead's request to move this session to goal "${SW_TITLE}".`),
-    `accept=${swAccept.stdout} ${JSON.stringify(swAccepted)} before=${JSON.stringify(swEpochBefore)} after=${JSON.stringify(swEpoch)} dir=${swDir} next=${swNext.stdout}`,
+    `accept=${swAccept.stdout} ${JSON.stringify(swAccepted)} before=${JSON.stringify(swEpochBefore)} after=${JSON.stringify(swEpoch)} root=${swRootTurn}/${swNextId} dir=${swDir} next=${swNext.stdout}`,
   );
 
   // -- a goal hold: every tool blocked, for sessions on the goal and one that binds to it later; independent of stop --
@@ -744,10 +748,16 @@ try {
   );
   // Q2 leaves the held goal; it keeps the hold until a release reaches it.
   prompt(Q2, `::align bind ${GT?.id}`);
+  const q2Moved = prompt(Q2, "elsewhere");
+  const q2MovedId = `q${qn}`;
   sync();
-  prompt(Q2, "elsewhere");
   sync();
-  sync();
+  const q2Epoch = sdb((d) => d.prepare("SELECT goal_id, root_turn, cause FROM v2_epochs WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL").get(W, Q2.key));
+  check(
+    "bind (E2E-AGENT B2): `::align bind <goal>` with no sync before the next prompt moves the session at that prompt: its context names the goal, and after `align sync` the server has one epoch on it opened at that prompt (cause manual)",
+    (q2Moved.context ?? "").startsWith(`[Align] From this turn this session counts toward goal "${SW_TITLE}"`) && q2Epoch?.goal_id === GT?.id && q2Epoch.root_turn === q2MovedId && q2Epoch.cause === "manual",
+    `${q2Moved.stdout} ${JSON.stringify(q2Epoch)} ${q2MovedId}`,
+  );
   const q2Left = tool(Q2, "Bash");
   // Stop and hold are independent: a resume does not lift the hold, and a release does not lift a stop.
   const stop1 = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
@@ -800,6 +810,76 @@ try {
       clStop.stdout === "" && reqRow(clView, Q1.key)?.state === "expired" && clView.state === "expired" && receipts(reqDirId(CL?.id, false), Q1.key, "accepted").length === 0 &&
       JSON.stringify(await auditOf("request.expired", CL?.id)) === JSON.stringify([M.id]) && localRequests().find((r) => r.id === CL?.id)?.state === "withdrawn",
     `${cl.text.slice(0, 200)} shown=${clShown.stdout} ${achieved.status} ${achieved.text.slice(0, 200)} closed=${clClosed.stdout} ${JSON.stringify(clView)}`,
+  );
+
+  // -- E2E-AGENT B1: more than a page of stored directives, then the local cursor goes back (a restored align.db):
+  //    intake moves past the replays with the server's next_cursor, and a new stop is still enforced --
+  for (let i = 0; i < 110; i++) await ws(M, "POST", `/sessions/${Q1.key}/${i % 2 ? "resume" : "stop"}`, {});
+  const manyFirst = sync();
+  withDb(path.join(alignHome, "align.db"), (d) => d.prepare("UPDATE kv SET value = '0' WHERE key = 'directive_cursor'").run());
+  const lateStop = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
+  const manySecond = sync();
+  const lateEnforced = receipts(lateStop.json?.directive_id, Q1.key, "enforced").length;
+  const lateDenied = denied(tool(Q1, "Bash"));
+  const cursorNow = withDb(path.join(alignHome, "align.db"), (d) => d.prepare("SELECT value FROM kv WHERE key = 'directive_cursor'").get())?.value;
+  const lateResume = await ws(M, "POST", `/sessions/${Q1.key}/resume`, {});
+  sync();
+  check(
+    "directives (E2E-AGENT B1): after 110 stop/resume directives and a cursor reset to 0, one `align sync` reports only the new stop (`1 directives`), latches it (Bash denied, enforced on the server) and leaves the cursor at its seq; a resume then frees the session",
+    manyFirst.code === 0 && /110 directives/.test(manyFirst.stdout) && lateStop.status === 200 && manySecond.code === 0 && /, 1 directives,/.test(manySecond.stdout) && lateEnforced === 1 && lateDenied !== null &&
+      Number(cursorNow) === sdb((d) => d.prepare("SELECT seq FROM v2_directives WHERE id = ?").get(lateStop.json?.directive_id))?.seq && lateResume.status === 200 && denied(tool(Q1, "Bash")) === null,
+    `${manyFirst.stdout} ${manySecond.stdout} ${manySecond.stderr} enforced=${lateEnforced} denied=${lateDenied} cursor=${cursorNow}`,
+  );
+
+  // -- E2E-AGENT B4/G2/B6: logout ends this machine's shares on the server and here; a stopped one stays blocked with
+  //    a way out; after logging in again the developer shares it again and the web can resume it --
+  const stopQ1 = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
+  sync();
+  const q1Stopped = tool(Q1, "Bash");
+  const logout = cli(["logout"]);
+  const q1Row = sdb((d) => d.prepare("SELECT state, ended_reason, agent_stopped FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, Q1.key));
+  const webStop = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
+  const webList = (await ws(M, "GET", "/sessions")).json?.mine?.find((s) => s.session_key === Q1.key);
+  const localQ1 = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((s) => s.native_id === Q1.sid);
+  const q1Deny = denied(tool(Q1, "Bash")) ?? "";
+  const q1Told = prompt(Q1, "still there?");
+  check(
+    "logout (E2E-AGENT B4/G2/B6): `align logout` revokes the device, and the server ends its sessions (stopped, ended_reason device_signed_out); a stop from the web is then refused 409 device_signed_out instead of reported sent; the CLI lists the session as stopped, not shared; the stopped session stays blocked and its deny names `align stop-sharing <id>`; the next prompt tells the developer that sharing ended and how to share again",
+    stopQ1.status === 200 && denied(q1Stopped) !== null && logout.code === 0 && q1Row?.state === "stopped" && q1Row.ended_reason === "device_signed_out" && q1Row.agent_stopped === 1 &&
+      webStop.status === 409 && webStop.json?.error === "device_signed_out" && webList?.ended_reason === "device_signed_out" &&
+      localQ1?.shared === "stopped (Ledger Co; this machine signed out)" && q1Deny.includes(`\`align stop-sharing ${localQ1.local_id.slice(0, 8)}\``) && !q1Deny.includes("until it is resumed there") &&
+      (q1Told.system ?? "").includes("this session stopped sharing because this machine signed out of Align") && (q1Told.system ?? "").includes("`::align share`"),
+    `${stopQ1.status} ${logout.stdout} ${logout.stderr} ${JSON.stringify(q1Row)} ${webStop.text} ${JSON.stringify(localQ1)} deny=${q1Deny} told=${q1Told.stdout}`,
+  );
+  // Pair again (a fresh sign-in approves it), share the session again in-session, and resume it from the web.
+  const M2 = await call("POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: M.email, password: `pw-${M.email}-123456` } });
+  const login2 = spawn(process.execPath, [CLI, "login", "--name", "Milo's laptop"], { env: agentEnv, stdio: ["ignore", "pipe", "pipe"] });
+  let login2Out = "";
+  login2.stdout.on("data", (d) => (login2Out += d));
+  const login2Done = new Promise((r) => login2.on("close", r));
+  let code2 = "";
+  for (let i = 0; i < 100 && !code2; i++) {
+    code2 = /enter the code (\S+)/.exec(login2Out)?.[1] ?? "";
+    if (!code2) await sleep(100);
+  }
+  const approve2 = await call("POST", "/api/v2/device/approve", { cookie: cookieOf(M2.setCookies), body: { user_code: code2, workspace_ids: [W] } });
+  const login2Code = await Promise.race([login2Done, sleep(60_000).then(() => "timeout")]);
+  if (login2Code === "timeout") login2.kill();
+  outputs.push(login2Out);
+  const notShared = !JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").some((s) => / \(Ledger Co\)$/.test(s.shared) && s.shared.startsWith("shared"));
+  const reshare = prompt(Q1, "::align share confirm");
+  sync();
+  const q1Again = sdb((d) => d.prepare("SELECT state, ended_reason, device_id FROM v2_sessions WHERE ws_id = ? AND session_key = ?").get(W, Q1.key));
+  const newDevice = JSON.parse(readFileSync(path.join(alignHome, "credentials.json"), "utf8")).device_id;
+  const stillBlocked = denied(tool(Q1, "Bash"));
+  const webResume = await ws(M, "POST", `/sessions/${Q1.key}/resume`, {});
+  sync();
+  const q1Free3 = tool(Q1, "Bash");
+  check(
+    "re-pair (E2E-AGENT B4/G2): after `align login` again no old share is listed as shared; `::align share confirm` in the session shares it again on the new device (the server takes the signed-out session over: shared, no ended_reason); it stays blocked until the web resumes it, and the resume reaches the new device",
+    M2.status === 200 && approve2.status === 200 && login2Code === 0 && notShared && reshare.json?.decision === "block" && q1Again?.state === "shared" && q1Again.ended_reason === null && q1Again.device_id === newDevice &&
+      stillBlocked !== null && webResume.status === 200 && denied(q1Free3) === null,
+    `${M2.status} ${approve2.status} ${approve2.text} ${login2Code} ${login2Out} ${notShared} ${reshare.stdout} ${JSON.stringify(q1Again)} ${newDevice} blocked=${stillBlocked} ${webResume.text} free=${q1Free3.stdout}`,
   );
 
   // -- canaries: people's words reach the model only inside Align's quoted-data wording --
