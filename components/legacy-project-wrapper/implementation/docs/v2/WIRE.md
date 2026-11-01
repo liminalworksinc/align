@@ -109,6 +109,8 @@ session was not shared, before it was shared again).
 `DELETE /api/v2/workspaces/:ws/sessions/:session_key` (cookie by owner, or Bearer from any live device of the person who
 shared it, not only the device that shared it) → 204; hard-deletes session, epochs, usage, deliveries; rollups change
 (the UI says so). Audited `session.history_deleted` with the acting device as the object. Another person → 404.
+Deleted already (on the web, say) → `410 history_deleted` to the person who shared it (a marker with a hash of them
+and the key is kept 13 months), 404 to anyone else.
 
 ## Directives
 Only structured content reaches agents: ratified goal fields, enumerated states and Align's typed requests (REQ-001).

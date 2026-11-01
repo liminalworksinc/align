@@ -45,7 +45,7 @@ import { flushOutbox, ingestSpool, outboxDepth, syncOnce, uploadUsage, type Last
 import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
 import { MIN_NODE, unsupportedNode } from "./node-version.ts";
-import { kvSet } from "./db.ts";
+import { kvGet, kvSet } from "./db.ts";
 import { podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
 import { clean, requestShortId } from "./shared/envelope.ts";
@@ -810,7 +810,11 @@ async function cmdDeleteHistory(ctx: Ctx, argv: string[]): Promise<void> {
   if (!(await confirm("Delete the shared history?", !!values.yes))) return out("Nothing deleted. Run again with --yes to confirm.");
   deleteHistory(ctx, s.local_id);
   await tryFlush(ctx);
-  if (!getShare(ctx, s.local_id)) return out("Shared history deleted.");
+  if (!getShare(ctx, s.local_id)) {
+    const gone = kvGet(ctx.db, `history_gone:${s.local_id}`);
+    if (gone) ctx.db.prepare("DELETE FROM kv WHERE key=?").run(`history_gone:${s.local_id}`);
+    return out(gone ? "This session's shared history was already deleted on the server (on the web, say); nothing is left there. Nothing more is queued." : "Shared history deleted.");
+  }
   // Never "deleted" unless the server said so (C4-1): a refusal keeps the share and the queued deletion.
   const refused = deleteRefused(ctx, s.local_id);
   if (!refused) return out(signedIn(ctx.home) ? "Deletion queued; the next sync retries when online." : "Deletion queued; it is sent once you run `align login` (the next sync after that retries it).");

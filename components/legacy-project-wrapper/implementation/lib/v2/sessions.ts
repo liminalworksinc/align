@@ -4,7 +4,7 @@ import { all, audit, get, run, tx } from "./db";
 import { takeDurable } from "./limits";
 import { V2Error, badRequest, conflict, notFound } from "./errors";
 import { event } from "./events";
-import { nowIso } from "./ids";
+import { nowIso, sha256hex } from "./ids";
 import { goalObj, goalRow, transferFor } from "./goals";
 import { authorize, canReadGoal, type PolicyPrincipal } from "./policy";
 import { stopStatus, writeDirective } from "./directives";
@@ -377,16 +377,26 @@ export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string
   return { session_key: key, state: "stopped" as const };
 }
 
+/** The marker a deleted session leaves: a hash of the person who shared it and its key, never either one. */
+const deletedKeyHash = (userId: string, key: string) => sha256hex(`deleted-session\0${userId}\0${key}`);
+
 /** Delete shared history: the session, its epochs, usage, directive deliveries and receipts, hard-deleted.
  *  Spend totals change. Directives left with no recipient are removed too. Unlike the session's other calls, any live
  *  device of the person who shared it may do this, not only the device that shared it (C4-1): a re-pair would
  *  otherwise strand the history where only the web could delete it. The audit row names the device that did it. */
 export async function deleteSession(pp: PolicyPrincipal, p: Principal, key: string) {
   const s = sessionRow(pp.wsId, key);
-  if (!s) throw notFound();
+  if (!s) {
+    // Deleted already (on the web, say): the account that shared it hears so, anyone else not found (cycle 5).
+    if (get("SELECT 1 AS x FROM v2_deleted_sessions WHERE ws_id = ? AND key_hash = ?", pp.wsId, deletedKeyHash(pp.userId, key))) {
+      throw new V2Error(410, "history_deleted", "This session's shared history was already deleted; nothing is left to delete");
+    }
+    throw notFound();
+  }
   need(pp, "session.manage", { kind: "session", ownerId: s.user_id });
   await tx(() => {
     run("DELETE FROM v2_sessions WHERE ws_id = ? AND session_key = ?", pp.wsId, key);
+    run("INSERT OR REPLACE INTO v2_deleted_sessions (ws_id, key_hash, deleted_at) VALUES (?, ?, ?)", pp.wsId, deletedKeyHash(s.user_id, key), nowIso());
     run("DELETE FROM v2_directives WHERE ws_id = ? AND NOT EXISTS (SELECT 1 FROM v2_directive_targets t WHERE t.directive_id = v2_directives.id)", pp.wsId);
     audit(pp.wsId, pp.userId, "session.history_deleted", p.kind === "device" ? p.deviceId : null, nowIso());
   });

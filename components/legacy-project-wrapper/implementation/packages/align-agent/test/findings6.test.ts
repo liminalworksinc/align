@@ -1,5 +1,5 @@
 // Follow-ups to the cycle-5 agent-side E2E report: the counts that took rows made while a session was not shared for
-// rows that will upload (C5-1's tail).
+// rows that will upload (C5-1's tail), and history already deleted on the web (section 5).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -95,5 +95,20 @@ describe("C5-1 follow-up: what counts as waiting to upload, and as shared time",
     ctx.db.close();
     assert.equal(d.total_tokens, 30, "both turns are this machine's agent time");
     assert.equal(d.unshared_tokens, 15, "the turn made while the session was not shared is not shared time");
+  });
+});
+
+describe("cycle 5, section 5: works, but would confuse a developer", () => {
+  test("history already deleted on the web: `align delete-history` says so, exits 0, and nothing stays queued or reads as refused", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    fake.deleteOnWeb(A.key);
+    const r = await runCli(t, ["delete-history", A.lid.slice(0, 8), "--yes"]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /This session's shared history was already deleted on the server \(on the web, say\); nothing is left there\. Nothing more is queued\./);
+    assert.match((await runCli(t, ["status"])).stdout, /Outbox: {5}0 pending/);
+    const row = JSON.parse((await runCli(t, ["sessions", "--all", "--json"])).stdout).find((s: { native_id: string }) => s.native_id === A.sid);
+    assert.equal(row.shared, "private");
+    assert.match(fs.readFileSync(path.join(t.home, "logs", "align.log"), "utf8"), /was already deleted on the server/);
   });
 });

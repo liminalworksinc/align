@@ -700,7 +700,11 @@ share and the queued deletion SHALL stay (tried again after an hour, or at once 
 can delete it, from a device that still has access to <workspace>; if it was deleted on the web already, nothing is
 left there. The deletion stays queued here and is tried again; you can also delete it on the web at
 <server>/app/w/<ws>/sessions.` While the server can't be reached it prints `Deletion queued; the next sync retries when
-online.` (signed out: `... it is sent once you run \`align login\` ...`).
+online.` (signed out: `... it is sent once you run \`align login\` ...`). When the server answers 410
+`history_deleted` (the history is gone already, deleted on the web, say; `workspaces` "Usage upload"), the deletion is
+done: the share is forgotten as on 204, the queued deletion and its outbox item go, it is logged once, and `align
+delete-history` prints `This session's shared history was already deleted on the server (on the web, say); nothing is
+left there. Nothing more is queued.` and exits 0.
 
 #### Scenario: Deleting after a re-pair
 
@@ -711,6 +715,11 @@ online.` (signed out: `... it is sent once you run \`align login\` ...`).
 
 - **WHEN** the server answers the deletion 404, then later accepts it and the developer runs `align delete-history` again (test `findings4` "a deletion the server refuses is never reported as done ...")
 - **THEN** the first run exits 1 with the refusal on stderr, never `Shared history deleted.`, the share and the queued deletion stay and `align sessions` says the deletion was refused; the second run deletes it and says so
+
+#### Scenario: Deleted on the web already
+
+- **WHEN** the session's history was deleted on the web and the developer runs `align delete-history <id> --yes` (test `findings6` "history already deleted on the web ...")
+- **THEN** it exits 0 saying the history was already deleted, `align status` shows `Outbox:     0 pending`, `align sessions` shows the session `private`, and the log says so
 
 #### Scenario: Nothing after stop, then hard delete
 

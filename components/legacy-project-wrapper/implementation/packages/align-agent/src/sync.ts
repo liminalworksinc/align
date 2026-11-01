@@ -370,6 +370,14 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
         forgetShare(ctx, lid);
         return;
       }
+      if (r.status === 410 && r.json?.error === "history_deleted") {
+        // Its history is gone on the server already (deleted on the web, say): nothing is left to delete, so the
+        // deletion is done here too, and said once (cycle 5).
+        forgetShare(ctx, lid);
+        kvSet(ctx.db, `history_gone:${lid}`, nowIso());
+        ctx.log(`history deletion: the shared history of session ${lid.slice(0, 8)} was already deleted on the server; nothing is left there`);
+        return;
+      }
       if (r.status === 404 || r.status === 403) {
         // Not deleted: the share and the queued deletion stay, and `align delete-history` says so (C4-1). The server
         // lets any live device of the account that shared it delete its history, so this is a device of another

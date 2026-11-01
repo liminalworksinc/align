@@ -114,6 +114,16 @@ export class FakeServer {
   /** AskView per workspace, as `GET /api/v2/workspaces/:ws/asks` returns them (the reader's `can` flags included). */
   asks = new Map<string, (Ask & { can: Record<string, boolean> })[]>();
   usage = new Map<string, any>();
+  /** Session keys whose history was deleted (on the web or by a device): a later DELETE gets 410 history_deleted. */
+  deletedKeys = new Set<string>();
+
+  /** The person deletes a session's shared history on the web. */
+  deleteOnWeb(key: string): void {
+    this.sessions.delete(key);
+    this.deletedKeys.add(key);
+    for (const [k, e] of this.epochs) if (e.session_key === key) this.epochs.delete(k);
+    for (const [k, u] of this.usage) if (u.session_key === key) this.usage.delete(k);
+  }
   directives: FakeDirective[] = [];
   receipts: { id: string; session_key: string; state: string; at: string; auto_accepted?: boolean }[] = [];
   requests = new Map<string, FakeRequest>();
@@ -461,10 +471,13 @@ export class FakeServer {
           const open = [...this.epochs.values()].find((e) => e.session_key === key && !e.ends_at) || null;
           return send(200, { session_key: key, state, current_epoch: open });
         }
+        // As lib/v2/sessions.ts: history deleted already (on the web, say) -> 410 history_deleted to its own account.
+        if (!sess && !sub && req.method === "DELETE" && this.deletedKeys.has(key)) return send(410, { error: "history_deleted" });
         if (!sess) return send(404, { error: "not_found" });
         if (!sub && req.method === "DELETE") {
           if (this.refuseDeletes) return send(404, { error: "not_found" });
           this.sessions.delete(key);
+          this.deletedKeys.add(key);
           this.deletedBy.push({ key, device: dev.id });
           // As the server: the session's activity goes with it.
           this.activity = this.activity.filter((i) => i.session_key !== key);

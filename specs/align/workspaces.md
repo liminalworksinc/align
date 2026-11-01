@@ -1145,7 +1145,11 @@ every session private to the device and person that shared it, let that person s
 `GET /api/v2/workspaces/{ws}/sessions` as `{mine, all}`. The hard delete SHALL be allowed to the person on the web and
 from any of their live paired devices granted the workspace, not only the device that shared it (a re-pair would
 otherwise strand the history where only the web could delete it), and SHALL be audited `session.history_deleted` with
-the person as actor and, from a device, the device that did it as the object; every other call on the session (its
+the person as actor and, from a device, the device that did it as the object. A deleted session SHALL leave a marker
+holding only its workspace, when, and a hash of the person who shared it and its key (never either one); while the
+marker lasts (13 months, "Data retention"), deleting it again SHALL answer 410 `history_deleted` to that person (from
+the web or any of their devices granted the workspace), so a deletion queued on a device while the history was deleted
+on the web is done, and 404 to anyone else; every other call on the session (its
 epochs, usage, stop-sharing) stays with the device that shared it, and another person's device gets 404. A session that ended because its device was revoked
 (`ended_reason` `device_signed_out`) SHALL be shared again by a `PUT` from another device of the same person with the
 same harness and repo key (its device, state `shared`, `stopped_at` and `ended_reason` cleared, its stop flag kept,
@@ -1170,6 +1174,11 @@ is off` and `server_time`.
 
 - **WHEN** one of a person's devices shared a session with usage, and later another of their live devices, then another person's device, deletes it; and the person's other device re-shares a session its person stopped sharing (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 4 C4-1) ..." and "sessions (E2E-AGENT cycle 4 C4-8) ...")
 - **THEN** the other person's device gets 404, the person's other device gets 204, the session and its usage are gone, the audit row `session.history_deleted` names the person and that device, uploads from it to a session it did not share stay 404, and the re-share gets 409 `sharing_stopped`
+
+#### Scenario: Deleting history that is already deleted
+
+- **WHEN** a person's device, then the person on the web, delete again a history already deleted, and the workspace owner deletes it again too (`scripts/test-v2.mjs` "delete (E2E-AGENT cycle 5): deleting history that is already deleted ...")
+- **THEN** the person gets 410 `history_deleted` both times and the owner 404, and no row of the v2 tables holds the deleted session's key
 
 #### Scenario: Stop sharing and delete
 
@@ -1477,8 +1486,10 @@ step in its own transaction, logging counts only; it purges a workspace with the
 `workspaces delete --purge`, deletes product events (`v2_events`, specified in `metrics`) after 13 months, deletes
 asks that are `done`, `declined` or `withdrawn` with their mentions 13 months after their last change (`asks_deleted`),
 deletes value reports on approved change requests 13 months after their last change
-(`value_reports_deleted`), and deletes requests to agents (the `goals-and-proposals` part) 13 months after they were
-sent, with their per-session states and the directives that carried them (`requests_deleted`); a goal hold has no
+(`value_reports_deleted`), deletes requests to agents (the `goals-and-proposals` part) 13 months after they were
+sent, with their per-session states and the directives that carried them (`requests_deleted`), and deletes the
+markers deleted sessions leave ("Shared session ownership") 13 months after the deletion
+(`deleted_session_markers_deleted`); a goal hold has no
 expiry and ends only when it is released.
 
 #### Scenario: Deleted workspaces
@@ -1525,6 +1536,11 @@ expiry and ends only when it is released.
 
 - **WHEN** a dry run of the job runs 12 months, and then 14 months, after requests were sent to a goal's agents
 - **THEN** the first reports `requests_deleted` 0 and the second counts every one of them
+
+#### Scenario: Deleted-session markers
+
+- **WHEN** a dry run of the job runs 12 months, and then 14 months, after sessions' histories were deleted (`scripts/test-v2.mjs` "retention (dry run, E2E-AGENT cycle 5) ...")
+- **THEN** the first reports `deleted_session_markers_deleted` 0 and the second counts every marker
 
 #### Scenario: Operator run and dry run
 

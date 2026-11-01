@@ -771,7 +771,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 18, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 18 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 19, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds and deleted-session markers included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 19 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -2607,6 +2607,15 @@ try {
   check("delete: someone else -> 404; the owner (Bearer and cookie) -> 204", delOther.status === 404 && del.status === 204 && delWeb.status === 204, `${delOther.status} ${del.status} ${delWeb.status}`);
   check("delete: zero rows anywhere in the v2 tables still mention the deleted sessions (read from the database file)", Object.keys(leftovers).length === 0, JSON.stringify(leftovers));
   check("delete: spend totals change (and the invariant still holds)", totalAfter.total.requests < totalBefore && invariantHolds(totalAfter), `${totalBefore} -> ${totalAfter.total.requests}`);
+  const delSessAgain = await call("U3", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { bearer: D3.access });
+  const delWebAgain = await call("U3", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3b}`, { cookie: U3.cookie });
+  const delOtherAgain = await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { cookie: U1.cookie });
+  const markers = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_deleted_sessions WHERE ws_id = ?").get(A).n);
+  check(
+    "delete (E2E-AGENT cycle 5): deleting history that is already deleted -> 410 history_deleted for the account that shared it (its device or the web), so a deletion queued on a device is done; anyone else -> 404; the marker it leaves names neither the session nor the person (the check above found no row with the key)",
+    delSessAgain.status === 410 && delSessAgain.json?.error === "history_deleted" && delWebAgain.status === 410 && delWebAgain.json?.error === "history_deleted" && delOtherAgain.status === 404 && markers >= 2,
+    `${delSessAgain.text} ${delWebAgain.text} ${delOtherAgain.status} ${markers}`,
+  );
 
   // -- the device authorize limit (10 per hour per client), last so earlier pairings aren't affected --
   let limited = 0;
@@ -5209,6 +5218,21 @@ try {
     const dry12 = dry(12);
     const dry14 = dry(14);
     check("retention (dry run): requests are kept 12 months and deleted after 13 (requests_deleted counts every one)", dry12 === 0 && dry14 === reqN && reqN >= 4, `${dry12} ${dry14} ${reqN}`);
+    // The markers deleted sessions leave (E2E-AGENT cycle 5) keep 13 months too.
+    const markerN = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_deleted_sessions").get().n);
+    const dryMarkers = (months) => {
+      const t = new Date();
+      t.setUTCMonth(t.getUTCMonth() + months);
+      const r = admin(["retention", "run", "--dry-run"], { ALIGN_DATA_DIR: onDir, ALIGN_TEST_IDP: "1", ALIGN_TEST_NOW: t.toISOString() });
+      try {
+        return JSON.parse(r.out.trim().split("\n").pop()).deleted_session_markers_deleted;
+      } catch {
+        return `${r.status} ${r.out} ${r.err}`;
+      }
+    };
+    const m12 = dryMarkers(12);
+    const m14 = dryMarkers(14);
+    check("retention (dry run, E2E-AGENT cycle 5): the markers deleted sessions leave are kept 12 months and deleted after 13 (deleted_session_markers_deleted counts every one)", m12 === 0 && m14 === markerN && markerN >= 3, `${m12} ${m14} ${markerN}`);
   }
   // ==== end req:requests ====
 

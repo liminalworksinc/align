@@ -1058,6 +1058,17 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE v2_request_targets ADD COLUMN ended_reason TEXT CHECK (ended_reason IS NULL OR ended_reason IN ('device_signed_out','member_removed'));
   `,
+  // E2E-AGENT cycle 5 (section 5): a session whose shared history was deleted leaves a marker, so a device of the account
+  // that shared it, asking to delete it again (queued while it was deleted on the web, say), hears 410 history_deleted
+  // and stops asking. Only a hash of the person and the session key is kept: no row names the session or the person.
+  `
+  CREATE TABLE v2_deleted_sessions (
+    ws_id TEXT NOT NULL REFERENCES v2_workspaces(id) ON DELETE CASCADE,
+    key_hash TEXT NOT NULL,
+    deleted_at TEXT NOT NULL,
+    PRIMARY KEY (ws_id, key_hash)
+  );
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).
