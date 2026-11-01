@@ -6579,6 +6579,77 @@ try {
       `${JSON.stringify(qOwnerPlain?.version_loops)} ${JSON.stringify(qMemberPlain?.version_loops)} ${loopVersion.status} ${loopVersion.text.slice(0, 200)}`,
     );
 
+    // -- C5-1: two requests that each add the other's goal as a dependency: once one launches, the other would loop --
+    const KL1 = await kGoal(KA, { title: "Loop dashboard", visibility: "workspace", team_id: KPT });
+    const KL2 = await kGoal(KA, { title: "Loop funnel", visibility: "workspace", team_id: KPT });
+    const KL3 = await kGoal(KA, { title: "Loop docs", visibility: "workspace", team_id: KPT });
+    const KL4 = await kGoal(KA, { title: "Loop site", visibility: "workspace", team_id: KPT });
+    const lr1 = await ka(KB, "POST", kcrs(KL1.id), { base_version: 1, changes: { depends_on: [KL2.id] }, reason: "The dashboard reads the funnel" });
+    const lr2 = await ka(KB, "POST", kcrs(KL2.id), { base_version: 1, changes: { depends_on: [KL1.id] }, reason: "The funnel reads the dashboard" });
+    const lr1Done = await kAct(KA, KL1.id, lr1.json?.id, "approve_and_launch", { revision: 1 });
+    const lr2AsKA = await kRead(KA, KL2.id, lr2.json?.id);
+    const lr2AsKB = await kRead(KB, KL2.id, lr2.json?.id);
+    const LOOP_APPROVE = `A goal this request adds as a dependency has since come to depend on this goal, so approving it would make a loop. Someone who decides on this goal can suggest a change without that dependency or decline it, and ${KB.name} can withdraw it.`;
+    check(
+      "C5-1: both requests are created (neither goal depends on the other yet); once the first launches, the second reads can.approve and can.approve_and_launch false (counter and reject still true) and dependency_loop = the refusal, naming no goal, for every reader; its deciders are waited on to suggest a change or decline it (waiting_on_me true for KA, false for the requester)",
+      lr1.status === 201 && lr2.status === 201 && lr1Done.status === 200 && lr1Done.json?.launch === "launched" &&
+        lr2AsKA?.can?.approve === false && lr2AsKA.can.approve_and_launch === false && lr2AsKA.can.counter === true && lr2AsKA.can.reject === true && lr2AsKA.dependency_loop === LOOP_APPROVE && lr2AsKA.waiting_on_me === true &&
+        lr2AsKB?.dependency_loop === LOOP_APPROVE && lr2AsKB.waiting_on_me === false && lr2AsKB.can.withdraw === true && !LOOP_APPROVE.includes(KL1.title),
+      `${lr1.status} ${lr2.status} ${lr1Done.status} ${JSON.stringify(lr2AsKA?.can)} ${lr2AsKA?.dependency_loop} ${lr2AsKA?.waiting_on_me} ${lr2AsKB?.waiting_on_me}`,
+    );
+    const lr2Ap = await kAct(KA, KL2.id, lr2.json?.id, "approve", { revision: 1 });
+    const lr2ApL = await kAct(KA, KL2.id, lr2.json?.id, "approve_and_launch", { revision: 1 });
+    const lr2After = await kRead(KA, KL2.id, lr2.json?.id);
+    const kaHomeLoop = (await ka(KA, "GET", "/home")).json?.change_requests;
+    const kbHomeLoop = (await ka(KB, "GET", "/home")).json?.change_requests;
+    const kaGroupsLoop = (await ka(KA, "GET", "/change-requests")).json;
+    const homeItem = (h, list, id) => (h?.[list] ?? []).find((c) => c.id === id);
+    check(
+      "C5-1: approve and approve and launch of that request -> 409 cycle with the same words (goals-and-proposals: approval of a request that would close a loop is refused); it stays pending and the goal at version 1; it is under the decider's \"Waiting on you\" (Requests tab and Home, next resolve_loop) and on the requester's Home as waiting on others to suggest a change or decline it",
+      lr2Ap.status === 409 && lr2Ap.json?.error === "cycle" && lr2Ap.json?.message === LOOP_APPROVE && lr2ApL.status === 409 && lr2ApL.json?.error === "cycle" && lr2ApL.json?.message === LOOP_APPROVE &&
+        lr2After?.state === "pending" && lr2After.goal.version === 1 && (kaGroupsLoop?.waiting_on_me ?? []).some((c) => c.id === lr2.json?.id) &&
+        homeItem(kaHomeLoop, "waiting_on_me", lr2.json?.id)?.next === "resolve_loop" && homeItem(kbHomeLoop, "waiting_on_others", lr2.json?.id)?.next === "resolve_loop" &&
+        homeItem(kbHomeLoop, "waiting_on_others", lr2.json?.id).waiting_on.some((p) => p.id === KA.id) && !homeItem(kbHomeLoop, "waiting_on_others", lr2.json?.id).waiting_on.some((p) => p.id === KB.id),
+      `${lr2Ap.status} ${lr2Ap.text} ${lr2ApL.status} ${lr2After?.state} ${lr2After?.goal?.version} ${JSON.stringify(homeItem(kaHomeLoop, "waiting_on_me", lr2.json?.id))} ${JSON.stringify(homeItem(kbHomeLoop, "waiting_on_others", lr2.json?.id))}`,
+    );
+    const lr2Ctr = await kAct(KA, KL2.id, lr2.json?.id, "counter", { revision: 1, changes: { title: "Loop funnel, measured", depends_on: [] }, note: "The dashboard already reads the funnel" });
+    const lr2Acc = await kAct(KB, KL2.id, lr2.json?.id, "accept_counter", { revision: 2 });
+    const lr2Ok = await kRead(KA, KL2.id, lr2.json?.id);
+    check(
+      "C5-1: a counter without that dependency, once accepted, can be approved again (dependency_loop null, can.approve true)",
+      lr2Ctr.status === 200 && lr2Acc.status === 200 && lr2Ok?.dependency_loop === null && lr2Ok.can.approve === true && lr2Ok.waiting_on_me === true,
+      `${lr2Ctr.status} ${lr2Ctr.text.slice(0, 200)} ${lr2Acc.status} ${lr2Ok?.dependency_loop} ${JSON.stringify(lr2Ok?.can)}`,
+    );
+    // Both approved before either launched, then one launches: the other can't.
+    const lr3 = await ka(KB, "POST", kcrs(KL3.id), { base_version: 1, changes: { depends_on: [KL4.id] }, reason: "The docs link the site" });
+    const lr4 = await ka(KB, "POST", kcrs(KL4.id), { base_version: 1, changes: { depends_on: [KL3.id] }, reason: "The site embeds the docs" });
+    const lr3Ap = await kAct(KA, KL3.id, lr3.json?.id, "approve", { revision: 1 });
+    const lr4Ap = await kAct(KA, KL4.id, lr4.json?.id, "approve", { revision: 1 });
+    const lr3L = await kAct(KA, KL3.id, lr3.json?.id, "launch", { revision: 1 });
+    const lr4AsKA = await kRead(KA, KL4.id, lr4.json?.id);
+    const lr4L = await kAct(KA, KL4.id, lr4.json?.id, "launch", { revision: 1 });
+    const LOOP_LAUNCH = `A goal this change adds as a dependency has since come to depend on this goal, so launching it would make a loop. It can launch once that loop is gone; a newer version of this goal supersedes it, and ${KB.name} can propose the change again without that dependency.`;
+    const kaHome4 = (await ka(KA, "GET", "/home")).json?.change_requests;
+    const kbHome4 = (await ka(KB, "GET", "/home")).json?.change_requests;
+    const kaGroups4 = (await ka(KA, "GET", "/change-requests")).json;
+    const koHome4 = (await ka(KO, "GET", "/home")).json?.change_requests;
+    const inHome = (h, id) => [...(h?.waiting_on_me ?? []), ...(h?.waiting_on_others ?? [])].some((c) => c.id === id);
+    check(
+      "C5-1: two requests approved before either launched: once one launches, the other reads can.launch false (not_yet still true), waiting_on_me false and dependency_loop = the launch refusal; launch -> 409 cycle with those words; it waits on nobody (in no one's Home queue, not under the launcher's \"Waiting on you\")",
+      lr3.status === 201 && lr4.status === 201 && lr3Ap.status === 200 && lr4Ap.status === 200 && lr3L.status === 200 && lr3L.json?.launch === "launched" &&
+        lr4AsKA?.can?.launch === false && lr4AsKA.can.not_yet === true && lr4AsKA.waiting_on_me === false && lr4AsKA.dependency_loop === LOOP_LAUNCH &&
+        lr4L.status === 409 && lr4L.json?.error === "cycle" && lr4L.json?.message === LOOP_LAUNCH &&
+        !(kaGroups4?.waiting_on_me ?? []).some((c) => c.id === lr4.json?.id) && !inHome(kaHome4, lr4.json?.id) && !inHome(kbHome4, lr4.json?.id) && !inHome(koHome4, lr4.json?.id),
+      `${lr3.status} ${lr4.status} ${lr3Ap.status} ${lr4Ap.status} ${lr3L.status} ${JSON.stringify(lr4AsKA?.can)} ${lr4AsKA?.waiting_on_me} ${lr4AsKA?.dependency_loop} ${lr4L.status} ${lr4L.text}`,
+    );
+    const hcLoop = await import(pathToFileURL(path.join(ROOT, "lib/v2/home-core.mts")).href);
+    check(
+      "C5-1 (home rules): a pending request with dependency_loop waits on its approvers to suggest a change or decline it (next resolve_loop); behind still waits on the requester first",
+      JSON.stringify(hcLoop.changeWaits({ state: "pending", behind: false, requester: { id: "r", name: "Rae" }, approvers: [{ id: "a", name: "Ann" }], dependency_loop: "loop" })) === JSON.stringify({ next: "resolve_loop", waiting_on: [{ id: "a", name: "Ann" }] }) &&
+        hcLoop.changeWaits({ state: "pending", behind: true, requester: { id: "r", name: "Rae" }, approvers: [], dependency_loop: "loop" })?.next === "rebase",
+      "",
+    );
+
     // -- N5: launch and not yet check the revision they are sent --
     const crS = (await ka(KB, "POST", kcrs(KGS.id), { base_version: 1, changes: { title: "Stale launch, checked" }, reason: "Check it" })).json;
     await kAct(KA, KGS.id, crS?.id, "approve", { revision: 1 });
@@ -6633,6 +6704,21 @@ try {
         return true;
       };
       try {
+        // C5-1 (ui): an approved change that would now close a loop offers no Launch and says why; the open request
+        // offers no Approve and says why, with Suggest a change and Decline still there.
+        const pL = await as(KA, 1000, 900);
+        await open(pL, `/app/w/${KW}/goals/${KL4.id}`);
+        await pL.waitForSelector(`[data-cr="${lr4.json?.id}"] [data-dependency-loop]`, { timeout: 15000 }).catch(() => undefined);
+        const lr4Ui = await pL.evaluate((id) => {
+          const c = document.querySelector(`[data-cr="${id}"]`);
+          return { text: c?.innerText ?? "", buttons: [...(c?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()) };
+        }, lr4.json?.id);
+        check(
+          "C5-1 (ui): the approved change that would close a loop shows \"Nobody can launch this as it stands. A goal this change adds as a dependency has since come to depend on this goal, …\" and no Launch button, nor \"Can launch: …\"",
+          lr4Ui.text.includes(`Nobody can launch this as it stands. ${LOOP_LAUNCH}`) && !lr4Ui.buttons.some((t) => /^Launch version/.test(t ?? "")) && !/Can launch:/.test(lr4Ui.text),
+          JSON.stringify(lr4Ui).slice(0, 800),
+        );
+
         // N3, N5 and F4: Not yet, then Launch, from the goal page. Every fetch and every "Loading…" in the change-request
         // section is recorded from the first click.
         const pA = await as(KA, 1000, 900);

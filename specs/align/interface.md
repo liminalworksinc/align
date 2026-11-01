@@ -458,8 +458,12 @@ bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `w
 each `null` when the server could not read it. Every queue item SHALL carry `next` (what it needs) and `waiting_on`
 (the people it waits on). An open change request waits on its approvers to decide (`waiting_on` is the effective
 approval set, and empty when nobody can approve it yet); pending behind the goal's current version, on its requester to
-update it (`rebase`); countered, on its requester to accept the change (`accept_counter`). It is waiting on the person
-when their `approve` or `accept_counter` flag is set or it is their own request to update; otherwise it is listed under
+update it (`rebase`); countered, on its requester to accept the change (`accept_counter`); pending with a dependency that
+would now close a loop (`dependency_loop`), on its approval set to suggest a change without it or decline it
+(`resolve_loop`: "Approving it would now make a dependency loop: suggest a change without that dependency, or decline
+it." for the person, "Approving it would now make a dependency loop. Waiting on <names> to suggest a change or decline
+it." for others). It is waiting on the person when their `waiting_on_me` flag is set or it is their own request to
+update; otherwise it is listed under
 waiting on others when the person asked for it, is in its approval set, or the goal is theirs, their team's, or (for a
 workspace owner) a company goal. An ask waits on the person when its `waiting_on_me` is set (`accept` while open,
 `done` once accepted). An alignment the person is part of waits on its requester when countered and, when pending, on
@@ -468,7 +472,8 @@ person's own (owned, their team's, or a company goal for a workspace owner) firs
 not launched (`launch` `pending` or `not_yet`) SHALL be listed with `next: "launch"` as "Approved, not launched": waiting
 on the person when their `can.launch` flag is set, otherwise under waiting on others, with `waiting_on` its `launchers`,
 when the person asked for it or the goal is theirs, their team's, or (for a workspace owner) a company goal. A launched
-or superseded request is on no Home.
+or superseded request is on no Home, nor is an approved one that would now close a dependency loop (`dependency_loop`):
+nobody can launch it as it stands.
 
 Every agent-status item SHALL show exactly one evidence class, "delivery receipt" (a `received`, `applied` or
 `enforced` receipt, or a goal read Align served), "agent reported" (the agent's own claim or evidence link) or "not
@@ -815,6 +820,11 @@ and a closed "Details" disclosure.
 
 - **WHEN** someone who decides on a request opens it after it added a dependency they can't read (their approval set changed since), so its `dependency_not_visible` is set
 - **THEN** the card offers neither **Approve** nor **Approve and launch** (on an approved request, no **Launch version <n+1> to agents**) and says "You can't approve this. This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask <requester> to withdraw it, or to rebase it without that dependency." (for a launch, "You can't launch this. This change adds a dependency on a goal you can't see, so you can't launch what it publishes. …"), naming no goal; "Decides", "Waiting on …" and "Can launch" leave them out; the Home doesn't list it under "Waiting on you" ("Approve it, suggest a change or decline it.", "… until you launch it."); and if they decided before the read changed (they could see it when they opened the card), the refusal reads "Not recorded. <that message>", the Confirm panel closes and nothing is recorded (`scripts/test-v2.mjs` "C4-1 (ui): ...")
+
+#### Scenario: A request that would now close a dependency loop
+
+- **WHEN** anyone opens a request whose `dependency_loop` is set (a goal it adds as a dependency has come to depend on its goal since it was made)
+- **THEN** an open request offers neither **Approve** nor **Approve and launch** and says "This can't be approved as it stands. <dependency_loop>", its waiting line reads "Waiting on <names> to suggest a change or decline it.", and **Suggest a change** and **Decline** stay for its deciders; an approved one offers no **Launch version <n+1> to agents** and, instead of "Can launch: …", says "Nobody can launch this as it stands. <dependency_loop>" (`scripts/test-v2.mjs` "C5-1 (ui): ...")
 
 #### Scenario: Launched or superseded before launch
 

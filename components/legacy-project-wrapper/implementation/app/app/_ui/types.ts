@@ -178,6 +178,9 @@ export interface ChangeRequest {
   /** Why the reader, who decides on it, may not approve (pending) or launch (approved) it: it adds a dependency on a
    *  goal they can't see. The server's refusal, naming no goal; null otherwise (C4-1). */
   dependency_not_visible?: string | null;
+  /** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop.
+   *  The server's refusal, naming no goal, the same for every reader; null otherwise (C5-1). */
+  dependency_loop?: string | null;
   waiting_on_me: boolean;
   created_at: string;
   updated_at: string;

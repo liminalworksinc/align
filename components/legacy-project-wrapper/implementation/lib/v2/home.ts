@@ -116,6 +116,9 @@ export function workspaceHome(pp: PolicyPrincipal) {
       // they can't see, C4-1).
       const notMe = (ps: HomePerson[]) => ps.filter((p) => p.id !== me);
       const launch = launchWaits(v);
+      // An approved change that would close a dependency loop can't launch as it stands, so it waits on nobody (C5-1);
+      // its card says why.
+      if (launch && v.dependency_loop) continue;
       if (launch) {
         // LAUNCH-001: an approved change agents don't have yet (see lib/v2/home-core.mts).
         if (launch.can_launch) onMe.push(item("launch", [{ id: me, name: memberName(me) }]));
@@ -126,7 +129,7 @@ export function workspaceHome(pp: PolicyPrincipal) {
       if (!w) continue;
       const mineToAct = v.waiting_on_me || (w.next === "rebase" && v.can.rebase);
       if (mineToAct) onMe.push(item(w.next, w.waiting_on));
-      else if (v.requester.id === me || ours(v.goal.id) || v.approvers.some((a) => a.id === me)) onOthers.push(item(w.next, w.next === "decide" ? notMe(w.waiting_on) : w.waiting_on));
+      else if (v.requester.id === me || ours(v.goal.id) || v.approvers.some((a) => a.id === me)) onOthers.push(item(w.next, w.next === "decide" || w.next === "resolve_loop" ? notMe(w.waiting_on) : w.waiting_on));
     }
     return { waiting_on_me: onMe, waiting_on_others: onOthers };
   });
