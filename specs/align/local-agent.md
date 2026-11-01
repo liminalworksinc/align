@@ -1628,7 +1628,10 @@ folder toward a goal. This stays on this machine.` when that part is more than 3
 
 `align allocation` SHALL print, per cached workspace, `<name>, last 7 days (cached <time>, steering <on|off>)` (or
 `(not fetched yet; use --refresh)`), a header `SHARE TARGET GAP GOAL`, one line per active goal (share, target or `-`,
-`<n> over`, `<n> under` or `on target`, title) from the feed's `allocation`, and, when this machine has agent time, the
+the gap as the web's Spend tab words it, `<n> point(s) over`, `<n> point(s) under`, `on target` (less than 1 point) or
+`no target`, where `<n>` is the feed's one-decimal `gap_7d` in whole points rounded toward zero, so a 9.6-point gap
+reads `9 points over` and agrees with steering's 10-point threshold, which compares the exact gap; then the title)
+from the feed's `allocation`, and, when this machine has agent time, the
 unshared share with its top 3 folders and `This part stays on this machine.`; `--refresh` SHALL refetch the feeds
 first, `--json` print the same as JSON, and `--week YYYY-MM-DD` (a usage error, exit 2, for anything else) print that week's rows
 from `GET /api/v2/workspaces/:ws/allocation`. `align steering status` SHALL print `<workspace>: steering <on|off>` with,
@@ -1638,7 +1641,7 @@ usage error (exit 2): the switch is a workspace owner's, on the web.
 #### Scenario: From the refreshed feed
 
 - **WHEN** the feed has goals at 40% of a 10% target and 5% of a 30% target with steering on, and the user runs `align allocation --refresh`, `align allocation --json` and `align steering status` (test `allocation` "align allocation prints share, target and gap ...")
-- **THEN** the lines read `40% 10% 30 over Alpha goal` and `5% 30% 25 under Beta goal`, the JSON carries the goals' allocation and `steering: "on"`, and the status says `steering on` and `0 lines waiting to be reported by the next sync.`; `align steering on` exits 2
+- **THEN** the lines read `40% 10% 30 points over Alpha goal` and `5% 30% 25 points under Beta goal`, goals with gaps of 9.6, -1.3 and 0.4 and one without a target read `9 points over`, `1 point under`, `on target` and `no target`, the JSON carries the goals' allocation and `steering: "on"`, and the status says `steering on` and `0 lines waiting to be reported by the next sync.`; `align steering on` exits 2
 
 ### Requirement: Nothing private leaves the machine
 
