@@ -6,6 +6,7 @@ import { addEvidence, LAUNCH_STATES, requestCondition } from "../v2/changes";
 import { CHANGE_REQUEST_STATES, getChangeRequest, listChangeRequests, type ChangeDiff, type ChangeRequestSummary, type Condition, type EvidenceLink } from "../v2/changes-read";
 import { launchWords } from "../v2/launch-words";
 import { diffWords, type FieldDiff } from "../v2/change-words.mts";
+import { count } from "../v2/plural.mts";
 import { noteGrantRead } from "../oauth/grants";
 import { EVIDENCE_SCOPE } from "../oauth/server";
 import { all, get } from "../v2/db";
@@ -99,8 +100,6 @@ type UT = z.infer<typeof UT>;
 const ut = (s: string): UT => ({ untrusted_text: s });
 /** For the text summary: < and > escaped, so the text can't close its tag. */
 const tag = (s: string) => `<untrusted-text>${s.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</untrusted-text>`;
-/** "1 session", "2 sessions": a count with its noun, singular for one (C4-4). */
-const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function result<T extends Record<string, unknown>>(structured: T, summary: string) {
   return { content: [{ type: "text" as const, text: summary }], structuredContent: structured };

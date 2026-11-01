@@ -5,6 +5,7 @@ import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, mea
 import { LIMIT_WORDS } from "./limits";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
 import { hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
+import { count } from "@/lib/v2/plural.mts";
 
 // Pieces a change request is shown with, shared by its open view (decide.tsx: understand, then decide) and its record
 // (changes.tsx): field values in words, the before/after diff, the changes form (a proposal or an approver's counter),
@@ -260,7 +261,7 @@ export function SnapshotBox({ s }: { s: AlignSnapshot }) {
       <p>
         {s.spend ? (
           <>
-            Spend on this goal in the last {s.window.days} days: {usd(s.spend.total.est_list_usd_micros)} estimated at list price, {num(s.spend.total.requests)} requests
+            Spend on this goal in the last {s.window.days} days: {usd(s.spend.total.est_list_usd_micros)} estimated at list price, {count(s.spend.total.requests, "request", undefined, num)}
             {models.length > 0 && <> ({models.map((m) => `${m.model} ${usd(m.est_list_usd_micros)}`).join(", ")})</>}.
           </>
         ) : (

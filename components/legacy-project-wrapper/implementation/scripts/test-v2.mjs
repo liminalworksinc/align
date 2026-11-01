@@ -6719,6 +6719,23 @@ try {
       `${hvCr.status} ${hvCr.text.slice(0, 200)} ${hvDone.status} ${JSON.stringify(hvValue.depends_on)} ${JSON.stringify(hvWords)} ${JSON.stringify(onlyHidden)} ${mcpText.slice(0, 600)}`,
     );
 
+    // -- C5-4: one count-and-noun helper for the MCP text and the web app --
+    const plural = await import(pathToFileURL(path.join(ROOT, "lib/v2/plural.mts")).href).catch(() => null);
+    const slips = [];
+    const walk = (dir) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const f = path.join(dir, e.name);
+        if (e.isDirectory()) walk(f);
+        else if (f.endsWith(".tsx")) for (const [i, l] of readFileSync(f, "utf8").split("\n").entries()) if (/num\([^)]*\)\}?\s*(unpriced )?(requests|sessions)\b/.test(l)) slips.push(`${path.relative(ROOT, f)}:${i + 1}`);
+      }
+    };
+    walk(path.join(ROOT, "app"));
+    check(
+      "C5-4: count(1, \"request\") is \"1 request\", count(2, \"request\") \"2 requests\" (with a formatter: \"1,200 requests\"); no web view writes a formatted count followed by a fixed plural (\"{num(n)} requests\"), so the snapshot never says \"1 requests\"",
+      plural?.count(1, "request") === "1 request" && plural.count(2, "request") === "2 requests" && plural.count(1200, "request", undefined, (n) => n.toLocaleString("en-US")) === "1,200 requests" && plural.count(1, "bound session") === "1 bound session" && slips.length === 0,
+      `${plural ? "" : "no lib/v2/plural.mts; "}${slips.join(", ")}`,
+    );
+
     // -- N5: launch and not yet check the revision they are sent --
     const crS = (await ka(KB, "POST", kcrs(KGS.id), { base_version: 1, changes: { title: "Stale launch, checked" }, reason: "Check it" })).json;
     await kAct(KA, KGS.id, crS?.id, "approve", { revision: 1 });

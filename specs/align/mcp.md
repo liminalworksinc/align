@@ -838,6 +838,7 @@ An Align URL that fails the scheme rule at start SHALL make the script write `al
 - `app/api/mcp/route.ts`
 - `lib/mcp/register.ts`
 - `lib/v2/change-words.mts`
+- `lib/v2/plural.mts`
 - `lib/v2/goal-limits.ts`
 - `lib/v2/asks.ts`
 - `lib/v2/goal-activity.ts`
