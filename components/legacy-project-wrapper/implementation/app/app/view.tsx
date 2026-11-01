@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "./_ui/kit";
 import type { CreationOptions, Me } from "./_ui/server";
 import { useTurnstile } from "./_ui/turnstile";
+import { firstRunWords } from "./_ui/words";
 
 interface DeletedWs {
   id: string;
@@ -29,7 +30,7 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
       <Card>
         {list.loading && <Loading />}
         <Err>{list.error}</Err>
-        {list.data && list.data.workspaces.length === 0 && <Note>You are not in a workspace yet. Create one, open an invite link someone sent you, or start from a sample.</Note>}
+        {list.data && list.data.workspaces.length === 0 && <Note>{firstRunWords(creation)}</Note>}
         <ul className="divide-y divide-zinc-200">
           {list.data?.workspaces.map((w) => (
             <li key={w.id} className="flex flex-wrap items-center gap-3 py-3">
@@ -80,7 +81,7 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
               <li key={w.id} className="flex flex-wrap items-center gap-3 py-3">
                 <span className="text-[17px] text-zinc-900">{w.name}</span>
                 <span className="text-[14px] text-zinc-500">
-                  Deleted {when(w.deleted_at)}. You can restore it until {when(w.restore_until)}; then it is erased.
+                  Deleted {when(w.deleted_at)}. You can restore it until {when(w.restore_until)}; then it is erased. Restoring brings back its members and history, but not its connected AI apps: each one has to connect again.
                 </span>
                 <span className="ml-auto">
                   <Btn

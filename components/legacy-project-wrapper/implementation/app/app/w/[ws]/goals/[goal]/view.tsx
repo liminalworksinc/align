@@ -5,6 +5,7 @@ import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, 
 import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILITY_LABEL, anchorsDraft, anchorsOut, limitsDraft, limitsOut, measuresDraft, measuresOut, takenBy, targetOut, type LimitDraft } from "../../../../_ui/goalform";
 import type { Me } from "../../../../_ui/server";
 import { ChangeRequestCard, ProposeChange, useGoalTitles } from "../../../../_ui/changes";
+import { hiddenGoals } from "../../../../_ui/crparts";
 import { GoalLimits, useStashedLimits } from "../../../../_ui/limits";
 import { GoalActivityCard } from "../../../../_ui/activity";
 import { AgentsOnGoalCard, HoldBanner, type HoldState } from "../../../../_ui/requests";
@@ -17,9 +18,11 @@ interface Detail {
   can_edit: boolean;
   /** The server's answer to "may this reader propose a change?" (not the owner, not a viewer, an active goal). */
   can_propose: boolean;
+  /** How many dependencies the reader can't see (never which); a new version keeps them. */
+  hidden_depends_on?: number;
 }
 
-function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () => void }) {
+function NewVersion({ ws, goal, hiddenDeps, onDone }: { ws: string; goal: Goal; hiddenDeps: number; onDone: () => void }) {
   const [title, setTitle] = useState(goal.title);
   const [status, setStatus] = useState(goal.status);
   const [measures, setMeasures] = useState(measuresDraft(goal));
@@ -59,7 +62,7 @@ function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () =
           </Field>
           <TargetShareField value={target} onChange={setTarget} taken={takenBy(feed.data?.goals, goal.id)} />
           <AnchorsEditor value={anchors} onChange={setAnchors} />
-          {others.length > 0 && (
+          {(others.length > 0 || hiddenDeps > 0) && (
             <div className="mb-3">
               <p className="mb-1 text-[14px] text-zinc-600">Depends on (agents on this goal hear when these change)</p>
               {others.map((g) => (
@@ -68,6 +71,11 @@ function NewVersion({ ws, goal, onDone }: { ws: string; goal: Goal; onDone: () =
                   {g.title}
                 </label>
               ))}
+              {hiddenDeps > 0 && (
+                <p className="text-[14px] text-zinc-500" data-hidden-deps>
+                  Also depends on {hiddenGoals(hiddenDeps)}. Saving keeps {hiddenDeps === 1 ? "it" : "them"}; only someone who can see {hiddenDeps === 1 ? "it" : "them"} can remove {hiddenDeps === 1 ? "it" : "them"}.
+                </p>
+              )}
             </div>
           )}
           <Btn type="submit" disabled={act.busy}>
@@ -153,11 +161,11 @@ function RequestAlignment({ ws, goal, me }: { ws: string; goal: Goal; me: Me }) 
   );
 }
 
-function Tree({ ws, goal, canEdit, onDone }: { ws: string; goal: Goal; canEdit: boolean; onDone: () => void }) {
+function Tree({ ws, goal, canEdit, hiddenDeps, onDone }: { ws: string; goal: Goal; canEdit: boolean; hiddenDeps: number; onDone: () => void }) {
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const act = useAction();
   const deps = (goal.depends_on ?? []).map((id) => feed.data?.goals.find((g) => g.id === id)).filter((g): g is Goal => !!g);
-  if (!goal.contributes_to?.length && !deps.length) return null;
+  if (!goal.contributes_to?.length && !deps.length && !hiddenDeps) return null;
   return (
     <Card title="Goal tree">
       {goal.contributes_to.map((p) => (
@@ -177,7 +185,7 @@ function Tree({ ws, goal, canEdit, onDone }: { ws: string; goal: Goal; canEdit: 
           )}
         </div>
       ))}
-      {deps.length > 0 && (
+      {(deps.length > 0 || hiddenDeps > 0) && (
         <p className="text-[15px]">
           Depends on:{" "}
           {deps.map((g, i) => (
@@ -189,6 +197,7 @@ function Tree({ ws, goal, canEdit, onDone }: { ws: string; goal: Goal; canEdit: 
               (version {g.version})
             </span>
           ))}
+          {hiddenDeps > 0 && `${deps.length ? ", " : ""}${hiddenGoals(hiddenDeps)}`}
         </p>
       )}
       {/* The review prompt is the owner's alone (whoever can edit it); everyone else sees the amber pill. Sessions on this
@@ -277,10 +286,10 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             {d.data!.contributions.length > 0 && <p className="mt-3 text-[14px] text-zinc-500">Contributing goals: {d.data!.contributions.map((c) => c.goal!.title).join(", ")}</p>}
           </Card>
           <GoalLimits ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={limitsDone} />
-          <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={d.reload} />
+          <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} hiddenDeps={d.data!.hidden_depends_on ?? 0} onDone={d.reload} />
           <GoalActivityCard ws={ws} goal={g} me={me} />
           <AgentsOnGoalCard key={g.version} ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
-          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} onDone={d.reload} />}
+          {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} onDone={d.reload} />}
           <ChangeRequests key={`${g.version}:${proposed}`} ws={ws} goal={g} me={me} canPropose={d.data!.can_propose} onGoalChanged={d.reload} />
           {ws0.data && ws0.data.role !== "viewer" && g.owner.id !== me.id && <RequestAlignment ws={ws} goal={g} me={me} />}
           <Card title="Versions">

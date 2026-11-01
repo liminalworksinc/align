@@ -9,11 +9,11 @@ import { emailOTP, genericOAuth } from "better-auth/plugins";
 import { config, hostAllowed } from "../config";
 import { clientNet } from "../ratelimit";
 import { captchaPlugin } from "./captcha";
-import { emailSignInEnabled, githubConfigured, googleConfigured, publicOrigin, RECENT_SIGN_IN_MS, sessionMaxDays, testIdpEnabled, testOAuthUrl } from "./config";
+import { emailSignInEnabled, githubConfigured, googleConfigured, localCodesPerHour, publicOrigin, RECENT_SIGN_IN_MS, sessionMaxDays, testIdpEnabled, testOAuthUrl } from "./config";
 import { liveCodeFor } from "./core.mts";
 import { audit, authDb, dbDir, get, LIVE_WS, run, sql, tx } from "./db";
 import { nowIso, rand32 } from "./ids";
-import { durableCount, durableRoom, otpEmailKey, takeAll } from "./limits";
+import { durableCount, durableRetryAfterMs, durableRoom, otpEmailKey, retryAfterMs, takeAll } from "./limits";
 import { sendSignInCode } from "./mail";
 
 // Authentication only (who you are): Better Auth, mounted at /api/v2/auth. Authorization (what you may do) is ours,
@@ -21,8 +21,10 @@ import { sendSignInCode } from "./mail";
 //   - Google and GitHub, each only when its client id and secret are set;
 //   - an emailed one-time code (emailOtp, type sign-in): always in Mode L (printed, lib/v2/mail.ts), hosted only with
 //     the email API settings. 6 digits, 5 minutes, 3 attempts, stored hashed. Sends are limited to 3 per email per
-//     10 minutes and 10 per client per hour and, hosted, 5 per email per hour (durable, keyed by an HMAC of the
-//     address) and 3 per client per minute (Better Auth's limit, durable). The send answer never says whether an
+//     10 minutes and, hosted, 10 per client per hour, 5 per email per hour (durable, keyed by an HMAC of the address)
+//     and 3 per client per minute (Better Auth's limit, durable); in Mode L, where everyone signs in from the one
+//     machine, only a machine-wide ceiling (ALIGN_LOCAL_CODES_PER_HOUR, default 60) adds to the per-email limit. A
+//     refusal says how long to wait, from the limit that frees up last. The send answer never says whether an
 //     account exists. A code signs in the account with that verified email; a new account is made only for a pending
 //     invite, in Mode L, or (hosted) for an address with a usable creation code bound to it (lib/v2/creation.ts) or
 //     for ALIGN_FIRST_OWNER_EMAIL while the server has no account. When Turnstile is on (lib/v2/captcha.ts), sending
@@ -145,7 +147,13 @@ async function endCappedSessions(ctx: HookCtx) {
   }
 }
 
-const tooMany = () => new APIError("TOO_MANY_REQUESTS", { code: "rate_limited", message: "Too many codes were sent. Wait a few minutes, then try again." });
+/** "Too many codes" with the real wait, from the limit that frees up last (whole minutes, at least 1), and Retry-After. */
+export function tooManyCodesMessage(waitMs: number): string {
+  const min = Math.max(1, Math.ceil(waitMs / 60_000));
+  return `Too many codes were sent. Try again in ${min === 1 ? "1 minute" : `${min} minutes`}.`;
+}
+const tooMany = (waitMs: number) =>
+  new APIError("TOO_MANY_REQUESTS", { code: "rate_limited", message: tooManyCodesMessage(waitMs) }, { "Retry-After": String(Math.max(1, Math.ceil(waitMs / 1000))) });
 
 /** Before every Better Auth request (and server-side api call): the absolute session cap, a recent sign-in for adding a
  *  passkey or linking an account, email-code send limits, and the unverified-email refusal. */
@@ -168,18 +176,20 @@ const beforeHook = createAuthMiddleware(async (ctx) => {
     const limits = [{ key: `otp-email:${email}`, max: 3, windowMs: 10 * 60 * 1000 }];
     // A code the server sends itself (the Mode L local owner, an in-process call with no request) has no client.
     if (ctx.request) {
-      const client = config().hosted ? `ip:${clientNet(ctx.request.headers.get("fly-client-ip") ?? "unknown")}` : "local";
-      limits.push({ key: `otp-client:${client}`, max: 10, windowMs: 60 * 60 * 1000 });
+      // Hosted: 10 per client per hour. Mode L has one client (the machine) and everyone on it signs in from there, so
+      // its limit is per address (above) with only a generous machine-wide ceiling against a runaway script.
+      if (config().hosted) limits.push({ key: `otp-client:ip:${clientNet(ctx.request.headers.get("fly-client-ip") ?? "unknown")}`, max: 10, windowMs: 60 * 60 * 1000 });
+      else limits.push({ key: "otp-client:local", max: localCodesPerHour(), windowMs: 60 * 60 * 1000 });
     }
     // Hosted, also 5 per address per hour, stored so a restart doesn't reset it. Keyed by an HMAC of the address, so
     // the table holds no email. All of these count only if all of them allow the send.
     const durable = config().hosted ? [{ key: otpEmailKey(email), max: 5, windowMs: 60 * 60 * 1000 }] : [];
-    const ok = await tx(() => {
-      if (!durableRoom(durable) || !takeAll(limits)) return false;
+    const wait = await tx(() => {
+      if (!durableRoom(durable) || !takeAll(limits)) return Math.max(durableRetryAfterMs(durable), retryAfterMs(limits));
       durableCount(durable);
-      return true;
+      return 0;
     });
-    if (!ok) throw tooMany();
+    if (wait > 0) throw tooMany(wait);
     return;
   }
   if (ctx.path === OTP_SIGN_IN && email && typeof body.otp === "string") {

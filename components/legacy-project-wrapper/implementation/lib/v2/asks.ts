@@ -133,10 +133,25 @@ interface AskInput {
   source: { kind: "meeting" | "manual"; title: string | null; date: string };
 }
 
-/** A new ask's fields. The team must exist (404); a goal must be readable (404) and the asked team's own (400). */
-function askIn(pp: PolicyPrincipal, b: Body, prefix = ""): AskInput {
+/** The team an ask names: `team_id`, or (an import, which people write by hand) `team`, a team's name in this
+ *  workspace, matched without regard to case (400 when no team or more than one has it). */
+function askTeam(pp: PolicyPrincipal, b: Body, prefix: string): string {
+  if ((b.team_id === undefined || b.team_id === null) && typeof b.team === "string") {
+    const name = text(b.team, `${prefix}team`, 200)!;
+    const ids = all<{ id: string }>("SELECT id FROM v2_pods WHERE ws_id = ? AND lower(name) = lower(?)", pp.wsId, name);
+    if (ids.length !== 1) throw badRequest(`${prefix}team: ${ids.length ? "more than one team" : "no team"} here is called "${name}"`);
+    return ids[0].id;
+  }
+  if (b.team_id === undefined || b.team_id === null || b.team_id === "") throw badRequest(`${prefix}team_id (or ${prefix}team, a team's name) is required`);
   const teamId = text(b.team_id, `${prefix}team_id`, 64)!;
   if (!get("SELECT 1 AS x FROM v2_pods WHERE ws_id = ? AND id = ?", pp.wsId, teamId)) throw notFound();
+  return teamId;
+}
+
+/** A new ask's fields. The team must exist (404 for an unknown team_id); a goal must be readable (404) and the asked
+ *  team's own (400). */
+function askIn(pp: PolicyPrincipal, b: Body, prefix = ""): AskInput {
+  const teamId = askTeam(pp, b, prefix);
   const goalId = text(b.goal_id, `${prefix}goal_id`, 64, { optional: true });
   if (goalId) {
     const g = goalRow(pp.wsId, goalId);

@@ -283,6 +283,17 @@ function anchorsIn(v: unknown, prev: Anchors = { repos: [], branch_patterns: [],
   return { repos: list("repos"), branch_patterns: list("branch_patterns"), issues: list("issues") };
 }
 
+/** The ids in `ids` naming goals this caller can't read (they exist; the caller is never shown them). */
+export function unreadableGoals(pp: PolicyPrincipal, ids: string[]): string[] {
+  return ids.filter((id) => {
+    const d = goalRow(pp.wsId, id);
+    return !!d && !canReadGoal(pp, goalObj(d));
+  });
+}
+
+/** A depends_on list from a body. Every goal sent must be one the caller can read (404 otherwise). The dependencies in
+ *  `prev` the caller can't read are kept: they never saw them, so a list without them is not a request to drop them
+ *  (a goal form only lists what its reader can see). At most 5 in all. */
 function dependsIn(pp: PolicyPrincipal, v: unknown, self: string | null, prev: string[] = []): string[] {
   if (v === undefined) return prev;
   if (!Array.isArray(v)) throw badRequest("depends_on must be a list of goal ids");
@@ -294,7 +305,9 @@ function dependsIn(pp: PolicyPrincipal, v: unknown, self: string | null, prev: s
     if (!d || !canReadGoal(pp, goalObj(d))) throw notFound();
     if (!out.includes(id)) out.push(id);
   }
-  return out;
+  const kept = unreadableGoals(pp, prev).filter((id) => !out.includes(id));
+  if (out.length + kept.length > 5) throw badRequest(`depends_on: at most 5, and ${kept.length === 1 ? "1 goal you can't see stays" : `${kept.length} goals you can't see stay`} on the list`);
+  return [...out, ...kept];
 }
 
 /** Would `goalId` depending on `deps` close a loop? Follows every goal's depends_on in the workspace, readable or not. */
@@ -607,6 +620,8 @@ export function goalDetail(pp: PolicyPrincipal, goalId: string) {
     .filter((c) => c.goal);
   return {
     goal: serializeGoal(pp, g),
+    /** How many of the goal's dependencies the reader can't see (never which): a new version keeps them. */
+    hidden_depends_on: unreadableGoals(pp, JSON.parse(g.depends_on_json || "[]") as string[]).length,
     versions: versions.map((v) => ({ ...v, created_by: undefined })),
     contributions,
     can_edit: g.owner_id === pp.userId && pp.wsRole !== "viewer",

@@ -156,3 +156,17 @@ body {
   text-transform: uppercase;
   color: var(--al-ink-4);
 }
+
+/*
+ * A phone's tap target (interface.md "Web app fits a phone"): below 640px every button and select is at least 44px
+ * tall, text-styled ones too (Sign out, Not now, Remove, Paste meeting notes). In the base layer, so a component's own
+ * utility classes still win where they set more.
+ */
+@layer base {
+  @media (width < 40rem) {
+    button,
+    select {
+      min-height: 44px;
+    }
+  }
+}

@@ -4,6 +4,7 @@ import { api, Btn, Err, useAction, useApi, when } from "./kit";
 import type { ChangeRequest } from "./types";
 import { ESTIMATE_WORDS, estimateSaid, VALUE_NOTE_MAX, VALUE_QUESTION, type EstimateId } from "@/lib/v2/value-core.mts";
 import { launchWords } from "@/lib/v2/launch-words";
+import { diffWords } from "@/lib/v2/change-words.mts";
 import { receiptEvidence } from "@/lib/v2/home-core.mts";
 import { EvidencePill } from "./evidence";
 
@@ -45,7 +46,6 @@ interface ValueView {
 
 const PITCH = "Align keeps teams and their agents on one approved plan as priorities change.";
 const FOLLOW_UP = "Want to evaluate Align on a real workflow? Ask for a follow-up; it can end with an optional, non-binding letter of intent.";
-const FIELD_WORDS: Record<string, string> = { title: "Title", measures: "Measures", depends_on: "Depends on", status: "Status", limits: "Limits" };
 const viewedSent = new Set<string>(); // per page: workspace and person, so a second card on the page sends nothing
 // A view is the card's top seen for a second (LIM-2445, #38): the card is taller than the column it scrolls in, so a
 // person who scrolls to it sees its heading and first rows, not half of it. The top TOP_PX (heading, the accepted change
@@ -64,21 +64,12 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** One changed field in a line: text before and after, or how many items before and after. */
-function changeLine(k: string, d: { before: unknown; after: unknown }): string {
-  const name = FIELD_WORDS[k] ?? k;
-  if (Array.isArray(d.before) || Array.isArray(d.after)) {
-    const n = (v: unknown) => (Array.isArray(v) ? v.length : 0);
-    return `${name}: ${n(d.before)} → ${n(d.after)}`;
-  }
-  return `${name}: ${String(d.before ?? "—")} → ${String(d.after ?? "—")}`;
-}
 
 function post(ws: string, cr: ChangeRequest, body: Record<string, unknown>) {
   return api<{ recorded: boolean; report: Report | null }>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}/value`, { body });
 }
 
-export function ValueCard({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: string }) {
+export function ValueCard({ ws, cr, me, titles }: { ws: string; cr: ChangeRequest; me: string; titles?: Map<string, string> }) {
   const v = useApi<ValueView>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}/value`);
   const top = useRef<HTMLDivElement>(null);
   const loaded = !!v.data;
@@ -117,7 +108,8 @@ export function ValueCard({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: s
 
   if (!v.data) return v.error ? <Err>{v.error}</Err> : null;
   const d = v.data;
-  const changed = Object.entries(d.diff ?? {});
+  // Each changed field in words ("Arms shipped target 500 → 600"), the same lines as the MCP decision record.
+  const changed = diffWords(d.diff ?? {}, { title: (id) => titles?.get(id) ?? "a goal" });
   const dl = d.delivery;
   const others = d.reports.filter((r) => r.person.id !== me);
 
@@ -129,8 +121,8 @@ export function ValueCard({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: s
       <Row label="Accepted change">
         {changed.length ? (
           <ul className="flex flex-col gap-0.5">
-            {changed.map(([k, diff]) => (
-              <li key={k}>{changeLine(k, diff)}</li>
+            {changed.map((line, i) => (
+              <li key={i}>{line}</li>
             ))}
           </ul>
         ) : (
@@ -144,7 +136,7 @@ export function ValueCard({ ws, cr, me }: { ws: string; cr: ChangeRequest; me: s
       </Row>
 
       <Row label="Who approved">
-        {d.approved_by.name}, {when(d.decided_at)}
+        {d.approved_by.id === me ? "You" : d.approved_by.name}, {when(d.decided_at)}
         {d.approved_without_evidence ? " (approved without evidence)" : ""}
       </Row>
 

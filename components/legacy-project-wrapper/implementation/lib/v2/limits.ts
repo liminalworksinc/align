@@ -1,5 +1,5 @@
 import { signPayload } from "../secret";
-import { get, run } from "./db";
+import { all, get, run } from "./db";
 import { V2Error } from "./errors";
 
 // Fixed-window counters for v2 (in memory, on globalThis, capped at 10,000 keys; oldest evicted first).
@@ -28,6 +28,17 @@ export function takeAll(limits: { key: string; max: number; windowMs: number }[]
   return true;
 }
 
+/** How long until every one of these limits has room again (0 when all have room now): for each full limit, until its
+ *  oldest counted call leaves the window. */
+export function retryAfterMs(limits: { key: string; max: number; windowMs: number }[], now = Date.now()): number {
+  let wait = 0;
+  for (const l of limits) {
+    const list = (hits.get(l.key) ?? []).filter((t) => now - t < l.windowMs).sort((a, b) => a - b);
+    if (list.length >= l.max) wait = Math.max(wait, list[list.length - l.max] + l.windowMs - now);
+  }
+  return wait;
+}
+
 // Durable sliding windows (v2_rate_hits: one row per counted call), for limits that must survive a restart: hosted
 // email-code sends per address, access requests, and new shared sessions per device. Call inside tx().
 export interface Limit {
@@ -53,6 +64,16 @@ export function durableRoom(limits: Limit[], now = Date.now()): boolean {
 export function durableCount(limits: Limit[], now = Date.now()) {
   run("DELETE FROM v2_rate_hits WHERE at <= ?", now - DURABLE_KEEP_MS);
   for (const l of limits) run("INSERT INTO v2_rate_hits (key, at) VALUES (?, ?)", l.key, now);
+}
+
+/** durableRoom's counterpart to retryAfterMs: how long until every durable limit has room again (0 when all do). */
+export function durableRetryAfterMs(limits: Limit[], now = Date.now()): number {
+  let wait = 0;
+  for (const l of limits) {
+    const rows = all<{ at: number }>("SELECT at FROM v2_rate_hits WHERE key = ? AND at > ? ORDER BY at DESC LIMIT ?", l.key, now - l.windowMs, l.max);
+    if (rows.length >= l.max) wait = Math.max(wait, rows[l.max - 1].at + l.windowMs - now);
+  }
+  return wait;
 }
 
 /** durableRoom, then durableCount: false (nothing counted) when any limit is full. */

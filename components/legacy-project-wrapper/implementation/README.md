@@ -54,10 +54,14 @@ Open it, enter the code, then create a workspace or the Northstar sample on `/ap
 
 ```sh
 npm run sign-in-link            # or: npm run sign-in-link someone@example.com
+PORT=3800 npm run sign-in-link  # when the server runs on another port than 3100
 ```
 
 The server prints the new link in its own terminal. Any address can sign in by email code in Mode L (the code is
-printed, never sent), so you can add people by inviting them from a workspace's People tab.
+printed, never sent), so you can add people by inviting them from a workspace's People tab. Codes are limited per
+address: 3 for one address in 10 minutes. Everyone signs in from this one machine, so there is no per-client limit in
+Mode L, only a machine-wide ceiling of `ALIGN_LOCAL_CODES_PER_HOUR` (default 60) an hour against a runaway script. A
+refused send says how long to wait.
 
 **Passkeys.** Once signed in, add a passkey on `/app/account`; then **Sign in with a passkey** (or pick it from the
 email field's suggestions) signs you in. In Mode L passkeys work only at `http://localhost:3100`, not
@@ -84,8 +88,9 @@ See `packages/align-agent/README.md` for the commands, and `docs/MCP.md` to conn
 generated Better Auth secret beside it. One server runs per data directory: a second one exits with
 `Another Align server (pid <n>) is using <dir>. Stop it first.` Delete `data/` to start over.
 
-**Mode L settings** (all optional): `ALIGN_DATA_DIR`, `ALIGN_LOCAL_OWNER_EMAIL`, `ALIGN_SECRET` (else generated into
-`data/.secret`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`,
+**Mode L settings** (all optional): `ALIGN_DATA_DIR`, `ALIGN_LOCAL_OWNER_EMAIL`, `ALIGN_LOCAL_CODES_PER_HOUR` (the
+machine-wide ceiling on sign-in codes an hour, a positive whole number, default 60; hosted ignores it), `ALIGN_SECRET`
+(else generated into `data/.secret`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`,
 `ALIGN_SESSION_MAX_DAYS` (the absolute session cap, 1 to 365 days, default 30; Mode L ignores a bad value).
 `ALIGN_TEST_IDP=1` turns on email-and-password sign-up for tests only; with it, `ALIGN_TEST_NOW` (an ISO time) is the
 retention job's clock and `ALIGN_TEST_OAUTH_URL` (a loopback OAuth 2.0 stub) adds an `align-test` sign-in provider,

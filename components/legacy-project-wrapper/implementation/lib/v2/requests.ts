@@ -287,8 +287,15 @@ export function listRequests(pp: PolicyPrincipal, goalId: string) {
   const sender = canSend(pp, g);
   const sessions = sender
     ? goalTargets(pp.wsId, g.id).map((k) => {
-        const s = get<{ user_id: string; repo_alias: string | null; harness: string }>("SELECT user_id, repo_alias, harness FROM v2_sessions WHERE ws_id = ? AND session_key = ?", pp.wsId, k)!;
-        return { session_key: k, owner: person(s.user_id), mine: s.user_id === pp.userId, repo_alias: s.repo_alias, harness: s.harness };
+        const s = get<{ user_id: string; repo_alias: string | null; harness: string; title: string | null; started_at: string }>(
+          "SELECT user_id, repo_alias, harness, title, started_at FROM v2_sessions WHERE ws_id = ? AND session_key = ?",
+          pp.wsId,
+          k,
+        )!;
+        // The start time (and, on the sender's own sessions, the title) tells two sessions of one person in one
+        // repository apart in the switch-goal picker. A title is shown only to the session's owner, as on its rows.
+        const mine = s.user_id === pp.userId;
+        return { session_key: k, owner: person(s.user_id), mine, repo_alias: s.repo_alias, harness: s.harness, title: mine ? s.title : null, started_at: s.started_at };
       })
     : null;
   return { requests: rows.map((r) => requestView(pp, g, r, approvers)), can_send: sender && g.status === "active", sessions, hold: holdView(pp, g) };

@@ -530,6 +530,16 @@ async function local(env) {
   check("consent page: a loopback redirect gets the warning naming its host", okPage.includes("This app sends you back to a program on this computer (127.0.0.1:33418). Allow it only if you started it yourself just now."), "");
   const viewerPage = plain((await page(authParams(clientId, challenge), { cookie: U3.cookie })).text);
   check("consent page: a person who is only a viewer gets 'You have no workspace where you can connect an app. Viewers can't connect apps.' and no Allow", viewerPage.includes("You have no workspace where you can connect an app. Viewers can't connect apps.") && !viewerPage.includes("Allow read-only access") && viewerPage.includes("Cancel"), viewerPage.slice(0, 600));
+  // U7 (web walk): a viewer everywhere with an old sign-in is told at once that viewers can't connect apps, never first
+  // asked to sign in again for nothing.
+  const oldViewer = { ...U3, cookie: await signInAgain(U3) };
+  signedInAt(oldViewer.cookie, Date.now() - 40 * 60 * 1000);
+  const oldViewerPage = plain((await page(authParams(clientId, challenge), { cookie: oldViewer.cookie })).text);
+  check(
+    "U7: a viewer with a 40-minute-old sign-in gets 'You have no workspace where you can connect an app. Viewers can't connect apps.' at once, with no 'Sign in again'",
+    oldViewerPage.includes("You have no workspace where you can connect an app. Viewers can't connect apps.") && !oldViewerPage.includes("Sign in again to connect an app."),
+    oldViewerPage.slice(0, 300),
+  );
 
   // -- the approve endpoint --
   const p0 = authParams(clientId, challenge);
@@ -1251,6 +1261,28 @@ async function local(env) {
   const lgU4 = await tool(tU4.access_token, "align_list_goals");
   const lgU1c = await tool(tU1.access_token, "align_list_goals");
   check("two people connect the same CIMD app: two grants, each reads only what its own person can (U4 sees their private goal, U1 doesn't)", lgU4.sc?.goals.some((g) => g.id === GPriv.id) && !lgU1c.sc?.goals.some((g) => g.id === GPriv.id), `${lgU4.text.slice(0, 100)} | ${lgU1c.text.slice(0, 100)}`);
+  // B11 (web walk): a private goal is the reader's own; summaries say so, never "team goal, visible to private".
+  const ggPriv = await tool(tU4.access_token, "align_get_goal", { goal_id: GPriv.id });
+  const briefU4 = await tool(tU4.access_token, "align_get_brief");
+  const privLine = lgU4.text.split("\n").find((l) => l.includes(GPriv.id)) ?? "";
+  check(
+    "B11: align_list_goals, align_get_goal and align_get_brief call the person's private goal \"personal goal, visible only to you\", never \"team goal\" or \"visible to private\"; a team goal reads \"team goal, visible to its team\"",
+    /\(active, personal goal, visible only to you\)/.test(privLine) && /personal goal, visible only to you\)/.test(ggPriv.text.split("\n")[0] ?? "") && briefU4.text.includes("(personal goal, visible only to you)") &&
+      ![lgU4.text, ggPriv.text, briefU4.text].some((t) => /visible to private/.test(t)) && !/team goal/.test(privLine) && lgU4.text.split("\n").some((l) => l.includes(GT.id) && /team goal, visible to its team/.test(l)),
+    `${privLine} | ${ggPriv.text.split("\n")[0]} | ${briefU4.text.slice(0, 400)}`,
+  );
+  // B4 (web walk): a decision record says what changed in words: a measure's target, not "Measures: 1 -> 1".
+  const gcNow = (await web(U1, "GET", `/api/v2/workspaces/${A}/goals/${GC.id}`)).json?.goal;
+  const logos = gcNow?.measures?.find((m) => m.text === "Regulated logos");
+  const [fromT, toT] = [logos?.target, String(Number(logos?.target) + 1)];
+  const crTarget = await web(U4, "POST", `/api/v2/workspaces/${A}/goals/${GC.id}/change-requests`, { base_version: gcNow?.version, changes: { measures: (gcNow?.measures ?? []).map((m) => (m.id === logos?.id ? { ...m, target: toT } : m)) }, reason: "One more logo" });
+  const crTargetDone = await web(U1, "POST", `/api/v2/workspaces/${A}/goals/${GC.id}/change-requests/${crTarget.json?.id}/approve_and_launch`, { revision: 1 });
+  const drTarget = await tool(tU1.access_token, "align_get_decision_record", { change_request_id: crTarget.json?.id });
+  check(
+    "B4: align_get_decision_record says a target change in words (\"<untrusted-text>Regulated logos</untrusted-text> target <untrusted-text>n</untrusted-text> -> <untrusted-text>n+1</untrusted-text>\"), never \"Measures: 1 -> 1\"",
+    !!logos && crTarget.status === 201 && crTargetDone.status === 200 && drTarget.text.includes(`<untrusted-text>Regulated logos</untrusted-text> target <untrusted-text>${fromT}</untrusted-text> -> <untrusted-text>${toT}</untrusted-text>`) && !/Measures: \d/.test(drTarget.text),
+    `${crTarget.status} ${crTarget.text.slice(0, 200)} ${crTargetDone.status} ${drTarget.text.slice(0, 600)}`,
+  );
   const appsMember = await web(U4, "GET", `/api/v2/workspaces/${A}/apps`);
   const appsOuter = await web(U3, "GET", `/api/v2/workspaces/${B}/apps`);
   check("GET /apps: a member sees only their own grants; an owner sees everyone's; a non-member -> 404 not_found", appsMember.json?.apps?.length === 1 && appsMember.json.apps[0].user.id === U4.id && (await web(U1, "GET", `/api/v2/workspaces/${A}/apps`)).json.apps.length === 3 && appsOuter.status === 404 && appsOuter.json?.error === "not_found", `${appsMember.text} ${appsOuter.text}`);
@@ -1267,6 +1299,17 @@ async function local(env) {
   const revokedRow = withDb((d) => d.prepare("SELECT * FROM v2_audit WHERE action = 'oauth.app_revoked' ORDER BY seq DESC LIMIT 1").get());
   check("an owner disconnects another member's app: 204, its access token 401, its refresh invalid_grant, audit oauth.app_revoked with the owner as actor", ownerDel.status === 204 && u4After.status === 401 && u4Refresh.json?.error === "invalid_grant" && revokedRow?.actor_id === U1.id && revokedRow.object_id === u4Grant && revokedRow.ws_id === A, `${ownerDel.status} ${u4After.status} ${u4Refresh.text} ${JSON.stringify(revokedRow)}`);
   check("disconnecting one person's grant leaves the other's working", (await tool(tU1.access_token, "align_list_goals")).status === 200);
+  // B10 (web walk): a revoked or bad token is told so; "No authorization provided" is only for a request with none.
+  const garbage = await mcp("alm.garbage", "tools/list");
+  const noTok = await mcp(null, "tools/list");
+  const descOf = (r) => /error_description="([^"]*)"/.exec(r.headers["www-authenticate"] ?? "")?.[1] ?? "";
+  check(
+    "B10: a revoked alm. token and a garbage one get 401 invalid_token described \"The access token is invalid, expired or revoked. Connect the app again.\"; a request with no token still gets \"No authorization provided\"",
+    u4After.status === 401 && /error="invalid_token"/.test(u4After.headers["www-authenticate"] ?? "") && descOf(u4After) === "The access token is invalid, expired or revoked. Connect the app again." &&
+      garbage.status === 401 && descOf(garbage) === descOf(u4After) && noTok.status === 401 && descOf(noTok) === "No authorization provided",
+    `${u4After.headers["www-authenticate"]} | ${garbage.headers["www-authenticate"]} | ${noTok.headers["www-authenticate"]}`,
+  );
+
   const again404 = await web(U1, "DELETE", `/api/v2/workspaces/${A}/apps/${u4Grant}`);
   const ownDel = await web(U1, "DELETE", `/api/v2/workspaces/${A}/apps/${u1Cimd}`);
   check("DELETE: a grant that no longer exists -> 404; a person disconnects their own -> 204 and it stops (401)", again404.status === 404 && ownDel.status === 204 && (await mcp(tU1.access_token, "tools/list")).status === 401, `${again404.status} ${ownDel.status}`);

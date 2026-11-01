@@ -39,7 +39,7 @@ export interface HoldState {
 interface RequestsData {
   requests: RequestView[];
   can_send: boolean;
-  sessions: { session_key: string; owner: Person; mine: boolean; repo_alias: string | null; harness: string }[] | null;
+  sessions: { session_key: string; owner: Person; mine: boolean; repo_alias: string | null; harness: string; title: string | null; started_at: string }[] | null;
   hold: HoldState;
 }
 
@@ -146,7 +146,14 @@ function SendRequest({ ws, goal, data, onDone }: { ws: string; goal: Goal; data:
           {sessions.map((s) => (
             <label key={s.session_key} className="mb-1 flex items-center gap-2 text-[15px]">
               <input type="checkbox" checked={keys.includes(s.session_key)} onChange={(e) => setKeys((k) => (e.target.checked ? [...k, s.session_key] : k.filter((x) => x !== s.session_key)))} />
-              {sessionName(s)}
+              <span>
+                {sessionName(s)}
+                {/* Two sessions can share a name (one person, one repository): the start time and the key's end tell them apart. */}
+                <span className="text-zinc-500">
+                  {" "}
+                  · started {when(s.started_at)} · …{s.session_key.slice(-6)}
+                </span>
+              </span>
             </label>
           ))}
           <Field label="Move them to">

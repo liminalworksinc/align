@@ -22,8 +22,12 @@ export const crTone = (s: ChangeRequest["state"]) => (s === "approved" ? "green"
 export const FIELD_LABEL: Record<keyof ChangeFields, string> = { title: "Goal", measures: "Measures", depends_on: "Depends on", status: "Status", limits: "Limits" };
 export const STATUS_WORD: Record<Goal["status"], string> = { active: "Active", achieved: "Achieved", dropped: "Dropped" };
 
-/** One field's value in plain words (dependencies by title when the person can see them). */
-export function FieldValue({ k, v, titles }: { k: keyof ChangeFields; v: ChangeFields[keyof ChangeFields]; titles: Map<string, string> }) {
+/** "a goal you can't see" / "2 goals you can't see": dependencies the reader can't read, never named. */
+export const hiddenGoals = (n: number) => (n === 1 ? "a goal you can't see" : `${n} goals you can't see`);
+
+/** One field's value in plain words (dependencies by title when the person can see them; `hidden` counts the ones they
+ *  can't, so a dependency they can't see never reads as "Nothing"). */
+export function FieldValue({ k, v, titles, hidden = 0 }: { k: keyof ChangeFields; v: ChangeFields[keyof ChangeFields]; titles: Map<string, string>; hidden?: number }) {
   if (v === undefined) return <span className="text-zinc-500">(unchanged)</span>;
   if (k === "measures") {
     const ms = v as Goal["measures"];
@@ -40,8 +44,9 @@ export function FieldValue({ k, v, titles }: { k: keyof ChangeFields; v: ChangeF
     );
   }
   if (k === "depends_on") {
-    const ids = v as string[];
-    return <span>{ids.length ? ids.map((id) => titles.get(id) ?? "a goal").join(", ") : "Nothing"}</span>;
+    const names = (v as string[]).map((id) => titles.get(id) ?? "a goal");
+    if (hidden > 0) names.push(hiddenGoals(hidden));
+    return <span>{names.length ? names.join(", ") : "Nothing"}</span>;
   }
   if (k === "status") return <span>{STATUS_WORD[v as Goal["status"]] ?? String(v)}</span>;
   if (k === "limits") {
@@ -70,11 +75,11 @@ export function Diff({ cr, titles }: { cr: ChangeRequest; titles: Map<string, st
           <span className="text-zinc-600">{FIELD_LABEL[k]}</span>
           <div>
             <span className="block text-[12px] text-zinc-500">Before</span>
-            <FieldValue k={k} v={cr.diff.before[k]} titles={titles} />
+            <FieldValue k={k} v={cr.diff.before[k]} titles={titles} hidden={cr.diff.hidden_depends_on?.before} />
           </div>
           <div>
             <span className="block text-[12px] text-zinc-500">After</span>
-            <FieldValue k={k} v={cr.diff.after[k]} titles={titles} />
+            <FieldValue k={k} v={cr.diff.after[k]} titles={titles} hidden={cr.diff.hidden_depends_on?.after} />
           </div>
         </div>
       ))}
@@ -232,6 +237,12 @@ export function SnapshotBox({ s }: { s: AlignSnapshot }) {
   );
 }
 
+/** A link that can no longer become an https one as it is typed (so "htt" is fine, "http://x" is not). */
+const notHttps = (url: string) => {
+  const u = url.trim().toLowerCase();
+  return !!u && !u.startsWith("https://") && !"https://".startsWith(u);
+};
+
 /** Add a link to the current revision (the requester, or someone who can approve, while the request is open). */
 export function AddEvidence({ path, revision, onDone }: { path: string; revision: number; onDone: () => void }) {
   const act = useAction();
@@ -271,7 +282,7 @@ export function AddEvidence({ path, revision, onDone }: { path: string; revision
           ))}
         </Select>
       </Field>
-      <Field label="Link (https)">
+      <Field label="Link (https)" hint={notHttps(url) ? "Use an https:// link: Align keeps only https links." : undefined}>
         <Input type="url" value={url} onChange={(e) => setUrl(e.target.value)} maxLength={2048} placeholder="https://" required />
       </Field>
       <Field label="What it shows" hint="At most 120 characters.">
@@ -291,16 +302,17 @@ export function AddEvidence({ path, revision, onDone }: { path: string; revision
 }
 
 
-/** The request's "Accept if…" condition: "Not confirmed yet" until the requester acknowledges it, then who and when.
- *  It is their statement; nothing here says verified. */
-export function ConditionBox({ c, said }: { c: NonNullable<ChangeRequest["condition"]>; said: (p: { id: string; name: string } | null) => string }) {
+/** The request's "Accept if…" condition: "Not confirmed yet" until the requester acknowledges it, then who and when;
+ *  "Never confirmed" once the request closed without it (`closed`: declined, withdrawn or superseded). It is their
+ *  statement; nothing here says verified. */
+export function ConditionBox({ c, said, closed }: { c: NonNullable<ChangeRequest["condition"]>; said: (p: { id: string; name: string } | null) => string; closed?: string }) {
   return (
     <div className="my-2 rounded-[10px] border border-zinc-200 p-2 text-[14px]" data-condition={c.acknowledged_by ? "acknowledged" : "open"}>
       <p>
         <span className="text-zinc-600">Accept if:</span> {c.text}
       </p>
-      <p className={c.acknowledged_by ? "text-zinc-600" : "text-amber-800"}>
-        {c.acknowledged_by ? `Acknowledged by ${said(c.acknowledged_by)}${c.acknowledged_at ? `, ${when(c.acknowledged_at)}` : ""}` : "Not confirmed yet"}
+      <p className={c.acknowledged_by || closed ? "text-zinc-600" : "text-amber-800"}>
+        {c.acknowledged_by ? `Acknowledged by ${said(c.acknowledged_by)}${c.acknowledged_at ? `, ${when(c.acknowledged_at)}` : ""}` : closed ? `Never confirmed: the request was ${closed}` : "Not confirmed yet"}
       </p>
     </div>
   );

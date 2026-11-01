@@ -191,7 +191,7 @@ export function LimitEditor({ value, onChange }: { value: LimitDraft[]; onChange
           </Select>
           <Input aria-label={`Limit ${i + 1}`} placeholder="The three models must not all fit on the GPU" value={l.text} maxLength={160} onChange={(e) => set(i, { text: e.target.value })} />
           <span className="hidden sm:block" />
-          <div className="grid grid-cols-[1fr_160px_auto] gap-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_160px_auto] [&>*:first-child]:max-sm:col-span-2">
             <Input aria-label={`Limit ${i + 1} meeting`} placeholder="Where it was said (optional)" value={l.source_title} maxLength={120} onChange={(e) => set(i, { source_title: e.target.value, source_kind: undefined })} />
             <Input aria-label={`Limit ${i + 1} date`} type="date" value={l.source_date} onChange={(e) => set(i, { source_date: e.target.value })} />
             <Btn kind="secondary" onClick={() => onChange(value.filter((_, j) => j !== i))}>

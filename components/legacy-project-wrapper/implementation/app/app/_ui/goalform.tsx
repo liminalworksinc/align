@@ -24,7 +24,9 @@ export function MeasuresEditor({ value, onChange }: { value: MeasureDraft[]; onC
     <div className="mb-3">
       <span className="mb-1 block text-[14px] text-zinc-600">Measures</span>
       {value.map((m, i) => (
-        <div key={i} className="mb-2 grid grid-cols-[1fr_180px_auto] gap-2">
+        // Below 640px (sm) the measure takes its own line and the target and Remove share the next, so the row fits a
+        // 320px phone (the measure never collapses, nothing scrolls sideways).
+        <div key={i} className="mb-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto] [&>*:first-child]:max-sm:col-span-2">
           <Input aria-label={`Measure ${i + 1}`} placeholder="What you will measure" value={m.text} maxLength={300} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} />
           <Input aria-label={`Target ${i + 1}`} placeholder="Target (optional)" value={m.target} maxLength={100} onChange={(e) => onChange(value.map((x, j) => (j === i ? { ...x, target: e.target.value } : x)))} />
           <Btn kind="secondary" onClick={() => onChange(value.filter((_, j) => j !== i))}>

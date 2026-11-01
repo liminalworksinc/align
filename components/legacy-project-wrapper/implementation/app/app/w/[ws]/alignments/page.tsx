@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { requireUser } from "../../../_ui/server";
+import { inWorkspace, requireUser } from "../../../_ui/server";
+import { NotInWorkspace } from "../../../_ui/missing";
 import Alignments from "./view";
 
 export default function Page({ params }: PageProps<"/app/w/[ws]/alignments">) {
@@ -13,5 +14,6 @@ export default function Page({ params }: PageProps<"/app/w/[ws]/alignments">) {
 async function Inner({ params }: { params: PageProps<"/app/w/[ws]/alignments">["params"] }) {
   const { ws } = await params;
   const me = await requireUser(`/app/w/${ws}/alignments`);
+  if (!(await inWorkspace(me, ws))) return <NotInWorkspace me={me} />;
   return <Alignments me={me} ws={ws} />;
 }

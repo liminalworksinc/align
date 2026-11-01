@@ -377,11 +377,15 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
     };
   }).filter(Boolean);
   const who = sessions.length === 1 ? "this session" : `these ${sessions.length} sessions`;
-  const effects = (JSON.parse(rev.effects_json) as EffectKind[]).map((kind) => ({
+  const kinds = JSON.parse(rev.effects_json) as EffectKind[];
+  // "No usage moves" only when nothing else in this alignment moves it (contribution only); work toward also transfers
+  // the sessions' future usage, said in its own line.
+  const movesUsage = kinds.includes("allocation_transfer");
+  const effects = kinds.map((kind) => ({
     kind,
     text:
       kind === "contributes_to"
-        ? `Records that ${a.source_goal_id ? named(source) : who} contributes to ${named(target)}. No usage moves.`
+        ? `Records that ${a.source_goal_id ? named(source) : who} contributes to ${named(target)}.${movesUsage ? "" : " No usage moves."}`
         : kind === "governing_goal"
           ? sessions.length === 1
             ? `This session follows ${named(target)}: its agent gets that goal and its changes.`
