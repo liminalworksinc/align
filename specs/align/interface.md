@@ -888,7 +888,9 @@ card for every reader of the request, from `GET /api/v2/workspaces/<ws>/goals/<g
 (`lib/v2/value.ts`; `409 not_approved` for any other state, `404` for a request the person can't read), with these
 rows: "Accepted change" (each change in words, one line each, the same lines as the MCP decision record: "<measure>
 target 500 → 600", "Added measure …", "Removed measure …", "Title … → …", "Status … → …", "Added limit …", "Now
-depends on <title>", never a count like "Measures: 1 → 1"; and the version it became once launched, or "Approved, agents
+depends on <title>", never a count like "Measures: 1 → 1"; a dependency the reader can't read counted after the named
+ones, as on the rest of the card, "Now depends on <title> and 1 other goal you can't see" ("Now depends on a goal you
+can't see" when it is the only one), never left out: `scripts/test-v2.mjs` "C5-3: ..."; and the version it became once launched, or "Approved, agents
 still on v<n> until launch"), "Who approved" (the approver, "You" for the reader, and time, and "approved without
 evidence" when so), "Affected goals and
 teams" (the goal and its team, the readable goals it contributes to and the readable goals that depend on or contribute

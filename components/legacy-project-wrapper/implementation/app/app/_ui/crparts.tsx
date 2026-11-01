@@ -4,6 +4,7 @@ import { api, Btn, Err, Field, Input, num, Pill, Select, TextArea, usd, useActio
 import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, measuresOut, sameLimits, type LimitDraft, type MeasureDraft } from "./goalform";
 import { LIMIT_WORDS } from "./limits";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
+import { hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
 
 // Pieces a change request is shown with, shared by its open view (decide.tsx: understand, then decide) and its record
 // (changes.tsx): field values in words, the before/after diff, the changes form (a proposal or an approver's counter),
@@ -22,17 +23,9 @@ export const crTone = (s: ChangeRequest["state"]) => (s === "approved" ? "green"
 export const FIELD_LABEL: Record<keyof ChangeFields, string> = { title: "Goal", measures: "Measures", depends_on: "Depends on", status: "Status", limits: "Limits" };
 export const STATUS_WORD: Record<Goal["status"], string> = { active: "Active", achieved: "Achieved", dropped: "Dropped" };
 
-/** "a goal you can't see" / "2 goals you can't see": dependencies the reader can't read, never named. */
-export const hiddenGoals = (n: number) => (n === 1 ? "a goal you can't see" : `${n} goals you can't see`);
-
-/** Named dependencies, then the ones the reader can't see, counted after "and": "Growth dashboard and 1 other goal you
- *  can't see", never "Growth dashboard, a goal you can't see", which reads as if the named goal were the hidden one
- *  (X1). With nothing named, just the count ("a goal you can't see"). */
-export function withHidden(names: string[], hidden: number): string {
-  if (!hidden) return names.join(", ");
-  if (!names.length) return hiddenGoals(hidden);
-  return `${names.join(", ")} and ${hidden === 1 ? "1 other goal" : `${hidden} other goals`} you can't see`;
-}
+// Dependencies the reader can't read, counted and never named: the same words as the value card and the MCP decision
+// record (lib/v2/change-words.mts).
+export { hiddenGoals, withHidden };
 
 /** One field's value in plain words (dependencies by title when the person can see them; `hidden` counts the ones they
  *  can't, so a dependency they can't see never reads as "Nothing"). */

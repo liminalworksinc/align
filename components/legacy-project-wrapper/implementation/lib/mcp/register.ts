@@ -368,7 +368,8 @@ const changeOut = (cr: ChangeRequestSummary): z.infer<typeof ChangeRequestOut> =
 const DiffOut = z.object({
   title: z.object({ before: UT, after: UT }).optional(),
   measures: z.object({ before: z.array(MeasureOut), after: z.array(MeasureOut) }).optional(),
-  depends_on: z.object({ before: z.array(z.string()), after: z.array(z.string()) }).optional(),
+  /** `hidden`: how many dependencies on each side the caller can't read (left out of the lists), or null. */
+  depends_on: z.object({ before: z.array(z.string()), after: z.array(z.string()), hidden: z.object({ before: z.number(), after: z.number() }).nullable() }).optional(),
   status: z.object({ before: StatusOut, after: StatusOut }).optional(),
 });
 const RecordOut = ChangeRequestOut.omit({ revision: true, created_at: true, updated_at: true }).extend({
@@ -387,7 +388,7 @@ function diffOut(pp: PolicyPrincipal, d: ChangeDiff): z.infer<typeof DiffOut> {
   const out: z.infer<typeof DiffOut> = {};
   if (d.title) out.title = { before: ut(d.title.before), after: ut(d.title.after) };
   if (d.measures) out.measures = { before: measuresOut(d.measures.before), after: measuresOut(d.measures.after) };
-  if (d.depends_on) out.depends_on = { before: readableIds(pp, d.depends_on.before), after: readableIds(pp, d.depends_on.after) };
+  if (d.depends_on) out.depends_on = { before: readableIds(pp, d.depends_on.before), after: readableIds(pp, d.depends_on.after), hidden: d.depends_on.hidden };
   if (d.status) out.status = { before: d.status.before, after: d.status.after };
   return out;
 }

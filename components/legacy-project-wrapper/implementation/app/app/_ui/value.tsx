@@ -30,7 +30,7 @@ interface ValueView {
   goal: { id: string; title: string; version: number | null; base_version: number; team: { id: string; name: string } | null };
   launch: "pending" | "not_yet" | "launched";
   launched_at: string | null;
-  diff: Record<string, { before: unknown; after: unknown }>;
+  diff: Record<string, { before: unknown; after: unknown; hidden?: { before: number; after: number } | null }>;
   approved_by: { id: string; name: string };
   decided_at: string;
   created_at: string;

@@ -6692,6 +6692,33 @@ try {
       "",
     );
 
+    // -- C5-3: a request adding a dependency the reader can see and one they can't: the value card and the MCP record
+    // count the hidden one ("… and 1 other goal you can't see"), as the rest of the card does --
+    const KHV = await kGoal(KH, { title: "Hardware visible plan", visibility: "workspace" });
+    const hvCr = await ka(KB, "POST", kcrs(KHV.id), { base_version: 1, changes: { depends_on: [KGV.id, KHW.id] }, reason: "Both feed the plan" });
+    const hvDone = await kAct(KH, KHV.id, hvCr.json?.id, "approve_and_launch", { revision: 1 });
+    const hvValue = (await ka(KC, "GET", `${kcrs(KHV.id)}/${hvCr.json?.id}/value`)).json?.diff ?? {};
+    const cwHidden = await import(pathToFileURL(path.join(ROOT, "lib/v2/change-words.mts")).href);
+    const hvWords = cwHidden.diffWords(hvValue, { title: (id) => (id === KGV.id ? KGV.title : "a goal") });
+    const onlyHidden = cwHidden.diffWords({ depends_on: { before: [], after: [], hidden: { before: 0, after: 2 } } });
+    const kcDev = insertDevice(KC.id, "KC's laptop");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(kcDev.id, KW));
+    const mcpR = await call("KC", "POST", "/api/mcp", { bearer: kcDev.access, headers: { accept: "application/json, text/event-stream" }, body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "align_get_decision_record", arguments: { change_request_id: hvCr.json?.id, workspace: KW } } } });
+    const mcpLine = mcpR.text.includes("data:") ? mcpR.text.split("\n").find((l) => l.startsWith("data:"))?.slice(5) : mcpR.text;
+    let mcpRec = null;
+    try {
+      mcpRec = JSON.parse(mcpLine ?? "")?.result;
+    } catch {}
+    const mcpText = mcpRec?.content?.[0]?.text ?? "";
+    check(
+      "C5-3: for a reader who can't see one of two added dependencies, the value card's diff counts it (hidden {before 0, after 1}) and its words read \"Now depends on Faster builds for everyone and 1 other goal you can't see\"; with only hidden ones, \"Now depends on 2 goals you can't see\"; the MCP decision record says \"… and 1 other goal you can't see\" too and its diff carries the count; the hidden goal is never named",
+      hvCr.status === 201 && hvDone.status === 200 && JSON.stringify(hvValue.depends_on?.hidden) === JSON.stringify({ before: 0, after: 1 }) &&
+        JSON.stringify(hvWords) === JSON.stringify([`Now depends on ${KGV.title} and 1 other goal you can't see`]) && JSON.stringify(onlyHidden) === JSON.stringify(["Now depends on 2 goals you can't see"]) &&
+        new RegExp(`Now depends on <untrusted-text>${KGV.id}</untrusted-text> and 1 other goal you can't see`).test(mcpText) && JSON.stringify(mcpRec?.structuredContent?.record?.diff?.depends_on?.hidden) === JSON.stringify({ before: 0, after: 1 }) &&
+        !mcpText.includes(KHW.id) && !mcpText.includes(KHW.title) && !JSON.stringify(hvValue).includes(KHW.id),
+      `${hvCr.status} ${hvCr.text.slice(0, 200)} ${hvDone.status} ${JSON.stringify(hvValue.depends_on)} ${JSON.stringify(hvWords)} ${JSON.stringify(onlyHidden)} ${mcpText.slice(0, 600)}`,
+    );
+
     // -- N5: launch and not yet check the revision they are sent --
     const crS = (await ka(KB, "POST", kcrs(KGS.id), { base_version: 1, changes: { title: "Stale launch, checked" }, reason: "Check it" })).json;
     await kAct(KA, KGS.id, crS?.id, "approve", { revision: 1 });

@@ -64,7 +64,8 @@ export interface ChangeRequestSummary {
 export interface ChangeDiff {
   title?: { before: string; after: string };
   measures?: { before: Measure[]; after: Measure[] };
-  depends_on?: { before: string[]; after: string[] };
+  /** `hidden` counts the dependencies on each side the reader can't read (left out of before and after). */
+  depends_on?: { before: string[]; after: string[]; hidden: { before: number; after: number } | null };
   status?: { before: GoalStatus; after: GoalStatus };
   limits?: { before: Limit[]; after: Limit[] };
 }
@@ -112,7 +113,7 @@ function detail(v: ChangeRequestView): ChangeRequestDetail {
   const { before, after } = v.diff;
   if (after.title !== undefined) diff.title = { before: before.title!, after: after.title };
   if (after.measures !== undefined) diff.measures = { before: before.measures!, after: after.measures };
-  if (after.depends_on !== undefined) diff.depends_on = { before: before.depends_on!, after: after.depends_on };
+  if (after.depends_on !== undefined) diff.depends_on = { before: before.depends_on!, after: after.depends_on, hidden: v.diff.hidden_depends_on };
   if (after.status !== undefined) diff.status = { before: before.status!, after: after.status };
   if (after.limits !== undefined) diff.limits = { before: before.limits ?? [], after: after.limits };
   return {
