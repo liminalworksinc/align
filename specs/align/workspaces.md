@@ -1019,7 +1019,13 @@ The server SHALL let a signed-in person look up a pending code on `GET /api/v2/d
 workspaces they belong to on `POST /api/v2/device/approve {user_code, workspace_ids}` or deny it on
 `POST /api/v2/device/deny {user_code}`, rotate refresh tokens on `POST /api/v2/device/refresh` only with an Ed25519
 signature from the paired key, and revoke a device on `DELETE /api/v2/devices/self` (its own token) or
-`DELETE /api/v2/devices/{id}` (its owner's browser session).
+`DELETE /api/v2/devices/{id}` (its owner's browser session). A refresh whose signature is valid but whose `ts` is more
+than 5 minutes off the server's clock SHALL be answered 400 `clock_skew` with the message `This device's clock is <n>
+minutes ahead of|behind the server's` and `server_time`, rotating nothing and leaving the device paired (the window
+is unchanged, so a captured signed message still expires within 5 minutes). Revoking a device, for any reason
+(logout, its owner on the web, signing out everywhere, refresh-token reuse), SHALL in the same transaction end each of
+its sessions that is not stopped: close its open epoch, clear its governing goal, and set it `stopped` with
+`ended_reason` `device_signed_out`, keeping its history.
 
 #### Scenario: Approving a code
 
@@ -1029,12 +1035,22 @@ signature from the paired key, and revoke a device on `DELETE /api/v2/devices/se
 #### Scenario: Refresh token reuse
 
 - **WHEN** a device presents, with a valid signature, a refresh token that was already rotated
-- **THEN** the server responds 401 `invalid_grant` and revokes the whole device; a bad signature, a timestamp more than 5 minutes off, an expired token or a revoked device also get 401 `invalid_grant`
+- **THEN** the server responds 401 `invalid_grant` and revokes the whole device; a bad signature, an expired token or a revoked device also get 401 `invalid_grant`
+
+#### Scenario: A device clock that is off
+
+- **WHEN** a device signs a refresh correctly with a timestamp 6 minutes behind, or 10 minutes ahead of, the server's clock, and another with that timestamp but a bad signature (`scripts/test-v2.mjs` "refresh (E2E-AGENT B3) ...")
+- **THEN** the first two get 400 `clock_skew` saying `6 minutes behind` and `10 minutes ahead of` with the server's `server_time`, the device's access token keeps working and the same refresh token still refreshes afterwards; the badly signed one gets 401 `invalid_grant`
 
 #### Scenario: Revoking a device
 
 - **WHEN** a device calls `DELETE /api/v2/devices/self`, or its owner calls `DELETE /api/v2/devices/{id}` from the browser
 - **THEN** the server responds 204, every token of that device stops working, and the audit records `device.revoked` with the person as actor; another person's device id is 404
+
+#### Scenario: Revoking a device ends its sessions
+
+- **WHEN** a device with a shared, stopped session logs out (`scripts/test-v2.mjs` "sessions (E2E-AGENT B4/G2) ...")
+- **THEN** the session is `stopped` with `ended_reason` `device_signed_out` and no open epoch, a workspace owner's list of everyone's sessions no longer shows it, and the person's own list does, with `ended_reason`
 
 ### Requirement: Shared session ownership
 
@@ -1042,12 +1058,21 @@ The server SHALL accept a shared session on `PUT /api/v2/workspaces/{ws}/session
 repo_alias?, started_at, title?}` only from a device granted that workspace (members and owners, never viewers), keep
 every session private to the device and person that shared it, let that person stop sharing on
 `POST .../sessions/{key}/stop-sharing` or hard-delete the history on `DELETE .../sessions/{key}`, and list sessions on
-`GET /api/v2/workspaces/{ws}/sessions` as `{mine, all}`.
+`GET /api/v2/workspaces/{ws}/sessions` as `{mine, all}`. A session that ended because its device was revoked
+(`ended_reason` `device_signed_out`) SHALL be shared again by a `PUT` from another device of the same person with the
+same harness and repo key (its device, state `shared`, `stopped_at` and `ended_reason` cleared, its stop flag kept,
+audited `session.shared_again`); any other stopped session stays 409 `sharing_stopped`, and another person's device
+still gets 404.
 
 #### Scenario: Sharing
 
 - **WHEN** a device PUTs a new session key with `harness` `claude-code` or `codex` and a 43-character base64url `repo_key`
 - **THEN** the response is `{session_key, state:"shared", current_epoch:null}`; the same key with another harness or repo is 409 `session_conflict`, a stopped session 409 `sharing_stopped`, and a key shared by another person or device 404
+
+#### Scenario: Sharing again after the device signed out
+
+- **WHEN** a person's device was revoked while it shared a stopped session, another person's device PUTs that key, and then the person's newly paired device does (`scripts/test-v2.mjs` "sessions (E2E-AGENT B4/G2) ...")
+- **THEN** the other person's device gets 404, the person's new device gets `{state:"shared"}` and owns the session, which is still stopped, and a resume from the web reaches the new device
 
 #### Scenario: Stop sharing and delete
 

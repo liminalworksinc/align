@@ -34,7 +34,7 @@ export function route<P extends Params = Params>(fn: Handler<P>) {
       const out = await fn(req, await ctx.params);
       return out instanceof Response ? out : Response.json(out);
     } catch (e) {
-      if (e instanceof V2Error) return Response.json({ error: e.code, message: e.message }, { status: e.status });
+      if (e instanceof V2Error) return Response.json({ ...(e.extra ?? {}), error: e.code, message: e.message }, { status: e.status });
       if (e instanceof HttpError) return Response.json({ error: "bad_request", message: e.message }, { status: e.status });
       if (config().hosted) console.error("Server error:", (e as Error)?.name ?? "unknown");
       else console.error(e);

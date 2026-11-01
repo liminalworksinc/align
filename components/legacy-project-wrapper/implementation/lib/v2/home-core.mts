@@ -29,10 +29,12 @@ export const appEvidence = (lastReadAt: string | null | undefined): EvidenceClas
  *  in the window, not observed. */
 export const activityEvidence = (a: { sessions: number; last_activity_at: string | null }): EvidenceClass => (a.sessions > 0 || a.last_activity_at ? "agent_reported" : "not_observed");
 
-/** One session's answer to a request to agents: received is a delivery receipt; accepted (by the developer, or done by
- *  the agent on its own) and declined are the session's own answer, agent reported; sent with nothing back, or expired,
- *  is not observed. */
-export const answerEvidence = (state: string): EvidenceClass => (state === "received" ? "delivery_receipt" : state === "accepted" || state === "declined" ? "agent_reported" : "not_observed");
+/** One session's answer to a request to agents: received is a delivery receipt, and so is an `auto_accepted` accept
+ *  (the request reached the agent and the developer did not decline it by the end of that turn; it says nothing about
+ *  what the agent did); the developer's accept and a decline are the session's own answer, agent reported; sent with
+ *  nothing back, or expired, is not observed. */
+export const answerEvidence = (state: string, autoAccepted = false): EvidenceClass =>
+  state === "received" || (state === "accepted" && autoAccepted) ? "delivery_receipt" : state === "accepted" || state === "declined" ? "agent_reported" : "not_observed";
 
 /** A directive's delivery (a stop or resume on the Sessions tab, a launched version on the value card): any received,
  *  applied or enforced receipt is a delivery receipt; none is not observed. */

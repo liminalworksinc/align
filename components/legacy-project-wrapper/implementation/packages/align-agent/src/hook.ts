@@ -7,6 +7,7 @@ import { alignHomeForHook } from "./shared/layout.ts";
 import type { Harness } from "./shared/types.ts";
 import { kickSync } from "./hooks/autostart.ts";
 import { denyOutput, failureDeny, latchedOnFailure, preToolUse, sessionStart, stop, userPromptSubmit, type HookInput, type HookOutput } from "./hooks/handlers.ts";
+import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 
 const DEADLINE_MS = Number(process.env.ALIGN_HOOK_DEADLINE_MS || 300);
 const MAX_INPUT = 8 * 1024 * 1024;
@@ -82,6 +83,8 @@ async function main(): Promise<void> {
     return failure();
   }
   if (!input || typeof input !== "object") return failure();
+  const old = unsupportedNode(process.env);
+  if (old) return emit(oldNode(old, input));
   switch (event) {
     case "SessionStart": {
       const out = (decided = sessionStart(home, harness, input, process.env));
@@ -90,7 +93,8 @@ async function main(): Promise<void> {
     }
     case "UserPromptSubmit": {
       const out = (decided = userPromptSubmit(home, harness, input));
-      await kickSync(home, process.argv[1] || "", process.env, event).catch(() => undefined);
+      const command = typeof input.prompt === "string" && /^\s*::align\b/i.test(input.prompt);
+      await kickSync(home, process.argv[1] || "", process.env, command ? "Command" : event).catch(() => undefined);
       return emit(out);
     }
     case "Stop":
@@ -115,6 +119,22 @@ async function main(): Promise<void> {
     default:
       return emit(null);
   }
+}
+
+/**
+ * On an unsupported Node the hooks do nothing (no context, no spool, no sync), with one message when a session starts.
+ * What already fails closed still does: a stop latch or goal hold of the session denies its tools, and an `::align`
+ * command is still kept from the model.
+ */
+function oldNode(why: string, input: HookInput): HookOutput {
+  const fix = `Install Node ${MIN_NODE} or later and run \`align install\` with it.`;
+  if (event === "SessionStart") return { systemMessage: `Align: ${why}, so Align is off in this session (a stop or goal hold still blocks tools). ${fix}` };
+  if (event === "UserPromptSubmit" && typeof input.prompt === "string" && /^\s*::align\b/i.test(input.prompt)) return { decision: "block", reason: `Align: ${why}. ${fix}` };
+  if (event === "PreToolUse" && harness) {
+    sessionId = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
+    if (latchedOnFailure(home, harness, sessionId)) return failureDeny(home, harness, sessionId);
+  }
+  return null;
 }
 
 main().catch(() => failure());

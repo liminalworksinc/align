@@ -12,9 +12,10 @@ import { memberName, memberPrincipal } from "./workspaces";
 // Requests and goal holds (REQ-001): the middle level between informing agents (goal versions, limits) and enforcing
 // (stop). Someone who can approve for a goal (its approval set, lib/v2/approval.ts) or a workspace owner sends one of
 // a fixed set of typed requests to the sessions on the goal; Align writes the wording, the sender is named, and the
-// developer can decline any of them. checkpoint and drafting a replan are safe: the agent does them on its own and
-// says so (an `accepted` receipt with auto_accepted); switch_goal changes direction and takes effect only when the
-// developer accepts. A goal hold is enforced: every session on the goal gets a `hold` directive and its agent blocks
+// developer can decline any of them. checkpoint and drafting a replan are safe: they reach the agent without waiting
+// for the developer, and the machine says so at the end of that turn when the developer has not declined (an
+// `accepted` receipt with auto_accepted: delivered to the agent and not declined, never a report that the agent did
+// it); switch_goal changes direction and takes effect only when the developer accepts. A goal hold is enforced: every session on the goal gets a `hold` directive and its agent blocks
 // tools until a `release`. Every write here runs in one transaction with its directive and audit row.
 
 export const REQUEST_TYPES = ["replan", "checkpoint", "switch_goal"] as const;
@@ -258,7 +259,7 @@ function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers =
     cancelled_by: r.cancelled_by ? person(r.cancelled_by) : null,
     // expired: its goal closed before any session answered (lib/v2/goals.ts writeGoalVersion).
     state: r.cancelled_at ? ("cancelled" as const) : pending ? ("open" as const) : rows.length && count("expired") === rows.length ? ("expired" as const) : ("answered" as const),
-    counts: { pending, accepted: count("accepted"), declined: count("declined"), expired: count("expired"), done_by_agent: rows.filter((t) => t.state === "accepted" && t.auto_accepted).length },
+    counts: { pending, accepted: count("accepted"), declined: count("declined"), expired: count("expired"), not_declined: rows.filter((t) => t.state === "accepted" && t.auto_accepted).length },
     sessions: rows
       .filter((t) => everyone || t.user_id === pp.userId)
       .map((t) => ({
@@ -322,7 +323,8 @@ export function requestWire(pp: PolicyPrincipal, j: RequestJson) {
  *  developer's own accept confirms one (auto_accepted back to 0). A cancelled (expired) or answered request keeps its
  *  state. auto_accepted on a switch_goal is refused (400): it changes direction, so only the developer accepts it.
  *  Each answer that changes the state is audited, with the session's person (`actor`) as actor: request.accepted (the
- *  developer's), request.done_by_agent (the agent's own) or request.declined. Returns the state. */
+ *  developer's), request.not_declined (an auto_accepted accept: delivered to the agent, not declined) or
+ *  request.declined. Returns the state. */
 export function requestReceipt(ws: string, requestId: string, sessionKey: string, state: ReceiptState, auto: boolean, actor: string): TargetState | null {
   const r = requestRow(ws, requestId);
   const t = get<{ state: TargetState; auto_accepted: number }>("SELECT state, auto_accepted FROM v2_request_targets WHERE request_id = ? AND session_key = ?", requestId, sessionKey);
@@ -338,7 +340,7 @@ export function requestReceipt(ws: string, requestId: string, sessionKey: string
   if (next !== t.state || flag !== t.auto_accepted) {
     const at = nowIso();
     run("UPDATE v2_request_targets SET state = ?, auto_accepted = ?, updated_at = ? WHERE request_id = ? AND session_key = ?", next, flag, at, requestId, sessionKey);
-    if (next === "accepted") audit(ws, actor, flag ? "request.done_by_agent" : "request.accepted", requestId, at);
+    if (next === "accepted") audit(ws, actor, flag ? "request.not_declined" : "request.accepted", requestId, at);
     else if (next === "declined") audit(ws, actor, "request.declined", requestId, at);
   }
   return next;

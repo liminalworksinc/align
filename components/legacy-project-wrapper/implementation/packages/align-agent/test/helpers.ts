@@ -36,6 +36,8 @@ export function makeEnv(extra: NodeJS.ProcessEnv = {}): TestEnv {
     ALIGN_NO_BROWSER: "1",
     ALIGN_TAIL_DAYS: "3650",
     ALIGN_NO_AUTOSTART: "1",
+    // The sandbox may run an older Node than the agent supports; the Node check has its own test.
+    ALIGN_ALLOW_UNSUPPORTED_NODE: "1",
     ...extra,
   };
   return { root, env, home: env.ALIGN_HOME as string, claudeDir, codexHome, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };

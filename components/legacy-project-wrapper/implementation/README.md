@@ -76,6 +76,8 @@ node dist/cli.js login --server http://127.0.0.1:3100   # approve the code at /a
 node dist/cli.js install                                # Claude Code and Codex hooks
 ```
 
+The CLI and its hooks need Node 24 or later and refuse an older Node with one message;
+`ALIGN_ALLOW_UNSUPPORTED_NODE=1` skips that check (for development on an older Node, unsupported).
 See `packages/align-agent/README.md` for the commands, and `docs/MCP.md` to connect an AI app.
 
 **Data.** Everything is in one SQLite file, `data/v2/align.sqlite` (or `$ALIGN_DATA_DIR/v2/align.sqlite`), with a

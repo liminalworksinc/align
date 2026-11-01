@@ -47,6 +47,15 @@ function limitLines(goal: GoalSnapshot, max: number): string[] {
   return ls.length ? [LIMITS_HEAD, ...ls.map((l) => `- ${limitWord(l)}: ${quoted(l.text, max)}`)] : [];
 }
 
+/**
+ * A newly bound goal's limits, all of them, in the envelope's wording: a session that binds mid-way gets them with the
+ * `bound` note instead of waiting for its next startup, clear or compact envelope. Null when the goal has none.
+ */
+export function boundLimits(goal: GoalSnapshot): string | null {
+  const lines = limitLines(goal, 160);
+  return lines.length ? lines.join("\n") : null;
+}
+
 function measureLine(m: Measure, max: number): string {
   const text = clean(m.text, max);
   const target = m.target ? clean(m.target, 60) : "";

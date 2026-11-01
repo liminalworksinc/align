@@ -122,18 +122,23 @@ export interface WireHold {
 
 /**
  * A request's local state for one session: `pending` until answered; `accepted` or `declined` by the developer;
- * `auto_accepted` when the agent did a safe request (checkpoint, replan draft) by itself; `withdrawn` by its sender.
+ * `auto_accepted` when a safe request (checkpoint, replan draft) reached the agent and the developer had not declined it
+ * by the end of that turn (delivered, not declined; not a report that the agent did it); `withdrawn` by its sender.
  */
 export type RequestState = "pending" | "accepted" | "auto_accepted" | "declined" | "withdrawn";
 
 export interface HotRequest extends Omit<WireRequest, "cancelled"> {
   state: RequestState;
   answered_at: string | null;
+  /** The `request` directive that carried it: an accepted switch_goal's binding names it as its cause. */
+  directive_id?: string;
 }
 
 /** latch/<lid>.hold.json: the goal holds on this session. Any hold, or a file that can't be read, blocks every tool. */
 export interface HoldLatch {
   v: 1;
+  /** As on the stop latch: the release can no longer reach this session. */
+  ended?: "device_signed_out" | "sharing_ended";
   holds: { goal_id: string; goal_title: string; by: string; reason: string | null; directive_id: string; seq: number; at: string }[];
 }
 
@@ -169,6 +174,12 @@ export interface InjectedState {
   requests_seen?: Record<string, { shown?: boolean; told?: string; answer?: "accepted" | "declined"; auto?: boolean }>;
   /** When this session was shown its one steering line, if ever. */
   steering_at?: string;
+  /**
+   * A binding the developer chose in the session (`::align bind`, or `::align accept` of a switch_goal) before the sync
+   * has recorded it: the next prompt opens its epoch from here, so it never waits for a sync. The spooled command
+   * carries the same id, so the sync records the same binding.
+   */
+  local_binding?: { id: string; goal_id: string | null; goal: GoalSnapshot | null; cause: string; directive_id: string | null };
   at: string;
 }
 
@@ -178,6 +189,9 @@ export interface Latch {
   directive_id: string;
   seq: number;
   at: string;
+  /** Set when the session's sharing ended (this machine signed out, or the server no longer has the share), so no
+   *  resume can reach it: only `align stop-sharing <session>` lifts the latch. */
+  ended?: "device_signed_out" | "sharing_ended";
 }
 
 export interface FeedFile {
@@ -288,6 +302,8 @@ export type SpoolRecord =
       request_id: string;
       answer: "accepted" | "declined";
       auto: boolean;
+      /** An accepted switch_goal: the id of the binding the hook already applies at the next prompt. */
+      pending_id?: string;
       ts: string;
     }
   | {
@@ -300,5 +316,7 @@ export type SpoolRecord =
       /** Set when a folder rule shares the session; otherwise the default workspace is used. */
       workspace?: string | null;
       rule_dir?: string | null;
+      /** `bind`: the id of the binding the hook already applies at the next prompt (InjectedState.local_binding). */
+      pending_id?: string;
       ts: string;
     };

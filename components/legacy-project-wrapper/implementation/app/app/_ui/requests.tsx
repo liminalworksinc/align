@@ -28,7 +28,7 @@ interface RequestView {
   cancelled_at: string | null;
   cancelled_by: Person | null;
   state: "open" | "answered" | "cancelled" | "expired";
-  counts: { pending: number; accepted: number; declined: number; expired: number; done_by_agent: number };
+  counts: { pending: number; accepted: number; declined: number; expired: number; not_declined: number };
   sessions: { session_key: string; owner: Person; mine: boolean; repo_alias: string | null; harness: string; title: string | null; state: TargetState; auto_accepted: boolean; updated_at: string }[];
   can_cancel: boolean;
 }
@@ -46,24 +46,25 @@ interface RequestsData {
 export const TYPE_LABEL: Record<RequestType, string> = { replan: "Replan", checkpoint: "Checkpoint", switch_goal: "Switch goal" };
 const TYPE_HELP: Record<RequestType, string> = {
   replan: "The agent re-reads this goal and drafts an updated plan for the developer. It keeps working as before until the developer agrees.",
-  checkpoint: "At the end of its current step the agent commits its work and summarizes where it is, then continues. A safe step: the agent does it without asking, and the developer can still decline.",
+  checkpoint: "At the end of its current step the agent commits its work and summarizes where it is, then continues. A safe step: it reaches the agent without waiting for the developer, who can still decline. Align shows it as delivered, not as done.",
   switch_goal: "The sessions you pick move to another goal, only if their developer accepts. Until then they keep working toward this goal.",
 };
 
-/** One session's answer, with its evidence class (lib/v2/home-core.mts answerEvidence): received is a delivery
- *  receipt, an answer is agent reported, nothing back is not observed. */
+/** One session's answer, with its evidence class (lib/v2/home-core.mts answerEvidence): received, or delivered and not
+ *  declined, is a delivery receipt; the developer's answer is agent reported; nothing back is not observed. */
 function statePill(s: { state: TargetState; auto_accepted: boolean }) {
   return (
     <>
       {answerPill(s)}
-      <EvidencePill c={answerEvidence(s.state)} />
+      <EvidencePill c={answerEvidence(s.state, s.auto_accepted)} />
     </>
   );
 }
 
-/** pending / accepted / declined / expired, and whether an accept was the agent's own (a safe request) or the developer's. */
+/** pending / accepted / declined / expired. A safe request the developer did not decline by the end of the turn it
+ *  reached is "delivered, not declined": Align knows it reached the agent, not what the agent did with it. */
 function answerPill(s: { state: TargetState; auto_accepted: boolean }) {
-  if (s.state === "accepted") return <Pill tone="green">{s.auto_accepted ? "done by the agent" : "accepted by the developer"}</Pill>;
+  if (s.state === "accepted") return s.auto_accepted ? <Pill>delivered, not declined</Pill> : <Pill tone="green">accepted by the developer</Pill>;
   if (s.state === "declined") return <Pill tone="red">declined</Pill>;
   if (s.state === "expired") return <Pill>expired</Pill>;
   return <Pill tone="amber">pending</Pill>;
@@ -206,7 +207,8 @@ function RequestRow({ ws, r, onDone }: { ws: string; r: RequestView; onDone: () 
       {r.note && <p className="text-[14px] text-zinc-600">Note: &ldquo;{r.note}&rdquo;</p>}
       {r.cancelled_by && <p className="text-[14px] text-zinc-500">Cancelled by {r.cancelled_by.name}, {when(r.cancelled_at)}</p>}
       <p className="text-[14px] text-zinc-500">
-        {c.pending} pending, {c.accepted} accepted{c.done_by_agent ? ` (${c.done_by_agent} done by the agent)` : ""}, {c.declined} declined{c.expired ? `, ${c.expired} expired` : ""}
+        {c.pending} pending, {c.accepted - c.not_declined} accepted by the developer{c.not_declined ? `, ${c.not_declined} delivered and not declined` : ""}, {c.declined} declined
+        {c.expired ? `, ${c.expired} expired` : ""}
       </p>
       {r.sessions.map((s) => (
         <p key={s.session_key} className="flex flex-wrap items-center gap-2 text-[14px] text-zinc-700">

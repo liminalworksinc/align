@@ -7,22 +7,23 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { api, loadCredentials, markSignedOut, rawRequest, saveCredentials, signedIn, type Credentials } from "./api.ts";
+import { api, clockWords, loadCredentials, markSignedOut, rawRequest, saveCredentials, SignedOut, signedIn, type Credentials } from "./api.ts";
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
-import { getShare } from "./hot.ts";
+import { DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
 import { generateDeviceKey } from "./keys.ts";
-import { applyShare, bind, deleteHistory, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, stopSharing } from "./share.ts";
+import { applyShare, bind, deleteHistory, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "./shared/rules.ts";
 import { layout } from "./shared/layout.ts";
 import type { Goal } from "./shared/types.ts";
-import { flushOutbox, ingestSpool, outboxDepth, syncOnce, uploadUsage } from "./sync.ts";
+import { flushOutbox, ingestSpool, outboxDepth, syncOnce, uploadUsage, type LastSync } from "./sync.ts";
 import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
+import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 import { kvSet } from "./db.ts";
 import { podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
@@ -207,6 +208,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { server: { type: "string" }, name: { type: "string" } }, allowPositionals: false });
   const server = (values.server || ctx.config.server_url).replace(/\/$/, "");
   const deviceName = values.name || ctx.config.device_name || `${os.userInfo().username}'s ${os.hostname().replace(/\.local$/, "")}`;
+  const before = loadCredentials(ctx.home);
   const key = generateDeviceKey(ctx.home);
   const a = await rawRequest(server, "POST", "/api/v2/device/authorize", { body: { device_name: deviceName, public_key: key.publicKeyB64 } });
   if (a.status !== 200 || !a.json?.device_code) throw new Error(`device authorize failed: ${a.status} ${a.json?.error || ""}`);
@@ -232,6 +234,13 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
       saveCredentials(ctx.home, creds);
       saveConfig(ctx.home, { server_url: server });
       ctx.config.server_url = server;
+      // A new pairing replaces the old device: revoke it while its access token still works (so the server ends its
+      // shares), and end its shares here; each session is told how to share it again.
+      if (before && !before.signed_out && before.access_token && before.device_id !== creds.device_id) {
+        await rawRequest(before.server_url, "DELETE", "/api/v2/devices/self", { headers: { authorization: `Bearer ${before.access_token}` } }).catch(() => undefined);
+      }
+      const ended = endSharesSignedOut(ctx);
+      if (ended) out(`${ended} session(s) shared from this machine's earlier sign-in stopped sharing; \`::align share\` in a session shares it again.`);
       break;
     }
     const code = t.json?.error;
@@ -259,16 +268,22 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
 async function cmdLogout(ctx: Ctx): Promise<void> {
   const c = loadCredentials(ctx.home);
   if (!c) return out("Not signed in.");
+  let revoked = !!c.signed_out;
   if (!c.signed_out) {
     try {
-      await api(ctx, "DELETE", "/api/v2/devices/self");
-    } catch {
+      const r = await api(ctx, "DELETE", "/api/v2/devices/self");
+      revoked = r.status === 204 || r.status === 200 || r.status === 401;
+    } catch (e) {
       /* best effort; tokens are wiped locally either way */
+      revoked = e instanceof SignedOut;
     }
   }
   markSignedOut(ctx.home, "logout");
   fs.rmSync(layout.deviceKey(ctx.home), { force: true });
+  const ended = endSharesSignedOut(ctx);
   out("Signed out. Tokens and the device key were removed; local metering continues.");
+  if (ended) out(`${ended} shared session(s) stopped sharing. Sessions stopped from the web stay blocked until you run \`align stop-sharing <session>\`.`);
+  if (!revoked) err(`align: could not reach ${c.server_url} to revoke this device; revoke it at ${c.server_url}/app/devices so its sessions stop showing as shared.`);
 }
 
 function installState(ctx: Ctx): { claude: string; codex: string; hash: string } {
@@ -294,13 +309,18 @@ function installState(ctx: Ctx): { claude: string; codex: string; hash: string }
 
 async function cmdStatus(ctx: Ctx): Promise<void> {
   ingestSpool(ctx);
+  endSharesIfSignedOut(ctx);
   const c = loadCredentials(ctx.home);
   const st = installState(ctx);
-  const last = readJson<{ at: string; ms: number }>(layout.lastSync(ctx.home));
+  const last = readJson<LastSync>(layout.lastSync(ctx.home));
   out(`Align ${VERSION}  home ${ctx.home}`);
   if (c && !c.signed_out) out(`  Identity:   ${c.user?.name || "?"} <${c.user?.email || "?"}> device ${c.device_id} on ${c.server_url}`);
   else out(`  Identity:   signed out${c?.signed_out_reason ? ` (${c.signed_out_reason})` : ""}; local metering only`);
+  if (c && !c.signed_out && c.clock_offset_ms) {
+    out(`  Clock:      this computer's clock is ${clockWords(c.clock_offset_ms)} the server's; Align signs in with the server's time. Set the system clock to update automatically.`);
+  }
   out(`  Last sync:  ${last ? `${shortTime(last.at)} (${last.ms} ms)` : "never"}`);
+  if (last?.error) out(`  Server:     unreachable since ${shortTime(last.error_since || last.at)}: ${last.error}; ${unuploadedRows(ctx)} usage rows wait to upload`);
   out(`  Hooks:      Claude Code ${st.claude}; Codex ${st.codex}; hook file ${st.hash}`);
   out(`  Outbox:     ${outboxDepth(ctx)} pending`);
   const shares = ctx.db.prepare("SELECT state, COUNT(*) AS n FROM shares GROUP BY state").all() as { state: string; n: number }[];
@@ -308,11 +328,14 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   const unpriced = ctx.db.prepare("SELECT unpriced, COUNT(*) AS n FROM requests WHERE unpriced IS NOT NULL GROUP BY unpriced").all() as { unpriced: string; n: number }[];
   out(`  Unpriced:   ${unpriced.length ? unpriced.map((u) => `${u.n} ${u.unpriced}`).join(", ") : "0"}`);
   const latched = (ctx.db.prepare("SELECT COUNT(*) AS n FROM latches WHERE stopped=1").get() as { n: number }).n;
-  if (latched) out(`  Stop latch: ${latched} session(s) stopped; see \`align latch status\``);
+  const stuck = (n: number) => (n ? `; ${n} can't be lifted from the web any more (sharing ended): \`align stop-sharing <session>\` unblocks each` : "");
+  const endedOf = (table: "latches" | "holds", flag: "stopped" | "held") =>
+    (ctx.db.prepare(`SELECT COUNT(DISTINCT x.local_id) AS n FROM ${table} x JOIN shares s ON s.local_id=x.local_id WHERE x.${flag}=1 AND s.state IN ('stopped','error')`).get() as { n: number }).n;
+  if (latched) out(`  Stop latch: ${latched} session(s) stopped${stuck(endedOf("latches", "stopped"))}; see \`align latch status\``);
   const holds = ctx.db.prepare("SELECT json FROM holds WHERE held=1").all() as { json: string }[];
   if (holds.length) {
     const goals = [...new Set(holds.map((h) => `"${clean((JSON.parse(h.json) as { goal_title: string }).goal_title, 80)}"`))];
-    out(`  Goal hold:  ${holds.length} session(s) paused on ${goals.join(", ")}; see \`align latch status\``);
+    out(`  Goal hold:  ${holds.length} session(s) paused on ${goals.join(", ")}${stuck(endedOf("holds", "held"))}; see \`align latch status\``);
   }
   const pending = (ctx.db.prepare("SELECT COUNT(*) AS n FROM goal_requests WHERE state='pending'").get() as { n: number }).n;
   if (pending) out(`  Requests:   ${pending} waiting for your answer; see \`align requests\``);
@@ -321,6 +344,7 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
 async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { all: { type: "boolean" }, json: { type: "boolean" } } });
   prepare(ctx);
+  endSharesIfSignedOut(ctx);
   const since = values.all ? "0" : new Date(Date.now() - 7 * 86_400_000).toISOString();
   const sessions = ctx.db.prepare("SELECT * FROM sessions WHERE COALESCE(last_active, created_at) >= ? ORDER BY last_active DESC LIMIT ?").all(since, values.all ? 100000 : 25) as unknown as SessionListRow[];
   const rows = sessions.map((s) => {
@@ -333,7 +357,8 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
       )
       .all(s.local_id) as { basis: string; requests: number; input: number; output: number; cache_read: number; cache_write: number; est: number; unpriced: number; unfinished: number }[];
     const share = getShare(ctx, s.local_id);
-    return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name})` : "private" };
+    const why = share?.error === DEVICE_SIGNED_OUT ? "; this machine signed out" : "";
+    return { ...s, repo: repoLabel(ctx, s, share?.workspace_id ?? null), usage: agg, shared: share ? `${share.state} (${share.workspace_name}${why})` : "private" };
   });
   if (values.json) return out(JSON.stringify(rows, null, 2));
   if (!rows.length) return out("No sessions seen in the last 7 days. Use --all for older ones.");
@@ -609,6 +634,7 @@ async function cmdBind(ctx: Ctx, argv: string[]): Promise<void> {
 async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
   if (argv[0] && argv[0] !== "status") throw new UsageError("usage: align latch status (stop and resume come from the web)");
   ingestSpool(ctx);
+  endSharesIfSignedOut(ctx);
   const rows = ctx.db.prepare("SELECT l.*, s.harness, s.native_id FROM latches l JOIN sessions s ON s.local_id=l.local_id ORDER BY l.at DESC").all() as {
     local_id: string;
     stopped: number;
@@ -626,15 +652,21 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
     harness: string;
   }[];
   if (!rows.length && !holds.length) return out("No stop latches or goal holds.");
+  /** A latch or hold whose share ended can't be lifted from the web: say how to get out. */
+  const way = (lid: string) => {
+    const ended = endedReason(getShare(ctx, lid));
+    if (!ended) return "";
+    return `; sharing ended (${ended === "device_signed_out" ? "this machine signed out" : "the server no longer has the share"}), so only \`align stop-sharing ${lid.slice(0, 8)}\` unblocks it`;
+  };
   for (const r of rows) {
     const file = fs.existsSync(layout.latch(ctx.home, r.local_id));
-    out(`${r.local_id.slice(0, 8)} ${r.harness} ${r.stopped ? "STOPPED (tools blocked)" : "resumed"} since ${shortTime(r.at)} by ${r.directive_id}${r.stopped && !file ? " (latch file missing!)" : ""}`);
+    out(`${r.local_id.slice(0, 8)} ${r.harness} ${r.stopped ? "STOPPED (tools blocked)" : "resumed"} since ${shortTime(r.at)} by ${r.directive_id}${r.stopped && !file ? " (latch file missing!)" : ""}${r.stopped ? way(r.local_id) : ""}`);
   }
   for (const h of holds) {
     const j = JSON.parse(h.json) as { goal_title: string; by: string; reason: string | null };
     const file = fs.existsSync(layout.hold(ctx.home, h.local_id));
     out(
-      `${h.local_id.slice(0, 8)} ${h.harness} HELD on goal "${clean(j.goal_title, 80)}" by ${clean(j.by, 50) || "someone"} since ${shortTime(h.at)}${j.reason ? ` (${clean(j.reason, 80)})` : ""} (all tools blocked)${file ? "" : " (hold file missing!)"}`,
+      `${h.local_id.slice(0, 8)} ${h.harness} HELD on goal "${clean(j.goal_title, 80)}" by ${clean(j.by, 50) || "someone"} since ${shortTime(h.at)}${j.reason ? ` (${clean(j.reason, 80)})` : ""} (all tools blocked)${file ? "" : " (hold file missing!)"}${way(h.local_id)}`,
     );
   }
 }
@@ -718,13 +750,31 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   out(`Local: ${r.spooled} hook records, ${r.tail.files} files scanned (${r.tail.bytes} new bytes).`);
   if (!signedIn(ctx.home)) return out("Signed out: nothing uploaded.");
   out(`Server: ${r.sent} queued calls sent, ${r.uploaded} usage rows uploaded, ${r.directives} directives, ${outboxDepth(ctx)} still queued.`);
+  if (r.serverError) {
+    const waiting = unuploadedRows(ctx);
+    err(`align: ${r.serverError}. ${waiting} usage rows and ${outboxDepth(ctx)} queued calls stay on this machine; the next sync retries.`);
+    process.exitCode = 1;
+  }
+}
+
+/** Finalized usage rows of shared sessions, from their first epoch on, not uploaded yet. */
+function unuploadedRows(ctx: Ctx): number {
+  return (
+    ctx.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM requests r JOIN shares s ON s.local_id=r.local_id
+         WHERE s.state='shared' AND r.uploaded=0 AND r.finalized=1
+           AND COALESCE(r.ts, r.created_at) >= (SELECT MIN(e.starts_at) FROM epochs e WHERE e.local_id=r.local_id)`,
+      )
+      .get() as { n: number }
+  ).n;
 }
 
 async function cmdDoctor(ctx: Ctx): Promise<void> {
   const checks: [string, "OK" | "WARN" | "FAIL", string][] = [];
   const add = (name: string, level: "OK" | "WARN" | "FAIL", detail: string) => checks.push([name, level, detail]);
   const major = Number(process.versions.node.split(".")[0]);
-  add("node", major >= 24 ? "OK" : "FAIL", `${process.version} at ${process.execPath}`);
+  add("node", major >= MIN_NODE ? "OK" : "FAIL", `${process.version} at ${process.execPath}`);
   const st = fs.statSync(ctx.home);
   add("align home", (st.mode & 0o077) === 0 ? "OK" : "FAIL", `${ctx.home} mode ${(st.mode & 0o777).toString(8)}`);
   for (const f of [layout.deviceSecret(ctx.home), layout.credentials(ctx.home), layout.deviceKey(ctx.home)]) {
@@ -841,6 +891,12 @@ export async function main(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") return out(HELP);
   if (cmd === "--version" || cmd === "version") return out(VERSION);
+  // One clear message on an unsupported Node, before anything else runs (and before node:sqlite loads).
+  const old = unsupportedNode(process.env);
+  if (old) {
+    process.exitCode = 1;
+    return err(`align: ${old}. Install Node ${MIN_NODE} or later, then run \`align install\` with it so the hooks use it too.`);
+  }
   const ctx = openCtx(process.env);
   try {
     switch (cmd) {

@@ -42,9 +42,11 @@ const REQUEST_KEEP_MS = 14 * 86_400_000;
 function hotRequests(ctx: Ctx, lid: string): HotRequest[] {
   const since = new Date(Date.now() - REQUEST_KEEP_MS).toISOString();
   const rows = ctx.db
-    .prepare("SELECT json, state, answered_at FROM goal_requests WHERE local_id=? AND (state='pending' OR created_at>=?) ORDER BY created_at DESC LIMIT 20")
-    .all(lid, since) as { json: string; state: RequestState; answered_at: string | null }[];
-  return rows.reverse().map((r) => ({ ...(JSON.parse(r.json) as Omit<HotRequest, "state" | "answered_at">), state: r.state, answered_at: r.answered_at }));
+    .prepare("SELECT json, state, answered_at, directive_id FROM goal_requests WHERE local_id=? AND (state='pending' OR created_at>=?) ORDER BY created_at DESC LIMIT 20")
+    .all(lid, since) as { json: string; state: RequestState; answered_at: string | null; directive_id: string }[];
+  return rows
+    .reverse()
+    .map((r) => ({ ...(JSON.parse(r.json) as Omit<HotRequest, "state" | "answered_at">), state: r.state, answered_at: r.answered_at, directive_id: r.directive_id }));
 }
 
 export function renderHot(ctx: Ctx, lid: string): HotState | null {
@@ -83,9 +85,12 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     updated_at: new Date().toISOString(),
   };
   writeJsonAtomic(layout.hot(ctx.home, lid), hot);
+  // A latch whose share has ended (this machine signed out, or the server no longer has the share) can't be lifted from
+  // the web any more: the latch says so, so the deny tells the user how to get out (`align stop-sharing`).
+  const ended = endedReason(share);
   const latch = ctx.db.prepare("SELECT * FROM latches WHERE local_id=?").get(lid) as { stopped: number; directive_id: string; seq: number; at: string } | undefined;
   if (latch && latch.stopped) {
-    const l: Latch = { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at };
+    const l: Latch = { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...(ended ? { ended } : {}) };
     writeJsonAtomic(layout.latch(ctx.home, lid), l);
   } else {
     removeFile(layout.latch(ctx.home, lid));
@@ -101,6 +106,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   if (holds.length) {
     const h: HoldLatch = {
       v: 1,
+      ...(ended ? { ended } : {}),
       holds: holds.map((r) => {
         const j = JSON.parse(r.json) as { goal_title: string; by: string; reason: string | null };
         return { goal_id: r.goal_id, goal_title: j.goal_title, by: j.by, reason: j.reason, directive_id: r.directive_id, seq: r.seq, at: r.at };
@@ -112,6 +118,15 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   }
   return hot;
 }
+
+/** Why a share can no longer receive directives (a resume or a release), or null while it can. */
+export function endedReason(share: ShareRow | null): "device_signed_out" | "sharing_ended" | null {
+  if (!share || (share.state !== "stopped" && share.state !== "error")) return null;
+  return share.error === DEVICE_SIGNED_OUT ? "device_signed_out" : "sharing_ended";
+}
+
+/** `shares.error` of a share ended because this machine signed out of Align (logout, or the device was revoked). */
+export const DEVICE_SIGNED_OUT = "device_signed_out";
 
 /** A user notice for one session, once per `id` and session: one directive that reaches several sessions (a release,
  *  a suspension) leaves each its own notice, so the stored id is scoped to the session. */

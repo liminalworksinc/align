@@ -32,6 +32,8 @@ export interface SessionRow {
   started_at: string;
   state: "shared" | "suspended" | "stopped";
   stopped_at: string | null;
+  /** Why a stopped session ended when its person did not stop it: its device signed out (lib/v2/devices.ts). */
+  ended_reason: "device_signed_out" | null;
   governing_goal_id: string | null;
   governing_alignment_id: string | null;
   agent_stopped: number;
@@ -83,7 +85,21 @@ export async function putSession(pp: PolicyPrincipal, dev: DevicePrincipal, key:
   const at = nowIso();
   const out = await tx(() => {
     const s = sessionRow(pp.wsId, key);
-    if (s) {
+    if (s && s.user_id === dev.user.id && s.device_id !== dev.deviceId && s.state === "stopped" && s.ended_reason === "device_signed_out") {
+      // The session ended because the machine that shared it signed out; the same person's machine, paired again (it
+      // still derives the same session key from its local secret), shares it again from now on.
+      if (s.harness !== harness || s.repo_key !== repoKey) throw conflict("session_conflict", "This session key was shared with a different harness or repo");
+      run(
+        "UPDATE v2_sessions SET device_id = ?, state = 'shared', stopped_at = NULL, ended_reason = NULL, repo_alias = ?, title = ?, updated_at = ? WHERE ws_id = ? AND session_key = ?",
+        dev.deviceId,
+        alias,
+        title,
+        at,
+        pp.wsId,
+        key,
+      );
+      audit(pp.wsId, dev.user.id, "session.shared_again", null, at);
+    } else if (s) {
       if (s.user_id !== dev.user.id || s.device_id !== dev.deviceId) throw notFound();
       if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
       if (s.harness !== harness || s.repo_key !== repoKey) throw conflict("session_conflict", "This session key was shared with a different harness or repo");
@@ -311,6 +327,13 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
   const s = sessionRow(pp.wsId, key);
   if (!s) throw notFound();
   need(pp, "session.stop", { kind: "session", ownerId: s.user_id });
+  // Never report a stop or resume as sent when nothing can deliver it.
+  if (s.ended_reason === "device_signed_out") {
+    throw conflict(
+      "device_signed_out",
+      "The machine that shared this session signed out of Align, so its sharing ended and a stop or resume can't reach it. If it was stopped, it stays stopped until its developer runs align stop-sharing there.",
+    );
+  }
   if (s.state === "stopped") throw conflict("sharing_stopped", "Sharing was stopped for this session");
   const at = nowIso();
   const id = await tx(() => {
@@ -344,6 +367,7 @@ export function listSessions(pp: PolicyPrincipal) {
       started_at: s.started_at,
       state: s.state,
       stopped_at: s.stopped_at,
+      ended_reason: s.ended_reason,
       current_epoch: e ? { ...epochOut(e), goal: goalLabel(e.goal_id) } : null,
       governing_goal: goalLabel(s.governing_goal_id),
       agent_stopped: !!s.agent_stopped,

@@ -109,6 +109,8 @@ export class FakeServer {
   /** Goal holds by `${ws}/${goal}` (`v2_goal_holds`). */
   holds = new Map<string, { held_by: { id: string; name: string }; reason: string | null; at: string; directive_id: string }>();
   refreshes = 0;
+  /** Refreshes refused as clock_skew. */
+  skewRefusals = 0;
   private streams = new Set<{ res: http.ServerResponse; device: string }>();
   private seq = 0;
 
@@ -345,10 +347,15 @@ export class FakeServer {
           return send(401, { error: "invalid_grant" });
         }
         if (body.refresh_token !== d.refresh) return send(401, { error: "invalid_grant" });
-        if (Math.abs(Date.parse(body.ts) - Date.now()) > 5 * 60_000) return send(401, { error: "invalid_grant" });
+        if (Number.isNaN(Date.parse(body.ts))) return send(401, { error: "invalid_grant" });
         const msg = `align-refresh\n${d.id}\n${crypto.createHash("sha256").update(body.refresh_token).digest("hex")}\n${body.ts}`;
         const key = crypto.createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: d.publicKey }, format: "jwk" });
         if (!crypto.verify(null, Buffer.from(msg), key, Buffer.from(String(body.sig), "base64url"))) return send(401, { error: "invalid_grant" });
+        // As lib/v2/devices.ts: a signed refresh from a skewed clock is 400 clock_skew with the server's time, not a revocation.
+        if (Math.abs(Date.parse(body.ts) - Date.now()) > 5 * 60_000) {
+          this.skewRefusals++;
+          return send(400, { error: "clock_skew", message: "This device's clock is off", server_time: new Date().toISOString() });
+        }
         this.refreshes++;
         return send(200, this.issue(d));
       }
