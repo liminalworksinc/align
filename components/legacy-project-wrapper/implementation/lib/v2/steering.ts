@@ -35,7 +35,8 @@ const pctOk = (x: unknown): x is number => typeof x === "number" && Number.isInt
 /** POST …/steering { events }: steering lines this device's own shared sessions showed. Events for another device's,
  *  an unknown or a stopped session (`not_shared`), or dated more than 5 minutes ahead (`clock_skew`, with `server_time`)
  *  or 14 days back (`too_old`), are skipped and listed in `refused` by index, so a device never loses them silently
- *  (C3-4); a repeat (same session and time) is accepted once. */
+ *  (C3-4). A repeat (same session and time, in this batch or an earlier one) is stored once and counted in `accepted`,
+ *  as activity counts every item it takes: `accepted + refused.length` is always the batch's length (X6). */
 export async function ingestSteering(pp: PolicyPrincipal, dev: DevicePrincipal, b: Body) {
   need(pp, "session.share");
   const events = b.events;
@@ -66,7 +67,8 @@ export async function ingestSteering(pp: PolicyPrincipal, dev: DevicePrincipal, 
         refused.push({ index, reason: "not_shared" });
         continue;
       }
-      accepted += run(
+      accepted++;
+      run(
         "INSERT OR IGNORE INTO v2_steering_events (ws_id, session_key, goal_id, suggested_goal_id, share, target, at, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         pp.wsId,
         e.session_key,

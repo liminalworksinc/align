@@ -5628,11 +5628,21 @@ try {
     const evRow = withDb((d) => d.prepare("SELECT * FROM v2_steering_events WHERE ws_id = ?").all(AW));
     const stCount = (await allocOf(AO)).json?.steering;
     check(
-      "steering events: this device's shared session -> accepted 1, the same line again -> 0, one older than 14 days -> skipped, another device's report about it -> skipped; a share over 100, a bad goal id, a bad time or 101 events -> 400; a cookie -> refused; stored as session key, goal ids and whole percents only; allocation counts 1 line today",
-      s1.json?.accepted === 1 && s2.json?.accepted === 0 && sOld.json?.accepted === 0 && sForeign.json?.accepted === 0 && sBad.every((r) => r.status === 400) && sCookie.status >= 400 &&
+      "steering events: this device's shared session -> accepted 1, the same line again -> accepted 1 too (X6: stored once, never lost from the answer), one older than 14 days -> skipped, another device's report about it -> skipped; a share over 100, a bad goal id, a bad time or 101 events -> 400; a cookie -> refused; stored as session key, goal ids and whole percents only; allocation counts 1 line today",
+      s1.json?.accepted === 1 && s2.json?.accepted === 1 && sOld.json?.accepted === 0 && sForeign.json?.accepted === 0 && sBad.every((r) => r.status === 400) && sCookie.status >= 400 &&
         evRow.length === 1 && JSON.stringify(Object.keys(evRow[0]).sort()) === JSON.stringify(["at", "goal_id", "recorded_at", "session_key", "share", "suggested_goal_id", "target", "ws_id"]) &&
         stCount?.steering === "on" && stCount.total === 1 && stCount.days.length === 1 && stCount.days[0].day === new Date().toISOString().slice(0, 10),
       `${s1.text} ${s2.text} ${sOld.text} ${sForeign.text} ${sBad.map((r) => r.status)} ${sCookie.status} ${JSON.stringify(stCount)}`,
+    );
+
+    // X6: the same line twice in one batch, beside one refused: the answer adds up to the batch.
+    const eTwice = ev({ at: new Date(Date.now() - 2000).toISOString() });
+    const sTwice = await postEv(DM, [eTwice, eTwice, ev({ at: new Date(Date.now() - 20 * 86_400_000).toISOString() })]);
+    check(
+      "X6: a repeated steering line (twice in one batch, or again in a later one) is counted in accepted, stored once, so accepted + refused.length is the batch's length (as activity counts every item it takes)",
+      sTwice.json?.accepted === 2 && JSON.stringify(sTwice.json?.refused) === JSON.stringify([{ index: 2, reason: "too_old" }]) && s2.json?.accepted === 1 &&
+        withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_steering_events WHERE ws_id = ? AND at = ?").get(AW, new Date(Date.parse(eTwice.at)).toISOString()))?.n === 1,
+      `${sTwice.text} ${s2.text}`,
     );
 
     // -- a held goal is marked in the feed: agents never steer from or toward it --

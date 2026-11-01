@@ -1266,14 +1266,21 @@ each skipped event as `{index, reason}` (`clock_skew` for one more than 5 minute
 clock; `too_old`; `not_shared`), so a device never loses one silently. A malformed session key or goal id, a
 share or target that is not a whole number from 0 to 100, an `at` that does not parse, or more than 100 events SHALL be
 400 and store nothing; an event for a session that is not this device's and this person's, is not `shared`, or is dated
-more than 5 minutes ahead or 14 days back SHALL be skipped, and a repeat (same session and time) stored once. Only the
+more than 5 minutes ahead or 14 days back SHALL be skipped, and a repeat (same session and time, in one batch or across
+batches) stored once and counted in `accepted`, as activity counts every item it takes, so that `accepted` plus the
+number of `refused` entries is always the number of events sent. Only the
 session key, the two goal ids, the two whole percents and the times are stored; an event goes with its session when the
 session is deleted or rolled up.
 
 #### Scenario: Another device's session
 
 - **WHEN** a member's device reports a line for its own shared session, then again, and another member's device reports one for the same session
-- **THEN** the responses accept 1, 0 and 0 (the third refused as `not_shared`), and the allocation report counts one line that day
+- **THEN** the responses accept 1, 1 and 0 (the repeat is stored once; the third is refused as `not_shared`), and the allocation report counts one line that day
+
+#### Scenario: A repeat in one batch
+
+- **WHEN** a device sends the same line twice in one batch beside one dated 20 days back (`scripts/test-v2.mjs` "X6: a repeated steering line ...")
+- **THEN** the response is `{accepted: 2, refused: [{index: 2, reason: "too_old"}]}` and the line is stored once
 
 ### Requirement: Activity signals
 
