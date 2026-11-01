@@ -30,7 +30,9 @@ export interface InstallRecord {
   installed_at: string;
   node: string;
   hook_sha256: string;
-  claude?: { plugin: string };
+  /** `skills_created`: the skills folder (CLAUDE_CONFIG_DIR/skills) did not exist before Align's first install, so
+   *  uninstall removes it when it is empty again (cycle 6). Absent in records from before: never removed. */
+  claude?: { plugin: string; skills_created?: boolean };
   codex?: { hooks: string; hooks_backup: string | null; hooks_created: boolean };
 }
 
@@ -209,6 +211,8 @@ export function install(paths: Paths, o: InstallOptions): { lines: string[]; rec
   if (o.claude) {
     const dir = pluginDir(paths);
     if (fs.existsSync(dir) && !isOurPlugin(paths)) throw new Error(`${dir} exists and is not Align's plugin; move it and run align install again`);
+    // Whether this install makes the skills folder: kept from the first install, so a reinstall does not claim it.
+    const skillsCreated = prev?.claude ? !!prev.claude.skills_created : !fs.existsSync(path.dirname(dir));
     const hooks: Record<string, unknown> = {};
     mergeHooks(hooks, home, o.nodePath, "claude");
     say(`${o.dryRun ? "Would install" : "Installed"} the Align plugin for Claude Code at ${dir} (hooks ${hookEvents("claude").join(", ")}; PreToolUse matcher "*"). New sessions load it; \`claude plugin disable align@skills-dir\` turns it off.`);
@@ -235,7 +239,7 @@ export function install(paths: Paths, o: InstallOptions): { lines: string[]; rec
         say(`${o.dryRun ? "Would remove" : "Removed"} ${removed} hook handlers an earlier Align added to ${file} (backup ${b}).`);
       }
     }
-    record.claude = { plugin: dir };
+    record.claude = { plugin: dir, ...(skillsCreated ? { skills_created: true } : {}) };
   }
 
   if (o.codex) {
@@ -277,6 +281,18 @@ export function uninstall(paths: Paths, opts: { purge: boolean }): string[] {
   if (isOurPlugin(paths)) {
     fs.rmSync(pluginDir(paths), { recursive: true, force: true });
     lines.push(`Removed the Align plugin for Claude Code (${pluginDir(paths)}).`);
+  }
+  // The skills folder Align's install made goes too, when nothing else is in it (cycle 6).
+  const skills = path.dirname(pluginDir(paths));
+  if (rec?.claude?.skills_created) {
+    try {
+      if (!fs.readdirSync(skills).length) {
+        fs.rmdirSync(skills);
+        lines.push(`Removed ${skills}, which Align's install created and is empty now.`);
+      }
+    } catch {
+      /* gone already, or not empty */
+    }
   }
   // Uninstall removes only Align's own handlers, so the files end as the user's own again: the backups Align made of
   // them on install are no longer needed and go too (no new backup is written).

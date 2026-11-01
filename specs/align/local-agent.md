@@ -871,13 +871,21 @@ The `align uninstall` command SHALL delete Align's plugin folder, remove only Al
 handler and the same content, the file SHALL get that backup's bytes back, so the user's file is byte-identical to
 what it was, its layout and indentation included), delete the `settings.json.align-backup-*` and
 `hooks.json.align-backup-*` copies Align made of those files (printing `Removed <n> backup file(s) Align made when
-installing (...)`), delete Codex `hooks.json` when Align created it and it is now empty, delete `~/.align/bin/` and `install.json`, and keep the rest of `ALIGN_HOME` (ledger and keys) unless
+installing (...)`), delete Codex `hooks.json` when Align created it and it is now empty, delete Claude Code's `skills/`
+folder when Align's first install created it (recorded in `install.json`; a reinstall keeps what the first install
+found) and it is empty once the plugin is gone (printing `Removed <folder>, which Align's install created and is empty
+now.`), delete `~/.align/bin/` and `install.json`, and keep the rest of `ALIGN_HOME` (ledger and keys) unless
 `--purge` is given, which deletes `ALIGN_HOME` entirely. Because that deletes the device key and tokens, `--purge` SHALL
 first revoke this machine's device (`DELETE /api/v2/devices/self`, printing `Revoked this device (<id>) on <server>;
 its shared sessions stopped sharing there.`) and every revoke a past logout or login left waiting, naming each one it
 revokes (`Revoked device <id>, which \`align login\` replaced on this machine; ...`), and when the server can't be
 reached SHALL print `align: could not reach <server> to revoke this device (<id>). Its key is deleted now, so revoke it
 at <server>/app/devices.` on stderr, so no device is left paired with no machine behind it.
+
+#### Scenario: The skills folder Align made
+
+- **WHEN** `align install --claude` runs twice and then `align uninstall`, with no `skills/` folder before, with one there before, and with none before but a skill of the user's added after the install (test `findings7` "`align uninstall` removes the skills folder Align's install created ...")
+- **THEN** the first ends with no `skills/` folder and says so; the other two keep it (with the user's skill)
 
 #### Scenario: Revert only Align changes
 

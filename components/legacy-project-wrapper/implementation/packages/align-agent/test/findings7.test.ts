@@ -397,4 +397,26 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     const r = await runCli(t, ["doctor"]);
     assert.match(r.stdout, new RegExp(`sign-in +access token expires ${new Date(local.getTime() - 600_000).toISOString().replace(/[.]/g, "\\.")} \\(on the server's clock\\)`), r.stdout);
   });
+
+  test("`align uninstall` removes the skills folder Align's install created when it is empty again; never one that was there before, or one the user put a skill in", async () => {
+    const run = async (setup: (skills: string) => void, after: (skills: string) => void) => {
+      const t = makeEnv();
+      cleanups.push(() => t.cleanup());
+      const skills = path.join(t.claudeDir, "skills");
+      setup(skills);
+      assert.equal((await runCli(t, ["install", "--claude"])).code, 0);
+      assert.equal((await runCli(t, ["install", "--claude"])).code, 0, "a reinstall keeps what the first install found");
+      after(skills);
+      const un = await runCli(t, ["uninstall"]);
+      assert.equal(un.code, 0, un.stderr);
+      return { un, skills };
+    };
+    const created = await run(() => undefined, () => undefined);
+    assert.ok(!fs.existsSync(created.skills), "Align made it, and it is empty: gone");
+    assert.match(created.un.stdout, /Removed .*skills, which Align's install created and is empty now\./);
+    const before = await run((d) => fs.mkdirSync(d, { recursive: true }), () => undefined);
+    assert.ok(fs.existsSync(before.skills), "it was there before: kept");
+    const used = await run(() => undefined, (d) => fs.mkdirSync(path.join(d, "mine")));
+    assert.deepEqual(fs.readdirSync(used.skills), ["mine"], "the user's skill keeps it");
+  });
 });
