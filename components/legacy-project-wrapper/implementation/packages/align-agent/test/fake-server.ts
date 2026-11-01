@@ -14,6 +14,9 @@ interface Device {
   name: string;
   publicKey: string;
   revoked: boolean;
+  /** Why it was revoked, as v2_devices.revoked_reason (the refresh refusal's `reason`); revoked_on_web when unset. */
+  revokedReason?: string;
+  createdAt?: string;
   refresh: string | null;
   oldRefresh: Set<string>;
 }
@@ -118,6 +121,9 @@ export class FakeServer {
   /** Hold every /device/refresh, before it is processed ("request") or after the server rotated ("answer"), until
    *  `release` settles: a refresh in flight while something else runs (C3-1). */
   holdRefresh: { phase: "request" | "answer"; release: Promise<void> } | null = null;
+  /** POST /device/authorize answers 429 rate_limited: `retryAfter` seconds (Retry-After), with the server's message
+   *  when `message` is set (an older server sent none). */
+  authorizeLimited: { retryAfter: number; message?: string } | null = null;
   /** The next n polls of /device/token answer 502 (a server restarting behind a proxy). */
   failTokenPolls = 0;
   /** Answer without a Date header, so a device can learn its clock offset only from a clock_skew answer. */
@@ -336,6 +342,10 @@ export class FakeServer {
     try {
       const body = req.method === "GET" || req.method === "DELETE" ? null : await this.body(req);
       // ---- device flow ----
+      if (req.method === "POST" && p === "/api/v2/device/authorize" && this.authorizeLimited) {
+        const lim = this.authorizeLimited;
+        return send(429, { error: "rate_limited", ...(lim.message ? { message: lim.message, retry_after: lim.retryAfter } : {}) }, { "retry-after": String(lim.retryAfter) });
+      }
       if (req.method === "POST" && p === "/api/v2/device/authorize") {
         const pend: Pending = { device_code: b64u(crypto.randomBytes(33)), user_code: "BCDF-GHJK", name: body.device_name, publicKey: body.public_key, polls: 0, issued: false, denied: false };
         if (Buffer.from(String(body.public_key), "base64url").length !== 32) return send(400, { error: "invalid_public_key" });
@@ -354,7 +364,7 @@ export class FakeServer {
         if (pend.polls === 1 && this.opts.slowDownFirst) return send(400, { error: "slow_down" });
         if (pend.polls < this.opts.approveAfterPolls) return send(400, { error: "authorization_pending" });
         pend.issued = true;
-        const d: Device = { id: rid("dv_"), name: pend.name, publicKey: pend.publicKey, revoked: false, refresh: null, oldRefresh: new Set() };
+        const d: Device = { id: rid("dv_"), name: pend.name, publicKey: pend.publicKey, revoked: false, refresh: null, oldRefresh: new Set(), createdAt: new Date().toISOString() };
         this.devices.set(d.id, d);
         return send(200, { device_id: d.id, ...this.issue(d), user: this.user });
       }
@@ -363,7 +373,9 @@ export class FakeServer {
         if (hold?.phase === "request") await hold.release;
         const answer = (status: number, b: unknown) => (hold?.phase === "answer" ? hold.release.then(() => send(status, b)) : send(status, b));
         const d = this.devices.get(body?.device_id);
-        if (!d || d.revoked) return answer(401, { error: "invalid_grant" });
+        // As lib/v2/devices.ts: an unknown device (its account was deleted) and a revoked one say why.
+        if (!d) return answer(401, { error: "invalid_grant", reason: "unknown_device" });
+        if (d.revoked) return answer(401, { error: "invalid_grant", reason: d.revokedReason || "revoked_on_web" });
         if (d.oldRefresh.has(body.refresh_token)) {
           d.revoked = true;
           return answer(401, { error: "invalid_grant" });
@@ -389,6 +401,10 @@ export class FakeServer {
         return send(204);
       }
       if (req.method === "GET" && p === "/api/v2/me") return send(200, { user: this.user, device: { id: dev.id, name: dev.name }, workspaces: this.workspaces });
+      if (req.method === "GET" && p === "/api/v2/devices") {
+        const list = [...this.devices.values()].map((d) => ({ id: d.id, name: d.name, created_at: d.createdAt ?? new Date(0).toISOString(), last_seen_at: d.createdAt ?? null, revoked_at: d.revoked ? new Date().toISOString() : null, revoked_reason: d.revoked ? d.revokedReason || "revoked_on_web" : null, workspaces: [], current: d.id === dev.id }));
+        return send(200, { devices: list });
+      }
       let m = /^\/api\/v2\/workspaces\/([^/]+)\/goals$/.exec(p);
       if (m && req.method === "GET") {
         const v = this.feedVersion(m[1]);
@@ -495,7 +511,8 @@ export class FakeServer {
       if (req.method === "GET" && p === "/api/v2/directives") {
         const cursor = Number(url.searchParams.get("cursor") || 0);
         const list = this.directives.filter((d) => d.seq > cursor && this.ownsAny(dev.id, d.session_keys)).slice(0, 100);
-        return send(200, { directives: list, next_cursor: String(list.length ? list[list.length - 1].seq : cursor) });
+        // As the server: the workspaces this device reaches now (a single-device fake: the person's workspaces).
+        return send(200, { directives: list, next_cursor: String(list.length ? list[list.length - 1].seq : cursor), workspaces: this.workspaces.map((w) => w.id).sort() });
       }
       if (req.method === "GET" && p === "/api/v2/directives/stream") {
         entry.status = 200;

@@ -127,6 +127,12 @@ export function applyShare(ctx: Ctx, p: SharePlan): void {
       .prepare("INSERT INTO epochs(epoch_id, local_id, workspace_id, goal_id, starts_at, root_turn, cause, created_at) VALUES(?,?,?,?,?,?,?,?)")
       .run(p.epoch_body.epoch_id, lid, p.workspace.id, p.epoch_body.goal_id, p.starts_at, null, "manual", nowIso());
     ctx.db.prepare("DELETE FROM pending_bindings WHERE local_id=?").run(lid);
+    // Notices about an earlier share that ended (and how to share again) are stale once it is shared again: one the
+    // session has not seen yet would otherwise show after this share, next to whatever ends it later.
+    for (const kind of ["signed_out_", "access_lost_", "workspace_back_", "workspace_added_"]) {
+      const prefix = `${lid}/${kind}`;
+      ctx.db.prepare("DELETE FROM notices WHERE local_id=? AND substr(id, 1, length(?))=?").run(lid, prefix, prefix);
+    }
     enqueue(ctx, lid, "put_session", { ws: p.workspace.id, session_key: p.session_key, body: p.put_body });
     enqueue(ctx, lid, "post_epoch", { ws: p.workspace.id, session_key: p.session_key, body: p.epoch_body });
   });
@@ -241,7 +247,7 @@ export function endSharesWithoutAccess(ctx: Ctx, me: MeFile): number {
       ctx,
       s.local_id,
       ACCESS_LOST,
-      `access_lost_${s.workspace_id}`,
+      `access_lost_${s.workspace_id}_${at}`,
       `Align: this session stopped sharing because you no longer have access to ${clean(s.workspace_name, 80)} in Align (you were removed from it or left it); its usage stays on this machine from now on.`,
       at,
     );
@@ -262,6 +268,40 @@ export function endSharesWithoutAccess(ctx: Ctx, me: MeFile): number {
   }
   if (live.length) ctx.log(`workspace access lost: ${live.length} shares ended on this machine`);
   return live.length;
+}
+
+/**
+ * Workspaces this device reaches now and did not at its last `/me` (its person accepted an invite and gave this device
+ * the workspace there, owner decision 2026-11-01). Logged, and told once to the sessions it matters to: each session
+ * whose share in it ended because the access was lost, with how to share it again (`::align share` shares it there,
+ * toward the goal it had), and each other session active in the last hour that is not shared, with how to share it
+ * there. Returns the workspaces, for `align sync` to print.
+ */
+export function noticeWorkspacesAdded(ctx: Ctx, me: MeFile, added: { id: string; name: string }[]): { id: string; name: string }[] {
+  const at = nowIso();
+  const solo = (ws: string) => me.default_workspace === ws || me.workspaces.length === 1;
+  for (const w of added) {
+    const told = new Set<string>();
+    const name = clean(w.name, 80);
+    ctx.log(`workspace added: this device can now reach ${w.name} (${w.id})`);
+    const ended = ctx.db.prepare("SELECT local_id, goal_json FROM shares WHERE workspace_id=? AND state IN ('stopped','error') AND error=?").all(w.id, ACCESS_LOST) as { local_id: string; goal_json: string | null }[];
+    for (const s of ended) {
+      const goal = s.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
+      told.add(s.local_id);
+      notify(ctx, s.local_id, `workspace_back_${w.id}_${at}`, `Align: this machine can reach ${name} in Align again. To share this session there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`);
+    }
+    const since = new Date(Date.now() - 3_600_000).toISOString();
+    const recent = ctx.db
+      .prepare("SELECT s.local_id FROM sessions s LEFT JOIN shares h ON h.local_id=s.local_id WHERE COALESCE(s.last_active, s.created_at) >= ? AND (h.local_id IS NULL OR h.state IN ('stopped','error'))")
+      .all(since) as { local_id: string }[];
+    for (const { local_id: lid } of recent) {
+      if (told.has(lid)) continue;
+      told.add(lid);
+      const how = solo(w.id) ? "type `::align share <goal>` here" : `run \`align share ${lid.slice(0, 8)} --workspace "${name}" --goal <goal>\` in a terminal`;
+      notify(ctx, lid, `workspace_added_${w.id}_${at}`, `Align: this machine can now reach ${name} in Align. To share this session there, ${how}.`);
+    }
+  }
+  return added.map((w) => ({ id: w.id, name: w.name }));
 }
 
 /** `endSharesSignedOut` when the credentials say this machine is signed out (a revocation the server reported). */

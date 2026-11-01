@@ -1,10 +1,11 @@
 import { createPublicKey, verify } from "node:crypto";
 import { randomInt } from "node:crypto";
+import { config } from "../config";
 import { all, audit, get, LIVE_WS, run, tx } from "./db";
 import { V2Error, badRequest, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
-import { take } from "./limits";
+import { retryAfterMs, take, takeAll } from "./limits";
 import { endSessions } from "./sessions";
 
 // Device pairing (RFC 8628 style, key-bound) and device credentials. docs/v2/WIRE.md "Device pairing".
@@ -60,9 +61,24 @@ export function normalizeUserCode(input: string): string | null {
   return `${s.slice(0, 4)}-${s.slice(4)}`;
 }
 
+/** Pairings one client may start per hour. */
+const PAIRINGS_PER_HOUR = 10;
+
+/** The pairing limit's refusal says how long to wait (whole minutes, at least 1), and `retry_after` (seconds, also sent
+ *  as Retry-After). In Mode L every pairing on the computer is one client, and the counter is in memory. */
+function pairingLimited(waitMs: number): V2Error {
+  const min = Math.max(1, Math.ceil(waitMs / 60_000));
+  const wait = min === 1 ? "1 minute" : `${min} minutes`;
+  const message = config().hosted
+    ? `Too many device pairings were started from this network in the last hour (the limit is ${PAIRINGS_PER_HOUR}). Try again in ${wait}.`
+    : `Align on this computer has started ${PAIRINGS_PER_HOUR} device pairings in the last hour, its limit for everyone who pairs here. Try again in ${wait}, or restart Align to clear it.`;
+  return new V2Error(429, "rate_limited", message, { retry_after: Math.max(1, Math.ceil(waitMs / 1000)) });
+}
+
 export async function authorize(input: { device_name: string; public_key: string }, client: string, origin: string) {
   publicKeyOf(input.public_key);
-  take(`device-authorize:${client}`, 10, 60 * 60 * 1000);
+  const limit = { key: `device-authorize:${client}`, max: PAIRINGS_PER_HOUR, windowMs: 60 * 60 * 1000 };
+  if (!takeAll([limit])) throw pairingLimited(retryAfterMs([limit]));
   const deviceCode = secretToken(32); // 43 chars
   const now = Date.now();
   const code = await tx(() => {
@@ -159,10 +175,16 @@ export async function token(deviceCode: string) {
 export const refreshMessage = (deviceId: string, refreshToken: string, ts: string) => `align-refresh\n${deviceId}\n${sha256hex(refreshToken)}\n${ts}`;
 
 export async function refresh(input: { device_id: string; refresh_token: string; ts: string; sig: string }) {
-  const invalid = () => new V2Error(401, "invalid_grant", "invalid grant");
+  // `reason` says why a device is refused when that is safe to say: `unknown_device` (no such device: only deleting an
+  // account deletes devices) or, for a correctly signed refresh of a revoked device, why it was revoked
+  // (`revoked_on_web`, `signed_out_everywhere`, `logout`, `refresh_reuse`), so the device can tell its person why.
+  const invalid = (reason?: string) => new V2Error(401, "invalid_grant", "invalid grant", reason ? { reason } : undefined);
   const nowMs = Date.now();
-  const device = get<{ id: string; public_key: string; revoked_at: string | null }>("SELECT id, public_key, revoked_at FROM v2_devices WHERE id = ?", input.device_id);
-  if (!device || device.revoked_at) throw invalid();
+  const device = get<{ id: string; public_key: string; revoked_at: string | null; revoked_reason: string | null }>(
+    "SELECT id, public_key, revoked_at, revoked_reason FROM v2_devices WHERE id = ?",
+    input.device_id,
+  );
+  if (!device) throw invalid("unknown_device");
   const tsMs = Date.parse(input.ts);
   if (Number.isNaN(tsMs)) throw invalid();
   let ok = false;
@@ -171,6 +193,7 @@ export async function refresh(input: { device_id: string; refresh_token: string;
   } catch {
     ok = false;
   }
+  if (device.revoked_at) throw invalid(ok ? device.revoked_reason || "revoked" : undefined);
   if (!ok) throw invalid();
   // A correctly signed request whose clock is off is not a bad grant: the device stays paired, nothing is rotated, and
   // the answer carries the server's time so the device can say how far off its clock is and sign again with a
@@ -297,6 +320,27 @@ export function listDevices(userId: string) {
     ...d,
     workspaces: all<{ id: string; name: string }>("SELECT w.id, w.name FROM v2_device_grants g JOIN v2_workspaces w ON w.id = g.ws_id WHERE g.device_id = ? AND w.deleted_at IS NULL ORDER BY w.name", d.id),
   }));
+}
+
+/** This person's paired devices that are not revoked, most recently seen first: what an invite's accept page offers to
+ *  give the workspace. */
+export function liveDevicesOf(userId: string) {
+  return all<{ id: string; name: string; created_at: string; last_seen_at: string | null }>(
+    "SELECT id, name, created_at, last_seen_at FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY COALESCE(last_seen_at, created_at) DESC, id",
+    userId,
+  );
+}
+
+/** Give each of these devices workspace `wsId`, inside the caller's tx() (accepting an invite; the person is a member
+ *  by then). Each must be the person's own and not revoked, else 404 and the caller's transaction rolls back. Audited
+ *  in the workspace as `device.workspace_added` (the device as object). */
+export function addWorkspaceToDevices(userId: string, wsId: string, deviceIds: string[], at: string): string[] {
+  for (const id of deviceIds) {
+    if (!get("SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL", id, userId)) throw notFound();
+    run("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)", id, wsId);
+    audit(wsId, userId, "device.workspace_added", id, at);
+  }
+  return deviceIds;
 }
 
 export function deviceOwnedBy(deviceId: string, userId: string): boolean {

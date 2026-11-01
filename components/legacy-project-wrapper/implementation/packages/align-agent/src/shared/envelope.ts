@@ -419,8 +419,9 @@ export function requestNotice(r: HotRequest): string {
   return `Align: ${senderName(r)} (${role}) asks: ${ask}.${note ? ` Note: ${note}.` : ""} ${answer}`;
 }
 
-/** What a safe request's notice says Align reports: delivery, never that the agent did it (Align can't tell). */
-const DELIVERED = "It goes to the agent now as a safe step that needs no answer; unless you decline it by the end of this turn, Align reports it delivered to the agent and not declined (not that the agent did it)";
+/** What a safe request's notice says Align reports: delivery, never that the agent did it (Align can't tell). A decline
+ *  after the turn ended still counts (the receipt moves to declined), so the notice sets no deadline on it. */
+const DELIVERED = "It goes to the agent now as a safe step that needs no answer. Align reports it delivered to the agent and not declined (not that the agent did it) until you decline it, which you can do now or later";
 
 /** The model context for a request: fixed wording per type. `boundGoalId` says whether the goal is already in context. */
 export function requestContext(r: HotRequest, boundGoalId: string | null): string {

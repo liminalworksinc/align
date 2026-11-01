@@ -73,11 +73,18 @@ export function saveCredentials(home: string, c: Credentials): void {
   writeJsonAtomic(layout.credentials(home), c, 0o600);
 }
 
-/** Why this machine is signed out, in words for `align status` (the stored reason is the server's error code). */
+/** Why this machine is signed out, in words for `align status`. The stored reason is the refusal's `reason` when the
+ *  server gave one (why it no longer knows or accepts this device), else its error code. */
 export function signedOutWords(reason: string | undefined): string {
   if (!reason) return "signed out";
   if (reason === "logout") return "you ran `align logout`";
-  if (reason === "invalid_grant" || reason === "access rejected") return "this device was unpaired on the web (Devices page, or signing out everywhere), or its sign-in expired";
+  if (reason === "unknown_device") return "the Align server no longer knows this device: its account was deleted (or the server's data was reset)";
+  if (reason === "revoked_on_web") return "this device was revoked on the web (Devices page)";
+  if (reason === "signed_out_everywhere") return "you signed out everywhere on the web and chose to unpair your devices too";
+  if (reason === "refresh_reuse") return "the server revoked this device because one of its old sign-in tokens was used again (a copied or restored Align folder, say)";
+  if (reason === "invalid_grant" || reason === "access rejected" || reason === "revoked") {
+    return "this device was unpaired on the web (Devices page, or signing out everywhere), its account was deleted, or its sign-in expired";
+  }
   if (reason === "device key missing") return "this machine's device key is missing";
   return reason;
 }
@@ -342,7 +349,7 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
       return next;
     }
     if (r.status === 400 || r.status === 401) {
-      markSignedOut(ctx.home, r.json?.error || `refresh ${r.status}`, c.device_id);
+      markSignedOut(ctx.home, (typeof r.json?.reason === "string" && /^[a-z_]{1,40}$/.test(r.json.reason) ? r.json.reason : null) || r.json?.error || `refresh ${r.status}`, c.device_id);
       throw new SignedOut("signed out by server");
     }
     throw new HttpError(r.status, r.json?.error ?? null, r.json);
@@ -464,17 +471,20 @@ export async function signOutLocally(ctx: Ctx, deviceId: string, revoked: boolea
  * Revoke a device this machine signed out of while the server could not be reached (`align logout` offline), so its
  * sessions end on the server instead of staying shared forever. Runs before anything else at the next contact: the
  * next `align login` and every sync pass. Uses the old access token, or, when it has expired, signs a refresh with
- * the old key first. "revoked" once the server has revoked it (or no longer accepts it at all), "pending" while the
- * server can't be reached (it is kept for the next contact), "none" when nothing waits.
+ * the old key first. "revoked" once the server has revoked it, "already" when the server no longer accepted it at all
+ * (it was revoked on the web meanwhile), "pending" while the server can't be reached (it is kept for the next contact),
+ * "none" when nothing waits.
  */
-export async function revokePending(ctx: Ctx): Promise<"none" | "revoked" | "pending"> {
+export async function revokePending(ctx: Ctx): Promise<"none" | "revoked" | "already" | "pending"> {
   const p = loadPendingRevoke(ctx.home);
   if (!p) return "none";
   const del = (token: string) => rawRequest(p.server_url, "DELETE", "/api/v2/devices/self", { headers: { authorization: `Bearer ${token}` } });
+  const seen: string[] = [];
   try {
     let done = false;
     if (p.access_token && (!p.access_expires_at || Date.parse(p.access_expires_at) - Date.now() > 30_000)) {
       const r = await del(p.access_token);
+      seen.push(`DELETE ${r.status}`);
       if (r.status >= 500) return "pending";
       done = r.status === 204 || r.status === 200;
     }
@@ -487,15 +497,25 @@ export async function revokePending(ctx: Ctx): Promise<"none" | "revoked" | "pen
       };
       let r = await refresh(clockOffset(ctx.home));
       if (r.status === 400 && r.json?.error === "clock_skew" && !Number.isNaN(Date.parse(String(r.json?.server_time)))) r = await refresh(Date.parse(String(r.json.server_time)) - Date.now());
+      seen.push(`refresh ${r.status}`);
       if (r.status >= 500) return "pending";
       if (r.status === 200 && r.json?.access_token) {
         const d = await del(r.json.access_token);
+        seen.push(`DELETE ${d.status}`);
         if (d.status >= 500) return "pending";
+        done = d.status === 204 || d.status === 200;
       }
-      // Otherwise (400/401) the server no longer accepts this device: it was revoked on the web meanwhile.
+      // Otherwise (400/401) the server no longer accepts this device. Revoked as `logout` means by a DELETE with its own
+      // token, which only this machine held: this revoke got through, though its answer was lost (a dropped connection,
+      // say). Any other reason: someone revoked it on the web meanwhile.
+      if (r.status === 401 && r.json?.reason === "logout") done = true;
     }
-    // Revoked now, or already (an access token the server refuses and no refresh it accepts).
     fs.rmSync(layout.pendingRevoke(ctx.home), { force: true });
+    if (!done) {
+      // An access token the server refuses and no refresh it accepts: someone revoked it already.
+      ctx.log(`device ${p.device_id}, which this machine signed out of at ${p.since} while ${p.server_url} could not be reached, was already revoked (${seen.join(", ") || "no token left to use"})`);
+      return "already";
+    }
     ctx.log(`revoked device ${p.device_id}, which this machine signed out of at ${p.since} while ${p.server_url} could not be reached`);
     return "revoked";
   } catch (e) {

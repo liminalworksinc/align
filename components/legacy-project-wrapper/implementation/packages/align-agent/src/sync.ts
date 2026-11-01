@@ -511,7 +511,7 @@ export interface SyncResult {
   /** The first time this pass could not reach the server or got a 5xx (null when every call got through). */
   serverError?: string | null;
   /** A revoke left waiting by `align logout` while the server was unreachable: done this pass, still waiting, or none. */
-  revoked?: "none" | "revoked" | "pending";
+  revoked?: "none" | "revoked" | "already" | "pending";
 }
 
 /** last-sync.json: when the last pass ran, and whether the server could be reached (B5). */
@@ -571,15 +571,20 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
       return res;
     }
     const refresh = new Set<string>();
+    let reach: string[] | null = null;
     res.sent += (await flushOutbox(ctx)).sent;
-    res.directives = await pollDirectives(ctx, (ws) => refresh.add(ws)).catch(() => 0);
+    res.directives = await pollDirectives(ctx, (ws) => refresh.add(ws), (ws) => (reach = ws)).catch(() => 0);
     res.sent += (await flushOutbox(ctx)).sent;
     res.uploaded = (await uploadUsage(ctx)).uploaded;
     res.sent += (await flushOutbox(ctx)).sent;
     // Workspaces and grants change rarely; goals can change any time, and a new session reads its envelope from the
     // cached feed, so every pass revalidates the feeds (a 304 when nothing changed).
     let me = loadMe(ctx.home);
-    if (opts.refreshFeeds || !me || Date.now() - Number(kvGet(ctx.db, "me_refreshed_at") || 0) >= ctx.config.goals_refresh_ms) {
+    // The directives answer lists the workspaces this device reaches now: when that differs from the cached /me (a
+    // workspace given back when an invite was accepted with this device ticked, or one lost), /me is read at once.
+    const reached = reach as string[] | null;
+    const moved = !!me && !!reached && [...new Set(reached)].sort().join() !== [...new Set(me.workspaces.map((w) => w.id))].sort().join();
+    if (opts.refreshFeeds || !me || moved || Date.now() - Number(kvGet(ctx.db, "me_refreshed_at") || 0) >= ctx.config.goals_refresh_ms) {
       kvSet(ctx.db, "me_refreshed_at", String(Date.now()));
       me = await refreshMe(ctx).catch(() => me);
     }

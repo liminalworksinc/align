@@ -182,9 +182,11 @@ const PAGE = 100;
 /**
  * Fetch directives by cursor, up to 20 pages a pass. After each page the cursor moves to the server's `next_cursor`
  * (never backwards), so a page of replays or malformed directives is never fetched again. Returns how many directives
- * were new and stored (replays and out-of-order ones are not counted).
+ * were new and stored (replays and out-of-order ones are not counted). `onReach` gets the ids of the workspaces the
+ * server says this device reaches now (`workspaces`, when the answer has it), so the pass can re-read `/me` at once
+ * when they changed (a workspace given back at an invite, or one lost).
  */
-export async function pollDirectives(ctx: Ctx, onRefresh: (ws: string) => void): Promise<number> {
+export async function pollDirectives(ctx: Ctx, onRefresh: (ws: string) => void, onReach: (ws: string[]) => void = () => undefined): Promise<number> {
   let n = 0;
   for (let i = 0; i < 20; i++) {
     const from = cursor(ctx);
@@ -193,6 +195,7 @@ export async function pollDirectives(ctx: Ctx, onRefresh: (ws: string) => void):
       if (r.status >= 500 || r.status === 429) throw new HttpError(r.status, r.json?.error ?? null, r.json);
       return n;
     }
+    if (i === 0 && Array.isArray(r.json?.workspaces)) onReach(r.json.workspaces.filter((w: unknown): w is string => typeof w === "string"));
     const list: Directive[] = Array.isArray(r.json?.directives) ? r.json.directives : [];
     for (const d of list) {
       const h = handleDirective(ctx, d);

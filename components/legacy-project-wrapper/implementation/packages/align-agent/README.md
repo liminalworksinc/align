@@ -12,7 +12,7 @@ Zero runtime dependencies (Node 24+: `node:sqlite`, `node:crypto`, `fetch`).
 ## Commands
 
 ```
-align login [--server <url>] [--name <device name>]   device flow; key-bound tokens
+align login [--server <url>] [--name <device name>]   device flow; key-bound tokens; names your other paired devices
 align logout                                          revokes this device, wipes tokens and the device key; this
                                                       machine's shares stop (sessions stopped from the web stay
                                                       blocked until `align stop-sharing`). If the server can't be
@@ -40,7 +40,7 @@ align allocation [--workspace W] [--week YYYY-MM-DD] [--refresh] [--json]
                                                       unshared share (local only)
 align steering status [--workspace W]                 steering switch, lines shown this week, lines waiting to report
 align install [--claude] [--codex] [--dry-run]
-align uninstall [--purge]
+align uninstall [--purge]                             --purge also revokes this device first (its key goes)
 align sync                                            one pass: spool, transcripts, outbox, directives, upload;
                                                       exits 1 naming the server when it can't be reached
 align doctor                                          checks plus hook latency
@@ -167,6 +167,11 @@ what was added.
 - `--dry-run` prints the plan and writes nothing. A reinstall that changes nothing writes no backup. `align uninstall`
   deletes the plugin folder, removes only Align's Codex handlers (and the backups Align made of those files) and keeps
   `ALIGN_HOME` unless `--purge`.
+
+Workspaces: a device reaches the workspaces you ticked when you approved it. When you accept an invite to a workspace
+(joining it, or rejoining after being removed), the invite page lists your paired devices: tick a device there and its
+next sync picks the workspace up (`align sync` and the sessions that lost it say so once), with no `align login`, so
+shares in your other workspaces carry on.
 
 ## State (`ALIGN_HOME`, default `~/.align`, 0700, must be owned by you)
 

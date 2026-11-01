@@ -8,6 +8,7 @@ import type { Principal, WebPrincipal } from "./http";
 import { config } from "../config";
 import { event } from "./events";
 import { take } from "./limits";
+import { addWorkspaceToDevices, liveDevicesOf } from "./devices";
 import { deleteMemberSessions, onMemberRemoved } from "./lifecycle";
 import { cancelDeparture, noteDeparture, personName, RESTORE_DAYS } from "./retention";
 import { workspaceSteering, writeSteering } from "./steering";
@@ -304,8 +305,11 @@ function inviteByToken(token: string): InviteRow {
   return r;
 }
 
-export function previewInvite(token: string, user: { email: string }) {
+/** The preview also lists, for the invited person only, their paired devices that are not revoked (`devices`: id,
+ *  name, last seen), so the accept page can offer to give some of them this workspace (owner decision 2026-11-01). */
+export function previewInvite(token: string, user: { id: string; email: string }) {
   const r = inviteByToken(token);
+  const matches = r.email === user.email.toLowerCase();
   const ws = get<{ name: string }>("SELECT name FROM v2_workspaces WHERE id = ?", r.ws_id);
   const team = r.team_id ? get<{ id: string; name: string }>("SELECT id, name FROM v2_pods WHERE ws_id = ? AND id = ?", r.ws_id, r.team_id) : undefined;
   return {
@@ -313,17 +317,27 @@ export function previewInvite(token: string, user: { email: string }) {
     role: r.role,
     team: team ?? null,
     team_role: team ? r.team_role : null,
-    email_matches: r.email === user.email.toLowerCase(),
+    email_matches: matches,
     invited_email: r.email,
+    devices: matches ? liveDevicesOf(user.id).map((d) => ({ id: d.id, name: d.name, last_seen_at: d.last_seen_at ?? d.created_at })) : [],
   };
 }
 
-export async function acceptInvite(token: string, user: { id: string; email: string }, emailVerified: boolean) {
+/**
+ * Join by invite. `deviceIds` are paired devices of the person's own (not revoked) that get this workspace too, in the
+ * same transaction: a re-invited person's devices lost it when they were removed, and a pairing grants only the
+ * workspaces chosen then (owner decision 2026-11-01). Giving a device a workspace is a device grant, so it needs a
+ * recent sign-in (`requireRecent` throws 403 reauth_required); another person's, a revoked or an unknown device is 404,
+ * and nothing is joined.
+ */
+export async function acceptInvite(token: string, user: { id: string; email: string }, emailVerified: boolean, deviceIds: string[] = [], requireRecent: () => void = () => undefined) {
   const r = inviteByToken(token);
   if (r.email !== user.email.toLowerCase()) throw new V2Error(403, "email_mismatch", "This invite is for a different email address");
   // When hosted, the sign-in method (Google, GitHub or an email code) must have verified the address.
   if (config().hosted && !emailVerified) throw new V2Error(403, "email_unverified", "Your sign-in provider has not verified this email address");
+  if (deviceIds.length) requireRecent();
   const at = nowIso();
+  let devices: string[] = [];
   await tx(() => {
     if (get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", r.ws_id, user.id)) throw conflict("already_member", "You are already a member");
     checkMemberCap(r.ws_id, false);
@@ -335,11 +349,12 @@ export async function acceptInvite(token: string, user: { id: string; email: str
     } else r.team_id = null;
     run("UPDATE v2_invites SET accepted_at = ?, accepted_by = ? WHERE id = ?", at, user.id, r.id);
     audit(r.ws_id, user.id, "invite.accepted", r.id, at);
+    devices = addWorkspaceToDevices(user.id, r.ws_id, deviceIds, at);
     event("invite_accepted", { ws: r.ws_id, user: user.id, props: { role: r.role }, at });
     // The workspace's second member (once, however many join or leave later).
     if ((get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_members WHERE ws_id = ?", r.ws_id)?.n ?? 0) >= 2) event("second_member_joined", { ws: r.ws_id, user: user.id, at });
   });
-  return { workspace_id: r.ws_id, role: r.role, team_id: r.team_id };
+  return { workspace_id: r.ws_id, role: r.role, team_id: r.team_id, device_ids: devices };
 }
 
 // ---- teams (stored as pods) ----
