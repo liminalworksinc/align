@@ -142,9 +142,10 @@ Requests and holds are sent from the web (cookie): `GET`/`POST /api/v2/workspace
 In-flight work signals for agents toward related goals. Deterministic metadata from the user's own hooks, never model
 output, prompts, tool output or file contents.
 `POST /api/v2/workspaces/:ws/activity` (Bearer) `{ "items": [ { "session_key", "kind": "edit"|"commit"|"task"|"claim",
-"at", "repo_id": hex, "path_hash": hex|null, "path": repo-relative string|null, "text": string|null } ] }` → `{ "accepted" }`.
-At most 200 items and 128 KB. Items for sessions this device didn't share, sessions not in `shared`, or older than 24 h
-are skipped. `path` and `text` are sent only when the user turned on work signals (`align share ... --signals`);
+"at", "repo_id": hex, "path_hash": hex|null, "path": repo-relative string|null, "text": string|null } ] }` →
+`{ "accepted", "refused": [ { "index", "reason": "clock_skew"|"too_old"|"not_shared" } ], "server_time" }`.
+At most 200 items and 128 KB. Items for sessions this device didn't share, sessions not in `shared`, more than 5 minutes
+ahead or older than 24 h are skipped and listed in `refused`. `path` and `text` are sent only when the user turned on work signals (`align share ... --signals`);
 otherwise only `path_hash` goes up. `repo_id` = sha256(ws + "\0repo\0" + normalized git remote) so clones on different
 machines match; `path_hash` = sha256(repo_id + "\0" + repo-relative path). Absolute and `..` paths are refused.
 Kept 24 hours; a `claim` 1 hour. The session's open epoch's goal is recorded with each item.
@@ -210,8 +211,9 @@ Additive fields; older agents ignore them. Spec: `goals-and-proposals`, `workspa
 - `PATCH /api/v2/workspaces/:ws { "name"?, "steering"?: "on"|"off" }` (cookie, workspace owner) → `{ id, name, steering }`.
   `GET /api/v2/workspaces/:ws` includes `workspace.steering`.
 - `POST /api/v2/workspaces/:ws/steering` (Bearer) `{ "events": [ { "session_key", "goal_id", "suggested_goal_id",
-  "share", "target", "at" } ] }`, at most 100 → `{ "accepted" }`. Only this device's own shared sessions count; others,
-  and times more than 5 minutes ahead or 14 days back, are skipped; a repeat is stored once.
+  "share", "target", "at" } ] }`, at most 100 → `{ "accepted", "refused": [ { "index", "reason" } ], "server_time" }`.
+  Only this device's own shared sessions count; others (`not_shared`), and times more than 5 minutes ahead
+  (`clock_skew`) or 14 days back (`too_old`), are skipped and listed in `refused`; a repeat is stored once.
 - Steering rule (agent, `packages/align-agent/src/shared/steering.ts`): with steering on, a shared session at
   `SessionStart` (`startup` or `clear`), not stopped or held, bound to a goal at least 10 points over its target and not
   held, while another active goal it can read is not held, has a target above 0 and is at least 10 points under, gets one

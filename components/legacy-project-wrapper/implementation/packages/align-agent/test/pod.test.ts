@@ -16,7 +16,7 @@ import { ENVELOPE_MAX } from "../src/shared/envelope.ts";
 import { writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, localId } from "../src/shared/layout.ts";
 import type { FeedFile, Goal, GoalSnapshot, Harness, InjectedState } from "../src/shared/types.ts";
-import { ctxFor, makeEnv, runHook, type TestEnv } from "./helpers.ts";
+import { ctxFor, makeEnv, runHook, touch, type TestEnv } from "./helpers.ts";
 
 const envs: TestEnv[] = [];
 after(() => envs.forEach((e) => e.cleanup()));
@@ -213,6 +213,7 @@ describe("pod awareness", () => {
     runHook(t, "codex", "SessionStart", { session_id: sid, source: "startup", cwd: dir });
     const patch = "*** Begin Patch\n*** Update File: trinity_sched/preempt.py\n@@\n-a\n+b\n*** End Patch\n";
     runHook(t, "codex", "PreToolUse", { session_id: sid, turn_id: "t1", cwd: dir, tool_name: "apply_patch", tool_input: { command: patch } });
+    touch(path.join(dir, "trinity_sched/preempt.py"));
     writePod(t, [
       { kind: "edit", path: null, path_hash: pathHash(id.repo_id, "trinity_sched/preempt.py"), repo_id: id.repo_id },
       { kind: "edit", path: null, path_hash: pathHash(id.repo_id, "x/other.py"), repo_id: id.repo_id },

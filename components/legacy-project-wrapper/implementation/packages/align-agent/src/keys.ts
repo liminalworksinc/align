@@ -2,7 +2,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { layout } from "./shared/layout.ts";
-import { b64url, writeFileAtomic } from "./shared/fsx.ts";
+import { b64url } from "./shared/fsx.ts";
 import type { Harness } from "./shared/types.ts";
 
 export class DeviceSecretError extends Error {}
@@ -57,11 +57,13 @@ export interface DeviceKey {
   sign(message: string): string;
 }
 
-/** Fresh Ed25519 keypair stored as PKCS#8 PEM in a 0600 file (not the Keychain, per plan). */
-export function generateDeviceKey(alignHome: string): DeviceKey {
+/** A fresh Ed25519 keypair, in memory only: `align login` writes it (PKCS#8 PEM, a 0600 file, not the Keychain, per
+ *  plan) together with the new credentials once the device is paired, so the key in use is never replaced by a
+ *  pairing that doesn't finish. */
+export function newDeviceKey(): DeviceKey & { pem: string } {
   const { privateKey } = crypto.generateKeyPairSync("ed25519");
-  writeFileAtomic(layout.deviceKey(alignHome), privateKey.export({ type: "pkcs8", format: "pem" }) as string, 0o600);
-  return loadDeviceKey(alignHome) as DeviceKey;
+  const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+  return { ...keyFromPem(pem), pem };
 }
 
 export function loadDeviceKey(alignHome: string): DeviceKey | null {
@@ -71,6 +73,10 @@ export function loadDeviceKey(alignHome: string): DeviceKey | null {
   } catch {
     return null;
   }
+  return keyFromPem(pem);
+}
+
+function keyFromPem(pem: string): DeviceKey {
   const priv = crypto.createPrivateKey(pem);
   const pub = crypto.createPublicKey(priv);
   const jwk = pub.export({ format: "jwk" }) as { x: string };

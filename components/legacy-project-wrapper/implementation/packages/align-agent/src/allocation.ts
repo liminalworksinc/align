@@ -2,7 +2,7 @@
 // how much of this machine's agent time was outside shared sessions, for the hooks' once-a-week note.
 import fs from "node:fs";
 import type { Ctx } from "./context.ts";
-import { api } from "./api.ts";
+import { postTimed } from "./api.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
 import { layout } from "./shared/layout.ts";
@@ -37,10 +37,11 @@ export async function uploadSteering(ctx: Ctx): Promise<number> {
     for (let i = 0; i < list.length; i += BATCH) {
       const chunk = list.slice(i, i + BATCH);
       const events = chunk.map(({ e }) => ({ session_key: e.session_key, goal_id: e.goal_id, suggested_goal_id: e.suggested_goal_id, share: e.share, target: e.target, at: e.at }));
-      const r = await api(ctx, "POST", `/api/v2/workspaces/${encodeURIComponent(ws)}/steering`, { body: { events } }).catch(() => null);
+      // Times go up on the server's clock; refusals are logged, never dropped silently (C3-4).
+      const { r, refused } = await postTimed(ctx, `/api/v2/workspaces/${encodeURIComponent(ws)}/steering`, "events", events, "steering lines");
       if (!r || r.status >= 500 || r.status === 401) return sent; // try again next pass
       for (const c of chunk) fs.rmSync(c.file, { force: true });
-      if (r.status >= 200 && r.status < 300) sent += chunk.length;
+      if (r.status >= 200 && r.status < 300) sent += chunk.length - refused.length;
     }
   }
   return sent;

@@ -12,7 +12,7 @@ import { readJson } from "../src/shared/fsx.ts";
 import type { AsksFile, HotState } from "../src/shared/types.ts";
 import { FakeServer } from "./fake-server.ts";
 import { pathHash, repoIdentity } from "../src/hooks/siblings.ts";
-import { appendLines, claudeAssistant, claudeUser, ctxFor, makeEnv, rows, runCli, runHook, usage, waitFor, writeLines, type TestEnv } from "./helpers.ts";
+import { appendLines, claudeAssistant, claudeUser, ctxFor, makeEnv, rows, runCli, runHook, touch, usage, waitFor, writeLines, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 after(async () => {
@@ -343,6 +343,7 @@ describe("e2e", () => {
     runHook(t, "claude", "UserPromptSubmit", { session_id: A, prompt_id: "a1", prompt: "::align task SSO wiring", cwd: named });
     for (const [sid, cwd] of [[A, named], [B, hashed]]) {
       runHook(t, "claude", "PreToolUse", { session_id: sid, cwd, tool_name: "Edit", tool_input: { file_path: path.join(cwd, "src/sso.ts") } });
+      touch(path.join(cwd, "src/sso.ts"));
       runHook(t, "claude", "PreToolUse", { session_id: sid, cwd, tool_name: "Bash", tool_input: { command: 'git commit -am "Wire SSO callback"' } });
     }
     const kA = hot(t, A)!.share!.session_key;

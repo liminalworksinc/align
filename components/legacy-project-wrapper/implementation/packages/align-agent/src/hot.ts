@@ -1,6 +1,7 @@
 // Hot files are a projection of the database, rewritten whole after every change, so the CLI, the sync job and the hooks can all
 // update state without racing on the files. Hooks read only these files.
 import type { Ctx } from "./context.ts";
+import { kvGet } from "./db.ts";
 import { getSession } from "./ledger.ts";
 import { layout } from "./shared/layout.ts";
 import { removeFile, writeJsonAtomic } from "./shared/fsx.ts";
@@ -58,6 +59,13 @@ function releasedHolds(ctx: Ctx, lid: string): NonNullable<HotState["released_ho
     .map((r) => ({ directive_id: r.directive_id, goal_title: r.goal_title, by: r.by }));
 }
 
+/** The resume that lifted this session's stop, while no later stop replaced it. */
+function resumedBy(ctx: Ctx, lid: string): string | null {
+  const latch = ctx.db.prepare("SELECT stopped, directive_id FROM latches WHERE local_id=?").get(lid) as { stopped: number; directive_id: string } | undefined;
+  const id = kvGet(ctx.db, `resumed:${lid}`);
+  return latch && !latch.stopped && id && latch.directive_id === id ? id : null;
+}
+
 export function renderHot(ctx: Ctx, lid: string): HotState | null {
   const s = getSession(ctx.db, lid);
   if (!s) return null;
@@ -92,6 +100,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     context_goals: live && live.goal_json ? contextGoals(ctx.home, live.workspace_id, (JSON.parse(live.goal_json) as GoalSnapshot).id) : [],
     requests: live ? hotRequests(ctx, lid) : [],
     released_holds: live ? releasedHolds(ctx, lid) : [],
+    resumed: resumedBy(ctx, lid),
     epochs_seen: (ctx.db.prepare("SELECT epoch_id FROM epochs WHERE local_id=? ORDER BY rowid DESC LIMIT 10").all(lid) as { epoch_id: string }[]).map((e) => e.epoch_id),
     updated_at: new Date().toISOString(),
   };

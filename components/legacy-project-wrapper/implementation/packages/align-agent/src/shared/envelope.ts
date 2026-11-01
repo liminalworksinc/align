@@ -227,6 +227,11 @@ export function renderAsksDelta(ta: TeamAsks, added: AcceptedAsk[], removed: num
   return `[Align] Accepted ask of team ${team}: ${quoted(added[0].text, 30)}.${end}`.slice(0, DELTA_MAX);
 }
 
+/** The person is no longer in the bound goal's team, so its accepted asks are no longer listed here (C3-10). */
+export function renderAsksGone(ta: TeamAsks): string {
+  return `[Align] Team ${quoted(ta.team.name, 40)}: you are no longer in this team, so its accepted asks are no longer shown here; they were not closed. No added authority.`.slice(0, DELTA_MAX);
+}
+
 /** The text a measure is compared by when telling an agent what changed. */
 export const measureKey = (m: Measure): string => `${clean(m.text, 200)}${m.target ? ` (target: ${clean(m.target, 60)})` : ""}`;
 

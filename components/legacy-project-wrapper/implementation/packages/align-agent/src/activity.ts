@@ -7,10 +7,10 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Ctx } from "./context.ts";
-import { api } from "./api.ts";
+import { api, postTimed } from "./api.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { getSession } from "./ledger.ts";
-import { pathHash, readActs, record, relTo, repoIdentity, type Act, type PodFeed, type RemoteItem } from "./hooks/siblings.ts";
+import { madeActs, pathHash, readActs, record, relTo, repoIdentity, type Act, type PodFeed, type RemoteItem } from "./hooks/siblings.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
 import { layout } from "./shared/layout.ts";
@@ -146,7 +146,7 @@ function newActs(file: string, from: number): { acts: Act[]; next: number } {
         /* torn line */
       }
     }
-    return { acts, next: from + Buffer.byteLength(text.slice(0, end + 1)) };
+    return { acts: madeActs(acts), next: from + Buffer.byteLength(text.slice(0, end + 1)) };
   } finally {
     fs.closeSync(fd);
   }
@@ -182,9 +182,11 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
     }
     let ok = true;
     for (let i = 0; i < items.length && ok; i += BATCH) {
-      const r = await api(ctx, "POST", `/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/activity`, { body: { items: items.slice(i, i + BATCH) } }).catch(() => null);
+      // Times go up on the server's clock; refusals are logged, never dropped silently (C3-4).
+      const batch = items.slice(i, i + BATCH);
+      const { r, refused } = await postTimed(ctx, `/api/v2/workspaces/${encodeURIComponent(s.workspace_id)}/activity`, "items", batch, "activity");
       ok = !!r && r.status >= 200 && r.status < 300;
-      if (ok) sent += Math.min(BATCH, items.length - i);
+      if (ok) sent += batch.length - refused.length;
     }
     if (ok) kvSet(ctx.db, offKey, String(next)); // on failure the same lines go up on the next pass
   }

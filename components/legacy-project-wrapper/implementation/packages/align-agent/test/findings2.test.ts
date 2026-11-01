@@ -4,6 +4,7 @@
 // reaches the next prompt, no workspaces is not an error, login survives a transient 5xx, a re-share keeps its goal, a
 // logout while the server is unreachable still revokes the device later, and losing a workspace ends its shares here.
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -19,10 +20,12 @@ import { requestShortId } from "../src/shared/envelope.ts";
 import { readJson, writeJsonAtomic } from "../src/shared/fsx.ts";
 import { layout, listSpool, localId } from "../src/shared/layout.ts";
 import { rulesPath } from "../src/shared/rules.ts";
+import { queueSteering } from "../src/shared/steering.ts";
+import { record } from "../src/hooks/siblings.ts";
 import type { FeedFile, Goal, GoalSnapshot, SpoolRecord, WireRequest } from "../src/shared/types.ts";
 import { ingestSpool } from "../src/sync.ts";
 import { FakeServer } from "./fake-server.ts";
-import { claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runHook, usage, writeLines, type TestEnv } from "./helpers.ts";
+import { CLI, claudeAssistant, claudeUser, ctxFor, makeEnv, runCli, runHook, touch, usage, writeLines, type TestEnv } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 after(async () => {
@@ -309,6 +312,160 @@ describe("E2E cycle 2: clock", () => {
   });
 });
 
+describe("E2E cycle 3: times on the server's clock", () => {
+  /** A checkout with a remote, so the sync pass reports the session's activity. */
+  const gitRepo = (dir: string) => {
+    fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    fs.writeFileSync(path.join(dir, ".git", "config"), '[remote "origin"]\n\turl = https://github.example.edu/lab/c3.git\n');
+  };
+
+  test("C3-4: with a clock 10 minutes ahead that Align doesn't know about yet, activity and steering lines are refused once as clock_skew, the offset is learned, and they go up on the server's clock (none lost)", async () => {
+    const { fake, t, cwd, lid } = await sharedWorld();
+    gitRepo(cwd);
+    const skew = skewEnv(t, 10 * 60_000);
+    const c = loadCredentials(t.home)!;
+    delete c.clock_offset_ms;
+    saveCredentials(t.home, c);
+    fake.noDate = true; // only a refusal says the server's time
+    const local = new Date(Date.now() + 10 * 60_000).toISOString();
+    record(t.home, lid, [{ t: "edit", at: local, p: path.join(cwd, "fast.txt") }]);
+    touch(path.join(cwd, "fast.txt"), new Date(Date.parse(local) + 100)); // written on that (fast) clock
+    queueSteering(t.home, { local_id: lid, workspace_id: "ws_acme", goal_id: "g_ship", suggested_goal_id: "g_perf", share: 58, target: 10, at: local });
+    const r = await runCli(t, ["sync"], skew);
+    assert.equal(r.code, 0, r.stderr);
+    const now = Date.now();
+    const edits = fake.activity.filter((a) => a.kind === "edit");
+    assert.equal(edits.length, 1, "the edit reached the server");
+    assert.ok(Date.parse(edits[0].at) <= now + 60_000, `activity at on the server's clock (${edits[0].at})`);
+    assert.equal(fake.steeringEvents.length, 1, "the steering line reached the server");
+    assert.ok(Date.parse(fake.steeringEvents[0].at) <= now + 60_000, `steering at on the server's clock (${fake.steeringEvents[0].at})`);
+    assert.ok(Math.abs((loadCredentials(t.home)!.clock_offset_ms ?? 0) + 600_000) < 30_000, "the offset was learned");
+    assert.match(fs.readFileSync(path.join(layout.logs(t.home), "align.log"), "utf8"), /clock: the server refused activity as clock_skew/);
+  });
+
+  test("C3-4: an item the server still refuses is logged with why, never dropped silently", async () => {
+    const { fake, t, cwd, lid, skey } = await sharedWorld();
+    gitRepo(cwd);
+    fake.sessions.delete(skey); // the server no longer has the share
+    queueSteering(t.home, { local_id: lid, workspace_id: "ws_acme", goal_id: "g_ship", suggested_goal_id: "g_perf", share: 58, target: 10, at: nowIso() });
+    record(t.home, lid, [{ t: "edit", at: nowIso(), p: path.join(cwd, "a.txt") }]);
+    touch(path.join(cwd, "a.txt"));
+    await runCli(t, ["sync"]);
+    const log = fs.readFileSync(path.join(layout.logs(t.home), "align.log"), "utf8");
+    assert.match(log, /activity: the server refused 1 of 1 \(not_shared\)/);
+    assert.match(log, /steering lines: the server refused 1 of 1 \(not_shared\)/);
+  });
+
+  test("C3-5: usage recorded while the clock ran 10 minutes ahead and sent after it was corrected goes up on its epoch's offset, inside its epoch", async () => {
+    const pre = makeEnv();
+    cleanups.push(() => pre.cleanup());
+    const skew = skewEnv(pre, 10 * 60_000);
+    const { fake, t, SID, cwd, skey } = await sharedWorld(skew);
+    const local = Date.now() + 10 * 60_000;
+    writeLines(path.join(t.claudeDir, "projects", "-repo", `${SID}.jsonl`), [
+      claudeUser(SID, "p1", new Date(local + 1000).toISOString(), { cwd }),
+      claudeAssistant(SID, "req_c35_1", new Date(local + 2000).toISOString(), usage(10, 5)),
+    ]);
+    runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p1", prompt: "go", cwd }, skew);
+    // The clock is corrected (NTP on reconnect) before the rows go up: this pass runs on the right clock.
+    const r = await runCli(t, ["sync"]);
+    assert.equal(r.code, 0, r.stderr);
+    const now = Date.now();
+    const epoch = [...fake.epochs.values()].filter((e) => e.session_key === skey).sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at))[0];
+    const rows = [...fake.usage.values()].filter((u) => u.session_key === skey);
+    assert.equal(rows.length, 1, "uploaded");
+    assert.ok(Date.parse(rows[0].ts) <= now + 60_000, `not in the future (${rows[0].ts})`);
+    assert.ok(Date.parse(rows[0].ts) >= Date.parse(epoch.starts_at), `inside its epoch (${rows[0].ts} >= ${epoch.starts_at})`);
+  });
+
+  test("C3-5: with a clock 7 minutes behind and no offset known, a session's first start goes up on the server's clock (the pass measures the clock before its first time)", async () => {
+    const { fake, t } = await fakeWorld();
+    const slow = skewEnv(t, -7 * 60_000);
+    const c = loadCredentials(t.home)!;
+    delete c.clock_offset_ms;
+    saveCredentials(t.home, c);
+    const SID = "ffffffff-c350-2222-3333-444444444444";
+    runHook(t, "claude", "SessionStart", { session_id: SID, source: "startup", cwd: t.root }, slow);
+    // Shared in the session; the sync pass's first call is the session's PUT.
+    assert.match(prompt(t, SID, "::align share Ship the v2 confirm", t.root, slow).reason, /sharing requested toward "Ship the v2 onboarding flow"/);
+    const r = await runCli(t, ["sync"], slow);
+    assert.equal(r.code, 0, r.stderr);
+    const ctx = ctxFor(t);
+    const skey = sessionKey(ctx.secret, "ws_acme", "claude-code", SID);
+    ctx.db.close();
+    const started = Date.parse(fake.sessions.get(skey)!.body.started_at);
+    assert.ok(started > Date.now() - 2 * 60_000, `started_at on the server's clock, not 7 minutes early (${new Date(started).toISOString()})`);
+  });
+});
+
+describe("E2E cycle 3: CLI output", () => {
+  test("C3-7: output into a pipe that closed ends quietly (no EPIPE stack trace)", async () => {
+    const { t } = await sharedWorld();
+    const p = spawn(process.execPath, [CLI, "status"], { env: t.env, stdio: ["ignore", "pipe", "pipe"] });
+    p.stdout.destroy(); // `| head -0`: the reader is gone before the first line
+    let stderr = "";
+    p.stderr.on("data", (d) => (stderr += d));
+    const code = await new Promise<number | null>((r) => p.on("close", r));
+    assert.doesNotMatch(stderr, /EPIPE|at out \(/, stderr);
+    assert.equal(code, 0, stderr);
+  });
+
+  test("C3-8: `align share <session> --yes` that the server refuses says why and what to do on stderr and exits 1, never \"is error.\"", async () => {
+    const { fake, t, cwd } = await sharedWorld();
+    const SID = "c3c3c3c3-8888-2222-3333-444444444444";
+    runHook(t, "claude", "SessionStart", { session_id: SID, source: "startup", cwd });
+    const ctx = ctxFor(t);
+    const key = sessionKey(ctx.secret, "ws_acme", "claude-code", SID);
+    ctx.db.close();
+    // Another (never revoked) device holds this session key.
+    fake.sessions.set(key, { ws: "ws_acme", device: "dv_old", body: { harness: "claude-code", started_at: nowIso() }, state: "shared" });
+    const r = await runCli(t, ["share", SID.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"]);
+    assert.equal(r.code, 1, `${r.stdout}\n${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /is error/);
+    assert.match(r.stderr, /^align: session [\w-]{8} was not shared: sharing failed \(not_found\): the server did not take this session from this machine\. .*revoke the old device at http:\/\/127\.0\.0\.1:\d+\/app\/devices/m);
+  });
+});
+
+describe("E2E cycle 3: a web Resume is told", () => {
+  test("a stop lifted from the web is told at the next prompt, once: the user gets a notice and the model a context line", async () => {
+    const { fake, t, SID, cwd, skey } = await sharedWorld();
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [skey], goal: null, binding: null });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal(json(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout).hookSpecificOutput.permissionDecision, "deny");
+    prompt(t, SID, "still there?", cwd);
+    fake.pushDirective({ ws: "ws_acme", kind: "resume", session_keys: [skey], goal: null, binding: null });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const told = prompt(t, SID, "go on", cwd);
+    assert.match(told.systemMessage, /Align: this session was resumed from its Align workspace, so its tools work again\./);
+    assert.match(told.hookSpecificOutput.additionalContext, /\[Align\] This session was resumed from its Align workspace, so its tools are no longer blocked\./);
+    assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: SID, prompt_id: "p-res", prompt: "again", cwd }).stdout, "", "once");
+    assert.equal(runHook(t, "claude", "PreToolUse", { session_id: SID, tool_name: "Bash", cwd }).stdout, "", "tools run");
+  });
+});
+
+describe("E2E cycle 3: a refused edit", () => {
+  test("C3-9: an edit the user refused at the permission check is reported neither to a sibling session nor to the team; one that ran is", async () => {
+    const { fake, t, SID, cwd } = await sharedWorld();
+    fs.mkdirSync(path.join(cwd, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(cwd, ".git", "config"), '[remote "origin"]\n\turl = https://github.example.edu/lab/c3.git\n');
+    // Session A: one shell write the user refuses (the file never appears), one edit that runs.
+    runHook(t, "claude", "PreToolUse", { session_id: SID, cwd, tool_name: "Bash", tool_input: { command: "echo skew-one > s1.txt" } });
+    runHook(t, "claude", "PreToolUse", { session_id: SID, cwd, tool_name: "Write", tool_input: { file_path: path.join(cwd, "ran.txt") } });
+    touch(path.join(cwd, "ran.txt"));
+    // A sibling toward the same goal starts in the folder.
+    const SID2 = "c3c3c3c3-9999-2222-3333-444444444444";
+    runHook(t, "claude", "SessionStart", { session_id: SID2, source: "startup", cwd });
+    assert.equal((await runCli(t, ["share", SID2.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).code, 0);
+    const card = JSON.stringify(prompt(t, SID2, "go", cwd) ?? {});
+    assert.match(card, /edited ran\.txt/);
+    assert.doesNotMatch(card, /s1\.txt/, "the refused write is not reported as made");
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const paths = fake.activity.filter((a) => a.kind === "edit").map((a) => a.path_hash);
+    assert.equal(paths.length, 1, `only the edit that ran goes up (${JSON.stringify(fake.activity)})`);
+  });
+});
+
 describe("E2E cycle 2: sign-out, sharing and workspaces", () => {
   test("N4: `::align share` while signed out is refused, and a folder rule leaves the session private, with no pile of contradictory notices", async () => {
     const { fake, t, cwd } = await sharedWorld();
@@ -389,6 +546,35 @@ describe("E2E cycle 2: sign-out, sharing and workspaces", () => {
     fake.user = { ...fake.user, name: "Sean Renamed" };
     await runCli(t, ["sync"]);
     assert.match((await runCli(t, ["status"])).stdout, /Identity: {3}Sean Renamed <sean@example\.test>/);
+  });
+
+  test("C3-6: on a device with two workspaces and no default, `::align share confirm` after logout and login shares toward the goal it had, in its workspace", async () => {
+    const fake = new FakeServer();
+    await fake.start();
+    cleanups.push(() => fake.stop());
+    fake.workspaces = [...fake.workspaces, { id: "ws_side", name: "Side Co", role: "owner", teams: [] }];
+    fake.goals.set("ws_side", []);
+    const t = makeEnv({ ALIGN_SERVER: fake.url, ...FAST });
+    cleanups.push(() => t.cleanup());
+    assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    assert.equal(readJson<{ default_workspace: string | null }>(layout.me(t.home))?.default_workspace, null, "no default workspace");
+    const SID = "c3c3c3c3-1111-2222-3333-444444444444";
+    const cwd = path.join(t.root, "repo");
+    fs.mkdirSync(cwd, { recursive: true });
+    runHook(t, "claude", "SessionStart", { session_id: SID, source: "startup", cwd });
+    assert.equal((await runCli(t, ["share", "--latest", "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).code, 0);
+    assert.equal((await runCli(t, ["logout"])).code, 0);
+    assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    const reply = prompt(t, SID, "::align share confirm", cwd).reason;
+    assert.equal(reply, 'Align: sharing requested toward "Ship the v2 onboarding flow". It takes effect within a few seconds; your next prompt carries the goal.');
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.match((await runCli(t, ["sessions"])).stdout, /shared \(Acme\)/);
+    const told = prompt(t, SID, "go on", cwd);
+    assert.doesNotMatch(JSON.stringify(told ?? {}), /share failed/);
+    // A session that never had a workspace can't tell which: it says so instead of claiming a share.
+    const SID2 = "c3c3c3c3-1111-2222-3333-555555555555";
+    runHook(t, "claude", "SessionStart", { session_id: SID2, source: "startup", cwd });
+    assert.match(prompt(t, SID2, "::align share confirm", cwd).reason, /more than one workspace and none is the default/);
   });
 
   test("logout while the server is unreachable: the device is revoked at the next sync that reaches it, `align status` says a revoke is pending until then", async () => {

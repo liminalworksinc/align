@@ -205,6 +205,30 @@ export function localKeys(home: string): Set<string> {
   return out;
 }
 
+/**
+ * Edits recorded at PreToolUse that actually happened. The hook runs before the harness's own permission check, so an
+ * edit the user refused is recorded too: it counts only if its file changed at or after the time it was recorded (a
+ * refused one leaves the file as it was, or absent), so it is never reported to sibling sessions or the team as made
+ * (C3-9). Edits the sync pass found in the working tree (`via: "git"`) and every other kind of act are kept.
+ */
+export function madeActs(acts: Act[]): Act[] {
+  const mtimes = new Map<string, number>();
+  const mtime = (p: string) => {
+    if (!mtimes.has(p)) {
+      let m = -Infinity;
+      try {
+        m = fs.statSync(p).mtimeMs;
+      } catch {
+        /* never written */
+      }
+      mtimes.set(p, m);
+    }
+    return mtimes.get(p)!;
+  };
+  // A second of slack for file systems that keep whole-second times.
+  return acts.filter((a) => a.t !== "edit" || a.via || !a.p || mtime(a.p) >= Date.parse(a.at) - 1000);
+}
+
 export function readActs(home: string, lid: string): Act[] {
   let text = "";
   try {
@@ -222,7 +246,7 @@ export function readActs(home: string, lid: string): Act[] {
       /* torn line */
     }
   }
-  return out;
+  return madeActs(out);
 }
 
 interface Sibling {

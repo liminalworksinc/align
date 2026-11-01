@@ -113,6 +113,11 @@ export class FakeServer {
   skewRefusals = 0;
   /** Session and epoch times refused as clock_skew (more than 5 min ahead of this server's clock). */
   timeRefusals = 0;
+  /** Every poll of /device/token answers access_denied (the person denied the pairing in the browser). */
+  denyLogins = false;
+  /** Hold every /device/refresh, before it is processed ("request") or after the server rotated ("answer"), until
+   *  `release` settles: a refresh in flight while something else runs (C3-1). */
+  holdRefresh: { phase: "request" | "answer"; release: Promise<void> } | null = null;
   /** The next n polls of /device/token answer 502 (a server restarting behind a proxy). */
   failTokenPolls = 0;
   /** Answer without a Date header, so a device can learn its clock offset only from a clock_skew answer. */
@@ -344,6 +349,7 @@ export class FakeServer {
         }
         const pend = this.pending.get(body?.device_code);
         if (!pend || pend.issued) return send(400, { error: "expired_token" });
+        if (this.denyLogins) return send(400, { error: "access_denied" });
         pend.polls++;
         if (pend.polls === 1 && this.opts.slowDownFirst) return send(400, { error: "slow_down" });
         if (pend.polls < this.opts.approveAfterPolls) return send(400, { error: "authorization_pending" });
@@ -353,24 +359,27 @@ export class FakeServer {
         return send(200, { device_id: d.id, ...this.issue(d), user: this.user });
       }
       if (req.method === "POST" && p === "/api/v2/device/refresh") {
+        const hold = this.holdRefresh;
+        if (hold?.phase === "request") await hold.release;
+        const answer = (status: number, b: unknown) => (hold?.phase === "answer" ? hold.release.then(() => send(status, b)) : send(status, b));
         const d = this.devices.get(body?.device_id);
-        if (!d || d.revoked) return send(401, { error: "invalid_grant" });
+        if (!d || d.revoked) return answer(401, { error: "invalid_grant" });
         if (d.oldRefresh.has(body.refresh_token)) {
           d.revoked = true;
-          return send(401, { error: "invalid_grant" });
+          return answer(401, { error: "invalid_grant" });
         }
-        if (body.refresh_token !== d.refresh) return send(401, { error: "invalid_grant" });
-        if (Number.isNaN(Date.parse(body.ts))) return send(401, { error: "invalid_grant" });
+        if (body.refresh_token !== d.refresh) return answer(401, { error: "invalid_grant" });
+        if (Number.isNaN(Date.parse(body.ts))) return answer(401, { error: "invalid_grant" });
         const msg = `align-refresh\n${d.id}\n${crypto.createHash("sha256").update(body.refresh_token).digest("hex")}\n${body.ts}`;
         const key = crypto.createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: d.publicKey }, format: "jwk" });
-        if (!crypto.verify(null, Buffer.from(msg), key, Buffer.from(String(body.sig), "base64url"))) return send(401, { error: "invalid_grant" });
+        if (!crypto.verify(null, Buffer.from(msg), key, Buffer.from(String(body.sig), "base64url"))) return answer(401, { error: "invalid_grant" });
         // As lib/v2/devices.ts: a signed refresh from a skewed clock is 400 clock_skew with the server's time, not a revocation.
         if (Math.abs(Date.parse(body.ts) - Date.now()) > 5 * 60_000) {
           this.skewRefusals++;
-          return send(400, { error: "clock_skew", message: "This device's clock is off", server_time: new Date().toISOString() });
+          return answer(400, { error: "clock_skew", message: "This device's clock is off", server_time: new Date().toISOString() });
         }
         this.refreshes++;
-        return send(200, this.issue(d));
+        return answer(200, this.issue(d));
       }
       // ---- authenticated device routes ----
       const dev = this.auth(req);
@@ -406,7 +415,10 @@ export class FakeServer {
           this.timeRefusals++;
           return send(400, { error: "clock_skew", message: "the time is ahead of the server's clock", server_time: new Date().toISOString() });
         };
-        if (sess && sess.device !== dev.id) return send(404, { error: "not_found" });
+        // As lib/v2/sessions.ts: a session whose device signed out (was revoked) is shared again by the same person's new
+        // pairing; any other device's session is not this one's.
+        const reshare = !sub && req.method === "PUT" && !!sess && sess.device !== dev.id && !!this.devices.get(sess.device)?.revoked;
+        if (sess && sess.device !== dev.id && !reshare) return send(404, { error: "not_found" });
         if (!sub && req.method === "PUT") {
           if (!/^[A-Za-z0-9_-]{43}$/.test(key) || !/^[A-Za-z0-9_-]{43}$/.test(body.repo_key)) return send(400, { error: "bad_key" });
           if (ahead(body.started_at)) return skewed();
@@ -504,25 +516,43 @@ export class FakeServer {
       if (m && req.method === "POST") {
         const events = Array.isArray(body?.events) ? body.events : [];
         let accepted = 0;
-        for (const e of events) {
+        // As lib/v2/steering.ts: what isn't taken is listed in `refused` (C3-4).
+        const refused: { index: number; reason: string }[] = [];
+        for (const [index, e] of events.entries()) {
+          if (Date.parse(e.at) > Date.now() + 5 * 60_000) {
+            refused.push({ index, reason: "clock_skew" });
+            continue;
+          }
           const sess = this.sessions.get(e.session_key);
-          if (!sess || sess.device !== dev.id) continue;
+          if (!sess || sess.device !== dev.id) {
+            refused.push({ index, reason: "not_shared" });
+            continue;
+          }
           this.steeringEvents.push({ ...e, ws: m[1] });
           accepted++;
         }
-        return send(200, { accepted });
+        return send(200, { accepted, refused, server_time: new Date().toISOString() });
       }
       m = /^\/api\/v2\/workspaces\/([^/]+)\/activity$/.exec(p);
       if (m && req.method === "POST") {
         const items = Array.isArray(body?.items) ? body.items : [];
         let accepted = 0;
-        for (const it of items) {
+        // As lib/v2/activity.ts: what isn't taken is listed in `refused` (C3-4).
+        const refused: { index: number; reason: string }[] = [];
+        for (const [index, it] of items.entries()) {
+          if (Date.parse(it.at) > Date.now() + 5 * 60_000) {
+            refused.push({ index, reason: "clock_skew" });
+            continue;
+          }
           const sess = this.sessions.get(it.session_key);
-          if (!sess || sess.device !== dev.id) continue;
+          if (!sess || sess.device !== dev.id) {
+            refused.push({ index, reason: "not_shared" });
+            continue;
+          }
           this.activity.push({ ...it, seq: ++this.activitySeq, ws: m[1], harness: sess.body.harness, user: { id: this.user.id, name: this.user.name }, mine: true, goal_id: sess.body.goal_id ?? "g_ship", expires_at: new Date(Date.parse(it.at) + 86_400_000).toISOString() });
           accepted++;
         }
-        return send(200, { accepted });
+        return send(200, { accepted, refused, server_time: new Date().toISOString() });
       }
       if (m && req.method === "GET") {
         const after = Number(url.searchParams.get("after") || 0);

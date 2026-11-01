@@ -6,20 +6,19 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
+import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import {
   api,
   clockWords,
+  commitPairing,
   loadCredentials,
   loadPendingRevoke,
-  markSignedOut,
   NetworkError,
   rawRequest,
   revokePending,
-  saveCredentials,
-  savePendingRevoke,
   SignedOut,
   signedIn,
+  signOutLocally,
   signedOutWords,
   type Credentials,
 } from "./api.ts";
@@ -28,7 +27,7 @@ import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts";
 import { fetchAsks } from "./asks.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
-import { generateDeviceKey } from "./keys.ts";
+import { newDeviceKey } from "./keys.ts";
 import { applyShare, bind, deleteHistory, endSharesIfSignedOut, endSharesSignedOut, PAST_MAX_DAYS, pastSessions, planShare, renderPreview, stopSharing } from "./share.ts";
 import { askLineForPeople, askOrder, readAsks } from "./shared/asks.ts";
 import { gitInfo } from "./shared/anchors.ts";
@@ -137,13 +136,55 @@ function resolveSession(ctx: Ctx, ref: string | undefined, opts: { latest?: bool
   }
   if (!ref) throw new UsageError("missing <session>; use a session id, a prefix, or --latest");
   const rows = ctx.db
-    .prepare("SELECT * FROM sessions WHERE local_id=? OR native_id=? OR local_id LIKE ? OR native_id LIKE ? ORDER BY last_active DESC")
-    .all(ref, ref, `${ref}%`, `${ref}%`) as unknown as SessionListRow[];
+    .prepare(`SELECT * FROM sessions WHERE ${PREFIX_MATCH} ORDER BY last_active DESC`)
+    .all({ ref }) as unknown as SessionListRow[];
   const exact = rows.filter((r) => r.local_id === ref || r.native_id === ref);
   if (exact.length === 1) return exact[0];
   if (rows.length === 1) return rows[0];
   if (!rows.length) throw new UsageError(`no session matches "${ref}"`);
   throw new UsageError(`"${ref}" matches ${rows.length} sessions; use more characters`);
+}
+
+/** A session whose local or native id starts with `:ref`, compared exactly: LIKE would ignore case, which base64url
+ *  ids need, and read their `_` as any character. */
+const PREFIX_MATCH = "substr(local_id, 1, length(:ref)) = :ref OR substr(native_id, 1, length(:ref)) = :ref";
+
+/** Is `arg` an id or id prefix of a session this machine metered (one the hooks only spooled so far included)? */
+function isSessionRef(ctx: Ctx, arg: string): boolean {
+  const known = () => !!ctx.db.prepare(`SELECT 1 FROM sessions WHERE ${PREFIX_MATCH} LIMIT 1`).get({ ref: arg });
+  if (known()) return true;
+  ingestSpool(ctx);
+  return known();
+}
+
+/**
+ * parseArgs for a command that takes a session. Local ids are base64url, so one session in 64 has an id, and so the
+ * 8-character prefix every hint prints (`align stop-sharing <id>`), that starts with "-": an argument that is not one
+ * of the command's options but names a session here is that session, not an unknown option, and so is the value of a
+ * string option (`--session -AbC1234`). Anything else that starts with "-" is still refused as an unknown option.
+ */
+function parseSessionArgs<T extends ParseArgsOptionsConfig>(ctx: Ctx, argv: string[], options: T) {
+  const optionName = (a: string): string | null => {
+    if (a.startsWith("--")) {
+      const name = a.slice(2).split("=")[0];
+      return Object.hasOwn(options, name) ? name : null;
+    }
+    return Object.keys(options).find((k) => options[k].short && a === `-${options[k].short}`) ?? null;
+  };
+  const opts: string[] = [];
+  const positionals: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--") {
+      positionals.push(...argv.slice(i + 1));
+      break;
+    }
+    const name = a.length > 1 && a.startsWith("-") ? optionName(a) : null;
+    if (name && options[name].type === "string" && !a.includes("=") && i + 1 < argv.length && !optionName(argv[i + 1])) opts.push(`--${name}=${argv[++i]}`);
+    else if (name || (a.length > 1 && a.startsWith("-") && !isSessionRef(ctx, a))) opts.push(a);
+    else positionals.push(a);
+  }
+  return parseArgs({ args: [...opts, "--", ...positionals], options, allowPositionals: true });
 }
 
 function realpath(p: string): string {
@@ -224,14 +265,15 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { server: { type: "string" }, name: { type: "string" } }, allowPositionals: false });
   const server = (values.server || ctx.config.server_url).replace(/\/$/, "");
   const deviceName = values.name || ctx.config.device_name || `${os.userInfo().username}'s ${os.hostname().replace(/\.local$/, "")}`;
-  const before = loadCredentials(ctx.home);
   // A device this machine signed out of while the server was unreachable is revoked first, so its sessions end there
   // and can be shared again from the new pairing.
   if (loadPendingRevoke(ctx.home)) {
     const was = loadPendingRevoke(ctx.home)!.device_id;
     if ((await revokePending(ctx)) === "revoked") out(`Revoked device ${was}, which this machine signed out of while the server could not be reached; its sessions stopped sharing there.`);
   }
-  const key = generateDeviceKey(ctx.home);
+  // The new key stays in memory until the device is paired: the pairing in use (key, tokens) is untouched until then,
+  // so an aborted, denied or expired login changes nothing (C3-2).
+  const key = newDeviceKey();
   const a = await rawRequest(server, "POST", "/api/v2/device/authorize", { body: { device_name: deviceName, public_key: key.publicKeyB64 } });
   if (a.status !== 200 || !a.json?.device_code) throw new Error(`device authorize failed: ${a.status} ${a.json?.error || ""}`);
   const { device_code, user_code, verification_uri } = a.json;
@@ -261,13 +303,16 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
         refresh_token: t.json.refresh_token,
         user: t.json.user || null,
       };
-      saveCredentials(ctx.home, creds);
+      // Key and credentials together, under the refresh lock (a sync's refresh in flight finishes first and can't
+      // write the old device's tokens back, C3-1), keeping what revokes the device this pairing replaces.
+      const replaced = await commitPairing(ctx, creds, key.pem);
       saveConfig(ctx.home, { server_url: server });
       ctx.config.server_url = server;
-      // A new pairing replaces the old device: revoke it while its access token still works (so the server ends its
-      // shares), and end its shares here; each session is told how to share it again.
-      if (before && !before.signed_out && before.access_token && before.device_id !== creds.device_id) {
-        await rawRequest(before.server_url, "DELETE", "/api/v2/devices/self", { headers: { authorization: `Bearer ${before.access_token}` } }).catch(() => undefined);
+      // The replaced device is revoked now (with its access token, or a refresh signed with its key when that has
+      // expired, C3-3), so the server ends its shares; when the server can't be told, the next contact does it. Its
+      // shares end here too; each session is told how to share it again.
+      if (replaced && (await revokePending(ctx)) === "pending") {
+        err(`align: could not revoke this machine's earlier device ${replaced}. Align revokes it the next time it reaches the server (the next \`align sync\`); until then its sessions still show as shared there.`);
       }
       const ended = endSharesSignedOut(ctx);
       if (ended) out(`${ended} session(s) shared from this machine's earlier sign-in stopped sharing; \`::align share\` in a session shares it again.`);
@@ -310,28 +355,10 @@ async function cmdLogout(ctx: Ctx): Promise<void> {
       revoked = e instanceof SignedOut;
     }
   }
-  // The server could not be told: keep what revokes the device later (its tokens and key, in a 0600 file of their
-  // own), so the next contact (a sync pass, or the next `align login`) revokes it before anything else.
-  const latest = loadCredentials(ctx.home) || c;
-  if (!revoked) {
-    let keyPem: string | null = null;
-    try {
-      keyPem = fs.readFileSync(layout.deviceKey(ctx.home), "utf8");
-    } catch {
-      keyPem = null;
-    }
-    savePendingRevoke(ctx.home, {
-      server_url: latest.server_url,
-      device_id: latest.device_id,
-      access_token: latest.access_token,
-      access_expires_at: latest.access_expires_at,
-      refresh_token: latest.refresh_token,
-      key_pem: keyPem,
-      since: new Date().toISOString(),
-    });
-  }
-  markSignedOut(ctx.home, "logout");
-  fs.rmSync(layout.deviceKey(ctx.home), { force: true });
+  // The server could not be told: keep what revokes the device later (its latest tokens and key, in a 0600 file of
+  // their own), so the next contact (a sync pass, or the next `align login`) revokes it before anything else. Under the
+  // refresh lock, so a refresh in flight can't write tokens back afterwards.
+  await signOutLocally(ctx, c.device_id, revoked);
   const ended = endSharesSignedOut(ctx);
   out("Signed out. Tokens and the device key were removed; local metering continues.");
   if (ended) out(`${ended} shared session(s) stopped sharing. Sessions stopped from the web stay blocked until you run \`align stop-sharing <session>\`.`);
@@ -477,21 +504,17 @@ async function goalFor(ctx: Ctx, wsId: string, ref: string): Promise<Goal | null
 }
 
 async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      latest: { type: "boolean" },
-      cwd: { type: "string" },
-      dir: { type: "boolean" },
-      workspace: { type: "string" },
-      goal: { type: "string" },
-      alias: { type: "string" },
-      from: { type: "string" },
-      signals: { type: "boolean" },
-      past: { type: "string" },
-      yes: { type: "boolean", short: "y" },
-    },
+  const { values, positionals } = parseSessionArgs(ctx, argv, {
+    latest: { type: "boolean" },
+    cwd: { type: "string" },
+    dir: { type: "boolean" },
+    workspace: { type: "string" },
+    goal: { type: "string" },
+    alias: { type: "string" },
+    from: { type: "string" },
+    signals: { type: "boolean" },
+    past: { type: "string" },
+    yes: { type: "boolean", short: "y" },
   });
   await needLogin(ctx);
   if (!values.goal) throw new UsageError("--goal <ref|none> is required");
@@ -529,6 +552,14 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
   kvSet(ctx.db, `signals:${session.local_id}`, values.signals ? "1" : "0");
   await tryFlush(ctx);
   const after = getShare(ctx, session.local_id);
+  if (after?.state === "error" || after?.state === "stopped") {
+    // The server refused it: say why and what to do (the session's own notice has the same words), never "is error." (C3-8).
+    const notice = ctx.db.prepare("SELECT text FROM notices WHERE local_id=? AND id LIKE ? ORDER BY created_at DESC LIMIT 1").get(session.local_id, `${session.local_id}/share_err_%`) as { text: string } | undefined;
+    const why = notice ? notice.text.replace(/^Align: /, "") : `the server refused it (${after.error || after.state}). This session stays private.`;
+    err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${why}`);
+    process.exitCode = 1;
+    return;
+  }
   out(`Session ${session.local_id.slice(0, 8)} is ${after?.state === "pending" ? "queued to share (offline; the next sync retries)" : after?.state}.`);
 }
 
@@ -662,12 +693,12 @@ async function cmdConfig(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 async function cmdStopSharing(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values: dv, positionals: dp } = parseArgs({ args: argv, allowPositionals: true, options: { dir: { type: "boolean" } } });
+  const { values: dv, positionals: dp } = parseSessionArgs(ctx, argv, { dir: { type: "boolean" } });
   if (dv.dir) {
     const removed = removeRule(ctx.home, dp[0] || process.cwd());
     return out(removed ? `New sessions in ${removed.dir} are private again. Already shared sessions keep sharing until you stop them.` : "No folder rule covers that folder.");
   }
-  const { positionals } = parseArgs({ args: argv, allowPositionals: true, options: {} });
+  const { positionals } = parseSessionArgs(ctx, argv, {});
   prepare(ctx);
   const s = resolveSession(ctx, positionals[0]);
   stopSharing(ctx, s.local_id);
@@ -676,7 +707,7 @@ async function cmdStopSharing(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 async function cmdDeleteHistory(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { yes: { type: "boolean", short: "y" } } });
+  const { values, positionals } = parseSessionArgs(ctx, argv, { yes: { type: "boolean", short: "y" } });
   prepare(ctx);
   const s = resolveSession(ctx, positionals[0]);
   out("This hard-deletes this session's shared usage and epochs on the server. Goal and workspace totals will change. Local metering is kept.");
@@ -687,7 +718,7 @@ async function cmdDeleteHistory(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 async function cmdBind(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { goal: { type: "string" } } });
+  const { values, positionals } = parseSessionArgs(ctx, argv, { goal: { type: "string" } });
   prepare(ctx);
   if (!values.goal) throw new UsageError("--goal <ref|none> is required");
   const s = resolveSession(ctx, positionals[0]);
@@ -740,7 +771,7 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
 
 /** `align requests`: what people who can approve a session's goal asked of it, and the developer's answers. */
 async function cmdRequests(ctx: Ctx, argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { all: { type: "boolean" }, json: { type: "boolean" }, session: { type: "string" } } });
+  const { values, positionals } = parseSessionArgs(ctx, argv, { all: { type: "boolean" }, json: { type: "boolean" }, session: { type: "string" } });
   ingestSpool(ctx);
   const [sub, ref] = positionals;
   if (!sub) {
@@ -1047,6 +1078,14 @@ const invokedDirectly = (() => {
 })();
 
 if (invokedDirectly) {
+  // Output into a pipe that closed (`align status | head -3`): stop quietly, as other command-line tools do, instead of
+  // an unhandled EPIPE stack trace (C3-7).
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (e: NodeJS.ErrnoException) => {
+      if (e.code === "EPIPE") process.exit(process.exitCode ?? 0);
+      throw e;
+    });
+  }
   main(process.argv.slice(2)).catch((e) => {
     err(`align: ${(e as Error).message}`);
     process.exitCode = e instanceof UsageError ? 2 : 1;

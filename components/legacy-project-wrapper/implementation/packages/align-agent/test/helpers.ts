@@ -71,6 +71,15 @@ export function runCli(t: TestEnv, args: string[], extraEnv: NodeJS.ProcessEnv =
   });
 }
 
+/** What an edit tool does once its PreToolUse hook let it run: write the file (now, or at `at`). Align reports an edit
+ *  only if its file changed after the hook recorded it (C3-9). */
+export function touch(file: string, at?: Date): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, "");
+  const when = at ?? new Date();
+  fs.utimesSync(file, when, when);
+}
+
 export function writeLines(file: string, lines: unknown[], trailingNewline = true): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, lines.map((l) => (typeof l === "string" ? l : JSON.stringify(l))).join("\n") + (trailingNewline ? "\n" : ""));

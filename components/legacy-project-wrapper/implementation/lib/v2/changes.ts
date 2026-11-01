@@ -31,7 +31,10 @@ import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evid
 // requester and then back to that set, so it must be readable by both (C2 N1). A rebase refused for a dependency an
 // approver's counter added says whose suggestion added it, never "you added". A counter keeps the request's
 // dependencies its author can't read, as the goal form does (C2 N2). The propose form offers only the goals the set
-// can read (dependencyChoices, C2 F5).
+// can read (dependencyChoices, C2 F5), and the counter form only the goals the requester and the set can read.
+// The approval set can change after a dependency was added (someone joins as a lead): approve, approve_and_launch and
+// launch are refused (409 dependency_not_visible) for a decider who can't read a dependency the request adds, so
+// nobody approves or publishes what they can't see (C3).
 // A reader still sees only the dependencies they can read, with the others counted (diff.hidden_depends_on).
 // Everyone who can read the goal can read its requests (viewers too); viewers can't act. A request is its own
 // decision record once approved or rejected.
@@ -129,6 +132,13 @@ const DEPENDENCY_READERS = {
   counter: "The person who asked can't see a goal you added as a dependency, so they couldn't see what they accept. Remove it from your suggestion.",
   counter_approvers: "Someone who decides on this goal can't see a goal you added as a dependency, so they couldn't see what they approve once it is accepted. Remove it from your suggestion, or ask that goal's owner to share it with them first.",
 } as const;
+/** A decision refused because the decider can't read a dependency the request adds (the approval set, or what they can
+ *  read, changed after it was added): what they can do, naming no goal. Before approval the requester can still change
+ *  the request; an approved one can only be launched by someone who can see it, or proposed again. */
+const decisionRefusedFor = (requester: string) =>
+  `This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask ${memberName(requester)} to withdraw it, or to rebase it without that dependency.`;
+const launchRefusedFor = (requester: string) =>
+  `This change adds a dependency on a goal you can't see, so you can't launch what it publishes. Ask someone who decides on this goal and can see it to launch it, or ask ${memberName(requester)} to propose the change again without that dependency.`;
 /** A rebase refused for a dependency someone else's counter added (the approval set changed since): whose it was. */
 const rebaseRefusedFor = (author: string) =>
   `Someone who decides on this goal can't see a goal that ${memberName(author)}'s suggestion added as a dependency, so they couldn't see what they approve. Withdraw this request and propose the change again without it, or ask that goal's owner to share it with them first.`;
@@ -163,11 +173,25 @@ function dependencyAddedBy(revs: RevisionRow[], dep: string): string | null {
 
 /** The goals a change request from this reader on `goalId` may add as a dependency: the goals they can read that every
  *  member of the goal's effective approval set (for them as the requester) can read too, so the propose form offers
- *  only what the server accepts (C2 F5). null when they may not propose (a viewer, the owner, a closed goal). */
-export function dependencyChoices(pp: PolicyPrincipal, goalId: string): string[] | null {
+ *  only what the server accepts (C2 F5). null when they may not propose (a viewer, the owner, a closed goal). With
+ *  `counterOf` (a request on that goal), the goals a counter from this reader may add: readable by them, the requester
+ *  and the request's approval set (404 for a request not on the goal; null when they may not counter it). */
+export function dependencyChoices(pp: PolicyPrincipal, goalId: string, counterOf?: string): string[] | null {
   const g = visibleGoal(pp, goalId);
-  if (pp.wsRole === "viewer" || g.owner_id === pp.userId || g.status !== "active") return null;
-  const deciders = effectiveSet(g, pp.userId).map((u) => memberPrincipal(pp.wsId, u));
+  if (pp.wsRole === "viewer" || g.status !== "active") return null;
+  let readers: string[];
+  if (counterOf) {
+    // A counter on that request: what it adds goes to the requester, who accepts it, and then to the approval set.
+    const r = crRow(pp.wsId, counterOf);
+    if (!r || r.goal_id !== g.id) throw notFound();
+    const set = effectiveSet(g, r.requester_id);
+    if (r.state !== "pending" || !set.includes(pp.userId)) return null;
+    readers = [r.requester_id, ...set];
+  } else {
+    if (g.owner_id === pp.userId) return null;
+    readers = effectiveSet(g, pp.userId);
+  }
+  const deciders = readers.map((u) => memberPrincipal(pp.wsId, u));
   return all<GoalRow>("SELECT * FROM v2_goals WHERE ws_id = ? AND id != ? ORDER BY id", pp.wsId, g.id)
     .filter((d) => canReadGoal(pp, goalObj(d)) && deciders.every((dp) => canReadGoal(dp, goalObj(d))))
     .map((d) => d.id);
@@ -283,6 +307,11 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
     const expectRevision = (required: boolean) => {
       if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", `This request is at revision ${r.revision}; reload and try again`);
     };
+    /** 409 dependency_not_visible when the caller can't read a dependency the request adds to its base version. */
+    const assertDecidable = (deps: string[], message: string) => {
+      const base = versionContentOf(pp.wsId, g.id, r.base_version)!;
+      if (unreadableGoals(pp, deps.filter((d) => !base.depends_on.includes(d))).length) throw conflict("dependency_not_visible", message);
+    };
     /** Record the approval and keep the resulting content on the request, approved but unlaunched (no version, no
      *  directive). Returns that content. */
     const approve = (): GoalContent => {
@@ -293,6 +322,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
       if (g.version !== r.base_version) {
         throw conflict("stale_version", `The goal changed after this request was made. ${memberName(r.requester_id)} needs to update it before it can be approved.`);
       }
+      assertDecidable(changes.depends_on ?? [], decisionRefusedFor(r.requester_id));
       const next = applied(contentOf(g), changes);
       if (sameContent(next, contentOf(g))) throw conflict("no_change", "This request no longer changes anything");
       // Advisory evidence: approving a revision with no links is allowed, and recorded on the decision and in the audit.
@@ -344,7 +374,9 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         launcherOnly();
         launchable();
         expectRevision(false);
-        launch(JSON.parse(r.approved_json!) as GoalContent, r.approved_by!);
+        const content = JSON.parse(r.approved_json!) as GoalContent;
+        assertDecidable(content.depends_on, launchRefusedFor(r.requester_id));
+        launch(content, r.approved_by!);
         break;
       }
       case "not_yet": {

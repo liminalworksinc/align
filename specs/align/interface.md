@@ -795,6 +795,16 @@ and a closed "Details" disclosure.
 - **WHEN** an approver chooses **Suggest a change** on a request that depends on a goal they can't see
 - **THEN** the form says "Also depends on a goal you can't see. Sending keeps it; only someone who can see it can remove it.", the confirmation shows it in "Depends on would be" ("…, a goal you can't see") with a "Kept" line "A goal you can't see stays a dependency: your suggestion keeps it, and only someone who can see it can remove it.", and the counter keeps it
 
+#### Scenario: Suggest a change offers only dependencies a counter may add
+
+- **WHEN** an approver chooses **Suggest a change** on a request, and can read goals that the requester or someone else who decides on the goal can't (another team's team-only goal, their own private goal)
+- **THEN** the form reads the goal with `?counter=<request id>` and "Depends on" offers as new dependencies only the goals in its `dependency_choices` (the request's dependencies stay listed), saying "<n> goals you can see aren't offered: <requester> or someone who decides on this goal can't see them." ("1 goal you can see isn't offered" for one), so the form never offers what the server would refuse
+
+#### Scenario: Approving a dependency the decider can't see
+
+- **WHEN** an approver whose approval set changed after a request added a dependency they can't read presses **Approve**, **Approve and launch** or, on an approved request, **Launch version <n+1> to agents**
+- **THEN** the card shows a focused alert "Not recorded. This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask <requester> to withdraw it, or to rebase it without that dependency." (for a launch, "Not recorded. This change adds a dependency on a goal you can't see, so you can't launch what it publishes. …"), naming no goal, and nothing is recorded
+
 #### Scenario: Launched or superseded before launch
 
 - **WHEN** a request is launched, or superseded after its approval
