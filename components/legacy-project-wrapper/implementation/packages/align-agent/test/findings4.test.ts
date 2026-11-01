@@ -311,3 +311,28 @@ describe("cycle 4: CLI arguments and `--past`", () => {
     assert.doesNotMatch(r.stdout, new RegExp(s.lid.slice(0, 8)));
   });
 });
+
+describe("C4-5: an edit approved after a pass read it", () => {
+  test("is reported once, for its own session, not for the session most recently active in the repo", async () => {
+    const { fake, t } = await world();
+    const repo = path.join(t.root, "repo-git");
+    fs.mkdirSync(repo, { recursive: true });
+    execFileSync("git", ["init", "-q", repo]);
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", "https://github.example.edu/lab/c45.git"]);
+    const A = await shared(t, repo);
+    const B = await shared(t, repo);
+    assert.equal((await runCli(t, ["sync"])).code, 0, "a first pass takes the repo's baseline");
+    // A's Write waits on the permission prompt: recorded at PreToolUse, its file not written yet. A pass reads it.
+    const file = path.join(repo, "pending2.txt");
+    runHook(t, "claude", "PreToolUse", { session_id: A.sid, cwd: repo, tool_name: "Write", tool_input: { file_path: file } });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    // B is the session most recently active in the repo; then the user approves A's Write.
+    prompt(t, B.sid, "go on", repo);
+    touch(file);
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    const edits = fake.activity.filter((a) => a.kind === "edit" && a.mine);
+    assert.equal(edits.length, 1, JSON.stringify(edits));
+    assert.equal(edits[0].session_key, A.key, "credited to the session that made it");
+  });
+});

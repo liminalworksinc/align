@@ -1586,8 +1586,11 @@ The `align sync` pass SHALL upload new lines of each shared session's activity f
 /api/v2/workspaces/:ws/activity` in batches of 200, advancing its offset only on success. The hook records an edit at
 `PreToolUse`, before the harness's own permission check, so an edit SHALL count, for the upload and for the sibling
 card and hold, only if its file changed at or after the time it was recorded (one second of slack); an edit the user
-refused leaves the file as it was and is never reported as made. Edits the sync pass finds in the working tree count
-as they are. Each item SHALL carry the
+refused leaves the file as it was and is never reported as made. An edit whose file has not changed yet when a pass
+reads it (the user is still on the permission prompt) SHALL wait, for up to an hour, and go up for its own session once
+its file changes, exactly once; after an hour unchanged it counts as refused. Edits the sync pass finds in the working
+tree count as they are, except a change some session's hook recorded (since the last pass, or waiting so): that is
+that session's edit, never credited to the session most recently active in the repo. Each item SHALL carry the
 session key, its kind (`edit`, `commit`, `task` or `claim`), a time and a `repo_id` (hash of the workspace and
 normalized git remote, or the local folder when there is none), and `edit` and `claim` items also a `path_hash`
 (file reads stay local); repo-relative `path`, commit subjects, task labels, claim reasons and a `branch <name>` task (except
@@ -1598,6 +1601,11 @@ without `--signals` SHALL include `(Add --signals to share file paths and task l
 single-session `::align share` preview does not mention work signals). The pass SHALL fetch `GET
 .../activity?after=<cursor>` into `~/.align/feeds/activity-<ws>.json`, keeping items from the last 6 hours (at most
 1,000).
+
+#### Scenario: An edit approved after a pass read it
+
+- **WHEN** session A's `Write` is recorded at `PreToolUse` and a sync runs before its file exists, then session B in the same repo prompts, the file is written, and two syncs run (test `findings4` "is reported once, for its own session ...")
+- **THEN** exactly one edit item goes up, with session A's key
 
 #### Scenario: A refused edit
 

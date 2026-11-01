@@ -111,13 +111,46 @@ export function detectGitEdits(ctx: Ctx): number {
     if (!changed.size) continue;
     const owner = sessions.filter((s) => s.last && Date.parse(s.last) >= prev.at - 120_000).sort((a, b) => Date.parse(b.last!) - Date.parse(a.last!))[0];
     if (!owner) continue;
-    const seen = new Set(readActs(ctx.home, owner.lid).filter((a) => a.t === "edit" && Date.parse(a.at) >= prev.at - 5_000).map((a) => a.p));
+    // A change a hook already recorded, in any of the repo's sessions, is that session's edit and goes up with it once:
+    // one recorded since the last pass, or one recorded earlier whose file was only written later (an edit approved
+    // after a pass read it, C4-5). Only the rest is credited to the session most recently active here.
+    const seen = new Set<string>();
+    for (const s of sessions) {
+      const waiting = new Set(undecidedEdits(ctx, s.lid).map(actKey));
+      for (const a of readActs(ctx.home, s.lid)) {
+        if (a.t === "edit" && !a.via && a.p && (Date.parse(a.at) >= prev.at - 5_000 || waiting.has(actKey(a)))) seen.add(a.p);
+      }
+    }
     const at = new Date().toISOString();
     const acts: Act[] = [...changed].map((f) => path.join(top, f)).filter((p) => !seen.has(p)).map((p) => ({ t: "edit", at, p, via: "git" }));
     record(ctx.home, owner.lid, acts);
     found += acts.length;
   }
   return found;
+}
+
+/**
+ * How long an edit a hook recorded waits for its file to change (the user may sit on the harness's permission prompt)
+ * before it counts as refused and is dropped. Until then it is neither uploaded nor lost (C4-5).
+ */
+const UNDECIDED_EDIT_MS = 60 * 60_000;
+
+const actKey = (a: Act) => `${a.at}\0${a.p ?? ""}`;
+
+/** Edits of a session that a pass read before their file changed: kept, not uploaded yet (C4-5). */
+function undecidedEdits(ctx: Ctx, lid: string): Act[] {
+  try {
+    const list = JSON.parse(kvGet(ctx.db, `act_undecided:${lid}`) || "[]") as Act[];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Edits a hook recorded that have not happened (their file has not changed since) and are recent enough to still. */
+function stillUndecided(all: Act[], made: Act[], now = Date.now()): Act[] {
+  const done = new Set(made.map(actKey));
+  return all.filter((a) => a.t === "edit" && !a.via && a.p && !done.has(actKey(a)) && now - Date.parse(a.at) < UNDECIDED_EDIT_MS);
 }
 
 /** Complete lines appended to a session's activity file since the last upload, and the offset after them. */
@@ -146,7 +179,7 @@ function newActs(file: string, from: number): { acts: Act[]; next: number } {
         /* torn line */
       }
     }
-    return { acts: madeActs(acts), next: from + Buffer.byteLength(text.slice(0, end + 1)) };
+    return { acts, next: from + Buffer.byteLength(text.slice(0, end + 1)) };
   } finally {
     fs.closeSync(fd);
   }
@@ -157,11 +190,19 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
   let sent = 0;
   for (const s of shares) {
     const offKey = `act_off:${s.local_id}`;
-    const { acts, next } = newActs(layout.activity(ctx.home, s.local_id), Number(kvGet(ctx.db, offKey) || 0));
+    const waitKey = `act_undecided:${s.local_id}`;
+    const fresh = newActs(layout.activity(ctx.home, s.local_id), Number(kvGet(ctx.db, offKey) || 0));
+    const next = fresh.next;
+    // Edits read by an earlier pass before their file changed come first; each counts once its file has changed (an
+    // edit the user refused never does, C3-9), and is kept until then rather than skipped for good (C4-5).
+    const all = [...undecidedEdits(ctx, s.local_id), ...fresh.acts];
+    const acts = madeActs(all);
+    const waiting = stillUndecided(all, acts);
     const cwd = getSession(ctx.db, s.local_id)?.cwd ?? null;
     const repo = repoIdentity(s.workspace_id, cwd);
     if (!repo) {
       kvSet(ctx.db, offKey, String(next));
+      kvSet(ctx.db, waitKey, "[]");
       continue;
     }
     const named = signalsAllowed(ctx, s.local_id, cwd);
@@ -188,7 +229,11 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
       ok = !!r && r.status >= 200 && r.status < 300;
       if (ok) sent += batch.length - refused.length;
     }
-    if (ok) kvSet(ctx.db, offKey, String(next)); // on failure the same lines go up on the next pass
+    if (ok) {
+      // On failure the same lines (and the same waiting edits) go up on the next pass.
+      kvSet(ctx.db, offKey, String(next));
+      kvSet(ctx.db, waitKey, JSON.stringify(waiting));
+    }
   }
   return sent;
 }
