@@ -22,6 +22,8 @@ interface Detail {
   hidden_depends_on?: number;
   /** The goals a change request from the reader may add as a dependency (null when they can't propose). */
   dependency_choices?: string[] | null;
+  /** Goals left out of dependency_choices because they already depend on this goal (adding one would make a loop). */
+  dependency_loops?: string[] | null;
 }
 
 function NewVersion({ ws, goal, hiddenDeps, onDone }: { ws: string; goal: Goal; hiddenDeps: number; onDone: () => void }) {
@@ -223,6 +225,7 @@ function ChangeRequests({
   me,
   canPropose,
   choices,
+  loops,
   hiddenDeps,
   onGoalChanged,
 }: {
@@ -231,6 +234,7 @@ function ChangeRequests({
   me: Me;
   canPropose: boolean;
   choices: string[] | null;
+  loops: string[] | null;
   hiddenDeps: number;
   onGoalChanged: () => void;
 }) {
@@ -262,7 +266,7 @@ function ChangeRequests({
       <Card title="Change requests">
         {canPropose && (
           <div className="mb-4">
-            <ProposeChange ws={ws} goal={goal} choices={choices} hiddenDeps={hiddenDeps} onDone={reload} />
+            <ProposeChange ws={ws} goal={goal} choices={choices} loops={loops} hiddenDeps={hiddenDeps} onDone={reload} />
           </div>
         )}
         {list.loading && <Loading />}
@@ -325,7 +329,9 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
           <GoalLimits ws={ws} goal={g} canEdit={d.data!.can_edit} onDone={limitsDone} />
           <Tree ws={ws} goal={g} canEdit={d.data!.can_edit} hiddenDeps={d.data!.hidden_depends_on ?? 0} onDone={d.reload} />
           <GoalActivityCard ws={ws} goal={g} me={me} />
-          <AgentsOnGoalCard key={g.version} ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
+          {/* Not keyed by the goal's version: a new version reloads the card in place (C3-4). Keyed, it shared its key with
+              the New version form below, and a launch left a second card beside the first. */}
+          <AgentsOnGoalCard ws={ws} goal={g} me={me} onHoldChanged={hold.reload} />
           {d.data!.can_edit && <NewVersion key={g.version} ws={ws} goal={g} hiddenDeps={d.data!.hidden_depends_on ?? 0} onDone={d.reload} />}
           {/* Keyed by limit proposals only (a new request to list): a goal version, a launch's included, reloads the list
               in place (C2 N3). */}
@@ -336,6 +342,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
             me={me}
             canPropose={d.data!.can_propose}
             choices={d.data!.dependency_choices ?? null}
+            loops={d.data!.dependency_loops ?? null}
             hiddenDeps={d.data!.hidden_depends_on ?? 0}
             onGoalChanged={d.reload}
           />

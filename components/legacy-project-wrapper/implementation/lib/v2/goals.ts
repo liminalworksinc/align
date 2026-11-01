@@ -327,6 +327,23 @@ function dependencyCycle(wsId: string, goalId: string, deps: string[]): boolean 
   return false;
 }
 
+/** The goals that already depend on `goalId`, directly or through others (every goal's depends_on, readable or not):
+ *  adding any of them as a dependency of `goalId` would close a loop (C3-3). */
+export function goalsDependingOn(wsId: string, goalId: string): Set<string> {
+  const dependents = new Map<string, string[]>();
+  for (const r of all<{ id: string; depends_on_json: string }>("SELECT id, depends_on_json FROM v2_goals WHERE ws_id = ?", wsId))
+    for (const dep of JSON.parse(r.depends_on_json || "[]") as string[]) dependents.set(dep, [...(dependents.get(dep) ?? []), r.id]);
+  const out = new Set<string>();
+  const stack = [...(dependents.get(goalId) ?? [])];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (out.has(id) || id === goalId) continue;
+    out.add(id);
+    stack.push(...(dependents.get(id) ?? []));
+  }
+  return out;
+}
+
 export const DEPENDENCY_CYCLE = "That would make these goals depend on each other in a loop.";
 
 /** 409 cycle when these dependencies would make the goal depend on itself. Exported for change requests. */

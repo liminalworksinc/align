@@ -338,6 +338,25 @@ export function OpenRequest({
     }
   };
 
+  /** Update to the goal's version: recorded, or refused like any other decision ("Not recorded. …", and a 409 reloads
+   *  the card to show the request as it is now; C3-5). */
+  const rebase = async () => {
+    if (sending) return;
+    setSending(true);
+    setNotice(null);
+    try {
+      await api(`${path}/rebase`, { body: { revision: cr.revision, base_version: n } });
+      setNotice({ kind: "done", text: `Recorded: you updated your request to version ${n} (revision ${cr.revision + 1}). It waits for approval again.` });
+      onDone();
+    } catch (e) {
+      const conflict = e instanceof ApiError && e.status === 409;
+      setNotice({ kind: "refused", text: `Not recorded. ${(e as Error).message}${conflict ? "" : " Nothing changed."}` });
+      if (conflict) onDone(); // the request or its goal moved on: show it as it is now
+    } finally {
+      setSending(false);
+    }
+  };
+
   const stateWord = CR_STATE_WORDS[cr.state];
   const transition = (): string => {
     switch (choice) {
@@ -464,19 +483,7 @@ export function OpenRequest({
           <Note>
             Made against version {cr.base_version}. The goal is now at version {n}.
           </Note>
-          <Btn
-            kind="secondary"
-            disabled={act.busy}
-            onClick={() =>
-              void act.run(
-                () => api(`${path}/rebase`, { body: { revision: cr.revision, base_version: n } }),
-                () => {
-                  setNotice({ kind: "done", text: `Recorded: you updated your request to version ${n} (revision ${cr.revision + 1}). It waits for approval again.` });
-                  onDone();
-                },
-              )
-            }
-          >
+          <Btn kind="secondary" disabled={act.busy || sending} onClick={() => void rebase()}>
             Update to version {n}
           </Btn>
         </div>

@@ -14,9 +14,24 @@ import { launchWords } from "@/lib/v2/launch-words";
 // workspace Requests tab.
 
 /** "Propose a change": for a member who can read an active goal but doesn't own it. `choices` are the goals the
- *  server would accept as a new dependency (the goal read's dependency_choices); `hiddenDeps` counts the goal's
+ *  server would accept as a new dependency (the goal read's dependency_choices), `loops` those left out because they
+ *  already depend on this goal (dependency_loops); `hiddenDeps` counts the goal's
  *  dependencies the person can't see, which a proposal keeps. */
-export function ProposeChange({ ws, goal, choices = null, hiddenDeps = 0, onDone }: { ws: string; goal: Goal; choices?: string[] | null; hiddenDeps?: number; onDone: () => void }) {
+export function ProposeChange({
+  ws,
+  goal,
+  choices = null,
+  loops = null,
+  hiddenDeps = 0,
+  onDone,
+}: {
+  ws: string;
+  goal: Goal;
+  choices?: string[] | null;
+  loops?: string[] | null;
+  hiddenDeps?: number;
+  onDone: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const act = useAction();
@@ -37,6 +52,7 @@ export function ProposeChange({ ws, goal, choices = null, hiddenDeps = 0, onDone
         goal={goal}
         start={{}}
         choices={choices}
+        loops={loops}
         hiddenDeps={hiddenDeps}
         noteLabel="Why this change"
         noteRequired

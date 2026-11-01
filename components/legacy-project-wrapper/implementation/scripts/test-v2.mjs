@@ -771,7 +771,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 17, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 17 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 18, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, and goal holds included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 18 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -6493,6 +6493,315 @@ try {
     } else check("ui (Chrome) available for the c2 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c2-web ====
+
+  // ==== fix:c3-web ====
+  // Regression checks for the cycle-3 web walk (e2e-reports/cycle3/web.md: C3-1 to C3-5, S1, W2, W3), on a workspace
+  // of their own. XO owns it; XA proposes; XD, XB, XC and XN each have a shared session that ends a different way (removed,
+  // device signed out, sign out everywhere with devices, account deleted); XS shares sessions with usage.
+  {
+    // C3-1: the migration that keeps why a request target expired.
+    const upgraded18 = (() => {
+      const src = readFileSync(path.join(ROOT, "lib/v2/db.ts"), "utf8");
+      const migrations = new Function(`return [${src.slice(src.indexOf("[", src.indexOf("const MIGRATIONS")) + 1, src.indexOf("];\n\n// The operator script"))}];`)();
+      const d = new DatabaseSync(":memory:");
+      d.exec("PRAGMA foreign_keys = OFF; CREATE TABLE ba_user (id TEXT PRIMARY KEY, name TEXT)");
+      migrations.slice(0, 17).forEach((m) => d.exec(m));
+      d.exec("INSERT INTO v2_request_targets (ws_id, request_id, session_key, state, updated_at) VALUES ('ws_x', 'rq_x', 'key-x', 'expired', 'x')");
+      if (typeof migrations[17] !== "string") return { n: migrations.length, missing: true };
+      d.exec(migrations[17]);
+      const kept = d.prepare("SELECT state, ended_reason FROM v2_request_targets").get();
+      d.exec("UPDATE v2_request_targets SET ended_reason = 'member_removed'");
+      const set = d.prepare("SELECT ended_reason FROM v2_request_targets").get()?.ended_reason;
+      let other = "";
+      try {
+        d.exec("UPDATE v2_request_targets SET ended_reason = 'goal_closed'");
+      } catch (e) {
+        other = String(e?.message);
+      }
+      d.close();
+      return { n: migrations.length, kept, set, other };
+    })();
+    check(
+      "storage (C3-1): migration 18 adds ended_reason to request targets (null on a version 17 database's rows; device_signed_out or member_removed, anything else refused)",
+      upgraded18.n === SCHEMA_VERSION && upgraded18.kept?.state === "expired" && upgraded18.kept.ended_reason === null && upgraded18.set === "member_removed" && /CHECK/.test(upgraded18.other),
+      JSON.stringify(upgraded18),
+    );
+
+    const xUsers = {};
+    for (const [who, name] of [
+      ["XO", "Xia Owner"],
+      ["XA", "Xan Asker"],
+      ["XD", "Xed Removed"],
+      ["XB", "Xeb Laptop"],
+      ["XC", "Xec Everywhere"],
+      ["XN", "Xen Deleted"],
+      ["XS", "Xes Sharer"],
+    ])
+      xUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c3web.example.test`);
+    const { XO, XA, XD, XB, XC, XN, XS } = xUsers;
+    const XW = (await call("XO", "POST", "/api/v2/workspaces", { cookie: XO.cookie, body: { name: "C3 web fix workspace" } })).json?.id;
+    const xa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${XW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    const xInvite = async (u) => {
+      const i = await xa(XO, "POST", "/invites", { email: u.email, role: "member" });
+      return call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    };
+    for (const u of [XA, XD, XB, XC, XN, XS]) await xInvite(u);
+    const xGoal = async (u, body) => (await xa(u, "POST", "/goals", { visibility: "workspace", ...body })).json;
+    const gEnd = {};
+    // Each session's own person owns its goal, so the session may bind to it; XO, a workspace owner, sends the requests.
+    for (const [k, u] of [["XD", XD], ["XB", XB], ["XC", XC], ["XN", XN], ["closed", XS]]) gEnd[k] = await xGoal(u, { title: `Ended via ${k}` });
+    const xDevice = (u) => {
+      const keys = newDeviceKeys();
+      const d = insertDevice(u.id, `${u.name}'s laptop`);
+      withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(d.id, XW));
+      return { ...keys, who: u.who, user: u, id: d.id, access: d.access };
+    };
+    const xT0 = new Date(Date.now() - 3600_000).toISOString();
+    const xShare = async (dev, native, goalId, { alias = null, startedAt = xT0, tokens = 0 } = {}) => {
+      const key = sessionKey(dev, XW, "claude-code", native);
+      const put = await call(dev.who, "PUT", `/api/v2/workspaces/${XW}/sessions/${key}`, { bearer: dev.access, body: { harness: "claude-code", repo_key: repoKey(dev, XW, `/src/${alias ?? native}`), repo_alias: alias, started_at: startedAt, title: null } });
+      const ep = epochId();
+      const e = await call(dev.who, "POST", `/api/v2/workspaces/${XW}/sessions/${key}/epochs`, { bearer: dev.access, body: { epoch_id: ep, goal_id: goalId, starts_at: startedAt, root_turn: null, cause: "manual" } });
+      const up = tokens ? await call(dev.who, "POST", `/api/v2/workspaces/${XW}/sessions/${key}/usage`, { bearer: dev.access, body: { rows: [usageRow(dev, `${native}-1`, ep, { input: tokens, output: 0, cache_write_5m: 0, cache_read: 99_000 })] } }) : null;
+      return { key, ok: put.status === 200 && e.status === 200 && (!up || up.json?.accepted === 1) };
+    };
+    const xDevs = { XD: xDevice(XD), XB: xDevice(XB), XC: xDevice(XC), XN: xDevice(XN), XS: xDevice(XS) };
+    const xKeys = {};
+    for (const k of ["XD", "XB", "XC", "XN"]) xKeys[k] = await xShare(xDevs[k], `ended-${k}`, gEnd[k].id);
+    xKeys.closed = await xShare(xDevs.XS, "ended-closed", gEnd.closed.id);
+    const xReq = {};
+    for (const k of ["XD", "XB", "XC", "XN", "closed"]) xReq[k] = (await xa(XO, "POST", `/goals/${gEnd[k].id}/requests`, { type: "checkpoint" })).json?.request?.id;
+    check(
+      "c3 web fix setup (C3-1): five shared sessions, each on its own goal with a checkpoint waiting on it",
+      !!XW && Object.values(xKeys).every((s) => s.ok) && Object.values(xReq).every(Boolean),
+      JSON.stringify({ XW, keys: Object.values(xKeys).map((s) => s.ok), req: xReq }),
+    );
+
+    // The four ways a session ends, then the goal-closed control.
+    const rmXD = await xa(XO, "DELETE", `/members/${XD.id}`);
+    const outXB = await call("XB", "DELETE", "/api/v2/devices/self", { bearer: xDevs.XB.access });
+    const soeXC = await call("XC", "POST", "/api/v2/account/sign-out-everywhere", { cookie: XC.cookie, body: { devices: true } });
+    const delXN = await call("XN", "DELETE", "/api/v2/me", { cookie: XN.cookie, headers: { origin: BASE }, body: { email: XN.email } });
+    const closeX = await xa(XS, "POST", `/goals/${gEnd.closed.id}/versions`, { version: 1, status: "achieved" });
+    const xView = async (k) => (await xa(XO, "GET", `/goals/${gEnd[k].id}/requests`)).json?.requests?.find((r) => r.id === xReq[k]);
+    const views = {};
+    for (const k of ["XD", "XB", "XC", "XN", "closed"]) views[k] = await xView(k);
+    const endedAs = (k, why) => views[k]?.state === "expired" && views[k].expired_reason === "sessions_ended" && views[k].counts.pending === 0 && views[k].sessions.length === 1 && views[k].sessions[0].state === "expired" && views[k].sessions[0].ended_reason === why;
+    check(
+      "C3-1: a request whose sessions ended reads expired with expired_reason sessions_ended (never goal_closed), and its session row says why: member removed and account deleted -> member_removed; device signed out and sign out everywhere with devices -> device_signed_out",
+      rmXD.status === 204 && outXB.status === 204 && soeXC.status === 200 && soeXC.json?.devices === 1 && [200, 204].includes(delXN.status) &&
+        endedAs("XD", "member_removed") && endedAs("XB", "device_signed_out") && endedAs("XC", "device_signed_out") && endedAs("XN", "member_removed"),
+      `${rmXD.status} ${outXB.status} ${soeXC.status} ${soeXC.text} ${delXN.status} ${JSON.stringify(["XD", "XB", "XC", "XN"].map((k) => [views[k]?.state, views[k]?.expired_reason, views[k]?.sessions?.map((s) => [s.state, s.ended_reason])]))}`,
+    );
+    check(
+      "C3-1: a request that expired because its goal closed still reads expired_reason goal_closed, its session row with no ended_reason; an open request has no expired_reason",
+      closeX.status === 201 && views.closed?.state === "expired" && views.closed.expired_reason === "goal_closed" && views.closed.sessions[0]?.ended_reason === null,
+      `${closeX.status} ${JSON.stringify(views.closed)}`,
+    );
+
+    // XD is let back in (for S1); the old request keeps why it expired.
+    await xInvite(XD);
+    const xdBack = await xView("XD");
+    check("C3-1: once the removed member is back, the request still says its session ended (left the workspace)", xdBack?.expired_reason === "sessions_ended" && xdBack.sessions[0]?.ended_reason === "member_removed", JSON.stringify(xdBack));
+
+    // -- C3-3: dependency_choices leaves out the goals that already depend on this one --
+    const GQ = await xGoal(XA, { title: "Grow trials" });
+    const GP = await xGoal(XO, { title: "Ship arms", depends_on: [GQ?.id] });
+    const GP2 = await xGoal(XO, { title: "Arms launch", depends_on: [GP?.id] });
+    const GO = await xGoal(XO, { title: "Plain other goal" });
+    const qRead = (await xa(XO, "GET", `/goals/${GQ?.id}`)).json;
+    const loopCr = await xa(XO, "POST", `/goals/${GQ?.id}/change-requests`, { base_version: 1, changes: { depends_on: [GP?.id] }, reason: "Arms first" });
+    check(
+      "C3-3: GET a goal's dependency_choices leaves out the goals that already depend on it, directly or through another (adding one would make a loop) and lists them in dependency_loops; the server still refuses one (409 cycle), so the form never offers what is refused",
+      Array.isArray(qRead?.dependency_choices) && !qRead.dependency_choices.includes(GP?.id) && !qRead.dependency_choices.includes(GP2?.id) && qRead.dependency_choices.includes(GO?.id) &&
+        JSON.stringify([...(qRead.dependency_loops ?? [])].sort()) === JSON.stringify([GP?.id, GP2?.id].sort()) && loopCr.status === 409 && loopCr.json?.error === "cycle",
+      `${JSON.stringify(qRead?.dependency_choices)} ${JSON.stringify(qRead?.dependency_loops)} ${loopCr.status} ${loopCr.text.slice(0, 200)}`,
+    );
+
+    // -- C3-2 setup: usage 2000 / 2000 / 6000 tokens (20%, 20% and 60% unbound) against targets 19, 21 and 5 --
+    const GS1 = await xGoal(XS, { title: "Spend one over", target_share: 19 });
+    const GS2 = await xGoal(XS, { title: "Spend one under", target_share: 21 });
+    const GS3 = await xGoal(XS, { title: "Spend five under", target_share: 5 });
+    const su = [await xShare(xDevs.XS, "spend-1", GS1?.id, { tokens: 2000 }), await xShare(xDevs.XS, "spend-2", GS2?.id, { tokens: 2000 }), await xShare(xDevs.XS, "spend-u", null, { tokens: 6000 })];
+    const alloc = (await xa(XO, "GET", "/allocation")).json?.window?.rows ?? [];
+    const gapOf = (g) => alloc.find((r) => r.goal?.id === g?.id)?.gap;
+    check("c3 setup (C3-2): the allocation reads gaps +1, -1 and -5", su.every((s) => s.ok) && gapOf(GS1) === 1 && gapOf(GS2) === -1 && gapOf(GS3) === -5, JSON.stringify([su.map((s) => s.ok), gapOf(GS1), gapOf(GS2), gapOf(GS3)]));
+
+    // -- W3: two of XS's sessions in one repository, started at different times --
+    const w3a = await xShare(xDevs.XS, "w3-a", null, { alias: "acme/xs", startedAt: new Date(Date.now() - 2 * 3600_000).toISOString() });
+    const w3b = await xShare(xDevs.XS, "w3-b", null, { alias: "acme/xs", startedAt: new Date(Date.now() - 3 * 3600_000).toISOString() });
+    const everyone = (await xa(XO, "GET", "/sessions")).json?.all ?? [];
+    const w3Rows = everyone.filter((s) => s.session_key === w3a.key || s.session_key === w3b.key);
+    check(
+      "W3: the owner's list of everyone's sessions carries each session's started_at (never its title or usage)",
+      w3a.ok && w3b.ok && w3Rows.length === 2 && w3Rows.every((s) => typeof s.started_at === "string" && !("title" in s) && !("usage" in s)) && w3Rows[0].started_at !== w3Rows[1].started_at,
+      JSON.stringify(w3Rows),
+    );
+
+    // -- C3-4, C3-5 and W2 setup --
+    const GL = await xGoal(XO, { title: "Launch here" });
+    const crL = (await xa(XA, "POST", `/goals/${GL?.id}/change-requests`, { base_version: 1, changes: { title: "Launch here, renamed" }, reason: "Clearer" })).json;
+    const apL = await xa(XO, "POST", `/goals/${GL?.id}/change-requests/${crL?.id}/approve`, { revision: 1 });
+    const GR = await xGoal(XO, { title: "Rebase here" });
+    const crR = (await xa(XA, "POST", `/goals/${GR?.id}/change-requests`, { base_version: 1, changes: { title: "Rebase here, renamed" }, reason: "Clearer" })).json;
+    const bumpR = await xa(XO, "POST", `/goals/${GR?.id}/versions`, { version: 1, measures: [{ text: "Rebased requests", target: "1" }] });
+    check("c3 setup (C3-4, C3-5): an approved request waiting for launch, and a request behind its goal", apL.status === 200 && !!crR?.id && bumpR.status === 201, `${apL.status} ${apL.text.slice(0, 200)} ${bumpR.status}`);
+
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u, width = 1100, height = 900) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width, height });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const textOf = (pg, sel) => pg.evaluate((s) => document.querySelector(s)?.innerText ?? "", sel);
+      const press = (pg, scope, label) => pg.evaluate((s, t) => [...document.querySelectorAll(`${s} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      try {
+        // C3-1 (ui): the goal pages name why each request expired.
+        const pO = await as(XO);
+        const agentsText = async (k) => {
+          await open(pO, `/app/w/${XW}/goals/${gEnd[k].id}`);
+          await pO.waitForSelector("#agents-on-goal", { timeout: 15000 }).catch(() => undefined);
+          return textOf(pO, "#agents-on-goal");
+        };
+        const tXD = await agentsText("XD");
+        const tXB = await agentsText("XB");
+        const tXC = await agentsText("XC");
+        const tXN = await agentsText("XN");
+        const tClosed = await agentsText("closed");
+        check(
+          "C3-1 (ui): on the goal page a request whose sessions ended reads \"expired: its sessions ended\" (never \"expired: the goal closed\"), each session \"ended: left the workspace\" (removed, account deleted) or \"ended: device signed out\" (signed out, sign out everywhere with devices); a goal that closed still reads \"expired: the goal closed\"",
+          [tXD, tXB, tXC, tXN].every((t) => t.includes("expired: its sessions ended") && !t.includes("the goal closed")) &&
+            tXD.includes("ended: left the workspace") && tXN.includes("ended: left the workspace") && tXB.includes("ended: device signed out") && tXC.includes("ended: device signed out") &&
+            tClosed.includes("expired: the goal closed") && !tClosed.includes("ended:"),
+          [tXD, tXB, tXC, tXN, tClosed].map((t) => t.slice(0, 300)).join(" || "),
+        );
+
+        // S1: the removed member, back in, reads how to share the ended session again.
+        const pD = await as(XD);
+        await open(pD, `/app/w/${XW}/sessions`);
+        const dText = await pD.evaluate(() => document.body.innerText);
+        check(
+          "S1 (ui): back in the workspace, the removed member's Sessions tab reads \"ended: left the workspace\" and says how to share it again: run align login on that machine again, then ::align share in the session",
+          dText.includes("ended: left the workspace") && /Sharing ended when you left this workspace \(or were removed from it\)/.test(dText) && /run align login on that machine again \(it lost access to this workspace when you left\), then ::align share in the session/.test(dText),
+          dText.slice(0, 900),
+        );
+
+        // C3-2 (ui): "1 point", "5 points".
+        await open(pO, `/app/w/${XW}/spend`);
+        await pO.waitForSelector('[aria-label="Allocation by goal"]', { timeout: 15000 }).catch(() => undefined);
+        const rowText = (title) => pO.evaluate((t) => [...document.querySelectorAll('[aria-label="Allocation by goal"] li')].find((li) => li.innerText.startsWith(t))?.innerText ?? "", title);
+        const [s1, s2, s3] = [await rowText("Spend one over"), await rowText("Spend one under"), await rowText("Spend five under")];
+        check("C3-2 (ui): the Spend tab says \"1 point over\" and \"1 point under\" (singular) and \"5 points under\" (plural)", /\b1 point over\b/.test(s1) && /\b1 point under\b/.test(s2) && /\b5 points under\b/.test(s3) && !/1 points/.test(s1 + s2), `${s1} || ${s2} || ${s3}`);
+
+        // W2: a reallocation's decisions each leave a "Recorded: …" line. XS owns the goal, so decides on it.
+        const rl = await xa(XA, "POST", "/reallocations", { targets: [{ goal_id: GS1?.id, target_share: 18 }], note: "One point back" });
+        const rlSel = `[data-reallocation="${rl.json?.id}"]`;
+        const pS = await as(XS);
+        await open(pS, `/app/w/${XW}/alignments`);
+        await pS.waitForSelector(rlSel, { timeout: 15000 }).catch(() => undefined);
+        await press(pS, rlSel, "Approve (agents switch at launch)");
+        await pS.waitForFunction((s) => /Recorded:/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, rlSel).catch(() => undefined);
+        await pS.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const afterApprove = await textOf(pS, rlSel);
+        await press(pS, rlSel, "Launch");
+        await pS.waitForFunction((s) => /Recorded: you launched/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, rlSel).catch(() => undefined);
+        await pS.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const afterLaunchRl = await textOf(pS, rlSel);
+        const gs1After = (await xa(XS, "GET", `/goals/${GS1?.id}`)).json?.goal;
+        check(
+          "W2 (ui): approving and launching new targets on the Alignments tab each leave a \"Recorded: …\" line, as change-request decisions do (\"Recorded: you approved revision 1. Every goal in it is approved; …\", \"Recorded: you launched the new targets. …\")",
+          rl.status === 201 && afterApprove.includes("Recorded: you approved revision 1. Every goal in it is approved; agents keep the old targets until someone launches it.") &&
+            afterLaunchRl.includes("Recorded: you launched the new targets. Agents on these goals hear them at their next turn.") && gs1After?.target_share === 18,
+          `${rl.status} ${afterApprove.slice(0, 400)} || ${afterLaunchRl.slice(0, 400)} ${gs1After?.target_share}`,
+        );
+
+        // W3 (ui): the owner's Everyone list tells XS's two sessions in one repository apart.
+        await open(pO, `/app/w/${XW}/sessions`);
+        const evRows = await pO.evaluate(() => [...document.querySelectorAll("li")].filter((li) => li.innerText.includes("acme/xs")).map((li) => li.innerText));
+        check(
+          "W3 (ui): each row of the owner's Everyone list shows when the session started and the last 6 characters of its key, so two of one person's sessions in one repository differ",
+          evRows.length === 2 && evRows[0] !== evRows[1] && [w3a.key, w3b.key].every((k) => evRows.some((t) => t.includes(`…${k.slice(-6)}`))) && evRows.every((t) => /started /.test(t)),
+          JSON.stringify(evRows),
+        );
+
+        // C3-4: a launch from the goal page reloads "Agents on this goal" in place: exactly one card at every moment (keyed by
+        // the goal's version, a launch made a second card beside the first, with the New version form sharing its key),
+        // never a "Loading…" on the page, and the hold reason typed into it stays.
+        await open(pO, `/app/w/${XW}/goals/${GL?.id}`);
+        await pO.waitForFunction(() => !!document.querySelector("#agents-on-goal") && [...document.querySelectorAll("button")].some((b) => b.textContent === "Launch version 2 to agents"), { timeout: 15000 }).catch(() => undefined);
+        await pO.evaluate(() => {
+          const f = [...document.querySelectorAll("#agents-on-goal label")].find((x) => x.querySelector("span")?.textContent?.trim() === "Reason (optional, shown to the developers)")?.querySelector("input");
+          f?.setAttribute("data-typing", "1");
+        });
+        await pO.type("#agents-on-goal [data-typing]", "Keep this reason");
+        await pO.evaluate(() => {
+          window.__agentsGone = 0;
+          new MutationObserver(() => {
+            const n = document.querySelectorAll("#agents-on-goal").length;
+            if (n !== 1 || [...document.querySelectorAll("p")].some((p) => p.textContent === "Loading…")) window.__agentsGone++;
+          }).observe(document.body, { childList: true, subtree: true, characterData: true });
+        });
+        await press(pO, `[data-cr="${crL?.id}"]`, "Launch version 2 to agents");
+        await pO.waitForFunction(() => document.body.innerText.includes("Recorded: you launched version 2 to agents") && /version 2/.test(document.querySelector("h1")?.nextElementSibling?.textContent ?? ""), { timeout: 15000 }).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        const c34 = await pO.evaluate(() => ({
+          gone: window.__agentsGone,
+          cards: document.querySelectorAll("#agents-on-goal").length,
+          reason: document.querySelector("#agents-on-goal [data-typing]")?.value ?? null,
+          pills: document.querySelector("h1")?.nextElementSibling?.textContent ?? "",
+        }));
+        check(
+          "C3-4 (ui): launching version 2 from the goal page reloads \"Agents on this goal\" in place: one card at every moment (never none, never a second one), no \"Loading…\", and the hold reason typed into it stays",
+          /version 2/.test(c34.pills) && c34.gone === 0 && c34.cards === 1 && c34.reason === "Keep this reason",
+          JSON.stringify(c34),
+        );
+
+        // C3-5: a refused "Update to version n" reads "Not recorded. …" and reloads the card.
+        const pA = await as(XA);
+        await open(pA, `/app/w/${XW}/goals/${GR?.id}`);
+        const rSel = `[data-cr="${crR?.id}"]`;
+        await pA.waitForFunction((s) => [...document.querySelectorAll(`${s} button`)].some((b) => b.textContent?.trim() === "Update to version 2"), { timeout: 15000 }, rSel).catch(() => undefined);
+        const bumpR2 = await xa(XO, "POST", `/goals/${GR?.id}/versions`, { version: 2, measures: [{ text: "Rebased requests", target: "2" }] });
+        await press(pA, rSel, "Update to version 2");
+        await pA.waitForFunction((s) => /Not recorded\./.test(document.querySelector(s)?.innerText ?? "") && [...document.querySelectorAll(`${s} button`)].some((b) => b.textContent?.trim() === "Update to version 3"), { timeout: 15000 }, rSel).catch(() => undefined);
+        const rText = await textOf(pA, rSel);
+        const rNotice = await pA.evaluate((s) => document.querySelector(`${s} [data-notice]`)?.getAttribute("data-notice") ?? null, rSel);
+        check(
+          "C3-5 (ui): a refused Update to version n reads \"Not recorded. This goal is at version 3; reload and try again\" like other refused decisions, and the card reloads (it now offers Update to version 3)",
+          bumpR2.status === 201 && rNotice === "refused" && rText.includes("Not recorded. This goal is at version 3; reload and try again") && rText.includes("Update to version 3"),
+          `${bumpR2.status} ${rNotice} ${rText.slice(0, 500)}`,
+        );
+
+        // C3-3 (ui): the propose form doesn't offer the goals that would make a loop, and says why.
+        await open(pO, `/app/w/${XW}/goals/${GQ?.id}`);
+        await press(pO, "#change-requests", "Propose a change");
+        await pO.waitForFunction(() => /Send for approval/.test(document.querySelector("#change-requests")?.innerText ?? ""), { timeout: 15000 }).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const qForm = await textOf(pO, "#change-requests form");
+        check(
+          "C3-3 (ui): the propose form on Grow trials doesn't offer Ship arms or Arms launch (they already depend on it) and says \"2 goals aren't offered: they already depend on this goal, so adding them would make a loop.\", never that someone can't see them",
+          qForm.includes("Plain other goal") && !qForm.includes("Ship arms") && !qForm.includes("Arms launch") && qForm.includes("2 goals aren't offered: they already depend on this goal, so adding them would make a loop.") && !qForm.includes("can't see"),
+          qForm.slice(0, 700),
+        );
+        check("c3 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c3 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c3 web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:c3-web ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));

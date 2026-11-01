@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, SignInAgain, TextArea, useAction, useApi, when } from "./kit";
 import type { Me } from "./server";
 import type { Goal } from "./types";
@@ -13,6 +13,7 @@ import { answerEvidence } from "@/lib/v2/home-core.mts";
 
 type RequestType = "replan" | "checkpoint" | "switch_goal";
 type TargetState = "sent" | "received" | "accepted" | "declined" | "expired";
+type EndedReason = "device_signed_out" | "member_removed";
 interface Person {
   id: string;
   name: string;
@@ -28,8 +29,22 @@ interface RequestView {
   cancelled_at: string | null;
   cancelled_by: Person | null;
   state: "open" | "answered" | "cancelled" | "expired";
+  /** Why an expired request expired: its goal closed, or every session it waited on ended (C3-1). */
+  expired_reason: "goal_closed" | "sessions_ended" | null;
   counts: { pending: number; accepted: number; declined: number; expired: number; not_declined: number };
-  sessions: { session_key: string; owner: Person; mine: boolean; repo_alias: string | null; harness: string; title: string | null; state: TargetState; auto_accepted: boolean; updated_at: string }[];
+  sessions: {
+    session_key: string;
+    owner: Person;
+    mine: boolean;
+    repo_alias: string | null;
+    harness: string;
+    title: string | null;
+    state: TargetState;
+    /** Why an expired session's sharing ended (its device signed out, or its person left the workspace), else null. */
+    ended_reason: EndedReason | null;
+    auto_accepted: boolean;
+    updated_at: string;
+  }[];
   can_cancel: boolean;
 }
 export interface HoldState {
@@ -52,7 +67,7 @@ const TYPE_HELP: Record<RequestType, string> = {
 
 /** One session's answer, with its evidence class (lib/v2/home-core.mts answerEvidence): received, or delivered and not
  *  declined, is a delivery receipt; the developer's answer is agent reported; nothing back is not observed. */
-function statePill(s: { state: TargetState; auto_accepted: boolean }) {
+function statePill(s: { state: TargetState; ended_reason: EndedReason | null; auto_accepted: boolean }) {
   return (
     <>
       {answerPill(s)}
@@ -62,10 +77,13 @@ function statePill(s: { state: TargetState; auto_accepted: boolean }) {
 }
 
 /** pending / accepted / declined / expired. A safe request the developer did not decline by the end of the turn it
- *  reached is "delivered, not declined": Align knows it reached the agent, not what the agent did with it. */
-function answerPill(s: { state: TargetState; auto_accepted: boolean }) {
+ *  reached is "delivered, not declined": Align knows it reached the agent, not what the agent did with it. A session
+ *  that ended before it answered says why, as the Sessions tab does (C3-1). */
+function answerPill(s: { state: TargetState; ended_reason: EndedReason | null; auto_accepted: boolean }) {
   if (s.state === "accepted") return s.auto_accepted ? <Pill>delivered, not declined</Pill> : <Pill tone="green">accepted by the developer</Pill>;
   if (s.state === "declined") return <Pill tone="red">declined</Pill>;
+  if (s.state === "expired" && s.ended_reason === "device_signed_out") return <Pill>ended: device signed out</Pill>;
+  if (s.state === "expired" && s.ended_reason === "member_removed") return <Pill>ended: left the workspace</Pill>;
   if (s.state === "expired") return <Pill>expired</Pill>;
   return <Pill tone="amber">pending</Pill>;
 }
@@ -198,7 +216,7 @@ function RequestRow({ ws, r, onDone }: { ws: string; r: RequestView; onDone: () 
     <li className="py-3" data-request={r.id}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[16px] text-zinc-900">{TYPE_LABEL[r.type]}</span>
-        {r.state === "cancelled" ? <Pill>cancelled</Pill> : r.state === "expired" ? <Pill>expired: the goal closed</Pill> : r.state === "open" ? <Pill tone="amber">waiting</Pill> : <Pill tone="green">answered</Pill>}
+        {r.state === "cancelled" ? <Pill>cancelled</Pill> : r.state === "expired" ? <Pill>{r.expired_reason === "sessions_ended" ? "expired: its sessions ended" : "expired: the goal closed"}</Pill> : r.state === "open" ? <Pill tone="amber">waiting</Pill> : <Pill tone="green">answered</Pill>}
         <span className="text-[14px] text-zinc-500">
           from {r.sender.name} ({r.sender.role === "approver" ? "approver" : "workspace owner"}), {when(r.created_at)}, goal version {r.goal.version}
         </span>
@@ -227,10 +245,19 @@ function RequestRow({ ws, r, onDone }: { ws: string; r: RequestView; onDone: () 
   );
 }
 
-/** "Agents on this goal": hold and release, send a request, and the requests sent so far with each session's answer. */
+/** "Agents on this goal": hold and release, send a request, and the requests sent so far with each session's answer.
+ *  A new goal version (a launch, a version saved above, the goal closing) reloads it in place, keeping what is on
+ *  screen and anything typed meanwhile: never a remount and its "Loading…" (C3-4, as the change-request list, C2 N3). */
 export function AgentsOnGoalCard({ ws, goal, me, onHoldChanged }: { ws: string; goal: Goal; me: Me; onHoldChanged: () => void }) {
   const d = useApi<RequestsData>(`/api/v2/workspaces/${ws}/goals/${goal.id}/requests`);
   const data = d.data;
+  const { reload: reloadList } = d;
+  const seenVersion = useRef(goal.version);
+  useEffect(() => {
+    if (seenVersion.current === goal.version) return;
+    seenVersion.current = goal.version;
+    reloadList();
+  }, [goal.version, reloadList]);
   const reload = () => {
     d.reload();
     onHoldChanged();

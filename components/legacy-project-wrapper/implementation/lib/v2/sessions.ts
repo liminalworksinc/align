@@ -62,7 +62,8 @@ export type EndedReason = "device_signed_out" | "member_removed";
 /**
  * End sessions nothing can deliver a stop, a resume or a release to any more (inside the caller's tx()): each one still
  * shared (or suspended) is stopped as stop-sharing would stop it (open epoch closed, no governing goal), marked with
- * why, and the requests still waiting on it expire (a request no device can answer never stays open). Its history
+ * why, and the requests still waiting on it expire, each target marked with the same reason (a request no device can
+ * answer never stays open, and it says its sessions ended rather than that its goal closed). Its history
  * stays. A stop latch or goal hold already set on the machine stays until the developer runs `align stop-sharing`.
  * Used when a device is revoked (lib/v2/devices.ts) and when a member leaves or is removed (lib/v2/lifecycle.ts).
  * Returns how many ended.
@@ -79,7 +80,14 @@ export function endSessions(live: { ws_id: string; session_key: string }[], reas
       s.ws_id,
       s.session_key,
     );
-    run("UPDATE v2_request_targets SET state = 'expired', updated_at = ? WHERE ws_id = ? AND session_key = ? AND state IN ('sent','received')", at, s.ws_id, s.session_key);
+    // The target keeps why it expired (C3-1): the request then says its sessions ended, never that the goal closed.
+    run(
+      "UPDATE v2_request_targets SET state = 'expired', ended_reason = ?, updated_at = ? WHERE ws_id = ? AND session_key = ? AND state IN ('sent','received')",
+      reason,
+      at,
+      s.ws_id,
+      s.session_key,
+    );
   }
   return live.length;
 }
@@ -393,7 +401,7 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
 }
 
 /** The sessions page: the caller's own shared sessions in full; for workspace owners, every shared session's
- *  alias, owner and state (for stop/resume), never its title or usage. */
+ *  alias, owner, start and state (for stop/resume), never its title or usage. */
 export function listSessions(pp: PolicyPrincipal) {
   const goalLabel = (id: string | null) => {
     if (!id) return null;
@@ -434,6 +442,8 @@ export function listSessions(pp: PolicyPrincipal) {
           owner: { id: s.user_id, name: personName(s.user_id, s.owner_name) },
           repo_alias: s.repo_alias,
           harness: s.harness,
+          // When it started: with the key's end, it tells one person's sessions in one repository apart (W3).
+          started_at: s.started_at,
           state: s.state,
           agent_stopped: !!s.agent_stopped,
           stop_status: stopStatus(pp.wsId, s.session_key),
