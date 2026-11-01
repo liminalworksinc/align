@@ -4,6 +4,7 @@ import fs from "node:fs";
 import type { Ctx } from "./context.ts";
 import { postTimed } from "./api.ts";
 import { kvGet, kvSet } from "./db.ts";
+import { willUpload, type PendingRow } from "./ledger.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
 import { layout } from "./shared/layout.ts";
 import { listSteering, type QueuedSteering, type UnsharedDigest } from "./shared/steering.ts";
@@ -55,18 +56,25 @@ export function computeUnsharedDigest(ctx: Ctx, now = Date.now(), force = false)
   const last = Number(kvGet(ctx.db, "unshared_digest_at") || 0);
   if (!force && now - last < 6 * 3600_000) return readJson<UnsharedDigest>(layout.unsharedDigest(ctx.home));
   const since = new Date(now - 7 * DAY).toISOString();
-  // A request counts as shared when it went up (`uploaded` 1), or its session is shared now and it waits to go up. A
+  // A request counts as shared when it went up (`uploaded` 1), or its session is shared now and it will go up. A
   // session whose share ended (this machine signed out, or a new pairing replaced the device) keeps what it shared:
-  // only its later, private usage counts as not shared (and a session whose history was deleted, none of it).
-  const rows = ctx.db
+  // only its later, private usage counts as not shared (and a session whose history was deleted, none of it). Usage
+  // made while a session was not shared stays not shared after it is shared again (C5-1).
+  const reqs = ctx.db
     .prepare(
-      `SELECT s.local_id, s.cwd, COALESCE(SUM(${fresh}), 0) AS tokens,
-              COALESCE(SUM(CASE WHEN r.uploaded = 1 OR sh.state IN ('shared','pending') THEN ${fresh} ELSE 0 END), 0) AS shared_tokens
+      `SELECT s.local_id, s.cwd, ${fresh} AS tokens, r.root_turn, r.ts, r.created_at, r.epoch_id, r.uploaded, sh.state AS share_state
        FROM requests r JOIN sessions s ON s.local_id = r.local_id LEFT JOIN shares sh ON sh.local_id = s.local_id
-       WHERE COALESCE(r.ts, r.created_at) >= ?
-       GROUP BY s.local_id`,
+       WHERE COALESCE(r.ts, r.created_at) >= ?`,
     )
-    .all(since) as { local_id: string; cwd: string | null; tokens: number; shared_tokens: number }[];
+    .all(since) as unknown as (PendingRow & { cwd: string | null; tokens: number; share_state: string | null })[];
+  const bySession = new Map<string, { local_id: string; cwd: string | null; tokens: number; shared_tokens: number }>();
+  for (const r of reqs) {
+    const s = bySession.get(r.local_id) ?? { local_id: r.local_id, cwd: r.cwd, tokens: 0, shared_tokens: 0 };
+    s.tokens += r.tokens;
+    if (r.uploaded === 1 || ((r.share_state === "shared" || r.share_state === "pending") && willUpload(ctx.db, r))) s.shared_tokens += r.tokens;
+    bySession.set(r.local_id, s);
+  }
+  const rows = [...bySession.values()];
   const total = rows.reduce((a, r) => a + r.tokens, 0);
   const byDir = new Map<string, number>();
   let unshared = 0;

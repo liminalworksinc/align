@@ -296,6 +296,31 @@ export function epochFor(db: Db, lid: string, rootTurn: string | null, ts: strin
   return e;
 }
 
+/** A request row as `willUpload` reads it. */
+export interface PendingRow {
+  local_id: string;
+  root_turn: string | null;
+  ts: string | null;
+  created_at: string;
+  epoch_id: string | null;
+  uploaded: number;
+}
+
+/**
+ * Whether a row not uploaded yet will go up while its session stays shared: it has an epoch, or one holds it
+ * (`epochFor`), and that epoch is not withheld. A row made while the session was not shared never will (C5-1), so it
+ * is neither "waiting to upload" nor shared time.
+ */
+export function willUpload(db: Db, r: PendingRow): boolean {
+  if (r.uploaded !== 0) return false;
+  if (r.epoch_id) {
+    const e = db.prepare("SELECT synced FROM epochs WHERE epoch_id=?").get(r.epoch_id) as { synced: number } | undefined;
+    return !!e && e.synced >= 0;
+  }
+  const e = epochFor(db, r.local_id, r.root_turn, r.ts || r.created_at);
+  return !!e && e.synced >= 0;
+}
+
 /** The share of session `lid` ended at `at`: its epochs still open end there (C5-1). */
 export function endEpochs(db: Db, lid: string, at: string): void {
   db.prepare("UPDATE epochs SET ends_at=? WHERE local_id=? AND ends_at IS NULL").run(at, lid);

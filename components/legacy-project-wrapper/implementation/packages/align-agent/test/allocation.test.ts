@@ -104,6 +104,10 @@ function shareAs(ctx: Ctx, sid: string, g: GoalSnapshot, state = "shared"): stri
        VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .run(lid, WS, "Acme", `key-${sid}`.padEnd(43, "x").slice(0, 43), g.id, state, "start", nowIso(), JSON.stringify(g), "ep_1", g.id);
+  // Its epoch, from before the session started, as a share from session start has: its usage will upload.
+  ctx.db
+    .prepare("INSERT OR IGNORE INTO epochs(epoch_id, local_id, workspace_id, goal_id, starts_at, cause, created_at) VALUES(?,?,?,?,?,?,?)")
+    .run(`ep_${sid}`, lid, WS, g.id, new Date(Date.now() - 3_600_000).toISOString(), "manual", nowIso());
   renderHot(ctx, lid);
   return lid;
 }

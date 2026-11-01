@@ -616,7 +616,10 @@ the session is shared again, at the time its share stopped). A request SHALL be 
 interval holds both its root turn's time and its own time; one made at or after its epoch's end, while the session was
 not shared, SHALL be assigned to none and stay on this machine for good, also after the session is shared again: that
 share counts from its own start (now, as for every session shared before), never from the earlier epoch. So the notices
-that say a session's usage `stays on this machine from now on` hold. `::align share`'s preview SHALL say `counts from
+that say a session's usage `stays on this machine from now on` hold. Such usage SHALL not count among the usage rows
+waiting to upload (`align sync`'s `<n> usage rows ... stay on this machine` and `align status`'s `<n> usage rows wait
+to upload` count only rows that will go up), and the weekly note's digest SHALL count it as not shared. `::align
+share`'s preview SHALL say `counts from
 now.` for a session shared before (`counts from session start.` otherwise), as the share's confirmation notice
 (`..., counting from now.`) does.
 
@@ -624,6 +627,11 @@ now.` for a session shared before (`counts from session start.` otherwise), as t
 
 - **WHEN** a shared session's person is removed from its workspace (a sync ends the share), a turn is made, the workspace is given back, and the developer types `::align share`, `::align share confirm`, and makes another turn, with a sync after each (test `findings5` "lost access, a turn, the workspace given back and `::align share confirm` ...")
 - **THEN** the preview says `counts from now.`, the turn made in between is never uploaded and has no epoch locally, and the turn after the re-share goes up under the new epoch
+
+#### Scenario: Not waiting to upload, and not shared time
+
+- **WHEN** after such a re-share only the turn made while the share had ended is not uploaded, the server is unreachable, and `align sync`, `align status` and the digest run (test `findings6` "a turn made while the share had ended is not a row waiting to upload ...")
+- **THEN** both say `0 usage rows`, and the digest counts that turn's tokens as not shared
 
 #### Scenario: A turn made while signed out
 
@@ -1540,8 +1548,8 @@ The sync pass SHALL compute, from the local ledger and at most every 6 hours, th
 output and cache writes) of the last 7 days and the part in sessions not shared toward a goal, grouped by folder (top
 5), into `~/.align/unshared-digest.json`, which SHALL never be uploaded. Usage that went up to the server SHALL count as
 shared even after its session's share ended (this machine signed out, or a new pairing replaced the device), so a
-re-pair never turns what was shared into "not shared"; usage of a session whose history was deleted counts as not
-shared. The `align` hook SHALL, on `SessionStart` with
+re-pair never turns what was shared into "not shared"; usage of a session whose history was deleted, and usage made
+while a session was not shared (its share had ended, before it was shared again), counts as not shared. The `align` hook SHALL, on `SessionStart` with
 source `startup` (shared or not), show once per calendar week (Monday, UTC), as `systemMessage` only and never
 `additionalContext`, `Align: <n>% of this machine's agent time in the last 7 days was in sessions not shared toward any
 goal (mostly <up to 3 folder names>). Run \`align share --dir <folder> --workspace <workspace> --goal <goal>\` to count a

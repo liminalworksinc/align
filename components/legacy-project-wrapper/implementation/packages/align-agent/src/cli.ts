@@ -28,6 +28,7 @@ import {
   type Credentials,
 } from "./api.ts";
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
+import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
 import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, getShare } from "./hot.ts";
 import { fetchAsks } from "./asks.ts";
@@ -999,17 +1000,16 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   }
 }
 
-/** Finalized usage rows of shared sessions, from their first epoch on, not uploaded yet. */
+/** Finalized usage rows of shared sessions that will upload and have not yet: never one made while the session was not
+ *  shared, which stays on this machine (C5-1). */
 function unuploadedRows(ctx: Ctx): number {
-  return (
-    ctx.db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM requests r JOIN shares s ON s.local_id=r.local_id
-         WHERE s.state='shared' AND r.uploaded=0 AND r.finalized=1
-           AND COALESCE(r.ts, r.created_at) >= (SELECT MIN(e.starts_at) FROM epochs e WHERE e.local_id=r.local_id)`,
-      )
-      .get() as { n: number }
-  ).n;
+  const rows = ctx.db
+    .prepare(
+      `SELECT r.local_id, r.root_turn, r.ts, r.created_at, r.epoch_id, r.uploaded FROM requests r JOIN shares s ON s.local_id=r.local_id
+       WHERE s.state='shared' AND r.uploaded=0 AND r.finalized=1`,
+    )
+    .all() as unknown as PendingRow[];
+  return rows.filter((r) => willUpload(ctx.db, r)).length;
 }
 
 async function cmdDoctor(ctx: Ctx): Promise<void> {
