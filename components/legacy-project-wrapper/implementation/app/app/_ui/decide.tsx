@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, Btn, Err, Field, Loading, Note, Pill, TextArea, useAction, useApi, when } from "./kit";
-import { AddEvidence, ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, EvidenceItem, FIELD_LABEL, FieldValue, hiddenGoals, NoticeBox, Revisions, SnapshotBox, STATUS_WORD, type Notice } from "./crparts";
+import { AddEvidence, ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, EvidenceItem, FIELD_LABEL, FieldValue, NoticeBox, Revisions, SnapshotBox, STATUS_WORD, withHidden, type Notice } from "./crparts";
 import { LIMIT_WORDS } from "./limits";
 import type { ChangeFields, ChangeRequest, Goal, Limit } from "./types";
 
@@ -80,10 +80,8 @@ export function changeLines(cr: ChangeRequest, titles: Map<string, string>): str
     const hid = cr.diff.hidden_depends_on ?? { before: 0, after: 0 };
     const more = Math.max(0, hid.after - hid.before);
     const fewer = Math.max(0, hid.before - hid.after);
-    const addedWords = [...added.map(name), ...(more ? [hiddenGoals(more)] : [])];
-    const removedWords = [...removed.map(name), ...(fewer ? [hiddenGoals(fewer)] : [])];
-    if (addedWords.length) out.push(`Would depend on ${addedWords.join(", ")}.`);
-    if (removedWords.length) out.push(`Would no longer depend on ${removedWords.join(", ")}.`);
+    if (added.length || more) out.push(`Would depend on ${withHidden(added.map(name), more)}.`);
+    if (removed.length || fewer) out.push(`Would no longer depend on ${withHidden(removed.map(name), fewer)}.`);
   }
   return out;
 }

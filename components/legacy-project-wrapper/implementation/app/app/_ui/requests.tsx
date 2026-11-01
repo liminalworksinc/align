@@ -39,6 +39,7 @@ interface RequestView {
     repo_alias: string | null;
     harness: string;
     title: string | null;
+    started_at: string;
     state: TargetState;
     /** Why an expired session's sharing ended (its device signed out, or its person left the workspace), else null. */
     ended_reason: EndedReason | null;
@@ -237,7 +238,13 @@ function RequestRow({ ws, r, onDone }: { ws: string; r: RequestView; onDone: () 
       </p>
       {r.sessions.map((s) => (
         <p key={s.session_key} className="flex flex-wrap items-center gap-2 text-[14px] text-zinc-700">
-          {sessionName(s)} {statePill(s)}
+          {sessionName(s)}
+          {/* Two sessions can share a name (one person, one repository): the start time and the key's end tell them apart (X4). */}
+          <span className="text-zinc-500">
+            {" "}
+            · started {when(s.started_at)} · …{s.session_key.slice(-6)}
+          </span>{" "}
+          {statePill(s)}
         </p>
       ))}
       <Err>{act.error}</Err>

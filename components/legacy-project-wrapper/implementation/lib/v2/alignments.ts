@@ -373,6 +373,10 @@ function alignmentView(pp: PolicyPrincipal, a: AlignmentRow) {
       session_key: mine ? s.session_key : null,
       owner: { id: s.user_id, name: memberName(s.user_id) },
       label: mine ? s.title || s.repo_alias || `${s.harness} session` : s.repo_alias ? `${s.repo_alias} (${s.harness})` : `a ${s.harness} session`,
+      // When it started and the key's last 6 characters, so two sessions of one person in one repository differ (X4), as
+      // on the owner's list of everyone's sessions; never the whole key for someone else's.
+      started_at: s.started_at,
+      key_end: s.session_key.slice(-6),
       current_goal: goalLabel(pp, e?.goal_id ?? null),
     };
   }).filter(Boolean);

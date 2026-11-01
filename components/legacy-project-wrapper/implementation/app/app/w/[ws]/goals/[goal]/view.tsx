@@ -213,7 +213,8 @@ function Tree({ ws, goal, canEdit, hiddenDeps, onDone }: { ws: string; goal: Goa
               (version {g.version})
             </span>
           ))}
-          {hiddenDeps > 0 && `${deps.length ? ", " : ""}${hiddenGoals(hiddenDeps)}`}
+          {/* After named ones, "and 1 other goal you can't see" (X1): never read as if a named goal were hidden. */}
+          {hiddenDeps > 0 && (deps.length ? ` and ${hiddenDeps === 1 ? "1 other goal" : `${hiddenDeps} other goals`} you can't see` : hiddenGoals(hiddenDeps))}
         </p>
       )}
       {/* The review prompt is the owner's alone (whoever can edit it); everyone else sees the amber pill. Sessions on this

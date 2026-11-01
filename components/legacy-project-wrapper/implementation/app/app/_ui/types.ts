@@ -89,7 +89,8 @@ export interface Alignment {
   requester: { id: string; name: string };
   target_goal: { id: string | null; title: string | null; visible: boolean } | null;
   source_goal: { id: string | null; title: string | null; visible: boolean } | null;
-  sessions: { ref: number; session_key: string | null; owner: { id: string; name: string }; label: string; current_goal: { id: string | null; title: string | null; visible: boolean } | null }[];
+  /** started_at and key_end (the key's last 6 characters) tell two sessions of one person in one repository apart. */
+  sessions: { ref: number; session_key: string | null; owner: { id: string; name: string }; label: string; started_at: string | null; key_end: string; current_goal: { id: string | null; title: string | null; visible: boolean } | null }[];
   effects: { kind: string; text: string }[];
   requirements: { for: string | null; approvers: { id: string; name: string }[]; approved_by: { id: string; name: string } | null }[];
   approvers: { id: string; name: string; approved: boolean }[];
