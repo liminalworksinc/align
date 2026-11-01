@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, TextArea, useAction, useApi, when } from "./kit";
+import { api, ApiError, Btn, Card, Err, Field, Input, Loading, Note, Pill, TextArea, useAction, useApi, when } from "./kit";
+import { NoticeBox, useNotice, type Notice } from "./crparts";
 import type { Me } from "./server";
 import type { Goal, Reallocation, WsDetail } from "./types";
 
@@ -29,17 +30,65 @@ function launchLine(r: Reallocation) {
   return "Approved, waiting for launch. Agents still have the old targets.";
 }
 
+/** What a decision recorded, for its "Recorded: …" line (W2, as change requests confirm every decision). `after` is
+ *  the proposal as the server answered. */
+function recordedLine(action: string, r: Reallocation, after: Reallocation | null): string {
+  const allApproved = after?.state === "approved";
+  switch (action) {
+    case "approve":
+      return allApproved
+        ? `Recorded: you approved revision ${r.revision}. Every goal in it is approved; agents keep the old targets until someone launches it.`
+        : `Recorded: you approved revision ${r.revision} for the goals you decide on. Other goals in it still need an approval.`;
+    case "approve_and_launch":
+      return `Recorded: you approved revision ${r.revision} and launched it. Agents on these goals hear the new targets at their next turn.`;
+    case "launch":
+      return "Recorded: you launched the new targets. Agents on these goals hear them at their next turn.";
+    case "not_yet":
+      return "Recorded: you decided not yet. Agents keep the old targets until someone launches them.";
+    case "counter":
+      return `Recorded: you suggested other targets to ${r.requester.name}. They accept them, then they can be approved.`;
+    case "accept_counter":
+      return allApproved ? "Recorded: you accepted the suggested targets. Every goal in it is approved; agents keep the old targets until someone launches it." : "Recorded: you accepted the suggested targets. They wait for approval again.";
+    case "reject":
+      return "Recorded: you declined these targets. The goals keep their targets.";
+    case "withdraw":
+      return "Recorded: you withdrew your proposal. The goals keep their targets.";
+    default:
+      return "Recorded.";
+  }
+}
+
 function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: Me; onDone: () => void }) {
   const act = useAction();
   const [countering, setCountering] = useState(false);
   const [values, setValues] = useState<string[]>(r.targets.map((t) => (t.target_share === null ? "" : String(t.target_share))));
   const [note, setNote] = useState("");
+  // The item is keyed by its revision, state and launch, so a decision remounts it: the notice outlives that.
+  const [notice, setNotice] = useNotice(`reallocation:${r.id}`);
   const base = `/api/v2/workspaces/${ws}/reallocations/${r.id}`;
   const visible = r.targets.every((t) => t.goal);
-  const doIt = (action: string, body: Record<string, unknown> = {}) => void act.run(() => api(`${base}/${action}`, { body }), onDone);
+  /** Send a decision: "Recorded: …" when it is, "Not recorded. <why>" when the server refuses it (a 409 reloads, to show
+   *  the proposal as it is now). */
+  const decide = (action: string, body: Record<string, unknown> = {}, after?: () => void) =>
+    void act.run(async () => {
+      setNotice(null);
+      try {
+        const out = await api<Reallocation>(`${base}/${action}`, { body });
+        setNotice({ kind: "done", text: recordedLine(action, r, out ?? null) });
+        after?.();
+        onDone();
+      } catch (e) {
+        if (!(e instanceof ApiError)) throw e;
+        const conflict = e.status === 409;
+        setNotice({ kind: "refused", text: `Not recorded. ${e.message}${conflict ? "" : " Nothing changed."}` });
+        if (conflict) onDone();
+      }
+    });
+  const doIt = decide;
   const line = launchLine(r);
   return (
     <li className="py-3" data-reallocation={r.id}>
+      {notice && <NoticeBox notice={notice} />}
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <span className="text-[15px] text-zinc-900">{r.requester.id === me.id ? "You" : r.requester.name} proposed new targets</span>
         <Pill tone={r.state === "approved" ? "green" : r.state === "pending" || r.state === "countered" ? "amber" : "neutral"}>{STATE_WORDS[r.state]}</Pill>
@@ -106,13 +155,7 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
           className="mt-3 rounded-[10px] border border-zinc-200 p-3"
           onSubmit={(e) => {
             e.preventDefault();
-            void act.run(
-              () => api(`${base}/counter`, { body: { revision: r.revision, targets: r.targets.map((t, i) => ({ goal_id: t.goal!.id, target_share: values[i].trim() === "" ? null : Number(values[i]) })), note: note || null } }),
-              () => {
-                setCountering(false);
-                onDone();
-              },
-            );
+            decide("counter", { revision: r.revision, targets: r.targets.map((t, i) => ({ goal_id: t.goal!.id, target_share: values[i].trim() === "" ? null : Number(values[i]) })), note: note || null }, () => setCountering(false));
           }}
         >
           {r.targets.map((t, i) => (
@@ -138,6 +181,7 @@ export function ProposalsCard({ ws, me, detail }: { ws: string; me: Me; detail: 
   const feed = useApi<{ goals: Goal[] }>(`/api/v2/workspaces/${ws}/goals`);
   const [values, setValues] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
+  const [proposed, setProposed] = useState<Notice | null>(null);
   const act = useAction();
   const active = feed.data?.goals.filter((g) => g.status === "active") ?? [];
   const changes = active.filter((g) => (values[g.id] ?? "").trim() !== "" && Number(values[g.id]) !== (g.target_share ?? -1));
@@ -167,9 +211,12 @@ export function ProposalsCard({ ws, me, detail }: { ws: string; me: Me; detail: 
             className="mt-4 border-t border-zinc-200 pt-4"
             onSubmit={(e) => {
               e.preventDefault();
+              const n = changes.length;
+              setProposed(null);
               void act.run(
                 () => api(`/api/v2/workspaces/${ws}/reallocations`, { body: { targets: changes.map((g) => ({ goal_id: g.id, target_share: Number(values[g.id]) })), note: note || null } }),
                 () => {
+                  setProposed({ kind: "done", text: `Recorded: you proposed new targets for ${n === 1 ? "1 goal" : `${n} goals`}. Someone who can approve for each goal decides on its part.` });
                   setValues({});
                   setNote("");
                   reload();
@@ -178,6 +225,7 @@ export function ProposalsCard({ ws, me, detail }: { ws: string; me: Me; detail: 
             }}
           >
             <p className="mb-2 text-[15px] font-medium text-zinc-900">Propose new targets</p>
+            {proposed && <NoticeBox notice={proposed} />}
             <div className="grid gap-2 sm:grid-cols-2">
               {active.map((g) => (
                 <Field key={g.id} label={`${g.title} (now ${g.target_share === null || g.target_share === undefined ? "no target" : `${g.target_share}%`})`}>

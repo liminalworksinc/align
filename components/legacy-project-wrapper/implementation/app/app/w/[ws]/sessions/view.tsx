@@ -75,7 +75,8 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
               {s.ended_reason === "member_removed" && (
                 <Note>
                   Sharing ended when you left this workspace (or were removed from it), so Stop or Resume can&apos;t reach it.
-                  {s.agent_stopped ? " It stays stopped on your machine until you run align stop-sharing there." : ""}
+                  {s.agent_stopped ? " It stays stopped on your machine until you run align stop-sharing there." : ""} To share it again now that you are back, run align login on
+                  that machine again (it lost access to this workspace when you left), then ::align share in the session.
                 </Note>
               )}
               <div className="mt-2 flex flex-wrap gap-2">
@@ -124,6 +125,10 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
               <li key={s.session_key} className="flex flex-wrap items-center gap-2 py-2 text-[15px]">
                 <span className="text-zinc-900">{s.owner.name}</span>
                 <span className="text-zinc-500">{s.repo_alias ? `${s.repo_alias} (${s.harness})` : `a ${s.harness} session`}</span>
+                {/* Titles stay private; the start time and the key's end tell one person's sessions apart (W3). */}
+                <span className="text-[14px] text-zinc-500" data-session-detail>
+                  started {when(s.started_at)} · …{s.session_key.slice(-6)}
+                </span>
                 <StopStatusPills s={s.stop_status} stopped={s.agent_stopped} />
                 <span className="ml-auto">
                   {s.agent_stopped ? (

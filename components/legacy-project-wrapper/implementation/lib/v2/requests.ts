@@ -6,6 +6,7 @@ import { event } from "./events";
 import { newId, nowIso } from "./ids";
 import { goalObj, goalRow, transferFor, visibleGoal, type GoalRow } from "./goals";
 import { authorize, canReadGoal, type PolicyPrincipal } from "./policy";
+import type { EndedReason } from "./sessions";
 import { optStr, oneOf, SESSION_KEY_RE, str, type Body } from "./validate";
 import { memberName, memberPrincipal } from "./workspaces";
 
@@ -227,6 +228,8 @@ export function expireOpenRequests(ws: string, goalId: string, actorId: string, 
 interface TargetRow {
   session_key: string;
   state: TargetState;
+  /** Why an expired target's session ended (lib/v2/sessions.ts endSessions); null when it expired for another reason. */
+  ended_reason: EndedReason | null;
   auto_accepted: number;
   updated_at: string;
   user_id: string;
@@ -239,7 +242,7 @@ interface TargetRow {
  *  row (owner, repository alias, state); anyone else who reads the goal sees their own sessions' rows and the counts. */
 function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers = approvalSet(g)) {
   const rows = all<TargetRow>(
-    `SELECT t.session_key, t.state, t.auto_accepted, t.updated_at, s.user_id, s.repo_alias, s.harness, s.title
+    `SELECT t.session_key, t.state, t.ended_reason, t.auto_accepted, t.updated_at, s.user_id, s.repo_alias, s.harness, s.title
      FROM v2_request_targets t JOIN v2_sessions s ON s.ws_id = t.ws_id AND s.session_key = t.session_key
      WHERE t.request_id = ? ORDER BY t.session_key`,
     r.id,
@@ -247,6 +250,7 @@ function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers =
   const everyone = r.sender_id === pp.userId || pp.wsRole === "owner" || approvers.includes(pp.userId);
   const count = (...s: TargetState[]) => rows.filter((t) => s.includes(t.state)).length;
   const pending = count("sent", "received");
+  const state = r.cancelled_at ? ("cancelled" as const) : pending ? ("open" as const) : rows.length && count("expired") === rows.length ? ("expired" as const) : ("answered" as const);
   return {
     id: r.id,
     type: r.type,
@@ -257,8 +261,12 @@ function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers =
     created_at: r.created_at,
     cancelled_at: r.cancelled_at,
     cancelled_by: r.cancelled_by ? person(r.cancelled_by) : null,
-    // expired: its goal closed before any session answered (lib/v2/goals.ts writeGoalVersion).
-    state: r.cancelled_at ? ("cancelled" as const) : pending ? ("open" as const) : rows.length && count("expired") === rows.length ? ("expired" as const) : ("answered" as const),
+    // expired: no session answered before the request stopped waiting, because its goal closed (lib/v2/goals.ts
+    // writeGoalVersion) or because every session it waited on ended (C3-1).
+    state,
+    /** Why an expired request expired: sessions_ended when every session it waited on ended (its device signed out, or
+     *  its person left the workspace), else goal_closed. null unless state is expired. */
+    expired_reason: state !== "expired" ? null : rows.every((t) => t.ended_reason) ? ("sessions_ended" as const) : ("goal_closed" as const),
     // accepted: the developer's own accepts; not_declined: delivered to the agent and not declined (auto_accepted),
     // never counted as accepted.
     counts: {
@@ -278,6 +286,7 @@ function requestView(pp: PolicyPrincipal, g: GoalRow, r: RequestRow, approvers =
         harness: t.harness,
         title: t.user_id === pp.userId ? t.title : null,
         state: t.state,
+        ended_reason: t.state === "expired" ? t.ended_reason : null,
         auto_accepted: !!t.auto_accepted,
         updated_at: t.updated_at,
       })),

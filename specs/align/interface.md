@@ -719,7 +719,7 @@ send the proposal with
 #### Scenario: Only dependencies the deciders can see are offered
 
 - **WHEN** a member opens **Propose a change** on a goal whose effective approval set can't read some goals the member can (their private goal, another team's team-only goal)
-- **THEN** "Depends on" offers as new dependencies only the goals in the goal read's `dependency_choices` (the goal's current dependencies stay listed), and says "<n> goals you can see aren't offered: someone who decides on this goal can't see them." ("1 goal you can see isn't offered" for one), so the form never offers what the server would refuse; dependencies on the goal the member can't see read "Also depends on a goal you can't see. Sending keeps it; only someone who can see it can remove it."
+- **THEN** "Depends on" offers as new dependencies only the goals in the goal read's `dependency_choices` (the goal's current dependencies stay listed), and says "<n> goals you can see aren't offered: someone who decides on this goal can't see them." ("1 goal you can see isn't offered" for one), and leaves out the goals in `dependency_loops` (they already depend on this goal), saying "<n> goals aren't offered: they already depend on this goal, so adding them would make a loop." ("1 goal isn't offered: it already depends on this goal, so adding it would make a loop." for one), so the form never offers what the server would refuse; dependencies on the goal the member can't see read "Also depends on a goal you can't see. Sending keeps it; only someone who can see it can remove it."
 
 #### Scenario: Suggest a limit
 
@@ -819,6 +819,11 @@ and a closed "Details" disclosure.
 
 - **WHEN** the requester views their own open request
 - **THEN** a countered request offers **Accept the change** (`accept_counter`, back to pending) and **Withdraw**; a pending one offers **Withdraw** (`withdraw`) and, with an unacknowledged condition, **Confirm the condition is met**; and one whose base version is behind the goal and whose `can.rebase` flag is set shows "Made against version <b>. The goal is now at version <n>." with **Update to version <n>**, which posts `{revision, base_version:<n>}` to `rebase` and then shows "Recorded: you updated your request to version <n> (revision <r>). It waits for approval again." like every other decision
+
+#### Scenario: A refused update to the goal's version
+
+- **WHEN** the requester presses **Update to version <n>** and the server refuses it (409, for example `stale_version` because the goal moved on again, `dependency_not_visible` or `cycle`) (`scripts/test-v2.mjs` "C3-5 (ui): a refused Update to version n reads \"Not recorded. ...")
+- **THEN** the card shows a focused alert "Not recorded. <the server's message>" like every other refused decision and reloads, so it shows the request as it is now (for `stale_version`, **Update to version <the goal's new version>**)
 
 #### Scenario: Viewer
 
@@ -973,7 +978,17 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 #### Scenario: Own sessions
 
 - **WHEN** a member opens the tab
-- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", or "ended: device signed out" with the note "The machine that shared this session signed out of Align, so sharing ended and Stop or Resume can't reach it. ... To share it again, run align login on that machine, then ::align share in the session." and no **Stop agent** or **Resume agent**), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
+- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", "ended: device signed out" or "ended: left the workspace", the two ended states with no **Stop agent**, **Resume agent** or **Stop sharing**, only **Delete shared history**, and "Stopped; can't be resumed from here" when its agent was stopped), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
+
+#### Scenario: A session whose device signed out
+
+- **WHEN** a member opens the tab after the machine that shared one of their sessions signed out of Align (`align logout`, removal on the web, or Sign out everywhere with "Also unpair all my devices")
+- **THEN** that session reads "ended: device signed out" with the note "The machine that shared this session signed out of Align, so sharing ended and Stop or Resume can't reach it. ... To share it again, run align login on that machine, then ::align share in the session." ("It stays stopped on that machine until you run align stop-sharing there." in between when its agent was stopped)
+
+#### Scenario: A session ended by leaving the workspace
+
+- **WHEN** a member who was removed from the workspace (or left it) while a session of theirs was shared is invited back and opens the tab (`scripts/test-v2.mjs` "S1 (ui): back in the workspace, the removed member's Sessions tab reads ...")
+- **THEN** that session reads "ended: left the workspace" with the note "Sharing ended when you left this workspace (or were removed from it), so Stop or Resume can't reach it. ... To share it again now that you are back, run align login on that machine again (it lost access to this workspace when you left), then ::align share in the session." ("It stays stopped on your machine until you run align stop-sharing there." in between when its agent was stopped)
 
 #### Scenario: Confirmed actions
 
@@ -983,7 +998,7 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 #### Scenario: Owners see everyone's sessions
 
 - **WHEN** a workspace owner opens the tab
-- **THEN** an "Everyone's shared sessions (workspace owners)" card lists each session's owner, repo alias and harness with **Stop agent** or **Resume agent** (`POST .../sessions/<key>/stop` or `/resume`), never titles or usage; a suspended own session shows "The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads."
+- **THEN** an "Everyone's shared sessions (workspace owners)" card lists each session's owner, repo alias and harness, and "started <time> · …<the key's last 6 characters>" so two sessions of one person in one repository can be told apart (`scripts/test-v2.mjs` "W3 (ui): each row of the owner's Everyone list ..."), with **Stop agent** or **Resume agent** (`POST .../sessions/<key>/stop` or `/resume`), never titles or usage; a suspended own session shows "The alignment this session counted under was revoked. Pick a goal for it on your machine to resume uploads."
 
 ### Requirement: Workspace Alignments tab
 
@@ -1005,6 +1020,11 @@ only the actions the server allows.
 
 - **WHEN** a member opens the tab
 - **THEN** a "Target changes" card (anchor `#target-changes`) lists the reallocations from `GET /api/v2/workspaces/<ws>/reallocations` the person can read, each as "<requester or You> proposed new targets", its state ("waiting for approval", "approver suggested other targets", "approved", "declined", "withdrawn", "superseded"), each goal as "<title>: <from> → <to>" ("A goal you can't see: changes" otherwise) with "(approved by <name>)" or "(needs one of: <names>)", the note, where the launch stands ("Approved, waiting for launch. Agents still have the old targets.", "Approved, not launched yet: …", "Launched by <name>, <time>. Agents on these goals hear the new targets at their next turn.", or why it was superseded), and the buttons its `can` flags allow: **Approve (agents switch at launch)**, **Approve and launch**, **Launch**, **Not yet**, **Accept the counter**, **Counter** (a target field per goal and a note), **Decline**, **Withdraw**; for everyone but viewers a "Propose new targets" form lists each active goal ("<title> (now <n>% | no target)") with a blank field meaning unchanged, an optional "Why", and **Propose <n> change(s)**, which posts `{targets, note}` to `POST /api/v2/workspaces/<ws>/reallocations`
+
+#### Scenario: Target-change decisions are confirmed
+
+- **WHEN** a person proposes new targets or takes a decision on a proposal (approve, approve and launch, launch, not yet, counter, accept the counter, decline, withdraw) (`scripts/test-v2.mjs` "W2 (ui): approving and launching new targets on the Alignments tab ...")
+- **THEN** the page shows a "Recorded: …" line as change-request decisions do: "Recorded: you proposed new targets for <n> goals. Someone who can approve for each goal decides on its part."; "Recorded: you approved revision <r>. Every goal in it is approved; agents keep the old targets until someone launches it." (or "… for the goals you decide on. Other goals in it still need an approval."); "Recorded: you approved revision <r> and launched it. Agents on these goals hear the new targets at their next turn."; "Recorded: you launched the new targets. Agents on these goals hear them at their next turn."; "Recorded: you decided not yet. Agents keep the old targets until someone launches them."; "Recorded: you suggested other targets to <requester>. …"; "Recorded: you accepted the suggested targets. …"; "Recorded: you declined these targets. …"; "Recorded: you withdrew your proposal. …"; a refusal reads "Not recorded. <the server's message>", and a 409 reloads the proposal
 
 #### Scenario: Approval would make a loop
 
@@ -1066,15 +1086,25 @@ developer is asked first), for Switch goal a checkbox per session on the goal (i
 key's last 6 characters>", so two sessions of one person in one repository can be told apart) and a target-goal picker of the other
 active goals, an optional note (at most 280 characters, "shown to the developer and the agent, quoted") and
 **Send** (`POST …/requests`), or "No shared session is working on this goal, so there is no one to send a request
-to." when there is no session. Each request SHALL be listed with its type, a pill (waiting, answered, cancelled, or "expired: the goal closed"), its
+to." when there is no session. Each request SHALL be listed with its type, a pill (waiting, answered, cancelled, "expired: the goal closed", or "expired: its sessions ended" when its `expired_reason` is `sessions_ended`), its
 sender and time, the goal version it was sent at, the target goal ("a goal you can't see" when hidden), the quoted
 note, who cancelled it, the counts ("<n> accepted by the developer, <n> delivered and not declined"), and per visible
 session a pill: pending, accepted by the developer, "delivered, not declined" (an `auto_accepted` accept: the request
 reached the agent and the developer did not decline it by the end of that turn; it never says the agent did it),
-declined or expired, each with one evidence class: "delivery receipt" for a request the session's machine received and
+declined, expired, or for a session that ended before it answered "ended: device signed out" or "ended: left the workspace" (its row's `ended_reason`), each with one evidence class: "delivery receipt" for a request the session's machine received and
 has not answered and for one delivered and not declined, "agent reported" for the developer's answer (accepted or
-declined, sent from their machine), "not observed" for one sent with nothing back or expired; with **Cancel** when its
+declined, sent from their machine), "not observed" for one sent with nothing back, expired or ended; with **Cancel** when its
 `can_cancel` is true.
+
+#### Scenario: A new goal version reloads the card in place
+
+- **WHEN** the goal gets a new version while the page is open (a launch from the Change requests card, a version saved in the New version form, the goal closing), with a hold reason or a request note typed into the card (`scripts/test-v2.mjs` "C3-4 (ui): launching version 2 from the goal page reloads ...")
+- **THEN** the card's requests are fetched again in place: it never shows "Loading…", disappears or appears twice, and what was typed into it stays
+
+#### Scenario: A request whose sessions ended
+
+- **WHEN** a goal's checkpoint waited only on sessions that then ended (their person was removed or deleted their account, or their device signed out, alone or through Sign out everywhere with "Also unpair all my devices") (`scripts/test-v2.mjs` "C3-1 (ui): on the goal page a request whose sessions ended reads ...")
+- **THEN** the request reads "expired: its sessions ended", never "expired: the goal closed" while the goal is active, and each session "ended: left the workspace" or "ended: device signed out"; a request that expired because its goal closed still reads "expired: the goal closed"
 
 #### Scenario: Approver sends a replan
 
@@ -1113,7 +1143,12 @@ sessions.
 #### Scenario: Agent time against targets
 
 - **WHEN** a member (viewers included) opens the tab
-- **THEN** above the usage table an "Agent time against targets" card (pill "steering on" or "steering off") reads `GET /api/v2/workspaces/<ws>/allocation?weeks=6` and shows, for the last 7 days, one line per row ("<goal>", "Goals you can't see" or "Not bound to a goal") with "<share>% of agent time · target <n>%", a pill "<n> points over", "<n> points under", "on target" or "no target" (amber at 10 points or more), a bar with the target marked, and its fresh tokens, list price, unpriced requests and sessions; a table of each goal's share per week (weeks start Monday, UTC); "Steering is <on|off>. …" with how many lines were shown in the last 7 days; a "Propose new targets" link to the Alignments tab's target changes; and, for a workspace owner only, **Turn steering on** / **Turn steering off**, which PATCHes `{steering}` to `/api/v2/workspaces/<ws>`
+- **THEN** above the usage table an "Agent time against targets" card (pill "steering on" or "steering off") reads `GET /api/v2/workspaces/<ws>/allocation?weeks=6` and shows, for the last 7 days, one line per row ("<goal>", "Goals you can't see" or "Not bound to a goal") with "<share>% of agent time · target <n>%", a pill "<n> points over", "<n> points under" ("1 point over", "1 point under" for one), "on target" or "no target" (amber at 10 points or more), a bar with the target marked, and its fresh tokens, list price, unpriced requests and sessions; a table of each goal's share per week (weeks start Monday, UTC); "Steering is <on|off>. …" with how many lines were shown in the last 7 days; a "Propose new targets" link to the Alignments tab's target changes; and, for a workspace owner only, **Turn steering on** / **Turn steering off**, which PATCHes `{steering}` to `/api/v2/workspaces/<ws>`
+
+#### Scenario: One point from the target
+
+- **WHEN** goals are 1 point over, 1 point under and 5 points under their targets (`scripts/test-v2.mjs` "C3-2 (ui): the Spend tab says ...")
+- **THEN** their pills read "1 point over", "1 point under" and "5 points under", never "1 points"
 
 ### Requirement: Workspace Apps tab
 

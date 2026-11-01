@@ -1052,6 +1052,12 @@ const MIGRATIONS: string[] = [
   CREATE INDEX v2_sessions_device ON v2_sessions(device_id);
   CREATE INDEX v2_sessions_user ON v2_sessions(ws_id, user_id);
   `,
+  // E2E-WEB cycle 3 (C3-1): a request target that expired because its session ended (lib/v2/sessions.ts endSessions)
+  // keeps why, so the request reads "expired: its sessions ended" and the row "ended: device signed out" or "ended: left
+  // the workspace" (never "the goal closed"), even after the session is shared again. NULL: withdrawn or goal closed.
+  `
+  ALTER TABLE v2_request_targets ADD COLUMN ended_reason TEXT CHECK (ended_reason IS NULL OR ended_reason IN ('device_signed_out','member_removed'));
+  `,
 ];
 
 // The operator script (scripts/align-admin.mjs) accepts only a database at SCHEMA_VERSION (lib/v2/core.mts).

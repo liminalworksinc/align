@@ -3,7 +3,7 @@ import { badRequest, conflict, forbidden, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso } from "./ids";
 import { effectiveSet, launchSet } from "./approval";
-import { contentOf, goalObj, goalRow, nextContent, sameContent, unreadableGoals, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
+import { contentOf, goalObj, goalRow, goalsDependingOn, nextContent, sameContent, unreadableGoals, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName, memberPrincipal } from "./workspaces";
 import { nonNegInt, optStr, str, type Body } from "./validate";
@@ -173,7 +173,8 @@ function dependencyAddedBy(revs: RevisionRow[], dep: string): string | null {
 
 /** The goals a change request from this reader on `goalId` may add as a dependency: the goals they can read that every
  *  member of the goal's effective approval set (for them as the requester) can read too, so the propose form offers
- *  only what the server accepts (C2 F5). null when they may not propose (a viewer, the owner, a closed goal). With
+ *  only what the server accepts (C2 F5), leaving out goals that already depend on this goal, which would close a loop
+ *  (C3-3). null when they may not propose (a viewer, the owner, a closed goal). With
  *  `counterOf` (a request on that goal), the goals a counter from this reader may add: readable by them, the requester
  *  and the request's approval set (404 for a request not on the goal; null when they may not counter it). */
 export function dependencyChoices(pp: PolicyPrincipal, goalId: string, counterOf?: string): string[] | null {
@@ -192,9 +193,21 @@ export function dependencyChoices(pp: PolicyPrincipal, goalId: string, counterOf
     readers = effectiveSet(g, pp.userId);
   }
   const deciders = readers.map((u) => memberPrincipal(pp.wsId, u));
+  const loops = goalsDependingOn(pp.wsId, g.id);
   return all<GoalRow>("SELECT * FROM v2_goals WHERE ws_id = ? AND id != ? ORDER BY id", pp.wsId, g.id)
-    .filter((d) => canReadGoal(pp, goalObj(d)) && deciders.every((dp) => canReadGoal(dp, goalObj(d))))
+    .filter((d) => !loops.has(d.id) && canReadGoal(pp, goalObj(d)) && deciders.every((dp) => canReadGoal(dp, goalObj(d))))
     .map((d) => d.id);
+}
+
+/** The goals this reader can read that already depend on `goalId` (so dependencyChoices leaves them out: adding one
+ *  would close a loop), for the propose form to say why they aren't offered (C3-3). null when they may not propose. */
+export function dependencyLoops(pp: PolicyPrincipal, goalId: string): string[] | null {
+  const g = visibleGoal(pp, goalId);
+  if (pp.wsRole === "viewer" || g.owner_id === pp.userId || g.status !== "active") return null;
+  return [...goalsDependingOn(pp.wsId, g.id)].filter((id) => {
+    const d = goalRow(pp.wsId, id);
+    return !!d && canReadGoal(pp, goalObj(d));
+  });
 }
 
 const crRow = (ws: string, id: string) => get<ChangeRequestRow>("SELECT * FROM v2_change_requests WHERE ws_id = ? AND id = ?", ws, id);

@@ -104,6 +104,7 @@ export function ChangesForm({
   hiddenDeps = 0,
   choices = null,
   notOfferedWho = "someone who decides on this goal",
+  loops = null,
   noteLabel,
   noteRequired,
   withCondition = false,
@@ -118,6 +119,8 @@ export function ChangesForm({
   hiddenDeps?: number;
   choices?: string[] | null;
   notOfferedWho?: string;
+  /** Goals left out of `choices` because they already depend on this goal (a loop), counted on their own (C3-3). */
+  loops?: string[] | null;
   noteLabel: string;
   noteRequired: boolean;
   /** Offer the "Accept if…" condition (an approver's counter). */
@@ -139,7 +142,8 @@ export function ChangesForm({
   // A goal someone who decides can't see would be refused as a new dependency, so it isn't offered (C2 F5).
   const offered = (id: string) => !choices || choices.includes(id) || startDeps.includes(id);
   const others = listed.filter((g) => offered(g.id));
-  const notOffered = listed.length - others.length;
+  const looping = listed.filter((g) => !offered(g.id) && loops?.includes(g.id)).length;
+  const notOffered = listed.length - others.length - looping;
   const them = (n: number) => (n === 1 ? "it" : "them");
   const out = measuresOut(measures);
   const changes: ChangeFields = {};
@@ -169,7 +173,7 @@ export function ChangesForm({
           <option value="dropped">Dropped</option>
         </Select>
       </Field>
-      {(others.length > 0 || hiddenDeps > 0 || notOffered > 0) && (
+      {(others.length > 0 || hiddenDeps > 0 || notOffered > 0 || looping > 0) && (
         <div className="mb-3">
           <p className="mb-1 text-[14px] text-zinc-600">Depends on</p>
           {others.map((g) => (
@@ -186,6 +190,11 @@ export function ChangesForm({
           {notOffered > 0 && (
             <p className="text-[14px] text-zinc-500" data-deps-not-offered>
               {notOffered === 1 ? "1 goal you can see isn't offered" : `${notOffered} goals you can see aren't offered`}: {notOfferedWho} can&apos;t see {them(notOffered)}.
+            </p>
+          )}
+          {looping > 0 && (
+            <p className="text-[14px] text-zinc-500" data-deps-looping>
+              {looping === 1 ? "1 goal isn't offered: it already depends on this goal" : `${looping} goals aren't offered: they already depend on this goal`}, so adding {them(looping)} would make a loop.
             </p>
           )}
         </div>

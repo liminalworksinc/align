@@ -352,7 +352,8 @@ newest 200 `{ at, actor: {id, name}|null, action, object_id }`), `GET/POST .../i
 team_role? }`), `DELETE .../invites/:id`, `GET /api/v2/invites/:token`, `POST .../accept`, `POST .../teams`,
 `POST .../teams/:team/members`, `DELETE .../teams/:team/members/:user` (the `/pods` paths are aliases), `POST .../goals`
 (`{ title, level?, visibility?, team_id?, measures?, anchors?, depends_on?, limits? }`), `GET .../goals/:goal` (with
-`dependency_choices`: the goal ids a change request from the reader may add as a dependency, `null` when they can't propose),
+`dependency_choices`: the goal ids a change request from the reader may add as a dependency, `null` when they can't propose;
+and `dependency_loops`: the readable goals left out because they already depend on this one),
 `POST .../goals/:goal/versions` (`{ version, title?, measures?, anchors?, status?, limits? }`, `409 stale_version` /
 `no_change`), `POST .../limits/suggest` (`{ notes (≤20,000), source: { title?, date }, prefer_goal_id? }`, owners and
 members, 20 a minute per person and 120 an hour per workspace → `{ suggestions: [ { goal: { id, title, version },

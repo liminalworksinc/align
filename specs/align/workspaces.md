@@ -1129,7 +1129,7 @@ is off` and `server_time`.
 #### Scenario: Session list
 
 - **WHEN** a member calls `GET .../sessions`
-- **THEN** `mine` lists their own sessions in full (state, current epoch and goal, governing goal, stop status, conflicts and token totals), and `all` is null except for workspace owners, for whom it lists every non-stopped session's alias, owner, harness, state and stop status, never its title or usage
+- **THEN** `mine` lists their own sessions in full (state, current epoch and goal, governing goal, stop status, conflicts and token totals), and `all` is null except for workspace owners, for whom it lists every non-stopped session's key, alias, owner, harness, `started_at`, state and stop status, never its title or usage (`scripts/test-v2.mjs` "W3: the owner's list of everyone's sessions carries each session's started_at ...")
 
 ### Requirement: Binding epochs
 

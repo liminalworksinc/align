@@ -75,6 +75,7 @@ export interface AnySession {
   owner: { id: string; name: string };
   repo_alias: string | null;
   harness: string;
+  started_at: string;
   state: string;
   agent_stopped: boolean;
   stop_status: StopStatus | null;

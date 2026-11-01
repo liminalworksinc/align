@@ -13,7 +13,8 @@ const rowLabel = (r: AllocationRow) => (r.kind === "goal" ? r.goal!.title : r.ki
 function gapText(gap: number | null) {
   if (gap === null) return "no target";
   if (Math.abs(gap) < 1) return "on target";
-  return gap > 0 ? `${Math.round(gap)} points over` : `${Math.round(-gap)} points under`;
+  const n = Math.round(Math.abs(gap));
+  return `${n} ${n === 1 ? "point" : "points"} ${gap > 0 ? "over" : "under"}`;
 }
 
 function Bar({ share, target }: { share: number; target: number | null }) {

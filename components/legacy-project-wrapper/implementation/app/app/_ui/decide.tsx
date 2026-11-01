@@ -128,7 +128,7 @@ function Choice({ on, title, sub, onPick }: { on: boolean; title: string; sub: s
  *  count to the confirmation. Depends on offers only the goals the server accepts from this counter (the goal read's
  *  dependency_choices for it: readable by the requester and everyone deciding), as the propose form does. */
 function CounterInput({ ws, cr, focus, onReview }: { ws: string; cr: ChangeRequest; focus: boolean; onReview: (changes: ChangeFields, note: string, condition: string, hidden: number) => void }) {
-  const g = useApi<{ goal: Goal; hidden_depends_on?: number; dependency_choices?: string[] | null }>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}?counter=${cr.id}`);
+  const g = useApi<{ goal: Goal; hidden_depends_on?: number; dependency_choices?: string[] | null; dependency_loops?: string[] | null }>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}?counter=${cr.id}`);
   const box = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (g.data && focus) box.current?.querySelector<HTMLElement>("input, textarea, select")?.focus();
@@ -146,6 +146,7 @@ function CounterInput({ ws, cr, focus, onReview }: { ws: string; cr: ChangeReque
         start={cr.changes}
         keep={Object.keys(cr.changes) as (keyof ChangeFields)[]}
         choices={g.data.dependency_choices ?? null}
+        loops={g.data.dependency_loops ?? null}
         notOfferedWho={`${cr.requester.name} or someone who decides on this goal`}
         hiddenDeps={hidden}
         noteLabel="Note"
@@ -341,6 +342,25 @@ export function OpenRequest({
     }
   };
 
+  /** Update to the goal's version: recorded, or refused like any other decision ("Not recorded. …", and a 409 reloads
+   *  the card to show the request as it is now; C3-5). */
+  const rebase = async () => {
+    if (sending) return;
+    setSending(true);
+    setNotice(null);
+    try {
+      await api(`${path}/rebase`, { body: { revision: cr.revision, base_version: n } });
+      setNotice({ kind: "done", text: `Recorded: you updated your request to version ${n} (revision ${cr.revision + 1}). It waits for approval again.` });
+      onDone();
+    } catch (e) {
+      const conflict = e instanceof ApiError && e.status === 409;
+      setNotice({ kind: "refused", text: `Not recorded. ${(e as Error).message}${conflict ? "" : " Nothing changed."}` });
+      if (conflict) onDone(); // the request or its goal moved on: show it as it is now
+    } finally {
+      setSending(false);
+    }
+  };
+
   const stateWord = CR_STATE_WORDS[cr.state];
   const transition = (): string => {
     switch (choice) {
@@ -467,19 +487,7 @@ export function OpenRequest({
           <Note>
             Made against version {cr.base_version}. The goal is now at version {n}.
           </Note>
-          <Btn
-            kind="secondary"
-            disabled={act.busy}
-            onClick={() =>
-              void act.run(
-                () => api(`${path}/rebase`, { body: { revision: cr.revision, base_version: n } }),
-                () => {
-                  setNotice({ kind: "done", text: `Recorded: you updated your request to version ${n} (revision ${cr.revision + 1}). It waits for approval again.` });
-                  onDone();
-                },
-              )
-            }
-          >
+          <Btn kind="secondary" disabled={act.busy || sending} onClick={() => void rebase()}>
             Update to version {n}
           </Btn>
         </div>
