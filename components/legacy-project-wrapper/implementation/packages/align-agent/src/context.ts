@@ -33,6 +33,9 @@ export interface Ctx {
   config: Config;
   env: NodeJS.ProcessEnv;
   log: (msg: string) => void;
+  /** The device this pass or command is bound to (`bindDevice` in api.ts): authenticated calls refuse to go on as
+   *  another one. Undefined when unbound. */
+  boundDevice?: string | null;
 }
 
 export function loadConfig(alignHome: string, env: NodeJS.ProcessEnv = process.env): Config {

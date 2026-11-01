@@ -238,7 +238,9 @@ out ends this machine's shares" says), and print `Signed out. Tokens and the dev
 continues.`; when the server could not be told it SHALL keep what revokes the device later (as "A logout the server did
 not hear is finished later" says) and print `align: could not reach <server> to revoke this device. Align revokes it
 the next time it reaches the server (the next \`align sync\` or \`align login\`); until then its sessions still show
-as shared there. You can also revoke it at <server>/app/devices.` on stderr. Signing out SHALL also mark the cached
+as shared there. You can also revoke it at <server>/app/devices.` on stderr. `align logout` SHALL print `Signed out.
+...` only when the credentials it leaves are marked signed out and the device key is gone; otherwise it SHALL exit 1
+saying the machine still holds a sign-in and to run it again. Signing out SHALL also mark the cached
 `me.json` `signed_out`, which the hooks read (they never read credentials), until the next `align login` replaces it. Local metering
 SHALL continue while signed out.
 
@@ -276,13 +278,53 @@ told, it SHALL print `align: could not revoke this machine's earlier device <id>
 reaches the server (the next \`align sync\`); until then its sessions still show as shared there.` and the next sync
 pass revokes it. A refresh SHALL write credentials only while they are still its device's, and a refusal (a refresh's
 400 or 401, a second 401) SHALL sign out only the device it was made for: a sync's refresh in flight never writes the
-old device's tokens over a new pairing, nor signs it out. `align logout` SHALL likewise mark the credentials signed out
-and remove the key under the refresh lock.
+old device's tokens over a new pairing, nor signs it out. In the same locked step that writes the new pairing, before
+it is written, login SHALL end the shares of the pairing it replaces (as "Signing out ends this machine's shares"
+says), so a session the new pairing shares while the old device's revoke is still in flight keeps its share.
+
+`align logout` SHALL run entirely under the same refresh lock (waiting up to 40 seconds for it; when it can't get it,
+exit 1 saying another Align command is changing the sign-in and nothing was changed): it reads the credentials, revokes
+that device (refreshing first inside the lock when needed), keeps what revokes it later when the server could not be
+told, marks the credentials signed out, removes the key and ends the shares. A logout and a login on one machine
+therefore never interleave: whichever takes the lock second acts on what the first left, so the machine never stays
+signed in as a device the server revoked.
+
+A sync pass, and the flush a CLI command does after queuing calls, SHALL be bound to the device signed in when it
+started: when the credentials on disk belong to another device (or none) at its next call (a login or logout committed
+meanwhile), it SHALL stop there, with `align sync` printing `This machine's Align pairing changed during this sync
+(\`align login\` or \`align logout\`), so it stopped there; nothing more was sent as the earlier device. The next sync
+goes on as the device signed in now.` and logging it, and SHALL NOT refresh the new pairing, send queued uploads,
+shares or retries with its tokens, nor leave a second, contradictory notice for a session. After pairing, `align
+login` SHALL print `Signed in as ...` only under the lock and only while its own device is still the one signed in;
+when another `align login` (or `align logout`) replaced or signed out its pairing before then, it SHALL exit 1 with
+`align: another \`align login\` (or \`align logout\`) on this machine finished while this one did, so device <id> it
+paired is replaced and revoked; it is signed in as device <id>|it is signed out now. Run \`align status\` to see
+which.`
 
 #### Scenario: Login while a sync's refresh is in flight
 
 - **WHEN** a sync pass's refresh of the old device is held in flight (its request, or its answer after the server rotated) while `align login` pairs a new device (test `findings` "C3-1: `align login` while a sync's refresh is in flight ...")
 - **THEN** login prints `Signed in as …` and exits 0, `credentials.json` holds the new device signed in, the old device is revoked on the server, the new one is live, no `revoke.json` is left, and a later forced refresh succeeds
+
+#### Scenario: An upload in flight while a login replaces the device
+
+- **WHEN** a sync pass's usage upload is held in flight while `align login` pairs a new device and revokes the old one, and the upload is then refused (test `findings4` "an upload held in flight while `align login` replaces the device ...")
+- **THEN** the pass refreshes nothing and sends nothing as the new device, `align sync` says the pairing changed during the sync, and the session has only the one sign-out notice
+
+#### Scenario: A share made while the old device's revoke is in flight
+
+- **WHEN** `align login` has written the new pairing and its revoke of the old device is held in flight, and a new session is shared meanwhile (test `findings4` "a session the new pairing shares while `align login` is still revoking ...")
+- **THEN** the new session stays `shared` on the new device, the old pairing's share ends as `device_signed_out`, and login says `1 session(s) shared from this machine's earlier sign-in stopped sharing`
+
+#### Scenario: Logout during a login
+
+- **WHEN** something holds the refresh lock while `align login` waits to commit a new pairing and `align logout` starts, and the first revoke the server sees is held for a while (test `findings4` "`align logout` while `align login` waits to commit ...")
+- **THEN** the first device is revoked, and the machine ends either signed out (no device key) or signed in as a device the server has not revoked, never signed in as a revoked one
+
+#### Scenario: Two logins at once
+
+- **WHEN** a first `align login` has written its pairing and its read of `/me` is held while a second `align login` pairs and revokes the first one's device (test `findings4` "two `align login`s at once ...")
+- **THEN** the second prints `Signed in as ... on device Laptop 2.`, and the first prints no `Signed in`, exits 1 and names the device it is signed in as now
 
 #### Scenario: An interrupted login
 
@@ -353,9 +395,11 @@ share\` here again. This session stays private.`
 
 ### Requirement: A logout the server did not hear is finished later
 
-When `align logout` cannot reach the server, the `align` CLI SHALL keep, in `~/.align/revoke.json` (mode 0600), the
-server URL, the device id, its access and refresh tokens and its device key, and SHALL revoke that device at the next
-contact with the server, before anything else: every sync pass (signed in or not) and the next `align login`, before it
+When `align logout` cannot reach the server, or `align login` could not revoke the device its new pairing replaced,
+the `align` CLI SHALL keep, in `~/.align/revoke.json` (mode 0600), the server URL, the device id, its access and refresh
+tokens, its device key, when, and why (`logout` or `replaced`), and SHALL revoke that device at the next contact with
+the server, before anything else. The file SHALL hold every device still waiting (a later login or offline logout adds
+one and never drops another), each kept until the server confirms it, and each contact SHALL try them all: every sync pass (signed in or not) and the next `align login`, before it
 asks for a code. The revoke SHALL use `DELETE /api/v2/devices/self` with the old access token, or, when it has
 expired, first sign a refresh with the old key; when the server no longer accepts the device at all (it was revoked
 on the web meanwhile) there is nothing left to do. Once done the file SHALL be deleted and it SHALL be logged, `align
@@ -364,13 +408,23 @@ which only this machine's own revoke causes, that it `was already revoked (on th
 never `Revoked`), and the server ends that device's sessions (`device_signed_out`), so
 `::align share` after the new pairing shares them again as after an online logout. While it waits, the file SHALL be
 kept through any number of unreachable passes (a signed-out `align sync` that could not reach the server for it exits 1,
-as any unreachable pass does), and `align status` SHALL show `Revoke:     pending for device <id>,
-signed out <time> while <server> could not be reached; the next \`align sync\` or \`align login\` revokes it`.
+as any unreachable pass does), and `align status` SHALL show one line per device, `Revoke:     pending for device <id>,
+signed out <time> while <server> could not be reached; the next \`align sync\` or \`align login\` revokes it`, or for a
+device a login replaced `Revoke:     pending for device <id>, replaced by \`align login\` <time> and not revoked yet
+(<server> could not be told); ...`. A replaced device SHALL be said and logged as replaced by \`align login\` (`Revoked
+device <id>, which \`align login\` replaced on this machine; its sessions stopped sharing there.`, logged `revoked device
+<id>, replaced by \`align login\` at <time> UTC`), never as a sign-out while the server could not be reached. An older
+`revoke.json` holding a single device SHALL still be read.
 
 #### Scenario: Revoked at the next sync
 
 - **WHEN** `align logout` runs while the server is unreachable, `align sync` runs while it still is, then again once it is back (test `findings2` "logout while the server is unreachable: the device is revoked at the next sync ...")
 - **THEN** logout says Align revokes it at the next contact, `revoke.json` is 0600 and `device_key` is gone, `align status` shows the pending revoke, the first sync keeps it (and exits 1), the second revokes the device on the server, says so and deletes the file, and `align status` no longer shows it
+
+#### Scenario: A failed login revoke, then an offline logout
+
+- **WHEN** `align login` can't revoke the device it replaced (the server answers 503), then the network drops and the developer runs `align logout`, then `align sync` once the server is back (test `findings4` "a revoke `align login` could not do survives an offline logout ...")
+- **THEN** `align status` lists both devices, the first as replaced by `align login`, the sync revokes both on the server and says so per device, the log names the first as replaced, and `revoke.json` is gone
 
 #### Scenario: Already revoked on the web
 
@@ -771,7 +825,8 @@ queued calls sent, <n> usage rows uploaded, <n> directives, <n> still queued.` (
 stored, not replays), then `This machine can now reach <workspace> in Align (given to this device when you accepted an
 invite). ...` once per workspace the pass found added, or `Another sync is running.`; when the pass could not reach the server it SHALL print, instead
 of the `Server:` line, `align: <error>. <n> usage rows and <n> queued calls stay on this machine; the next sync
-retries.` on stderr and exit 1.
+retries.` on stderr and exit 1. A pass whose pairing changed under it stops (as "A new pairing replaces the old one only
+once it exists" says) and prints that line after `Local:`.
 
 #### Scenario: Unreachable server
 

@@ -5,10 +5,12 @@ import path from "node:path";
 import type { Ctx } from "./context.ts";
 import {
   api,
+  bindDevice,
   clockMeasured,
   clockOffset,
   clockWords,
   CLOCK_TOLERANCE_MS,
+  DeviceChanged,
   HttpError,
   loadCredentials,
   NetworkError,
@@ -19,7 +21,9 @@ import {
   serverTrouble,
   SignedOut,
   signedIn,
+  stillBound,
   type Resp,
+  type RevokeOutcome,
 } from "./api.ts";
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
@@ -510,8 +514,11 @@ export interface SyncResult {
   steering?: number;
   /** The first time this pass could not reach the server or got a 5xx (null when every call got through). */
   serverError?: string | null;
-  /** A revoke left waiting by `align logout` while the server was unreachable: done this pass, still waiting, or none. */
-  revoked?: "none" | "revoked" | "already" | "pending";
+  /** Devices left to revoke (`align logout` offline, or one `align login` replaced): what this pass did with each. */
+  revoked?: RevokeOutcome;
+  /** The pass stopped because this machine's pairing changed under it (an `align login` or `align logout` committed):
+   *  nothing more went to the server as the device it started as, nor as the new one (C4-2). */
+  aborted?: boolean;
 }
 
 /** last-sync.json: when the last pass ran, and whether the server could be reached (B5). */
@@ -555,9 +562,16 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
   }
   const t0 = Date.now();
   resetServerTrouble();
+  // The whole pass is one device's (C4-2): if `align login` or `align logout` commits while it runs, its next call to
+  // the server refuses to go on as the new pairing (or none), and the pass stops there.
+  const unbind = bindDevice(ctx);
+  /** Stop the pass when the pairing changed under it: steps that swallow their own errors would otherwise go on. */
+  const guard = () => {
+    if (!stillBound(ctx)) throw new DeviceChanged("pairing changed during the pass");
+  };
   try {
     // A device this machine signed out of while the server was unreachable is revoked before anything else.
-    res.revoked = await revokePending(ctx).catch(() => "pending" as const);
+    res.revoked = await revokePending(ctx).catch(() => ({ revoked: [], already: [], pending: [] }));
     res.spooled += ingestSpool(ctx);
     res.tail = tailAll(ctx, opts.tailBudgetMs);
     res.spooled += ingestSpool(ctx);
@@ -570,13 +584,19 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
       endSharesIfSignedOut(ctx);
       return res;
     }
+    guard();
     const refresh = new Set<string>();
     let reach: string[] | null = null;
     res.sent += (await flushOutbox(ctx)).sent;
+    guard();
     res.directives = await pollDirectives(ctx, (ws) => refresh.add(ws), (ws) => (reach = ws)).catch(() => 0);
+    guard();
     res.sent += (await flushOutbox(ctx)).sent;
+    guard();
     res.uploaded = (await uploadUsage(ctx)).uploaded;
+    guard();
     res.sent += (await flushOutbox(ctx)).sent;
+    guard();
     // Workspaces and grants change rarely; goals can change any time, and a new session reads its envelope from the
     // cached feed, so every pass revalidates the feeds (a 304 when nothing changed).
     let me = loadMe(ctx.home);
@@ -588,10 +608,12 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
       kvSet(ctx.db, "me_refreshed_at", String(Date.now()));
       me = await refreshMe(ctx).catch(() => me);
     }
+    guard();
     for (const w of me?.workspaces || []) refresh.add(w.id);
     for (const ws of refresh) await refreshFeed(ctx, ws).catch(() => undefined);
     // Asks between teams (a 304 when nothing changed): read by `align asks`, `align team` and the envelope.
     for (const ws of refresh) await fetchAsks(ctx, ws).catch(() => false);
+    guard();
     // Team activity: this machine's in-flight work up, other machines' down (a few hundred bytes when quiet).
     try {
       detectGitEdits(ctx);
@@ -599,10 +621,18 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
       /* best effort */
     }
     res.activity = await uploadActivity(ctx).catch(() => 0);
+    guard();
     for (const ws of refresh) await fetchPod(ctx, ws).catch(() => 0);
     res.steering = await uploadSteering(ctx).catch(() => 0);
+    guard();
+    return res;
+  } catch (e) {
+    if (!(e instanceof DeviceChanged)) throw e;
+    res.aborted = true;
+    ctx.log("sync: this machine's pairing changed during the pass (align login or logout); the pass stopped, and the next one goes on as the device signed in now");
     return res;
   } finally {
+    unbind();
     res.serverError = serverTrouble();
     try {
       const at = nowIso();

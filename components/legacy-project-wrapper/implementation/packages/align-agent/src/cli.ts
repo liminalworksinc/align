@@ -12,13 +12,18 @@ import {
   clockWords,
   commitPairing,
   loadCredentials,
-  loadPendingRevoke,
+  bindDevice,
+  loadPendingRevokes,
+  logoutLocked,
   NetworkError,
   rawRequest,
   revokePending,
   SignedOut,
   signedIn,
-  signOutLocally,
+  revokeState,
+  whileSignedInAs,
+  type PendingRevoke,
+  type RevokeOutcome,
   signedOutWords,
   type Credentials,
 } from "./api.ts";
@@ -247,12 +252,16 @@ async function needLogin(ctx: Ctx): Promise<void> {
 }
 
 async function tryFlush(ctx: Ctx): Promise<void> {
+  // One device's flush, like a sync pass: a login committing meanwhile stops it rather than sending as the new device.
+  const unbind = bindDevice(ctx);
   try {
     await flushOutbox(ctx);
     await uploadUsage(ctx);
     await flushOutbox(ctx);
   } catch (e) {
     ctx.log(`flush failed: ${(e as Error).message}`);
+  } finally {
+    unbind();
   }
 }
 
@@ -267,12 +276,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const deviceName = values.name || ctx.config.device_name || `${os.userInfo().username}'s ${os.hostname().replace(/\.local$/, "")}`;
   // A device this machine signed out of while the server was unreachable is revoked first, so its sessions end there
   // and can be shared again from the new pairing.
-  if (loadPendingRevoke(ctx.home)) {
-    const was = loadPendingRevoke(ctx.home)!.device_id;
-    const done = await revokePending(ctx);
-    if (done === "revoked") out(`Revoked device ${was}, which this machine signed out of while the server could not be reached; its sessions stopped sharing there.`);
-    if (done === "already") out(`Device ${was}, which this machine signed out of while the server could not be reached, was already revoked (on the web, say); nothing was left to do.`);
-  }
+  if (loadPendingRevokes(ctx.home).length) revokeLines(await revokePending(ctx), "login").forEach((l) => out(l));
   // The new key stays in memory until the device is paired: the pairing in use (key, tokens) is untouched until then,
   // so an aborted, denied or expired login changes nothing (C3-2).
   const key = newDeviceKey();
@@ -288,6 +292,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const { device_code, user_code, verification_uri } = a.json;
   let interval = Number(a.json.interval || 5);
   const expiresAt = Date.now() + Number(a.json.expires_in || 600) * 1000;
+  let pairedAs: string | null = null;
   out(`To connect this device, open ${verification_uri} and enter the code ${user_code}`);
   if (!ctx.env.ALIGN_NO_BROWSER && process.platform === "darwin") execFile("open", [verification_uri], () => undefined);
   const scale = Number(ctx.env.ALIGN_DEVICE_POLL_SCALE_MS || 1000);
@@ -313,18 +318,26 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
         user: t.json.user || null,
       };
       // Key and credentials together, under the refresh lock (a sync's refresh in flight finishes first and can't
-      // write the old device's tokens back, C3-1), keeping what revokes the device this pairing replaces.
-      const replaced = await commitPairing(ctx, creds, key.pem);
+      // write the old device's tokens back, C3-1), keeping what revokes the device this pairing replaces. The shares of
+      // the pairing it replaces end in the same step, before anything can share as the new device: a session the new
+      // pairing shares while the old device's revoke is in flight keeps its share (C4-2). Each is told how to share
+      // it again.
+      const { replaced, committed: ended } = await commitPairing(ctx, creds, key.pem, () => endSharesSignedOut(ctx));
+      // From here on this command is the new device's: if another login replaces it meanwhile, nothing goes on as that
+      // one, and this login does not say it signed in (two logins at once).
+      bindDevice(ctx, creds.device_id);
       saveConfig(ctx.home, { server_url: server });
       ctx.config.server_url = server;
       // The replaced device is revoked now (with its access token, or a refresh signed with its key when that has
-      // expired, C3-3), so the server ends its shares; when the server can't be told, the next contact does it. Its
-      // shares end here too; each session is told how to share it again.
-      if (replaced && (await revokePending(ctx)) === "pending") {
-        err(`align: could not revoke this machine's earlier device ${replaced}. Align revokes it the next time it reaches the server (the next \`align sync\`); until then its sessions still show as shared there.`);
+      // expired, C3-3), so the server ends its shares; when the server can't be told, the next contact does it.
+      if (replaced) {
+        const o = await revokePending(ctx);
+        if (o.pending.some((p) => p.device_id === replaced)) {
+          err(`align: could not revoke this machine's earlier device ${replaced}. Align revokes it the next time it reaches the server (the next \`align sync\`); until then its sessions still show as shared there.`);
+        }
       }
-      const ended = endSharesSignedOut(ctx);
       if (ended) out(`${ended} session(s) shared from this machine's earlier sign-in stopped sharing; \`::align share\` in a session shares it again.`);
+      pairedAs = creds.device_id;
       break;
     }
     const code = t.json?.error;
@@ -337,8 +350,18 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     if (code === "expired_token") throw new Error("the code expired; run `align login` again");
     throw new Error(`device token failed: ${t.status} ${code || ""}`);
   }
-  const me = await refreshMe(ctx);
-  out(`Signed in as ${me.user.name} <${me.user.email}> on device ${me.device?.name || deviceName}.`);
+  let me;
+  try {
+    me = await refreshMe(ctx);
+  } catch (e) {
+    // Another login replaced this pairing (DeviceChanged), or a logout signed it out (SignedOut), while it finished.
+    if (e instanceof SignedOut) return replacedMeanwhile(ctx, pairedAs!);
+    throw e;
+  }
+  // Said under the refresh lock and only while this pairing is still the one signed in: a second `align login` that
+  // committed meanwhile revoked it, and this one must not report a revoked device as signed in.
+  const name = me.device?.name || deviceName;
+  if (!(await whileSignedInAs(ctx, pairedAs!, () => out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`)))) return replacedMeanwhile(ctx, pairedAs!);
   await mentionOtherDevices(ctx, server);
   for (const w of me.workspaces) {
     out(`  workspace ${w.name} (${w.id}), role ${w.role}`);
@@ -350,6 +373,32 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
       /* feed later */
     }
   }
+}
+
+/** Another `align login` committed after this one and replaced (and revoked) its device: say so, and which device this
+ *  machine is signed in as now, instead of "Signed in". */
+function replacedMeanwhile(ctx: Ctx, mine: string): void {
+  const now = loadCredentials(ctx.home);
+  const as = now && !now.signed_out ? `it is signed in as device ${now.device_id}` : "it is signed out now";
+  err(`align: another \`align login\` (or \`align logout\`) on this machine finished while this one did, so device ${mine} it paired is replaced and revoked; ${as}. Run \`align status\` to see which.`);
+  process.exitCode = 1;
+}
+
+/** Lines for the devices `revokePending` revoked or found revoked already (C4-3, C4-9). */
+function revokeLines(o: RevokeOutcome, style: "login" | "sync"): string[] {
+  const how = (p: PendingRevoke) => (p.reason === "replaced" ? "which `align login` replaced on this machine" : "which this machine signed out of while the server could not be reached");
+  return [
+    ...o.revoked.map((p) =>
+      style === "sync" && p.reason !== "replaced"
+        ? `Revoked the device this machine signed out of while the server could not be reached (${p.device_id}); its sessions stopped sharing there.`
+        : `Revoked device ${p.device_id}, ${how(p)}; its sessions stopped sharing there.`,
+    ),
+    ...o.already.map((p) =>
+      style === "sync" && p.reason !== "replaced"
+        ? `The device this machine signed out of while the server could not be reached was already revoked (on the web, say); nothing was left to do (${p.device_id}).`
+        : `Device ${p.device_id}, ${how(p)}, was already revoked (on the web, say); nothing was left to do.`,
+    ),
+  ];
 }
 
 /**
@@ -371,26 +420,29 @@ async function mentionOtherDevices(ctx: Ctx, server: string): Promise<void> {
 }
 
 async function cmdLogout(ctx: Ctx): Promise<void> {
-  const c = loadCredentials(ctx.home);
-  if (!c) return out("Not signed in.");
-  let revoked = !!c.signed_out;
-  if (!c.signed_out) {
-    try {
-      const r = await api(ctx, "DELETE", "/api/v2/devices/self");
-      revoked = r.status === 204 || r.status === 200 || r.status === 401;
-    } catch (e) {
-      /* tokens are wiped locally either way */
-      revoked = e instanceof SignedOut;
+  // Entirely under the refresh lock that `align login` commits under (C4-4): the device this reads is the one it revokes
+  // and signs out, whichever of the two finishes first. When the server could not be told, what revokes the device
+  // later (its latest tokens and key) is kept in `revoke.json` for the next contact.
+  let res;
+  try {
+    res = await logoutLocked(ctx, () => endSharesSignedOut(ctx));
+  } catch (e) {
+    if (e instanceof NetworkError && /lock busy/.test(e.message)) {
+      throw new Error("could not sign out: another Align command is changing this machine's sign-in (an `align login` finishing, say); nothing was changed. Run `align logout` again.");
     }
+    throw e;
   }
-  // The server could not be told: keep what revokes the device later (its latest tokens and key, in a 0600 file of
-  // their own), so the next contact (a sync pass, or the next `align login`) revokes it before anything else. Under the
-  // refresh lock, so a refresh in flight can't write tokens back afterwards.
-  await signOutLocally(ctx, c.device_id, revoked);
-  const ended = endSharesSignedOut(ctx);
+  const c = res.device;
+  if (!c) return out("Not signed in.");
+  // "Signed out" only when the credentials say so and the key is gone.
+  const now = loadCredentials(ctx.home);
+  if (!now?.signed_out || now.device_id !== c.device_id || fs.existsSync(layout.deviceKey(ctx.home))) {
+    throw new Error(`could not sign out: this machine still holds the sign-in of device ${now?.device_id ?? "?"}. Run \`align logout\` again.`);
+  }
   out("Signed out. Tokens and the device key were removed; local metering continues.");
+  const ended = res.after ?? 0;
   if (ended) out(`${ended} shared session(s) stopped sharing. Sessions stopped from the web stay blocked until you run \`align stop-sharing <session>\`.`);
-  if (!revoked) {
+  if (!res.revoked) {
     err(
       `align: could not reach ${c.server_url} to revoke this device. Align revokes it the next time it reaches the server (the next \`align sync\` or \`align login\`); until then its sessions still show as shared there. You can also revoke it at ${c.server_url}/app/devices.`,
     );
@@ -432,9 +484,9 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   if (c && !c.signed_out && c.clock_offset_ms) {
     out(`  Clock:      this computer's clock is ${clockWords(c.clock_offset_ms)} the server's; Align sends times on the server's clock. Set the system clock to update automatically.`);
   }
-  const pendingRevoke = loadPendingRevoke(ctx.home);
-  if (pendingRevoke) {
-    out(`  Revoke:     pending for device ${pendingRevoke.device_id}, signed out ${shortTime(pendingRevoke.since)} while ${pendingRevoke.server_url} could not be reached; the next \`align sync\` or \`align login\` revokes it`);
+  for (const p of loadPendingRevokes(ctx.home)) {
+    const why = p.reason === "replaced" ? `replaced by \`align login\` ${shortTime(p.since)} and not revoked yet (${p.server_url} could not be told)` : `signed out ${shortTime(p.since)} while ${p.server_url} could not be reached`;
+    out(`  Revoke:     pending for device ${p.device_id}, ${why}; the next \`align sync\` or \`align login\` revokes it`);
   }
   out(`  Last sync:  ${last ? `${shortTime(last.at)} (${last.ms} ms)` : "never"}`);
   if (last?.error) out(`  Server:     unreachable since ${shortTime(last.error_since || last.at)}: ${last.error}; ${unuploadedRows(ctx)} usage rows wait to upload`);
@@ -872,10 +924,8 @@ async function cmdUninstall(ctx: Ctx, argv: string[]): Promise<void> {
 
 async function revokeBeforePurge(ctx: Ctx): Promise<void> {
   const c = loadCredentials(ctx.home);
-  const pending = loadPendingRevoke(ctx.home);
-  if (pending && (await revokePending(ctx).catch(() => "pending" as const)) === "pending") {
-    err(`align: could not revoke device ${pending.device_id}, which this machine signed out of earlier; revoke it at ${pending.server_url}/app/devices.`);
-  }
+  const left = loadPendingRevokes(ctx.home).length ? (await revokePending(ctx).catch(() => null))?.pending ?? loadPendingRevokes(ctx.home) : [];
+  for (const p of left) err(`align: could not revoke device ${p.device_id}, which this machine no longer uses; revoke it at ${p.server_url}/app/devices.`);
   if (!c || c.signed_out || !c.refresh_token) return;
   let revoked = false;
   try {
@@ -901,11 +951,11 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   if (hook) return;
   if (r.skipped) return out("Another sync is running.");
   out(`Local: ${r.spooled} hook records, ${r.tail.files} files scanned (${r.tail.bytes} new bytes).`);
-  if (r.revoked === "revoked") out("Revoked the device this machine signed out of while the server could not be reached; its sessions stopped sharing there.");
-  if (r.revoked === "already") out("The device this machine signed out of while the server could not be reached was already revoked (on the web, say); nothing was left to do.");
+  if (r.revoked) revokeLines(r.revoked, "sync").forEach((l) => out(l));
+  if (r.aborted) out("This machine's Align pairing changed during this sync (`align login` or `align logout`), so it stopped there; nothing more was sent as the earlier device. The next sync goes on as the device signed in now.");
   if (!signedIn(ctx.home)) {
     out("Signed out: nothing uploaded.");
-    if (r.revoked === "pending") {
+    if (r.revoked && revokeState(r.revoked) === "pending") {
       // The server could not be reached for the revoke: an unreachable server exits 1, as every other pass does.
       err(`align: ${r.serverError || "the server could not be reached"}; the device this machine signed out of is revoked at the next sync that reaches it.`);
       process.exitCode = 1;

@@ -177,7 +177,8 @@ shares in your other workspaces carry on.
 
 `config.json`, `credentials.json` (0600; `clock_offset_ms` while this computer's clock is a minute or more off the
 server's, measured from its answers' `Date` header: every time the CLI sends is put on the server's clock),
-`revoke.json` (0600, only while a logout's revoke waits for the server: the old device's tokens and key),
+`revoke.json` (0600, only while a revoke waits for the server: each device an offline logout signed out or a login
+replaced and could not revoke, with its tokens and key, kept until the server confirms it),
 `device_key` (Ed25519 PKCS#8, 0600), `device_secret` (32 random bytes,
 0600, never sent), `align.db` (SQLite WAL: sessions, root turns, epochs, request ledger, file offsets, outbox,
 directives, requests, holds, shares, aliases), `rules.json` folder share rules, `hot/` and `injected/` per-session JSON for hooks,
