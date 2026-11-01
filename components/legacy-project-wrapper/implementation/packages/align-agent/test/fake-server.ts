@@ -385,7 +385,11 @@ export class FakeServer {
         if (pend.polls === 1 && this.opts.slowDownFirst) return send(400, { error: "slow_down" });
         if (pend.polls < this.opts.approveAfterPolls) return send(400, { error: "authorization_pending" });
         pend.issued = true;
-        const d: Device = { id: rid("dv_"), name: pend.name, publicKey: pend.publicKey, revoked: false, refresh: null, oldRefresh: new Set(), createdAt: new Date().toISOString() };
+        // As lib/v2/devices.ts: a name none of the person's live devices has ("Test Mac (2)" next to a live "Test Mac").
+        const taken = new Set([...this.devices.values()].filter((x) => !x.revoked).map((x) => x.name));
+        let name = pend.name;
+        for (let n = 2; taken.has(name); n++) name = `${pend.name} (${n})`;
+        const d: Device = { id: rid("dv_"), name, publicKey: pend.publicKey, revoked: false, refresh: null, oldRefresh: new Set(), createdAt: new Date().toISOString() };
         this.devices.set(d.id, d);
         return send(200, { device_id: d.id, ...this.issue(d), user: this.user });
       }

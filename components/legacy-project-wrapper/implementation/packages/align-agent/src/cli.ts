@@ -367,7 +367,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   // committed meanwhile revoked it, and this one must not report a revoked device as signed in.
   const name = me.device?.name || deviceName;
   if (!(await whileSignedInAs(ctx, pairedAs!, () => out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`)))) return replacedMeanwhile(ctx, pairedAs!);
-  await mentionOtherDevices(ctx, server);
+  await mentionOtherDevices(ctx, server, pairedAs!);
   for (const w of me.workspaces) {
     out(`  workspace ${w.name} (${w.id}), role ${w.role}`);
     try {
@@ -406,22 +406,43 @@ function revokeLines(o: RevokeOutcome, style: "login" | "sync"): string[] {
   ];
 }
 
+/** The devices still to revoke, each as what it is: "the device this machine signed out of is revoked", "device
+ *  <id>, which `align login` replaced, is revoked", or "2 devices this machine no longer uses (…) are revoked". */
+function waitingRevokes(list: PendingRevoke[]): string {
+  const what = (p: PendingRevoke) => (p.reason === "replaced" ? `${p.device_id}, which \`align login\` replaced` : `${p.device_id}, which this machine signed out of`);
+  if (list.length === 1) return list[0].reason === "replaced" ? `device ${what(list[0])}, is revoked` : "the device this machine signed out of is revoked";
+  return `the ${list.length} devices this machine no longer uses (${list.map(what).join("; ")}) are revoked`;
+}
+
 /**
  * After pairing: name the person's other devices that are still paired (not this one), so one left behind (a machine
- * whose Align home was deleted without `align logout`, say) is seen and can be revoked on the web. Best effort.
+ * whose Align home was deleted without `align logout`, say) is seen and can be revoked on the web. Best effort. Each is
+ * named with the end of its id and when it was paired, as the Devices page shows them, so two devices of one name are
+ * told apart (cycle 5). Never named as one to revoke: this machine's own earlier devices (revoked here, or waiting in
+ * revoke.json to be), and a device paired after this one (a second `align login` on this machine, which replaces this
+ * pairing, may be the device signed in a moment later). Said only while this pairing is still the one signed in.
  */
-async function mentionOtherDevices(ctx: Ctx, server: string): Promise<void> {
+async function mentionOtherDevices(ctx: Ctx, server: string, pairedAs: string): Promise<void> {
   try {
     const r = await api(ctx, "GET", "/api/v2/devices");
     if (r.status !== 200 || !Array.isArray(r.json?.devices)) return;
-    const others = (r.json.devices as { name: string; created_at: string; last_seen_at: string | null; revoked_at: string | null; current?: boolean }[]).filter((d) => !d.revoked_at && !d.current);
+    const list = r.json.devices as { id: string; name: string; created_at: string; last_seen_at: string | null; revoked_at: string | null; current?: boolean }[];
+    const mine = list.find((d) => d.current);
+    const earlier = new Set(loadPendingRevokes(ctx.home).map((p) => p.device_id));
+    const others = list.filter((d) => !d.revoked_at && !d.current && !earlier.has(d.id) && (!mine || d.created_at < mine.created_at));
     if (!others.length) return;
-    const named = others.slice(0, 5).map((d) => `${clean(d.name, 60)} (last seen ${shortTime(d.last_seen_at || d.created_at)})`);
+    const named = others.slice(0, 5).map((d) => `${clean(d.name, 60)} (${deviceTag(d.id)}, paired ${shortTime(d.created_at)}, last seen ${shortTime(d.last_seen_at || d.created_at)})`);
     const more = others.length > 5 ? ` and ${others.length - 5} more` : "";
-    out(`Your account has ${others.length} other paired device${others.length === 1 ? "" : "s"}: ${named.join(", ")}${more}. Revoke any you no longer use at ${server}/app/devices.`);
+    const line = `Your account has ${others.length} other paired device${others.length === 1 ? "" : "s"}: ${named.join(", ")}${more}. This machine is ${mine ? `${clean(mine.name, 60)} (${deviceTag(mine.id)})` : `device ${pairedAs}`}. Revoke any other you no longer use at ${server}/app/devices.`;
+    await whileSignedInAs(ctx, pairedAs, () => out(line));
   } catch {
     /* only a hint */
   }
+}
+
+/** A device as the Devices page and `align status` show it: `dv_…` and the last 6 characters of its id. */
+export function deviceTag(id: string): string {
+  return `dv_…${id.slice(-6)}`;
 }
 
 async function cmdLogout(ctx: Ctx): Promise<void> {
@@ -955,7 +976,10 @@ async function cmdUninstall(ctx: Ctx, argv: string[]): Promise<void> {
 
 async function revokeBeforePurge(ctx: Ctx): Promise<void> {
   const c = loadCredentials(ctx.home);
-  const left = loadPendingRevokes(ctx.home).length ? (await revokePending(ctx).catch(() => null))?.pending ?? loadPendingRevokes(ctx.home) : [];
+  // Every device revoked here is named, not only this one (cycle 5): a device an earlier login replaced goes too.
+  const o = loadPendingRevokes(ctx.home).length ? await revokePending(ctx).catch(() => null) : null;
+  if (o) revokeLines(o, "login").forEach((l) => out(l));
+  const left = o ? o.pending : loadPendingRevokes(ctx.home);
   for (const p of left) err(`align: could not revoke device ${p.device_id}, which this machine no longer uses; revoke it at ${p.server_url}/app/devices.`);
   if (!c || c.signed_out || !c.refresh_token) return;
   let revoked = false;
@@ -989,14 +1013,15 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
     if (!r.aborted) out("Signed out: nothing uploaded.");
     if (r.revoked && revokeState(r.revoked) === "pending") {
       // The server could not be reached for the revoke: an unreachable server exits 1, as every other pass does.
-      err(`align: ${r.serverError || "the server could not be reached"}; the device this machine signed out of is revoked at the next sync that reaches it.`);
+      err(`align: ${r.serverError || "the server could not be reached"}; ${waitingRevokes(r.revoked.pending)} at the next sync that reaches it.`);
       process.exitCode = 1;
     }
     return;
   }
-  for (const w of takeWorkspacesAdded()) out(`This machine can now reach ${clean(w.name, 80)} in Align (given to this device when you accepted an invite). \`align share\`, or \`::align share\` in a session, shares sessions there.`);
   // Nothing got through, so no "0 sent" line above the error (it reads as if the pass had worked).
   if (!r.serverError) out(`Server: ${r.sent} queued calls sent, ${r.uploaded} usage rows uploaded, ${r.directives} directives, ${outboxDepth(ctx)} still queued.`);
+  // After the `Server:` line, as the spec orders them (cycle 5).
+  for (const w of takeWorkspacesAdded()) out(`This machine can now reach ${clean(w.name, 80)} in Align (given to this device when you accepted an invite or on your Devices page). \`align share\`, or \`::align share\` in a session, shares sessions there.`);
   if (r.serverError) {
     const waiting = unuploadedRows(ctx);
     err(`align: ${r.serverError}. ${waiting} usage rows and ${outboxDepth(ctx)} queued calls stay on this machine; the next sync retries.`);

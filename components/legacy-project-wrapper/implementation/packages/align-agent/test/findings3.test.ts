@@ -110,7 +110,7 @@ describe("re-invite: a workspace given back to this device at an invite (owner d
     fake.workspaces = [...fake.workspaces, { id: "ws_new", name: "New Co", role: "member", teams: [] }];
     fake.goals.set("ws_new", []);
     const first = await runCli(t, ["sync"]);
-    assert.match(first.stdout, /This machine can now reach New Co in Align \(given to this device when you accepted an invite\)/);
+    assert.match(first.stdout, /This machine can now reach New Co in Align \(given to this device when you accepted an invite or on your Devices page\)/);
     const again = await runCli(t, ["sync"]);
     assert.doesNotMatch(again.stdout, /can now reach/, "once");
     const lid8 = localId("claude-code", sid).slice(0, 8);
@@ -204,7 +204,15 @@ describe("E2E cycle 3 leftovers", () => {
     const r = await runCli(t, ["login", "--name", "Test Mac"]);
     assert.equal(r.code, 0, r.stderr);
     assert.ok(fake.devices.get(first)!.revoked, "the replaced device is revoked, so not listed");
-    assert.match(r.stdout, new RegExp(`Your account has 1 other paired device: Old laptop \\(last seen [^)]+\\)\\. Revoke any you no longer use at ${fake.url.replace(/[.]/g, "\\.")}/app/devices\\.`));
+    // Named with the end of its id and when it was paired, beside this machine's own, which the server named "Test Mac (2)"
+    // while the device it replaced, also "Test Mac", was still live (cycle 5).
+    const tag = (id: string) => `dv_…${id.slice(-6)}`;
+    assert.match(
+      r.stdout,
+      new RegExp(
+        `Your account has 1 other paired device: Old laptop \\(dv_…laptop, paired \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d, last seen [^)]+\\)\\. This machine is Test Mac \\(2\\) \\(${tag(loadCredentials(t.home)!.device_id)}\\)\\. Revoke any other you no longer use at ${fake.url.replace(/[.]/g, "\\.")}/app/devices\\.`,
+      ),
+    );
     const current = loadCredentials(t.home)!.device_id;
     const purge = await runCli(t, ["uninstall", "--purge"]);
     assert.equal(purge.code, 0, purge.stderr);

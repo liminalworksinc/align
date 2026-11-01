@@ -1095,12 +1095,20 @@ device a workspace at an invite (`device.workspace_added`) is recorded in that w
 
 The server SHALL pair a device by a key-bound device-code flow: `POST /api/v2/device/authorize {device_name,
 public_key}` (a 32-byte base64url Ed25519 key, name at most 100 characters) returns a code for the person to approve,
-and `POST /api/v2/device/token` returns the tokens exactly once after approval.
+and `POST /api/v2/device/token` returns the tokens exactly once after approval. The device SHALL get a name none of
+the person's live devices has: when one already has the requested name (a new `align login` on a machine whose
+earlier device is still being revoked, say), it gets the first free `<name> (2)`, `<name> (3)`, ..., so the Devices
+page and `align login` never show two live devices of one name.
 
 #### Scenario: Starting a pairing
 
 - **WHEN** the CLI POSTs `/api/v2/device/authorize`
 - **THEN** the response is `{device_code, user_code:"XXXX-XXXX", verification_uri:"<origin>/app/device", expires_in:600, interval:5}`, where the user code uses only the letters `BCDFGHJKLMNPQRSTVWXZ`; more than 10 requests per client per hour get 429 `rate_limited` with `retry_after` (seconds, also sent as `Retry-After`) and a message that says how long to wait: in Mode L, where every pairing on the computer is one client, `Align on this computer has started 10 device pairings in the last hour, its limit for everyone who pairs here. Try again in <n> minutes, or restart Align to clear it.`, and when hosted `Too many device pairings were started from this network in the last hour (the limit is 10). Try again in <n> minutes.` (`scripts/test-v2.mjs` "device: authorize is limited to 10 per hour per client ...")
+
+#### Scenario: A second device of one name
+
+- **WHEN** a person with a live device named `reuse test` pairs another device with that name (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices ...")
+- **THEN** the new device is named `reuse test (2)`
 
 #### Scenario: Polling before and after a decision
 

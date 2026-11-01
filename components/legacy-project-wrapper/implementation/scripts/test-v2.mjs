@@ -1121,8 +1121,13 @@ try {
   const ts2 = new Date().toISOString();
   const r2 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: D1.id, refresh_token: r1.json.refresh_token, ts: ts2, sig: refreshSig(D1, D1.id, r1.json.refresh_token, ts2) } });
   check("refresh: the rotated token refreshes again", r2.status === 200, r2.text);
-  // A dedicated device for the reuse test, so D1 stays usable.
+  // A dedicated device for the reuse test, so D1 stays usable. A live device of U1's already has its name, so the new
+  // pairing gets a distinguishing suffix (E2E-AGENT cycle 5).
+  const twin = insertDevice(U1.id, "reuse test");
   const DR = await pairDevice("U1", U1, [A], "reuse test");
+  const drName = withDb((d) => d.prepare("SELECT name FROM v2_devices WHERE id = ?").get(DR.id))?.name;
+  withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), twin.id));
+  check("device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices gets a distinguishing suffix (\"reuse test (2)\"), so no two live devices share a name", drName === "reuse test (2)", String(drName));
   const ts3 = new Date().toISOString();
   const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });
   const rrReuse = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });

@@ -1125,6 +1125,27 @@ try {
     `${JSON.stringify(q1Usage.slice(-4))} gap=${new Date(gapAt).toISOString()} back=${new Date(backAt).toISOString()} default=${reDefault}`,
   );
 
+  // -- ADR 0003 section 6, extended (E2E-AGENT cycle 5): Milo joins Later Co without ticking this device, so it does not
+  //    reach it; later, on the Devices page, he gives the device the workspace, and its next sync reaches it, said once --
+  const LATER_W = (await call("POST", "/api/v2/workspaces", { cookie: O2.cookie, body: { name: "Later Co" } })).json?.id;
+  const laterInv = (await call("POST", `/api/v2/workspaces/${LATER_W}/invites`, { cookie: O2.cookie, body: { email: M.email, role: "member" } })).json?.token;
+  const ML = await freshMilo();
+  const laterAccept = await call("POST", `/api/v2/invites/${laterInv}/accept`, { cookie: ML.cookie, body: {} });
+  const laterNone = sync();
+  const laterBefore = meIds();
+  const laterGive = await call("POST", `/api/v2/devices/${deviceBefore}/workspaces`, { cookie: ML.cookie, body: { workspace_id: LATER_W } });
+  const laterSync = sync();
+  const laterAgain = sync();
+  const laterAudit = ((await call("GET", `/api/v2/workspaces/${LATER_W}/audit`, { cookie: O2.cookie })).json?.audit ?? []).filter((a) => a.action === "device.workspace_added" && a.object_id === deviceBefore).map((a) => a.actor?.id);
+  check(
+    "devices page (ADR 0003 section 6, E2E-AGENT cycle 5): a workspace joined without ticking this device is not reached; given to the device later on the Devices page (audited device.workspace_added), the next `align sync` reaches it, says so once after its Server: line, and /me lists it, with no new pairing",
+    laterAccept.status === 200 && laterNone.code === 0 && !laterBefore.includes(LATER_W) && laterGive.status === 200 &&
+      laterSync.code === 0 && laterSync.stdout.includes("This machine can now reach Later Co in Align (given to this device when you accepted an invite or on your Devices page)") &&
+      laterSync.stdout.indexOf("Server:") < laterSync.stdout.indexOf("can now reach Later Co") && !laterAgain.stdout.includes("can now reach") &&
+      meIds().includes(LATER_W) && laterAudit.join() === M.id && liveDevice() === deviceBefore,
+    `${laterAccept.text} ${laterBefore} ${laterGive.text} ${laterSync.stdout} ${laterSync.stderr} ${meIds()} ${JSON.stringify(laterAudit)}`,
+  );
+
   // -- canaries: people's words reach the model only inside Align's quoted-data wording --
   const modelText = outputs
     .map((o) => {

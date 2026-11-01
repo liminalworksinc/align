@@ -600,6 +600,7 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     }
   }
   const t0 = Date.now();
+  ctx.passStartedAt = t0;
   resetServerTrouble();
   // The whole pass is one device's (C4-2): if `align login` or `align logout` commits while it runs, its next call to
   // the server refuses to go on as the new pairing (or none), and the pass stops there.

@@ -328,9 +328,14 @@ export function noticeWorkspacesAdded(ctx: Ctx, me: MeFile, added: { id: string;
       notify(ctx, s.local_id, `workspace_back_${w.id}_${at}`, `Align: this machine can reach ${name} in Align again. To share this session there again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`);
     }
     const since = new Date(Date.now() - 3_600_000).toISOString();
+    // A session this pass recorded first started with it (its own SessionStart spooled it and started the pass): it
+    // starts out with the workspace in reach, so it is not told (cycle 5).
+    const fresh = new Date(ctx.passStartedAt ?? Date.now()).toISOString();
     const recent = ctx.db
-      .prepare("SELECT s.local_id FROM sessions s LEFT JOIN shares h ON h.local_id=s.local_id WHERE COALESCE(s.last_active, s.created_at) >= ? AND (h.local_id IS NULL OR h.state IN ('stopped','error'))")
-      .all(since) as { local_id: string }[];
+      .prepare(
+        "SELECT s.local_id FROM sessions s LEFT JOIN shares h ON h.local_id=s.local_id WHERE COALESCE(s.last_active, s.created_at) >= ? AND s.created_at < ? AND (h.local_id IS NULL OR h.state IN ('stopped','error'))",
+      )
+      .all(since, fresh) as { local_id: string }[];
     for (const { local_id: lid } of recent) {
       if (told.has(lid)) continue;
       told.add(lid);

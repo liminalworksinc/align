@@ -1,5 +1,8 @@
 // Follow-ups to the cycle-5 agent-side E2E report: the counts that took rows made while a session was not shared for
-// rows that will upload (C5-1's tail), and history already deleted on the web (section 5).
+// rows that will upload (C5-1's tail), and the "works, but would confuse a developer" items of its section 5: devices
+// named unambiguously at login, history already deleted on the web, every device `--purge` revokes, accurate wording
+// for several revokes that wait, `align uninstall` leaving the user's Codex hooks.json byte for byte, the order of
+// `align sync`'s lines, and no "can now reach" notice to a session that started with the pass that found the workspace.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -99,6 +102,25 @@ describe("C5-1 follow-up: what counts as waiting to upload, and as shared time",
 });
 
 describe("cycle 5, section 5: works, but would confuse a developer", () => {
+  test("login names devices unambiguously: a new pairing next to a live one of the same name gets a suffix; the device it replaced (its revoke waiting) and a device paired after it are never named as ones to revoke", async () => {
+    const { fake, t } = await world();
+    const first = loadCredentials(t.home)!.device_id;
+    // The replaced device's revoke can't get through, so it is still live on the server, with the same name.
+    fake.failCalls = (m, p) => m === "DELETE" && p === "/api/v2/devices/self";
+    fake.devices.set("dv_laterpairing", { id: "dv_laterpairing", name: "Test Mac (3)", publicKey: "x", revoked: false, refresh: null, oldRefresh: new Set(), createdAt: new Date(Date.now() + 3_600_000).toISOString() });
+    fake.devices.set("dv_oldlaptop", { id: "dv_oldlaptop", name: "Old laptop", publicKey: "x", revoked: false, refresh: null, oldRefresh: new Set(), createdAt: "2026-10-01T09:00:00.000Z" });
+    const r = await runCli(t, ["login", "--name", "Test Mac"]);
+    assert.equal(r.code, 0, r.stderr);
+    fake.failCalls = null;
+    const now = loadCredentials(t.home)!.device_id;
+    assert.ok(!fake.devices.get(first)!.revoked && loadPendingRevokes(t.home).some((p) => p.device_id === first), "the replaced device waits to be revoked");
+    assert.equal(fake.devices.get(now)!.name, "Test Mac (2)", "two live devices never share a name");
+    assert.match(r.stdout, /Signed in as Sean <sean@example\.test> on device Test Mac \(2\)\./);
+    assert.match(r.stdout, new RegExp(`Your account has 1 other paired device: Old laptop \\(dv_…laptop, paired [^)]+\\)\\. This machine is Test Mac \\(2\\) \\(dv_…${now.slice(-6)}\\)\\.`));
+    assert.doesNotMatch(r.stdout, /Test Mac \(3\)|dv_…airing/, "a device paired after this one is not named");
+    assert.doesNotMatch(r.stdout, new RegExp(`dv_…${first.slice(-6)}`), "nor this machine's own earlier device");
+  });
+
   test("history already deleted on the web: `align delete-history` says so, exits 0, and nothing stays queued or reads as refused", async () => {
     const { fake, t } = await world();
     const A = await shared(t);
@@ -110,5 +132,72 @@ describe("cycle 5, section 5: works, but would confuse a developer", () => {
     const row = JSON.parse((await runCli(t, ["sessions", "--all", "--json"])).stdout).find((s: { native_id: string }) => s.native_id === A.sid);
     assert.equal(row.shared, "private");
     assert.match(fs.readFileSync(path.join(t.home, "logs", "align.log"), "utf8"), /was already deleted on the server/);
+  });
+
+  test("`align uninstall --purge` names every device it revokes, the one an earlier login replaced too", async () => {
+    const { fake, t } = await world();
+    const first = loadCredentials(t.home)!.device_id;
+    fake.failCalls = (m, p) => m === "DELETE" && p === "/api/v2/devices/self";
+    assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    fake.failCalls = null;
+    const now = loadCredentials(t.home)!.device_id;
+    const purge = await runCli(t, ["uninstall", "--purge"]);
+    assert.equal(purge.code, 0, purge.stderr);
+    assert.match(purge.stdout, new RegExp(`Revoked device ${first}, which \`align login\` replaced on this machine; its sessions stopped sharing there\\.`));
+    assert.match(purge.stdout, new RegExp(`Revoked this device \\(${now}\\)`));
+    assert.ok(fake.devices.get(first)!.revoked && fake.devices.get(now)!.revoked);
+  });
+
+  test("two revokes waiting while the server is unreachable are both named, each as what it is", async () => {
+    const { fake, t } = await world();
+    const first = loadCredentials(t.home)!.device_id;
+    fake.failCalls = (m, p) => m === "DELETE" && p === "/api/v2/devices/self";
+    assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
+    const second = loadCredentials(t.home)!.device_id;
+    assert.equal((await runCli(t, ["logout"])).code, 0);
+    fake.failCalls = null;
+    fake.setOffline(true);
+    const r = await runCli(t, ["sync"]);
+    assert.equal(r.code, 1);
+    assert.match(
+      r.stderr,
+      new RegExp(`the 2 devices this machine no longer uses \\(${first}, which \`align login\` replaced; ${second}, which this machine signed out of\\) are revoked at the next sync that reaches it`),
+      r.stderr,
+    );
+  });
+
+  test("`align uninstall` leaves the user's own Codex hooks.json byte for byte, layout included", async () => {
+    const t = makeEnv();
+    cleanups.push(() => t.cleanup());
+    const file = path.join(t.codexHome, "hooks.json");
+    const mine = '{\n    "hooks": {\n        "Stop": [ { "hooks": [ { "type": "command", "command": "say done" } ] } ]\n    },\n    "note":   "mine"\n}\n';
+    fs.writeFileSync(file, mine);
+    assert.equal((await runCli(t, ["install", "--codex"])).code, 0);
+    assert.notEqual(fs.readFileSync(file, "utf8"), mine, "install merged Align's handlers");
+    const un = await runCli(t, ["uninstall"]);
+    assert.equal(un.code, 0, un.stderr);
+    assert.equal(fs.readFileSync(file, "utf8"), mine);
+  });
+
+  test("`align sync` prints \"can now reach\" after its Server: line; a session that started with the pass that found the workspace is not told, an older one is", async () => {
+    const { fake, t } = await world();
+    const cwd = path.join(t.root, "repo-reach");
+    fs.mkdirSync(cwd, { recursive: true });
+    const OLD = "abababab-1111-2222-3333-444444444444";
+    const NEW = "cdcdcdcd-1111-2222-3333-444444444444";
+    runHook(t, "claude", "SessionStart", { session_id: OLD, source: "startup", cwd });
+    assert.equal((await runCli(t, ["sync"])).code, 0);
+    fake.workspaces = [...fake.workspaces, { id: "ws_new", name: "New Co", role: "member", teams: [] }];
+    fake.goals.set("ws_new", []);
+    // Its SessionStart spools it; the pass it starts (here, the next sync) is the one that finds New Co.
+    runHook(t, "claude", "SessionStart", { session_id: NEW, source: "startup", cwd });
+    const r = await runCli(t, ["sync"]);
+    assert.equal(r.code, 0, r.stderr);
+    const server = r.stdout.indexOf("Server:");
+    const reach = r.stdout.indexOf("This machine can now reach New Co");
+    assert.ok(server >= 0 && reach > server, r.stdout);
+    const hot = (sid: string) => readJson<HotState>(layout.hot(t.home, localId("claude-code", sid)));
+    assert.ok(hot(OLD)?.notices.some((x) => /can now reach New Co/.test(x.text)), "the older session is told");
+    assert.ok(!(hot(NEW)?.notices ?? []).some((x) => /can now reach New Co/.test(x.text)), "the one that started with the pass is not");
   });
 });

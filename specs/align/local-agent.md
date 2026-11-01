@@ -185,10 +185,14 @@ behind a proxy) SHALL be retried at the next interval until the code expires, ne
 a code, `align login` SHALL revoke a device this machine signed out of while the server could not be reached (as "A
 logout the server did not hear is finished later" says), and after pairing it SHALL cache each granted workspace's
 asks feed with its goal feed, so the first session after pairing gets its team's accepted asks in its envelope. After
-`Signed in as ...` it SHALL name the person's other paired devices that are not revoked (from `GET /api/v2/devices`,
-leaving out this one), `Your account has <n> other paired device(s): <name> (last seen <time>), ... Revoke any you no
-longer use at <server>/app/devices.`, so a device left paired with no machine behind it (an Align folder deleted
-without `align logout`, say) is seen. When the server refuses to start pairing with 429 `rate_limited`, `align login`
+`Signed in as ...` it SHALL name the person's other paired devices that are not revoked (from `GET /api/v2/devices`),
+`Your account has <n> other paired device(s): <name> (dv_…<last 6 of its id>, paired <time>, last seen <time>), ...
+This machine is <name> (dv_…<last 6>). Revoke any other you no longer use at <server>/app/devices.`, so a device left
+paired with no machine behind it (an Align folder deleted without `align logout`, say) is seen and two devices of one
+name are told apart, as the Devices page names them. It SHALL leave out this device, this machine's own earlier
+devices (revoked by this login, or waiting in `revoke.json` to be), and devices paired after this one (a second `align
+login` on this machine may replace this pairing a moment later), so it never names the device signed in now, or about
+to be, as one to revoke; and it SHALL say it only while this pairing is still the one signed in. When the server refuses to start pairing with 429 `rate_limited`, `align login`
 SHALL exit 1 with `align: could not start pairing this device: <the server's message>` when that message says how
 long to wait, else `... too many device pairings were started recently. Try again in <n> minutes.` from `Retry-After`.
 
@@ -210,7 +214,12 @@ long to wait, else `... too many device pairings were started recently. Try agai
 #### Scenario: Other paired devices are named
 
 - **WHEN** the account has another paired device and the developer runs `align login` again on this machine (test `findings3` "orphan devices: ...")
-- **THEN** the device this pairing replaced is revoked and not named, and stdout says `Your account has 1 other paired device: Old laptop (last seen <time>). Revoke any you no longer use at <server>/app/devices.`
+- **THEN** the device this pairing replaced is revoked and not named, and stdout says `Your account has 1 other paired device: Old laptop (dv_…laptop, paired <time>, last seen <time>). This machine is Test Mac (2) (dv_…<last 6>). Revoke any other you no longer use at <server>/app/devices.` (the server named the new device `Test Mac (2)` because the one it replaced was still live)
+
+#### Scenario: A replaced device whose revoke waits, and a device paired later
+
+- **WHEN** `align login` can't revoke the device it replaced, which has the same name, and the account also has a device paired after this one and an old laptop (test `findings6` "login names devices unambiguously ...")
+- **THEN** the new device is `Test Mac (2)` on the server and in `Signed in as ...`, and the line names only the old laptop and this machine, never the replaced device or the later one
 
 #### Scenario: Denied or expired code
 
@@ -417,13 +426,21 @@ which only this machine's own revoke causes, that it `was already revoked (on th
 never `Revoked`), and the server ends that device's sessions (`device_signed_out`), so
 `::align share` after the new pairing shares them again as after an online logout. While it waits, the file SHALL be
 kept through any number of unreachable passes (a signed-out `align sync` that could not reach the server for it exits 1,
-as any unreachable pass does), and `align status` SHALL show one line per device, `Revoke:     pending for device <id>,
+as any unreachable pass does, saying on stderr `... the device this machine signed out of is revoked at the next sync
+that reaches it.`, `... device <id>, which \`align login\` replaced, is revoked ...`, or for several `... the <n>
+devices this machine no longer uses (<id>, which \`align login\` replaced; <id>, which this machine signed out of) are
+revoked ...`), and `align status` SHALL show one line per device, `Revoke:     pending for device <id>,
 signed out <time> while <server> could not be reached; the next \`align sync\` or \`align login\` revokes it`, or for a
 device a login replaced `Revoke:     pending for device <id>, replaced by \`align login\` <time> and not revoked yet
 (<server> could not be told); ...`. A replaced device SHALL be said and logged as replaced by \`align login\` (`Revoked
 device <id>, which \`align login\` replaced on this machine; its sessions stopped sharing there.`, logged `revoked device
 <id>, replaced by \`align login\` at <time> UTC`), never as a sign-out while the server could not be reached. An older
 `revoke.json` holding a single device SHALL still be read.
+
+#### Scenario: Two revokes waiting
+
+- **WHEN** a login could not revoke the device it replaced, `align logout` then could not reach the server either, and a signed-out `align sync` runs while it is unreachable (test `findings6` "two revokes waiting ...")
+- **THEN** it exits 1 naming both devices, each as replaced or signed out of, in the plural
 
 #### Scenario: Revoked at the next sync
 
@@ -799,12 +816,15 @@ handler per event. `--dry-run` SHALL print `Would ...` lines and write nothing.
 ### Requirement: Uninstalling
 
 The `align uninstall` command SHALL delete Align's plugin folder, remove only Align's handlers from Claude
-`settings.json` and Codex `hooks.json` (writing no new backup), delete the `settings.json.align-backup-*` and
+`settings.json` and Codex `hooks.json` (writing no new backup; when a backup Align made on install holds no Align
+handler and the same content, the file SHALL get that backup's bytes back, so the user's file is byte-identical to
+what it was, its layout and indentation included), delete the `settings.json.align-backup-*` and
 `hooks.json.align-backup-*` copies Align made of those files (printing `Removed <n> backup file(s) Align made when
 installing (...)`), delete Codex `hooks.json` when Align created it and it is now empty, delete `~/.align/bin/` and `install.json`, and keep the rest of `ALIGN_HOME` (ledger and keys) unless
 `--purge` is given, which deletes `ALIGN_HOME` entirely. Because that deletes the device key and tokens, `--purge` SHALL
 first revoke this machine's device (`DELETE /api/v2/devices/self`, printing `Revoked this device (<id>) on <server>;
-its shared sessions stopped sharing there.`) and a revoke a past logout left waiting, and when the server can't be
+its shared sessions stopped sharing there.`) and every revoke a past logout or login left waiting, naming each one it
+revokes (`Revoked device <id>, which \`align login\` replaced on this machine; ...`), and when the server can't be
 reached SHALL print `align: could not reach <server> to revoke this device (<id>). Its key is deleted now, so revoke it
 at <server>/app/devices.` on stderr, so no device is left paired with no machine behind it.
 
@@ -812,6 +832,16 @@ at <server>/app/devices.` on stderr, so no device is left paired with no machine
 
 - **WHEN** the user runs `align uninstall` after an install, then `align uninstall --purge` (test `install` "Claude Code plugin + Codex merge ...")
 - **THEN** `settings.json` and `config.toml` equal the user's originals, the plugin folder and the Align-created `hooks.json` are gone, `ALIGN_HOME` survives the first command, and the second deletes it
+
+#### Scenario: The user's Codex hooks.json back byte for byte
+
+- **WHEN** the user's Codex `hooks.json` uses 4-space indents and spacing of its own, and `align install --codex` then `align uninstall` run (test `findings6` "`align uninstall` leaves the user's own Codex hooks.json byte for byte ...")
+- **THEN** the file is byte-identical to the user's original
+
+#### Scenario: Purging names every device it revokes
+
+- **WHEN** a login could not revoke the device it replaced, and `align uninstall --purge` then runs with the server reachable (test `findings6` "`align uninstall --purge` names every device it revokes ...")
+- **THEN** stdout says `Revoked device <id>, which \`align login\` replaced on this machine; ...` and `Revoked this device (<id>) ...`, and both are revoked on the server
 
 #### Scenario: Purging revokes the device
 
@@ -903,8 +933,8 @@ HTTP <5xx>` of the pass) and `error_since` while passes fail to reach the server
 `logs/align.log` (and `sync: the server is reachable again` once a pass gets through). Run from the CLI it SHALL print `Local: <n>
 hook records, <n> files scanned (<n> new bytes).` and then either `Signed out: nothing uploaded.` or `Server: <n>
 queued calls sent, <n> usage rows uploaded, <n> directives, <n> still queued.` (`directives` counts the new directives
-stored, not replays), then `This machine can now reach <workspace> in Align (given to this device when you accepted an
-invite). ...` once per workspace the pass found added, or `Another sync is running.`; when the pass could not reach the server it SHALL print, instead
+stored, not replays), then, after that line, `This machine can now reach <workspace> in Align (given to this device
+when you accepted an invite or on your Devices page). ...` once per workspace the pass found added, or `Another sync is running.`; when the pass could not reach the server it SHALL print, instead
 of the `Server:` line, `align: <error>. <n> usage rows and <n> queued calls stay on this machine; the next sync
 retries.` on stderr and exit 1. A pass whose pairing changed under it stops (as "A new pairing replaces the old one only
 once it exists" says) and prints that line after `Local:`, instead of `Signed out: nothing uploaded.` when it was a
@@ -1482,17 +1512,20 @@ continue, and shares in the person's other workspaces SHALL be unaffected.
 ### Requirement: A workspace given back at an invite reaches this device
 
 Owner decision 2026-11-01: when the person accepts an invite and ticks this device on the accept page (`workspaces`
-"Invites give paired devices the workspace"), the device SHALL pick the workspace up at its next pass, without a new
+"Invites give paired devices the workspace"), or gives it the workspace later on the Devices page (`workspaces`
+"Giving a device a workspace later"), the device SHALL pick the workspace up at its next pass, without a new
 `align login`, so no share in another workspace ends. Every pass's directives answer lists the workspaces the device
 reaches (`workspaces`); when they differ from the cached `me.json` the pass SHALL read `GET /api/v2/me` at once
 (a hook-started pass otherwise reads it only every 10 minutes), cache the workspace's goal and asks feeds, and, for
 each workspace this same device did not reach at its previous `/me` and reaches now (never at a new pairing's first
 read, which `align login` lists), log `workspace added: this device can now reach <name> (<id>)` and say so once:
 `align sync` prints `This machine can now reach <workspace> in Align (given to this device when you accepted an
-invite). \`align share\`, or \`::align share\` in a session, shares sessions there.`; each session whose share there
+invite or on your Devices page). \`align share\`, or \`::align share\` in a session, shares sessions there.`; each session whose share there
 ended because the workspace was lost gets the notice `Align: this machine can reach <workspace> in Align again. To
 share this session there again, type \`::align share\` here (it counts toward "<goal>" again).` (without the
-parenthesis when it had no goal); and each other session active in the last hour that is not shared gets `Align: this
+parenthesis when it had no goal); and each other session active in the last hour that is not shared and that an
+earlier pass recorded (one this pass recorded first started with it, its own `SessionStart` spooling it, and already
+starts out with the workspace in reach, so it is not told) gets `Align: this
 machine can now reach <workspace> in Align. To share this session there, type \`::align share <goal>\` here.` when the
 workspace is the device's only or default one, else `... run \`align share <lid8> --workspace "<workspace>" --goal
 <goal>\` in a terminal.` `::align share` in a session that lost the workspace SHALL share it there again toward the goal
@@ -1513,6 +1546,16 @@ workspaces SHALL be untouched.
 
 - **WHEN** a device that reaches two workspaces gains a third when its person joins it with this device ticked, and `align sync` runs twice (test `findings3` "a workspace joined for the first time ..."; against the real server in `scripts/test-agent-live.mjs` "invite with a device ticked ...")
 - **THEN** the first sync prints `This machine can now reach New Co in Align ...` and the second does not, and a recent unshared session's next prompt says `... run \`align share <lid8> --workspace "New Co" --goal <goal>\` in a terminal.`
+
+#### Scenario: A session that started with the pass
+
+- **WHEN** one unshared session was recorded by an earlier pass, a second starts (its `SessionStart` spooled) just as the device gains New Co, and `align sync` runs (test `findings6` "`align sync` prints \"can now reach\" after its Server: line ...")
+- **THEN** `This machine can now reach New Co ...` comes after the `Server:` line, the earlier session gets the notice and the new one does not
+
+#### Scenario: Given the workspace later on the Devices page
+
+- **WHEN** the person joins Later Co without ticking this device, a sync runs, then they give the device Later Co on the Devices page and `align sync` runs twice (`scripts/test-agent-live.mjs` "devices page (ADR 0003 section 6, E2E-AGENT cycle 5) ...")
+- **THEN** the first sync does not reach it; the next says `This machine can now reach Later Co in Align (given to this device when you accepted an invite or on your Devices page). ...` once, after its `Server:` line, `me.json` lists it, and there was no new pairing
 
 ### Requirement: One steering line at a fresh session start
 
