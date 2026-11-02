@@ -353,25 +353,45 @@ The `/app/device` page SHALL let a person with a recent sign-in look up the code
 which of their workspaces the device may use, and approve or deny it. **Approve** and **Deny** SHALL act on the device
 whose panel is shown, by the code it was looked up by, never on what the code field holds now: editing the field to
 another code SHALL close that panel and clear its ticks, as a new **Look up** does, so no device is approved or denied
-that the person did not look up (E2E-WEB cycle 10 C10-1). An approval or denial with no code SHALL be 400 `Enter the
-code shown by align login.`, never a field name (E2E-WEB cycle 10 W4). A device name, on this page as on the Devices
-page, the invite page and the Sessions page, SHALL wrap anywhere and clip what can't wrap, so no name scrolls the page
-sideways at any width from 320 to 1280 px (E2E-WEB cycle 10 C10-3).
+that the person did not look up (E2E-WEB cycle 10 C10-1). A **Look up** still on its way when the field changes SHALL
+be dropped when it answers unless the field still holds the code it looked up (case, spaces and dashes aside), and so
+SHALL any but the latest **Look up**, so the panel never opens for a device whose code the field no longer shows
+(E2E-WEB cycle 11 C11-1). An approval or denial with no code, or with a `user_code` that is not text (`null`, a number),
+SHALL be 400 `Enter the code shown by align login.`, and one longer than 20 characters 400 `That code is too long. Enter
+the code shown by align login.`, never a field name (E2E-WEB cycle 10 W4, cycle 11 W1). A device name, on this page (its
+panel and the note after **Approve**) as on the Devices page, the invite page ("Your paired devices") and the Sessions
+page (the line naming a session's machine), SHALL wrap anywhere and clip what can't wrap inside its own box, and every box
+that holds one SHALL be able to shrink below the name's width (a `fieldset` included, whose default minimum is its
+widest content), so no name scrolls the page sideways at any width from 320 to 1280 px (E2E-WEB cycle 10 C10-3, cycle
+11 C11-2). This rendering, not the device-name limits, is what keeps a name inside the page: the limits accept names
+that draw one wide character, such as `ก` with 15 × `ำ`, 15 Malayalam dot rephs before `ക` or 16 Hangul initial jamo,
+since none of their parts is a grapheme extender and the 16-part cap bounds them (`workspaces` "Device pairing flow";
+E2E-WEB cycle 11 W4).
 
 #### Scenario: A code edited after Look up
 
 - **WHEN** a person looks up device C's code and ticks a workspace, then types device D's code into the field without pressing **Look up**; then looks D up and presses **Deny** (`scripts/test-v2.mjs` "C10-1 (ui, E2E-WEB cycle 10): ...")
 - **THEN** C's panel (its name, the workspace boxes, **Approve** and **Deny**) closes as the code changes, D looked up is denied, and C stays pending
 
+#### Scenario: A code edited while Look up is on its way
+
+- **WHEN** a person presses **Look up** for device E's code and, before the answer arrives, types device F's code into the field; and, another time, types F's code and then E's again (lowercase, without the dash) before it arrives (`scripts/test-v2.mjs` "C11-1 (ui, E2E-WEB cycle 11): ...")
+- **THEN** the first answer is dropped: no panel opens (no name, no workspace boxes, no **Approve** or **Deny**), the field keeps F's code and both devices stay pending; the second answer opens E's panel
+
 #### Scenario: An empty code
 
-- **WHEN** an approval or denial is posted with an empty or blank `user_code` (`scripts/test-v2.mjs` "W4 (E2E-WEB cycle 10): ...")
-- **THEN** it is 400 `Enter the code shown by align login.`
+- **WHEN** an approval or denial is posted with an empty or blank `user_code` (`scripts/test-v2.mjs` "W4 (E2E-WEB cycle 10): ..."), or with `null`, a number or a list (`scripts/test-v2.mjs` "c11 W1 (E2E-WEB cycle 11): ...")
+- **THEN** it is 400 `Enter the code shown by align login.`, and a code of more than 20 characters is 400 `That code is too long. Enter the code shown by align login.`
 
 #### Scenario: A device name too wide for the page
 
 - **WHEN** the Devices page lists a device stored as `ｶ` with 150 half-width voiced sound marks (stored before the limit that now refuses it) and one named with a 100-letter word, at 320 and at 1280 px (`scripts/test-v2.mjs` "C10-3 (ui, E2E-WEB cycle 10): ...")
 - **THEN** the page never scrolls sideways
+
+#### Scenario: Every page that shows a device name
+
+- **WHEN** a person's device names include `ｶ` with 150 × U+FF9E (stored before the limit), `ก` with 15 × `ำ`, 15 Malayalam dot rephs before `ക`, 16 Hangul initial jamo, a 100-letter word, 30 × `﷽` and twelve eight-woman families, and they open the approval page for each (its panel, and the "connected as “<name> (2)”" note), the Devices page, an invite to them and the Sessions page naming the machine of a session that ended when they left, at 320, 390, 768 and 1280 px (`scripts/test-v2.mjs` "C11-2 and W4 (ui, E2E-WEB cycle 11): ...")
+- **THEN** no page scrolls sideways
 
 #### Scenario: Approve a device
 
@@ -874,7 +894,7 @@ and a closed "Details" disclosure.
 #### Scenario: Approved, not launched
 
 - **WHEN** a request is approved and not launched
-- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>"). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1> to agents. They get it at their next turn." or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Declined by you"), anyone else by name
+- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>", and a **Not yet** on a card left open while someone said not yet elsewhere with 409 `wrong_state` "<name> already decided not yet, so nothing changes: …", shown the same way: E2E-WEB cycle 11 W2). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1> to agents. They get it at their next turn." or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Declined by you"), anyone else by name
 
 #### Scenario: The list after a launch
 

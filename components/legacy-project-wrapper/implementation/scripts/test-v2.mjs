@@ -2007,13 +2007,18 @@ try {
   const notYetViewer = await crAct(U4, GL.id, cr1.json.id, "not_yet", {});
   const notYet1 = await crAct(U2, GL.id, cr1.json.id, "not_yet", {});
   const notYet2 = await crAct(U3, GL.id, cr1.json.id, "not_yet", {});
+  const notYet2Own = await crAct(U2, GL.id, cr1.json.id, "not_yet", {});
+  const notYetRead = (await crGet(U3, GL.id, cr1.json.id)).json;
   const dirsAfterNotYet = await dirs(D3, cursor3);
   const feedAfterNotYet = await glFeed();
   check(
-    "launch (D1): not yet (a viewer -> 403 read_only) records the decision and publishes nothing; a later not yet replaces it (launch not_yet, launch_decided_by the owner); the feed's ETag is unchanged and no directive is written; audit change_request.not_yet",
-    notYetViewer.status === 403 && notYetViewer.json?.error === "read_only" && notYet1.json?.launch === "not_yet" && notYet1.json.launch_decided_by?.id === U2.id && notYet2.json?.launch === "not_yet" && notYet2.json.launch_decided_by?.id === U3.id && notYet2.json.version === null &&
-      (dirsAfterNotYet?.directives ?? []).length === 0 && feedAfterNotYet.headers.get("etag") === etagBefore && auditOf("change_request.not_yet", cr1.json.id).sort().join() === [U2.id, U3.id].sort().join(),
-    `${notYet1.text.slice(0, 200)} ${notYet2.text.slice(0, 200)} ${JSON.stringify(dirsAfterNotYet).slice(0, 200)}`,
+    "launch (D1): not yet (a viewer -> 403 read_only) records the decision and publishes nothing (launch not_yet, launch_decided_by the launcher); a second not yet, by another launcher or the same one (another tab), is 409 wrong_state \"Uli Two already decided not yet, so nothing changes: agents stay on version 1 until someone launches version 2.\" (\"You already decided not yet, …\" to them) and is not recorded again, while can.not_yet reads false and can.launch true (c11 W2); the feed's ETag is unchanged and no directive is written; audit change_request.not_yet once",
+    notYetViewer.status === 403 && notYetViewer.json?.error === "read_only" && notYet1.json?.launch === "not_yet" && notYet1.json.launch_decided_by?.id === U2.id && notYet1.json.version === null &&
+      notYet2.status === 409 && notYet2.json?.error === "wrong_state" && notYet2.json.message === `${U2.name} already decided not yet, so nothing changes: agents stay on version 1 until someone launches version 2.` &&
+      notYet2Own.status === 409 && notYet2Own.json?.message === "You already decided not yet, so nothing changes: agents stay on version 1 until someone launches version 2." &&
+      notYetRead?.launch_decided_by?.id === U2.id && notYetRead.can?.not_yet === false && notYetRead.can.launch === true &&
+      (dirsAfterNotYet?.directives ?? []).length === 0 && feedAfterNotYet.headers.get("etag") === etagBefore && auditOf("change_request.not_yet", cr1.json.id).join() === U2.id,
+    `${notYet1.text.slice(0, 200)} ${notYet2.text.slice(0, 200)} ${notYet2Own.text.slice(0, 200)} ${JSON.stringify(notYetRead?.can)} ${JSON.stringify(dirsAfterNotYet).slice(0, 200)}`,
   );
   // U1, the workspace owner, is the requester: not an approver, but in the launch set.
   const launchViewer = await crAct(U4, GL.id, cr1.json.id, "launch", {});
@@ -2803,6 +2808,53 @@ try {
         editLooked.text.includes("U5's edit C") && editLooked.buttons.includes("Approve") && !editAfter.text.includes("U5's edit C") && editAfter.boxes === 0 &&
           !editAfter.buttons.includes("Approve") && !editAfter.buttons.includes("Deny") && stateOf(editD.userCode) === "denied" && stateOf(editC.userCode) === "pending",
         `${JSON.stringify({ ...editLooked, text: editLooked.text.slice(0, 200) })} ${JSON.stringify({ ...editAfter, text: editAfter.text.slice(0, 200) })} C=${stateOf(editC.userCode)} D=${stateOf(editD.userCode)}`,
+      );
+      // E2E-WEB cycle 11 C11-1: a code edited while its Look up is still on its way: the answer is for a code the field
+      // no longer shows, so it is dropped (no panel, nothing to approve or deny); edited back to the same code (in another
+      // format), the answer is kept. The lookup is slowed by 2.5 s, as on a slow connection.
+      const raceE = insertPairing("U5's race E");
+      const raceF = insertPairing("U5's race F");
+      const rp = await browser.newPage();
+      await rp.setCookie(...U5.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+      await rp.setRequestInterception(true);
+      rp.on("request", (r) => (r.url().includes("/api/v2/device/requests/") ? setTimeout(() => void r.continue().catch(() => undefined), 2500) : void r.continue().catch(() => undefined)));
+      const rpRetype = async (code) => {
+        await rp.focus(codeField);
+        await rp.evaluate((f) => document.querySelector(f)?.select(), codeField);
+        await rp.keyboard.press("Backspace");
+        await rp.type(codeField, code);
+      };
+      const rpPanel = () =>
+        rp.evaluate(() => ({
+          text: document.querySelector("main")?.innerText ?? "",
+          buttons: [...document.querySelectorAll("main button")].map((b) => b.textContent),
+          boxes: document.querySelectorAll('main input[type="checkbox"]').length,
+          field: document.querySelector('main input[placeholder="BCDF-GHJK"]')?.value ?? "",
+        }));
+      const slowLookup = async (during) => {
+        const answered = rp.waitForResponse((res) => res.url().includes("/api/v2/device/requests/"), { timeout: 15000 }).catch(() => undefined);
+        await rp.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+        await sleep(300);
+        await during();
+        await answered;
+        await sleep(500);
+        return rpPanel();
+      };
+      await rp.goto(`${BASE}/app/device?code=${raceE.userCode}`, { waitUntil: "networkidle0" });
+      const raceAway = await slowLookup(() => rpRetype(raceF.userCode));
+      const raceDeny = await rp.evaluate(() => [...document.querySelectorAll("main button")].some((b) => b.textContent === "Approve" || b.textContent === "Deny"));
+      // Edited to F and back to E's code, lowercase and without the dash, while the lookup is on its way: E's panel opens.
+      await rp.goto(`${BASE}/app/device?code=${raceE.userCode}`, { waitUntil: "networkidle0" });
+      const raceBack = await slowLookup(async () => {
+        await rpRetype(raceF.userCode);
+        await rpRetype(raceE.userCode.replace("-", "").toLowerCase());
+      });
+      await rp.close();
+      check(
+        "C11-1 (ui, E2E-WEB cycle 11): a code edited to another device's while its Look up is still on its way: the answer is dropped, so no panel opens (no name, no workspace boxes, no Approve or Deny) and the field keeps the code typed; both devices stay pending; edited back to the same code in another format before the answer, the panel opens for that device",
+        !raceAway.text.includes("U5's race E") && !raceAway.text.includes("U5's race F") && raceAway.boxes === 0 && !raceDeny && raceAway.field === raceF.userCode &&
+          stateOf(raceE.userCode) === "pending" && stateOf(raceF.userCode) === "pending" && raceBack.text.includes("U5's race E") && raceBack.buttons.includes("Approve") && raceBack.buttons.includes("Deny"),
+        `${JSON.stringify({ ...raceAway, text: raceAway.text.slice(0, 300) })} ${JSON.stringify({ ...raceBack, text: raceBack.text.slice(0, 300) })} E=${stateOf(raceE.userCode)} F=${stateOf(raceF.userCode)}`,
       );
       // W4 (E2E-WEB cycle 10): an approval or denial with no code says what to do, not a field name.
       const w4Empty = await call("U5", "POST", "/api/v2/device/approve", { cookie: U5.cookie, body: { user_code: "  ", workspace_ids: [A] } });
@@ -6430,7 +6482,7 @@ try {
     );
     const apL = await rlAct(AL, P1.id, "approve", { revision: 1 });
     const apL2 = await rlAct(AL, P1.id, "approve", { revision: 1 });
-    const apStale = await rlAct(AX, P1.id, "approve", { revision: 2 });
+    const apStale = await rlAct(AX, P1.id, "approve", { revision: 0 });
     const lnEarly = await rlAct(AO, P1.id, "launch");
     const notApprover = await rlAct(AV, P1.id, "approve", { revision: 1 });
     check(
@@ -7592,8 +7644,8 @@ try {
     // -- N5: launch and not yet check the revision they are sent --
     const crS = (await ka(KB, "POST", kcrs(KGS.id), { base_version: 1, changes: { title: "Stale launch, checked" }, reason: "Check it" })).json;
     await kAct(KA, KGS.id, crS?.id, "approve", { revision: 1 });
-    const staleLaunch = await kAct(KA, KGS.id, crS?.id, "launch", { revision: 7 });
-    const staleNotYet = await kAct(KA, KGS.id, crS?.id, "not_yet", { revision: 7 });
+    const staleLaunch = await kAct(KA, KGS.id, crS?.id, "launch", { revision: 0 });
+    const staleNotYet = await kAct(KA, KGS.id, crS?.id, "not_yet", { revision: 0 });
     const sAfter = await kRead(KA, KGS.id, crS?.id);
     check(
       "C2 N5: launch and not yet with a revision that isn't the request's -> 409 stale_revision, and nothing is recorded (launch still pending, the goal at version 1)",
@@ -8140,6 +8192,84 @@ try {
           "W7 (ui): once the machine that shared it has the workspace again, the member_removed note says \"Its machine, <name>, has this workspace again: to share it again, run ::align share in the session.\" (no align login, no Devices page)",
           xdGive.status === 200 && dGiven.includes(`Its machine, ${xdLaptop}, has this workspace again: to share it again, run ::align share in the session.`) && !dGiven.includes("align login") && !dGiven.includes("on your Devices page"),
           `${xdGive.status} ${xdGive.text.slice(0, 200)} ${dGiven.slice(0, 900)}`,
+        );
+        // C11-2 and W4 (E2E-WEB cycle 11): every page that shows a device name, with names that can't break: a name stored
+        // before the extender limit (ｶ + 150 × U+FF9E), and names the limits accept that draw one wide character (ก + 15
+        // × ำ, 15 Malayalam dot rephs + ക, 16 Hangul initial jamo), with a 100-letter word, a run of ﷽ and of eight-woman
+        // families. On the approval page (the panel, and the "(2)" note after Approve), the Devices page, the invite page
+        // and the Sessions page (its machine's name), none scrolls the page sideways at 320, 390, 768 or 1280 px.
+        const WIDE_NAMES = {
+          legacy: `\uFF76${"\uFF9E".repeat(150)}`,
+          thai: `\u0E01${"\u0E33".repeat(15)}`,
+          malayalam: `${"\u0D4E".repeat(15)}\u0D15`,
+          hangul: "\u1100".repeat(16),
+          word: "W".repeat(100),
+          ligature: "\uFDFD".repeat(30),
+          family: Array(12).fill(Array(8).fill("\u{1F469}").join("\u200D")).join(""),
+        };
+        const WIDTHS = [320, 390, 768, 1280];
+        const wideAt = async (pg, label, out) => {
+          for (const width of WIDTHS) {
+            await pg.setViewport({ width, height: 900 });
+            await sleep(150);
+            const m = await pg.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+            if (m.scroll > m.client) out.push(`${label}@${width}: ${m.scroll}>${m.client}`);
+          }
+          await pg.setViewport({ width: 1100, height: 900 });
+        };
+        const wideFails = [];
+        const wideSeen = [];
+        const pWideD = await as(XD);
+        // Sessions: the machine that shared the ended session carries each name in turn.
+        for (const [k, name] of Object.entries(WIDE_NAMES)) {
+          withDb((d) => d.prepare("UPDATE v2_devices SET name = ? WHERE id = ?").run(name, xDevs.XD.id));
+          await open(pWideD, `/app/w/${XW}/sessions`);
+          if ((await pWideD.evaluate(() => document.body.innerText)).includes(`Its machine, ${name}, has this workspace again`)) wideSeen.push(`sessions:${k}`);
+          await wideAt(pWideD, `sessions:${k}`, wideFails);
+        }
+        withDb((d) => d.prepare("UPDATE v2_devices SET name = ? WHERE id = ?").run(xdLaptop, xDevs.XD.id));
+        // Devices and invite pages: XD has a paired device of every name.
+        for (const name of Object.values(WIDE_NAMES)) insertDevice(XD.id, name);
+        await open(pWideD, "/app/devices");
+        if ((await pWideD.evaluate(() => document.body.innerText)).includes("W".repeat(100))) wideSeen.push("devices");
+        await wideAt(pWideD, "devices", wideFails);
+        const WW = (await call("XO", "POST", "/api/v2/workspaces", { cookie: XO.cookie, body: { name: "Wide names" } })).json?.id;
+        const wInv = await call("XO", "POST", `/api/v2/workspaces/${WW}/invites`, { cookie: XO.cookie, body: { email: XD.email, role: "member" } });
+        await open(pWideD, `/app/invite/${wInv.json?.token}`);
+        if ((await pWideD.evaluate(() => document.body.innerText)).includes("W".repeat(100))) wideSeen.push("invite");
+        await wideAt(pWideD, "invite", wideFails);
+        // The approval page needs a sign-in from the last 15 minutes.
+        const xdRecent = cookieOf((await call("XD", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: XD.email, password: `pw-${XD.who}-123456` } })).setCookies);
+        const pWideA = await as({ ...XD, cookie: xdRecent });
+        for (const [k, name] of Object.entries(WIDE_NAMES)) {
+          const pr = insertPairing(name);
+          await open(pWideA, `/app/device?code=${pr.userCode}`);
+          await pWideA.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+          await pWideA.waitForFunction(() => [...document.querySelectorAll("main button")].some((b) => b.textContent === "Deny"), { timeout: 15000 }).catch(() => undefined);
+          if ((await pWideA.evaluate(() => document.body.innerText)).includes(name)) wideSeen.push(`approval:${k}`);
+          await wideAt(pWideA, `approval:${k}`, wideFails);
+        }
+        // Approved under a name XD's devices already have: the page says "… is connected as “<name> (2)”: you already have a
+        // device named “<name>”. …", naming it three times.
+        const prDup = insertPairing(WIDE_NAMES.hangul);
+        await open(pWideA, `/app/device?code=${prDup.userCode}`);
+        await pWideA.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+        await pWideA.waitForFunction(() => document.querySelectorAll('main input[type="checkbox"]').length > 0, { timeout: 15000 }).catch(() => undefined);
+        await pWideA.evaluate(() => document.querySelector('main input[type="checkbox"]')?.click());
+        await pWideA.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve" && !b.disabled), { timeout: 15000 }).catch(() => undefined);
+        await pWideA.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve")?.click());
+        await pWideA.waitForFunction(() => document.body.innerText.includes("is connected as"), { timeout: 15000 }).catch(() => undefined);
+        if ((await pWideA.evaluate(() => document.body.innerText)).includes(`is connected as “${WIDE_NAMES.hangul} (2)”`)) wideSeen.push("approved");
+        await wideAt(pWideA, "approved", wideFails);
+        // Leave XD as the next checks expect: only its own laptop paired.
+        withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE user_id = ? AND id != ? AND revoked_at IS NULL").run(new Date().toISOString(), XD.id, xDevs.XD.id));
+        await pWideD.close();
+        await pWideA.close();
+        const wideWant = [...Object.keys(WIDE_NAMES).map((k) => `sessions:${k}`), "devices", "invite", ...Object.keys(WIDE_NAMES).map((k) => `approval:${k}`), "approved"];
+        check(
+          "C11-2 and W4 (ui, E2E-WEB cycle 11): no page that shows a device name scrolls sideways at 320, 390, 768 or 1280 px with a name that can't break (ｶ + 150 × U+FF9E stored before the limit; ก + 15 × ำ, 15 Malayalam dot rephs + ക and 16 Hangul initial jamo, which the limits accept; a 100-letter word; 30 × ﷽; 12 eight-woman families): the approval page's panel and its \"connected as … (2)\" note, the Devices page, the invite page's \"Your paired devices\" and the Sessions page's line naming the session's machine",
+          wideFails.length === 0 && wideWant.every((w) => wideSeen.includes(w)) && wInv.status === 201,
+          `fails=${JSON.stringify(wideFails)} missing=${JSON.stringify(wideWant.filter((w) => !wideSeen.includes(w)))} ${wInv.status}`,
         );
         // The machine signs out (revoked on the web): align login pairs it again.
         const xdOut = await call("XD", "DELETE", `/api/v2/devices/${xDevs.XD.id}`, { cookie: XD.cookie });
@@ -9120,7 +9250,7 @@ try {
       ["revoke", RO, e3, 1, {}],
     ];
     for (const [action, u, al, rev, extra] of alCases) {
-      const stale = await alAct(u, al, action, { ...extra, revision: rev + 7 });
+      const stale = await alAct(u, al, action, { ...extra, revision: rev - 1 });
       const bare = await alAct(u, al, action, extra);
       tried.alignments[action] = staleOk(stale) && bare.status === 400 && JSON.stringify(alNow(al)) === JSON.stringify({ state: action === "accept_counter" ? "countered" : action === "revoke" ? "approved" : "pending", revision: rev }) ? "ok" : `${stale.text} ${bare.status}`;
     }
@@ -9161,7 +9291,7 @@ try {
     const crBefore = (x) => JSON.stringify(crNow(x));
     for (const [action, u, x, extra] of crCases) {
       const was = crBefore(x);
-      const stale = await crAct(u, x, action, { ...extra, revision: 9 });
+      const stale = await crAct(u, x, action, { ...extra, revision: 0 });
       tried["change-requests"][action] = staleOk(stale) && crBefore(x) === was ? "ok" : stale.text;
     }
     // accept_counter needs a countered request: a fresh one, sent for revision 1 after the counter made revision 2.
@@ -9192,7 +9322,7 @@ try {
     ];
     for (const [action, u, t, extra] of rlCases) {
       const was = JSON.stringify(rlNow(t));
-      const stale = await rlAct(u, t, action, { ...extra, revision: 9 });
+      const stale = await rlAct(u, t, action, { ...extra, revision: 0 });
       tried.reallocations[action] = staleOk(stale) && JSON.stringify(rlNow(t)) === was ? "ok" : stale.text;
     }
     const rlFresh = t3Ok.json?.state === "approved" && rlNow(t2)?.state === "countered";
@@ -9330,6 +9460,176 @@ try {
     } else check("ui (Chrome) available for the c10 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c10-web ====
+
+  // ==== fix:c11-web ====
+  // Regression checks for the cycle-11 web walk (e2e-reports/cycle11/web.md) that the API shows: W1 (API-only refusals
+  // in a person's words), W2 (Not yet twice) and W3 (a revision from the future), on a workspace of their own. SO owns it
+  // and ST, a Growth goal; SC leads Growth, so SO and SC both decide on ST; SD, a Growth member, asks.
+  {
+    const sUsers = {};
+    for (const [who, name] of [
+      ["SO", "Sasha Owner"],
+      ["SC", "Sol Lead"],
+      ["SD", "Sami Asker"],
+    ])
+      sUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c11web.example.test`);
+    const { SO, SC, SD } = sUsers;
+    const SW = (await call("SO", "POST", "/api/v2/workspaces", { cookie: SO.cookie, body: { name: "C11 web fix workspace" } })).json?.id;
+    const sa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${SW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [SC, SD]) {
+      const i = await sa(SO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const STm = (await sa(SO, "POST", "/teams", { name: "Growth" })).json?.id;
+    await sa(SO, "POST", `/teams/${STm}/members`, { user_id: SC.id, role: "lead" });
+    for (const u of [SD, SO]) await sa(SO, "POST", `/teams/${STm}/members`, { user_id: u.id, role: "member" });
+    const sGoal = async (title, u = SO, team = STm) => (await sa(u, "POST", "/goals", { title, visibility: "workspace", ...(team ? { team_id: team } : {}) })).json;
+    const ST = await sGoal("Ship 2000 robot arms");
+    const sAl = async (n) => {
+      const src = await sGoal(`Sami's goal ${n}`, SD, null);
+      return (await sa(SD, "POST", "/alignments", { target_goal_id: ST?.id, source_goal_id: src?.id, choice: "contribution", session_keys: [] })).json;
+    };
+    const sAlAct = (u, al, action, body) => sa(u, "POST", `/alignments/${al?.id}/${action}`, body);
+    const sAlNow = (al) => withDb((d) => d.prepare("SELECT state, revision FROM v2_alignments WHERE id = ?").get(al?.id));
+
+    // -- W1: refusals only an API client can get say what to do, never a field name --
+    const NO_REV = "This decision doesn't say which revision you read, so nothing was recorded. Read it again and decide again.";
+    const w1Al = await sAl("w1");
+    const w1Revs = [];
+    for (const body of [{}, { revision: "1" }, { revision: null }, { revision: -1 }, { revision: 1.5 }]) w1Revs.push(await sAlAct(SO, w1Al, "approve", body));
+    const w1Codes = [];
+    for (const [route, body] of [
+      ["approve", { user_code: null, workspace_ids: [SW] }],
+      ["approve", { user_code: 12345678, workspace_ids: [SW] }],
+      ["deny", { user_code: null }],
+      ["deny", { user_code: ["BCDF-GHJK"] }],
+    ])
+      w1Codes.push(await call("SO", "POST", `/api/v2/device/${route}`, { cookie: SO.cookie, body }));
+    const w1Long = await call("SO", "POST", "/api/v2/device/deny", { cookie: SO.cookie, body: { user_code: "BCDF-GHJK-BCDF-GHJK-BCDF" } });
+    check(
+      "c11 W1 (E2E-WEB cycle 11): an alignment decision with no revision, or one that isn't a whole number (\"1\", null, -1, 1.5), is 400 \"This decision doesn't say which revision you read, so nothing was recorded. Read it again and decide again.\", never \"revision must be a non-negative integer\"; a device approval or denial whose code is null, a number or a list is 400 \"Enter the code shown by align login.\" and a code longer than any align login shows \"That code is too long. Enter the code shown by align login.\", never \"user_code …\"; the request stays pending at revision 1",
+      w1Revs.every((r) => r.status === 400 && r.json?.message === NO_REV) && w1Codes.every((r) => r.status === 400 && r.json?.message === "Enter the code shown by align login.") &&
+        w1Long.status === 400 && w1Long.json?.message === "That code is too long. Enter the code shown by align login." && JSON.stringify(sAlNow(w1Al)) === JSON.stringify({ state: "pending", revision: 1 }),
+      `${w1Revs.map((r) => `${r.status} ${r.json?.message}`).join(" | ")} || ${w1Codes.map((r) => `${r.status} ${r.json?.message}`).join(" | ")} || ${w1Long.text} ${JSON.stringify(sAlNow(w1Al))}`,
+    );
+
+    // -- W2: Not yet on a target change someone already said not yet to is refused, not recorded again --
+    const sRl = async (share) => (await sa(SD, "POST", "/reallocations", { targets: [{ goal_id: ST?.id, target_share: share }], note: "More here" })).json;
+    const sRlAct = (u, t, action, body) => sa(u, "POST", `/reallocations/${t?.id}/${action}`, body);
+    const sRlNow = (t) => withDb((d) => d.prepare("SELECT state, revision, launch, launch_by FROM v2_reallocations WHERE id = ?").get(t?.id));
+    const sRlAudit = (t, action) => withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE action = ? AND object_id = ?").all(action, t?.id).map((r) => r.actor_id));
+    const NOT_YET_RL = (who) => `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches these.`;
+    const n1 = await sRl(10);
+    const n1Ok = await sRlAct(SO, n1, "approve", { revision: 1 });
+    const n1First = await sRlAct(SO, n1, "not_yet", { revision: 1 });
+    const n1Again = await sRlAct(SO, n1, "not_yet", { revision: 1 });
+    const n1Other = await sRlAct(SC, n1, "not_yet", { revision: 1 });
+    const n1Read = (await sa(SC, "GET", `/reallocations/${n1?.id}`)).json;
+    const n1Launch = await sRlAct(SC, n1, "launch", { revision: 1 });
+    check(
+      "c11 W2 (E2E-WEB cycle 11): Not yet on an approved target change already \"not yet\" is 409 wrong_state, \"You already decided not yet, so nothing changes: agents keep the old targets until someone launches these.\" to the person who said it and \"Sasha Owner already decided not yet, …\" to another launcher, and is not recorded again (one reallocation.not_yet, launch_by unchanged); can.not_yet then reads false and can.launch true, and Launch still launches",
+      n1Ok.json?.state === "approved" && n1First.status === 200 && n1First.json?.launch === "not_yet" &&
+        n1Again.status === 409 && n1Again.json?.error === "wrong_state" && n1Again.json.message === NOT_YET_RL("You") &&
+        n1Other.status === 409 && n1Other.json?.error === "wrong_state" && n1Other.json.message === NOT_YET_RL(SO.name) &&
+        sRlAudit(n1, "reallocation.not_yet").join() === SO.id && n1Read?.can?.not_yet === false && n1Read.can.launch === true && n1Launch.json?.launch === "launched",
+      `${n1Ok.status} ${n1First.status} ${n1Again.text} | ${n1Other.text} | ${JSON.stringify(n1Read?.can)} ${n1Launch.text.slice(0, 200)} ${JSON.stringify(sRlAudit(n1, "reallocation.not_yet"))}`,
+    );
+
+    // -- W3: a decision sent for a revision the request or proposal never reached is 400 unknown_revision, saying so,
+    //    never the stale refusal "it is now at revision 1" (nothing changed); a malformed one is 400 in words too --
+    const sCr = async (n) => {
+      const g = await sGoal(`Change request goal ${n}`);
+      const cr = (await sa(SD, "POST", `/goals/${g?.id}/change-requests`, { base_version: 1, changes: { title: `Change request goal ${n}, renamed` }, reason: "Cycle 11" })).json;
+      return { g, cr };
+    };
+    const sCrAct = (u, x, action, body) => sa(u, "POST", `/goals/${x.g?.id}/change-requests/${x.cr?.id}/${action}`, body);
+    const sCrNow = (x) => withDb((d) => d.prepare("SELECT state, revision, launch FROM v2_change_requests WHERE id = ?").get(x.cr?.id));
+    const FUTURE = (what, sent, now) => `This ${what} has no revision ${sent}: it is at revision ${now}, so nothing was recorded. Read it again and decide again.`;
+    const future = (r, what, sent, now) => r.status === 400 && r.json?.error === "unknown_revision" && r.json.message === FUTURE(what, sent, now);
+    const w3Al = await sAl("w3");
+    const w3Cr = await sCr("w3");
+    const w3Rl = await sRl(12);
+    const w3Out = {
+      alApprove: await sAlAct(SO, w3Al, "approve", { revision: 2 }),
+      alReject: await sAlAct(SO, w3Al, "reject", { revision: 5 }),
+      alWithdraw: await sAlAct(SD, w3Al, "withdraw", { revision: 9 }),
+      crApprove: await sCrAct(SO, w3Cr, "approve", { revision: 2 }),
+      crReject: await sCrAct(SO, w3Cr, "reject", { revision: 3, reason: "No" }),
+      crWithdraw: await sCrAct(SD, w3Cr, "withdraw", { revision: 4 }),
+      rlApprove: await sRlAct(SO, w3Rl, "approve", { revision: 2 }),
+      rlReject: await sRlAct(SO, w3Rl, "reject", { revision: 3, reason: "No" }),
+      rlWithdraw: await sRlAct(SD, w3Rl, "withdraw", { revision: 4 }),
+    };
+    const w3Bad = [await sCrAct(SO, w3Cr, "reject", { revision: "1", reason: "No" }), await sRlAct(SO, w3Rl, "reject", { revision: null })];
+    // An approved request's launch decisions too: a future revision is 400, the current one is recorded.
+    const w3Launch = await sCr("w3 launch");
+    await sCrAct(SO, w3Launch, "approve", { revision: 1 });
+    const w3NotYet = await sCrAct(SO, w3Launch, "not_yet", { revision: 2 });
+    const w3Still = [JSON.stringify(sAlNow(w3Al)), JSON.stringify(sCrNow(w3Cr)), JSON.stringify(sRlNow(w3Rl)), JSON.stringify(sCrNow(w3Launch))];
+    const w3Then = [await sAlAct(SO, w3Al, "reject", { revision: 1 }), await sCrAct(SO, w3Cr, "reject", { revision: 1, reason: "No" }), await sRlAct(SO, w3Rl, "reject", { revision: 1, reason: "No" })];
+    check(
+      "c11 W3 (E2E-WEB cycle 11): an alignment, change request or target change decision sent for a revision it never reached is 400 unknown_revision \"This request has no revision <n>: it is at revision 1, so nothing was recorded. Read it again and decide again.\" (\"This proposal …\" for a target change), never the stale \"changed after you read it\"; a change request's or target change's revision that isn't a whole number is 400 in the same words as an alignment's (W1); nothing changes, and the same decision with the current revision is then recorded",
+      future(w3Out.alApprove, "request", 2, 1) && future(w3Out.alReject, "request", 5, 1) && future(w3Out.alWithdraw, "request", 9, 1) &&
+        future(w3Out.crApprove, "request", 2, 1) && future(w3Out.crReject, "request", 3, 1) && future(w3Out.crWithdraw, "request", 4, 1) &&
+        future(w3Out.rlApprove, "proposal", 2, 1) && future(w3Out.rlReject, "proposal", 3, 1) && future(w3Out.rlWithdraw, "proposal", 4, 1) &&
+        future(w3NotYet, "request", 2, 1) && w3Bad.every((r) => r.status === 400 && r.json?.message === NO_REV) &&
+        JSON.stringify(w3Still) === JSON.stringify([JSON.stringify({ state: "pending", revision: 1 }), JSON.stringify({ state: "pending", revision: 1, launch: null }), JSON.stringify({ state: "pending", revision: 1, launch: null, launch_by: null }), JSON.stringify({ state: "approved", revision: 1, launch: "pending" })]) &&
+        w3Then.every((r) => r.status === 200 && r.json?.state === "rejected"),
+      `${Object.entries(w3Out).map(([k, r]) => `${k}=${r.status} ${r.json?.error} ${r.json?.message}`).join(" | ")} || ${w3NotYet.text} || ${w3Bad.map((r) => r.text).join(" | ")} || ${w3Still.join(" ")} || ${w3Then.map((r) => `${r.status} ${r.json?.state}`).join(" ")}`,
+    );
+
+    // -- the browser: W2 (ui), Not yet on a target change card left open while another launcher said not yet --
+    const n2 = await sRl(11);
+    const n2Ok = await sRlAct(SO, n2, "approve", { revision: 1 });
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width: 1100, height: 900 });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const press = (pg, scope, label) => pg.evaluate((sc, t) => [...document.querySelectorAll(`${sc} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      const hasButton = (pg, scope, label) => pg.waitForFunction((sc, t) => [...document.querySelectorAll(`${sc} button`)].some((b) => b.textContent?.trim() === t), { timeout: 15000 }, scope, label).catch(() => undefined);
+      const cardState = (pg, sel) =>
+        pg.evaluate((c) => {
+          const card = document.querySelector(c);
+          const n = card?.querySelector("[data-notice]");
+          return { notice: n?.getAttribute("data-notice") ?? null, noticeText: n?.textContent?.trim() ?? "", focused: !!n && document.activeElement === n, text: card?.innerText ?? "", buttons: [...(card?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()) };
+        }, sel);
+      try {
+        const pO = await as(SO);
+        await open(pO, `/app/w/${SW}/alignments`);
+        const card = `[data-reallocation="${n2?.id}"]`;
+        await hasButton(pO, card, "Not yet");
+        const n2Other = await sRlAct(SC, n2, "not_yet", { revision: 1 });
+        await press(pO, card, "Not yet");
+        await pO.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const n2Ui = await cardState(pO, card);
+        check(
+          "c11 W2 (ui): Not yet on a target change card left open while another launcher said not yet reads, focused, \"Not recorded. Sol Lead already decided not yet, so nothing changes: …\"; the card reloads (\"Approved, not launched yet: Sol Lead decided not yet.\", no Not yet button) and only Sol Lead's not yet is recorded",
+          n2Ok.json?.state === "approved" && n2Other.status === 200 && n2Ui.notice === "refused" && n2Ui.focused && n2Ui.noticeText === `Not recorded. ${NOT_YET_RL(SC.name)}` &&
+            n2Ui.text.includes(`Approved, not launched yet: ${SC.name} decided not yet.`) && !n2Ui.buttons.includes("Not yet") && sRlAudit(n2, "reallocation.not_yet").join() === SC.id,
+          JSON.stringify(n2Ui).slice(0, 700),
+        );
+        check("c11 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c11 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c11 web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:c11-web ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));

@@ -6,7 +6,7 @@ import { effectiveSet, launchSet } from "./approval";
 import { contentOf, dependencyCycle, goalObj, goalRow, goalsDependingOn, nextContent, sameContent, unreadableGoals, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName, memberPrincipal, nameTo } from "./workspaces";
-import { nonNegInt, optStr, str, type Body } from "./validate";
+import { assertRevisionReached, nonNegInt, optStr, revisionRead, str, type Body } from "./validate";
 import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evidenceView, recordSnapshot, snapshotView, type EvidenceSource } from "./evidence";
 import { counterNoChange, counterSameAsRequest } from "./change-words.mts";
 
@@ -423,10 +423,14 @@ export async function createChangeRequest(pp: PolicyPrincipal, goalId: string, b
 export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id: string, action: ChangeRequestAction, b: Body) {
   visibleRequest(pp, id, goalId);
   if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
+  // A revision, when sent, is a whole number (400 in words otherwise, c11 W1) that the request has reached: one it never
+  // reached was never read, so it is 400, not a stale refusal (c11 W3).
+  const sent = revisionRead(b, true);
   const me = pp.userId;
   const at = nowIso();
   await tx(() => {
     const r = crRow(pp.wsId, id)!; // read inside the transaction
+    assertRevisionReached("request", sent, r.revision);
     const g = goalRow(pp.wsId, r.goal_id)!;
     const isRequester = r.requester_id === me;
     const isApprover = effectiveSet(g, r.requester_id).includes(me);
@@ -530,6 +534,11 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         launcherOnly();
         launchable();
         expectRevision(false);
+        // Already not yet (in another tab, or by another launcher): recording it again would change nothing (c11 W2).
+        if (r.launch === "not_yet") {
+          const who = r.launch_by === me ? "You" : r.launch_by ? memberName(r.launch_by) : "Someone";
+          throw conflict("wrong_state", `${who} already decided not yet, so nothing changes: agents stay on version ${r.base_version} until someone launches version ${r.base_version + 1}.`);
+        }
         run("UPDATE v2_change_requests SET launch = 'not_yet', launch_by = ?, launch_at = ?, updated_at = ? WHERE id = ?", me, at, at, r.id);
         audit(pp.wsId, me, "change_request.not_yet", r.id, at);
         break;
@@ -766,7 +775,7 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     rebase: r.state === "pending" && isRequester,
     add_evidence: mayAddEvidence(pp, r, approvers),
     launch: launchable && !hiddenRefusal && !loop,
-    not_yet: launchable,
+    not_yet: launchable && r.launch !== "not_yet",
   };
   if (pp.wsRole === "viewer") for (const k of Object.keys(can) as (keyof typeof can)[]) can[k] = false;
   const evidence = evidenceRows(r.id);

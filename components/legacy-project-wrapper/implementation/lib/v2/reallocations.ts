@@ -5,7 +5,7 @@ import { effectiveSet, launchSet } from "./approval";
 import { assertTargetsFit, contentOf, goalObj, goalRow, visibleGoal, writeGoalVersion } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName, nameTo } from "./workspaces";
-import { optStr, type Body } from "./validate";
+import { assertRevisionReached, optStr, revisionRead, type Body } from "./validate";
 
 // Reallocations (PORT29, main #29): a proposal to change the target share of agent time of one or more goals at once,
 // so time can move from one goal to another without passing 100% in between. It follows the change request model
@@ -219,8 +219,12 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
   // A counter's targets are read before the transaction: reading checks each goal's visibility and can throw 404.
   const countered = action === "counter" ? targetsIn(pp, b.targets) : null;
   const note = action === "counter" || action === "reject" ? optStr(b, action === "reject" ? "reason" : "note", NOTE_MAX) : null;
+  // A revision, when sent, is a whole number (400 in words otherwise, c11 W1) that the proposal has reached: one it
+  // never reached was never read, so it is 400, not a stale refusal (c11 W3).
+  const sent = revisionRead(b, true);
   await tx(() => {
     const r = rowOf(pp.wsId, id)!; // read inside the transaction
+    assertRevisionReached("proposal", sent, r.revision);
     const targets = targetsOf(r.id, r.revision);
     const isRequester = r.requester_id === me;
     const isApprover = targets.some((t) => {
@@ -284,6 +288,11 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
         launcherOnly();
         launchable();
         expectRevision(false);
+        // Already not yet (in another tab, or by another launcher): recording it again would change nothing (c11 W2).
+        if (r.launch === "not_yet") {
+          const who = r.launch_by === me ? "You" : r.launch_by ? memberName(r.launch_by) : "Someone";
+          throw conflict("wrong_state", `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches these.`);
+        }
         run("UPDATE v2_reallocations SET launch = 'not_yet', launch_by = ?, launch_at = ?, updated_at = ? WHERE id = ?", me, at, at, r.id);
         audit(r.ws_id, me, "reallocation.not_yet", r.id, at);
         break;
@@ -384,7 +393,7 @@ function view(pp: PolicyPrincipal, r: Row) {
     // My approval completes it and I may launch: both in one step.
     approve_and_launch: r.state === "pending" && canApproveNow && launcher && targets.every((t) => t.approved || t.approvers.some((a) => a.id === me)),
     launch: unlaunched && launcher,
-    not_yet: unlaunched && launcher,
+    not_yet: unlaunched && launcher && r.launch !== "not_yet",
     counter: r.state === "pending" && isApprover && !isRequester,
     accept_counter: r.state === "countered" && isRequester,
     reject: open && isApprover && !isRequester,
