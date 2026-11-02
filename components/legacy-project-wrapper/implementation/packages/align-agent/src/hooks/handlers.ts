@@ -17,6 +17,7 @@ import {
   keptHoldsNote,
   limitsSeen,
   otherWorkspaceWords,
+  expiredWhy,
   outOfReachWords,
   measureKey,
   renderAsksDelta,
@@ -38,7 +39,7 @@ import {
 import { myTeams, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
 import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
-import { endedWhyWords, latchWayOut, SHARE_CHANGED, shareAgainWords, shareNotice, shareRetell, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
+import { endedWhyWords, latchWayOut, noneTold, SHARE_CHANGED, shareAgainWords, shareNotice, shareRetell, toldSituation, type ReleaseReaches, type ShareAgain, type ShareFacts, type ShareTold } from "../shared/ended.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
@@ -180,7 +181,8 @@ export interface NoticePlan {
  * deny uses (`shareNotice`), and told when the session has not seen it, or again when its advice changed since it was
  * told (signed in or out, the workspace back or lost again, a release that no longer reaches it); held back, unseen,
  * while the ended shares are not read since this sign-in (E2E-AGENT cycle 11 C11-1 to C11-4). Of the others: a
- * "resumed" one only while that resume still holds (a later stop withdrew it, C4-6), a workspace this device reaches for
+ * "resumed" one only while that resume still holds (a later stop withdrew it, C4-6), a release only while it holds (a
+ * later hold on its goal withdrew it, C14-2), a workspace this device reaches for
  * the first time only while the session has no share of its own (C11-2), and each text once. All count as seen.
  */
 export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
@@ -193,30 +195,39 @@ export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
   seen.push(...state.filter((n) => n !== newest && unseen(n)).map((n) => n.id));
   // Never a share-state notice's stored words: one with no facts (an older agent wrote it, whenever that was: a
   // downgrade, or hooks and terminal at different builds after the one-time migration ran) is worded as "its share's
-  // state changed", from the state now like any other (E2E-AGENT cycle 13 C13-1).
+  // state changed", from the state now like any other (E2E-AGENT cycle 13 C13-1); the newer build's hot file gives it
+  // (and another build's notices) those facts, with how its share ended as every view reads it (cycle 14 C14-1).
   const facts = newest ? (newest.facts ?? changedFacts(hot)) : null;
+  const prev = inj.share_told ?? null;
   if (newest && facts && hot.share_now) {
     const fresh = unseen(newest);
-    const prev = inj.share_told ?? null;
-    const w = shareNotice(hot.local_id, newest.id, facts, hot.share_now, prev);
+    const changed = facts.e === "changed";
+    const toldFacts = prev ? (hot.notices.find((n) => n.id === prev.id)?.facts ?? null) : null;
+    const w = shareNotice(hot.local_id, newest.id, facts, hot.share_now, prev, toldFacts);
     if (w !== "hold") {
       if (fresh) seen.push(newest.id);
       // Seen, but by an older hook, which showed its stored text (that only says the sharing changed): told once now,
       // worded as now (E2E-AGENT cycle 12 C12-1).
       const olderHook = !fresh && prev?.id !== newest.id && !(inj.share_seen ?? []).includes(newest.id);
-      if (w && (shareRetell(newest.id, w, prev, fresh) || olderHook)) {
+      if (w && (shareRetell(newest.id, w, prev, fresh, changed) || olderHook)) {
         told = { id: newest.id, text: w.text };
         shareTold = { id: newest.id, key: w.key, tail: w.tail };
+      } else if (w && changed && (fresh || prev?.id !== newest.id)) {
+        // An older build's notice in the situation the session was last told: nothing new, and what it was told stands.
+        shareTold = { id: newest.id, key: w.key, tail: prev?.tail ?? w.tail };
       } else if (!w && (fresh || olderHook)) {
-        // Nothing to tell about it now (shared again since, say): kept as told with no words, so a later change of
-        // situation is told.
-        shareTold = { id: newest.id, key: "none:", tail: "" };
+        // Nothing to tell about it now (shared again since, say): kept as told with no words, with the situation it is
+        // in, so a later change of situation is told.
+        shareTold = noneTold(newest.id, hot.share_now);
       }
     }
   } else if (newest && unseen(newest)) {
-    // A hot file an older agent wrote, with no state to word it from: only what is true whenever it is shown.
+    // A hot file an older agent wrote, with no state to word it from: only what is true whenever it is shown. What the
+    // session was told of its situation before stands (the sentence names none), so the newer build's next hot file
+    // tells it when its situation differs from that, or, told none, once from the state then (E2E-AGENT cycle 14 C14-3).
     seen.push(newest.id);
     told = { id: newest.id, text: SHARE_CHANGED };
+    shareTold = prev && toldSituation(prev.key) ? { id: newest.id, key: prev.key, tail: prev.tail } : { id: newest.id, key: "changed:neutral", tail: "" };
   }
   const others = hot.notices.filter((n) => !state.includes(n) && unseen(n));
   seen.push(...others.map((n) => n.id));
@@ -225,6 +236,8 @@ export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
     if (!others.includes(n)) return false;
     const k = noticeKind(n.id);
     if (k.startsWith("resumed_")) return !!hot.resumed && k === `resumed_${hot.resumed}`;
+    // A release only while it holds: a later hold on its goal withdrew it (E2E-AGENT cycle 14 C14-2).
+    if (k.startsWith("release_") && hot.releases_now) return hot.releases_now.includes(k.slice("release_".length));
     if (k.startsWith("workspace_added_")) return !hot.share;
     return true;
   });
@@ -1149,7 +1162,8 @@ const STATE_LABELS: Record<RequestState, string> = {
   withdrawn: "withdrawn",
   expired: "expired (this session's share ended)",
 };
-const stateLabel = (s: RequestState) => STATE_LABELS[s] || s;
+/** A request's state in the session's words; an expired one says why, as `align requests` does (cycle 14, section 5). */
+const stateLabel = (s: RequestState, r?: HotRequest) => (s === "expired" && r ? `expired (${expiredWhy(r as Parameters<typeof expiredWhy>[0])})` : STATE_LABELS[s] || s);
 
 /** One line about a request for people (never model context). */
 function requestLine(r: HotRequest): string {
@@ -1175,7 +1189,7 @@ function holdLine(home: string, lid: string, cwd: string | null): string {
   }
   if (h.state !== "ok" || !Array.isArray(h.value?.holds)) return "  Goal hold: unreadable (tools blocked)";
   const out = h.value.holds.map((x) => `  Goal hold: on goal "${clean(x.goal_title, 80)}" by ${clean(x.by, 50) || "someone"} (all tools blocked)`);
-  if (h.value.ended && h.value.reshare) out.push(`  Sharing ended; ${shareAgainWords(!!h.value.unread, "here")}, after which the hold can be released from the web`);
+  if (h.value.ended && h.value.reshare) out.push(`  Sharing ended (${endedWhyWords(h.value.ended, true, !!h.value.relogin, true)}); ${shareAgainWords(!!h.value.unread, "here")}, after which the hold can be released from the web`);
   else if (h.value.ended && h.value.login) out.push(`  Sharing ended (this machine signed out): ${latchWayOut(lid, false, "user", null, { login: true })}`);
   else if (h.value.ended && h.value.release?.goals.length) out.push(`  Sharing ended: ${latchWayOut(lid, false, "user", h.value.release)}`);
   else if (h.value.ended) out.push(`  Sharing ended, so no release can reach it: run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it`);
@@ -1320,7 +1334,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
             ? "off"
             : latch.state === "ok" && latch.value.stopped
               ? latch.value.ended && latch.value.reshare
-                ? `on (tools blocked; sharing ended: ${shareAgainWords(!!latch.value.unread, "here")}, after which it can be resumed from the web)`
+                ? `on (tools blocked; sharing ended (${endedWhyWords(latch.value.ended, true, !!latch.value.relogin, true)}): ${shareAgainWords(!!latch.value.unread, "here")}, after which it can be resumed from the web)`
                 : latch.value.ended && latch.value.login
                   ? `on (tools blocked; sharing ended, this machine signed out: ${latchWayOut(lid, false, "user", null, { login: true })})`
                   : latch.value.ended
@@ -1353,7 +1367,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       const inj = readInjected(home, lid);
       return [
         "Align requests for this session (sent by people who can approve its goal):",
-        ...list.map((r) => `  ${requestShortId(r.id)} ${requestLine(r)} [${stateLabel(requestState(r, inj.requests_seen?.[r.id]))}]`),
+        ...list.map((r) => `  ${requestShortId(r.id)} ${requestLine(r)} [${stateLabel(requestState(r, inj.requests_seen?.[r.id]), r)}]`),
         "Answer with `::align accept <id>` or `::align decline <id>`.",
       ].join("\n");
     }
@@ -1369,7 +1383,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       const hits = ref ? open.filter((r) => r.id.toLowerCase().replace(/^rq_/, "").startsWith(ref)) : open;
       if (!hits.length) {
         const known = ref ? (hot?.requests || []).filter((r) => r.id.toLowerCase().replace(/^rq_/, "").startsWith(ref)) : [];
-        if (known.length === 1) return `Align: the request ${requestShortId(known[0].id)} is already ${stateLabel(requestState(known[0], inj.requests_seen?.[known[0].id]))}, so it can't be ${answer} now.`;
+        if (known.length === 1) return `Align: the request ${requestShortId(known[0].id)} is already ${stateLabel(requestState(known[0], inj.requests_seen?.[known[0].id]), known[0])}, so it can't be ${answer} now.`;
         return ref ? `Align: no open request matches "${arg}". Type \`::align requests\` to list them.` : "Align: no request is waiting for an answer.";
       }
       if (hits.length > 1) return `Align: ${hits.length} requests match; use one of the ids: ${hits.map((r) => requestShortId(r.id)).join(", ")}.`;
@@ -1522,8 +1536,8 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // no default would otherwise not know which (C3-6).
       spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed?.workspace_id, ts });
       return goal
-        ? `Align: sharing requested toward "${goal.title}". It takes effect within a few seconds; your next prompt carries the goal.${heldNote(goal)}`
-        : "Align: sharing requested with no goal (its usage counts as unallocated; `::align bind <goal>` picks one). It takes effect within a few seconds.";
+        ? `Align: sharing requested toward "${goal.title}". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.${heldNote(goal)}`
+        : "Align: sharing requested with no goal (its usage counts as unallocated; `::align bind <goal>` picks one). The next sync asks the Align server for it (within a few seconds).";
     }
     case "unshare":
     case "stop":

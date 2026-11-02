@@ -9,13 +9,19 @@
 // and the unread and signed-out ways out (section 6: `align sync` first; `align login` or `align stop-sharing`). Cycle 13
 // added an older agent writing a notice about a share's state with no facts after the one-time migration ran (C13-1: never
 // shown as stored), and the pass reads the ended sessions before it sends a share (no share sent to be refused as
-// stopped). A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
+// stopped). Cycle 14 added an older build writing to the same ~/.align (one from before builds were marked: a notice
+// with no facts and its own hot file, the session perhaps prompted at once; or one that sees a newer build's mark and
+// leaves the sessions' hot files to it while still enforcing a stop or hold it alone hears: C14-1, C14-3), with every session whose situation changed since it was last told
+// told at its next prompt, and a hold, its release and a hold again with no prompt between (C14-2: no release notice
+// while held again). A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
 // ALIGN_PROP_SEEDS=<seed>).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, test } from "node:test";
+import * as build from "../src/build.ts";
 import { renderHot } from "../src/hot.ts";
+import * as ended from "../src/shared/ended.ts";
 import { sessionKey } from "../src/keys.ts";
 import * as handlers from "../src/hooks/handlers.ts";
 import { readJson } from "../src/shared/fsx.ts";
@@ -45,6 +51,10 @@ const OLDER_WORDS: Record<string, string> = {
   access_lost_ws_acme_: "Align: this session stopped sharing because you no longer have access to Acme in Align (you were removed from it or left it); its usage stays on this machine from now on.",
 };
 
+// Read loosely, so this test runs against an agent from before builds were marked.
+const { NEWEST_BUILD = "newest_build", WRITER_GEN = 13 } = build as Partial<{ NEWEST_BUILD: string; WRITER_GEN: number }>;
+const { stateSituation, toldSituation } = ended as Partial<typeof ended>;
+
 /** mulberry32: a small seeded generator, so a failing sequence can be run again. */
 function rng(seed: number) {
   let a = seed >>> 0;
@@ -67,7 +77,7 @@ type Way = "sync" | "login" | "share" | "release" | "stop+release" | "stop";
 function wayOf(text: string): Way | null {
   if (/`align sync` (in a terminal )?first/.test(text)) return "sync";
   if (/shared again (once this machine is signed in|that way)/.test(text)) return "login";
-  if (/`::align share` (here|in the session) shares it (there )?again|until it is shared again \((you|the user) can type `::align share`/.test(text)) return "share";
+  if (/`::align share` (here|in the session) shares it( there)?( again)?\b|until it is shared again \((you|the user) can type `::align share`/.test(text)) return "share";
   if (/lifts only the hold/.test(text)) return "stop+release";
   if (/a release still reaches (this session though its sharing ended|it:)|is released from the web \(a release still reaches/.test(text)) return "release";
   if (/align stop-sharing [A-Za-z0-9_-]{8}`/.test(text)) return "stop";
@@ -228,6 +238,57 @@ test(`share-state notices agree with the deny and the status views, whatever the
         renderHot(ctx, s.lid);
         ctx.db.close();
       },
+      // C14-1, C14-3: an older build writes to the same ~/.align. One from before builds were marked stores a notice as
+      // words with no facts and renders the session's hot file its way (no share state), and the session may be
+      // prompted before this build's next command; or one that sees this build's mark (here: a newer build marked the
+      // database) runs a command, writing no notice about a share's state, hot or latch file, and then this build runs.
+      "an older build writes": async () => {
+        const s = pick(ss);
+        if (rand() < 0.5) {
+          const kind = pick(Object.keys(OLDER_WORDS));
+          const ctx = ctxFor(t);
+          ctx.db.prepare("INSERT OR IGNORE INTO notices(id, local_id, text, created_at, facts) VALUES(?,?,?,?,NULL)").run(`${s.lid}/${kind}${Date.now()}_older`, s.lid, OLDER_WORDS[kind], new Date().toISOString());
+          const rows = ctx.db.prepare("SELECT id, text FROM notices WHERE local_id=? ORDER BY created_at, rowid").all(s.lid) as { id: string; text: string }[];
+          ctx.db.close();
+          const hot = readJson<Record<string, unknown>>(layout.hot(t.home, s.lid));
+          if (hot) {
+            for (const k of ["share_now", "by", "releases_now"]) delete hot[k];
+            hot.notices = rows;
+            fs.writeFileSync(layout.hot(t.home, s.lid), JSON.stringify(hot));
+          }
+          if (rand() < 0.5) runHook(t, "claude", "UserPromptSubmit", { session_id: s.sid, prompt_id: `p${rand()}`, prompt: "go on", cwd: s.cwd });
+        } else {
+          let ctx = ctxFor(t);
+          ctx.db.prepare("INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(NEWEST_BUILD, JSON.stringify({ version: "9.9.9", build: "fffffffffff0", gen: WRITER_GEN + 1, since: new Date().toISOString() }));
+          ctx.db.close();
+          // A stop or a hold it alone hears is enforced at the next tool call, before the newest build runs.
+          // (Only to a session shared on the server while this machine is signed in: a signed-out pass hears nothing.)
+          const target = signedIn() && live().length && rand() < 0.5 ? pick(live()) : null;
+          if (target) {
+            // A hold only when the goal is not held already (a hold that is on reached the sessions it was sent to).
+            if (rand() < 0.5 || fake.holds.has("ws_acme/g_ship")) fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [target.key], goal: null, binding: null });
+            else fake.holdGoal("ws_acme", "g_ship", ss.map((x) => x.key));
+            await sync();
+            const reason = json(runHook(t, "claude", "PreToolUse", { session_id: target.sid, tool_name: "Bash", tool_input: { command: "true" }, cwd: target.cwd }).stdout)?.hookSpecificOutput?.permissionDecisionReason;
+            assert.ok(reason, `seed ${seed} after ${trail.join(" > ")}: a stop or hold heard only by an older build is not enforced`);
+          } else {
+            await pick([() => runCli(t, ["logout"]), () => runCli(t, ["login", "--name", "Prop Mac"]), sync, () => runCli(t, ["stop-sharing", s.lid.slice(0, 8)])])();
+          }
+          ctx = ctxFor(t);
+          ctx.db.prepare("DELETE FROM kv WHERE key=?").run(NEWEST_BUILD);
+          ctx.db.close();
+        }
+      },
+      // C14-2: a hold, its release and a hold again, with no prompt in between.
+      "hold, release, hold again": async () => {
+        if (fake.holds.has("ws_acme/g_ship")) fake.releaseGoal("ws_acme", "g_ship", ss.map((s) => s.key));
+        fake.holdGoal("ws_acme", "g_ship", ss.map((s) => s.key), "first");
+        await sync();
+        fake.releaseGoal("ws_acme", "g_ship", ss.map((s) => s.key));
+        await sync();
+        fake.holdGoal("ws_acme", "g_ship", ss.map((s) => s.key), "again");
+        await sync();
+      },
       prompt: async () => {
         const s = pick(ss);
         const planned = wouldTell(t, s);
@@ -279,7 +340,22 @@ test(`share-state notices agree with the deny and the status views, whatever the
         for (const w of statusWays) assert.equal(w, dw, `::align status\n${ctx}`);
         for (const w of latchWays) assert.equal(w, dw, `align latch status\n${ctx}`);
         if (dw) assert.ok(statusWays.length && latchWays.length, `a way out in every view\n${ctx}`);
+        // C14-2: no release notice while its goal is held again.
+        const hotNow = readJson<HotState>(layout.hot(t.home, s.lid));
+        const holdNow = readJson<{ holds?: { goal_title: string }[] }>(layout.hold(t.home, s.lid));
+        const injNow = { notices_shown: [], applied: [], ...(readJson<InjectedState>(layout.injected(t.home, s.lid)) || {}) } as InjectedState;
+        if (hotNow && (handlers as Partial<typeof handlers>).planNotices) {
+          const all = handlers.planNotices(hotNow, injNow).told.map((x) => x.text).join("\n");
+          for (const h of holdNow?.holds ?? []) assert.ok(!all.includes(`released the hold on "${h.goal_title}"`), `a release told while its goal is held again\n${ctx}\nnotices: ${all}`);
+        }
         const n = wouldTell(t, s);
+        // C14-3: a session whose situation changed since it was last told (signed out, shareable again, out of reach) is
+        // told at its next prompt, whatever build wrote what it was told before.
+        const toldKey = injNow.share_told?.key;
+        if (hotNow?.share_now && toldKey && stateSituation && toldSituation) {
+          const sit = stateSituation(hotNow.share_now);
+          if ((sit === "out" || sit === "reshare" || sit === "noreach") && toldSituation(toldKey) !== sit) assert.ok(n, `situation ${sit}, last told ${toldKey}, and told nothing\n${ctx}`);
+        }
         if (!n) continue;
         const nctx = `${ctx}\nnotice: ${n.text}`;
         // Its latch sentence is the deny's way out.
@@ -291,11 +367,11 @@ test(`share-state notices agree with the deny and the status views, whatever the
         // `align sessions`; never while the ended shares are unread since this sign-in.
         if (/type `::align share` here/.test(n.text) && !/run `align login`/.test(n.text)) {
           assert.ok(!dw || dw === "share", `offers \`::align share\`, the deny does not\n${nctx}`);
-          assert.match(row, /`::align share` shares it again/, `offers \`::align share\`, \`align sessions\` does not\n${nctx}`);
+          assert.match(row, /`::align share` shares it( again)?\b/, `offers \`::align share\`, \`align sessions\` does not\n${nctx}`);
           assert.ok(signedIn(), `offers \`::align share\` while signed out\n${nctx}`);
         }
         if (/run `align login`/.test(n.text)) assert.ok(!signedIn(), `says to sign in while signed in\n${nctx}`);
-        if (/stays stopped|can't be shared (there )?again from here/.test(n.text)) assert.notEqual(dw, "share", nctx);
+        if (/stays stopped|can't be shared (there )?(again )?from here/.test(n.text)) assert.notEqual(dw, "share", nctx);
         if (dw === "share") assert.doesNotMatch(n.text, /until you run `align stop-sharing/, nctx);
         const hot = readJson<HotState>(layout.hot(t.home, s.lid));
         // A share its person stopped on the web, already read, stays stopped whatever is unread: its notice names the

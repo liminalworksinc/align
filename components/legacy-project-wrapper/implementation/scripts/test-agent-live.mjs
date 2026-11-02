@@ -1289,7 +1289,7 @@ try {
     reInv.status === 201 && rePreview.json?.devices?.map((d) => d.id).join() === deviceBefore && reAccept.status === 200 && reAudit.join() === M.id &&
       reHook.code === 0 && reMe === [W, SIDE_W].sort().join() &&
       (reTold.system ?? "") === `Align: this machine can reach Ledger Co in Align again. To share this session there again, type \`::align share\` here (it counts toward "${GOAL_TITLE}" again).` && reTold2.system === null &&
-      (reShare.json?.reason ?? "") === `Align: sharing requested toward "${GOAL_TITLE}". It takes effect within a few seconds; your next prompt carries the goal.` &&
+      (reShare.json?.reason ?? "") === `Align: sharing requested toward "${GOAL_TITLE}". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.` &&
       q1Back?.state === "shared" && q1Back.ended_reason === null && q1Back.device_id === deviceBefore && q1Local === "shared (Ledger Co)" &&
       scRow()?.state === "shared" && scRow()?.device_id === deviceBefore && scLocal() === "shared (Side Co)" && liveDevice() === deviceBefore && miloDevices === 1,
     `${reInv.status} ${rePreview.text} ${reAccept.text} ${JSON.stringify(reAudit)} ${reHook.stderr} ${reMe} told=${reTold.stdout} told2=${reTold2.stdout} share=${reShare.stdout} ${JSON.stringify(q1Back)} ${q1Local} ${JSON.stringify(scRow())} ${scLocal()} ${miloDevices}`,

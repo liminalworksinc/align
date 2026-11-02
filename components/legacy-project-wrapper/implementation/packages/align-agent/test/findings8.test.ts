@@ -120,7 +120,7 @@ describe("C7-1: shared again toward the goal already in context, after a folder 
 
 describe("C7-2: signed out and in again, the session's notice says what holds now, as its deny and the status views do", () => {
   const AGAIN = 'Align: this machine is signed in to Align again. To share this session again, type `::align share` here (it counts toward "Ship the v2 onboarding flow" again).';
-  const LATCHED = " It was stopped or held from the web, so tools stay blocked until it is shared again (you can type `::align share` in this session), after which the stop or hold can be lifted from the web.";
+  const LATCHED = " It was stopped or held from the web, so tools stay blocked until it is shared again (you can type `::align share` in this session), after which the stop or hold, if still in place, can be lifted from the web.";
 
   test("stopped from the web, then `align logout` and `align login`: the next prompt tells the signed-in-again notice, never `align login` or `align stop-sharing`; a session not stopped gets it at its next start", async () => {
     const { fake, t } = await world();
@@ -331,7 +331,7 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
     fs.mkdirSync(cwd, { recursive: true });
     start(t, sid, "startup", cwd);
     assert.match(prompt(t, sid, "::align share Cut hook", cwd).reason, new RegExp(`Goal: Cut hook latency; counts from session start\\. ${HELD.replace(/[.()]/g, "\\$&")}`));
-    assert.equal(prompt(t, sid, "::align share Cut hook confirm", cwd).reason, `Align: sharing requested toward "Cut hook latency". It takes effect within a few seconds; your next prompt carries the goal. ${HELD}`);
+    assert.equal(prompt(t, sid, "::align share Cut hook confirm", cwd).reason, `Align: sharing requested toward "Cut hook latency". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal. ${HELD}`);
     const sid2 = newSid();
     const cwd2 = path.join(t.root, "held-dir");
     fs.mkdirSync(cwd2, { recursive: true });
@@ -388,6 +388,6 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
     await sync(t);
     assert.equal(deny(t, A), 'Align: Dana Lee paused all agents on goal "Ship the v2 onboarding flow": "Security review". Work resumes when they release it. Your work so far is saved. Tell the user and wait for instructions.');
     assert.equal((await runCli(t, ["logout"])).code, 0);
-    assert.match(deny(t, A) ?? "", /^Align: Dana Lee paused .* tools stay blocked until the user runs `align stop-sharing [^`]+` in a terminal, or until it is shared again once this machine is signed in \(.*\), after which the stop or hold can be lifted from the web\. Tell the user and wait for instructions\.$/);
+    assert.match(deny(t, A) ?? "", /^Align: Dana Lee paused .* tools stay blocked until the user runs `align stop-sharing [^`]+` in a terminal, or until it is shared again once this machine is signed in \(.*\), after which the stop or hold, if still in place, can be lifted from the web\. Tell the user and wait for instructions\.$/);
   });
 });

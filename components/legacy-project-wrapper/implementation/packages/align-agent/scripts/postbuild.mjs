@@ -1,6 +1,7 @@
 // Mark the CLI and hook entry points executable after tsc, and record the build's identity (dist/build.json): a hash of
 // every built file, so `align` can tell when the hooks' copy in ALIGN_HOME/bin/current is another build of the same
-// version (E2E-AGENT cycle 13 C13-1).
+// version (E2E-AGENT cycle 13 C13-1), and its writer generation (`WRITER_GEN`, ordered: which of two builds is newer,
+// E2E-AGENT cycle 14).
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -22,4 +23,5 @@ for (const f of files.map((f) => path.relative(dist, f).split(path.sep).join("/"
   h.update("\0");
 }
 const version = JSON.parse(fs.readFileSync(path.join(dist, "..", "package.json"), "utf8")).version;
-fs.writeFileSync(path.join(dist, "build.json"), JSON.stringify({ version, build: h.digest("hex").slice(0, 12) }) + "\n");
+const { WRITER_GEN: gen } = await import(new URL("../dist/build.js", import.meta.url).href);
+fs.writeFileSync(path.join(dist, "build.json"), JSON.stringify({ version, build: h.digest("hex").slice(0, 12), gen }) + "\n");

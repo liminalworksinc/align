@@ -219,7 +219,7 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/sessions/{key}/stop` and `
 #### Scenario: The session's device signed out
 
 - **WHEN** the owner calls `.../stop` or `.../resume` for a session whose device was revoked (`ended_reason` `device_signed_out`) (`scripts/test-v2.mjs` "sessions (E2E-AGENT B4/G2) ...")
-- **THEN** the response is HTTP 409 `device_signed_out` with a message saying the machine signed out of Align so a stop or resume can't reach it, and that a stopped session stays stopped until its developer runs `align stop-sharing`, and no directive is written
+- **THEN** the response is HTTP 409 `device_signed_out` with a message saying the machine signed out of Align so a stop or resume can't reach it, that once that machine is signed in again `::align share` in the session shares it again (after which Stop and Resume reach it), and that until then a stopped session stays stopped unless its developer runs `align stop-sharing`, and no directive is written
 
 #### Scenario: The session's person left the workspace
 

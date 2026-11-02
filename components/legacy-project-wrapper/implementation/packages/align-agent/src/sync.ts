@@ -27,7 +27,7 @@ import {
 } from "./api.ts";
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
-import { addNotice, addShareNotice, getShare, renderHot, snapshot } from "./hot.ts";
+import { addNotice, addShareNotice, catchUpOtherBuilds, getShare, renderHot, snapshot } from "./hot.ts";
 import { clean, otherWorkspaceWords, outOfReachWords, requestShortId } from "./shared/envelope.ts";
 import { applyShare, bind, endedUnread, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, SHARE_UNREAD_WORDS, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
@@ -848,6 +848,13 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
       } catch (e) {
         ctx.log(`sync: ending the shares of this signed-out machine failed: ${(e as Error).message}`);
       }
+    }
+    // Another build that wrote here since (an older `align` on PATH, the hooks' older copy): every session re-rendered
+    // from the state now, an older build's notices read as "changed" (E2E-AGENT cycle 14).
+    try {
+      catchUpOtherBuilds(ctx, true);
+    } catch (e) {
+      ctx.log(`sync: catching up with another build failed: ${(e as Error).message}`);
     }
     // A call the pairing change cut short (held past its timeout while `align login` or `align logout` committed, say)
     // says nothing about whether the server can be reached: no "could not reach", and last-sync keeps what it said

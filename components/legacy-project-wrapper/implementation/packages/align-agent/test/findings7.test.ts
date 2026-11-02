@@ -156,16 +156,16 @@ describe("C6-2: a stopped session whose share ended says the same thing everywhe
     fake.workspaces = [acme];
     await sync(t);
     const start = json(runHook(t, "claude", "SessionStart", { session_id: A.sid, source: "resume", cwd: A.cwd }).stdout);
-    assert.match(start.systemMessage, /can reach Acme in Align again\. To share this session there again, type `::align share` here \(it counts toward "Ship the v2 onboarding flow" again\)\. It was stopped or held from the web, so tools stay blocked until it is shared again \(you can type `::align share` in this session\), after which the stop or hold can be lifted from the web\./);
+    assert.match(start.systemMessage, /can reach Acme in Align again\. To share this session there again, type `::align share` here \(it counts toward "Ship the v2 onboarding flow" again\)\. It was stopped or held from the web, so tools stay blocked until it is shared again \(you can type `::align share` in this session\), after which the stop or hold, if still in place, can be lifted from the web\./);
     const d = deny(t, A);
     assert.equal(
       d,
-      "Align: this session was stopped from its Align workspace. Its sharing ended (this machine lost access to its Align workspace, and can reach it again now), so tools stay blocked until it is shared again (the user can type `::align share` in this session), after which the stop or hold can be lifted from the web. Tell the user and wait for instructions.",
+      "Align: this session was stopped from its Align workspace. Its sharing ended (this machine lost access to its Align workspace, and can reach it again now), so tools stay blocked until it is shared again (the user can type `::align share` in this session), after which the stop or hold, if still in place, can be lifted from the web. Tell the user and wait for instructions.",
     );
     const latch = (await runCli(t, ["latch", "status"])).stdout;
     assert.match(latch, /sharing ended \(this machine lost access to its Align workspace, and can reach it again now\): `::align share` in the session shares it there again, after which it can be resumed or released from the web/);
     assert.doesNotMatch(latch, /only `align stop-sharing/);
-    assert.match(prompt(t, A.sid, "::align status", A.cwd).reason, /Stop latch: on \(tools blocked; sharing ended: `::align share` here shares it again, after which it can be resumed from the web\)/);
+    assert.match(prompt(t, A.sid, "::align status", A.cwd).reason, /Stop latch: on \(tools blocked; sharing ended \(this machine lost access to its Align workspace, and can reach it again now\): `::align share` here shares it again, after which it can be resumed from the web\)/);
     assert.match((await runCli(t, ["status"])).stdout, /Stop latch: 1 session\(s\) stopped; 1 can be shared again \(`::align share` in the session\), after which the web can lift it; see/);
 
     fake.workspaces = [];
@@ -315,7 +315,9 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     const signed = lines.findIndex((l) => l.startsWith("Signed in as"));
     const ws = lines.findIndex((l) => l.startsWith("  workspace Acme (ws_acme)"));
     const others = lines.findIndex((l) => l.startsWith("Your account has 1 other paired device"));
-    assert.ok(signed >= 0 && ws === signed + 1 && others > ws, r.stdout);
+    // A replacing login says, right after "Signed in as", that it keeps the device's name (E2E-AGENT cycle 14, section 5).
+    const kept = lines[signed + 1]?.startsWith("This login replaced this machine's earlier device") ? 1 : 0;
+    assert.ok(signed >= 0 && ws === signed + 1 + kept && others > ws, r.stdout);
   });
 
   test("two logins approved together: the machine ends on the plain name, as the device the other login paired is revoked and names its replacement", async () => {

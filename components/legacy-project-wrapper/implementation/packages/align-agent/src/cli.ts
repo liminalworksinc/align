@@ -31,9 +31,10 @@ import {
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
-import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedByLogin, endedReason, endedState, getShare, notMember, releaseOf, renderEndedShares } from "./hot.ts";
+import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedByLogin, endedReason, endedState, endedUnsent, getShare, notMember, releaseOf, renderEndedShares } from "./hot.ts";
 import { endedWhyWords, latchWayOut, shareAgainWords } from "./shared/ended.ts";
-import { buildOf, hooksBuildDiffers, hooksBuildWords } from "./build.ts";
+import { buildOf, hooksBuildDiffers, hooksBuildWords, selfBuild, supersededWords } from "./build.ts";
+import { resolvePaths, type Paths } from "./paths.ts";
 import { fetchAsks } from "./asks.ts";
 import { pullEndedSessions } from "./directives.ts";
 import { hookEvents, install, pluginHooksFile, sha256File, uninstall, type InstallRecord } from "./install.ts";
@@ -44,7 +45,7 @@ import { gitInfo } from "./shared/anchors.ts";
 import { readJson } from "./shared/fsx.ts";
 import { matchRule, readRules, realDir, removeRule, setRule } from "./shared/rules.ts";
 import { layout } from "./shared/layout.ts";
-import type { Goal } from "./shared/types.ts";
+import type { Goal, MeFile } from "./shared/types.ts";
 import { flushOutbox, ingestSpool, outboxDepth, syncOnce, uploadUsage, type LastSync } from "./sync.ts";
 import { tailAll } from "./tailer.ts";
 import { VERSION } from "./version.ts";
@@ -350,7 +351,13 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   /** The live shares of this machine's earlier sign-in that this login ended. */
   let endedLids: string[] = [];
   let concurrent: string | null = null;
+  /** The device of this machine's earlier pairing that this login replaced, and its name as this machine cached it. */
+  let replacedDevice: string | null = null;
+  const earlierName = readJson<MeFile>(layout.me(ctx.home))?.device?.name ?? null;
   out(`To connect this device, open ${verification_uri} and enter the code ${user_code}`);
+  // The page approves only with a recent sign-in: an older browser session sees a sign-in prompt there while this
+  // command waits (E2E-AGENT cycle 14, section 5).
+  out(`Approving needs a sign-in from the last 15 minutes in that browser: if the page asks you to sign in again, do so. This command waits until the device is approved (the code is good for ${Math.round(Number(a.json.expires_in || 600) / 60)} minutes).`);
   if (!ctx.env.ALIGN_NO_BROWSER && process.platform === "darwin") execFile("open", [verification_uri], () => undefined);
   const scale = Number(ctx.env.ALIGN_DEVICE_POLL_SCALE_MS || 1000);
   for (;;) {
@@ -412,6 +419,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
       }
       // Said after "Signed in as ..." and its workspace lines, which name the sign-in first (cycle 8).
       endedLids = ended;
+      replacedDevice = replaced || null;
       pairedAs = creds.device_id;
       break;
     }
@@ -447,6 +455,9 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const name = me.device?.name || deviceName;
   const said = () => {
     out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`);
+    // The approval page named the device before this login said which one it replaces, so it may have shown the name
+    // with a number (`<name> (2)`): this machine keeps its earlier device's name (E2E-AGENT cycle 14, section 5).
+    if (replacedDevice && !concurrent && earlierName === name) out(`This login replaced this machine's earlier device, so it keeps that device's name (the approval page may have shown it with a number added).`);
     if (concurrent) out(`Another \`align login\` on this machine paired device ${concurrent} while this one waited; this login replaced it, so this machine is ${clean(name, 60)} (${pairedAs}).`);
   };
   if (!(await whileSignedInAs(ctx, pairedAs!, said))) {
@@ -759,11 +770,18 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
     const unread = !!kvGet(ctx.db, ENDED_UNREAD);
     // Ended by a new `align login` that replaced this machine's pairing, as its notice and deny say; out of reach because
     // its person is no longer a member, that rather than this sign-in's reach (cycle 13, section 5).
-    const at = share?.error === DEVICE_SIGNED_OUT && signedIn(ctx.home) && endedByLogin(ctx, s.local_id) ? "ended at a new sign-in (`align login`)" : "ended at a sign-out";
+    // One that never reached the server was never shared: it is shared, not shared again (E2E-AGENT cycle 14 C14-4).
+    const unsent = endedUnsent(ctx, s.local_id, share);
+    const relogin = share?.error === DEVICE_SIGNED_OUT && signedIn(ctx.home) && endedByLogin(ctx, s.local_id);
+    const at = unsent
+      ? `not shared: ${share?.error === ACCESS_LOST ? "this machine lost the workspace" : relogin ? "a new sign-in (`align login`) came" : "this machine signed out"} before its share reached the Align server`
+      : relogin
+        ? "ended at a new sign-in (`align login`)"
+        : "ended at a sign-out";
     const why =
       (share?.error === DEVICE_SIGNED_OUT || (share?.error === ACCESS_LOST && !signedIn(ctx.home))
         ? again
-          ? `; ${at}; ${shareAgainWords(unread, "")}`
+          ? `; ${at}; ${shareAgainWords(unread, "", false, unsent)}`
           : lost
             ? "; no access to the workspace; this machine signed out"
             : signedIn(ctx.home)
@@ -771,7 +789,7 @@ async function cmdSessions(ctx: Ctx, argv: string[]): Promise<void> {
               : "; this machine signed out"
         : share?.error === ACCESS_LOST
           ? again
-            ? `; ended while out of the workspace; ${shareAgainWords(unread, "")}`
+            ? `; ${unsent ? at : "ended while out of the workspace"}; ${shareAgainWords(unread, "", false, unsent)}`
             : "; no access to the workspace"
           : "") +
       (refused ? `; history deletion refused (${refused})` : deleting ? "; history deletion queued" : "");
@@ -1280,15 +1298,19 @@ async function cmdRequests(ctx: Ctx, argv: string[]): Promise<void> {
 }
 
 async function cmdInstall(ctx: Ctx, argv: string[]): Promise<void> {
+  installLines(ctx.paths, ctx.env, argv);
+}
+
+function installLines(paths: Paths, env: NodeJS.ProcessEnv, argv: string[]): void {
   const { values } = parseArgs({ args: argv, options: { claude: { type: "boolean" }, codex: { type: "boolean" }, "dry-run": { type: "boolean" } } });
   const any = values.claude || values.codex;
-  const res = install(ctx.paths, {
+  const res = install(paths, {
     claude: !!values.claude || !any,
     codex: !!values.codex || !any,
     dryRun: !!values["dry-run"],
     distDir: distDir(),
     version: VERSION,
-    nodePath: stableNodePath(ctx.env),
+    nodePath: stableNodePath(env),
   });
   res.lines.forEach((l) => out(l));
   out("No background process: hooks start a short `align sync` (at most every 10 to 30 seconds) that exits when done.");
@@ -1405,6 +1427,8 @@ async function cmdDoctor(ctx: Ctx): Promise<void> {
   const mine = buildOf(distDir());
   if (differs) add("hooks build", "WARN", hooksBuildWords(differs, mine));
   else if (s.hash !== "not installed" && mine) add("hooks build", "OK", `${mine.version} build ${mine.build}, as this \`align\``);
+  // A newer build has written here: this one leaves the sessions' files to it (E2E-AGENT cycle 14).
+  if (ctx.superseded) add("newest build", "WARN", supersededWords(ctx.superseded, selfBuild()));
   const rec = readJson<InstallRecord>(layout.install(ctx.home));
   if (rec && !fs.existsSync(rec.node)) add("hook node path", "FAIL", `${rec.node} no longer exists; rerun align install`);
   const hookJs = fs.existsSync(path.join(ctx.home, "bin", "current", "hook.js")) ? path.join(ctx.home, "bin", "current", "hook.js") : path.join(distDir(), "hook.js");
@@ -1548,6 +1572,8 @@ export async function main(argv: string[]): Promise<void> {
     process.exitCode = 1;
     return err(`align: ${old}. Install Node ${MIN_NODE} or later, then run \`align install\` with it so the hooks use it too.`);
   }
+  // `align install --dry-run` writes nothing, not even ALIGN_HOME (E2E-AGENT cycle 14 C14-5).
+  if (cmd === "install" && opts.includes("--dry-run")) return installLines(resolvePaths(process.env), process.env, rest);
   const ctx = openCtx(process.env);
   try {
     // Two logins at once: the next command the person runs says which device this machine is now (`align status` says it
@@ -1561,6 +1587,13 @@ export async function main(argv: string[]): Promise<void> {
     if (cmd !== "install" && cmd !== "uninstall" && cmd !== "doctor" && !rest.includes("--hook")) {
       const differs = hooksBuildDiffers(ctx.home, distDir());
       if (differs) err(`align: ${hooksBuildWords(differs, buildOf(distDir()))}`);
+    }
+    // A newer build has written to this database: this one meters, and leaves what sessions are told and their stop and
+    // hold files to it, so it says so at every command, never silently (E2E-AGENT cycle 14).
+    if (ctx.superseded && cmd !== "doctor") {
+      const words = supersededWords(ctx.superseded, selfBuild());
+      if (rest.includes("--hook")) ctx.log(words);
+      else err(`align: ${words}`);
     }
     switch (cmd) {
       case "login":

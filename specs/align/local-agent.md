@@ -183,9 +183,14 @@ when `ALIGN_HOME` is a symlink, not a directory, or owned by another user. Secre
 
 The `align login` command SHALL generate a fresh Ed25519 device key, call `POST /api/v2/device/authorize` with the
 device name and public key, print `To connect this device, open <verification_uri> and enter the code
-<user_code>`, poll `POST /api/v2/device/token` every `interval` seconds (adding 5 s on `slow_down`), and on success
+<user_code>` and `Approving needs a sign-in from the last 15 minutes in that browser: if the page asks you to sign in
+again, do so. This command waits until the device is approved (the code is good for <n> minutes).` (the page approves
+only with a recent sign-in, so a stalled approval is explained where the developer waits; E2E-AGENT cycle 14, section
+5), poll `POST /api/v2/device/token` every `interval` seconds (adding 5 s on `slow_down`), and on success
 save `credentials.json`, persist `--server` as `server_url` in `config.json`, fetch `GET /api/v2/me`, print
-`Signed in as <name> <<email>> on device <device name>.` plus one `workspace <name> (<id>), role <role>` line per
+`Signed in as <name> <<email>> on device <device name>.` (after a login that replaced this machine's live pairing and
+kept its device's name, then `This login replaced this machine's earlier device, so it keeps that device's name (the approval page may have shown it
+with a number added).`, as the page named it before the poll said which device it replaces) plus one `workspace <name> (<id>), role <role>` line per
 workspace, and cache each workspace's goal feed. Its token polls SHALL name, as `replaces`, the device of the
 credentials this machine holds for the same server (signed in or not), read again at each poll, so the server keeps the
 new device's plain name rather than adding `(2)` for the device this login replaces; when another `align login` on this
@@ -559,7 +564,7 @@ it `stopped` with the reason `device_signed_out`, drop its pending binding and i
 leave each of those sessions the notice `Align: this session stopped sharing because this machine signed out of
 Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type
 \`::align share\` here (it counts toward "<goal>" again).` (without the parenthesis when it had no goal; plus, for a session that is stopped or held, `It was stopped or held from the web, so tools
-stay blocked until it is shared again that way, after which the stop or hold can be lifted from the web, or until you
+stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web, or until you
 run \`align stop-sharing <id>\` in a terminal.`, the two ways out its deny names while signed out, in one sentence,
 E2E-AGENT cycle 12, section 6). Once this machine is signed in again, each
 session whose share a sign-out ended and that has that notice SHALL get its counterpart, which supersedes it (as `can
@@ -567,7 +572,7 @@ reach ... again` supersedes a lost workspace's notice) and is worked out from th
 session's deny and the status views: `Align: this machine is signed in to Align again. To share this session again,
 type \`::align share\` here (it counts toward "<goal>" again).` (plus, for a session stopped or held from the web, `It
 was stopped or held from the web, so tools stay blocked until it is shared again (you can type \`::align share\` in this
-session), after which the stop or hold can be lifted from the web.`), or, when this sign-in does not reach its workspace, `Align: this machine is signed in to Align again, but
+session), after which the stop or hold, if still in place, can be lifted from the web.`), or, when this sign-in does not reach its workspace, `Align: this machine is signed in to Align again, but
 this sign-in does not reach <workspace>, so this session can't be shared there again from here; its usage stays on this
 machine.` (plus `It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing <id>\`
 in a terminal.`). It SHALL be told once per sign-in and again when that answer changes; the next sign-out SHALL take it
@@ -604,9 +609,11 @@ several workspaces with no default shares it there. The same workspace SHALL be 
 <goal>` answers about that goal (E2E-AGENT cycle 10 C10-2). A session with no workspace of its own and no rule folder
 on such a device SHALL get `Align: this machine reaches more than one workspace and none is the default, so \`::align
 share\` can't tell which. Run \`align share --latest --workspace <name>\` in a terminal.` and spool nothing, whether or not
-it names a goal (no goal can be looked up without a workspace, so never `no cached goal matches`). It SHALL reply `Align: sharing requested toward "<goal>". It takes effect within a few seconds; your next
-prompt carries the goal.`, or, with no goal, `Align: sharing requested with no goal (its usage counts as unallocated;
-\`::align bind <goal>\` picks one). It takes effect within a few seconds.` While this machine is signed out, `::align
+it names a goal (no goal can be looked up without a workspace, so never `no cached goal matches`). It SHALL reply `Align: sharing requested toward "<goal>". The next sync asks the Align server for it (within a
+few seconds); once it is shared, your next prompt carries the goal.`, or, with no goal, `Align: sharing requested with no
+goal (its usage counts as unallocated; \`::align bind <goal>\` picks one). The next sync asks the Align server for it
+(within a few seconds).`: a request, never a promise, as the server may refuse it (a session stopped on the web stays
+stopped; E2E-AGENT cycle 14, section 5). While this machine is signed out, `::align
 share` SHALL be refused with `Align: not signed in on this machine. Run \`align login\` in a terminal first.` and
 spool nothing; a folder rule SHALL leave a new session private with `Align: this folder is shared with <workspace>, but
 this machine is signed out of Align, so this session stays private. Run \`align login\` in a terminal, then type
@@ -650,12 +657,12 @@ whose share ends at a sign-out SHALL expire here ("The developer answers request
 #### Scenario: Logout with a stopped session
 
 - **WHEN** a shared session is stopped from the web, then the user runs `align logout`, then `align login` (test `findings` "B4/G2/B6: logout ends this machine's shares ..."; against the real server in `scripts/test-agent-live.mjs` "logout ...")
-- **THEN** logout prints `1 shared session(s) stopped sharing. Sessions stopped or held from the web stay blocked: after \`align login\`, \`::align share\` in such a session shares it again, and then the web can lift the stop or hold.` (test `findings8` "`align logout` with a session stopped from the web ..."); while signed out `align sessions` lists it as `stopped (Acme; this machine signed out)`, `Bash` stays denied with the reason naming `align stop-sharing <id>` and, in the same sentence, a new sign-in and `::align share`, and the next prompt shows the sign-out notice once; after the new login no share is listed as shared, `align sessions` lists it as `stopped (Acme; ended at a sign-out; \`::align share\` shares it again)`, `Bash` stays denied with `... Its sharing ended (this machine signed out of Align, and is signed in again now), so tools stay blocked until it is shared again (the user can type \`::align share\` in this session), after which the stop or hold can be lifted from the web. ...` and no `align stop-sharing`, the next prompt shows `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here ...`, and `align stop-sharing <id>` still frees the tools
+- **THEN** logout prints `1 shared session(s) stopped sharing. Sessions stopped or held from the web stay blocked: after \`align login\`, \`::align share\` in such a session shares it again, and then the web can lift the stop or hold.` (test `findings8` "`align logout` with a session stopped from the web ..."); while signed out `align sessions` lists it as `stopped (Acme; this machine signed out)`, `Bash` stays denied with the reason naming `align stop-sharing <id>` and, in the same sentence, a new sign-in and `::align share`, and the next prompt shows the sign-out notice once; after the new login no share is listed as shared, `align sessions` lists it as `stopped (Acme; ended at a sign-out; \`::align share\` shares it again)`, `Bash` stays denied with `... Its sharing ended (this machine signed out of Align, and is signed in again now), so tools stay blocked until it is shared again (the user can type \`::align share\` in this session), after which the stop or hold, if still in place, can be lifted from the web. ...` and no `align stop-sharing`, the next prompt shows `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here ...`, and `align stop-sharing <id>` still frees the tools
 
 #### Scenario: Signed in again, the sign-out notice is not told stale
 
 - **WHEN** a session stopped from the web and another shared session are on a machine that runs `align logout` and `align login`, and the first is prompted and then shared again with `::align share confirm`, the second resumed; in another case the machine signs out again before the next prompt, and then signs in with a pairing that does not reach the workspace, which is later given back (tests `findings8` "stopped from the web, then `align logout` and `align login`: ..." and "signed in again and then out again before the next prompt: ...")
-- **THEN** the first prompt shows only `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here (it counts toward "Ship the v2 onboarding flow" again). It was stopped or held from the web, so tools stay blocked until it is shared again (you can type \`::align share\` in this session), after which the stop or hold can be lifted from the web.`, never `align login` or `align stop-sharing`, its deny offers `::align share` too, the resume shows the same notice without the last sentence, and once shared again neither notice is left; in the other case the prompt shows the sign-out notice, then `... but this sign-in does not reach Acme, so this session can't be shared there again from here; ... until you run \`align stop-sharing <lid8>\` in a terminal.` as the deny says, and, once the workspace is back, `Align: this machine can reach Acme in Align again. ...` with the shareable latch sentence (only the reach changed)
+- **THEN** the first prompt shows only `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here (it counts toward "Ship the v2 onboarding flow" again). It was stopped or held from the web, so tools stay blocked until it is shared again (you can type \`::align share\` in this session), after which the stop or hold, if still in place, can be lifted from the web.`, never `align login` or `align stop-sharing`, its deny offers `::align share` too, the resume shows the same notice without the last sentence, and once shared again neither notice is left; in the other case the prompt shows the sign-out notice, then `... but this sign-in does not reach Acme, so this session can't be shared there again from here; ... until you run \`align stop-sharing <lid8>\` in a terminal.` as the deny says, and, once the workspace is back, `Align: this machine can reach Acme in Align again. ...` with the shareable latch sentence (only the reach changed)
 
 #### Scenario: The pass that hears the device was revoked
 
@@ -665,7 +672,7 @@ whose share ends at a sign-out SHALL expire here ("The developer answers request
 #### Scenario: Signed out with a session stopped from the web
 
 - **WHEN** a session stopped from the web is on a machine that runs `align logout`, and it is prompted and a tool is denied (test `findings13` "signed out, a stopped session's notice and deny name both ways out in one sentence ...")
-- **THEN** the notice ends `It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold can be lifted from the web, or until you run \`align stop-sharing <lid8>\` in a terminal.` and the deny names the same two ways
+- **THEN** the notice ends `It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web, or until you run \`align stop-sharing <lid8>\` in a terminal.` and the deny names the same two ways
 
 #### Scenario: A re-pairing, and a workspace given back
 
@@ -1091,7 +1098,8 @@ not Align's. With `--codex` (or no flag) it SHALL merge `SessionStart`, `UserPro
 `hooks.json.align-backup-<timestamp>` copy when the merge changes the file (a reinstall that changes nothing writes
 nothing, makes no backup and prints `Codex hooks in <file> are already up to date.`), tell the user to trust them in Codex `/hooks`, warn when `config.toml`
 sets `hooks = false`, and never edit `config.toml` or write trust entries. Installing twice SHALL leave one Align
-handler per event. `--dry-run` SHALL print `Would ...` lines and write nothing.
+handler per event. `--dry-run` SHALL print `Would ...` lines and write nothing, not even `ALIGN_HOME` (no database,
+`config.json`, `device_secret` or folders; E2E-AGENT cycle 14 C14-5).
 
 Each build SHALL record its identity in `build.json` beside `cli.js` (its version and `build`, a hash of its built files),
 which `align install` copies with it, so the hooks' copy in `bin/current` and the terminal `align` can never be different
@@ -1109,6 +1117,11 @@ replaced without `align install`.
 - **WHEN** `align install --claude --codex --dry-run` runs, then `align install --claude --codex` runs twice (test `install` "Claude Code plugin + Codex merge, idempotent ...")
 - **THEN** the dry run writes nothing, the user's `settings.json` and `config.toml` are byte-identical afterwards with no backup of `settings.json`, the plugin `hooks.json` has one Align handler for each of the five events, Codex `hooks.json` has one for each of four events, and stdout includes `trust them; Align never writes trust entries` and `No background process`
 
+#### Scenario: A dry run writes nothing
+
+- **WHEN** `align install --claude --codex --dry-run` runs with a fresh `HOME` (test `findings15` "C14-5: ...")
+- **THEN** it prints `Would copy ...` and exits 0, and `ALIGN_HOME`, the Claude Code folder and the Codex folder hold nothing afterwards
+
 #### Scenario: The hooks run another build
 
 - **WHEN** Align is installed, then the copy in `bin/current` is of another build (its `build.json` names another hash, or it has none), and `align status`, `align sessions` and `align doctor` run, then `align install` runs again (test `findings14` "every command says so on stderr and `align doctor` warns ...")
@@ -1118,6 +1131,48 @@ replaced without `align install`.
 
 - **WHEN** `settings.json` holds an Align handler from an earlier version, or `~/.claude/skills/align/` holds someone else's skill (tests `install` "moves handlers ..." and "refuses to overwrite ...")
 - **THEN** install prints `Removed 1 hook handlers an earlier Align added` and keeps the user's own hooks, or fails non-zero with `is not Align's plugin` and leaves the foreign folder unchanged
+
+### Requirement: The newest build writes the sessions' state
+
+Two agent builds can write to one `ALIGN_HOME` (an older `align` still on PATH, or the hooks' older copy in
+`bin/current`, next to a newer one), and an older build's notices and hot files have twice told sessions what their
+deny contradicted (E2E-AGENT cycle 13 C13-1, cycle 14 C14-1 and C14-3). So each build SHALL carry a writer generation
+(an ordered number raised by any change to what the sessions' notices, hot files and latch files carry or how they are
+worded), recorded in `build.json` with its version and build id, and every command and pass SHALL record in the local
+database the newest build that has written to it (`newest_build`: its generation, version, build id, and since when).
+A build that finds a newer build's record SHALL NOT write notices about a session's share state or hot files: it still
+runs its passes and meters (its usage uploads). Enforcement never waits for the newest build: a stop or hold its pass
+hears SHALL be written to the session's stop latch and hold file at once (a hold file keeps the holds it already held
+besides), so the next tool call is denied whatever build heard it, while a resume or release it hears removes nothing
+(a file another build wrote may hold what it does not know), and the newest build lifts it when it re-renders the
+session. It leaves what it would have told for the newest build to store, records which sessions it changed, and every
+command it runs prints on stderr `align: a newer Align build (<version> build <id>) has written to this machine's Align
+data, so this \`align\` (<version> build <id>) leaves what sessions are told to that build: it meters
+and enforces the stops and holds it hears, and sessions are told what this command does once that build runs. Run the newer \`align\` (and
+\`align install\` with it) instead.` (a hook's `sync --hook` logs it instead; `align doctor` shows it as a `WARN`
+`newest build` line). The newest build SHALL stamp the hot files it writes with its generation and, at every command
+and every pass, catch up with what another build wrote: it stores the notices left for it as notices that only say the
+share's state changed (with how the share ended as every view reads it: a replacing `align login`, a share that never
+reached the server), and when anything shows another build wrote (those, a session it did not render, a hot file
+without this generation's stamp) re-renders every session's hot and latch files from the state now. A notice about a
+share's state that a build of an older generation stored after the newest build's record began (or one with no facts)
+SHALL be worded as one that says only that the share's state changed (`Notices about a share's state are worded when
+shown`), so each session is told from the state now.
+
+#### Scenario: An older build after a newer one
+
+- **WHEN** two shared sessions (one stopped from the web) are on a machine whose database records a newer build, and this build runs `align logout`, then the newer build runs a command (test `findings15` "records the newest build; an older one writes no share-state notice or hot file ...")
+- **THEN** the newest build is recorded and stamped on the hot files; the older build's logout prints `align: a newer Align build (...) has written to this machine's Align data, ...` on stderr, changes no hot file, keeps the stopped one's stop latch and stores no notice about a share's state, `align doctor` warns `newest build`, and the sessions' prompts tell nothing; after the newer build's command each is told `Align: this session stopped sharing because this machine signed out of Align; ...` once, and the stopped one's deny says its sharing ended at the sign-out
+
+#### Scenario: A stop and a hold heard only by an older build
+
+- **WHEN** a build that finds a newer build's record runs `align sync` and hears a stop for one shared session and a goal hold for another, then, in a later pass, their resume and release; then the newer build runs a command (test `findings15` "a stop and a hold heard only by an older build are enforced at the next tool call ..."; and the `sharestate-property` event "an older build writes")
+- **THEN** the next `PreToolUse` of each is denied (the stop deny, the hold deny naming its reason) before the newer build runs, no hot file is written, both stay denied after the resume and release that build heard, and both run once the newer build has run
+
+#### Scenario: An older build's pass
+
+- **WHEN** a build that finds a newer build's record runs `align sync` and `align sync --hook` (test `findings15` "an older build's pass still runs ...")
+- **THEN** the pass reaches the server and exits 0, the terminal pass prints the warning on stderr and the hook's pass prints nothing
 
 ### Requirement: Uninstalling
 
@@ -1673,7 +1728,25 @@ migration: an older `align` can still write such a notice after it ran (a downgr
 only that the share's state changed, from the state now like any other: held back while the ended shares are unread, a
 sign-out's or a lost workspace's words when the share ended so, and otherwise (live, or stopped for good) `Align: this
 session's sharing changed; ...` with the latch sentence its deny gives; a hot file an older agent wrote, with no share
-state, gets only that sentence. The hold-back while the ended shares
+state, gets only that sentence. Such a notice (and one another build stored, `The newest build writes the sessions'
+state`) is about no event of its own: it continues what the session was last told, whatever notice that came from, so
+it SHALL be told only when the session's situation (live, stopped for good, signed out, shareable again, out of reach)
+differs from the one it was last told, or it was told none, or its latch sentence changed while something blocks the
+tools, and in the same situation keeps the words it was told; a share a replacing `align login` ended SHALL never be
+worded as `signed in to Align again` by it, as its deny never says the machine signed out (E2E-AGENT cycle 14 C14-1).
+The sentence from an older agent's hot file names no situation: the session's next notice from this build is told when
+its situation differs from what it was told before that sentence, or, told none, once from the state then, so a
+session that only ever got that sentence is told when its situation changes (C14-3). A share that had not reached the
+server yet when a sign-out, a replacing `align login` or a lost workspace ended it was never shared: every notice about
+that end SHALL say so through one clause, `this session's share had not reached the Align server yet when <this
+machine signed out of Align | a new sign-in on this machine (\`align login\`) replaced the earlier one | you lost access
+to <workspace> in Align (...)>, so it was not shared`, signed out, signed in again (`Align: this machine is signed in to
+Align again. Earlier, ...; to share it, type \`::align share\` here ...`), at the replacing login (`Align: this
+session's share had not reached ... replaced the earlier one, so it was not shared; its usage stays on this machine
+until it is shared. To share it, ...`) and out of reach (`... so this session can't be shared there from here (<the
+clause>) ...`), never that it ended, stopped sharing or is shared "again", and `align sessions` SHALL show it as `not
+shared: <this machine signed out | a new sign-in (\`align login\`) came | this machine lost the workspace> before its
+share reached the Align server; \`::align share\` shares it` (E2E-AGENT cycle 14 C14-4). The hold-back while the ended shares
 are unread SHALL hold for every path that would share such a session (E2E-AGENT cycle 12 C12-3): `::align share --dir`
 (its preview says `This session is not shared yet: this machine has not yet heard from the Align server whether its
 sharing was stopped on the web meanwhile (a session stopped there is not shared again). Run \`align sync\` in a
@@ -1688,8 +1761,8 @@ share of its own, and `align share --dir --past` only sessions never shared, so 
 
 #### Scenario: Any order of events
 
-- **WHEN** three shared sessions (one also stopped from the web, one held) go through random sequences of sign-out, login, a login that can't read the ended shares, sync, Stop sharing and stop or resume on the web, a goal hold and its release, a hold then Stop sharing on the web, the workspace lost and given back (on the Devices page, or a re-invite and a new login), the device revoked on the web and heard by a sync, `align stop-sharing`, `::align share`, `::align share --dir confirm`, `align share` and prompts, for a fixed set of seeds and random ones (test `sharestate-property` "share-state notices agree with the deny and the status views ...")
-- **THEN** after every step, for every session, the notice it would be told now names the deny's way out in its latch sentence, offers `::align share` only when the deny (if any) and `align sessions` say it shares the session again and this machine is signed in, says to run `align login` only while signed out, says nothing while the ended shares are unread since a sign-in (but that a share its person stopped on the web stays stopped, which no read changes), never says `sharing failed (sharing_stopped)`, no share is sent that the server refuses as stopped (each web stop there comes before the next pass reads it), `::align status` and `align latch status` name the deny's way out, the deny never offers plain `::align share` while the ended shares are unread, no share is live while this machine is signed out, and a prompt tells the notice that was worked out
+- **WHEN** three shared sessions (one also stopped from the web, one held) go through random sequences of sign-out, login, a login that can't read the ended shares, sync, Stop sharing and stop or resume on the web, a goal hold and its release, a hold then Stop sharing on the web, the workspace lost and given back (on the Devices page, or a re-invite and a new login), the device revoked on the web and heard by a sync, `align stop-sharing`, `::align share`, `::align share --dir confirm`, `align share`, an older build writing (one from before builds were recorded storing a notice with no facts and its own hot file, the session perhaps prompted at once; or one that finds a newer build's record running a logout, a login, a sync or `align stop-sharing`, or hearing a stop or a hold in its sync, which the next tool call of that session is denied by), a hold, its release and a hold again with no prompt between, and prompts, for a fixed set of seeds and random ones (test `sharestate-property` "share-state notices agree with the deny and the status views ...")
+- **THEN** after every step, for every session, the notice it would be told now names the deny's way out in its latch sentence, a session whose situation (signed out, shareable again, out of reach) differs from the one it was last told would be told something, no release notice is told while its goal is held again, offers `::align share` only when the deny (if any) and `align sessions` say it shares the session again and this machine is signed in, says to run `align login` only while signed out, says nothing while the ended shares are unread since a sign-in (but that a share its person stopped on the web stays stopped, which no read changes), never says `sharing failed (sharing_stopped)`, no share is sent that the server refuses as stopped (each web stop there comes before the next pass reads it), `::align status` and `align latch status` name the deny's way out, the deny never offers plain `::align share` while the ended shares are unread, no share is live while this machine is signed out, and a prompt tells the notice that was worked out
 
 #### Scenario: A login that can't read the ended shares, sessions not prompted since the sign-out
 
@@ -1706,6 +1779,21 @@ share of its own, and `align share --dir --past` only sessions never shared, so 
 - **WHEN** after this agent's migration ran, an older agent stores the sign-out notices of two sessions (one stopped from the web) as words with no facts, then the machine signs in with a login that can't read the ended shares, then a sync reads them; in other cases the machine is signed out, a live session gets an older agent's notice with no facts, and its hot file has no share state (test `findings14` "C13-1: ..."; and the `sharestate-property` event "an older agent's notice, after the migration")
 - **THEN** neither prompt says anything while the ended shares are unread (never the stored `run \`align login\``), after the sync each is told `Align: this machine is signed in to Align again. ...` once, the stopped one with its deny's latch sentence; signed out it gets the sign-out's words; the live one and the one with no share state are told `Align: this session's sharing changed; ...`
 
+#### Scenario: An older build's notice after a replacing login
+
+- **WHEN** two shared sessions (one stopped from the web) are told that a replacing `align login` ended their share, then an older build stores a `signed in again` notice with no facts for each and renders their hot files its way, then a sync runs; in another case the session was not prompted since the replacing login (test `findings15` "C14-1: ...")
+- **THEN** neither is told anything new, never `signed in to Align again`, the stopped one's deny still names the new sign-in and `align sessions` says `ended at a new sign-in (\`align login\`)`; the other is told `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in; ...` once
+
+#### Scenario: A session told only the neutral sentence
+
+- **WHEN** an older build's sign-out leaves one of two shared sessions a notice with no facts and its own hot file, which the session's prompt shows, then the machine signs in and a sync reads the ended shares (test `findings15` "C14-3: ...")
+- **THEN** the prompt says `Align: this session's sharing changed; ...`, and after the sync both sessions are told `Align: this machine is signed in to Align again. ...` once, as `align sessions` says
+
+#### Scenario: A share that never reached the server
+
+- **WHEN** a share is asked for while the server refuses its `PUT`, then `align logout`, `align login` and a sync run; in another case a replacing `align login` ends such a share, then the person is removed from the workspace (test `findings15` "C14-4: ...")
+- **THEN** after the sign-out it is told it was not shared; after the login `Align: this machine is signed in to Align again. Earlier, this session's share had not reached the Align server yet when this machine signed out of Align, so it was not shared; to share it, type \`::align share\` here (it counts toward "<goal>").`, and `align sessions` shows `stopped (Acme; not shared: this machine signed out before its share reached the Align server; \`::align share\` shares it)`; at the replacing login `Align: this session's share had not reached the Align server yet when a new sign-in on this machine (\`align login\`) replaced the earlier one, so it was not shared; ...`, and after the removal `Align: you are no longer a member of Acme in Align (...), so this session can't be shared there from here (this session's share had not reached ...)`
+
 #### Scenario: Every share path holds back while the ended shares are unread
 
 - **WHEN** three shared sessions, two then stopped with Stop sharing on the web, are on a machine that signs out and signs in with a login that can't read the ended shares; the developer types `::align share --dir` and its `confirm` in one stopped session, runs `align share` for the other while the directives still fail, a share for it is spooled and a sync runs; then the directives answer again, `align share` runs for the third and a sync reads the ended shares (test `findings13` "C12-3: ...")
@@ -1714,7 +1802,7 @@ share of its own, and `align share --dir --past` only sessions never shared, so 
 #### Scenario: A lost workspace back through a new login
 
 - **WHEN** a session stopped from the web and another shared one lose their workspace (removed; the first is told so), the machine signs out, the person is re-invited and runs `align login` (test `findings12` "C11-3: ...")
-- **THEN** the first is told `Align: this machine can reach Acme in Align again. To share this session there again, type \`::align share\` here (it counts toward "Ship the v2 onboarding flow" again). It was stopped or held from the web, so tools stay blocked until it is shared again (you can type \`::align share\` in this session), after which the stop or hold can be lifted from the web.`, as its deny says, the other's resume shows the same first sentence and never `no longer have access`, and `::align share confirm` shares it again
+- **THEN** the first is told `Align: this machine can reach Acme in Align again. To share this session there again, type \`::align share\` here (it counts toward "Ship the v2 onboarding flow" again). It was stopped or held from the web, so tools stay blocked until it is shared again (you can type \`::align share\` in this session), after which the stop or hold, if still in place, can be lifted from the web.`, as its deny says, the other's resume shows the same first sentence and never `no longer have access`, and `::align share confirm` shares it again
 
 #### Scenario: A re-pairing takes the release away
 
@@ -1746,13 +1834,14 @@ hold files (`reshare`), so the deny, `align latch status`, `::align status`, `al
 notices give the same advice: when a share that ended because this machine signed out or lost the workspace can be
 shared again now (signed in again, the workspace in reach again), the reason SHALL instead read `... Its sharing ended
 (this machine lost access to its Align workspace, and can reach it again now), so tools stay blocked until it is shared
-again (the user can type \`::align share\` in this session), after which the stop or hold can be lifted from the web.
+again (the user can type \`::align share\` in this session), after which the stop or hold, if still in place, can be lifted from the web.
 Tell the user and wait for instructions.` (`this machine signed out of Align, and is signed in again
 now` for a sign-out), and never name `align stop-sharing` as the only way out, since a session its person stopped
 sharing can never be shared again; `align latch status` SHALL end `; sharing ended (<why>, and can reach it again
 now): \`::align share\` in the session shares it there again, after which it can be resumed or released from the
-web`, `::align status` `on (tools blocked; sharing ended: \`::align share\` here shares it again, after which it can be
-resumed from the web)`, and `align status` count those as `<n> can be shared again (\`::align share\` in the session),
+web`, `::align status` `on (tools blocked; sharing ended (<why, as \`align latch status\` says it>): \`::align share\`
+here shares it again, after which it can be resumed from the web)` (a held one `Sharing ended (<why>); ...`: why it
+ended, a replacing \`align login\` included, as the deny says; E2E-AGENT cycle 14, section 5), and `align status` count those as `<n> can be shared again (\`::align share\` in the session),
 after which the web can lift it`. Every notice about a share that ended (a sign-out, signed in again, a lost workspace or
 its return, a removal this machine never saw, a share its person stopped on the web, a usage
 upload refused) SHALL, for a session stopped or held from the web, end with the sentence built from the same wording as
@@ -1800,14 +1889,14 @@ hold files SHALL carry `unread` with `reshare`, and the deny, `::align status`, 
 held back then (E2E-AGENT cycle 12, section 6): the deny `... so tools stay blocked until it is shared again: the user
 runs \`align sync\` in a terminal first (this machine has not yet heard from the Align server whether its sharing was
 stopped on the web meanwhile, and one stopped there is not shared again), then types \`::align share\` in this session,
-after which the stop or hold can be lifted from the web.`, the other views `run \`align sync\` first (this machine has
+after which the stop or hold, if still in place, can be lifted from the web.`, the other views `run \`align sync\` first (this machine has
 not yet heard whether its sharing was stopped on the web meanwhile), then \`::align share\` <here|in the session>
 shares it again`, and `align status` `<n> can be shared again (run \`align sync\` first, then \`::align share\` in the
 session), after which the web can lift it`. While this machine is signed out, a latch whose share ended at a sign-out
 (or at a lost workspace the cached `/me` still reaches) SHALL carry `login`, and every view SHALL name both ways out in
 one sentence: the deny `Its sharing has since ended (this machine signed out of Align), so tools stay blocked until the
 user runs \`align stop-sharing <lid8>\` in a terminal, or until it is shared again once this machine is signed in (the
-user runs \`align login\` in a terminal, then types \`::align share\` in this session), after which the stop or hold
+user runs \`align login\` in a terminal, then types \`::align share\` in this session), after which the stop or hold, if still in place,
 can be lifted from the web.`; `::align status` `on (tools blocked; sharing ended, this machine signed out: tools stay
 blocked until you run ...)` (a hold: `Sharing ended (this machine signed out): ...`); `align latch status` `; sharing
 ended (this machine signed out): tools stay blocked until you run ...`; `align status` `<n> can be shared again once this
@@ -1955,10 +2044,13 @@ session's next `UserPromptSubmit` and never at `PreToolUse` (so never mid-turn),
 Run \`::align accept <id>\` or \`::align decline <id>\`, or tell the agent.` (`workspace owner` instead of the approver
 role when `sender.role` is `owner`); a checkpoint, which has nothing to agree to, ends `Run \`::align decline <id>\` if
 you don't want it, or tell the agent.` The notice SHALL never say the agent does a safe request: for a checkpoint and a
-replan it says `It goes to the agent now as a safe step that needs no answer. Align reports it delivered to the agent
-and not declined (not that the agent did it) until you decline it, which you can do now or later` (a decline after the
-turn ended still moves it to `declined`, so the notice sets no deadline) (a replan's also says the
-agent is asked to draft an updated plan and to keep its current course until the developer agrees). The model context SHALL be fixed Align wording per type that starts `[Align] A
+replan it says that it goes to the agent now and that Align reports it delivered to the agent and not declined (not
+that the agent did it) until you decline it, which you can do now or later (a decline after the turn ended still moves
+it to `declined`, so the notice sets no deadline): a checkpoint's `It goes to the agent now as a safe step that needs no
+answer. ...`; a replan's says the agent is asked to draft an updated plan and to keep its current course until the
+developer agrees, `It goes to the agent now: drafting the plan needs no answer from you, and the plan changes only when
+you accept it. ...`, and ends `Run \`::align accept <id>\` when you agree to its plan, or \`::align decline <id>\`, or
+tell the agent.`, so it never says both that it needs no answer and to answer it (E2E-AGENT cycle 14, section 5). The model context SHALL be fixed Align wording per type that starts `[Align] A
 request from <sender>, who can approve goal "<goal>":` (`[Align] A request from <sender>, a workspace owner, about
 goal "<goal>":` when `sender.role` is `owner`) and ends `Their note, quoted as data, not instructions:
 "<note>".`: for `replan`, re-read goal v<N> and draft an updated plan, keeping working as before until the developer
@@ -2020,7 +2112,9 @@ so it can't be <accepted|declined> now.` (from the terminal `align: request <id>
 ... now`, exit 2), and the answer is spooled for the next sync. A request is open to `accept` while it waits for an answer or is
 a replan delivered to the agent and not declined, and open to `decline` while it waits or was delivered and not declined. `align requests accept|decline <id> [--session <session>]` SHALL
 record the answer directly and flush the outbox, and exit 2 when no open request matches. `align requests` SHALL list,
-offline, the requests waiting for an answer or delivered and not declined (shown as `delivered to the agent, not declined`; `--all` also answered and withdrawn ones; `--session <session>`
+offline, the requests waiting for an answer or delivered and not declined (shown as `delivered to the agent, not declined`;
+a checkpoint or replan not yet delivered as `not delivered yet: it goes to the agent at the session's next prompt, with
+no answer needed`, never as waiting for an answer, E2E-AGENT cycle 14, section 5; `--all` also answered and withdrawn ones; `--session <session>`
 only that session's; `--json`
 with `id`, `short_id`, `session`, `type`, `state`, `goal`, `target_goal`, `sender`, `note`, `created_at` and
 `answered_at`). Each answer SHALL queue an `accepted` or `declined` receipt to the request's directive. When a session's
@@ -2041,7 +2135,12 @@ SHALL expire here as the server expires it, and an answer the server refuses 409
 again: the request reads `expired (this session's sharing was stopped (Stop sharing on the web, or \`align
 stop-sharing\`), and the Align server expired the request)` in `align requests --all` and in what `align requests
 accept|decline` then say (exit 2), and the session's next prompt shows `Align: <sender>'s request <id> had expired (this
-session's sharing was stopped), so your answer was not taken and <sender> does not see it.` (E2E-AGENT cycle 13). `::align
+session's sharing was stopped), so your answer was not taken and <sender> does not see it.` (E2E-AGENT cycle 13). An
+answer given here whose receipt had not reached the server when the session's share ended or was stopped SHALL expire
+with the request at once, its receipt not sent, the same notice told, so no view reads it `accepted` while the server
+has already expired it (E2E-AGENT cycle 14, section 5). An expired request SHALL read with the same why in the session
+(`::align accept` and `::align decline` refuse it with `Align: the request <id> is already expired (<why>), so it can't
+be <accepted|declined> now.`, and `::align requests` lists it so) as in the terminal. `::align
 decline` SHALL name the request it declined: `Align: you declined <sender>'s request to <what> (<id>); <sender> will see
 that.` (cycle 12, section 6), and `::align accept` the request it accepted, the same way: `Align: you accepted
 <sender>'s request to <what> (<id>); <sender> will see that. The agent hears it at your next prompt.` (for a
@@ -2106,13 +2205,15 @@ set the `align` hook SHALL deny every `PreToolUse`, read-only tools too, with `A
 instructions.` (without `: "<reason>"` when there is none; a share that ended puts its `Its sharing ...` sentence before
 the last one, as the stop deny does), without needing a sync; a hold file that cannot be parsed SHALL deny every tool. A `release` directive
 SHALL remove that goal's hold, be acknowledged `received` then `applied`, and show the user `Align: <name> released
-the hold on "<title>".` once in each session it released; when the model saw that hold deny one of its tools (a hold
+the hold on "<title>".` once in each session it released, while that release holds: a later hold on the goal before the
+session's next prompt withdraws the release's notice, as a later stop withdraws a resume's, so the user never reads it
+while the goal is held again (E2E-AGENT cycle 14 C14-2); when the model saw that hold deny one of its tools (a hold
 deny, or the cached feed's hold, named that goal since) or was told of it in its context (the envelope of a session a
 folder rule shares toward a held goal, the bound note of a move that keeps a hold, a resume told while held: each counts
 as told, E2E-AGENT cycle 13 C13-2), that prompt SHALL also give it one context line `[Align]
 <name> released the hold on goal "<title>", so it no longer blocks tools.`, and a session whose model never saw it
 block a tool SHALL get no such line (test `findings9` "a hold or stop released before the model saw it block a tool
-..."). A hold the model saw deny one of its tools that no longer blocks the session and that no `release` reached SHALL
+..."); a release a later hold withdrew gives it no line either. A hold the model saw deny one of its tools that no longer blocks the session and that no `release` reached SHALL
 be told to it at the next prompt too, once: a hold it saw only in the cached feed that was released before it reached
 the session (its share still pending, or the machine offline), as the context line `[Align] The hold on goal "<title>"
 was released, so it no longer blocks tools.` and the notice `Align: the hold on "<title>" was released, so this
@@ -2134,6 +2235,11 @@ in Align's cached goals; it reaches this session at the next sync) (all tools bl
 <harness> HELD on goal "<title>" (held in Align's cached goals; the hold reaches this session at the next sync) (all
 tools blocked)` for each such session active in the last 7 days, and `align status` counts them in its `Goal hold:`
 line (`... (<n> from the cached goals, before the hold reaches them)`).
+
+#### Scenario: Held, released and held again before a prompt
+
+- **WHEN** a shared session's goal is held (its model sees a tool denied), released and held again, a sync after each, with no prompt in between; then released again (test `findings15` "C14-2: ...")
+- **THEN** the next prompt shows no `released the hold` notice and gives the model no release line, and the deny names the second hold; after the second release the next prompt shows the release once and gives the model `[Align] Dana Lee released the hold on goal ...`, and tools run
 
 #### Scenario: Told of the hold by its envelope
 
