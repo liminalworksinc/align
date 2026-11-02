@@ -6,6 +6,7 @@ import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILIT
 import type { Me } from "../../../../_ui/server";
 import { ChangeRequestCard, ProposeChange, useGoalTitles } from "../../../../_ui/changes";
 import { hiddenGoals } from "../../../../_ui/crparts";
+import { dependsOnFull } from "@/lib/v2/change-words.mts";
 import { GoalLimits, useStashedLimits } from "../../../../_ui/limits";
 import { GoalActivityCard } from "../../../../_ui/activity";
 import { AgentsOnGoalCard, HoldBanner, type HoldState } from "../../../../_ui/requests";
@@ -45,6 +46,8 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
   const others = listed.filter((g) => !loops?.includes(g.id) || (goal.depends_on ?? []).includes(g.id));
   const looping = listed.length - others.length;
   const them = (n: number) => (n === 1 ? "it" : "them");
+  // At most 5 dependencies, the ones the owner can't see included: the rest can't be ticked (W4).
+  const full = dependsOnFull(deps.length, hiddenDeps);
   const act = useAction();
   return (
     <section id="new-version">
@@ -78,10 +81,20 @@ function NewVersion({ ws, goal, hiddenDeps, loops, onDone }: { ws: string; goal:
               <p className="mb-1 text-[14px] text-zinc-600">Depends on (agents on this goal hear when these change)</p>
               {others.map((g) => (
                 <label key={g.id} className="mb-1 flex items-center gap-2 text-[15px]">
-                  <input type="checkbox" checked={deps.includes(g.id)} onChange={(e) => setDeps((d) => (e.target.checked ? [...d, g.id] : d.filter((x) => x !== g.id)))} />
+                  <input
+                    type="checkbox"
+                    checked={deps.includes(g.id)}
+                    disabled={!deps.includes(g.id) && !!full}
+                    onChange={(e) => setDeps((d) => (e.target.checked ? [...d, g.id] : d.filter((x) => x !== g.id)))}
+                  />
                   {g.title}
                 </label>
               ))}
+              {full && (
+                <p className="text-[14px] text-zinc-500" data-deps-full>
+                  {full}
+                </p>
+              )}
               {hiddenDeps > 0 && (
                 <p className="text-[14px] text-zinc-500" data-hidden-deps>
                   Also depends on {hiddenGoals(hiddenDeps)}. Saving keeps {hiddenDeps === 1 ? "it" : "them"}; only someone who can see {hiddenDeps === 1 ? "it" : "them"} can remove {hiddenDeps === 1 ? "it" : "them"}.

@@ -4,7 +4,7 @@ import { api, ApiError, Btn, Err, Field, Input, num, Pill, Select, sentence, Tex
 import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, measuresOut, sameLimits, type LimitDraft, type MeasureDraft } from "./goalform";
 import { LIMIT_WORDS } from "./limits";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
-import { counterSameAsBase, counterSameAsRequest, hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
+import { counterSameAsBase, counterSameAsRequest, dependsOnFull, hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
 import { count } from "@/lib/v2/plural.mts";
 import { isBlankText } from "@/lib/v2/text-core.mts";
 
@@ -187,6 +187,8 @@ export function ChangesForm({
   const titleOf = (id: string) => `“${feed.data?.goals.find((g) => g.id === id)?.title ?? "a goal"}”`;
   const notOffered = listed.filter((g) => leftOut(g.id) === "hidden").length;
   const them = (n: number) => (n === 1 ? "it" : "them");
+  // At most 5 dependencies, the ones the reader can't see included: the rest can't be ticked (W4).
+  const full = dependsOnFull(deps.length, hiddenDeps);
   const out = measuresOut(measures);
   const changes: ChangeFields = {};
   if (title.trim() !== goal.title || keep.includes("title")) changes.title = title.trim();
@@ -231,10 +233,20 @@ export function ChangesForm({
           <p className="mb-1 text-[14px] text-zinc-600">Depends on</p>
           {others.map((g) => (
             <label key={g.id} className="mb-1 flex items-center gap-2 text-[15px]">
-              <input type="checkbox" checked={deps.includes(g.id)} onChange={(e) => setDeps((d) => (e.target.checked ? [...d, g.id] : d.filter((x) => x !== g.id)))} />
+              <input
+                type="checkbox"
+                checked={deps.includes(g.id)}
+                disabled={!deps.includes(g.id) && !!full}
+                onChange={(e) => setDeps((d) => (e.target.checked ? [...d, g.id] : d.filter((x) => x !== g.id)))}
+              />
               {g.title}
             </label>
           ))}
+          {full && (
+            <p className="text-[14px] text-zinc-500" data-deps-full>
+              {full}
+            </p>
+          )}
           {hiddenDeps > 0 && (
             <p className="text-[14px] text-zinc-500" data-hidden-deps>
               Also depends on {hiddenGoals(hiddenDeps)}. Sending keeps {them(hiddenDeps)}; only someone who can see {them(hiddenDeps)} can remove {them(hiddenDeps)}.

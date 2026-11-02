@@ -3377,6 +3377,38 @@ try {
           `${rmG.status} ${stopStatus} ${JSON.stringify(rowsBefore)} ${JSON.stringify(w2)} ${errors.join(" | ")}`,
         );
 
+        // E2E-WEB cycle 13 W4: the New version form stops at 5 dependencies with a note, before the server would refuse
+        // a sixth; the server's refusal of six is in words, never "depends_on: at most 5".
+        const w4Goals = [];
+        for (let i = 0; i < 7; i++) w4Goals.push((await ca(CO, "POST", "/goals", { title: `W4 goal ${i}`, visibility: "workspace" })).json);
+        const [w4Main, ...w4Others] = w4Goals;
+        const w4Six = await ca(CO, "POST", `/goals/${w4Main.id}/versions`, { version: w4Main.version, depends_on: w4Others.map((g) => g.id) });
+        const w4SixNew = await ca(CO, "POST", "/goals", { title: "W4 six", visibility: "workspace", depends_on: w4Others.map((g) => g.id) });
+        await page.goto(`${BASE}/app/w/${CW}/goals/${w4Main.id}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector("#new-version form input[type=checkbox]", { timeout: 15000 }).catch(() => undefined);
+        const boxes = async () =>
+          page.evaluate(() =>
+            [...document.querySelectorAll("#new-version form label")]
+              .filter((l) => l.querySelector("input[type=checkbox]") && l.innerText.startsWith("W4 goal"))
+              .map((l) => ({ title: l.innerText.trim(), checked: l.querySelector("input").checked, disabled: l.querySelector("input").disabled })),
+          );
+        const w4Before = await boxes();
+        for (let i = 1; i <= 5; i++) {
+          await page.evaluate((t) => [...document.querySelectorAll("#new-version form label")].find((l) => l.innerText.trim() === t)?.querySelector("input")?.click(), `W4 goal ${i}`);
+        }
+        const w4After = await boxes();
+        const w4Note = await page.evaluate(() => document.querySelector("#new-version [data-deps-full]")?.innerText ?? "");
+        await page.evaluate(() => [...document.querySelectorAll("#new-version form label")].find((l) => l.innerText.trim() === "W4 goal 6")?.querySelector("input")?.click());
+        const w4Tried = (await boxes()).find((b) => b.title === "W4 goal 6");
+        const W4_WORDS = "A goal can depend on at most 5 other goals; choose fewer.";
+        check(
+          "c13 W4 (E2E-WEB cycle 13): the New version form lets the owner tick at most 5 dependencies: with 5 ticked the other goals' boxes are disabled (a press ticks nothing) and the form says \"A goal can depend on at most 5 other goals. Untick one to choose another.\", absent before; the server's refusal of 6 (new version and new goal) is 400 too_many_dependencies \"A goal can depend on at most 5 other goals; choose fewer.\", never the field's name",
+          w4Before.length === 6 && w4Before.every((b) => !b.checked && !b.disabled) &&
+            w4After.filter((b) => b.checked).length === 5 && w4After.find((b) => b.title === "W4 goal 6")?.disabled === true && w4Tried?.checked === false &&
+            w4Note === "A goal can depend on at most 5 other goals. Untick one to choose another." &&
+            [w4Six, w4SixNew].every((r) => r.status === 400 && r.json?.error === "too_many_dependencies" && r.json.message === W4_WORDS) && errors.length === 0,
+          `${JSON.stringify(w4Before)} ${JSON.stringify(w4After)} ${w4Note} | ${w4Six.text} | ${w4SixNew.text} ${errors.join(" | ")}`,
+        );
       } finally {
         await browser.close();
       }
@@ -6944,7 +6976,7 @@ try {
     check(
       "B1: saving a new version through the goal form (depends_on as the editor sees it, without the goal they can't read) keeps that dependency: GET says hidden_depends_on 1 and the new version still depends on it; five visible plus the kept one -> 400 naming the goal they can't see",
       gciDep.status === 201 && [200, 204].includes(leave.status) && JSON.stringify(faDetail?.goal?.depends_on) === "[]" && faDetail.hidden_depends_on === 1 && formSave.status === 201 && JSON.stringify(foSees?.depends_on) === JSON.stringify([GGH.id]) && foSees.title === "Cut CI time in half (p50)" &&
-        sixDeps.status === 400 && /goal you can't see/.test(sixDeps.json?.message ?? ""),
+        sixDeps.status === 400 && sixDeps.json?.error === "too_many_dependencies" && sixDeps.json.message === "A goal can depend on at most 5 other goals, and 1 goal you can't see stays on its list; choose fewer.",
       `${gciDep.status} ${leave.status} ${JSON.stringify(faDetail?.goal?.depends_on)} ${faDetail?.hidden_depends_on} ${formSave.status} ${formSave.text.slice(0, 200)} ${JSON.stringify(foSees?.depends_on)} ${sixDeps.status} ${sixDeps.text}`,
     );
 

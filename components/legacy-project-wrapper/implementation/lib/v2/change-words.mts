@@ -21,6 +21,17 @@ export interface FieldDiff {
   hidden?: { before: number; after: number } | null;
 }
 
+/** How many goals one goal may depend on (lib/v2/goals.ts refuses more; the goal forms stop at it: E2E-WEB cycle 13 W4). */
+export const DEPENDS_ON_MAX = 5;
+
+/** The goal forms' note once Depends on is full (`ticked` plus the `hidden` ones the reader can't see, which stay and
+ *  count), null before: said before the person presses anything, so the server's refusal is never how they learn it. */
+export function dependsOnFull(ticked: number, hidden: number): string | null {
+  if (ticked + hidden < DEPENDS_ON_MAX) return null;
+  const also = hidden ? ` (${hidden === 1 ? "1 of them a goal you can't see, which stays" : `${hidden} of them goals you can't see, which stay`})` : "";
+  return `A goal can depend on at most ${DEPENDS_ON_MAX} other goals${also}. Untick one to choose another.`;
+}
+
 /** "a goal you can't see" / "2 goals you can't see": dependencies the reader can't read, never named. */
 export const hiddenGoals = (n: number) => (n === 1 ? "a goal you can't see" : `${n} goals you can't see`);
 
