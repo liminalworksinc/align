@@ -335,7 +335,20 @@ login` SHALL print `Signed in as ...` only under the lock and only while its own
 when another `align login` (or `align logout`) replaced or signed out its pairing before then, it SHALL exit 1 with
 `align: another \`align login\` (or \`align logout\`) on this machine finished while this one did, so device <id> it
 paired is replaced and revoked; it is signed in as device <id>|it is signed out now. Run \`align status\` to see
-which.`
+which.` Two logins can still both say `Signed in` when the first finished printing before the second committed and
+replaced its device; that can't be prevented without making one login wait for the other's browser approval, so the
+second SHALL say it: a login whose commit replaced a device other than the one this machine was signed in as when it
+started SHALL add, after `Signed in as ...`, `Another \`align login\` on this machine paired device <id> while this one
+waited; this login replaced it, so this machine is <name> (<id>).`, and the person's next `align` command (not a hook's
+background sync) SHALL say once, on stderr, `align: two \`align login\`s ran at once on this machine (<time>): device
+<id>, which the other one paired (and may have said it signed in as), was replaced and revoked. This machine is <name>
+(<id>).`, which `align status` gives as a `Pairing:` line instead; nothing is said once another login or a logout has
+changed the pairing since. `align status` names the device by name too (`Identity: ... device <name> (<id>)`).
+
+#### Scenario: Two logins at once both finish
+
+- **WHEN** a second `align login` commits after the first one finished and said `Signed in as ...`, replacing its device, and the person then runs `align status` and another command (test `findings10` "two `align login`s at once ...")
+- **THEN** the second login says `Another \`align login\` on this machine paired device <first> while this one waited; this login replaced it, so this machine is Test Mac (<second>).`; the next command says once on stderr that two logins ran at once, naming both devices and `This machine is Test Mac (<second>).`, and the one after it says nothing; `align status` shows `Identity: ... device Test Mac (<second>)`, and, when it is the next command, the same as a `Pairing:` line
 
 #### Scenario: Login while a sync's refresh is in flight
 
@@ -582,7 +595,7 @@ this machine is signed out of Align ...`, nothing for a folder rule's), never ap
 ### Requirement: Status, latch and doctor diagnostics
 
 The `align status` command SHALL print, offline, `Align 0.2.0  home <ALIGN_HOME>` followed by `Identity:` (the name
-and email as the last `GET /api/v2/me` gave them, not as at pairing; when signed out, why in words, from the refusal's
+and email as the last `GET /api/v2/me` gave them, not as at pairing, and the device as `device <name> (<id>)`; when signed out, why in words, from the refusal's
 `reason` when the server gave one: `you ran \`align logout\``, `the Align server no longer knows this device: its
 account was deleted (or the server's data was reset)` for `unknown_device`, `this device was revoked on the web
 (Devices page)` for `revoked_on_web`, `you signed out everywhere on the web and chose to unpair your devices too` for
@@ -785,7 +798,20 @@ send the folder path. Every new Claude Code or Codex session whose `SessionStart
 in that folder or below it SHALL be shared from its start; forks, resumed sessions and sessions outside the folder
 SHALL stay private. `align rules` SHALL list rules as `<dir>  ->  <workspace> / <goal title>  (since <date>[, work
 signals on])` or print `No folder rules. Every session is private until you share it.`, and `align unshare --dir
-[<folder>]` SHALL remove the nearest covering rule without changing sessions that are already shared.
+[<folder>]` SHALL remove the nearest covering rule without changing sessions that are already shared. When the cached
+goals say the rule's goal can't be bound by this person (it needs an approved alignment, say after they left the team
+it belongs to), `align rules` SHALL add under that rule `  warning: "<goal>" needs an approved alignment before your
+sessions can count toward it (cached goals of <time>), so new sessions in this folder stay private until it has one.
+\`align share --dir <dir> --workspace "<workspace>" --goal <goal>\` points the rule at another goal.`, and a new
+session in the folder SHALL stay private, spool no share and be told so at its start, never `shared ... for "<goal>"`
+first and a failure later: `Align: this folder's rule shares sessions with <workspace> for "<goal>" (folder rule for
+<dir>), but that goal needs an approved alignment before a session of yours can count toward it, so this session stays
+private. Once it has one, type \`::align share <goal>\` here; \`align rules\` shows the rule.`
+
+#### Scenario: A rule toward a goal that needs an alignment
+
+- **WHEN** a folder rule's goal becomes one the person can't bind (the cached goals say `bindable: false`), then `align rules` runs and a session starts in the folder, a sync runs, the session is prompted and the developer types `::align share Ship confirm` (test `findings10` "a folder rule toward a goal the cached feed says needs an alignment ...")
+- **THEN** `align rules` shows the warning under the rule, `SessionStart` says the session stays private (never `Align: shared with ...`), no share is made, no `share failed` notice follows, and `::align share` answers `Align: "Ship the v2 onboarding flow" needs an approved alignment before sessions can count toward it.`
 
 #### Scenario: Rule shares new sessions with the envelope
 
@@ -1257,7 +1283,14 @@ effect only together with `--dir` (it sets the rule's work-signals choice); a si
 SHALL refuse goals that are not bindable and SHALL be accepted for a `suspended` share, which is how its user resumes
 it. A goal name no cached goal matches SHALL be answered `Align: no cached goal matches "<name>" (goals fetched <n> s
 ago). A goal created just now arrives with the next sync, which starts now: try again in a few seconds, or run \`align
-goals --refresh\` in a terminal. ...`, and `::align goals` SHALL say how long ago the goals were fetched. `::align unshare` (alias `::align stop`) SHALL spool a stop-sharing that the
+goals --refresh\` in a terminal. ...`, and `::align goals` SHALL say how long ago the goals were fetched. A session
+shared before in its own workspace, which is in reach, that names a goal no goal of that workspace matches but another
+cached workspace's does SHALL be answered as a share into another workspace is (`Align: this session was shared with
+<workspace>, so it is shared again only there (its work is that workspace's), never into <other>.`), not `no cached goal
+matches`; and `::align share <goal>` (preview or `confirm`) toward a goal the cached goals say this person can't bind
+SHALL answer `Align: "<goal>" needs an approved alignment before sessions can count toward it.` and spool nothing, never
+`sharing requested` and a failure at the next sync (test `findings10` "`::align share <goal> confirm` naming another
+workspace's goal ..."). `::align unshare` (alias `::align stop`) SHALL spool a stop-sharing that the
 next sync applies like `align stop-sharing`, and `::align unshare --dir` SHALL remove the folder rule covering the
 session's folder at once. `::align task <label>` and `::align claim <file> [why]` SHALL record
 activity (claims last 60 minutes) only for sessions that are shared or covered by a folder rule. A bare `::align`

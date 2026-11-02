@@ -15,6 +15,7 @@ import {
   goalMark,
   HELD_MARK,
   limitsSeen,
+  otherWorkspaceWords,
   outOfReachWords,
   measureKey,
   renderAsksDelta,
@@ -238,6 +239,17 @@ function autoShare(home: string, harness: Harness, sid: string, cwd: string | nu
   if (signedOut(home)) {
     // Nothing could reach the server: the session stays private, and the developer hears why (N4).
     messages.push(`Align: this folder is shared with ${rule.workspace_name}, but this machine is signed out of Align, so this session stays private. Run \`align login\` in a terminal, then type \`::align share\` here.`);
+    return null;
+  }
+  // The cached goals already say the rule's goal can't be bound by this person (it needs an approved alignment): the
+  // sync would refuse the share, so the session stays private and is told so now, never "shared ... for <goal>" first
+  // (cycle 9).
+  const cached = rule.goal_id ? readJson<FeedFile>(layout.feed(home, rule.workspace_id))?.goals.find((x) => x.id === rule.goal_id) : undefined;
+  if (cached && !cached.bindable) {
+    inj.notices_shown.push("anchor");
+    messages.push(
+      `Align: this folder's rule shares sessions with ${rule.workspace_name} for "${clean(cached.title, 100)}" (folder rule for ${rule.dir}), but that goal needs an approved alignment before a session of yours can count toward it, so this session stays private. Once it has one, type \`::align share ${clean(cached.title, 100)}\` here; \`align rules\` shows the rule.`,
+    );
     return null;
   }
   const epochId = randomId("ep_");
@@ -1243,7 +1255,15 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // that goal can still be bound (N8).
       const before = !arg && !dirMode && hot?.goal ? feed?.goals.find((g) => g.id === hot.goal!.id && g.bindable && g.status === "active") || null : null;
       const goal = arg && feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) || null : before;
-      if (arg && !goal) return noCachedGoal(arg, feed);
+      if (arg && !goal) {
+        // Shared before in its own workspace, which is in reach, and the goal named is another workspace's: it is shared
+        // again only there, as the out-of-reach answer says, never "no cached goal matches" (cycle 9).
+        const elsewhere = !dirMode && own ? feeds(home).find((f) => f.workspace_id !== own.workspace_id && f.goals.some((g) => g.id === arg || g.title.toLowerCase().startsWith(arg.toLowerCase()))) : undefined;
+        if (elsewhere && own) return `Align: ${otherWorkspaceWords(own.workspace_name, elsewhere.workspace_name)}`;
+        return noCachedGoal(arg, feed);
+      }
+      // A goal the cached feed says this person can't bind yet: said now, never "sharing requested" and a failure later.
+      if (!dirMode && goal && !goal.bindable) return `Align: "${goal.title}" needs an approved alignment before sessions can count toward it.`;
       if (dirMode) {
         if (!feed) return "Align: no cached workspace. Run `align goals --refresh` in a terminal.";
         if (!cwd) return "Align: this session has no working folder to share.";

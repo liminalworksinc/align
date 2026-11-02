@@ -12,7 +12,8 @@ import { readJson } from "../src/shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../src/shared/layout.ts";
 import type { HotState } from "../src/shared/types.ts";
 import { FakeServer } from "./fake-server.ts";
-import { ctxFor, makeEnv, runCli, runHook, type TestEnv } from "./helpers.ts";
+import { ctxFor, makeEnv, runCli, runHook, waitFor, type TestEnv } from "./helpers.ts";
+import { loadCredentials } from "../src/api.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 after(async () => {
@@ -237,4 +238,74 @@ describe("C9-3: a hold the model saw only in the cached feed, gone before it rea
     assert.equal(ctx.match(/hold on goal/g)?.length, 1, ctx);
     assert.match(ctx, /released the hold on goal "Ship the v2 onboarding flow"/);
   });
+});
+
+describe("cycle 9, section 5: works, but would confuse a developer", () => {
+  test("a folder rule toward a goal the cached feed says needs an alignment: `align rules` warns, and a new session stays private and is told so up front, never \"shared ... for <goal>\"", async () => {
+    const { fake, t } = await world();
+    const dir = path.join(t.root, "rule-unbindable");
+    fs.mkdirSync(dir, { recursive: true });
+    assert.equal((await runCli(t, ["share", "--dir", dir, "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).code, 0);
+    assert.doesNotMatch((await runCli(t, ["rules"])).stdout, /warning/);
+    fake.goals.get("ws_acme")!.find((x) => x.id === "g_ship")!.bindable = false;
+    assert.equal((await runCli(t, ["goals", "--refresh"])).code, 0);
+    const rules = (await runCli(t, ["rules"])).stdout;
+    assert.match(rules, /warning: "Ship the v2 onboarding flow" needs an approved alignment before your sessions can count toward it \(cached goals of [^)]+\), so new sessions in this folder stay private until it has one\./, rules);
+    const sid = newSid();
+    const said = start(t, sid, "startup", dir)?.systemMessage ?? "";
+    assert.match(said, /^Align: this folder's rule shares sessions with Acme for "Ship the v2 onboarding flow" \(folder rule for [^)]+\), but that goal needs an approved alignment before a session of yours can count toward it, so this session stays private\./, said);
+    assert.doesNotMatch(said, /^Align: shared with/);
+    await sync(t);
+    assert.equal(hot(t, localId("claude-code", sid)).share, null, "no share was made");
+    assert.equal(prompt(t, sid, "go on", dir)?.systemMessage, undefined, "no share failure later");
+    // An explicit `::align share` toward it says so up front too.
+    assert.equal(prompt(t, sid, "::align share Ship confirm", dir).reason, 'Align: "Ship the v2 onboarding flow" needs an approved alignment before sessions can count toward it.');
+  });
+
+  test("`::align share <goal> confirm` naming another workspace's goal in a session whose own workspace is in reach says it is shared again only there, never \"no cached goal matches\"", async () => {
+    const { t } = await world({ side: true });
+    assert.equal((await runCli(t, ["goals", "--refresh"])).code, 0);
+    const A = await shared(t);
+    await sync(t);
+    await logout(t);
+    await login(t);
+    assert.equal(prompt(t, A.sid, "::align share Side confirm", A.cwd).reason, "Align: this session was shared with Acme, so it is shared again only there (its work is that workspace's), never into Side Co.");
+    assert.match(prompt(t, A.sid, "::align share Nothing like it confirm", A.cwd).reason, /^Align: no cached goal matches "Nothing like it"/);
+  });
+
+  test("`align sessions` while signed out reads a share that ended at a lost workspace as its newest notice does", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    fake.workspaces = [];
+    await sync(t);
+    await logout(t);
+    const rows = json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[];
+    assert.equal(rows.find((r) => r.local_id === A.lid)?.shared, "stopped (Acme; this machine signed out)");
+  });
+
+  for (const next of ["status", "rules"]) {
+    test(`two \`align login\`s at once both finish: the second says it replaced the first's device, and the next command (\`align ${next}\`) says which device this machine is now, once`, async () => {
+      const { fake, t } = await world();
+      const from = fake.log.length;
+      const slow = runCli(t, ["login", "--name", "Test Mac"], { ALIGN_DEVICE_POLL_SCALE_MS: "300" });
+      await waitFor(() => fake.log.slice(from).some((l) => l.path === "/api/v2/device/authorize"), 10_000, "the slow login's authorize");
+      const fast = await runCli(t, ["login", "--name", "Test Mac"]);
+      assert.equal(fast.code, 0, fast.stderr);
+      assert.doesNotMatch(fast.stdout, /Another `align login`/);
+      const first = loadCredentials(t.home)!.device_id;
+      const r = await slow;
+      assert.equal(r.code, 0, r.stderr);
+      const now = loadCredentials(t.home)!.device_id;
+      assert.match(r.stdout, new RegExp(`Another \`align login\` on this machine paired device ${first} while this one waited; this login replaced it, so this machine is Test Mac \\(${now}\\)\\.`), r.stdout);
+      const note = `two \`align login\`s ran at once on this machine`;
+      const said = await runCli(t, [next]);
+      const where = next === "status" ? said.stdout : said.stderr;
+      assert.ok(where.includes(next === "status" ? `Pairing:    T${note.slice(1)}` : `align: ${note}`), `${said.stdout}\n${said.stderr}`);
+      assert.ok(where.includes(`device ${first}, which the other one paired (and may have said it signed in as), was replaced and revoked. This machine is Test Mac (${now}).`), where);
+      const again = await runCli(t, [next]);
+      assert.doesNotMatch(again.stdout + again.stderr, /ran at once/, "once");
+      assert.match((await runCli(t, ["status"])).stdout, new RegExp(`Identity: {3}Sean <sean@example\\.test> device Test Mac \\(${now}\\)`));
+    });
+  }
 });
