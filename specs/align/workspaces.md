@@ -710,7 +710,9 @@ database whose schema version is not the one it was written for. An emailed code
 `ALIGN_PUBLIC_ORIGIN` from the script's environment: hosted (`HOSTED=1`) without an https one, `requests approve` SHALL
 refuse to email before approving anything (exit 1, the request still pending, nothing sent), never sending a link to
 the machine it runs on; in Mode L without one the link SHALL be the computer's local address and both the email and the
-script's output SHALL say that it is local (E2E-WEB cycle 13 W7).
+script's output SHALL say that it is local (E2E-WEB cycle 13 W7). `requests approve` SHALL look the request up before
+that check, so an id that names no request, or a request already approved or declined, is said as it is (exit 1,
+nothing approved or sent), never "still pending" (E2E-WEB cycle 14 C14-4).
 
 #### Scenario: Approving a request
 
@@ -721,6 +723,11 @@ script's output SHALL say that it is local (E2E-WEB cycle 13 W7).
 
 - **WHEN** the operator approves a pending request with the email settings but no `ALIGN_PUBLIC_ORIGIN` in the script's environment, hosted and in Mode L (`scripts/test-v2.mjs` "c13 W7 (E2E-WEB cycle 13): ...")
 - **THEN** hosted, the script exits 1 with "ALIGN_PUBLIC_ORIGIN is not set in this shell (or is not an https origin), so the email's sign-in link would point at this machine. Nothing was approved; <id> is still pending. Run this on the server machine (fly ssh console), where it is set, or add --print to show the code instead.", and no email is sent; in Mode L it emails `http://127.0.0.1:<PORT>/app/sign-in?email=…` followed by "(a local address: it opens only on the computer Align runs on; if it doesn't open for you, ask whoever runs Align for its address)" and prints that the link is this computer's local address and to set `ALIGN_PUBLIC_ORIGIN` for one others can open
+
+#### Scenario: Approving a request that isn't pending
+
+- **WHEN** the operator approves, hosted with the email settings, an id no access request has, or a request already approved, with and without `ALIGN_PUBLIC_ORIGIN` (`scripts/test-v2.mjs` "c14 C14-4 (E2E-WEB cycle 14): ...")
+- **THEN** the script exits 1 with "No pending request <id>: no access request has that id, so nothing was approved. requests list shows them." or "No pending request <id>: it was already approved on <day>, so nothing was approved." (declined likewise), never "<id> is still pending"; no code is made and no email is sent
 
 #### Scenario: Listing without secrets or people
 

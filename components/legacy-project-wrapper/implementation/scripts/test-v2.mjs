@@ -11628,6 +11628,20 @@ try {
     noSecret.status === 1 && /ALIGN_SECRET/.test(noSecret.err) && approveG.status === 0 && /emailed a creation code \(cc_/.test(approveG.out) && aliceMail?.auth === `Bearer ${MAIL_KEY}` && aliceMail.body.subject === "Your Align workspace creation code" && aliceMail.body.text.includes(`https://${HOSTED_HOST}/app/sign-in?email=alice%40example.test`) && aliceCode && aliceMail.body.text.includes("only for alice@example.test") && codesIn(approveG.out + approveG.err).length === 0 && dbFilesLack(dbFile, aliceCode),
     `${noSecret.status} ${noSecret.err} | ${approveG.status} ${approveG.out} ${approveG.err} ${JSON.stringify(aliceMail?.body)}`,
   );
+  // E2E-WEB cycle 14 C14-4: without ALIGN_PUBLIC_ORIGIN, an id that names no request, or one already approved, is said
+  // as it is, never "<id> is still pending".
+  const mailsBeforeC14 = mails.length;
+  const c14Unknown = await adminAsync(["requests", "approve", "ar_doesnotexist000000000000"], { ...opGate, ALIGN_PUBLIC_ORIGIN: undefined });
+  const c14Approved = await adminAsync(["requests", "approve", aliceReq.id], { ...opGate, ALIGN_PUBLIC_ORIGIN: undefined });
+  const c14ApprovedHttps = await adminAsync(["requests", "approve", aliceReq.id], opGate);
+  check(
+    "c14 C14-4 (E2E-WEB cycle 14): align-admin requests approve, hosted with no ALIGN_PUBLIC_ORIGIN, of an unknown id exits 1 with \"No pending request <id>: no access request has that id, so nothing was approved.\", and of a request already approved \"No pending request <id>: it was already approved on <day>, so nothing was approved.\" (as with the origin set), never \"is still pending\"; no code, no email",
+    c14Unknown.status === 1 && c14Unknown.err.includes("No pending request ar_doesnotexist000000000000: no access request has that id, so nothing was approved.") &&
+      [c14Approved, c14ApprovedHttps].every((r) => r.status === 1 && r.err.includes(`No pending request ${aliceReq.id}: it was already approved on ${new Date().toISOString().slice(0, 10)}, so nothing was approved.`)) &&
+      ![c14Unknown, c14Approved].some((r) => /still pending|ALIGN_PUBLIC_ORIGIN/.test(r.err)) && mails.length === mailsBeforeC14 &&
+      withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_creation_codes WHERE request_id = ?").get(aliceReq.id).n) === 1,
+    `${c14Unknown.status} ${c14Unknown.err} | ${c14Approved.status} ${c14Approved.err} | ${c14ApprovedHttps.err}`,
+  );
   // -- the approved person can sign in by email code (no invite needed) and spends the code once --
   const ALICE = await gSignIn("alice@example.test");
   const aBadFormat = await gCreate(ALICE, "Alice One", "alc_nope");
