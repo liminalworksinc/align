@@ -487,6 +487,7 @@ try {
     const lid = d.prepare("SELECT local_id FROM sessions WHERE native_id = ?").get(P2)?.local_id ?? "";
     for (const table of ["shares", "epochs", "outbox"]) d.prepare(`DELETE FROM ${table} WHERE local_id = ?`).run(lid);
     d.prepare("UPDATE requests SET uploaded = 0, epoch_id = NULL WHERE local_id = ?").run(lid);
+    d.prepare("DELETE FROM kv WHERE key = ?").run(`shared_before:${lid}`);
   });
   const p2EpochBefore = sdb((d) => d.prepare("SELECT starts_at FROM v2_epochs WHERE session_key = ?").all(K2));
   const past = cli(["share", "--dir", oldRepo, "--past", "3", "--workspace", W, "--goal", G.id, "--yes"]);
@@ -1062,6 +1063,10 @@ try {
   const rmStop = await ws(M, "POST", `/sessions/${Q1.key}/stop`, {});
   // E2E-AGENT cycle 6 C6-2: a second session stopped from the web goes through the removal and the re-invite stopped.
   const Q3 = startQ("q3");
+  // The folder rule's goal is achieved by now, so the rule did not share it: shared from the terminal toward the goal Q1 has.
+  const q3Lid0 = JSON.parse(cli(["sessions", "--all", "--json"]).stdout || "[]").find((x) => x.native_id === Q3.sid)?.local_id ?? "none";
+  const q3Shared0 = cli(["share", "--workspace", W, "--goal", G.id, "--yes", "--", q3Lid0.slice(0, 8)]);
+  sync();
   const q3Stop = await ws(M, "POST", `/sessions/${Q3.key}/stop`, {});
   sync();
   const rm = await ws(O2, "DELETE", `/members/${M.id}`);
@@ -1141,12 +1146,12 @@ try {
   const q3Free = denied(tool(Q3, "Bash"));
   check(
     "stopped, removed and re-invited (E2E-AGENT cycle 6 C6-2): while the workspace is out of reach the deny names `align stop-sharing`; once it is back the deny and `align latch status` offer `::align share` instead, as the session's notice does; `::align share confirm` shares it again, the deny becomes the plain stop, and a web resume frees its tools",
-    q3Stop.status === 200 && q3Lost.includes("no longer has access to its Align workspace") && q3Lost.includes("`align stop-sharing ") &&
+    q3Shared0.code === 0 && q3Stop.status === 200 && q3Lost.includes("no longer has access to its Align workspace") && q3Lost.includes("`align stop-sharing ") &&
       q3Back.includes("can reach it again now), so the user can share it there again by typing `::align share` in this session") && !q3Back.includes("align stop-sharing") &&
       q3Latch.includes(`${q3Lid.slice(0, 8)} claude-code STOPPED`) && !new RegExp(`${q3Lid.slice(0, 8)}[^\n]*only \`align stop-sharing`).test(q3Latch) &&
       /sharing requested/.test(q3Share.json?.reason ?? "") && q3Shared === "Align: this session was stopped from its Align workspace. Tools are blocked until it is resumed there. Tell the user and wait for instructions." &&
       q3Resume.status === 200 && q3Free === null,
-    `${q3Stop.status} lost=${q3Lost} back=${q3Back} latch=${q3Latch} share=${q3Share.stdout} shared=${q3Shared} ${q3Resume.text} free=${q3Free}`,
+    `lost=${q3Lost} back=${q3Back} latch=${q3Latch} share=${q3Share.stdout} shared=${q3Shared} ${q3Resume.text} free=${q3Free} stop=${q3Stop.status} first share=${q3Shared0.code} ${q3Shared0.stderr}`,
   );
 
   // C5-1 and C5-2: shared again, the session counts from the re-share; the turn made while it was not shared never goes
