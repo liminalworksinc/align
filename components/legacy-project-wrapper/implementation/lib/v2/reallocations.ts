@@ -292,7 +292,7 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
         // Already not yet (in another tab, or by another launcher): recording it again would change nothing (c11 W2).
         if (r.launch === "not_yet") {
           const who = r.launch_by === me ? "You" : r.launch_by ? memberName(r.launch_by) : "Someone";
-          throw conflict("wrong_state", `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches these.`);
+          throw conflict("wrong_state", `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches the new ones.`);
         }
         run("UPDATE v2_reallocations SET launch = 'not_yet', launch_by = ?, launch_at = ?, updated_at = ? WHERE id = ?", me, at, at, r.id);
         audit(r.ws_id, me, "reallocation.not_yet", r.id, at);

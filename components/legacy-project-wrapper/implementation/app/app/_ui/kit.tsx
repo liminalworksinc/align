@@ -19,11 +19,12 @@ export class ApiError extends Error {
   }
 }
 
-/** A server message as a sentence for a "Not recorded. …" line: capitalized, ending in a full stop, so a short
- *  validation message ("condition is required") never runs into the next sentence (c9 sweep). */
+/** A server message as a sentence for a "Not recorded. …" line: ending in a full stop, so a short message never runs
+ *  into the next sentence (c9 sweep). Its first letter is left as the server wrote it: a refusal can open with a
+ *  person's name as they wrote it ("carol already decided not yet, …"), which the card spells the same way (E2E-WEB
+ *  cycle 12 C12-1). */
 export function sentence(message: string): string {
-  const t = message.trim();
-  const s = t.charAt(0).toUpperCase() + t.slice(1);
+  const s = message.trim();
   return /[.!?…]["”]?$/.test(s) ? s : `${s}.`;
 }
 

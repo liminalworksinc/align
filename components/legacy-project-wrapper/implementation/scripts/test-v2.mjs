@@ -9518,7 +9518,7 @@ try {
     const sRlAct = (u, t, action, body) => sa(u, "POST", `/reallocations/${t?.id}/${action}`, body);
     const sRlNow = (t) => withDb((d) => d.prepare("SELECT state, revision, launch, launch_by FROM v2_reallocations WHERE id = ?").get(t?.id));
     const sRlAudit = (t, action) => withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE action = ? AND object_id = ?").all(action, t?.id).map((r) => r.actor_id));
-    const NOT_YET_RL = (who) => `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches these.`;
+    const NOT_YET_RL = (who) => `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches the new ones.`;
     const n1 = await sRl(10);
     const n1Ok = await sRlAct(SO, n1, "approve", { revision: 1 });
     const n1First = await sRlAct(SO, n1, "not_yet", { revision: 1 });
@@ -9527,7 +9527,7 @@ try {
     const n1Read = (await sa(SC, "GET", `/reallocations/${n1?.id}`)).json;
     const n1Launch = await sRlAct(SC, n1, "launch", { revision: 1 });
     check(
-      "c11 W2 (E2E-WEB cycle 11): Not yet on an approved target change already \"not yet\" is 409 wrong_state, \"You already decided not yet, so nothing changes: agents keep the old targets until someone launches these.\" to the person who said it and \"Sasha Owner already decided not yet, …\" to another launcher, and is not recorded again (one reallocation.not_yet, launch_by unchanged); can.not_yet then reads false and can.launch true, and Launch still launches",
+      "c11 W2 (E2E-WEB cycle 11): Not yet on an approved target change already \"not yet\" is 409 wrong_state, \"You already decided not yet, so nothing changes: agents keep the old targets until someone launches the new ones.\" to the person who said it and \"Sasha Owner already decided not yet, …\" to another launcher, and is not recorded again (one reallocation.not_yet, launch_by unchanged); can.not_yet then reads false and can.launch true, and Launch still launches",
       n1Ok.json?.state === "approved" && n1First.status === 200 && n1First.json?.launch === "not_yet" &&
         n1Again.status === 409 && n1Again.json?.error === "wrong_state" && n1Again.json.message === NOT_YET_RL("You") &&
         n1Other.status === 409 && n1Other.json?.error === "wrong_state" && n1Other.json.message === NOT_YET_RL(SO.name) &&
@@ -9713,6 +9713,93 @@ try {
       `${w3Out.map((r) => `${r.status} ${r.json?.message}`).join(" | ")} || ${w3Pending} ${w3Ok.status} ${w3Ok.text.slice(0, 200)}`,
     );
 
+    // -- W4: a second Not yet on a target change is refused in the words its Recorded line uses --
+    const NOT_YET_RL12 = (who) => `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches the new ones.`;
+    const w4Rl = await tRl(14);
+    await ta(TO, "POST", `/reallocations/${w4Rl?.id}/approve`, { revision: 1 });
+    await ta(TO, "POST", `/reallocations/${w4Rl?.id}/not_yet`, { revision: 1 });
+    const w4Again = await ta(TO, "POST", `/reallocations/${w4Rl?.id}/not_yet`, { revision: 1 });
+    const w4Other = await ta(TC, "POST", `/reallocations/${w4Rl?.id}/not_yet`, { revision: 1 });
+    check(
+      "c12 W4 (E2E-WEB cycle 12): a second Not yet on a target change is 409 \"You already decided not yet, so nothing changes: agents keep the old targets until someone launches the new ones.\" (\"Tess Owner already decided not yet, …\" to another launcher), the words of the app's Recorded line, never \"launches these\"",
+      w4Again.status === 409 && w4Again.json?.message === NOT_YET_RL12("You") && w4Other.status === 409 && w4Other.json?.message === NOT_YET_RL12(TO.name),
+      `${w4Again.text} | ${w4Other.text}`,
+    );
+
+    // -- the browser: C12-1 (ui) on a target-change card and a change-request card, W4 (ui), W1 (ui) --
+    const c1Rl = await tRl(15);
+    const c1RlOk = await ta(TO, "POST", `/reallocations/${c1Rl?.id}/approve`, { revision: 1 });
+    const w4UiRl = await tRl(16);
+    const w4UiOk = await ta(TO, "POST", `/reallocations/${w4UiRl?.id}/approve`, { revision: 1 });
+    const c1Cr = await tCr("c1");
+    const c1CrOk = await ta(TO, "POST", `/goals/${c1Cr.g?.id}/change-requests/${c1Cr.cr?.id}/approve`, { revision: 1 });
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width: 1100, height: 900 });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const press = (pg, scope, label) => pg.evaluate((sc, t) => [...document.querySelectorAll(`${sc} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      const hasButton = (pg, scope, label) => pg.waitForFunction((sc, t) => [...document.querySelectorAll(`${sc} button`)].some((b) => b.textContent?.trim() === t), { timeout: 15000 }, scope, label).catch(() => undefined);
+      const noticeOf = async (pg, card) => {
+        await pg.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
+        await pg.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        return pg.evaluate((c) => {
+          const n = document.querySelector(`${c} [data-notice]`);
+          return { notice: n?.getAttribute("data-notice") ?? null, text: n?.textContent?.trim() ?? "", focused: !!n && document.activeElement === n, card: document.querySelector(c)?.innerText ?? "" };
+        }, card);
+      };
+      try {
+        // C12-1 (ui): the owner's open target-change card, after carol twelve said not yet elsewhere.
+        const pO = await as(TO);
+        await open(pO, `/app/w/${TW}/alignments`);
+        const rlCard = `[data-reallocation="${c1Rl?.id}"]`;
+        await hasButton(pO, rlCard, "Not yet");
+        const c1RlOther = await ta(TC, "POST", `/reallocations/${c1Rl?.id}/not_yet`, { revision: 1 });
+        await press(pO, rlCard, "Not yet");
+        const c1RlUi = await noticeOf(pO, rlCard);
+        // W4 (ui): Not yet recorded on another card says what the refusal says.
+        const w4Card = `[data-reallocation="${w4UiRl?.id}"]`;
+        await hasButton(pO, w4Card, "Not yet");
+        await press(pO, w4Card, "Not yet");
+        const w4Ui = await noticeOf(pO, w4Card);
+        // C12-1 (ui): the owner's open change-request card, after carol twelve said not yet elsewhere.
+        await open(pO, `/app/w/${TW}/goals/${c1Cr.g?.id}`);
+        const crCard = `[data-cr="${c1Cr.cr?.id}"]`;
+        await hasButton(pO, crCard, "Not yet");
+        const c1CrOther = await ta(TC, "POST", `/goals/${c1Cr.g?.id}/change-requests/${c1Cr.cr?.id}/not_yet`, { revision: 1 });
+        await press(pO, crCard, "Not yet");
+        const c1CrUi = await noticeOf(pO, crCard);
+        check(
+          "c12 C12-1 (ui, E2E-WEB cycle 12): Not yet on a target-change card and on a change-request card left open while \"carol twelve\" (her name written in lower case) said not yet elsewhere reads, focused, \"Not recorded. carol twelve already decided not yet, so nothing changes: …\", the name as she wrote it and as the card spells it (\"carol twelve decided not yet\"), never \"Carol twelve\"",
+          c1RlOk.json?.state === "approved" && c1RlOther.status === 200 && c1RlUi.notice === "refused" && c1RlUi.focused && c1RlUi.text === `Not recorded. ${NOT_YET_RL12(TC.name)}` && c1RlUi.card.includes(`${TC.name} decided not yet`) &&
+            c1CrOk.json?.state === "approved" && c1CrOther.status === 200 && c1CrUi.notice === "refused" && c1CrUi.focused &&
+            c1CrUi.text === `Not recorded. ${TC.name} already decided not yet, so nothing changes: agents stay on version 1 until someone launches version 2.` && c1CrUi.card.includes(`${TC.name} decided not yet`) &&
+            ![c1RlUi.text, c1CrUi.text].some((t) => t.includes("Carol")),
+          `${JSON.stringify(c1RlUi).slice(0, 500)} || ${JSON.stringify(c1CrUi).slice(0, 500)}`,
+        );
+        check(
+          "c12 W4 (ui, E2E-WEB cycle 12): Not yet on a target-change card reads \"Recorded: you decided not yet. Agents keep the old targets until someone launches the new ones.\", the refusal's words (never \"launches them\")",
+          w4UiOk.json?.state === "approved" && w4Ui.notice === "done" && w4Ui.text === "Recorded: you decided not yet. Agents keep the old targets until someone launches the new ones.",
+          JSON.stringify(w4Ui).slice(0, 500),
+        );
+        check("c12 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c12 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c12 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c12-web ====
 
