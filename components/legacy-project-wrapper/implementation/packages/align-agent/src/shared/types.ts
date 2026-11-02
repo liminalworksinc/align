@@ -203,6 +203,9 @@ export interface InjectedState {
   releases_told?: string[];
   /** Goals whose hold the model saw block a tool (a hold deny), so a release of it is told to the model (cycle 8). */
   holds_told?: string[];
+  /** The goal title of each hold in `holds_told`, so a hold that is gone without a release directive (one seen only in
+   *  the cached feed, say) is told to the model by name (cycle 9). */
+  hold_titles?: Record<string, string>;
   /** The model saw the stop latch block a tool since the last resume it was told, so a resume is told to it. */
   stop_told?: boolean;
   /** The resume the model was last told about. */

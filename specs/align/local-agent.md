@@ -1636,7 +1636,14 @@ the hold on "<title>".` once in each session it released; when the model saw tha
 deny, or the cached feed's hold, named that goal since), that prompt SHALL also give it one context line `[Align]
 <name> released the hold on goal "<title>", so it no longer blocks tools.`, and a session whose model never saw it
 block a tool SHALL get no such line (test `findings9` "a hold or stop released before the model saw it block a tool
-..."). A hold SHALL stay on a session that moves to another goal until that goal's `release`
+..."). A hold the model saw deny one of its tools that no longer blocks the session and that no `release` reached SHALL
+be told to it at the next prompt too, once: a hold it saw only in the cached feed that was released before it reached
+the session (its share still pending, or the machine offline), as the context line `[Align] The hold on goal "<title>"
+was released, so it no longer blocks tools.` and the notice `Align: the hold on "<title>" was released, so this
+session's tools work again.` when the cached feed no longer says held; otherwise (it no longer applies to the session:
+its share stopped, or it left the goal) as `[Align] The hold on goal "<title>" no longer applies to this session, so it
+no longer blocks tools.`; a hold whose `release` reached the session is told by that release only. So a model that was
+told to wait for instructions never finds its tools working again without a word. A hold SHALL stay on a session that moves to another goal until that goal's `release`
 reaches it (the server sends the release to every session its hold reached). The hold and the stop latch SHALL be independent: a tool runs only when neither blocks
 it, `resume` SHALL NOT lift a hold and `release` SHALL NOT lift a stop. At the end of a turn a held session behaves
 like a stopped one (the `Stop` hook prints nothing). Stopping sharing or deleting history SHALL lift a session's holds
@@ -1656,6 +1663,11 @@ line (`... (<n> from the cached goals, before the hold reaches them)`).
 
 - **WHEN** a goal is held and a session starts in a folder a rule shares toward it, then calls `Bash` and `Read` before any sync, then a sync shares it, the hold and its release reach it while the cached feed still says held, and a session in another, unshared folder calls `Bash` (test `findings7` "held goal, fail closed ...")
 - **THEN** both calls are denied with the hold wording, `::align status`, `align latch status` and `align status` show that hold, it stays denied after the sync and while held, its tools run after the release (and the status views no longer show it), and the unshared session's tools run
+
+#### Scenario: A feed hold released before it reached the session
+
+- **WHEN** a folder rule shares a new session toward a goal the cached feed says is held, its share stays pending (or the machine is offline), a tool is denied with the cached feed's hold wording, the hold is released and the server is reachable again, two syncs run, and the session is prompted twice; in another case the session leaves the held goal with `::align unshare` (test `findings10` "C9-3: ...")
+- **THEN** the first prompt gives the model `[Align] The hold on goal "Ship the v2 onboarding flow" was released, so it no longer blocks tools.` and the user `Align: the hold on "Ship the v2 onboarding flow" was released, so this session's tools work again.`, tools run, and the second prompt says nothing about the hold; the session that left the goal is told the hold no longer applies to it; a hold whose release reached the session gives one line, the release's
 
 #### Scenario: A hold deny asks the model to tell the user
 

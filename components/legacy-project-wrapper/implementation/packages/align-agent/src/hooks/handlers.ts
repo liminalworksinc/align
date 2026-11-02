@@ -563,15 +563,56 @@ function resumeLine(hot: HotState, inj: InjectedState): string | null {
   return saw ? "[Align] This session was resumed from its Align workspace, so its tools are no longer blocked. Continue the user's task." : null;
 }
 
-/** The model is shown a deny of a tool by the stop latch (`stop`) or by holds on `goals`: recorded, so their lifting is
- *  told to it later, and only then. */
-function noteBlockTold(home: string, lid: string, block: { stop?: boolean; goals?: string[] }): void {
+/**
+ * Holds the model saw block a tool (`holds_told`) that block it no longer, which no release directive told it about: a
+ * hold it saw only in the cached feed that was released before it reached the session (its share still pending, or the
+ * machine offline), or one that stopped applying to it (its share stopped since). Without a word the model would go on
+ * waiting for instructions while its tools work again: one context line each, once, and, when the cached feed says the
+ * hold was released, a notice for the user too (E2E-AGENT cycle 9 C9-3). Run after `releaseLines`, which tells (and
+ * forgets) the holds a release directive lifted. A hold file that can't be read still blocks every tool: nothing is told.
+ */
+function liftedHolds(home: string, lid: string, inj: InjectedState, cwd: string | null): { context: string[]; notices: string[] } {
+  const out = { context: [] as string[], notices: [] as string[] };
+  const seen = inj.holds_told || [];
+  if (!seen.length) return out;
+  const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
+  if (h.state !== "absent" && !(h.state === "ok" && Array.isArray(h.value?.holds))) return out;
+  const held = new Set(h.state === "ok" ? h.value.holds.map((x) => x.goal_id) : []);
+  const fromFeed = feedHold(home, lid, cwd)?.goal_id ?? null;
+  const gone = seen.filter((g) => !held.has(g) && g !== fromFeed);
+  if (!gone.length) return out;
+  const titles = { ...(inj.hold_titles || {}) };
+  const cached = feeds(home).flatMap((f) => f.goals);
+  for (const g of gone) {
+    const title = titles[g];
+    delete titles[g];
+    // Seen by an older hook, which kept no title: forgotten without a line.
+    if (!title) continue;
+    const goal = cached.find((x) => x.id === g);
+    if (goal && !goal.allocation?.held) {
+      out.context.push(`[Align] The hold on goal "${clean(title, 100)}" was released, so it no longer blocks tools.`);
+      out.notices.push(`Align: the hold on "${clean(title, 100)}" was released, so this session's tools work again.`);
+    } else {
+      out.context.push(`[Align] The hold on goal "${clean(title, 100)}" no longer applies to this session, so it no longer blocks tools.`);
+    }
+  }
+  inj.holds_told = seen.filter((g) => !gone.includes(g));
+  inj.hold_titles = titles;
+  return out;
+}
+
+/** The model is shown a deny of a tool by the stop latch (`stop`) or by holds on `goals` (`titles`: each one's goal
+ *  title): recorded, so their lifting is told to it later, and only then. */
+function noteBlockTold(home: string, lid: string, block: { stop?: boolean; goals?: string[]; titles?: Record<string, string> }): void {
   try {
     const inj = readInjected(home, lid);
     const goals = [...new Set([...(inj.holds_told || []), ...(block.goals || [])])];
-    if (!(block.stop && !inj.stop_told) && goals.length === (inj.holds_told || []).length) return;
+    const untitled = (block.goals || []).some((g) => block.titles?.[g] && !inj.hold_titles?.[g]);
+    if (!(block.stop && !inj.stop_told) && goals.length === (inj.holds_told || []).length && !untitled) return;
     if (block.stop) inj.stop_told = true;
     inj.holds_told = goals.slice(-50);
+    const titles = { ...(inj.hold_titles || {}), ...(block.titles || {}) };
+    inj.hold_titles = Object.fromEntries(Object.entries(titles).filter(([g]) => inj.holds_told!.includes(g)));
     writeInjected(home, lid, inj);
   } catch {
     /* best effort: a deny never fails on its bookkeeping */
@@ -590,14 +631,19 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   const rootTurn = (harness === "claude-code" ? input.prompt_id : input.turn_id) || input.prompt_id || input.turn_id || `ts:${ts}`;
   spoolWrite(home, { type: "root_turn", harness, native_id: sid, root_turn: rootTurn, cwd: input.cwd || null, ts });
   const hot = readHot(home, lid);
-  if (!hot) return null;
-  if (!hot.share) {
-    // A session whose share failed (or ended) still hears the sync's notices at its next prompt (N5).
+  if (!hot || !hot.share) {
+    // A session whose share failed (or ended) still hears the sync's notices at its next prompt (N5); and one a folder
+    // rule is sharing that saw the cached feed's hold, that the hold is gone (C9-3).
     const inj = readInjected(home, lid);
     const notices = takeNotices(hot, inj);
-    if (!notices) return null;
+    const lifted = liftedHolds(home, lid, inj, input.cwd || hot?.cwd || null);
+    const system = [notices, ...lifted.notices].filter(Boolean).join("\n") || null;
+    if (!system && !lifted.context.length) return null;
     writeInjected(home, lid, inj);
-    return { systemMessage: notices };
+    const out: Record<string, unknown> = {};
+    if (lifted.context.length) out.hookSpecificOutput = { hookEventName: "UserPromptSubmit", additionalContext: lifted.context.join("\n") };
+    if (system) out.systemMessage = system;
+    return out;
   }
   const inj = readInjected(home, lid);
   let goal: GoalSnapshot | null = hot.goal;
@@ -677,9 +723,11 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
   if (req.context.length) context = [context, ...req.context].filter(Boolean).join("\n");
   const released = releaseLines(hot, inj);
   if (released.length) context = [context, ...released].filter(Boolean).join("\n");
+  const lifted = liftedHolds(home, lid, inj, input.cwd || hot.cwd);
+  if (lifted.context.length) context = [context, ...lifted.context].filter(Boolean).join("\n");
   const resumed = resumeLine(hot, inj);
   if (resumed) context = [context, resumed].filter(Boolean).join("\n");
-  const notices = [takeNotices(hot, inj), ...req.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
+  const notices = [takeNotices(hot, inj), ...req.notices, ...lifted.notices, takeDrift(home, lid, hot, inj)].filter(Boolean).join("\n") || null;
   writeInjected(home, lid, inj);
   if (!context && !notices) return null;
   const out: Record<string, unknown> = {};
@@ -778,7 +826,7 @@ function holdDeny(home: string, lid: string): HookOutput {
   const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
   if (h.state === "absent") return null;
   if (h.state === "ok" && h.value && Array.isArray(h.value.holds) && !h.value.holds.length) return null;
-  if (h.state === "ok" && h.value && Array.isArray(h.value.holds)) noteBlockTold(home, lid, { goals: h.value.holds.map((x) => x.goal_id) });
+  if (h.state === "ok" && h.value && Array.isArray(h.value.holds)) noteBlockTold(home, lid, { goals: h.value.holds.map((x) => x.goal_id), titles: Object.fromEntries(h.value.holds.map((x) => [x.goal_id, x.goal_title])) });
   return denyOutput(holdDenyReason(h.state === "ok" ? h.value : null, lid));
 }
 
@@ -834,7 +882,7 @@ export function latchDeny(home: string, harness: Harness, input: HookInput): Hoo
  *  as a hold, fail closed (cycle 6). */
 function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput {
   const h = feedHold(home, lid, cwd);
-  if (h) noteBlockTold(home, lid, { goals: [h.goal_id] });
+  if (h) noteBlockTold(home, lid, { goals: [h.goal_id], titles: { [h.goal_id]: h.goal_title } });
   return h ? denyOutput(`${feedHoldReason(h.goal_title, clean)} ${TELL_USER}`) : null;
 }
 

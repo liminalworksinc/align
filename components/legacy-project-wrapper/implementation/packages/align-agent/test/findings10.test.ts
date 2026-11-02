@@ -182,3 +182,59 @@ describe("C9-2: every notice about a share that ended gives the deny's advice", 
     same(t, B, "share again", "workspace back");
   });
 });
+
+describe("C9-3: a hold the model saw only in the cached feed, gone before it reached the session, is told as lifted", () => {
+  const HELD_DENY = 'Align: all agents on goal "Ship the v2 onboarding flow" were paused from its Align workspace. Work resumes when the hold is released. Your work so far is saved. Tell the user and wait for instructions.';
+  for (const how of ["its share still pending", "the machine offline"]) {
+    test(`folder rule toward a held goal, ${how}: denied from the feed; released before the hold reached it: the next prompt tells the model and the user once, and tools run`, async () => {
+      const { fake, t } = await world();
+      const g = fake.goals.get("ws_acme")!.find((x) => x.id === "g_ship")!;
+      g.allocation = { target_share: null, share_7d: 0, gap_7d: null, held: true };
+      const dir = path.join(t.root, `held-${how.split(" ")[1]}`);
+      fs.mkdirSync(dir, { recursive: true });
+      assert.equal((await runCli(t, ["share", "--dir", dir, "--workspace", "Acme", "--goal", "Ship the v2", "--yes"])).code, 0);
+      fake.failCalls = how.includes("pending") ? (_m: string, p: string) => p.includes("/sessions/") : () => true;
+      const sid = newSid();
+      const s = { sid, cwd: dir, lid: localId("claude-code", sid) };
+      start(t, sid, "startup", dir);
+      if (how.includes("pending")) await runCli(t, ["sync"]);
+      assert.equal(deny(t, s), HELD_DENY);
+      // Released on the web; the server is reachable again; the share takes, and the feed no longer says held.
+      g.allocation = { target_share: null, share_7d: 0, gap_7d: null, held: false };
+      fake.failCalls = undefined;
+      await sync(t);
+      await sync(t);
+      assert.equal(hot(t, s.lid).share?.state, "shared");
+      const told = prompt(t, sid, "go on", dir);
+      assert.match(told?.hookSpecificOutput?.additionalContext ?? "", /\[Align\] The hold on goal "Ship the v2 onboarding flow" was released, so it no longer blocks tools\./);
+      assert.match(told?.systemMessage ?? "", /Align: the hold on "Ship the v2 onboarding flow" was released, so this session's tools work again\./);
+      assert.equal(deny(t, s), undefined, "tools run");
+      const again = prompt(t, sid, "go on", dir);
+      assert.doesNotMatch(`${again?.hookSpecificOutput?.additionalContext ?? ""} ${again?.systemMessage ?? ""}`, /hold/, "once");
+    });
+  }
+
+  test("a feed hold the session leaves (`::align unshare`) is told to the model as no longer applying; a hold that reached it is told by its release only", async () => {
+    const { fake, t } = await world();
+    const g = fake.goals.get("ws_acme")!.find((x) => x.id === "g_ship")!;
+    g.allocation = { target_share: null, share_7d: 0, gap_7d: null, held: true };
+    const A = await shared(t);
+    await sync(t);
+    assert.equal(deny(t, A), HELD_DENY);
+    prompt(t, A.sid, "::align unshare", A.cwd);
+    await sync(t);
+    assert.match(prompt(t, A.sid, "go on", A.cwd)?.hookSpecificOutput?.additionalContext ?? "", /\[Align\] The hold on goal "Ship the v2 onboarding flow" no longer applies to this session, so it no longer blocks tools\./);
+    // The server's hold reaches B, the model sees it, then its release: one line, from the release.
+    const B = await shared(t);
+    await sync(t);
+    fake.holdGoal("ws_acme", "g_ship", [B.key]);
+    await sync(t);
+    assert.match(deny(t, B) ?? "", /paused all agents on goal "Ship the v2 onboarding flow"/);
+    fake.releaseGoal("ws_acme", "g_ship", [B.key]);
+    g.allocation = { target_share: null, share_7d: 0, gap_7d: null, held: false };
+    await sync(t);
+    const ctx = prompt(t, B.sid, "go on", B.cwd)?.hookSpecificOutput?.additionalContext ?? "";
+    assert.equal(ctx.match(/hold on goal/g)?.length, 1, ctx);
+    assert.match(ctx, /released the hold on goal "Ship the v2 onboarding flow"/);
+  });
+});
