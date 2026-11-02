@@ -364,6 +364,28 @@ export function endShareRemoved(ctx: Ctx, lid: string): void {
 }
 
 /**
+ * The server refused this session's usage as `sharing_stopped` because its share ended when this machine signed out
+ * (`ended_reason: "device_signed_out"`: a sign-out of an earlier pairing this machine never saw end it). Not a stop by
+ * its person: the share ends here as a sign-out ends it (`align sessions` and the latch say so), and the notice says
+ * `::align share` shares it again, as the sign-out notice does once signed in (C7-5).
+ */
+export function endShareSignedOutByServer(ctx: Ctx, lid: string): void {
+  const s = getShare(ctx, lid);
+  if (!s || (s.state !== "shared" && s.state !== "pending" && s.state !== "suspended")) return;
+  const goal = s.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
+  const at = nowIso();
+  endShare(
+    ctx,
+    lid,
+    DEVICE_SIGNED_OUT,
+    `upload_refused_signed_out_${at}`,
+    `Align: this session stopped sharing because the Align server ended its share when this machine signed out of Align (an earlier sign-in); its usage stays on this machine from now on. This machine is signed in now, so to share it again, type \`::align share\` here${goal ? ` (it counts toward "${clean(goal.title, 100)}" again)` : ""}.`,
+    at,
+  );
+  ctx.log(`usage refused: session ${lid.slice(0, 8)} ended on the server when this machine signed out; ended here too`);
+}
+
+/**
  * This device can no longer reach a workspace (`/me` no longer lists it: its person was removed from it or left, or a
  * new pairing did not include it). The server ended those sessions (`member_removed`), so each live share in it ends
  * here too, with one notice; its cached goals and asks go, so no envelope or `::align goals` shows them. Stop latches

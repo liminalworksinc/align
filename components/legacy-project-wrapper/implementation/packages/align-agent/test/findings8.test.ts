@@ -194,3 +194,26 @@ describe("C7-4: the access token's expiry once a clock skew is fixed", () => {
     assert.match(fixed.stdout, new RegExp(`access token expires ${new Date(server).toISOString().replace(/\./g, "\\.")}\\n`));
   });
 });
+
+describe("C7-5: a usage refusal that names `device_signed_out`", () => {
+  test("worded as a sign-out the server ended, with `::align share` to share it again, and `align sessions` says it ended at a sign-out; never the older-server words", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    turn(t, A, "req_c75_shared");
+    await sync(t);
+    const s = fake.sessions.get(A.key)!;
+    s.state = "stopped";
+    s.ended = "device_signed_out";
+    turn(t, A, "req_c75_after", 50);
+    await sleep(80);
+    await sync(t);
+    const told = prompt(t, A.sid, "go on", A.cwd);
+    assert.equal(
+      told?.systemMessage,
+      'Align: this session stopped sharing because the Align server ended its share when this machine signed out of Align (an earlier sign-in); its usage stays on this machine from now on. This machine is signed in now, so to share it again, type `::align share` here (it counts toward "Ship the v2 onboarding flow" again).',
+    );
+    assert.doesNotMatch(told.systemMessage, /left its workspace|sharing_stopped/);
+    const row = JSON.parse((await runCli(t, ["sessions", "--all", "--json"])).stdout).find((x: { native_id: string }) => x.native_id === A.sid);
+    assert.equal(row.shared, "stopped (Acme; ended at a sign-out; `::align share` shares it again)");
+  });
+});

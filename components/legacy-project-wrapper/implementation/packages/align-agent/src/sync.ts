@@ -28,7 +28,7 @@ import {
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { applyShare, bind, endShareRemoved, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
+import { applyShare, bind, endShareRemoved, endShareSignedOutByServer, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -518,6 +518,9 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
             // Its person was removed (and is back: /me lists the workspace) while this device never saw it: not a stop
             // for good, so it ends as a lost workspace does and `::align share` shares it again (C6-3).
             endShareRemoved(ctx, s.local_id);
+          } else if (stopped && r.json?.ended_reason === "device_signed_out") {
+            // Ended at a sign-out this machine never saw end it: worded as a sign-out, not as leaving the workspace (C7-5).
+            endShareSignedOutByServer(ctx, s.local_id);
           } else if (stopped || r.json?.error === "not_shared" || r.status === 404) {
             markStopped(ctx, s.local_id);
             // A server that names why (`ended_reason`) says null when its person stopped it (on the web, or on another
