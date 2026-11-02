@@ -1109,6 +1109,11 @@ login at once), it gets the first free `<name> (2)`, `<name> (3)`, ..., so the D
 two live devices of one name. The token poll MAY name the device the pairing replaces on the same machine (`replaces`,
 a device id; malformed is 400); that device, counted only when it is the approving person's own, is left out of the
 check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with `<name> (2)`.
+A device name SHALL be one line as the person reads it everywhere (the approval page, the Devices page, `align
+login`): at `authorize` every run of control characters (C0, DEL and C1) and whitespace, line and paragraph
+separators included, SHALL become one space, invisible direction marks (bidirectional embeddings, overrides and
+isolates, left-to-right and right-to-left marks) and zero-width spaces SHALL be dropped, and the ends trimmed, before
+the 100-character limit applies; a name with nothing left SHALL be 400 `device_name is required`.
 A device that revokes itself because a newer pairing on the same machine replaced it (`DELETE
 /api/v2/devices/self?replaced_by=<device id>`) SHALL pass its name on: when the named device is the same person's, live,
 and named `<its name> (<n>)`, and no other live device of the person has the plain name once it is revoked, the named
@@ -1125,6 +1130,11 @@ named while the first's device was live, then replacing it) so end with the plai
 
 - **WHEN** the CLI POSTs `/api/v2/device/authorize`
 - **THEN** the response is `{device_code, user_code:"XXXX-XXXX", verification_uri:"<origin>/app/device", expires_in:600, interval:5}`, where the user code uses only the letters `BCDFGHJKLMNPQRSTVWXZ`; more than 10 requests per client per hour get 429 `rate_limited` with `retry_after` (seconds, also sent as `Retry-After`) and a message that says how long to wait: in Mode L, where every pairing on the computer is one client, `Align on this computer has started 10 device pairings in the last hour, its limit for everyone who pairs here. Try again in <n> minutes, or restart Align to clear it.`, and when hosted `Too many device pairings were started from this network in the last hour (the limit is 10). Try again in <n> minutes.` (`scripts/test-v2.mjs` "device: authorize is limited to 10 per hour per client ...")
+
+#### Scenario: A device name with control characters
+
+- **WHEN** a pairing is started with the name `"  nl\nhere\t\u0007x \u202e "`, and another with only `"\n\t\u0000\u200b"` (`scripts/test-v2.mjs` "Z4: a device name ...")
+- **THEN** the first is stored (and so shown on the approval page) as `nl here x`; the second is 400 `device_name is required` and starts no pairing
 
 #### Scenario: A second device of one name
 
@@ -1284,7 +1294,9 @@ The server SHALL accept usage from the sharing device on `POST .../sessions/{key
 the end of the epoch it names, at a time no epoch of the session covers (its share had ended, by a stop, a removal or a
 revoked device, and the session was shared again only later), was made while the session was not shared: it SHALL be a
 conflict, counted on the session and never stored, so a re-share never brings in the gap. A row from after its epoch
-ended while a later epoch of the session was open is the tail of a turn that started in its epoch, and is stored.
+ended while a later epoch of the session was open is the tail of a turn that started in its epoch, and is stored. A
+row whose `ts` is before the start of the epoch it names was not made in that epoch (from the gap, naming the epoch of
+the re-share, say, or from before the session was first shared): it SHALL be a conflict too, counted and never stored.
 Usage or an epoch for a stopped session SHALL be refused 409 `sharing_stopped` with `ended_reason`: `member_removed` when
 its sharing ended because its person was removed from the workspace or left it (they may be a member again, and their
 device that never saw the ending can then share it again), `device_signed_out` when its device signed out, and `null`
@@ -1298,12 +1310,17 @@ when its person stopped sharing it, so the device words the refusal as what its 
 #### Scenario: Usage batch
 
 - **WHEN** a device POSTs rows for its session
-- **THEN** the response is `{accepted, duplicates, conflicts, refused}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for an epoch this session does not have is a conflict that is counted on the session and never stored; `refused` lists the `request_key` of each conflict that was not stored (an unknown epoch, or made while the session was not shared), so the device counts it as not shared, never a key stored earlier with other values
+- **THEN** the response is `{accepted, duplicates, conflicts, refused}`, where a repeated `request_key` with identical values is a duplicate, and one with other values or a row for an epoch this session does not have is a conflict that is counted on the session and never stored; `refused` lists the `request_key` of each conflict that was not stored (an unknown epoch, made while the session was not shared, or dated before its epoch started), so the device counts it as not shared, never a key stored earlier with other values
 
 #### Scenario: Usage from while a session was not shared
 
 - **WHEN** a member's session ends when they are removed, they are let back in, their device shares it again with a new epoch starting 2 seconds after the old one ended, and uploads rows naming the old epoch from 1 second before its end, 1 second after it and 2.5 seconds after it, and one naming the new epoch from 2.5 seconds after (`scripts/test-v2.mjs` "usage (C5-1): a row naming an epoch that ended ...")
 - **THEN** the response is `{accepted: 3, conflicts: 1}` with `refused` naming the gap row's key (`scripts/test-v2.mjs` "usage (E2E-AGENT cycle 6): the answer names the conflicts it did not store ..."), the session's conflicts grow by one, and only the row from the gap is not stored
+
+#### Scenario: Usage from before its epoch started
+
+- **WHEN** after such a re-share the device uploads a row naming the new epoch from the gap (1 second after the old epoch ended, before the new one started), one naming the old epoch from before it started, and one naming the new epoch from after it started (`scripts/test-v2.mjs` "Z7: a usage row dated before the start of the epoch it names ...")
+- **THEN** the response is `{accepted: 1, conflicts: 2}` with `refused` naming the first two rows' keys, the session's conflicts grow by two, and only the last row is stored
 
 #### Scenario: Oversized batch
 

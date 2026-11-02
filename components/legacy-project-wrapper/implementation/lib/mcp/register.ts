@@ -7,6 +7,7 @@ import { CHANGE_REQUEST_STATES, getChangeRequest, listChangeRequests, type Chang
 import { launchWords } from "../v2/launch-words";
 import { diffWords, type FieldDiff } from "../v2/change-words.mts";
 import { count } from "../v2/plural.mts";
+import { usd } from "../v2/money.mts";
 import { noteGrantRead } from "../oauth/grants";
 import { EVIDENCE_SCOPE } from "../oauth/server";
 import { all, get } from "../v2/db";
@@ -304,7 +305,6 @@ const snapshotOut = (s: SnapshotView | null): z.infer<typeof SnapshotOut> | null
     last_activity_at: s.last_activity_at,
   };
 const evidenceLine = (e: z.infer<typeof EvidenceOut>) => `  - revision ${e.revision} ${e.kind}, ${e.reported_as} by ${tag(e.added_by.name.untrusted_text)}: ${tag(e.label.untrusted_text)} ${tag(e.url.untrusted_text)}`;
-const usd = (micros: number) => `$${(micros / 1e6).toFixed(2)}`;
 const snapshotLine = (s: z.infer<typeof SnapshotOut> | null) =>
   !s
     ? "  No Align snapshot for this revision."

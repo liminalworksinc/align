@@ -135,7 +135,10 @@ export function ChangesForm({
   const [title, setTitle] = useState(start.title ?? goal.title);
   const [status, setStatus] = useState<Goal["status"]>(start.status ?? goal.status);
   const [measures, setMeasures] = useState<MeasureDraft[]>(measuresDraft({ ...goal, measures: start.measures ?? goal.measures }));
-  const [startDeps] = useState<string[]>(start.depends_on ?? goal.depends_on ?? []);
+  // A dependency the request has that now depends on this goal would close a loop, which the server refuses (409 cycle):
+  // the counter form leaves it unticked and unoffered, and says so (C6-1). A goal's own dependencies never loop.
+  const [looped] = useState<string[]>(() => (start.depends_on ?? []).filter((id) => loops?.includes(id)));
+  const [startDeps] = useState<string[]>(() => (start.depends_on ?? goal.depends_on ?? []).filter((id) => !looped.includes(id)));
   const [deps, setDeps] = useState<string[]>(startDeps);
   const [limits, setLimits] = useState<LimitDraft[]>(limitsDraft(start.limits ?? goal.limits ?? []));
   const [note, setNote] = useState("");
@@ -144,7 +147,8 @@ export function ChangesForm({
   // A goal someone who decides can't see would be refused as a new dependency, so it isn't offered (C2 F5).
   const offered = (id: string) => !choices || choices.includes(id) || startDeps.includes(id);
   const others = listed.filter((g) => offered(g.id));
-  const looping = listed.filter((g) => !offered(g.id) && loops?.includes(g.id)).length;
+  const looping = listed.filter((g) => !offered(g.id) && loops?.includes(g.id) && !looped.includes(g.id)).length;
+  const titleOf = (id: string) => `“${feed.data?.goals.find((g) => g.id === id)?.title ?? "a goal"}”`;
   const notOffered = listed.length - others.length - looping;
   const them = (n: number) => (n === 1 ? "it" : "them");
   const out = measuresOut(measures);
@@ -152,7 +156,7 @@ export function ChangesForm({
   if (title.trim() !== goal.title || keep.includes("title")) changes.title = title.trim();
   if (!sameMeasures(out, goal.measures) || keep.includes("measures")) changes.measures = out as Goal["measures"];
   if (status !== goal.status || keep.includes("status")) changes.status = status;
-  if (!sameIds(deps, goal.depends_on ?? []) || keep.includes("depends_on")) changes.depends_on = deps;
+  if (!sameIds(deps, goal.depends_on ?? []) || keep.includes("depends_on") || looped.length) changes.depends_on = deps;
   const limitsChanged = !sameLimits(limits, goal.limits ?? []);
   if (limitsChanged || keep.includes("limits")) changes.limits = limitsOut(limits) as Goal["limits"];
   const differs = title.trim() !== goal.title || !sameMeasures(out, goal.measures) || status !== goal.status || !sameIds(deps, goal.depends_on ?? []) || limitsChanged || keep.length > 0;
@@ -175,7 +179,7 @@ export function ChangesForm({
           <option value="dropped">Dropped</option>
         </Select>
       </Field>
-      {(others.length > 0 || hiddenDeps > 0 || notOffered > 0 || looping > 0) && (
+      {(others.length > 0 || hiddenDeps > 0 || notOffered > 0 || looping > 0 || looped.length > 0) && (
         <div className="mb-3">
           <p className="mb-1 text-[14px] text-zinc-600">Depends on</p>
           {others.map((g) => (
@@ -197,6 +201,14 @@ export function ChangesForm({
           {looping > 0 && (
             <p className="text-[14px] text-zinc-500" data-deps-looping>
               {looping === 1 ? "1 goal isn't offered: it already depends on this goal" : `${looping} goals aren't offered: they already depend on this goal`}, so adding {them(looping)} would make a loop.
+            </p>
+          )}
+          {looped.length > 0 && feed.data && (
+            <p className="text-[14px] text-zinc-500" data-deps-loop-dropped>
+              {looped.length === 1
+                ? `The request's dependency on ${titleOf(looped[0])} is left out: it already depends on this goal`
+                : `The request's dependencies on ${looped.map(titleOf).join(", ")} are left out: they already depend on this goal`}
+              , so keeping {them(looped.length)} would make a loop.
             </p>
           )}
         </div>

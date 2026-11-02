@@ -1,5 +1,6 @@
 "use client";
-import { api, Btn, Card, Err, Loading, Note, Pill, Shell, num, useAction, useApi, when } from "../../../_ui/kit";
+import { useState } from "react";
+import { api, ApiError, Btn, Card, Err, Loading, Note, Pill, Shell, num, useAction, useApi, when } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
 import { EvidencePill } from "../../../_ui/evidence";
 import { HoldBanner } from "../../../_ui/requests";
@@ -38,6 +39,19 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
   const act = useAction();
   const base = `/api/v2/workspaces/${ws}/sessions`;
   const post = (key: string, verb: string) => act.run(() => api(`${base}/${key}/${verb}`, { body: {} }), d.reload);
+  const [alreadyDeleted, setAlreadyDeleted] = useState(false);
+  /** Delete a session's shared history. 410 history_deleted means it is already gone (deleted in another tab or window,
+   *  or from the machine): the deletion is done, so the row goes and the page says so instead of an error (Z3). */
+  const del = (key: string) =>
+    act.run(async () => {
+      setAlreadyDeleted(false);
+      try {
+        await api(`${base}/${key}`, { method: "DELETE" });
+      } catch (e) {
+        if (!(e instanceof ApiError && e.code === "history_deleted")) throw e;
+        setAlreadyDeleted(true);
+      }
+    }, d.reload);
 
   return (
     <Shell me={me} ws={ws} tab="Sessions">
@@ -48,6 +62,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
       ))}
       {d.loading && <Loading />}
       <Err>{d.error ?? act.error}</Err>
+      {alreadyDeleted && <Note>That session&apos;s shared history was already deleted, in another tab or window or from its machine, so it is no longer listed.</Note>}
       <Card title="Yours">
         {d.data?.mine.length === 0 && <Note>You have not shared a session in this workspace.</Note>}
         <ul className="divide-y divide-zinc-200">
@@ -107,7 +122,7 @@ export default function Sessions({ me, ws }: { me: Me; ws: string }) {
                   disabled={act.busy}
                   onClick={() => {
                     if (window.confirm("Delete this session's shared history? Its usage is removed from every total, so goal and team totals will change. This can't be undone.")) {
-                      void act.run(() => api(`${base}/${s.session_key}`, { method: "DELETE" }), d.reload);
+                      void del(s.session_key);
                     }
                   }}
                 >

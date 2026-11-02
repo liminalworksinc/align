@@ -355,7 +355,7 @@ which of their workspaces the device may use, and approve or deny it.
 #### Scenario: Approve a device
 
 - **WHEN** a person enters the code, presses **Look up**, ticks at least one workspace and presses **Approve**
-- **THEN** the page calls `GET /api/v2/device/requests/<code>` (showing the device name and "Asked <n> seconds/minutes ago") and then `POST /api/v2/device/approve` with `{user_code, workspace_ids}`, and says "<device> is connected. You can close this page."; **Approve** stays disabled until a workspace is ticked
+- **THEN** the page calls `GET /api/v2/device/requests/<code>` (showing the device name and "Asked <n> seconds ago" or "Asked <n> minutes ago", with the count-and-noun helper `lib/v2/plural.mts`, so "Asked 1 minute ago" for a code 60 to 89 seconds old: `scripts/test-v2.mjs` "C6-4 (ui): ...") and then `POST /api/v2/device/approve` with `{user_code, workspace_ids}`, and says "<device> is connected. You can close this page."; **Approve** stays disabled until a workspace is ticked
 
 #### Scenario: Unknown code or deny
 
@@ -403,11 +403,26 @@ person is a member of SHALL offer those workspaces in a list with **Give this de
 `POST /api/v2/devices/<id>/workspaces` (`workspaces` "Giving a device a workspace later", an extension of owner decision
 2026-11-01 in `docs/decisions/0003-owner-decisions-v2.md` section 6); a 403 `reauth_required` shows the server's message
 with **Sign in again** (back to `/app/devices`), and a note says the device picks the workspace up at its next sync.
+The devices SHALL be listed as the invite page lists them, by name (case-insensitive), the live ones first and then the
+revoked ones. The button SHALL give the workspace the list shows: once one is given it leaves the list, and the next
+press gives the one shown then. A refusal because the device is no longer the person's (revoked in another tab, say),
+or the workspace no longer theirs, SHALL show the server's message and read both lists again, so the row shows what is
+true now.
 
 #### Scenario: Give a device a workspace
 
 - **WHEN** a person with a recent sign-in opens the page with a device that lacks one of their workspaces and presses **Give this device the workspace** (`scripts/test-v2.mjs` "ui (Chrome, E2E-AGENT cycle 5): the Devices page names each device ...")
 - **THEN** the row showed the device's `dv_…` tag, now lists the workspace and offers it no more, the device has the grant on the server, and a device that has every workspace of theirs is offered none
+
+#### Scenario: Two workspaces given one after the other
+
+- **WHEN** a device lacks two of the person's workspaces, they choose the second in the list and press **Give this device the workspace**, then press it again without choosing (`scripts/test-v2.mjs` "C6-3 (ui): ...")
+- **THEN** the first press gives the chosen workspace, the list then shows only the other, and the second press gives that one (never the one just given, which the server would refuse 409 `already_granted`)
+
+#### Scenario: Order, and a device revoked in another tab
+
+- **WHEN** the person opens the page, then a device is revoked in another tab and they press **Give this device the workspace** on its row (`scripts/test-v2.mjs` "Z1, Z2 (ui): ...")
+- **THEN** the live devices were listed by name before the revoked ones, and after the press the page shows "This device is not one of your paired devices any more …", and the row reads "revoked" with nothing offered
 
 #### Scenario: Revoke a device
 
@@ -436,7 +451,15 @@ of the person's paired devices (signed out in another tab) gives the server's me
 again: choose again, or join without them.", with the list read again and nothing ticked; an invite the person already
 accepted in another tab gives "You already joined <workspace>, in another tab or window." with a link to it; an
 invite that is gone otherwise gives "This invite can't be used any more: it was withdrawn, it expired, or it was
-already used. You have not joined. …".
+already used. You have not joined. …", and then only that: no invite text and no **Join workspace**. When the person
+already joined in another tab with devices ticked here, it SHALL also say "The device you ticked was not given
+<workspace>: give it to that device on your Devices page." ("The <n> devices you ticked were … give it to them …"),
+with a link to `/app/devices`, since a refused Join grants nothing.
+
+#### Scenario: Refused Join, invite gone or joined elsewhere
+
+- **WHEN** the invitee presses Join after the invite was withdrawn, and, on another invite, presses Join with a device ticked after accepting it in another tab (`scripts/test-v2.mjs` "C6-5, Z6 (ui): ...")
+- **THEN** the first page shows "This invite can't be used any more: …" alone, with no "You are invited …", no "This invite link is not valid" and no Join button; the second says "You already joined <workspace>, in another tab or window." and "The device you ticked was not given <workspace>: give it to that device on your Devices page." with links to `/app/devices` and the workspace, and the device has no new workspace
 
 #### Scenario: Accept an invite
 
@@ -847,7 +870,7 @@ and a closed "Details" disclosure.
 #### Scenario: A request that would now close a dependency loop
 
 - **WHEN** anyone opens a request whose `dependency_loop` is set (a goal it adds as a dependency has come to depend on its goal since it was made)
-- **THEN** an open request offers neither **Approve** nor **Approve and launch** and says "This can't be approved as it stands. <dependency_loop>", its waiting line reads "Waiting on <names> to suggest a change or decline it.", and **Suggest a change** and **Decline** stay for its deciders; an approved one offers no **Launch version <n+1> to agents** and, instead of "Can launch: …", says "Nobody can launch this as it stands. <dependency_loop>" (`scripts/test-v2.mjs` "C5-1 (ui): ...")
+- **THEN** an open request offers neither **Approve** nor **Approve and launch** and says "This can't be approved as it stands. <dependency_loop>", its waiting line reads "Waiting on <names> to suggest a change or decline it.", and **Suggest a change** and **Decline** stay for its deciders, but not **Accept if…** (it keeps the change as asked, which the server refuses 409 `cycle`); **Suggest a change** opens with the request's looping dependency unticked and not offered, saying "The request's dependency on “<goal>” is left out: it already depends on this goal, so keeping it would make a loop." (`scripts/test-v2.mjs` "C6-1 (ui): ..."); one that is also behind its goal shows the same note with **Update to version <n>** for its requester, which is recorded (`goals-and-proposals` "A request that would now close a loop is not approved or launched"); an approved one offers no **Launch version <n+1> to agents** and, instead of "Can launch: …", says "Nobody can launch this as it stands. <dependency_loop>" (`scripts/test-v2.mjs` "C5-1 (ui): ...")
 
 #### Scenario: Launched or superseded before launch
 
@@ -877,7 +900,7 @@ and a closed "Details" disclosure.
 ### Requirement: Evidence on change request cards
 
 Every change request card (on the goal page and in the Requests tab) SHALL show, under "Evidence for revision <n>"
-(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days with its request count, "1 request" for one as in the MCP snapshot line (one count-and-noun helper, `lib/v2/plural.mts`, for both: `scripts/test-v2.mjs` "C5-4: ..."), and its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence on the approved revision (<r>)." (links on earlier revisions are still listed under "From revision <n>") or "Approved with <n> evidence link(s), none verified." An **Add link** for a link that can no longer become an `https://` one (`http://…`) SHALL stay disabled with the hint "Use an https:// link: Align keeps only https links."
+(or "No evidence attached." when the current revision has no links), the Align snapshot of the current revision as "Recorded by Align at revision <n>" (the goal's estimated spend in the last 30 days, by the money rule the MCP snapshot line uses (`lib/v2/money.mts`: "$0.0010" under one cent), with its request count, "1 request" for one as in the MCP snapshot line (one count-and-noun helper, `lib/v2/plural.mts`, for both: `scripts/test-v2.mjs` "C5-4: ..."), and its models, or "Spend on this goal is hidden from you.", the sessions bound to it and its last activity), and each link on the current revision with its kind ("Pull request", "CI run", "Incident", "Dashboard", "Doc" or "Link"), its label as a link to its URL that opens in a new tab with `rel="noopener noreferrer"`, the URL's host, who added it ("you" for the person) and "self-reported" or "agent-reported". It SHALL never call a link verified. Links on earlier revisions SHALL be listed under "From revision <n>". When `can.add_evidence` is set, **Add evidence** SHALL open a form with a kind, an https link and "What it shows" (at most 120 characters) whose **Add link** posts `{kind, url, label, revision}` to `.../change-requests/<id>/evidence`; a link whose `can_remove` is set SHALL offer **Remove**, which sends `DELETE .../evidence/<evidence id>`. Once approved, the card SHALL say "Approved without evidence on the approved revision (<r>)." (links on earlier revisions are still listed under "From revision <n>") or "Approved with <n> evidence link(s), none verified." An **Add link** for a link that can no longer become an `https://` one (`http://…`) SHALL stay disabled with the hint "Use an https:// link: Align keeps only https links."
 
 #### Scenario: Approve without evidence
 
@@ -1040,6 +1063,11 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 
 - **WHEN** the person presses **Stop sharing** or **Delete shared history**
 - **THEN** the page asks "Stop sharing this session? Nothing more will be uploaded. What was already shared stays until you delete it." or "Delete this session's shared history? Its usage is removed from every total, so goal and team totals will change. This can't be undone." and on confirm posts to `.../sessions/<key>/stop-sharing` or calls `DELETE .../sessions/<key>`
+
+#### Scenario: History already deleted elsewhere
+
+- **WHEN** the person deletes a session's shared history that was already deleted in another tab, window or from its machine (`DELETE` answers 410 `history_deleted`; `scripts/test-v2.mjs` "Z3 (ui): ...")
+- **THEN** the deletion counts as done: the list is read again, so the row is gone, and the page says "That session's shared history was already deleted, in another tab or window or from its machine, so it is no longer listed." instead of an error
 
 #### Scenario: Owners see everyone's sessions
 
@@ -1349,6 +1377,7 @@ active goal), neutral otherwise.
 - `lib/v2/launch-words.ts`
 - `lib/v2/change-words.mts`
 - `lib/v2/plural.mts`
+- `lib/v2/money.mts`
 - `app/app/_ui/missing.tsx`
 - `app/app/_ui/value.tsx`
 - `lib/v2/value-core.mts`

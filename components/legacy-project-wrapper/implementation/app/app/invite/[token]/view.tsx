@@ -19,13 +19,19 @@ interface Preview {
 // devices get this workspace. Nothing is ticked for them; ticking needs a recent sign-in, like any device grant.
 // "Sign in again" goes straight to the sign-in page and back here, and a 403 reauth_required on Join says so in place,
 // unticking the devices, so Join (without them) stays on the page (Y2). A refusal says what happened: a ticked device
-// signed out meanwhile (the list is read again), the invite gone, or already joined in another tab (Y1).
+// signed out meanwhile (the list is read again), the invite gone, or already joined in another tab (Y1). Once the invite
+// is known to be gone the page shows only that (C6-5); joined in another tab, it says the devices ticked here were not
+// given the workspace and where to give it to them (Z6).
+const GONE = "This invite can't be used any more: it was withdrawn, it expired, or it was already used. You have not joined. Ask a workspace owner for a new invite if you should be in it.";
+
 export default function InviteAccept({ me, token, recent }: { me: Me; token: string; recent: boolean }) {
   const previewPath = `/api/v2/invites/${encodeURIComponent(token)}`;
   const p = useApi<Preview>(previewPath);
   const act = useAction();
   const [chosen, setChosen] = useState<string[]>([]);
-  const [joined, setJoined] = useState(false);
+  /** Joined in another tab: how many devices were ticked here (none of them was given the workspace). */
+  const [joined, setJoined] = useState<{ ticked: number } | null>(null);
+  const [gone, setGone] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const here = `/app/invite/${token}`;
   // Devices can be ticked only with a sign-in the server still takes as recent.
@@ -42,16 +48,21 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
       } catch (e) {
         if (e instanceof ApiError && e.code === "reauth_required") setChosen([]);
         if (e instanceof ApiError && e.code === "already_member") {
-          setJoined(true);
+          setJoined({ ticked: chosen.length });
+          setChosen([]);
           return;
         }
         if (e instanceof ApiError && e.status === 404) {
           // The invite is still there, so a ticked device was the refusal (signed out meanwhile): list them again.
           const still = await api<Preview>(previewPath).catch(() => null);
           setChosen([]);
-          p.reload();
-          if (still && chosen.length) throw new Error(`${e.message} Your devices are listed again: choose again, or join without them.`);
-          throw new Error("This invite can't be used any more: it was withdrawn, it expired, or it was already used. You have not joined. Ask a workspace owner for a new invite if you should be in it.");
+          if (still && chosen.length) {
+            p.reload();
+            throw new Error(`${e.message} Your devices are listed again: choose again, or join without them.`);
+          }
+          // The invite itself is gone: only that is shown, with no invite text and no Join (C6-5).
+          setGone(true);
+          return;
         }
         throw e;
       }
@@ -61,8 +72,9 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
       <h1 className="mb-5 text-[26px] font-semibold text-zinc-900">Workspace invite</h1>
       <Card>
         {p.loading && <Loading />}
-        {p.error && <Err>This invite link is not valid. It may have been used, withdrawn or expired.</Err>}
-        {p.data && (
+        {gone && <Err>{GONE}</Err>}
+        {p.error && !gone && <Err>This invite link is not valid. It may have been used, withdrawn or expired.</Err>}
+        {p.data && !gone && (
           <>
             <p className="mb-3 text-[16px] text-zinc-700">
               {p.data.email_matches ? "You are" : `${p.data.invited_email} is`} invited to <strong className="text-zinc-900">{p.data.workspace.name}</strong> as {p.data.role}
@@ -77,7 +89,7 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
             </p>
             {p.data.email_matches ? (
               <>
-                {p.data.devices.length > 0 && (
+                {p.data.devices.length > 0 && !joined && (
                   <fieldset className="mb-4 rounded-[12px] border border-zinc-300 p-4">
                     <legend className="px-1 text-[15px] text-zinc-700">Your paired devices</legend>
                     <p className="mb-2 text-[15px] text-zinc-600">
@@ -110,6 +122,16 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
                 {joined ? (
                   <Note>
                     You already joined {p.data.workspace.name}, in another tab or window.{" "}
+                    {joined.ticked > 0 && (
+                      <span data-devices-not-given>
+                        {joined.ticked === 1 ? "The device you ticked was" : `The ${joined.ticked} devices you ticked were`} not given {p.data.workspace.name}: give it to{" "}
+                        {joined.ticked === 1 ? "that device" : "them"} on your{" "}
+                        <Link href="/app/devices" className="underline">
+                          Devices page
+                        </Link>
+                        .{" "}
+                      </span>
+                    )}
                     <Link href={`/app/w/${p.data.workspace.id}`} className="underline">
                       Open {p.data.workspace.name}
                     </Link>

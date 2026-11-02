@@ -19,13 +19,16 @@ import type { ChangeFields, ChangeRequest, Goal, Limit } from "./types";
 type Person = { id: string; name: string };
 type Decision = "approve" | "approve_and_launch" | "accept_if" | "counter" | "reject" | "accept_counter" | "acknowledge" | "withdraw";
 
-/** The decisions this person may take on this request now, from its `can` flags (and nothing else), in screen order. */
+/** The decisions this person may take on this request now, from its `can` flags, in screen order. Accept if… is a
+ *  counter that keeps the request's changes, so it isn't offered while they would close a dependency loop
+ *  (`dependency_loop`, the server's own check, which refuses that counter 409 cycle; C6-1): Suggest a change is. */
 export function decisionsFor(cr: ChangeRequest): Decision[] {
   const c = cr.can;
   const out: Decision[] = [];
   if (c.approve) out.push("approve");
   if (c.approve_and_launch) out.push("approve_and_launch");
-  if (c.counter) out.push("accept_if", "counter");
+  if (c.counter && !cr.dependency_loop) out.push("accept_if");
+  if (c.counter) out.push("counter");
   if (c.reject) out.push("reject");
   if (c.accept_counter) out.push("accept_counter");
   if (c.acknowledge && cr.condition) out.push("acknowledge");

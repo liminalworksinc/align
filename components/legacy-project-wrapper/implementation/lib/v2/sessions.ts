@@ -329,7 +329,8 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
     let accepted = 0;
     let duplicates = 0;
     let conflicts = 0;
-    // The conflicts that were never stored (an unknown epoch, or made while the session was not shared), by key, so the
+    // The conflicts that were never stored (an unknown epoch, or made while the session was not shared or before its
+    // epoch started), by key, so the
     // device counts them as not shared (E2E-AGENT cycle 6); a key stored before with other values is not one of them.
     const refused: string[] = [];
     for (const r of rows) {
@@ -343,6 +344,13 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
       // shared (its share had ended and it was shared again later): it is never stored (C5-1). A row from after its
       // epoch ended while a later epoch was open is the tail of a turn that started in its epoch, and counts there.
       const t = Date.parse(r.ts as string);
+      // A row from before its epoch started can't have been made in it (in the gap before a re-share, say): never
+      // stored either (Z7).
+      if (t < Date.parse(e.starts_at)) {
+        conflicts++;
+        refused.push(r.request_key as string);
+        continue;
+      }
       if (e.ends_at !== null && t >= Date.parse(e.ends_at) && !shared(t)) {
         conflicts++;
         refused.push(r.request_key as string);

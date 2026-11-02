@@ -1661,12 +1661,15 @@ try {
   // GL: U3's workspace-visible goal in team P1 (lead U2), so its approval set is U3 (owner) and U2 (lead).
   const GL = (await mkGoal(U3, { title: "Pen-test the platform", visibility: "workspace", team_id: P1, measures: [{ text: "Open findings", target: "0" }] })).json;
   const SC = sessionKey(D3, A, "claude-code", "native-cr");
-  await put(D3, SC);
+  // Shared from 45 days ago, so a row from 40 days ago is inside its epoch (a row from before its epoch started is
+  // refused, Z7) and only the 30-day window leaves it out.
+  const scStart = new Date(Date.now() - 45 * 24 * 3600 * 1000).toISOString();
+  await put(D3, SC, { started_at: scStart });
   const SCe = epochId();
-  const scStart = new Date().toISOString();
   const scBind = await epoch(D3, SC, { epoch_id: SCe, goal_id: GL.id, starts_at: scStart });
   // Usage under GL for the snapshot: two models in the last 30 days, and one request 40 days ago (outside the window).
-  await upload(D3, SC, [usageRow(D3, "cr-a", SCe), usageRow(D3, "cr-b", SCe, { model: "claude-opus-4-1", est_list_usd_micros: 50_000 }), usageRow(D3, "cr-old", SCe, { ts: new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString() })]);
+  const scTs = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  await upload(D3, SC, [usageRow(D3, "cr-a", SCe, { ts: scTs }), usageRow(D3, "cr-b", SCe, { ts: scTs, model: "claude-opus-4-1", est_list_usd_micros: 50_000 }), usageRow(D3, "cr-old", SCe, { ts: new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString() })]);
   const mPen = { text: "Pen-test window booked", target: "May" };
   const cr1 = await propose(U1, GL.id, { base_version: 1, changes: { measures: [...GL.measures, mPen] }, reason: "Onboarding needs a pen-test window in May" });
   check(
@@ -1744,7 +1747,7 @@ try {
   const snap1 = cr1.json.revisions[0]?.snapshot;
   check(
     "evidence: revision 1 carries the snapshot Align recorded: the goal's spend over the last 30 days (total and by model, the old request left out), 1 bound session, last activity",
-    snap1?.revision === 1 && snap1.recorded_by === "align" && snap1.window.days === 30 && snap1.spend_hidden === false && snap1.spend.total.requests === 2 && snap1.spend.total.est_list_usd_micros === 62_345 && snap1.spend.by_model.map((m) => m.model).join() === "claude-opus-4-1,claude-sonnet-4-5" && snap1.spend.by_model[0].est_list_usd_micros === 50_000 && snap1.bound_sessions === 1 && snap1.last_activity_at === scStart && cr1.json.evidence_count === 0 && cr1.json.approved_without_evidence === null,
+    snap1?.revision === 1 && snap1.recorded_by === "align" && snap1.window.days === 30 && snap1.spend_hidden === false && snap1.spend.total.requests === 2 && snap1.spend.total.est_list_usd_micros === 62_345 && snap1.spend.by_model.map((m) => m.model).join() === "claude-opus-4-1,claude-sonnet-4-5" && snap1.spend.by_model[0].est_list_usd_micros === 50_000 && snap1.bound_sessions === 1 && snap1.last_activity_at === scTs && cr1.json.evidence_count === 0 && cr1.json.approved_without_evidence === null,
     JSON.stringify(snap1),
   );
   const forged = await propose(U2, GL.id, { base_version: 1, changes: { title: "Forged snapshot" }, reason: "x", snapshot: { bound_sessions: 99 } });
@@ -2019,6 +2022,25 @@ try {
     /in 2 requests, 1 bound session, last activity/.test(mcpList.text) && !/\b1 bound sessions\b/.test(mcpList.text) && !/\b1 requests\b/.test(mcpList.text),
     (mcpList.text ?? "").slice(0, 900),
   );
+  // Z5 (E2E-WEB cycle 6): a snapshot under one cent reads the same in the MCP text as on the web card ("$0.0010"), from
+  // one money helper (lib/v2/money.mts), never "$0.00" to an agent.
+  const GZ5 = (await mkGoal(U3, { title: "Tiny spend goal", visibility: "workspace" })).json;
+  const SZ5 = sessionKey(D3, A, "claude-code", "native-z5");
+  await put(D3, SZ5);
+  const EZ5 = epochId();
+  await epoch(D3, SZ5, { epoch_id: EZ5, goal_id: GZ5.id, starts_at: T0 });
+  await upload(D3, SZ5, [usageRow(D3, "z5-1", EZ5, { est_list_usd_micros: 1000 })]);
+  const crZ5 = await propose(U1, GZ5.id, { base_version: 1, changes: { title: "Tiny spend goal, renamed" }, reason: "A clearer name" });
+  const mcpZ5 = await mcpCall("U1", D1, "align_list_change_requests", { state: "pending" });
+  const money = await import(pathToFileURL(path.join(ROOT, "lib/v2/money.mts")).href).catch(() => null);
+  const z5Micros = crZ5.json?.revisions?.[0]?.snapshot?.spend?.total?.est_list_usd_micros;
+  check(
+    "Z5: one money rule for the web and MCP (lib/v2/money.mts): usd(1000) is \"$0.0010\", usd(0) \"$0.00\", usd(12_345_678) \"$12.35\"; a snapshot of $0.001 reads \"$0.0010 estimated over 30 days in 1 request\" in the MCP text, as the web card writes it, never \"$0.00 estimated\"",
+    money?.usd(1000) === "$0.0010" && money.usd(0) === "$0.00" && money.usd(12_345_678) === "$12.35" && crZ5.status === 201 && z5Micros === 1000 &&
+      mcpZ5.text.includes("$0.0010 estimated over 30 days in 1 request"),
+    `${money ? "" : "no lib/v2/money.mts; "}${crZ5.status} ${z5Micros} ${(mcpZ5.text ?? "").slice(0, 1500)}`,
+  );
+  await crAct(U1, GZ5.id, crZ5.json?.id, "withdraw");
   const evEventText = withDb((d) => d.prepare("SELECT * FROM v2_events").all()).map((r) => Object.values(r).join(" ")).join("\n");
   const evRowsAll = withDb((d) => d.prepare("SELECT url, label FROM v2_change_request_evidence").all());
   check(
@@ -2430,6 +2452,80 @@ try {
         before.includes(`dv_…${desk2.id.slice(-6)}`) && after.includes(`Workspaces: ${wsName}`) && !after.includes("Give this device the workspace") && granted2 === A && !deskRow.includes("Give this device the workspace"),
         `${before} | ${after} | ${deskRow} | ${granted2}`,
       );
+
+      // C6-3, Z1 and Z2 (E2E-WEB cycle 6): U5 joins a second workspace and pairs a device that has neither.
+      const u5Side = (await call("U5", "POST", "/api/v2/workspaces", { cookie: U5.cookie, body: { name: "U5 side" } })).json?.id;
+      const cart = insertDevice(U5.id, "U5's zed cart");
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      const cartRow = `li[data-device="${cart.id}"]`;
+      await page.waitForSelector(`${cartRow} select`, { timeout: 15000 }).catch(() => undefined);
+      const u5Devs = (await call("U5", "GET", "/api/v2/devices", { cookie: U5.cookie })).json?.devices ?? [];
+      const nameOrder = (a, b) => (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : a.id < b.id ? -1 : 1);
+      const wantOrder = [...u5Devs.filter((d) => !d.revoked_at).sort(nameOrder), ...u5Devs.filter((d) => d.revoked_at).sort(nameOrder)].map((d) => d.id);
+      const pageOrder = await page.$$eval("li[data-device]", (lis) => lis.map((li) => li.getAttribute("data-device")));
+      check(
+        "Z1 (ui): the Devices page lists the live devices by name (case-insensitive), as the invite page does, then the revoked ones, not newest first",
+        u5Devs.length >= 4 && JSON.stringify(pageOrder) === JSON.stringify(wantOrder) && pageOrder.indexOf(cart.id) > pageOrder.indexOf(desk.id),
+        `${JSON.stringify(pageOrder)} want ${JSON.stringify(wantOrder)}`,
+      );
+      const cartOptions = await page.$$eval(`${cartRow} select option`, (os) => os.map((o) => o.value)).catch(() => []);
+      const giveOn = (sel) => page.$eval(sel, (li) => [...li.querySelectorAll("button")].find((b) => b.textContent === "Give this device the workspace")?.click());
+      await page.select(`${cartRow} select`, cartOptions[1] ?? "");
+      await giveOn(cartRow);
+      await page.waitForFunction((sel) => document.querySelectorAll(`${sel} select option`).length === 1, { timeout: 15000 }, cartRow).catch(() => undefined);
+      const cartShown = await page.$eval(`${cartRow} select`, (s) => s.value).catch(() => null);
+      await giveOn(cartRow).catch(() => undefined);
+      await page.waitForFunction((sel) => !document.querySelector(sel)?.textContent?.includes("Give this device the workspace") || document.body.innerText.includes("already has this workspace"), { timeout: 15000 }, cartRow).catch(() => undefined);
+      const cartGrants = withDb((d) => d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ? ORDER BY ws_id").all(cart.id).map((r) => r.ws_id).join());
+      const cartPage = await page.evaluate((sel) => ({ row: document.querySelector(sel)?.textContent ?? "", body: document.body.innerText }), cartRow);
+      check(
+        "C6-3 (ui): a device missing two workspaces: choosing the second and giving it, then pressing Give this device the workspace again without choosing, gives the one the list then shows (both granted, no 409 \"already has this workspace\"), and the row offers nothing more",
+        !!u5Side && cartOptions.length === 2 && cartShown === cartOptions[0] && cartGrants === [A, u5Side].sort().join() && !cartPage.body.includes("already has this workspace") && !cartPage.row.includes("Give this device the workspace"),
+        `${JSON.stringify(cartOptions)} shown=${cartShown} grants=${cartGrants} ${cartPage.row} | ${cartPage.body.slice(0, 300)}`,
+      );
+      // desk now lacks the new workspace; it is revoked in another tab, then Give is pressed on its row.
+      const deskRowSel = `li[data-device="${desk.id}"]`;
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, deskRowSel).catch(() => undefined);
+      const revokedElsewhere = await call("U5", "DELETE", `/api/v2/devices/${desk.id}`, { cookie: U5.cookie });
+      await giveOn(deskRowSel).catch(() => undefined);
+      await page.waitForFunction((sel) => /revoked/.test(document.querySelector(sel)?.textContent ?? ""), { timeout: 15000 }, deskRowSel).catch(() => undefined);
+      const z2 = await page.evaluate((sel) => ({ row: document.querySelector(sel)?.textContent ?? "", body: document.body.innerText }), deskRowSel);
+      check(
+        "Z2 (ui): Give this device the workspace on a device revoked in another tab says \"This device is not one of your paired devices any more …\" and reads the list again: the row reads revoked and offers nothing",
+        revokedElsewhere.status === 204 && z2.body.includes("This device is not one of your paired devices any more (it may have been signed out), so it was given nothing.") && /revoked/.test(z2.row) && !/active/.test(z2.row) && !z2.row.includes("Give this device the workspace"),
+        `${revokedElsewhere.status} ${z2.row} | ${z2.body.slice(0, 300)}`,
+      );
+
+      // C6-4 (ui): a pairing code asked 70 seconds ago reads "Asked 1 minute ago".
+      const askedCode = "ZXCV-BNMQ";
+      withDb((d) =>
+        d
+          .prepare("INSERT INTO v2_device_requests (id, device_code_hash, user_code, device_name, public_key, created_at, expires_at, interval_s, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')")
+          .run(`dr_${randomBytes(12).toString("hex")}`, sha256hex(randomBytes(32).toString("hex")), askedCode, "U5's asking laptop", newDeviceKeys().pub, new Date(Date.now() - 70_000).toISOString(), new Date(Date.now() + 500_000).toISOString(), 5),
+      );
+      await page.goto(`${BASE}/app/device?code=${askedCode}`, { waitUntil: "networkidle0" });
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+      await page.waitForFunction(() => /Asked \d+ /.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+      const askedLine = await page.evaluate(() => [...document.querySelectorAll("p")].map((p) => p.textContent ?? "").find((t) => t.startsWith("Asked ")) ?? "");
+      check("C6-4 (ui): the device approval page says \"Asked 1 minute ago\" for a code 70 seconds old (one count-and-noun helper), never \"1 minutes\"", askedLine === "Asked 1 minute ago", askedLine);
+
+      // Z3 (ui): Delete shared history on a session already deleted in another tab is done: the row goes, and the page
+      // says it was already deleted instead of an error.
+      const z3Key = sessionKey(D5, A, "claude-code", "native-z3");
+      const z3Put = await put(D5, z3Key, { title: "Z3 history" });
+      page.on("dialog", (dl) => void dl.accept());
+      await page.goto(`${BASE}/app/w/${A}/sessions`, { waitUntil: "networkidle0" });
+      await page.waitForFunction(() => document.body.innerText.includes("Z3 history"), { timeout: 15000 }).catch(() => undefined);
+      const z3Gone = await call("U5", "DELETE", `/api/v2/workspaces/${A}/sessions/${z3Key}`, { cookie: U5.cookie });
+      await page.evaluate(() => [...document.querySelectorAll("main li")].find((li) => li.innerText.includes("Z3 history"))?.querySelectorAll("button").forEach((b) => b.textContent === "Delete shared history" && b.click()));
+      await page.waitForFunction(() => !document.body.innerText.includes("Z3 history"), { timeout: 15000 }).catch(() => undefined);
+      const z3Text = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
+      check(
+        "Z3 (ui): deleting shared history already deleted in another tab (410 history_deleted) counts as done: the row is gone and the page says \"That session's shared history was already deleted, …\" with no error",
+        z3Put.status === 200 && z3Gone.status === 204 && !z3Text.includes("Z3 history") && z3Text.includes("That session's shared history was already deleted, in another tab or window or from its machine, so it is no longer listed.") && !z3Text.includes("nothing is left to delete"),
+        `${z3Put.status} ${z3Gone.status} ${z3Text.slice(0, 600)}`,
+      );
     } finally {
       await browser.close();
     }
@@ -2715,6 +2811,23 @@ try {
       JSON.stringify(upGap.json?.refused) === JSON.stringify([reqKey(DC, "c51-gap")]) &&
         (await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DC.access, body: { rows: [usageRow(DC, "c63-unknown", epochId(), { ts: isoAt(2600) })] } })).json?.refused?.join() === reqKey(DC, "c63-unknown"),
       upGap.text,
+    );
+    // Z7 (E2E-WEB cycle 6): a row dated before the start of the epoch it names was not made in it: one naming the new
+    // epoch from the gap, and one naming the old epoch from before it started, are conflicts too.
+    const oldStart = Date.parse(withDb((d) => d.prepare("SELECT starts_at FROM v2_epochs WHERE ws_id = ? AND epoch_id = ?").get(CW, oldB?.epoch_id ?? ""))?.starts_at ?? "");
+    const cBefore7 = conflictsB();
+    const earlyRows = [
+      usageRow(DC, "z7-new-in-gap", newB, { ts: isoAt(1000) }),
+      usageRow(DC, "z7-old-before-start", oldB?.epoch_id, { ts: new Date(oldStart - 60_000).toISOString() }),
+      usageRow(DC, "z7-new-after-start", newB, { ts: isoAt(3000) }),
+    ];
+    const upEarly = await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DC.access, body: { rows: earlyRows } });
+    check(
+      "Z7: a usage row dated before the start of the epoch it names (the re-share's epoch named from the gap, or an epoch named from before it started) is a conflict counted on the session, never stored and named in `refused`; a row inside the new epoch is stored",
+      Number.isFinite(oldStart) && upEarly.status === 200 && upEarly.json?.accepted === 1 && upEarly.json.conflicts === 2 && conflictsB() === cBefore7 + 2 &&
+        !stored("z7-new-in-gap") && !stored("z7-old-before-start") && stored("z7-new-after-start") &&
+        JSON.stringify(upEarly.json?.refused) === JSON.stringify([reqKey(DC, "z7-new-in-gap"), reqKey(DC, "z7-old-before-start")]),
+      `${oldStart} ${upEarly.text} ${cBefore7}/${conflictsB()}`,
     );
 
     // A clock that runs ahead: named, with the server's time; a start stored in the future is moved back.
@@ -4690,7 +4803,19 @@ try {
         await press(po, cr1.id, "Review this decision");
         await sleep(300);
         await press(po, cr1.id, "Confirm: Accept if");
-        await po.waitForFunction((sel) => /Recorded: you accepted revision 1 if Drew Requester acknowledges your condition/.test(document.querySelector(sel)?.innerText ?? ""), { timeout: 15000 }, card(cr1.id));
+        // The Recorded line shows before the card is read again: wait for the reloaded card (countered, with the
+        // condition and "Not confirmed yet"), not for a fixed time, so a slow reload can't be caught half-way.
+        await po
+          .waitForFunction(
+            (sel, cond) => {
+              const t = document.querySelector(sel)?.innerText ?? "";
+              return /Recorded: you accepted revision 1 if Drew Requester acknowledges your condition/.test(t) && t.includes(`Accept if: ${cond}`) && t.includes("Not confirmed yet");
+            },
+            { timeout: 15000 },
+            card(cr1.id),
+            COND,
+          )
+          .catch(() => undefined);
         const afterIf = (await read(cr1.id)).json;
         const ifText = await po.$eval(card(cr1.id), (e) => e.innerText);
         check(
@@ -6617,6 +6742,41 @@ try {
             yOtherPerson.status === 404 && yJoined.text.includes("You already joined Invite Y, in another tab or window.") && yJoined.link === `/app/w/${IWY}` && !/Not found/.test(yJoined.text),
           `${yOther.status} ${yAgain.status} ${yAgain.text} ${yOtherPerson.status} ${JSON.stringify(yJoined).slice(0, 400)}`,
         );
+        // Z6 (E2E-WEB cycle 6): joined in another tab with a device ticked here: the page says the device was not given
+        // the workspace and points to the Devices page.
+        const IWY3 = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite Y three" } })).json?.id;
+        const ivY3 = await call("FO", "POST", `/api/v2/workspaces/${IWY3}/invites`, { cookie: FO.cookie, body: { email: FY.email, role: "member" } });
+        await open(pY, `/app/invite/${ivY3.json?.token}`);
+        await pY.click('main input[type="checkbox"]');
+        await pY.waitForFunction(() => [...document.querySelectorAll("main button")].some((b) => b.textContent?.trim() === "Join workspace and give it to this device"), { timeout: 5000 }).catch(() => undefined);
+        const y3Other = await call("FY", "POST", `/api/v2/invites/${ivY3.json?.token}/accept`, { cookie: FY.cookie, body: {} });
+        await press(pY, "main", "Join workspace and give it to this device");
+        await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("You already joined"), { timeout: 15000 }).catch(() => undefined);
+        const y3 = await pY.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", links: [...document.querySelectorAll("main a")].map((a) => a.getAttribute("href")) }));
+        const y3Grant = withDb((d) => d.prepare("SELECT 1 AS x FROM v2_device_grants WHERE device_id = ? AND ws_id = ?").get(fyA.id, IWY3) ?? null);
+        check(
+          "Z6 (ui): Join with a device ticked on an invite already accepted in another tab says \"You already joined Invite Y three, in another tab or window.\" and \"The device you ticked was not given Invite Y three: give it to that device on your Devices page.\" (linked), and the device has no new workspace",
+          y3Other.status === 200 && y3.text.includes("You already joined Invite Y three, in another tab or window.") &&
+            /The device you ticked was not given Invite Y three: give it to that device on your Devices page\./.test(y3.text.replace(/\s+/g, " ")) &&
+            y3.links.includes("/app/devices") && y3.links.includes(`/app/w/${IWY3}`) && y3Grant === null,
+          `${y3Other.status} ${JSON.stringify(y3).slice(0, 600)} ${JSON.stringify(y3Grant)}`,
+        );
+        // C6-5 (E2E-WEB cycle 6): the invite is withdrawn while the page is open, then Join: only the refusal is shown.
+        const IWY4 = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite Y four" } })).json?.id;
+        const ivY4 = await call("FO", "POST", `/api/v2/workspaces/${IWY4}/invites`, { cookie: FO.cookie, body: { email: FY.email, role: "viewer" } });
+        await open(pY, `/app/invite/${ivY4.json?.token}`);
+        const y4Withdrawn = await call("FO", "DELETE", `/api/v2/workspaces/${IWY4}/invites/${ivY4.json?.id}`, { cookie: FO.cookie });
+        await press(pY, "main", "Join workspace");
+        await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("can't be used any more"), { timeout: 15000 }).catch(() => undefined);
+        await pY.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        const y4 = await pY.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", buttons: [...document.querySelectorAll("main button")].map((b) => b.textContent?.trim()) }));
+        check(
+          "C6-5 (ui): Join on an invite withdrawn while the page was open shows only \"This invite can't be used any more: … You have not joined. …\": no \"You are invited …\", no \"This invite link is not valid\" and no Join button",
+          y4Withdrawn.status === 204 &&
+            y4.text.includes("This invite can't be used any more: it was withdrawn, it expired, or it was already used. You have not joined.") &&
+            !y4.text.includes("You are invited") && !y4.text.includes("This invite link is not valid") && !y4.buttons.some((t) => /^Join workspace/.test(t ?? "")),
+          `${y4Withdrawn.status} ${JSON.stringify(y4).slice(0, 600)}`,
+        );
         // A 403 reauth_required on Join (the sign-in aged while the page was open) says so in place: the devices are
         // unticked and disabled, and Join (without them) stays; then Sign in again is one step to the sign-in page.
         const IWY2 = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite Y two" } })).json?.id;
@@ -6980,6 +7140,55 @@ try {
         hcLoop.changeWaits({ state: "pending", behind: true, requester: { id: "r", name: "Rae" }, approvers: [], dependency_loop: "loop" })?.next === "rebase",
       "",
     );
+    // -- C6-1: a pending request that would now loop, kept for the browser (no Accept if…, the counter form leaves the
+    // looping dependency out) --
+    const KL5 = await kGoal(KA, { title: "Loop five", visibility: "workspace", team_id: KPT });
+    const KL6 = await kGoal(KA, { title: "Loop six", visibility: "workspace", team_id: KPT });
+    const lr5 = await ka(KB, "POST", kcrs(KL5.id), { base_version: 1, changes: { depends_on: [KL6.id] }, reason: "Five reads six" });
+    const lr6 = await ka(KB, "POST", kcrs(KL6.id), { base_version: 1, changes: { title: "Loop six, measured", depends_on: [KL5.id] }, reason: "Six reads five" });
+    const lr5Done = await kAct(KA, KL5.id, lr5.json?.id, "approve_and_launch", { revision: 1 });
+    const lr6IfKeep = await kAct(KA, KL6.id, lr6.json?.id, "counter", { revision: 1, changes: lr6.json?.changes, note: "Fine if", condition: "Docs first" });
+    const lr6Read = await kRead(KA, KL6.id, lr6.json?.id);
+    check(
+      "C6-1: on a pending request that would now close a loop, an Accept if… (a counter keeping its changes) is refused 409 cycle, so the card must not offer it; the request stays pending with dependency_loop set and can.counter true for its decider",
+      lr5Done.status === 200 && lr6IfKeep.status === 409 && lr6IfKeep.json?.error === "cycle" && lr6Read?.state === "pending" && lr6Read.revision === 1 && !!lr6Read.dependency_loop && lr6Read.can.counter === true,
+      `${lr5Done.status} ${lr6IfKeep.status} ${lr6IfKeep.text.slice(0, 200)} ${lr6Read?.state} ${lr6Read?.dependency_loop}`,
+    );
+
+    // -- C6-2: a pending request that would now loop, on a goal that then moved on: its requester can still update it,
+    // and it then waits on its deciders like any request that would loop --
+    const KL7 = await kGoal(KA, { title: "Loop seven", visibility: "workspace", team_id: KPT });
+    const KL8 = await kGoal(KA, { title: "Loop eight", visibility: "workspace", team_id: KPT });
+    const lr7 = await ka(KB, "POST", kcrs(KL7.id), { base_version: 1, changes: { depends_on: [KL8.id] }, reason: "Seven reads eight" });
+    const lr8 = await ka(KB, "POST", kcrs(KL8.id), { base_version: 1, changes: { title: "Loop eight, measured", depends_on: [KL7.id] }, reason: "Eight reads seven" });
+    await kAct(KA, KL7.id, lr7.json?.id, "approve_and_launch", { revision: 1 });
+    const kl8v2 = await ka(KA, "POST", `/goals/${KL8.id}/versions`, { version: 1, title: "Loop eight, renamed" });
+    const lr8KB = await kRead(KB, KL8.id, lr8.json?.id);
+    const lr8KA = await kRead(KA, KL8.id, lr8.json?.id);
+    const kbHome8 = (await ka(KB, "GET", "/home")).json?.change_requests;
+    const kaHome8 = (await ka(KA, "GET", "/home")).json?.change_requests;
+    const lr8Sent = await kAct(KB, KL8.id, lr8.json?.id, "rebase", { revision: 1, base_version: 2, changes: { title: "Loop eight, measured", depends_on: [KL7.id] } });
+    const lr8Kept = await kAct(KB, KL8.id, lr8.json?.id, "rebase", { revision: 1, base_version: 2 });
+    const lr8After = await kRead(KA, KL8.id, lr8.json?.id);
+    const kaHome8b = (await ka(KA, "GET", "/home")).json?.change_requests;
+    check(
+      "C6-2: a pending request that would close a loop, on a goal that moved on, reads behind with dependency_loop set (the loop is known before the update), the requester's can.rebase true and the decider's waiting_on_me false; the Home sends the requester to rebase (waiting on them); a rebase sending its changes is 409 cycle, the rebase keeping them is recorded (revision 2 at version 2); then it waits on the decider (waiting_on_me, Home resolve_loop)",
+      lr7.status === 201 && lr8.status === 201 && kl8v2.status === 201 &&
+        lr8KB?.behind === true && !!lr8KB.dependency_loop && lr8KB.can.rebase === true && lr8KA?.waiting_on_me === false && lr8KA.can.approve === false &&
+        homeItem(kbHome8, "waiting_on_me", lr8.json?.id)?.next === "rebase" && homeItem(kaHome8, "waiting_on_others", lr8.json?.id)?.next === "rebase" && !homeItem(kaHome8, "waiting_on_me", lr8.json?.id) &&
+        lr8Sent.status === 409 && lr8Sent.json?.error === "cycle" &&
+        lr8Kept.status === 200 && lr8Kept.json?.revision === 2 && lr8Kept.json?.base_version === 2 && lr8Kept.json?.behind === false &&
+        lr8After?.dependency_loop === LOOP_APPROVE && lr8After.waiting_on_me === true && lr8After.can.approve === false && homeItem(kaHome8b, "waiting_on_me", lr8.json?.id)?.next === "resolve_loop",
+      `${kl8v2.status} ${JSON.stringify({ behind: lr8KB?.behind, loop: lr8KB?.dependency_loop, can: lr8KB?.can })} ${lr8KA?.waiting_on_me} ${JSON.stringify(homeItem(kbHome8, "waiting_on_me", lr8.json?.id))} ${lr8Sent.status} ${lr8Sent.text.slice(0, 160)} ${lr8Kept.status} ${lr8Kept.text.slice(0, 200)} ${lr8After?.dependency_loop} ${lr8After?.waiting_on_me}`,
+    );
+    const lr8Ctr = await kAct(KA, KL8.id, lr8.json?.id, "counter", { revision: 2, changes: { title: "Loop eight, measured", depends_on: [] }, note: "Seven already reads eight" });
+    const lr8Acc = await kAct(KB, KL8.id, lr8.json?.id, "accept_counter", { revision: 3 });
+    const lr8Ap = await kAct(KA, KL8.id, lr8.json?.id, "approve", { revision: 3 });
+    check(
+      "C6-2: after the update, a counter without the looping dependency, once accepted, is approved",
+      lr8Ctr.status === 200 && lr8Acc.status === 200 && lr8Ap.status === 200 && lr8Ap.json?.state === "approved",
+      `${lr8Ctr.status} ${lr8Ctr.text.slice(0, 160)} ${lr8Acc.status} ${lr8Ap.status} ${lr8Ap.text.slice(0, 160)}`,
+    );
 
     // -- C5-3: a request adding a dependency the reader can see and one they can't: the value card and the MCP record
     // count the hidden one ("… and 1 other goal you can't see"), as the rest of the card does --
@@ -7092,6 +7301,29 @@ try {
           "C5-1 (ui): the approved change that would close a loop shows \"Nobody can launch this as it stands. A goal this change adds as a dependency has since come to depend on this goal, …\" and no Launch button, nor \"Can launch: …\"",
           lr4Ui.text.includes(`Nobody can launch this as it stands. ${LOOP_LAUNCH}`) && !lr4Ui.buttons.some((t) => /^Launch version/.test(t ?? "")) && !/Can launch:/.test(lr4Ui.text),
           JSON.stringify(lr4Ui).slice(0, 800),
+        );
+
+        // C6-1 (ui): the pending request that would now loop offers its decider Suggest a change and Decline, not Accept
+        // if…; Suggest a change leaves the looping dependency unticked and unoffered, and says why.
+        const lr6Card = `[data-cr="${lr6.json?.id}"]`;
+        await open(pL, `/app/w/${KW}/goals/${KL6.id}`);
+        await pL.waitForSelector(`${lr6Card} [data-dependency-loop]`, { timeout: 15000 }).catch(() => undefined);
+        const lr6Choices = await pL.$$eval(`${lr6Card} [data-decision]`, (els) => els.map((e) => e.getAttribute("data-decision"))).catch(() => []);
+        await pL.click(`${lr6Card} [data-decision="Suggest a change"]`).catch(() => undefined);
+        await pL.waitForSelector(`${lr6Card} [data-deps-loop-dropped]`, { timeout: 15000 }).catch(() => undefined);
+        const lr6Form = await pL.evaluate((sel) => {
+          const c = document.querySelector(sel);
+          return {
+            dropped: c?.querySelector("[data-deps-loop-dropped]")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+            boxes: [...(c?.querySelectorAll('[data-decision-input] input[type="checkbox"]') ?? [])].map((b) => ({ label: b.closest("label")?.textContent?.trim() ?? "", checked: b.checked })),
+          };
+        }, lr6Card);
+        check(
+          "C6-1 (ui): a pending request that would now close a loop offers its decider Suggest a change and Decline but not Accept if… (refused 409 cycle); Suggest a change leaves the looping dependency unticked and unoffered and says \"The request's dependency on “Loop five” is left out: it already depends on this goal, so keeping it would make a loop.\"",
+          JSON.stringify(lr6Choices) === JSON.stringify(["Suggest a change", "Decline"]) &&
+            lr6Form.dropped === `The request's dependency on “${KL5.title}” is left out: it already depends on this goal, so keeping it would make a loop.` &&
+            !lr6Form.boxes.some((b) => b.label === KL5.title),
+          `${JSON.stringify(lr6Choices)} ${JSON.stringify(lr6Form).slice(0, 600)}`,
         );
 
         // N3, N5 and F4: Not yet, then Launch, from the goal page. Every fetch and every "Loading…" in the change-request
@@ -8408,6 +8640,15 @@ try {
   await mustStart({ ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" });
   dbFile = path.join(evDir, "v2", "align.sqlite");
   {
+    // Z4 (E2E-WEB cycle 6), on this fresh server (the pairing limit of the first one is spent): a device name is one line.
+    const z4 = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "  nl\nhere\t\u0007x \u202e ", public_key: newDeviceKeys().pub } });
+    const z4Name = withDb((d) => d.prepare("SELECT device_name FROM v2_device_requests WHERE user_code = ?").get(z4.json?.user_code ?? ""))?.device_name;
+    const z4Empty = await call("D", "POST", "/api/v2/device/authorize", { body: { device_name: "\n\t\u0000\u200b", public_key: newDeviceKeys().pub } });
+    check(
+      "Z4: a device name with control characters is kept on one line at pairing (\"  nl\\nhere\\t\\u0007x \\u202e \" -> \"nl here x\": control characters and whitespace runs become one space, direction marks are dropped, the ends trimmed); a name with nothing left -> 400 device_name is required",
+      z4.status === 200 && z4Name === "nl here x" && z4Empty.status === 400 && z4Empty.json?.message === "device_name is required",
+      `${z4.status} ${JSON.stringify(z4Name)} ${z4Empty.status} ${z4Empty.text}`,
+    );
     const evEnv = { ALIGN_DATA_DIR: evDir, ALIGN_TEST_IDP: "1" };
     const q = (sql, ...a) => withDb((d) => d.prepare(sql).all(...a));
     const ev = (name, w = null) => (w ? q("SELECT * FROM v2_events WHERE name = ? AND ws_id = ?", name, w) : q("SELECT * FROM v2_events WHERE name = ?", name));

@@ -20,6 +20,8 @@ The agent generates an Ed25519 keypair locally (`~/.align/device_key`, 0600; pub
 → 200 `{ "device_code": "<43+ chars>", "user_code": "BCDF-GHJK", "verification_uri": "<origin>/app/device", "expires_in": 600, "interval": 5 }`
 → 429 `{ "error": "rate_limited", "message": "... Try again in <n> minutes ...", "retry_after": <s> }` with `Retry-After: <s>`
   (in Mode L every pairing on the computer counts as one client, and a restart clears the in-memory count)
+  The name is kept on one line: control characters and whitespace runs become one space, invisible direction marks
+  are dropped and the ends trimmed; a name with nothing left is 400.
 
 The user signs in at `/app/device`, types the code, sees device name + request age, ticks workspaces, approves.
 
@@ -115,7 +117,7 @@ Key owned by another user/device → 404. `started_at` more than 5 min ahead of 
 `refused` names the conflicts that were not stored (below), so the device counts them as not shared.
 Rows whose epoch is unknown or belongs to another session → rejected per row (counted as conflicts).
 So are rows whose `ts` is at or after their epoch's end at a time no epoch of the session covers (made while the
-session was not shared, before it was shared again).
+session was not shared, before it was shared again), and rows whose `ts` is before their epoch's `starts_at`.
 A stopped session's usage (and epochs) → `409 { "error": "sharing_stopped", "ended_reason": "member_removed"|"device_signed_out"|null }`:
 `null` when its person stopped sharing it; `member_removed` when it ended because they left the workspace or were
 removed (once they are back, their device shares it again with a `PUT`).

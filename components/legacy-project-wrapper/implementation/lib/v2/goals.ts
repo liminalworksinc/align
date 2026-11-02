@@ -405,8 +405,9 @@ export function versionContentOf(wsId: string, goalId: string, version: number):
 
 /** Validate a version body against `prev` (the same rules for a new version and a change request): the fields sent
  *  replace prev's, then 409 cycle when depends_on would loop and 409 no_change when nothing changed. A depends_on sent
- *  keeps the dependencies in `keepDepsFrom` (by default prev's) that the caller can't read. */
-export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalContent, b: Body, keepDepsFrom: string[] = prev.depends_on): GoalContent {
+ *  keeps the dependencies in `keepDepsFrom` (by default prev's) that the caller can't read. `loopOk` skips the cycle
+ *  check, for a change request rebased with its own changes (C6-2): it adds nothing, and is never approved while it loops. */
+export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalContent, b: Body, keepDepsFrom: string[] = prev.depends_on, loopOk = false): GoalContent {
   const status = (b.status ?? prev.status) as GoalStatus;
   if (!GOAL_STATUSES.includes(status)) throw badRequest("status must be active, achieved or dropped");
   const next: GoalContent = {
@@ -418,7 +419,7 @@ export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalConte
     limits: limitsIn(b.limits, prev.limits),
     target_share: targetIn(b.target_share, prev.target_share),
   };
-  assertNoDependencyCycle(pp.wsId, goalId, next.depends_on);
+  if (!loopOk) assertNoDependencyCycle(pp.wsId, goalId, next.depends_on);
   if (sameContent(next, prev)) throw conflict("no_change", "Nothing changed");
   return next;
 }
