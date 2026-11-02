@@ -213,7 +213,9 @@ blank fillers (U+115F, U+1160, U+3164, U+FFA0, U+2800) made spaces and the ends 
 required field with nothing left, or nothing but combining marks and spaces, SHALL be 400 `<field> is required`, and
 an optional one SHALL be stored as absent (null), never as empty text a reader sees as a blank reason (E2E-WEB cycle 13
 W3). The MCP tools SHALL drop control characters from the people's text they return, text stored before this rule
-included. The web forms SHALL treat such text as empty too, as they treat spaces.
+included. The web forms SHALL treat such text as empty too, as they treat spaces, with the same rule (`isBlankText`):
+a measure or limit row of it is left out, and a required field of it (a title, a reason, the request-access name and
+use case) stops the form before sending; a passkey name of it is no name (E2E-WEB cycle 14 C14-2).
 
 #### Scenario: A decline reason of zero-width spaces
 
@@ -224,6 +226,11 @@ included. The web forms SHALL treat such text as empty too, as they treat spaces
 
 - **WHEN** a goal title, a measure, a change request's reason or a decline reason is only control characters (U+007F, U+0001 U+0002, U+0007, U+0085, U+0080 U+009F, or U+0000 U+001B U+009B with spaces), and a goal title, measure, target, reason, session title, repository alias or request note has them inside (`scripts/test-v2.mjs` "c14 C14-1 (E2E-WEB cycle 14): ...")
 - **THEN** the first are 400 `title is required`, `text is required` or `reason is required` and nothing is recorded; in the others the control characters are dropped ("Needs review" with its line break kept), and a session title or request note of only them is stored as none; MCP returns a goal title stored with them before this rule without them
+
+#### Scenario: Forms treat invisible text as blank
+
+- **WHEN** a person creates a goal with a measure of U+200B U+2060, saves a new version with such a measure and limit beside a real measure, or fills the request-access name or use case with it (`scripts/test-v2.mjs` "c14 C14-2 (ui, E2E-WEB cycle 14): ...")
+- **THEN** the goal is created without the measure, the version is saved with only the real measure and no limit, and **Send request** stays disabled; no form shows "text is required"
 
 ### Requirement: Who reads a goal
 

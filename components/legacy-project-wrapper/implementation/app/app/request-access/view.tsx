@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { api, Btn, Err, Field, Input, Note, Select, TextArea, TrustLinks, useAction } from "../_ui/kit";
 import { useTurnstile } from "../_ui/turnstile";
+import { isBlankText } from "@/lib/v2/text-core.mts";
 
 // The request-access form (POST /api/v2/access-requests). Requests are answered by hand. Nothing here is an agreement:
 // asking for a follow-up or a letter of intent commits nobody, and the form never asks anyone to sign for an employer.
@@ -42,7 +43,7 @@ export default function RequestAccess({
     void act.run(async () => {
       try {
         await api("/api/v2/access-requests", {
-          body: { email: email.trim(), name, company: company || null, team_size: teamSize || null, use_case: useCase, interest, via },
+          body: { email: email.trim(), name, company: isBlankText(company) ? null : company, team_size: teamSize || null, use_case: useCase, interest, via },
           headers: bot.headers,
         });
         setSent(email.trim());
@@ -119,7 +120,7 @@ export default function RequestAccess({
               .
             </p>
             {bot.widget}
-            <Btn type="submit" disabled={act.busy || !bot.ready || !email.trim() || !name.trim() || !useCase.trim()}>
+            <Btn type="submit" disabled={act.busy || !bot.ready || !email.trim() || isBlankText(name) || isBlankText(useCase)}>
               Send request
             </Btn>
             <Err>{act.error}</Err>

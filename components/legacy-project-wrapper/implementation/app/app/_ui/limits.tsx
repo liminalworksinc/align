@@ -20,15 +20,16 @@ const EXAMPLE = "No limits found. Write them as rules, like “The three models 
 export const limitsDraft = (ls: Limit[] = []): LimitDraft[] =>
   ls.map((l) => ({ id: l.id, type: l.type, text: l.text, source_title: l.source?.title ?? "", source_date: l.source?.date ?? "", source_kind: l.source?.kind }));
 
-/** The limits to send: empty rows left out; a source only when it has a date. */
+/** The limits to send: empty rows left out (spaces, or only invisible characters: E2E-WEB cycle 14 C14-2); a source
+ *  only when it has a date. */
 export const limitsOut = (d: LimitDraft[]) =>
   d
-    .filter((x) => x.text.trim())
+    .filter((x) => !isBlankText(x.text))
     .map((x) => ({
       ...(x.id ? { id: x.id } : {}),
       type: x.type,
       text: x.text.trim(),
-      source: x.source_date ? { kind: x.source_kind ?? (x.source_title.trim() ? "meeting" : "manual"), title: x.source_title.trim(), date: x.source_date } : null,
+      source: x.source_date ? { kind: x.source_kind ?? (isBlankText(x.source_title) ? "manual" : "meeting"), title: isBlankText(x.source_title) ? "" : x.source_title.trim(), date: x.source_date } : null,
     }));
 
 /** True when the drafts say exactly the goal's limits (same ids, types, words and sources, in order). */
@@ -286,7 +287,7 @@ function GoalGroup({ ws, group, title, date, onDone }: { ws: string; group: Goal
               onClick={() =>
                 void act.run(async () => {
                   const { goal, all } = await withCurrent();
-                  const reason = `Limits from ${title.trim() || "pasted notes"}, ${date}`;
+                  const reason = `Limits from ${isBlankText(title) ? "pasted notes" : title.trim()}, ${date}`;
                   await api(`/api/v2/workspaces/${ws}/goals/${goal.id}/change-requests`, { body: { base_version: goal.version, changes: { limits: limitsOut(all) }, reason } });
                   setSent(true);
                 }, onDone)

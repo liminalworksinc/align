@@ -3409,6 +3409,63 @@ try {
             [w4Six, w4SixNew].every((r) => r.status === 400 && r.json?.error === "too_many_dependencies" && r.json.message === W4_WORDS) && errors.length === 0,
           `${JSON.stringify(w4Before)} ${JSON.stringify(w4After)} ${w4Note} | ${w4Six.text} | ${w4SixNew.text} ${errors.join(" | ")}`,
         );
+
+        // E2E-WEB cycle 14 C14-2: the forms treat text of only invisible characters as they treat spaces. A measure of
+        // U+200B U+2060 on New goal is left out (the goal is created); on New version a measure and a limit of them are
+        // left out (the version is saved with the real measure); the request-access form keeps Send request disabled
+        // while the name or the use case is only invisible characters.
+        const INVIS = "​⁠";
+        const btnIn = (root, label) => page.evaluate((r, l) => [...document.querySelectorAll(`${r} button`)].find((b) => b.textContent?.trim() === l)?.click(), root, label);
+        await page.goto(`${BASE}/app/w/${CW}/goals`, { waitUntil: "networkidle0" });
+        await page.waitForSelector('input[aria-label="Measure 1"]', { timeout: 15000 });
+        await page.type("main form input:not([aria-label])", "C14 form goal");
+        await page.type('input[aria-label="Measure 1"]', INVIS);
+        await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Create goal")?.click());
+        await page.waitForFunction(() => document.body.innerText.includes("C14 form goal") || /text is required/.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+        await sleep(300);
+        const c14NewText = await page.evaluate(() => document.body.innerText);
+        const c14NewGoal = withDb((d) => d.prepare("SELECT id, version FROM v2_goals WHERE ws_id = ? AND title = ?").get(CW, "C14 form goal"));
+        const c14NewMeasures = c14NewGoal ? (await ca(CO, "GET", `/goals/${c14NewGoal.id}`)).json?.goal?.measures : null;
+        await page.goto(`${BASE}/app/w/${CW}/goals/${w4Main.id}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector("#new-version form", { timeout: 15000 });
+        await btnIn("#new-version", "Add a measure");
+        await btnIn("#new-version", "Add a measure");
+        await page.waitForSelector('#new-version input[aria-label="Measure 2"]', { timeout: 15000 });
+        await page.type('#new-version input[aria-label="Measure 1"]', INVIS);
+        await page.type('#new-version input[aria-label="Measure 2"]', "C14 real measure");
+        await btnIn("#new-version", "Add a limit");
+        await page.waitForSelector('#new-version input[aria-label="Limit 1"]', { timeout: 15000 });
+        await page.type('#new-version input[aria-label="Limit 1"]', INVIS);
+        await btnIn("#new-version", `Save version ${w4Main.version + 1}`);
+        let c14Ver = null;
+        for (let i = 0; i < 40 && !(c14Ver?.version > w4Main.version) && !/text is required/.test(await page.evaluate(() => document.body.innerText)); i++) {
+          await sleep(200);
+          c14Ver = (await ca(CO, "GET", `/goals/${w4Main.id}`)).json?.goal;
+        }
+        c14Ver = (await ca(CO, "GET", `/goals/${w4Main.id}`)).json?.goal;
+        const c14VerText = await page.evaluate(() => document.body.innerText);
+        await page.goto(`${BASE}/app/request-access`, { waitUntil: "networkidle0" });
+        await page.waitForSelector('input[name="name"]', { timeout: 15000 });
+        const sendDisabled = () => page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Send request")?.disabled ?? null);
+        await page.type('input[name="email"]', "c14-form@example.test");
+        await page.type('input[name="name"]', INVIS);
+        await page.type('textarea[name="use_case"]', "Goals for our agents");
+        const raNameBlank = await sendDisabled();
+        await page.goto(`${BASE}/app/request-access`, { waitUntil: "networkidle0" });
+        await page.waitForSelector('input[name="name"]', { timeout: 15000 });
+        await page.type('input[name="email"]', "c14-form@example.test");
+        await page.type('input[name="name"]', "Cy Form");
+        await page.type('textarea[name="use_case"]', INVIS);
+        const raUseBlank = await sendDisabled();
+        await page.type('textarea[name="use_case"]', "Goals");
+        const raFilled = await sendDisabled();
+        check(
+          "c14 C14-2 (ui, E2E-WEB cycle 14): a form treats text of only invisible characters (U+200B U+2060) as blank, as spaces: New goal leaves such a measure out and creates the goal; New version leaves such a measure and limit out and saves the version with the real measure; Send request on request access stays disabled while the name or the use case is only such text; no \"text is required\" or \"limits[0].text is required\"",
+          !!c14NewGoal && Array.isArray(c14NewMeasures) && c14NewMeasures.length === 0 && !/text is required/.test(c14NewText) &&
+            c14Ver?.version === w4Main.version + 1 && c14Ver.measures?.map((m) => m.text).join() === "C14 real measure" && (c14Ver.limits ?? []).length === 0 && !/text is required/.test(c14VerText) &&
+            raNameBlank === true && raUseBlank === true && raFilled === false && errors.length === 0,
+          `${JSON.stringify(c14NewGoal)} ${JSON.stringify(c14NewMeasures)} ${c14NewText.match(/.{0,80}text is required.{0,40}/)?.[0] ?? ""} | ${c14Ver?.version} ${JSON.stringify(c14Ver?.measures)} ${JSON.stringify(c14Ver?.limits)} ${c14VerText.match(/.{0,80}text is required.{0,40}/)?.[0] ?? ""} | ${raNameBlank} ${raUseBlank} ${raFilled} ${errors.join(" | ")}`,
+        );
       } finally {
         await browser.close();
       }
@@ -4159,6 +4216,49 @@ try {
         audit: d.prepare("SELECT actor_id FROM v2_audit WHERE action = 'passkey.deleted' AND object_id = ?").get(pkRow[0]?.id)?.actor_id,
       }));
       check("ui (Chrome): Rename names the passkey; Delete (confirmed) removes it and its use record, and audits passkey.deleted", pkGone.rows === 0 && pkGone.use === 0 && pkGone.audit === pkUser(), JSON.stringify(pkGone));
+      // E2E-WEB cycle 14 C14-2 and C14-3: a passkey name of only invisible characters is no name, so nothing is sent to
+      // name the passkey; when naming a new passkey fails, the list is reloaded, so its row is there to rename.
+      const pkPatches = [];
+      let pkFailPatch = false;
+      const pkIntercept = (r) => {
+        if (r.method() === "PATCH" && r.url().includes("/api/v2/account/passkeys/")) {
+          pkPatches.push(r.postData() ?? "");
+          if (pkFailPatch) return void r.respond({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "server_error", message: "Server error" }) });
+        }
+        void r.continue();
+      };
+      await pk.setRequestInterception(true);
+      pk.on("request", pkIntercept);
+      await pk.type('main input[maxlength="100"]:not([aria-label])', "​⁠");
+      await pkClick("Add a passkey");
+      await pk.waitForFunction(() => document.body.innerText.includes("Unnamed passkey") || document.body.innerText.includes("naming it didn't work"), { timeout: 15000 }).catch(() => undefined);
+      await sleep(300);
+      const pkInvisText = await pkText();
+      const pkInvisRows = withDb((d) => d.prepare("SELECT name FROM ba_passkey WHERE userId = ?").all(pkUser()));
+      const pkInvisPatches = pkPatches.length;
+      if (pkInvisRows.length) {
+        await pkClick("Delete");
+        await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet."), { timeout: 15000 }).catch(() => undefined);
+      }
+      pkFailPatch = true;
+      await pk.click('main input[maxlength="100"]:not([aria-label])', { clickCount: 3 });
+      await pk.type('main input[maxlength="100"]:not([aria-label])', "Desk key");
+      await pkClick("Add a passkey");
+      await pk.waitForFunction(() => document.body.innerText.includes("naming it didn't work") && document.body.innerText.includes("Unnamed passkey"), { timeout: 15000 }).catch(() => undefined);
+      const pkFailText = await pkText();
+      const pkFailRows = withDb((d) => d.prepare("SELECT name FROM ba_passkey WHERE userId = ?").all(pkUser()));
+      pk.off("request", pkIntercept);
+      await pk.setRequestInterception(false);
+      check(
+        "c14 C14-2 and C14-3 (ui, E2E-WEB cycle 14): Add a passkey with a name of only invisible characters (U+200B U+2060) adds it unnamed and sends no name (no rename, no error); when naming a new passkey fails the card says \"The passkey was added, but naming it didn't work. Rename it below.\" and the list is reloaded: it shows the passkey (\"Unnamed passkey\"), never \"No passkeys yet.\"",
+        pkInvisRows.length === 1 && !pkInvisRows[0].name && pkInvisPatches === 0 && pkInvisText.includes("Unnamed passkey") && !pkInvisText.includes("naming it didn't work") && !pkInvisText.includes("No passkeys yet.") &&
+          pkFailRows.length === 1 && pkPatches.length === 1 && pkFailText.includes("The passkey was added, but naming it didn't work. Rename it below.") && pkFailText.includes("Unnamed passkey") && !pkFailText.includes("No passkeys yet."),
+        `${JSON.stringify(pkInvisRows)} ${pkInvisPatches} ${JSON.stringify(pkPatches)} | ${pkInvisText.slice(0, 400)} | ${JSON.stringify(pkFailRows)} | ${pkFailText.slice(0, 400)}`,
+      );
+      if (pkFailRows.length) {
+        await pkClick("Delete");
+        await pk.waitForFunction(() => document.body.innerText.includes("No passkeys yet."), { timeout: 15000 }).catch(() => undefined);
+      }
       // Sign out everywhere, also unpairing devices.
       await pk.evaluate(() => document.querySelector('input[name="devices"]')?.click());
       await Promise.all([pk.waitForNavigation({ waitUntil: "networkidle0" }), pkClick("Sign out everywhere")]);
