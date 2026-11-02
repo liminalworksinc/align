@@ -8682,6 +8682,30 @@ try {
       `${ask1.status} ${ask1No.status} ${ask1Withdraw.text} | ${ask1Done.text} | ${ask1Accept.text}`,
     );
 
+    // -- W2: MCP says "declined" for a rejected request, and "you" for the token's person --
+    const qDev = insertDevice(QB.id, "Quentin's laptop");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(qDev.id, QW));
+    const mcpRejected = await mcpCall("QB", qDev, "align_list_change_requests", { state: "rejected", workspace: QW });
+    const mcpRecord = await mcpCall("QB", qDev, "align_get_decision_record", { change_request_id: r1?.id, workspace: QW });
+    check(
+      "c9 W2: align_list_change_requests with state rejected says \"1 change request (declined).\" and \"- <id> declined on goal …\" (the state field stays \"rejected\"), never \"rejected\" in the text; the person the token acts for is \"you\" (\"from you\", \"Asked by you\", \"by you\" on their link)",
+      mcpRejected.text.startsWith("1 change request (declined).") && mcpRejected.text.includes(`- ${r1?.id} declined on goal ${GR1.id}`) && mcpRejected.sc?.change_requests?.[0]?.state === "rejected" && mcpRejected.text.includes(" from you (") && mcpRejected.text.includes("self-reported by you:") &&
+        !/rejected/i.test(mcpRejected.text) && mcpRecord.text.includes(`was declined by <untrusted-text>${QA.name}</untrusted-text>`) && mcpRecord.text.includes("Asked by you against version 1") && !/rejected/i.test(mcpRecord.text),
+      `${mcpRejected.text.slice(0, 500)} || ${mcpRecord.text.slice(0, 300)}`,
+    );
+    // The scan: no user-facing string in the web app or in MCP text says "rejected" (the state value "rejected" in code,
+    // a record key, a property and comments are not user-facing).
+    const rejectedSays = [];
+    const sourcesUnder = (dir, ext) =>
+      readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sourcesUnder(path.join(dir, e.name), ext) : ext.test(e.name) ? [path.join(dir, e.name)] : []));
+    for (const rel of [...sourcesUnder("app", /\.tsx$/), ...sourcesUnder("lib/mcp", /\.ts$/)])
+      for (const [i, l] of readFileSync(path.join(ROOT, rel), "utf8").split("\n").entries()) {
+        if (/^\s*(\/\/|\*|\/\*|\{\/\*)/.test(l)) continue; // a comment line
+        const code = l.replace(/\/\/ .*$/, ""); // a trailing comment
+        const left = code.replace(/(["'`])rejected\1/g, "").replace(/\brejected:/g, "").replace(/\.rejected\b/g, "");
+        if (/\brejected\b/i.test(left)) rejectedSays.push(`${rel}:${i + 1}`);
+      }
+    check("c9 W2 (scan): no user-facing string in app/**/*.tsx or lib/mcp says \"rejected\" (\"declined\", the app's word; state values stay)", rejectedSays.length === 0, rejectedSays.join(", "));
     // The sweep: every 409 and 403 refusal the server builds (outside the device pairing and session sharing the agent
     // reads) is a sentence ending in a full stop, and none tells the person to "reload and try again".
     const notSentences = [];
@@ -8695,7 +8719,7 @@ try {
     }
     check("c9 sweep (scan): every 409/403 refusal literal in lib/v2 (but devices.ts and sessions.ts) ends in a full stop, and none says \"reload and try again\"", notSentences.length === 0, notSentences.join(" | "));
 
-    // -- the browser: W1 (ui), W6 (ui), W3 (ui), W7 (ui), W4 (ui) --
+    // -- the browser: W1 (ui), W6 (ui), W3 (ui), W7 (ui), W4 (ui), W2 (ui) --
     const GU1 = await qGoal("Remove in the browser");
     const u1 = await qPropose(GU1, { title: "Remove in the browser, renamed" });
     const u1Link = await qLink(GU1, u1, 11);
@@ -8721,6 +8745,7 @@ try {
         await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
         await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
       };
+      const textOf = (pg, sel) => pg.evaluate((s) => document.querySelector(s)?.innerText ?? "", sel);
       const press = (pg, scope, label) => pg.evaluate((s, t) => [...document.querySelectorAll(`${s} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
       const typeIn = async (pg, scope, label, value) => {
         const ok = await pg.evaluate(
@@ -8822,6 +8847,13 @@ try {
           JSON.stringify(askUi).slice(0, 700),
         );
 
+        // W2 (ui): the Home's first-run card lists what an agent reads in the app's words.
+        const pO = await as(QO);
+        await open(pO, `/app/w/${QW}`);
+        await pO.waitForSelector('[data-tool="align_get_decision_record"]', { timeout: 15000 }).catch(() => undefined);
+        const readLine = await textOf(pO, '[data-tool="align_get_decision_record"]');
+        const homeText = await textOf(pO, "main");
+        check("c9 W2 (ui): the Home's first-run card says \"Decision records: who approved or declined a change, and why\", never \"rejected\"", readLine === "Decision records: who approved or declined a change, and why" && !/rejected/i.test(homeText), `${readLine} | ${homeText.slice(0, 200)}`);
         check("c9 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
       } catch (e) {
         check("c9 web fix (ui) run", false, e?.stack ?? e);

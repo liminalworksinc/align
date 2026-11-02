@@ -616,7 +616,8 @@ The connect path SHALL show the Claude Code line of the Apps tab (`lib/paste-lin
 `GET /api/v2/workspaces/<ws>/apps` returns) with **Copy** above it, say that it adds Align to Claude Code for the
 person's user account and starts the sign-in and writes no hooks, list what a connected agent can read as the person,
 one line per read tool the server lists for a `goals:read` token (`lib/mcp/read-tools.ts`, the activity line marked
-agent-reported), say that it can't propose, approve, launch or change anything (and that, if allowed when connecting,
+agent-reported; in the app's words, "Decision records: who approved or declined a change, and why", never "rejected":
+`scripts/test-v2.mjs` "c9 W2: ..."), say that it can't propose, approve, launch or change anything (and that, if allowed when connecting,
 it can add evidence links labelled agent-reported), and link to the Apps tab for other apps; for a viewer it says
 viewers can't connect apps instead of the line. Its status line (a polite live region) SHALL say only what Align has
 seen: no app connected yet (for anyone but an owner: they haven't connected one), or for each approved app with no

@@ -104,8 +104,8 @@ const tag = (s: string) => `<untrusted-text>${s.replace(/</g, "&lt;").replace(/>
 /** A person in a summary: "you" for the person the token acts for, as the web app says it (c9 W3), else their name as
  *  people's text. */
 const who = (p: { id: string; name: { untrusted_text: string } }, me: string) => (p.id === me ? "you" : tag(p.name.untrusted_text));
-/** A change request's state in the app's words: "declined" for `rejected` (the state value stays), as the web app
- *  says it. */
+/** A change request's state in the app's words: "declined" for `rejected` (the state value stays), as the web app and
+ *  the decision record say it (c9 W2). */
 const crStateWord = (state: string) => (state === "rejected" ? "declined" : state);
 
 function result<T extends Record<string, unknown>>(structured: T, summary: string) {
@@ -771,13 +771,13 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         .map(changeOut);
       const out = { workspace: workspaceOf(pp), state: state ?? null, change_requests: list };
       const lines = list.flatMap((cr) => [
-        `- ${cr.id} ${cr.state} on goal ${cr.goal.id} ${tag(cr.goal.title.untrusted_text)} from ${who(cr.requested_by, pp.userId)} (base version ${cr.base_version}, revision ${cr.revision}, ${count(cr.evidence.length, "evidence link")}): ${tag(cr.reason.untrusted_text)}`,
+        `- ${cr.id} ${crStateWord(cr.state)} on goal ${cr.goal.id} ${tag(cr.goal.title.untrusted_text)} from ${who(cr.requested_by, pp.userId)} (base version ${cr.base_version}, revision ${cr.revision}, ${count(cr.evidence.length, "evidence link")}): ${tag(cr.reason.untrusted_text)}`,
         ...(cr.launch ? [`  ${launchWords(cr.launch, cr.base_version, null)}`] : []),
         ...(cr.condition ? [conditionLine(cr.condition, pp.userId)] : []),
         ...cr.evidence.map(evidenceLine(pp.userId)),
         snapshotLine(cr.snapshot),
       ]);
-      return result(out, [`${count(list.length, "change request")}${state ? ` (${state})` : ""}.`, ...lines].join("\n"));
+      return result(out, [`${count(list.length, "change request")}${state ? ` (${crStateWord(state)})` : ""}.`, ...lines].join("\n"));
     },
   );
 
@@ -785,7 +785,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
     "align_get_decision_record",
     {
       title: "Get a decision record",
-      description: "A decided change request: who asked, who approved or rejected it, the reason, the before and after of each changed field, whether an approved change is launched to agents yet and the goal version its launch created, its \"Accept if\" condition and acknowledgement, its evidence links, whether it was approved without evidence, and the snapshot Align recorded at the decided revision.",
+      description: "A decided change request: who asked, who approved or declined it, the reason, the before and after of each changed field, whether an approved change is launched to agents yet and the goal version its launch created, its \"Accept if\" condition and acknowledgement, its evidence links, whether it was approved without evidence, and the snapshot Align recorded at the decided revision.",
       inputSchema: z.object({ change_request_id: z.string().max(64), ...wsInput }),
       outputSchema: DecisionOut,
       annotations: READ_ONLY,
