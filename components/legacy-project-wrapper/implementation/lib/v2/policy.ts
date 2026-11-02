@@ -106,7 +106,7 @@ export function canBind(p: PolicyPrincipal, g: GoalObject, hasTransfer: boolean)
 }
 
 const roleDenied = (p: PolicyPrincipal): Decision =>
-  p.wsRole === "viewer" ? deny("read_only", "Viewers can look but not change anything") : deny("owner_only", "Only a workspace owner can do this");
+  p.wsRole === "viewer" ? deny("read_only", "Viewers can look but not change anything.") : deny("owner_only", "Only a workspace owner can do this.");
 
 export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject): Decision {
   if (!p.wsRole) return hidden(); // not a member (or no device grant): the workspace and everything in it is hidden
@@ -122,7 +122,7 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
     case "goal.create": {
       if (!wsCan(p, "goal.create")) return roleDenied(p);
       if (obj.kind !== "goal_draft") return hidden();
-      if (obj.podId && !podCan(p, obj.podId, "goal.create_in_pod")) return deny("not_in_team", "Only members of that team can add its goals");
+      if (obj.podId && !podCan(p, obj.podId, "goal.create_in_pod")) return deny("not_in_team", "Only members of that team can add its goals.");
       return ALLOW;
     }
 
@@ -133,7 +133,7 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
     case "goal.edit":
       if (obj.kind !== "goal" || !canReadGoal(p, obj)) return hidden();
       if (!wsCan(p, "goal.create")) return roleDenied(p);
-      return obj.ownerId === p.userId ? ALLOW : deny("not_goal_owner", "Only the goal's owner can change it");
+      return obj.ownerId === p.userId ? ALLOW : deny("not_goal_owner", "Only the goal's owner can change it.");
 
     case "goal.bind": {
       if (obj.kind !== "bind" || !canReadGoal(p, obj.goal)) return hidden();
@@ -141,13 +141,13 @@ export function authorize(p: PolicyPrincipal, action: Action, obj: PolicyObject)
       if (obj.goal.ownerId === p.userId) return ALLOW;
       if (podCan(p, obj.goal.podId, "goal.bind_pod_goal")) return ALLOW;
       if (obj.hasTransfer) return ALLOW;
-      return deny("alignment_required", "Ask the goal's owner to approve working toward it first");
+      return deny("alignment_required", "Ask the goal's owner to approve working toward it first.");
     }
 
     case "pod.manage_members": {
       if (obj.kind !== "pod") return hidden();
       if (wsCan(p, "workspace.manage") || podCan(p, obj.podId, "pod.manage_members")) return ALLOW;
-      return p.wsRole === "viewer" ? roleDenied(p) : deny("not_team_lead", "Only a workspace owner or the team's lead can change its members");
+      return p.wsRole === "viewer" ? roleDenied(p) : deny("not_team_lead", "Only a workspace owner or the team's lead can change its members.");
     }
 
     case "session.manage":

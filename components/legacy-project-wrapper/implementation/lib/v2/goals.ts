@@ -420,7 +420,7 @@ export function nextContent(pp: PolicyPrincipal, goalId: string, prev: GoalConte
     target_share: targetIn(b.target_share, prev.target_share),
   };
   if (!loopOk) assertNoDependencyCycle(pp.wsId, goalId, next.depends_on);
-  if (sameContent(next, prev)) throw conflict("no_change", "Nothing changed");
+  if (sameContent(next, prev)) throw conflict("no_change", "Nothing changed, so no new version was saved.");
   return next;
 }
 
@@ -503,7 +503,7 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   if (podId && !get("SELECT 1 AS x FROM v2_pods WHERE ws_id = ? AND id = ?", pp.wsId, podId)) throw notFound();
   if (visibility === "pod" && !podId) throw badRequest("A team goal needs a team");
   need(pp, "goal.create", { kind: "goal_draft", podId });
-  if (level === "company" && pp.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can create a company goal");
+  if (level === "company" && pp.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can create a company goal.");
   const title = str(b, "title", 300);
   const measures = measuresIn(b.measures ?? []);
   const anchors = anchorsIn(b.anchors ?? {});
@@ -512,7 +512,7 @@ export async function createGoal(pp: PolicyPrincipal, b: Body): Promise<Goal> {
   const targetShare = targetIn(b.target_share);
   const at = nowIso();
   const count = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_goals WHERE ws_id = ?", pp.wsId)?.n ?? 0;
-  if (count >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals");
+  if (count >= 1000) throw conflict("too_many_goals", "This workspace has the maximum number of goals.");
   const id = await tx(() => {
     const created = insertGoal(pp, { title, level, podId, visibility, measures, anchors, dependsOn, limits, targetShare }, at);
     // Here, not in insertGoal: the sample workspace's seeded limit is nobody's first.
@@ -556,7 +556,7 @@ export function writeGoalVersion(g: GoalRow, content: GoalContent, actorId: stri
     g.id,
     g.version,
   );
-  if (!n) throw conflict("stale_version", "This goal changed meanwhile; reload and try again");
+  if (!n) throw conflict("stale_version", "This goal changed while you were editing. Reload to start from its latest version.");
   run(
     "INSERT INTO v2_goal_versions (ws_id, goal_id, version, title, measures_json, anchors_json, depends_on_json, limits_json, target_share, status, content_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     g.ws_id,
@@ -615,7 +615,7 @@ export async function newGoalVersion(pp: PolicyPrincipal, goalId: string, b: Bod
   const g = goalRow(pp.wsId, goalId);
   if (!g) throw notFound();
   need(pp, "goal.edit", goalObj(g));
-  if (b.version !== undefined && b.version !== g.version) throw conflict("stale_version", `This goal is at version ${g.version}; reload and try again`);
+  if (b.version !== undefined && b.version !== g.version) throw conflict("stale_version", `This goal changed while you were editing. Reload to start from version ${g.version}.`);
   const next = nextContent(pp, g.id, contentOf(g), b);
   await tx(() => writeGoalVersion(g, next, pp.userId, nowIso()));
   return serializeGoal(pp, goalRow(pp.wsId, goalId)!);

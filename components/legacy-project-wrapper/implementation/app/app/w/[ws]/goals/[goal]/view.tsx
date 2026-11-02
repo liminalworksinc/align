@@ -311,7 +311,7 @@ export default function GoalPage({ me, ws, goal }: { me: Me; ws: string; goal: s
       {d.error && <Err>{d.error === "Not found" ? "This goal does not exist or you can't see it." : d.error}</Err>}
       {g && (
         <>
-          <HoldBanner hold={hold.data?.held ?? null} />
+          <HoldBanner hold={hold.data?.held ?? null} me={me.id} />
           <h1 className="mb-2 text-[26px] font-semibold text-zinc-900">{g.title}</h1>
           <div className="mb-5 flex flex-wrap gap-2">
             <Pill tone="violet">{g.status}</Pill>

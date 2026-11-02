@@ -4,7 +4,7 @@ import { newId, nowIso } from "./ids";
 import { effectiveSet, launchSet } from "./approval";
 import { assertTargetsFit, contentOf, goalObj, goalRow, visibleGoal, writeGoalVersion } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
-import { memberName } from "./workspaces";
+import { memberName, nameTo } from "./workspaces";
 import { optStr, type Body } from "./validate";
 
 // Reallocations (PORT29, main #29): a proposal to change the target share of agent time of one or more goals at once,
@@ -86,10 +86,10 @@ function targetsIn(pp: PolicyPrincipal, v: unknown): Target[] {
     const g = visibleGoal(pp, typeof t.goal_id === "string" ? t.goal_id : "");
     if (seen.has(g.id)) throw badRequest("Each goal can appear once");
     seen.add(g.id);
-    if (g.status !== "active") throw conflict("goal_not_active", "A goal in this proposal is achieved or dropped");
+    if (g.status !== "active") throw conflict("goal_not_active", "A goal in this proposal is achieved or dropped, so its target can't change.");
     if ((g.target_share ?? null) !== share) out.push({ goal_id: g.id, base_version: g.version, from_share: g.target_share ?? null, target_share: share as number | null });
   }
-  if (!out.length) throw conflict("no_change", "These targets are already set");
+  if (!out.length) throw conflict("no_change", "These targets are already set, so there is nothing to propose.");
   return out;
 }
 
@@ -147,14 +147,14 @@ function visible(pp: PolicyPrincipal, id: string): Row {
 
 /** POST …/reallocations { targets: [{goal_id, target_share}], note? } -> 201 (owners and members). */
 export async function createReallocation(pp: PolicyPrincipal, b: Body) {
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   const targets = targetsIn(pp, b.targets);
   const note = optStr(b, "note", NOTE_MAX);
   fits(pp.wsId, targets);
   const id = newId("rl");
   const at = nowIso();
   await tx(() => {
-    for (const t of targets) if (goalRow(pp.wsId, t.goal_id)!.version !== t.base_version) throw conflict("stale_version", "A goal changed meanwhile; reload and try again");
+    for (const t of targets) if (goalRow(pp.wsId, t.goal_id)!.version !== t.base_version) throw conflict("stale_version", "A goal changed while this was being sent. Reload the page and propose again.");
     run("INSERT INTO v2_reallocations (id, ws_id, requester_id, state, revision, created_at, updated_at) VALUES (?, ?, ?, 'pending', 1, ?, ?)", id, pp.wsId, pp.userId, at, at);
     writeRevision({ id, ws_id: pp.wsId }, 1, targets, note, pp.userId, at);
     audit(pp.wsId, pp.userId, "reallocation.requested", id, at);
@@ -181,24 +181,30 @@ function launchTargets(r: Row, actor: string, at: string) {
     .sort((a, b) => (a.t.target_share ?? 0) - (a.g?.target_share ?? 0) - ((b.t.target_share ?? 0) - (b.g?.target_share ?? 0)));
   for (const { t, g } of targets) {
     // writeGoalVersion supersedes a proposal whose goal moved, so this is a guard, not a path.
-    if (!g || g.status !== "active" || g.version !== t.base_version) throw conflict("stale_version", "A goal in this proposal changed; it can't be launched");
+    if (!g || g.status !== "active" || g.version !== t.base_version) throw conflict("stale_version", "A goal in this proposal changed, so it can't be launched.");
     writeGoalVersion(g, { ...contentOf(g), target_share: t.target_share }, actor, at, approvedBy.get(t.goal_id) ?? actor);
   }
 }
 
 /** Why an action on a target change in another state is refused (409 wrong_state), in the app's words ("declined", never
- *  "rejected") and naming who did it, as change requests and alignments say it (C8-1's sweep). */
-function stateRefusal(r: Row): string {
+ *  "rejected") and naming who did it, as change requests and alignments say it (C8-1's sweep); the reader is "you"
+ *  (c9 W3: "You declined this proposal, …", never the owner's own name). */
+function stateRefusal(r: Row, reader: string): string {
   switch (r.state) {
     case "pending":
-      return "This proposal is waiting for approval; reload to see it.";
-    case "countered":
-      return `This proposal was countered by ${memberName(revisionOf(r.id, r.revision).author_id)}; review the counter.`;
+      return "This proposal is waiting for approval.";
+    case "countered": {
+      const author = revisionOf(r.id, r.revision).author_id;
+      if (author === reader) return `You countered this proposal; it waits on ${nameTo(r.requester_id, reader)} to accept it.`;
+      return `This proposal was countered by ${memberName(author)}; review the counter.`;
+    }
     case "approved":
-      return "This proposal is already approved; reload to see it.";
+      return "This proposal is already approved.";
     case "rejected":
+      if (r.decided_by === reader) return "You declined this proposal, so nothing changes.";
       return `This proposal was declined${r.decided_by ? ` by ${memberName(r.decided_by)}` : ""}, so nothing changes.`;
     case "withdrawn":
+      if (r.requester_id === reader) return "You withdrew this proposal, so nothing changes.";
       return `This proposal was withdrawn by ${memberName(r.requester_id)}, so nothing changes.`;
     case "superseded":
       return "This proposal was superseded: one of its goals got a newer version or was closed first, so nothing changes.";
@@ -207,7 +213,7 @@ function stateRefusal(r: Row): string {
 
 export async function actOnReallocation(pp: PolicyPrincipal, id: string, action: ReallocationAction, b: Body) {
   visible(pp, id);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   const me = pp.userId;
   const at = nowIso();
   // A counter's targets are read before the transaction: reading checks each goal's visibility and can throw 404.
@@ -222,28 +228,28 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
       return !!g && effectiveSet(g, r.requester_id).includes(me);
     });
     const inState = (...s: ReallocationState[]) => {
-      if (!s.includes(r.state)) throw conflict("wrong_state", stateRefusal(r));
+      if (!s.includes(r.state)) throw conflict("wrong_state", stateRefusal(r, me));
     };
     const expectRevision = (required: boolean) => {
-      if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", `This proposal is at revision ${r.revision}; reload and try again`);
+      if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", `This proposal changed after you read it: it is now at revision ${r.revision}. Read it again and decide again.`);
     };
     const approverOnly = () => {
-      if (!isApprover) throw forbidden("not_an_approver", "Only someone who can approve for one of these goals can do this");
+      if (!isApprover) throw forbidden("not_an_approver", "Only someone who can approve for one of these goals can do this.");
     };
     const requesterOnly = () => {
-      if (!isRequester) throw forbidden("not_requester", "Only the person who asked can do this");
+      if (!isRequester) throw forbidden("not_requester", "Only the person who asked can do this.");
     };
     const launcherOnly = () => {
-      if (!mayLaunch(pp, r)) throw forbidden("not_a_launcher", "Only someone who can launch for every goal in it (an approver of each, or a workspace owner who can read them all) can launch it");
+      if (!mayLaunch(pp, r)) throw forbidden("not_a_launcher", "Only someone who can launch for every goal in it (an approver of each, or a workspace owner who can read them all) can launch it.");
     };
     const launchable = () => {
-      if (r.state !== "approved" || (r.launch !== "pending" && r.launch !== "not_yet")) throw conflict("wrong_state", r.launch === "launched" ? "These targets are already launched" : stateRefusal(r));
+      if (r.state !== "approved" || (r.launch !== "pending" && r.launch !== "not_yet")) throw conflict("wrong_state", r.launch === "launched" ? `These targets were already launched by ${r.launch_by ? nameTo(r.launch_by, me) : "someone"}.` : stateRefusal(r, me));
     };
     const approve = () => {
       approverOnly();
       inState("pending");
       expectRevision(true);
-      if (!approveAs(r, r.revision, me, at)) throw conflict("already_approved", "The goals you can approve for are already approved");
+      if (!approveAs(r, r.revision, me, at)) throw conflict("already_approved", "The goals you can approve for are already approved.");
       run("UPDATE v2_reallocations SET updated_at = ? WHERE id = ?", at, r.id);
       audit(r.ws_id, me, "reallocation.approval", r.id, at);
       return settle(r, at);
@@ -262,7 +268,7 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
         break;
       case "approve_and_launch":
         launcherOnly(); // before approving: nothing is written unless both can happen
-        if (!approve()) throw conflict("not_ready", "Other goals in this proposal still need an approval; approve it instead");
+        if (!approve()) throw conflict("not_ready", "Other goals in this proposal still need an approval, so it can't launch yet; approve it instead.");
         launch();
         break;
       case "launch":
@@ -279,7 +285,7 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
         break;
       case "counter": {
         approverOnly();
-        if (isRequester) throw forbidden("not_an_approver", "Withdraw and propose again to change your own proposal");
+        if (isRequester) throw forbidden("not_an_approver", "Withdraw and propose again to change your own proposal.");
         inState("pending");
         expectRevision(false);
         fits(r.ws_id, countered!);
@@ -294,7 +300,7 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
         requesterOnly();
         inState("countered");
         expectRevision(false);
-        for (const t of targets) if (goalRow(r.ws_id, t.goal_id)?.version !== t.base_version) throw conflict("stale_version", "A goal changed meanwhile; reload and try again");
+        for (const t of targets) if (goalRow(r.ws_id, t.goal_id)?.version !== t.base_version) throw conflict("stale_version", "A goal in this proposal changed after the counter, so it can't go back for approval. Withdraw it and propose again.");
         fits(r.ws_id, targets);
         run("UPDATE v2_reallocations SET state = 'pending', updated_at = ? WHERE id = ?", at, r.id);
         approveAs(r, r.revision, me, at);
@@ -303,7 +309,7 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
         break;
       case "reject":
         approverOnly();
-        if (isRequester) throw forbidden("not_an_approver", "Withdraw your own proposal instead");
+        if (isRequester) throw forbidden("not_an_approver", "Withdraw your own proposal instead.");
         inState("pending", "countered");
         expectRevision(false);
         run("UPDATE v2_reallocations SET state = 'rejected', decided_by = ?, decision_note = ?, decided_at = ?, updated_at = ? WHERE id = ?", me, note, at, at, r.id);

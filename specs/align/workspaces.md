@@ -1524,12 +1524,22 @@ for a reader of it (404 otherwise) who is not a viewer (403 `read_only`): `accep
 `not_in_team`); `withdraw` from `open` or `accepted` by its requester (403 `not_requester`); and `mention {date, text
 1..300, source_title 1..120}` on an `open` or `accepted` ask by any owner or member who reads it, at most 10 per ask (409
 `too_many_mentions`); any other state is 409 `wrong_state`, and a person gets at most 30 ask actions a minute (429).
-Each change records who made it (`decided_by`, `decided_at`), and a mention its author.
+Each change records who made it (`decided_by`, `decided_at`), and a mention its author. A `wrong_state` refusal SHALL say
+what happened, who did it and end in a full stop, as a change request's does, never "This ask is <state>": "This ask was
+declined by <name>, so nothing changes.", "This ask was withdrawn by <requester>, so nothing changes.", "This ask was
+marked done by <name>.", "This ask was already accepted by <name>.", "<name> reopened this ask, so it waits for the team
+asked to accept it again." or "This ask waits for the team asked to accept it.", saying "you" to the person who did it
+("You declined this ask, so nothing changes."; `scripts/test-v2.mjs` "c9 W4: ...").
 
 #### Scenario: State machine
 
 - **WHEN** the team's lead accepts an open ask, a member marks it done, the lead reopens it and a workspace owner declines it
 - **THEN** each answers the AskView in its new state (`accepted`, `done`, `open`, `declined`) with `decided_by` that person, and withdrawing or mentioning the declined ask is 409 `wrong_state`
+
+#### Scenario: Acting on an ask declined meanwhile
+
+- **WHEN** a lead declines an open ask and its requester then withdraws it, a member marks it done, and the lead accepts it (`scripts/test-v2.mjs` "c9 W4: ...")
+- **THEN** the requester and the member get 409 `wrong_state` "This ask was declined by <lead>, so nothing changes." and the lead "You declined this ask, so nothing changes."
 
 #### Scenario: Can flags and waiting on me
 

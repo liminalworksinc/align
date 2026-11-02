@@ -7,7 +7,7 @@ export const READ_TOOLS: readonly { name: string; reads: string; agentReported?:
   { name: "align_list_goals", reads: "The goals you can read, at their current version" },
   { name: "align_get_goal", reads: "One goal's measures and its earlier versions" },
   { name: "align_list_change_requests", reads: "Change requests, with their evidence links" },
-  { name: "align_get_decision_record", reads: "Decision records: who approved or rejected a change, and why" },
+  { name: "align_get_decision_record", reads: "Decision records: who approved or declined a change, and why" },
   { name: "align_get_directives", reads: "What changed for your own shared sessions" },
   { name: "align_get_limits", reads: "The goals' limits" },
   { name: "align_get_asks", reads: "What teams were asked to do" },

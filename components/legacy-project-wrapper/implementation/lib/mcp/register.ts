@@ -101,6 +101,12 @@ type UT = z.infer<typeof UT>;
 const ut = (s: string): UT => ({ untrusted_text: s });
 /** For the text summary: < and > escaped, so the text can't close its tag. */
 const tag = (s: string) => `<untrusted-text>${s.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</untrusted-text>`;
+/** A person in a summary: "you" for the person the token acts for, as the web app says it (c9 W3), else their name as
+ *  people's text. */
+const who = (p: { id: string; name: { untrusted_text: string } }, me: string) => (p.id === me ? "you" : tag(p.name.untrusted_text));
+/** A change request's state in the app's words: "declined" for `rejected` (the state value stays), as the web app and
+ *  the decision record say it (c9 W2). */
+const crStateWord = (state: string) => (state === "rejected" ? "declined" : state);
 
 function result<T extends Record<string, unknown>>(structured: T, summary: string) {
   return { content: [{ type: "text" as const, text: summary }], structuredContent: structured };
@@ -304,7 +310,7 @@ const snapshotOut = (s: SnapshotView | null): z.infer<typeof SnapshotOut> | null
     bound_sessions: s.bound_sessions,
     last_activity_at: s.last_activity_at,
   };
-const evidenceLine = (e: z.infer<typeof EvidenceOut>) => `  - revision ${e.revision} ${e.kind}, ${e.reported_as} by ${tag(e.added_by.name.untrusted_text)}: ${tag(e.label.untrusted_text)} ${tag(e.url.untrusted_text)}`;
+const evidenceLine = (me: string) => (e: z.infer<typeof EvidenceOut>) => `  - revision ${e.revision} ${e.kind}, ${e.reported_as} by ${who(e.added_by, me)}: ${tag(e.label.untrusted_text)} ${tag(e.url.untrusted_text)}`;
 const snapshotLine = (s: z.infer<typeof SnapshotOut> | null) =>
   !s
     ? "  No Align snapshot for this revision."
@@ -318,8 +324,8 @@ const LaunchOut = z.enum(LAUNCH_STATES).nullable();
 const ConditionOut = z.object({ revision: z.number(), text: UT, acknowledged_by: Person.nullable(), acknowledged_at: z.string().nullable() });
 const conditionOut = (c: Condition | null): z.infer<typeof ConditionOut> | null =>
   c && { revision: c.revision, text: ut(c.text), acknowledged_by: c.acknowledged_by ? person(c.acknowledged_by.id, c.acknowledged_by.name) : null, acknowledged_at: c.acknowledged_at };
-const conditionLine = (c: z.infer<typeof ConditionOut>, indent = "  ") =>
-  `${indent}Accept if (revision ${c.revision}): ${tag(c.text.untrusted_text)}; ${c.acknowledged_by ? `acknowledged by ${tag(c.acknowledged_by.name.untrusted_text)} at ${c.acknowledged_at}` : "not confirmed yet"}.`;
+const conditionLine = (c: z.infer<typeof ConditionOut>, me: string, indent = "  ") =>
+  `${indent}Accept if (revision ${c.revision}): ${tag(c.text.untrusted_text)}; ${c.acknowledged_by ? `acknowledged by ${who(c.acknowledged_by, me)} at ${c.acknowledged_at}` : "not confirmed yet"}.`;
 
 // ---------- align_list_change_requests ----------
 
@@ -765,13 +771,13 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         .map(changeOut);
       const out = { workspace: workspaceOf(pp), state: state ?? null, change_requests: list };
       const lines = list.flatMap((cr) => [
-        `- ${cr.id} ${cr.state} on goal ${cr.goal.id} ${tag(cr.goal.title.untrusted_text)} from ${tag(cr.requested_by.name.untrusted_text)} (base version ${cr.base_version}, revision ${cr.revision}, ${count(cr.evidence.length, "evidence link")}): ${tag(cr.reason.untrusted_text)}`,
+        `- ${cr.id} ${crStateWord(cr.state)} on goal ${cr.goal.id} ${tag(cr.goal.title.untrusted_text)} from ${who(cr.requested_by, pp.userId)} (base version ${cr.base_version}, revision ${cr.revision}, ${count(cr.evidence.length, "evidence link")}): ${tag(cr.reason.untrusted_text)}`,
         ...(cr.launch ? [`  ${launchWords(cr.launch, cr.base_version, null)}`] : []),
-        ...(cr.condition ? [conditionLine(cr.condition)] : []),
-        ...cr.evidence.map(evidenceLine),
+        ...(cr.condition ? [conditionLine(cr.condition, pp.userId)] : []),
+        ...cr.evidence.map(evidenceLine(pp.userId)),
         snapshotLine(cr.snapshot),
       ]);
-      return result(out, [`${count(list.length, "change request")}${state ? ` (${state})` : ""}.`, ...lines].join("\n"));
+      return result(out, [`${count(list.length, "change request")}${state ? ` (${crStateWord(state)})` : ""}.`, ...lines].join("\n"));
     },
   );
 
@@ -779,7 +785,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
     "align_get_decision_record",
     {
       title: "Get a decision record",
-      description: "A decided change request: who asked, who approved or rejected it, the reason, the before and after of each changed field, whether an approved change is launched to agents yet and the goal version its launch created, its \"Accept if\" condition and acknowledgement, its evidence links, whether it was approved without evidence, and the snapshot Align recorded at the decided revision.",
+      description: "A decided change request: who asked, who approved or declined it, the reason, the before and after of each changed field, whether an approved change is launched to agents yet and the goal version its launch created, its \"Accept if\" condition and acknowledgement, its evidence links, whether it was approved without evidence, and the snapshot Align recorded at the decided revision.",
       inputSchema: z.object({ change_request_id: z.string().max(64), ...wsInput }),
       outputSchema: DecisionOut,
       annotations: READ_ONLY,
@@ -812,18 +818,19 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         decided_at: cr.decided_at,
       };
       const lines = [
-        // "declined", the app's word for a rejected request (its state stays "rejected" in the record).
-        `Change request ${cr.id} on goal ${cr.goal.id} ${tag(cr.goal.title)} was ${cr.state === "rejected" ? "declined" : cr.state}${record.decided_by ? ` by ${tag(cr.decided_by!.name)}` : ""}${cr.decided_at ? ` at ${cr.decided_at}` : ""}.`,
-        `Asked by ${tag(cr.requested_by.name)} against version ${cr.base_version}: ${tag(cr.reason)}`,
+        // "declined", the app's word for a rejected request (its state stays "rejected" in the record); the person the
+        // token acts for is "you" (c9 W3).
+        `Change request ${cr.id} on goal ${cr.goal.id} ${tag(cr.goal.title)} was ${crStateWord(cr.state)}${record.decided_by ? ` by ${who(record.decided_by, pp.userId)}` : ""}${cr.decided_at ? ` at ${cr.decided_at}` : ""}.`,
+        `Asked by ${who(record.requested_by, pp.userId)} against version ${cr.base_version}: ${tag(cr.reason)}`,
         cr.decision_note !== null ? `Decision note: ${tag(cr.decision_note)}` : "No decision note.",
         // Each changed field in words, as the web app's value card says it ("<measure> target 500 -> 600").
         ...diffWords(cr.diff as Record<string, FieldDiff | undefined>, { q: tag, arrow: "->" }),
-        ...(cr.state === "superseded" ? [`Approved, then superseded before launch: it never reached agents. ${tag(cr.requested_by.name)} can propose it again.`] : []),
-        ...(cr.state === "approved" ? [`${launchWords(cr.launch, cr.base_version, cr.resulting_version)}.${cr.launch === "not_yet" && record.launch_decided_by ? ` ${tag(cr.launch_decided_by!.name)} decided not yet at ${cr.launch_decided_at}.` : ""}${cr.launch === "launched" && record.launch_decided_by ? ` Launched by ${tag(cr.launch_decided_by!.name)} at ${cr.launch_decided_at}.` : ""}`] : []),
-        ...(record.condition ? [conditionLine(record.condition, "")] : []),
+        ...(cr.state === "superseded" ? [`Approved, then superseded before launch: it never reached agents. ${record.requested_by.id === pp.userId ? "You" : tag(cr.requested_by.name)} can propose it again.`] : []),
+        ...(cr.state === "approved" ? [`${launchWords(cr.launch, cr.base_version, cr.resulting_version)}.${cr.launch === "not_yet" && record.launch_decided_by ? ` ${record.launch_decided_by.id === pp.userId ? "You" : tag(cr.launch_decided_by!.name)} decided not yet at ${cr.launch_decided_at}.` : ""}${cr.launch === "launched" && record.launch_decided_by ? ` Launched by ${who(record.launch_decided_by, pp.userId)} at ${cr.launch_decided_at}.` : ""}`] : []),
+        ...(record.condition ? [conditionLine(record.condition, pp.userId, "")] : []),
         record.resulting_version !== null ? `Resulting goal version: ${record.resulting_version}.` : "No goal version was created.",
         record.approved_without_evidence ? "Approved without evidence." : `${count(record.evidence.length, "evidence link")} (self-reported or agent-reported, none verified):`,
-        ...record.evidence.map(evidenceLine),
+        ...record.evidence.map(evidenceLine(pp.userId)),
         snapshotLine(record.snapshot),
       ];
       return result({ found: true, decided: true, record }, lines.join("\n"));
@@ -1050,11 +1057,11 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
             ])
           : ["- none"]),
         "NOT AGREED YET:",
-        ...(open.length ? open.map((p) => `- ${p.kind === "change_request" ? "change request" : "alignment"} ${p.id} on ${tag(clipped(p.goal.title.untrusted_text, clip))}, ${p.state}, waiting on ${p.waiting_on.map((w) => tag(w.name.untrusted_text)).join(", ") || "nobody yet"}${p.condition ? `; accept if ${tag(clipped(p.condition.text.untrusted_text, clip))} (${p.condition.acknowledged_by ? "acknowledged" : "not confirmed yet"})` : ""}`) : ["- nothing"]),
+        ...(open.length ? open.map((p) => `- ${p.kind === "change_request" ? "change request" : "alignment"} ${p.id} on ${tag(clipped(p.goal.title.untrusted_text, clip))}, ${p.state}, waiting on ${p.waiting_on.map((w) => who(w, pp.userId)).join(", ") || "nobody yet"}${p.condition ? `; accept if ${tag(clipped(p.condition.text.untrusted_text, clip))} (${p.condition.acknowledged_by ? "acknowledged" : "not confirmed yet"})` : ""}`) : ["- nothing"]),
         ...(unlaunched.length
           ? [
               "APPROVED, NOT LAUNCHED:",
-              ...unlaunched.map((p) => `- change request ${p.id} on ${tag(clipped(p.goal.title.untrusted_text, clip))}: ${launchWords(p.launch, versionOf(p.goal.id), null)}${p.launch === "not_yet" ? " (not yet)" : ""}, can launch: ${p.waiting_on.map((w) => tag(w.name.untrusted_text)).join(", ") || "nobody yet"}`),
+              ...unlaunched.map((p) => `- change request ${p.id} on ${tag(clipped(p.goal.title.untrusted_text, clip))}: ${launchWords(p.launch, versionOf(p.goal.id), null)}${p.launch === "not_yet" ? " (not yet)" : ""}, can launch: ${p.waiting_on.map((w) => who(w, pp.userId)).join(", ") || "nobody yet"}`),
             ]
           : []),
         "ASKED OF YOUR TEAMS:",

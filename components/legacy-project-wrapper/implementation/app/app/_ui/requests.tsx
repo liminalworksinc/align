@@ -93,11 +93,11 @@ const sessionName = (s: { owner: Person; mine: boolean; repo_alias: string | nul
   `${s.mine ? "Your" : `${s.owner.name}'s`} ${s.title || s.repo_alias || s.harness} session`;
 
 /** The hold banner for the top of the goal page (also shown on the Goals and Sessions tabs). */
-export function HoldBanner({ hold, goalTitle }: { hold: HoldState["held"]; goalTitle?: string }) {
+export function HoldBanner({ hold, goalTitle, me }: { hold: HoldState["held"]; goalTitle?: string; me?: string }) {
   if (!hold) return null;
   return (
     <div data-hold-banner className="mb-5 rounded-[14px] border border-red-700 bg-red-50 px-4 py-3 text-[15px] text-red-800">
-      <strong>All agents on {goalTitle ? `"${goalTitle}"` : "this goal"} are on hold.</strong> {hold.held_by.name} paused them {when(hold.held_at)}
+      <strong>All agents on {goalTitle ? `"${goalTitle}"` : "this goal"} are on hold.</strong> {hold.held_by.id === me ? "You" : hold.held_by.name} paused them {when(hold.held_at)}
       {hold.reason ? `: ${hold.reason}` : ""}. Their tools are blocked until someone who can approve for the goal releases it.
     </div>
   );
@@ -210,7 +210,7 @@ function SendRequest({ ws, goal, data, onDone }: { ws: string; goal: Goal; data:
   );
 }
 
-function RequestRow({ ws, r, onDone }: { ws: string; r: RequestView; onDone: () => void }) {
+function RequestRow({ ws, r, me, onDone }: { ws: string; r: RequestView; me: string; onDone: () => void }) {
   const act = useAction();
   const c = r.counts;
   return (
@@ -219,7 +219,7 @@ function RequestRow({ ws, r, onDone }: { ws: string; r: RequestView; onDone: () 
         <span className="text-[16px] text-zinc-900">{TYPE_LABEL[r.type]}</span>
         {r.state === "cancelled" ? <Pill>cancelled</Pill> : r.state === "expired" ? <Pill>{r.expired_reason === "sessions_ended" ? "expired: its sessions ended" : "expired: the goal closed"}</Pill> : r.state === "open" ? <Pill tone="amber">waiting</Pill> : <Pill tone="green">answered</Pill>}
         <span className="text-[14px] text-zinc-500">
-          from {r.sender.name} ({r.sender.role === "approver" ? "approver" : "workspace owner"}), {when(r.created_at)}, goal version {r.goal.version}
+          from {r.sender.id === me ? "you" : r.sender.name} ({r.sender.role === "approver" ? "approver" : "workspace owner"}), {when(r.created_at)}, goal version {r.goal.version}
         </span>
         {r.can_cancel && (
           <span className="ml-auto">
@@ -231,7 +231,7 @@ function RequestRow({ ws, r, onDone }: { ws: string; r: RequestView; onDone: () 
       </div>
       {r.target_goal && <p className="text-[14px] text-zinc-600">Move to: {r.target_goal.private ? "a goal you can't see" : r.target_goal.title}</p>}
       {r.note && <p className="text-[14px] text-zinc-600">Note: &ldquo;{r.note}&rdquo;</p>}
-      {r.cancelled_by && <p className="text-[14px] text-zinc-500">Cancelled by {r.cancelled_by.name}, {when(r.cancelled_at)}</p>}
+      {r.cancelled_by && <p className="text-[14px] text-zinc-500">Cancelled by {r.cancelled_by.id === me ? "you" : r.cancelled_by.name}, {when(r.cancelled_at)}</p>}
       <p className="text-[14px] text-zinc-500">
         {c.pending} pending, {c.accepted} accepted by the developer{c.not_declined ? `, ${c.not_declined} delivered and not declined` : ""}, {c.declined} declined
         {c.expired ? `, ${c.expired} expired` : ""}
@@ -283,7 +283,7 @@ export function AgentsOnGoalCard({ ws, goal, me, onHoldChanged }: { ws: string; 
         ) : (
           <ul className="divide-y divide-zinc-200">
             {data.requests.map((r) => (
-              <RequestRow key={`${r.id}:${r.state}`} ws={ws} r={r} onDone={d.reload} />
+              <RequestRow key={`${r.id}:${r.state}`} ws={ws} r={r} me={me.id} onDone={d.reload} />
             ))}
           </ul>
         )}

@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { api, ApiError, Btn, Err, Note, Pill, useAction, useApi, when } from "./kit";
-import { ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, Diff, EvidenceItem, NoticeBox, Revisions, SnapshotBox, useNotice, type Notice } from "./crparts";
+import { api, ApiError, Btn, Err, Note, Pill, sentence, useAction, useApi, when } from "./kit";
+import { ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, Diff, EvidenceItem, NoticeBox, removeEvidence, Revisions, SnapshotBox, useNotice, type Notice } from "./crparts";
 import { OpenRequest } from "./decide";
 import type { ChangeRequest, Goal } from "./types";
 import { ValueCard } from "./value";
@@ -116,7 +116,20 @@ function RequestRecord({
 }) {
   const act = useAction();
   const path = `/api/v2/workspaces/${ws}/goals/${cr.goal.id}/change-requests/${cr.id}`;
-  const doIt = (action: string, body: Record<string, unknown>) => act.run(() => api(`${path}/${action}`, { body }), onDone);
+  /** Confirm the condition is met: recorded, or refused like every decision (a 409 is the card's focused "Not recorded.
+   *  <the server's words>" and the card reloads; c9 sweep). */
+  const acknowledge = () =>
+    void act.run(async () => {
+      setNotice(null);
+      try {
+        await api(`${path}/acknowledge`, { body: { revision: cr.condition!.revision } });
+        setNotice({ kind: "done", text: "Recorded: you acknowledged the condition." });
+      } catch (e) {
+        if (!(e instanceof ApiError) || e.status !== 409) throw e;
+        setNotice({ kind: "refused", text: `Not recorded. ${sentence(e.message)}` });
+      }
+      onDone();
+    });
   const next = cr.goal.version + 1;
   /** Launch or not yet: the decision's outcome is a notice, which outlives the reload (and remount) that follows. */
   const decideLaunch = (action: "launch" | "not_yet") =>
@@ -126,7 +139,7 @@ function RequestRecord({
         await api(`${path}/${action}`, { body: { revision: cr.revision } });
       } catch (e) {
         if (!(e instanceof ApiError) || e.status !== 409) throw e;
-        setNotice({ kind: "refused", text: `Not recorded. ${e.message}` });
+        setNotice({ kind: "refused", text: `Not recorded. ${sentence(e.message)}` });
         onDone(); // the request moved on: show it as it is now
         return;
       }
@@ -142,7 +155,7 @@ function RequestRecord({
   const mine = cr.requester.id === me;
   const current = cr.revisions.find((r) => r.revision === cr.revision);
   const earlier = cr.revisions.filter((r) => r.revision !== cr.revision && r.evidence.length > 0);
-  const remove = (id: string) => void act.run(() => api(`${path}/evidence/${id}`, { method: "DELETE" }), onDone);
+  const remove = (id: string) => void act.run(() => removeEvidence(path, id, setNotice, onDone));
   const names = (ps: { id: string; name: string }[]) => ps.map((a) => (a.id === me ? "you" : a.name)).join(" or ");
   const said = (p: { id: string; name: string } | null) => (p ? (p.id === me ? "you" : p.name) : "someone");
   const words = launchWords(cr.launch, cr.base_version, cr.version);
@@ -243,10 +256,10 @@ function RequestRecord({
           </div>
         ))}
       </div>
-      <Revisions cr={cr} />
+      <Revisions cr={cr} me={me} />
       <div className="mt-3 flex flex-wrap gap-2">
         {cr.can.acknowledge && cr.condition && (
-          <Btn kind="secondary" disabled={act.busy} onClick={() => void doIt("acknowledge", { revision: cr.condition!.revision })}>
+          <Btn kind="secondary" disabled={act.busy} onClick={acknowledge}>
             Confirm the condition is met
           </Btn>
         )}

@@ -84,8 +84,8 @@ function canSend(pp: PolicyPrincipal, g: GoalRow): boolean {
 }
 
 function requireSender(pp: PolicyPrincipal, g: GoalRow, what: string) {
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
-  if (!canSend(pp, g)) throw forbidden("not_approver", `Only someone who can approve for this goal, or a workspace owner, can ${what}`);
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
+  if (!canSend(pp, g)) throw forbidden("not_approver", `Only someone who can approve for this goal, or a workspace owner, can ${what}.`);
 }
 
 /** A goal as a reader sees it in a request: its title only if they can read it. */
@@ -139,14 +139,14 @@ export async function sendRequest(pp: PolicyPrincipal, goalId: string, b: Body) 
   const at = nowIso();
   const id = await tx(() => {
     const live = goalRow(pp.wsId, g.id)!;
-    if (live.status !== "active") throw conflict("wrong_state", "This goal is no longer active");
+    if (live.status !== "active") throw conflict("wrong_state", "This goal is achieved or dropped, so it takes no requests.");
     const onGoal = goalTargets(pp.wsId, g.id);
     if (keys && keys.some((k) => !onGoal.includes(k))) throw badRequest("session_keys must be sessions on this goal");
     const targets = keys ?? onGoal;
-    if (!targets.length) throw conflict("no_sessions", "No shared session is working on this goal");
+    if (!targets.length) throw conflict("no_sessions", "No shared session is working on this goal, so there is nobody to ask.");
     const to = target;
     if (to && !targets.every((k) => bindableForSession(pp.wsId, k, to))) {
-      throw conflict("not_bindable", "That goal can't be taken up by every chosen session: it is not active, or a session's owner can't bind it");
+      throw conflict("not_bindable", "That goal can't be taken up by every chosen session: it is not active, or a session's owner can't bind it.");
     }
     const open = get(
       `SELECT 1 AS x FROM v2_requests r WHERE r.ws_id = ? AND r.goal_id = ? AND r.type = ? AND r.cancelled_at IS NULL
@@ -155,7 +155,7 @@ export async function sendRequest(pp: PolicyPrincipal, goalId: string, b: Body) 
       g.id,
       type,
     );
-    if (open) throw conflict("already_open", "A request of this type is still waiting for an answer on this goal; cancel it first");
+    if (open) throw conflict("already_open", "A request of this type is still waiting for an answer on this goal; cancel it first.");
     const sent = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_requests WHERE sender_id = ? AND created_at > ?", pp.userId, new Date(Date.now() - 3600_000).toISOString())?.n ?? 0;
     if (sent >= REQUESTS_PER_HOUR) throw new V2Error(429, "rate_limited", "Too many requests sent in the last hour, try again later");
     const rid = newId("rq");
@@ -188,10 +188,10 @@ export async function sendRequest(pp: PolicyPrincipal, goalId: string, b: Body) 
  *  `request` directive with cancelled true and their state becomes expired. Cancelling again changes nothing. */
 export async function cancelRequest(pp: PolicyPrincipal, goalId: string, id: string) {
   const g = visibleGoal(pp, goalId);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   const r = requestRow(pp.wsId, id);
   if (!r || r.goal_id !== g.id) throw notFound();
-  if (r.sender_id !== pp.userId && pp.wsRole !== "owner") throw forbidden("not_sender", "Only the person who sent this request, or a workspace owner, can cancel it");
+  if (r.sender_id !== pp.userId && pp.wsRole !== "owner") throw forbidden("not_sender", "Only the person who sent this request, or a workspace owner, can cancel it.");
   const at = nowIso();
   await tx(() => {
     const cur = requestRow(pp.wsId, id)!;
@@ -403,7 +403,7 @@ export async function holdGoal(pp: PolicyPrincipal, goalId: string, b: Body) {
   const at = nowIso();
   const created = await tx(() => {
     if (holdRow(pp.wsId, g.id)) return false;
-    if (goalRow(pp.wsId, g.id)!.status !== "active") throw conflict("wrong_state", "This goal is no longer active");
+    if (goalRow(pp.wsId, g.id)!.status !== "active") throw conflict("wrong_state", "This goal is achieved or dropped, so it takes no requests.");
     const dir = writeDirective(pp.wsId, "hold", goalTargets(pp.wsId, g.id), null, null, { goalId: g.id, hold: { by: pp.userId, reason, at } });
     run("INSERT INTO v2_goal_holds (ws_id, goal_id, held_by, reason, held_at, directive_id) VALUES (?, ?, ?, ?, ?, ?)", pp.wsId, g.id, pp.userId, reason, at, dir);
     audit(pp.wsId, pp.userId, "goal.held", g.id, at);

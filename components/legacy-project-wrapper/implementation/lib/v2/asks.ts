@@ -346,7 +346,7 @@ export function asksForBrief(pp: PolicyPrincipal): { asks: AskView[]; more: numb
 
 function requireWriter(pp: PolicyPrincipal) {
   need(pp, "workspace.read");
-  if (!writer(pp)) throw forbidden("read_only", "Viewers can look but not change anything");
+  if (!writer(pp)) throw forbidden("read_only", "Viewers can look but not change anything.");
 }
 
 const openCount = (ws: string) => get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_asks WHERE ws_id = ? AND state IN ('open','accepted')", ws)?.n ?? 0;
@@ -354,8 +354,8 @@ const createdLastHour = (ws: string) => get<{ n: number }>("SELECT COUNT(*) AS n
 
 /** Inside a tx: refuse `adding` more asks when the workspace is at its caps (409 too_many_asks, 429 rate_limited). */
 function checkCaps(ws: string, adding: number) {
-  if (openCount(ws) + adding > OPEN_ASKS_MAX) throw conflict("too_many_asks", `A workspace can have at most ${OPEN_ASKS_MAX} open or accepted asks; close some first`);
-  if (createdLastHour(ws) + adding > ASKS_PER_HOUR) throw new V2Error(429, "rate_limited", "Too many asks recorded in the last hour, try again later");
+  if (openCount(ws) + adding > OPEN_ASKS_MAX) throw conflict("too_many_asks", `A workspace can have at most ${OPEN_ASKS_MAX} open or accepted asks; close some first.`);
+  if (createdLastHour(ws) + adding > ASKS_PER_HOUR) throw new V2Error(429, "rate_limited", "Too many asks were recorded in the last hour; try again later.");
 }
 
 function insertAsk(pp: PolicyPrincipal, f: AskInput, state: AskState, at: string): string {
@@ -385,7 +385,7 @@ function insertAsk(pp: PolicyPrincipal, f: AskInput, state: AskState, at: string
 
 function addMention(pp: PolicyPrincipal, a: AskRow, m: MentionInput, at: string) {
   const n = (get<{ n: number | null }>("SELECT MAX(n) AS n FROM v2_ask_mentions WHERE ask_id = ?", a.id)?.n ?? 0) + 1;
-  if (n > MENTIONS_MAX) throw conflict("too_many_mentions", `An ask keeps at most ${MENTIONS_MAX} mentions`);
+  if (n > MENTIONS_MAX) throw conflict("too_many_mentions", `An ask keeps at most ${MENTIONS_MAX} mentions, so this one isn't recorded.`);
   run("INSERT INTO v2_ask_mentions (ws_id, ask_id, n, date, text, source_title, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", a.ws_id, a.id, n, m.date, m.text, m.source_title, pp.userId, at);
   run("UPDATE v2_asks SET updated_at = ? WHERE id = ?", at, a.id);
 }
@@ -458,7 +458,7 @@ export async function importAsks(pp: PolicyPrincipal, b: Body) {
       created++;
     }
     checkCaps(pp.wsId, 0);
-    if (createdLastHour(pp.wsId) > ASKS_PER_HOUR) throw new V2Error(429, "rate_limited", "Too many asks recorded in the last hour, try again later");
+    if (createdLastHour(pp.wsId) > ASKS_PER_HOUR) throw new V2Error(429, "rate_limited", "Too many asks were recorded in the last hour; try again later.");
     audit(pp.wsId, pp.userId, "ask.imported", String(created + merged), at);
     if (created) event("first_ask", { ws: pp.wsId, user: pp.userId, at });
     return { created, merged, unchanged };
@@ -483,6 +483,26 @@ const FROM: Record<AskAction, readonly AskState[]> = {
   mention: ["open", "accepted"],
 };
 
+/** Why an action on an ask in another state is refused (409 wrong_state), in the words change requests use (c9 W4):
+ *  what happened, who did it ("you" to the reader), and a full stop, never "This ask is <state>". */
+function askStateRefusal(a: AskRow, reader: string): string {
+  const who = a.decided_by;
+  const self = who === reader;
+  const by = who ? ` by ${memberName(who)}` : "";
+  switch (a.state) {
+    case "open":
+      return who ? `${self ? "You" : memberName(who)} reopened this ask, so it waits for the team asked to accept it again.` : "This ask waits for the team asked to accept it.";
+    case "accepted":
+      return self ? "You already accepted this ask." : `This ask was already accepted${by}.`;
+    case "done":
+      return self ? "You marked this ask done." : `This ask was marked done${by}.`;
+    case "declined":
+      return self ? "You declined this ask, so nothing changes." : `This ask was declined${by}, so nothing changes.`;
+    case "withdrawn":
+      return a.created_by === reader ? "You withdrew this ask, so nothing changes." : `This ask was withdrawn by ${memberName(a.created_by)}, so nothing changes.`;
+  }
+}
+
 /** POST .../asks/{id}/{action}. Unreadable: 404. Viewers: 403 read_only. Then who: accept, decline and reopen need a
  *  lead of the team asked or a workspace owner (403 not_team_lead); done any member of the team or a workspace owner
  *  (403 not_in_team); withdraw the person who recorded it (403 not_requester). Then the state (409 wrong_state). */
@@ -494,10 +514,10 @@ export async function actOnAsk(pp: PolicyPrincipal, id: string, action: AskActio
   const at = nowIso();
   await tx(() => {
     const a = askRow(pp.wsId, id)!; // re-read inside the transaction
-    if ((action === "accept" || action === "decline" || action === "reopen") && !leads(pp, a) && !isOwner(pp)) throw forbidden("not_team_lead", "Only a lead of the team asked, or a workspace owner, can do this");
-    if (action === "done" && !inTeam(pp, a) && !isOwner(pp)) throw forbidden("not_in_team", "Only the team asked, or a workspace owner, can mark it done");
-    if (action === "withdraw" && a.created_by !== pp.userId) throw forbidden("not_requester", "Only the person who recorded this ask can withdraw it");
-    if (!FROM[action].includes(a.state)) throw conflict("wrong_state", `This ask is ${a.state}`);
+    if ((action === "accept" || action === "decline" || action === "reopen") && !leads(pp, a) && !isOwner(pp)) throw forbidden("not_team_lead", "Only a lead of the team asked, or a workspace owner, can do this.");
+    if (action === "done" && !inTeam(pp, a) && !isOwner(pp)) throw forbidden("not_in_team", "Only the team asked, or a workspace owner, can mark it done.");
+    if (action === "withdraw" && a.created_by !== pp.userId) throw forbidden("not_requester", "Only the person who recorded this ask can withdraw it.");
+    if (!FROM[action].includes(a.state)) throw conflict("wrong_state", askStateRefusal(a, pp.userId));
     if (mention) addMention(pp, a, mention, at);
     else run("UPDATE v2_asks SET state = ?, decided_by = ?, decided_at = ?, updated_at = ? WHERE id = ?", NEXT[action]!, pp.userId, at, at, a.id);
     audit(pp.wsId, pp.userId, AUDIT[action], a.id, at);

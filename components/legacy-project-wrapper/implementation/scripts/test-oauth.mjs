@@ -815,9 +815,9 @@ async function local(env) {
   const evDeclined = await tool(appEv, "align_add_change_request_evidence", { change_request_id: crDeclined.json?.id, kind: "pr", url: "https://github.com/acme/x/pull/4", label: "after the decline" });
   const drDeclined = await tool(app, "align_get_decision_record", { change_request_id: crDeclined.json?.id });
   check(
-    "C8-1 (mcp): align_add_change_request_evidence on a request declined meanwhile fails with \"This request was declined by Ola Owner, so nothing changes.\" (never \"This request is rejected\"), and nothing is added; its decision record says it \"was declined by\" Ola Owner (state still rejected)",
-    crDeclined.status === 201 && crDecline.json?.state === "rejected" && evDeclined.isError && evDeclined.text === "This request was declined by Ola Owner, so nothing changes." &&
-      (await web(U1, "GET", `${crBase(GC.id)}/${crDeclined.json?.id}`)).json?.evidence_count === 0 && drDeclined.sc?.record?.state === "rejected" && drDeclined.text.startsWith(`Change request ${crDeclined.json?.id} on goal ${GC.id} `) && /was declined by <untrusted-text>Ola Owner<\/untrusted-text>/.test(drDeclined.text) && !/rejected/.test(drDeclined.text),
+    "C8-1 (mcp), c9 W3 (mcp): align_add_change_request_evidence on a request declined meanwhile fails in the app's words (never \"This request is rejected\"), and to Ola Owner, who declined it, says \"you\": \"You declined this request, so nothing changes.\"; nothing is added; its decision record says it \"was declined by you\" (state still rejected, decided_by still Ola Owner)",
+    crDeclined.status === 201 && crDecline.json?.state === "rejected" && evDeclined.isError && evDeclined.text === "You declined this request, so nothing changes." &&
+      (await web(U1, "GET", `${crBase(GC.id)}/${crDeclined.json?.id}`)).json?.evidence_count === 0 && drDeclined.sc?.record?.state === "rejected" && drDeclined.sc.record.decided_by?.id === U1.id && drDeclined.text.startsWith(`Change request ${crDeclined.json?.id} on goal ${GC.id} `) && / was declined by you at /.test(drDeclined.text) && !/rejected|Ola Owner/.test(drDeclined.text.split("\n")[0]),
     `${crDeclined.status} ${crDeclined.text.slice(0, 160)} ${crDecline.status} ${evDeclined.text} | ${drDeclined.text.slice(0, 300)}`,
   );
   const evNotInvolved = await tool(appEv, "align_add_change_request_evidence", { change_request_id: crApproved.json?.id, kind: "pr", url: "https://github.com/acme/x/pull/3", label: "not mine" });
@@ -826,7 +826,7 @@ async function local(env) {
   const evBadKind = await tool(appEv, "align_add_change_request_evidence", { change_request_id: crPending.json?.id, kind: "verified_check", url: "https://example.com/x", label: "kind" });
   check(
     "align_add_change_request_evidence: a closed request fails in the app's words ('This request was withdrawn by Lou Lead, so nothing changes.', C8-1); one the person neither asked for nor can approve fails; an unknown request fails as 'Change request not found'; a non-https url fails; an unknown kind fails input validation",
-    evClosed.isError && evClosed.text === "This request was withdrawn by Lou Lead, so nothing changes." && evNotInvolved.isError && evNotInvolved.text === "Only the person who asked or someone who can approve can add evidence" && evHidden.isError && evHidden.text === "Change request not found" && evBadUrl.isError && /https/.test(evBadUrl.text) && (evBadKind.isError || !!evBadKind.error),
+    evClosed.isError && evClosed.text === "This request was withdrawn by Lou Lead, so nothing changes." && evNotInvolved.isError && evNotInvolved.text === "Only the person who asked or someone who can approve can add evidence." && evHidden.isError && evHidden.text === "Change request not found" && evBadUrl.isError && /https/.test(evBadUrl.text) && (evBadKind.isError || !!evBadKind.error),
     `${evClosed.text} | ${evNotInvolved.text} | ${evHidden.text} | ${evBadUrl.text} | ${evBadKind.text}`,
   );
   // Refresh keeps the grant's scopes: it may narrow one access token, never widen the grant.
