@@ -545,14 +545,16 @@ The Home at `/app/w/<ws>`, a workspace's landing view, SHALL show under "Know wh
 `GET /api/v2/workspaces/<ws>/home`, a line saying how many things wait on the person, four count tiles ("Waiting on
 you", "Waiting on others", "Active goals", and "Connected apps that read the goals" as "<read> of <connected>", or
 "Connected apps" with none), each a link to its section, and the sections "Waiting on you", "Waiting on others",
-"Active goals" and "Connected AI apps · when they last read the goals". It SHALL show only what the server holds: a count or a
+"Your declined requests" (only when there is one), "Active goals" and "Connected AI apps · when they last read the
+goals". It SHALL show only what the server holds: a count or a
 section the server could not read SHALL say "unknown", never zero, and nothing on the page SHALL infer what an agent is
 doing (no working, stuck, blocked or diverged state, and no claim that an app has the current goal version or is "on
-the current plan": Align keeps no per-app version). The page
+the current plan": Align knows only which versions it sent an app, never which one the app uses; the decision value
+card names the apps Align sent a launched version). The page
 reads once when it opens and does not poll (only its first-run card checks the apps while it is shown).
 
 The read SHALL return, for a workspace member or viewer (cookie only: an `Authorization` header gets `403
-bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`), `asks`
+bearer_not_allowed`, a non-member `404`), `change_requests` (`waiting_on_me`, `waiting_on_others`, `declined`), `asks`
 (`waiting_on_me`), `alignments` (`waiting_on_me`, `waiting_on_others`), `goals` and `apps` (`everyone`, `items`),
 each `null` when the server could not read it. Every queue item SHALL carry `next` (what it needs) and `waiting_on`
 (the people it waits on). An open change request waits on its approvers to decide (`waiting_on` is the effective
@@ -573,6 +575,14 @@ on the person when their `can.launch` flag is set, otherwise under waiting on ot
 when the person asked for it or the goal is theirs, their team's, or (for a workspace owner) a company goal. A launched
 or superseded request is on no Home, nor is an approved one that would now close a dependency loop (`dependency_loop`):
 nobody can launch it as it stands.
+
+The decide card tells an approver who declines that the requester sees their reason, so the requester's Home SHALL
+show it (main #53): `change_requests.declined` lists, per active goal, the person's own latest change request there
+when it is `rejected`, with the goal (its current version), `reason`, `rejected_by`, `rejection_reason` and
+`decided_at`, newest decision first. It waits on nobody, is counted in no tile or summary, and is on nobody else's Home.
+It stays until the person sends a newer request on that goal (whatever becomes of that one) or the goal closes. Each is
+a row "<approver> declined your request on <goal>" with "Declined <time>. Reason: “<reason>”. Your change wasn't made;
+the goal is at version <n>." and **Open** (the goal page's change requests, where the record is).
 
 Every agent-status item SHALL show exactly one evidence class, "delivery receipt" (a `received`, `applied` or
 `enforced` receipt, or a goal read Align served), "agent reported" (the agent's own claim or evidence link) or "not
@@ -614,6 +624,16 @@ read. A workspace owner sees every connected app and anyone else their own, as o
 - **WHEN** a signed-in person who is not a member opens `/app/w/<ws>` or any page under it: the workspace doesn't exist, was deleted, they were removed, or they were never in it
 - **THEN** the page shows only the top bar and "This workspace doesn't exist or you're not in it" with a link to `/app` ("Go to your workspaces"): no workspace tabs, no tiles, no "unknown" and no "Reload" (that is for a read that failed, not for a 404)
 
+#### Scenario: A declined request on the requester's Home
+
+- **WHEN** an approver declines a member's change request with a reason
+- **THEN** the member's Home shows it under "Your declined requests" as "<approver> declined your request on <goal>" with the time, the quoted reason and the goal's version, with **Open** to the goal's change requests; the approver's, the workspace owner's and every other Home don't list it, and no count includes it
+
+#### Scenario: A newer request replaces the declined one
+
+- **WHEN** that member then sends a new request on the same goal, and later withdraws it
+- **THEN** the declined request leaves their Home when the new one is sent and does not come back after the withdrawal
+
 #### Scenario: First-run card after the queue
 
 - **WHEN** the first-run card is shown and something waits on the person
@@ -633,7 +653,8 @@ state): the Home's connected apps (see "Workspace Home"); the goal page's Agent 
 the align CLI's bindings, usage and work signals, else "not observed"); each session's answer on the Agents on this goal
 card ("delivery receipt" for a request received and not answered, "agent reported" for an answer, "not observed"
 otherwise); the value card's "Agents on the new version" line ("delivery receipt" once any receipt for the launched
-version arrived, else "not observed"); and the Sessions tab's stop or resume progress (the same rule). Where an MCP
+version arrived, else "not observed") and its "Connected AI apps" row ("delivery receipt" when Align sent the launched
+version to an app the reader can see, else "not observed"); and the Sessions tab's stop or resume progress (the same rule). Where an MCP
 read returns the same item (`align_get_goal_activity`), it SHALL carry the same class as `evidence_class`.
 
 #### Scenario: One class per item
@@ -998,7 +1019,12 @@ to it), "Agents on the new version" (before the launch "Not launched yet: agents
 of the bound sessions the launch's `goal_version` directive reached: how many have it in context, received but not used
 yet, and not reached; "No shared sessions work toward this goal yet." when none; marked "delivery receipt" when any of
 those sessions' machines sent a receipt for it, else "not observed", as in "Evidence class on every agent-status
-item"), "Measured in Align" (proposal to
+item"), once launched "Connected AI apps" (the apps the reader can see on the Apps tab, a workspace owner every one,
+that Align sent the version the launch made when they read the goals, the `mcp` part's "Goal versions Align sent an
+app are recorded": "<app> (connected by <person>): Align sent it version <n> on <time>", and that Align can't see what
+the app does next; with none, "Align hasn't sent version <n> to a connected app yet" ("an app you connected" for anyone
+but a workspace owner); marked "delivery receipt" when it lists any app, else "not observed"; main #56), "Measured in
+Align" (proposal to
 approval, approval to launch, and approval to the first `applied` receipt of the launch's directive, from server
 timestamps only; "not yet" while there is none), one optional question with a note, the reports
 of others, and the follow-up link.
@@ -1017,6 +1043,11 @@ of others, and the follow-up link.
 
 - **WHEN** the card loads below the fold and the person scrolls until at least 75% of its top 240 px is on screen (clipped by the window and any scroll column) and stays there for one second
 - **THEN** the page posts `{action: "viewed"}` once (the server keeps one `value_card_viewed` per person per workspace); a card nobody scrolled to, or whose top was seen for less than a second, records nothing. The card is taller than the screen, so its top, not half of it, is what a reader sees (LIM-2445, #38)
+
+#### Scenario: Apps Align sent the launched version
+
+- **WHEN** a change is launched as version 2, one member's app then reads the goals, and a workspace owner's app last read them at version 1
+- **THEN** the owner's card shows "Connected AI apps" marked "delivery receipt" with "<member's app> (connected by <member>): Align sent it version 2 on <time>" and not the owner's own app; before the launch the row is not shown (`apps` is `null`), and once the member disconnects the app it is gone
 
 #### Scenario: Follow-up link
 

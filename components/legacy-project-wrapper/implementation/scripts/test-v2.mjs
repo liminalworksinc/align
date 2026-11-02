@@ -785,7 +785,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 21, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds and deleted-session markers included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 21 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 22, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds, deleted-session markers and the goal versions sent to connected apps included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 22 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "v2_oauth_goal_sends", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -5146,6 +5146,34 @@ try {
       JSON.stringify(vRecv?.delivery) === JSON.stringify({ sessions: 1, received: 1, applied: 0 }) && JSON.stringify(vAppl?.delivery) === JSON.stringify({ sessions: 1, received: 1, applied: 1 }) && typeof vAppl.measured.decision_to_first_applied === "string" && vAppl.measured.decision_to_first_applied.length > 0,
       `${JSON.stringify(vRecv?.delivery)} ${JSON.stringify(vAppl?.delivery)} ${JSON.stringify(vAppl?.measured)}`,
     );
+    // -- main #56 on v2: the connected apps Align sent the launched version (an MCP goal read served it; the recording
+    //    itself is test-oauth's), as the reader could see them on the Apps tab; null before the launch --
+    const vcore = await import(pathToFileURL(path.join(ROOT, "lib/v2/core.mts")).href);
+    const vkid = vcore.hmac(vcore.serverSecret(onDir, {}), "align-grant-kid").slice(0, 16);
+    const sentAt = new Date(Date.now() - 90_000).toISOString();
+    withDb((d) => {
+      d.exec("PRAGMA foreign_keys = ON");
+      const ins = d.prepare("INSERT INTO v2_oauth_grants (id, ws_id, user_id, client_id, client_name, redirect_host, created_at, last_used_at, last_read_at, refresh_hash, refresh_exp, kid) VALUES (?, ?, ?, ?, ?, 'app.example', ?, ?, ?, 'h', ?, ?)");
+      ins.run("gr_VALUEVALUEVALUE1", W, V2.id, "c-value-1", "Claude Code", sentAt, sentAt, sentAt, Date.now() + 86_400_000, vkid);
+      ins.run("gr_VALUEVALUEVALUE2", W, V1.id, "c-value-2", "Codex", sentAt, sentAt, sentAt, Date.now() + 86_400_000, vkid);
+      ins.run("gr_VALUEVALUEVALUE3", W, V2.id, "c-value-3", "Cursor", sentAt, sentAt, sentAt, Date.now() + 86_400_000, vkid);
+      const sent = d.prepare("INSERT INTO v2_oauth_goal_sends (grant_id, ws_id, goal_id, version, sent_at) VALUES (?, ?, ?, ?, ?)");
+      sent.run("gr_VALUEVALUEVALUE1", W, GV.id, 2, sentAt);
+      sent.run("gr_VALUEVALUEVALUE2", W, GV.id, 1, sentAt); // the version before the launch: not this decision's
+      sent.run("gr_VALUEVALUEVALUE3", W, GV.id, 2, sentAt);
+    });
+    const [apO, apR, apL] = await Promise.all([V1, V2, V3].map(async (u) => (await vGet(u, GV.id, crP.json?.id)).json?.apps));
+    const ids = (a) => (a?.items ?? []).map((x) => x.id).join();
+    check(
+      "value (main #56): once launched, apps lists the connected apps Align sent the new version (version 2): a workspace owner sees every such app (everyone true; the app sent only version 1 is left out), the requester their own, a lead with no app none; each is {id, name, connected_by, sent_at}; before the launch apps is null",
+      v0?.apps === null && apO?.everyone === true && ids(apO) === "gr_VALUEVALUEVALUE1,gr_VALUEVALUEVALUE3" && apO.items[0].name === "Claude Code" && JSON.stringify(apO.items[0].connected_by) === JSON.stringify({ id: V2.id, name: "Vic Two" }) && apO.items[0].sent_at === sentAt &&
+        Object.keys(apO.items[0]).sort().join() === "connected_by,id,name,sent_at" && apR?.everyone === false && ids(apR) === "gr_VALUEVALUEVALUE1,gr_VALUEVALUEVALUE3" && apL?.everyone === false && apL.items.length === 0,
+      `${JSON.stringify(v0?.apps)} ${JSON.stringify(apO)} ${JSON.stringify(apR)} ${JSON.stringify(apL)}`,
+    );
+    const offV = await call("V2", "DELETE", `/api/v2/workspaces/${W}/apps/gr_VALUEVALUEVALUE3`, { cookie: V2.cookie });
+    const apAfter = (await vGet(V1, GV.id, crP.json?.id)).json?.apps;
+    const sendsLeft = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_oauth_goal_sends WHERE grant_id = 'gr_VALUEVALUEVALUE3'").get().n);
+    check("value (main #56): disconnecting an app deletes what Align recorded sending it, and the card no longer lists it", offV.status === 204 && ids(apAfter) === "gr_VALUEVALUEVALUE1" && sendsLeft === 0, `${offV.status} ${JSON.stringify(apAfter)} ${sendsLeft}`);
 
     // -- events and reports --
     const view1 = await vPost(V2, GV.id, crP.json?.id, { action: "viewed" });
@@ -5311,11 +5339,20 @@ try {
             belowFold === before && seenAfter === before + 1 && errors.length === 0,
           `${JSON.stringify({ top: card.top, vh: card.vh, before, belowFold, seenAfter })} ${card.text.slice(0, 300)} ${errors.join(" | ")}`,
         );
-        const valueClasses = await page.$$eval(`[data-value-card="${crP.json?.id}"] [data-evidence-class]`, (els) => els.map((e) => e.getAttribute("data-evidence-class")));
+        const valueClasses = await page.$$eval(`[data-value-card="${crP.json?.id}"] [data-value-row="delivery"] [data-evidence-class]`, (els) => els.map((e) => e.getAttribute("data-evidence-class")));
         check(
           "ui (Chrome, LIM-2455 §E2): the value card's \"Agents on the new version\" line carries exactly one evidence class, a delivery receipt (the session's machine sent a receipt for the launched version)",
           JSON.stringify(valueClasses) === '["delivery_receipt"]' && /delivery receipt/.test(card.text),
           JSON.stringify(valueClasses),
+        );
+        const appsRow = await page.$eval(`[data-value-card="${crP.json?.id}"]`, (el) => {
+          const row = el.querySelector('[data-value-row="apps"]');
+          return { text: row?.innerText ?? "", classes: [...(row?.querySelectorAll("[data-evidence-class]") ?? [])].map((e) => e.getAttribute("data-evidence-class")), apps: [...(row?.querySelectorAll("[data-value-app]") ?? [])].map((e) => e.getAttribute("data-value-app")) };
+        });
+        check(
+          "ui (Chrome, main #56): the launched request's value card has a \"Connected AI apps\" row with one evidence class (delivery receipt) naming the app Align sent version 2 (\"Claude Code (connected by Vic Two): Align sent it version 2 on <time>\"), not the app sent only version 1, and saying Align can't see what the app does next",
+          /Connected AI apps/i.test(appsRow.text) && JSON.stringify(appsRow.classes) === '["delivery_receipt"]' && JSON.stringify(appsRow.apps) === '["gr_VALUEVALUEVALUE1"]' && /Claude Code \(connected by Vic Two\): Align sent it version 2 on \S/.test(appsRow.text) && !/Codex/.test(appsRow.text) && /can.t see what the app does next/.test(appsRow.text),
+          JSON.stringify(appsRow),
         );
         // On a phone (390x844) the card is taller than the screen: its top seen for 1.5 s is a view, once; a second look
         // adds nothing (V3, the approver, who has not viewed it yet).
@@ -6591,6 +6628,63 @@ try {
     const lnHL = await ha(HO, "POST", `/goals/${GX.id}/change-requests/${crHL.json?.id}/launch`, {});
     const [kX, kM] = await Promise.all([HX, HM].map(home));
     check("home (LAUNCH-001): once launched the change leaves every Home", lnHL.json?.launch === "launched" && !lOf(kX, "waiting_on_me") && !lOf(kM, "waiting_on_others"), lnHL.text.slice(0, 200));
+
+    // -- main #53 (M2) on v2: the requester's Home shows their declined request (who declined it, the reason, the goal's
+    //    version) until they send a newer request on that goal; nobody else's Home lists it, and it waits on nobody --
+    const crD = await ha(HM, "POST", `/goals/${GX.id}/change-requests`, { base_version: 2, changes: { title: "Hank's side project, paused" }, reason: "Home: pause it" });
+    const rjD = await ha(HX, "POST", `/goals/${GX.id}/change-requests/${crD.json?.id}/reject`, { revision: 1, reason: "Home: not this quarter" });
+    const [dM, dX, dO, dL] = await Promise.all([HM, HX, HO, HL].map(home));
+    const dOf = (h) => h?.change_requests?.declined?.find((c) => c.id === crD.json?.id);
+    const inQueues = (h) => [...(h?.change_requests?.waiting_on_me ?? []), ...(h?.change_requests?.waiting_on_others ?? [])].some((c) => c.id === crD.json?.id);
+    check(
+      "home (main #53): a declined request is under change_requests.declined on its requester's Home only, with the goal at its current version, rejected_by the approver, the rejection reason and decided_at; it is in no queue and on no other Home (approver, workspace owner, lead)",
+      crD.status === 201 && rjD.json?.state === "rejected" && dOf(dM)?.goal?.id === GX.id && dOf(dM).goal.version === 2 && JSON.stringify(dOf(dM).rejected_by) === JSON.stringify({ id: HX.id, name: "Hank Other" }) && dOf(dM).rejection_reason === "Home: not this quarter" && typeof dOf(dM).decided_at === "string" &&
+        !inQueues(dM) && !dOf(dX) && !dOf(dO) && !dOf(dL) && Array.isArray(dX?.change_requests?.declined) && (dM.change_requests.declined ?? []).every((c) => c.goal.id !== GT.id),
+      `${crD.status} ${rjD.text.slice(0, 200)} ${JSON.stringify(dM?.change_requests?.declined)}`,
+    );
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await page.setViewport({ width: 390, height: 844 });
+        await page.setCookie(...HM.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        await page.goto(`${BASE}/app/w/${HW}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-home-item="declined:${crD.json?.id}"]`, { timeout: 15000 });
+        const dv = await page.evaluate((id) => {
+          const row = document.querySelector(`[data-home-item="declined:${id}"]`);
+          return {
+            text: row?.innerText ?? "",
+            href: row?.querySelector("a")?.getAttribute("href") ?? "",
+            section: row?.closest("section[aria-label]")?.getAttribute("aria-label") ?? "",
+            summary: document.querySelector("[data-home-summary]")?.textContent ?? "",
+            sw: document.scrollingElement.scrollWidth,
+            W: window.innerWidth,
+          };
+        }, crD.json?.id);
+        check(
+          "ui (Chrome, main #53): the requester's Home lists \"Hank Other declined your request on <goal>\" under \"Your declined requests\" with when, the quoted reason and \"Your change wasn't made; the goal is at version 2.\", and Open goes to the goal's change requests; the summary still counts only what waits on them; it fits 390 px",
+          /Hank Other declined your request on Hank's side project, shipped/.test(dv.text) && /Declined .+\. Reason: “Home: not this quarter”\. Your change wasn.t made; the goal is at version 2\./.test(dv.text) && dv.section === "Your declined requests" &&
+            dv.href === `/app/w/${HW}/goals/${GX.id}#change-requests` && !/declined/i.test(dv.summary) && dv.sw <= dv.W && errors.length === 0,
+          `${JSON.stringify(dv)} ${errors.join(" | ")}`,
+        );
+      } catch (e) {
+        check("ui (Chrome) home declined run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the Home's declined request", false, `no Chrome at ${CHROME}`);
+    const crD2 = await ha(HM, "POST", `/goals/${GX.id}/change-requests`, { base_version: 2, changes: { title: "Hank's side project, paused in May" }, reason: "Home: pause it later" });
+    const eM = await home(HM);
+    const wdD2 = await ha(HM, "POST", `/goals/${GX.id}/change-requests/${crD2.json?.id}/withdraw`, {});
+    const fM = await home(HM);
+    check(
+      "home (main #53): once the requester sends a newer request on that goal the declined one leaves their Home, and stays gone after they withdraw the newer one (their latest request there is no longer declined)",
+      crD2.status === 201 && !dOf(eM) && wdD2.json?.state === "withdrawn" && !dOf(fM) && (fM?.change_requests?.declined ?? []).every((c) => c.goal.id !== GX.id),
+      `${crD2.status} ${wdD2.text.slice(0, 120)} ${JSON.stringify(fM?.change_requests?.declined)}`,
+    );
   }
   // ==== end port2:home ====
 

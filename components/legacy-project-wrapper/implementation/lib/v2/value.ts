@@ -1,3 +1,4 @@
+import { appsSentGoalVersion } from "../oauth/grants";
 import { ESTIMATES } from "./core.mts";
 import { getChangeRequest as diffOf, type ChangeDiff } from "./changes-read";
 import { getChangeRequest, type LaunchState } from "./changes";
@@ -24,6 +25,9 @@ import { cleanValueText, ESTIMATE_WORDS, followUpUrl, loiUrlOk, spanWords, VALUE
 // and may save their own report; every report is shown to the request's participants (the requester, revision
 // authors, the approver and the goal's approval set for it) and to workspace owners, anyone else sees only their own.
 // Reports are retained and pseudonymised by the retention job (PERSON_COLUMNS) and deleted with the request.
+// Once launched, the card also names the connected AI apps Align sent the new version to (main #56: an MCP goal read
+// served it, lib/oauth/grants.ts appsSentGoalVersion), each with when Align first sent it; the reader sees the apps
+// they could see on the Apps tab. It says what Align sent, never what an app did with it.
 
 export { ESTIMATES, followUpUrl, loiUrlOk, spanWords, VALUE_EDIT_DAYS, VALUE_NOTE_MAX };
 export type Estimate = (typeof ESTIMATES)[number];
@@ -63,6 +67,9 @@ export interface ValueView {
   /** The launch's goal_version directive: its target sessions, and those with a received or applied receipt; null
    *  before the launch, or when it reached no session. */
   delivery: { sessions: number; received: number; applied: number } | null;
+  /** The connected apps (a workspace owner's: every one; anyone else's: their own) that an MCP goal read sent the
+   *  launched version, with when Align first sent it; null before the launch. */
+  apps: { everyone: boolean; items: { id: string; name: string; connected_by: { id: string; name: string }; sent_at: string }[] } | null;
   /** decision_to_launch and decision_to_first_applied (the launch directive's first applied receipt) are null until
    *  they happened. */
   measured: { proposal_to_decision: string; decision_to_launch: string | null; decision_to_first_applied: string | null };
@@ -172,6 +179,7 @@ export function valueView(pp: PolicyPrincipal, goalId: string, requestId: string
     approved_without_evidence: cr.approved_without_evidence,
     affected: { parents, dependents },
     delivery,
+    apps: launched ? { everyone: pp.wsRole === "owner", items: appsSentGoalVersion(pp, g.id, cr.version!) } : null,
     measured: { proposal_to_decision: spanWords(Math.max(0, decided - Date.parse(cr.created_at))), decision_to_launch: toLaunch, decision_to_first_applied: toApplied },
     my_report: mine ? reportOf(pp, mine, now) : null,
     reports: (seesAll ? rows : rows.filter((r) => r.person_id === pp.userId)).map((r) => reportOf(pp, r, now)),

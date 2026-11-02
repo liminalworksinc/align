@@ -17,7 +17,9 @@ import { pinClient } from "./clients";
 // allowed (`scope`, space-separated; lib/oauth/server.ts) and rotation never changes them. Two times say what Align saw
 // of the app, each written at most every 5 minutes: last_used_at (shown as "Last connected") by any /api/mcp request
 // whose token verifies, initialize and tools/list included, and last_read_at (shown as "Last read the goals") only by a
-// tool call that returned goal content (lib/mcp/register.ts). A connection alone is never a read.
+// tool call that returned goal content (lib/mcp/register.ts). A connection alone is never a read. The same goal reads
+// record which goal versions Align sent the app, and when it first sent each (v2_oauth_goal_sends, main #56): what
+// Align served, never what the app did with it. The decision value card names the apps Align sent a launched version.
 
 export interface Grant {
   id: string;
@@ -235,3 +237,43 @@ export const noteGrantUse = (id: string) => noteGrant(lastUse, "last_used_at", i
 
 /** Record a tool call that returned goal content to the app (lib/mcp/register.ts): an observed read of the goals. */
 export const noteGrantRead = (id: string) => noteGrant(lastRead, "last_read_at", id);
+
+// ---- the goal versions Align sent each app (main #56) ----
+
+const g2 = globalThis as unknown as { __alignGoalSent?: Set<string> };
+const sentSeen = (g2.__alignGoalSent ??= new Set());
+
+/** Record that a goal read (lib/mcp/register.ts) sent this app these goals at these versions. Only the first sending of
+ *  each (grant, goal, version) is kept, so `sent_at` is when Align first sent that version; this process writes each at
+ *  most once. Off the request path; failures (a busy database, a grant or goal gone meanwhile) are skipped and may be
+ *  written by a later read, never thrown. */
+export function noteGoalsSent(id: string, wsId: string, goals: { id: string; version: number }[]) {
+  const fresh = goals.filter((x) => !sentSeen.has(`${id}|${x.id}|${x.version}`));
+  if (!fresh.length) return;
+  const at = new Date().toISOString();
+  for (const x of fresh) sentSeen.add(`${id}|${x.id}|${x.version}`);
+  while (sentSeen.size > 50_000) sentSeen.delete(sentSeen.values().next().value!);
+  setImmediate(() => {
+    for (const x of fresh) {
+      try {
+        run("INSERT OR IGNORE INTO v2_oauth_goal_sends (grant_id, ws_id, goal_id, version, sent_at) VALUES (?, ?, ?, ?, ?)", id, wsId, x.id, x.version, at);
+      } catch {
+        sentSeen.delete(`${id}|${x.id}|${x.version}`);
+      }
+    }
+  });
+}
+
+/** The connected apps the reader can see (as on the Apps tab: a workspace owner every app, anyone else their own) that
+ *  Align sent this version of this goal, with when it first did, earliest first. */
+export function appsSentGoalVersion(pp: PolicyPrincipal, goalId: string, version: number) {
+  const apps = listGrants(pp);
+  if (!apps.length) return [];
+  const sent = new Map(
+    all<{ grant_id: string; sent_at: string }>("SELECT grant_id, sent_at FROM v2_oauth_goal_sends WHERE ws_id = ? AND goal_id = ? AND version = ?", pp.wsId, goalId, version).map((r) => [r.grant_id, r.sent_at]),
+  );
+  return apps
+    .filter((a) => sent.has(a.id))
+    .map((a) => ({ id: a.id, name: a.name, connected_by: a.user, sent_at: sent.get(a.id)! }))
+    .sort((a, b) => a.sent_at.localeCompare(b.sent_at) || a.id.localeCompare(b.id));
+}
