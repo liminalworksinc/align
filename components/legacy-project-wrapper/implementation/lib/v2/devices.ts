@@ -153,7 +153,18 @@ export async function token(deviceCode: string, replaces: string | null = null) 
     const user = r.user_id ? userById(r.user_id) : undefined;
     if (!user) return { error: "access_denied" };
     const deviceId = newId("dv");
-    run("INSERT INTO v2_devices (id, user_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)", deviceId, user.id, pairedName(user.id, r, replaces, nowMs), r.public_key, at, at);
+    // The device it replaces on the same machine, kept when it is this person's live one (C11-5).
+    const replaced = replaces && get("SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL", replaces, user.id) ? replaces : null;
+    run(
+      "INSERT INTO v2_devices (id, user_id, name, public_key, created_at, last_seen_at, replaces) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      deviceId,
+      user.id,
+      pairedName(user.id, r, replaces, nowMs),
+      r.public_key,
+      at,
+      at,
+      replaced,
+    );
     const granted: string[] = [];
     for (const ws of JSON.parse(r.ws_ids_json || "[]") as string[]) {
       if (get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, user.id)) {
@@ -208,7 +219,12 @@ function pairedName(userId: string, r: RequestRow, replaces: string | null, nowM
     // that machine's name, so a re-login on "X (3)" stays "X (3)" even when "X (2)" is free (E2E-WEB cycle 9 C9-1),
     // unless another live device or approved pairing of theirs holds that name now.
     if (free === r.device_name || nameNumber(r.device_name, old.name) === null) return free;
-    const taken = held.includes(old.name) || !!get("SELECT 1 AS x FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name = ? AND id <> ?", userId, old.name, replaces);
+    // A device paired a moment ago by another login on this same machine (its poll named the same device to replace:
+    // two `align login`s approved together) is that machine too, and one of the two logins revokes it in a moment: it
+    // does not hold the machine's name, so both keep it (E2E-AGENT cycle 11 C11-5).
+    const taken =
+      held.includes(old.name) ||
+      !!get("SELECT 1 AS x FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name = ? AND id <> ? AND (replaces IS NULL OR replaces <> ?)", userId, old.name, replaces, replaces);
     return taken ? free : old.name;
   }
   if (r.approved_name && !get("SELECT 1 AS x FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name = ?", userId, r.approved_name)) return r.approved_name;

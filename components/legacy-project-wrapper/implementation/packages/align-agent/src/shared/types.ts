@@ -1,5 +1,5 @@
 // Types shared by the CLI, the sync job and the hooks. Wire shapes follow docs/v2/WIRE.md.
-import type { ReleaseReaches } from "./ended.ts";
+import type { ReleaseReaches, ShareFacts, ShareNow, ShareTold } from "./ended.ts";
 
 export type Harness = "claude-code" | "codex";
 
@@ -86,8 +86,11 @@ export interface HotState {
   } | null;
   /** Directive ids whose effect on model context has not been injected yet. */
   pending_directives: string[];
-  /** User-only messages (systemMessage); never model context. */
-  notices: { id: string; text: string }[];
+  /** User-only messages (systemMessage); never model context. A notice about the share's state carries what happened
+   *  (`facts`) and is worded when it is shown, from `share_now` (`text` is its words as the event left the state). */
+  notices: { id: string; text: string; facts?: ShareFacts }[];
+  /** The share's state now, from the same values as its latch files: what its notices are worded from (cycle 11). */
+  share_now?: ShareNow;
   /** Parents and dependencies of the bound goal, from the cached feed. */
   context_goals?: ContextGoal[];
   /** Requests sent to this session (REQ-002): pending ones, and recently answered or withdrawn ones the hooks still tell. */
@@ -170,6 +173,8 @@ export interface InjectedState {
   consumed_binding: string | null;
   applied: string[];
   notices_shown: string[];
+  /** The notice about its share's state the session was last told, so it is told again when its advice changes. */
+  share_told?: ShareTold;
   /** Sibling session local id (or remote session key) -> newest activity of theirs already shown to this session. */
   siblings_seen?: Record<string, string>;
   /** When the last sibling card was injected (cards are rate-limited unless work overlaps). */
