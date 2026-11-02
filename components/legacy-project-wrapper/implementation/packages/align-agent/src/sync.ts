@@ -28,8 +28,8 @@ import {
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, addShareNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { otherWorkspaceWords, outOfReachWords } from "./shared/envelope.ts";
-import { applyShare, bind, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
+import { clean, otherWorkspaceWords, outOfReachWords, requestShortId } from "./shared/envelope.ts";
+import { applyShare, bind, endedUnread, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, SHARE_UNREAD_WORDS, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -207,6 +207,13 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       if (!signedIn(ctx.home)) {
         if (r.rule_dir) return lid;
         throw new Error("this machine is signed out of Align. Run `align login` in a terminal, then type `::align share` here");
+      }
+      // Its share ended at a sign-out or a lost workspace, and this sign-in has not read which shares their person
+      // stopped on the web: not shared until that is known, whichever way it was asked for (a spooled `::align share`
+      // or `::align share --dir`; E2E-AGENT cycle 12 C12-3). A folder rule's share stays quiet.
+      if (endedUnread(ctx, lid)) {
+        if (r.rule_dir) return lid;
+        throw new Error(SHARE_UNREAD_WORDS);
       }
       // Shared before in a workspace: shared again only there, never into another one (the default, a folder rule's),
       // which would file that workspace's work under another (cycle 8).
@@ -432,7 +439,11 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
     }
     case "receipt": {
       const r = await api(ctx, "POST", `/api/v2/directives/${enc(p.directive_id)}/receipts`, { body: { ...p.body, at: serverIso(p.body.at, clockOffset(ctx.home)) } });
-      if (r.status === 200 || r.status === 404) return;
+      if (r.status === 200) return;
+      if (r.status === 404) {
+        receiptRefused(ctx, lid, p.directive_id, String(p.body?.state ?? ""), r.json?.error || "not_found");
+        return;
+      }
       throw new HttpError(r.status, r.json?.error ?? null, r.json);
     }
     case "stop_sharing": {
@@ -466,6 +477,31 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
     default:
       return;
   }
+}
+
+/**
+ * The server refused a receipt as not found (the session's share there is gone, or no longer this device's): not resent,
+ * but never dropped without a word (E2E-AGENT cycle 12 C12-4). Logged; an answer to a request (`accepted`,
+ * `declined`) also marks the request expired here, with why, so `align requests` and `align requests accept|decline`
+ * say the server did not take it, and the session hears so at its next prompt.
+ */
+function receiptRefused(ctx: Ctx, lid: string, directiveId: string, state: string, code: string): void {
+  ctx.log(`receipt ${state} for directive ${directiveId} (session ${lid.slice(0, 8)}) refused by the server: ${code}; not sent again`);
+  if (state !== "accepted" && state !== "declined") return;
+  const row = ctx.db.prepare("SELECT request_id, json FROM goal_requests WHERE directive_id=? AND local_id=?").get(directiveId, lid) as { request_id: string; json: string } | undefined;
+  if (!row) return;
+  const q = JSON.parse(row.json) as { sender?: { name?: string } } & Record<string, unknown>;
+  ctx.db
+    .prepare("UPDATE goal_requests SET state='expired', json=? WHERE request_id=? AND local_id=?")
+    .run(JSON.stringify({ ...q, expired_reason: "receipt_refused", refused_answer: state, refused_error: code }), row.request_id, lid);
+  const who = clean(q.sender?.name, 50) || "the sender";
+  addNotice(
+    ctx,
+    lid,
+    `ans_refused_${row.request_id}`,
+    `Align: the Align server did not take your answer to ${who}'s request ${requestShortId(row.request_id)} (${code}): this session's share there has ended, so ${who} does not see it.`,
+  );
+  renderHot(ctx, lid);
 }
 
 // ---------- settled unfinalized rows ----------
@@ -767,6 +803,16 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     return res;
   } finally {
     unbind();
+    // A refresh this pass made was refused (the device was revoked on the web, say): this machine is signed out now, so
+    // its shares end in this same pass, as a sign-out the server reported, and the next prompt and deny already say so
+    // (E2E-AGENT cycle 12 C12-2). Not when `align logout` or `align login` committed meanwhile: that ended them itself.
+    if (!res.aborted) {
+      try {
+        endSharesIfSignedOut(ctx);
+      } catch (e) {
+        ctx.log(`sync: ending the shares of this signed-out machine failed: ${(e as Error).message}`);
+      }
+    }
     // A call the pairing change cut short (held past its timeout while `align login` or `align logout` committed, say)
     // says nothing about whether the server can be reached: no "could not reach", and last-sync keeps what it said
     // (cycle 7).

@@ -80,6 +80,8 @@ const AGAIN = `Align: this machine is signed in to Align again. To share this se
 const LATCHED_AGAIN = " It was stopped or held from the web, so tools stay blocked until it is shared again (you can type `::align share` in this session), after which the stop or hold can be lifted from the web.";
 const SIGNED_OUT = `Align: this session stopped sharing because this machine signed out of Align; its usage stays on this machine from now on. To share it again, run \`align login\` in a terminal, then type \`::align share\` here (it counts toward "${GOAL}" again).`;
 const stopSharingTail = (lid: string) => ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
+/** Signed out: sharing it again after `align login`, which the notice has just said, or `align stop-sharing` (cycle 12). */
+const signedOutTail = (lid: string) => ` It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold can be lifted from the web, or until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
 
 describe("C8-1: every change of whether a session can be shared again tells it the notice for the new state, whatever it has seen", () => {
   test("told \"signed in to Align again\", then signed out again: the next prompt tells the sign-out notice again, as the deny says; signed in once more, the signed-in-again notice again", async () => {
@@ -94,8 +96,8 @@ describe("C8-1: every change of whether a session can be shared again tells it t
     assert.equal(start(t, B.sid, "resume", B.cwd)?.systemMessage, AGAIN, "seen by a session that was not stopped");
 
     await logout(t);
-    assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, SIGNED_OUT + stopSharingTail(A.lid));
-    assert.match(deny(t, A) ?? "", new RegExp(`tools stay blocked until the user runs \`align stop-sharing ${A.lid.slice(0, 8)}\``));
+    assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, SIGNED_OUT + signedOutTail(A.lid));
+    assert.match(deny(t, A) ?? "", new RegExp(`tools stay blocked until the user runs \`align stop-sharing ${A.lid.slice(0, 8)}\` in a terminal, or until it is shared again once this machine is signed in`));
     assert.equal(prompt(t, B.sid, "go on", B.cwd)?.systemMessage, SIGNED_OUT, "not stopped: the sign-out notice too");
     assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, undefined, "once");
     // Every sync pass while signed out ends the shares again (nothing is live): no new notice.
@@ -133,7 +135,7 @@ describe("C8-1: every change of whether a session can be shared again tells it t
     await logout(t);
     assert.equal(
       prompt(t, A.sid, "go on", A.cwd)?.systemMessage,
-      `Align: this machine signed out of Align, so this session can't be shared again from here for now; its usage stays on this machine. To share it again, run \`align login\` in a terminal, then type \`::align share\` here (it counts toward "${GOAL}" again).${stopSharingTail(A.lid)}`,
+      `Align: this machine signed out of Align, so this session can't be shared again from here for now; its usage stays on this machine. To share it again, run \`align login\` in a terminal, then type \`::align share\` here (it counts toward "${GOAL}" again).${signedOutTail(A.lid)}`,
     );
     await login(t);
     assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, AGAIN + LATCHED_AGAIN, "signed in again, reaching Acme: told so");

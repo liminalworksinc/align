@@ -44,10 +44,26 @@ function prose(reply: string): string {
   return reply.slice(-REPLY_MAX).replace(/```[\s\S]*?(```|$)/g, "\n").replace(/`[^`\n]*`/g, " ");
 }
 
+/** Words a list of limits puts around one ("Limits: ...", "out of scope: ...", "(must not)"). */
+const LIST_LABELS = new Set(["limit", "limits", "constraint", "constraints", "rule", "rules", "out", "scope", "listed", "following", "these", "type", "types", "done", "criteria", "boundary", "boundaries"]);
+
+const norm = (t: string) => ` ${t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+
+/** The sentence only restates the limit (the agent listing the goal's limits): its words, with nothing around them but a
+ *  list's labels. Not a crossing (E2E-AGENT cycle 12, section 6). */
+function restates(sen: string, limit: string): boolean {
+  const l = norm(limit);
+  const s = norm(sen);
+  const i = l.trim() ? s.indexOf(l) : -1;
+  if (i < 0) return false;
+  return [...keyWords(`${s.slice(0, i)} ${s.slice(i + l.length)}`)].every((w) => LIST_LABELS.has(w));
+}
+
 /**
  * Whether a reply may cross a limit (v1 `crossing`): some sentence uses the limit's key word (the one after its
  * "must" or "not") and one more of its words, or half of its words, with the opposite sense (one says "not" where the
- * other doesn't); for out of scope, any such mention. Questions never count.
+ * other doesn't); for out of scope, any such mention. Questions never count, nor a sentence that only restates the
+ * limit (a list of the goal's limits).
  */
 export function crossing(l: Pick<Limit, "text" | "type">, reply: string): boolean {
   const key = keyWords(l.text);
@@ -56,7 +72,7 @@ export function crossing(l: Pick<Limit, "text" | "type">, reply: string): boolea
   return sentences(prose(reply))
     .slice(-SENTENCES_MAX)
     .some((sen) => {
-      if (sen.endsWith("?")) return false;
+      if (sen.endsWith("?") || restates(sen, l.text)) return false;
       const w = keyWords(sen);
       let n = 0;
       for (const k of key) if (w.has(k)) n++;

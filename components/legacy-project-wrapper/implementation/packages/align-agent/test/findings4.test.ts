@@ -111,9 +111,11 @@ describe("C4-2: a sync pass is one device's", () => {
     assert.match(r.stdout, new RegExp(`The next sync goes on as the device signed in now \\(dv_…${now.slice(-6)}\\)\\.`));
     assert.equal(fake.refreshes, refreshes, "the pass did not refresh the new device");
     assert.ok(!fake.log.some((l) => l.path.endsWith("/usage") && l.device === now), "nothing went up as the new device");
-    const notices = hot(t, s.lid).notices.map((x) => x.text);
-    assert.equal(notices.filter((x) => /stopped sharing/.test(x) || /no longer accepts/.test(x)).length, 1, notices.join("\n"));
-    assert.match(notices.join("\n"), /because this machine signed out of Align/);
+    // One notice about the share's end, which the hook words from its facts (its stored text says only that the
+    // sharing changed, for an older hook: E2E-AGENT cycle 12 C12-1); a login that replaced the pairing ended it.
+    const notices = hot(t, s.lid).notices.filter((x) => x.facts && x.facts.e !== "started");
+    assert.equal(notices.length, 1, JSON.stringify(notices));
+    assert.deepEqual([notices[0].facts?.e, notices[0].facts?.via], ["signed_out", "login"]);
   });
 
   test("a session the new pairing shares while `align login` is still revoking the old device keeps its share", async () => {

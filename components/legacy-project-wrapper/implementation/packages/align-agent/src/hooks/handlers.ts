@@ -31,13 +31,14 @@ import {
   requestNotice,
   requestShortId,
   requestWithdrawnNotice,
+  requestWhat,
   SAFE_REQUESTS,
   type DeltaKind,
 } from "../shared/envelope.ts";
 import { myTeams, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
 import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
-import { latchWayOut, shareNotice, shareRetell, type ReleaseReaches, type ShareTold } from "../shared/ended.ts";
+import { latchWayOut, shareAgainWords, shareNotice, shareRetell, type ReleaseReaches, type ShareAgain, type ShareTold } from "../shared/ended.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
@@ -169,6 +170,8 @@ export interface NoticePlan {
   told: HotState["notices"];
   seen: string[];
   share_told: ShareTold | null;
+  /** The notices about the share's state among `seen` (`InjectedState.share_seen`). */
+  share_seen: string[];
 }
 
 /**
@@ -194,12 +197,16 @@ export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
     const w = shareNotice(hot.local_id, newest.id, newest.facts, hot.share_now, prev);
     if (w !== "hold") {
       if (fresh) seen.push(newest.id);
-      if (w && shareRetell(newest.id, w, prev, fresh)) {
+      // Seen, but by an older hook, which showed its stored text (that only says the sharing changed): told once now,
+      // worded as now (E2E-AGENT cycle 12 C12-1).
+      const olderHook = !fresh && prev?.id !== newest.id && !(inj.share_seen ?? []).includes(newest.id);
+      if (w && (shareRetell(newest.id, w, prev, fresh) || olderHook)) {
         told = { id: newest.id, text: w.text };
         shareTold = { id: newest.id, key: w.key, tail: w.tail };
-      } else if (w && prev?.id !== newest.id) {
-        // Seen before its words were kept (an older agent): what it reads as now, so a later change is told.
-        shareTold = { id: newest.id, key: w.key, tail: w.tail };
+      } else if (!w && (fresh || olderHook)) {
+        // Nothing to tell about it now (shared again since, say): kept as told with no words, so a later change of
+        // situation is told.
+        shareTold = { id: newest.id, key: "none:", tail: "" };
       }
     }
   } else if (newest && unseen(newest)) {
@@ -217,7 +224,7 @@ export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
     return true;
   });
   const words = kept.map((n) => (n.id === told?.id ? told : n));
-  return { told: words.filter((n, i) => !words.slice(i + 1).some((m) => m.text === n.text)), seen, share_told: shareTold };
+  return { told: words.filter((n, i) => !words.slice(i + 1).some((m) => m.text === n.text)), seen, share_told: shareTold, share_seen: seen.filter((id) => state.some((n) => n.id === id)) };
 }
 
 /** `held`: the goal holds that block this session's tools now (`blockingHolds`), so a "resumed" notice told while one
@@ -227,6 +234,7 @@ function takeNotices(hot: HotState | null, inj: InjectedState, held: () => Block
   const plan = planNotices(hot, inj);
   inj.notices_shown.push(...plan.seen);
   if (plan.share_told) inj.share_told = plan.share_told;
+  if (plan.share_seen.length) inj.share_seen = [...(inj.share_seen ?? []), ...plan.share_seen].slice(-100);
   const told = plan.told;
   if (!told.length) return null;
   const blocking = told.some((n) => noticeKind(n.id).startsWith("resumed_")) ? held() : null;
@@ -893,17 +901,22 @@ const ENDED_AGAIN: Partial<Record<keyof typeof ENDED_WHY, string>> = {
 
 /**
  * The way out of a latch nothing can lift from the web any more (B6), or, when the session can be shared there again now
- * (`reshare`), the way back (C6-2): worded by `latchWayOut`, which every notice about a share that ended uses too, so
- * the deny and the notices never give different advice (C9-2).
+ * (`reshare`), the way back (C6-2), with `align sync` first while the ended shares are unread, and, signed out, both
+ * ways in one sentence (`more`, cycle 12, section 6): worded by `latchWayOut`, which every notice about a share that ended
+ * uses too, so the deny and the notices never give different advice (C9-2).
  */
-function endedNote(ended: keyof typeof ENDED_WHY, lid: string, reshare = false, release: ReleaseReaches | null = null): string {
+function endedNote(ended: keyof typeof ENDED_WHY, lid: string, reshare = false, release: ReleaseReaches | null = null, more: ShareAgain = {}): string {
   const again = reshare ? ENDED_AGAIN[ended] : undefined;
-  if (again) return `Its sharing ended (${again}), so ${latchWayOut(lid, true, "model")}`;
+  if (again) return `Its sharing ended (${again}), so ${latchWayOut(lid, true, "model", null, more)}`;
   const why = ENDED_WHY[ended] ?? ENDED_WHY.sharing_ended;
   // A hold whose release still reaches it can still be lifted from the web; its stop, if any, can't (C10-4).
   if (release?.goals.length) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", release)}`;
+  if (more.login) return `Its sharing has since ended (${why}), so ${latchWayOut(lid, false, "model", null, more)}`;
   return `Its sharing has since ended (${why}), so this can no longer be lifted from the web: ${latchWayOut(lid, false, "model")}`;
 }
+
+/** What a latch file says about sharing its session again besides now (`ShareAgain`). */
+const againOf = (l: { unread?: true; login?: true } | null | undefined): ShareAgain => ({ unread: !!l?.unread, login: !!l?.login });
 
 /** What every deny that blocks tools until people act ends with: the model tells the user instead of working around it. */
 const TELL_USER = "Tell the user and wait for instructions.";
@@ -911,12 +924,12 @@ const TELL_USER = "Tell the user and wait for instructions.";
 /** The stop deny: the plain wording, or, when the session's sharing ended, how the user gets out. */
 export function stopReason(latch: Latch | null, lid: string): string {
   if (!latch?.ended) return DENY_REASON;
-  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare, latch.release ?? null)} ${TELL_USER}`;
+  return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare, latch.release ?? null, againOf(latch))} ${TELL_USER}`;
 }
 
 function holdDenyReason(h: HoldLatch | null, lid: string): string {
   const base = holdReason(h);
-  return `${h?.ended ? `${base} ${endedNote(h.ended, lid, !!h.reshare, h.release ?? null)}` : base} ${TELL_USER}`;
+  return `${h?.ended ? `${base} ${endedNote(h.ended, lid, !!h.reshare, h.release ?? null, againOf(h))}` : base} ${TELL_USER}`;
 }
 
 /** The goal-hold latch: a hold file that names a hold, or one that can't be read, blocks every tool (read-only ones too). */
@@ -1117,6 +1130,7 @@ const STATE_LABELS: Record<RequestState, string> = {
   auto_accepted: "delivered, not declined",
   declined: "declined",
   withdrawn: "withdrawn",
+  expired: "expired (this session's share ended)",
 };
 const stateLabel = (s: RequestState) => STATE_LABELS[s] || s;
 
@@ -1144,7 +1158,8 @@ function holdLine(home: string, lid: string, cwd: string | null): string {
   }
   if (h.state !== "ok" || !Array.isArray(h.value?.holds)) return "  Goal hold: unreadable (tools blocked)";
   const out = h.value.holds.map((x) => `  Goal hold: on goal "${clean(x.goal_title, 80)}" by ${clean(x.by, 50) || "someone"} (all tools blocked)`);
-  if (h.value.ended && h.value.reshare) out.push("  Sharing ended; `::align share` here shares it again, after which the hold can be released from the web");
+  if (h.value.ended && h.value.reshare) out.push(`  Sharing ended; ${shareAgainWords(!!h.value.unread, "here")}, after which the hold can be released from the web`);
+  else if (h.value.ended && h.value.login) out.push(`  Sharing ended (this machine signed out): ${latchWayOut(lid, false, "user", null, { login: true })}`);
   else if (h.value.ended && h.value.release?.goals.length) out.push(`  Sharing ended: ${latchWayOut(lid, false, "user", h.value.release)}`);
   else if (h.value.ended) out.push(`  Sharing ended, so no release can reach it: run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it`);
   return out.join("\n");
@@ -1182,6 +1197,19 @@ const MULTI_WORKSPACE = "Align: this machine reaches more than one workspace and
 /** `::align share` in a session whose share ended, before this sign-in read which shares their person stopped (C11-1). */
 const SHARE_UNREAD =
   "Align: this machine is signed in to Align again, but has not yet heard from the Align server whether this session's sharing was stopped on the web meanwhile (a session stopped there is not shared again), so nothing was asked for. Run `align sync` in a terminal, then type `::align share` here again.";
+
+/** The same for this session in `::align share --dir` (E2E-AGENT cycle 12 C12-3): the rule is made, this session waits. */
+const DIR_UNREAD =
+  "This session is not shared yet: this machine has not yet heard from the Align server whether its sharing was stopped on the web meanwhile (a session stopped there is not shared again). Run `align sync` in a terminal, then type `::align share` here.";
+
+/**
+ * A session whose share a sign-out or a lost workspace ended, while this sign-in has not read which shares their person
+ * stopped on the web: no share path asks for it until that is known (`::align share`, C11-1; `::align share --dir`,
+ * C12-3), as its notices are held back.
+ */
+function endedUnread(hot: HotState | null): boolean {
+  return hot?.share?.state === "stopped" && !!hot.share_now?.unread && (hot.share.ended === "device_signed_out" || hot.share.ended === "access_lost");
+}
 
 /** The same for `::align goals` (C11-6): every workspace's goals are cached, and the terminal lists them by workspace. */
 const MULTI_WORKSPACE_GOALS =
@@ -1275,10 +1303,12 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
             ? "off"
             : latch.state === "ok" && latch.value.stopped
               ? latch.value.ended && latch.value.reshare
-                ? "on (tools blocked; sharing ended: `::align share` here shares it again, after which it can be resumed from the web)"
-                : latch.value.ended
-                  ? `on (tools blocked; sharing ended, so run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it${latch.value.release?.goals.length ? "; a release of the hold lifts only the hold" : ""})`
-                  : "on (tools blocked)"
+                ? `on (tools blocked; sharing ended: ${shareAgainWords(!!latch.value.unread, "here")}, after which it can be resumed from the web)`
+                : latch.value.ended && latch.value.login
+                  ? `on (tools blocked; sharing ended, this machine signed out: ${latchWayOut(lid, false, "user", null, { login: true })})`
+                  : latch.value.ended
+                    ? `on (tools blocked; sharing ended, so run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal to unblock it${latch.value.release?.goals.length ? "; a release of the hold lifts only the hold" : ""})`
+                    : "on (tools blocked)"
               : "unreadable (tools blocked)"
         }`,
         holdLine(home, lid, cwd),
@@ -1344,7 +1374,8 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       const seen = (inj.requests_seen = inj.requests_seen || {});
       seen[r.id] = { ...(seen[r.id] || {}), answer };
       writeInjected(home, lid, inj);
-      if (answer === "declined") return `Align: you declined ${who}'s request; ${who} will see that.${seen[r.id].shown ? " The agent hears it at your next prompt." : ""}`;
+      // Which request: the model's line names it, and so does this (E2E-AGENT cycle 12, section 6).
+      if (answer === "declined") return `Align: you declined ${who}'s request to ${requestWhat(r)} (${requestShortId(r.id)}); ${who} will see that.${seen[r.id].shown ? " The agent hears it at your next prompt." : ""}`;
       if (r.type === "switch_goal" && later) return `Align: you accepted ${who}'s request. This session moves to "${clean(r.target_goal?.title, 100)}" at the first prompt after Align has fetched that goal (the next sync).`;
       if (r.type === "switch_goal") return `Align: you accepted ${who}'s request. From your next prompt this session counts toward "${clean(r.target_goal?.title, 100)}".`;
       return `Align: you accepted ${who}'s request; ${who} will see that. The agent hears it at your next prompt.`;
@@ -1377,7 +1408,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (!dirMode && hot?.share?.state === "stopped" && hot.prior_share?.stopped && (hot.share.ended ?? "sharing_ended") === "sharing_ended") return `Align: ${stoppedForGoodWords(lid, "type `::align share` here")}`;
       // A share a sign-out or a lost workspace ended, while this sign-in has not read which shares their person stopped
       // on the web: one stopped there is never shared again, so nothing is asked for until that is known (C11-1).
-      if (!dirMode && hot?.share?.state === "stopped" && hot.share_now?.unread && (hot.share.ended === "device_signed_out" || hot.share.ended === "access_lost")) return SHARE_UNREAD;
+      if (!dirMode && endedUnread(hot)) return SHARE_UNREAD;
       // Shared before in a workspace this machine can't reach now (its person was removed from it, say): shared again
       // only there, never into the default workspace, which would file that workspace's work under another (cycle 8).
       const own = hot?.share;
@@ -1392,7 +1423,17 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // Shared before (its share ended, say by a sign-out): with no goal named it shares toward the goal it had, while
       // that goal can still be bound (N8).
       const before = !arg && !dirMode && hot?.goal ? feed?.goals.find((g) => g.id === hot.goal!.id && g.bindable && g.status === "active") || null : null;
-      const goal = arg && feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) || null : before;
+      // With no goal named, in a folder a rule covers in this workspace: the rule's goal, as a session started there gets
+      // (`::align share` in a session that started before the rule), and `--dir` keeps the rule's goal rather than
+      // replacing it with none, which `--dir none` asks for (E2E-AGENT cycle 12, section 6).
+      const noGoal = dirMode && arg.toLowerCase() === "none";
+      if (noGoal) arg = "";
+      const rule = !arg && !noGoal && !before && feed ? matchRule(readRules(home), cwd) : null;
+      const ruleGoal =
+        rule && feed && rule.workspace_id === feed.workspace_id && rule.goal_id && (!dirMode || rule.dir === (gitInfo(cwd || "")?.toplevel || cwd))
+          ? feed.goals.find((g) => g.id === rule.goal_id && g.bindable && g.status === "active") || null
+          : null;
+      const goal = arg && feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) || null : before || ruleGoal;
       if (arg && !goal) {
         // Shared before in its own workspace, which is in reach, and the goal named is another workspace's: it is shared
         // again only there, as the out-of-reach answer says, never "no cached goal matches" (cycle 9).
@@ -1423,14 +1464,14 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
           return [
             `Align folder share preview (nothing changes yet):`,
             `  Folder: ${dir} (stays on this machine)`,
-            `  Every new session started in it is shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : " with no goal"}, from its start.${goal ? heldNote(goal) : ""}`,
+            `  Every new session started in it is shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"${goal === ruleGoal ? " (the goal its rule has now; `::align share --dir none` for no goal)" : ""}` : " with no goal"}, from its start.${goal ? heldNote(goal) : ""}`,
             replaces ? `  This replaces the current rule (${replaces}).` : "",
-            `  ${already ? "This session is already shared." : hot?.prior_share?.stopped ? "This session stays private: its sharing was stopped (or its history deleted)." : "This session is shared too."} Forks stay private. \`::align unshare\` keeps one session private.`,
+            `  ${already ? "This session is already shared." : hot?.prior_share?.stopped ? "This session stays private: its sharing was stopped (or its history deleted)." : endedUnread(hot) ? DIR_UNREAD : "This session is shared too."} Forks stay private. \`::align unshare\` keeps one session private.`,
             `  Sent per session: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
             signals
               ? `  Work signals on: repo-relative paths of edited files, commit subjects, task labels and the branch name go to people who can read the goal, kept 24 hours. Never sent: prompts, responses, tool output, file contents.`
               : `  Never sent: prompts, responses, tool input or output, paths, branch names. (Add --signals to share file paths and task labels with the team.)`,
-            `Type \`::align share --dir ${signals ? "--signals " : ""}${arg ? `${arg} ` : ""}confirm\` to turn it on.`,
+            `Type \`::align share --dir ${signals ? "--signals " : ""}${noGoal ? "none " : arg ? `${arg} ` : ""}confirm\` to turn it on.`,
           ]
             .filter(Boolean)
             .join("\n");
@@ -1439,8 +1480,10 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         // A session its person stopped sharing (or whose history was deleted) stays private: only `::align share` or
         // `align share` shares it again (C6-1).
         const kept = !already && !!hot?.prior_share?.stopped;
-        if (!already && !kept) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
-        const self = already ? "" : kept ? " This session stays private: its sharing was stopped (or its history deleted)." : " This session too; your next prompt carries the goal.";
+        // Its share ended, and whether its person stopped it on the web is not read yet: not asked for (C12-3).
+        const waits = !already && !kept && endedUnread(hot);
+        if (!already && !kept && !waits) spoolWrite(home, { type: "command", harness, native_id: sid, cwd, command: "share", arg: goal ? goal.id : null, workspace: feed.workspace_id, rule_dir: dir, ts });
+        const self = already ? "" : kept ? " This session stays private: its sharing was stopped (or its history deleted)." : waits ? ` ${DIR_UNREAD}` : " This session too; your next prompt carries the goal.";
         return `Align: new sessions in ${dir} are now shared with ${feed.workspace_name}${goal ? ` for "${goal.title}"` : ""}.${replaces ? ` This replaces the current rule (${replaces}).` : ""}${self}${goal ? heldNote(goal) : ""} \`::align unshare --dir\` turns it off.`;
       }
       if (!confirm) {
@@ -1450,7 +1493,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         return [
           `Align share preview for this session (nothing uploaded yet):`,
           `  Workspace: ${feed?.workspace_name || "your default workspace"}`,
-          `  Goal: ${goal ? `${goal.title}${before ? " (the goal it had before)" : ""}` : "none (unallocated)"}; counts from ${from}.${goal ? heldNote(goal) : ""}`,
+          `  Goal: ${goal ? `${goal.title}${before ? " (the goal it had before)" : goal === ruleGoal ? " (this folder's rule's goal)" : ""}` : "none (unallocated)"}; counts from ${from}.${goal ? heldNote(goal) : ""}`,
           `  Sent: harness, a keyed repo hash, start time, an epoch, and per-request token counts with model, basis and estimated list cost.`,
           `  Never sent: prompts, responses, tool input or output, paths, branch names.`,
           `Type \`::align share ${arg ? `${arg} ` : ""}confirm\` to share.`,

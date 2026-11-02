@@ -161,7 +161,12 @@ describe("C7-2: signed out and in again, the session's notice says what holds no
     assert.match(deny(t, A) ?? "", /tools stay blocked until the user runs `align stop-sharing /);
     fake.workspaces = [acme];
     await sync(t);
-    assert.match(prompt(t, A.sid, "go on", A.cwd)?.systemMessage ?? "", new RegExp(`^${AGAIN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}${LATCHED.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), "it can reach the workspace again: told once more");
+    // What changed is the reach, not the sign-in: its words say so (E2E-AGENT cycle 12, section 6).
+    assert.equal(
+      prompt(t, A.sid, "go on", A.cwd)?.systemMessage,
+      `Align: this machine can reach Acme in Align again. To share this session there again, type \`::align share\` here (it counts toward "Ship the v2 onboarding flow" again).${LATCHED}`,
+      "it can reach the workspace again: told once more",
+    );
   });
 });
 
@@ -363,8 +368,12 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
     const sid = newSid();
     start(t, sid, "startup", dir);
     const preview = prompt(t, sid, "::align share --dir", dir).reason;
-    assert.match(preview, /with no goal, from its start\.\n {2}This replaces the current rule \(Acme, "Ship the v2 onboarding flow"\)\./);
-    assert.match(prompt(t, sid, "::align share --dir confirm", dir).reason, new RegExp(`^Align: new sessions in ${dir.replace(/[.]/g, "\\.")} are now shared with Acme\\. This replaces the current rule \\(Acme, "Ship the v2 onboarding flow"\\)\\.`));
+    // With no goal named, the rule keeps its goal; `none` asks for no goal (E2E-AGENT cycle 12, section 6).
+    assert.match(preview, /for "Ship the v2 onboarding flow" \(the goal its rule has now; `::align share --dir none` for no goal\), from its start\.\n {2}This replaces the current rule \(Acme, "Ship the v2 onboarding flow"\)\./);
+    const none = prompt(t, sid, "::align share --dir none", dir).reason;
+    assert.match(none, /with no goal, from its start\.\n {2}This replaces the current rule \(Acme, "Ship the v2 onboarding flow"\)\./);
+    assert.match(none, /Type `::align share --dir none confirm` to turn it on\./);
+    assert.match(prompt(t, sid, "::align share --dir none confirm", dir).reason, new RegExp(`^Align: new sessions in ${dir.replace(/[.]/g, "\\.")} are now shared with Acme\\. This replaces the current rule \\(Acme, "Ship the v2 onboarding flow"\\)\\.`));
     assert.match((await runCli(t, ["rules"])).stdout, /Acme \/ no goal/);
   });
 
@@ -376,6 +385,6 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
     await sync(t);
     assert.equal(deny(t, A), 'Align: Dana Lee paused all agents on goal "Ship the v2 onboarding flow": "Security review". Work resumes when they release it. Your work so far is saved. Tell the user and wait for instructions.');
     assert.equal((await runCli(t, ["logout"])).code, 0);
-    assert.match(deny(t, A) ?? "", /^Align: Dana Lee paused .* tools stay blocked until the user runs `align stop-sharing [^`]+` in a terminal\. Tell the user and wait for instructions\.$/);
+    assert.match(deny(t, A) ?? "", /^Align: Dana Lee paused .* tools stay blocked until the user runs `align stop-sharing [^`]+` in a terminal, or until it is shared again once this machine is signed in \(.*\), after which the stop or hold can be lifted from the web\. Tell the user and wait for instructions\.$/);
   });
 });

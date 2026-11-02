@@ -9,7 +9,7 @@ import { removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { contextGoals, snapshot } from "./shared/goaltree.ts";
 import { clean } from "./shared/envelope.ts";
 import { readJson } from "./shared/fsx.ts";
-import { eventWords, type ReleaseReaches, type ShareFacts, type ShareNow } from "./shared/ended.ts";
+import { storedText, type ReleaseReaches, type ShareFacts, type ShareNow } from "./shared/ended.ts";
 import type { EndedWhy, GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, MeFile, RequestState, ShareState } from "./shared/types.ts";
 
 export { snapshot };
@@ -191,7 +191,18 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   }[];
   // A hold whose release still reaches the session though its share ended: both latch files say so, so every deny and
   // notice names the release as a way out of the hold, and none says it lifts the stop (C10-4).
-  const ended = end ? { ended: end.why, ...(end.reshare ? { reshare: true as const } : {}), ...(release ? { release } : {}) } : {};
+  // While the ended shares are unread since this sign-in, `align sync` comes first (`unread`); signed out, a new
+  // `align login` may offer `::align share` (`login`): the deny says so as the status views do (cycle 12, section 6).
+  const unread = !!end?.reshare && hot.share_now?.unread === true;
+  const ended = end
+    ? {
+        ended: end.why,
+        ...(end.reshare ? { reshare: true as const } : {}),
+        ...(unread ? { unread: true as const } : {}),
+        ...(end.login ? { login: true as const } : {}),
+        ...(release ? { release } : {}),
+      }
+    : {};
   if (latch && latch.stopped) {
     const l: Latch = { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...ended };
     writeJsonAtomic(layout.latch(ctx.home, lid), l);
@@ -240,6 +251,7 @@ export function shareNow(
     reaches: !!share && !!me && me.workspaces.some((w) => w.id === share.workspace_id),
     reshare: !!end?.reshare,
     unread: signed && !!kvGet(ctx.db, ENDED_UNREAD),
+    login: !!end?.login,
     latched: latchedFromWeb(ctx, lid),
     release,
   };
@@ -256,14 +268,17 @@ export function endedReason(share: ShareRow | null): EndedWhy | null {
  * (`reshare`): for a share that ended because this machine signed out or lost the workspace, once it is signed in and
  * reaches that workspace again (`::align share` shares it again, and then the web can resume or release it). Null while
  * the share lasts. Read afresh from the credentials and `me.json` each time, so the latch, `align latch status` and the
- * notices all say what is true now (C6-2).
+ * notices all say what is true now (C6-2). `login`: signed out, and a new sign-in would offer it `::align share` (it
+ * ended at a sign-out, or at a lost workspace the cached `/me` reaches again), as its sign-out notice says (cycle 12).
  */
-export function endedState(ctx: Ctx, share: ShareRow | null): { why: EndedWhy; reshare: boolean } | null {
+export function endedState(ctx: Ctx, share: ShareRow | null): { why: EndedWhy; reshare: boolean; login: boolean } | null {
   const why = endedReason(share);
   if (!why || !share) return null;
-  if (why === "sharing_ended" || !signedIn(ctx.home)) return { why, reshare: false };
   const me = readJson<MeFile>(layout.me(ctx.home));
-  return { why, reshare: !!me && !me.signed_out && me.workspaces.some((w) => w.id === share.workspace_id) };
+  const reaches = !!me && me.workspaces.some((w) => w.id === share.workspace_id);
+  if (why === "sharing_ended") return { why, reshare: false, login: false };
+  if (!signedIn(ctx.home)) return { why, reshare: false, login: why === "device_signed_out" || reaches };
+  return { why, reshare: !!me && !me.signed_out && reaches, login: false };
 }
 
 /** kv: set when a new pairing commits, cleared once the directives answer's `ended_sessions` were read as that pairing
@@ -323,8 +338,8 @@ export function addNotice(ctx: Ctx, lid: string, id: string, text: string, facts
     .run(`${lid}/${id}`, lid, text, new Date().toISOString(), facts ? JSON.stringify(facts) : null);
 }
 
-/** A notice about what happened to the share of `lid` (`facts`), worded when it is shown, from the state then; its stored
- *  text is its words as the event left the state (cycle 11). */
+/** A notice about what happened to the share of `lid` (`facts`), worded when it is shown, from the state then (cycle
+ *  11); its stored text, which only an older hook shows, is true whenever it is shown (`storedText`, C12-1). */
 export function addShareNotice(ctx: Ctx, lid: string, id: string, facts: ShareFacts): void {
-  addNotice(ctx, lid, id, eventWords(lid, facts, shareNow(ctx, lid)), facts);
+  addNotice(ctx, lid, id, storedText(facts), facts);
 }
