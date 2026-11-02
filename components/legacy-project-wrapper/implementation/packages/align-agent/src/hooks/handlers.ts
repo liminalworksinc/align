@@ -30,6 +30,7 @@ import {
 } from "../shared/envelope.ts";
 import { myTeams, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
+import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
@@ -774,32 +775,11 @@ export function latchDeny(home: string, harness: Harness, input: HookInput): Hoo
   return holdDeny(home, lid) || feedHoldDeny(home, lid, input.cwd || null);
 }
 
-/**
- * A goal hold that has not reached this session yet (cycle 6): the server holds every session bound to a held goal, but
- * a session learns it from a hold directive at a sync, so a folder-rule session bound to a held goal would run tools
- * until its first sync. When the cached goals feed already says the session's goal is held (`allocation.held`) and no
- * hold or release of that goal has reached the session, every tool is denied as a hold (fail closed). The goal is the
- * live share's (the one this hook opened last, until the sync has it) or, for a session a folder rule is sharing that
- * has no share yet, the rule's goal it was given at its start. A release the session got wins over a stale feed.
- */
+/** A goal hold that has not reached this session yet, from the cached feed (`shared/feedhold.ts`): every tool is denied
+ *  as a hold, fail closed (cycle 6). */
 function feedHoldDeny(home: string, lid: string, cwd: string | null): HookOutput {
-  const hot = readHot(home, lid);
-  const inj = readInjected(home, lid);
-  let ws: string | null = null;
-  let goalId: string | null = null;
-  const share = hot?.share;
-  if (share && (share.state === "shared" || share.state === "pending")) {
-    ws = share.workspace_id;
-    goalId = inj.opened_epoch ? (inj.opened_epoch.goal?.id ?? null) : (hot!.goal?.id ?? null);
-  } else if (!share && inj.share_state === "shared" && inj.goal_id) {
-    const rule = matchRule(readRules(home), cwd || hot?.cwd || null);
-    if (rule && rule.goal_id === inj.goal_id) [ws, goalId] = [rule.workspace_id, rule.goal_id];
-  }
-  if (!ws || !goalId) return null;
-  const g = readJson<FeedFile>(layout.feed(home, ws))?.goals?.find((x) => x.id === goalId);
-  if (!g?.allocation?.held) return null;
-  if ((hot?.released_holds || []).some((r) => r.goal_id === goalId)) return null;
-  return denyOutput(`Align: all agents on goal "${clean(g.title, 100)}" were paused from its Align workspace. Work resumes when the hold is released. Your work so far is saved.`);
+  const h = feedHold(home, lid, cwd);
+  return h ? denyOutput(feedHoldReason(h.goal_title, clean)) : null;
 }
 
 /**
@@ -953,9 +933,13 @@ function openRequests(hot: HotState | null, inj: InjectedState): HotRequest[] {
   });
 }
 
-function holdLine(home: string, lid: string): string {
+function holdLine(home: string, lid: string, cwd: string | null): string {
   const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
-  if (h.state === "absent" || (h.state === "ok" && Array.isArray(h.value?.holds) && !h.value.holds.length)) return "  Goal hold: off";
+  if (h.state === "absent" || (h.state === "ok" && Array.isArray(h.value?.holds) && !h.value.holds.length)) {
+    // A hold the cached feed shows that has not reached the session yet: denied as PreToolUse denies it (cycle 6).
+    const f = feedHold(home, lid, cwd);
+    return f ? `  Goal hold: on goal "${clean(f.goal_title, 80)}" (held in Align's cached goals; it reaches this session at the next sync) (all tools blocked)` : "  Goal hold: off";
+  }
   if (h.state !== "ok" || !Array.isArray(h.value?.holds)) return "  Goal hold: unreadable (tools blocked)";
   const out = h.value.holds.map((x) => `  Goal hold: on goal "${clean(x.goal_title, 80)}" by ${clean(x.by, 50) || "someone"} (all tools blocked)`);
   if (h.value.ended && h.value.reshare) out.push("  Sharing ended; `::align share` here shares it again, after which the hold can be released from the web");
@@ -1029,7 +1013,7 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
                   : "on (tools blocked)"
               : "unreadable (tools blocked)"
         }`,
-        holdLine(home, lid),
+        holdLine(home, lid, cwd),
         ...openRequests(hot, inj).map((r) =>
           requestState(r, inj.requests_seen?.[r.id]) === "pending"
             ? `  Request:  ${requestLine(r)}; \`::align accept ${requestShortId(r.id)}\` or \`::align decline ${requestShortId(r.id)}\``

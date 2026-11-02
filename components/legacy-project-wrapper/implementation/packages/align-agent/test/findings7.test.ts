@@ -279,6 +279,11 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
       assert.equal(d?.hookSpecificOutput?.permissionDecision, "deny", `${tool} before any sync`);
       assert.equal(d.hookSpecificOutput.permissionDecisionReason, 'Align: all agents on goal "Ship the v2 onboarding flow" were paused from its Align workspace. Work resumes when the hold is released. Your work so far is saved.');
     }
+    // The status views show the hold PreToolUse enforces.
+    assert.match(json(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "st", prompt: "::align status", cwd: dir }).stdout).reason, /Goal hold: on goal "Ship the v2 onboarding flow" \(held in Align's cached goals; it reaches this session at the next sync\) \(all tools blocked\)/);
+    const lid8 = localId("claude-code", sid).slice(0, 8);
+    assert.match((await runCli(t, ["latch", "status"])).stdout, new RegExp(`${lid8} claude-code HELD on goal "Ship the v2 onboarding flow" \\(held in Align's cached goals; the hold reaches this session at the next sync\\) \\(all tools blocked\\)`));
+    assert.match((await runCli(t, ["status"])).stdout, /Goal hold: {2}1 session\(s\) paused on "Ship the v2 onboarding flow" \(1 from the cached goals, before the hold reaches them\); see/);
     // The sync shares it; the server's hold and release reach it; the feed still says held (stale): the release wins.
     await sync(t);
     const ctx = ctxFor(t);
@@ -291,6 +296,8 @@ describe("cycle 6, section 5: works, but would confuse a developer", () => {
     fake.releaseGoal("ws_acme", "g_ship", [key]);
     await sync(t);
     assert.equal(use("Bash"), null, "released: tools run although the cached feed still says held");
+    assert.equal((await runCli(t, ["latch", "status"])).stdout.trim(), "No stop latches or goal holds.");
+    assert.match(json(runHook(t, "claude", "UserPromptSubmit", { session_id: sid, prompt_id: "st2", prompt: "::align status", cwd: dir }).stdout).reason, /Goal hold: off/);
     // A session in another folder, not shared, toward nothing: not held.
     const other = path.join(t.root, "free-repo");
     fs.mkdirSync(other, { recursive: true });

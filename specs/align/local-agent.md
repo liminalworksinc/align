@@ -1457,11 +1457,16 @@ a folder rule is sharing that has no share yet, the rule's goal it was given at 
 feed (`allocation.held`) and no hold or release of that goal has reached the session, the hook SHALL deny every
 `PreToolUse` with `Align: all agents on goal "<title>" were paused from its Align workspace. Work resumes when the hold
 is released. Your work so far is saved.`; a release that reached the session wins over a feed that still says held.
+The status views SHALL show such a hold as PreToolUse enforces it: `::align status` `Goal hold: on goal "<title>" (held
+in Align's cached goals; it reaches this session at the next sync) (all tools blocked)`, `align latch status` `<lid8>
+<harness> HELD on goal "<title>" (held in Align's cached goals; the hold reaches this session at the next sync) (all
+tools blocked)` for each such session active in the last 7 days, and `align status` counts them in its `Goal hold:`
+line (`... (<n> from the cached goals, before the hold reaches them)`).
 
 #### Scenario: A held goal before its first sync
 
 - **WHEN** a goal is held and a session starts in a folder a rule shares toward it, then calls `Bash` and `Read` before any sync, then a sync shares it, the hold and its release reach it while the cached feed still says held, and a session in another, unshared folder calls `Bash` (test `findings7` "held goal, fail closed ...")
-- **THEN** both calls are denied with the hold wording, it stays denied after the sync and while held, its tools run after the release, and the unshared session's tools run
+- **THEN** both calls are denied with the hold wording, `::align status`, `align latch status` and `align status` show that hold, it stays denied after the sync and while held, its tools run after the release (and the status views no longer show it), and the unshared session's tools run
 
 #### Scenario: Hold, stop and release with no sync running
 

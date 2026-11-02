@@ -50,6 +50,7 @@ import { kvGet, kvSet } from "./db.ts";
 import { podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
 import { clean, requestShortId } from "./shared/envelope.ts";
+import { feedHold } from "./shared/feedhold.ts";
 import type { WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
 import { listSteering, weekKey } from "./shared/steering.ts";
@@ -541,9 +542,11 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
   };
   if (latched) out(`  Stop latch: ${latched} session(s) stopped${stuck(endedOf("latches", "stopped"))}; see \`align latch status\``);
   const holds = ctx.db.prepare("SELECT json FROM holds WHERE held=1").all() as { json: string }[];
-  if (holds.length) {
-    const goals = [...new Set(holds.map((h) => `"${clean((JSON.parse(h.json) as { goal_title: string }).goal_title, 80)}"`))];
-    out(`  Goal hold:  ${holds.length} session(s) paused on ${goals.join(", ")}${stuck(endedOf("holds", "held"))}; see \`align latch status\``);
+  const fromFeed = feedHolds(ctx);
+  if (holds.length || fromFeed.length) {
+    const goals = [...new Set([...holds.map((h) => (JSON.parse(h.json) as { goal_title: string }).goal_title), ...fromFeed.map((f) => f.goal_title)].map((t) => `"${clean(t, 80)}"`))];
+    const early = fromFeed.length ? ` (${fromFeed.length} from the cached goals, before the hold reaches them)` : "";
+    out(`  Goal hold:  ${holds.length + fromFeed.length} session(s) paused on ${goals.join(", ")}${early}${stuck(endedOf("holds", "held"))}; see \`align latch status\``);
   }
   const pending = (ctx.db.prepare("SELECT COUNT(*) AS n FROM goal_requests WHERE state='pending'").get() as { n: number }).n;
   if (pending) out(`  Requests:   ${pending} waiting for your answer; see \`align requests\``);
@@ -643,6 +646,19 @@ function unknownWorkspace(ctx: Ctx, ref: string): UsageError {
   return new UsageError(
     `this device has not been given the workspace ${clean(other.name, 80)}: you are a member, but this device was not ticked when you joined it. Give it this workspace on your Devices page (${server}/app/devices, "Give this device the workspace"), then run \`align goals --refresh\`.`,
   );
+}
+
+/** Sessions of the last week held only by the cached feed (`allocation.held`, a hold not delivered yet), which their
+ *  PreToolUse hook denies as held (`shared/feedhold.ts`, cycle 6). */
+function feedHolds(ctx: Ctx): { local_id: string; harness: string; goal_title: string }[] {
+  const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const rows = ctx.db
+    .prepare("SELECT local_id, harness, cwd FROM sessions WHERE COALESCE(last_active, created_at) >= ? AND local_id NOT IN (SELECT local_id FROM holds WHERE held=1)")
+    .all(since) as { local_id: string; harness: string; cwd: string | null }[];
+  return rows.flatMap((r) => {
+    const f = feedHold(ctx.home, r.local_id, r.cwd);
+    return f ? [{ local_id: r.local_id, harness: r.harness, goal_title: f.goal_title }] : [];
+  });
 }
 
 /** No workspace in this device's reach (its person was removed from the only one, say): not an error (N6). */
@@ -926,7 +942,8 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
     at: string;
     harness: string;
   }[];
-  if (!rows.length && !holds.length) return out("No stop latches or goal holds.");
+  const fromFeed = feedHolds(ctx);
+  if (!rows.length && !holds.length && !fromFeed.length) return out("No stop latches or goal holds.");
   /** A latch or hold whose share ended can't be lifted from the web: say how to get out. */
   const way = (lid: string) => {
     const ended = endedState(ctx, getShare(ctx, lid));
@@ -949,7 +966,7 @@ async function cmdLatch(ctx: Ctx, argv: string[]): Promise<void> {
     out(
       `${h.local_id.slice(0, 8)} ${h.harness} HELD on goal "${clean(j.goal_title, 80)}" by ${clean(j.by, 50) || "someone"} since ${shortTime(h.at)}${j.reason ? ` (${clean(j.reason, 80)})` : ""} (all tools blocked)${file ? "" : " (hold file missing!)"}${way(h.local_id)}`,
     );
-  }
+  }  for (const f of fromFeed) out(`${f.local_id.slice(0, 8)} ${f.harness} HELD on goal "${clean(f.goal_title, 80)}" (held in Align's cached goals; the hold reaches this session at the next sync) (all tools blocked)`);
 }
 
 /** `align requests`: what people who can approve a session's goal asked of it, and the developer's answers. */
