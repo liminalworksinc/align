@@ -5899,6 +5899,12 @@ try {
             JSON.stringify(ui.radios) === JSON.stringify(["replan", "checkpoint", "switch_goal"]) && /Checkpoint/.test(ui.cp) && ui.cp.includes(QNOTE) && /declined/.test(ui.cp) && /accepted by the developer/.test(ui.cp) && errors.length === 0,
           `${JSON.stringify(ui).slice(0, 600)} ${errors.join(" | ")}`,
         );
+        check(
+          "c13 recent sign-in (E2E-AGENT cycle 13, section 5): beside Release the goal page says before the press that releasing needs a sign-in from the last 15 minutes, and that with an older one Align asks to sign in again and comes back here to press Release again (holding says the same beside its button)",
+          (await page.evaluate(() => document.querySelector("[data-hold-hint]")?.innerText ?? "")) ===
+            "Releasing needs a sign-in from the last 15 minutes: with an older one, Align asks you to sign in again and brings you back here to press Release again.",
+          await page.evaluate(() => document.querySelector("#agents-on-goal")?.innerText ?? ""),
+        );
         await page.click('input[name="request-type"][value="replan"]');
         await page.type("#send-request textarea", "From the browser");
         const sentResp = page.waitForResponse((r) => r.url().endsWith(`/goals/${GR.id}/requests`) && r.request().method() === "POST");

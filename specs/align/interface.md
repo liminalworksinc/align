@@ -1218,7 +1218,13 @@ The goal page SHALL show, under the "Agent activity" card, an "Agents on this go
 when the goal has requests. For a person who may hold the goal it SHALL offer **Hold all agents on this goal** with an
 optional reason (at most 280 characters, "shown to the developers") while the goal is active and not held, and
 **Release** while it is held, calling `PUT` and `DELETE /api/v2/workspaces/<ws>/goals/<goal>/hold` and showing
-**Sign in again** on 403 `reauth_required`. For a person who may send requests it SHALL offer "Send a request" with
+**Sign in again** on 403 `reauth_required`. Each button SHALL say before it is pressed that it needs a sign-in from the
+last 15 minutes (a developer told to lift a hold "from the web" otherwise meets it only as a refusal: E2E-AGENT cycle
+13, section 5): under **Release** "Releasing needs a sign-in from the last 15 minutes: with an older one, Align asks you
+to sign in again and brings you back here to press Release again." (`scripts/test-v2.mjs` "c13 recent sign-in ..."),
+and under **Hold all agents on this goal** "Align blocks their tools until someone who can approve for the goal
+releases it. Holding, like releasing, needs a sign-in from the last 15 minutes: with an older one, Align asks you to
+sign in again and brings you back here." For a person who may send requests it SHALL offer "Send a request" with
 the type choices Replan, Checkpoint and Switch goal (each with a sentence saying what the agent does and whether the
 developer is asked first), for Switch goal a checkbox per session on the goal (its name, then "started <time> · …<the
 key's last 6 characters>", so two sessions of one person in one repository can be told apart) and a target-goal picker of the other
