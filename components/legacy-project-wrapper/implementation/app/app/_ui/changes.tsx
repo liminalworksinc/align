@@ -216,7 +216,7 @@ function RequestRecord({
       {cr.state === "approved" && <ValueCard ws={ws} cr={cr} me={me} titles={titles} />}
       {cr.state === "rejected" && (
         <p className="text-[14px] text-zinc-600">
-          Rejected by {said(cr.rejected_by)}
+          Declined by {said(cr.rejected_by)}
           {cr.decided_at ? `, ${when(cr.decided_at)}` : ""}. Reason: {cr.rejection_reason}
         </p>
       )}

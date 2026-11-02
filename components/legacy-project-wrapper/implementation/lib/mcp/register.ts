@@ -176,7 +176,7 @@ function capped(head: string, lines: string[], tail: string, max: number): strin
     out.push(lines[i]);
     len += lines[i].length + 1;
   }
-  if (i < lines.length) out.push(`(${lines.length - i} more lines not shown here; structuredContent has everything.)`);
+  if (i < lines.length) out.push(`(${count(lines.length - i, "more line")} not shown here; structuredContent has everything.)`);
   out.push(tail);
   return out.join("\n").slice(0, max);
 }
@@ -765,13 +765,13 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         .map(changeOut);
       const out = { workspace: workspaceOf(pp), state: state ?? null, change_requests: list };
       const lines = list.flatMap((cr) => [
-        `- ${cr.id} ${cr.state} on goal ${cr.goal.id} ${tag(cr.goal.title.untrusted_text)} from ${tag(cr.requested_by.name.untrusted_text)} (base version ${cr.base_version}, revision ${cr.revision}, ${cr.evidence.length} evidence links): ${tag(cr.reason.untrusted_text)}`,
+        `- ${cr.id} ${cr.state} on goal ${cr.goal.id} ${tag(cr.goal.title.untrusted_text)} from ${tag(cr.requested_by.name.untrusted_text)} (base version ${cr.base_version}, revision ${cr.revision}, ${count(cr.evidence.length, "evidence link")}): ${tag(cr.reason.untrusted_text)}`,
         ...(cr.launch ? [`  ${launchWords(cr.launch, cr.base_version, null)}`] : []),
         ...(cr.condition ? [conditionLine(cr.condition)] : []),
         ...cr.evidence.map(evidenceLine),
         snapshotLine(cr.snapshot),
       ]);
-      return result(out, [`${list.length} change requests${state ? ` (${state})` : ""}.`, ...lines].join("\n"));
+      return result(out, [`${count(list.length, "change request")}${state ? ` (${state})` : ""}.`, ...lines].join("\n"));
     },
   );
 
@@ -812,7 +812,8 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         decided_at: cr.decided_at,
       };
       const lines = [
-        `Change request ${cr.id} on goal ${cr.goal.id} ${tag(cr.goal.title)} was ${cr.state}${record.decided_by ? ` by ${tag(cr.decided_by!.name)}` : ""}${cr.decided_at ? ` at ${cr.decided_at}` : ""}.`,
+        // "declined", the app's word for a rejected request (its state stays "rejected" in the record).
+        `Change request ${cr.id} on goal ${cr.goal.id} ${tag(cr.goal.title)} was ${cr.state === "rejected" ? "declined" : cr.state}${record.decided_by ? ` by ${tag(cr.decided_by!.name)}` : ""}${cr.decided_at ? ` at ${cr.decided_at}` : ""}.`,
         `Asked by ${tag(cr.requested_by.name)} against version ${cr.base_version}: ${tag(cr.reason)}`,
         cr.decision_note !== null ? `Decision note: ${tag(cr.decision_note)}` : "No decision note.",
         // Each changed field in words, as the web app's value card says it ("<measure> target 500 -> 600").
@@ -821,7 +822,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         ...(cr.state === "approved" ? [`${launchWords(cr.launch, cr.base_version, cr.resulting_version)}.${cr.launch === "not_yet" && record.launch_decided_by ? ` ${tag(cr.launch_decided_by!.name)} decided not yet at ${cr.launch_decided_at}.` : ""}${cr.launch === "launched" && record.launch_decided_by ? ` Launched by ${tag(cr.launch_decided_by!.name)} at ${cr.launch_decided_at}.` : ""}`] : []),
         ...(record.condition ? [conditionLine(record.condition, "")] : []),
         record.resulting_version !== null ? `Resulting goal version: ${record.resulting_version}.` : "No goal version was created.",
-        record.approved_without_evidence ? "Approved without evidence." : `${record.evidence.length} evidence links (self-reported or agent-reported, none verified):`,
+        record.approved_without_evidence ? "Approved without evidence." : `${count(record.evidence.length, "evidence link")} (self-reported or agent-reported, none verified):`,
         ...record.evidence.map(evidenceLine),
         snapshotLine(record.snapshot),
       ];
@@ -905,7 +906,7 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         (d) =>
           `- ${d.created_at} ${d.kind} for ${d.session_keys.length} of your sessions${d.goal ? `: goal ${d.goal.id} v${d.goal.version} ${tag(d.goal.title.untrusted_text)}` : ""}${d.binding ? ` (bound to ${d.binding.goal_id ?? "no goal"}, ${d.binding.effective})` : ""}${d.request ? `: ${d.request.cancel_reason === "goal_closed" ? "expired (goal closed) " : d.request.cancelled ? "withdrawn " : ""}${d.request.type} request ${d.request.id} on goal ${d.request.goal.id} v${d.request.goal.version} from ${tag(d.request.sender.name.untrusted_text)}${d.request.target_goal ? `, to goal ${d.request.target_goal.id}` : ""}${d.request.note ? `, note ${tag(d.request.note.untrusted_text)}` : ""}` : ""}${d.hold ? `: goal ${d.hold.goal.id} ${d.kind === "hold" ? `held by ${tag(d.hold.held_by?.name.untrusted_text ?? "")}` : `released by ${tag(d.hold.released_by?.name.untrusted_text ?? "")}`}` : ""}`,
       );
-      return result(out, [`${directives.length} recent directives for your sessions.`, ...lines].join("\n"));
+      return result(out, [`${count(directives.length, "recent directive")} for your sessions.`, ...lines].join("\n"));
     },
   );
 

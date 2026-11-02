@@ -124,12 +124,15 @@ function Choice({ on, title, sub, onPick }: { on: boolean; title: string; sub: s
 }
 
 /** The counter's input: the request's fields pre-filled on the goal as it is now, a required note and an optional
- *  "Accept if…" condition. Its button goes to the confirmation; nothing is sent from here. The request's dependencies
+ *  "Accept if…" condition; what it would send is compared with the request's base version (the read's counter_base),
+ *  as the server compares it (C8-2). Its button goes to the confirmation; nothing is sent from here. The request's dependencies
  *  the counterer can't see stay on it (the server keeps them, C2 N2): the form counts them and says so, and passes the
  *  count to the confirmation. Depends on offers only the goals the server accepts from this counter (the goal read's
  *  dependency_choices for it: readable by the requester and everyone deciding), as the propose form does. */
 function CounterInput({ ws, cr, focus, onReview }: { ws: string; cr: ChangeRequest; focus: boolean; onReview: (changes: ChangeFields, note: string, condition: string, hidden: number) => void }) {
-  const g = useApi<{ goal: Goal; hidden_depends_on?: number; dependency_choices?: string[] | null; dependency_loops?: string[] | null }>(`/api/v2/workspaces/${ws}/goals/${cr.goal.id}?counter=${cr.id}`);
+  const g = useApi<{ goal: Goal; hidden_depends_on?: number; dependency_choices?: string[] | null; dependency_loops?: string[] | null; counter_base?: Required<ChangeFields> | null }>(
+    `/api/v2/workspaces/${ws}/goals/${cr.goal.id}?counter=${cr.id}`,
+  );
   const box = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (g.data && focus) box.current?.querySelector<HTMLElement>("input, textarea, select")?.focus();
@@ -148,7 +151,8 @@ function CounterInput({ ws, cr, focus, onReview }: { ws: string; cr: ChangeReque
         keep={Object.keys(cr.changes) as (keyof ChangeFields)[]}
         choices={g.data.dependency_choices ?? null}
         loops={g.data.dependency_loops ?? null}
-        before={cr.diff.before}
+        base={g.data.counter_base ?? null}
+        versions={{ base: cr.base_version, goal: g.data.goal.version }}
         hiddenChange={!!cr.diff.hidden_depends_on && cr.diff.hidden_depends_on.after !== cr.diff.hidden_depends_on.before}
         requesterName={cr.requester.name}
         notOfferedWho={`${cr.requester.name} or someone who decides on this goal`}
@@ -326,12 +330,14 @@ export function OpenRequest({
     if (!req || sending) return;
     setSending(true);
     try {
-      // Freshness: is the revision on screen still the one the server holds? (The server checks again on the write.)
+      // Freshness: is the revision on screen still the one the server holds? (The server checks again on the write.) A
+      // new state is said in the server's own words, the ones its wrong_state refusal gives (W2: "declined by <name>",
+      // never "rejected"); a new revision in the same state by its number.
       const now = await api<ChangeRequest>(path).catch(() => null);
       if (now && (now.revision !== cr.revision || now.state !== cr.state)) {
         setNotice({
           kind: "stale",
-          text: `Not recorded. This request changed after you opened it: it is now ${quote(CR_STATE_WORDS[now.state])} at revision ${now.revision}. Nothing was sent. Read it again and decide again.`,
+          text: `Not recorded. ${now.state !== cr.state ? now.state_note : `This request changed after you opened it: it is now at revision ${now.revision}.`} Nothing was sent. Read it again and decide again.`,
         });
         onDone();
         return;
@@ -384,7 +390,7 @@ export function OpenRequest({
       case "counter":
         return `${stateWord} → ${CR_STATE_WORDS.countered} (revision ${cr.revision + 1}). ${cr.requester.name} accepts it, then it can be approved.`;
       case "reject":
-        return `${stateWord} → rejected. The goal stays at version ${n}, and ${cr.requester.name} sees your reason.`;
+        return `${stateWord} → ${CR_STATE_WORDS.rejected}. The goal stays at version ${n}, and ${cr.requester.name} sees your reason.`;
       case "accept_counter":
         return `${stateWord} → ${CR_STATE_WORDS.pending}, with the suggested change.`;
       case "acknowledge":
@@ -554,7 +560,7 @@ export function OpenRequest({
             </div>
           ))}
           <p className="mt-1 text-[13px] text-zinc-500">Links are what people or agents say support the change, labelled self-reported or agent-reported. Align doesn&apos;t check them.</p>
-          {cr.can.add_evidence && <AddEvidence path={path} revision={cr.revision} onDone={onDone} />}
+          {cr.can.add_evidence && <AddEvidence path={path} revision={cr.revision} onDone={onDone} setNotice={setNotice} />}
         </section>
       </div>
       <Err>{act.error}</Err>

@@ -186,6 +186,25 @@ function launchTargets(r: Row, actor: string, at: string) {
   }
 }
 
+/** Why an action on a target change in another state is refused (409 wrong_state), in the app's words ("declined", never
+ *  "rejected") and naming who did it, as change requests and alignments say it (C8-1's sweep). */
+function stateRefusal(r: Row): string {
+  switch (r.state) {
+    case "pending":
+      return "This proposal is waiting for approval; reload to see it.";
+    case "countered":
+      return `This proposal was countered by ${memberName(revisionOf(r.id, r.revision).author_id)}; review the counter.`;
+    case "approved":
+      return "This proposal is already approved; reload to see it.";
+    case "rejected":
+      return `This proposal was declined${r.decided_by ? ` by ${memberName(r.decided_by)}` : ""}, so nothing changes.`;
+    case "withdrawn":
+      return `This proposal was withdrawn by ${memberName(r.requester_id)}, so nothing changes.`;
+    case "superseded":
+      return "This proposal was superseded: one of its goals got a newer version or was closed first, so nothing changes.";
+  }
+}
+
 export async function actOnReallocation(pp: PolicyPrincipal, id: string, action: ReallocationAction, b: Body) {
   visible(pp, id);
   if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
@@ -203,7 +222,7 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
       return !!g && effectiveSet(g, r.requester_id).includes(me);
     });
     const inState = (...s: ReallocationState[]) => {
-      if (!s.includes(r.state)) throw conflict("wrong_state", `This proposal is ${r.state}`);
+      if (!s.includes(r.state)) throw conflict("wrong_state", stateRefusal(r));
     };
     const expectRevision = (required: boolean) => {
       if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", `This proposal is at revision ${r.revision}; reload and try again`);
@@ -218,7 +237,7 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
       if (!mayLaunch(pp, r)) throw forbidden("not_a_launcher", "Only someone who can launch for every goal in it (an approver of each, or a workspace owner who can read them all) can launch it");
     };
     const launchable = () => {
-      if (r.state !== "approved" || (r.launch !== "pending" && r.launch !== "not_yet")) throw conflict("wrong_state", r.launch === "launched" ? "These targets are already launched" : `This proposal is ${r.state}`);
+      if (r.state !== "approved" || (r.launch !== "pending" && r.launch !== "not_yet")) throw conflict("wrong_state", r.launch === "launched" ? "These targets are already launched" : stateRefusal(r));
     };
     const approve = () => {
       approverOnly();

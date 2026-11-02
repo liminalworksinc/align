@@ -6,6 +6,7 @@ import { CODE_RE, redeemCreationCode } from "./core.mts";
 import { get, sql } from "./db";
 import { refuseDisposable } from "./disposable";
 import { V2Error, conflict, forbidden } from "./errors";
+import { count } from "./plural.mts";
 
 // Who may create a hosted workspace (PRESEED-002) and the hosted caps (PRESEED-003). Mode L skips all of it: one person
 // on their own machine creates what they like.
@@ -47,9 +48,9 @@ function check(user: Creator, code: string | null) {
   if (!config().hosted) return;
   if (creationMode() === "closed") throw forbidden("creation_closed", "New workspaces can't be created on this server right now. Contact its operator.");
   const c = caps()!;
-  if (liveWorkspaces() >= c.workspaces) throw forbidden("workspace_cap", `This server has reached its limit of ${c.workspaces} workspaces. ${RAISE}`);
+  if (liveWorkspaces() >= c.workspaces) throw forbidden("workspace_cap", `This server has reached its limit of ${count(c.workspaces, "workspace")}. ${RAISE}`);
   const owned = liveOwned(user.id);
-  if (owned >= c.owned) throw forbidden("owned_workspace_cap", `You already own ${owned} workspace${owned === 1 ? "" : "s"}, the limit for one account here. ${RAISE}`);
+  if (owned >= c.owned) throw forbidden("owned_workspace_cap", `You already own ${count(owned, "workspace")}, the limit for one account here. ${RAISE}`);
   refuseDisposable(user.email);
   if (needsCode(user.email) && !code) throw forbidden("creation_code_required", "Creating a workspace here needs a creation code. Request access to get one.");
 }
@@ -80,11 +81,11 @@ export function checkRestoreCaps(userId: string) {
   const c = caps();
   if (!c) return;
   if (liveWorkspaces() >= c.workspaces) {
-    throw conflict("workspace_cap", `Restoring it would take this server past its limit of ${c.workspaces} workspaces. ${RAISE}`);
+    throw conflict("workspace_cap", `Restoring it would take this server past its limit of ${count(c.workspaces, "workspace")}. ${RAISE}`);
   }
   const owned = liveOwned(userId);
   if (owned >= c.owned) {
-    throw conflict("owned_workspace_cap", `You already own ${owned} workspace${owned === 1 ? "" : "s"}, the limit for one account here, so this one can't be restored. ${RAISE}`);
+    throw conflict("owned_workspace_cap", `You already own ${count(owned, "workspace")}, the limit for one account here, so this one can't be restored. ${RAISE}`);
   }
 }
 
@@ -96,10 +97,10 @@ export function checkMemberCap(wsId: string, countInvites: boolean) {
   const now = new Date().toISOString();
   const members = get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_members WHERE ws_id = ?", wsId)?.n ?? 0;
   const pending = countInvites ? (get<{ n: number }>("SELECT COUNT(*) AS n FROM v2_invites WHERE ws_id = ? AND accepted_at IS NULL AND expires_at > ?", wsId, now)?.n ?? 0) : 0;
-  if (members + pending >= c.members) throw forbidden("member_cap", `This workspace has reached its limit of ${c.members} members, counting open invites. ${RAISE}`);
+  if (members + pending >= c.members) throw forbidden("member_cap", `This workspace has reached its limit of ${count(c.members, "member")}, counting open invites. ${RAISE}`);
 }
 
 /** New shared sessions per device in any 24 hours (hosted). */
 export function sessionCapError(max: number) {
-  return new V2Error(403, "session_cap", `This device has shared ${max} new sessions in the last 24 hours, the limit here. ${RAISE}`);
+  return new V2Error(403, "session_cap", `This device has shared ${count(max, "new session")} in the last 24 hours, the limit here. ${RAISE}`);
 }

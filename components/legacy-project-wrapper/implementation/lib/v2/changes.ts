@@ -8,6 +8,7 @@ import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName, memberPrincipal } from "./workspaces";
 import { nonNegInt, optStr, str, type Body } from "./validate";
 import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evidenceView, recordSnapshot, snapshotView, type EvidenceSource } from "./evidence";
+import { counterNoChange, counterSameAsRequest } from "./change-words.mts";
 
 // Change requests: a member proposes a new version of a goal they can read but don't own (owners just publish a
 // version). The goal's approval set decides, under the requester rule (lib/v2/approval.ts): one approval is enough.
@@ -136,7 +137,8 @@ const applied = (base: GoalContent, c: Changes): GoalContent => ({ ...base, ...c
 /** Why an action on a request in another state is refused (409 wrong_state), in the app's words ("declined", never
  *  "rejected") and naming who did it, as the alignments' refusals do (Y5): everyone who may act on a request sees its
  *  requester and approvers. A counter names its author, so a requester whose open card offered **Update to version n**
- *  hears to review it (W6). */
+ *  hears to review it (W6). Every action on a request refuses its state with these words, adding evidence included
+ *  (C8-1), and the request view carries them as `state_note`, so a card that finds the request changed says the same (W2). */
 function crStateRefusal(r: ChangeRequestRow): string {
   switch (r.state) {
     case "pending":
@@ -155,9 +157,6 @@ function crStateRefusal(r: ChangeRequestRow): string {
       return "This request was superseded: its goal was closed or got a newer version first, so nothing changes.";
   }
 }
-
-/** A counter that would change nothing (409 no_change): suggest a change, or decline instead (C7-2). */
-const COUNTER_NO_CHANGE = "This suggestion changes nothing on the goal, so there is nothing to suggest. Change a field to suggest something else, or decline the request.";
 
 /** Who must be able to read a dependency a revision adds, and what the refusal says. A proposal (or a rebase) is
  *  decided by the goal's effective approval set; a counter goes back to the requester, who accepts it or not, and then
@@ -293,6 +292,19 @@ export function dependencyChoices(pp: PolicyPrincipal, goalId: string, counterOf
 export function dependencyLoops(pp: PolicyPrincipal, goalId: string, counterOf?: string): string[] | null {
   const g = visibleGoal(pp, goalId);
   return dependencyReaders(pp, g, counterOf) ? readableLoops(pp, g.id) : null;
+}
+
+/** What a counter from this reader on request `counterOf` is compared with: the request's base version (its dependencies
+ *  limited to those the reader can read; a counter keeps the others), so the Suggest a change form offers Review exactly
+ *  when the server would record the counter, also on a request behind its goal (C8-2). null without `counterOf`, and
+ *  for a reader who may not counter it (the same audience as dependencyChoices). */
+export function counterBase(pp: PolicyPrincipal, goalId: string, counterOf?: string): Changes | null {
+  if (!counterOf) return null;
+  const g = visibleGoal(pp, goalId);
+  if (!dependencyReaders(pp, g, counterOf)) return null;
+  const base = versionContentOf(pp.wsId, g.id, crRow(pp.wsId, counterOf)!.base_version)!;
+  const hidden = unreadableGoals(pp, base.depends_on);
+  return { title: base.title, measures: base.measures, depends_on: base.depends_on.filter((id) => !hidden.includes(id)), status: base.status, limits: base.limits };
 }
 
 /** The goals the New version form leaves out of Depends on because they already depend on `goalId` (saving one would
@@ -538,14 +550,18 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
           const hiddenBase = unreadableGoals(pp, base.depends_on);
           sent = { ...(sent as Body), depends_on: base.depends_on.filter((id) => !hiddenBase.includes(id)) };
         }
-        // A suggestion that changes nothing on the version the request was made against says what to do instead (C7-2).
+        // A suggestion that changes nothing on the version the request was made against says what to do instead (C7-2),
+        // naming that version when the goal has moved on since (C8-2).
         let countered: Changes;
         try {
           countered = changesIn(pp, g.id, base, sent, current.depends_on);
         } catch (e) {
-          if (e instanceof V2Error && e.code === "no_change") throw conflict("no_change", COUNTER_NO_CHANGE);
+          if (e instanceof V2Error && e.code === "no_change") throw conflict("no_change", counterNoChange(r.base_version, g.version));
           throw e;
         }
+        // One that asks for exactly what the request asks, with no condition to add, is no suggestion: approving it is
+        // (W4). With a condition it is Accept if…, which keeps the request's changes.
+        if (condition === null && sameContent(applied(base, countered), current)) throw conflict("no_change", counterSameAsRequest(memberName(r.requester_id), r.base_version, g.version));
         // A dependency already on the request or its base was checked when it was added; one this counter adds must be
         // readable by the requester, who accepts it, and by the approval set, who then decide on it (C2 N1).
         const already = [...base.depends_on, ...current.depends_on];
@@ -629,7 +645,7 @@ export async function addEvidence(pp: PolicyPrincipal, goalId: string | undefine
     if (r.requester_id !== pp.userId && !approvers.includes(pp.userId)) {
       throw forbidden("not_involved", "Only the person who asked or someone who can approve can add evidence");
     }
-    if (!isOpen(r)) throw conflict("wrong_state", `This request is ${r.state}`);
+    if (!isOpen(r)) throw conflict("wrong_state", crStateRefusal(r)); // in the app's words, as every action's (C8-1)
     if (b.revision !== undefined && b.revision !== r.revision) throw conflict("stale_revision", `This request is at revision ${r.revision}; reload and try again`);
     if (get("SELECT 1 AS x FROM v2_change_request_evidence WHERE change_request_id = ? AND revision = ? AND url = ?", r.id, r.revision, input.url)) {
       throw conflict("duplicate_evidence", "This link is already on this revision");
@@ -785,6 +801,10 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     /** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
     approved_without_evidence: r.state === "approved" && r.approved_without_evidence !== null ? r.approved_without_evidence === 1 : null,
     can,
+    /** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
+     *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
+     *  before sending says what the server would (W2). */
+    state_note: crStateRefusal(r),
     /** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
      *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
     dependency_not_visible: hiddenRefusal,

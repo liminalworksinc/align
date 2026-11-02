@@ -5038,9 +5038,9 @@ try {
         const recText = await po.$eval(card(cr1.id), (e) => e.innerText);
         const lateAccept = await da(DR, "POST", `${crs}/${cr1.id}/accept_counter`, { revision: 2 });
         check(
-          "ui (Chrome, decide, #49): the approver declines the countered request with a typed reason (focus on \"Why you're declining\"; the confirmation says nothing goes to launch); it is rejected by them with that reason, the record says \"Recorded: you declined this request\" and \"Rejected by you\" (B14: the reader is named one way on a card), and the requester's accept_counter then gets 409 wrong_state",
-          fD.tag === "TEXTAREA" && /^Why you're declining/.test(fD.label) && /approver suggested a change → rejected/.test(confD) && /Nothing goes to launch\. The goal stays at version 1\./.test(confD) &&
-            declined?.state === "rejected" && declined.rejected_by?.id === DO.id && declined.rejection_reason === "We will revisit after the freeze" && /Recorded: you declined this request/.test(recText) && /Rejected by you/.test(recText) &&
+          "ui (Chrome, decide, #49): the approver declines the countered request with a typed reason (focus on \"Why you're declining\"; the confirmation says nothing goes to launch); it is rejected by them with that reason, the record says \"Recorded: you declined this request\" and \"Declined by you\" (B14: the reader is named one way on a card; W2: the app's word, never \"rejected\", also in the confirmation and the pill), and the requester's accept_counter then gets 409 wrong_state",
+          fD.tag === "TEXTAREA" && /^Why you're declining/.test(fD.label) && /approver suggested a change → declined\./.test(confD) && !/rejected/i.test(confD + recText) && /Nothing goes to launch\. The goal stays at version 1\./.test(confD) &&
+            declined?.state === "rejected" && declined.rejected_by?.id === DO.id && declined.rejection_reason === "We will revisit after the freeze" && /Recorded: you declined this request/.test(recText) && /Declined by you/.test(recText) &&
             lateAccept.status === 409 && lateAccept.json?.error === "wrong_state",
           `${JSON.stringify(fD)} ${confD.slice(0, 300)} ${JSON.stringify(declined)?.slice(0, 300)} ${recText.slice(0, 300)} ${lateAccept.text}`,
         );
@@ -5068,8 +5068,8 @@ try {
         const after2 = (await read(cr2.id)).json;
         const rejectedRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE action = 'change_request.rejected' AND object_id = ?").get(cr2.id).n);
         check(
-          "ui (Chrome 390x844, decide): approved now and proposed stack and the confirmation fits with no sideways scroll; a request withdrawn after it was opened is read again before sending: nothing is recorded (still withdrawn, no rejection audited) and a focused alert says \"Not recorded. This request changed after you opened it: it is now “withdrawn” at revision 1. Nothing was sent.\"",
-          stacked && phoneWide && fS.role === "alert" && /^Not recorded\. This request changed after you opened it: it is now “withdrawn” at revision 1\. Nothing was sent\./.test(fS.text) && after2?.state === "withdrawn" && rejectedRows === 0 && errors.length === 0,
+          "ui (Chrome 390x844, decide): approved now and proposed stack and the confirmation fits with no sideways scroll; a request withdrawn after it was opened is read again before sending: nothing is recorded (still withdrawn, no rejection audited) and a focused alert says, in the server's words for that state (W2), \"Not recorded. This request was withdrawn by Drew Requester, so nothing changes. Nothing was sent.\"",
+          stacked && phoneWide && fS.role === "alert" && /^Not recorded\. This request was withdrawn by Drew Requester, so nothing changes\. Nothing was sent\. Read it again and decide again\./.test(fS.text) && after2?.state === "withdrawn" && rejectedRows === 0 && errors.length === 0,
           `${stacked} ${phoneWide} ${JSON.stringify(fS)} ${after2?.state} ${rejectedRows} ${errors.join(" | ")}`,
         );
 
@@ -8262,6 +8262,303 @@ try {
     } else check("ui (Chrome) available for the c4 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c4-web ====
+
+  // ==== fix:c8-web ====
+  // Regression checks for the cycle-8 web walk (e2e-reports/cycle8/web.md: C8-1 to C8-3, W2 to W4), on a workspace of
+  // their own. ZO owns it; ZA leads team Core and owns its goals (so decides on their change requests); ZB, a Core member,
+  // asks.
+  {
+    const zUsers = {};
+    for (const [who, name] of [
+      ["ZO", "Zed Owner"],
+      ["ZA", "Zoe Approver"],
+      ["ZB", "Zak Asker"],
+    ])
+      zUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c8web.example.test`);
+    const { ZO, ZA, ZB } = zUsers;
+    const ZW = (await call("ZO", "POST", "/api/v2/workspaces", { cookie: ZO.cookie, body: { name: "C8 web fix workspace" } })).json?.id;
+    const za = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${ZW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [ZA, ZB]) {
+      const i = await za(ZO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const ZT = (await za(ZO, "POST", "/teams", { name: "Core" })).json?.id;
+    await za(ZO, "POST", `/teams/${ZT}/members`, { user_id: ZA.id, role: "lead" });
+    await za(ZO, "POST", `/teams/${ZT}/members`, { user_id: ZB.id, role: "member" });
+    const zGoal = async (title) => (await za(ZA, "POST", "/goals", { title, visibility: "workspace", team_id: ZT })).json;
+    const zcrs = (g) => `/goals/${g}/change-requests`;
+    const zAct = (u, g, id, action, body = {}) => za(u, "POST", `${zcrs(g)}/${id}/${action}`, body);
+    const zRead = (u, g, id) => za(u, "GET", `${zcrs(g)}/${id}`).then((r) => r.json);
+    const zPropose = (g, changes) => za(ZB, "POST", zcrs(g.id), { base_version: 1, changes, reason: "Cycle 8" }).then((r) => r.json);
+    const DECLINED = `This request was declined by ${ZA.name}, so nothing changes.`;
+
+    // -- C8-1: evidence on a request decided meanwhile is refused in the app's words, as every other action is --
+    const [GE1, GE2, GE3] = [await zGoal("Evidence declined"), await zGoal("Evidence withdrawn"), await zGoal("Evidence approved")];
+    const [e1, e2, e3] = [await zPropose(GE1, { title: "Evidence declined, renamed" }), await zPropose(GE2, { title: "Evidence withdrawn, renamed" }), await zPropose(GE3, { title: "Evidence approved, renamed" })];
+    const decided = [await zAct(ZA, GE1.id, e1?.id, "reject", { reason: "Not now" }), await zAct(ZB, GE2.id, e2?.id, "withdraw"), await zAct(ZA, GE3.id, e3?.id, "approve", { revision: 1 })];
+    const lateEv = (g, cr, n) => za(ZB, "POST", `${zcrs(g.id)}/${cr?.id}/evidence`, { kind: "doc", url: `https://docs.example.com/c8-${n}`, label: "A late link" });
+    const [ev1, ev2, ev3] = [await lateEv(GE1, e1, 1), await lateEv(GE2, e2, 2), await lateEv(GE3, e3, 3)];
+    const lateRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_change_request_evidence WHERE url LIKE 'https://docs.example.com/c8-%'").get().n);
+    check(
+      "C8-1: adding evidence to a request declined, withdrawn or approved meanwhile is 409 wrong_state in the app's words, as every other action on a change request: \"This request was declined by <approver>, so nothing changes.\", \"This request was withdrawn by <requester>, so nothing changes.\", \"This request is already approved; reload to see it.\" (never \"This request is rejected\"); nothing is added",
+      decided.every((r) => r.status === 200) && [ev1, ev2, ev3].every((r) => r.status === 409 && r.json?.error === "wrong_state") && ev1.json.message === DECLINED && ev2.json.message === `This request was withdrawn by ${ZB.name}, so nothing changes.` && ev3.json.message === "This request is already approved; reload to see it." && lateRows === 0,
+      `${decided.map((r) => r.status)} ${[ev1, ev2, ev3].map((r) => `${r.status} ${r.text}`).join(" | ")} ${lateRows}`,
+    );
+    // The sweep: no refusal of a change request, alignment or target change builds its own "This request is <state>".
+    const ownStateWords = [];
+    for (const dir of ["lib/v2", "lib/mcp"])
+      for (const f of readdirSync(path.join(ROOT, dir)).filter((x) => /\.m?ts$/.test(x)))
+        for (const [i, l] of readFileSync(path.join(ROOT, dir, f), "utf8").split("\n").entries()) if (/This (request|proposal|alignment) is \$\{[^}]*state\}/.test(l)) ownStateWords.push(`${dir}/${f}:${i + 1}`);
+    check("C8-1 (sweep): no wrong_state refusal in lib/v2 or lib/mcp is built as \"This request (proposal, alignment) is ${state}\"", ownStateWords.length === 0, ownStateWords.join(", "));
+    // Target changes say it the same way.
+    const zRl = await za(ZB, "POST", "/reallocations", { targets: [{ goal_id: GE2.id, target_share: 10 }], note: "More for this" });
+    const zRlNo = await za(ZA, "POST", `/reallocations/${zRl.json?.id}/reject`, { reason: "Not now" });
+    const zRlApprove = await za(ZA, "POST", `/reallocations/${zRl.json?.id}/approve`, { revision: 1 });
+    const zRlWithdraw = await za(ZB, "POST", `/reallocations/${zRl.json?.id}/withdraw`, {});
+    check(
+      "C8-1 (target changes): approving or withdrawing a declined target change is 409 wrong_state \"This proposal was declined by <approver>, so nothing changes.\" (never \"This proposal is rejected\")",
+      zRl.status === 201 && zRlNo.json?.state === "rejected" && [zRlApprove, zRlWithdraw].every((r) => r.status === 409 && r.json?.error === "wrong_state" && r.json.message === `This proposal was declined by ${ZA.name}, so nothing changes.`),
+      `${zRl.status} ${zRl.text.slice(0, 120)} ${zRlNo.status} ${zRlApprove.text} ${zRlWithdraw.text}`,
+    );
+
+    // -- W2: the request's read carries the server's own words for its state --
+    const e1Read = await zRead(ZB, GE1.id, e1?.id);
+    const e2Read = await zRead(ZA, GE2.id, e2?.id);
+    check("W2: a request's read has state_note, the wrong_state words for its state (\"This request was declined by Zoe Approver, so nothing changes.\"; withdrawn: \"… withdrawn by Zak Asker …\")", e1Read?.state === "rejected" && e1Read.state_note === DECLINED && e2Read?.state_note === `This request was withdrawn by ${ZB.name}, so nothing changes.`, `${e1Read?.state_note} | ${e2Read?.state_note}`);
+
+    // -- C8-2: a counter on a request behind its goal is compared with the request's base, and the refusal says so --
+    const GB = await zGoal("Behind goal");
+    const b1 = await zPropose(GB, { title: "Behind goal renamed" });
+    const bV2 = await za(ZA, "POST", `/goals/${GB.id}/versions`, { version: 1, measures: [{ text: "Added in v2", target: null }] });
+    const bRead = (await za(ZA, "GET", `/goals/${GB.id}?counter=${b1?.id}`)).json;
+    const bReadReq = (await za(ZB, "GET", `/goals/${GB.id}?counter=${b1?.id}`)).json;
+    const bBack = await zAct(ZA, GB.id, b1?.id, "counter", { revision: 1, changes: { title: "Behind goal", measures: [] }, note: "Back to the old name" });
+    check(
+      "C8-2: GET ?counter= gives the approver counter_base, the request's base version (version 1: title \"Behind goal\", no measures) though the goal is at version 2 (null for the requester); a counter that sets the title back and removes the version-2 measure is 409 no_change naming that version: \"This suggestion changes nothing on version 1, the version this request was made against (the goal is now at version 2), …\"",
+      bV2.status === 201 && bRead?.goal?.version === 2 && bRead.counter_base?.title === "Behind goal" && JSON.stringify(bRead.counter_base.measures) === "[]" && bRead.counter_base.status === "active" && bReadReq?.counter_base === null &&
+        bBack.status === 409 && bBack.json?.error === "no_change" && bBack.json.message === "This suggestion changes nothing on version 1, the version this request was made against (the goal is now at version 2), so there is nothing to suggest. Change a field to suggest something else, or decline the request.",
+      `${bV2.status} ${JSON.stringify(bRead?.counter_base)} ${JSON.stringify(bReadReq?.counter_base)} ${bBack.status} ${bBack.text}`,
+    );
+
+    // -- W4: a counter that is the request itself is no suggestion (with a condition it is Accept if…) --
+    const GN = await zGoal("Norm");
+    const GN2 = await zGoal("Norm two");
+    const n1 = await zPropose(GN, { title: "Norm 2" });
+    const n2 = await zPropose(GN2, { title: "Norm two, renamed" });
+    const nSame = await zAct(ZA, GN.id, n1?.id, "counter", { revision: 1, changes: { title: "Norm 2" }, note: "The same thing" });
+    const nAfter = await zRead(ZA, GN.id, n1?.id);
+    const nIf = await zAct(ZA, GN2.id, n2?.id, "counter", { revision: 1, changes: { title: "Norm two, renamed" }, note: "If", condition: "Docs first" });
+    const bSame = await zAct(ZA, GB.id, b1?.id, "counter", { revision: 1, changes: { title: "Behind goal renamed" }, note: "The same thing" });
+    check(
+      "W4: a counter whose changes are the request's own, with no condition, is 409 no_change \"That's what the request already asks for: approve it instead.\" and nothing is recorded (on a request behind its goal: \"… approve it once Zak Asker updates it to version 2.\"); with a condition (Accept if…) it is countered",
+      nSame.status === 409 && nSame.json?.error === "no_change" && nSame.json.message === "That's what the request already asks for: approve it instead." && nAfter?.state === "pending" && nAfter.revision === 1 &&
+        nIf.status === 200 && nIf.json?.state === "countered" && bSame.status === 409 && bSame.json?.message === `That's what the request already asks for: approve it once ${ZB.name} updates it to version 2.`,
+      `${nSame.status} ${nSame.text} ${nAfter?.state} ${nIf.status} ${bSame.status} ${bSame.text}`,
+    );
+
+    // -- C8-3: MCP counts agree with their nouns, through the one helper --
+    const zDev = insertDevice(ZB.id, "Zak's laptop");
+    withDb((d) => d.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(zDev.id, ZW));
+    const GV = await zGoal("Evidence counted");
+    const v1 = await zPropose(GV, { title: "Evidence counted, renamed" });
+    const vEv = await za(ZB, "POST", `${zcrs(GV.id)}/${v1?.id}/evidence`, { kind: "pr", url: "https://github.com/acme/c8/pull/1", label: "The change" });
+    const mcpWithdrawn = await mcpCall("ZB", zDev, "align_list_change_requests", { state: "withdrawn", workspace: ZW });
+    const mcpPending = await mcpCall("ZB", zDev, "align_list_change_requests", { state: "pending", workspace: ZW });
+    const vApprove = await zAct(ZA, GV.id, v1?.id, "approve", { revision: 1 });
+    const mcpRecord = await mcpCall("ZB", zDev, "align_get_decision_record", { change_request_id: v1?.id, workspace: ZW });
+    const mcpDeclined = await mcpCall("ZB", zDev, "align_get_decision_record", { change_request_id: e1?.id, workspace: ZW });
+    const mcpAll = [mcpWithdrawn, mcpPending, mcpRecord, mcpDeclined].map((m) => m.text).join("\n");
+    check(
+      "C8-3: MCP text summaries agree count with noun: \"1 change request (withdrawn).\", a list line \"(base version 1, revision 1, 1 evidence link)\", the decision record's \"1 evidence link (self-reported or agent-reported, none verified):\"; a declined request's record says it \"was declined by\" its approver",
+      vEv.status === 201 && vApprove.status === 200 && mcpWithdrawn.text.startsWith("1 change request (withdrawn).") && mcpPending.text.includes(`${v1?.id} pending on goal ${GV.id}`) && mcpPending.text.includes("(base version 1, revision 1, 1 evidence link):") &&
+        mcpRecord.text.includes("1 evidence link (self-reported or agent-reported, none verified):") && /was declined by <untrusted-text>Zoe Approver<\/untrusted-text>/.test(mcpDeclined.text) && !/\b1 (change requests|evidence links|recent directives)\b/.test(mcpAll) && !/was rejected/.test(mcpAll),
+      mcpAll.slice(0, 900),
+    );
+    // A count followed by a fixed plural noun, without count() (lib/v2/plural.mts), in any MCP or server message.
+    const VERBS = new Set(["is", "was", "has", "does", "needs", "counts", "contributes", "stays", "updates", "yours"]);
+    const PLURAL_OK = [
+      ["lib/v2/validate.ts", "${k} items are too long"], // k is a field name
+      ["lib/v2/goals.ts", "anchors.${k} items are too long"], // k is a field name
+      ["lib/v2/devices.ts", "${Math.abs(minutes)} minutes"], // a clock skew past the allowed few minutes
+      ["lib/v2/sessions.ts", "${minutes} minutes ahead"], // the same
+      ["lib/v2/metrics-core.mts", "${a.codes_from_requests} from requests"], // "<n> (codes) from requests"
+      ["lib/mcp/register.ts", "${s.window.days} days"], // the 30-day snapshot window
+      ["lib/v2/db.ts", "${MIGRATIONS.length} migrations"], // a startup invariant, never one
+    ];
+    const plurals = [];
+    for (const dir of ["lib/mcp", "lib/v2"])
+      for (const f of readdirSync(path.join(ROOT, dir)).filter((x) => /\.m?ts$/.test(x) && !x.endsWith(".d.ts"))) {
+        const rel = `${dir}/${f}`;
+        for (const [i, l] of readFileSync(path.join(ROOT, rel), "utf8").split("\n").entries())
+          for (const m of l.matchAll(/\$\{([^{}]+)\}\s+(?:([a-z]+)\s+)?([a-z]+s)\b/g)) {
+            const [whole, expr, word, noun] = m;
+            const e = expr.trim();
+            if (/^[A-Z][A-Z0-9_]*$/.test(e) || /["'`]/.test(e) || /^(count|plural)\(/.test(e)) continue; // a constant, a word, the helper
+            if (VERBS.has(noun) || (word && VERBS.has(word)) || /(max| to) $/.test(l.slice(0, m.index))) continue; // a name and a verb; a limit, "(max N characters)", "(8 to N characters)"
+            if (l.includes(`${e} === 1`)) continue; // one is worded by hand on that line
+            if (PLURAL_OK.some(([af, snip]) => af === rel && l.includes(snip))) continue;
+            plurals.push(`${rel}:${i + 1} ${whole}`);
+          }
+      }
+    check("C8-3 (scan): no message in lib/mcp or lib/v2 writes a count followed by a fixed plural noun (\"${n} change requests\") without count() from lib/v2/plural.mts", plurals.length === 0, plurals.join(" | "));
+
+    // -- the browser: C8-1 (ui), W2 (ui), C8-2 (ui), W3 (ui), W4 (ui) --
+    const GE4 = await zGoal("Evidence in the browser");
+    const GW2 = await zGoal("Withdraw in the browser");
+    const e4 = await zPropose(GE4, { title: "Evidence in the browser, renamed" });
+    const w2 = await zPropose(GW2, { title: "Withdraw in the browser, renamed" });
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width: 1100, height: 900 });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const textOf = (pg, sel) => pg.evaluate((s) => document.querySelector(s)?.innerText ?? "", sel);
+      const press = (pg, scope, label) => pg.evaluate((s, t) => [...document.querySelectorAll(`${s} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      /** Replace what the field labelled `label` inside `scope` holds with `value`, typed as a person would. */
+      const typeIn = async (pg, scope, label, value) => {
+        const ok = await pg.evaluate(
+          (s, l) => {
+            const f = [...document.querySelectorAll(`${s} label`)].find((x) => x.querySelector("span")?.textContent?.trim() === l)?.querySelector("input, textarea");
+            if (!f) return false;
+            document.querySelectorAll("[data-typing]").forEach((e) => e.removeAttribute("data-typing"));
+            f.setAttribute("data-typing", "1");
+            return true;
+          },
+          scope,
+          label,
+        );
+        if (!ok) return false;
+        await pg.focus("[data-typing]");
+        await pg.$eval("[data-typing]", (el) => el.select());
+        await pg.keyboard.press("Backspace");
+        if (value) await pg.type("[data-typing]", value);
+        return true;
+      };
+      /** The counter form's Review this decision (enabled or disabled) and the reason shown next to it. */
+      const reviewState = (pg, card) =>
+        pg.evaluate((c) => {
+          const box = document.querySelector(`${c} [data-decision-input="counter"]`);
+          const b = [...(box?.querySelectorAll("button") ?? [])].find((x) => x.textContent?.trim() === "Review this decision");
+          return { review: b ? (b.disabled ? "disabled" : "enabled") : "none", reason: box?.querySelector("[data-counter-reason]")?.textContent?.trim() ?? "" };
+        }, card);
+      try {
+        // C8-1 (ui): ZB fills in Add evidence; ZA declines in another tab; Add link reads "Not recorded. …" and reloads.
+        const pB = await as(ZB);
+        const e4Card = `[data-cr="${e4?.id}"]`;
+        await open(pB, `/app/w/${ZW}/goals/${GE4.id}`);
+        await pB.waitForSelector(e4Card, { timeout: 15000 }).catch(() => undefined);
+        await press(pB, e4Card, "Add evidence");
+        await pB.waitForFunction((c) => [...document.querySelectorAll(`${c} button`)].some((b) => b.textContent?.trim() === "Add link"), { timeout: 15000 }, e4Card).catch(() => undefined);
+        await typeIn(pB, e4Card, "Link (https)", "https://github.com/acme/c8/pull/4");
+        await typeIn(pB, e4Card, "What it shows", "The browser change");
+        const e4No = await zAct(ZA, GE4.id, e4?.id, "reject", { reason: "Not this one" });
+        await press(pB, e4Card, "Add link");
+        await pB.waitForFunction((c) => document.querySelector(c)?.getAttribute("data-cr-view") === "record" && /Not recorded\./.test(document.querySelector(c)?.innerText ?? ""), { timeout: 15000 }, e4Card).catch(() => undefined);
+        const e4Ui = await pB.evaluate((c) => {
+          const card = document.querySelector(c);
+          return { view: card?.getAttribute("data-cr-view"), notice: card?.querySelector("[data-notice]")?.getAttribute("data-notice") ?? null, text: card?.innerText ?? "", buttons: [...(card?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()) };
+        }, e4Card);
+        check(
+          "C8-1 (ui): Add link on a request declined in another tab reads \"Not recorded. This request was declined by Zoe Approver, so nothing changes.\" (a focused refusal, never \"This request is rejected\") and the card reloads as the declined record (\"Declined by Zoe Approver\", no Withdraw)",
+          e4No.status === 200 && e4Ui.view === "record" && e4Ui.notice === "refused" && e4Ui.text.includes(`Not recorded. ${DECLINED}`) && e4Ui.text.includes(`Declined by ${ZA.name}`) && !e4Ui.buttons.includes("Withdraw") && !/rejected|This request is/i.test(e4Ui.text),
+          JSON.stringify(e4Ui).slice(0, 700),
+        );
+
+        // W2 (ui): ZB confirms Withdraw after ZA declined in another tab: the re-read says it in the server's words.
+        const w2Card = `[data-cr="${w2?.id}"]`;
+        await open(pB, `/app/w/${ZW}/goals/${GW2.id}`);
+        await pB.waitForSelector(`${w2Card} [data-decision="Withdraw"]`, { timeout: 15000 }).catch(() => undefined);
+        await pB.click(`${w2Card} [data-decision="Withdraw"]`).catch(() => undefined);
+        await press(pB, w2Card, "Review this decision");
+        await pB.waitForSelector(`${w2Card} [data-confirm]`, { timeout: 15000 }).catch(() => undefined);
+        const w2No = await zAct(ZA, GW2.id, w2?.id, "reject", { reason: "Declined first" });
+        await press(pB, w2Card, "Confirm: Withdraw");
+        await pB.waitForFunction((c) => !!document.querySelector(`${c} [data-notice="stale"]`), { timeout: 15000 }, w2Card).catch(() => undefined);
+        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const w2Text = await textOf(pB, w2Card);
+        const w2After = await zRead(ZA, GW2.id, w2?.id);
+        check(
+          "W2 (ui): confirming Withdraw on a request declined meanwhile sends nothing and reads \"Not recorded. This request was declined by Zoe Approver, so nothing changes. Nothing was sent. …\", the server's words, and the record says \"declined\" and \"Declined by Zoe Approver\", never \"rejected\"",
+          w2No.status === 200 && w2After?.state === "rejected" && w2Text.includes(`Not recorded. ${DECLINED} Nothing was sent. Read it again and decide again.`) && w2Text.includes(`Declined by ${ZA.name}`) && !/rejected/i.test(w2Text),
+          w2Text.slice(0, 700),
+        );
+
+        // C8-2 and W3/W4 (ui) on the behind request: Review follows the server's comparison with the base, with a reason.
+        const pA = await as(ZA);
+        const bCard = `[data-cr="${b1?.id}"]`;
+        const bForm = `${bCard} [data-decision-input="counter"]`;
+        await open(pA, `/app/w/${ZW}/goals/${GB.id}`);
+        await pA.waitForSelector(`${bCard} [data-decision="Suggest a change"]`, { timeout: 15000 }).catch(() => undefined);
+        await pA.click(`${bCard} [data-decision="Suggest a change"]`).catch(() => undefined);
+        await pA.waitForSelector(`${bForm} form`, { timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const bOpen = await reviewState(pA, bCard);
+        await typeIn(pA, bForm, "Note", "Back to the old name");
+        await typeIn(pA, bForm, "Goal", "Behind goal");
+        const bTitleBack = await reviewState(pA, bCard);
+        await press(pA, bForm, "Remove");
+        const bRemoved = await reviewState(pA, bCard);
+        const bRemovedForm = await textOf(pA, bForm);
+        await typeIn(pA, bForm, "Goal", "Behind goal, retitled");
+        const bChanged = await reviewState(pA, bCard);
+        const SAME_BASE_BEHIND = "This suggestion is the same as the request's base, version 1 (the goal is now at version 2); change a field to suggest something.";
+        check(
+          "C8-2 (ui): on a request behind its goal, Suggest a change compares with the request's base version as the server does: with the title set back and the version-2 measure removed, Review this decision stays disabled, saying \"This suggestion is the same as the request's base, version 1 (the goal is now at version 2); change a field to suggest something.\"; a real change enables it",
+          bTitleBack.review === "disabled" && bTitleBack.reason === SAME_BASE_BEHIND && !bRemovedForm.includes("Added in v2") && bRemoved.review === "disabled" && bRemoved.reason === SAME_BASE_BEHIND && bChanged.review === "enabled" && bChanged.reason === "",
+          JSON.stringify({ bTitleBack, bRemoved, bChanged }),
+        );
+        check(
+          "W4 (ui): Suggest a change on a behind request opens with Review this decision disabled and \"That's what the request already asks for: approve it once Zak Asker updates it to version 2.\"",
+          bOpen.review === "disabled" && bOpen.reason === `That's what the request already asks for: approve it once ${ZB.name} updates it to version 2.`,
+          JSON.stringify(bOpen),
+        );
+
+        const nCard = `[data-cr="${n1?.id}"]`;
+        const nForm = `${nCard} [data-decision-input="counter"]`;
+        await open(pA, `/app/w/${ZW}/goals/${GN.id}`);
+        await pA.waitForSelector(`${nCard} [data-decision="Suggest a change"]`, { timeout: 15000 }).catch(() => undefined);
+        await pA.click(`${nCard} [data-decision="Suggest a change"]`).catch(() => undefined);
+        await pA.waitForSelector(`${nForm} form`, { timeout: 15000 }).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        await typeIn(pA, nForm, "Note", "A thought");
+        const nOpen = await reviewState(pA, nCard);
+        await typeIn(pA, nForm, "Accept if… (optional condition the requester confirms)", "Docs first");
+        const nIfUi = await reviewState(pA, nCard);
+        await typeIn(pA, nForm, "Accept if… (optional condition the requester confirms)", "");
+        await typeIn(pA, nForm, "Goal", "Norm");
+        const nBase = await reviewState(pA, nCard);
+        await typeIn(pA, nForm, "Goal", "Norm 3");
+        const nChanged = await reviewState(pA, nCard);
+        check(
+          "W4 (ui): Suggest a change opens with the request's own fields and, with a note but no condition, keeps Review this decision disabled next to \"That's what the request already asks for: approve it instead.\"; writing an Accept if… condition enables it",
+          nOpen.review === "disabled" && nOpen.reason === "That's what the request already asks for: approve it instead." && nIfUi.review === "enabled" && nIfUi.reason === "",
+          JSON.stringify({ nOpen, nIfUi }),
+        );
+        check(
+          "W3 (ui): setting an ordinary request's field back to its base value disables Review this decision with the reason \"This suggestion is the same as the request's base; change a field to suggest something.\"; changing it enables Review and the reason goes",
+          nBase.review === "disabled" && nBase.reason === "This suggestion is the same as the request's base; change a field to suggest something." && nChanged.review === "enabled" && nChanged.reason === "",
+          JSON.stringify({ nBase, nChanged }),
+        );
+        check("c8 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c8 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c8 web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:c8-web ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
