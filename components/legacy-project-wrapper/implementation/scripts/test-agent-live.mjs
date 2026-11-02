@@ -73,7 +73,14 @@ async function call(method, p, { body, cookie, bearer, headers = {} } = {}) {
   if (body !== undefined && !h["content-type"]) h["content-type"] = "application/json";
   if (cookie) h.cookie = cookie;
   if (bearer) h.authorization = `Bearer ${bearer}`;
-  const res = await fetch(BASE + p, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect: "manual" });
+  const send = () => fetch(BASE + p, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect: "manual" });
+  // The CLI and hooks run synchronously (spawnSync), so while one runs this process can't see the server close an idle
+  // keep-alive connection: the next request on it fails "other side closed" before reaching the server. Sent once more
+  // on a fresh connection then (nothing reached the server the first time).
+  const res = await send().catch((e) => {
+    if (e?.cause?.code === "UND_ERR_SOCKET") return send();
+    throw e;
+  });
   const text = await res.text();
   let json = null;
   try {
