@@ -10,7 +10,7 @@ import type { Ctx } from "./context.ts";
 import { api, postTimed } from "./api.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { getSession } from "./ledger.ts";
-import { madeActs, pathHash, readActs, record, relTo, repoIdentity, type Act, type PodFeed, type RemoteItem } from "./hooks/siblings.ts";
+import { activityBase, confirming, madeActs, pathHash, rawActs, readActs, record, relTo, repoIdentity, type Act, type PodFeed, type RemoteItem } from "./hooks/siblings.ts";
 import { gitInfo } from "./shared/anchors.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
 import { layout } from "./shared/layout.ts";
@@ -76,10 +76,44 @@ function gitState(top: string): GitSnap | null {
   }
 }
 
+/** Hook-seen edits by file: the file's change time when the sync pass took the edit as made (`act_cover`). */
+const COVER_KEY = "act_cover";
+
+function readCover(ctx: Ctx): Record<string, number> {
+  try {
+    const v = JSON.parse(kvGet(ctx.db, COVER_KEY) || "{}");
+    return v && typeof v === "object" ? (v as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Remember that a hook saw these files' latest change (6 hours, at most 5,000 files). */
+function addCover(ctx: Ctx, edits: Act[]): void {
+  if (!edits.length) return;
+  const cover = readCover(ctx);
+  for (const a of edits) {
+    let m = Date.parse(a.at) || 0;
+    try {
+      m = Math.max(m, Math.floor(fs.statSync(a.p as string).mtimeMs));
+    } catch {
+      /* gone since */
+    }
+    cover[a.p as string] = Math.max(cover[a.p as string] || 0, m);
+  }
+  const now = Date.now();
+  const kept = Object.entries(cover)
+    .filter(([, m]) => now - m < KEEP_MS)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5000);
+  kvSet(ctx.db, COVER_KEY, JSON.stringify(Object.fromEntries(kept)));
+}
+
 /**
  * Files changed in a shared session's repo since the previous pass (working tree, and commits made since), recorded as
  * edits of the session most recently active there. Hooks see edit tools and plain shell writes; this catches the rest
- * (a script, a code-mode tool). The first pass only takes a baseline, so earlier changes are never attributed.
+ * (a script, a code-mode tool). The first pass only takes a baseline, so earlier changes are never attributed. A file
+ * whose latest change a hook already recorded is never credited again, whenever it is committed (A1-local-2).
  */
 export function detectGitEdits(ctx: Ctx): number {
   const rows = ctx.db
@@ -112,17 +146,30 @@ export function detectGitEdits(ctx: Ctx): number {
     const owner = sessions.filter((s) => s.last && Date.parse(s.last) >= prev.at - 120_000).sort((a, b) => Date.parse(b.last!) - Date.parse(a.last!))[0];
     if (!owner) continue;
     // A change a hook already recorded, in any of the repo's sessions, is that session's edit and goes up with it once:
-    // one recorded since the last pass, or one recorded earlier whose file was only written later (an edit approved
-    // after a pass read it, C4-5). Only the rest is credited to the session most recently active here.
+    // one recorded since the last pass, one recorded earlier whose file was only written later (an edit approved after a
+    // pass read it, C4-5), or one an earlier pass took as made, while the file has not changed since (a commit of it,
+    // A1-local-2). Only the rest is credited to the session most recently active here.
     const seen = new Set<string>();
     for (const s of sessions) {
-      const waiting = new Set(undecidedEdits(ctx, s.lid).map(actKey));
+      for (const a of undecidedEdits(ctx, s.lid)) if (a.p) seen.add(a.p);
       for (const a of readActs(ctx.home, s.lid)) {
-        if (a.t === "edit" && !a.via && a.p && (Date.parse(a.at) >= prev.at - 5_000 || waiting.has(actKey(a)))) seen.add(a.p);
+        if (a.t === "edit" && !a.via && a.p && Date.parse(a.at) >= prev.at - 5_000) seen.add(a.p);
       }
     }
+    const cover = readCover(ctx);
+    const covered = (p: string) => {
+      if (cover[p] === undefined) return false;
+      try {
+        return fs.statSync(p).mtimeMs <= cover[p] + 1000;
+      } catch {
+        return false;
+      }
+    };
     const at = new Date().toISOString();
-    const acts: Act[] = [...changed].map((f) => path.join(top, f)).filter((p) => !seen.has(p)).map((p) => ({ t: "edit", at, p, via: "git" }));
+    const acts: Act[] = [...changed]
+      .map((f) => path.join(top, f))
+      .filter((p) => !seen.has(p) && !covered(p))
+      .map((p) => ({ t: "edit", at, p, via: "git" }));
     record(ctx.home, owner.lid, acts);
     found += acts.length;
   }
@@ -147,41 +194,50 @@ function undecidedEdits(ctx: Ctx, lid: string): Act[] {
   }
 }
 
-/** Edits a hook recorded that have not happened (their file has not changed since) and are recent enough to still. */
+/** Edits a hook recorded that have not happened (not confirmed, or their file has not changed) and may still. */
 function stillUndecided(all: Act[], made: Act[], now = Date.now()): Act[] {
   const done = new Set(made.map(actKey));
   return all.filter((a) => a.t === "edit" && !a.via && a.p && !done.has(actKey(a)) && now - Date.parse(a.at) < UNDECIDED_EDIT_MS);
 }
 
-/** Complete lines appended to a session's activity file since the last upload, and the offset after them. */
+/**
+ * Complete lines appended to a session's activity file since the last upload, and the offset after them. Offsets are
+ * logical: the bytes a trim dropped (the file's `base` line) plus the position in what is left, so a trim never makes
+ * the pass resume mid-file (A1-local-8). The hook drops only lines up to the uploaded offset (below 4 MB).
+ */
 function newActs(file: string, from: number): { acts: Act[]; next: number } {
-  let size = 0;
+  let buf: Buffer;
   try {
-    size = fs.statSync(file).size;
+    buf = fs.readFileSync(file);
   } catch {
     return { acts: [], next: from };
   }
-  if (size < from) from = 0; // the file was trimmed: start over (duplicates are harmless, they expire)
-  if (size === from) return { acts: [], next: from };
-  const fd = fs.openSync(file, "r");
-  try {
-    const buf = Buffer.alloc(size - from);
-    fs.readSync(fd, buf, 0, buf.length, from);
-    const text = buf.toString("utf8");
-    const end = text.lastIndexOf("\n");
-    if (end < 0) return { acts: [], next: from };
-    const acts: Act[] = [];
-    for (const line of text.slice(0, end).split("\n")) {
-      try {
-        const a = JSON.parse(line) as Act;
-        if (a && typeof a.at === "string") acts.push(a);
-      } catch {
-        /* torn line */
-      }
+  const head = activityBase(buf.subarray(0, 128));
+  let start = head.len + Math.max(0, from - head.base);
+  if (start > buf.length) start = head.len; // a different file than the offset is about: start over
+  const rest = buf.subarray(start);
+  const end = rest.lastIndexOf(10);
+  const at = head.base + (start - head.len);
+  if (end < 0) return { acts: [], next: at };
+  const acts: Act[] = [];
+  for (const line of rest.subarray(0, end).toString("utf8").split("\n")) {
+    try {
+      const a = JSON.parse(line) as Act;
+      if (a && typeof a.at === "string") acts.push(a);
+    } catch {
+      /* torn line */
     }
-    return { acts, next: from + Buffer.byteLength(text.slice(0, end + 1)) };
-  } finally {
-    fs.closeSync(fd);
+  }
+  return { acts, next: at + end + 1 };
+}
+
+/** Save how far the session's activity went up: in the database for the pass, and beside the file for the hook's trim. */
+function saveOffset(ctx: Ctx, lid: string, next: number): void {
+  kvSet(ctx.db, `act_off:${lid}`, String(next));
+  try {
+    fs.writeFileSync(layout.activityUploaded(ctx.home, lid), String(next), { mode: 0o600 });
+  } catch {
+    /* the hook then keeps more lines */
   }
 }
 
@@ -196,12 +252,15 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
     // Edits read by an earlier pass before their file changed come first; each counts once its file has changed (an
     // edit the user refused never does, C3-9), and is kept until then rather than skipped for good (C4-5).
     const all = [...undecidedEdits(ctx, s.local_id), ...fresh.acts];
-    const acts = madeActs(all);
+    // Confirmations of a session whose PostToolUse hook runs: an edit counts once its own tool call ran (A1-local-1).
+    const ran = new Set([...rawActs(ctx.home, s.local_id), ...fresh.acts].filter((a) => a.t === "ran" && a.u).map((a) => a.u as string));
+    const acts = madeActs(all, confirming(ctx.home, s.local_id), ran);
     const waiting = stillUndecided(all, acts);
+    addCover(ctx, acts.filter((a) => a.t === "edit" && !a.via && a.p));
     const cwd = getSession(ctx.db, s.local_id)?.cwd ?? null;
     const repo = repoIdentity(s.workspace_id, cwd);
     if (!repo) {
-      kvSet(ctx.db, offKey, String(next));
+      saveOffset(ctx, s.local_id, next);
       kvSet(ctx.db, waitKey, "[]");
       continue;
     }
@@ -231,7 +290,7 @@ export async function uploadActivity(ctx: Ctx): Promise<number> {
     }
     if (ok) {
       // On failure the same lines (and the same waiting edits) go up on the next pass.
-      kvSet(ctx.db, offKey, String(next));
+      saveOffset(ctx, s.local_id, next);
       kvSet(ctx.db, waitKey, JSON.stringify(waiting));
     }
   }

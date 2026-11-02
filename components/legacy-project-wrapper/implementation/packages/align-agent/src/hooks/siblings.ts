@@ -11,7 +11,7 @@ import { asksSection } from "../shared/asks.ts";
 import { readJson, writeFileAtomic } from "../shared/fsx.ts";
 import { layout } from "../shared/layout.ts";
 import { NAME_NOT_SHARED, SELF_ELSEWHERE, type SiblingSummary } from "../shared/envelope.ts";
-import type { FeedFile, Goal, Harness, HotState } from "../shared/types.ts";
+import type { FeedFile, Goal, Harness, HotState, InjectedState } from "../shared/types.ts";
 
 /** An edit by another session this recent holds an edit to the same file once. */
 export const COLLIDE_MS = 20 * 60_000;
@@ -23,18 +23,29 @@ const CARD_WINDOW_MS = 6 * 3_600_000;
 const MINE_MS = 2 * 3_600_000;
 export const CLAIM_MS = 60 * 60_000;
 const MAX_BYTES = 128 * 1024;
+/** Lines kept when the file is trimmed (only lines the sync pass has uploaded are dropped). */
+const KEEP_LINES = 300;
+/** Above this, lines go even before they are uploaded (the server is out of reach for a long burst of work). */
+const HARD_BYTES = 4 * 1024 * 1024;
 
 export interface Act {
-  t: "edit" | "read" | "commit" | "task" | "claim" | "warned" | "noted";
+  t: "edit" | "read" | "commit" | "task" | "claim" | "warned" | "noted" | "ran";
   at: string;
   /** Absolute path for edit, read, claim and warned. */
   p?: string;
   /** Commit subject or task label. */
   s?: string;
-  /** warned: the sibling edit it was about, `<lid>@<at>`; noted: the remote item, `seq:<n>`. */
+  /** warned: the sibling edit it was about, `<lid>@<at>`; noted: the remote item, `seq:<n>`, a local claim,
+   *  `claim:<lid>@<at>`, or a sibling's change told in a note, `chg:<lid>@<at>`. */
   ref?: string;
   /** "git": found by the sync pass in the repo's working tree, not seen by a hook (e.g. a script wrote the file). */
   via?: "git";
+  /** edit: the harness's id for the tool call (`tool_use_id`); ran: the same id, once the PostToolUse hook saw it run. */
+  u?: string;
+  /** edit: written through a shell command, which counts only if the command ran and its file changed. */
+  sh?: 1;
+  /** The goal the session counted toward when this was recorded (null: none); absent in lines older builds wrote. */
+  g?: string | null;
 }
 
 /** One item of another machine's activity, as GET /activity returns it. */
@@ -104,20 +115,26 @@ export function editedPaths(harness: Harness, tool: string | undefined, input: R
 
 const PATHLIKE = /^[\w.@+~/-]+$/;
 
+/** Adds a plain path-like shell token to `out` as an absolute path; variables, globs, flags and /dev targets never. */
+function pathAdder(out: Set<string>, cwd: string | null): (raw: string | undefined) => void {
+  return (raw) => {
+    const p = (raw || "").replace(/^['"]|['"]$/g, "");
+    if (!p || !PATHLIKE.test(p) || p.startsWith("-") || p.startsWith("/dev/") || p === "." || p === "..") return;
+    out.add(path.resolve(cwd || "/", p));
+  };
+}
+
 /**
- * Files a shell command will write: redirect targets (`>`, `>>`), `tee`, `sed -i`, `touch`, the destination of `cp`
- * and `mv`, and explicit `git add` paths. Agents often edit through the shell instead of an edit tool. Heuristic by
- * design: only plain path-like tokens count, never variables, globs or /dev targets.
+ * Files a shell command will write: redirect targets (`>`, `>>`), `tee`, `sed -i`, `touch`, and the destination of
+ * `cp` and `mv`. Agents often edit through the shell instead of an edit tool. Heuristic by design: only plain path-like
+ * tokens count, never variables, globs or /dev targets. `git add` stages a file and changes nothing in it, so it is no
+ * edit (A1-local-1).
  */
 export function shellWrites(tool: string | undefined, input: Record<string, unknown> | undefined, cwd: string | null): string[] {
   if (tool !== "Bash" || typeof input?.command !== "string") return [];
   const cmd = input.command;
   const out = new Set<string>();
-  const add = (raw: string | undefined) => {
-    const p = (raw || "").replace(/^['"]|['"]$/g, "");
-    if (!p || !PATHLIKE.test(p) || p.startsWith("-") || p.startsWith("/dev/") || p === "." || p === "..") return;
-    out.add(path.resolve(cwd || "/", p));
-  };
+  const add = pathAdder(out, cwd);
   for (const m of cmd.matchAll(/(?:^|[^<>&\d])\d?>>?\s*(?!&)("[^"\n]+"|'[^'\n]+'|[^\s;&|<>()]+)/g)) add(m[1]);
   for (const m of cmd.matchAll(/\btee\s+(?:-\w+\s+)*("[^"\n]+"|'[^'\n]+'|[^\s;&|<>()]+)/g)) add(m[1]);
   for (const seg of cmd.split(/&&|\|\||;|\||\n/)) {
@@ -127,15 +144,36 @@ export function shellWrites(tool: string | undefined, input: Record<string, unkn
     if (t[0] === "sed" && t.some((x) => /^-i/.test(x) || x === "--in-place") && args.length) add(args[args.length - 1]);
     else if (t[0] === "touch") args.forEach(add);
     else if ((t[0] === "cp" || t[0] === "mv") && args.length >= 2) add(args[args.length - 1]);
-    else if (t[0] === "git" && t[1] === "add") t.slice(2).filter((x) => !x.startsWith("-")).forEach(add);
   }
   return [...out];
 }
 
-/** A file Claude Code's Read tool is about to read, so a later edit of it is not held. Codex reads through the shell. */
-export function readPath(harness: Harness, tool: string | undefined, input: Record<string, unknown> | undefined, cwd: string | null): string | null {
-  if (harness !== "claude-code" || tool !== "Read" || typeof input?.file_path !== "string") return null;
-  return path.resolve(cwd || "/", input.file_path);
+const SHELL_READERS = new Set(["cat", "head", "tail", "less", "more", "nl", "bat", "view"]);
+
+/**
+ * Files a tool call is about to read, so a later edit of them is not held: Claude Code's `Read`, and plain shell reads
+ * (`cat`, `head`, `tail`, `less`, `more`, `nl`, `bat`, `sed` without `-i`, `git diff <path>`), which is how Codex reads
+ * (A1-local-4). The same path-like rule as for shell writes; a token after a redirect is never a read.
+ */
+export function readPaths(harness: Harness, tool: string | undefined, input: Record<string, unknown> | undefined, cwd: string | null): string[] {
+  if (harness === "claude-code" && tool === "Read" && typeof input?.file_path === "string") return [path.resolve(cwd || "/", input.file_path)];
+  if (tool !== "Bash" || typeof input?.command !== "string") return [];
+  const out = new Set<string>();
+  const add = pathAdder(out, cwd);
+  for (const seg of input.command.split(/&&|\|\||;|\||\n/)) {
+    const t = seg.trim().split(/\s+/).filter(Boolean);
+    if (!t.length) continue;
+    const words: string[] = [];
+    for (const x of t.slice(1)) {
+      if (/^\d?[<>]/.test(x)) break;
+      words.push(x);
+    }
+    const args = words.filter((x) => !x.startsWith("-"));
+    if (SHELL_READERS.has(t[0])) args.forEach(add);
+    else if (t[0] === "sed" && !words.some((x) => /^-i/.test(x) || x === "--in-place") && args.length >= 2) args.slice(1).forEach(add);
+    else if (t[0] === "git" && t[1] === "diff") args.slice(1).forEach(add);
+  }
+  return [...out];
 }
 
 /** Subject of a `git commit -m "..."` in a shell command, if any. */
@@ -155,13 +193,74 @@ export function record(home: string, lid: string, acts: Act[]): void {
   try {
     fs.mkdirSync(layout.activityDir(home), { recursive: true, mode: 0o700 });
     fs.appendFileSync(file, acts.map((a) => JSON.stringify(a)).join("\n") + "\n", { mode: 0o600 });
-    if (fs.statSync(file).size > MAX_BYTES) {
-      const lines = fs.readFileSync(file, "utf8").trim().split("\n");
-      writeFileAtomic(file, lines.slice(-300).join("\n") + "\n", 0o600);
-    }
+    const size = fs.statSync(file).size;
+    if (size > MAX_BYTES) trimActivity(home, lid, size);
   } catch {
     /* activity is best effort */
   }
+}
+
+/**
+ * A trimmed activity file starts with `{"t":"base","b":<n>}`: the bytes of the session's activity dropped before its
+ * body. Offsets the sync pass keeps are logical (`b` plus the position in the body), so they stay right across trims.
+ */
+export function activityBase(head: Buffer): { base: number; len: number } {
+  if (!head.subarray(0, 11).equals(Buffer.from('{"t":"base"'))) return { base: 0, len: 0 };
+  const nl = head.indexOf(10);
+  if (nl < 0) return { base: 0, len: 0 };
+  try {
+    const b = Number(JSON.parse(head.subarray(0, nl).toString("utf8")).b);
+    return { base: Number.isFinite(b) && b > 0 ? b : 0, len: nl + 1 };
+  } catch {
+    return { base: 0, len: nl + 1 };
+  }
+}
+
+/** The logical offset up to which the sync pass has uploaded this session's activity. */
+export function uploadedOffset(home: string, lid: string): number {
+  try {
+    const n = Number(fs.readFileSync(layout.activityUploaded(home, lid), "utf8").trim());
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Keep the last 300 lines, dropping only lines the sync pass has uploaded (A1-local-8: dropping lines it had not read
+ * lost them from the upload and from the git pass's view of what hooks saw). Above 4 MB the oldest go anyway.
+ */
+function trimActivity(home: string, lid: string, size: number): void {
+  const file = layout.activity(home, lid);
+  const fd = fs.openSync(file, "r");
+  const first = Buffer.alloc(Math.min(size, 128));
+  try {
+    fs.readSync(fd, first, 0, first.length, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const head = activityBase(first);
+  const uploaded = Math.max(0, uploadedOffset(home, lid) - head.base);
+  // Little uploaded yet: nothing worth rewriting the file for.
+  if (size <= HARD_BYTES && uploaded < (size - head.len) / 4) return;
+  const body = fs.readFileSync(file).subarray(head.len);
+  let keepFrom = 0;
+  for (let i = body.length - 2, n = 0; i >= 0; i--) {
+    if (body[i] === 10 && ++n === KEEP_LINES) {
+      keepFrom = i + 1;
+      break;
+    }
+  }
+  let cut = Math.min(keepFrom, uploaded);
+  if (body.length > HARD_BYTES) cut = Math.max(cut, keepFrom);
+  cut = cut > 0 ? body.lastIndexOf(10, cut - 1) + 1 : 0;
+  if (cut <= 0) return;
+  writeFileAtomic(file, Buffer.concat([Buffer.from(`${JSON.stringify({ t: "base", b: head.base + cut })}\n`), body.subarray(cut)]), 0o600);
+}
+
+/** The session's PostToolUse hook runs, so its edits count only once it confirms them (A1-local-1). */
+export function confirming(home: string, lid: string): boolean {
+  return fs.existsSync(layout.activityConfirmed(home, lid));
 }
 
 export function readPod(home: string, ws: string): RemoteItem[] {
@@ -207,11 +306,14 @@ export function localKeys(home: string): Set<string> {
 
 /**
  * Edits recorded at PreToolUse that actually happened. The hook runs before the harness's own permission check, so an
- * edit the user refused is recorded too: it counts only if its file changed at or after the time it was recorded (a
- * refused one leaves the file as it was, or absent), so it is never reported to sibling sessions or the team as made
- * (C3-9). Edits the sync pass found in the working tree (`via: "git"`) and every other kind of act are kept.
+ * edit the user refused is recorded too. In a session whose PostToolUse hook runs (`confirmed`: Claude Code with this
+ * build's plugin), an edit counts only once that hook saw its own tool call run (a `ran` act with its `u`), plus, for a
+ * shell write, its file changed: another session's write to the same file never makes it count (A1-local-1).
+ * Otherwise (Codex, an older plugin) it counts if its file changed at or after the time it was recorded (C3-9). Edits
+ * the sync pass found in the working tree (`via: "git"`) and every other kind of act are kept.
  */
-export function madeActs(acts: Act[]): Act[] {
+export function madeActs(acts: Act[], confirmed = false, ran?: Set<string>): Act[] {
+  const done = ran ?? new Set(acts.filter((a) => a.t === "ran" && a.u).map((a) => a.u as string));
   const mtimes = new Map<string, number>();
   const mtime = (p: string) => {
     if (!mtimes.has(p)) {
@@ -226,10 +328,16 @@ export function madeActs(acts: Act[]): Act[] {
     return mtimes.get(p)!;
   };
   // A second of slack for file systems that keep whole-second times.
-  return acts.filter((a) => a.t !== "edit" || a.via || !a.p || mtime(a.p) >= Date.parse(a.at) - 1000);
+  const changed = (a: Act) => mtime(a.p as string) >= Date.parse(a.at) - 1000;
+  return acts.filter((a) => {
+    if (a.t !== "edit" || a.via || !a.p) return true;
+    if (confirmed && a.u) return done.has(a.u) && (!a.sh || changed(a));
+    return changed(a);
+  });
 }
 
-export function readActs(home: string, lid: string): Act[] {
+/** Every line of a session's activity file, as recorded (the trim header and torn lines left out). */
+export function rawActs(home: string, lid: string): Act[] {
   let text = "";
   try {
     text = fs.readFileSync(layout.activity(home, lid), "utf8");
@@ -246,8 +354,26 @@ export function readActs(home: string, lid: string): Act[] {
       /* torn line */
     }
   }
-  return madeActs(out);
+  return out;
 }
+
+export function readActs(home: string, lid: string): Act[] {
+  return madeActs(rawActs(home, lid), confirming(home, lid));
+}
+
+/**
+ * The goal a shared session counts toward now: the one its hook opened at a prompt (a binding chosen in the session,
+ * such as an accepted switch_goal) until the sync records it, else the hot file's. The card and the edit hold both
+ * follow it from that prompt (A1-local-6).
+ */
+export function liveGoalId(hot: HotState, inj: InjectedState | null, now = Date.now()): string | null {
+  const o = inj?.opened_epoch;
+  if (o && hot.share?.state === "shared" && !(hot.epochs_seen || []).includes(o.epoch_id) && now - Date.parse(o.at) <= 10 * 60_000) return o.goal?.id ?? null;
+  return hot.goal?.id ?? null;
+}
+
+/** Acts toward `goalId`: a session's work toward its earlier goal is not work toward the one it moved to (A1-local-5). */
+const towardGoal = (a: Act, goalId: string) => a.g === undefined || a.g === goalId;
 
 interface Sibling {
   lid: string;
@@ -255,8 +381,8 @@ interface Sibling {
   acts: Act[];
 }
 
-/** Other shared sessions on this machine bound to the same goal. */
-export function siblings(home: string, lid: string, goalId: string): Sibling[] {
+/** Other shared sessions on this machine bound to the same goal (`everyLocal`: this one too), with their acts toward it. */
+export function siblings(home: string, lid: string, goalId: string, everyLocal = false): Sibling[] {
   let names: string[] = [];
   try {
     names = fs.readdirSync(layout.hotDir(home)).filter((n) => n.endsWith(".json"));
@@ -266,8 +392,9 @@ export function siblings(home: string, lid: string, goalId: string): Sibling[] {
   const out: Sibling[] = [];
   for (const n of names) {
     const hot = readJson<HotState>(path.join(layout.hotDir(home), n));
-    if (!hot || hot.local_id === lid || hot.share?.state !== "shared" || hot.goal?.id !== goalId) continue;
-    out.push({ lid: hot.local_id, hot, acts: readActs(home, hot.local_id) });
+    if (!hot || (hot.local_id === lid && !everyLocal) || hot.share?.state !== "shared") continue;
+    if (liveGoalId(hot, readJson<InjectedState>(layout.injected(home, hot.local_id))) !== goalId) continue;
+    out.push({ lid: hot.local_id, hot, acts: readActs(home, hot.local_id).filter((a) => towardGoal(a, goalId)) });
   }
   return out;
 }
@@ -290,6 +417,31 @@ export function collision(home: string, lid: string, goalId: string, files: stri
     }
   }
   return null;
+}
+
+/**
+ * Edits other sessions toward the same goal made through a hook in the last 20 minutes to files this session read or
+ * edited before them, and has not read, edited or been told about since: newest first. Telling it this way does not
+ * replace the hold: an edit of the file without reading it first is still held once. Claude Code refuses an edit of a
+ * file changed since it was read before any hook runs, so this is how its model learns which session changed the file
+ * (A1-local-3).
+ */
+export function siblingChanges(home: string, lid: string, goalId: string, now = Date.now()): { sib: Sibling; file: string; at: string }[] {
+  const mine = readActs(home, lid);
+  const touched = new Map<string, number>();
+  for (const a of mine) if ((a.t === "edit" || a.t === "read") && a.p && now - ms(a.at) < MINE_MS) touched.set(a.p, Math.max(touched.get(a.p) || 0, ms(a.at)));
+  if (!touched.size) return [];
+  // Told already: by this note (`noted` `chg:<lid>@<at>`), or by a hold on that edit (`warned`).
+  const told = new Set(mine.filter((a) => a.t === "warned" || a.t === "noted").map((a) => (a.t === "noted" ? String(a.ref).replace(/^chg:/, "") : a.ref)));
+  const out: { sib: Sibling; file: string; at: string }[] = [];
+  for (const sib of siblings(home, lid, goalId)) {
+    const latest = new Map<string, string>();
+    for (const a of sib.acts) {
+      if (a.t === "edit" && !a.via && a.p && touched.has(a.p) && now - ms(a.at) < COLLIDE_MS && ms(a.at) > touched.get(a.p)!) latest.set(a.p, a.at);
+    }
+    for (const [file, at] of latest) if (!told.has(`${sib.lid}@${at}`)) out.push({ sib, file, at });
+  }
+  return out.sort((x, y) => ms(y.at) - ms(x.at));
 }
 
 export function display(file: string, cwd: string | null): string {
@@ -325,10 +477,12 @@ export function siblingNews(
   cwd: string | null,
   now = Date.now(),
   ws?: string,
+  everyLocal = false,
 ): { summaries: (SiblingSummary & { rank: number })[]; seen: Record<string, string> } {
   const next = { ...seen };
   const summaries: (SiblingSummary & { rank: number })[] = [];
-  for (const sib of siblings(home, lid, goalId)) {
+  const here = siblings(home, lid, goalId, everyLocal);
+  for (const sib of here) {
     const since = Math.max(ms(seen[sib.lid] || ""), now - CARD_WINDOW_MS);
     const fresh = sib.acts.filter((a) => (a.t === "edit" || a.t === "commit" || a.t === "task" || a.t === "claim") && ms(a.at) > since);
     if (!fresh.length) continue;
@@ -344,7 +498,8 @@ export function siblingNews(
     const related = relatedGoals(home, ws, goalId);
     const local = localKeys(home);
     const repo = repoIdentity(ws, cwd);
-    const mine = myHashes(readActs(home, lid), repo, now);
+    // "Yours": this session's files, or, for a report on every session here, any of theirs.
+    const mine = myHashes(everyLocal ? here.flatMap((s) => s.acts) : readActs(home, lid), repo, now);
     const byUser = new Map<string, RemoteItem[]>();
     for (const it of readPod(home, ws)) {
       if (local.has(it.session_key) || !it.goal_id || !related.has(it.goal_id) || now - ms(it.at) > CARD_WINDOW_MS || ms(it.at) <= ms(seen[`u:${it.user.id}`] || "")) continue;
@@ -455,9 +610,9 @@ export function crossOverlap(
  * Plain-text view of work in flight toward this goal and related ones, for `::align team` (user only) and `align team`
  * (which an agent may run itself when the card is not enough). Reads local files only and marks nothing as seen.
  */
-export function podReport(home: string, lid: string | null, ws: string, goalId: string, cwd: string | null, max = 1500, now = Date.now()): string {
+export function podReport(home: string, lid: string | null, ws: string, goalId: string, cwd: string | null, max = 1500, now = Date.now(), everyLocal = false): string {
   const related = relatedGoals(home, ws, goalId);
-  const news = siblingNews(home, lid || "", goalId, {}, cwd, now, ws).summaries;
+  const news = siblingNews(home, lid || "", goalId, {}, cwd, now, ws, everyLocal).summaries;
   const head = `Align team: work in flight toward "${related.get(goalId)?.title || goalId}" and related goals, last 6 hours.`;
   const line = (s: SiblingSummary) => {
     const name = s.remote ? `${s.who || "A teammate"} (${s.sessions ?? 1} session${(s.sessions ?? 1) > 1 ? "s" : ""})` : `${s.harness === "codex" ? "Codex" : "Claude Code"} session ${String(s.id).slice(0, 8)} (this machine)`;

@@ -56,6 +56,10 @@ export const layout = {
   spool: (h: string) => path.join(h, "spool"),
   activityDir: (h: string) => path.join(h, "activity"),
   activity: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.jsonl`),
+  /** Present once the session's PostToolUse hook ran: its edits then count only when that hook confirms them. */
+  activityConfirmed: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.confirmed`),
+  /** How far the sync pass has uploaded the session's activity (a logical byte offset), so the hook trims only that. */
+  activityUploaded: (h: string, lid: string) => path.join(h, "activity", `${safe(lid)}.uploaded`),
   /** Team activity fetched from the server for one workspace (other machines' sessions). */
   podFeed: (h: string, ws: string) => path.join(h, "feeds", `activity-${safe(ws)}.json`),
   /** Asks of this person's teams and their own, for one workspace (`align asks`, `align team`, the envelope). */

@@ -55,8 +55,9 @@ describe("install", () => {
     const plugin = path.join(t.claudeDir, "skills", "align");
     assert.equal(JSON.parse(fs.readFileSync(path.join(plugin, ".claude-plugin", "plugin.json"), "utf8")).name, "align");
     const ph = JSON.parse(fs.readFileSync(path.join(plugin, "hooks", "hooks.json"), "utf8"));
-    assert.deepEqual(counts(ph, marker), { SessionStart: 1, UserPromptSubmit: 1, PreToolUse: 1, Stop: 1, StopFailure: 1 }, "one Align handler per event after two installs");
+    assert.deepEqual(counts(ph, marker), { SessionStart: 1, UserPromptSubmit: 1, PreToolUse: 1, PostToolUse: 1, PostToolUseFailure: 1, Stop: 1, StopFailure: 1 }, "one Align handler per event after two installs");
     assert.equal(ph.hooks.PreToolUse[0].matcher, "*");
+    assert.equal(ph.hooks.PostToolUse[0].matcher, "*", "PostToolUse confirms an edit ran (A1-local-1)");
 
     const codexHooks = JSON.parse(fs.readFileSync(path.join(t.codexHome, "hooks.json"), "utf8"));
     assert.deepEqual(counts(codexHooks, marker), { SessionStart: 1, UserPromptSubmit: 1, PreToolUse: 1, Stop: 1 });

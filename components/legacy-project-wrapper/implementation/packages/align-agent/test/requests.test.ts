@@ -310,7 +310,8 @@ describe("requests", () => {
     assert.match(json(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: "Bash" }).stdout).hookSpecificOutput.permissionDecisionReason, /was stopped/);
     assert.equal(runHook(t, "claude", "PreToolUse", { session_id: sid, tool_name: "Read" }).stdout, "");
     const rel = json(prompt(t, sid).stdout);
-    assert.equal(rel.systemMessage, `Align: Dana Lee released the hold on "Ship the v2 onboarding flow".`);
+    // The stop still blocks, and the release notice says so (A1-local, "works but confusing").
+    assert.equal(rel.systemMessage, `Align: Dana Lee released the hold on "Ship the v2 onboarding flow". This session is still stopped from its Align workspace, so its tools stay blocked until it is resumed there.`);
     // The model saw its tools blocked by the hold: it hears once that the hold no longer blocks them (E2E-AGENT cycle 2).
     assert.equal(rel.hookSpecificOutput.additionalContext, `[Align] Dana Lee released the hold on goal "Ship the v2 onboarding flow", so it no longer blocks tools.`);
     assert.deepEqual(

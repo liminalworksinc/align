@@ -1065,7 +1065,8 @@ async function cmdTeam(ctx: Ctx, argv: string[]): Promise<void> {
   const inside = (c: string | null) => !!c && (realDir(c) === dir || realDir(c).startsWith(dir + path.sep) || dir.startsWith(realDir(c) + path.sep));
   for (const r of rows.filter((x) => inside(x.cwd))) {
     const hot = readJson<{ share: { workspace_id: string } | null; goal: { id: string } | null }>(layout.hot(ctx.home, r.lid));
-    if (hot?.share && hot.goal) return out(podReport(ctx.home, r.lid, hot.share.workspace_id, hot.goal.id, r.cwd, 1500));
+    // Run from a terminal, so no session is "self": every session here is listed (A1-local-7).
+    if (hot?.share && hot.goal) return out(podReport(ctx.home, r.lid, hot.share.workspace_id, hot.goal.id, r.cwd, 1500, Date.now(), true));
   }
   const rule = matchRule(readRules(ctx.home), dir);
   if (rule?.goal_id) return out(podReport(ctx.home, null, rule.workspace_id, rule.goal_id, dir, 1500));

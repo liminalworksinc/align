@@ -46,6 +46,14 @@ Source: https://code.claude.com/docs/en/hooks (markdown at https://code.claude.c
   (`python3 - <<PY ... write_bytes`) is invisible to every hook. Claude Sonnet 5.5 and Haiku 5.5 also wrote files with
   `printf >>` and `cat >> <<EOF` in that demo. Hence shell-write parsing in PreToolUse and git-based detection in the
   sync pass.
+- Checked with Claude Code 2.1.316 on 11-02 (`claude -p`, a plugin logging every hook input): `PreToolUse` and
+  `PostToolUse` carry the same `tool_use_id`. An `Edit` refused at the permission prompt fires `PreToolUse` and no
+  `PostToolUse`, `PostToolUseFailure` or `PermissionDenied`. An `Edit` of a file changed since it was read whose
+  `old_string` no longer matches fails with `File has been modified since read, either by the user or by a linter.`
+  before any hook (no `PreToolUse`, no `PostToolUseFailure`); one that still applies cleanly runs with a note. A Bash
+  command that exits non-zero fires `PostToolUseFailure` (with `error: "Exit code 1"`), not `PostToolUse`. Claude
+  Code also blocks a standalone `sleep <n>` command. Hence edits counted on `PostToolUse` confirmation, and the
+  sibling-change note at the next prompt or tool call (A1-local-1, A1-local-3).
 - Plugins: a folder in `~/.claude/skills/` "that contains a `.claude-plugin/plugin.json` is a skills-directory plugin"
   that Claude Code "loads ... when a session starts, with no flag and no install step"; its `hooks/hooks.json` uses
   the settings `hooks` shape. `claude plugin disable <name>@skills-dir` turns it off. Checked with 2.1.309:
