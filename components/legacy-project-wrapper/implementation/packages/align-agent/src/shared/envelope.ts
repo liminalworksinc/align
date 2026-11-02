@@ -468,6 +468,28 @@ export function stoppedForGoodWords(lid: string, then: string): string {
   return `this session's sharing was stopped (\`::align unshare\`, \`align stop-sharing\` or Stop sharing on the web), and a session whose sharing was stopped is not shared again, so it stays stopped. To share it again, counting from now, first delete its shared history (it leaves every total): run \`align delete-history ${lid.slice(0, 8)}\` in a terminal, or use Delete shared history on the web's Sessions page; then ${then}.`;
 }
 
+/** A goal's mark in `align goals` and `::align goals`: `*` for one a session can be bound to now, `h` for one it can be
+ *  bound to that is on hold (all agents on it paused, so a session bound to it has its tools blocked), else a space
+ *  (cycle 8: never `*` for a held goal). */
+export function goalMark(g: { bindable?: boolean; allocation?: { held?: boolean } | null }): string {
+  return !g.bindable ? " " : g.allocation?.held ? "h" : "*";
+}
+
+export const GOAL_MARKS = "* = you can bind a session to it now.";
+export const HELD_MARK = "h = on hold: all agents on it were paused from its Align workspace, so a session bound to it has its tools blocked until the hold is released.";
+
+/** Why a session shared before in workspace `ws` is not shared now: this machine can't reach `ws` (cycle 8). It is shared
+ *  again only there (its work is that workspace's), never into another one; `latched`: its tools stay blocked until
+ *  `align stop-sharing`. */
+export function outOfReachWords(ws: string, lid: string, latched: boolean): string {
+  return `this session was shared with ${clean(ws, 80)}, and this machine can't reach ${clean(ws, 80)} in Align now, so this session can't be shared there again from here, and it is never shared into another workspace instead; its usage stays on this machine.${latched ? ` It was stopped or held from the web, so tools stay blocked until you run \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.` : ""}`;
+}
+
+/** Why a session shared before in workspace `ws` is not shared into `other` (cycle 8). */
+export function otherWorkspaceWords(ws: string, other: string): string {
+  return `this session was shared with ${clean(ws, 80)}, so it is shared again only there (its work is that workspace's), never into ${clean(other, 80)}.`;
+}
+
 export function releaseNotice(by: string, title: string): string {
   return `Align: ${clean(by, 50) || "Someone"} released the hold on "${clean(title, 100)}".`;
 }

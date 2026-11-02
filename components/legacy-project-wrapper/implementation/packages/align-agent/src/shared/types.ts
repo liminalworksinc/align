@@ -201,6 +201,10 @@ export interface InjectedState {
   opened_epoch?: { epoch_id: string; goal: GoalSnapshot | null; at: string };
   /** Release directives already told to the model as a context line. */
   releases_told?: string[];
+  /** Goals whose hold the model saw block a tool (a hold deny), so a release of it is told to the model (cycle 8). */
+  holds_told?: string[];
+  /** The model saw the stop latch block a tool since the last resume it was told, so a resume is told to it. */
+  stop_told?: boolean;
   /** The resume the model was last told about. */
   resume_told?: string;
   /** The share (its `since`, the share's first epoch) the model was last told it counts in, recorded whenever an envelope

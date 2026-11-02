@@ -172,4 +172,96 @@ describe("cycle 8, section 5: works, but would confuse a developer", () => {
     assert.equal(hot(t, B.lid).share?.state, "shared", "the new share stays shared");
   });
 
+  test("a session whose own workspace is out of reach is never shared into another one: `::align share` (preview and confirm), a spooled share and the terminal refuse with the can't-be-shared-there-again words; back in reach, it is shared there", async () => {
+    const { fake, t } = await world({ side: true });
+    const A = await shared(t);
+    const acme = fake.workspaces[0];
+    fake.workspaces = [SIDE];
+    await sync(t);
+    assert.match(prompt(t, A.sid, "go on", A.cwd)?.systemMessage ?? "", /you no longer have access to Acme/);
+    const WORDS =
+      "Align: this session was shared with Acme, and this machine can't reach Acme in Align now, so this session can't be shared there again from here, and it is never shared into another workspace instead; its usage stays on this machine.";
+    assert.equal(prompt(t, A.sid, "::align share", A.cwd).reason, WORDS);
+    assert.equal(prompt(t, A.sid, "::align share confirm", A.cwd).reason, WORDS);
+    assert.equal(prompt(t, A.sid, "::align share Side confirm", A.cwd).reason, WORDS);
+    // A share spooled with no workspace (an older hook's): the sync shares it nowhere else either.
+    spoolWrite(t.home, { type: "command", harness: "claude-code", native_id: A.sid, cwd: A.cwd, command: "share", arg: null, ts: new Date().toISOString() });
+    await sync(t);
+    assert.equal(hot(t, A.lid).share?.workspace_id, "ws_acme");
+    assert.equal(hot(t, A.lid).share?.state, "stopped");
+    assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, `Align: share failed: ${WORDS.replace(/^Align: /, "")}`);
+    assert.ok(![...fake.sessions.values()].some((s) => s.ws === "ws_side"), "nothing went to Side Co");
+    const lid8 = A.lid.slice(0, 8);
+    const plain = await runCli(t, ["share", lid8, "--goal", "none", "--yes"]);
+    assert.equal(plain.code, 1);
+    assert.equal(plain.stderr.trim(), `align: session ${lid8} was not shared: ${WORDS.replace(/^Align: /, "")}`);
+    const side = await runCli(t, ["share", lid8, "--workspace", "Side Co", "--goal", "none", "--yes"]);
+    assert.equal(side.code, 1);
+    assert.doesNotMatch(side.stdout, /Share preview/);
+
+    fake.workspaces = [acme, SIDE];
+    await sync(t);
+    const moved = await runCli(t, ["share", lid8, "--workspace", "Side Co", "--goal", "none", "--yes"]);
+    assert.equal(moved.code, 1);
+    assert.equal(moved.stderr.trim(), `align: session ${lid8} was not shared: this session was shared with Acme, so it is shared again only there (its work is that workspace's), never into Side Co.`);
+    assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested toward "Ship the v2 onboarding flow"/);
+    await sync(t);
+    assert.equal(hot(t, A.lid).share?.state, "shared");
+    assert.equal(hot(t, A.lid).share?.workspace_id, "ws_acme");
+  });
+
+  test("`align login` that ends live shares says so after \"Signed in as ...\" and its workspace lines", async () => {
+    const { t } = await world();
+    await shared(t);
+    const l = await login(t);
+    const lines = l.stdout.split("\n");
+    const signedIn = lines.findIndex((x) => x.startsWith("Signed in as "));
+    const ended = lines.findIndex((x) => /^1 session\(s\) shared from this machine's earlier sign-in stopped sharing/.test(x));
+    const ws = lines.findIndex((x) => x.startsWith("  workspace Acme"));
+    assert.ok(signedIn >= 0 && ended > signedIn && ended > ws, l.stdout);
+  });
+
+  test("a hold or stop released before the model saw it block a tool is told to the user only; one it saw is told to the model too", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    const B = await shared(t);
+    await sync(t);
+    for (const s of [A, B]) prompt(t, s.sid, "go on", s.cwd);
+    const goal = fake.goals.get("ws_acme")!.find((g) => g.title === GOAL)!;
+    const ref = { id: goal.id, title: goal.title, version: goal.version };
+    fake.pushDirective({ ws: "ws_acme", kind: "hold", session_keys: [A.key, B.key], goal: null, binding: null, hold: { goal: ref, held_by: { id: "u_dana", name: "Dana Lee" }, reason: null, at: new Date().toISOString() } });
+    await sync(t);
+    assert.equal(json(runHook(t, "claude", "PreToolUse", { session_id: B.sid, tool_name: "Bash", cwd: B.cwd }).stdout)?.hookSpecificOutput?.permissionDecision, "deny");
+    fake.pushDirective({ ws: "ws_acme", kind: "release", session_keys: [A.key, B.key], goal: null, binding: null, hold: { goal: ref, released_by: { id: "u_dana", name: "Dana Lee" }, at: new Date().toISOString() } });
+    await sync(t);
+    const a = prompt(t, A.sid, "go on", A.cwd);
+    assert.match(a?.systemMessage ?? "", /Dana Lee released the hold on "Ship the v2 onboarding flow"/, "the user hears it");
+    assert.doesNotMatch(a?.hookSpecificOutput?.additionalContext ?? "", /released the hold/, "the model never saw the hold");
+    const b = prompt(t, B.sid, "go on", B.cwd);
+    assert.equal(b?.hookSpecificOutput?.additionalContext, `[Align] Dana Lee released the hold on goal "${GOAL}", so it no longer blocks tools.`, "the model saw it block a tool");
+
+    fake.pushDirective({ ws: "ws_acme", kind: "stop", session_keys: [A.key], goal: null, binding: null });
+    await sync(t);
+    fake.pushDirective({ ws: "ws_acme", kind: "resume", session_keys: [A.key], goal: null, binding: null });
+    await sync(t);
+    const r = prompt(t, A.sid, "go on", A.cwd);
+    assert.match(r?.systemMessage ?? "", /this session was resumed from its Align workspace, so its tools work again/);
+    assert.doesNotMatch(r?.hookSpecificOutput?.additionalContext ?? "", /was resumed/, "the model never saw the stop");
+  });
+
+  test("`align goals` and `::align goals` mark a held goal `h` (on hold), never `*` (bind now), and say what it means", async () => {
+    const { fake, t } = await world();
+    const perf = fake.goals.get("ws_acme")!.find((x) => x.id === "g_perf")!;
+    perf.allocation = { target_share: null, share_7d: 0, gap_7d: null, held: true };
+    const g = await runCli(t, ["goals", "--refresh"]);
+    assert.equal(g.code, 0, g.stderr);
+    const HELD = "h = on hold: all agents on it were paused from its Align workspace, so a session bound to it has its tools blocked until the hold is released.";
+    assert.match(g.stdout, /^ {2}h g_perf\s/m);
+    assert.match(g.stdout, /^ {2}\* g_ship\s/m);
+    assert.ok(g.stdout.includes(HELD), g.stdout);
+    const A = await shared(t);
+    const listed = prompt(t, A.sid, "::align goals", A.cwd).reason as string;
+    assert.match(listed, /^ {2}h Cut hook latency \(g_perf,/m);
+    assert.ok(listed.endsWith(HELD), listed);
+  });
 });

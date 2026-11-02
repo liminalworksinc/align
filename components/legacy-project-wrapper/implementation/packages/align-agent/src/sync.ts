@@ -28,6 +28,7 @@ import {
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
+import { otherWorkspaceWords, outOfReachWords } from "./shared/envelope.ts";
 import { applyShare, bind, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
@@ -161,7 +162,18 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
         if (r.rule_dir) return lid;
         throw new Error("this machine is signed out of Align. Run `align login` in a terminal, then type `::align share` here");
       }
-      const ws = resolveWorkspace(ctx.home, r.workspace || ctx.config.default_workspace);
+      // Shared before in a workspace: shared again only there, never into another one (the default, a folder rule's),
+      // which would file that workspace's work under another (cycle 8).
+      const own = existing?.state === "stopped" ? { id: existing.workspace_id, name: existing.workspace_name } : null;
+      if (own && r.workspace && r.workspace !== own.id) {
+        if (r.rule_dir) return lid;
+        throw new Error(otherWorkspaceWords(own.name, resolveWorkspace(ctx.home, r.workspace)?.name ?? r.workspace));
+      }
+      const ws = resolveWorkspace(ctx.home, own?.id || r.workspace || ctx.config.default_workspace);
+      if (!ws && own) {
+        if (r.rule_dir) return lid;
+        throw new Error(outOfReachWords(own.name, lid, !!(ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid))));
+      }
       if (!ws) throw new Error(r.workspace ? `${r.rule_dir ? "the folder rule's" : "that"} workspace is no longer available on this device` : "no default workspace; run `align share --latest --workspace <name>` in a terminal");
       const goal = r.arg ? resolveGoal(loadFeed(ctx.home, ws.id), r.arg) : null;
       if (goal && !goal.bindable) throw new Error(`goal "${goal.title}" needs an approved alignment before it can be bound`);
