@@ -1144,7 +1144,10 @@ character built of tens or hundreds of combining marks, which would draw over th
 (`device_name has a character with too many accents or marks on it (at most 6 on one character)`), and SHALL be built
 of at most 16 code points (the longest emoji, a kiss with two skin tones, is 10), so a chain of emoji joined into one
 character is refused (`device_name has a character joined from too many parts (at most 16 in one character)`)
-(E2E-WEB cycle 10 C10-3); and the name SHALL also be at most 1600 bytes of UTF-8, which only long emoji sequences reach, refused in
+(E2E-WEB cycle 10 C10-3). These limits bound a name; they do not guarantee its width: a character of up to 16 parts none
+of which is an extender (`ก` with 15 × `ำ`, 15 Malayalam dot rephs before `ക`, 16 Hangul initial jamo) is accepted and
+can draw wide, and every page that shows a device name wraps and clips it so the page never scrolls sideways
+(`interface` "Device approval screen"; E2E-WEB cycle 11 W4); and the name SHALL also be at most 1600 bytes of UTF-8, which only long emoji sequences reach, refused in
 words the person can act on rather than a byte count (`device_name is too long to store: emoji such as families and
 flags take much more room than letters, so use fewer of them`); a name with nothing left SHALL be 400 `device_name is
 required`. `align login` SHALL show such a refusal as `align: the device name was refused: it <reason>. Pass another

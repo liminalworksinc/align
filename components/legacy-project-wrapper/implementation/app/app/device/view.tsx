@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, ApiError, Btn, Card, Err, Field, Input, Note, Shell, SignInAgain, useAction, useApi, type WsSummary } from "../_ui/kit";
 import type { Me } from "../_ui/server";
 import { count } from "@/lib/v2/plural.mts";
@@ -49,6 +49,11 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
   const [chosen, setChosen] = useState<string[]>([]);
   const [done, setDone] = useState<string | null>(null);
   const act = useAction();
+  /** The code in the field now, and which Look up is the latest: an answer arriving after the field changed to another
+   *  code, or after a newer Look up, is dropped, so the panel never opens for a device whose code the field no longer
+   *  shows (E2E-WEB cycle 11 C11-1). */
+  const field = useRef(code0);
+  const lookups = useRef(0);
 
   const lookup = () =>
     act.run(async () => {
@@ -58,16 +63,25 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
       setPending(null);
       setChosen([]);
       const looked = code.trim();
-      const found = await api<Omit<Pending, "code">>(`/api/v2/device/requests/${encodeURIComponent(looked)}`).catch((e) => {
-        throw new Error(e.status === 404 ? NOT_WAITING : e.message);
-      });
-      setPending({ ...found, code: looked });
+      const mine = ++lookups.current;
+      const current = () => mine === lookups.current && codeKey(field.current) === codeKey(looked);
+      let found: Omit<Pending, "code">;
+      try {
+        found = await api<Omit<Pending, "code">>(`/api/v2/device/requests/${encodeURIComponent(looked)}`);
+      } catch (e) {
+        // A refusal for a code the field no longer holds is not about the code shown: it is dropped too.
+        if (!current()) return;
+        throw new Error((e as ApiError).status === 404 ? NOT_WAITING : (e as Error).message);
+      }
+      if (current()) setPending({ ...found, code: looked });
     });
 
   /** The field changed to another code: the panel and its ticks belong to the device looked up before, so they go, as
-   *  a new Look up would clear them (E2E-WEB cycle 10 C10-1). */
+   *  a new Look up would clear them (E2E-WEB cycle 10 C10-1); a Look up still on its way for the code before is dropped
+   *  when it answers (C11-1). */
   const edit = (next: string) => {
     setCode(next);
+    field.current = next;
     if (pending && codeKey(next) !== codeKey(pending.code)) {
       setPending(null);
       setChosen([]);
@@ -110,6 +124,7 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
       setPending(null);
       setChosen([]);
       setCode("");
+      field.current = "";
     });
 
   return (

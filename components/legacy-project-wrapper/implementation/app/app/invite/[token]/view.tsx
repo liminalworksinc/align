@@ -90,7 +90,10 @@ export default function InviteAccept({ me, token, recent }: { me: Me; token: str
             {p.data.email_matches ? (
               <>
                 {p.data.devices.length > 0 && !joined && (
-                  <fieldset className="mb-4 rounded-[12px] border border-zinc-300 p-4">
+                  // A fieldset is at least as wide as its widest content by default (min-inline-size: min-content), so it
+                  // would grow past the card for a name it can't wrap: min-w-0 lets it shrink, and the name clips inside
+                  // it, as on the Devices page (E2E-WEB cycle 11 C11-2).
+                  <fieldset className="mb-4 min-w-0 overflow-hidden rounded-[12px] border border-zinc-300 p-4">
                     <legend className="px-1 text-[15px] text-zinc-700">Your paired devices</legend>
                     <p className="mb-2 text-[15px] text-zinc-600">
                       Tick the devices that should reach {p.data.workspace.name} too. Each one picks it up the next time it syncs, without signing in again; its other workspaces stay as they are.

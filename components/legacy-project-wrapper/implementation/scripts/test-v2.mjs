@@ -2779,6 +2779,53 @@ try {
           !editAfter.buttons.includes("Approve") && !editAfter.buttons.includes("Deny") && stateOf(editD.userCode) === "denied" && stateOf(editC.userCode) === "pending",
         `${JSON.stringify({ ...editLooked, text: editLooked.text.slice(0, 200) })} ${JSON.stringify({ ...editAfter, text: editAfter.text.slice(0, 200) })} C=${stateOf(editC.userCode)} D=${stateOf(editD.userCode)}`,
       );
+      // E2E-WEB cycle 11 C11-1: a code edited while its Look up is still on its way: the answer is for a code the field
+      // no longer shows, so it is dropped (no panel, nothing to approve or deny); edited back to the same code (in another
+      // format), the answer is kept. The lookup is slowed by 2.5 s, as on a slow connection.
+      const raceE = insertPairing("U5's race E");
+      const raceF = insertPairing("U5's race F");
+      const rp = await browser.newPage();
+      await rp.setCookie(...U5.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+      await rp.setRequestInterception(true);
+      rp.on("request", (r) => (r.url().includes("/api/v2/device/requests/") ? setTimeout(() => void r.continue().catch(() => undefined), 2500) : void r.continue().catch(() => undefined)));
+      const rpRetype = async (code) => {
+        await rp.focus(codeField);
+        await rp.evaluate((f) => document.querySelector(f)?.select(), codeField);
+        await rp.keyboard.press("Backspace");
+        await rp.type(codeField, code);
+      };
+      const rpPanel = () =>
+        rp.evaluate(() => ({
+          text: document.querySelector("main")?.innerText ?? "",
+          buttons: [...document.querySelectorAll("main button")].map((b) => b.textContent),
+          boxes: document.querySelectorAll('main input[type="checkbox"]').length,
+          field: document.querySelector('main input[placeholder="BCDF-GHJK"]')?.value ?? "",
+        }));
+      const slowLookup = async (during) => {
+        const answered = rp.waitForResponse((res) => res.url().includes("/api/v2/device/requests/"), { timeout: 15000 }).catch(() => undefined);
+        await rp.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+        await sleep(300);
+        await during();
+        await answered;
+        await sleep(500);
+        return rpPanel();
+      };
+      await rp.goto(`${BASE}/app/device?code=${raceE.userCode}`, { waitUntil: "networkidle0" });
+      const raceAway = await slowLookup(() => rpRetype(raceF.userCode));
+      const raceDeny = await rp.evaluate(() => [...document.querySelectorAll("main button")].some((b) => b.textContent === "Approve" || b.textContent === "Deny"));
+      // Edited to F and back to E's code, lowercase and without the dash, while the lookup is on its way: E's panel opens.
+      await rp.goto(`${BASE}/app/device?code=${raceE.userCode}`, { waitUntil: "networkidle0" });
+      const raceBack = await slowLookup(async () => {
+        await rpRetype(raceF.userCode);
+        await rpRetype(raceE.userCode.replace("-", "").toLowerCase());
+      });
+      await rp.close();
+      check(
+        "C11-1 (ui, E2E-WEB cycle 11): a code edited to another device's while its Look up is still on its way: the answer is dropped, so no panel opens (no name, no workspace boxes, no Approve or Deny) and the field keeps the code typed; both devices stay pending; edited back to the same code in another format before the answer, the panel opens for that device",
+        !raceAway.text.includes("U5's race E") && !raceAway.text.includes("U5's race F") && raceAway.boxes === 0 && !raceDeny && raceAway.field === raceF.userCode &&
+          stateOf(raceE.userCode) === "pending" && stateOf(raceF.userCode) === "pending" && raceBack.text.includes("U5's race E") && raceBack.buttons.includes("Approve") && raceBack.buttons.includes("Deny"),
+        `${JSON.stringify({ ...raceAway, text: raceAway.text.slice(0, 300) })} ${JSON.stringify({ ...raceBack, text: raceBack.text.slice(0, 300) })} E=${stateOf(raceE.userCode)} F=${stateOf(raceF.userCode)}`,
+      );
       // W4 (E2E-WEB cycle 10): an approval or denial with no code says what to do, not a field name.
       const w4Empty = await call("U5", "POST", "/api/v2/device/approve", { cookie: U5.cookie, body: { user_code: "  ", workspace_ids: [A] } });
       const w4EmptyDeny = await call("U5", "POST", "/api/v2/device/deny", { cookie: U5.cookie, body: {} });
@@ -8116,6 +8163,84 @@ try {
           xdGive.status === 200 && dGiven.includes(`Its machine, ${xdLaptop}, has this workspace again: to share it again, run ::align share in the session.`) && !dGiven.includes("align login") && !dGiven.includes("on your Devices page"),
           `${xdGive.status} ${xdGive.text.slice(0, 200)} ${dGiven.slice(0, 900)}`,
         );
+        // C11-2 and W4 (E2E-WEB cycle 11): every page that shows a device name, with names that can't break: a name stored
+        // before the extender limit (ｶ + 150 × U+FF9E), and names the limits accept that draw one wide character (ก + 15
+        // × ำ, 15 Malayalam dot rephs + ക, 16 Hangul initial jamo), with a 100-letter word, a run of ﷽ and of eight-woman
+        // families. On the approval page (the panel, and the "(2)" note after Approve), the Devices page, the invite page
+        // and the Sessions page (its machine's name), none scrolls the page sideways at 320, 390, 768 or 1280 px.
+        const WIDE_NAMES = {
+          legacy: `\uFF76${"\uFF9E".repeat(150)}`,
+          thai: `\u0E01${"\u0E33".repeat(15)}`,
+          malayalam: `${"\u0D4E".repeat(15)}\u0D15`,
+          hangul: "\u1100".repeat(16),
+          word: "W".repeat(100),
+          ligature: "\uFDFD".repeat(30),
+          family: Array(12).fill(Array(8).fill("\u{1F469}").join("\u200D")).join(""),
+        };
+        const WIDTHS = [320, 390, 768, 1280];
+        const wideAt = async (pg, label, out) => {
+          for (const width of WIDTHS) {
+            await pg.setViewport({ width, height: 900 });
+            await sleep(150);
+            const m = await pg.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+            if (m.scroll > m.client) out.push(`${label}@${width}: ${m.scroll}>${m.client}`);
+          }
+          await pg.setViewport({ width: 1100, height: 900 });
+        };
+        const wideFails = [];
+        const wideSeen = [];
+        const pWideD = await as(XD);
+        // Sessions: the machine that shared the ended session carries each name in turn.
+        for (const [k, name] of Object.entries(WIDE_NAMES)) {
+          withDb((d) => d.prepare("UPDATE v2_devices SET name = ? WHERE id = ?").run(name, xDevs.XD.id));
+          await open(pWideD, `/app/w/${XW}/sessions`);
+          if ((await pWideD.evaluate(() => document.body.innerText)).includes(`Its machine, ${name}, has this workspace again`)) wideSeen.push(`sessions:${k}`);
+          await wideAt(pWideD, `sessions:${k}`, wideFails);
+        }
+        withDb((d) => d.prepare("UPDATE v2_devices SET name = ? WHERE id = ?").run(xdLaptop, xDevs.XD.id));
+        // Devices and invite pages: XD has a paired device of every name.
+        for (const name of Object.values(WIDE_NAMES)) insertDevice(XD.id, name);
+        await open(pWideD, "/app/devices");
+        if ((await pWideD.evaluate(() => document.body.innerText)).includes("W".repeat(100))) wideSeen.push("devices");
+        await wideAt(pWideD, "devices", wideFails);
+        const WW = (await call("XO", "POST", "/api/v2/workspaces", { cookie: XO.cookie, body: { name: "Wide names" } })).json?.id;
+        const wInv = await call("XO", "POST", `/api/v2/workspaces/${WW}/invites`, { cookie: XO.cookie, body: { email: XD.email, role: "member" } });
+        await open(pWideD, `/app/invite/${wInv.json?.token}`);
+        if ((await pWideD.evaluate(() => document.body.innerText)).includes("W".repeat(100))) wideSeen.push("invite");
+        await wideAt(pWideD, "invite", wideFails);
+        // The approval page needs a sign-in from the last 15 minutes.
+        const xdRecent = cookieOf((await call("XD", "POST", "/api/v2/auth/sign-in/email", { headers: { origin: BASE }, body: { email: XD.email, password: `pw-${XD.who}-123456` } })).setCookies);
+        const pWideA = await as({ ...XD, cookie: xdRecent });
+        for (const [k, name] of Object.entries(WIDE_NAMES)) {
+          const pr = insertPairing(name);
+          await open(pWideA, `/app/device?code=${pr.userCode}`);
+          await pWideA.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+          await pWideA.waitForFunction(() => [...document.querySelectorAll("main button")].some((b) => b.textContent === "Deny"), { timeout: 15000 }).catch(() => undefined);
+          if ((await pWideA.evaluate(() => document.body.innerText)).includes(name)) wideSeen.push(`approval:${k}`);
+          await wideAt(pWideA, `approval:${k}`, wideFails);
+        }
+        // Approved under a name XD's devices already have: the page says "… is connected as “<name> (2)”: you already have a
+        // device named “<name>”. …", naming it three times.
+        const prDup = insertPairing(WIDE_NAMES.hangul);
+        await open(pWideA, `/app/device?code=${prDup.userCode}`);
+        await pWideA.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+        await pWideA.waitForFunction(() => document.querySelectorAll('main input[type="checkbox"]').length > 0, { timeout: 15000 }).catch(() => undefined);
+        await pWideA.evaluate(() => document.querySelector('main input[type="checkbox"]')?.click());
+        await pWideA.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve" && !b.disabled), { timeout: 15000 }).catch(() => undefined);
+        await pWideA.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve")?.click());
+        await pWideA.waitForFunction(() => document.body.innerText.includes("is connected as"), { timeout: 15000 }).catch(() => undefined);
+        if ((await pWideA.evaluate(() => document.body.innerText)).includes(`is connected as “${WIDE_NAMES.hangul} (2)”`)) wideSeen.push("approved");
+        await wideAt(pWideA, "approved", wideFails);
+        // Leave XD as the next checks expect: only its own laptop paired.
+        withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE user_id = ? AND id != ? AND revoked_at IS NULL").run(new Date().toISOString(), XD.id, xDevs.XD.id));
+        await pWideD.close();
+        await pWideA.close();
+        const wideWant = [...Object.keys(WIDE_NAMES).map((k) => `sessions:${k}`), "devices", "invite", ...Object.keys(WIDE_NAMES).map((k) => `approval:${k}`), "approved"];
+        check(
+          "C11-2 and W4 (ui, E2E-WEB cycle 11): no page that shows a device name scrolls sideways at 320, 390, 768 or 1280 px with a name that can't break (ｶ + 150 × U+FF9E stored before the limit; ก + 15 × ำ, 15 Malayalam dot rephs + ക and 16 Hangul initial jamo, which the limits accept; a 100-letter word; 30 × ﷽; 12 eight-woman families): the approval page's panel and its \"connected as … (2)\" note, the Devices page, the invite page's \"Your paired devices\" and the Sessions page's line naming the session's machine",
+          wideFails.length === 0 && wideWant.every((w) => wideSeen.includes(w)) && wInv.status === 201,
+          `fails=${JSON.stringify(wideFails)} missing=${JSON.stringify(wideWant.filter((w) => !wideSeen.includes(w)))} ${wInv.status}`,
+        );
         // The machine signs out (revoked on the web): align login pairs it again.
         const xdOut = await call("XD", "DELETE", `/api/v2/devices/${xDevs.XD.id}`, { cookie: XD.cookie });
         await open(pD, `/app/w/${XW}/sessions`);
@@ -9305,6 +9430,7 @@ try {
     } else check("ui (Chrome) available for the c10 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c10-web ====
+
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
