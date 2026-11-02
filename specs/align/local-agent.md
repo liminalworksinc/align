@@ -503,7 +503,8 @@ in a terminal.`). It SHALL be told once per sign-in and again when that answer c
 back, so the sign-out notice holds again; and such a session SHALL not also get the `can now reach <workspace>` notice
 for its own workspace. Its stop latch and goal holds SHALL stay, so
 it fails closed until it is shared again and the web lifts them, or the developer runs `align stop-sharing`. `align sessions` SHALL show such a share as `stopped
-(<workspace>; this machine signed out)`, never as `shared`, also after signing in again. Sharing it again after a new
+(<workspace>; this machine signed out)` while it can't be shared again, and `stopped (<workspace>; ended at a sign-out;
+\`::align share\` shares it again)` once this machine is signed in again and reaches its workspace; never as `shared`. Sharing it again after a new
 `align login` (`::align share` or `align share`) SHALL work through the server's re-share of a signed-out session:
 logout keeps `device_secret`, so the re-paired machine derives the same session keys. `::align share` with no goal
 named SHALL share such a session toward the goal it had while that goal can still be bound (the preview says `(the goal
@@ -523,7 +524,7 @@ this machine is signed out of Align ...`, nothing for a folder rule's), never ap
 #### Scenario: Logout with a stopped session
 
 - **WHEN** a shared session is stopped from the web, then the user runs `align logout`, then `align login` (test `findings` "B4/G2/B6: logout ends this machine's shares ..."; against the real server in `scripts/test-agent-live.mjs` "logout ...")
-- **THEN** logout prints `1 shared session(s) stopped sharing. Sessions stopped or held from the web stay blocked: after \`align login\`, \`::align share\` in such a session shares it again, and then the web can lift the stop or hold.` (test `findings8` "`align logout` with a session stopped from the web ..."), `align sessions` lists it as `stopped (Acme; this machine signed out)` before and after the new login, `Bash` stays denied with the reason naming `align stop-sharing <id>`, the next prompt shows the notice once, and `align stop-sharing <id>` frees the tools
+- **THEN** logout prints `1 shared session(s) stopped sharing. Sessions stopped or held from the web stay blocked: after \`align login\`, \`::align share\` in such a session shares it again, and then the web can lift the stop or hold.` (test `findings8` "`align logout` with a session stopped from the web ..."); while signed out `align sessions` lists it as `stopped (Acme; this machine signed out)`, `Bash` stays denied with the reason naming `align stop-sharing <id>` and the next prompt shows the sign-out notice once; after the new login no share is listed as shared, `align sessions` lists it as `stopped (Acme; ended at a sign-out; \`::align share\` shares it again)`, `Bash` stays denied with `... Its sharing ended (this machine signed out of Align, and is signed in again now), so the user can share it there again by typing \`::align share\` in this session; once it is shared again, this can be lifted from the web. ...` and no `align stop-sharing`, the next prompt shows `Align: this machine is signed in to Align again. To share this session again, type \`::align share\` here ...`, and `align stop-sharing <id>` still frees the tools
 
 #### Scenario: Signed in again, the sign-out notice is not told stale
 
