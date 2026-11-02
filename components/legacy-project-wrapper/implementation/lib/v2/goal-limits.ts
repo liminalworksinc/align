@@ -1,4 +1,5 @@
 import { badRequest } from "./errors";
+import { cleanProse, isBlankText } from "./text-core.mts";
 import { rand32 } from "./ids";
 import type { Body } from "./validate";
 
@@ -34,8 +35,13 @@ export interface Limit {
   source: LimitSource | null;
 }
 
-/** People's text on one line: control characters (C0, DEL, C1) become spaces, runs of spaces one, trimmed. */
-export const cleanText = (v: string) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
+/** People's text on one line: control characters (C0, DEL, C1) become spaces, invisible characters are dropped and blank
+ *  fillers made spaces as in all people's text (lib/v2/text-core.mts), runs of spaces one, trimmed; nothing a person can
+ *  read left is "" (E2E-WEB cycle 13 W3). */
+export const cleanText = (v: string) => {
+  const t = cleanProse(v.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")).replace(/\s+/g, " ").trim();
+  return isBlankText(t) ? "" : t;
+};
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /** A real calendar day as YYYY-MM-DD. */

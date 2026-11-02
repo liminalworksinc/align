@@ -4,8 +4,9 @@ import { api, ApiError, Btn, Err, Field, Input, num, Pill, Select, sentence, Tex
 import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, measuresOut, sameLimits, type LimitDraft, type MeasureDraft } from "./goalform";
 import { LIMIT_WORDS } from "./limits";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
-import { counterSameAsBase, counterSameAsRequest, hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
+import { counterSameAsBase, counterSameAsRequest, dependsOnFull, hiddenGoals, withHidden } from "@/lib/v2/change-words.mts";
 import { count } from "@/lib/v2/plural.mts";
+import { isBlankText } from "@/lib/v2/text-core.mts";
 
 // Pieces a change request is shown with, shared by its open view (decide.tsx: understand, then decide) and its record
 // (changes.tsx): field values in words, the before/after diff, the changes form (a proposal or an approver's counter),
@@ -186,6 +187,8 @@ export function ChangesForm({
   const titleOf = (id: string) => `“${feed.data?.goals.find((g) => g.id === id)?.title ?? "a goal"}”`;
   const notOffered = listed.filter((g) => leftOut(g.id) === "hidden").length;
   const them = (n: number) => (n === 1 ? "it" : "them");
+  // At most 5 dependencies, the ones the reader can't see included: the rest can't be ticked (W4).
+  const full = dependsOnFull(deps.length, hiddenDeps);
   const out = measuresOut(measures);
   const changes: ChangeFields = {};
   if (title.trim() !== goal.title || keep.includes("title")) changes.title = title.trim();
@@ -203,7 +206,7 @@ export function ChangesForm({
   // A counter asking for exactly what the request asks (every field it sends against the request's own values), with
   // no condition: the server refuses it 409 no_change, approve instead (W4).
   const asked: ChangeFields | null = base ? { ...base, ...start } : null;
-  const sameAsRequest = !!asked && differs && !condition.trim() && sent.every((k) => sameField(k, changes[k], asked[k]));
+  const sameAsRequest = !!asked && differs && isBlankText(condition) && sent.every((k) => sameField(k, changes[k], asked[k]));
   const v = versions ?? { base: goal.version, goal: goal.version };
   const why = !base || nothingLeft ? null : !differs ? counterSameAsBase(v.base, v.goal) : sameAsRequest ? counterSameAsRequest(requesterName ?? "the requester", v.base, v.goal) : null;
   return (
@@ -230,10 +233,20 @@ export function ChangesForm({
           <p className="mb-1 text-[14px] text-zinc-600">Depends on</p>
           {others.map((g) => (
             <label key={g.id} className="mb-1 flex items-center gap-2 text-[15px]">
-              <input type="checkbox" checked={deps.includes(g.id)} onChange={(e) => setDeps((d) => (e.target.checked ? [...d, g.id] : d.filter((x) => x !== g.id)))} />
+              <input
+                type="checkbox"
+                checked={deps.includes(g.id)}
+                disabled={!deps.includes(g.id) && !!full}
+                onChange={(e) => setDeps((d) => (e.target.checked ? [...d, g.id] : d.filter((x) => x !== g.id)))}
+              />
               {g.title}
             </label>
           ))}
+          {full && (
+            <p className="text-[14px] text-zinc-500" data-deps-full>
+              {full}
+            </p>
+          )}
           {hiddenDeps > 0 && (
             <p className="text-[14px] text-zinc-500" data-hidden-deps>
               Also depends on {hiddenGoals(hiddenDeps)}. Sending keeps {them(hiddenDeps)}; only someone who can see {them(hiddenDeps)} can remove {them(hiddenDeps)}.
@@ -275,7 +288,7 @@ export function ChangesForm({
         </p>
       )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <Btn type="submit" disabled={busy || !differs || sameAsRequest || (noteRequired && !note.trim()) || !title.trim()}>
+        <Btn type="submit" disabled={busy || !differs || sameAsRequest || (noteRequired && isBlankText(note)) || isBlankText(title)}>
           {sendLabel}
         </Btn>
         {why && (
@@ -420,7 +433,7 @@ export function AddEvidence({ path, revision, onDone, setNotice }: { path: strin
         <Input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={120} required />
       </Field>
       <div className="flex flex-wrap gap-2">
-        <Btn type="submit" disabled={act.busy || !/^https:\/\//i.test(url.trim()) || !label.trim()}>
+        <Btn type="submit" disabled={act.busy || !/^https:\/\//i.test(url.trim()) || isBlankText(label)}>
           Add link
         </Btn>
         <Btn kind="secondary" onClick={() => setOpen(false)}>

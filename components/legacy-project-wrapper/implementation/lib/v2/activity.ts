@@ -6,6 +6,7 @@ import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { openEpoch, sessionRow } from "./sessions";
 import type { DevicePrincipal } from "./devices";
 import { need } from "./workspaces";
+import { cleanProse, isBlankText } from "./text-core.mts";
 import { personName } from "./retention";
 import { SESSION_KEY_RE, type Body } from "./validate";
 
@@ -47,8 +48,8 @@ function relPath(v: unknown): string | null {
 function shortText(v: unknown): string | null {
   if (v === undefined || v === null) return null;
   if (typeof v !== "string") throw badRequest("text must be a string");
-  const t = v.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
-  return t ? t.slice(0, 120) : null;
+  const t = cleanProse(v.replace(/[\u0000-\u001f\u007f]/g, " "));
+  return isBlankText(t) ? null : t.slice(0, 120);
 }
 
 /** A batch of this device's activity for its own shared sessions. Items it doesn't take are listed in `refused` by

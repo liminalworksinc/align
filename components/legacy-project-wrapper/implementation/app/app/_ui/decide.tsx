@@ -5,6 +5,7 @@ import { api, ApiError, Btn, Err, Field, Loading, Note, Pill, sentence, TextArea
 import { AddEvidence, ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, EvidenceItem, FIELD_LABEL, FieldValue, NoticeBox, removeEvidence, Revisions, SnapshotBox, STATUS_WORD, withHidden, type Notice } from "./crparts";
 import { LIMIT_WORDS } from "./limits";
 import type { ChangeFields, ChangeRequest, Goal, Limit } from "./types";
+import { isBlankText } from "@/lib/v2/text-core.mts";
 
 // An open change request (pending or countered): understand it, then decide (main #43 and #49, on v2).
 // Order on screen: what is approved now beside what is proposed, with its version, requester, who decides and state ->
@@ -264,10 +265,10 @@ export function OpenRequest({
 
   function validate(): string | null {
     if (choice === "accept_if") {
-      if (!condition.trim()) return `Write the condition ${cr.requester.name} acknowledges.`;
-      if (!ifNote.trim()) return `Write a note to ${cr.requester.name}: why you accept only on this condition.`;
+      if (isBlankText(condition)) return `Write the condition ${cr.requester.name} acknowledges.`;
+      if (isBlankText(ifNote)) return `Write a note to ${cr.requester.name}: why you accept only on this condition.`;
     }
-    if (choice === "reject" && !reason.trim()) return `Write why you're declining. ${cr.requester.name} sees it.`;
+    if (choice === "reject" && isBlankText(reason)) return `Write why you're declining. ${cr.requester.name} sees it.`;
     return null;
   }
 
@@ -417,7 +418,7 @@ export function OpenRequest({
   const enteredRows = (): [string, ReactNode][] => {
     const rows: [string, ReactNode][] = [];
     if ((choice === "approve" || choice === "approve_and_launch") && noEvidence) rows.push(["Evidence", "None. The decision record and the audit log will say it was approved without evidence."]);
-    if ((choice === "approve" || choice === "approve_and_launch") && note.trim()) rows.push(["Your note", note.trim()]);
+    if ((choice === "approve" || choice === "approve_and_launch") && !isBlankText(note)) rows.push(["Your note", note.trim()]);
     if (choice === "accept_if") {
       rows.push(["Accept if", condition.trim()]);
       rows.push(["Your note", ifNote.trim()]);

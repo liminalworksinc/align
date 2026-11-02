@@ -409,9 +409,10 @@ export async function postEmail(api: EmailApi, msg: { to: string; subject: strin
   }
 }
 
-/** The message that carries an approved request's creation code. */
-export function codeEmail(origin: string, name: string, code: NewCode): { subject: string; text: string } {
-  const signIn = `${origin}/app/sign-in?${new URLSearchParams({ email: code.email ?? "" })}`;
+/** The message that carries an approved request's creation code. `local`: the sign-in link is the local address of the
+ *  computer Align runs on (Mode L with no ALIGN_PUBLIC_ORIGIN), and the email says so (E2E-WEB cycle 13 W7). */
+export function codeEmail(origin: string, name: string, code: NewCode, { local = false }: { local?: boolean } = {}): { subject: string; text: string } {
+  const signIn = `${origin}/app/sign-in?${new URLSearchParams({ email: code.email ?? "" })}${local ? " (a local address: it opens only on the computer Align runs on; if it doesn't open for you, ask whoever runs Align for its address)" : ""}`;
   return {
     subject: "Your Align workspace creation code",
     text: [

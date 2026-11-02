@@ -1930,6 +1930,24 @@ try {
   const rejectEmpty = await crAct(U2, GL.id, cr1.json.id, "reject", {});
   const afterRejectEmpty = await crGet(U1, GL.id, cr1.json.id);
   check("change requests: reject without a reason -> 400 and the request is unchanged", rejectEmpty.status === 400 && afterRejectEmpty.json?.state === "pending" && afterRejectEmpty.json.revision === 1, `${rejectEmpty.text} ${afterRejectEmpty.json?.state}`);
+  // E2E-WEB cycle 13 W3: free text of only invisible characters (zero-width spaces, a word joiner, a variation selector,
+  // a Hangul filler, an accent with no letter) is missing, as a device name of them is: never recorded as empty text.
+  const INVISIBLES = ["\u200B\u200B", "\u2060", "\uFE0F", "\u3164", " \u0301 \u200D "];
+  const w3Reject = [];
+  for (const v of INVISIBLES) w3Reject.push(await crAct(U2, GL.id, cr1.json.id, "reject", { reason: v }));
+  const w3Cond = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: [...GL.measures, { text: "W3 measure", target: null }] }, note: "April", condition: "\u200B" });
+  const w3Note = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: [...GL.measures, { text: "W3 measure", target: null }] }, note: "\u2060\u200B" });
+  const w3Title = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, body: { title: "\u200B\uFE0F", visibility: "workspace" } });
+  const w3Measure = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, body: { title: "W3 goal", visibility: "workspace", measures: [{ text: "\u3164", target: null }] } });
+  const w3Limit = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, body: { title: "W3 goal", visibility: "workspace", limits: [{ type: "must", text: "\u200B\u200B" }] } });
+  const afterW3 = await crGet(U1, GL.id, cr1.json.id);
+  check(
+    "c13 W3 (E2E-WEB cycle 13): a decline reason, a counter's condition or note, a goal title, a measure and a limit of only invisible characters (two zero-width spaces, a word joiner, U+FE0F, a Hangul filler, an accent and a joiner with spaces) are cleaned as names are and then missing: 400 \"<field> is required\", nothing recorded",
+    w3Reject.every((r) => r.status === 400 && r.json?.message === "reason is required") && w3Cond.status === 400 && w3Cond.json?.message === "condition is required" && w3Note.status === 400 && w3Note.json?.message === "note is required" &&
+      w3Title.status === 400 && w3Title.json?.message === "title is required" && w3Measure.status === 400 && /text is required/.test(w3Measure.json?.message ?? "") && w3Limit.status === 400 && w3Limit.json?.message === "limits[0].text is required" &&
+      afterW3.json?.state === "pending" && afterW3.json.revision === 1,
+    `${w3Reject.map((r) => r.text).join(" | ")} | ${w3Cond.text} | ${w3Note.text} | ${w3Title.text} | ${w3Measure.text} | ${w3Limit.text} | ${afterW3.json?.state}`,
+  );
 
   let cursor3 = await drain(D3);
   const counterMeasures = [...GL.measures, { text: "Pen-test window booked", target: "April" }];
@@ -2922,6 +2940,20 @@ try {
   const renByViewer = await call("U4", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U4.cookie, body: { name: "Hijacked" } });
   const ren = await call("U1", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U1.cookie, body: { name: "Workspace A renamed" } });
   check("workspaces: an owner renames (PATCH -> {id, name}); a member -> 403 owner_only, a viewer -> 403 read_only", ren.status === 200 && ren.json.id === A && ren.json.name === "Workspace A renamed" && renByMember.json?.error === "owner_only" && renByViewer.json?.error === "read_only", `${ren.text} ${renByMember.text} ${renByViewer.text}`);
+  // E2E-WEB cycle 13 W8: workspace and team names are cleaned as device names are: one of only invisible characters or
+  // marks is blank (400 name is required); invisible characters inside a name are dropped.
+  const BLANK_NAMES = ["\u200B", "\uFE0F", "\u0301\u0301", "\u3164", " \u200B\u2060 "];
+  const w8Renames = [];
+  for (const name of BLANK_NAMES) w8Renames.push(await call("U1", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U1.cookie, body: { name } }));
+  const w8Create = await call("U1", "POST", "/api/v2/workspaces", { cookie: U1.cookie, body: { name: "\u200B\uFE0F" } });
+  const w8Team = await call("U1", "POST", `/api/v2/workspaces/${A}/teams`, { cookie: U1.cookie, body: { name: "\u3164\u200B" } });
+  const w8Inner = await call("U1", "PATCH", `/api/v2/workspaces/${A}`, { cookie: U1.cookie, body: { name: "Workspace\u200B A\nrenamed\u2060" } });
+  check(
+    "c13 W8 (E2E-WEB cycle 13): a workspace rename, a new workspace and a new team named with only invisible characters or marks (U+200B, U+FE0F, two U+0301, U+3164, spaces with a word joiner) -> 400 \"name is required\" and nothing changes; invisible characters inside a name are dropped and a line break becomes a space (\"Workspace A renamed\")",
+    w8Renames.every((r) => r.status === 400 && r.json?.message === "name is required") && w8Create.status === 400 && w8Create.json?.message === "name is required" && w8Team.status === 400 && w8Team.json?.message === "name is required" &&
+      w8Inner.status === 200 && w8Inner.json?.name === "Workspace A renamed" && withDb((d) => d.prepare("SELECT name FROM v2_workspaces WHERE id = ?").get(A).name) === "Workspace A renamed",
+    `${w8Renames.map((r) => r.text).join(" | ")} | ${w8Create.text} | ${w8Team.text} | ${w8Inner.text}`,
+  );
 
   // -- audit trail --
   withDb((d) => d.prepare("INSERT INTO v2_audit (ws_id, actor_id, action, object_id, at) VALUES (?, ?, 'pod.created', 'pod_legacyrowxxxxxxxxxxxxxx', ?)").run(A, U1.id, new Date().toISOString()));
@@ -3249,14 +3281,21 @@ try {
     const backMachine = await ca(CO, "POST", `/sessions/${SB}/resume`, {});
     const backMachineOwn = await ca(CM, "POST", `/sessions/${SB}/stop`, {});
     const BACK_LEAD = (who) => `This session's sharing ended when ${who} left this workspace, so a stop or resume can't reach it.`;
-    const BACK_THEN = "::align share in that session shares it again, and then Stop and Resume here reach it.";
+    const BACK_THEN = "Then Stop and Resume here reach it.";
+    // E2E-WEB cycle 13 W1: once they are back, the refusal says what the person's own Sessions tab says for where the
+    // machine stands (lib/v2/share-again.mts), in the third person to an owner.
+    const BACK_GIVE = (who) =>
+      who === "you"
+        ? "To share it again now that you are back, give its machine, Cato's laptop, this workspace on your Devices page (Give this device the workspace), then run ::align share in the session."
+        : `To share it again now that ${who} is back, ${who} gives its machine, Cato's laptop, this workspace on their Devices page (Give this device the workspace), then runs ::align share in the session.`;
+    const BACK_HAS = (who) => `Its machine, Cato's laptop, has this workspace again: to share it again, ${who === "you" ? "run" : `${who} runs`} ::align share in the session.`;
     check(
-      "c12 member_removed (E2E-AGENT cycle 12, section 6): Stop or Resume on a session that ended when its person left, once they are back, says what shares it again now: \"Once the machine that shared it has this workspace again, ::align share in that session shares it again, and then Stop and Resume here reach it.\", and once the machine has it again \"Its machine, Cato's laptop, has this workspace again: ::align share …\"; \"you\" to the person themself; never align stop-sharing; no directive",
+      "c12 member_removed (E2E-AGENT cycle 12, section 6; E2E-WEB cycle 13 W1): Stop or Resume on a session that ended when its person left, once they are back, says what shares it again now in the Sessions tab's words for where its machine stands: still paired without the workspace, \"To share it again now that <name> is back, <name> gives its machine, Cato's laptop, this workspace on their Devices page (Give this device the workspace), then runs ::align share in the session. Then Stop and Resume here reach it.\", and once the machine has it again \"Its machine, Cato's laptop, has this workspace again: to share it again, <name> runs ::align share in the session. …\"; word for word the tab's sentence to the person themself (\"you\"); never align stop-sharing; no directive",
       [backNoMachine, backNoMachineOwn, backMachine, backMachineOwn].every((r) => r.status === 409 && r.json?.error === "member_removed" && !/stop-sharing/.test(r.json.message)) &&
-        backNoMachine.json.message === `${BACK_LEAD(CM.name)} Once the machine that shared it has this workspace again, ${BACK_THEN}` &&
-        backNoMachineOwn.json.message === `${BACK_LEAD("you")} Once the machine that shared it has this workspace again, ${BACK_THEN}` &&
-        backMachine.json.message === `${BACK_LEAD(CM.name)} Its machine, Cato's laptop, has this workspace again: ${BACK_THEN}` &&
-        backMachineOwn.json.message === `${BACK_LEAD("you")} Its machine, Cato's laptop, has this workspace again: ${BACK_THEN}` && dirCount(SB) === dirsBack,
+        backNoMachine.json.message === `${BACK_LEAD(CM.name)} ${BACK_GIVE(CM.name)} ${BACK_THEN}` &&
+        backNoMachineOwn.json.message === `${BACK_LEAD("you")} ${BACK_GIVE("you")} ${BACK_THEN}` &&
+        backMachine.json.message === `${BACK_LEAD(CM.name)} ${BACK_HAS(CM.name)} ${BACK_THEN}` &&
+        backMachineOwn.json.message === `${BACK_LEAD("you")} ${BACK_HAS("you")} ${BACK_THEN}` && dirCount(SB) === dirsBack,
       `${sbDevice === DC.id} ${[backNoMachine, backNoMachineOwn, backMachine, backMachineOwn].map((r) => `${r.status} ${r.text}`).join(" | ")}`,
     );
     withDb((d) => d.prepare("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DC.id, CW));
@@ -3269,6 +3308,129 @@ try {
       rmAgain.status === 204 && endedAgain === "member_removed" && webStopEnded.status === 200 && rowStopped?.state === "stopped" && rowStopped.ended_reason === null &&
         upStopped.status === 409 && upStopped.json?.error === "sharing_stopped" && upStopped.json?.ended_reason === null && putStopped.status === 409 && putStopped.json?.error === "sharing_stopped",
       `${rmAgain.status} ${endedAgain} ${webStopEnded.text} ${JSON.stringify(rowStopped)} ${upStopped.text} ${putStopped.text}`,
+    );
+
+    // E2E-WEB cycle 13 W1: removed, let back in, and the machine that shared it signed out of Align: the refusal says to
+    // run align login on that machine, as the person's Sessions tab does, never "once the machine has this workspace".
+    const DE = cDevice();
+    const SE = await cShare(DE, "ended-e");
+    await ca(CO, "DELETE", `/members/${CM.id}`);
+    await invite();
+    const outE = await call("CM", "DELETE", "/api/v2/devices/self", { bearer: DE.access });
+    const stopOutE = await ca(CO, "POST", `/sessions/${SE}/stop`, {});
+    const stopOutEOwn = await ca(CM, "POST", `/sessions/${SE}/resume`, {});
+    const tabE = (await ca(CM, "GET", "/sessions")).json?.mine?.find((x) => x.session_key === SE);
+    const shareMod = await import(pathToFileURL(path.join(ROOT, "lib/v2/share-again.mts")).href);
+    const LOGIN = (who) =>
+      who === "you"
+        ? "To share it again now that you are back, run align login on that machine (it has signed out of Align) and give it this workspace, then ::align share in the session."
+        : `To share it again now that ${who} is back, ${who} runs align login on that machine (it has signed out of Align) and gives it this workspace, then ::align share in the session.`;
+    check(
+      "c13 W1 (E2E-WEB cycle 13): Stop or Resume on a member_removed session whose person is back but whose machine signed out of Align says to run align login on that machine and give it this workspace (\"<name> runs …\" to an owner, \"run …\" to the person), the very sentence the person's Sessions tab note shows for that session (one function), never \"Once the machine that shared it has this workspace again\"",
+      outE.status === 204 && tabE?.ended_reason === "member_removed" && tabE.device?.signed_out === true &&
+        [stopOutE, stopOutEOwn].every((r) => r.status === 409 && r.json?.error === "member_removed" && !/Once the machine that shared it/.test(r.json.message)) &&
+        stopOutE.json.message === `${BACK_LEAD(CM.name)} ${LOGIN(CM.name)} ${BACK_THEN}` &&
+        stopOutEOwn.json.message === `${BACK_LEAD("you")} ${LOGIN("you")} ${BACK_THEN}` &&
+        shareMod.shareAgainText(shareMod.shareAgainWords(tabE.device, null)) === LOGIN("you"),
+      `${outE.status} ${JSON.stringify(tabE?.device)} | ${stopOutE.text} | ${stopOutEOwn.text}`,
+    );
+
+    // E2E-WEB cycle 13 W2: an owner's Sessions page open while the person is removed: Stop agent on their row is
+    // refused member_removed; the page reloads (their other ended row leaves the list, so it offers nothing more) and the
+    // refusal is shown and focused at the row pressed, which offers no Stop or Resume any more.
+    if (existsSync(CHROME)) {
+      const DG = cDevice();
+      const SG = await cShare(DG, "ended-g");
+      const SH = await cShare(DG, "ended-h");
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        const [cn, ...cv] = CO.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+        await page.setCookie({ name: cn, value: cv.join("="), url: BASE });
+        await page.goto(`${BASE}/app/w/${CW}/sessions`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-session-row="${SG}"] button`, { timeout: 15000 });
+        const rowsBefore = await page.evaluate(() => [...document.querySelectorAll("[data-session-row]")].map((li) => li.getAttribute("data-session-row")));
+        const rmG = await ca(CO, "DELETE", `/members/${CM.id}`);
+        const stopResp = page.waitForResponse((r) => r.url().endsWith(`/sessions/${SG}/stop`) && r.request().method() === "POST");
+        await page.evaluate((k) => [...document.querySelectorAll(`[data-session-row="${k}"] button`)].find((b) => b.textContent === "Stop agent")?.click(), SG);
+        const stopStatus = (await stopResp).status();
+        await page.waitForFunction((k) => !document.querySelector(`[data-session-row="${k}"]`), { timeout: 15000 }, SH).catch(() => undefined);
+        const w2 = await page.evaluate((k) => {
+          const row = document.querySelector(`[data-session-row="${k}"]`);
+          const alert = row?.querySelector("[data-row-refusal]");
+          return {
+            rows: [...document.querySelectorAll("[data-session-row]")].map((li) => li.getAttribute("data-session-row")),
+            alert: alert?.textContent ?? "",
+            focused: !!alert && document.activeElement === alert,
+            buttons: [...(row?.querySelectorAll("button") ?? [])].map((b) => b.textContent),
+            alerts: document.querySelectorAll('main [role="alert"]').length,
+          };
+        }, SG);
+        check(
+          "c13 W2 (ui, E2E-WEB cycle 13): on an owner's Sessions page opened before a member was removed, Stop agent on that person's row is refused 409 member_removed; the page reloads (their other ended row leaves the list), and the refusal is shown at the row pressed, focused, as the only alert, and that row no longer offers Stop agent or Resume agent",
+          rmG.status === 204 && rowsBefore.includes(SG) && rowsBefore.includes(SH) && stopStatus === 409 &&
+            w2.rows.includes(SG) && !w2.rows.includes(SH) && w2.alert.startsWith(`This session's sharing ended when ${CM.name} left this workspace`) && w2.focused && w2.alerts === 1 &&
+            !w2.buttons.includes("Stop agent") && !w2.buttons.includes("Resume agent") && errors.length === 0,
+          `${rmG.status} ${stopStatus} ${JSON.stringify(rowsBefore)} ${JSON.stringify(w2)} ${errors.join(" | ")}`,
+        );
+
+        // E2E-WEB cycle 13 W4: the New version form stops at 5 dependencies with a note, before the server would refuse
+        // a sixth; the server's refusal of six is in words, never "depends_on: at most 5".
+        const w4Goals = [];
+        for (let i = 0; i < 7; i++) w4Goals.push((await ca(CO, "POST", "/goals", { title: `W4 goal ${i}`, visibility: "workspace" })).json);
+        const [w4Main, ...w4Others] = w4Goals;
+        const w4Six = await ca(CO, "POST", `/goals/${w4Main.id}/versions`, { version: w4Main.version, depends_on: w4Others.map((g) => g.id) });
+        const w4SixNew = await ca(CO, "POST", "/goals", { title: "W4 six", visibility: "workspace", depends_on: w4Others.map((g) => g.id) });
+        await page.goto(`${BASE}/app/w/${CW}/goals/${w4Main.id}`, { waitUntil: "networkidle0" });
+        await page.waitForSelector("#new-version form input[type=checkbox]", { timeout: 15000 }).catch(() => undefined);
+        const boxes = async () =>
+          page.evaluate(() =>
+            [...document.querySelectorAll("#new-version form label")]
+              .filter((l) => l.querySelector("input[type=checkbox]") && l.innerText.startsWith("W4 goal"))
+              .map((l) => ({ title: l.innerText.trim(), checked: l.querySelector("input").checked, disabled: l.querySelector("input").disabled })),
+          );
+        const w4Before = await boxes();
+        for (let i = 1; i <= 5; i++) {
+          await page.evaluate((t) => [...document.querySelectorAll("#new-version form label")].find((l) => l.innerText.trim() === t)?.querySelector("input")?.click(), `W4 goal ${i}`);
+        }
+        const w4After = await boxes();
+        const w4Note = await page.evaluate(() => document.querySelector("#new-version [data-deps-full]")?.innerText ?? "");
+        await page.evaluate(() => [...document.querySelectorAll("#new-version form label")].find((l) => l.innerText.trim() === "W4 goal 6")?.querySelector("input")?.click());
+        const w4Tried = (await boxes()).find((b) => b.title === "W4 goal 6");
+        const W4_WORDS = "A goal can depend on at most 5 other goals; choose fewer.";
+        check(
+          "c13 W4 (E2E-WEB cycle 13): the New version form lets the owner tick at most 5 dependencies: with 5 ticked the other goals' boxes are disabled (a press ticks nothing) and the form says \"A goal can depend on at most 5 other goals. Untick one to choose another.\", absent before; the server's refusal of 6 (new version and new goal) is 400 too_many_dependencies \"A goal can depend on at most 5 other goals; choose fewer.\", never the field's name",
+          w4Before.length === 6 && w4Before.every((b) => !b.checked && !b.disabled) &&
+            w4After.filter((b) => b.checked).length === 5 && w4After.find((b) => b.title === "W4 goal 6")?.disabled === true && w4Tried?.checked === false &&
+            w4Note === "A goal can depend on at most 5 other goals. Untick one to choose another." &&
+            [w4Six, w4SixNew].every((r) => r.status === 400 && r.json?.error === "too_many_dependencies" && r.json.message === W4_WORDS) && errors.length === 0,
+          `${JSON.stringify(w4Before)} ${JSON.stringify(w4After)} ${w4Note} | ${w4Six.text} | ${w4SixNew.text} ${errors.join(" | ")}`,
+        );
+      } finally {
+        await browser.close();
+      }
+      await invite();
+    } else check("ui (Chrome) available for the owner's Sessions page (W2)", false, `no Chrome at ${CHROME}`);
+
+    // E2E-WEB cycle 13 C13-1: the person deletes their account (a live session of theirs ends member_removed with it):
+    // nothing can share their sessions again, and the refusal says so instead of "once <name> is back".
+    const DF = cDevice();
+    const SF = await cShare(DF, "ended-f");
+    const delCM = await call("CM", "DELETE", "/api/v2/me", { cookie: CM.cookie, headers: { origin: BASE }, body: { email: CM.email } });
+    const rowF = cRow(SF);
+    const userLeft = withDb((d) => d.prepare("SELECT 1 AS x FROM ba_user WHERE id = ?").get(CM.id));
+    const goneStop = await ca(CO, "POST", `/sessions/${SF}/stop`, {});
+    const goneResume = await ca(CO, "POST", `/sessions/${SE}/resume`, {});
+    const goneLead = /^This session's sharing ended when (Former member #\d+) left this workspace, so a stop or resume can't reach it\. Their account was deleted, so nothing can share it again\.$/;
+    check(
+      "c13 C13-1 (E2E-WEB cycle 13): once the person whose session ended member_removed has deleted their account (a session live at the deletion, and one that had ended before it), an owner's Stop or Resume -> 409 member_removed \"This session's sharing ended when Former member #n left this workspace, so a stop or resume can't reach it. Their account was deleted, so nothing can share it again.\", never \"Once … is back\" or ::align share; no directive",
+      delCM.status === 204 && !userLeft && rowF?.state === "stopped" && rowF.ended_reason === "member_removed" &&
+        [goneStop, goneResume].every((r) => r.status === 409 && r.json?.error === "member_removed" && goneLead.test(r.json.message) && !/is back|::align share/.test(r.json.message)) &&
+        dirCount(SF) === 0,
+      `${delCM.status} ${delCM.text} ${JSON.stringify(rowF)} | ${goneStop.text} | ${goneResume.text}`,
     );
   }
   const totalBefore = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json.total.requests;
@@ -4681,6 +4843,33 @@ try {
         stopRows.length >= 1 && stopRows.every((r) => r.classes.length === 1) && stopRows.filter((r) => /Resume sent, not yet received/.test(r.text)).every((r) => r.classes[0] === "not_observed") && stopRows.some((r) => /Resume sent, not yet received/.test(r.text)),
         JSON.stringify(stopRows),
       );
+      // E2E-WEB cycle 13 W6: a new import clears the last import's result, so a failed import never sits under
+      // "Imported: …" as if it had counted something.
+      const pageO = await browser.newPage();
+      pageO.on("pageerror", (e) => errors.push(e.message));
+      for (const pair of KO.cookie.split("; ")) {
+        const i = pair.indexOf("=");
+        await pageO.setCookie({ name: pair.slice(0, i), value: pair.slice(i + 1), url: BASE });
+      }
+      await pageO.goto(`${BASE}/app/w/${AK}/asks`, { waitUntil: "networkidle0" });
+      await pageO.click("#import-asks summary");
+      const importText = async (text) => {
+        await pageO.$eval("#import-asks textarea", (t) => (t.value = ""));
+        await pageO.type("#import-asks textarea", text);
+        await pageO.evaluate(() => [...document.querySelectorAll("#import-asks button")].find((b) => b.textContent === "Import")?.click());
+      };
+      await importText(JSON.stringify([{ team_id: TS, text: "W6 imported ask", source: { kind: "manual", date: "2026-10-02" } }]));
+      await pageO.waitForFunction(() => document.querySelector("#import-asks")?.innerText.includes("Imported:"), { timeout: 15000 }).catch(() => undefined);
+      const w6First = await pageO.evaluate(() => document.querySelector("#import-asks")?.innerText ?? "");
+      await importText("not json");
+      await pageO.waitForFunction(() => !!document.querySelector('#import-asks [role="alert"]'), { timeout: 15000 }).catch(() => undefined);
+      const w6Second = await pageO.evaluate(() => document.querySelector("#import-asks")?.innerText ?? "");
+      check(
+        "c13 W6 (ui, E2E-WEB cycle 13): Import asks shows \"Imported: 1 new, …\"; a second import that fails shows only its error, never the first import's counts beside it",
+        w6First.includes("Imported: 1 new, 0 came up again, 0 already recorded.") && w6Second.includes("Paste valid JSON") && !w6Second.includes("Imported:") && errors.length === 0,
+        `${w6First.slice(-300)} | ${w6Second.slice(-300)} ${errors.join(" | ")}`,
+      );
+      await pageO.close();
     } catch (e) {
       check("ui (Chrome) asks and activity run", false, e?.stack ?? e);
     } finally {
@@ -5801,6 +5990,12 @@ try {
             JSON.stringify(ui.radios) === JSON.stringify(["replan", "checkpoint", "switch_goal"]) && /Checkpoint/.test(ui.cp) && ui.cp.includes(QNOTE) && /declined/.test(ui.cp) && /accepted by the developer/.test(ui.cp) && errors.length === 0,
           `${JSON.stringify(ui).slice(0, 600)} ${errors.join(" | ")}`,
         );
+        check(
+          "c13 recent sign-in (E2E-AGENT cycle 13, section 5): beside Release the goal page says before the press that releasing needs a sign-in from the last 15 minutes, and that with an older one Align asks to sign in again and comes back here to press Release again (holding says the same beside its button)",
+          (await page.evaluate(() => document.querySelector("[data-hold-hint]")?.innerText ?? "")) ===
+            "Releasing needs a sign-in from the last 15 minutes: with an older one, Align asks you to sign in again and brings you back here to press Release again.",
+          await page.evaluate(() => document.querySelector("#agents-on-goal")?.innerText ?? ""),
+        );
         await page.click('input[name="request-type"][value="replan"]');
         await page.type("#send-request textarea", "From the browser");
         const sentResp = page.waitForResponse((r) => r.url().endsWith(`/goals/${GR.id}/requests`) && r.request().method() === "POST");
@@ -6831,7 +7026,7 @@ try {
     check(
       "B1: saving a new version through the goal form (depends_on as the editor sees it, without the goal they can't read) keeps that dependency: GET says hidden_depends_on 1 and the new version still depends on it; five visible plus the kept one -> 400 naming the goal they can't see",
       gciDep.status === 201 && [200, 204].includes(leave.status) && JSON.stringify(faDetail?.goal?.depends_on) === "[]" && faDetail.hidden_depends_on === 1 && formSave.status === 201 && JSON.stringify(foSees?.depends_on) === JSON.stringify([GGH.id]) && foSees.title === "Cut CI time in half (p50)" &&
-        sixDeps.status === 400 && /goal you can't see/.test(sixDeps.json?.message ?? ""),
+        sixDeps.status === 400 && sixDeps.json?.error === "too_many_dependencies" && sixDeps.json.message === "A goal can depend on at most 5 other goals, and 1 goal you can't see stays on its list; choose fewer.",
       `${gciDep.status} ${leave.status} ${JSON.stringify(faDetail?.goal?.depends_on)} ${faDetail?.hidden_depends_on} ${formSave.status} ${formSave.text.slice(0, 200)} ${JSON.stringify(foSees?.depends_on)} ${sixDeps.status} ${sixDeps.text}`,
     );
 
@@ -8518,6 +8713,14 @@ try {
 
     // X3 setup: YA proposes a new target for YO's goal with a reason; YO counters without a note.
     const rl = await ya(YA, "POST", "/reallocations", { targets: [{ goal_id: GT?.id, target_share: 15 }], note: "Docs need more time" });
+    // E2E-WEB cycle 13 W5: a counter with exactly the proposal's targets is refused as a change request's is.
+    const rlSame = await ya(YO, "POST", `/reallocations/${rl.json?.id}/counter`, { revision: 1, targets: [{ goal_id: GT?.id, target_share: 15 }], note: "Same again" });
+    const rlAfterSame = (await ya(YO, "GET", `/reallocations/${rl.json?.id}`)).json;
+    check(
+      "c13 W5 (E2E-WEB cycle 13): a target-change counter asking for exactly the proposal's targets -> 409 no_change \"That's what the proposal already asks for: approve it instead.\" (as a change request's counter says); nothing recorded: still pending at revision 1",
+      rlSame.status === 409 && rlSame.json?.error === "no_change" && rlSame.json.message === "That's what the proposal already asks for: approve it instead." && rlAfterSame?.state === "pending" && rlAfterSame.revision === 1,
+      `${rlSame.status} ${rlSame.text} ${rlAfterSame?.state} ${rlAfterSame?.revision}`,
+    );
     const rlCtr = await ya(YO, "POST", `/reallocations/${rl.json?.id}/counter`, { revision: 1, targets: [{ goal_id: GT?.id, target_share: 12 }] });
     check("c4 web fix setup (X3): a proposal with a reason, countered with no note", rl.status === 201 && rlCtr.status === 200 && rlCtr.json?.state === "countered" && rlCtr.json.note === null, `${rl.status} ${rl.text.slice(0, 200)} ${rlCtr.status} ${rlCtr.text.slice(0, 200)}`);
 
@@ -8709,7 +8912,7 @@ try {
       mcpAll.slice(0, 900),
     );
     // A count followed by a fixed plural noun, without count() (lib/v2/plural.mts), in any MCP or server message.
-    const VERBS = new Set(["is", "was", "has", "does", "needs", "counts", "contributes", "stays", "updates", "yours"]);
+    const VERBS = new Set(["is", "was", "has", "does", "needs", "counts", "contributes", "stays", "updates", "yours", "runs", "gives"]);
     const PLURAL_OK = [
       ["lib/v2/validate.ts", "${k} items are too long"], // k is a field name
       ["lib/v2/goals.ts", "anchors.${k} items are too long"], // k is a field name
@@ -11253,6 +11456,16 @@ try {
   );
   // -- the operator approves: an email-bound code, emailed, never printed --
   const noSecret = admin(["requests", "approve", aliceReq.id], { ...opGate, ALIGN_SECRET: undefined });
+  // E2E-WEB cycle 13 W7: hosted, without ALIGN_PUBLIC_ORIGIN in its environment, the script refuses to email a link to
+  // this machine; nothing is approved or sent.
+  const mailsBeforeNoOrigin = mails.length;
+  const noOrigin = await adminAsync(["requests", "approve", aliceReq.id], { ...opGate, ALIGN_PUBLIC_ORIGIN: undefined });
+  const aliceAfterNoOrigin = withDb((d) => d.prepare("SELECT status, code_id FROM v2_access_requests WHERE id = ?").get(aliceReq.id));
+  check(
+    "c13 W7 (E2E-WEB cycle 13): align-admin requests approve, hosted with the email settings but no ALIGN_PUBLIC_ORIGIN, exits 1 saying the link would point at this machine (run it where the variable is set, or --print); the request stays pending with no code, and no email is sent",
+    noOrigin.status === 1 && noOrigin.err.includes("ALIGN_PUBLIC_ORIGIN is not set in this shell") && noOrigin.err.includes("--print") && aliceAfterNoOrigin?.status === "pending" && aliceAfterNoOrigin.code_id === null && mails.length === mailsBeforeNoOrigin,
+    `${noOrigin.status} ${noOrigin.out} ${noOrigin.err} ${JSON.stringify(aliceAfterNoOrigin)}`,
+  );
   const mailsBeforeApprove = mails.length;
   const approveG = await adminAsync(["requests", "approve", aliceReq.id], opGate);
   const aliceMail = mails.slice(mailsBeforeApprove).find((m) => m.body?.to === "alice@example.test");
@@ -11294,6 +11507,21 @@ try {
     redeemedEv.length === 1 && redeemedEv[0].ws_id === W2.json?.id && redeemedEv[0].actor === eventActor(good.ALIGN_SECRET, withDb((d) => d.prepare("SELECT id FROM ba_user WHERE email = ?").get("alice@example.test")?.id)) &&
       gEv("workspace_created", W1.json?.id).length === 1 && gEv("code_redeemed", W1.json?.id).length === 0 && gEv("workspace_created", W2.json?.id).length === 1,
     JSON.stringify(redeemedEv),
+  );
+  // E2E-WEB cycle 13 W7: in Mode L (no HOSTED) with no ALIGN_PUBLIC_ORIGIN the emailed link stays this computer's local
+  // address, and both the email and the script's output say it is local.
+  const localReqId = "ar_c13w7localaaaaaaaaaaaaaa";
+  withDb((d) =>
+    d.prepare("INSERT INTO v2_access_requests (id, email, name, use_case, interest, status, created_at) VALUES (?, ?, ?, ?, 'try', 'pending', ?)").run(localReqId, "local-link@example.test", "Lo Cal", "Local link", new Date().toISOString()),
+  );
+  const mailsBeforeLocal = mails.length;
+  const localApprove = await adminAsync(["requests", "approve", localReqId], { ...opGate, HOSTED: undefined, ALIGN_PUBLIC_ORIGIN: undefined });
+  const localMail = mails.slice(mailsBeforeLocal).find((m) => m.body?.to === "local-link@example.test");
+  check(
+    "c13 W7 (E2E-WEB cycle 13): align-admin requests approve in Mode L with no ALIGN_PUBLIC_ORIGIN still emails the local sign-in link (http://127.0.0.1:3100/app/sign-in?…), the email saying it is a local address that opens only on the computer Align runs on, and the output saying the link is this computer's local address and to set ALIGN_PUBLIC_ORIGIN for one others can open",
+    localApprove.status === 0 && localMail?.body?.text.includes("http://127.0.0.1:3100/app/sign-in?email=local-link%40example.test (a local address: it opens only on the computer Align runs on") &&
+      localApprove.out.includes("this computer's local address") && localApprove.out.includes("Set ALIGN_PUBLIC_ORIGIN"),
+    `${localApprove.status} ${localApprove.out} ${localApprove.err} ${JSON.stringify(localMail?.body)}`,
   );
   // -- codes made by the operator: revoked, expired and bound to someone else don't work; a disposable address can't create --
   const gMade = admin(["codes", "create", "--count", "4"], opGate);

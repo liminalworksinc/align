@@ -21,6 +21,17 @@ export interface FieldDiff {
   hidden?: { before: number; after: number } | null;
 }
 
+/** How many goals one goal may depend on (lib/v2/goals.ts refuses more; the goal forms stop at it: E2E-WEB cycle 13 W4). */
+export const DEPENDS_ON_MAX = 5;
+
+/** The goal forms' note once Depends on is full (`ticked` plus the `hidden` ones the reader can't see, which stay and
+ *  count), null before: said before the person presses anything, so the server's refusal is never how they learn it. */
+export function dependsOnFull(ticked: number, hidden: number): string | null {
+  if (ticked + hidden < DEPENDS_ON_MAX) return null;
+  const also = hidden ? ` (${hidden === 1 ? "1 of them a goal you can't see, which stays" : `${hidden} of them goals you can't see, which stay`})` : "";
+  return `A goal can depend on at most ${DEPENDS_ON_MAX} other goals${also}. Untick one to choose another.`;
+}
+
 /** "a goal you can't see" / "2 goals you can't see": dependencies the reader can't read, never named. */
 export const hiddenGoals = (n: number) => (n === 1 ? "a goal you can't see" : `${n} goals you can't see`);
 
@@ -124,6 +135,10 @@ export function counterSameAsBase(baseVersion: number, goalVersion: number): str
 
 /** A counter identical to the request with no "Accept if…" condition: the server's 409 no_change and the form's reason
  *  (W4). A request behind its goal is approved once its requester updates it. */
+/** A target-change counter that asks for exactly the proposal's targets (409 no_change; the counter form says it before
+ *  sending): approving the proposal is what it means (E2E-WEB cycle 13 W5). */
+export const COUNTER_SAME_AS_PROPOSAL = "That's what the proposal already asks for: approve it instead.";
+
 export function counterSameAsRequest(requester: string, baseVersion: number, goalVersion: number): string {
   return baseVersion === goalVersion ? "That's what the request already asks for: approve it instead." : `That's what the request already asks for: approve it once ${requester} updates it to version ${goalVersion}.`;
 }

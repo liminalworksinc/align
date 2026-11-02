@@ -1106,7 +1106,7 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 #### Scenario: A session ended by leaving the workspace
 
 - **WHEN** a member who was removed from the workspace (or left it) while a session of theirs was shared is invited back and opens the tab, without the machine that shared it ticked on Join; then once that machine has the workspace again (from the Devices page, or ticked on Join); then once it has signed out (`scripts/test-v2.mjs` "S1, W7 (ui): ..." and "W7 (ui): ...")
-- **THEN** that session reads "ended: left the workspace" with the note "Sharing ended when you left this workspace (or were removed from it), so Stop or Resume can't reach it. ... <how to share it again> To keep it from being shared again, press Stop sharing for good." ("It stays stopped on your machine until you run align stop-sharing there." in between when its agent was stopped), where how to share it again follows where that machine (the session list's `device`) stands now: still paired without the workspace, "To share it again now that you are back, give its machine, <device name>, this workspace on your Devices page (Give this device the workspace), then run ::align share in the session." with a link to `/app/devices` (never `align login`, which would end that machine's shares in its other workspaces); given the workspace again, "Its machine, <device name>, has this workspace again: to share it again, run ::align share in the session."; signed out, "To share it again now that you are back, run align login on that machine (it has signed out of Align) and give it this workspace, then ::align share in the session."
+- **THEN** that session reads "ended: left the workspace" with the note "Sharing ended when you left this workspace (or were removed from it), so Stop or Resume can't reach it. ... <how to share it again> To keep it from being shared again, press Stop sharing for good." ("It stays stopped on your machine until you run align stop-sharing there." in between when its agent was stopped), where how to share it again follows where that machine (the session list's `device`) stands now, in the words Stop and Resume's `member_removed` refusal uses too (`directives` "The session's person left the workspace"): still paired without the workspace, "To share it again now that you are back, give its machine, <device name>, this workspace on your Devices page (Give this device the workspace), then run ::align share in the session." with a link to `/app/devices` (never `align login`, which would end that machine's shares in its other workspaces); given the workspace again, "Its machine, <device name>, has this workspace again: to share it again, run ::align share in the session."; signed out, "To share it again now that you are back, run align login on that machine (it has signed out of Align) and give it this workspace, then ::align share in the session."
 
 #### Scenario: Stopping an ended session for good
 
@@ -1218,7 +1218,13 @@ The goal page SHALL show, under the "Agent activity" card, an "Agents on this go
 when the goal has requests. For a person who may hold the goal it SHALL offer **Hold all agents on this goal** with an
 optional reason (at most 280 characters, "shown to the developers") while the goal is active and not held, and
 **Release** while it is held, calling `PUT` and `DELETE /api/v2/workspaces/<ws>/goals/<goal>/hold` and showing
-**Sign in again** on 403 `reauth_required`. For a person who may send requests it SHALL offer "Send a request" with
+**Sign in again** on 403 `reauth_required`. Each button SHALL say before it is pressed that it needs a sign-in from the
+last 15 minutes (a developer told to lift a hold "from the web" otherwise meets it only as a refusal: E2E-AGENT cycle
+13, section 5): under **Release** "Releasing needs a sign-in from the last 15 minutes: with an older one, Align asks you
+to sign in again and brings you back here to press Release again." (`scripts/test-v2.mjs` "c13 recent sign-in ..."),
+and under **Hold all agents on this goal** "Align blocks their tools until someone who can approve for the goal
+releases it. Holding, like releasing, needs a sign-in from the last 15 minutes: with an older one, Align asks you to
+sign in again and brings you back here." For a person who may send requests it SHALL offer "Send a request" with
 the type choices Replan, Checkpoint and Switch goal (each with a sentence saying what the agent does and whether the
 developer is asked first), for Switch goal a checkbox per session on the goal (its name, then "started <time> · …<the
 key's last 6 characters>", so two sessions of one person in one repository can be told apart) and a target-goal picker of the other

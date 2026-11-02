@@ -1,38 +1,31 @@
 import { badRequest } from "./errors";
+import { BLANK_FILLERS, cleanProse, dropInvisible, isBlankText } from "./text-core.mts";
 
 // Small field validators for v2 request bodies. Every failure is 400 with the field's name.
 
 export type Body = Record<string, unknown>;
 
+/** A string field, cleaned as people's text is (`cleanProse`: invisible characters dropped, blank fillers made spaces,
+ *  trimmed; line breaks kept), so a reason, note, condition or title of only invisible characters or marks is missing
+ *  (400 "<k> is required"), never recorded as empty text (E2E-WEB cycle 13 W3). */
 export function str(b: Body, k: string, max = 300, { min = 1 }: { min?: number } = {}): string {
   const v = b[k];
   if (typeof v !== "string") throw badRequest(`${k} must be a string`);
-  const t = v.trim();
-  if (t.length < min) throw badRequest(`${k} is required`);
+  const t = cleanProse(v);
+  if (t.length < min || (min > 0 && isBlankText(t))) throw badRequest(`${k} is required`);
   if (t.length > max) throw badRequest(`${k} is too long (max ${max} characters)`);
   return t;
 }
 
-/** Characters a one-line name never keeps, by Unicode property rather than a list (W3): controls (category Cc: C0, DEL,
- *  C1), Unicode line and paragraph separators and the blank fillers that render as nothing (Hangul fillers U+115F,
- *  U+1160, U+3164, U+FFA0 and the Braille blank U+2800) become a space, as runs of whitespace do; invisible format
- *  characters (category Cf: bidirectional marks, embeddings, overrides and isolates, the Arabic letter mark, zero-width
- *  spaces, the zero-width non-joiner, word joiners, invisible operators, the byte order mark, the Mongolian vowel
- *  separator, soft hyphens) and lone surrogates (Cs) are dropped, so a name reads the same wherever it is shown. The
- *  only Cf characters kept are those an emoji is made of (E2E-WEB cycle 8 W5): a zero-width joiner between two
- *  pictographs (`👩‍💻`), and the tag characters of a tag sequence after one (U+E0020 to U+E007E ended by U+E007F, a
- *  subdivision flag such as Scotland's). */
-const NAME_SPACE = /[\p{Cc}\s\u2028\u2029\u115F\u1160\u3164\uFFA0\u2800]+/gu;
-const NAME_DROP = /[\p{Cf}\p{Cs}]/gu;
-const EMOJI_ZWJ = /(?<=\p{Extended_Pictographic}[\uFE0E\uFE0F\u{1F3FB}-\u{1F3FF}]?)\u200D(?=\p{Extended_Pictographic})/gu;
-const EMOJI_TAGS = /(?<=\p{Extended_Pictographic}\uFE0F?)[\u{E0020}-\u{E007E}]+\u{E007F}/gu;
+/** Characters a one-line name never keeps (W3): controls (category Cc: C0, DEL, C1), Unicode line and paragraph
+ *  separators and the blank fillers that render as nothing (lib/v2/text-core.mts) become a space, as runs of whitespace
+ *  do; invisible format characters and lone surrogates are dropped as in all people's text (`dropInvisible`, which keeps
+ *  emoji sequences whole), so a name reads the same wherever it is shown. */
+const NAME_SPACE = new RegExp(`[\\p{Cc}\\s\\u2028\\u2029${BLANK_FILLERS}]+`, "gu");
 
 /** `v` with the characters a one-line name never keeps dropped (or made spaces), keeping emoji sequences whole. */
 export function cleanName(v: string): string {
-  const keep = new Set<number>();
-  for (const m of v.matchAll(EMOJI_ZWJ)) keep.add(m.index);
-  for (const m of v.matchAll(EMOJI_TAGS)) for (let i = 0; i < m[0].length; i++) keep.add(m.index + i);
-  return v.replace(NAME_DROP, (c, at: number) => (keep.has(at) ? c : "")).replace(NAME_SPACE, " ");
+  return dropInvisible(v).replace(NAME_SPACE, " ");
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -51,11 +44,6 @@ const MARK = /(?!\u200D)[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}]/gu;
  *  conjuncts fit; a chain of emoji joined into one "character" (`👩‍👩‍…`) does not (E2E-WEB cycle 10 C10-3). */
 export const NAME_PARTS_PER_CHAR = 16;
 
-/** Combining marks and spaces: a name of only these (a variation selector such as U+FE0F, the combining grapheme joiner
- *  U+034F, an accent with no letter under it) renders as nothing, so it is blank, as `align login` refuses it locally
- *  (E2E-AGENT cycle 12, section 6). */
-const MARKS_AND_SPACES = /[\p{M}\s]+/gu;
-
 /** A one-line name (a device name, Z4): cleaned (`cleanName`) and trimmed; nothing left, or nothing but combining marks,
  *  is 400 "<k> is required". At
  *  most `max` characters as a person reads them (grapheme clusters, W6: never UTF-16 units, so 100 emoji fit), each
@@ -66,7 +54,7 @@ export function oneLine(b: Body, k: string, max = 300): string {
   const v = b[k];
   if (typeof v !== "string") throw badRequest(`${k} must be a string`);
   const t = cleanName(v).trim();
-  if (!t.replace(MARKS_AND_SPACES, "")) throw badRequest(`${k} is required`);
+  if (isBlankText(t)) throw badRequest(`${k} is required`);
   const chars = [...graphemes.segment(t)].map((g) => g.segment);
   if (chars.length > max) throw badRequest(`${k} is too long (max ${max} characters)`);
   if (chars.some((c) => (c.match(MARK)?.length ?? 0) > NAME_MARKS_PER_CHAR)) throw badRequest(`${k} has a character with too many accents or marks on it (at most ${NAME_MARKS_PER_CHAR} on one character)`);
@@ -75,13 +63,15 @@ export function oneLine(b: Body, k: string, max = 300): string {
   return t;
 }
 
+/** An optional string field, cleaned as `str` cleans one; nothing a person can read left is null (W3). */
 export function optStr(b: Body, k: string, max = 300): string | null {
   const v = b[k];
   if (v === undefined || v === null) return null;
   if (typeof v !== "string") throw badRequest(`${k} must be a string or null`);
-  const t = v.trim();
+  const t = cleanProse(v);
+  if (isBlankText(t)) return null;
   if (t.length > max) throw badRequest(`${k} is too long (max ${max} characters)`);
-  return t || null;
+  return t;
 }
 
 export function oneOf<T extends string>(b: Body, k: string, allowed: readonly T[]): T {

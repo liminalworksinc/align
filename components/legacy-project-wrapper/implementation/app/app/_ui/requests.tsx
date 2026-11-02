@@ -103,6 +103,12 @@ export function HoldBanner({ hold, goalTitle, me }: { hold: HoldState["held"]; g
   );
 }
 
+/** What holding and releasing ask for, said beside each button: a sign-in from the last 15 minutes, and what happens
+ *  with an older one (Sign in again comes back to this page, where the button is pressed again). */
+export const HOLD_HINT =
+  "Align blocks their tools until someone who can approve for the goal releases it. Holding, like releasing, needs a sign-in from the last 15 minutes: with an older one, Align asks you to sign in again and brings you back here.";
+export const RELEASE_HINT = "Releasing needs a sign-in from the last 15 minutes: with an older one, Align asks you to sign in again and brings you back here to press Release again.";
+
 function HoldControls({ ws, goal, me, hold, onDone }: { ws: string; goal: Goal; me: Me; hold: HoldState; onDone: () => void }) {
   const [reason, setReason] = useState("");
   const act = useAction();
@@ -117,9 +123,16 @@ function HoldControls({ ws, goal, me, hold, onDone }: { ws: string; goal: Goal; 
   return (
     <div className="mb-4 border-b border-zinc-200 pb-4">
       {hold.held ? (
-        <Btn kind="secondary" disabled={act.busy} onClick={() => void act.run(() => api(path, { method: "DELETE" }), onDone)}>
-          Release
-        </Btn>
+        <>
+          <Btn kind="secondary" disabled={act.busy} onClick={() => void act.run(() => api(path, { method: "DELETE" }), onDone)}>
+            Release
+          </Btn>
+          {/* Said before the press, as for holding: a developer told to lift a hold "from the web" otherwise meets the
+              recent sign-in only as a refusal (E2E-AGENT cycle 13, section 5). */}
+          <p className="mt-1 text-[13px] text-zinc-500" data-hold-hint>
+            {RELEASE_HINT}
+          </p>
+        </>
       ) : (
         goal.status === "active" && (
           <>
@@ -129,7 +142,9 @@ function HoldControls({ ws, goal, me, hold, onDone }: { ws: string; goal: Goal; 
             <Btn kind="danger" disabled={act.busy} onClick={() => void act.run(() => api(path, { method: "PUT", body: { reason: reason || null } }), onDone)}>
               Hold all agents on this goal
             </Btn>
-            <p className="mt-1 text-[13px] text-zinc-500">Align blocks their tools until you release it. It asks for a recent sign-in.</p>
+            <p className="mt-1 text-[13px] text-zinc-500" data-hold-hint>
+              {HOLD_HINT}
+            </p>
           </>
         )
       )}

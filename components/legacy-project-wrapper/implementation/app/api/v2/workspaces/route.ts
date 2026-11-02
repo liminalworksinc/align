@@ -1,5 +1,5 @@
 import { readJson, route, webAuth, webWrite } from "@/lib/v2/http";
-import { optStr, str } from "@/lib/v2/validate";
+import { oneLine, optStr } from "@/lib/v2/validate";
 import { createWorkspace, deletedWorkspacesFor, workspacesFor } from "@/lib/v2/workspaces";
 
 // GET /api/v2/workspaces (cookie): mine, and the deleted ones I own that can still be restored.
@@ -14,5 +14,5 @@ export const GET = route(async (req) => {
 export const POST = route(async (req) => {
   const p = await webWrite(req);
   const b = await readJson(req, 4096);
-  return Response.json(await createWorkspace(req, p, str(b, "name", 100), optStr(b, "creation_code", 100)), { status: 201 });
+  return Response.json(await createWorkspace(req, p, oneLine(b, "name", 100), optStr(b, "creation_code", 100)), { status: 201 });
 });

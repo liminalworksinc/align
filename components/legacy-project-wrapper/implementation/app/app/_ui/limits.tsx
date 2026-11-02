@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, ApiError, Btn, Card, Err, Field, go, Input, Note, Pill, Select, TextArea, useAction, useApi } from "./kit";
 import type { Goal, Limit, WsDetail } from "./types";
+import { isBlankText } from "@/lib/v2/text-core.mts";
 
 // A goal's limits in the web app (PORT-002): the chips on the Goals tab, the Limits card on the goal page, the limit
 // editor of the goal forms (re-exported by goalform.tsx with the other editors), and "Paste meeting notes", which
@@ -157,7 +158,7 @@ function SuggestLimit({ ws, goal, onClose, onDone }: { ws: string; goal: Goal; o
         <TextArea rows={2} value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} required />
       </Field>
       <div className="flex flex-wrap gap-2">
-        <Btn type="submit" disabled={act.busy || !changed || !reason.trim()}>
+        <Btn type="submit" disabled={act.busy || !changed || isBlankText(reason)}>
           Send for approval
         </Btn>
         <Btn kind="secondary" onClick={onClose}>
@@ -337,7 +338,7 @@ export function NotesSuggest({ ws, preferGoalId, onDone }: { ws: string; preferG
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
           </Field>
         </div>
-        <Btn type="submit" disabled={act.busy || !notes.trim() || !date}>
+        <Btn type="submit" disabled={act.busy || isBlankText(notes) || !date}>
           Suggest limits
         </Btn>
       </form>

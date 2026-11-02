@@ -12,6 +12,7 @@ import { feedAllocation } from "./allocation";
 import { workspaceSteering } from "./steering";
 import { supersedeReallocations } from "./reallocations";
 import { optStr, str, type Body } from "./validate";
+import { DEPENDS_ON_MAX } from "./change-words.mts";
 
 // Goals and their immutable versions. A goal's current fields live on v2_goals; every version (including the
 // first) is also kept in v2_goal_versions with a content hash. Level, team and visibility are fixed at creation.
@@ -291,6 +292,14 @@ export function unreadableGoals(pp: PolicyPrincipal, ids: string[]): string[] {
   });
 }
 
+/** More dependencies than a goal may have, in words a person can act on, never the field's name (E2E-WEB cycle 13 W4):
+ *  the forms stop at the limit before this, so only an API client or a list changed meanwhile reaches it. `kept` counts
+ *  the goals the sender can't see, which stay on the list and count too. */
+function tooManyDependencies(kept: number): string {
+  const also = kept ? `, and ${kept === 1 ? "1 goal you can't see stays" : `${kept} goals you can't see stay`} on its list` : "";
+  return `A goal can depend on at most ${DEPENDS_ON_MAX} other goals${also}; choose fewer.`;
+}
+
 /** A depends_on list from a body. Every goal sent must be one the caller can read (404 otherwise). The dependencies in
  *  `keepFrom` (by default `prev`) the caller can't read are kept: they never saw them, so a list without them is not a
  *  request to drop them (a goal form only lists what its reader can see). A counter keeps them from the request it
@@ -298,7 +307,7 @@ export function unreadableGoals(pp: PolicyPrincipal, ids: string[]): string[] {
 function dependsIn(pp: PolicyPrincipal, v: unknown, self: string | null, prev: string[] = [], keepFrom: string[] = prev): string[] {
   if (v === undefined) return prev;
   if (!Array.isArray(v)) throw badRequest("depends_on must be a list of goal ids");
-  if (v.length > 5) throw badRequest("depends_on: at most 5");
+  if (v.length > DEPENDS_ON_MAX) throw badRequest(tooManyDependencies(0), "too_many_dependencies");
   const out: string[] = [];
   for (const id of v) {
     if (typeof id !== "string" || id === self) throw badRequest("depends_on must list other goals");
@@ -307,7 +316,7 @@ function dependsIn(pp: PolicyPrincipal, v: unknown, self: string | null, prev: s
     if (!out.includes(id)) out.push(id);
   }
   const kept = unreadableGoals(pp, keepFrom).filter((id) => !out.includes(id));
-  if (out.length + kept.length > 5) throw badRequest(`depends_on: at most 5, and ${kept.length === 1 ? "1 goal you can't see stays" : `${kept.length} goals you can't see stay`} on the list`);
+  if (out.length + kept.length > DEPENDS_ON_MAX) throw badRequest(tooManyDependencies(kept.length), "too_many_dependencies");
   return [...out, ...kept];
 }
 

@@ -13,6 +13,7 @@ import type { Principal } from "./http";
 import { need } from "./workspaces";
 import { expireStoppedSessionTargets, holdNewlyBound } from "./requests";
 import { personName } from "./retention";
+import { shareAgainText, shareAgainWords } from "./share-again.mts";
 import { b64url, iso, nonNegInt, oneOf, optInt, optStr, str, type Body } from "./validate";
 
 // Shared sessions, binding epochs and usage. docs/v2/WIRE.md "Shared sessions".
@@ -449,19 +450,23 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
 }
 
 /** Why a stop or resume can't reach a session that ended when its person left the workspace, and what shares it again
- *  as things stand: back in the workspace, with its machine given the workspace again, `::align share` in that session
- *  shares it again (which the machine offers), and then Stop and Resume here reach it (E2E-AGENT cycle 12, section 6:
- *  never only "align stop-sharing", which gives the session up). Its person is "you" to the reader. */
+ *  as things stand (E2E-AGENT cycle 12, section 6: never only "align stop-sharing", which gives the session up): while
+ *  they are out, back in the workspace with its machine given the workspace again; once they are back, the Sessions
+ *  tab's own words for where that machine stands (lib/v2/share-again.mts, E2E-WEB cycle 13 W1: a signed-out machine
+ *  needs align login, never just "has this workspace again"), then Stop and Resume here reach it; and once their
+ *  account is deleted, nothing (its devices are gone and nobody else can share it: E2E-WEB cycle 13 C13-1). Its
+ *  person is "you" to the reader. */
 function memberRemovedRefusal(pp: PolicyPrincipal, s: SessionRow): string {
   const you = s.user_id === pp.userId;
-  const name = personName(s.user_id, get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", s.user_id)?.name);
+  const user = get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", s.user_id);
+  const name = personName(s.user_id, user?.name);
   const lead = `This session's sharing ended when ${you ? "you" : name} left this workspace, so a stop or resume can't reach it.`;
-  const then = "::align share in that session shares it again, and then Stop and Resume here reach it.";
+  if (!user) return `${lead} Their account was deleted, so nothing can share it again.`;
   const member = !!get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", pp.wsId, s.user_id);
-  if (!member) return `${lead} Once ${you ? "you are" : `${name} is`} back in the workspace and the machine that shared it has the workspace again, ${then}`;
-  const machine = sharedFrom(pp.wsId, s.device_id);
-  if (machine?.has_workspace) return `${lead} Its machine, ${machine.name}, has this workspace again: ${then}`;
-  return `${lead} Once the machine that shared it has this workspace again, ${then}`;
+  if (!member) {
+    return `${lead} Once ${you ? "you are" : `${name} is`} back in the workspace and the machine that shared it has the workspace again, ::align share in that session shares it again, and then Stop and Resume here reach it.`;
+  }
+  return `${lead} ${shareAgainText(shareAgainWords(sharedFrom(pp.wsId, s.device_id), you ? null : name))} Then Stop and Resume here reach it.`;
 }
 
 /** The machine that shared one of the caller's own sessions, as the Sessions tab words how to share it again (W7): its
