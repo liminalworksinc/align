@@ -8,7 +8,13 @@ interface Pending {
   device_name: string;
   requested_at: string;
   age_seconds: number;
+  /** The code this device was looked up by: Approve and Deny act on it, never on what the field holds now (E2E-WEB cycle
+   *  10 C10-1). */
+  code: string;
 }
+
+/** A code as the server reads it (case, spaces and dashes aside), so editing the field to the same code keeps the panel. */
+const codeKey = (c: string) => c.toUpperCase().replace(/[^A-Z]/g, "");
 
 /** “a”, “a” and “b”, “a”, “b” and “c”. */
 const quoted = (names: string[]) => {
@@ -51,18 +57,32 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
       // so do its ticks, so a workspace ticked for one device is never approved for the next (E2E-WEB cycle 9 C9-2).
       setPending(null);
       setChosen([]);
-      setPending(
-        await api<Pending>(`/api/v2/device/requests/${encodeURIComponent(code.trim())}`).catch((e) => {
-          throw new Error(e.status === 404 ? NOT_WAITING : e.message);
-        }),
-      );
+      const looked = code.trim();
+      const found = await api<Omit<Pending, "code">>(`/api/v2/device/requests/${encodeURIComponent(looked)}`).catch((e) => {
+        throw new Error(e.status === 404 ? NOT_WAITING : e.message);
+      });
+      setPending({ ...found, code: looked });
     });
+
+  /** The field changed to another code: the panel and its ticks belong to the device looked up before, so they go, as
+   *  a new Look up would clear them (E2E-WEB cycle 10 C10-1). */
+  const edit = (next: string) => {
+    setCode(next);
+    if (pending && codeKey(next) !== codeKey(pending.code)) {
+      setPending(null);
+      setChosen([]);
+      act.setError(null);
+    }
+  };
 
   const decide = (approve: boolean) =>
     act.run(async () => {
+      // Only the device whose panel is shown: the code it was looked up by.
+      const target = pending?.code;
+      if (!target) return;
       let out: { device_name?: string; asked_as?: string; same_name?: string[] };
       try {
-        out = await api(approve ? "/api/v2/device/approve" : "/api/v2/device/deny", { body: approve ? { user_code: code.trim(), workspace_ids: chosen } : { user_code: code.trim() } });
+        out = await api(approve ? "/api/v2/device/approve" : "/api/v2/device/deny", { body: approve ? { user_code: target, workspace_ids: chosen } : { user_code: target } });
       } catch (e) {
         // The sign-in aged past 15 minutes while the page was open: nothing was approved.
         if (e instanceof ApiError && e.code === "reauth_required") {
@@ -109,7 +129,7 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
             }}
           >
             <Field label="Code from align login">
-              <Input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="BCDF-GHJK" maxLength={12} autoComplete="off" required />
+              <Input value={code} onChange={(e) => edit(e.target.value.toUpperCase())} placeholder="BCDF-GHJK" maxLength={12} autoComplete="off" required />
             </Field>
             <Btn type="submit" kind="secondary" disabled={act.busy || !code.trim()}>
               Look up
@@ -117,7 +137,7 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
           </form>
           {pending && (
             <div className="mt-5 rounded-[12px] border border-zinc-300 p-4">
-              <p className="text-[17px] text-zinc-900">{pending.device_name}</p>
+              <p className="overflow-hidden text-[17px] text-zinc-900 [overflow-wrap:anywhere]">{pending.device_name}</p>
               <p className="mb-3 text-[14px] text-zinc-500">Asked {ago(pending.age_seconds)}</p>
               <p className="mb-2 text-[15px] text-zinc-600">Workspaces this device may use:</p>
               {list.data?.workspaces.map((w) => (
@@ -137,7 +157,11 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
               </div>
             </div>
           )}
-          {done && <Note>{done}</Note>}
+          {done && (
+            <Note>
+              <span className="block overflow-hidden [overflow-wrap:anywhere]">{done}</span>
+            </Note>
+          )}
           <Err>{act.error}</Err>
         </Card>
       )}

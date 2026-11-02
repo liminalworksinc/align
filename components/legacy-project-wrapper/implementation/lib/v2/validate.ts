@@ -41,10 +41,15 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 export const charCount = (v: string): number => [...graphemes.segment(v)].length;
 
 /** Combining marks one character of a one-line name may carry: enough for any script's real clusters (Vietnamese stacks
- *  two, Devanagari and Tibetan clusters up to five, an emoji's variation selectors and keycap three), never a tower
- *  of accents that draws over the page around it (E2E-WEB cycle 9 C9-3). */
+ *  two, Devanagari and Tibetan clusters up to five, an emoji's variation selectors and keycap three, a subdivision
+ *  flag's six tags), never a tower of accents that draws over the page around it (E2E-WEB cycle 9 C9-3). Every
+ *  grapheme extender counts, not only category M: half-width voiced sound marks (U+FF9E) and emoji skin-tone modifiers
+ *  join the character before them too (E2E-WEB cycle 10 C10-3); the zero-width joiner of an emoji sequence does not. */
 export const NAME_MARKS_PER_CHAR = 6;
-const MARK = /\p{M}/gu;
+const MARK = /(?!\u200D)[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}]/gu;
+/** Code points one character may be built of: the longest emoji (a kiss with two skin tones, 10) and the longest
+ *  conjuncts fit; a chain of emoji joined into one "character" (`👩‍👩‍…`) does not (E2E-WEB cycle 10 C10-3). */
+export const NAME_PARTS_PER_CHAR = 16;
 
 /** A one-line name (a device name, Z4): cleaned (`cleanName`) and trimmed; nothing left is 400 "<k> is required". At
  *  most `max` characters as a person reads them (grapheme clusters, W6: never UTF-16 units, so 100 emoji fit), each
@@ -59,6 +64,7 @@ export function oneLine(b: Body, k: string, max = 300): string {
   const chars = [...graphemes.segment(t)].map((g) => g.segment);
   if (chars.length > max) throw badRequest(`${k} is too long (max ${max} characters)`);
   if (chars.some((c) => (c.match(MARK)?.length ?? 0) > NAME_MARKS_PER_CHAR)) throw badRequest(`${k} has a character with too many accents or marks on it (at most ${NAME_MARKS_PER_CHAR} on one character)`);
+  if (chars.some((c) => [...c].length > NAME_PARTS_PER_CHAR)) throw badRequest(`${k} has a character joined from too many parts (at most ${NAME_PARTS_PER_CHAR} in one character)`);
   if (Buffer.byteLength(t, "utf8") > max * 16) throw badRequest(`${k} is too long to store: emoji such as families and flags take much more room than letters, so use fewer of them`);
   return t;
 }

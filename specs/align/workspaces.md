@@ -1137,10 +1137,14 @@ to U+E007E ended by the cancel tag U+E007F right after an Extended_Pictographic 
 U+FE0F), as in a subdivision flag; a joiner between letters, or a tag character anywhere else, is dropped. The limit
 SHALL count the characters a person reads (extended grapheme clusters: `👩‍💻` or a flag is one), at most 100, never
 UTF-16 units (`device_name is too long (max 100 characters)`); each character SHALL carry at most 6 combining marks
-(Unicode category M; enough for decomposed Vietnamese, Devanagari and Tibetan clusters and an emoji's variation
-selectors and keycap), so a character built of tens or hundreds of combining marks, which would draw over the page
-around it, is refused (`device_name has a character with too many accents or marks on it (at most 6 on one
-character)`); and the name SHALL also be at most 1600 bytes of UTF-8, which only long emoji sequences reach, refused in
+(every grapheme extender, not only Unicode category M: half-width voiced sound marks such as U+FF9E and emoji
+skin-tone modifiers count too, a zero-width joiner does not; enough for decomposed Vietnamese, Devanagari and Tibetan
+clusters, an emoji's variation selectors and keycap, a family's skin tones and a subdivision flag's tags), so a
+character built of tens or hundreds of combining marks, which would draw over the page around it, is refused
+(`device_name has a character with too many accents or marks on it (at most 6 on one character)`), and SHALL be built
+of at most 16 code points (the longest emoji, a kiss with two skin tones, is 10), so a chain of emoji joined into one
+character is refused (`device_name has a character joined from too many parts (at most 16 in one character)`)
+(E2E-WEB cycle 10 C10-3); and the name SHALL also be at most 1600 bytes of UTF-8, which only long emoji sequences reach, refused in
 words the person can act on rather than a byte count (`device_name is too long to store: emoji such as families and
 flags take much more room than letters, so use fewer of them`); a name with nothing left SHALL be 400 `device_name is
 required`. `align login` SHALL show such a refusal as `align: the device name was refused: it <reason>. Pass another
@@ -1171,6 +1175,11 @@ from a live device is passed back: a replacement whose name is exactly the name 
 
 - **WHEN** a device authorizes with `a` plus 700 combining acute accents (1,401 bytes), with `a` plus 7, with decomposed Vietnamese, a Devanagari conjunct, a keycap emoji and `a` plus 6 marks, and with 100 family emoji (`scripts/test-v2.mjs` "C9-3 (E2E-WEB cycle 9): ..." and "W6 (E2E-WEB cycle 8) and W5 (E2E-WEB cycle 9): ..."; the CLI in test `findings10` "a refused device name")
 - **THEN** the first two are 400 `device_name has a character with too many accents or marks on it (at most 6 on one character)`, the third is accepted, the last is 400 `device_name is too long to store: emoji such as families and flags take much more room than letters, so use fewer of them`, and `align login --name` with such a name exits 2 saying why and how to pass another
+
+#### Scenario: Grapheme extenders and joined parts in a device name
+
+- **WHEN** a device authorizes with `ｶ` plus 150 × U+FF9E, with `👋` plus 50 skin-tone modifiers, with 21 women joined by zero-width joiners, and with a kiss with two skin tones, a family with four, the Scotland flag and `ｶﾞ` (`scripts/test-v2.mjs` "C10-3 (E2E-WEB cycle 10): ...")
+- **THEN** the first two are 400 `device_name has a character with too many accents or marks on it (at most 6 on one character)`, the third is 400 `device_name has a character joined from too many parts (at most 16 in one character)`, and the last is accepted
 
 #### Scenario: A name asked for is kept when it replaces a live pairing
 

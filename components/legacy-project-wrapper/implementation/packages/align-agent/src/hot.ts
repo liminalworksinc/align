@@ -1,13 +1,15 @@
 // Hot files are a projection of the database, rewritten whole after every change, so the CLI, the sync job and the hooks can all
 // update state without racing on the files. Hooks read only these files.
 import type { Ctx } from "./context.ts";
-import { signedIn } from "./api.ts";
+import { loadCredentials, signedIn } from "./api.ts";
 import { kvGet, kvSet, nowIso } from "./db.ts";
 import { getSession } from "./ledger.ts";
 import { layout } from "./shared/layout.ts";
 import { removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { contextGoals, snapshot } from "./shared/goaltree.ts";
+import { clean } from "./shared/envelope.ts";
 import { readJson } from "./shared/fsx.ts";
+import type { ReleaseReaches } from "./shared/ended.ts";
 import type { EndedWhy, GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, MeFile, RequestState, ShareState } from "./shared/types.ts";
 
 export { snapshot };
@@ -123,7 +125,10 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   const pending = ctx.db.prepare("SELECT * FROM pending_bindings WHERE local_id=?").get(lid) as
     | { id: string; goal_id: string | null; goal_json: string | null; cause: string; directive_id: string | null }
     | undefined;
-  const notices = ctx.db.prepare("SELECT id, text FROM notices WHERE local_id=? ORDER BY created_at, rowid").all(lid) as { id: string; text: string }[];
+  const held = kvGet(ctx.db, ENDED_UNREAD) && signedIn(ctx.home);
+  const notices = (ctx.db.prepare("SELECT id, text FROM notices WHERE local_id=? ORDER BY created_at, rowid").all(lid) as { id: string; text: string }[]).filter(
+    (n) => !held || !n.id.slice(lid.length + 1).startsWith("signed_out_"),
+  );
   const pendingDirs = (
     ctx.db
       .prepare("SELECT d.id AS id, d.kind AS kind FROM directive_sessions ds JOIN directives d ON d.id=ds.directive_id WHERE ds.local_id=? AND ds.state='received' ORDER BY d.seq")
@@ -171,14 +176,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
   // session can be shared there again now (signed in again, its workspace in reach again), the latch says that instead,
   // so the deny gives the same advice as the session's notice: `::align share` (C6-2).
   const end = endedState(ctx, share);
-  const ended = end ? { ended: end.why, ...(end.reshare ? { reshare: true as const } : {}) } : {};
   const latch = ctx.db.prepare("SELECT * FROM latches WHERE local_id=?").get(lid) as { stopped: number; directive_id: string; seq: number; at: string } | undefined;
-  if (latch && latch.stopped) {
-    const l: Latch = { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...ended };
-    writeJsonAtomic(layout.latch(ctx.home, lid), l);
-  } else {
-    removeFile(layout.latch(ctx.home, lid));
-  }
   // Goal holds: a latch of their own, so a stop and a hold are set and lifted independently.
   const holds = ctx.db.prepare("SELECT goal_id, json, directive_id, seq, at FROM holds WHERE local_id=? AND held=1 ORDER BY seq").all(lid) as {
     goal_id: string;
@@ -187,6 +185,16 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     seq: number;
     at: string;
   }[];
+  // A hold whose release still reaches the session though its share ended: both latch files say so, so every deny and
+  // notice names the release as a way out of the hold, and none says it lifts the stop (C10-4).
+  const release = end && !end.reshare ? releaseOf(ctx, lid, share) : null;
+  const ended = end ? { ended: end.why, ...(end.reshare ? { reshare: true as const } : {}), ...(release ? { release } : {}) } : {};
+  if (latch && latch.stopped) {
+    const l: Latch = { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...ended };
+    writeJsonAtomic(layout.latch(ctx.home, lid), l);
+  } else {
+    removeFile(layout.latch(ctx.home, lid));
+  }
   if (holds.length) {
     const h: HoldLatch = {
       v: 1,
@@ -222,6 +230,41 @@ export function endedState(ctx: Ctx, share: ShareRow | null): { why: EndedWhy; r
   if (why === "sharing_ended" || !signedIn(ctx.home)) return { why, reshare: false };
   const me = readJson<MeFile>(layout.me(ctx.home));
   return { why, reshare: !!me && !me.signed_out && me.workspaces.some((w) => w.id === share.workspace_id) };
+}
+
+/** kv: set when a new pairing commits, cleared once the directives answer's `ended_sessions` were read as that pairing
+ *  (`align login`, or the next pass): until then no session is told this machine is signed in again, nor shown a
+ *  sign-out notice that says to type `::align share` after signing in (cycle 10, section 5). */
+export const ENDED_UNREAD = "ended_sessions_unread";
+
+/** kv: the device this machine was signed in as when a live share of `lid` stopped (`markStopped`): the server's session
+ *  row still names it, so the goal holds' releases still reach the session there (C10-4). */
+export const stoppedOnDeviceKey = (lid: string) => `stopped_on_device:${lid}`;
+
+/**
+ * A goal's release still reaches this ended share: its sharing was stopped (Stop sharing on the web, or the server
+ * refused its usage as stopped) while it was live on this machine's current device, which reaches its workspace. The
+ * server sends a release to every session its hold reached, and lists directives for the device its session row names;
+ * a share ended at a sign-out or a lost workspace, or stopped under an earlier pairing, hears none (C10-4).
+ */
+export function releaseReaches(ctx: Ctx, share: ShareRow | null): boolean {
+  if (!share || share.state !== "stopped" || endedReason(share) !== "sharing_ended") return false;
+  const dev = kvGet(ctx.db, stoppedOnDeviceKey(share.local_id));
+  const c = loadCredentials(ctx.home);
+  if (!dev || !c || c.signed_out || c.device_id !== dev) return false;
+  const me = readJson<MeFile>(layout.me(ctx.home));
+  return !!me && !me.signed_out && me.workspaces.some((w) => w.id === share.workspace_id);
+}
+
+/** The holds whose release still reaches `lid` though its share ended, by goal title, and whether a stop blocks it too
+ *  (C10-4); null when none does. What its latch files, its notices and the status views all say. */
+export function releaseOf(ctx: Ctx, lid: string, share: ShareRow | null): ReleaseReaches | null {
+  if (!releaseReaches(ctx, share)) return null;
+  const goals = (ctx.db.prepare("SELECT json FROM holds WHERE local_id=? AND held=1 ORDER BY seq").all(lid) as { json: string }[]).map((r) =>
+    clean((JSON.parse(r.json) as { goal_title: string }).goal_title, 100),
+  );
+  if (!goals.length) return null;
+  return { goals, stopped: !!ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) };
 }
 
 /** Rewrite the latch files of every stopped or held session whose share ended, after this machine's sign-in or reach

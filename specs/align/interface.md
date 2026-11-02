@@ -350,7 +350,28 @@ both pages, and the request-access form SHALL link to `/privacy`.
 ### Requirement: Device approval screen
 
 The `/app/device` page SHALL let a person with a recent sign-in look up the code that `align login` printed, choose
-which of their workspaces the device may use, and approve or deny it.
+which of their workspaces the device may use, and approve or deny it. **Approve** and **Deny** SHALL act on the device
+whose panel is shown, by the code it was looked up by, never on what the code field holds now: editing the field to
+another code SHALL close that panel and clear its ticks, as a new **Look up** does, so no device is approved or denied
+that the person did not look up (E2E-WEB cycle 10 C10-1). An approval or denial with no code SHALL be 400 `Enter the
+code shown by align login.`, never a field name (E2E-WEB cycle 10 W4). A device name, on this page as on the Devices
+page, the invite page and the Sessions page, SHALL wrap anywhere and clip what can't wrap, so no name scrolls the page
+sideways at any width from 320 to 1280 px (E2E-WEB cycle 10 C10-3).
+
+#### Scenario: A code edited after Look up
+
+- **WHEN** a person looks up device C's code and ticks a workspace, then types device D's code into the field without pressing **Look up**; then looks D up and presses **Deny** (`scripts/test-v2.mjs` "C10-1 (ui, E2E-WEB cycle 10): ...")
+- **THEN** C's panel (its name, the workspace boxes, **Approve** and **Deny**) closes as the code changes, D looked up is denied, and C stays pending
+
+#### Scenario: An empty code
+
+- **WHEN** an approval or denial is posted with an empty or blank `user_code` (`scripts/test-v2.mjs` "W4 (E2E-WEB cycle 10): ...")
+- **THEN** it is 400 `Enter the code shown by align login.`
+
+#### Scenario: A device name too wide for the page
+
+- **WHEN** the Devices page lists a device stored as `ｶ` with 150 half-width voiced sound marks (stored before the limit that now refuses it) and one named with a 100-letter word, at 320 and at 1280 px (`scripts/test-v2.mjs` "C10-3 (ui, E2E-WEB cycle 10): ...")
+- **THEN** the page never scrolls sideways
 
 #### Scenario: Approve a device
 
