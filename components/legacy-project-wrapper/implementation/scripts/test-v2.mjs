@@ -2719,8 +2719,12 @@ try {
       await page.evaluate(() => document.querySelector('main input[type="checkbox"]')?.click());
       await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve" && !b.disabled), { timeout: 15000 }).catch(() => undefined);
       const tickedA = await page.evaluate(() => [...document.querySelectorAll('main input[type="checkbox"]')].filter((b) => b.checked).length);
-      await page.click('main input[placeholder="BCDF-GHJK"]', { clickCount: 3 });
+      // Clear the code field as a person would: select its text and delete it, then type the next code.
+      await page.focus('main input[placeholder="BCDF-GHJK"]');
+      await page.evaluate(() => document.querySelector('main input[placeholder="BCDF-GHJK"]')?.select());
+      await page.keyboard.press("Backspace");
       await page.type('main input[placeholder="BCDF-GHJK"]', tickB.userCode);
+      const tickTyped = await page.evaluate(() => document.querySelector('main input[placeholder="BCDF-GHJK"]')?.value ?? "");
       await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
       await page.waitForFunction(() => document.body.innerText.includes("U5's tick two") && document.querySelectorAll('main input[type="checkbox"]').length > 0, { timeout: 15000 }).catch(() => undefined);
       const tickPage = await page.evaluate(() => ({
@@ -2732,7 +2736,7 @@ try {
       check(
         "C9-2 (ui, E2E-WEB cycle 9): a workspace ticked for one device looked up is not ticked for the next device looked up: its boxes start unticked and Approve stays disabled",
         tickedA === 1 && tickPage.text.includes("U5's tick two") && !tickPage.text.includes("U5's tick one") && tickPage.boxes > 0 && tickPage.checked === 0 && tickPage.approve === true,
-        `${tickedA} ${JSON.stringify({ ...tickPage, text: tickPage.text.slice(0, 300) })}`,
+        `${tickedA} typed=${tickTyped} want=${tickB.userCode} ${JSON.stringify({ ...tickPage, text: tickPage.text.slice(0, 300) })}`,
       );
 
       // Z3 (ui): Delete shared history on a session already deleted in another tab is done: the row goes, and the page
