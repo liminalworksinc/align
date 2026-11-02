@@ -737,14 +737,14 @@ function endedNote(ended: keyof typeof ENDED_WHY, lid: string, reshare = false):
   return `Its sharing has since ended (${ENDED_WHY[ended] ?? ENDED_WHY.sharing_ended}), so this can no longer be lifted from the web: tools stay blocked until the user runs \`align stop-sharing ${lid.slice(0, 8)}\` in a terminal.`;
 }
 
+/** What every deny that blocks tools until people act ends with: the model tells the user instead of working around it. */
+const TELL_USER = "Tell the user and wait for instructions.";
+
 /** The stop deny: the plain wording, or, when the session's sharing ended, how the user gets out. */
 export function stopReason(latch: Latch | null, lid: string): string {
   if (!latch?.ended) return DENY_REASON;
   return `Align: this session was stopped from its Align workspace. ${endedNote(latch.ended, lid, !!latch.reshare)} ${TELL_USER}`;
 }
-
-/** What every deny that blocks tools until people act ends with: the model tells the user instead of working around it. */
-const TELL_USER = "Tell the user and wait for instructions.";
 
 function holdDenyReason(h: HoldLatch | null, lid: string): string {
   const base = holdReason(h);
@@ -1155,7 +1155,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       arg = arg.replace(/\s*(confirm|--yes|-y)$/i, "").trim();
       const me = readJson<MeFile>(layout.me(home));
       if (!me || me.signed_out) return "Align: not signed in on this machine. Run `align login` in a terminal first.";
-      if (!dirMode && hot?.share?.state === "stopped" && hot.prior_share?.stopped) return stoppedForGood(lid);
+      // Stopped by its person while it was shared there; not one whose share a sign-out or a lost workspace had ended
+      // before `align stop-sharing` freed its tools, which the server shares again.
+      if (!dirMode && hot?.share?.state === "stopped" && hot.prior_share?.stopped && (hot.share.ended ?? "sharing_ended") === "sharing_ended") return stoppedForGood(lid);
       const feed = feedFor(home, hot);
       // With no workspace of its own, no default and more than one in reach, no goal can be looked up either: say why
       // first, whatever goal was named, rather than that the goal is not cached (C4-7); a folder rule can't tell which

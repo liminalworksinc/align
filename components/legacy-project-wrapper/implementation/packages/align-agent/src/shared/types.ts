@@ -69,8 +69,10 @@ export interface HotState {
   harness: Harness;
   native_session_id: string;
   cwd: string | null;
-  /** `since`: the first epoch of this share, which a share made again after an earlier one ended changes (cycle 6). */
-  share: { workspace_id: string; workspace_name: string; session_key: string; state: ShareState; since?: string } | null;
+  /** `since`: the first epoch of this share, which a share made again after an earlier one ended changes (cycle 6).
+   *  `ended`: why a stopped share ended (a sign-out or a lost workspace, which the server lets this person share again;
+   *  else `sharing_ended`), cycle 7. */
+  share: { workspace_id: string; workspace_name: string; session_key: string; state: ShareState; since?: string; ended?: EndedWhy } | null;
   goal: GoalSnapshot | null;
   binding: { epoch_id: string; goal_id: string | null } | null;
   /** Opened by the next UserPromptSubmit hook (a root-turn boundary). */

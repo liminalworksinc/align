@@ -1192,7 +1192,8 @@ session it was typed in, except one its person stopped sharing or whose shared h
 private (`This session stays private: its sharing was stopped (or its history deleted).`), as the sync also never
 shares such a session for a folder rule; only `::align share` or `align share` shares it again, counting from now.
 `::align share`'s preview says `counts from now.` for any session shared before, except one its person stopped sharing
-whose shared history is kept: the server never shares it again, so `::align share` (preview or `confirm`) SHALL answer
+while it was shared there and whose shared history is kept (not one whose share a sign-out or a lost workspace had ended
+before `align stop-sharing` freed its tools, which the server shares again): the server never shares it again, so `::align share` (preview or `confirm`) SHALL answer
 `Align: this session's sharing was stopped (\`::align unshare\`, \`align stop-sharing\` or Stop sharing on the web), and
 a session whose sharing was stopped is not shared again, so it stays stopped. To share it again, counting from now,
 first delete its shared history (it leaves every total): run \`align delete-history <lid8>\` in a terminal, or use
@@ -1230,7 +1231,7 @@ SHALL show `::align status`.
 #### Scenario: Sharing again a session its person stopped
 
 - **WHEN** a shared session is stopped with `align stop-sharing`, the developer types `::align share`, then `::align share confirm`, a sync runs, and then its history is deleted with `align delete-history` and the developer types `::align share` (test `findings8` "`::align share` in a session its person stopped (history kept) ...")
-- **THEN** both replies say it stays stopped and point to `align delete-history <lid8>` and the web's Delete shared history, nothing is sent to the server, and after the deletion the preview says `counts from now.`
+- **THEN** both replies say it stays stopped and point to `align delete-history <lid8>` and the web's Delete shared history, nothing is sent to the server, and after the deletion the preview says `counts from now.`; a session whose lost workspace ended its share, freed with `align stop-sharing` and then back in reach, previews `counts from now.` and its `confirm` requests the share (test `findings8` "`align stop-sharing` that freed a session whose lost workspace ended its share ...")
 
 #### Scenario: Toward a held goal, and replacing a folder's rule
 

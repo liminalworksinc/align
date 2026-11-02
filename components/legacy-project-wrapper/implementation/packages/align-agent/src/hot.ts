@@ -146,6 +146,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
           session_key: live.session_key,
           state: live.state as ShareState,
           ...(since ? { since } : {}),
+          ...(live.state === "stopped" ? { ended: endedReason(live) ?? "sharing_ended" } : {}),
         }
       : null,
     goal: live && live.goal_json ? (JSON.parse(live.goal_json) as GoalSnapshot) : null,

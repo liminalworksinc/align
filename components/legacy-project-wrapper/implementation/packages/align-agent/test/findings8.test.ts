@@ -234,6 +234,20 @@ describe("cycle 7, section 5: works, but would confuse a developer", () => {
     assert.match(prompt(t, A.sid, "::align share", A.cwd).reason, /counts from now\./);
   });
 
+  test("`align stop-sharing` that freed a session whose lost workspace ended its share does not make it stopped for good: back in the workspace, `::align share` shares it again", async () => {
+    const { fake, t } = await world();
+    const A = await shared(t);
+    await sync(t);
+    const acme = fake.workspaces[0];
+    fake.workspaces = [];
+    await sync(t);
+    assert.equal((await runCli(t, ["stop-sharing", A.lid.slice(0, 8)])).code, 0);
+    fake.workspaces = [acme];
+    await sync(t);
+    assert.match(prompt(t, A.sid, "::align share", A.cwd).reason, /counts from now\./);
+    assert.match(prompt(t, A.sid, "::align share confirm", A.cwd).reason, /sharing requested/);
+  });
+
   test("a sync whose pairing changed: no `Server:` line after `align login` either; a held call that never answers is not reported as an unreachable server, nor marked so in last-sync.json", async () => {
     const { fake, t } = await world();
     await shared(t);
