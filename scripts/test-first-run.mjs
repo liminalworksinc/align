@@ -163,6 +163,16 @@ async function connect(w, clientId, role) {
 }
 const rpc = (tok, method, params) =>
   req("POST", "/api/mcp", { body: { jsonrpc: "2.0", id: 1, method, params }, headers: { accept: "application/json, text/event-stream", authorization: `Bearer ${tok}` } });
+/** A JSON-RPC notification (no id), as a client sends after initialize. */
+const notify = (tok, method) =>
+  req("POST", "/api/mcp", { body: { jsonrpc: "2.0", method }, headers: { accept: "application/json, text/event-stream", authorization: `Bearer ${tok}` } });
+/** Product asks, the owning team agrees (untested, as the example scenario has no sandbox). Returns the proposal id. */
+async function agree(w) {
+  const p = await req("POST", "/api/proposals", { cookie: w.c.product, body: { proposed_measure_text: "Retention first for two weeks", rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
+  const a = await req("POST", `/api/proposals/${p.json?.id}/accept`, { cookie: w.c.security, body: { rationale: "ok", accept_untested: true } });
+  if (p.status !== 200 || a.status !== 200) throw new Error(`agree: ${p.status} ${a.status} ${a.text.slice(0, 200)}`);
+  return p.json.id;
+}
 function rpcResult(r) {
   const text = r.text.includes("data:") ? r.text.split("\n").find((l) => l.startsWith("data:"))?.slice(5) : r.text;
   try {
@@ -347,7 +357,7 @@ async function phaseLocal(dir) {
       check("approved, not seen yet: the card says 'Claude Code: Approved, not seen by Align yet'", ok && /Claude Code: Approved, not seen by Align yet\./.test(c1?.text ?? ""), c1?.text);
       await shots(page, "approved");
     } else check("approved, not seen yet: the server reports the grant with no last_used_at", false, (await connections(w)).text);
-    // Any authenticated MCP request marks the app seen (last_used_at), tools/list included, so it comes after that check.
+    // Only a tool call marks the app seen (app/api/mcp/route.ts): listing the tools leaves it approved, not seen.
     const tools = rpcResult(await rpc(tok, "tools/list", {}))?.tools ?? [];
     check("'It can read' has one line per tool the MCP server lists, and every tool only reads", reads.length > 0 && reads.length === tools.length && tools.every((t) => t.annotations?.readOnlyHint === true), `${reads.length} lines, ${tools.length} tools`);
     check(
@@ -478,13 +488,103 @@ async function phaseHosted(dir) {
     check("hosted: the setup line names this server's https MCP URL", /claude mcp add/.test(c0?.text ?? "") && c0.text.includes(`https://${HOSTED_HOST}/api/mcp`), c0?.text);
     await shots(page, "none");
     const tok = await connect(w, await newClient("Claude Code"), "leadership");
+    // What `claude mcp list` and a client's handshake send: initialize, notifications/initialized, tools/list, ping.
+    // None of them calls a tool, so none marks the app seen (app/api/mcp/route.ts).
+    const init = await rpc(tok, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test-first-run", version: "0" } });
+    const inited = await notify(tok, "notifications/initialized");
+    const listed = await rpc(tok, "tools/list", {});
+    const pinged = await rpc(tok, "ping", {});
+    await sleep(1500); // a tool call is recorded off the request path; give a wrong mark time to land
+    const unseen = (await connections(w)).json?.apps?.[0];
+    await page.reload({ waitUntil: "networkidle2" });
+    const stillApproved = await waitFor(page, async () => (await card(page))?.state === "approved", 8000);
+    check(
+      "hosted: initialize, notifications/initialized, tools/list and ping don't mark the app seen: last_used_at stays null and the card still says approved, not seen",
+      init.status === 200 && inited.status < 300 && listed.status === 200 && pinged.status === 200 && unseen?.last_used_at === null && stillApproved,
+      `${init.status} ${inited.status} ${listed.status} ${pinged.status} ${JSON.stringify(unseen)}`,
+    );
     const read = await rpc(tok, "tools/call", { name: "align_list_goals", arguments: {} });
     const onPlan = await untilApi(w, (j) => j?.apps?.[0]?.on_current_plan === true);
     await page.reload({ waitUntil: "networkidle2" });
     const side = () => page.evaluate(() => document.querySelector('ul[aria-label="Connected AI apps"]')?.textContent ?? "");
+    const home = () => page.evaluate(() => document.querySelector("section#agents")?.textContent ?? "");
     const flipped = await waitFor(page, async () => /Claude Code\s*Seen since the latest change/.test(await side()));
-    check("hosted: after an OAuth connection and one MCP request the sidebar says Claude Code was seen since the latest change, and the card yields", read.status === 200 && onPlan && flipped && !(await card(page)), `${read.status} ${await side()}`);
+    check("hosted: after an OAuth connection and one tool call the sidebar says Claude Code was seen since the latest change, and the card yields", read.status === 200 && onPlan && flipped && !(await card(page)), `${read.status} ${await side()}`);
     await shots(page, "yielded");
+
+    // The plan receipt (lib/oauth/grants.ts notePlanReceipt): written when align_get_accepted_plan serves an agreed plan.
+    const readPlan = () => rpc(tok, "tools/call", { name: "align_get_accepted_plan", arguments: {} });
+    const app0 = async () => (await connections(w)).json?.apps?.[0];
+    await readPlan();
+    await sleep(1000);
+    const before = await app0();
+    check("hosted: align_get_accepted_plan before the teams agree leaves no receipt", before?.plan_receipt === null && before?.received_current_plan === false, JSON.stringify(before));
+
+    const pid1 = await agree(w);
+    await readPlan();
+    const pending = await untilApi(w, (j) => j?.apps?.[0]?.plan_receipt?.proposal_id === pid1 && j.apps[0].received_current_plan === true);
+    const r1 = (await app0())?.plan_receipt;
+    check("hosted: once agreed (launch pending), reading the plan records a receipt: this acceptance, its goal version, launch pending, a time", pending && r1?.accepted_version === "v2" && r1?.launch === "pending" && !Number.isNaN(Date.parse(r1?.at)), JSON.stringify(r1));
+
+    const launched = await req("POST", `/api/proposals/${pid1}/launch`, { cookie: w.c.leadership, body: { decision: "approved", accept_untested: true } });
+    const afterLaunch = await app0();
+    check("hosted: a launch decision since the read means the receipt no longer counts as the current plan", launched.status === 200 && afterLaunch?.received_current_plan === false && afterLaunch?.plan_receipt?.launch === "pending", `${launched.status} ${JSON.stringify(afterLaunch)}`);
+    await readPlan();
+    const current = await untilApi(w, (j) => j?.apps?.[0]?.plan_receipt?.launch === "approved" && j.apps[0].received_current_plan === true);
+    const at1 = (await app0())?.plan_receipt?.at;
+    await readPlan();
+    await sleep(800);
+    check("hosted: reading the launched plan counts again; reading it again keeps the first time Align sent it", current && (await app0())?.plan_receipt?.at === at1, JSON.stringify(await app0()));
+
+    await page.reload({ waitUntil: "networkidle2" });
+    const sideGot = await waitFor(page, async () => /Claude Code\s*Received the approved plan \(v2\)/.test(await side()));
+    const homeGot = /Claude Code[\s\S]*Received the approved plan \(v2\)/.test(await home()) && !/Seen since the latest change/.test(await home());
+    check("hosted: the sidebar and Home say Claude Code received the approved plan (v2), in place of 'Seen since the latest change'", sideGot && homeGot, `${await side()} || ${await home()}`);
+    const claims = `${await side()} ${await home()}`;
+    check("hosted: no screen says the agent is working from or follows the plan", !/working from|works from|follows|is working/i.test(claims), claims);
+    await shots(page, "receipt-home");
+    const decisionText = () => page.evaluate(() => document.querySelector('section[aria-label="What this decision gave you"]')?.innerText ?? "");
+    const openDecision = async () => {
+      await page.reload({ waitUntil: "networkidle2" });
+      await waitFor(page, async () => page.evaluate(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.includes("See the decision"))));
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("See the decision"))?.click());
+    };
+    await openDecision();
+    const recordGot = await waitFor(page, async () => /Claude Code \(Leadership\)\s*◆?\s*Received this approved plan/.test(await decisionText()));
+    check(
+      "hosted: the decision record lists Claude Code (Leadership) as having received this approved plan, and says Align can't see what the agent does next",
+      recordGot && /Align sent it this plan\. Align can’t see what the agent does next\./.test(await decisionText()),
+      await decisionText(),
+    );
+    await shots(page, "receipt-decision");
+
+    // A newer approval: the old receipt doesn't count for it.
+    const pid2 = await agree(w);
+    const moved = await app0();
+    check("hosted: after a new approval the old receipt no longer counts: received_current_plan is false and the receipt still names the old acceptance", pid2 !== pid1 && moved?.received_current_plan === false && moved?.plan_receipt?.proposal_id === pid1, JSON.stringify(moved));
+    await openDecision();
+    const recordNone = await waitFor(page, async () => /Not received by a connected app yet/.test(await decisionText()));
+    const sideNow = await side();
+    check("hosted: the new decision record says not received yet, and the sidebar no longer says received", recordNone && !/Received the approved plan/.test(sideNow), `${await decisionText()} || ${sideNow}`);
+    await shots(page, "receipt-newer");
+    await readPlan();
+    const caughtUp = await untilApi(w, (j) => j?.apps?.[0]?.plan_receipt?.proposal_id === pid2 && j.apps[0].plan_receipt.accepted_version === "v3" && j.apps[0].received_current_plan === true);
+    check("hosted: reading the new plan records a receipt for it (v3)", caughtUp, JSON.stringify(await app0()));
+
+    // Tenancy: another workspace never sees this receipt, and its own app's read records nothing here.
+    const w2 = await newWorkspace("FIRSTRUNH2", { signup_code: "first-run-invite-02" });
+    const tok2 = await connect(w2, await newClient("Claude Code"), "product");
+    await rpc(tok2, "tools/call", { name: "align_get_accepted_plan", arguments: {} });
+    await sleep(1000);
+    const l2 = await connections(w2);
+    const mine = (await connections(w)).json?.apps ?? [];
+    check(
+      "hosted: no cross-workspace receipt: the other workspace's list has only its own app, with no receipt, and never this workspace's proposal ids",
+      l2.status === 200 && l2.json.apps.length === 1 && l2.json.apps[0].plan_receipt === null && !l2.text.includes(pid1) && !l2.text.includes(pid2) && mine.length === 1 && mine[0].plan_receipt?.proposal_id === pid2,
+      `${l2.text} || ${JSON.stringify(mine)}`,
+    );
+    const asSec = await req("GET", "/api/workspaces/connections", { cookie: w.c.security });
+    check("hosted: every signed-in team of the workspace sees the same receipt (the agreed plan is shared)", asSec.json?.apps?.[0]?.plan_receipt?.proposal_id === pid2, asSec.text);
   } finally {
     await browser.close();
   }

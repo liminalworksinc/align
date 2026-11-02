@@ -9,6 +9,7 @@ import { LIMIT_WORDS, limitDrift } from "@/lib/limits";
 import type { Actor, Ask, Goal, Limit, Proposal, StateView } from "@/lib/types";
 import { api } from "@/components/useAlign";
 import { DecisionValueCard } from "@/components/DecisionValueCard";
+import { useAgents, type AgentsRead } from "@/components/useAgents";
 
 // v6 "Your turn": the landing view for every role, built from state only. Waiting on you = proposals whose next action
 // is the signed-in actor's (the same rules the server enforces in lib/flow.ts), each quoting the exact measure text with
@@ -123,47 +124,6 @@ function Card({ it, hot }: { it: Item; hot?: boolean }) {
   );
 }
 
-// Connected AI apps, as GET /api/workspaces/connections reports them (custom workspaces only; Northstar has none).
-// Align knows only when an app last contacted it, never what it read or does: any authenticated MCP request, even
-// initialize or tools/list, sets last_used_at (app/api/mcp/route.ts verifyToken -> noteGrantUse), and "seen since the
-// latest change" means nothing an agent reads changed since that contact (lib/plan-rev.ts: goals, requests and their
-// answers, decisions). An approved app Align hasn't seen isn't connected yet.
-interface AgentApp {
-  id: string;
-  name: string;
-  role: string;
-  approved_at: string;
-  last_used_at: string | null;
-  on_current_plan?: boolean;
-}
-interface Agents {
-  apps: AgentApp[];
-  changedAt: string | null;
-}
-/** null = not checked yet; "unknown" = the check failed before any good read (never shown as zero apps). */
-type AgentsRead = Agents | "unknown" | null;
-
-function useAgents(workspace?: string): AgentsRead {
-  const [data, setData] = useState<AgentsRead>(null);
-  useEffect(() => {
-    if (!workspace) return;
-    let live = true;
-    const load = () =>
-      api<{ apps: AgentApp[]; plan?: { changed_at: string | null } }>("/api/workspaces/connections", { workspace }).then(
-        (d) => live && setData({ apps: d.apps, changedAt: d.plan?.changed_at ?? null }),
-        () => live && setData((d) => (d && d !== "unknown" ? d : "unknown")), // keep the last good read; never guess
-      );
-    const first = setTimeout(() => void load(), 0);
-    const t = setInterval(() => void load(), 15000);
-    return () => {
-      live = false;
-      clearTimeout(first);
-      clearInterval(t);
-    };
-  }, [workspace]);
-  return data;
-}
-
 function ago(iso: string) {
   const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
   if (m < 1) return "just now";
@@ -211,9 +171,16 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
               </span>
               <span className="min-w-0 font-semibold text-zinc-900">{a.name}</span>
               <span className="text-[14px] text-zinc-500">as {teamOf(a.role)}</span>
-              <span className={`ml-auto text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"} @max-md:ml-6 @max-md:basis-full`}>
-                {a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"} · last seen by Align {ago(a.last_used_at!)}
-              </span>
+              {a.received_current_plan && a.plan_receipt ? (
+                <span className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-zinc-700 @max-md:ml-6 @max-md:basis-full">
+                  <Badge tone="violet">Received the approved plan ({a.plan_receipt.accepted_version})</Badge>
+                  <span>sent by Align {ago(a.plan_receipt.at)}</span>
+                </span>
+              ) : (
+                <span className={`ml-auto text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"} @max-md:ml-6 @max-md:basis-full`}>
+                  {a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"} · last seen by Align {ago(a.last_used_at!)}
+                </span>
+              )}
             </div>
           ))}
           {waiting.map((a) => (
@@ -229,7 +196,9 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
       {agents && reading.length > 0 && (
         <p className="text-[13px] leading-snug text-zinc-500">
           {older.length > 0 && agents.changedAt ? `The workspace changed ${ago(agents.changedAt)}; ${older.length === 1 ? "one app hasn’t" : `${older.length} apps haven’t`} been seen since. ` : ""}
-          Align sees when each app last contacted it, not what it read or does.
+          {agents.apps.some((a) => a.received_current_plan)
+            ? "Align sees when each app last called it and which approved plan it sent the app, not what the app does next."
+            : "Align sees when each app last contacted it, not what it read or does."}
         </p>
       )}
     </section>
