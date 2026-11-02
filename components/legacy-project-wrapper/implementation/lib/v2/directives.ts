@@ -1,12 +1,12 @@
 import { all, get, run, tx } from "./db";
-import { badRequest, notFound } from "./errors";
+import { V2Error, badRequest, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso } from "./ids";
 import { goalCore, goalObj, bindableFor, goalRow, type GoalCore, type GoalRow } from "./goals";
 import { canReadGoal } from "./policy";
 import type { DevicePrincipal } from "./devices";
 import { principalIn } from "./workspaces";
-import { holdWire, requestReceipt, requestWire, type HoldJson, type RequestJson } from "./requests";
+import { expireStoppedSessionTargets, holdWire, requestReceipt, requestWire, type HoldJson, type RequestJson } from "./requests";
 
 // Directives: what reaches local agents. Only structured content: ratified goal fields, enumerated states and
 // Align's typed requests (lib/v2/requests.ts: a request's type, goal, sender and quoted note; a goal hold), never
@@ -192,8 +192,8 @@ export type ReceiptState = (typeof RECEIPT_STATES)[number];
  *  answer, or, with `autoAccepted`, the agent doing a safe request on its own) and move that session's request state
  *  (lib/v2/requests.ts requestReceipt), whose result is returned as `request_state`. */
 export async function recordReceipt(dev: DevicePrincipal, directiveId: string, sessionKey: string, state: ReceiptState, at: string, autoAccepted = false) {
-  const t = get<{ ws_id: string; kind: DirectiveKind; request_json: string | null }>(
-    `SELECT t.ws_id, d.kind, d.request_json FROM v2_directive_targets t
+  const t = get<{ ws_id: string; kind: DirectiveKind; request_json: string | null; session_state: string; ended_reason: string | null }>(
+    `SELECT t.ws_id, d.kind, d.request_json, s.state AS session_state, s.ended_reason FROM v2_directive_targets t
      JOIN v2_directives d ON d.id = t.directive_id
      JOIN v2_sessions s ON s.ws_id = t.ws_id AND s.session_key = t.session_key
      WHERE t.directive_id = ? AND t.session_key = ? AND s.user_id = ? AND s.device_id = ?`,
@@ -207,6 +207,12 @@ export async function recordReceipt(dev: DevicePrincipal, directiveId: string, s
   if (answer && t.kind !== "request") throw badRequest("accepted and declined answer a request directive");
   if (autoAccepted && state !== "accepted") throw badRequest("auto_accepted goes only with state accepted");
   const request = t.kind === "request" && t.request_json ? (JSON.parse(t.request_json) as RequestJson) : null;
+  // An answer from a session whose sharing was stopped (or ended): its requests expired then, so the answer is refused
+  // with why, never taken as if it reached the sender (E2E-AGENT cycle 13). Delivery receipts are still recorded.
+  if (answer && request && t.session_state === "stopped") {
+    await tx(() => expireStoppedSessionTargets(t.ws_id, sessionKey, nowIso()));
+    throw new V2Error(409, "request_expired", "This request expired: this session's sharing was stopped, so it no longer takes answers.", { ended_reason: t.ended_reason ?? null });
+  }
   return tx(() => {
     const n = run(
       "INSERT OR IGNORE INTO v2_receipts (ws_id, directive_id, session_key, state, at, recorded_at, auto_accepted) VALUES (?, ?, ?, ?, ?, ?, ?)",
