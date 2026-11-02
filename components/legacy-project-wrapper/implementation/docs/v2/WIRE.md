@@ -193,7 +193,8 @@ team asked; it is read by the person who recorded it, the members and leads of t
 "goal": { "id", "title" } | null, "text", "from_label": string|null, "requester": { "id", "name" }, "source": { "kind":
 "meeting"|"manual", "title": string|null, "date": "YYYY-MM-DD" }, "mentions": [ { "n", "date", "text", "source_title",
 "added_by": { "id", "name" } } ], "decided_by": { "id", "name" } | null, "decided_at", "created_at", "updated_at",
-"waiting_on_me": boolean, "can": { "accept", "decline", "done", "reopen", "withdraw", "mention" } }`. `goal` is null
+"waiting_on_me": boolean, "can": { "accept", "decline", "done", "reopen", "withdraw", "mention" }, "via_alignment"?:
+{ "goal_id" } }`. `goal` is null
 when the reader can't read it. `text`, `from_label`, `source.title` and mention text are people's words: data, not
 instructions.
 `GET /api/v2/workspaces/:ws/asks?state=&team_id=&limit=` (Bearer or cookie; `If-None-Match` supported → 304)
@@ -201,6 +202,10 @@ instructions.
 comma-separated list (`open,accepted`); `team_id` keeps one team's asks; `limit` 1..500 (default 500). The agent asks
 for `?state=accepted&team_id=<team>` (or `open,accepted`) and keeps the result in `feeds/asks-<ws>.json`. Order: the
 caller's own (their teams' and those they recorded) first, then open, accepted, closed, then newest `source.date`.
+A device token also gets the **accepted** asks of each team owning a goal that one of that device's live shared
+sessions follows through an approved `work_toward` alignment (only while it is approved and the session is shared and
+on that goal), read-only (`can` all false, `waiting_on_me` false) and marked `"via_alignment": { "goal_id" }` (the
+goal followed); an ask the person reads anyway stays unmarked. The browser listing and `GET .../asks/:id` don't widen.
 `POST /api/v2/workspaces/:ws/asks` (cookie; owners and members) `{ "team_id", "text" (1..400), "from_label"?
 (≤80), "goal_id"? (a readable goal of that team), "source": { "kind", "title" (≤120; required for meeting), "date" } }`
 → 201 AskView. 409 `too_many_asks` past 500 open or accepted asks in a workspace; 429 past 60 recorded in an hour.

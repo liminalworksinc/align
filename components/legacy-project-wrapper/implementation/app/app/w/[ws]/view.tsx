@@ -47,6 +47,9 @@ interface Alignment {
   state: string;
   requester: HomePerson;
   target_goal: { id: string | null; title: string | null; visible: boolean } | null;
+  choice: "contribution" | "work_toward";
+  source_goal: { id: string | null; title: string | null; visible: boolean } | null;
+  sessions: { label: string; started_at: string | null; key_end: string }[];
   next: HomeNext;
   waiting_on: HomePerson[];
 }
@@ -105,14 +108,19 @@ function Tile({ n, label, href, hot }: { n: ReactNode | null; label: string; hre
   );
 }
 
-/** One queue row: what it is, the quoted subject, what it needs and from whom, and where to act. */
-function Row({ kind, title, quote, need, href, testId }: { kind: string; title: ReactNode; quote?: string; need: ReactNode; href: string; testId: string }) {
+/** One queue row: what it is, the quoted subject, what tells it apart, what it needs and from whom, and where to act. */
+function Row({ kind, title, quote, detail, need, href, testId }: { kind: string; title: ReactNode; quote?: string; detail?: string; need: ReactNode; href: string; testId: string }) {
   return (
     <li className="flex flex-wrap items-start gap-x-4 gap-y-1 py-3" data-home-item={testId}>
       <div className="min-w-0 flex-1 basis-64">
         <p className="al-lbl">{kind}</p>
         <p className="text-[16px] text-zinc-900">{title}</p>
         {quote && <p className="break-words text-[14px] text-zinc-600">&ldquo;{quote}&rdquo;</p>}
+        {detail && (
+          <p className="break-words text-[14px] text-zinc-600" data-home-detail>
+            {detail}
+          </p>
+        )}
         <p className="text-[14px] text-zinc-700">{need}</p>
       </div>
       <Link href={href} className="text-[15px] font-medium text-violet-700 hover:underline">
@@ -152,6 +160,15 @@ function alignmentNeed(a: Alignment, mine: boolean, me: string) {
 }
 
 const goalName = (g: Alignment["target_goal"]) => (g?.visible && g.title ? g.title : "a goal you can't see");
+
+/** What tells two alignment requests on one goal apart (A1-cross-9): the choice, then the requester's goal that
+ *  contributes and the sessions, each as the Alignments tab names it ("started <time> · …<key end>"). */
+function alignmentDetail(a: Alignment): string {
+  const choice = a.choice === "contribution" ? "Contribution only" : "Work toward, usage moves";
+  const from = a.source_goal ? `from ${a.source_goal.visible && a.source_goal.title ? `“${a.source_goal.title}”` : "a goal you can't see"}` : "";
+  const sessions = a.sessions.map((s) => `${s.label}${s.started_at ? ` · started ${when(s.started_at)} · …${s.key_end}` : ""}`).join("; ");
+  return [choice, from, sessions ? `${a.sessions.length === 1 ? "session" : `${a.sessions.length} sessions`}: ${sessions}` : ""].filter(Boolean).join(" · ");
+}
 
 export default function Home({ me, ws }: { me: Me; ws: string }) {
   const d = useApi<HomeData>(`/api/v2/workspaces/${ws}/home`);
@@ -219,6 +236,7 @@ export default function Home({ me, ws }: { me: Me; ws: string }) {
           {a.requester.id === me.id ? "You ask" : `${a.requester.name} asks`} to align with <b className="font-semibold">{goalName(a.target_goal)}</b>
         </>
       }
+      detail={alignmentDetail(a)}
       need={alignmentNeed(a, mine, me.id)}
       href={`${base}/alignments`}
     />

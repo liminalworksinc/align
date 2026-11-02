@@ -58,6 +58,11 @@ export interface HomeAlignment {
   state: string;
   requester: HomePerson;
   target_goal: { id: string | null; title: string | null; visible: boolean } | null;
+  /** What it asks for and from what, so two requests of one person on one goal differ on the Home (A1-cross-9): the
+   *  choice, the requester's goal that contributes (if any) and its sessions as the Alignments tab names them. */
+  choice: "contribution" | "work_toward";
+  source_goal: { id: string | null; title: string | null; visible: boolean } | null;
+  sessions: { label: string; started_at: string | null; key_end: string }[];
   next: HomeNext;
   waiting_on: HomePerson[];
   updated_at: string;
@@ -173,7 +178,18 @@ export function workspaceHome(pp: PolicyPrincipal) {
     for (const a of [...l.waiting_on_me, ...l.mine, ...l.others]) {
       const w = alignmentWaits(a);
       if (!w) continue;
-      const item: HomeAlignment = { id: a.id, state: a.state, requester: a.requester, target_goal: a.target_goal, next: w.next, waiting_on: w.waiting_on, updated_at: a.updated_at };
+      const item: HomeAlignment = {
+        id: a.id,
+        state: a.state,
+        requester: a.requester,
+        target_goal: a.target_goal,
+        choice: a.choice,
+        source_goal: a.source_goal,
+        sessions: a.sessions.map((x) => ({ label: x!.label, started_at: x!.started_at, key_end: x!.key_end })),
+        next: w.next,
+        waiting_on: w.waiting_on,
+        updated_at: a.updated_at,
+      };
       (a.waiting_on_me ? onMe : onOthers).push(item);
     }
     return { waiting_on_me: onMe, waiting_on_others: onOthers };

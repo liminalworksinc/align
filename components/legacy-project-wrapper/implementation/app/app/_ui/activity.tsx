@@ -53,8 +53,8 @@ export function GoalActivityCard({ ws, goal, me }: { ws: string; goal: Goal; me:
         </dl>
         {a.detail && (
           <>
-            {(a.detail.files.length > 0 || a.detail.files_hidden > 0) && (
-              <div className="mt-3">
+            {a.detail.files.length > 0 && (
+              <div className="mt-3" data-activity-files>
                 <p className="text-[14px] text-zinc-500">Files these sessions reported working on</p>
                 <ul className="list-disc pl-5 font-mono text-[13px] text-zinc-700 [overflow-wrap:anywhere]">
                   {a.detail.files.map((f) => (
@@ -63,6 +63,12 @@ export function GoalActivityCard({ ws, goal, me }: { ws: string; goal: Goal; me:
                 </ul>
                 {a.detail.files_hidden > 0 && <p className="text-[13px] text-zinc-500">and {a.detail.files_hidden} more whose paths aren&apos;t shared</p>}
               </div>
+            )}
+            {/* Only files whose paths aren't shared: one sentence, never a heading over an empty list. */}
+            {a.detail.files.length === 0 && a.detail.files_hidden > 0 && (
+              <p className="mt-3 text-[14px] text-zinc-500" data-activity-files>
+                These sessions reported working on {a.detail.files_hidden === 1 ? "1 file whose path isn't shared" : `${a.detail.files_hidden} files whose paths aren't shared`}.
+              </p>
             )}
             {a.detail.mine.length > 0 && (
               <div className="mt-3">

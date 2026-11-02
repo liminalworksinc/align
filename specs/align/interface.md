@@ -568,7 +568,11 @@ update; otherwise it is listed under
 waiting on others when the person asked for it, is in its approval set, or the goal is theirs, their team's, or (for a
 workspace owner) a company goal. An ask waits on the person when its `waiting_on_me` is set (`accept` while open,
 `done` once accepted). An alignment the person is part of waits on its requester when countered and, when pending, on
-everyone who could satisfy a requirement nobody has satisfied yet. Active goals are the readable active goals, the
+everyone who could satisfy a requirement nobody has satisfied yet; its item SHALL carry its `choice`, `source_goal` and
+`sessions` (each `{label, started_at, key_end}` as the alignment view names them, never another person's key) and its
+row SHALL say them under the title, "Contribution only" or "Work toward, usage moves", then "from “<source goal>”" when
+there is one and "session: <label> · started <time> · …<key end>" ("<n> sessions: …" for several), so two requests of
+one person on one goal never read alike (e2e-reports/acycle1/cross.md A1-cross-9). Active goals are the readable active goals, the
 person's own (owned, their team's, or a company goal for a workspace owner) first. An approved change request that is
 not launched (`launch` `pending` or `not_yet`) SHALL be listed with `next: "launch"` as "Approved, not launched": waiting
 on the person when their `can.launch` flag is set, otherwise under waiting on others, with `waiting_on` its `launchers`,
@@ -603,6 +607,11 @@ read. A workspace owner sees every connected app and anyone else their own, as o
 
 - **WHEN** an ask of the lead's team is open and an alignment request with a company goal is pending
 - **THEN** the lead's "Waiting on you" lists "<who asked> asked <team>" with the quoted ask, and the workspace owner's lists "<requester> asks to align with <goal>"; each opens its tab
+
+#### Scenario: Two alignment requests on one goal
+
+- **WHEN** Lena asks twice to align with Milo's goal, contribution only with one session and work toward with another, and Milo opens the Home (`scripts/test-v2.mjs` "A1-cross-9 (ui): ...")
+- **THEN** the two items read "Contribution only · session: claude-code session · started <time> · …<key end>" and "Work toward, usage moves · session: claude-code session · started <time> · …<other key end>"
 
 #### Scenario: Connected apps
 
@@ -829,12 +838,22 @@ tree and every version, and SHALL give a person the server lets edit it (`can_ed
 ### Requirement: Ask to align from the goal page
 
 The goal page SHALL offer an "Align with this goal" card on an active goal owned by someone else to every member who
-is not a viewer, and SHALL send the request with `POST /api/v2/workspaces/<ws>/alignments`.
+is not a viewer, and SHALL send the request with `POST /api/v2/workspaces/<ws>/alignments`. It SHALL list each of the
+person's shared sessions as the Alignments tab does, "<title, repo alias or harness session> · started <time> · …<the
+key's last 6 characters> · now on <goal>" (or "no goal yet"), so two sessions of one person in one repository can be
+told apart before one is ticked, and SHALL not offer a session already on this goal (following it through an alignment,
+or bound to it), saying "1 of your sessions is already on this goal, so it isn't offered." ("<n> of your sessions are
+already on this goal, so they aren't offered.") (e2e-reports/acycle1/cross.md A1-cross-4).
 
 #### Scenario: Send an alignment request
 
 - **WHEN** a member picks **Recognize contribution only** (optionally naming one of their own bindable goals) or **Work toward this goal and count future usage here**, ticks shared sessions (at least one for work toward), writes an optional note "never sent to agents" (up to 1000 characters) and presses **Send request**
 - **THEN** the page posts `{target_goal_id, source_goal_id, choice, session_keys, note}` and says "Sent. Follow it on Alignments." with a link to the Alignments tab; **Send request** stays disabled until at least one session is ticked (for work toward) or a session or contributing goal is chosen (for contribution only)
+
+#### Scenario: Sessions told apart
+
+- **WHEN** Lena opens Milo's goal with several shared sessions in one repository, one of which already follows the goal (`scripts/test-v2.mjs` "A1-cross-4 (ui): ...")
+- **THEN** each offered session reads "claude-code session · started <time> · …<key end> · now on <goal>", no two alike, and the one following the goal is not offered
 
 #### Scenario: Refused request
 
@@ -1132,7 +1151,7 @@ everyone's shared sessions with stop and resume, from `GET /api/v2/workspaces/<w
 #### Scenario: Own sessions
 
 - **WHEN** a member opens the tab
-- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", "ended: device signed out" or "ended: left the workspace", the two ended states with no **Stop agent**, **Resume agent** or **Stop sharing**, only **Stop sharing for good** and **Delete shared history**, and "Stopped; can't be resumed from here" when its agent was stopped), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows, and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
+- **THEN** each of their sessions shows its title (or repo alias or "<harness> session"), harness, state ("shared", "suspended", "not shared", "ended: device signed out" or "ended: left the workspace", the two ended states with no **Stop agent**, **Resume agent** or **Stop sharing**, only **Stop sharing for good** and **Delete shared history**, and "Stopped; can't be resumed from here" when its agent was stopped), its stop or resume progress ("Stop sent, not yet received", "Stop received by the machine", "Local stop active", "Resume sent, not yet received", "Resumed") marked "delivery receipt" once the machine sent any receipt for it and "not observed" before, the goal it counts under and follows (for a session no longer shared, "Sharing stopped <time>, so nothing more counts" or "Sharing ended <time>, …" for an ended one, never "Counting under: no goal"), and its requests and tokens, with **Stop agent** or **Resume agent**, **Stop sharing** and **Delete shared history**
 
 #### Scenario: A session whose device signed out
 
@@ -1173,7 +1192,12 @@ only the actions the server allows.
 #### Scenario: Alignment card
 
 - **WHEN** a member opens the tab
-- **THEN** each card shows "<requester> asks to align with <goal>" ("You ask to align with <goal>" for the requester; goals the person can't read show as "a goal you can't see"), the state, the choice, the revision, its effects, its sessions (each with "started <time> · …<the key's last 6 characters>", so two sessions of one person in one repository can be told apart), each approval requirement with the people who can satisfy it and whether it is satisfied ("you" for the reader, as everywhere on the card), the note and the history, and the buttons its `can` flags allow: **Approve**, **Suggest a change**, **Accept the change**, **Decline**, **Withdraw**, **Revoke**
+- **THEN** each card shows "<requester> asks to align with <goal>" ("You ask to align with <goal>" for the requester; goals the person can't read show as "a goal you can't see"), the state, the choice, the revision, its effects, its sessions (each with "started <time> · …<the key's last 6 characters>", so two sessions of one person in one repository can be told apart), each approval requirement with the people who can satisfy it and whether it is satisfied ("you" for the reader, as everywhere on the card) while it is open or approved, the note and the history, and the buttons its `can` flags allow: **Approve**, **Suggest a change**, **Accept the change**, **Decline**, **Withdraw**, **Revoke**
+
+#### Scenario: A closed request shows its decision
+
+- **WHEN** a person opens the tab with a request that was declined, withdrawn or revoked (`scripts/test-v2.mjs` "A1-cross-8 (ui): ...")
+- **THEN** in place of "Approvals needed" (none is waited for any more) its card says who closed it and when, from the view's `closed_by` and `closed_at`: "Declined by <name>, <time>. Nothing changes.", "Withdrawn by <name>, <time>. Nothing changes." or "Revoked by <name>, <time>. It has no effect from then on; past usage did not move.", with "you" for the reader ("Declined by you, …"), and never "waiting"
 
 #### Scenario: Alignment decisions are confirmed
 
@@ -1239,7 +1263,9 @@ with the response's one evidence class ("agent reported", or "not observed" with
 "Sessions people shared toward this goal, last 14 days. Counts come from bindings, not from what agents wrote.", with
 Sessions (and how many per harness, as "<n> Claude Code, <n> Codex"), Active now and Last activity ("None yet" when
 there is none), and, when the response has `detail`, "Files these sessions reported working on" (its paths, then "and
-<n> more whose paths aren't shared") and "Your sessions" (harness, a state pill and the last activity). Nothing on the
+<n> more whose paths aren't shared"; with no path shared, only "These sessions reported working on <n> files whose
+paths aren't shared.", never the heading over an empty list) and "Your sessions" (harness, a state pill and the last
+activity). Nothing on the
 card says what agents are doing: the files are what the sessions' align CLI reported.
 
 #### Scenario: Activity card
