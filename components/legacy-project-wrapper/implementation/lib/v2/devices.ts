@@ -194,11 +194,23 @@ const heldNames = (userId: string, exceptRequest: string, nowMs: number) =>
 
 /** The name a pairing's device is stored under at its token poll (W4): the one decided when it was approved, which the
  *  approval page showed, unless the poll names (`replaces`) this person's live device it replaces on the same machine,
- *  when the name is decided again without that device, so a re-login keeps its plain name; or unless that name has been
- *  taken since (by a device paired before this poll), when the next free one is used. */
+ *  when the name is decided again without that device: the name asked for when that is free, so a re-login keeps its
+ *  plain name, else the replaced device's own name when it is one of the asked name's family (`X (3)` stays `X (3)`),
+ *  as the approval page promises; or unless the approved name has been taken since (by a device paired before this
+ *  poll), when the next free one is used. */
 function pairedName(userId: string, r: RequestRow, replaces: string | null, nowMs: number): string {
   const held = heldNames(userId, r.id, nowMs);
-  if (replaces && get("SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL", replaces, userId)) return distinctName(userId, r.device_name, replaces, held);
+  const old = replaces ? get<{ name: string }>("SELECT name FROM v2_devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL", replaces, userId) : undefined;
+  if (old) {
+    const free = distinctName(userId, r.device_name, replaces, held);
+    // The name asked for is free: the device gets it, as its approval page said (a request for "X (5)" keeps it, cycle
+    // 9 C9-4). Taken by another machine: the page said a new login on one of the machines told apart from it keeps
+    // that machine's name, so a re-login on "X (3)" stays "X (3)" even when "X (2)" is free (E2E-WEB cycle 9 C9-1),
+    // unless another live device or approved pairing of theirs holds that name now.
+    if (free === r.device_name || nameNumber(r.device_name, old.name) === null) return free;
+    const taken = held.includes(old.name) || !!get("SELECT 1 AS x FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name = ? AND id <> ?", userId, old.name, replaces);
+    return taken ? free : old.name;
+  }
   if (r.approved_name && !get("SELECT 1 AS x FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name = ?", userId, r.approved_name)) return r.approved_name;
   return distinctName(userId, r.device_name, null, held);
 }

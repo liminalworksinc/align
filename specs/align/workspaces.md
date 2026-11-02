@@ -1118,7 +1118,11 @@ device under that name, unless a device of theirs paired since has taken it (the
 MAY name the device the pairing replaces on the same machine (`replaces`, a device id; malformed is 400); when that
 device is the approving person's own and live, the name SHALL be decided again at the poll with that device left out
 of the check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with
-`<name> (2)`.
+`<name> (2)`; and when the name asked for is still taken by another of their live devices, a replaced device named
+`<asked> (<n>)` SHALL pass its own name on, unless another live device or approved pairing of theirs holds it: a
+re-login on `bob laptop (3)` stays `bob laptop (3)` even when `bob laptop (2)` is free, as the approval page promised
+("it keeps that machine's name instead"). A name asked for that is free (`align login --name "bob laptop (5)"`) is
+kept as asked.
 A device name SHALL be one line as the person reads it everywhere (the approval page, the Devices page, `align
 login`): at `authorize` every run of control characters (C0, DEL and C1) and whitespace, line and paragraph
 separators and the blank fillers that render as nothing (Hangul fillers U+115F, U+1160, U+3164, U+FFA0 and the Braille
@@ -1132,9 +1136,15 @@ or a skin-tone modifier U+1F3FB to U+1F3FF) and right before another, as in `�
 to U+E007E ended by the cancel tag U+E007F right after an Extended_Pictographic character (optionally followed by
 U+FE0F), as in a subdivision flag; a joiner between letters, or a tag character anywhere else, is dropped. The limit
 SHALL count the characters a person reads (extended grapheme clusters: `👩‍💻` or a flag is one), at most 100, never
-UTF-16 units (`device_name is too long (max 100 characters)`), and the name SHALL also be at most 1600 bytes of UTF-8
-(`device_name is too long (max 1600 bytes)`), so a character built of hundreds of combining marks is refused; a name
-with nothing left SHALL be 400 `device_name is required`.
+UTF-16 units (`device_name is too long (max 100 characters)`); each character SHALL carry at most 6 combining marks
+(Unicode category M; enough for decomposed Vietnamese, Devanagari and Tibetan clusters and an emoji's variation
+selectors and keycap), so a character built of tens or hundreds of combining marks, which would draw over the page
+around it, is refused (`device_name has a character with too many accents or marks on it (at most 6 on one
+character)`); and the name SHALL also be at most 1600 bytes of UTF-8, which only long emoji sequences reach, refused in
+words the person can act on rather than a byte count (`device_name is too long to store: emoji such as families and
+flags take much more room than letters, so use fewer of them`); a name with nothing left SHALL be 400 `device_name is
+required`. `align login` SHALL show such a refusal as `align: the device name was refused: it <reason>. Pass another
+with \`align login --name <name>\`.`
 A device that revokes itself because a newer pairing on the same machine replaced it (`DELETE
 /api/v2/devices/self?replaced_by=<device id>`) SHALL pass its name on, whatever that name is: when the named device is
 the same person's and live, is named `<base> (<n>)`, the revoked device's name is `<base>` or `<base> (<m>)` with m
@@ -1151,6 +1161,16 @@ from a live device is passed back: a replacement whose name is exactly the name 
 
 - **WHEN** a person's device `pass mac (2)` (their other machine is `pass mac`) revokes itself naming their live `pass mac (3)` as its replacement; `pass mac (5)` names their `work mac (2)`; and `pass mac (6)` names their `pass mac (4)` (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 8 C8-2): ...")
 - **THEN** each revoke is 204, `pass mac (3)` becomes `pass mac (2)` and `pass mac` stays, while `work mac (2)` and `pass mac (4)` keep their names
+
+#### Scenario: A re-login on a suffixed machine keeps its name when a lower number is free
+
+- **WHEN** a person has live devices `gap mac` and `gap mac (3)` (`gap mac (2)` revoked), a pairing asking for `gap mac` is approved, its token poll names the `gap mac (3)` device in `replaces`, and that device then revokes itself naming the new one (`scripts/test-v2.mjs` "device (E2E-WEB cycle 9 C9-1): ...")
+- **THEN** the approval answers `gap mac (2)` with `same_name` `["gap mac", "gap mac (3)"]`, and the new device is stored as `gap mac (3)` and keeps it after the revoke
+
+#### Scenario: A device name with a tower of combining marks or too many long emoji
+
+- **WHEN** a device authorizes with `a` plus 700 combining acute accents (1,401 bytes), with `a` plus 7, with decomposed Vietnamese, a Devanagari conjunct, a keycap emoji and `a` plus 6 marks, and with 100 family emoji (`scripts/test-v2.mjs` "C9-3 (E2E-WEB cycle 9): ..." and "W6 (E2E-WEB cycle 8) and W5 (E2E-WEB cycle 9): ..."; the CLI in test `findings10` "a refused device name")
+- **THEN** the first two are 400 `device_name has a character with too many accents or marks on it (at most 6 on one character)`, the third is accepted, the last is 400 `device_name is too long to store: emoji such as families and flags take much more room than letters, so use fewer of them`, and `align login --name` with such a name exits 2 saying why and how to pass another
 
 #### Scenario: A name asked for is kept when it replaces a live pairing
 

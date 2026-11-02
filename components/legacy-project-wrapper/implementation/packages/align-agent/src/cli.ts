@@ -300,6 +300,8 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     const wait = Number.isFinite(secs) && secs > 0 ? ` Try again in ${Math.max(1, Math.ceil(secs / 60))} minute${Math.ceil(secs / 60) > 1 ? "s" : ""}.` : " Try again later.";
     throw new Error(`could not start pairing this device: ${said || `too many device pairings were started recently.${wait}`}`);
   }
+  // A refused name says why in the person's words (too many marks on a character, too many long emoji, cycle 9).
+  if (a.status === 400 && typeof a.json?.message === "string" && /^device_name /.test(a.json.message)) throw new UsageError(`the device name was refused: ${a.json.message.replace(/^device_name /, "it ")}. Pass another with \`align login --name <name>\`.`);
   if (a.status !== 200 || !a.json?.device_code) throw new Error(`device authorize failed: ${a.status} ${a.json?.error || ""}`);
   const { device_code, user_code, verification_uri } = a.json;
   let interval = Number(a.json.interval || 5);

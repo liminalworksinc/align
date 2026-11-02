@@ -40,16 +40,26 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 /** How many characters a person reads in `v` (grapheme clusters: `👩‍💻` and a flag are one each). */
 export const charCount = (v: string): number => [...graphemes.segment(v)].length;
 
+/** Combining marks one character of a one-line name may carry: enough for any script's real clusters (Vietnamese stacks
+ *  two, Devanagari and Tibetan clusters up to five, an emoji's variation selectors and keycap three), never a tower
+ *  of accents that draws over the page around it (E2E-WEB cycle 9 C9-3). */
+export const NAME_MARKS_PER_CHAR = 6;
+const MARK = /\p{M}/gu;
+
 /** A one-line name (a device name, Z4): cleaned (`cleanName`) and trimmed; nothing left is 400 "<k> is required". At
- *  most `max` characters as a person reads them (grapheme clusters, W6: never UTF-16 units, so 100 emoji fit), and at
- *  most 16 bytes of UTF-8 per character allowed, so a cluster built of thousands of combining marks is refused too. */
+ *  most `max` characters as a person reads them (grapheme clusters, W6: never UTF-16 units, so 100 emoji fit), each
+ *  with at most `NAME_MARKS_PER_CHAR` combining marks (C9-3), and at most 16 bytes of UTF-8 per character allowed, which
+ *  only long emoji sequences (families, flags) reach: refused in words the person can act on, never a byte count they
+ *  can't see (E2E-WEB cycle 9 W5). */
 export function oneLine(b: Body, k: string, max = 300): string {
   const v = b[k];
   if (typeof v !== "string") throw badRequest(`${k} must be a string`);
   const t = cleanName(v).trim();
   if (!t) throw badRequest(`${k} is required`);
-  if (charCount(t) > max) throw badRequest(`${k} is too long (max ${max} characters)`);
-  if (Buffer.byteLength(t, "utf8") > max * 16) throw badRequest(`${k} is too long (max ${max * 16} bytes)`);
+  const chars = [...graphemes.segment(t)].map((g) => g.segment);
+  if (chars.length > max) throw badRequest(`${k} is too long (max ${max} characters)`);
+  if (chars.some((c) => (c.match(MARK)?.length ?? 0) > NAME_MARKS_PER_CHAR)) throw badRequest(`${k} has a character with too many accents or marks on it (at most ${NAME_MARKS_PER_CHAR} on one character)`);
+  if (Buffer.byteLength(t, "utf8") > max * 16) throw badRequest(`${k} is too long to store: emoji such as families and flags take much more room than letters, so use fewer of them`);
   return t;
 }
 

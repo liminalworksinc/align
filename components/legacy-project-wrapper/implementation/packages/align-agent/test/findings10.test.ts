@@ -309,3 +309,12 @@ describe("cycle 9, section 5: works, but would confuse a developer", () => {
     });
   }
 });
+
+describe("E2E-WEB cycle 9: a refused device name", () => {
+  test("`align login --name` with a name the server refuses says why in the person's words and how to pass another", async () => {
+    const { t } = await world();
+    const r = await runCli(t, ["login", "--name", `a${"\u0301".repeat(700)}`]);
+    assert.equal(r.code, 2, r.stderr);
+    assert.equal(r.stderr.trim(), "align: the device name was refused: it has a character with too many accents or marks on it (at most 6 on one character). Pass another with `align login --name <name>`.");
+  });
+});

@@ -402,6 +402,8 @@ export class FakeServer {
         return send(429, { error: "rate_limited", ...(lim.message ? { message: lim.message, retry_after: lim.retryAfter } : {}) }, { "retry-after": String(lim.retryAfter) });
       }
       if (req.method === "POST" && p === "/api/v2/device/authorize") {
+        // As lib/v2/validate.ts oneLine: a character with more than 6 combining marks is refused (cycle 9).
+        if (String(body.device_name).normalize("NFD").match(/\p{M}{7,}/u)) return send(400, { error: "bad_request", message: "device_name has a character with too many accents or marks on it (at most 6 on one character)" });
         const pend: Pending = { device_code: b64u(crypto.randomBytes(33)), user_code: "BCDF-GHJK", name: body.device_name, publicKey: body.public_key, polls: 0, issued: false, denied: false };
         if (Buffer.from(String(body.public_key), "base64url").length !== 32) return send(400, { error: "invalid_public_key" });
         this.pending.set(pend.device_code, pend);
