@@ -27,9 +27,9 @@ import {
 } from "./api.ts";
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
-import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
+import { addNotice, addShareNotice, getShare, renderHot, snapshot } from "./hot.ts";
 import { otherWorkspaceWords, outOfReachWords } from "./shared/envelope.ts";
-import { applyShare, bind, latchTail, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
+import { applyShare, bind, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -232,7 +232,10 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       // Shared before (its history deleted since, too): this share counts from now (C6-1).
       const before = sharedBefore(ctx, lid);
       applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start", r.epoch_id));
-      if (!r.rule_dir) addNotice(ctx, lid, `share_started_${r.ts}`, `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${before ? "now" : "session start"}.`);
+      if (!r.rule_dir) {
+        const text = `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${before ? "now" : "session start"}.`;
+        addShareNotice(ctx, lid, `share_started_${r.ts}`, { e: "started", ws: ws.name, goal: goal?.title ?? null, text });
+      }
     }
   } catch (e) {
     say(`Align: ${r.command} failed: ${(e as Error).message}`);
@@ -341,6 +344,13 @@ function dropShareStarted(ctx: Ctx, lid: string): void {
   ctx.db.prepare("DELETE FROM notices WHERE local_id=? AND id LIKE ?").run(lid, `${lid}/share_started_%`);
 }
 
+/** The notice of a share the server refused (`text`: why, and what to do): about the share's state, so only the newest
+ *  such notice is told. */
+function shareErr(ctx: Ctx, lid: string, id: string, text: string): void {
+  const s = getShare(ctx, lid);
+  addShareNotice(ctx, lid, id, { e: "share_err", ws: s?.workspace_name ?? "", goal: null, text });
+}
+
 /** Why the server refused a session's share, and what to do, for its notice (N5). */
 function shareRefusal(ctx: Ctx, status: number, code: string | null): string {
   const server = loadCredentials(ctx.home)?.server_url || "the Align server";
@@ -369,7 +379,7 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
         // Its sharing was stopped (by the developer, or on the web): the server never shares a stopped session again,
         // whichever of the account's devices asks, so no "revoke the old device" here (C4-8).
         dropShareStarted(ctx, lid);
-        addNotice(ctx, lid, `share_err_${item.id}`, "Align: sharing failed (sharing_stopped): this session's sharing was stopped (`align stop-sharing`, `::align unshare` or Stop sharing on the web), and a session whose sharing was stopped is not shared again. This session stays private.");
+        shareErr(ctx, lid, `share_err_${item.id}`, "Align: sharing failed (sharing_stopped): this session's sharing was stopped (`align stop-sharing`, `::align unshare` or Stop sharing on the web), and a session whose sharing was stopped is not shared again. This session stays private.");
         renderHot(ctx, lid);
         return;
       }
@@ -378,7 +388,7 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
         endEpochs(ctx.db, lid, nowIso());
         ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
         dropShareStarted(ctx, lid);
-        addNotice(ctx, lid, `share_err_${item.id}`, `Align: sharing failed because this computer's clock is off (${String(r.json?.message || "clock_skew").replace(/\.$/, "")}). Set the system clock to update automatically, then type \`::align share\` here again. This session stays private.`);
+        shareErr(ctx, lid, `share_err_${item.id}`, `Align: sharing failed because this computer's clock is off (${String(r.json?.message || "clock_skew").replace(/\.$/, "")}). Set the system clock to update automatically, then type \`::align share\` here again. This session stays private.`);
         renderHot(ctx, lid);
         return;
       }
@@ -390,7 +400,7 @@ async function perform(ctx: Ctx, item: OutboxRow): Promise<void> {
         endEpochs(ctx.db, lid, nowIso());
         ctx.db.prepare("DELETE FROM outbox WHERE local_id=? AND kind IN ('post_epoch')").run(lid);
         dropShareStarted(ctx, lid);
-        addNotice(ctx, lid, `share_err_${item.id}`, shareRefusal(ctx, r.status, r.json?.error ?? null));
+        shareErr(ctx, lid, `share_err_${item.id}`, shareRefusal(ctx, r.status, r.json?.error ?? null));
         renderHot(ctx, lid);
         return;
       }
@@ -522,7 +532,7 @@ const MAX_BYTES = 256 * 1024;
 export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches: number }> {
   const res = { uploaded: 0, batches: 0 };
   if (!signedIn(ctx.home)) return res;
-  const shares = ctx.db.prepare("SELECT local_id, workspace_id, session_key FROM shares WHERE state='shared'").all() as { local_id: string; workspace_id: string; session_key: string }[];
+  const shares = ctx.db.prepare("SELECT local_id, workspace_id, workspace_name, session_key FROM shares WHERE state='shared'").all() as { local_id: string; workspace_id: string; workspace_name: string; session_key: string }[];
   promoteSettled(ctx);
   // Rows go up with their times on the server's clock, on the offset their epoch's start went up on: a clock corrected
   // between recording and sending (an offline machine whose clock ran ahead) keeps each row inside its epoch (C3-5).
@@ -590,14 +600,10 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
             }
             markStopped(ctx, s.local_id);
             // Never silently: the session hears that its sharing ended and that usage now stays here.
-            addNotice(
-              ctx,
-              s.local_id,
-              `upload_refused_${r.status}`,
-              (stopped
-                  ? "Align: the server no longer accepts this session's usage (sharing_stopped), so it stopped sharing here; its usage stays on this machine from now on. If its sharing ended because you left its workspace or were removed and you are a member again, `::align share` here shares it again."
-                  : `Align: the server no longer accepts this session's usage (${r.json?.error || r.status}), so it stopped sharing; its usage stays on this machine from now on.`) + latchTail(ctx, s.local_id),
-            );
+            const text = stopped
+              ? "Align: the server no longer accepts this session's usage (sharing_stopped), so it stopped sharing here; its usage stays on this machine from now on. If its sharing ended because you left its workspace or were removed and you are a member again, `::align share` here shares it again."
+              : `Align: the server no longer accepts this session's usage (${r.json?.error || r.status}), so it stopped sharing; its usage stays on this machine from now on.`;
+            addShareNotice(ctx, s.local_id, `upload_refused_${r.status}`, { e: "upload_refused", ws: s.workspace_name, goal: null, text });
             renderHot(ctx, s.local_id);
           }
         }

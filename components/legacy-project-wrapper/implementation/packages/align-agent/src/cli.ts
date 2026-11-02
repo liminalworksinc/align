@@ -31,7 +31,7 @@ import {
 import { openCtx, saveConfig, type Ctx } from "./context.ts";
 import { willUpload, type PendingRow } from "./ledger.ts";
 import { loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace, takeWorkspacesAdded } from "./goals.ts";
-import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, endedState, getShare, releaseOf } from "./hot.ts";
+import { ACCESS_LOST, DEVICE_SIGNED_OUT, endedReason, endedState, getShare, releaseOf, renderEndedShares } from "./hot.ts";
 import { latchWayOut } from "./shared/ended.ts";
 import { fetchAsks } from "./asks.ts";
 import { pullEndedSessions } from "./directives.ts";
@@ -95,6 +95,19 @@ const HELP = `align ${VERSION}: Align local agent
   align doctor
 
 <session> is a local id, a native session id prefix, or "latest".`;
+
+/** The help lines of one command (its usage lines and their continuations), or the whole help for an unknown one. */
+function commandHelp(cmd: string): string {
+  const lines = HELP.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith(`  align ${cmd} `) && lines[i] !== `  align ${cmd}`) continue;
+    out.push(lines[i]);
+    while (i + 1 < lines.length && /^ {10,}\S/.test(lines[i + 1])) out.push(lines[++i]);
+  }
+  if (!out.length) return HELP;
+  return [...out, ...(out.some((l) => l.includes("<session")) ? ["", lines[lines.length - 1]] : [])].join("\n");
+}
 
 // ---------- helpers ----------
 /**
@@ -190,6 +203,10 @@ function parseSessionArgs<T extends ParseArgsOptionsConfig>(ctx: Ctx, cmd: strin
       break;
     }
     const name = a.length > 1 && a.startsWith("-") ? optionName(a) : null;
+    // A value-taking option with nothing after it, or another option right after it: said in words, not as Node's
+    // "argument is ambiguous" (cycle 11, section 5).
+    // An option-parsing error, as Node's would be (exit 1), in words (`--cwd=` is the current folder).
+    if (name && options[name].type === "string" && !a.includes("=") && (i + 1 >= argv.length || optionName(argv[i + 1]))) throw new Error(`--${name} needs a value (\`align ${cmd} ... --${name} <value>\`)`);
     if (name && options[name].type === "string" && !a.includes("=") && i + 1 < argv.length && !optionName(argv[i + 1])) opts.push(`--${name}=${argv[++i]}`);
     else if (name) opts.push(a);
     else if (a.length > 1 && a.startsWith("-") && !isSessionRef(ctx, a)) {
@@ -283,11 +300,15 @@ function distDir(): string {
 const nameRefused = (why: string) => `the device name was refused: ${why}. Pass another with \`align login --name <name>\`.`;
 /** A name with nothing a person can read in it: said as that, not as "it is required" (cycle 10, section 5). */
 const EMPTY_NAME = "it is blank (nothing is left once spaces and invisible characters are dropped)";
+/** What the server drops from a name or reads as a space (lib/v2/validate.ts cleanName): controls, spaces, invisible
+ *  format characters (zero-width spaces, joiners, bidirectional marks), lone surrogates and the blank fillers. A name
+ *  of only these is blank, refused here before a pairing starts (cycle 11, section 5). */
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\s\u2028\u2029\u115F\u1160\u3164\uFFA0\u2800]+/gu;
 
 async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { server: { type: "string" }, name: { type: "string" } }, allowPositionals: false });
   // A blank `--name` is refused here, before a pairing is started (each counts toward the server's hourly limit).
-  if (values.name !== undefined && !values.name.trim()) throw new UsageError(nameRefused(EMPTY_NAME));
+  if (values.name !== undefined && !values.name.replace(INVISIBLE, "")) throw new UsageError(nameRefused(EMPTY_NAME));
   const server = (values.server || ctx.config.server_url).replace(/\/$/, "");
   const deviceName = values.name || ctx.config.device_name || `${os.userInfo().username}'s ${os.hostname().replace(/\.local$/, "")}`;
   // A device this machine signed out of while the server was unreachable is revoked first, so its sessions end there
@@ -361,6 +382,9 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
         endSharesSignedOut(ctx);
         return live;
       });
+      // Signed in now: every ended share's hot and latch files say so (its notices held back until the ended shares
+      // are read), whatever the next steps reach (C11-1).
+      renderEndedShares(ctx);
       // The device this pairing replaced is not the one this machine was signed in as when this login started: another
       // `align login` paired it meanwhile, and may have said it signed in as it. This login says so, and so does this
       // machine's next command and `align status`, which name the device it is now (cycle 9).
@@ -666,14 +690,29 @@ async function cmdStatus(ctx: Ctx): Promise<void> {
     return { stuck: lids.length - again - release, again, release };
   };
   if (latched) out(`  Stop latch: ${latched} session(s) stopped${stuck(endedOf("latches", "stopped"))}; see \`align latch status\``);
-  const holds = ctx.db.prepare("SELECT local_id, json FROM holds WHERE held=1").all() as { local_id: string; json: string }[];
+  const holds = ctx.db.prepare("SELECT local_id, goal_id, json FROM holds WHERE held=1").all() as { local_id: string; goal_id: string; json: string }[];
   const fromFeed = feedHolds(ctx);
   if (holds.length || fromFeed.length) {
     const goals = [...new Set([...holds.map((h) => (JSON.parse(h.json) as { goal_title: string }).goal_title), ...fromFeed.map((f) => f.goal_title)].map((t) => `"${clean(t, 80)}"`))];
     const early = fromFeed.length ? ` (${fromFeed.length} from the cached goals, before the hold reaches them)` : "";
     // Sessions, not holds: one session held on two goals is one session paused (cycle 10 audit).
     const sessions = new Set([...holds.map((h) => h.local_id), ...fromFeed.map((f) => f.local_id)]).size;
-    out(`  Goal hold:  ${sessions} session(s) paused on ${goals.join(", ")}${early}${stuck(endedOf("holds", "held"))}; see \`align latch status\``);
+    // Held where no release reaches (sharing ended) on a goal the cached goals say is no longer held: the release came
+    // and could not reach them, which `align goals` showing the goal free would otherwise leave unexplained (cycle 11,
+    // section 5).
+    const missed = new Set(
+      holds
+        .filter((h) => {
+          const share = getShare(ctx, h.local_id);
+          const end = endedState(ctx, share);
+          if (!share || !end || end.reshare || releaseOf(ctx, h.local_id, share)) return false;
+          const g = loadFeed(ctx.home, share.workspace_id)?.goals.find((x) => x.id === h.goal_id);
+          return !!g && !g.allocation?.held;
+        })
+        .map((h) => h.local_id),
+    ).size;
+    const released = missed ? `; ${missed} of them on a goal whose hold was released on the web since, a release that can't reach them` : "";
+    out(`  Goal hold:  ${sessions} session(s) paused on ${goals.join(", ")}${early}${stuck(endedOf("holds", "held"))}${released}; see \`align latch status\``);
   }
   const pending = (ctx.db.prepare("SELECT COUNT(*) AS n FROM goal_requests WHERE state='pending'").get() as { n: number }).n;
   if (pending) out(`  Requests:   ${pending} waiting for your answer; see \`align requests\``);
@@ -1261,7 +1300,10 @@ async function cmdSync(ctx: Ctx, argv: string[] = []): Promise<void> {
   }
   if (!signedIn(ctx.home)) {
     // Cut short by `align logout`: the line above says so, not that it ran signed out (C5-4).
-    if (!r.aborted) out("Signed out: nothing uploaded.");
+    // Why, when it was not `align logout` (a revoke on the web, say): this pass may be the first to hear it (cycle 11,
+    // section 5), as `align status` says it.
+    const why = loadCredentials(ctx.home)?.signed_out_reason;
+    if (!r.aborted) out(`Signed out: nothing uploaded.${why && why !== "logout" ? ` This machine is signed out because ${signedOutWords(why)}; run \`align login\` to sign in again.` : ""}`);
     if (r.revoked && revokeState(r.revoked) === "pending") {
       // The server could not be reached for the revoke: an unreachable server exits 1, as every other pass does.
       err(`align: ${r.serverError || "the server could not be reached"}; ${waitingRevokes(r.revoked.pending)} at the next sync that reaches it.`);
@@ -1380,6 +1422,8 @@ async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
       // No shared agent time that week: every gap is undefined, as the web's Spend tab says it (C10-7).
       const none = a.window.total_fresh_tokens === 0;
       if (none) out("  No shared agent time that week.");
+      // The same columns as the last-7-days view (cycle 11, section 5).
+      out(`  ${pad("SHARE", 7)} ${pad("TARGET", 6)} ${pad("GAP", 16)} GOAL`);
       for (const r of a.window.rows) {
         const label = r.kind === "goal" ? r.goal!.title : r.kind === "private" ? "Goals you can't see" : "Not bound to a goal";
         out(`  ${pad(`${r.share}%`, 7)} ${pad(r.target_share === null ? "-" : `${r.target_share}%`, 6)} ${pad(gapWords(none ? null : r.gap, r.target_share), 16)} ${label}`);
@@ -1395,11 +1439,12 @@ async function cmdAllocation(ctx: Ctx, argv: string[]): Promise<void> {
   if (values.json) return out(JSON.stringify({ workspaces: feeds.map((f) => ({ workspace: f.workspace, steering: f.feed?.steering ?? "off", fetched_at: f.feed?.fetched_at ?? null, goals: (f.feed?.goals ?? []).map((g) => ({ id: g.id, title: g.title, ...(g.allocation ?? {}) })) })), unshared: digest }, null, 2));
   for (const f of feeds) {
     out(`${f.workspace}, last 7 days${f.feed ? ` (cached ${shortTime(f.feed.fetched_at)}, steering ${f.feed.steering ?? "off"})` : " (not fetched yet; use --refresh)"}`);
-    out(`  ${pad("SHARE", 7)} ${pad("TARGET", 6)} ${pad("GAP", 16)} GOAL`);
     const goals = [...(f.feed?.goals ?? [])].filter((g) => g.status === "active").sort((a, b) => (b.allocation?.share_7d ?? 0) - (a.allocation?.share_7d ?? 0));
     // The feed leaves a goal's gap out (null) only when it has no target or the workspace has no shared agent time yet:
-    // a target with no gap says the latter, in the words of the web's Spend tab (C10-7).
+    // a target with no gap says the latter, in the words of the web's Spend tab (C10-7), above the columns (cycle 11,
+    // section 5).
     if (goals.some((g) => g.allocation && g.allocation.target_share !== null && g.allocation.gap_7d === null)) out("  No shared agent time in the last 7 days yet.");
+    out(`  ${pad("SHARE", 7)} ${pad("TARGET", 6)} ${pad("GAP", 16)} GOAL`);
     for (const g of goals) {
       const a = g.allocation;
       const target = a?.target_share ?? null;
@@ -1438,6 +1483,10 @@ export async function main(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") return out(HELP);
   if (cmd === "--version" || cmd === "version") return out(VERSION);
+  // `align <command> --help` (before any `--`): that command's lines of the help, never "no session matches" (cycle 11,
+  // section 5).
+  const opts = rest.includes("--") ? rest.slice(0, rest.indexOf("--")) : rest;
+  if (opts.includes("--help") || opts.includes("-h")) return out(commandHelp(cmd));
   // One clear message on an unsupported Node, before anything else runs (and before node:sqlite loads).
   const old = unsupportedNode(process.env);
   if (old) {

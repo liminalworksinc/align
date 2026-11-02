@@ -125,6 +125,8 @@ export class FakeServer {
   /** AskView per workspace, as `GET /api/v2/workspaces/:ws/asks` returns them (the reader's `can` flags included). */
   asks = new Map<string, (Ask & { can: Record<string, boolean> })[]>();
   usage = new Map<string, any>();
+  /** The answer to `GET …/allocation` (one week); unset: no shared agent time, every active goal with its target. */
+  allocationWeek: unknown = null;
   /** Session keys whose history was deleted (on the web or by a device): a later DELETE gets 410 history_deleted. */
   deletedKeys = new Set<string>();
 
@@ -507,11 +509,12 @@ export class FakeServer {
         // A session its person stopped sharing (not one its device's revoke ended) stays stopped: 409 sharing_stopped to
         // any of their devices (C4-8). Its history may be deleted by any of their live devices (C4-1).
         const reshare = !sub && req.method === "PUT" && !!sess && sess.device !== dev.id && sess.state !== "stopped" && !!this.devices.get(sess.device)?.revoked;
-        // A session that ended when its person was removed is shared again by its own device once they are back.
-        const back = !!sess && !sub && req.method === "PUT" && sess.state === "stopped" && sess.ended === "member_removed" && sess.device === dev.id;
+        // A session that ended when its person was removed is shared again by any device of theirs once they are back (as
+        // lib/v2/sessions.ts: a new pairing after a re-invite too).
+        const back = !!sess && !sub && req.method === "PUT" && sess.state === "stopped" && sess.ended === "member_removed";
         if (sess && !sub && req.method === "PUT" && sess.state === "stopped" && !back) return send(409, { error: "sharing_stopped" });
         const deleting = !sub && req.method === "DELETE";
-        if (sess && sess.device !== dev.id && !reshare && !deleting) return send(404, { error: "not_found" });
+        if (sess && sess.device !== dev.id && !reshare && !back && !deleting) return send(404, { error: "not_found" });
         if (!sub && req.method === "PUT") {
           if (!/^[A-Za-z0-9_-]{43}$/.test(key) || !/^[A-Za-z0-9_-]{43}$/.test(body.repo_key)) return send(400, { error: "bad_key" });
           if (ahead(body.started_at)) return skewed();
@@ -670,6 +673,12 @@ export class FakeServer {
         const after = Number(url.searchParams.get("after") || 0);
         const items = this.activity.filter((i) => i.ws === m![1] && i.seq > after);
         return send(200, { cursor: items.length ? items[items.length - 1].seq : after, items });
+      }
+      // A week of the workspace's allocation (lib/v2/allocation.ts), as `allocationWeek` sets it: no shared time by default.
+      m = /^\/api\/v2\/workspaces\/([^/]+)\/allocation$/.exec(p);
+      if (m && req.method === "GET") {
+        const rows = (this.goals.get(m[1]) || []).map((g) => ({ kind: "goal", goal: { id: g.id, title: g.title }, share: 0, target_share: g.allocation?.target_share ?? null, gap: null }));
+        return send(200, this.allocationWeek ?? { window: { total_fresh_tokens: 0, rows }, steering: { steering: this.steering.get(m[1]) || "off", total: 0 } });
       }
       m = /^\/api\/v2\/directives\/([^/]+)\/receipts$/.exec(p);
       if (m && req.method === "POST") {

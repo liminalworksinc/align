@@ -440,7 +440,8 @@ export function requestContext(r: HotRequest, boundGoalId: string | null): strin
 
 /** One context line once the developer answered a request the model already has. */
 export function requestAnswerLine(r: HotRequest, answer: "accepted" | "declined"): string {
-  if (answer === "declined") return "[Align] The developer declined the request; continue as before.";
+  // Which request: a checkpoint and a switch can reach the model together (cycle 11, section 5).
+  if (answer === "declined") return `[Align] The developer declined ${senderName(r)}'s request to ${requestWhat(r)}; continue as before.`;
   if (r.type === "replan") return `[Align] The developer accepted ${senderName(r)}'s request to replan toward goal "${goalTitle(r)}": follow the updated plan.`;
   return `[Align] The developer accepted ${senderName(r)}'s request to ${requestWhat(r)}.`;
 }

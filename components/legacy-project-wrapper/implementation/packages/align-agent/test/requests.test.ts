@@ -148,7 +148,7 @@ describe("requests", () => {
     const next = json(prompt(t, sid).stdout);
     assert.equal(
       next.hookSpecificOutput.additionalContext,
-      `[Align] The developer accepted Dana Lee's request to replan toward goal "Ship the v2 onboarding flow": follow the updated plan.\n[Align] The developer declined the request; continue as before.`,
+      `[Align] The developer accepted Dana Lee's request to replan toward goal "Ship the v2 onboarding flow": follow the updated plan.\n[Align] The developer declined Dana Lee's request to make a checkpoint; continue as before.`,
       "told before the sync records it",
     );
     ingestSpool(ctx);
@@ -413,7 +413,7 @@ describe("requests e2e", () => {
     assert.equal(dec.code, 0, dec.stderr);
     await waitFor(() => has(cp.directive_id, "declined"), 5000, "checkpoint declined");
     assert.deepEqual(cp.targets.get(skey), { state: "declined", auto_accepted: false }, "a later decline overrides the auto-accept");
-    assert.equal(JSON.parse(up("p5").stdout).hookSpecificOutput.additionalContext, "[Align] The developer declined the request; continue as before.");
+    assert.equal(JSON.parse(up("p5").stdout).hookSpecificOutput.additionalContext, "[Align] The developer declined Dana Lee's request to make a checkpoint; continue as before.");
     assert.equal((await runCli(t, ["requests", "accept", "zzzzzz"])).code, 2);
 
     // cancel: the server expires the target and sends a cancelled request; the session hears nothing it never had.

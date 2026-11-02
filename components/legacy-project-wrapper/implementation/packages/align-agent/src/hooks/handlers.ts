@@ -37,14 +37,14 @@ import {
 import { myTeams, teamAsks } from "../shared/asks.ts";
 import { crossing, lastReply } from "../shared/drift.ts";
 import { feedHold, feedHoldReason } from "../shared/feedhold.ts";
-import { latchWayOut, type ReleaseReaches } from "../shared/ended.ts";
+import { latchWayOut, shareNotice, shareRetell, type ReleaseReaches, type ShareTold } from "../shared/ended.ts";
 import { contextGoals, snapshot } from "../shared/goaltree.ts";
 import { randomId, readJson, readJsonStrict, removeFile, writeJsonAtomic } from "../shared/fsx.ts";
 import { layout, localId, spoolWrite } from "../shared/layout.ts";
 import { isShareStateNotice, noticeKind, resumedButHeld } from "../shared/notices.ts";
 import { matchRule, readRules, removeRule, setRule } from "../shared/rules.ts";
 import { queueSteering, steeringLine, unsharedNote } from "../shared/steering.ts";
-import type { DriftFile, FeedFile, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
+import type { DriftFile, FeedFile, Goal, GoalSnapshot, Harness, HoldLatch, HotRequest, HotState, InjectedState, Latch, MeFile, RequestState, TeamAsks } from "../shared/types.ts";
 import { CLAIM_MS, collision, commitSubject, crossOverlap, display, editedPaths, podReport, readPath, record, shellWrites, siblingNews, type Act } from "./siblings.ts";
 
 export interface HookInput {
@@ -163,30 +163,71 @@ function reportApplied(home: string, lid: string, inj: InjectedState, ids: (stri
   spoolWrite(home, { type: "applied", local_id: lid, directive_ids: fresh, ts: new Date().toISOString() });
 }
 
+/** The notices a prompt (or a session start) would tell now, which notice ids that marks as seen, and what the session is
+ *  then told about its share (`told`). Pure, so a test can ask what the session would be told without telling it. */
+export interface NoticePlan {
+  told: HotState["notices"];
+  seen: string[];
+  share_told: ShareTold | null;
+}
+
 /**
- * The notices still worth telling, of those the session has not seen: one about its share's state (the newest, the
- * earlier ones are stale), a "resumed" one only while that resume still holds (a later stop withdrew it, C4-6), and each
- * text once. All of them count as seen.
+ * The notices still worth telling. About the share's state only the newest notice still holds (C5-3, C7-2): it is
+ * worded now, from the share's state now (`share_now`, the values its latch files carry), through the same words the
+ * deny uses (`shareNotice`), and told when the session has not seen it, or again when its advice changed since it was
+ * told (signed in or out, the workspace back or lost again, a release that no longer reaches it); held back, unseen,
+ * while the ended shares are not read since this sign-in (E2E-AGENT cycle 11 C11-1 to C11-4). Of the others: a
+ * "resumed" one only while that resume still holds (a later stop withdrew it, C4-6), a workspace this device reaches for
+ * the first time only while the session has no share of its own (C11-2), and each text once. All count as seen.
  */
-export function currentNotices(hot: HotState, fresh: HotState["notices"]): HotState["notices"] {
-  const lastState = fresh.filter((n) => isShareStateNotice(noticeKind(n.id))).pop();
-  const kept = fresh.filter((n) => {
+export function planNotices(hot: HotState, inj: InjectedState): NoticePlan {
+  const unseen = (n: { id: string }) => !inj.notices_shown.includes(n.id);
+  const seen: string[] = [];
+  const state = hot.notices.filter((n) => n.facts || isShareStateNotice(noticeKind(n.id)));
+  const newest = state[state.length - 1];
+  let told: HotState["notices"][number] | null = null;
+  let shareTold: ShareTold | null = null;
+  seen.push(...state.filter((n) => n !== newest && unseen(n)).map((n) => n.id));
+  if (newest?.facts && hot.share_now) {
+    const fresh = unseen(newest);
+    const prev = inj.share_told ?? null;
+    const w = shareNotice(hot.local_id, newest.id, newest.facts, hot.share_now, prev);
+    if (w !== "hold") {
+      if (fresh) seen.push(newest.id);
+      if (w && shareRetell(newest.id, w, prev, fresh)) {
+        told = { id: newest.id, text: w.text };
+        shareTold = { id: newest.id, key: w.key, tail: w.tail };
+      } else if (w && prev?.id !== newest.id) {
+        // Seen before its words were kept (an older agent): what it reads as now, so a later change is told.
+        shareTold = { id: newest.id, key: w.key, tail: w.tail };
+      }
+    }
+  } else if (newest && unseen(newest)) {
+    seen.push(newest.id);
+    told = newest;
+  }
+  const others = hot.notices.filter((n) => !state.includes(n) && unseen(n));
+  seen.push(...others.map((n) => n.id));
+  const kept = hot.notices.filter((n) => {
+    if (n.id === told?.id) return true;
+    if (!others.includes(n)) return false;
     const k = noticeKind(n.id);
     if (k.startsWith("resumed_")) return !!hot.resumed && k === `resumed_${hot.resumed}`;
-    if (isShareStateNotice(k)) return n === lastState;
+    if (k.startsWith("workspace_added_")) return !hot.share;
     return true;
   });
-  return kept.filter((n, i) => !kept.slice(i + 1).some((m) => m.text === n.text));
+  const words = kept.map((n) => (n.id === told?.id ? told : n));
+  return { told: words.filter((n, i) => !words.slice(i + 1).some((m) => m.text === n.text)), seen, share_told: shareTold };
 }
 
 /** `held`: the goal holds that block this session's tools now (`blockingHolds`), so a "resumed" notice told while one
  *  does says the hold still blocks them instead of that the tools work again (C10-3). */
 function takeNotices(hot: HotState | null, inj: InjectedState, held: () => BlockingHolds | null = () => null): string | null {
   if (!hot) return null;
-  const fresh = hot.notices.filter((n) => !inj.notices_shown.includes(n.id));
-  if (!fresh.length) return null;
-  inj.notices_shown.push(...fresh.map((n) => n.id));
-  const told = currentNotices(hot, fresh);
+  const plan = planNotices(hot, inj);
+  inj.notices_shown.push(...plan.seen);
+  if (plan.share_told) inj.share_told = plan.share_told;
+  const told = plan.told;
   if (!told.length) return null;
   const blocking = told.some((n) => noticeKind(n.id).startsWith("resumed_")) ? held() : null;
   return told.map((n) => (blocking && noticeKind(n.id).startsWith("resumed_") ? resumedButHeld(blocking.titles, "user") : n.text)).join("\n");
@@ -290,8 +331,10 @@ function autoShare(home: string, harness: Harness, sid: string, cwd: string | nu
   inj.notices_shown.push("anchor");
   const goal = rule.goal_id ? feedGoal(home, rule.workspace_id, rule.goal_id) : null;
   inj.rule_share = { workspace_id: rule.workspace_id, workspace_name: rule.workspace_name, goal_id: rule.goal_id, goal_title: goal?.title ?? rule.goal_title, at: new Date().toISOString() };
+  // A goal the cached feed says is held: its tools are blocked from the first call, so the start says so (cycle 11,
+  // section 5), as `::align share` toward it does.
   messages.push(
-    `Align: shared with ${rule.workspace_name}${goal ? ` for "${goal.title}"` : rule.goal_title ? ` for "${rule.goal_title}"` : ""} (folder rule for ${rule.dir}). Type \`::align unshare\` to keep this session private.`,
+    `Align: shared with ${rule.workspace_name}${goal ? ` for "${goal.title}"` : rule.goal_title ? ` for "${rule.goal_title}"` : ""} (folder rule for ${rule.dir}).${cached ? heldNote(cached) : ""} Type \`::align unshare\` to keep this session private.`,
   );
   return epochId;
 }
@@ -445,6 +488,9 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
       markAsks(inj, ta);
       markContext(inj, related);
       inj.context_epoch++;
+      // Held (the cached feed says so): the model hears it with its goal, not first from a deny (cycle 11, section 5).
+      const cached = readJson<FeedFile>(layout.feed(home, rule!.workspace_id))?.goals.find((x) => x.id === goal.id);
+      if (cached?.allocation?.held) context = `${context}\n${heldContext([goal.title])}`;
       const card = cardFor(home, lid, goal.id, inj, cwd, rule!.workspace_id);
       if (card) context = `${context}\n${card}`;
       const steer = steerOnce(home, lid, source, rule!.workspace_id, goal.id, inj);
@@ -747,6 +793,13 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
     context = renderDelta(kind, goal, limits);
     const all = goal && kind === "bound" ? boundLimits(goal) : null;
     if (all) context = `${context}\n${all}`;
+    // Moved to another goal while a hold on the old one still blocks the tools: the model hears that too, as the user
+    // did at `::align bind` (cycle 11, section 5).
+    if (goal && kind === "bound") {
+      const h = readJsonStrict<HoldLatch>(layout.hold(home, lid));
+      const kept = h.state === "ok" && Array.isArray(h.value?.holds) ? h.value.holds.filter((x) => x.goal_id !== goal!.id).map((x) => x.goal_title) : [];
+      if (kept.length) context = `${context}\n${heldContext(kept, true)}`;
+    }
     markInjected(inj, kind === "unbound" ? null : goal, hot.share.state);
   }
   if (hot.share.state === "shared" && goal) {
@@ -1098,8 +1151,11 @@ function holdLine(home: string, lid: string, cwd: string | null): string {
 }
 
 function lastSync(home: string): string {
-  const d = readJson<{ at: string }>(layout.lastSync(home));
-  return d ? `${Math.round((Date.now() - Date.parse(d.at)) / 1000)} s ago` : "never";
+  const d = readJson<{ at: string; error?: string; error_since?: string }>(layout.lastSync(home));
+  if (!d) return "never";
+  const ago = (at: string) => `${Math.max(0, Math.round((Date.now() - Date.parse(at)) / 1000))} s ago`;
+  // A pass that could not reach the server still ran: say so, as `align status` does (cycle 11, section 5).
+  return d.error ? `${ago(d.at)}; the Align server could not be reached (since ${ago(d.error_since || d.at)}: ${clean(d.error, 160)}), so queued work waits on this machine` : ago(d.at);
 }
 
 /**
@@ -1123,6 +1179,24 @@ function willShare(home: string, hot: HotState | null, cwd: string | null): bool
 
 const MULTI_WORKSPACE = "Align: this machine reaches more than one workspace and none is the default, so `::align share` can't tell which. Run `align share --latest --workspace <name>` in a terminal.";
 
+/** `::align share` in a session whose share ended, before this sign-in read which shares their person stopped (C11-1). */
+const SHARE_UNREAD =
+  "Align: this machine is signed in to Align again, but has not yet heard from the Align server whether this session's sharing was stopped on the web meanwhile (a session stopped there is not shared again), so nothing was asked for. Run `align sync` in a terminal, then type `::align share` here again.";
+
+/** The same for `::align goals` (C11-6): every workspace's goals are cached, and the terminal lists them by workspace. */
+const MULTI_WORKSPACE_GOALS =
+  "Align: this machine reaches more than one workspace and none is the default, so `::align goals` can't tell which this session's is. Run `align goals` in a terminal to list each workspace's goals (`align goals --workspace <name>` for one); `align share --latest --workspace <name> --goal <goal>` shares this session in the one you pick.";
+
+/** The cached workspace, other than `except`, with a goal `arg` names (by id or title prefix), and that goal. */
+function goalElsewhere(home: string, except: string | null, arg: string): { feed: FeedFile; goal: Goal } | null {
+  for (const f of feeds(home)) {
+    if (f.workspace_id === except) continue;
+    const goal = f.goals.find((g) => g.id === arg) || f.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase()));
+    if (goal) return { feed: f, goal };
+  }
+  return null;
+}
+
 /** The same for `::align share --dir`, which can't name a workspace either: the terminal command for this folder (C7-3). */
 function multiWorkspaceDir(cwd: string | null): string {
   const dir = cwd ? gitInfo(cwd)?.toplevel || cwd : "<folder>";
@@ -1135,6 +1209,15 @@ function multiWorkspaceDir(cwd: string | null): string {
 function noCachedGoal(arg: string, feed: FeedFile | null): string {
   const when = feed?.fetched_at ? ` (goals fetched ${Math.max(0, Math.round((Date.now() - Date.parse(feed.fetched_at)) / 1000))} s ago)` : "";
   return `Align: no cached goal matches "${arg}"${when}. A goal created just now arrives with the next sync, which starts now: try again in a few seconds, or run \`align goals --refresh\` in a terminal. \`::align goals\` lists the cached ones.`;
+}
+
+/** The model's line for goal holds that block this session's tools (`titles`); `moved` after a move to another goal. */
+function heldContext(titles: string[], moved = false): string {
+  const q = titles.map((t) => `"${clean(t, 100)}"`);
+  const which = q.length > 1 ? `the holds on goals ${q.slice(0, -1).join(", ")} and ${q[q.length - 1]}` : `the hold on goal ${q[0]}`;
+  return moved
+    ? `[Align] ${which.charAt(0).toUpperCase()}${which.slice(1)} still ${q.length > 1 ? "block" : "blocks"} this session's tools until ${q.length > 1 ? "they are" : "it is"} released: moving to another goal does not lift ${q.length > 1 ? "them" : "it"}. Tell the user and wait for instructions.`
+    : `[Align] All agents on goal ${q.join(", ")} were paused from its Align workspace (a goal hold), so this session's tools are blocked until the hold is released. Tell the user and wait for instructions.`;
 }
 
 /** A goal the cached feed says is held: binding or sharing toward it works, but its tools stay blocked (cycle 7). */
@@ -1268,6 +1351,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
     }
     case "goals": {
       const feed = feedFor(home, hot, cwd);
+      // No workspace of its own and several in reach with no default: say that, and how to pick one, not that no goals
+      // are cached (E2E-AGENT cycle 11 C11-6).
+      if (!feed && (readJson<MeFile>(layout.me(home))?.workspaces?.length ?? 0) > 1) return MULTI_WORKSPACE_GOALS;
       if (!feed) return "Align: no cached goals. Run `align goals --refresh` in a terminal.";
       const shown = feed.goals.slice(0, 12);
       const list = shown.map((g) => `  ${goalMark(g)} ${g.title} (${g.id}, v${g.version}, ${g.status})`);
@@ -1289,6 +1375,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       // Stopped by its person while it was shared there; not one whose share a sign-out or a lost workspace had ended
       // before `align stop-sharing` freed its tools, which the server shares again.
       if (!dirMode && hot?.share?.state === "stopped" && hot.prior_share?.stopped && (hot.share.ended ?? "sharing_ended") === "sharing_ended") return `Align: ${stoppedForGoodWords(lid, "type `::align share` here")}`;
+      // A share a sign-out or a lost workspace ended, while this sign-in has not read which shares their person stopped
+      // on the web: one stopped there is never shared again, so nothing is asked for until that is known (C11-1).
+      if (!dirMode && hot?.share?.state === "stopped" && hot.share_now?.unread && (hot.share.ended === "device_signed_out" || hot.share.ended === "access_lost")) return SHARE_UNREAD;
       // Shared before in a workspace this machine can't reach now (its person was removed from it, say): shared again
       // only there, never into the default workspace, which would file that workspace's work under another (cycle 8).
       const own = hot?.share;
@@ -1309,6 +1398,17 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
         // again only there, as the out-of-reach answer says, never "no cached goal matches" (cycle 9).
         const elsewhere = !dirMode && own ? feeds(home).find((f) => f.workspace_id !== own.workspace_id && f.goals.some((g) => g.id === arg || g.title.toLowerCase().startsWith(arg.toLowerCase()))) : undefined;
         if (elsewhere && own) return `Align: ${otherWorkspaceWords(own.workspace_name, elsewhere.workspace_name)}`;
+        // Not shared before, and the goal is another cached workspace's: `::align share` shares this session in its
+        // folder rule's workspace (or the default), so say which, and the terminal command for the one named (C11-6).
+        const other = feed ? goalElsewhere(home, feed.workspace_id, arg) : null;
+        if (other && feed) {
+          const rule = matchRule(readRules(home), cwd);
+          const why = dirMode ? "`::align share --dir` makes a rule for that workspace" : rule && rule.workspace_id === feed.workspace_id ? "this folder's rule shares sessions there" : "it is this machine's default workspace";
+          const how = dirMode
+            ? `\`align share --dir ${cwd ? gitInfo(cwd)?.toplevel || cwd : "<folder>"} --workspace "${clean(other.feed.workspace_name, 80)}" --goal "${clean(other.goal.title, 100)}"\``
+            : `\`align share ${lid.slice(0, 8)} --workspace "${clean(other.feed.workspace_name, 80)}" --goal "${clean(other.goal.title, 100)}"\``;
+          return `Align: "${clean(other.goal.title, 100)}" is a goal of ${clean(other.feed.workspace_name, 80)}, and \`::align share\` here shares this session with ${clean(feed.workspace_name, 80)} (${why}). To share it toward that goal, run ${how} in a terminal.`;
+        }
         return noCachedGoal(arg, feed);
       }
       // A goal the cached feed says this person can't bind yet: said now, never "sharing requested" and a failure later.
@@ -1386,6 +1486,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (!arg) return "Align: usage is `::align bind <goal>`.";
       const feed = feedFor(home, hot, cwd);
       const goal = feed ? feed.goals.find((g) => g.id === arg) || feed.goals.find((g) => g.title.toLowerCase().startsWith(arg.toLowerCase())) : null;
+      // Another workspace's goal: a session counts only toward goals of the workspace it is shared with (C11-6).
+      const other = goal ? null : goalElsewhere(home, hot.share.workspace_id, arg);
+      if (other) return `Align: "${clean(other.goal.title, 100)}" is a goal of ${clean(other.feed.workspace_name, 80)}, and this session is shared with ${clean(hot.share.workspace_name, 80)}, so it counts only toward ${clean(hot.share.workspace_name, 80)}'s goals. \`::align goals\` lists them.`;
       if (!goal) return noCachedGoal(arg, feed);
       if (!goal.bindable) return `Align: "${goal.title}" needs an approved alignment before this session can count toward it.`;
       // Recorded here, so the very next prompt opens the epoch even before a sync runs (as `align bind` does).

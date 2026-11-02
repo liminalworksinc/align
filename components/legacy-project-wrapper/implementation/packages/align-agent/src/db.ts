@@ -220,6 +220,8 @@ const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
   ["epochs", "wire_offset", "INTEGER"],
   // When the share the epoch belongs to ended (stopped, signed out, access lost): usage after it stays here (C5-1).
   ["epochs", "ends_at", "TEXT"],
+  // What happened to a share (`ShareFacts`), for a notice worded when it is shown, from the state then (cycle 11).
+  ["notices", "facts", "TEXT"],
 ];
 
 function addColumns(db: Db): void {
