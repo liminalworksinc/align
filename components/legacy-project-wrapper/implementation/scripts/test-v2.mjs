@@ -3542,6 +3542,22 @@ try {
       c14Mcp.status === 200 && c14Mcp.sc?.goals?.find((g) => g.id === CNG?.id)?.title?.untrusted_text === "Legacy title" && c14Mcp.text.includes("<untrusted-text>Legacy title</untrusted-text>") && !/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/.test(c14Mcp.text + JSON.stringify(c14Mcp.sc)),
       `${c14Mcp.status} ${JSON.stringify(c14Mcp.sc?.goals?.find((g) => g.id === CNG?.id)?.title)} ${JSON.stringify(c14Mcp.text.slice(0, 300))}`,
     );
+    // E2E-WEB cycle 14 W3: Cy stops sharing SN1 on the web; the owner's Stop and Cy's own Resume say who stopped it and
+    // what shares the work again, in a full sentence.
+    const cnStopShare = await ca(CN, "POST", `/sessions/${SN1}/stop-sharing`, {});
+    const sn1Dirs = dirCount(SN1);
+    const coStopStopped = await ca(CO, "POST", `/sessions/${SN1}/stop`, {});
+    const cnResumeStopped = await ca(CN, "POST", `/sessions/${SN1}/resume`, {});
+    check(
+      "c14 W3 (E2E-WEB cycle 14): Stop or Resume on a session its person stopped sharing -> 409 sharing_stopped in a full sentence that says who stopped it and what shares the work again: to an owner \"Cy New stopped sharing this session, so a stop or resume can't reach it, and it won't be shared again, even if its machine runs ::align share. To share their work again, Cy New starts a new session and runs ::align share in it.\", to the person \"You stopped sharing …, start a new session and run ::align share in it.\"; no directive",
+      cnStopShare.status === 200 &&
+        coStopStopped.status === 409 && coStopStopped.json?.error === "sharing_stopped" &&
+        coStopStopped.json.message === "Cy New stopped sharing this session, so a stop or resume can't reach it, and it won't be shared again, even if its machine runs ::align share. To share their work again, Cy New starts a new session and runs ::align share in it." &&
+        cnResumeStopped.status === 409 && cnResumeStopped.json?.error === "sharing_stopped" &&
+        cnResumeStopped.json.message === "You stopped sharing this session, so a stop or resume can't reach it, and it won't be shared again, even if its machine runs ::align share. To share your work again, start a new session and run ::align share in it." &&
+        dirCount(SN1) === sn1Dirs,
+      `${cnStopShare.status} | ${coStopStopped.text} | ${cnResumeStopped.text} | ${sn1Dirs} ${dirCount(SN1)}`,
+    );
   }
   const totalBefore = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json.total.requests;
   const delOther = await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { cookie: U1.cookie });
@@ -9065,7 +9081,7 @@ try {
       mcpAll.slice(0, 900),
     );
     // A count followed by a fixed plural noun, without count() (lib/v2/plural.mts), in any MCP or server message.
-    const VERBS = new Set(["is", "was", "has", "does", "needs", "counts", "contributes", "stays", "updates", "yours", "runs", "gives"]);
+    const VERBS = new Set(["is", "was", "has", "does", "needs", "counts", "contributes", "stays", "updates", "yours", "runs", "gives", "starts"]);
     const PLURAL_OK = [
       ["lib/v2/validate.ts", "${k} items are too long"], // k is a field name
       ["lib/v2/goals.ts", "anchors.${k} items are too long"], // k is a field name

@@ -213,8 +213,8 @@ The server SHALL accept `POST /api/v2/workspaces/{ws}/sessions/{key}/stop` and `
 
 #### Scenario: Sharing already stopped
 
-- **WHEN** the owner calls `.../stop` or `.../resume` for a session whose sharing was stopped
-- **THEN** the response is HTTP 409 `sharing_stopped` with message "Sharing was stopped for this session"
+- **WHEN** the owner calls `.../stop` or `.../resume` for a session whose sharing its person stopped, and the person calls it for their own (`scripts/test-v2.mjs` "c14 W3 (E2E-WEB cycle 14): ...")
+- **THEN** the response is HTTP 409 `sharing_stopped` with a sentence that says who stopped it and what shares the work again (`lib/v2/share-again.mts`): "<name> stopped sharing this session, so a stop or resume can't reach it, and it won't be shared again, even if its machine runs ::align share. To share their work again, <name> starts a new session and runs ::align share in it.", to the person "You stopped sharing this session, …, start a new session and run ::align share in it.", and once their account is deleted "<name> stopped sharing this session, so a stop or resume can't reach it. Their account was deleted, so nothing can share it again."; no directive is written (E2E-WEB cycle 14 W3)
 
 #### Scenario: The session's device signed out
 
