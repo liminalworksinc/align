@@ -1271,7 +1271,9 @@ The server SHALL accept usage from the sharing device on `POST .../sessions/{key
 the end of the epoch it names, at a time no epoch of the session covers (its share had ended, by a stop, a removal or a
 revoked device, and the session was shared again only later), was made while the session was not shared: it SHALL be a
 conflict, counted on the session and never stored, so a re-share never brings in the gap. A row from after its epoch
-ended while a later epoch of the session was open is the tail of a turn that started in its epoch, and is stored.
+ended while a later epoch of the session was open is the tail of a turn that started in its epoch, and is stored. A
+row whose `ts` is before the start of the epoch it names was not made in that epoch (from the gap, naming the epoch of
+the re-share, say, or from before the session was first shared): it SHALL be a conflict too, counted and never stored.
 
 #### Scenario: Usage batch
 
@@ -1282,6 +1284,11 @@ ended while a later epoch of the session was open is the tail of a turn that sta
 
 - **WHEN** a member's session ends when they are removed, they are let back in, their device shares it again with a new epoch starting 2 seconds after the old one ended, and uploads rows naming the old epoch from 1 second before its end, 1 second after it and 2.5 seconds after it, and one naming the new epoch from 2.5 seconds after (`scripts/test-v2.mjs` "usage (C5-1): a row naming an epoch that ended ...")
 - **THEN** the response is `{accepted: 3, conflicts: 1}`, the session's conflicts grow by one, and only the row from the gap is not stored
+
+#### Scenario: Usage from before its epoch started
+
+- **WHEN** after such a re-share the device uploads a row naming the new epoch from the gap (1 second after the old epoch ended, before the new one started), one naming the old epoch from before it started, and one naming the new epoch from after it started (`scripts/test-v2.mjs` "Z7: a usage row dated before the start of the epoch it names ...")
+- **THEN** the response is `{accepted: 1, conflicts: 2}`, the session's conflicts grow by two, and only the last row is stored
 
 #### Scenario: Oversized batch
 

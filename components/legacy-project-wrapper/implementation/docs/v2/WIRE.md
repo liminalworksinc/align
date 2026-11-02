@@ -113,7 +113,7 @@ Key owned by another user/device → 404. `started_at` more than 5 min ahead of 
 → 200 `{ "accepted": n, "duplicates": n, "conflicts": n }`. Same key with different values = conflict, never overwritten.
 Rows whose epoch is unknown or belongs to another session → rejected per row (counted as conflicts).
 So are rows whose `ts` is at or after their epoch's end at a time no epoch of the session covers (made while the
-session was not shared, before it was shared again).
+session was not shared, before it was shared again), and rows whose `ts` is before their epoch's `starts_at`.
 
 `POST /api/v2/workspaces/:ws/sessions/:session_key/stop-sharing` (Bearer or cookie by owner) → 200; no more uploads accepted.
 `DELETE /api/v2/workspaces/:ws/sessions/:session_key` (cookie by owner, or Bearer from any live device of the person who

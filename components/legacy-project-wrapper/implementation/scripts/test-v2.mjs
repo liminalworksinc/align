@@ -1639,12 +1639,15 @@ try {
   // GL: U3's workspace-visible goal in team P1 (lead U2), so its approval set is U3 (owner) and U2 (lead).
   const GL = (await mkGoal(U3, { title: "Pen-test the platform", visibility: "workspace", team_id: P1, measures: [{ text: "Open findings", target: "0" }] })).json;
   const SC = sessionKey(D3, A, "claude-code", "native-cr");
-  await put(D3, SC);
+  // Shared from 45 days ago, so a row from 40 days ago is inside its epoch (a row from before its epoch started is
+  // refused, Z7) and only the 30-day window leaves it out.
+  const scStart = new Date(Date.now() - 45 * 24 * 3600 * 1000).toISOString();
+  await put(D3, SC, { started_at: scStart });
   const SCe = epochId();
-  const scStart = new Date().toISOString();
   const scBind = await epoch(D3, SC, { epoch_id: SCe, goal_id: GL.id, starts_at: scStart });
   // Usage under GL for the snapshot: two models in the last 30 days, and one request 40 days ago (outside the window).
-  await upload(D3, SC, [usageRow(D3, "cr-a", SCe), usageRow(D3, "cr-b", SCe, { model: "claude-opus-4-1", est_list_usd_micros: 50_000 }), usageRow(D3, "cr-old", SCe, { ts: new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString() })]);
+  const scTs = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  await upload(D3, SC, [usageRow(D3, "cr-a", SCe, { ts: scTs }), usageRow(D3, "cr-b", SCe, { ts: scTs, model: "claude-opus-4-1", est_list_usd_micros: 50_000 }), usageRow(D3, "cr-old", SCe, { ts: new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString() })]);
   const mPen = { text: "Pen-test window booked", target: "May" };
   const cr1 = await propose(U1, GL.id, { base_version: 1, changes: { measures: [...GL.measures, mPen] }, reason: "Onboarding needs a pen-test window in May" });
   check(
@@ -1722,7 +1725,7 @@ try {
   const snap1 = cr1.json.revisions[0]?.snapshot;
   check(
     "evidence: revision 1 carries the snapshot Align recorded: the goal's spend over the last 30 days (total and by model, the old request left out), 1 bound session, last activity",
-    snap1?.revision === 1 && snap1.recorded_by === "align" && snap1.window.days === 30 && snap1.spend_hidden === false && snap1.spend.total.requests === 2 && snap1.spend.total.est_list_usd_micros === 62_345 && snap1.spend.by_model.map((m) => m.model).join() === "claude-opus-4-1,claude-sonnet-4-5" && snap1.spend.by_model[0].est_list_usd_micros === 50_000 && snap1.bound_sessions === 1 && snap1.last_activity_at === scStart && cr1.json.evidence_count === 0 && cr1.json.approved_without_evidence === null,
+    snap1?.revision === 1 && snap1.recorded_by === "align" && snap1.window.days === 30 && snap1.spend_hidden === false && snap1.spend.total.requests === 2 && snap1.spend.total.est_list_usd_micros === 62_345 && snap1.spend.by_model.map((m) => m.model).join() === "claude-opus-4-1,claude-sonnet-4-5" && snap1.spend.by_model[0].est_list_usd_micros === 50_000 && snap1.bound_sessions === 1 && snap1.last_activity_at === scTs && cr1.json.evidence_count === 0 && cr1.json.approved_without_evidence === null,
     JSON.stringify(snap1),
   );
   const forged = await propose(U2, GL.id, { base_version: 1, changes: { title: "Forged snapshot" }, reason: "x", snapshot: { bound_sessions: 99 } });
@@ -2754,6 +2757,22 @@ try {
       !!oldB?.ends_at && reEp.status === 200 && upGap.status === 200 && upGap.json?.accepted === 3 && upGap.json.conflicts === 1 && conflictsB() === cBefore + 1 &&
         stored("c51-before-end") && !stored("c51-gap") && stored("c51-tail") && stored("c51-new"),
       `${JSON.stringify(oldB)} ${reEp.text} ${upGap.text} ${cBefore}/${conflictsB()}`,
+    );
+    // Z7 (E2E-WEB cycle 6): a row dated before the start of the epoch it names was not made in it: one naming the new
+    // epoch from the gap, and one naming the old epoch from before it started, are conflicts too.
+    const oldStart = Date.parse(withDb((d) => d.prepare("SELECT starts_at FROM v2_epochs WHERE ws_id = ? AND epoch_id = ?").get(CW, oldB?.epoch_id ?? ""))?.starts_at ?? "");
+    const cBefore7 = conflictsB();
+    const earlyRows = [
+      usageRow(DC, "z7-new-in-gap", newB, { ts: isoAt(1000) }),
+      usageRow(DC, "z7-old-before-start", oldB?.epoch_id, { ts: new Date(oldStart - 60_000).toISOString() }),
+      usageRow(DC, "z7-new-after-start", newB, { ts: isoAt(3000) }),
+    ];
+    const upEarly = await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DC.access, body: { rows: earlyRows } });
+    check(
+      "Z7: a usage row dated before the start of the epoch it names (the re-share's epoch named from the gap, or an epoch named from before it started) is a conflict counted on the session and never stored; a row inside the new epoch is stored",
+      Number.isFinite(oldStart) && upEarly.status === 200 && upEarly.json?.accepted === 1 && upEarly.json.conflicts === 2 && conflictsB() === cBefore7 + 2 &&
+        !stored("z7-new-in-gap") && !stored("z7-old-before-start") && stored("z7-new-after-start"),
+      `${oldStart} ${upEarly.text} ${cBefore7}/${conflictsB()}`,
     );
 
     // A clock that runs ahead: named, with the server's time; a start stored in the future is moved back.

@@ -333,6 +333,12 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
       // shared (its share had ended and it was shared again later): it is never stored (C5-1). A row from after its
       // epoch ended while a later epoch was open is the tail of a turn that started in its epoch, and counts there.
       const t = Date.parse(r.ts as string);
+      // A row from before its epoch started can't have been made in it (in the gap before a re-share, say): never
+      // stored either (Z7).
+      if (t < Date.parse(e.starts_at)) {
+        conflicts++;
+        continue;
+      }
       if (e.ends_at !== null && t >= Date.parse(e.ends_at) && !shared(t)) {
         conflicts++;
         continue;
