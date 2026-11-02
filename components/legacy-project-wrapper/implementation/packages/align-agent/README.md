@@ -156,7 +156,11 @@ symlink `ALIGN_HOME/bin/current` at it, so hooks never run from a git checkout. 
 what was added. Each build records its identity in `dist/build.json` (version and a hash of the built files): when
 the hooks' copy is another build than the `align` you run (an older `align` still on `PATH`, a newer one not installed
 yet), every command says so on stderr and `align doctor` shows a `WARN hooks build` line until `align install` runs
-with that `align`.
+with that `align`. `build.json` also carries the build's writer generation (`gen`, ordered), and every command and
+pass records in `align.db` the newest build that has written to it: an older build that finds a newer one's record
+writes no share-state notice or hot file (it still meters and writes the stop latch and hold file for a stop or hold it hears, and says so on stderr and in `align doctor`),
+and the newest build re-renders every session from the state now whenever another build wrote. `--dry-run` writes
+nothing, not even `ALIGN_HOME`.
 
 - `--claude` (default when no flag is given): writes the Claude Code plugin folder
   `$CLAUDE_CONFIG_DIR/skills/align/` (default `~/.claude/skills/align/`): `.claude-plugin/plugin.json` and

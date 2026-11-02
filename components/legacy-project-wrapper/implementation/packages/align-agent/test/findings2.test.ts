@@ -540,7 +540,7 @@ describe("E2E cycle 2: sign-out, sharing and workspaces", () => {
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
     assert.ok(fs.existsSync(layout.asksFeed(t.home, "ws_acme")), "login caches the asks feed, so the first session's envelope has them");
     const reply = prompt(t, SID, "::align share confirm", cwd).reason;
-    assert.equal(reply, 'Align: sharing requested toward "Ship the v2 onboarding flow". It takes effect within a few seconds; your next prompt carries the goal.');
+    assert.equal(reply, 'Align: sharing requested toward "Ship the v2 onboarding flow". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.');
     const cmd = spooled(t).find((r) => r.type === "command") as Extract<SpoolRecord, { type: "command" }>;
     assert.equal(cmd.arg, "g_ship");
     fake.user = { ...fake.user, name: "Sean Renamed" };
@@ -566,7 +566,7 @@ describe("E2E cycle 2: sign-out, sharing and workspaces", () => {
     assert.equal((await runCli(t, ["logout"])).code, 0);
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
     const reply = prompt(t, SID, "::align share confirm", cwd).reason;
-    assert.equal(reply, 'Align: sharing requested toward "Ship the v2 onboarding flow". It takes effect within a few seconds; your next prompt carries the goal.');
+    assert.equal(reply, 'Align: sharing requested toward "Ship the v2 onboarding flow". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.');
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.match((await runCli(t, ["sessions"])).stdout, /shared \(Acme\)/);
     const told = prompt(t, SID, "go on", cwd);

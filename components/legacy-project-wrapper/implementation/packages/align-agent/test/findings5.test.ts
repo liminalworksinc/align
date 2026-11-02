@@ -97,7 +97,7 @@ describe("C5-1: turns made while a session's share had ended stay on this machin
     assert.equal((await runCli(t, ["sync"])).code, 0);
     await waitFor(() => Date.now() > gapAt + 100, 1000, "time to pass the gap turn");
     const preview = prompt(t, A.sid, "::align share", A.cwd).reason as string;
-    assert.equal(prompt(t, A.sid, "::align share confirm", A.cwd).reason, 'Align: sharing requested toward "Ship the v2 onboarding flow". It takes effect within a few seconds; your next prompt carries the goal.');
+    assert.equal(prompt(t, A.sid, "::align share confirm", A.cwd).reason, 'Align: sharing requested toward "Ship the v2 onboarding flow". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.');
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.equal(fake.sessions.get(A.key)?.state, "shared");
     assert.equal((await runCli(t, ["sync"])).code, 0);
@@ -136,7 +136,7 @@ describe("C5-1: turns made while a session's share had ended stay on this machin
     turn(t, A, "req_c51_l_gap", 0);
     await sleep(50);
     assert.equal((await runCli(t, ["login", "--name", "Test Mac"])).code, 0);
-    assert.equal(prompt(t, A.sid, "::align share confirm", A.cwd).reason, 'Align: sharing requested toward "Ship the v2 onboarding flow". It takes effect within a few seconds; your next prompt carries the goal.');
+    assert.equal(prompt(t, A.sid, "::align share confirm", A.cwd).reason, 'Align: sharing requested toward "Ship the v2 onboarding flow". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.');
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.equal((await runCli(t, ["sync"])).code, 0);
     assert.equal(fake.usage.size, 1, "the turn made while signed out was not uploaded");

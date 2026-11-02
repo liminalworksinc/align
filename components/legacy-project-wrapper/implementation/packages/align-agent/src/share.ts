@@ -12,7 +12,7 @@ import { ACCESS_LOST, addNotice, addShareNotice, DEVICE_SIGNED_OUT, ENDED_UNREAD
 export { ENDED_UNREAD, notePriorShare, sharedBefore, stoppedByPerson } from "./hot.ts";
 import { clockOffset, loadCredentials, signedIn } from "./api.ts";
 import { gitInfo } from "./shared/anchors.ts";
-import { clean } from "./shared/envelope.ts";
+import { clean, requestShortId } from "./shared/envelope.ts";
 import { randomId, readJson, removeFile, writeJsonAtomic } from "./shared/fsx.ts";
 import { layout } from "./shared/layout.ts";
 import type { ShareFacts } from "./shared/ended.ts";
@@ -343,7 +343,39 @@ export function expireRequests(ctx: Ctx, lid: string, reason: RequestExpiry, at 
     const json = JSON.stringify({ ...(JSON.parse(r.json) as object), expired_reason: reason });
     ctx.db.prepare("UPDATE goal_requests SET state='expired', json=?, answered_at=? WHERE request_id=? AND local_id=? AND state='pending'").run(json, at, r.request_id, lid);
   }
-  return rows.length;
+  return rows.length + expireQueuedAnswers(ctx, lid, reason);
+}
+
+/** Why a request expired, as a notice about an answer the server did not take says it. */
+const expiredWords = (reason: RequestExpiry): string => (reason === "sharing_stopped" ? "this session's sharing was stopped" : "this session's share ended");
+
+/**
+ * Answers given here whose receipt had not reached the server when the share ended: the server expired the request in
+ * that same step and refuses the answer, so it reads expired from now on (never `accepted` until the queued receipt is
+ * refused), its receipt is not sent, and the session hears its answer was not taken, as the server's refusal would say
+ * (E2E-AGENT cycle 14, section 5).
+ */
+function expireQueuedAnswers(ctx: Ctx, lid: string, reason: RequestExpiry): number {
+  const queued = ctx.db.prepare("SELECT id, payload FROM outbox WHERE local_id=? AND kind='receipt'").all(lid) as { id: number; payload: string }[];
+  let n = 0;
+  for (const o of queued) {
+    let p: { directive_id?: string; body?: { state?: string } };
+    try {
+      p = JSON.parse(o.payload);
+    } catch {
+      continue;
+    }
+    if (p.body?.state !== "accepted" && p.body?.state !== "declined") continue;
+    const row = ctx.db.prepare("SELECT request_id, json, state FROM goal_requests WHERE directive_id=? AND local_id=?").get(p.directive_id ?? "", lid) as { request_id: string; json: string; state: string } | undefined;
+    if (!row || (row.state !== "accepted" && row.state !== "declined" && row.state !== "auto_accepted")) continue;
+    const q = JSON.parse(row.json) as { sender?: { name?: string } } & Record<string, unknown>;
+    ctx.db.prepare("UPDATE goal_requests SET state='expired', json=? WHERE request_id=? AND local_id=?").run(JSON.stringify({ ...q, expired_reason: reason }), row.request_id, lid);
+    ctx.db.prepare("DELETE FROM outbox WHERE id=?").run(o.id);
+    const who = clean(q.sender?.name, 50) || "the sender";
+    addNotice(ctx, lid, `ans_expired_${row.request_id}`, `Align: ${who}'s request ${requestShortId(row.request_id)} had expired (${expiredWords(reason)}), so your answer was not taken and ${who} does not see it.`);
+    n++;
+  }
+  return n;
 }
 
 /**
@@ -498,14 +530,16 @@ export function endSharesEndedOnServer(ctx: Ctx, ended: EndedOnServer[]): number
  */
 export function endSharesWithoutAccess(ctx: Ctx, me: MeFile): number {
   const reach = new Set(me.workspaces.map((w) => w.id));
-  const live = (ctx.db.prepare("SELECT local_id, workspace_id, workspace_name, goal_json FROM shares WHERE state IN ('shared','pending','suspended')").all() as {
+  const live = (ctx.db.prepare("SELECT local_id, workspace_id, workspace_name, goal_json, state FROM shares WHERE state IN ('shared','pending','suspended')").all() as {
     local_id: string;
     workspace_id: string;
     workspace_name: string;
     goal_json: string | null;
+    state: string;
   }[]).filter((s) => !reach.has(s.workspace_id));
   const at = nowIso();
-  for (const s of live) endShare(ctx, s.local_id, ACCESS_LOST, `access_lost_${s.workspace_id}_${at}`, factsOf(s, "access_lost"), at, "member_removed");
+  // One still pending had not reached the server: it was not shared, and its notice says so (E2E-AGENT cycle 14 C14-4).
+  for (const s of live) endShare(ctx, s.local_id, ACCESS_LOST, `access_lost_${s.workspace_id}_${at}`, factsOf(s, "access_lost", s.state === "pending" ? { unsent: true } : {}), at, "member_removed");
   // A session whose share there had ended already and that was told it can be shared there again (its workspace back,
   // or a member again) hears it can't any more at its next prompt, whatever it has seen: its notice is worded from the
   // state its deny gives, which the caller's `renderEndedShares` writes (C8-1, cycle 11).

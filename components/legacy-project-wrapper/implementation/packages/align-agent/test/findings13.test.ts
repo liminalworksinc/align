@@ -305,7 +305,7 @@ describe("cycle 12, section 6: the advice while the ended shares are unread", ()
     const lid8 = A.lid.slice(0, 8);
     assert.ok(deny(t, A).includes(latchWayOut(A.lid, true, "model", null, { unread: true })), deny(t, A));
     assert.match(deny(t, A), /the user runs `align sync` in a terminal first .*, then types `::align share` in this session/);
-    assert.match(status(t, A), /Stop latch: on \(tools blocked; sharing ended: run `align sync` first \(this machine has not yet heard whether its sharing was stopped on the web meanwhile\), then `::align share` here shares it again/);
+    assert.match(status(t, A), /Stop latch: on \(tools blocked; sharing ended \(this machine signed out, and is signed in again now\): run `align sync` first \(this machine has not yet heard whether its sharing was stopped on the web meanwhile\), then `::align share` here shares it again/);
     assert.match((await runCli(t, ["latch", "status"])).stdout, new RegExp(`${lid8} .*sharing ended \\(this machine signed out, and is signed in again now\\): run \`align sync\` first`));
     const row = (json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[]).find((r) => r.local_id === A.lid)!;
     assert.match(row.shared, /ended at a sign-out; run `align sync` first .*, then `::align share` shares it again/);
@@ -329,7 +329,7 @@ describe("cycle 12, section 6: works, but would confuse a developer", () => {
     await logout(t);
     const msg = said(t, A);
     assert.ok(msg.endsWith(latchNoticeTail(A.lid, false, null, { login: true })), msg);
-    assert.match(msg, /run `align login` in a terminal, then type `::align share` here .* It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold can be lifted from the web, or until you run `align stop-sharing \S+` in a terminal\.$/);
+    assert.match(msg, /run `align login` in a terminal, then type `::align share` here .* It was stopped or held from the web, so tools stay blocked until it is shared again that way, after which the stop or hold, if still in place, can be lifted from the web, or until you run `align stop-sharing \S+` in a terminal\.$/);
     assert.ok(deny(t, A).includes(latchWayOut(A.lid, false, "model", null, { login: true })), deny(t, A));
   });
 
