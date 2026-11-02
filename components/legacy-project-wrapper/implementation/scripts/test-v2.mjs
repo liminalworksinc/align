@@ -9631,6 +9631,74 @@ try {
   }
   // ==== end fix:c11-web ====
 
+  // ==== fix:c12-web ====
+  // Regression checks for the cycle-12 web walk (e2e-reports/cycle12/web.md): C12-1 (a refusal that opens with a
+  // person's name keeps its letter case), C12-2 (unknown_revision before the body, on every decision), W1 (the approval
+  // page's refusal goes when the code changes), W3 (approval refusals in a person's words) and W4 (one wording for a
+  // target change's Not yet). TO owns the workspace and TG, a Growth goal; "carol twelve" (TC, written in lower case)
+  // leads Growth, so TO and TC both decide on TG; TD, a Growth member, asks.
+  {
+    const tUsers = {};
+    for (const [who, name] of [
+      ["TO", "Tess Owner"],
+      ["TC", "carol twelve"],
+      ["TD", "Tomi Asker"],
+    ])
+      tUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c12web.example.test`);
+    const { TO, TC, TD } = tUsers;
+    const TW = (await call("TO", "POST", "/api/v2/workspaces", { cookie: TO.cookie, body: { name: "C12 web fix workspace" } })).json?.id;
+    const ta = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${TW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [TC, TD]) {
+      const i = await ta(TO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const TTm = (await ta(TO, "POST", "/teams", { name: "Growth" })).json?.id;
+    await ta(TO, "POST", `/teams/${TTm}/members`, { user_id: TC.id, role: "lead" });
+    for (const u of [TD, TO]) await ta(TO, "POST", `/teams/${TTm}/members`, { user_id: u.id, role: "member" });
+    const tGoal = async (title, u = TO, team = TTm) => (await ta(u, "POST", "/goals", { title, visibility: "workspace", ...(team ? { team_id: team } : {}) })).json;
+    const TG = await tGoal("Ship 3000 robot arms");
+    const tAl = async (n) => {
+      const src = await tGoal(`Tomi's goal ${n}`, TD, null);
+      return (await ta(TD, "POST", "/alignments", { target_goal_id: TG?.id, source_goal_id: src?.id, choice: "contribution", session_keys: [] })).json;
+    };
+    const tCr = async (n) => {
+      const g = await tGoal(`Twelve change goal ${n}`);
+      const cr = (await ta(TD, "POST", `/goals/${g?.id}/change-requests`, { base_version: 1, changes: { title: `Twelve change goal ${n}, renamed` }, reason: "Cycle 12" })).json;
+      return { g, cr };
+    };
+    const tRl = async (share) => (await ta(TD, "POST", "/reallocations", { targets: [{ goal_id: TG?.id, target_share: share }], note: "More here" })).json;
+    const tAlNow = (al) => withDb((d) => d.prepare("SELECT state, revision FROM v2_alignments WHERE id = ?").get(al?.id));
+    const tCrNow = (x) => withDb((d) => d.prepare("SELECT state, revision, launch FROM v2_change_requests WHERE id = ?").get(x.cr?.id));
+    const tRlNow = (t) => withDb((d) => d.prepare("SELECT state, revision, launch FROM v2_reallocations WHERE id = ?").get(t?.id));
+
+    // -- C12-2: every decision on an alignment, change request or target change sent for a revision it never reached
+    //    is 400 unknown_revision, even when its body is wrong too: the revision is checked before the body --
+    const FUTURE12 = (what) => `This ${what} has no revision 9: it is at revision 1, so nothing was recorded. Read it again and decide again.`;
+    const long = (n) => "x".repeat(n);
+    const c2Al = await tAl("c2");
+    const c2Cr = await tCr("c2");
+    const c2Rl = await tRl(13);
+    const c2Bodies = {
+      al: { revision: 9, choice: "bogus", keep: "x", note: long(5000) },
+      cr: { revision: 9, reason: "", note: long(2001), condition: long(2001), changes: "x", base_version: "x" },
+      rl: { revision: 9, targets: "x", reason: long(1001), note: long(1001) },
+    };
+    const c2Out = [];
+    for (const action of ["approve", "counter", "accept_counter", "reject", "withdraw", "revoke"]) c2Out.push(["alignment", action, "request", await ta(TO, "POST", `/alignments/${c2Al?.id}/${action}`, c2Bodies.al)]);
+    for (const action of ["approve", "approve_and_launch", "launch", "not_yet", "reject", "counter", "accept_counter", "acknowledge", "withdraw", "rebase"])
+      c2Out.push(["change request", action, "request", await ta(TO, "POST", `/goals/${c2Cr.g?.id}/change-requests/${c2Cr.cr?.id}/${action}`, c2Bodies.cr)]);
+    for (const action of ["approve", "approve_and_launch", "launch", "not_yet", "counter", "accept_counter", "reject", "withdraw"]) c2Out.push(["target change", action, "proposal", await ta(TO, "POST", `/reallocations/${c2Rl?.id}/${action}`, c2Bodies.rl)]);
+    const c2Wrong = c2Out.filter(([, , what, r]) => !(r.status === 400 && r.json?.error === "unknown_revision" && r.json.message === FUTURE12(what)));
+    check(
+      "c12 C12-2 (E2E-WEB cycle 12): every decision on an alignment (6 actions), a change request (10) and a target change (8) at revision 1, sent with revision 9 and a body that is wrong too (a bad choice, targets that are not a list, a reason or note over the limit, a bad base_version), is 400 unknown_revision \"This request|proposal has no revision 9: it is at revision 1, …\", never the body's refusal; nothing changes",
+      c2Out.length === 24 && c2Wrong.length === 0 &&
+        JSON.stringify([tAlNow(c2Al), tCrNow(c2Cr), tRlNow(c2Rl)]) === JSON.stringify([{ state: "pending", revision: 1 }, { state: "pending", revision: 1, launch: null }, { state: "pending", revision: 1, launch: null }]),
+      `${c2Wrong.map(([k, a, , r]) => `${k} ${a}: ${r.status} ${r.json?.error} ${r.json?.message}`).join(" | ")} || ${JSON.stringify([tAlNow(c2Al), tCrNow(c2Cr), tRlNow(c2Rl)])}`,
+    );
+
+  }
+  // ==== end fix:c12-web ====
+
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
   const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));

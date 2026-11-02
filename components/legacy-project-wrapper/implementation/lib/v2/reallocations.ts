@@ -216,15 +216,16 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
   if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   const me = pp.userId;
   const at = nowIso();
-  // A counter's targets are read before the transaction: reading checks each goal's visibility and can throw 404.
-  const countered = action === "counter" ? targetsIn(pp, b.targets) : null;
-  const note = action === "counter" || action === "reject" ? optStr(b, action === "reject" ? "reason" : "note", NOTE_MAX) : null;
   // A revision, when sent, is a whole number (400 in words otherwise, c11 W1) that the proposal has reached: one it
-  // never reached was never read, so it is 400, not a stale refusal (c11 W3).
+  // never reached was never read, so it is 400, not a stale refusal (c11 W3). Both are checked before the rest of the
+  // body, as on alignments and change requests (E2E-WEB cycle 12 C12-2).
   const sent = revisionRead(b, true);
   await tx(() => {
     const r = rowOf(pp.wsId, id)!; // read inside the transaction
     assertRevisionReached("proposal", sent, r.revision);
+    // A counter's targets: reading checks each goal's visibility and can throw 404.
+    const countered = action === "counter" ? targetsIn(pp, b.targets) : null;
+    const note = action === "counter" || action === "reject" ? optStr(b, action === "reject" ? "reason" : "note", NOTE_MAX) : null;
     const targets = targetsOf(r.id, r.revision);
     const isRequester = r.requester_id === me;
     const isApprover = targets.some((t) => {
