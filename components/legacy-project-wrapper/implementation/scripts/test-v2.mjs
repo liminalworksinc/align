@@ -3249,14 +3249,21 @@ try {
     const backMachine = await ca(CO, "POST", `/sessions/${SB}/resume`, {});
     const backMachineOwn = await ca(CM, "POST", `/sessions/${SB}/stop`, {});
     const BACK_LEAD = (who) => `This session's sharing ended when ${who} left this workspace, so a stop or resume can't reach it.`;
-    const BACK_THEN = "::align share in that session shares it again, and then Stop and Resume here reach it.";
+    const BACK_THEN = "Then Stop and Resume here reach it.";
+    // E2E-WEB cycle 13 W1: once they are back, the refusal says what the person's own Sessions tab says for where the
+    // machine stands (lib/v2/share-again.mts), in the third person to an owner.
+    const BACK_GIVE = (who) =>
+      who === "you"
+        ? "To share it again now that you are back, give its machine, Cato's laptop, this workspace on your Devices page (Give this device the workspace), then run ::align share in the session."
+        : `To share it again now that ${who} is back, ${who} gives its machine, Cato's laptop, this workspace on their Devices page (Give this device the workspace), then runs ::align share in the session.`;
+    const BACK_HAS = (who) => `Its machine, Cato's laptop, has this workspace again: to share it again, ${who === "you" ? "run" : `${who} runs`} ::align share in the session.`;
     check(
-      "c12 member_removed (E2E-AGENT cycle 12, section 6): Stop or Resume on a session that ended when its person left, once they are back, says what shares it again now: \"Once the machine that shared it has this workspace again, ::align share in that session shares it again, and then Stop and Resume here reach it.\", and once the machine has it again \"Its machine, Cato's laptop, has this workspace again: ::align share …\"; \"you\" to the person themself; never align stop-sharing; no directive",
+      "c12 member_removed (E2E-AGENT cycle 12, section 6; E2E-WEB cycle 13 W1): Stop or Resume on a session that ended when its person left, once they are back, says what shares it again now in the Sessions tab's words for where its machine stands: still paired without the workspace, \"To share it again now that <name> is back, <name> gives its machine, Cato's laptop, this workspace on their Devices page (Give this device the workspace), then runs ::align share in the session. Then Stop and Resume here reach it.\", and once the machine has it again \"Its machine, Cato's laptop, has this workspace again: to share it again, <name> runs ::align share in the session. …\"; word for word the tab's sentence to the person themself (\"you\"); never align stop-sharing; no directive",
       [backNoMachine, backNoMachineOwn, backMachine, backMachineOwn].every((r) => r.status === 409 && r.json?.error === "member_removed" && !/stop-sharing/.test(r.json.message)) &&
-        backNoMachine.json.message === `${BACK_LEAD(CM.name)} Once the machine that shared it has this workspace again, ${BACK_THEN}` &&
-        backNoMachineOwn.json.message === `${BACK_LEAD("you")} Once the machine that shared it has this workspace again, ${BACK_THEN}` &&
-        backMachine.json.message === `${BACK_LEAD(CM.name)} Its machine, Cato's laptop, has this workspace again: ${BACK_THEN}` &&
-        backMachineOwn.json.message === `${BACK_LEAD("you")} Its machine, Cato's laptop, has this workspace again: ${BACK_THEN}` && dirCount(SB) === dirsBack,
+        backNoMachine.json.message === `${BACK_LEAD(CM.name)} ${BACK_GIVE(CM.name)} ${BACK_THEN}` &&
+        backNoMachineOwn.json.message === `${BACK_LEAD("you")} ${BACK_GIVE("you")} ${BACK_THEN}` &&
+        backMachine.json.message === `${BACK_LEAD(CM.name)} ${BACK_HAS(CM.name)} ${BACK_THEN}` &&
+        backMachineOwn.json.message === `${BACK_LEAD("you")} ${BACK_HAS("you")} ${BACK_THEN}` && dirCount(SB) === dirsBack,
       `${sbDevice === DC.id} ${[backNoMachine, backNoMachineOwn, backMachine, backMachineOwn].map((r) => `${r.status} ${r.text}`).join(" | ")}`,
     );
     withDb((d) => d.prepare("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DC.id, CW));
@@ -3269,6 +3276,97 @@ try {
       rmAgain.status === 204 && endedAgain === "member_removed" && webStopEnded.status === 200 && rowStopped?.state === "stopped" && rowStopped.ended_reason === null &&
         upStopped.status === 409 && upStopped.json?.error === "sharing_stopped" && upStopped.json?.ended_reason === null && putStopped.status === 409 && putStopped.json?.error === "sharing_stopped",
       `${rmAgain.status} ${endedAgain} ${webStopEnded.text} ${JSON.stringify(rowStopped)} ${upStopped.text} ${putStopped.text}`,
+    );
+
+    // E2E-WEB cycle 13 W1: removed, let back in, and the machine that shared it signed out of Align: the refusal says to
+    // run align login on that machine, as the person's Sessions tab does, never "once the machine has this workspace".
+    const DE = cDevice();
+    const SE = await cShare(DE, "ended-e");
+    await ca(CO, "DELETE", `/members/${CM.id}`);
+    await invite();
+    const outE = await call("CM", "DELETE", "/api/v2/devices/self", { bearer: DE.access });
+    const stopOutE = await ca(CO, "POST", `/sessions/${SE}/stop`, {});
+    const stopOutEOwn = await ca(CM, "POST", `/sessions/${SE}/resume`, {});
+    const tabE = (await ca(CM, "GET", "/sessions")).json?.mine?.find((x) => x.session_key === SE);
+    const shareMod = await import(pathToFileURL(path.join(ROOT, "lib/v2/share-again.mts")).href);
+    const LOGIN = (who) =>
+      who === "you"
+        ? "To share it again now that you are back, run align login on that machine (it has signed out of Align) and give it this workspace, then ::align share in the session."
+        : `To share it again now that ${who} is back, ${who} runs align login on that machine (it has signed out of Align) and gives it this workspace, then ::align share in the session.`;
+    check(
+      "c13 W1 (E2E-WEB cycle 13): Stop or Resume on a member_removed session whose person is back but whose machine signed out of Align says to run align login on that machine and give it this workspace (\"<name> runs …\" to an owner, \"run …\" to the person), the very sentence the person's Sessions tab note shows for that session (one function), never \"Once the machine that shared it has this workspace again\"",
+      outE.status === 204 && tabE?.ended_reason === "member_removed" && tabE.device?.signed_out === true &&
+        [stopOutE, stopOutEOwn].every((r) => r.status === 409 && r.json?.error === "member_removed" && !/Once the machine that shared it/.test(r.json.message)) &&
+        stopOutE.json.message === `${BACK_LEAD(CM.name)} ${LOGIN(CM.name)} ${BACK_THEN}` &&
+        stopOutEOwn.json.message === `${BACK_LEAD("you")} ${LOGIN("you")} ${BACK_THEN}` &&
+        shareMod.shareAgainText(shareMod.shareAgainWords(tabE.device, null)) === LOGIN("you"),
+      `${outE.status} ${JSON.stringify(tabE?.device)} | ${stopOutE.text} | ${stopOutEOwn.text}`,
+    );
+
+    // E2E-WEB cycle 13 W2: an owner's Sessions page open while the person is removed: Stop agent on their row is
+    // refused member_removed; the page reloads (their other ended row leaves the list, so it offers nothing more) and the
+    // refusal is shown and focused at the row pressed, which offers no Stop or Resume any more.
+    if (existsSync(CHROME)) {
+      const DG = cDevice();
+      const SG = await cShare(DG, "ended-g");
+      const SH = await cShare(DG, "ended-h");
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      try {
+        const page = await browser.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        const [cn, ...cv] = CO.cookie.split("; ").find((c) => c.startsWith("align_v2.session_token=")).split("=");
+        await page.setCookie({ name: cn, value: cv.join("="), url: BASE });
+        await page.goto(`${BASE}/app/w/${CW}/sessions`, { waitUntil: "networkidle0" });
+        await page.waitForSelector(`[data-session-row="${SG}"] button`, { timeout: 15000 });
+        const rowsBefore = await page.evaluate(() => [...document.querySelectorAll("[data-session-row]")].map((li) => li.getAttribute("data-session-row")));
+        const rmG = await ca(CO, "DELETE", `/members/${CM.id}`);
+        const stopResp = page.waitForResponse((r) => r.url().endsWith(`/sessions/${SG}/stop`) && r.request().method() === "POST");
+        await page.evaluate((k) => [...document.querySelectorAll(`[data-session-row="${k}"] button`)].find((b) => b.textContent === "Stop agent")?.click(), SG);
+        const stopStatus = (await stopResp).status();
+        await page.waitForFunction((k) => !document.querySelector(`[data-session-row="${k}"]`), { timeout: 15000 }, SH).catch(() => undefined);
+        const w2 = await page.evaluate((k) => {
+          const row = document.querySelector(`[data-session-row="${k}"]`);
+          const alert = row?.querySelector("[data-row-refusal]");
+          return {
+            rows: [...document.querySelectorAll("[data-session-row]")].map((li) => li.getAttribute("data-session-row")),
+            alert: alert?.textContent ?? "",
+            focused: !!alert && document.activeElement === alert,
+            buttons: [...(row?.querySelectorAll("button") ?? [])].map((b) => b.textContent),
+            alerts: document.querySelectorAll('main [role="alert"]').length,
+          };
+        }, SG);
+        check(
+          "c13 W2 (ui, E2E-WEB cycle 13): on an owner's Sessions page opened before a member was removed, Stop agent on that person's row is refused 409 member_removed; the page reloads (their other ended row leaves the list), and the refusal is shown at the row pressed, focused, as the only alert, and that row no longer offers Stop agent or Resume agent",
+          rmG.status === 204 && rowsBefore.includes(SG) && rowsBefore.includes(SH) && stopStatus === 409 &&
+            w2.rows.includes(SG) && !w2.rows.includes(SH) && w2.alert.startsWith(`This session's sharing ended when ${CM.name} left this workspace`) && w2.focused && w2.alerts === 1 &&
+            !w2.buttons.includes("Stop agent") && !w2.buttons.includes("Resume agent") && errors.length === 0,
+          `${rmG.status} ${stopStatus} ${JSON.stringify(rowsBefore)} ${JSON.stringify(w2)} ${errors.join(" | ")}`,
+        );
+
+      } finally {
+        await browser.close();
+      }
+      await invite();
+    } else check("ui (Chrome) available for the owner's Sessions page (W2)", false, `no Chrome at ${CHROME}`);
+
+    // E2E-WEB cycle 13 C13-1: the person deletes their account (a live session of theirs ends member_removed with it):
+    // nothing can share their sessions again, and the refusal says so instead of "once <name> is back".
+    const DF = cDevice();
+    const SF = await cShare(DF, "ended-f");
+    const delCM = await call("CM", "DELETE", "/api/v2/me", { cookie: CM.cookie, headers: { origin: BASE }, body: { email: CM.email } });
+    const rowF = cRow(SF);
+    const userLeft = withDb((d) => d.prepare("SELECT 1 AS x FROM ba_user WHERE id = ?").get(CM.id));
+    const goneStop = await ca(CO, "POST", `/sessions/${SF}/stop`, {});
+    const goneResume = await ca(CO, "POST", `/sessions/${SE}/resume`, {});
+    const goneLead = /^This session's sharing ended when (Former member #\d+) left this workspace, so a stop or resume can't reach it\. Their account was deleted, so nothing can share it again\.$/;
+    check(
+      "c13 C13-1 (E2E-WEB cycle 13): once the person whose session ended member_removed has deleted their account (a session live at the deletion, and one that had ended before it), an owner's Stop or Resume -> 409 member_removed \"This session's sharing ended when Former member #n left this workspace, so a stop or resume can't reach it. Their account was deleted, so nothing can share it again.\", never \"Once … is back\" or ::align share; no directive",
+      delCM.status === 204 && !userLeft && rowF?.state === "stopped" && rowF.ended_reason === "member_removed" &&
+        [goneStop, goneResume].every((r) => r.status === 409 && r.json?.error === "member_removed" && goneLead.test(r.json.message) && !/is back|::align share/.test(r.json.message)) &&
+        dirCount(SF) === 0,
+      `${delCM.status} ${delCM.text} ${JSON.stringify(rowF)} | ${goneStop.text} | ${goneResume.text}`,
     );
   }
   const totalBefore = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json.total.requests;
@@ -8686,7 +8784,7 @@ try {
       mcpAll.slice(0, 900),
     );
     // A count followed by a fixed plural noun, without count() (lib/v2/plural.mts), in any MCP or server message.
-    const VERBS = new Set(["is", "was", "has", "does", "needs", "counts", "contributes", "stays", "updates", "yours"]);
+    const VERBS = new Set(["is", "was", "has", "does", "needs", "counts", "contributes", "stays", "updates", "yours", "runs", "gives"]);
     const PLURAL_OK = [
       ["lib/v2/validate.ts", "${k} items are too long"], // k is a field name
       ["lib/v2/goals.ts", "anchors.${k} items are too long"], // k is a field name
