@@ -94,10 +94,9 @@ describe("C9-1: a web Stop sharing before a re-pairing is heard by the new pairi
       await login(t);
       const told = prompt(t, A.sid, "go on", A.cwd)?.systemMessage ?? "";
       assert.doesNotMatch(told, /signed in to Align again|::align share/, told);
-      assert.equal(
-        told,
-        "Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here (its share here had ended when this machine signed out of Align); its usage stays on this machine.",
-      );
+      // A login that replaced the live pairing never signed out: its words say so (E2E-AGENT cycle 12, section 6).
+      const ended = how.startsWith("logout") ? "this machine signed out of Align" : "a new sign-in on this machine (`align login`) ended its earlier sign-in's shares";
+      assert.equal(told, `Align: this session's sharing was stopped (Stop sharing on the web), so it stays stopped and is not shared again from here (its share here had ended when ${ended}); its usage stays on this machine.`);
       const rows = json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[];
       assert.equal(rows.find((r) => r.local_id === A.lid)?.shared, "stopped (Acme)");
       assert.match(rows.find((r) => r.local_id === B.lid)?.shared ?? "", /ended at a sign-out; `::align share` shares it again/, "another session still offers it");
@@ -105,7 +104,12 @@ describe("C9-1: a web Stop sharing before a re-pairing is heard by the new pairi
       // The next pass changes nothing more, and the other session is still told it can be shared again.
       await sync(t);
       assert.equal(prompt(t, A.sid, "go on", A.cwd)?.systemMessage, undefined);
-      assert.equal(prompt(t, B.sid, "go on", B.cwd)?.systemMessage, AGAIN);
+      assert.equal(
+        prompt(t, B.sid, "go on", B.cwd)?.systemMessage,
+        how.startsWith("logout")
+          ? AGAIN
+          : `Align: a new sign-in on this machine (\`align login\`) ended this session's share from the earlier sign-in; its usage stays on this machine until it is shared again. To share it again, type \`::align share\` here (it counts toward "${GOAL}" again).`,
+      );
     });
   }
 
@@ -125,16 +129,21 @@ describe("C9-1: a web Stop sharing before a re-pairing is heard by the new pairi
 });
 
 describe("C9-2: every notice about a share that ended gives the deny's advice", () => {
-  /** Which way out a text gives, as `latchWayOut` words it for its reader: sharing again, `align stop-sharing`, or none. */
+  /** Which way out a text gives, as `latchWayOut` words it for its reader: sharing again, `align stop-sharing`, or none.
+   *  Signed out, `align stop-sharing` comes with a new sign-in and `::align share` as the other way (cycle 12). */
   const advice = (text: string, lid: string, reader: "model" | "user") =>
-    text.includes(latchWayOut(lid, true, reader)) ? "share again" : text.includes(latchWayOut(lid, false, reader)) ? "stop-sharing" : "none";
+    text.includes(latchWayOut(lid, true, reader))
+      ? "share again"
+      : text.includes(latchWayOut(lid, false, reader)) || text.includes(latchWayOut(lid, false, reader, null, { login: true })) || text.includes(latchNoticeTail(lid, false, null, { login: true }))
+        ? "stop-sharing"
+        : "none";
   /** The session's newest notice and its deny give the same way out, and the expected one. */
   const same = (t: TestEnv, s: { sid: string; cwd: string; lid: string }, want: "share again" | "stop-sharing", label: string) => {
     const notice = prompt(t, s.sid, "go on", s.cwd)?.systemMessage ?? "";
     const why = deny(t, s) ?? "";
     assert.equal(advice(notice, s.lid, "user"), want, `${label}: notice ${notice}`);
     assert.equal(advice(why, s.lid, "model"), want, `${label}: deny ${why}`);
-    assert.ok(notice.endsWith(latchNoticeTail(s.lid, want === "share again")), `${label}: the notice ends with the latch sentence: ${notice}`);
+    assert.ok(notice.endsWith(latchNoticeTail(s.lid, want === "share again")) || notice.endsWith(latchNoticeTail(s.lid, false, null, { login: true })), `${label}: the notice ends with the latch sentence: ${notice}`);
   };
   const stopped = async (fake: FakeServer, t: TestEnv) => {
     const A = await shared(t);

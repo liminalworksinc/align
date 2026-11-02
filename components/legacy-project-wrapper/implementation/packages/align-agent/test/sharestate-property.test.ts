@@ -4,7 +4,9 @@
 // are driven through random sequences of sign-out, login (and a login that can't read the ended shares), sync, Stop
 // sharing and stop/resume on the web, goal hold and release, the workspace lost (removed) and given back (Devices page,
 // or a re-invite and a new login), `align stop-sharing`, `::align share` and prompts; after every step every session is
-// checked. A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
+// checked. Cycle 12 added the device revoked on the web and heard by a sync (C12-2: that pass ends the shares), and
+// `::align share --dir` and `align share` (C12-3: held back like `::align share` while the ended shares are unread),
+// and the unread and signed-out ways out (section 6: `align sync` first; `align login` or `align stop-sharing`). A fixed set of seeds runs every time, plus random ones (printed, so a failure can be run again with
 // ALIGN_PROP_SEEDS=<seed>).
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -46,11 +48,15 @@ function rng(seed: number) {
 }
 
 type S = { sid: string; cwd: string; lid: string; key: string };
-type Way = "share" | "release" | "stop+release" | "stop";
+type Way = "sync" | "login" | "share" | "release" | "stop+release" | "stop";
 
-/** The way out a text names for a share that ended: `::align share` (shared again, then the web lifts it), a release
- *  (or `align stop-sharing`), `align stop-sharing` with the release lifting only the hold, or `align stop-sharing`. */
+/** The way out a text names for a share that ended: `align sync` first, then `::align share` (signed in again, the ended
+ *  shares unread); a new sign-in and `::align share`, or `align stop-sharing` (signed out); `::align share` (shared
+ *  again, then the web lifts it), a release (or `align stop-sharing`), `align stop-sharing` with the release lifting
+ *  only the hold, or `align stop-sharing`. */
 function wayOf(text: string): Way | null {
+  if (/`align sync` (in a terminal )?first/.test(text)) return "sync";
+  if (/shared again (once this machine is signed in|that way)/.test(text)) return "login";
   if (/`::align share` (here|in the session) shares it (there )?again|until it is shared again \((you|the user) can type `::align share`/.test(text)) return "share";
   if (/lifts only the hold/.test(text)) return "stop+release";
   if (/a release still reaches (this session though its sharing ended|it:)|is released from the web \(a release still reaches/.test(text)) return "release";
@@ -186,6 +192,22 @@ test(`share-state notices agree with the deny and the status views, whatever the
         runHook(t, "claude", "UserPromptSubmit", { session_id: s.sid, prompt_id: `p${rand()}`, prompt: "::align share confirm", cwd: s.cwd });
         await sync();
       },
+      // C12-3: the folder form shares the session too, and the terminal form; neither while the ended shares are unread.
+      "::align share --dir": async () => {
+        const s = pick(ss);
+        runHook(t, "claude", "UserPromptSubmit", { session_id: s.sid, prompt_id: `p${rand()}`, prompt: "::align share --dir confirm", cwd: s.cwd });
+        if (rand() < 0.5) await sync();
+      },
+      "align share": async () => {
+        const s = pick(ss);
+        await runCli(t, ["share", s.lid.slice(0, 8), "--workspace", "Acme", "--goal", "Ship the v2", "--yes"]);
+      },
+      // C12-2: the device revoked on the Devices page, heard by the next pass, which ends the shares there and then.
+      "device revoked on the web, then a sync": async () => {
+        const c = readJson<{ device_id: string; signed_out?: boolean }>(layout.credentials(t.home));
+        if (c && !c.signed_out) fake.revokeOnWeb(c.device_id);
+        await sync();
+      },
       prompt: async () => {
         const s = pick(ss);
         const planned = wouldTell(t, s);
@@ -199,6 +221,13 @@ test(`share-state notices agree with the deny and the status views, whatever the
       trail.push(name);
       await events[name]();
       const where = `seed ${seed}, after ${trail.join(" > ")}`;
+      // Signed out (a revocation a pass heard included): no share stays live here (C12-2).
+      if (!signedIn()) {
+        const ctx = ctxFor(t);
+        const live = ctx.db.prepare("SELECT local_id FROM shares WHERE state IN ('shared','pending','suspended')").all();
+        ctx.db.close();
+        assert.equal(live.length, 0, `${where}: signed out with live shares`);
+      }
       const latch = (await runCli(t, ["latch", "status"])).stdout;
       const listed = json((await runCli(t, ["sessions", "--json"])).stdout) as { local_id: string; shared: string }[];
       for (const s of ss) {
@@ -218,6 +247,9 @@ test(`share-state notices agree with the deny and the status views, whatever the
           .filter((w): w is Way => !!w);
         const row = listed.find((r) => r.local_id === s.lid)?.shared ?? "";
         const ctx = `${where}\nsession ${lid8}\ndeny: ${reason}\nstatus:\n${status}\nlatch:\n${latch}\nsessions: ${row}`;
+        // While the ended shares are unread since this sign-in, no view offers plain `::align share` (section 6).
+        const unread = readJson<HotState>(layout.hot(t.home, s.lid))?.share_now?.unread;
+        if (unread && dw) assert.notEqual(dw, "share", `the deny offers \`::align share\` while the ended shares are unread\n${ctx}`);
         // The status views give the deny's way out (and none when the deny names none).
         for (const w of statusWays) assert.equal(w, dw, `::align status\n${ctx}`);
         for (const w of latchWays) assert.equal(w, dw, `align latch status\n${ctx}`);
@@ -242,6 +274,8 @@ test(`share-state notices agree with the deny and the status views, whatever the
         if (dw === "share") assert.doesNotMatch(n.text, /until you run `align stop-sharing/, nctx);
         const hot = readJson<HotState>(layout.hot(t.home, s.lid));
         if (hot?.share_now?.unread) assert.doesNotMatch(n.text, /signed (in to|out of) Align|`::align share`/, `told while the ended shares are unread\n${nctx}`);
+        // A share its person stopped on the web is never asked for again, so it is never refused as stopped (C12-3).
+        assert.doesNotMatch(n.text, /sharing failed \(sharing_stopped\)/, `a share path asked for a share stopped on the web\n${nctx}`);
       }
     }
     console.log(`seed ${seed}: ${trail.join(" > ")}`);

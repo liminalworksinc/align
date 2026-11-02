@@ -335,6 +335,25 @@ export class FakeServer {
     return keys.some((k) => this.sessions.get(k)?.device === device);
   }
 
+  /** As lib/v2/devices.ts when a device is revoked on the Devices page: it is refused from then on, and its live sessions
+   *  end (`device_signed_out`) with their open request targets expired. */
+  revokeOnWeb(deviceId: string): void {
+    const d = this.devices.get(deviceId);
+    if (!d) return;
+    d.revoked = true;
+    d.revokedReason = "revoked_on_web";
+    const at = new Date().toISOString();
+    for (const [k, s] of this.sessions) {
+      if (s.device !== deviceId || s.state === "stopped") continue;
+      Object.assign(s, { state: "stopped", ended: "device_signed_out", stopped_at: at });
+      for (const e of this.epochs.values()) if (e.session_key === k && !e.ends_at) e.ends_at = at;
+      for (const r of this.requests.values()) {
+        const t = r.targets.get(k);
+        if (t && (t.state === "sent" || t.state === "received")) t.state = "expired";
+      }
+    }
+  }
+
   revokeAll(): void {
     for (const d of this.devices.values()) d.revoked = true;
     for (const s of this.streams) s.res.destroy();
@@ -510,8 +529,10 @@ export class FakeServer {
         // any of their devices (C4-8). Its history may be deleted by any of their live devices (C4-1).
         const reshare = !sub && req.method === "PUT" && !!sess && sess.device !== dev.id && sess.state !== "stopped" && !!this.devices.get(sess.device)?.revoked;
         // A session that ended when its person was removed is shared again by any device of theirs once they are back (as
-        // lib/v2/sessions.ts: a new pairing after a re-invite too).
-        const back = !!sess && !sub && req.method === "PUT" && sess.state === "stopped" && sess.ended === "member_removed";
+        // lib/v2/sessions.ts: a new pairing after a re-invite too), and one a revocation ended (`device_signed_out`) by
+        // their new pairing.
+        const back =
+          !!sess && !sub && req.method === "PUT" && sess.state === "stopped" && (sess.ended === "member_removed" || (sess.ended === "device_signed_out" && sess.device !== dev.id));
         if (sess && !sub && req.method === "PUT" && sess.state === "stopped" && !back) return send(409, { error: "sharing_stopped" });
         const deleting = !sub && req.method === "DELETE";
         if (sess && sess.device !== dev.id && !reshare && !back && !deleting) return send(404, { error: "not_found" });

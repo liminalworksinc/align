@@ -139,9 +139,11 @@ export interface WireHold {
 /**
  * A request's local state for one session: `pending` until answered; `accepted` or `declined` by the developer;
  * `auto_accepted` when a safe request (checkpoint, replan draft) reached the agent and the developer had not declined it
- * by the end of that turn (delivered, not declined; not a report that the agent did it); `withdrawn` by its sender.
+ * by the end of that turn (delivered, not declined; not a report that the agent did it); `withdrawn` by its sender;
+ * `expired` when the session's share ended (a sign-out, a lost workspace) before an answer, as the server expires it
+ * (E2E-AGENT cycle 12 C12-4).
  */
-export type RequestState = "pending" | "accepted" | "auto_accepted" | "declined" | "withdrawn";
+export type RequestState = "pending" | "accepted" | "auto_accepted" | "declined" | "withdrawn" | "expired";
 
 export interface HotRequest extends Omit<WireRequest, "cancelled"> {
   state: RequestState;
@@ -157,6 +159,10 @@ export interface HoldLatch {
   ended?: EndedWhy;
   /** As on the stop latch: `::align share` can share it again now, after which a release reaches it. */
   reshare?: true;
+  /** As on the stop latch. */
+  unread?: true;
+  /** As on the stop latch. */
+  login?: true;
   /** With `ended`: the holds' release still reaches this session (its sharing was stopped while this device held it),
    *  and whether a stop blocks it too (C10-4). */
   release?: ReleaseReaches;
@@ -175,6 +181,9 @@ export interface InjectedState {
   notices_shown: string[];
   /** The notice about its share's state the session was last told, so it is told again when its advice changes. */
   share_told?: ShareTold;
+  /** Notices about its share's state this agent's hook marked seen (told or not): one seen that is not among them was
+   *  shown by an older hook, as its stored text (E2E-AGENT cycle 12 C12-1). */
+  share_seen?: string[];
   /** Sibling session local id (or remote session key) -> newest activity of theirs already shown to this session. */
   siblings_seen?: Record<string, string>;
   /** When the last sibling card was injected (cards are rate-limited unless work overlaps). */
@@ -242,6 +251,12 @@ export interface Latch {
   /** With `ended`: this machine can share the session there again now (signed in again, its workspace in reach again),
    *  so `::align share` shares it again, after which the web can resume it (C6-2). */
   reshare?: true;
+  /** With `reshare`: this sign-in has not yet read which shares their person stopped on the web, so `align sync` comes
+   *  before `::align share` (E2E-AGENT cycle 12, section 6). */
+  unread?: true;
+  /** With `ended`: signed out, and a new `align login` would let `::align share` share it again, besides
+   *  `align stop-sharing` (cycle 12, section 6). */
+  login?: true;
   /** With `ended`: the session is held too, and the hold's release still reaches it, lifting only the hold (C10-4). */
   release?: ReleaseReaches;
 }
