@@ -1169,7 +1169,11 @@ confirmed command SHALL be spooled for the next sync, and `--dir` SHALL also wri
 session it was typed in, except one its person stopped sharing or whose shared history was deleted: that one stays
 private (`This session stays private: its sharing was stopped (or its history deleted).`), as the sync also never
 shares such a session for a folder rule; only `::align share` or `align share` shares it again, counting from now.
-`::align share`'s preview says `counts from now.` for any session shared before. `--signals` takes
+`::align share`'s preview says `counts from now.` for any session shared before. On a device that reaches more than
+one workspace and has no default, `::align share --dir` (preview or `confirm`) in a session with no workspace of its own
+SHALL answer `Align: this machine reaches more than one workspace and none is the default, so \`::align share --dir\`
+can't tell which. Run \`align share --dir <folder> --workspace <name> --goal <goal|none>\` in a terminal.`, naming the
+session's folder (its git toplevel), and change nothing. `--signals` takes
 effect only together with `--dir` (it sets the rule's work-signals choice); a single-session `::align share
 --signals` is accepted but records no work-signals consent. `::align bind`
 SHALL refuse goals that are not bindable and SHALL be accepted for a `suspended` share, which is how its user resumes
@@ -1190,6 +1194,11 @@ SHALL show `::align status`.
 
 - **WHEN** a shared session is stopped with `align stop-sharing`, its history is deleted on the web, `align delete-history` hears 410, and the developer types `::align share --dir confirm`, then `::align share`, and previews `align share --dir <folder> --past 3` (test `findings7` "stopped, then its history deleted on the web (410) ...")
 - **THEN** the first reply says `This session stays private: its sharing was stopped (or its history deleted).` and the next sync sends nothing for it, the second previews `counts from now.`, and the third says `Skipped 1 whose shared history was deleted (on the web or with \`align delete-history\`)`
+
+#### Scenario: A folder share on a device with two workspaces
+
+- **WHEN** the device reaches two workspaces and has no default, and in a session with no workspace of its own the developer types `::align share --dir`, then `::align share --dir confirm` (test `findings8` "preview and confirm both get the multi-workspace answer ...")
+- **THEN** both replies are `Align: this machine reaches more than one workspace and none is the default, so \`::align share --dir\` can't tell which. Run \`align share --dir <folder> --workspace <name> --goal <goal|none>\` in a terminal.` with the session's folder, never `no cached workspace`, and `align rules` lists no rule
 
 #### Scenario: Share needs confirm
 

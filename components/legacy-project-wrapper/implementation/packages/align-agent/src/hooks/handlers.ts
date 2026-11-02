@@ -992,6 +992,13 @@ function willShare(home: string, hot: HotState | null, cwd: string | null): bool
 
 const MULTI_WORKSPACE = "Align: this machine reaches more than one workspace and none is the default, so `::align share` can't tell which. Run `align share --latest --workspace <name>` in a terminal.";
 
+/** The same for `::align share --dir`, which can't name a workspace either: the terminal command for this folder (C7-3). */
+function multiWorkspaceDir(cwd: string | null): string {
+  const dir = cwd ? gitInfo(cwd)?.toplevel || cwd : "<folder>";
+  const arg = /\s/.test(dir) ? `"${dir}"` : dir;
+  return `Align: this machine reaches more than one workspace and none is the default, so \`::align share --dir\` can't tell which. Run \`align share --dir ${arg} --workspace <name> --goal <goal|none>\` in a terminal.`;
+}
+
 /** No cached goal matches: say when the goals were fetched, and that a goal created moments ago arrives with the next
  *  sync (this command starts one), so trying again shortly works. */
 function noCachedGoal(arg: string, feed: FeedFile | null): string {
@@ -1127,8 +1134,9 @@ export function command(home: string, harness: Harness, sid: string, cwd: string
       if (!me || me.signed_out) return "Align: not signed in on this machine. Run `align login` in a terminal first.";
       const feed = feedFor(home, hot);
       // With no workspace of its own, no default and more than one in reach, no goal can be looked up either: say why
-      // first, whatever goal was named, rather than that the goal is not cached (C4-7).
-      if (!dirMode && !feed && (me.workspaces?.length ?? 0) > 1) return MULTI_WORKSPACE;
+      // first, whatever goal was named, rather than that the goal is not cached (C4-7); a folder rule can't tell which
+      // either (C7-3).
+      if (!feed && (me.workspaces?.length ?? 0) > 1) return dirMode ? multiWorkspaceDir(cwd) : MULTI_WORKSPACE;
       // Shared before (its share ended, say by a sign-out): with no goal named it shares toward the goal it had, while
       // that goal can still be bound (N8).
       const before = !arg && !dirMode && hot?.goal ? feed?.goals.find((g) => g.id === hot.goal!.id && g.bindable && g.status === "active") || null : null;

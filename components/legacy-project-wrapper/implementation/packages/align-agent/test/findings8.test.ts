@@ -164,3 +164,17 @@ describe("C7-2: signed out and in again, the session's notice says what holds no
     assert.match(prompt(t, A.sid, "go on", A.cwd)?.systemMessage ?? "", new RegExp(`^${AGAIN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}${LATCHED.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), "it can reach the workspace again: told once more");
   });
 });
+
+describe("C7-3: `::align share --dir` on a device with several workspaces and no default", () => {
+  test("preview and confirm both get the multi-workspace answer with the terminal command for the folder, never \"no cached workspace\"", async () => {
+    const { t } = await world({ side: true });
+    const sid = newSid();
+    const cwd = path.join(t.root, "two-ws-repo");
+    fs.mkdirSync(cwd, { recursive: true });
+    start(t, sid, "startup", cwd);
+    const want = `Align: this machine reaches more than one workspace and none is the default, so \`::align share --dir\` can't tell which. Run \`align share --dir ${cwd} --workspace <name> --goal <goal|none>\` in a terminal.`;
+    assert.equal(prompt(t, sid, "::align share --dir", cwd).reason, want);
+    assert.equal(prompt(t, sid, "::align share --dir confirm", cwd).reason, want);
+    assert.equal((await runCli(t, ["rules"])).stdout.trim(), "No folder rules. Every session is private until you share it.");
+  });
+});
