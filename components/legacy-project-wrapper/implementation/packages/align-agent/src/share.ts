@@ -53,7 +53,14 @@ export interface SharePlan {
   unfinalized_now: number;
 }
 
-export function planShare(ctx: Ctx, lid: string, workspace: { id: string; name: string }, goal: Goal | null, alias: string | null, from: "start" | "now"): SharePlan {
+/** An epoch id as the server takes it. */
+const EPOCH_ID = /^ep_[A-Za-z0-9_-]{22,64}$/;
+
+/**
+ * `epochId`: the share's first epoch when the caller chose it (a folder rule's share, whose hook told the model about it
+ * by that id, cycle 7); a fresh one when it is not a well-formed id or this machine has used it already.
+ */
+export function planShare(ctx: Ctx, lid: string, workspace: { id: string; name: string }, goal: Goal | null, alias: string | null, from: "start" | "now", epochId?: string | null): SharePlan {
   const s = getSession(ctx.db, lid);
   if (!s) throw new Error("unknown session");
   const root = repoRoot(s.cwd) || s.cwd || "(unknown)";
@@ -76,10 +83,15 @@ export function planShare(ctx: Ctx, lid: string, workspace: { id: string; name: 
     session_key: skey,
     repo_key: rkey,
     put_body: { harness: s.harness, repo_key: rkey, repo_alias: savedAlias, started_at: started, title: null },
-    epoch_body: { epoch_id: randomId("ep_"), goal_id: goal ? goal.id : null, starts_at, root_turn: null, cause: "manual" },
+    epoch_body: { epoch_id: freshEpochId(ctx, epochId), goal_id: goal ? goal.id : null, starts_at, root_turn: null, cause: "manual" },
     rows_now: counts.fin || 0,
     unfinalized_now: counts.unf || 0,
   };
+}
+
+function freshEpochId(ctx: Ctx, wanted: string | null | undefined): string {
+  if (wanted && EPOCH_ID.test(wanted) && !ctx.db.prepare("SELECT 1 FROM epochs WHERE epoch_id=?").get(wanted)) return wanted;
+  return randomId("ep_");
 }
 
 export function renderPreview(p: SharePlan): string {

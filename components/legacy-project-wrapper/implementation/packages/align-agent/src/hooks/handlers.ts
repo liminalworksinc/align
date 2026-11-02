@@ -227,15 +227,20 @@ function feedGoal(home: string, ws: string, goalId: string): GoalSnapshot | null
   return snapshot(g);
 }
 
-/** A folder rule covers this session: ask the next sync to share it from session start. Forks stay private. */
-function autoShare(home: string, harness: Harness, sid: string, cwd: string | null, inj: InjectedState, messages: string[]): boolean {
+/**
+ * A folder rule covers this session: ask the next sync to share it from session start. Forks stay private. Returns the
+ * share's first epoch, which this hook chooses, so the share the model is told about here is known by its id (cycle 7),
+ * or null when it does not ask.
+ */
+function autoShare(home: string, harness: Harness, sid: string, cwd: string | null, inj: InjectedState, messages: string[]): string | null {
   const rule = matchRule(readRules(home), cwd);
-  if (!rule) return false;
+  if (!rule) return null;
   if (signedOut(home)) {
     // Nothing could reach the server: the session stays private, and the developer hears why (N4).
     messages.push(`Align: this folder is shared with ${rule.workspace_name}, but this machine is signed out of Align, so this session stays private. Run \`align login\` in a terminal, then type \`::align share\` here.`);
-    return false;
+    return null;
   }
+  const epochId = randomId("ep_");
   spoolWrite(home, {
     type: "command",
     harness,
@@ -245,6 +250,7 @@ function autoShare(home: string, harness: Harness, sid: string, cwd: string | nu
     arg: rule.goal_id,
     workspace: rule.workspace_id,
     rule_dir: rule.dir,
+    epoch_id: epochId,
     ts: new Date().toISOString(),
   });
   inj.notices_shown.push("anchor");
@@ -252,7 +258,23 @@ function autoShare(home: string, harness: Harness, sid: string, cwd: string | nu
   messages.push(
     `Align: shared with ${rule.workspace_name}${goal ? ` for "${goal.title}"` : rule.goal_title ? ` for "${rule.goal_title}"` : ""} (folder rule for ${rule.dir}). Type \`::align unshare\` to keep this session private.`,
   );
-  return true;
+  return epochId;
+}
+
+/**
+ * The share the model knows this session counts in (`share_since`), which only a delivered envelope or delta records
+ * (cycle 7): a later share (shared again after the one it knew ended) is a new share to tell it about, even toward the
+ * goal already in its context. A context given before this was recorded (an older hook) is taken to know the share it
+ * matches.
+ */
+function sharedAgain(inj: InjectedState, hot: HotState, goal: GoalSnapshot | null): boolean {
+  const since = hot.share?.since;
+  if (!since || hot.share?.state !== "shared" || !goal) return false;
+  if (!inj.share_since) {
+    if (sameAsInjected(inj, goal, "shared")) inj.share_since = since;
+    return false;
+  }
+  return inj.share_since !== since;
 }
 
 // ---------- requests (REQ-002) ----------
@@ -353,17 +375,18 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
   const inj = readInjected(home, lid);
   let context: string | null = null;
   const messages: string[] = [];
+  let ruleEpoch: string | null = null;
   if (hot?.share?.state === "shared" && hot.goal) {
     const full = source === "startup" || source === "clear" || source === "compact";
-    // A resumed session shared again since its context was given (cycle 6) gets the envelope again, as a new goal would.
-    const since = hot.share.since;
-    const again = !!since && !!inj.share_since && inj.share_since !== since;
+    // A resumed session shared again since its context was given (cycles 6, 7) gets the envelope again, as a new goal
+    // would.
+    const again = sharedAgain(inj, hot, hot.goal);
     const need = full || ((source === "resume" || source === "fork") && (!sameAsInjected(inj, hot.goal, "shared") || again));
-    if (since) inj.share_since = since;
     if (need) {
       const ta = teamAsks(home, hot.share.workspace_id, hot.goal.id);
       context = renderEnvelope(hot.goal, hot.context_goals || [], ta);
       markInjected(inj, hot.goal, "shared");
+      if (hot.share.since) inj.share_since = hot.share.since;
       markAsks(inj, ta);
       markContext(inj, hot.context_goals);
       inj.context_epoch++;
@@ -373,7 +396,7 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
     if (card) context = context ? `${context}\n${card}` : card;
     const steer = steerOnce(home, lid, source, hot.share.workspace_id, hot.goal.id, inj);
     if (steer) context = context ? `${context}\n${steer}` : steer;
-  } else if (!hot?.share && (source === "startup" || source === "clear") && autoShare(home, harness, sid, cwd, inj, messages)) {
+  } else if (!hot?.share && (source === "startup" || source === "clear") && (ruleEpoch = autoShare(home, harness, sid, cwd, inj, messages))) {
     const rule = matchRule(readRules(home), cwd);
     const goal = rule?.goal_id ? feedGoal(home, rule.workspace_id, rule.goal_id) : null;
     if (goal) {
@@ -381,6 +404,9 @@ export function sessionStart(home: string, harness: Harness, input: HookInput, e
       const ta = teamAsks(home, rule!.workspace_id, goal.id);
       context = renderEnvelope(goal, related, ta);
       markInjected(inj, goal, "shared");
+      // The share this envelope is about: the one the sync makes from this rule, with the epoch chosen here. It may
+      // only take effect after this session's prompts (`claude -p`), so no later hook call can record it (cycle 7).
+      inj.share_since = ruleEpoch;
       markAsks(inj, ta);
       markContext(inj, related);
       inj.context_epoch++;
@@ -599,11 +625,10 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
     goal = null;
   }
   // Shared again (a new share, after the one the model knew ended) toward the goal already in its context: it was
-  // never told the session stopped counting, so it is told it counts again (cycle 6). A share the model's context
-  // predates the record of is taken as the one it knows.
-  const since = hot.share.since;
-  if (!kind && hot.share.state === "shared" && goal && since && inj.share_since && inj.share_since !== since) kind = "bound";
-  if (hot.share.state === "shared" && since) inj.share_since = since;
+  // never told the session stopped counting, so it is told it counts again, with the goal in full (cycles 6, 7).
+  if (kind !== "unbound" && sharedAgain(inj, hot, goal)) kind = "bound";
+  // Whatever is told now is told about this share.
+  if (kind && hot.share.state === "shared" && hot.share.since) inj.share_since = hot.share.since;
   let context: string | null = null;
   if (kind) {
     // A newly bound goal comes with all its limits, as the envelope words them; a version whose limits changed names

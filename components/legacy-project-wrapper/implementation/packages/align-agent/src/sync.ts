@@ -173,7 +173,7 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       }
       // Shared before (its history deleted since, too): this share counts from now (C6-1).
       const before = sharedBefore(ctx, lid);
-      applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start"));
+      applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start", r.epoch_id));
       if (!r.rule_dir) addNotice(ctx, lid, `share_started_${r.ts}`, `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${before ? "now" : "session start"}.`);
     }
   } catch (e) {

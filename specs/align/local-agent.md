@@ -1034,7 +1034,12 @@ byte-identical to the goal-only envelope. The envelope SHALL be injected on `sta
 and on `resume` or `fork` only when that goal version is not already in context or the session was shared again since
 it was (a new share after the one its context came with ended, so it stopped counting in between). For the same
 reason the first prompt after a session is shared again toward the goal already in its context SHALL carry the `bound`
-delta (`[Align] From this turn this session counts toward goal "<title>" (v<n>, <status>). ...`), once. Every `SessionStart` SHALL spool a
+delta (`[Align] From this turn this session counts toward goal "<title>" (v<n>, <status>). ...`), once. Which share the
+model was told about SHALL be recorded whenever an envelope or a delta is delivered, by the share's id (its first
+epoch), and compared with the current share at each prompt and resume, whenever that share took effect: a folder rule's
+share, whose envelope is given at `SessionStart` before the sync applies the rule (always the case for `claude -p`,
+whose prompts run first), SHALL be recorded by the first epoch the hook chooses for it and spools with the share
+request. Every `SessionStart` SHALL spool a
 `session_start` record (cwd, model, transcript path, and booleans for whether API-key or cloud-provider variables
 are set, never their values).
 
@@ -1047,6 +1052,11 @@ are set, never their values).
 
 - **WHEN** a shared session's workspace is lost and given back and the developer types `::align share confirm`, then resumes the session; and another shared session's machine signs out and in again, the developer types `::align share confirm` and prompts twice (test `findings7` "shared again toward the goal already in context ...")
 - **THEN** the resume gets the goal envelope again, and the other session's first prompt carries `[Align] From this turn this session counts toward goal "Ship the v2 onboarding flow" (v1, active).` and the second nothing
+
+#### Scenario: Shared again after a folder rule's share that took effect after the session's prompts
+
+- **WHEN** a session starts in a folder a rule shares toward "Ship the v2 onboarding flow", gets its envelope and runs a prompt before the sync applies the rule, the machine signs out and in again, the developer types `::align share confirm` and prompts twice; and a second such session is shared again the same way and then resumed (test `findings8` "signed out and in, `::align share confirm`: the next prompt carries the bound delta once ...")
+- **THEN** the first session's first prompt after the new share carries `[Align] From this turn this session counts toward goal "Ship the v2 onboarding flow" (v1, active).` and the second nothing, and the resume gets the goal envelope again
 
 #### Scenario: Goal text cannot forge the marker
 
