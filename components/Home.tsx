@@ -780,8 +780,6 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
             {custom ? plainError(error) : error}
           </div>
         )}
-        {/* The first-run card (components/FirstRun.tsx), rendered here by ConnectAI so it shares that one poll. */}
-        {workspace && <div ref={setFirstRunSlot} />}
         {me.actor !== "leadership" && ceo && (
           <div className={custom ? CUSTOM_STRIP : "mb-4 grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-6 rounded-[14px] border border-zinc-200 bg-white px-5 py-3.5"}>
             <div className="flex min-w-0 items-center gap-4">
@@ -830,6 +828,9 @@ export default function Home({ workspace, hosted, nextStep }: { workspace?: stri
         {view === "company" && <OrgView {...props} />}
         {view === "team" && <TeamLens {...props} />}
         {view === "proposals" && <ProposalsView {...props} />}
+        {/* The first-run card (components/FirstRun.tsx), rendered here by ConnectAI so it shares that one poll. Below the
+            view, so a new workspace's next step (Propose a change, Review) is the first thing on screen, not the setup card. */}
+        {workspace && <div ref={setFirstRunSlot} className="mt-4" />}
 
         {drawer && !custom && (
           <div className="fixed inset-y-0 left-[236px] right-[360px] top-16 z-20 flex justify-end bg-[rgba(5,5,7,0.55)]" onClick={closeDrawer}>
