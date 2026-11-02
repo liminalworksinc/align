@@ -2,7 +2,7 @@ import { createPublicKey, verify } from "node:crypto";
 import { randomInt } from "node:crypto";
 import { config } from "../config";
 import { all, audit, get, LIVE_WS, run, tx } from "./db";
-import { V2Error, badRequest, conflict, notFound } from "./errors";
+import { V2Error, badRequest, conflict } from "./errors";
 import { event } from "./events";
 import { newId, nowIso, secretToken, sha256hex } from "./ids";
 import { retryAfterMs, take, takeAll } from "./limits";
@@ -116,6 +116,7 @@ interface RequestRow {
   state: "pending" | "approved" | "denied" | "consumed";
   user_id: string | null;
   ws_ids_json: string | null;
+  approved_name: string | null;
 }
 
 const oauthError = (code: string) => new V2Error(400, code, code.replaceAll("_", " "));
@@ -152,7 +153,7 @@ export async function token(deviceCode: string, replaces: string | null = null) 
     const user = r.user_id ? userById(r.user_id) : undefined;
     if (!user) return { error: "access_denied" };
     const deviceId = newId("dv");
-    run("INSERT INTO v2_devices (id, user_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)", deviceId, user.id, distinctName(user.id, r.device_name, replaces), r.public_key, at, at);
+    run("INSERT INTO v2_devices (id, user_id, name, public_key, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)", deviceId, user.id, pairedName(user.id, r, replaces, nowMs), r.public_key, at, at);
     const granted: string[] = [];
     for (const ws of JSON.parse(r.ws_ids_json || "[]") as string[]) {
       if (get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, user.id)) {
@@ -171,14 +172,35 @@ export async function token(deviceCode: string, replaces: string | null = null) 
   return out.ok;
 }
 
-/** A name none of this person's live devices has: a second "Milo's laptop" (another machine of that name, or a second
- *  login at once) becomes "Milo's laptop (2)", so the Devices page and `align login` never show two live devices of one
- *  name (E2E cycle 5). The device this pairing replaces on the same machine (`replaces`, counted only when it is this
- *  person's: the query reads only theirs) does not count, as it is revoked a moment later: a re-login keeps its name. */
-function distinctName(userId: string, name: string, replaces: string | null): string {
-  const taken = new Set(all<{ name: string }>("SELECT name FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND id <> ?", userId, replaces ?? "").map((d) => d.name));
+/** A name none of this person's live devices has, nor any of their other approved pairings still waiting for their
+ *  token poll (`held`): a second "Milo's laptop" (another machine of that name, or a second login at once) becomes
+ *  "Milo's laptop (2)", so the Devices page and `align login` never show two live devices of one name (E2E cycle 5). The
+ *  device this pairing replaces on the same machine (`replaces`, counted only when it is this person's: the query reads
+ *  only theirs) does not count, as it is revoked a moment later: a re-login keeps its name. */
+function distinctName(userId: string, name: string, replaces: string | null, held: string[] = []): string {
+  const taken = new Set([...all<{ name: string }>("SELECT name FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND id <> ?", userId, replaces ?? "").map((d) => d.name), ...held]);
   if (!taken.has(name)) return name;
   for (let n = 2; ; n++) if (!taken.has(`${name} (${n})`)) return `${name} (${n})`;
+}
+
+/** The names this person's other approved pairings hold until their token poll (or until they expire). */
+const heldNames = (userId: string, exceptRequest: string, nowMs: number) =>
+  all<{ approved_name: string }>(
+    "SELECT approved_name FROM v2_device_requests WHERE user_id = ? AND state = 'approved' AND id <> ? AND approved_name IS NOT NULL AND expires_at > ?",
+    userId,
+    exceptRequest,
+    new Date(nowMs).toISOString(),
+  ).map((r) => r.approved_name);
+
+/** The name a pairing's device is stored under at its token poll (W4): the one decided when it was approved, which the
+ *  approval page showed, unless the poll names (`replaces`) this person's live device it replaces on the same machine,
+ *  when the name is decided again without that device, so a re-login keeps its plain name; or unless that name has been
+ *  taken since (by a device paired before this poll), when the next free one is used. */
+function pairedName(userId: string, r: RequestRow, replaces: string | null, nowMs: number): string {
+  const held = heldNames(userId, r.id, nowMs);
+  if (replaces && get("SELECT 1 AS x FROM v2_devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL", replaces, userId)) return distinctName(userId, r.device_name, replaces, held);
+  if (r.approved_name && !get("SELECT 1 AS x FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name = ?", userId, r.approved_name)) return r.approved_name;
+  return distinctName(userId, r.device_name, null, held);
 }
 
 /** The exact bytes a device signs to refresh (docs/v2/WIRE.md). */
@@ -313,10 +335,13 @@ export function deviceFromAccessToken(tokenValue: string): DevicePrincipal | nul
 
 // ---- the browser half (signed-in user at /app/device) ----
 
+/** A code no device is waiting on: unknown, expired, or approved or denied already (in another tab, say). */
+const CODE_NOT_WAITING = "No device is waiting for that code. Check it, or run align login again.";
+
 function pendingByCode(code: string, nowMs = Date.now()): RequestRow {
   const norm = normalizeUserCode(code);
   const r = norm ? get<RequestRow>("SELECT * FROM v2_device_requests WHERE user_code = ?", norm) : undefined;
-  if (!r || r.state !== "pending" || Date.parse(r.expires_at) <= nowMs) throw notFound();
+  if (!r || r.state !== "pending" || Date.parse(r.expires_at) <= nowMs) throw new V2Error(404, "not_found", CODE_NOT_WAITING);
   return r;
 }
 
@@ -326,6 +351,9 @@ export function lookupRequest(userId: string, code: string) {
   return { device_name: r.device_name, requested_at: r.created_at, age_seconds: Math.max(0, Math.round((Date.now() - Date.parse(r.created_at)) / 1000)), expires_at: r.expires_at };
 }
 
+/** Approve or deny a pairing. Approving decides the device's name now that the person is known (W4): the name it asked
+ *  for, or "<name> (n)" when one of their live devices (or another approved pairing of theirs waiting for its poll) has
+ *  it. The answer carries it as `device_name`, with `asked_as`, so the page names the device as it is stored. */
 export async function decideRequest(userId: string, code: string, decision: "approve" | "deny", wsIds: string[]) {
   take(`device-decide:${userId}`, 20, 10 * 60 * 1000);
   return tx(() => {
@@ -335,11 +363,16 @@ export async function decideRequest(userId: string, code: string, decision: "app
       return { state: "denied" as const };
     }
     if (!wsIds.length) throw badRequest("Choose at least one workspace for this device");
-    for (const ws of wsIds) if (!get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, userId)) throw notFound();
-    run("UPDATE v2_device_requests SET state = 'approved', user_id = ?, ws_ids_json = ? WHERE id = ?", userId, JSON.stringify(wsIds), r.id);
-    return { state: "approved" as const };
+    for (const ws of wsIds) if (!get(`SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ? AND ${LIVE_WS("ws_id")}`, ws, userId)) throw new V2Error(404, "not_found", WORKSPACE_CHOSEN_NOT_YOURS);
+    const name = distinctName(userId, r.device_name, null, heldNames(userId, r.id, Date.now()));
+    run("UPDATE v2_device_requests SET state = 'approved', user_id = ?, ws_ids_json = ?, approved_name = ? WHERE id = ?", userId, JSON.stringify(wsIds), name, r.id);
+    return { state: "approved" as const, device_name: name, asked_as: r.device_name };
   });
 }
+
+/** The approval's refusal for a ticked workspace that is not the person's (any more): deleted, left or removed from in
+ *  another tab, say. Nothing is approved. */
+export const WORKSPACE_CHOSEN_NOT_YOURS = "A workspace you ticked is not one of yours any more (it was deleted, or you left it or were removed from it), so nothing was approved. Tick your workspaces again.";
 
 export function listDevices(userId: string) {
   const rows = all<{ id: string; name: string; created_at: string; last_seen_at: string | null; revoked_at: string | null; revoked_reason: string | null }>(

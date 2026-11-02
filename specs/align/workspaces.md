@@ -1108,9 +1108,15 @@ public_key}` (a 32-byte base64url Ed25519 key, name at most 100 characters) retu
 and `POST /api/v2/device/token` returns the tokens exactly once after approval. The device SHALL get a name none of
 the person's live devices has: when one already has the requested name (another machine of that name, or a second
 login at once), it gets the first free `<name> (2)`, `<name> (3)`, ..., so the Devices page and `align login` never show
-two live devices of one name. The token poll MAY name the device the pairing replaces on the same machine (`replaces`,
-a device id; malformed is 400); that device, counted only when it is the approving person's own, is left out of the
-check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with `<name> (2)`.
+two live devices of one name. The name SHALL be decided when the person approves the pairing (the person is known
+then), against their live devices and the names held by their other approved pairings still waiting for their token
+poll, stored on the request, and answered by the approval as `{state:"approved", device_name, asked_as}` (the name
+decided and the name asked for), so the approval page names the device as it is stored; the token poll SHALL store the
+device under that name, unless a device of theirs paired since has taken it (then the next free one). The token poll
+MAY name the device the pairing replaces on the same machine (`replaces`, a device id; malformed is 400); when that
+device is the approving person's own and live, the name SHALL be decided again at the poll with that device left out
+of the check, as it is revoked a moment later, so a re-login keeps the plain name instead of alternating with
+`<name> (2)`.
 A device name SHALL be one line as the person reads it everywhere (the approval page, the Devices page, `align
 login`): at `authorize` every run of control characters (C0, DEL and C1) and whitespace, line and paragraph
 separators included, SHALL become one space, every invisible format character (Unicode general category Cf, by
@@ -1149,6 +1155,11 @@ named while the first's device was live, then replacing it) so end with the plai
 
 - **WHEN** a person with a live device named `reuse test` pairs another device with that name (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices ...")
 - **THEN** the new device is named `reuse test (2)`, also when its poll names another person's device as the one it replaces
+
+#### Scenario: The name is decided at approval
+
+- **WHEN** a person with a live device named `reuse test` approves a pairing of that name; and approves two pairings named `twin approval` one after the other, whose devices then poll the second first (`scripts/test-v2.mjs` "W4 (E2E-WEB cycle 7): ..." and "W4: two pairings of one name approved together ...")
+- **THEN** the first approval answers `{state:"approved", device_name:"reuse test (2)", asked_as:"reuse test"}` and the device is `reuse test (2)`; the two others answer `twin approval` and `twin approval (2)`, and each device keeps the name its approval answered
 
 #### Scenario: A re-login keeps its name
 

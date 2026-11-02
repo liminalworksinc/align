@@ -10,6 +10,14 @@ interface Pending {
   age_seconds: number;
 }
 
+/** What an approval says (W4): the device's name as it is stored, decided at approval. When one of the person's devices
+ *  already had the name it asked for, it is "<name> (n)", and the page says why, and that a new align login on that same
+ *  machine keeps that device's name instead (its token poll names the device it replaces). */
+function connectedLine(asked: string, name: string): string {
+  if (name === asked) return `${name} is connected. You can close this page.`;
+  return `${asked} is connected as “${name}”: you already have a device named “${asked}”. If this is a new align login on that same machine, it keeps that device's name instead. You can close this page.`;
+}
+
 /** How long ago the device asked, with the count-and-noun helper (C6-4: never "1 minutes ago"). */
 const ago = (s: number) => `${s < 60 ? count(s, "second") : count(Math.round(s / 60), "minute")} ago`;
 
@@ -34,17 +42,26 @@ export default function DeviceApprove({ me, code: code0, recent }: { me: Me; cod
 
   const decide = (approve: boolean) =>
     act.run(async () => {
+      let out: { device_name?: string; asked_as?: string };
       try {
-        await api(approve ? "/api/v2/device/approve" : "/api/v2/device/deny", { body: approve ? { user_code: code.trim(), workspace_ids: chosen } : { user_code: code.trim() } });
+        out = await api(approve ? "/api/v2/device/approve" : "/api/v2/device/deny", { body: approve ? { user_code: code.trim(), workspace_ids: chosen } : { user_code: code.trim() } });
       } catch (e) {
         // The sign-in aged past 15 minutes while the page was open: nothing was approved.
         if (e instanceof ApiError && e.code === "reauth_required") {
           setStale(true);
           return;
         }
+        // A ticked workspace that is no longer theirs (deleted or left in another tab): the list is read again and the
+        // ticks it no longer offers are cleared; the server's message says what happened.
+        if (e instanceof ApiError && e.status === 404) {
+          const now = await api<{ workspaces: WsSummary[] }>("/api/v2/workspaces").catch(() => null);
+          list.reload();
+          if (now) setChosen((c) => c.filter((id) => now.workspaces.some((w) => w.id === id)));
+        }
         throw e;
       }
-      setDone(approve ? `${pending?.device_name} is connected. You can close this page.` : "Denied. That device was not connected.");
+      const asked = out.asked_as ?? pending?.device_name ?? "The device";
+      setDone(approve ? connectedLine(asked, out.device_name ?? asked) : "Denied. That device was not connected.");
       setPending(null);
       setCode("");
     });

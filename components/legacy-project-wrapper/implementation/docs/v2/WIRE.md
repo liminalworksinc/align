@@ -427,8 +427,9 @@ waiting_on_others } | null, asks: { waiting_on_me } | null, alignments: { waitin
 `last_read_at`; one that only connected is not observed); each queue item has `next` and `waiting_on`; a section
 the server couldn't read is `null`; see `lib/v2/home.ts`),
 `GET /api/v2/device/requests/:code`,
-`POST /api/v2/device/approve` (`{ user_code, workspace_ids }`; needs a sign-in from the last 15 minutes, else
-`403 reauth_required`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,
+`POST /api/v2/device/approve` (`{ user_code, workspace_ids }` → `{ state: "approved", device_name, asked_as }`, the
+device's name decided at approval, "<name> (2)" when a live device of the person has the name; needs a sign-in from the
+last 15 minutes, else `403 reauth_required`), `POST /api/v2/device/deny`, `GET /api/v2/devices`,
 `DELETE /api/v2/devices/:id`, `POST /api/v2/devices/:id/workspaces`. Better Auth is mounted at `/api/v2/auth/*` (cookie `align_v2.session_token`,
 `__Secure-` prefixed when hosted).
 

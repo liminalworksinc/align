@@ -304,7 +304,21 @@ async function pairDevice(who, user, wsIds, name = `${who}'s laptop`, replaces =
   if (ap.status !== 200) throw new Error(`approve ${ap.status} ${ap.text}`);
   const t = await call(who, "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: a.json.device_code, ...(replaces ? { replaces } : {}) } });
   if (t.status !== 200) throw new Error(`token ${t.status} ${t.text}`);
-  return { ...keys, who, user, id: t.json.device_id, access: t.json.access_token, refresh: t.json.refresh_token };
+  return { ...keys, who, user, id: t.json.device_id, access: t.json.access_token, refresh: t.json.refresh_token, approved: ap.json };
+}
+
+/** A pending pairing request written straight into the database (the pairing limit is spent by then), with the device
+ *  code that polls it. */
+function insertPairing(name, { ageMs = 0 } = {}) {
+  const deviceCode = randomBytes(32).toString("base64url");
+  const letters = Array.from(randomBytes(8), (x) => "BCDFGHJKLMNPQRSTVWXZ"[x % 20]).join("");
+  const userCode = `${letters.slice(0, 4)}-${letters.slice(4)}`;
+  withDb((d) =>
+    d
+      .prepare("INSERT INTO v2_device_requests (id, device_code_hash, user_code, device_name, public_key, created_at, expires_at, interval_s, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')")
+      .run(`dr_${randomBytes(12).toString("hex")}`, sha256hex(deviceCode), userCode, name, newDeviceKeys().pub, new Date(Date.now() - ageMs).toISOString(), new Date(Date.now() + 500_000).toISOString(), 5),
+  );
+  return { deviceCode, userCode };
 }
 
 /** A paired device written straight into the database, with a live access token (the device-pairing limit, 10 per
@@ -771,7 +785,7 @@ try {
   check("storage: v2 directory 0700 and database file 0600", mode(path.join(onDir, "v2")) === "700" && mode(dbFile) === "600", `${mode(path.join(onDir, "v2"))} ${mode(dbFile)}`);
   const pragmas = withDb((d) => ({ jm: d.prepare("PRAGMA journal_mode").get().journal_mode, uv: d.prepare("PRAGMA user_version").get().user_version, tables: d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name) }));
   const limitCols = withDb((d) => ["v2_goals", "v2_goal_versions"].map((t) => d.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === "limits_json")));
-  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 19, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds and deleted-session markers included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 19 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
+  check(`storage: WAL, migrated (user_version ${SCHEMA_VERSION} = 20, lib/v2/core.mts SCHEMA_VERSION), v2_ tables (connected-app grants, change requests and their evidence, spend roll-ups, former members, passkey use, creation codes, access requests, durable limits, product events, asks and their mentions, value reports, requests and their per-session states, goal holds and deleted-session markers included), limits on goals and goal versions, and Better Auth tables (passkeys included)`, SCHEMA_VERSION === 20 && pragmas.jm === "wal" && pragmas.uv === SCHEMA_VERSION && ["v2_usage", "v2_activity", "v2_goal_acks", "v2_oauth_grants", "v2_change_requests", "v2_change_request_revisions", "v2_change_request_evidence", "v2_spend_rollups", "v2_former_members", "v2_passkey_use", "v2_passkey_prompt_dismissed", "v2_creation_codes", "v2_access_requests", "v2_rate_hits", "v2_events", "v2_asks", "v2_ask_mentions", "v2_value_reports", "v2_requests", "v2_request_targets", "v2_goal_holds", "v2_deleted_sessions", "ba_user", "ba_passkey"].every((t) => pragmas.tables.includes(t)) && limitCols.every(Boolean), `${JSON.stringify(pragmas)} ${limitCols}`);
   const launchCols = withDb((d) => [["v2_change_requests", ["launch", "approved_json", "launch_by", "launch_at"]], ["v2_change_request_revisions", ["condition", "acknowledged_by", "acknowledged_at"]]].every(([t, cols]) => cols.every((c) => d.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c))));
   check("storage (LAUNCH-001/002): migration 13 adds launch, approved_json, launch_by and launch_at to change requests and condition, acknowledged_by and acknowledged_at to their revisions", launchCols, "");
   const grantCols = withDb((d) => d.prepare("PRAGMA table_info(v2_oauth_grants)").all().map((c) => c.name));
@@ -1151,6 +1165,27 @@ try {
     d.prepare("DELETE FROM v2_devices WHERE id = ?").run(notMine.id);
   });
   check("device (E2E-AGENT cycle 5): a new pairing named as one of the person's live devices gets a distinguishing suffix (\"reuse test (2)\"), so no two live devices share a name, also when the poll names another person's device as the one it replaces", drName === "reuse test (2)", String(drName));
+  check(
+    "W4 (E2E-WEB cycle 7): the approval answers the device's name as it will be stored, decided when the person approves it: {state:\"approved\", device_name:\"reuse test (2)\", asked_as:\"reuse test\"}, the name the device then has",
+    DR.approved?.state === "approved" && DR.approved.device_name === "reuse test (2)" && DR.approved.asked_as === "reuse test" && drName === DR.approved.device_name,
+    JSON.stringify(DR.approved),
+  );
+  // W4: two pairings of one name approved together get two names at approval, and keep them whichever polls first.
+  const pairPoll = (code) => call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: code } });
+  const twinA = insertPairing("twin approval");
+  const twinB = insertPairing("twin approval");
+  const twinApA = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: twinA.userCode, workspace_ids: [A] } });
+  const twinApB = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: twinB.userCode, workspace_ids: [A] } });
+  const twinTokB = await pairPoll(twinB.deviceCode);
+  const twinTokA = await pairPoll(twinA.deviceCode);
+  const twinNames = withDb((d) => [twinTokA, twinTokB].map((t) => d.prepare("SELECT name FROM v2_devices WHERE id = ?").get(t.json?.device_id ?? "")?.name));
+  check(
+    "W4: two pairings of one name approved together are named at approval (\"twin approval\", then \"twin approval (2)\", the first one's name held until its poll), and each device keeps the name its approval answered, even when the second polls first",
+    twinApA.json?.device_name === "twin approval" && twinApB.json?.device_name === "twin approval (2)" && twinTokA.status === 200 && twinTokB.status === 200 &&
+      twinNames[0] === "twin approval" && twinNames[1] === "twin approval (2)",
+    `${twinApA.text} ${twinApB.text} ${twinTokA.status} ${twinTokB.status} ${JSON.stringify(twinNames)}`,
+  );
+  withDb((d) => d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id IN (?, ?)").run(new Date().toISOString(), twinTokA.json?.device_id ?? "", twinTokB.json?.device_id ?? ""));
   // E2E-AGENT cycle 6: two logins approved together. The first's device ("race mac") is replaced by the second's ("race
   // mac (2)", named while the first was live); the first's revoke names its replacement, which takes the plain name.
   // Not while another live device of the person has it, never for another person's device, and never without the name.
@@ -2559,6 +2594,25 @@ try {
       await page.waitForFunction(() => /Asked \d+ /.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
       const askedLine = await page.evaluate(() => [...document.querySelectorAll("p")].map((p) => p.textContent ?? "").find((t) => t.startsWith("Asked ")) ?? "");
       check("C6-4 (ui): the device approval page says \"Asked 1 minute ago\" for a code 70 seconds old (one count-and-noun helper), never \"1 minutes\"", askedLine === "Asked 1 minute ago", askedLine);
+
+      // W4 (ui): approving a second "U5's zed cart" names it as it is stored, "(2)" included, decided at approval.
+      const w4 = insertPairing("U5's zed cart");
+      await page.goto(`${BASE}/app/device?code=${w4.userCode}`, { waitUntil: "networkidle0" });
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Look up")?.click());
+      await page.waitForFunction(() => document.querySelectorAll('main input[type="checkbox"]').length > 0, { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => document.querySelector('main input[type="checkbox"]')?.click());
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Approve" && !b.disabled), { timeout: 15000 }).catch(() => undefined);
+      await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Approve")?.click());
+      await page.waitForFunction(() => /is connected/.test(document.body.innerText), { timeout: 15000 }).catch(() => undefined);
+      const w4Text = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
+      const w4Tok = await call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: w4.deviceCode } });
+      const w4Name = withDb((d) => d.prepare("SELECT name FROM v2_devices WHERE id = ?").get(w4Tok.json?.device_id ?? "")?.name);
+      check(
+        "W4 (ui): approving a pairing named as a live device of mine says \"U5's zed cart is connected as “U5's zed cart (2)”: you already have a device named “U5's zed cart”. …\" and the device is then stored under that name (never \"U5's zed cart is connected\" for a device stored as \"(2)\")",
+        w4Text.includes("U5's zed cart is connected as “U5's zed cart (2)”: you already have a device named “U5's zed cart”. If this is a new align login on that same machine, it keeps that device's name instead. You can close this page.") &&
+          w4Tok.status === 200 && w4Name === "U5's zed cart (2)",
+        `${w4Text.slice(0, 600)} | ${w4Tok.status} ${w4Name}`,
+      );
 
       // Z3 (ui): Delete shared history on a session already deleted in another tab is done: the row goes, and the page
       // says it was already deleted instead of an error.
