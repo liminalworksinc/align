@@ -3432,6 +3432,59 @@ try {
         dirCount(SF) === 0,
       `${delCM.status} ${delCM.text} ${JSON.stringify(rowF)} | ${goneStop.text} | ${goneResume.text}`,
     );
+
+    // E2E-WEB cycle 14 C14-1: control characters (C0 but tab and line feed, DEL, C1) are dropped from people's text as
+    // invisible characters are, so a title, measure, reason, decline reason, request note or session title of only
+    // them is missing, and MCP never passes one on to an AI app.
+    const CN = await signUp("CN", "Cy New", "cn@ended.example.test");
+    const cnInv = await ca(CO, "POST", "/invites", { email: CN.email, role: "member" });
+    await call("CN", "POST", `/api/v2/invites/${cnInv.json?.token}/accept`, { cookie: CN.cookie, body: {} });
+    const CONTROLS = ["\u007f", "\u0001\u0002", "\u0007", "\u0085", "\u0080\u009f", " \u0000\u001b\u009b "];
+    const c14Titles = [];
+    for (const v of CONTROLS) c14Titles.push(await ca(CN, "POST", "/goals", { title: v, visibility: "workspace" }));
+    const c14Measure = await ca(CN, "POST", "/goals", { title: "C14 goal", visibility: "workspace", measures: [{ text: "\u0080\u009f", target: null }] });
+    const CNG = (await ca(CN, "POST", "/goals", { title: "Cy's\u0007 goal\u0085", visibility: "workspace", measures: [{ text: "Latency\u007f p95", target: "200\u0001ms" }] })).json;
+    const c14Reasons = [];
+    for (const v of CONTROLS) c14Reasons.push(await ca(CO, "POST", `/goals/${CNG?.id}/change-requests`, { base_version: 1, changes: { title: "Cy's goal, sooner" }, reason: v }));
+    const c14Cr = await ca(CO, "POST", `/goals/${CNG?.id}/change-requests`, { base_version: 1, changes: { title: "Cy's goal, sooner" }, reason: "Needs\u0007 review\r\nby May" });
+    const c14Declines = [];
+    for (const v of CONTROLS) c14Declines.push(await ca(CN, "POST", `/goals/${CNG?.id}/change-requests/${c14Cr.json?.id}/reject`, { revision: 1, reason: v }));
+    const c14CrRow = withDb((d) => d.prepare("SELECT state, reason FROM v2_change_requests WHERE id = ?").get(c14Cr.json?.id ?? ""));
+    const DN = insertDevice(CN.id, "Cy's laptop");
+    withDb((db) => db.prepare("INSERT INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DN.id, CW));
+    const dn = { ...newDeviceKeys(), who: "CN", user: CN, id: DN.id, access: DN.access };
+    const cnPut = (key, title) =>
+      call("CN", "PUT", `/api/v2/workspaces/${CW}/sessions/${key}`, { bearer: dn.access, body: { harness: "claude-code", repo_key: repoKey(dn, CW, "/src/cy"), repo_alias: "cy\u0007-repo", started_at: cT0, title } });
+    const SN1 = sessionKey(dn, CW, "claude-code", "c14-one");
+    const SN2 = sessionKey(dn, CW, "claude-code", "c14-two");
+    const sn1Put = await cnPut(SN1, "\u0001\u0002\u007f");
+    const sn2Put = await cnPut(SN2, "Desk\u007f session\u0085");
+    for (const k of [SN1, SN2]) await call("CN", "POST", `/api/v2/workspaces/${CW}/sessions/${k}/epochs`, { bearer: dn.access, body: { epoch_id: epochId(), goal_id: CNG?.id, starts_at: cT0, root_turn: null, cause: "manual" } });
+    const snRows = withDb((d) => d.prepare("SELECT session_key, title, repo_alias FROM v2_sessions WHERE ws_id = ? AND session_key IN (?, ?)").all(CW, SN1, SN2));
+    const c14ReqBlank = await ca(CN, "POST", `/goals/${CNG?.id}/requests`, { type: "checkpoint", note: "\u007f\u0085" });
+    const c14Req = await ca(CN, "POST", `/goals/${CNG?.id}/requests`, { type: "replan", note: "Commit\u0007 what you have" });
+    const c14ReqNotes = withDb((d) => d.prepare("SELECT id, note FROM v2_requests WHERE id IN (?, ?)").all(c14ReqBlank.json?.request?.id ?? "", c14Req.json?.request?.id ?? ""));
+    const c14Goal = withDb((d) => d.prepare("SELECT title FROM v2_goals WHERE id = ?").get(CNG?.id ?? ""));
+    check(
+      "c14 C14-1 (E2E-WEB cycle 14): a goal title, a measure, a change-request reason and a decline reason of only control characters (DEL, C0, BEL, C1 U+0085, U+0080 U+009F, NUL ESC CSI with spaces) are missing: 400 \"<field> is required\", nothing recorded; control characters inside are dropped (a title, measure and target, a reason keeping its line break, a session title and repo alias, a request note), and a session title or request note of only them is stored as none",
+      c14Titles.every((r) => r.status === 400 && r.json?.message === "title is required") && c14Measure.status === 400 && /text is required/.test(c14Measure.json?.message ?? "") &&
+        CNG?.title === "Cy's goal" && c14Goal?.title === "Cy's goal" && CNG.measures?.[0]?.text === "Latency p95" && CNG.measures[0].target === "200ms" &&
+        c14Reasons.every((r) => r.status === 400 && r.json?.message === "reason is required") && c14Cr.status === 201 && c14CrRow?.reason === "Needs review\nby May" &&
+        c14Declines.every((r) => r.status === 400 && r.json?.message === "reason is required") && c14CrRow?.state === "pending" &&
+        sn1Put.status === 200 && sn2Put.status === 200 && snRows.find((r) => r.session_key === SN1)?.title === null && snRows.find((r) => r.session_key === SN2)?.title === "Desk session" && snRows.every((r) => r.repo_alias === "cy-repo") &&
+        c14ReqBlank.status === 201 && c14Req.status === 201 && c14ReqNotes.find((r) => r.id === c14ReqBlank.json?.request?.id)?.note === null && c14ReqNotes.find((r) => r.id === c14Req.json?.request?.id)?.note === "Commit what you have",
+      `${c14Titles.map((r) => r.text).join(" | ")} | ${c14Measure.text} | ${JSON.stringify(c14Goal)} | ${c14Reasons.map((r) => r.status).join(",")} ${c14Cr.text.slice(0, 200)} ${JSON.stringify(c14CrRow)} | ${c14Declines.map((r) => r.text).join(" | ")} | ${JSON.stringify(snRows)} | ${c14ReqBlank.status} ${c14Req.text.slice(0, 200)} ${JSON.stringify(c14ReqNotes)}`,
+    );
+    // Text stored before the rule (written here straight to the database) reaches an AI app without its control
+    // characters, in structuredContent and in the text summary.
+    withDb((d) => d.prepare("UPDATE v2_goals SET title = ? WHERE id = ?").run("Legacy\u0007 title\u0085\u007f", CNG?.id ?? ""));
+    const c14Mcp = await mcpCall("CN", dn, "align_list_goals");
+    withDb((d) => d.prepare("UPDATE v2_goals SET title = ? WHERE id = ?").run("Cy's goal", CNG?.id ?? ""));
+    check(
+      "c14 C14-1 (E2E-WEB cycle 14): MCP drops control characters from people's text it passes on, also from text stored before the rule: a goal title \"Legacy<BEL> title<NEL><DEL>\" reads \"Legacy title\" in untrusted_text and in the <untrusted-text> summary",
+      c14Mcp.status === 200 && c14Mcp.sc?.goals?.find((g) => g.id === CNG?.id)?.title?.untrusted_text === "Legacy title" && c14Mcp.text.includes("<untrusted-text>Legacy title</untrusted-text>") && !/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/.test(c14Mcp.text + JSON.stringify(c14Mcp.sc)),
+      `${c14Mcp.status} ${JSON.stringify(c14Mcp.sc?.goals?.find((g) => g.id === CNG?.id)?.title)} ${JSON.stringify(c14Mcp.text.slice(0, 300))}`,
+    );
   }
   const totalBefore = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json.total.requests;
   const delOther = await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { cookie: U1.cookie });

@@ -11,7 +11,8 @@ import { expireOpenRequests, releaseHold } from "./requests";
 import { feedAllocation } from "./allocation";
 import { workspaceSteering } from "./steering";
 import { supersedeReallocations } from "./reallocations";
-import { optStr, str, type Body } from "./validate";
+import { cleanName, optStr, str, type Body } from "./validate";
+import { isBlankText } from "./text-core.mts";
 import { DEPENDS_ON_MAX } from "./change-words.mts";
 
 // Goals and their immutable versions. A goal's current fields live on v2_goals; every version (including the
@@ -275,9 +276,11 @@ function anchorsIn(v: unknown, prev: Anchors = { repos: [], branch_patterns: [],
     const out: string[] = [];
     for (const s of x) {
       if (typeof s !== "string") throw badRequest(`anchors.${k} must be a list of strings`);
-      const t = s.trim();
+      // One line each, cleaned as a name is (control and invisible characters: E2E-WEB cycle 14 C14-1); an item with
+      // nothing a person can read left is dropped, as an empty one is.
+      const t = cleanName(s).trim();
       if (t.length > 200) throw badRequest(`anchors.${k} items are too long (max 200 characters)`);
-      if (t && !out.includes(t)) out.push(t);
+      if (!isBlankText(t) && !out.includes(t)) out.push(t);
     }
     return out;
   };
