@@ -326,12 +326,14 @@ export function OpenRequest({
     if (!req || sending) return;
     setSending(true);
     try {
-      // Freshness: is the revision on screen still the one the server holds? (The server checks again on the write.)
+      // Freshness: is the revision on screen still the one the server holds? (The server checks again on the write.) A
+      // new state is said in the server's own words, the ones its wrong_state refusal gives (W2: "declined by <name>",
+      // never "rejected"); a new revision in the same state by its number.
       const now = await api<ChangeRequest>(path).catch(() => null);
       if (now && (now.revision !== cr.revision || now.state !== cr.state)) {
         setNotice({
           kind: "stale",
-          text: `Not recorded. This request changed after you opened it: it is now ${quote(CR_STATE_WORDS[now.state])} at revision ${now.revision}. Nothing was sent. Read it again and decide again.`,
+          text: `Not recorded. ${now.state !== cr.state ? now.state_note : `This request changed after you opened it: it is now at revision ${now.revision}.`} Nothing was sent. Read it again and decide again.`,
         });
         onDone();
         return;
@@ -384,7 +386,7 @@ export function OpenRequest({
       case "counter":
         return `${stateWord} → ${CR_STATE_WORDS.countered} (revision ${cr.revision + 1}). ${cr.requester.name} accepts it, then it can be approved.`;
       case "reject":
-        return `${stateWord} → rejected. The goal stays at version ${n}, and ${cr.requester.name} sees your reason.`;
+        return `${stateWord} → ${CR_STATE_WORDS.rejected}. The goal stays at version ${n}, and ${cr.requester.name} sees your reason.`;
       case "accept_counter":
         return `${stateWord} → ${CR_STATE_WORDS.pending}, with the suggested change.`;
       case "acknowledge":

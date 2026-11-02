@@ -786,6 +786,10 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     /** Once approved: true when the approved revision had no evidence links. null until then, and for older rows. */
     approved_without_evidence: r.state === "approved" && r.approved_without_evidence !== null ? r.approved_without_evidence === 1 : null,
     can,
+    /** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
+     *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
+     *  before sending says what the server would (W2). */
+    state_note: crStateRefusal(r),
     /** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
      *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
     dependency_not_visible: hiddenRefusal,

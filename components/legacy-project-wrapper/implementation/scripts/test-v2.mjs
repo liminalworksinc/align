@@ -4980,9 +4980,9 @@ try {
         const recText = await po.$eval(card(cr1.id), (e) => e.innerText);
         const lateAccept = await da(DR, "POST", `${crs}/${cr1.id}/accept_counter`, { revision: 2 });
         check(
-          "ui (Chrome, decide, #49): the approver declines the countered request with a typed reason (focus on \"Why you're declining\"; the confirmation says nothing goes to launch); it is rejected by them with that reason, the record says \"Recorded: you declined this request\" and \"Rejected by you\" (B14: the reader is named one way on a card), and the requester's accept_counter then gets 409 wrong_state",
-          fD.tag === "TEXTAREA" && /^Why you're declining/.test(fD.label) && /approver suggested a change → rejected/.test(confD) && /Nothing goes to launch\. The goal stays at version 1\./.test(confD) &&
-            declined?.state === "rejected" && declined.rejected_by?.id === DO.id && declined.rejection_reason === "We will revisit after the freeze" && /Recorded: you declined this request/.test(recText) && /Rejected by you/.test(recText) &&
+          "ui (Chrome, decide, #49): the approver declines the countered request with a typed reason (focus on \"Why you're declining\"; the confirmation says nothing goes to launch); it is rejected by them with that reason, the record says \"Recorded: you declined this request\" and \"Declined by you\" (B14: the reader is named one way on a card; W2: the app's word, never \"rejected\", also in the confirmation and the pill), and the requester's accept_counter then gets 409 wrong_state",
+          fD.tag === "TEXTAREA" && /^Why you're declining/.test(fD.label) && /approver suggested a change → declined\./.test(confD) && !/rejected/i.test(confD + recText) && /Nothing goes to launch\. The goal stays at version 1\./.test(confD) &&
+            declined?.state === "rejected" && declined.rejected_by?.id === DO.id && declined.rejection_reason === "We will revisit after the freeze" && /Recorded: you declined this request/.test(recText) && /Declined by you/.test(recText) &&
             lateAccept.status === 409 && lateAccept.json?.error === "wrong_state",
           `${JSON.stringify(fD)} ${confD.slice(0, 300)} ${JSON.stringify(declined)?.slice(0, 300)} ${recText.slice(0, 300)} ${lateAccept.text}`,
         );
@@ -5010,8 +5010,8 @@ try {
         const after2 = (await read(cr2.id)).json;
         const rejectedRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_audit WHERE action = 'change_request.rejected' AND object_id = ?").get(cr2.id).n);
         check(
-          "ui (Chrome 390x844, decide): approved now and proposed stack and the confirmation fits with no sideways scroll; a request withdrawn after it was opened is read again before sending: nothing is recorded (still withdrawn, no rejection audited) and a focused alert says \"Not recorded. This request changed after you opened it: it is now “withdrawn” at revision 1. Nothing was sent.\"",
-          stacked && phoneWide && fS.role === "alert" && /^Not recorded\. This request changed after you opened it: it is now “withdrawn” at revision 1\. Nothing was sent\./.test(fS.text) && after2?.state === "withdrawn" && rejectedRows === 0 && errors.length === 0,
+          "ui (Chrome 390x844, decide): approved now and proposed stack and the confirmation fits with no sideways scroll; a request withdrawn after it was opened is read again before sending: nothing is recorded (still withdrawn, no rejection audited) and a focused alert says, in the server's words for that state (W2), \"Not recorded. This request was withdrawn by Drew Requester, so nothing changes. Nothing was sent.\"",
+          stacked && phoneWide && fS.role === "alert" && /^Not recorded\. This request was withdrawn by Drew Requester, so nothing changes\. Nothing was sent\. Read it again and decide again\./.test(fS.text) && after2?.state === "withdrawn" && rejectedRows === 0 && errors.length === 0,
           `${stacked} ${phoneWide} ${JSON.stringify(fS)} ${after2?.state} ${rejectedRows} ${errors.join(" | ")}`,
         );
 
@@ -8263,6 +8263,11 @@ try {
       `${zRl.status} ${zRl.text.slice(0, 120)} ${zRlNo.status} ${zRlApprove.text} ${zRlWithdraw.text}`,
     );
 
+    // -- W2: the request's read carries the server's own words for its state --
+    const e1Read = await zRead(ZB, GE1.id, e1?.id);
+    const e2Read = await zRead(ZA, GE2.id, e2?.id);
+    check("W2: a request's read has state_note, the wrong_state words for its state (\"This request was declined by Zoe Approver, so nothing changes.\"; withdrawn: \"… withdrawn by Zak Asker …\")", e1Read?.state === "rejected" && e1Read.state_note === DECLINED && e2Read?.state_note === `This request was withdrawn by ${ZB.name}, so nothing changes.`, `${e1Read?.state_note} | ${e2Read?.state_note}`);
+
     // -- the browser: C8-1 (ui), W2 (ui), C8-2 (ui), W3 (ui), W4 (ui) --
     const GE4 = await zGoal("Evidence in the browser");
     const GW2 = await zGoal("Withdraw in the browser");
@@ -8334,6 +8339,25 @@ try {
           "C8-1 (ui): Add link on a request declined in another tab reads \"Not recorded. This request was declined by Zoe Approver, so nothing changes.\" (a focused refusal, never \"This request is rejected\") and the card reloads as the declined record (\"Declined by Zoe Approver\", no Withdraw)",
           e4No.status === 200 && e4Ui.view === "record" && e4Ui.notice === "refused" && e4Ui.text.includes(`Not recorded. ${DECLINED}`) && e4Ui.text.includes(`Declined by ${ZA.name}`) && !e4Ui.buttons.includes("Withdraw") && !/rejected|This request is/i.test(e4Ui.text),
           JSON.stringify(e4Ui).slice(0, 700),
+        );
+
+        // W2 (ui): ZB confirms Withdraw after ZA declined in another tab: the re-read says it in the server's words.
+        const w2Card = `[data-cr="${w2?.id}"]`;
+        await open(pB, `/app/w/${ZW}/goals/${GW2.id}`);
+        await pB.waitForSelector(`${w2Card} [data-decision="Withdraw"]`, { timeout: 15000 }).catch(() => undefined);
+        await pB.click(`${w2Card} [data-decision="Withdraw"]`).catch(() => undefined);
+        await press(pB, w2Card, "Review this decision");
+        await pB.waitForSelector(`${w2Card} [data-confirm]`, { timeout: 15000 }).catch(() => undefined);
+        const w2No = await zAct(ZA, GW2.id, w2?.id, "reject", { reason: "Declined first" });
+        await press(pB, w2Card, "Confirm: Withdraw");
+        await pB.waitForFunction((c) => !!document.querySelector(`${c} [data-notice="stale"]`), { timeout: 15000 }, w2Card).catch(() => undefined);
+        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const w2Text = await textOf(pB, w2Card);
+        const w2After = await zRead(ZA, GW2.id, w2?.id);
+        check(
+          "W2 (ui): confirming Withdraw on a request declined meanwhile sends nothing and reads \"Not recorded. This request was declined by Zoe Approver, so nothing changes. Nothing was sent. …\", the server's words, and the record says \"declined\" and \"Declined by Zoe Approver\", never \"rejected\"",
+          w2No.status === 200 && w2After?.state === "rejected" && w2Text.includes(`Not recorded. ${DECLINED} Nothing was sent. Read it again and decide again.`) && w2Text.includes(`Declined by ${ZA.name}`) && !/rejected/i.test(w2Text),
+          w2Text.slice(0, 700),
         );
 
         check("c8 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));

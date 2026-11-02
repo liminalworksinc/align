@@ -183,6 +183,9 @@ export interface ChangeRequest {
   /** Why nobody can approve (pending) or launch (approved) it as it stands: a dependency it adds would now close a loop.
    *  The server's refusal, naming no goal, the same for every reader; null otherwise (C5-1). */
   dependency_loop?: string | null;
+  /** What happened to it, in the words the server's wrong_state refusal gives ("This request was declined by <name>, so
+   *  nothing changes."), for a card that finds it changed before sending (W2). */
+  state_note: string;
   waiting_on_me: boolean;
   created_at: string;
   updated_at: string;

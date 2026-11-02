@@ -15,7 +15,7 @@ export const CR_STATE_WORDS: Record<ChangeRequest["state"], string> = {
   pending: "waiting for approval",
   countered: "approver suggested a change",
   approved: "approved",
-  rejected: "rejected",
+  rejected: "declined", // the state is "rejected"; the app says what the button did, as for target changes and alignments
   withdrawn: "withdrawn",
   superseded: "superseded",
 };

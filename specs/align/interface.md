@@ -809,7 +809,7 @@ send the proposal with
 
 The goal page SHALL list the goal's change requests from `GET .../goals/<goal>/change-requests` to everyone who can
 read the goal, and SHALL show on each request only the actions its `can` flags allow, posting them to
-`POST .../goals/<goal>/change-requests/<id>/<action>`. A decided request (approved, rejected, withdrawn or superseded)
+`POST .../goals/<goal>/change-requests/<id>/<action>`. A decided request (approved, declined, withdrawn or superseded)
 SHALL be its record. An open request (pending or countered) SHALL be shown to be understood, then decided, in this
 order: approved now beside proposed; what would change beside the evidence; the person's decision; a confirmation;
 and a closed "Details" disclosure.
@@ -817,7 +817,7 @@ and a closed "Details" disclosure.
 #### Scenario: Reading a request
 
 - **WHEN** a member opens a request in "Change requests"
-- **THEN** the card, built from the list response, shows the requester and a state pill ("waiting for approval", "approver suggested a change", "approved", "rejected", "withdrawn" or "superseded"); a decided request shows the base version, the revision, the reason, a before and after view of each changed field, who approved or rejected it and their note or reason, and every revision with its author and note under "Revisions" once there is more than one; a superseded request says "Closed because the goal was marked achieved or dropped."
+- **THEN** the card, built from the list response, shows the requester and a state pill ("waiting for approval", "approver suggested a change", "approved", "declined", "withdrawn" or "superseded": a request in state `rejected` reads "declined", the app's word for what **Decline** did, as target changes and alignments say it, never "rejected"); a decided request shows the base version, the revision, the reason, a before and after view of each changed field, who approved or declined it ("Declined by <name>") and their note or reason, and every revision with its author and note under "Revisions" once there is more than one; a superseded request says "Closed because the goal was marked achieved or dropped."
 
 #### Scenario: Understand an open request
 
@@ -837,7 +837,7 @@ and a closed "Details" disclosure.
 #### Scenario: The request changed before sending
 
 - **WHEN** the request's revision or state changed after the person opened it and they confirm
-- **THEN** the page reads the request again first, sends nothing, and shows a focused alert "Not recorded. This request changed after you opened it: it is now “<state>” at revision <r>. Nothing was sent. Read it again and decide again." on the reloaded card
+- **THEN** the page reads the request again first, sends nothing, and shows a focused alert on the reloaded card: when its state changed, "Not recorded. <its `state_note`> Nothing was sent. Read it again and decide again.", in the server's own words for that state (for a request declined in another tab, "Not recorded. This request was declined by <name>, so nothing changes. …", never "rejected": `scripts/test-v2.mjs` "W2 (ui): ..."); when only its revision changed, "Not recorded. This request changed after you opened it: it is now at revision <r>. Nothing was sent. Read it again and decide again."
 
 #### Scenario: Refused by the server
 
@@ -852,7 +852,7 @@ and a closed "Details" disclosure.
 #### Scenario: Approved, not launched
 
 - **WHEN** a request is approved and not launched
-- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>"). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1> to agents. They get it at their next turn." or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Rejected by you"), anyone else by name
+- **THEN** the card says "Approved, agents still on v<n> until launch" (n its base version), who approved it and when, and after a not yet "Not launched yet: <name> decided not yet, <time>."; never "agents on v<n+1>"; it lists who can launch ("Can launch: …" from `launchers`), and for someone whose `can.launch` is set offers **Launch version <n+1> to agents** (`launch`) and, unless the last decision already was not yet, **Not yet** (`not_yet`), both posting `{revision}` (the revision on screen; the server refuses a stale one with 409 `stale_revision`, shown as "Not recorded. <message>"). Each then shows "Recorded: …" on the reloaded card like every other decision: "Recorded: you launched version <n+1> to agents. They get it at their next turn." or "Recorded: you decided not yet. Agents stay on version <n> until someone launches version <n+1>." A card names each person one way: the reader is "you" in every line ("Approved by you", "Launched by you", "Declined by you"), anyone else by name
 
 #### Scenario: The list after a launch
 
