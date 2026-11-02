@@ -136,7 +136,8 @@ const applied = (base: GoalContent, c: Changes): GoalContent => ({ ...base, ...c
 /** Why an action on a request in another state is refused (409 wrong_state), in the app's words ("declined", never
  *  "rejected") and naming who did it, as the alignments' refusals do (Y5): everyone who may act on a request sees its
  *  requester and approvers. A counter names its author, so a requester whose open card offered **Update to version n**
- *  hears to review it (W6). */
+ *  hears to review it (W6). Every action on a request refuses its state with these words, adding evidence included
+ *  (C8-1), and the request view carries them as `state_note`, so a card that finds the request changed says the same (W2). */
 function crStateRefusal(r: ChangeRequestRow): string {
   switch (r.state) {
     case "pending":
@@ -629,7 +630,7 @@ export async function addEvidence(pp: PolicyPrincipal, goalId: string | undefine
     if (r.requester_id !== pp.userId && !approvers.includes(pp.userId)) {
       throw forbidden("not_involved", "Only the person who asked or someone who can approve can add evidence");
     }
-    if (!isOpen(r)) throw conflict("wrong_state", `This request is ${r.state}`);
+    if (!isOpen(r)) throw conflict("wrong_state", crStateRefusal(r)); // in the app's words, as every action's (C8-1)
     if (b.revision !== undefined && b.revision !== r.revision) throw conflict("stale_revision", `This request is at revision ${r.revision}; reload and try again`);
     if (get("SELECT 1 AS x FROM v2_change_request_evidence WHERE change_request_id = ? AND revision = ? AND url = ?", r.id, r.revision, input.url)) {
       throw conflict("duplicate_evidence", "This link is already on this revision");

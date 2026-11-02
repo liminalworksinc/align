@@ -808,13 +808,25 @@ async function local(env) {
     `${JSON.stringify(addEv.sc ?? addEv).slice(0, 400)} ${JSON.stringify(webEv)}`,
   );
   const evClosed = await tool(appEv, "align_add_change_request_evidence", { change_request_id: crWithdrawn.json?.id, kind: "pr", url: "https://github.com/acme/x/pull/1", label: "late" });
+  // C8-1: a request declined meanwhile refuses evidence in the app's words, naming who declined it (never "rejected").
+  const gcDeclineBase = (await web(U1, "GET", `/api/v2/workspaces/${A}/goals/${GC.id}`)).json?.goal?.version;
+  const crDeclined = await web(U4, "POST", crBase(GC.id), { base_version: gcDeclineBase, changes: { title: "Regulated customers, declined" }, reason: "Try again" });
+  const crDecline = await web(U1, "POST", `${crBase(GC.id)}/${crDeclined.json?.id}/reject`, { reason: "Not this quarter" });
+  const evDeclined = await tool(appEv, "align_add_change_request_evidence", { change_request_id: crDeclined.json?.id, kind: "pr", url: "https://github.com/acme/x/pull/4", label: "after the decline" });
+  const drDeclined = await tool(app, "align_get_decision_record", { change_request_id: crDeclined.json?.id });
+  check(
+    "C8-1 (mcp): align_add_change_request_evidence on a request declined meanwhile fails with \"This request was declined by Ola Owner, so nothing changes.\" (never \"This request is rejected\"), and nothing is added; its decision record says it \"was declined by\" Ola Owner (state still rejected)",
+    crDeclined.status === 201 && crDecline.json?.state === "rejected" && evDeclined.isError && evDeclined.text === "This request was declined by Ola Owner, so nothing changes." &&
+      (await web(U1, "GET", `${crBase(GC.id)}/${crDeclined.json?.id}`)).json?.evidence_count === 0 && drDeclined.sc?.record?.state === "rejected" && drDeclined.text.startsWith(`Change request ${crDeclined.json?.id} on goal ${GC.id} `) && /was declined by <untrusted-text>Ola Owner<\/untrusted-text>/.test(drDeclined.text) && !/rejected/.test(drDeclined.text),
+    `${crDeclined.status} ${crDeclined.text.slice(0, 160)} ${crDecline.status} ${evDeclined.text} | ${drDeclined.text.slice(0, 300)}`,
+  );
   const evNotInvolved = await tool(appEv, "align_add_change_request_evidence", { change_request_id: crApproved.json?.id, kind: "pr", url: "https://github.com/acme/x/pull/3", label: "not mine" });
   const evHidden = await tool(appEv, "align_add_change_request_evidence", { change_request_id: "cr_nosuchrequestnosuchreq", kind: "pr", url: "https://github.com/acme/x/pull/2", label: "hidden" });
   const evBadUrl = await tool(appEv, "align_add_change_request_evidence", { change_request_id: crPending.json?.id, kind: "pr", url: "ftp://example.com/x", label: "ftp" });
   const evBadKind = await tool(appEv, "align_add_change_request_evidence", { change_request_id: crPending.json?.id, kind: "verified_check", url: "https://example.com/x", label: "kind" });
   check(
-    "align_add_change_request_evidence: a closed request fails ('This request is withdrawn'); one the person neither asked for nor can approve fails; an unknown request fails as 'Change request not found'; a non-https url fails; an unknown kind fails input validation",
-    evClosed.isError && evClosed.text === "This request is withdrawn" && evNotInvolved.isError && evNotInvolved.text === "Only the person who asked or someone who can approve can add evidence" && evHidden.isError && evHidden.text === "Change request not found" && evBadUrl.isError && /https/.test(evBadUrl.text) && (evBadKind.isError || !!evBadKind.error),
+    "align_add_change_request_evidence: a closed request fails in the app's words ('This request was withdrawn by Lou Lead, so nothing changes.', C8-1); one the person neither asked for nor can approve fails; an unknown request fails as 'Change request not found'; a non-https url fails; an unknown kind fails input validation",
+    evClosed.isError && evClosed.text === "This request was withdrawn by Lou Lead, so nothing changes." && evNotInvolved.isError && evNotInvolved.text === "Only the person who asked or someone who can approve can add evidence" && evHidden.isError && evHidden.text === "Change request not found" && evBadUrl.isError && /https/.test(evBadUrl.text) && (evBadKind.isError || !!evBadKind.error),
     `${evClosed.text} | ${evNotInvolved.text} | ${evHidden.text} | ${evBadUrl.text} | ${evBadKind.text}`,
   );
   // Refresh keeps the grant's scopes: it may narrow one access token, never widen the grant.

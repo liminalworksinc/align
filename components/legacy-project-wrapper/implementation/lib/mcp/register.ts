@@ -812,7 +812,8 @@ export function registerAlign(server: McpServer, { evidence }: { evidence: boole
         decided_at: cr.decided_at,
       };
       const lines = [
-        `Change request ${cr.id} on goal ${cr.goal.id} ${tag(cr.goal.title)} was ${cr.state}${record.decided_by ? ` by ${tag(cr.decided_by!.name)}` : ""}${cr.decided_at ? ` at ${cr.decided_at}` : ""}.`,
+        // "declined", the app's word for a rejected request (its state stays "rejected" in the record).
+        `Change request ${cr.id} on goal ${cr.goal.id} ${tag(cr.goal.title)} was ${cr.state === "rejected" ? "declined" : cr.state}${record.decided_by ? ` by ${tag(cr.decided_by!.name)}` : ""}${cr.decided_at ? ` at ${cr.decided_at}` : ""}.`,
         `Asked by ${tag(cr.requested_by.name)} against version ${cr.base_version}: ${tag(cr.reason)}`,
         cr.decision_note !== null ? `Decision note: ${tag(cr.decision_note)}` : "No decision note.",
         // Each changed field in words, as the web app's value card says it ("<measure> target 500 -> 600").

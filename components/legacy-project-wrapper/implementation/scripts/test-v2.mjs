@@ -8205,6 +8205,147 @@ try {
   }
   // ==== end fix:c4-web ====
 
+  // ==== fix:c8-web ====
+  // Regression checks for the cycle-8 web walk (e2e-reports/cycle8/web.md: C8-1 to C8-3, W2 to W4), on a workspace of
+  // their own. ZO owns it; ZA leads team Core and owns its goals (so decides on their change requests); ZB, a Core member,
+  // asks.
+  {
+    const zUsers = {};
+    for (const [who, name] of [
+      ["ZO", "Zed Owner"],
+      ["ZA", "Zoe Approver"],
+      ["ZB", "Zak Asker"],
+    ])
+      zUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c8web.example.test`);
+    const { ZO, ZA, ZB } = zUsers;
+    const ZW = (await call("ZO", "POST", "/api/v2/workspaces", { cookie: ZO.cookie, body: { name: "C8 web fix workspace" } })).json?.id;
+    const za = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${ZW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [ZA, ZB]) {
+      const i = await za(ZO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const ZT = (await za(ZO, "POST", "/teams", { name: "Core" })).json?.id;
+    await za(ZO, "POST", `/teams/${ZT}/members`, { user_id: ZA.id, role: "lead" });
+    await za(ZO, "POST", `/teams/${ZT}/members`, { user_id: ZB.id, role: "member" });
+    const zGoal = async (title) => (await za(ZA, "POST", "/goals", { title, visibility: "workspace", team_id: ZT })).json;
+    const zcrs = (g) => `/goals/${g}/change-requests`;
+    const zAct = (u, g, id, action, body = {}) => za(u, "POST", `${zcrs(g)}/${id}/${action}`, body);
+    const zRead = (u, g, id) => za(u, "GET", `${zcrs(g)}/${id}`).then((r) => r.json);
+    const zPropose = (g, changes) => za(ZB, "POST", zcrs(g.id), { base_version: 1, changes, reason: "Cycle 8" }).then((r) => r.json);
+    const DECLINED = `This request was declined by ${ZA.name}, so nothing changes.`;
+
+    // -- C8-1: evidence on a request decided meanwhile is refused in the app's words, as every other action is --
+    const [GE1, GE2, GE3] = [await zGoal("Evidence declined"), await zGoal("Evidence withdrawn"), await zGoal("Evidence approved")];
+    const [e1, e2, e3] = [await zPropose(GE1, { title: "Evidence declined, renamed" }), await zPropose(GE2, { title: "Evidence withdrawn, renamed" }), await zPropose(GE3, { title: "Evidence approved, renamed" })];
+    const decided = [await zAct(ZA, GE1.id, e1?.id, "reject", { reason: "Not now" }), await zAct(ZB, GE2.id, e2?.id, "withdraw"), await zAct(ZA, GE3.id, e3?.id, "approve", { revision: 1 })];
+    const lateEv = (g, cr, n) => za(ZB, "POST", `${zcrs(g.id)}/${cr?.id}/evidence`, { kind: "doc", url: `https://docs.example.com/c8-${n}`, label: "A late link" });
+    const [ev1, ev2, ev3] = [await lateEv(GE1, e1, 1), await lateEv(GE2, e2, 2), await lateEv(GE3, e3, 3)];
+    const lateRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_change_request_evidence WHERE url LIKE 'https://docs.example.com/c8-%'").get().n);
+    check(
+      "C8-1: adding evidence to a request declined, withdrawn or approved meanwhile is 409 wrong_state in the app's words, as every other action on a change request: \"This request was declined by <approver>, so nothing changes.\", \"This request was withdrawn by <requester>, so nothing changes.\", \"This request is already approved; reload to see it.\" (never \"This request is rejected\"); nothing is added",
+      decided.every((r) => r.status === 200) && [ev1, ev2, ev3].every((r) => r.status === 409 && r.json?.error === "wrong_state") && ev1.json.message === DECLINED && ev2.json.message === `This request was withdrawn by ${ZB.name}, so nothing changes.` && ev3.json.message === "This request is already approved; reload to see it." && lateRows === 0,
+      `${decided.map((r) => r.status)} ${[ev1, ev2, ev3].map((r) => `${r.status} ${r.text}`).join(" | ")} ${lateRows}`,
+    );
+    // The sweep: no refusal of a change request, alignment or target change builds its own "This request is <state>".
+    const ownStateWords = [];
+    for (const dir of ["lib/v2", "lib/mcp"])
+      for (const f of readdirSync(path.join(ROOT, dir)).filter((x) => /\.m?ts$/.test(x)))
+        for (const [i, l] of readFileSync(path.join(ROOT, dir, f), "utf8").split("\n").entries()) if (/This (request|proposal|alignment) is \$\{[^}]*state\}/.test(l)) ownStateWords.push(`${dir}/${f}:${i + 1}`);
+    check("C8-1 (sweep): no wrong_state refusal in lib/v2 or lib/mcp is built as \"This request (proposal, alignment) is ${state}\"", ownStateWords.length === 0, ownStateWords.join(", "));
+    // Target changes say it the same way.
+    const zRl = await za(ZB, "POST", "/reallocations", { targets: [{ goal_id: GE2.id, target_share: 10 }], note: "More for this" });
+    const zRlNo = await za(ZA, "POST", `/reallocations/${zRl.json?.id}/reject`, { reason: "Not now" });
+    const zRlApprove = await za(ZA, "POST", `/reallocations/${zRl.json?.id}/approve`, { revision: 1 });
+    const zRlWithdraw = await za(ZB, "POST", `/reallocations/${zRl.json?.id}/withdraw`, {});
+    check(
+      "C8-1 (target changes): approving or withdrawing a declined target change is 409 wrong_state \"This proposal was declined by <approver>, so nothing changes.\" (never \"This proposal is rejected\")",
+      zRl.status === 201 && zRlNo.json?.state === "rejected" && [zRlApprove, zRlWithdraw].every((r) => r.status === 409 && r.json?.error === "wrong_state" && r.json.message === `This proposal was declined by ${ZA.name}, so nothing changes.`),
+      `${zRl.status} ${zRl.text.slice(0, 120)} ${zRlNo.status} ${zRlApprove.text} ${zRlWithdraw.text}`,
+    );
+
+    // -- the browser: C8-1 (ui), W2 (ui), C8-2 (ui), W3 (ui), W4 (ui) --
+    const GE4 = await zGoal("Evidence in the browser");
+    const GW2 = await zGoal("Withdraw in the browser");
+    const e4 = await zPropose(GE4, { title: "Evidence in the browser, renamed" });
+    const w2 = await zPropose(GW2, { title: "Withdraw in the browser, renamed" });
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width: 1100, height: 900 });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const textOf = (pg, sel) => pg.evaluate((s) => document.querySelector(s)?.innerText ?? "", sel);
+      const press = (pg, scope, label) => pg.evaluate((s, t) => [...document.querySelectorAll(`${s} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      /** Replace what the field labelled `label` inside `scope` holds with `value`, typed as a person would. */
+      const typeIn = async (pg, scope, label, value) => {
+        const ok = await pg.evaluate(
+          (s, l) => {
+            const f = [...document.querySelectorAll(`${s} label`)].find((x) => x.querySelector("span")?.textContent?.trim() === l)?.querySelector("input, textarea");
+            if (!f) return false;
+            document.querySelectorAll("[data-typing]").forEach((e) => e.removeAttribute("data-typing"));
+            f.setAttribute("data-typing", "1");
+            return true;
+          },
+          scope,
+          label,
+        );
+        if (!ok) return false;
+        await pg.focus("[data-typing]");
+        await pg.$eval("[data-typing]", (el) => el.select());
+        await pg.keyboard.press("Backspace");
+        if (value) await pg.type("[data-typing]", value);
+        return true;
+      };
+      /** The counter form's Review this decision (enabled or disabled) and the reason shown next to it. */
+      const reviewState = (pg, card) =>
+        pg.evaluate((c) => {
+          const box = document.querySelector(`${c} [data-decision-input="counter"]`);
+          const b = [...(box?.querySelectorAll("button") ?? [])].find((x) => x.textContent?.trim() === "Review this decision");
+          return { review: b ? (b.disabled ? "disabled" : "enabled") : "none", reason: box?.querySelector("[data-counter-reason]")?.textContent?.trim() ?? "" };
+        }, card);
+      try {
+        // C8-1 (ui): ZB fills in Add evidence; ZA declines in another tab; Add link reads "Not recorded. …" and reloads.
+        const pB = await as(ZB);
+        const e4Card = `[data-cr="${e4?.id}"]`;
+        await open(pB, `/app/w/${ZW}/goals/${GE4.id}`);
+        await pB.waitForSelector(e4Card, { timeout: 15000 }).catch(() => undefined);
+        await press(pB, e4Card, "Add evidence");
+        await pB.waitForFunction((c) => [...document.querySelectorAll(`${c} button`)].some((b) => b.textContent?.trim() === "Add link"), { timeout: 15000 }, e4Card).catch(() => undefined);
+        await typeIn(pB, e4Card, "Link (https)", "https://github.com/acme/c8/pull/4");
+        await typeIn(pB, e4Card, "What it shows", "The browser change");
+        const e4No = await zAct(ZA, GE4.id, e4?.id, "reject", { reason: "Not this one" });
+        await press(pB, e4Card, "Add link");
+        await pB.waitForFunction((c) => document.querySelector(c)?.getAttribute("data-cr-view") === "record" && /Not recorded\./.test(document.querySelector(c)?.innerText ?? ""), { timeout: 15000 }, e4Card).catch(() => undefined);
+        const e4Ui = await pB.evaluate((c) => {
+          const card = document.querySelector(c);
+          return { view: card?.getAttribute("data-cr-view"), notice: card?.querySelector("[data-notice]")?.getAttribute("data-notice") ?? null, text: card?.innerText ?? "", buttons: [...(card?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()) };
+        }, e4Card);
+        check(
+          "C8-1 (ui): Add link on a request declined in another tab reads \"Not recorded. This request was declined by Zoe Approver, so nothing changes.\" (a focused refusal, never \"This request is rejected\") and the card reloads as the declined record (\"Declined by Zoe Approver\", no Withdraw)",
+          e4No.status === 200 && e4Ui.view === "record" && e4Ui.notice === "refused" && e4Ui.text.includes(`Not recorded. ${DECLINED}`) && e4Ui.text.includes(`Declined by ${ZA.name}`) && !e4Ui.buttons.includes("Withdraw") && !/rejected|This request is/i.test(e4Ui.text),
+          JSON.stringify(e4Ui).slice(0, 700),
+        );
+
+        check("c8 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c8 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c8 web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:c8-web ====
+
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));
   const ownerSaw = seen.some((s) => s.who === "U2" && s.text.includes(CANARY));

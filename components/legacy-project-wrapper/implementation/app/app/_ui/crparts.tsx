@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, Btn, Err, Field, Input, num, Pill, Select, TextArea, usd, useAction, useApi, when } from "./kit";
+import { api, ApiError, Btn, Err, Field, Input, num, Pill, Select, TextArea, usd, useAction, useApi, when } from "./kit";
 import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, measuresOut, sameLimits, type LimitDraft, type MeasureDraft } from "./goalform";
 import { LIMIT_WORDS } from "./limits";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
@@ -329,8 +329,10 @@ const notHttps = (url: string) => {
   return !!u && !u.startsWith("https://") && !"https://".startsWith(u);
 };
 
-/** Add a link to the current revision (the requester, or someone who can approve, while the request is open). */
-export function AddEvidence({ path, revision, onDone }: { path: string; revision: number; onDone: () => void }) {
+/** Add a link to the current revision (the requester, or someone who can approve, while the request is open). A 409 (the
+ *  request was decided or moved on meanwhile, or the link is already there) is refused like any decision: the card's
+ *  focused "Not recorded. <the server's message>", and the card reloads to show the request as it is now (C8-1). */
+export function AddEvidence({ path, revision, onDone, setNotice }: { path: string; revision: number; onDone: () => void; setNotice: (n: Notice | null) => void }) {
   const act = useAction();
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<EvidenceKind>("pr");
@@ -347,15 +349,22 @@ export function AddEvidence({ path, revision, onDone }: { path: string; revision
       className="mt-2 rounded-[12px] border border-zinc-300 p-3"
       onSubmit={(ev) => {
         ev.preventDefault();
-        void act.run(
-          () => api(`${path}/evidence`, { body: { kind, url: url.trim(), label: label.trim(), revision } }),
-          () => {
-            setOpen(false);
-            setUrl("");
-            setLabel("");
-            onDone();
-          },
-        );
+        const close = () => {
+          setOpen(false);
+          setUrl("");
+          setLabel("");
+          onDone();
+        };
+        void act.run(async () => {
+          setNotice(null);
+          try {
+            await api(`${path}/evidence`, { body: { kind, url: url.trim(), label: label.trim(), revision } });
+          } catch (e) {
+            if (!(e instanceof ApiError) || e.status !== 409) throw e;
+            setNotice({ kind: "refused", text: `Not recorded. ${e.message}` });
+          }
+          close();
+        });
       }}
     >
       <p className="mb-2 text-[14px] text-zinc-600">A link that supports this change. It is shown as self-reported: Align does not check it.</p>
