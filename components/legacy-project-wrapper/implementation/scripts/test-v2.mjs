@@ -8981,6 +8981,16 @@ try {
       `${al1Ctr.status} ${al1No.text} | ${al1Out.text} | ${al1Own.text} | ${al1Bare.status} ${al1Bare.text} | ${JSON.stringify(al1After)}`,
     );
 
+    // -- W1: the approver who countered an alignment hears "You countered this request; …", as on change requests --
+    const al1MineAgain = await alAct(RC, al1, "approve", { revision: 2 });
+    const al1Others = await alAct(RO, al1, "approve", { revision: 2 });
+    check(
+      "c10 W1: Approve on an alignment the caller countered is 409 wrong_state \"You countered this request; it waits on Dorian Asker to accept it.\"; another approver still hears \"An approver suggested a change to this request; it waits on Dorian Asker to accept it.\"",
+      al1MineAgain.status === 409 && al1MineAgain.json?.error === "wrong_state" && al1MineAgain.json.message === `You countered this request; it waits on ${RD.name} to accept it.` &&
+        al1Others.status === 409 && al1Others.json?.message === `An approver suggested a change to this request; it waits on ${RD.name} to accept it.`,
+      `${al1MineAgain.text} | ${al1Others.text}`,
+    );
+
     // -- C10-2: every decision route, enumerated. Each [action] route under the workspace is classified; for those whose
     //    objects have revisions, every action the module lists is sent with a revision that isn't current where it would
     //    otherwise be allowed, and must be 409 stale_revision with nothing changed. Alignments also need the revision

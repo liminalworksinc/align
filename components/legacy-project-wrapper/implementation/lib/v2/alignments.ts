@@ -257,6 +257,8 @@ function stateRefusal(a: AlignmentRow, reader: string): string {
     case "pending":
       return "This request is waiting for approval.";
     case "countered":
+      // The counter's author hears "You countered…", as on change requests and target changes (c10 W1).
+      if (counterAuthor(a) === reader) return `You countered this request; it waits on ${nameTo(a.requester_id, reader)} to accept it.`;
       return `An approver suggested a change to this request; it waits on ${nameTo(a.requester_id, reader)} to accept it.`;
     case "approved":
       return "This request is already approved.";
