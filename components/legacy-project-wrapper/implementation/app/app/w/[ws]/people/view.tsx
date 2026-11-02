@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when } from "../../../_ui/kit";
 import type { Me } from "../../../_ui/server";
 import type { WsDetail } from "../../../_ui/types";
+import { isBlankText } from "@/lib/v2/text-core.mts";
 
 type WsRole = "owner" | "member" | "viewer";
 type TeamRole = "lead" | "member";
@@ -343,7 +344,7 @@ export default function People({ me, ws }: { me: Me; ws: string }) {
                   </Field>
                 </div>
                 <div className="mb-3">
-                  <Btn type="submit" kind="secondary" disabled={act.busy || !teamName.trim()}>
+                  <Btn type="submit" kind="secondary" disabled={act.busy || isBlankText(teamName)}>
                     Create team
                   </Btn>
                 </div>

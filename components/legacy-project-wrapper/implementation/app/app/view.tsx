@@ -5,6 +5,7 @@ import { api, go, Btn, Card, Err, Field, Input, Loading, Note, Pill, Shell, Sign
 import type { CreationOptions, Me } from "./_ui/server";
 import { useTurnstile } from "./_ui/turnstile";
 import { firstRunWords } from "./_ui/words";
+import { isBlankText } from "@/lib/v2/text-core.mts";
 
 interface DeletedWs {
   id: string;
@@ -128,7 +129,7 @@ export default function Home({ me, creation }: { me: Me; creation: CreationOptio
               </>
             )}
             {bot.widget}
-            <Btn type="submit" disabled={act.busy || !name.trim() || (creation.needsCode && !code.trim()) || !bot.ready}>
+            <Btn type="submit" disabled={act.busy || isBlankText(name) || (creation.needsCode && !code.trim()) || !bot.ready}>
               Create
             </Btn>
             <Err>{act.error}</Err>

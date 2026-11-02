@@ -195,6 +195,23 @@ The server SHALL validate goal content the same way on creation, on a new versio
 - **WHEN** the owner saves a version sending the previous version's limit with its id and a new limit with an id the goal never had
 - **THEN** the first keeps its id and the second gets a new `lim_…` id; six limits, a 161-character text, an unknown type or a date like `2026-13-01` are 400
 
+### Requirement: Invisible characters in people's text
+
+The server SHALL clean every free-text field a person or device sends (a change request's `reason`, a decision's
+`note`, `reason` and `condition`, goal titles, measures and limits, request notes, target-change notes and reasons,
+alignment notes, evidence labels, ask texts and titles, value notes, access-request fields, session titles) as names are
+cleaned (`workspaces` "Device pairing flow"): invisible format characters (Unicode category Cf, emoji sequences kept
+whole) and lone surrogates dropped, the blank fillers (U+115F, U+1160, U+3164, U+FFA0, U+2800) made spaces and the
+ends trimmed, keeping line breaks where the field allows them. A required field with nothing left, or nothing but
+combining marks and spaces, SHALL be 400 `<field> is required`, and an optional one SHALL be stored as absent (null),
+never as empty text a reader sees as a blank reason (E2E-WEB cycle 13 W3). The web forms SHALL treat such text as
+empty too, as they treat spaces.
+
+#### Scenario: A decline reason of zero-width spaces
+
+- **WHEN** an approver declines a change request with the reason U+200B U+200B (or U+2060, U+FE0F, U+3164, an accent and a joiner with spaces), counters with the condition U+200B or the note U+2060 U+200B, and an owner creates a goal titled U+200B U+FE0F, or with a measure U+3164 or a limit of two U+200B (`scripts/test-v2.mjs` "c13 W3 (E2E-WEB cycle 13): ...")
+- **THEN** each is 400 `reason is required`, `condition is required`, `note is required`, `title is required`, `text is required` or `limits[0].text is required`, and the request stays `pending` at revision 1
+
 ### Requirement: Who reads a goal
 
 The server SHALL let a goal's owner always read it, and otherwise decide by visibility: a `private` goal is read by its owner only (workspace owners do not read another person's private goals); a `team` goal by the members and leads of its owning team and by workspace owners; a `workspace` goal (every company goal) by every workspace member, viewers included. A goal the caller may not read SHALL be answered 404 `not_found` on every route, and SHALL be left out of, or unnamed in, every list and view that would otherwise mention it.

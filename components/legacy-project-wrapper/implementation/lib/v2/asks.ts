@@ -3,6 +3,7 @@ import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso, sha256hex } from "./ids";
 import { take } from "./limits";
+import { cleanProse, isBlankText } from "./text-core.mts";
 import { goalObj, goalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
 import { memberName, need } from "./workspaces";
@@ -96,15 +97,16 @@ interface MentionRow {
 
 // ---- input ----
 
-/** People's text: control characters become spaces (as v1 did), then trimmed and bounded. */
+/** People's text: control characters become spaces (as v1 did), invisible characters are dropped and blank fillers made
+ *  spaces (lib/v2/text-core.mts), then trimmed and bounded; nothing a person can read left is missing (W3). */
 function text(v: unknown, field: string, max: number, { optional = false } = {}): string | null {
   if (v === undefined || v === null || (optional && v === "")) {
     if (optional) return null;
     throw badRequest(`${field} is required`);
   }
   if (typeof v !== "string") throw badRequest(`${field} must be a string`);
-  const t = v.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
-  if (!t) {
+  const t = cleanProse(v.replace(/[\u0000-\u001f\u007f-\u009f]/g, " "));
+  if (isBlankText(t)) {
     if (optional) return null;
     throw badRequest(`${field} is required`);
   }

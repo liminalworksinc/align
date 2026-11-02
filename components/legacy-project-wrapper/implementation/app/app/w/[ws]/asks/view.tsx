@@ -5,6 +5,7 @@ import { api, ApiError, Btn, Card, Err, Field, Input, Loading, Note, Pill, Selec
 import { NoticeBox, useNotice } from "../../../_ui/crparts";
 import type { Me } from "../../../_ui/server";
 import type { Goal, WsDetail } from "../../../_ui/types";
+import { isBlankText } from "@/lib/v2/text-core.mts";
 
 // The Asks tab (PORT-003): what other people asked of teams, recorded from meetings or by hand (GET .../asks). Each card
 // offers only the actions its `can` flags allow; people's text is shown quoted, as written.
@@ -58,7 +59,7 @@ function MentionForm({ ws, a, onDone }: { ws: string; a: Ask; onDone: () => void
       <Field label="Where (the meeting or document)">
         <Input value={where} maxLength={120} onChange={(e) => setWhere(e.target.value)} />
       </Field>
-      <Btn kind="secondary" disabled={act.busy || !text.trim() || !where.trim()} onClick={() => void act.run(() => api(`/api/v2/workspaces/${ws}/asks/${a.id}/mention`, { body: { date, text, source_title: where } }), onDone)}>
+      <Btn kind="secondary" disabled={act.busy || isBlankText(text) || isBlankText(where)} onClick={() => void act.run(() => api(`/api/v2/workspaces/${ws}/asks/${a.id}/mention`, { body: { date, text, source_title: where } }), onDone)}>
         Save
       </Btn>
       <Err>{act.error}</Err>
@@ -222,7 +223,7 @@ function RecordAsk({ ws, teams, goals, onDone }: { ws: string; teams: WsDetail["
           ))}
         </Select>
       </Field>
-      <Btn disabled={act.busy || !team || !text.trim() || !date || (kind === "meeting" && !title.trim())} onClick={() => void save()}>
+      <Btn disabled={act.busy || !team || isBlankText(text) || !date || (kind === "meeting" && isBlankText(title))} onClick={() => void save()}>
         Record ask
       </Btn>
       <Err>{act.error}</Err>

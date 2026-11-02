@@ -1,6 +1,7 @@
-// The decision value card's plain rules (PORT-004), with no imports so the web app's card, the server (lib/v2/value.ts)
-// and Node tests all load this file as is: the one optional question and its five answers, how a note is cleaned, how
+// The decision value card's plain rules (PORT-004), importing only plain modules (lib/v2/text-core.mts) so the web app's
+// card, the server (lib/v2/value.ts) and Node tests all load this file as is: the one optional question and its five answers, how a note is cleaned, how
 // a measured span reads, and which follow-up link may be shown.
+import { cleanProse, isBlankText } from "./text-core.mts";
 
 /** "Before Align, how long would getting this decision usually take?" The person's own estimate, never a measurement.
  *  The ids are lib/v2/core.mts ESTIMATES, in the same order (lib/v2/value.ts checks that they agree). */
@@ -19,13 +20,13 @@ export const VALUE_NOTE_MAX = 500;
 /** A value report can be edited by its author for this many days after it was first saved. */
 export const VALUE_EDIT_DAYS = 7;
 
-/** Plain text: C0 and C1 control, bidi (U+061C, U+200E/F, U+202A–E, U+2066–9) and zero-width characters removed,
- *  whitespace collapsed, trimmed. */
+/** Plain text: C0 and C1 control characters removed, invisible characters dropped and blank fillers made spaces as in
+ *  all people's text (lib/v2/text-core.mts), whitespace collapsed, trimmed; nothing a person can read left is "" (W3). */
 export function cleanValueText(s: string): string {
-  return s
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F؜​-‏‪-‮⁠-⁩﻿]/g, "")
+  const t = cleanProse(s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ""))
     .replace(/\s+/g, " ")
     .trim();
+  return isBlankText(t) ? "" : t;
 }
 
 /** A follow-up link that is safe to show, normalized, or null: https with no credentials and no non-default port, or a

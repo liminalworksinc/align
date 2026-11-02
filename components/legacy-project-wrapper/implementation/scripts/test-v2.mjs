@@ -1930,6 +1930,24 @@ try {
   const rejectEmpty = await crAct(U2, GL.id, cr1.json.id, "reject", {});
   const afterRejectEmpty = await crGet(U1, GL.id, cr1.json.id);
   check("change requests: reject without a reason -> 400 and the request is unchanged", rejectEmpty.status === 400 && afterRejectEmpty.json?.state === "pending" && afterRejectEmpty.json.revision === 1, `${rejectEmpty.text} ${afterRejectEmpty.json?.state}`);
+  // E2E-WEB cycle 13 W3: free text of only invisible characters (zero-width spaces, a word joiner, a variation selector,
+  // a Hangul filler, an accent with no letter) is missing, as a device name of them is: never recorded as empty text.
+  const INVISIBLES = ["\u200B\u200B", "\u2060", "\uFE0F", "\u3164", " \u0301 \u200D "];
+  const w3Reject = [];
+  for (const v of INVISIBLES) w3Reject.push(await crAct(U2, GL.id, cr1.json.id, "reject", { reason: v }));
+  const w3Cond = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: [...GL.measures, { text: "W3 measure", target: null }] }, note: "April", condition: "\u200B" });
+  const w3Note = await crAct(U2, GL.id, cr1.json.id, "counter", { revision: 1, changes: { measures: [...GL.measures, { text: "W3 measure", target: null }] }, note: "\u2060\u200B" });
+  const w3Title = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, body: { title: "\u200B\uFE0F", visibility: "workspace" } });
+  const w3Measure = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, body: { title: "W3 goal", visibility: "workspace", measures: [{ text: "\u3164", target: null }] } });
+  const w3Limit = await call("U1", "POST", `/api/v2/workspaces/${A}/goals`, { cookie: U1.cookie, body: { title: "W3 goal", visibility: "workspace", limits: [{ type: "must", text: "\u200B\u200B" }] } });
+  const afterW3 = await crGet(U1, GL.id, cr1.json.id);
+  check(
+    "c13 W3 (E2E-WEB cycle 13): a decline reason, a counter's condition or note, a goal title, a measure and a limit of only invisible characters (two zero-width spaces, a word joiner, U+FE0F, a Hangul filler, an accent and a joiner with spaces) are cleaned as names are and then missing: 400 \"<field> is required\", nothing recorded",
+    w3Reject.every((r) => r.status === 400 && r.json?.message === "reason is required") && w3Cond.status === 400 && w3Cond.json?.message === "condition is required" && w3Note.status === 400 && w3Note.json?.message === "note is required" &&
+      w3Title.status === 400 && w3Title.json?.message === "title is required" && w3Measure.status === 400 && /text is required/.test(w3Measure.json?.message ?? "") && w3Limit.status === 400 && w3Limit.json?.message === "limits[0].text is required" &&
+      afterW3.json?.state === "pending" && afterW3.json.revision === 1,
+    `${w3Reject.map((r) => r.text).join(" | ")} | ${w3Cond.text} | ${w3Note.text} | ${w3Title.text} | ${w3Measure.text} | ${w3Limit.text} | ${afterW3.json?.state}`,
+  );
 
   let cursor3 = await drain(D3);
   const counterMeasures = [...GL.measures, { text: "Pen-test window booked", target: "April" }];

@@ -6,6 +6,7 @@ import { AnchorsEditor, LimitEditor, MeasuresEditor, TargetShareField, VISIBILIT
 import { LimitChips, NotesSuggest } from "../../../_ui/limits";
 import type { Me } from "../../../_ui/server";
 import type { Goal, WsDetail } from "../../../_ui/types";
+import { isBlankText } from "@/lib/v2/text-core.mts";
 
 const STATUS_TONE = { active: "violet", achieved: "green", dropped: "neutral" } as const;
 
@@ -136,7 +137,7 @@ export default function Goals({ me, ws }: { me: Me; ws: string }) {
             </div>
             <TargetShareField value={target} onChange={setTarget} taken={takenBy(feed.data?.goals)} />
             <AnchorsEditor value={anchors} onChange={setAnchors} />
-            <Btn type="submit" disabled={act.busy || !title.trim() || (!company && visibility === "team" && !team)}>
+            <Btn type="submit" disabled={act.busy || isBlankText(title) || (!company && visibility === "team" && !team)}>
               Create goal
             </Btn>
             <Err>{act.error}</Err>
