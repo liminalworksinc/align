@@ -18,14 +18,22 @@ export function activeProposal(s: StateView) {
 /** A proposal still being worked on (at most one is open at a time). */
 export const OPEN_STATES = ["PENDING_SECURITY", "COUNTERED", "ACKNOWLEDGED_BY_PRODUCT", "DRAFT"];
 
+/** The request Proposals shows: the one picked, else the one with a notice pinned (a decision just recorded), else the
+ *  latest one still standing. For the asking team, else its latest declined one: a decline by the owner keeps the
+ *  declined request on screen instead of swapping it for an empty composer. */
+export function shownProposal(s: StateView, actor: string | null | undefined, selection: Selection | null, noticed?: Proposal) {
+  const selected = selection?.kind === "proposal" ? s.proposals.find((p) => p.id === selection.id) : undefined;
+  const declined = actor === "product" ? [...s.proposals].reverse().find((p) => p.state === "REJECTED") : undefined;
+  return selected ?? noticed ?? activeProposal(s) ?? declined ?? null;
+}
+
 /** Whether Proposals shows the asking team's composer: nothing open, and either a request for it (+ New conflict, the
- *  Your turn card, the inbox's Propose a change: Home's `compose`) or no request to show. One rule for ProposalsView
- *  (what it renders) and Home (the rail's + New conflict steps down while the composer is the screen's primary). */
+ *  Your turn card, the inbox's Propose a change: Home's `compose`) or no request to show (shownProposal). One rule for
+ *  ProposalsView (what it renders) and Home (the rail's + New conflict steps down while the composer is the screen's
+ *  primary). */
 export function composerShowing(s: StateView, actor: string | null | undefined, selection: Selection | null, compose: boolean, noticed?: Proposal) {
   if (actor !== "product" || s.proposals.some((p) => OPEN_STATES.includes(p.state))) return false;
-  if (compose) return true;
-  const selected = selection?.kind === "proposal" ? s.proposals.find((p) => p.id === selection.id) : undefined;
-  return !(selected ?? noticed ?? activeProposal(s));
+  return compose || !shownProposal(s, actor, selection, noticed);
 }
 
 /** Latest baseline and candidate runs (normal scenario) that share mission, seed and checks. Latest regardless of verdict: no cherry-picking a PASS. */

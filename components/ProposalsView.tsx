@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { CONDITIONS_UNCONFIRMED, companyMeasureId, conditionsUnconfirmedNote, conflictMeasureId, labelsFor, poss, type Labels } from "@/lib/labels";
 import type { Proposal, SimulationRun, StateView, TestStatus } from "@/lib/types";
 import type { ViewProps } from "./props";
-import { OPEN_STATES, activeProposal, changedToday, composerShowing, currentGoal, priorVersion } from "./select";
+import { OPEN_STATES, changedToday, composerShowing, currentGoal, priorVersion, shownProposal } from "./select";
 import { Badge, Button, OWNER_LABEL, STATE_LABEL, Section, StateBadge, fmtTime } from "./ui";
 import { api, type Me } from "./useAlign";
 import { NextStepAction, ProgressStrip } from "./Handoff";
@@ -156,11 +156,10 @@ export function ProposalsView(props: ViewProps) {
 
   const list = [...s.proposals].reverse();
   const openOne = s.proposals.find((p) => OPEN_STATES.includes(p.state)) ?? null;
-  const selected = selection?.kind === "proposal" ? s.proposals.find((p) => p.id === selection.id) : undefined;
   // A request with a notice stays on screen: a declined one leaves activeProposal(), which would show another request
   // and drop the notice.
   const noticed = notice ? s.proposals.find((p) => p.id === notice.id) : undefined;
-  const active = selected ?? noticed ?? activeProposal(s);
+  const active = shownProposal(s, me.actor, selection ?? null, noticed);
   const isProduct = me.actor === "product";
   // + New conflict, the Your turn card and the inbox's Propose a change ask for the composer (props.compose) until a
   // proposal is picked or sent. The rule is shared with Home (select.ts composerShowing).

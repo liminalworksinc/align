@@ -9,7 +9,8 @@
 //   phase "layout": LIM-2452 cycle 2 on a custom workspace: the phone layout (Propose a change above the fold, one
 //                   ConnectAI), the Goals map at every width, the asker's review at 768, 44px tap targets at 390,
 //                   the Switch team menu at 700, and the AI apps copy (Seen since the latest change / Last seen before the latest change, never reads, follows or works from),
-//                   the disabled + New conflict at 390 (the logo keeps its width) and one pink primary on the composer
+//                   the disabled + New conflict at 390 (the logo keeps its width) and one pink primary on the composer,
+//                   and after the owner declines, the asking team's Proposals shows the declined request, not the composer
 // Usage: node scripts/test-funnel.mjs <port> [--no-build] [--only local|layout|hosted]   (from a worktree root; refuses 3100 and the main checkout)
 
 import { spawn, spawnSync } from "node:child_process";
@@ -860,6 +861,83 @@ async function phaseLayout(dir) {
         `composing=${JSON.stringify(composing)} closed=${JSON.stringify(closed)} composerAfter=${composer}`,
       );
       await ctx.close();
+    }
+    // (j) After the OWNER declines (through the page, so the owner's notice is pinned in the owner's session), the asking
+    // team's Proposals shows the declined request, not the composer, until Product picks an item or presses Propose a
+    // change. Two ways in, at 390 and 1440: Proposals already open on the request when the decline lands (the poll brings
+    // it), and Proposals opened afresh afterwards from Goals ("Open proposals", no compose request).
+    {
+      const D = await newWorkspace("DECLINE");
+      const asOpen = async (role, width) => {
+        const ctx = await browser.createBrowserContext();
+        const page = await ctx.newPage();
+        await page.setViewport({ width, height: 900 });
+        const [name, ...v] = D.c[role].split("=");
+        await page.setCookie({ name, value: v.join("="), domain: "127.0.0.1", path: "/", httpOnly: true });
+        await page.goto(`${origin}/w/${D.ws}`, { waitUntil: "networkidle0" });
+        await waitText(page, /Your turn|Know what needs you/);
+        await sleep(800);
+        return { page, ctx };
+      };
+      const composerOn = (page) => page.evaluate(() => /Send proposal to /.test(document.querySelector("main")?.innerText ?? ""));
+      const mainHas = (page, text) => page.evaluate((t) => (document.querySelector("main")?.innerText ?? "").includes(t), text);
+      const bad = [];
+      for (const width of [390, 1440]) {
+        const marker = `DECLINE ${width} retention first`;
+        const pr = await req("POST", "/api/proposals", { cookie: D.c.product, body: { proposed_measure_text: marker, rationale: "The review needs it", reciprocal_commitment: "We freeze schema changes" } });
+        // Product has the request open on Proposals.
+        const prod = await asOpen("product", width);
+        const openedReq = await clickMain(prod.page, /reviews the proposal/);
+        // The owner declines through the page: Decline, Review this decision, Confirm.
+        const sec = await asOpen("security", width);
+        await clickMain(sec.page, /Review the proposal/);
+        await sec.page.evaluate(() => [...document.querySelectorAll('main [role="group"][aria-label="Your answer"] button')].find((b) => /^Decline/.test(b.textContent.trim()))?.click());
+        await sleep(400);
+        await clickMain(sec.page, /^Review this decision$/);
+        const confirmed = await clickMain(sec.page, /^Confirm: decline/);
+        await sleep(1200);
+        const rejected = stateOf(dir, D.ws).proposals.find((p) => p.id === pr.json?.id)?.state === "REJECTED";
+        const ownerPinned = await mainHas(sec.page, marker); // the owner's notice keeps the declined request on screen
+        await sec.ctx.close();
+        // The decline reaches Product's open page by the poll; the composer must not take over.
+        let declinedShown = false;
+        for (let i = 0; i < 20 && !declinedShown; i++) {
+          await sleep(500);
+          declinedShown = await prod.page.evaluate(() => /Declined|declined/.test(document.querySelector("main")?.innerText ?? ""));
+        }
+        const openCase = { openedReq, declinedShown, composer: await composerOn(prod.page), request: await mainHas(prod.page, marker) };
+        // Pressing the inbox's Propose a change then shows the composer.
+        await prod.page.evaluate(() => [...document.querySelectorAll('main aside[aria-label="Proposal inbox"] button')].find((b) => b.textContent.trim() === "Propose a change")?.click());
+        await sleep(700);
+        openCase.composerAfterPress = await composerOn(prod.page);
+        await prod.ctx.close();
+        // Afresh: Goals, the dependency, Open proposals (go("proposals") with no compose request and no selection).
+        const fresh = await asOpen("product", width);
+        await nav(fresh.page, "Goals");
+        await fresh.page.evaluate(() => document.querySelector('main button[aria-label*=" depends on "]')?.click());
+        await sleep(600);
+        const viaGoals = await fresh.page.evaluate(() => {
+          const b = [...document.querySelectorAll("button")].find((x) => x.textContent.trim() === "Open proposals");
+          b?.click();
+          return !!b;
+        });
+        await sleep(900);
+        const freshCase = { viaGoals, composer: await composerOn(fresh.page), request: await mainHas(fresh.page, marker) };
+        await fresh.page.evaluate(() => document.querySelector('main aside[aria-label="Proposal inbox"] li button')?.click());
+        await sleep(600);
+        freshCase.composerAfterPick = await composerOn(fresh.page);
+        await fresh.ctx.close();
+        const ok =
+          pr.status === 200 && confirmed && rejected && ownerPinned &&
+          openCase.openedReq && openCase.declinedShown && !openCase.composer && openCase.request && openCase.composerAfterPress &&
+          freshCase.viaGoals && !freshCase.composer && freshCase.request && !freshCase.composerAfterPick;
+        if (!ok) bad.push(`${width}: ${JSON.stringify({ pr: pr.status, confirmed, rejected, ownerPinned, openCase, freshCase })}`);
+      }
+      check(
+        "(j) 390/1440: after the owner declines, the asking team's Proposals shows the declined request, not the composer (open during the decline, and opened afresh from Goals), until Propose a change",
+        bad.length === 0,
+        bad.join(" | "),
+      );
     }
     // (g) part 2: two connected apps, one seen before the latest change and one after. The rail says "Seen since the
     // latest change" / "Last seen before the latest change" (the server's on_current_plan); the phone row counts them.
