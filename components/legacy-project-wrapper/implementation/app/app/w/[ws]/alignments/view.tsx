@@ -81,7 +81,7 @@ function Counter({ a, busy, onSend }: { a: Alignment; busy: boolean; onSend: (bo
       <Field label="Note (never sent to agents)">
         <TextArea rows={2} value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} />
       </Field>
-      <Btn kind="secondary" disabled={busy} onClick={() => onSend({ revision: a.revision, choice, keep: keep.map((s) => s.ref).filter((r) => !drop.includes(r)), note: note || null })}>
+      <Btn kind="secondary" disabled={busy} onClick={() => onSend({ choice, keep: keep.map((s) => s.ref).filter((r) => !drop.includes(r)), note: note || null })}>
         Send counter
       </Btn>
     </div>
@@ -94,13 +94,14 @@ function AlignmentCard({ ws, a, me, onDone }: { ws: string; a: Alignment; me: st
   // The card is keyed by its revision and state, and moves between sections, so a decision remounts it: the notice
   // outlives that.
   const [notice, setNotice] = useNotice(`alignment:${a.id}`);
-  /** Send a decision: "Recorded: …" when it is, "Not recorded. <why>" when the server refuses it (a 409 reloads, to show
-   *  the request as it is now). */
+  /** Send a decision on the revision on screen: "Recorded: …" when it is, "Not recorded. <why>" when the server refuses
+   *  it (a 409 reloads, to show the request as it is now). Every decision names the revision, so one taken on an older
+   *  view is refused instead of recorded against a counter the person never saw (c10 C10-2). */
   const doIt = (action: string, body: Record<string, unknown> = {}) =>
     act.run(async () => {
       setNotice(null);
       try {
-        const out = await api<Alignment>(`/api/v2/workspaces/${ws}/alignments/${a.id}/${action}`, { body });
+        const out = await api<Alignment>(`/api/v2/workspaces/${ws}/alignments/${a.id}/${action}`, { body: { ...body, revision: a.revision } });
         setNotice({ kind: "done", text: recordedLine(action, a, out ?? null) });
         setCountering(false);
         onDone();
@@ -155,7 +156,7 @@ function AlignmentCard({ ws, a, me, onDone }: { ws: string; a: Alignment; me: st
       )}
       <div className="mt-3 flex flex-wrap gap-2">
         {a.can.approve && (
-          <Btn disabled={act.busy} onClick={() => void doIt("approve", { revision: a.revision })}>
+          <Btn disabled={act.busy} onClick={() => void doIt("approve")}>
             Approve
           </Btn>
         )}
@@ -165,7 +166,7 @@ function AlignmentCard({ ws, a, me, onDone }: { ws: string; a: Alignment; me: st
           </Btn>
         )}
         {a.can.accept_counter && (
-          <Btn disabled={act.busy} onClick={() => void doIt("accept_counter", { revision: a.revision })}>
+          <Btn disabled={act.busy} onClick={() => void doIt("accept_counter")}>
             Accept the change
           </Btn>
         )}

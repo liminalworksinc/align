@@ -230,8 +230,12 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
     const inState = (...s: ReallocationState[]) => {
       if (!s.includes(r.state)) throw conflict("wrong_state", stateRefusal(r, me));
     };
+    // A counter meanwhile names its author ("you" to the reader), as a change request's stale refusal does (c10 C10-2).
     const expectRevision = (required: boolean) => {
-      if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", `This proposal changed after you read it: it is now at revision ${r.revision}. Read it again and decide again.`);
+      if (!((required || b.revision !== undefined) && b.revision !== r.revision)) return;
+      const author = r.state === "countered" ? revisionOf(r.id, r.revision).author_id : null;
+      const what = author ? `${nameTo(author, me)} countered it, and it is now at revision ${r.revision}` : `it is now at revision ${r.revision}`;
+      throw conflict("stale_revision", `This proposal changed after you read it: ${what}. Read it again and decide again.`);
     };
     const approverOnly = () => {
       if (!isApprover) throw forbidden("not_an_approver", "Only someone who can approve for one of these goals can do this.");

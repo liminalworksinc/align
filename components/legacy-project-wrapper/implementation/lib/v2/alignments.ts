@@ -8,7 +8,7 @@ import { writeDirective } from "./directives";
 import { holdNewlyBound } from "./requests";
 import { openEpoch, sessionRow, type SessionRow } from "./sessions";
 import { memberName, nameTo, need } from "./workspaces";
-import { oneOf, optStr, strList, type Body } from "./validate";
+import { nonNegInt, oneOf, optStr, strList, type Body } from "./validate";
 
 // Alignment = effect-scoped approval (plan rev 2, option D). Two choices in the UI:
 //   contribution -> contributes_to only (a relationship; nothing about usage or directives changes)
@@ -23,7 +23,8 @@ import { oneOf, optStr, strList, type Body } from "./validate";
 // requester alone satisfies all of them (they own every goal involved). Approving a link that would make the
 // contribution tree loop is refused (409 cycle), at creation and at the approval that would complete it.
 // Rows written before requirements stored a plain user-id array; each id reads as its own singleton requirement.
-// A counter is a new revision by an approver; it voids every earlier approval. Approve names the revision.
+// A counter is a new revision by an approver; it voids every earlier approval. Every decision names the revision the
+// person read (c10 C10-2): one sent from an older view is refused, never recorded against a revision they never saw.
 // Revocation is prospective: a session whose current binding exists only because of the revoked alignment is
 // suspended (binding_suspended), never moved back.
 
@@ -256,6 +257,8 @@ function stateRefusal(a: AlignmentRow, reader: string): string {
     case "pending":
       return "This request is waiting for approval.";
     case "countered":
+      // The counter's author hears "You countered…", as on change requests and target changes (c10 W1).
+      if (counterAuthor(a) === reader) return `You countered this request; it waits on ${nameTo(a.requester_id, reader)} to accept it.`;
       return `An approver suggested a change to this request; it waits on ${nameTo(a.requester_id, reader)} to accept it.`;
     case "approved":
       return "This request is already approved.";
@@ -272,9 +275,23 @@ function stateRefusal(a: AlignmentRow, reader: string): string {
   }
 }
 
+/** Who wrote the alignment's current revision, when that is a counter (else null). */
+const counterAuthor = (a: AlignmentRow): string | null => (a.state === "countered" ? revisionOf(a.id, a.revision).author_id : null);
+
+/** Why a decision sent for an earlier revision is refused (409 stale_revision), in the words change requests use: what
+ *  changed, naming a counter's author ("you" to the reader), and what to do, never "reload". */
+function revisionRefusal(a: AlignmentRow, reader: string): string {
+  const author = counterAuthor(a);
+  const what = author ? `${nameTo(author, reader)} countered it, and it is now at revision ${a.revision}` : `it is now at revision ${a.revision}`;
+  return `This request changed after you read it: ${what}. Read it again and decide again.`;
+}
+
 export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: AlignmentAction, b: Body) {
   const a0 = visibleAlignment(pp, id);
   if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
+  // Every decision names the revision the person read (400 without one), so it is never recorded against a counter or a
+  // revision they never saw (c10 C10-2).
+  const seen = nonNegInt(b, "revision");
   const me = pp.userId;
   const at = nowIso();
   await tx(() => {
@@ -284,16 +301,17 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
     const approvers = approversIn(currentRequirements(a.id, a.revision));
     const isRequester = a.requester_id === me;
     const isApprover = approvers.includes(me);
+    // Checked after the state, so a request closed meanwhile says who closed it rather than only its revision.
     const expectRevision = () => {
-      if (b.revision !== a.revision) throw conflict("stale_revision", `This request changed after you read it: it is now at revision ${a.revision}. Read it again and decide again.`);
+      if (seen !== a.revision) throw conflict("stale_revision", revisionRefusal(a, me));
     };
     const inState = (...s: AlignmentState[]) => {
       if (!s.includes(a.state)) throw conflict("wrong_state", stateRefusal(a, me));
     };
     switch (action) {
       case "approve": {
-        expectRevision();
         inState("pending");
+        expectRevision();
         if (!isApprover) throw forbidden("not_an_approver", "Your approval is not needed on this request.");
         recordApproval(a.ws_id, a.id, a.revision, me, at);
         run("UPDATE v2_alignments SET updated_at = ? WHERE id = ?", at, a.id);
@@ -301,8 +319,8 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         break;
       }
       case "counter": {
-        if (b.revision !== undefined) expectRevision();
         inState("pending");
+        expectRevision();
         if (!isApprover || isRequester) throw forbidden("not_an_approver", "Only an approver can suggest a change.");
         const prevKeys = keysOf(a.id, a.revision);
         const choice = b.choice === undefined ? rev.choice : oneOf(b, "choice", ["contribution", "work_toward"] as const);
@@ -324,8 +342,8 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
         break;
       }
       case "accept_counter": {
-        if (b.revision !== undefined) expectRevision();
         inState("countered");
+        expectRevision();
         if (!isRequester) throw forbidden("not_requester", "Only the person who asked can accept a suggested change.");
         if (isApprover) recordApproval(a.ws_id, a.id, a.revision, me, at);
         run("UPDATE v2_alignments SET state = 'pending', updated_at = ? WHERE id = ?", at, a.id);
@@ -334,6 +352,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
       }
       case "reject": {
         inState("pending", "countered");
+        expectRevision();
         if (!isApprover || isRequester) throw forbidden("not_an_approver", "Only an approver can decline.");
         run("UPDATE v2_alignments SET state = 'rejected', decided_at = ?, updated_at = ? WHERE id = ?", at, at, a.id);
         audit(a.ws_id, me, "alignment.rejected", a.id, at);
@@ -341,6 +360,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
       }
       case "withdraw": {
         inState("pending", "countered");
+        expectRevision();
         if (!isRequester) throw forbidden("not_requester", "Only the person who asked can withdraw.");
         run("UPDATE v2_alignments SET state = 'withdrawn', decided_at = ?, updated_at = ? WHERE id = ?", at, at, a.id);
         audit(a.ws_id, me, "alignment.withdrawn", a.id, at);
@@ -348,6 +368,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
       }
       case "revoke": {
         inState("approved");
+        expectRevision();
         if (!isRequester && !isApprover) throw forbidden("not_an_approver", "Only the person who asked or an approver can revoke.");
         run("UPDATE v2_alignments SET state = 'revoked', revoked_at = ?, revoked_by = ?, updated_at = ? WHERE id = ?", at, me, at, a.id);
         if (rev.choice === "work_toward") {

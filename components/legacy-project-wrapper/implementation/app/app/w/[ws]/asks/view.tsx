@@ -103,9 +103,10 @@ function AskCard({ ws, a, me, onDone }: { ws: string; a: Ask; me: string; onDone
       </div>
       <blockquote className="my-2 border-l-2 border-zinc-300 pl-3 text-[15px] text-zinc-800">“{a.text}”</blockquote>
       <p className="text-[14px] text-zinc-500">{askSubline(a)}</p>
+      {/* Who last decided it, in the refusal's words: "marked done by <name>", never the bare "done by" (c10 W3). */}
       <p className="text-[13px] text-zinc-500">
         Recorded by {said(a.requester, me)}
-        {a.decided_by && a.state !== "open" ? ` · ${a.state} by ${said(a.decided_by, me)}` : ""}
+        {a.decided_by && a.state !== "open" ? ` · ${a.state === "done" ? "marked done" : a.state} by ${said(a.decided_by, me)}` : ""}
       </p>
       {a.mentions.length > 0 && (
         <details className="mt-1 text-[14px] text-zinc-500">

@@ -254,7 +254,8 @@ Additive fields; older agents ignore them. Spec: `goals-and-proposals`, `workspa
 - Reallocations (cookie): `POST /api/v2/workspaces/:ws/reallocations { "targets": [ { "goal_id", "target_share" } ],
   "note"? }` → 201; `GET .../reallocations` → `{ waiting_on_me, mine, others }`; `GET .../reallocations/:id`;
   `POST .../reallocations/:id/{approve|approve_and_launch|launch|not_yet|counter|accept_counter|reject|withdraw}`
-  (approve and approve_and_launch carry `revision`; counter `targets` and `note`; reject `reason`). Each goal needs one
+  (approve and approve_and_launch need `revision`; the others check it when sent, and the app sends it with every
+  decision; counter `targets` and `note`; reject `reason`). Each goal needs one
   approval from its effective approval set; then someone in every goal's launch set who can read every goal launches it,
   which writes each goal's next version with its new target (decreases first), authored by its approver. A newer version
   of any of its goals supersedes it. Readable by everyone who can read one of its goals.
@@ -272,7 +273,8 @@ day (a day counts when its start is in `[from, to)`), and `by=session` shows it 
 Effects: `contribution` → `contributes_to` only. `work_toward` → `contributes_to` + `governing_goal` + `allocation_transfer` for the listed sessions.
 Approval requirements computed from effects and snapshotted on the revision (see "Alignment (web)" below). States: `pending` → `approved` | `rejected` |
 `withdrawn`; `countered` (new revision by an approver, e.g. fewer sessions) → requester `accept_counter` → `pending`.
-Actions: `POST .../alignments/:id/{approve|counter|accept_counter|reject|withdraw|revoke}` (approve carries `revision`).
+Actions: `POST .../alignments/:id/{approve|counter|accept_counter|reject|withdraw|revoke}`, each carrying the `revision`
+the person read (400 without one; 409 `stale_revision` when the request has moved on).
 On approval with `allocation_transfer`: a `binding_changed` directive per session. Revoke is prospective; sessions whose
 binding exists only because of it get `binding_suspended`.
 

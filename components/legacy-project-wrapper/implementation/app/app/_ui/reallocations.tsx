@@ -71,13 +71,14 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
   const [notice, setNotice] = useNotice(`reallocation:${r.id}`);
   const base = `/api/v2/workspaces/${ws}/reallocations/${r.id}`;
   const visible = r.targets.every((t) => t.goal);
-  /** Send a decision: "Recorded: …" when it is, "Not recorded. <why>" when the server refuses it (a 409 reloads, to show
-   *  the proposal as it is now). */
+  /** Send a decision on the revision on screen: "Recorded: …" when it is, "Not recorded. <why>" when the server refuses
+   *  it (a 409 reloads, to show the proposal as it is now). Every decision names the revision, so a Decline or Withdraw
+   *  on an older view is refused instead of recorded against a counter the person never saw (c10 C10-2). */
   const decide = (action: string, body: Record<string, unknown> = {}, after?: () => void) =>
     void act.run(async () => {
       setNotice(null);
       try {
-        const out = await api<Reallocation>(`${base}/${action}`, { body });
+        const out = await api<Reallocation>(`${base}/${action}`, { body: { ...body, revision: r.revision } });
         setNotice({ kind: "done", text: recordedLine(action, r, out ?? null) });
         after?.();
         onDone();
@@ -137,12 +138,12 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
       {line && <p className="text-[14px] text-zinc-600">{line}</p>}
       <div className="mt-2 flex flex-wrap gap-2">
         {r.can.approve && (
-          <Btn disabled={act.busy} onClick={() => doIt("approve", { revision: r.revision })}>
+          <Btn disabled={act.busy} onClick={() => doIt("approve")}>
             Approve (agents switch at launch)
           </Btn>
         )}
         {r.can.approve_and_launch && (
-          <Btn kind="secondary" disabled={act.busy} onClick={() => doIt("approve_and_launch", { revision: r.revision })}>
+          <Btn kind="secondary" disabled={act.busy} onClick={() => doIt("approve_and_launch")}>
             Approve and launch
           </Btn>
         )}
@@ -157,7 +158,7 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
           </Btn>
         )}
         {r.can.accept_counter && (
-          <Btn disabled={act.busy} onClick={() => doIt("accept_counter", { revision: r.revision })}>
+          <Btn disabled={act.busy} onClick={() => doIt("accept_counter")}>
             Accept the counter
           </Btn>
         )}
@@ -182,7 +183,7 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
           className="mt-3 rounded-[10px] border border-zinc-200 p-3"
           onSubmit={(e) => {
             e.preventDefault();
-            decide("counter", { revision: r.revision, targets: r.targets.map((t, i) => ({ goal_id: t.goal!.id, target_share: values[i].trim() === "" ? null : Number(values[i]) })), note: note || null }, () => setCountering(false));
+            decide("counter", { targets: r.targets.map((t, i) => ({ goal_id: t.goal!.id, target_share: values[i].trim() === "" ? null : Number(values[i]) })), note: note || null }, () => setCountering(false));
           }}
         >
           {r.targets.map((t, i) => (
