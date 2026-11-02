@@ -149,6 +149,31 @@ export function directivesFor(dev: DevicePrincipal, cursor: number, limit = 100)
   return rows.map((r) => serialize(dev, r, r.keys.split(" ").sort()));
 }
 
+/** How far back the directives answer lists this device's ended sessions (`endedSessionsFor`). */
+const ENDED_LOOKBACK_MS = 30 * 86_400_000;
+
+/**
+ * This device's sessions whose share has ended on the server in the last 30 days, in the workspaces it reaches now
+ * (newest first, at most 200): stopped on the web (Stop sharing) or by another device of the person (`ended_reason`
+ * null), or ended because the person was removed from the workspace and is back (`member_removed`). A stop or resume
+ * reaches a device as a directive, but an end of sharing has none, and a device would otherwise hear of it only at the
+ * session's next usage upload (refused `sharing_stopped`): listed in every directives answer, the device ends its own
+ * share at its next pass (E2E-AGENT cycle 8). The device's own stops are listed too; it already knows them.
+ */
+export function endedSessionsFor(dev: DevicePrincipal, nowMs = Date.now()) {
+  const ws = [...dev.grants];
+  if (!ws.length) return [];
+  return all<{ ws_id: string; session_key: string; ended_reason: string | null; stopped_at: string }>(
+    `SELECT ws_id, session_key, ended_reason, stopped_at FROM v2_sessions
+     WHERE device_id = ? AND user_id = ? AND state = 'stopped' AND stopped_at >= ? AND ws_id IN (${ws.map(() => "?").join(",")})
+     ORDER BY stopped_at DESC LIMIT 200`,
+    dev.deviceId,
+    dev.user.id,
+    new Date(nowMs - ENDED_LOOKBACK_MS).toISOString(),
+    ...ws,
+  ).map((r) => ({ ws: r.ws_id, session_key: r.session_key, ended_reason: r.ended_reason ?? null, stopped_at: r.stopped_at }));
+}
+
 export function parseCursor(v: string | null): number {
   if (v === null || v === "") return 0;
   if (!/^\d{1,15}$/.test(v)) throw badRequest("cursor must be a sequence number");

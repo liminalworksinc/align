@@ -28,7 +28,8 @@ import {
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { applyShare, bind, endShareRemoved, endShareSignedOutByServer, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
+import { otherWorkspaceWords, outOfReachWords } from "./shared/envelope.ts";
+import { applyShare, bind, endShareRemoved, endShareSignedOutByServer, endShareStoppedByPerson, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -161,7 +162,18 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
         if (r.rule_dir) return lid;
         throw new Error("this machine is signed out of Align. Run `align login` in a terminal, then type `::align share` here");
       }
-      const ws = resolveWorkspace(ctx.home, r.workspace || ctx.config.default_workspace);
+      // Shared before in a workspace: shared again only there, never into another one (the default, a folder rule's),
+      // which would file that workspace's work under another (cycle 8).
+      const own = existing?.state === "stopped" ? { id: existing.workspace_id, name: existing.workspace_name } : null;
+      if (own && r.workspace && r.workspace !== own.id) {
+        if (r.rule_dir) return lid;
+        throw new Error(otherWorkspaceWords(own.name, resolveWorkspace(ctx.home, r.workspace)?.name ?? r.workspace));
+      }
+      const ws = resolveWorkspace(ctx.home, own?.id || r.workspace || ctx.config.default_workspace);
+      if (!ws && own) {
+        if (r.rule_dir) return lid;
+        throw new Error(outOfReachWords(own.name, lid, !!(ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(lid) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(lid))));
+      }
       if (!ws) throw new Error(r.workspace ? `${r.rule_dir ? "the folder rule's" : "that"} workspace is no longer available on this device` : "no default workspace; run `align share --latest --workspace <name>` in a terminal");
       const goal = r.arg ? resolveGoal(loadFeed(ctx.home, ws.id), r.arg) : null;
       if (goal && !goal.bindable) throw new Error(`goal "${goal.title}" needs an approved alignment before it can be bound`);
@@ -522,20 +534,21 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
             // Ended at a sign-out this machine never saw end it: worded as a sign-out, not as leaving the workspace (C7-5).
             endShareSignedOutByServer(ctx, s.local_id);
           } else if (stopped || r.json?.error === "not_shared" || r.status === 404) {
-            markStopped(ctx, s.local_id);
             // A server that names why (`ended_reason`) says null when its person stopped it (on the web, or on another
             // of their devices): stopped for good, and a folder rule never shares it again (C6-1). An older server
             // doesn't say, so the words stay neutral.
             const byPerson = stopped && r.json && "ended_reason" in r.json && r.json.ended_reason === null;
-            if (byPerson) notePriorShare(ctx, s.local_id, true);
+            if (byPerson) {
+              endShareStoppedByPerson(ctx, s.local_id, `upload_refused_${r.status}`);
+              break;
+            }
+            markStopped(ctx, s.local_id);
             // Never silently: the session hears that its sharing ended and that usage now stays here.
             addNotice(
               ctx,
               s.local_id,
               `upload_refused_${r.status}`,
-              byPerson
-                ? "Align: this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing` on another of your devices), so it stopped sharing here; its usage stays on this machine from now on."
-                : stopped
+              stopped
                   ? "Align: the server no longer accepts this session's usage (sharing_stopped), so it stopped sharing here; its usage stays on this machine from now on. If its sharing ended because you left its workspace or were removed and you are a member again, `::align share` here shares it again."
                   : `Align: the server no longer accepts this session's usage (${r.json?.error || r.status}), so it stopped sharing; its usage stays on this machine from now on.`,
             );

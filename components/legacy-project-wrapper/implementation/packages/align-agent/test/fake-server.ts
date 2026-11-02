@@ -111,7 +111,10 @@ export class FakeServer {
   devices = new Map<string, Device>();
   access = new Map<string, { device: string; exp: number }>();
   /** `ended`: why a stopped session ended when its person did not stop it (as `v2_sessions.ended_reason`). */
-  sessions = new Map<string, { ws: string; device: string; body: any; state: string; ended?: "member_removed" | "device_signed_out" | null }>();
+  sessions = new Map<string, { ws: string; device: string; body: any; state: string; ended?: "member_removed" | "device_signed_out" | null; stopped_at?: string }>();
+  /** As the server: the directives answer lists this device's ended sessions (`ended_sessions`, cycle 8). Off to see a
+   *  device that hears of an end only at its next usage upload (an older server). */
+  reportEnded = true;
   /** DELETE …/sessions/{key} that went through, and the device that sent each (audited with the acting device). */
   deletedBy: { key: string; device: string }[] = [];
   /** POST /activity items as received, plus items other people's machines "sent" (addRemoteActivity). */
@@ -130,6 +133,7 @@ export class FakeServer {
     const s = this.sessions.get(key)!;
     s.state = "stopped";
     s.ended = "member_removed";
+    s.stopped_at = new Date().toISOString();
     for (const e of this.epochs.values()) if (e.session_key === key && !e.ends_at) e.ends_at = new Date().toISOString();
   }
 
@@ -138,6 +142,7 @@ export class FakeServer {
     const s = this.sessions.get(key)!;
     s.state = "stopped";
     s.ended = null;
+    s.stopped_at = new Date().toISOString();
     for (const e of this.epochs.values()) if (e.session_key === key && !e.ends_at) e.ends_at = new Date().toISOString();
   }
 
@@ -529,6 +534,8 @@ export class FakeServer {
         }
         if (sub === "stop-sharing") {
           sess.state = "stopped";
+          sess.ended = null;
+          sess.stopped_at = new Date().toISOString();
           return send(200, { session_key: key, state: "stopped" });
         }
         if (sub === "epochs") {
@@ -593,7 +600,11 @@ export class FakeServer {
         const cursor = Number(url.searchParams.get("cursor") || 0);
         const list = this.directives.filter((d) => d.seq > cursor && this.ownsAny(dev.id, d.session_keys)).slice(0, 100);
         // As the server: the workspaces this device reaches now (a single-device fake: the person's workspaces).
-        return send(200, { directives: list, next_cursor: String(list.length ? list[list.length - 1].seq : cursor), workspaces: this.workspaces.map((w) => w.id).sort() });
+        const reach = new Set(this.workspaces.map((w) => w.id));
+        const ended = this.reportEnded
+          ? [...this.sessions].filter(([, x]) => x.device === dev.id && x.state === "stopped" && x.stopped_at && reach.has(x.ws)).map(([k, x]) => ({ ws: x.ws, session_key: k, ended_reason: x.ended ?? null, stopped_at: x.stopped_at }))
+          : undefined;
+        return send(200, { directives: list, next_cursor: String(list.length ? list[list.length - 1].seq : cursor), workspaces: [...reach].sort(), ...(ended ? { ended_sessions: ended } : {}) });
       }
       if (req.method === "GET" && p === "/api/v2/directives/stream") {
         entry.status = 200;

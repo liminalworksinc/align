@@ -49,7 +49,7 @@ import { MIN_NODE, unsupportedNode } from "./node-version.ts";
 import { kvGet, kvSet } from "./db.ts";
 import { podReport } from "./hooks/siblings.ts";
 import { answerable, answerRequest, listRequests, stateWords } from "./requests.ts";
-import { clean, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
+import { clean, GOAL_MARKS, goalMark, HELD_MARK, otherWorkspaceWords, outOfReachWords, requestShortId, stoppedForGoodWords } from "./shared/envelope.ts";
 import { feedHold } from "./shared/feedhold.ts";
 import type { WireRequest } from "./shared/types.ts";
 import { computeUnsharedDigest } from "./allocation.ts";
@@ -304,6 +304,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
   let interval = Number(a.json.interval || 5);
   const expiresAt = Date.now() + Number(a.json.expires_in || 600) * 1000;
   let pairedAs: string | null = null;
+  let endedLine: string | null = null;
   out(`To connect this device, open ${verification_uri} and enter the code ${user_code}`);
   if (!ctx.env.ALIGN_NO_BROWSER && process.platform === "darwin") execFile("open", [verification_uri], () => undefined);
   const scale = Number(ctx.env.ALIGN_DEVICE_POLL_SCALE_MS || 1000);
@@ -347,7 +348,8 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
           err(`align: could not revoke this machine's earlier device ${replaced}. Align revokes it the next time it reaches the server (the next \`align sync\`); until then its sessions still show as shared there.`);
         }
       }
-      if (ended) out(`${ended} session(s) shared from this machine's earlier sign-in stopped sharing; \`::align share\` in a session shares it again.`);
+      // Said after "Signed in as ..." and its workspace lines, which name the sign-in first (cycle 8).
+      if (ended) endedLine = `${ended} session(s) shared from this machine's earlier sign-in stopped sharing; \`::align share\` in a session shares it again.`;
       pairedAs = creds.device_id;
       break;
     }
@@ -366,13 +368,17 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
     me = await refreshMe(ctx);
   } catch (e) {
     // Another login replaced this pairing (DeviceChanged), or a logout signed it out (SignedOut), while it finished.
+    if (endedLine) out(endedLine);
     if (e instanceof SignedOut) return replacedMeanwhile(ctx, pairedAs!);
     throw e;
   }
   // Said under the refresh lock and only while this pairing is still the one signed in: a second `align login` that
   // committed meanwhile revoked it, and this one must not report a revoked device as signed in.
   const name = me.device?.name || deviceName;
-  if (!(await whileSignedInAs(ctx, pairedAs!, () => out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`)))) return replacedMeanwhile(ctx, pairedAs!);
+  if (!(await whileSignedInAs(ctx, pairedAs!, () => out(`Signed in as ${me.user.name} <${me.user.email}> on device ${name}.`)))) {
+    if (endedLine) out(endedLine);
+    return replacedMeanwhile(ctx, pairedAs!);
+  }
   for (const w of me.workspaces) {
     out(`  workspace ${w.name} (${w.id}), role ${w.role}`);
     try {
@@ -383,6 +389,7 @@ async function cmdLogin(ctx: Ctx, argv: string[]): Promise<void> {
       /* feed later */
     }
   }
+  if (endedLine) out(endedLine);
   // After the workspace lines, which belong with "Signed in as" (cycle 6).
   await mentionOtherDevices(ctx, server, pairedAs!);
 }
@@ -630,9 +637,10 @@ async function cmdGoals(ctx: Ctx, argv: string[]): Promise<void> {
   if (values.json) return out(JSON.stringify(all, null, 2));
   for (const a of all) {
     out(`${a.ws}${a.fetched ? ` (cached ${shortTime(a.fetched)})` : " (not fetched yet; use --refresh)"}`);
-    for (const g of a.goals) out(`  ${g.bindable ? "*" : " "} ${pad(g.id, 14)} v${pad(String(g.version), 3)} ${pad(g.status, 9)} ${pad(g.visibility === "pod" ? "team" : g.visibility, 10)} ${g.title}`);
+    for (const g of a.goals) out(`  ${goalMark(g)} ${pad(g.id, 14)} v${pad(String(g.version), 3)} ${pad(g.status, 9)} ${pad(g.visibility === "pod" ? "team" : g.visibility, 10)} ${g.title}`);
   }
-  out("* = you can bind a session to it now.");
+  out(GOAL_MARKS);
+  if (all.some((a) => a.goals.some((g) => g.bindable && g.allocation?.held))) out(HELD_MARK);
 }
 
 /**
@@ -718,10 +726,22 @@ async function cmdShare(ctx: Ctx, argv: string[]): Promise<void> {
     await refreshMe(ctx).catch(() => undefined);
     ws = resolveWorkspace(ctx.home, values.workspace);
   }
-  if (!ws) throw values.workspace ? unknownWorkspace(ctx, values.workspace) : new UsageError("--workspace is required (no default workspace)");
+  if (!ws && values.workspace) throw unknownWorkspace(ctx, values.workspace);
   const session = resolveSession(ctx, positionals[0], { latest: values.latest, cwd: values.cwd === undefined ? null : values.cwd || process.cwd() });
   const share = getShare(ctx, session.local_id);
   if (share && (share.state === "shared" || share.state === "pending" || share.state === "suspended")) throw new UsageError(`session is already ${share.state} with ${share.workspace_name}`);
+  // Shared before in a workspace: shared again only there (with no --workspace too, never the default), never into
+  // another one, which would file that workspace's work under another (cycle 8).
+  const own = share?.state === "stopped" ? share : null;
+  if (own && !values.workspace) ws = resolveWorkspace(ctx.home, own.workspace_id);
+  if (own && ws?.id !== own.workspace_id) {
+    const latched = !!(ctx.db.prepare("SELECT 1 FROM latches WHERE local_id=? AND stopped=1").get(own.local_id) || ctx.db.prepare("SELECT 1 FROM holds WHERE local_id=? AND held=1").get(own.local_id));
+    const why = ws && resolveWorkspace(ctx.home, own.workspace_id) ? otherWorkspaceWords(own.workspace_name, ws.name) : outOfReachWords(own.workspace_name, own.local_id, latched);
+    err(`align: session ${session.local_id.slice(0, 8)} was not shared: ${why}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (!ws) throw values.workspace ? unknownWorkspace(ctx, values.workspace) : new UsageError("--workspace is required (no default workspace)");
   // Its person stopped it while it was shared, and its history is kept: the server would refuse it, so nothing is sent
   // and the answer is the one `::align share` gives. A share a sign-out or a lost workspace had ended is shared again
   // (cycle 7).
