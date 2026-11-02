@@ -370,14 +370,16 @@ export async function ingestUsage(pp: PolicyPrincipal, dev: DevicePrincipal, key
   });
 }
 
-/** Stop sharing (future only): no more uploads; the open epoch ends now. History stays until deleted. */
+/** Stop sharing (future only): no more uploads; the open epoch ends now. History stays until deleted. It is its person's
+ *  stop also for a session that had ended (`member_removed`, `device_signed_out`): the reason goes, so it is never
+ *  shared again and its refusals say `ended_reason: null` (E2E-AGENT cycle 6). */
 export async function stopSharing(pp: PolicyPrincipal, p: Principal, key: string) {
   ownSession(pp, p, key);
   const at = nowIso();
   await tx(() => {
     run("UPDATE v2_epochs SET ends_at = ? WHERE ws_id = ? AND session_key = ? AND ends_at IS NULL", at, pp.wsId, key);
     run(
-      "UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?",
+      "UPDATE v2_sessions SET state = 'stopped', stopped_at = COALESCE(stopped_at, ?), ended_reason = NULL, governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND session_key = ?",
       at,
       at,
       pp.wsId,

@@ -2733,6 +2733,24 @@ try {
         epNow.status === 200 && cRow(KN)?.started_at === nowAt,
       `${putFar.text} ${putNear.status} ${epFar.text} ${epNow.text} ${JSON.stringify(cRow(KN))}`,
     );
+
+    // E2E-AGENT cycle 6: removed again (SB ends member_removed), let back in with the device given the workspace again,
+    // and the person stops sharing SB on the web: that is their stop, so its usage is refused with ended_reason null and
+    // the device can't share it again (a folder rule never would).
+    const rmAgain = await ca(CO, "DELETE", `/members/${CM.id}`);
+    const endedAgain = cRow(SB)?.ended_reason;
+    await invite();
+    withDb((d) => d.prepare("INSERT OR IGNORE INTO v2_device_grants (device_id, ws_id) VALUES (?, ?)").run(DC.id, CW));
+    const webStopEnded = await ca(CM, "POST", `/sessions/${SB}/stop-sharing`, {});
+    const rowStopped = cRow(SB);
+    const upStopped = await call("CM", "POST", `/api/v2/workspaces/${CW}/sessions/${SB}/usage`, { bearer: DC.access, body: { rows: [usageRow(DC, "c6-stopped", newB, {})] } });
+    const putStopped = await cPut(DC, SB);
+    check(
+      "sessions (E2E-AGENT cycle 6): a person who stops sharing on the web a session that had ended member_removed makes it their stop (state stopped, ended_reason null): its usage is refused 409 sharing_stopped with ended_reason null and its device's PUT 409 sharing_stopped, never shared again",
+      rmAgain.status === 204 && endedAgain === "member_removed" && webStopEnded.status === 200 && rowStopped?.state === "stopped" && rowStopped.ended_reason === null &&
+        upStopped.status === 409 && upStopped.json?.error === "sharing_stopped" && upStopped.json?.ended_reason === null && putStopped.status === 409 && putStopped.json?.error === "sharing_stopped",
+      `${rmAgain.status} ${endedAgain} ${webStopEnded.text} ${JSON.stringify(rowStopped)} ${upStopped.text} ${putStopped.text}`,
+    );
   }
   const totalBefore = (await call("U1", "GET", `/api/v2/workspaces/${A}/spend?by=goal`, { cookie: U1.cookie })).json.total.requests;
   const delOther = await call("U1", "DELETE", `/api/v2/workspaces/${A}/sessions/${S3a}`, { cookie: U1.cookie });

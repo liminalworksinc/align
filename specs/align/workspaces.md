@@ -1208,7 +1208,9 @@ epochs, usage, stop-sharing) stays with the device that shared it, and another p
 (`ended_reason` `device_signed_out`) SHALL be shared again by a `PUT` from another device of the same person with the
 same harness and repo key (its device, state `shared`, `stopped_at` and `ended_reason` cleared, its stop flag kept,
 audited `session.shared_again`), and so SHALL one that ended because its person left the workspace (`member_removed`),
-from any device of theirs once they are a member again; any other stopped session stays 409 `sharing_stopped`, to the
+from any device of theirs once they are a member again, unless its person stopped sharing it since: stop-sharing SHALL
+clear `ended_reason`, so a session that had ended is then their stop like any other (its refusals carry `ended_reason:
+null`, and it is never shared again); any other stopped session stays 409 `sharing_stopped`, to the
 device that shared it and to the person's other devices alike (never a 404 that reads as another device holding it),
 and another person's device still gets 404. A `started_at` more than 5 minutes ahead of the server's clock SHALL be
 answered 400 `clock_skew` with the message `started_at is <n> minutes ahead of the server's clock; this device's clock
@@ -1238,6 +1240,11 @@ is off` and `server_time`.
 
 - **WHEN** the session's person stops sharing, then deletes it
 - **THEN** stop-sharing returns `{session_key, state:"stopped"}`, ends the open epoch and refuses later uploads with 409 `sharing_stopped`; the delete returns 204 and removes the session, its epochs, usage, directive deliveries and receipts, so spend totals change
+
+#### Scenario: Stopping a session that had ended
+
+- **WHEN** a member's session ends `member_removed` when they are removed, they are let back in and their device is given the workspace again, and they stop sharing the session on the web (`scripts/test-v2.mjs` "sessions (E2E-AGENT cycle 6): a person who stops sharing on the web a session that had ended member_removed ...")
+- **THEN** the session is `stopped` with no `ended_reason`, its device's usage is refused 409 `sharing_stopped` with `ended_reason: null`, and its device's `PUT` is 409 `sharing_stopped`
 
 #### Scenario: Session list
 
