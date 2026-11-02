@@ -577,7 +577,9 @@ are none, and reject any other subcommand with `usage: align latch status (stop 
 `ALIGN_HOME` mode, 0600 file modes, Claude and Codex hooks, hook file hash, recorded node path, hook latency over
 10 probe runs with `p95 < 150 ms` as OK, outbox under 100, sign-in) and exit 1 when any check is `FAIL`. Its sign-in
 line SHALL give the access token's expiry on the server's clock: with a saved clock offset, `access token expires
-<time + offset> (on the server's clock)`.
+<time + offset> (on the server's clock)`. The stored expiry SHALL follow the saved offset: when the offset is replaced
+or cleared (the clock was fixed), the expiry moves by the change, so it stays the server's expiry and neither the
+sign-in line nor the proactive refresh is off by the old skew.
 
 #### Scenario: Who, as the server says now
 
@@ -593,6 +595,11 @@ line SHALL give the access token's expiry on the server's clock: with a saved cl
 
 - **WHEN** the saved clock offset is -10 minutes and the access token expires in an hour by this computer's clock, and the developer runs `align doctor` (test `findings7` "`align doctor` shows the access token's expiry on the server's clock ...")
 - **THEN** the `sign-in` line says `access token expires <that time minus 10 minutes> (on the server's clock)`
+
+#### Scenario: Token expiry after the clock is fixed
+
+- **WHEN** the access token was refreshed while this computer's clock ran 10 minutes ahead (offset -10 minutes, the expiry stored on that clock), and then a call finds the clocks agree and clears the offset (test `findings8` "a token refreshed while this computer's clock ran 10 minutes ahead ...")
+- **THEN** `align doctor` says `access token expires <the server's expiry> (on the server's clock)` before, and `access token expires <the same time>` after
 
 #### Scenario: Status after install
 

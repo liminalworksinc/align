@@ -265,15 +265,28 @@ function saveForDevice(home: string, c: Credentials): void {
   if (loadCredentials(home)?.device_id === c.device_id) saveCredentials(home, c);
 }
 
+/**
+ * `c` with the clock offset `offset` (0 clears it). The access token's expiry is kept on this computer's clock, as it
+ * read when the token came with the offset saved then; it moves by the change, so it stays the server's expiry read on
+ * this computer's clock: once a skewed clock is fixed and the offset cleared, the expiry (`align doctor`, the proactive
+ * refresh) is not off by the old skew (C7-4).
+ */
+function withClockOffset(c: Credentials, offset: number): Credentials {
+  const before = Number(c.clock_offset_ms) || 0;
+  const next: Credentials = { ...c };
+  if (offset) next.clock_offset_ms = offset;
+  else delete next.clock_offset_ms;
+  const t = c.access_expires_at ? Date.parse(c.access_expires_at) : NaN;
+  if (!Number.isNaN(t) && before !== offset) next.access_expires_at = new Date(t + before - offset).toISOString();
+  return next;
+}
+
 /** Save (or, with 0, clear) the clock offset, under the refresh lock so it never races a token rotation. */
 export async function saveClockOffset(ctx: Ctx, offset: number): Promise<void> {
   await withLock(ctx.home, async () => {
     const c = loadCredentials(ctx.home);
     if (!c || c.signed_out) return;
-    const upd: Credentials = { ...c };
-    if (offset) upd.clock_offset_ms = offset;
-    else delete upd.clock_offset_ms;
-    saveCredentials(ctx.home, upd);
+    saveCredentials(ctx.home, withClockOffset(c, offset));
   }).catch(() => undefined);
 }
 
@@ -378,13 +391,11 @@ export async function refreshIfNeeded(ctx: Ctx, force = false): Promise<Credenti
         // The clock is right and the saved offset was stale (the clock was fixed since): drop it, no warning (N3).
         offset = 0;
         ctx.log("refresh: this computer's clock agrees with the server's again; the saved offset is cleared");
-        const fixed: Credentials = { ...c };
-        delete fixed.clock_offset_ms;
-        saveCredentials(ctx.home, fixed);
+        saveCredentials(ctx.home, withClockOffset(c, 0));
       } else {
         ctx.log(`refresh: this computer's clock is ${words} the server's; signing with the server's time`);
         process.stderr.write(`align: this computer's clock is ${words} the Align server's. Align used the server's time and you stay signed in; set the system clock to update automatically.\n`);
-        saveCredentials(ctx.home, { ...c, clock_offset_ms: offset });
+        saveCredentials(ctx.home, withClockOffset(c, offset));
       }
       r = await attempt(offset);
       if (r.status === 400 && r.json?.error === "clock_skew") throw new ClockSkew(`this computer's clock is ${words} the Align server's; fix the system clock (you are still signed in)`);

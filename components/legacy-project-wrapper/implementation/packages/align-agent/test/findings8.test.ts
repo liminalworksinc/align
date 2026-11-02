@@ -178,3 +178,19 @@ describe("C7-3: `::align share --dir` on a device with several workspaces and no
     assert.equal((await runCli(t, ["rules"])).stdout.trim(), "No folder rules. Every session is private until you share it.");
   });
 });
+
+describe("C7-4: the access token's expiry once a clock skew is fixed", () => {
+  test("a token refreshed while this computer's clock ran 10 minutes ahead: once a call finds the clocks agree and clears the offset, `align doctor` gives the server's expiry, not 10 minutes later", async () => {
+    const { t } = await world();
+    const c = loadCredentials(t.home)!;
+    const server = Date.parse(c.access_expires_at!); // the clocks agree: this is the server's expiry
+    // As a refresh under the skew left it: the expiry read on the skewed clock, with the offset the server's answer gave.
+    saveCredentials(t.home, { ...c, clock_offset_ms: -600_000, access_expires_at: new Date(server + 600_000).toISOString() });
+    const skewed = await runCli(t, ["doctor"]);
+    assert.match(skewed.stdout, new RegExp(`access token expires ${new Date(server).toISOString().replace(/\./g, "\\.")} \\(on the server's clock\\)`));
+    assert.equal((await runCli(t, ["goals", "--refresh"])).code, 0);
+    assert.equal(loadCredentials(t.home)!.clock_offset_ms, undefined, "the offset is cleared");
+    const fixed = await runCli(t, ["doctor"]);
+    assert.match(fixed.stdout, new RegExp(`access token expires ${new Date(server).toISOString().replace(/\./g, "\\.")}\\n`));
+  });
+});
