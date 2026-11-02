@@ -87,7 +87,7 @@ interface ReportRow {
 /** The request (404 when the caller can't read it or it is on another goal), and 409 not_approved unless approved. */
 function approvedRequest(pp: PolicyPrincipal, goalId: string, requestId: string) {
   const cr = getChangeRequest(pp, requestId, goalId);
-  if (cr.state !== "approved" || !cr.approved_by || !cr.decided_at) throw conflict("not_approved", "This change request isn't approved, so it has no value card");
+  if (cr.state !== "approved" || !cr.approved_by || !cr.decided_at) throw conflict("not_approved", "This change request isn't approved, so it has no value card.");
   return cr;
 }
 
@@ -205,7 +205,7 @@ export async function recordValue(pp: PolicyPrincipal, goalId: string, requestId
   const recorded = await tx(() => {
     const prev = get<ReportRow>("SELECT * FROM v2_value_reports WHERE ws_id = ? AND change_request_id = ? AND person_id = ?", ws, cr.id, user);
     if (prev) {
-      if (Date.parse(at) - Date.parse(prev.created_at) >= EDIT_MS) throw conflict("edit_closed", `A value report can be changed for ${VALUE_EDIT_DAYS} days after it was saved`);
+      if (Date.parse(at) - Date.parse(prev.created_at) >= EDIT_MS) throw conflict("edit_closed", `A value report can be changed for ${VALUE_EDIT_DAYS} days after it was saved.`);
       run("UPDATE v2_value_reports SET estimate = ?, note = ?, updated_at = ? WHERE id = ?", estimate, note, at, prev.id);
     } else {
       run("INSERT INTO v2_value_reports (id, ws_id, change_request_id, person_id, estimate, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", newId("vr"), ws, cr.id, user, estimate, note, at, at);

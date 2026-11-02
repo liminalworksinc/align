@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, ApiError, Btn, Err, Field, Loading, Note, Pill, TextArea, useAction, useApi, when } from "./kit";
-import { AddEvidence, ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, EvidenceItem, FIELD_LABEL, FieldValue, NoticeBox, Revisions, SnapshotBox, STATUS_WORD, withHidden, type Notice } from "./crparts";
+import { api, ApiError, Btn, Err, Field, Loading, Note, Pill, sentence, TextArea, useAction, useApi, when } from "./kit";
+import { AddEvidence, ChangesForm, ConditionBox, CR_STATE_WORDS, crTone, EvidenceItem, FIELD_LABEL, FieldValue, NoticeBox, removeEvidence, Revisions, SnapshotBox, STATUS_WORD, withHidden, type Notice } from "./crparts";
 import { LIMIT_WORDS } from "./limits";
 import type { ChangeFields, ChangeRequest, Goal, Limit } from "./types";
 
@@ -347,7 +347,7 @@ export function OpenRequest({
       onDone();
     } catch (e) {
       const conflict = e instanceof ApiError && e.status === 409;
-      setNotice({ kind: "refused", text: `Not recorded. ${(e as Error).message}${conflict ? "" : " Nothing changed."}` });
+      setNotice({ kind: "refused", text: `Not recorded. ${sentence((e as Error).message)}${conflict ? "" : " Nothing changed."}` });
       if (conflict) {
         // The refusal is the answer: close the confirmation (a reload that leaves the request's revision and state as
         // they were keeps this card mounted) and show the request as it is now, with the decisions it now allows (C4-1).
@@ -372,7 +372,7 @@ export function OpenRequest({
       onDone();
     } catch (e) {
       const conflict = e instanceof ApiError && e.status === 409;
-      setNotice({ kind: "refused", text: `Not recorded. ${(e as Error).message}${conflict ? "" : " Nothing changed."}` });
+      setNotice({ kind: "refused", text: `Not recorded. ${sentence((e as Error).message)}${conflict ? "" : " Nothing changed."}` });
       if (conflict) onDone(); // the request or its goal moved on: show it as it is now
     } finally {
       setSending(false);
@@ -541,7 +541,7 @@ export function OpenRequest({
           {current && current.evidence.length > 0 ? (
             <ul>
               {current.evidence.map((e) => (
-                <EvidenceItem key={e.id} e={e} me={me} busy={act.busy} onRemove={(id) => void act.run(() => api(`${path}/evidence/${id}`, { method: "DELETE" }), onDone)} />
+                <EvidenceItem key={e.id} e={e} me={me} busy={act.busy} onRemove={(id) => void act.run(() => removeEvidence(path, id, setNotice, onDone))} />
               ))}
             </ul>
           ) : (
@@ -700,7 +700,7 @@ export function OpenRequest({
         </p>
       )}
 
-      <Revisions cr={cr} />
+      <Revisions cr={cr} me={me} />
       {/* 5. Details: the ids, closed by default. */}
       <details className="mt-1 text-[13px] text-zinc-500" data-details>
         <summary className="cursor-pointer">Details</summary>

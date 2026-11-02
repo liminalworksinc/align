@@ -1608,11 +1608,15 @@ try {
   const afterReject = await act(U1, rj.json.id, "approve", { revision: 1 });
   check("alignment: withdraw by the requester; reject by an approver (not the requester); a decided request can't be approved", wdo.json?.state === "withdrawn" && rjByRequester.status === 403 && rjo.json?.state === "rejected" && afterReject.status === 409, `${wdo.status} ${rjByRequester.status} ${rjo.status} ${afterReject.status}`);
   const afterWithdraw = await act(U3, wd.json.id, "withdraw");
+  const declinedToRequester = await act(U3, rj.json.id, "withdraw");
+  const withdrawnToApprover = await act(U1, wd.json.id, "reject");
   check(
-    "Y5: a decision on a closed alignment says what happened in the app's words and who did it: \"This request was declined by Una One, so nothing changes.\" (never \"is rejected\"), \"This request was withdrawn by <requester>, so nothing changes.\"",
-    afterReject.json?.error === "wrong_state" && afterReject.json?.message === `This request was declined by ${U1.name}, so nothing changes.` &&
-      afterWithdraw.status === 409 && afterWithdraw.json?.message === `This request was withdrawn by ${U3.name}, so nothing changes.`,
-    `${afterReject.text} ${afterWithdraw.status} ${afterWithdraw.text}`,
+    "Y5: a decision on a closed alignment says what happened in the app's words and who did it: \"This request was declined by Una One, so nothing changes.\" (never \"is rejected\"), \"This request was withdrawn by <requester>, so nothing changes.\"; to the person who did it, \"you\" (c9 W3): \"You declined this request, …\", \"You withdrew this request, …\"",
+    declinedToRequester.json?.error === "wrong_state" && declinedToRequester.json?.message === `This request was declined by ${U1.name}, so nothing changes.` &&
+      withdrawnToApprover.status === 409 && withdrawnToApprover.json?.message === `This request was withdrawn by ${U3.name}, so nothing changes.` &&
+      afterReject.json?.error === "wrong_state" && afterReject.json?.message === "You declined this request, so nothing changes." &&
+      afterWithdraw.status === 409 && afterWithdraw.json?.message === "You withdrew this request, so nothing changes.",
+    `${declinedToRequester.text} ${withdrawnToApprover.text} ${afterReject.text} ${afterWithdraw.status} ${afterWithdraw.text}`,
   );
   const otherSessions = await al(U3, { target_goal_id: G1.id, choice: "work_toward", session_keys: [S2a] });
   const privTarget = await al(U3, { target_goal_id: GP.id, choice: "contribution", session_keys: [S3b] });
@@ -2134,7 +2138,7 @@ try {
   );
   check(
     "launch (D1): the requester outside the launch set (a member who is neither an approver of their own request nor a workspace owner) -> 403 not_a_launcher; launching A -> version 3, and B becomes superseded before launch (approval kept, audit change_request.superseded by the launcher); launching B -> 409 wrong_state naming the requester; its decision record says it never reached agents",
-    launchBbyReq.status === 403 && launchBbyReq.json?.error === "not_a_launcher" && launchBbyReq.json.message === "Only someone who can approve for this goal, or a workspace owner, can launch it" && launchA.json?.launch === "launched" && launchA.json.version === 3 &&
+    launchBbyReq.status === 403 && launchBbyReq.json?.error === "not_a_launcher" && launchBbyReq.json.message === "Only someone who can approve for this goal, or a workspace owner, can launch it." && launchA.json?.launch === "launched" && launchA.json.version === 3 &&
       bSuperseded.json?.state === "superseded" && bSuperseded.json.launch === "superseded" && bSuperseded.json.approved_by?.id === U3.id && bSuperseded.json.version === null && bSuperseded.json.can.launch === false && auditOf("change_request.superseded", crB.json?.id).join() === U3.id &&
       launchB.status === 409 && launchB.json?.error === "wrong_state" && launchB.json.message === `This change was superseded before launch. ${U2.name} can propose it again.` &&
       bRecord.sc?.decided === true && bRecord.sc.record?.state === "superseded" && bRecord.sc.record.launch === "superseded" && bRecord.sc.record.resulting_version === null && /superseded before launch: it never reached agents/.test(bRecord.text),
@@ -6433,10 +6437,11 @@ try {
         await ap.evaluate(() => [...document.querySelectorAll("button")].find((b) => /^Propose 1 change/.test(b.textContent || ""))?.click());
         await ap.waitForFunction(() => document.body.innerText.includes("3% → 4%") && document.body.innerText.includes("waiting for launch"), { timeout: 15000 });
         await ap.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Launch")?.click());
-        await ap.waitForFunction(() => /Launched by Axel Other/.test(document.body.innerText), { timeout: 15000 });
+        // The launcher reads "Launched by you", never their own name (c9 W3).
+        await ap.waitForFunction(() => /Launched by you, /.test(document.body.innerText), { timeout: 15000 });
         const browserGoal = (await aa(AX, "GET", "/goals")).json?.goals.find((g) => g.title === "Browser target goal");
         check(
-          "ui (Chrome): a member sees no steering switch; on the Alignments page a proposal on your own goal is approved by asking and waits for launch; Launch gives the goal its new target (4%)",
+          "ui (Chrome): a member sees no steering switch; on the Alignments page a proposal on your own goal is approved by asking and waits for launch; Launch gives the goal its new target (4%) and the card says \"Launched by you\" (c9 W3)",
           noSwitch && browserGoal?.target_share === 4 && browserGoal.version === 2,
           JSON.stringify(browserGoal),
         );
@@ -7259,7 +7264,7 @@ try {
       "C5-1: both requests are created (neither goal depends on the other yet); once the first launches, the second reads can.approve and can.approve_and_launch false (counter and reject still true) and dependency_loop = the refusal, naming no goal, for every reader; its deciders are waited on to suggest a change or decline it (waiting_on_me true for KA, false for the requester)",
       lr1.status === 201 && lr2.status === 201 && lr1Done.status === 200 && lr1Done.json?.launch === "launched" &&
         lr2AsKA?.can?.approve === false && lr2AsKA.can.approve_and_launch === false && lr2AsKA.can.counter === true && lr2AsKA.can.reject === true && lr2AsKA.dependency_loop === LOOP_APPROVE && lr2AsKA.waiting_on_me === true &&
-        lr2AsKB?.dependency_loop === LOOP_APPROVE && lr2AsKB.waiting_on_me === false && lr2AsKB.can.withdraw === true && !LOOP_APPROVE.includes(KL1.title),
+        lr2AsKB?.dependency_loop === LOOP_APPROVE.replace(`and ${KB.name} can withdraw it`, "and you can withdraw it") && lr2AsKB.waiting_on_me === false && lr2AsKB.can.withdraw === true && !LOOP_APPROVE.includes(KL1.title),
       `${lr1.status} ${lr2.status} ${lr1Done.status} ${JSON.stringify(lr2AsKA?.can)} ${lr2AsKA?.dependency_loop} ${lr2AsKA?.waiting_on_me} ${lr2AsKB?.waiting_on_me}`,
     );
     const lr2Ap = await kAct(KA, KL2.id, lr2.json?.id, "approve", { revision: 1 });
@@ -8089,8 +8094,8 @@ try {
         const rText = await textOf(pA, rSel);
         const rNotice = await pA.evaluate((s) => document.querySelector(`${s} [data-notice]`)?.getAttribute("data-notice") ?? null, rSel);
         check(
-          "C3-5 (ui): a refused Update to version n reads \"Not recorded. This goal is at version 3; reload and try again\" like other refused decisions, and the card reloads (it now offers Update to version 3)",
-          bumpR2.status === 201 && rNotice === "refused" && rText.includes("Not recorded. This goal is at version 3; reload and try again") && rText.includes("Update to version 3"),
+          "C3-5 (ui): a refused Update to version n reads \"Not recorded. The goal changed after you read it: it is now at version 3. Update your request to that version.\" like other refused decisions (c9 W6: a sentence, never \"reload and try again\"), and the card reloads (it now offers Update to version 3)",
+          bumpR2.status === 201 && rNotice === "refused" && rText.includes("Not recorded. The goal changed after you read it: it is now at version 3. Update your request to that version.") && !/reload/i.test(rText) && rText.includes("Update to version 3"),
           `${bumpR2.status} ${rNotice} ${rText.slice(0, 500)}`,
         );
 
@@ -8300,24 +8305,24 @@ try {
     const [ev1, ev2, ev3] = [await lateEv(GE1, e1, 1), await lateEv(GE2, e2, 2), await lateEv(GE3, e3, 3)];
     const lateRows = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_change_request_evidence WHERE url LIKE 'https://docs.example.com/c8-%'").get().n);
     check(
-      "C8-1: adding evidence to a request declined, withdrawn or approved meanwhile is 409 wrong_state in the app's words, as every other action on a change request: \"This request was declined by <approver>, so nothing changes.\", \"This request was withdrawn by <requester>, so nothing changes.\", \"This request is already approved; reload to see it.\" (never \"This request is rejected\"); nothing is added",
-      decided.every((r) => r.status === 200) && [ev1, ev2, ev3].every((r) => r.status === 409 && r.json?.error === "wrong_state") && ev1.json.message === DECLINED && ev2.json.message === `This request was withdrawn by ${ZB.name}, so nothing changes.` && ev3.json.message === "This request is already approved; reload to see it." && lateRows === 0,
+      "C8-1: adding evidence to a request declined, withdrawn or approved meanwhile is 409 wrong_state in the app's words, as every other action on a change request: \"This request was declined by <approver>, so nothing changes.\", to its requester \"You withdrew this request, so nothing changes.\" (c9 W3), \"This request was already approved by <approver>.\" (c9 W6: no \"reload\"; never \"This request is rejected\"); nothing is added",
+      decided.every((r) => r.status === 200) && [ev1, ev2, ev3].every((r) => r.status === 409 && r.json?.error === "wrong_state") && ev1.json.message === DECLINED && ev2.json.message === "You withdrew this request, so nothing changes." && ev3.json.message === `This request was already approved by ${ZA.name}.` && lateRows === 0,
       `${decided.map((r) => r.status)} ${[ev1, ev2, ev3].map((r) => `${r.status} ${r.text}`).join(" | ")} ${lateRows}`,
     );
-    // The sweep: no refusal of a change request, alignment or target change builds its own "This request is <state>".
+    // The sweep: no refusal of a change request, alignment, target change or ask builds its own "This request is <state>".
     const ownStateWords = [];
     for (const dir of ["lib/v2", "lib/mcp"])
       for (const f of readdirSync(path.join(ROOT, dir)).filter((x) => /\.m?ts$/.test(x)))
-        for (const [i, l] of readFileSync(path.join(ROOT, dir, f), "utf8").split("\n").entries()) if (/This (request|proposal|alignment) is \$\{[^}]*state\}/.test(l)) ownStateWords.push(`${dir}/${f}:${i + 1}`);
-    check("C8-1 (sweep): no wrong_state refusal in lib/v2 or lib/mcp is built as \"This request (proposal, alignment) is ${state}\"", ownStateWords.length === 0, ownStateWords.join(", "));
+        for (const [i, l] of readFileSync(path.join(ROOT, dir, f), "utf8").split("\n").entries()) if (/This (request|proposal|alignment|ask) is \$\{[^}]*state\}/.test(l)) ownStateWords.push(`${dir}/${f}:${i + 1}`);
+    check("C8-1 (sweep), c9 W4: no wrong_state refusal in lib/v2 or lib/mcp is built as \"This request (proposal, alignment, ask) is ${state}\"", ownStateWords.length === 0, ownStateWords.join(", "));
     // Target changes say it the same way.
     const zRl = await za(ZB, "POST", "/reallocations", { targets: [{ goal_id: GE2.id, target_share: 10 }], note: "More for this" });
     const zRlNo = await za(ZA, "POST", `/reallocations/${zRl.json?.id}/reject`, { reason: "Not now" });
     const zRlApprove = await za(ZA, "POST", `/reallocations/${zRl.json?.id}/approve`, { revision: 1 });
     const zRlWithdraw = await za(ZB, "POST", `/reallocations/${zRl.json?.id}/withdraw`, {});
     check(
-      "C8-1 (target changes): approving or withdrawing a declined target change is 409 wrong_state \"This proposal was declined by <approver>, so nothing changes.\" (never \"This proposal is rejected\")",
-      zRl.status === 201 && zRlNo.json?.state === "rejected" && [zRlApprove, zRlWithdraw].every((r) => r.status === 409 && r.json?.error === "wrong_state" && r.json.message === `This proposal was declined by ${ZA.name}, so nothing changes.`),
+      "C8-1 (target changes): withdrawing a declined target change is 409 wrong_state \"This proposal was declined by <approver>, so nothing changes.\" (never \"This proposal is rejected\"); the approver who declined it hears \"You declined this proposal, so nothing changes.\" (c9 W3)",
+      zRl.status === 201 && zRlNo.json?.state === "rejected" && [zRlApprove, zRlWithdraw].every((r) => r.status === 409 && r.json?.error === "wrong_state") && zRlWithdraw.json.message === `This proposal was declined by ${ZA.name}, so nothing changes.` && zRlApprove.json.message === "You declined this proposal, so nothing changes.",
       `${zRl.status} ${zRl.text.slice(0, 120)} ${zRlNo.status} ${zRlApprove.text} ${zRlWithdraw.text}`,
     );
 
@@ -8559,6 +8564,273 @@ try {
     } else check("ui (Chrome) available for the c8 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c8-web ====
+
+  // ==== fix:c9-web ====
+  // Regression checks for the cycle-9 web walk (e2e-reports/cycle9/web.md, "Works, but feels wrong": W1 to W4, W6, W7
+  // and the sweep), on a workspace of their own. QO owns it; QA leads team Core and owns its goals (so decides on their
+  // change requests and target changes, and accepts or declines Core's asks); QB, a Core member, asks; QM is another
+  // Core member.
+  {
+    const qUsers = {};
+    for (const [who, name] of [
+      ["QO", "Quill Owner"],
+      ["QA", "Quinn Approver"],
+      ["QB", "Quentin Asker"],
+      ["QM", "Quorra Member"],
+    ])
+      qUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c9web.example.test`);
+    const { QO, QA, QB, QM } = qUsers;
+    const QW = (await call("QO", "POST", "/api/v2/workspaces", { cookie: QO.cookie, body: { name: "C9 web fix workspace" } })).json?.id;
+    const qa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${QW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [QA, QB, QM]) {
+      const i = await qa(QO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const QT = (await qa(QO, "POST", "/teams", { name: "Core" })).json?.id;
+    await qa(QO, "POST", `/teams/${QT}/members`, { user_id: QA.id, role: "lead" });
+    for (const u of [QB, QM]) await qa(QO, "POST", `/teams/${QT}/members`, { user_id: u.id, role: "member" });
+    const qGoal = async (title, u = QA) => (await qa(u, "POST", "/goals", { title, visibility: "workspace", team_id: QT })).json;
+    const qcrs = (g) => `/goals/${g}/change-requests`;
+    const qAct = (u, g, id, action, body = {}) => qa(u, "POST", `${qcrs(g)}/${id}/${action}`, body);
+    const qRead = (u, g, id) => qa(u, "GET", `${qcrs(g)}/${id}`).then((r) => r.json);
+    const qPropose = (g, changes) => qa(QB, "POST", qcrs(g.id), { base_version: 1, changes, reason: "Cycle 9" }).then((r) => r.json);
+    const qLink = (g, cr, n, revision) => qa(QB, "POST", `${qcrs(g.id)}/${cr?.id}/evidence`, { kind: "doc", url: `https://docs.example.com/c9-${n}`, label: `Link ${n}`, ...(revision ? { revision } : {}) });
+    const DECLINED = `This request was declined by ${QA.name}, so nothing changes.`;
+
+    // -- W1: removing your own link from a request declined meanwhile is refused in the words adding one gets (C8-1) --
+    const GR1 = await qGoal("Remove after decline");
+    const r1 = await qPropose(GR1, { title: "Remove after decline, renamed" });
+    const r1Link = await qLink(GR1, r1, 1);
+    const r1No = await qAct(QA, GR1.id, r1?.id, "reject", { reason: "Not now" });
+    const r1Remove = await qa(QB, "DELETE", `${qcrs(GR1.id)}/${r1?.id}/evidence/${r1Link.json?.evidence?.id}`);
+    const r1Left = withDb((d) => d.prepare("SELECT COUNT(*) AS n FROM v2_change_request_evidence WHERE change_request_id = ?").get(r1?.id).n);
+    check(
+      "c9 W1: removing your own link from a request declined meanwhile is 409 evidence_frozen in the words every refusal of the request gives, \"This request was declined by <approver>, so nothing changes.\" (never \"This link is kept as it was: its revision was superseded or the request was decided\"); the link stays",
+      r1Link.status === 201 && r1No.status === 200 && r1Remove.status === 409 && r1Remove.json?.error === "evidence_frozen" && r1Remove.json.message === DECLINED && r1Left === 1,
+      `${r1Link.status} ${r1No.status} ${r1Remove.status} ${r1Remove.text} ${r1Left}`,
+    );
+    // A link on an earlier revision (frozen by a counter) says which revision the request is at now, as a sentence.
+    const GR2 = await qGoal("Remove after counter");
+    const r2 = await qPropose(GR2, { title: "Remove after counter, renamed" });
+    const r2Link = await qLink(GR2, r2, 2);
+    const r2Ctr = await qAct(QA, GR2.id, r2?.id, "counter", { revision: 1, changes: { title: "Remove after counter, countered" }, note: "Shorter" });
+    const r2Remove = await qa(QB, "DELETE", `${qcrs(GR2.id)}/${r2?.id}/evidence/${r2Link.json?.evidence?.id}`);
+    check(
+      "c9 W1: removing a link frozen by a counter is 409 evidence_frozen \"This link is on revision 1, and the request has moved on to revision 2, so the link is kept as it was.\"",
+      r2Ctr.status === 200 && r2Remove.status === 409 && r2Remove.json?.error === "evidence_frozen" && r2Remove.json.message === "This link is on revision 1, and the request has moved on to revision 2, so the link is kept as it was.",
+      `${r2Ctr.status} ${r2Remove.status} ${r2Remove.text}`,
+    );
+
+    // -- W6: evidence refusals are sentences that never say "reload" --
+    const r2Stale = await qLink(GR2, r2, 3, 1);
+    const r2Dup1 = await qLink(GR2, r2, 4, 2);
+    const r2Dup2 = await qLink(GR2, r2, 4, 2);
+    check(
+      "c9 W6: a link sent for revision 1 of a request countered meanwhile is 409 stale_revision \"This request changed after you read it: Quinn Approver countered it, and it is now at revision 2. Add the link again if it supports that revision.\" (never \"…; reload and try again\"); the same link twice is 409 duplicate_evidence \"This link is already on revision 2, so it isn't added twice.\"",
+      r2Stale.status === 409 && r2Stale.json?.error === "stale_revision" && r2Stale.json.message === `This request changed after you read it: ${QA.name} countered it, and it is now at revision 2. Add the link again if it supports that revision.` &&
+        r2Dup1.status === 201 && r2Dup2.status === 409 && r2Dup2.json?.error === "duplicate_evidence" && r2Dup2.json.message === "This link is already on revision 2, so it isn't added twice.",
+      `${r2Stale.status} ${r2Stale.text} | ${r2Dup1.status} | ${r2Dup2.status} ${r2Dup2.text}`,
+    );
+
+    // -- W3: a refusal says "you" to the person who did it, never their own name --
+    const r2ApproveSelf = await qAct(QA, GR2.id, r2?.id, "approve", { revision: 1 });
+    const r2Note = (await qRead(QA, GR2.id, r2?.id))?.state_note;
+    const r1DeclineSelf = await qAct(QA, GR1.id, r1?.id, "reject", { reason: "Again" });
+    const r1NoteA = (await qRead(QA, GR1.id, r1?.id))?.state_note;
+    const r1NoteB = (await qRead(QB, GR1.id, r1?.id))?.state_note;
+    const GR3 = await qGoal("Withdrawn twice");
+    const r3 = await qPropose(GR3, { title: "Withdrawn twice, renamed" });
+    await qAct(QB, GR3.id, r3?.id, "withdraw");
+    const r3Again = await qAct(QB, GR3.id, r3?.id, "withdraw");
+    const r3ToApprover = await qAct(QA, GR3.id, r3?.id, "reject", { reason: "Late" });
+    check(
+      "c9 W3: to the person who did it a change request's refusal says \"you\": the approver who countered it hears \"You countered this request; it waits on Quentin Asker to accept it.\" (never \"…countered by Quinn Approver; review the counter.\"), the one who declined it \"You declined this request, so nothing changes.\" (its state_note too), its requester \"You withdrew this request, so nothing changes.\"; anyone else still hears the name",
+      r2ApproveSelf.status === 409 && r2ApproveSelf.json?.message === `You countered this request; it waits on ${QB.name} to accept it.` && r2Note === r2ApproveSelf.json.message &&
+        r1DeclineSelf.status === 409 && r1DeclineSelf.json?.message === "You declined this request, so nothing changes." && r1NoteA === "You declined this request, so nothing changes." && r1NoteB === DECLINED &&
+        r3Again.status === 409 && r3Again.json?.message === "You withdrew this request, so nothing changes." && r3ToApprover.status === 409 && r3ToApprover.json?.message === `This request was withdrawn by ${QB.name}, so nothing changes.`,
+      `${r2ApproveSelf.text} | ${r2Note} | ${r1DeclineSelf.text} | ${r1NoteA} | ${r1NoteB} | ${r3Again.text} | ${r3ToApprover.text}`,
+    );
+    // Target changes and alignments say it the same way.
+    const GT1 = await qGoal("Targets declined");
+    const t1 = await qa(QB, "POST", "/reallocations", { targets: [{ goal_id: GT1.id, target_share: 10 }], note: "More here" });
+    const t1No = await qa(QA, "POST", `/reallocations/${t1.json?.id}/reject`, { reason: "Not this month" });
+    const t1Again = await qa(QA, "POST", `/reallocations/${t1.json?.id}/approve`, { revision: 1 });
+    const t1Withdraw = await qa(QB, "POST", `/reallocations/${t1.json?.id}/withdraw`, {});
+    const GS = await qGoal("Asker's own goal", QB);
+    const al1 = await qa(QB, "POST", "/alignments", { target_goal_id: GT1.id, source_goal_id: GS?.id, choice: "contribution", session_keys: [] });
+    const al1No = await qa(QA, "POST", `/alignments/${al1.json?.id}/reject`, {});
+    const al1Again = await qa(QA, "POST", `/alignments/${al1.json?.id}/reject`, {});
+    const al1Withdraw = await qa(QB, "POST", `/alignments/${al1.json?.id}/withdraw`, {});
+    check(
+      "c9 W3: a declined target change tells the approver who declined it \"You declined this proposal, so nothing changes.\" (never \"…declined by Quinn Approver…\") and its requester the name; a declined alignment tells its decliner \"You declined this request, so nothing changes.\"",
+      t1.status === 201 && t1No.json?.state === "rejected" && t1Again.status === 409 && t1Again.json?.message === "You declined this proposal, so nothing changes." && t1Withdraw.status === 409 && t1Withdraw.json?.message === `This proposal was declined by ${QA.name}, so nothing changes.` &&
+        al1.status === 201 && al1No.json?.state === "rejected" && al1Again.status === 409 && al1Again.json?.message === "You declined this request, so nothing changes." && al1Withdraw.json?.message === `This request was declined by ${QA.name}, so nothing changes.`,
+      `${t1.status} ${t1No.status} ${t1Again.text} | ${t1Withdraw.text} | ${al1.status} ${al1.text.slice(0, 160)} ${al1No.status} | ${al1Again.text} | ${al1Withdraw.text}`,
+    );
+
+    // -- W4: an ask declined meanwhile is refused with who did it and a full stop, never "This ask is declined" --
+    const ask1 = await qa(QB, "POST", "/asks", { team_id: QT, text: "Cycle 9: write the runbook", source: { kind: "manual", date: "2026-11-01" } });
+    const ask1No = await qa(QA, "POST", `/asks/${ask1.json?.id}/decline`, {});
+    const ask1Withdraw = await qa(QB, "POST", `/asks/${ask1.json?.id}/withdraw`, {});
+    const ask1Done = await qa(QM, "POST", `/asks/${ask1.json?.id}/done`, {});
+    const ask1Accept = await qa(QA, "POST", `/asks/${ask1.json?.id}/accept`, {});
+    const ASK_DECLINED = `This ask was declined by ${QA.name}, so nothing changes.`;
+    check(
+      "c9 W4: withdraw, done and accept on an ask declined meanwhile are 409 wrong_state \"This ask was declined by Quinn Approver, so nothing changes.\" (the decliner: \"You declined this ask, so nothing changes.\"), never \"This ask is declined\"",
+      ask1.status === 201 && ask1No.json?.state === "declined" && [ask1Withdraw, ask1Done, ask1Accept].every((r) => r.status === 409 && r.json?.error === "wrong_state") &&
+        ask1Withdraw.json.message === ASK_DECLINED && ask1Done.json.message === ASK_DECLINED && ask1Accept.json.message === "You declined this ask, so nothing changes.",
+      `${ask1.status} ${ask1No.status} ${ask1Withdraw.text} | ${ask1Done.text} | ${ask1Accept.text}`,
+    );
+
+    // The sweep: every 409 and 403 refusal the server builds (outside the device pairing and session sharing the agent
+    // reads) is a sentence ending in a full stop, and none tells the person to "reload and try again".
+    const notSentences = [];
+    for (const f of readdirSync(path.join(ROOT, "lib/v2")).filter((x) => /\.m?ts$/.test(x) && !x.endsWith(".d.ts") && x !== "devices.ts" && x !== "sessions.ts")) {
+      const rel = `lib/v2/${f}`;
+      for (const [i, l] of readFileSync(path.join(ROOT, rel), "utf8").split("\n").entries()) {
+        if (/reload and try again/.test(l)) notSentences.push(`${rel}:${i + 1} reload and try again`);
+        // A message ends in a full stop, or in a constant sentence (`… ${RAISE}`).
+        for (const m of l.matchAll(/\b(?:conflict|forbidden|deny)\("[a-z_]+",\s*(["`])((?:(?!\1).)*)\1\s*\)/g)) if (!/([.!?]|\$\{[A-Z_]+\})$/.test(m[2])) notSentences.push(`${rel}:${i + 1} ${m[2].slice(-50)}`);
+      }
+    }
+    check("c9 sweep (scan): every 409/403 refusal literal in lib/v2 (but devices.ts and sessions.ts) ends in a full stop, and none says \"reload and try again\"", notSentences.length === 0, notSentences.join(" | "));
+
+    // -- the browser: W1 (ui), W6 (ui), W3 (ui), W7 (ui), W4 (ui) --
+    const GU1 = await qGoal("Remove in the browser");
+    const u1 = await qPropose(GU1, { title: "Remove in the browser, renamed" });
+    const u1Link = await qLink(GU1, u1, 11);
+    const GU2 = await qGoal("Add after a counter in the browser");
+    const u2 = await qPropose(GU2, { title: "Add after a counter, renamed" });
+    const GU3 = await qGoal("Targets in the browser");
+    const t2 = await qa(QB, "POST", "/reallocations", { targets: [{ goal_id: GU3.id, target_share: 15 }], note: "More in the browser" });
+    const t3 = await qa(QB, "POST", "/reallocations", { targets: [{ goal_id: GU3.id, target_share: 20 }], note: "Even more" });
+    const ask2 = await qa(QB, "POST", "/asks", { team_id: QT, text: "Cycle 9: in the browser", source: { kind: "manual", date: "2026-11-01" } });
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width: 1100, height: 900 });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const press = (pg, scope, label) => pg.evaluate((s, t) => [...document.querySelectorAll(`${s} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      const typeIn = async (pg, scope, label, value) => {
+        const ok = await pg.evaluate(
+          (s, l) => {
+            const f = [...document.querySelectorAll(`${s} label`)].find((x) => x.querySelector("span")?.textContent?.trim() === l)?.querySelector("input, textarea");
+            if (!f) return false;
+            document.querySelectorAll("[data-typing]").forEach((e) => e.removeAttribute("data-typing"));
+            f.setAttribute("data-typing", "1");
+            return true;
+          },
+          scope,
+          label,
+        );
+        if (!ok) return false;
+        await pg.focus("[data-typing]");
+        await pg.$eval("[data-typing]", (el) => el.select());
+        await pg.keyboard.press("Backspace");
+        if (value) await pg.type("[data-typing]", value);
+        return true;
+      };
+      /** The card's text, its notice kind, whether that notice has focus, its view and its buttons. */
+      const cardState = (pg, sel) =>
+        pg.evaluate((c) => {
+          const card = document.querySelector(c);
+          const n = card?.querySelector("[data-notice]");
+          return { view: card?.getAttribute("data-cr-view") ?? null, notice: n?.getAttribute("data-notice") ?? null, noticeText: n?.textContent?.trim() ?? "", focused: !!n && document.activeElement === n, text: card?.innerText ?? "", buttons: [...(card?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()) };
+        }, sel);
+      try {
+        // W1 (ui): QB's open card offers Remove on their link; QA declines in another tab; Remove reads "Not recorded. …".
+        const pB = await as(QB);
+        const u1Card = `[data-cr="${u1?.id}"]`;
+        await open(pB, `/app/w/${QW}/goals/${GU1.id}`);
+        await pB.waitForFunction((c) => [...document.querySelectorAll(`${c} button`)].some((b) => b.textContent?.trim() === "Remove"), { timeout: 15000 }, u1Card).catch(() => undefined);
+        const u1No = await qAct(QA, GU1.id, u1?.id, "reject", { reason: "Not this one" });
+        await press(pB, u1Card, "Remove");
+        await pB.waitForFunction((c) => document.querySelector(c)?.getAttribute("data-cr-view") === "record" && !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, u1Card).catch(() => undefined);
+        const u1Ui = await cardState(pB, u1Card);
+        check(
+          "c9 W1 (ui): Remove on your own link of a request declined in another tab reads, focused, \"Not recorded. This request was declined by Quinn Approver, so nothing changes.\" (never the raw \"This link is kept as it was…\") and the card reloads as the declined record (\"Declined by Quinn Approver\", no Withdraw, no Remove)",
+          u1Link.status === 201 && u1No.status === 200 && u1Ui.view === "record" && u1Ui.notice === "refused" && u1Ui.focused && u1Ui.text.includes(`Not recorded. ${DECLINED}`) && u1Ui.text.includes(`Declined by ${QA.name}`) && !u1Ui.buttons.includes("Withdraw") && !u1Ui.buttons.includes("Remove") && !/kept as it was/.test(u1Ui.text),
+          JSON.stringify(u1Ui).slice(0, 700),
+        );
+
+        // W6 (ui): QB fills in Add evidence; QA counters in another tab; Add link says what happened, without "reload".
+        const u2Card = `[data-cr="${u2?.id}"]`;
+        await open(pB, `/app/w/${QW}/goals/${GU2.id}`);
+        await pB.waitForSelector(u2Card, { timeout: 15000 }).catch(() => undefined);
+        await press(pB, u2Card, "Add evidence");
+        await pB.waitForFunction((c) => [...document.querySelectorAll(`${c} button`)].some((b) => b.textContent?.trim() === "Add link"), { timeout: 15000 }, u2Card).catch(() => undefined);
+        await typeIn(pB, u2Card, "Link (https)", "https://github.com/acme/c9/pull/2");
+        await typeIn(pB, u2Card, "What it shows", "The browser change");
+        const u2Ctr = await qAct(QA, GU2.id, u2?.id, "counter", { revision: 1, changes: { title: "Add after a counter, countered" }, note: "Shorter" });
+        await press(pB, u2Card, "Add link");
+        await pB.waitForFunction((c) => /Not recorded\./.test(document.querySelector(c)?.innerText ?? "") && /revision 2/.test(document.querySelector(c)?.innerText ?? ""), { timeout: 15000 }, u2Card).catch(() => undefined);
+        await pB.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const u2Ui = await cardState(pB, u2Card);
+        check(
+          "c9 W6 (ui): Add link on a request countered in another tab reads \"Not recorded. This request changed after you read it: Quinn Approver countered it, and it is now at revision 2. Add the link again if it supports that revision.\" on the reloaded card (now offering Accept the change), never \"…; reload and try again\"",
+          u2Ctr.status === 200 && u2Ui.notice === "refused" && u2Ui.noticeText === `Not recorded. This request changed after you read it: ${QA.name} countered it, and it is now at revision 2. Add the link again if it supports that revision.` && u2Ui.text.includes("Accept the change"),
+          JSON.stringify(u2Ui).slice(0, 700),
+        );
+
+        // W3 and W7 (ui): QA has the target changes open; QB withdraws t3 and QA declines t2 in another tab; QA's Decline on t2
+        // says "You declined…", and the closed proposals say who declined them as "you" and need nobody.
+        const pA = await as(QA);
+        const t2Card = `[data-reallocation="${t2.json?.id}"]`;
+        const t3Card = `[data-reallocation="${t3.json?.id}"]`;
+        await open(pA, `/app/w/${QW}/alignments`);
+        await pA.waitForFunction((c) => [...document.querySelectorAll(`${c} button`)].some((b) => b.textContent?.trim() === "Decline"), { timeout: 15000 }, t2Card).catch(() => undefined);
+        const t3Out = await qa(QB, "POST", `/reallocations/${t3.json?.id}/withdraw`, {});
+        const t2No = await qa(QA, "POST", `/reallocations/${t2.json?.id}/reject`, { reason: "Not in the browser" });
+        await press(pA, t2Card, "Decline");
+        await pA.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`) && !/needs one of/.test(document.querySelector(c)?.innerText ?? ""), { timeout: 15000 }, t2Card).catch(() => undefined);
+        await pA.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const t2Ui = await cardState(pA, t2Card);
+        const t3Ui = await cardState(pA, t3Card);
+        check(
+          "c9 W3 (ui): Decline on a target change declined in another tab by the same person reads \"Not recorded. You declined this proposal, so nothing changes.\" (never their own name), and the card says \"Declined by you: “…”\"",
+          t2No.status === 200 && t2Ui.notice === "refused" && t2Ui.text.includes("Not recorded. You declined this proposal, so nothing changes.") && t2Ui.text.includes("Declined by you: “Not in the browser”") && !t2Ui.text.includes(QA.name),
+          JSON.stringify(t2Ui).slice(0, 700),
+        );
+        check(
+          "c9 W7 (ui): a declined or withdrawn target change no longer says who it needs (\"(needs one of: …)\" is gone once it is closed)",
+          t3Out.status === 200 && t2Ui.text.includes(`${GU3.title}: no target → 15%`) && !/needs one of/.test(t2Ui.text) && t3Ui.text.includes(`${GU3.title}: no target → 20%`) && !/needs one of/.test(t3Ui.text),
+          `${t3Out.status} ${t2Ui.text.slice(0, 300)} || ${t3Ui.text.slice(0, 300)}`,
+        );
+
+        // W4 (ui): QB's Asks tab offers Withdraw; QA declines in another tab; Withdraw reads "Not recorded. …" and reloads.
+        const askCard = `[data-ask="${ask2.json?.id}"]`;
+        await open(pB, `/app/w/${QW}/asks`);
+        await pB.waitForFunction((c) => [...document.querySelectorAll(`${c} button`)].some((b) => b.textContent?.trim() === "Withdraw"), { timeout: 15000 }, askCard).catch(() => undefined);
+        const ask2No = await qa(QA, "POST", `/asks/${ask2.json?.id}/decline`, {});
+        await press(pB, askCard, "Withdraw");
+        await pB.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`) && ![...document.querySelectorAll(`${c} button`)].some((b) => b.textContent?.trim() === "Withdraw"), { timeout: 15000 }, askCard).catch(() => undefined);
+        const askUi = await cardState(pB, askCard);
+        check(
+          "c9 W4 (ui): Withdraw on an ask declined in another tab reads, focused, \"Not recorded. This ask was declined by Quinn Approver, so nothing changes.\" (never \"This ask is declined\"), and the card reloads (declined, no Withdraw; \"Recorded by you\")",
+          ask2.status === 201 && ask2No.status === 200 && askUi.notice === "refused" && askUi.focused && askUi.text.includes(`Not recorded. This ask was declined by ${QA.name}, so nothing changes.`) && !askUi.buttons.includes("Withdraw") && askUi.text.includes("Recorded by you") && !/This ask is/.test(askUi.text),
+          JSON.stringify(askUi).slice(0, 700),
+        );
+
+        check("c9 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c9 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c9 web fix checks", false, `no Chrome at ${CHROME}`);
+  }
+  // ==== end fix:c9-web ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));

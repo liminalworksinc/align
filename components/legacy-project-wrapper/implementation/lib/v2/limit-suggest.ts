@@ -118,7 +118,7 @@ export interface GoalSuggestions {
 /** POST /limits/suggest: `{notes, source:{title?, date}, prefer_goal_id?}`. Owners and members (viewers 403
  *  read_only); 20 a minute per person and 120 an hour per workspace (429 rate_limited). Stores nothing. */
 export function suggestLimits(pp: PolicyPrincipal, b: Body): { suggestions: GoalSuggestions[]; dropped: number } {
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   if (typeof b.notes !== "string" || !b.notes.trim()) throw badRequest("notes is required: paste the notes, or type the limit");
   if (b.notes.length > NOTES_MAX) throw badRequest(`notes is too long (max ${NOTES_MAX} characters)`);
   const src = (b.source ?? {}) as Body;

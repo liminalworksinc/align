@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { api, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, Shell, TextArea, useAction, useApi } from "../../../_ui/kit";
+import { api, ApiError, Btn, Card, Err, Field, Input, Loading, Note, Pill, Select, sentence, Shell, TextArea, useAction, useApi } from "../../../_ui/kit";
+import { NoticeBox, useNotice } from "../../../_ui/crparts";
 import type { Me } from "../../../_ui/server";
 import type { Goal, WsDetail } from "../../../_ui/types";
 
@@ -65,15 +66,33 @@ function MentionForm({ ws, a, onDone }: { ws: string; a: Ask; onDone: () => void
   );
 }
 
-function AskCard({ ws, a, onDone }: { ws: string; a: Ask; onDone: () => void }) {
+/** A person as the reader hears them: "you" for themself (c9 W3), never their own name. */
+const said = (p: Person, me: string) => (p.id === me ? "you" : p.name);
+
+function AskCard({ ws, a, me, onDone }: { ws: string; a: Ask; me: string; onDone: () => void }) {
   const act = useAction();
   const [mentioning, setMentioning] = useState(false);
-  const doIt = (action: string) => act.run(() => api(`/api/v2/workspaces/${ws}/asks/${a.id}/${action}`, { body: {} }), onDone);
+  // The card is keyed by its state, so a decision remounts it: the notice outlives that.
+  const [notice, setNotice] = useNotice(`ask:${a.id}`);
+  /** An action, refused like a decision on a change request (c9 W4): a 409 (the ask was decided meanwhile, in another
+   *  tab) is the card's focused "Not recorded. <the server's words>", and the card reloads to show the ask as it is. */
+  const doIt = (action: string) =>
+    act.run(async () => {
+      setNotice(null);
+      try {
+        await api(`/api/v2/workspaces/${ws}/asks/${a.id}/${action}`, { body: {} });
+      } catch (e) {
+        if (!(e instanceof ApiError) || e.status !== 409) throw e;
+        setNotice({ kind: "refused", text: `Not recorded. ${sentence(e.message)}` });
+      }
+      onDone();
+    });
   return (
     <div className="ask-card mb-4 rounded-[12px] border border-zinc-200 p-4" data-ask={a.id}>
+      {notice && <NoticeBox notice={notice} />}
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <span className="text-[16px] text-zinc-900">
-          {a.from_label ?? a.requester.name} asked {a.team.name}
+          {a.from_label ?? (a.requester.id === me ? "You" : a.requester.name)} asked {a.team.name}
         </span>
         <Pill tone={TONE[a.state]}>{a.state}</Pill>
         {a.goal && (
@@ -85,15 +104,15 @@ function AskCard({ ws, a, onDone }: { ws: string; a: Ask; onDone: () => void }) 
       <blockquote className="my-2 border-l-2 border-zinc-300 pl-3 text-[15px] text-zinc-800">“{a.text}”</blockquote>
       <p className="text-[14px] text-zinc-500">{askSubline(a)}</p>
       <p className="text-[13px] text-zinc-500">
-        Recorded by {a.requester.name}
-        {a.decided_by && a.state !== "open" ? ` · ${a.state} by ${a.decided_by.name}` : ""}
+        Recorded by {said(a.requester, me)}
+        {a.decided_by && a.state !== "open" ? ` · ${a.state} by ${said(a.decided_by, me)}` : ""}
       </p>
       {a.mentions.length > 0 && (
         <details className="mt-1 text-[14px] text-zinc-500">
           <summary className="cursor-pointer">When it came up again</summary>
           {a.mentions.map((m) => (
             <p key={m.n}>
-              {m.date}, {m.source_title}: “{m.text}” ({m.added_by.name})
+              {m.date}, {m.source_title}: “{m.text}” ({said(m.added_by, me)})
             </p>
           ))}
         </details>
@@ -265,7 +284,7 @@ export default function Asks({ me, ws }: { me: Me; ws: string }) {
     <>
       {asks.length === 0 && <Note>{empty}</Note>}
       {asks.map((a) => (
-        <AskCard key={`${a.id}:${a.state}:${a.mentions.length}`} ws={ws} a={a} onDone={d.reload} />
+        <AskCard key={`${a.id}:${a.state}:${a.mentions.length}`} ws={ws} a={a} me={me.id} onDone={d.reload} />
       ))}
     </>
   );

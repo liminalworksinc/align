@@ -160,7 +160,7 @@ export function deletedWorkspaceOwnedBy(userId: string, wsId: string) {
     wsId,
   );
   if (!w) throw notFound();
-  if (!w.deleted_at) throw conflict("not_deleted", "This workspace is not deleted");
+  if (!w.deleted_at) throw conflict("not_deleted", "This workspace is not deleted, so there is nothing to restore.");
   if (Date.parse(restoreUntil(w.deleted_at)) <= Date.now()) throw notFound();
   return { id: w.id, name: w.name };
 }
@@ -251,7 +251,7 @@ export async function createInvite(pp: PolicyPrincipal, email: string, role: WsR
   const e = email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw badRequest("Enter an email address");
   if (get("SELECT 1 AS x FROM v2_members m JOIN ba_user u ON u.id = m.user_id WHERE m.ws_id = ? AND lower(u.email) = ?", pp.wsId, e)) {
-    throw conflict("already_member", "That person is already a member");
+    throw conflict("already_member", "That person is already a member.");
   }
   checkMemberCap(pp.wsId, true);
   const token = secretToken(32);
@@ -361,7 +361,7 @@ export async function acceptInvite(token: string, user: { id: string; email: str
   const at = nowIso();
   let devices: string[] = [];
   await tx(() => {
-    if (get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", r.ws_id, user.id)) throw conflict("already_member", "You are already a member");
+    if (get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", r.ws_id, user.id)) throw conflict("already_member", "You are already a member.");
     checkMemberCap(r.ws_id, false);
     run("INSERT INTO v2_members (ws_id, user_id, role, created_at) VALUES (?, ?, ?, ?)", r.ws_id, user.id, r.role, at);
     cancelDeparture(r.ws_id, user.id);
@@ -401,7 +401,7 @@ export async function setTeamMember(pp: PolicyPrincipal, podId: string, userId: 
   need(pp, "pod.manage_members", { kind: "pod", podId });
   // A lead adds and removes members; only a workspace owner makes someone a lead (or changes a lead's role).
   const current = get<{ role: PodRole }>("SELECT role FROM v2_pod_members WHERE pod_id = ? AND user_id = ?", podId, userId);
-  if ((role === "lead" || current?.role === "lead") && pp.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can make someone a team lead");
+  if ((role === "lead" || current?.role === "lead") && pp.wsRole !== "owner") throw forbidden("owner_only", "Only a workspace owner can make someone a team lead.");
   if (!get("SELECT 1 AS x FROM v2_members WHERE ws_id = ? AND user_id = ?", pp.wsId, userId)) throw notFound();
   const at = nowIso();
   await tx(() => {
@@ -422,7 +422,7 @@ export async function removeTeamMember(pp: PolicyPrincipal, podId: string, userI
   teamInWs(pp.wsId, podId);
   need(pp, "pod.manage_members", { kind: "pod", podId });
   const current = get<{ role: PodRole }>("SELECT role FROM v2_pod_members WHERE pod_id = ? AND user_id = ?", podId, userId);
-  if (current?.role === "lead" && pp.wsRole !== "owner" && userId !== pp.userId) throw forbidden("owner_only", "Only a workspace owner can remove a team lead");
+  if (current?.role === "lead" && pp.wsRole !== "owner" && userId !== pp.userId) throw forbidden("owner_only", "Only a workspace owner can remove a team lead.");
   const n = await tx(() => {
     const deleted = run("DELETE FROM v2_pod_members WHERE ws_id = ? AND pod_id = ? AND user_id = ?", pp.wsId, podId, userId);
     if (deleted) audit(pp.wsId, pp.userId, "team.member_removed", podId, nowIso());
@@ -434,4 +434,11 @@ export async function removeTeamMember(pp: PolicyPrincipal, podId: string, userI
 /** The name to show for a person id in a workspace's rows ("Former member #n" once pseudonymised). */
 export function memberName(userId: string): string {
   return personName(userId, get<{ name: string }>("SELECT name FROM ba_user WHERE id = ?", userId)?.name);
+}
+
+/** A person as a message to `reader` names them: "you" when they are the reader, so nobody hears their own name in a
+ *  refusal or a record ("This request was countered by you", never "… by dave" to dave; c9 W3), else memberName. A
+ *  sentence that opens with the person words it for "you" itself ("You declined this request, …"). */
+export function nameTo(userId: string, reader: string): string {
+  return userId === reader ? "you" : memberName(userId);
 }

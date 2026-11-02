@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { api, ApiError, Btn, Card, Err, Field, Loading, Note, Pill, Shell, TextArea, useAction, useApi, when } from "../../../_ui/kit";
+import { api, ApiError, Btn, Card, Err, Field, Loading, Note, Pill, sentence, Shell, TextArea, useAction, useApi, when } from "../../../_ui/kit";
 import { NoticeBox, useNotice } from "../../../_ui/crparts";
 import { ProposalsCard } from "../../../_ui/reallocations";
 import type { Me } from "../../../_ui/server";
@@ -18,12 +18,15 @@ const STATE_WORDS: Record<Alignment["state"], string> = {
 const sessionId = (s: Alignment["sessions"][number]) => (s.started_at ? ` · started ${when(s.started_at)} · …${s.key_end}` : "");
 const named = (g: Alignment["target_goal"]) => (!g ? "" : g.visible ? g.title : "a goal you can't see");
 
+/** A person as the reader hears them: "you" for themself (c9 W3), never their own name. */
+const said = (p: { id: string; name: string }, me: string) => (p.id === me ? "you" : p.name);
+
 /** What an approval requirement is for, in words: a goal (by title when visible) or a person's sessions. */
-function requirementLabel(a: Alignment, forId: string | null): string {
+function requirementLabel(a: Alignment, forId: string | null, me: string): string {
   if (!forId) return a.requirements.some((r) => r.for) ? "A goal you can't see" : "Approval";
   if (forId.startsWith("sessions:")) {
-    const owner = a.sessions.find((s) => `sessions:${s.owner.id}` === forId)?.owner.name;
-    return owner ? `${owner}'s sessions` : "Their sessions";
+    const owner = a.sessions.find((s) => `sessions:${s.owner.id}` === forId)?.owner;
+    return owner ? (owner.id === me ? "Your sessions" : `${owner.name}'s sessions`) : "Their sessions";
   }
   const goals = [a.target_goal, a.source_goal, ...a.sessions.map((s) => s.current_goal)];
   const g = goals.find((x) => x?.id === forId);
@@ -85,7 +88,7 @@ function Counter({ a, busy, onSend }: { a: Alignment; busy: boolean; onSend: (bo
   );
 }
 
-function AlignmentCard({ ws, a, onDone }: { ws: string; a: Alignment; onDone: () => void }) {
+function AlignmentCard({ ws, a, me, onDone }: { ws: string; a: Alignment; me: string; onDone: () => void }) {
   const act = useAction();
   const [countering, setCountering] = useState(false);
   // The card is keyed by its revision and state, and moves between sections, so a decision remounts it: the notice
@@ -104,7 +107,7 @@ function AlignmentCard({ ws, a, onDone }: { ws: string; a: Alignment; onDone: ()
       } catch (e) {
         if (!(e instanceof ApiError)) throw e;
         const conflict = e.status === 409;
-        setNotice({ kind: "refused", text: `Not recorded. ${e.message}${conflict ? "" : " Nothing changed."}` });
+        setNotice({ kind: "refused", text: `Not recorded. ${sentence(e.message)}${conflict ? "" : " Nothing changed."}` });
         if (conflict) onDone();
       }
     });
@@ -113,7 +116,7 @@ function AlignmentCard({ ws, a, onDone }: { ws: string; a: Alignment; onDone: ()
       {notice && <NoticeBox notice={notice} />}
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <span className="text-[16px] text-zinc-900">
-          {a.requester.name} asks to align with {named(a.target_goal)}
+          {a.requester.id === me ? "You ask" : `${a.requester.name} asks`} to align with {named(a.target_goal)}
         </span>
         <Pill tone={a.state === "approved" ? "green" : a.state === "pending" || a.state === "countered" ? "amber" : "neutral"}>{STATE_WORDS[a.state]}</Pill>
         <Pill>{a.choice === "contribution" ? "contribution only" : "work toward, usage moves"}</Pill>
@@ -133,8 +136,8 @@ function AlignmentCard({ ws, a, onDone }: { ws: string; a: Alignment; onDone: ()
       <ul className="mb-1 list-disc pl-5 text-[14px] text-zinc-500">
         {a.requirements.map((r, i) => (
           <li key={`${r.for}-${i}`}>
-            {requirementLabel(a, r.for)}: {r.approvers.map((p) => p.name).join(" or ") || "nobody yet"}{" "}
-            {r.approved_by ? <Pill tone="green">approved by {r.approved_by.name}</Pill> : <Pill tone="amber">waiting</Pill>}
+            {requirementLabel(a, r.for, me)}: {r.approvers.map((p) => said(p, me)).join(" or ") || "nobody yet"}{" "}
+            {r.approved_by ? <Pill tone="green">approved by {said(r.approved_by, me)}</Pill> : <Pill tone="amber">waiting</Pill>}
           </li>
         ))}
       </ul>
@@ -144,7 +147,7 @@ function AlignmentCard({ ws, a, onDone }: { ws: string; a: Alignment; onDone: ()
           <summary className="cursor-pointer">History</summary>
           {a.history.map((h) => (
             <p key={h.revision}>
-              Revision {h.revision} by {h.author.name}, {h.choice === "contribution" ? "contribution only" : "work toward"}, {when(h.created_at)}
+              Revision {h.revision} by {said(h.author, me)}, {h.choice === "contribution" ? "contribution only" : "work toward"}, {when(h.created_at)}
               {h.note ? `: ${h.note}` : ""}
             </p>
           ))}
@@ -201,7 +204,7 @@ export default function Alignments({ me, ws }: { me: Me; ws: string }) {
     <Card title={title}>
       {list?.length === 0 && <Note>{empty}</Note>}
       {list?.map((a) => (
-        <AlignmentCard key={`${a.id}:${a.revision}:${a.state}`} ws={ws} a={a} onDone={d.reload} />
+        <AlignmentCard key={`${a.id}:${a.revision}:${a.state}`} ws={ws} a={a} me={me.id} onDone={d.reload} />
       ))}
     </Card>
   );

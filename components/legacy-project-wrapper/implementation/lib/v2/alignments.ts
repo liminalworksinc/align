@@ -7,7 +7,7 @@ import { canBind, canReadGoal, type PolicyPrincipal } from "./policy";
 import { writeDirective } from "./directives";
 import { holdNewlyBound } from "./requests";
 import { openEpoch, sessionRow, type SessionRow } from "./sessions";
-import { memberName, need } from "./workspaces";
+import { memberName, nameTo, need } from "./workspaces";
 import { oneOf, optStr, strList, type Body } from "./validate";
 
 // Alignment = effect-scoped approval (plan rev 2, option D). Two choices in the UI:
@@ -114,7 +114,7 @@ function sessionsIn(pp: PolicyPrincipal, keys: string[], ownerId: string): Sessi
   return keys.map((k) => {
     const s = sessionRow(pp.wsId, k);
     if (!s || s.user_id !== ownerId) throw notFound();
-    if (s.state === "stopped") throw conflict("sharing_stopped", "One of these sessions is no longer shared");
+    if (s.state === "stopped") throw conflict("sharing_stopped", "One of these sessions is no longer shared, so it can't be part of an alignment.");
     return s;
   });
 }
@@ -176,7 +176,7 @@ function maybeApprove(a: AlignmentRow, at: string, actor: string): boolean {
   if (a.source_goal_id && contributionCycle(a.ws_id, a.source_goal_id, a.target_goal_id)) throw conflict("cycle", CONTRIBUTION_CYCLE);
   const keys = keysOf(a.id, a.revision);
   if (rev.choice === "work_toward") {
-    if (governedElsewhere(a.ws_id, keys, a.id)) throw conflict("already_governed", "One of these sessions already follows another goal through an alignment; revoke that first");
+    if (governedElsewhere(a.ws_id, keys, a.id)) throw conflict("already_governed", "One of these sessions already follows another goal through an alignment; revoke that one first.");
     const target = goalRow(a.ws_id, a.target_goal_id)!;
     const core = goalCore(target);
     for (const k of keys) {
@@ -197,18 +197,18 @@ function maybeApprove(a: AlignmentRow, at: string, actor: string): boolean {
 export async function createAlignment(pp: PolicyPrincipal, b: Body) {
   need(pp, "alignment.create");
   const target = visibleGoal(pp, typeof b.target_goal_id === "string" ? b.target_goal_id : "");
-  if (target.status !== "active") throw conflict("goal_not_active", "That goal is no longer active");
+  if (target.status !== "active") throw conflict("goal_not_active", "That goal is achieved or dropped, so nothing can align with it.");
   const sourceId = optStr(b, "source_goal_id", 64);
   const source = sourceId ? visibleGoal(pp, sourceId) : undefined;
   if (source && source.id === target.id) throw badRequest("A goal can't align with itself");
-  if (source && !canBind(pp, goalObj(source), false)) throw forbidden("source_not_yours", "The source goal must be yours or your team's");
+  if (source && !canBind(pp, goalObj(source), false)) throw forbidden("source_not_yours", "The source goal must be yours or your team's.");
   if (source && contributionCycle(pp.wsId, source.id, target.id)) throw conflict("cycle", CONTRIBUTION_CYCLE);
   const choice = oneOf(b, "choice", ["contribution", "work_toward"] as const);
   const keys = strList(b, "session_keys", { max: 50, itemMax: 43 });
   const sessions = sessionsIn(pp, keys, pp.userId);
   if (choice === "work_toward" && !sessions.length) throw badRequest("Pick at least one of your shared sessions to work toward this goal");
   if (choice === "contribution" && !sessions.length && !source) throw badRequest("Pick a goal of yours or at least one session that contributes");
-  if (choice === "work_toward" && governedElsewhere(pp.wsId, keys, null)) throw conflict("already_governed", "One of these sessions already follows another goal through an alignment; revoke that first");
+  if (choice === "work_toward" && governedElsewhere(pp.wsId, keys, null)) throw conflict("already_governed", "One of these sessions already follows another goal through an alignment; revoke that one first.");
   const note = optStr(b, "note", 1000);
   const at = nowIso();
   const id = await tx(() => insertAlignment(pp, target, source, choice, sessions, note, at));
@@ -248,48 +248,53 @@ function visibleAlignment(pp: PolicyPrincipal, id: string): AlignmentRow {
 const closedBy = (a: AlignmentRow, action: string) => get<{ actor_id: string | null }>("SELECT actor_id FROM v2_audit WHERE ws_id = ? AND object_id = ? AND action = ? ORDER BY at DESC LIMIT 1", a.ws_id, a.id, action)?.actor_id ?? null;
 
 /** Why a decision on an alignment in another state is refused (409 wrong_state), in the app's words ("declined", never
- *  "rejected") and naming who closed it: everyone who may act on it is involved in it and sees its approvers (Y5). */
-function stateRefusal(a: AlignmentRow): string {
+ *  "rejected") and naming who closed it: everyone who may act on it is involved in it and sees its approvers (Y5). The
+ *  reader is "you", never their own name (c9 W3). */
+function stateRefusal(a: AlignmentRow, reader: string): string {
   const by = (id: string | null) => (id ? ` by ${memberName(id)}` : "");
   switch (a.state) {
     case "pending":
-      return "This request is waiting for approval; reload to see it.";
+      return "This request is waiting for approval.";
     case "countered":
-      return `An approver suggested a change to this request; it waits on ${memberName(a.requester_id)} to accept it. Reload to see it.`;
+      return `An approver suggested a change to this request; it waits on ${nameTo(a.requester_id, reader)} to accept it.`;
     case "approved":
-      return "This request is already approved; reload to see it.";
-    case "rejected":
-      return `This request was declined${by(closedBy(a, "alignment.rejected"))}, so nothing changes.`;
+      return "This request is already approved.";
+    case "rejected": {
+      const who = closedBy(a, "alignment.rejected");
+      return who === reader ? "You declined this request, so nothing changes." : `This request was declined${by(who)}, so nothing changes.`;
+    }
     case "withdrawn":
-      return `This request was withdrawn by ${memberName(a.requester_id)}, so nothing changes.`;
-    case "revoked":
-      return `This alignment was revoked${by(get<{ revoked_by: string | null }>("SELECT revoked_by FROM v2_alignments WHERE id = ?", a.id)?.revoked_by ?? null)}.`;
+      return a.requester_id === reader ? "You withdrew this request, so nothing changes." : `This request was withdrawn by ${memberName(a.requester_id)}, so nothing changes.`;
+    case "revoked": {
+      const who = get<{ revoked_by: string | null }>("SELECT revoked_by FROM v2_alignments WHERE id = ?", a.id)?.revoked_by ?? null;
+      return who === reader ? "You revoked this alignment." : `This alignment was revoked${by(who)}.`;
+    }
   }
 }
 
 export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: AlignmentAction, b: Body) {
   const a0 = visibleAlignment(pp, id);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   const me = pp.userId;
   const at = nowIso();
   await tx(() => {
     const a = alignmentRow(pp.wsId, id)!; // re-read inside the transaction
-    if (a.revision !== a0.revision || a.state !== a0.state) throw conflict("stale_revision", "This request changed meanwhile; reload and try again");
+    if (a.revision !== a0.revision || a.state !== a0.state) throw conflict("stale_revision", "This request changed while your decision was being sent. Read it again and decide again.");
     const rev = revisionOf(a.id, a.revision);
     const approvers = approversIn(currentRequirements(a.id, a.revision));
     const isRequester = a.requester_id === me;
     const isApprover = approvers.includes(me);
     const expectRevision = () => {
-      if (b.revision !== a.revision) throw conflict("stale_revision", `This request is at revision ${a.revision}; reload and try again`);
+      if (b.revision !== a.revision) throw conflict("stale_revision", `This request changed after you read it: it is now at revision ${a.revision}. Read it again and decide again.`);
     };
     const inState = (...s: AlignmentState[]) => {
-      if (!s.includes(a.state)) throw conflict("wrong_state", stateRefusal(a));
+      if (!s.includes(a.state)) throw conflict("wrong_state", stateRefusal(a, me));
     };
     switch (action) {
       case "approve": {
         expectRevision();
         inState("pending");
-        if (!isApprover) throw forbidden("not_an_approver", "Your approval is not needed on this request");
+        if (!isApprover) throw forbidden("not_an_approver", "Your approval is not needed on this request.");
         recordApproval(a.ws_id, a.id, a.revision, me, at);
         run("UPDATE v2_alignments SET updated_at = ? WHERE id = ?", at, a.id);
         maybeApprove(a, at, me);
@@ -298,7 +303,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
       case "counter": {
         if (b.revision !== undefined) expectRevision();
         inState("pending");
-        if (!isApprover || isRequester) throw forbidden("not_an_approver", "Only an approver can counter");
+        if (!isApprover || isRequester) throw forbidden("not_an_approver", "Only an approver can suggest a change.");
         const prevKeys = keysOf(a.id, a.revision);
         const choice = b.choice === undefined ? rev.choice : oneOf(b, "choice", ["contribution", "work_toward"] as const);
         let keys = prevKeys;
@@ -321,7 +326,7 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
       case "accept_counter": {
         if (b.revision !== undefined) expectRevision();
         inState("countered");
-        if (!isRequester) throw forbidden("not_requester", "Only the person who asked can accept a counter");
+        if (!isRequester) throw forbidden("not_requester", "Only the person who asked can accept a suggested change.");
         if (isApprover) recordApproval(a.ws_id, a.id, a.revision, me, at);
         run("UPDATE v2_alignments SET state = 'pending', updated_at = ? WHERE id = ?", at, a.id);
         maybeApprove({ ...a, state: "pending" }, at, me);
@@ -329,21 +334,21 @@ export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: Al
       }
       case "reject": {
         inState("pending", "countered");
-        if (!isApprover || isRequester) throw forbidden("not_an_approver", "Only an approver can decline");
+        if (!isApprover || isRequester) throw forbidden("not_an_approver", "Only an approver can decline.");
         run("UPDATE v2_alignments SET state = 'rejected', decided_at = ?, updated_at = ? WHERE id = ?", at, at, a.id);
         audit(a.ws_id, me, "alignment.rejected", a.id, at);
         break;
       }
       case "withdraw": {
         inState("pending", "countered");
-        if (!isRequester) throw forbidden("not_requester", "Only the person who asked can withdraw");
+        if (!isRequester) throw forbidden("not_requester", "Only the person who asked can withdraw.");
         run("UPDATE v2_alignments SET state = 'withdrawn', decided_at = ?, updated_at = ? WHERE id = ?", at, at, a.id);
         audit(a.ws_id, me, "alignment.withdrawn", a.id, at);
         break;
       }
       case "revoke": {
         inState("approved");
-        if (!isRequester && !isApprover) throw forbidden("not_an_approver", "Only the requester or an approver can revoke");
+        if (!isRequester && !isApprover) throw forbidden("not_an_approver", "Only the person who asked or an approver can revoke.");
         run("UPDATE v2_alignments SET state = 'revoked', revoked_at = ?, revoked_by = ?, updated_at = ? WHERE id = ?", at, me, at, a.id);
         if (rev.choice === "work_toward") {
           run("UPDATE v2_sessions SET governing_goal_id = NULL, governing_alignment_id = NULL, updated_at = ? WHERE ws_id = ? AND governing_alignment_id = ?", at, a.ws_id, a.id);

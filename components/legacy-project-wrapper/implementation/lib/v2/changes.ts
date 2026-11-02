@@ -5,7 +5,7 @@ import { newId, nowIso } from "./ids";
 import { effectiveSet, launchSet } from "./approval";
 import { contentOf, dependencyCycle, goalObj, goalRow, goalsDependingOn, nextContent, sameContent, unreadableGoals, versionContentOf, visibleGoal, writeGoalVersion, type GoalContent, type GoalRow } from "./goals";
 import { canReadGoal, type PolicyPrincipal } from "./policy";
-import { memberName, memberPrincipal } from "./workspaces";
+import { memberName, memberPrincipal, nameTo } from "./workspaces";
 import { nonNegInt, optStr, str, type Body } from "./validate";
 import { EVIDENCE_PER_REVISION, evidenceCount, evidenceInput, evidenceRows, evidenceView, recordSnapshot, snapshotView, type EvidenceSource } from "./evidence";
 import { counterNoChange, counterSameAsRequest } from "./change-words.mts";
@@ -137,26 +137,46 @@ const applied = (base: GoalContent, c: Changes): GoalContent => ({ ...base, ...c
 /** Why an action on a request in another state is refused (409 wrong_state), in the app's words ("declined", never
  *  "rejected") and naming who did it, as the alignments' refusals do (Y5): everyone who may act on a request sees its
  *  requester and approvers. A counter names its author, so a requester whose open card offered **Update to version n**
- *  hears to review it (W6). Every action on a request refuses its state with these words, adding evidence included
- *  (C8-1), and the request view carries them as `state_note`, so a card that finds the request changed says the same (W2). */
-function crStateRefusal(r: ChangeRequestRow): string {
+ *  hears to review it (W6). Every action on a request refuses its state with these words, adding and removing evidence
+ *  included (C8-1, c9 W1), and the request view carries them as `state_note`, so a card that finds the request changed
+ *  says the same (W2). The reader is "you", never their own name (c9 W3): "You declined this request, …". */
+function crStateRefusal(r: ChangeRequestRow, reader: string): string {
   switch (r.state) {
     case "pending":
-      return "This request is waiting for approval; reload to see it.";
+      // Said without "reload": the app's card reloads itself on a refusal (c9 W6).
+      return counterRevision(revisionRows(r.id)) ? "The suggested change was already accepted, so this request is waiting for approval." : "This request is waiting for approval.";
     case "countered": {
-      const author = get<{ author_id: string }>("SELECT author_id FROM v2_change_request_revisions WHERE change_request_id = ? AND revision = ?", r.id, r.revision)?.author_id;
+      const author = counterAuthor(r);
+      if (author === reader) return `You countered this request; it waits on ${nameTo(r.requester_id, reader)} to accept it.`;
       return `This request was countered${author ? ` by ${memberName(author)}` : ""}; review the counter.`;
     }
     case "approved":
-      return "This request is already approved; reload to see it.";
+      if (r.approved_by === reader) return "You already approved this request.";
+      return `This request was already approved${r.approved_by ? ` by ${memberName(r.approved_by)}` : ""}.`;
     case "rejected":
+      if (r.rejected_by === reader) return "You declined this request, so nothing changes.";
       return `This request was declined${r.rejected_by ? ` by ${memberName(r.rejected_by)}` : ""}, so nothing changes.`;
     case "withdrawn":
+      if (r.requester_id === reader) return "You withdrew this request, so nothing changes.";
       return `This request was withdrawn by ${memberName(r.requester_id)}, so nothing changes.`;
     case "superseded":
       return "This request was superseded: its goal was closed or got a newer version first, so nothing changes.";
   }
 }
+
+/** Who wrote the request's current revision, when that is a counter (else null). */
+const counterAuthor = (r: ChangeRequestRow): string | null =>
+  r.state === "countered" ? (get<{ author_id: string }>("SELECT author_id FROM v2_change_request_revisions WHERE change_request_id = ? AND revision = ?", r.id, r.revision)?.author_id ?? null) : null;
+
+/** Why an action sent for an earlier revision of a request is refused (409 stale_revision), as a sentence that says what
+ *  happened and what to do next, never "reload": the app's card reloads itself on a refusal (c9 W6). A counter meanwhile
+ *  names its author ("you" to the reader). `then` is what to do once the request is read again. */
+function crRevisionRefusal(r: ChangeRequestRow, reader: string, then: string): string {
+  const author = counterAuthor(r);
+  const what = author ? `${nameTo(author, reader)} countered it, and it is now at revision ${r.revision}` : `it is now at revision ${r.revision}`;
+  return `This request changed after you read it: ${what}. ${then}`;
+}
+const DECIDE_AGAIN = "Read it again and decide again.";
 
 /** Who must be able to read a dependency a revision adds, and what the refusal says. A proposal (or a rebase) is
  *  decided by the goal's effective approval set; a counter goes back to the requester, who accepts it or not, and then
@@ -169,10 +189,12 @@ const DEPENDENCY_READERS = {
 /** A decision refused because the decider can't read a dependency the request adds (the approval set, or what they can
  *  read, changed after it was added): what they can do, naming no goal. Before approval the requester can still change
  *  the request; an approved one can only be launched by someone who can see it, or proposed again. */
-const decisionRefusedFor = (requester: string) =>
-  `This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask ${memberName(requester)} to withdraw it, or to rebase it without that dependency.`;
-const launchRefusedFor = (requester: string) =>
-  `This change adds a dependency on a goal you can't see, so you can't launch what it publishes. Ask someone who decides on this goal and can see it to launch it, or ask ${memberName(requester)} to propose the change again without that dependency.`;
+const decisionRefusedFor = (requester: string, reader: string) =>
+  requester === reader
+    ? "This request adds a dependency on a goal you can't see, so you can't approve what it asks. Withdraw it, or update it without that dependency."
+    : `This request adds a dependency on a goal you can't see, so you can't approve what it asks. Ask ${memberName(requester)} to withdraw it, or to rebase it without that dependency.`;
+const launchRefusedFor = (requester: string, reader: string) =>
+  `This change adds a dependency on a goal you can't see, so you can't launch what it publishes. Ask someone who decides on this goal and can see it to launch it, or ${requester === reader ? "propose" : `ask ${memberName(requester)} to propose`} the change again without that dependency.`;
 /** A rebase refused for a dependency someone else's counter added (the approval set changed since): whose it was. */
 const rebaseRefusedFor = (author: string) =>
   `Someone who decides on this goal can't see a goal that ${memberName(author)}'s suggestion added as a dependency, so they couldn't see what they approve. Withdraw this request and propose the change again without it, or ask that goal's owner to share it with them first.`;
@@ -184,16 +206,16 @@ function hiddenDependencyRefusal(pp: PolicyPrincipal, r: ChangeRequestRow, kind:
   const deps = kind === "approve" ? ((JSON.parse(r.changes_json) as Changes).depends_on ?? []) : r.approved_json ? (JSON.parse(r.approved_json) as GoalContent).depends_on : [];
   const base = versionContentOf(r.ws_id, r.goal_id, r.base_version)!;
   if (!unreadableGoals(pp, deps.filter((d) => !base.depends_on.includes(d))).length) return null;
-  return kind === "approve" ? decisionRefusedFor(r.requester_id) : launchRefusedFor(r.requester_id);
+  return kind === "approve" ? decisionRefusedFor(r.requester_id, pp.userId) : launchRefusedFor(r.requester_id, pp.userId);
 }
 
 /** Why a request can't be approved (pending) or launched (approved) as it stands: a goal it adds as a dependency has come
  *  to depend on this goal since (another request launched, or an owner saved a version), so publishing it would close a
- *  loop. Names no goal; the same words for every reader. */
-const loopRefusalFor = (r: ChangeRequestRow) =>
+ *  loop. Names no goal; the same words for every reader, but the requester hears "you" (c9 W3). */
+const loopRefusalFor = (r: ChangeRequestRow, reader: string) =>
   r.state === "approved"
-    ? `A goal this change adds as a dependency has since come to depend on this goal, so launching it would make a loop. It can launch once that loop is gone; a newer version of this goal supersedes it, and ${memberName(r.requester_id)} can propose the change again without that dependency.`
-    : `A goal this request adds as a dependency has since come to depend on this goal, so approving it would make a loop. Someone who decides on this goal can suggest a change without that dependency or decline it, and ${memberName(r.requester_id)} can withdraw it.`;
+    ? `A goal this change adds as a dependency has since come to depend on this goal, so launching it would make a loop. It can launch once that loop is gone; a newer version of this goal supersedes it, and ${nameTo(r.requester_id, reader)} can propose the change again without that dependency.`
+    : `A goal this request adds as a dependency has since come to depend on this goal, so approving it would make a loop. Someone who decides on this goal can suggest a change without that dependency or decline it, and ${nameTo(r.requester_id, reader)} can withdraw it.`;
 
 /** The refusal (409 cycle) for approving a pending request, or launching an approved one, whose dependencies would close
  *  a loop against the goals as they stand now, or null. One predicate for the action, the `can` flags (Accept if… in the
@@ -201,7 +223,7 @@ const loopRefusalFor = (r: ChangeRequestRow) =>
  *  refuses for a loop. A pending request that is behind its goal is checked too, against the goals as they stand: its
  *  requester can still update it (a rebase keeping its changes is not refused for the loop, C6-2), and then it waits on
  *  its deciders like any other. An approved one only on a goal still at its base version (else it is superseded). */
-function dependencyLoop(r: ChangeRequestRow, g: GoalRow): string | null {
+function dependencyLoop(r: ChangeRequestRow, g: GoalRow, reader: string): string | null {
   let deps: string[];
   if (r.state === "pending") {
     const c = JSON.parse(r.changes_json) as Changes;
@@ -210,7 +232,7 @@ function dependencyLoop(r: ChangeRequestRow, g: GoalRow): string | null {
   } else if (r.state === "approved" && (r.launch === "pending" || r.launch === "not_yet") && r.approved_json && g.version === r.base_version) {
     deps = (JSON.parse(r.approved_json) as GoalContent).depends_on;
   } else return null;
-  return deps.length && dependencyCycle(r.ws_id, r.goal_id, deps) ? loopRefusalFor(r) : null;
+  return deps.length && dependencyCycle(r.ws_id, r.goal_id, deps) ? loopRefusalFor(r, reader) : null;
 }
 
 /** The first dependency `changes` adds (one not in `already`) that one of `readers` can't read, or null. */
@@ -374,9 +396,9 @@ const counterRevision = (revs: RevisionRow[]) => [...revs].reverse().find((v) =>
 
 export async function createChangeRequest(pp: PolicyPrincipal, goalId: string, b: Body) {
   const g = visibleGoal(pp, goalId);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   if (g.owner_id === pp.userId) throw forbidden("own_goal", "You own this goal. Save a new version instead.");
-  if (g.status !== "active") throw conflict("goal_not_active", "This goal is achieved or dropped, so it takes no change requests");
+  if (g.status !== "active") throw conflict("goal_not_active", "This goal is achieved or dropped, so it takes no change requests.");
   const baseVersion = nonNegInt(b, "base_version");
   if (baseVersion !== g.version) throw conflict("stale_version", `This goal changed while you were editing. Reload to start from version ${g.version}.`);
   const reason = str(b, "reason", TEXT_MAX);
@@ -387,7 +409,7 @@ export async function createChangeRequest(pp: PolicyPrincipal, goalId: string, b
     // Again inside the transaction: the goal may have moved, or another request been opened, since we read it.
     const now = goalRow(pp.wsId, g.id)!;
     if (now.version !== g.version) throw conflict("stale_version", `This goal changed while you were editing. Reload to start from version ${now.version}.`);
-    if (now.status !== "active") throw conflict("goal_not_active", "This goal is achieved or dropped, so it takes no change requests");
+    if (now.status !== "active") throw conflict("goal_not_active", "This goal is achieved or dropped, so it takes no change requests.");
     if (openRequestOf(pp.wsId, g.id, pp.userId)) throw conflict("already_open", "You already have an open change request on this goal.");
     assertDependenciesVisible(pp.wsId, contentOf(now), changes, effectiveSet(now, pp.userId), "proposal");
     const created = insertChangeRequest(pp, now, changes, reason, at);
@@ -400,7 +422,7 @@ export async function createChangeRequest(pp: PolicyPrincipal, goalId: string, b
 
 export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id: string, action: ChangeRequestAction, b: Body) {
   visibleRequest(pp, id, goalId);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   const me = pp.userId;
   const at = nowIso();
   await tx(() => {
@@ -410,19 +432,19 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
     const isApprover = effectiveSet(g, r.requester_id).includes(me);
     const changes = JSON.parse(r.changes_json) as Changes;
     const approverOnly = () => {
-      if (!isApprover) throw forbidden("not_an_approver", "Only someone who can approve for this goal can do this");
+      if (!isApprover) throw forbidden("not_an_approver", "Only someone who can approve for this goal can do this.");
     };
     const launcherOnly = () => {
-      if (!launchSet(g, r.requester_id).includes(me)) throw forbidden("not_a_launcher", "Only someone who can approve for this goal, or a workspace owner, can launch it");
+      if (!launchSet(g, r.requester_id).includes(me)) throw forbidden("not_a_launcher", "Only someone who can approve for this goal, or a workspace owner, can launch it.");
     };
     const requesterOnly = () => {
-      if (!isRequester) throw forbidden("not_requester", "Only the person who asked can do this");
+      if (!isRequester) throw forbidden("not_requester", "Only the person who asked can do this.");
     };
     const inState = (...s: ChangeRequestState[]) => {
-      if (!s.includes(r.state)) throw conflict("wrong_state", crStateRefusal(r));
+      if (!s.includes(r.state)) throw conflict("wrong_state", crStateRefusal(r, me));
     };
     const expectRevision = (required: boolean) => {
-      if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", `This request is at revision ${r.revision}; reload and try again`);
+      if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", crRevisionRefusal(r, me, DECIDE_AGAIN));
     };
     /** 409 dependency_not_visible when the caller can't read a dependency the request (approve) or its approved content
      *  (launch) adds to its base version. */
@@ -432,7 +454,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
     };
     /** 409 cycle when the request's dependencies would close a loop against the goals as they stand now (C5-1). */
     const assertNoLoop = () => {
-      const refusal = dependencyLoop(r, g);
+      const refusal = dependencyLoop(r, g, me);
       if (refusal) throw conflict("cycle", refusal);
     };
     /** Record the approval and keep the resulting content on the request, approved but unlaunched (no version, no
@@ -443,12 +465,12 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
       expectRevision(true);
       const note = optStr(b, "note", TEXT_MAX);
       if (g.version !== r.base_version) {
-        throw conflict("stale_version", `The goal changed after this request was made. ${memberName(r.requester_id)} needs to update it before it can be approved.`);
+        throw conflict("stale_version", `The goal changed after this request was made. ${isRequester ? "You need" : `${memberName(r.requester_id)} needs`} to update it before it can be approved.`);
       }
       assertDecidable("approve");
       assertNoLoop();
       const next = applied(contentOf(g), changes);
-      if (sameContent(next, contentOf(g))) throw conflict("no_change", "This request no longer changes anything");
+      if (sameContent(next, contentOf(g))) throw conflict("no_change", "This request no longer changes anything.");
       // Advisory evidence: approving a revision with no links is allowed, and recorded on the decision and in the audit.
       const without = evidenceCount(r.id, r.revision) === 0 ? 1 : 0;
       run(
@@ -469,10 +491,10 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
     /** An approved request still waiting for launch, on a goal still at its base version (else 409). */
     const launchable = () => {
       if (r.state === "approved" && r.launch === "launched") throw conflict("wrong_state", `This change is already launched as version ${r.version}.`);
-      if (r.state === "superseded" && r.launch === "superseded") throw conflict("wrong_state", `This change was superseded before launch. ${memberName(r.requester_id)} can propose it again.`);
-      if (r.state !== "approved") throw conflict("wrong_state", crStateRefusal(r));
+      if (r.state === "superseded" && r.launch === "superseded") throw conflict("wrong_state", `This change was superseded before launch. ${isRequester ? "You" : memberName(r.requester_id)} can propose it again.`);
+      if (r.state !== "approved") throw conflict("wrong_state", crStateRefusal(r, me));
       // A newer version supersedes it in the same transaction, so this is a guard, not a path.
-      if (g.version !== r.base_version) throw conflict("stale_version", `This goal is at version ${g.version}; reload and try again`);
+      if (g.version !== r.base_version) throw conflict("stale_version", `The goal changed after this change was approved: it is now at version ${g.version}.`);
     };
     /** Publish the approved content as the goal's next version (authored by the approver) with its directives. */
     const launch = (content: GoalContent, approvedBy: string) => {
@@ -516,9 +538,9 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         requesterOnly();
         inState("pending", "approved");
         const c = counterRevision(revisionRows(r.id));
-        if (!c?.condition) throw conflict("no_condition", "This request has no condition to acknowledge");
-        if (b.revision !== undefined && b.revision !== c.revision) throw conflict("stale_revision", `The condition is on revision ${c.revision}; reload and try again`);
-        if (c.acknowledged_by) throw conflict("already_acknowledged", "This condition is already acknowledged");
+        if (!c?.condition) throw conflict("no_condition", "This request has no condition to acknowledge.");
+        if (b.revision !== undefined && b.revision !== c.revision) throw conflict("stale_revision", `This request changed after you read it: its condition is now on revision ${c.revision}. Read the condition again before you confirm it.`);
+        if (c.acknowledged_by) throw conflict("already_acknowledged", "You already confirmed this condition.");
         run("UPDATE v2_change_request_revisions SET acknowledged_by = ?, acknowledged_at = ? WHERE change_request_id = ? AND revision = ?", me, at, r.id, c.revision);
         run("UPDATE v2_change_requests SET updated_at = ? WHERE id = ?", at, r.id);
         audit(pp.wsId, me, "change_request.condition_acknowledged", r.id, at);
@@ -594,7 +616,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         inState("pending");
         expectRevision(false);
         const baseVersion = nonNegInt(b, "base_version");
-        if (baseVersion !== g.version) throw conflict("stale_version", `This goal is at version ${g.version}; reload and try again`);
+        if (baseVersion !== g.version) throw conflict("stale_version", `The goal changed after you read it: it is now at version ${g.version}. Update your request to that version.`);
         // The changes as sent, or the request's own, checked again against the goal as it is now. Its own changes add
         // nothing new, so a dependency that has since come to close a loop doesn't refuse the update (C6-2): the request
         // moves to this version and waits, as any request that would loop does, on its deciders to suggest a change
@@ -635,7 +657,7 @@ const mayRemoveEvidence = (pp: PolicyPrincipal, r: ChangeRequestRow, e: { revisi
  *  web session, "agent" for MCP or a device token). `goalId` is the goal named in the path (MCP names none). */
 export async function addEvidence(pp: PolicyPrincipal, goalId: string | undefined, id: string, b: Body, source: EvidenceSource) {
   visibleRequest(pp, id, goalId);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   const input = evidenceInput(b);
   const at = nowIso();
   const evId = await tx(() => {
@@ -643,14 +665,14 @@ export async function addEvidence(pp: PolicyPrincipal, goalId: string | undefine
     const g = goalRow(pp.wsId, r.goal_id)!;
     const approvers = effectiveSet(g, r.requester_id);
     if (r.requester_id !== pp.userId && !approvers.includes(pp.userId)) {
-      throw forbidden("not_involved", "Only the person who asked or someone who can approve can add evidence");
+      throw forbidden("not_involved", "Only the person who asked or someone who can approve can add evidence.");
     }
-    if (!isOpen(r)) throw conflict("wrong_state", crStateRefusal(r)); // in the app's words, as every action's (C8-1)
-    if (b.revision !== undefined && b.revision !== r.revision) throw conflict("stale_revision", `This request is at revision ${r.revision}; reload and try again`);
+    if (!isOpen(r)) throw conflict("wrong_state", crStateRefusal(r, pp.userId)); // in the app's words, as every action's (C8-1)
+    if (b.revision !== undefined && b.revision !== r.revision) throw conflict("stale_revision", crRevisionRefusal(r, pp.userId, "Add the link again if it supports that revision."));
     if (get("SELECT 1 AS x FROM v2_change_request_evidence WHERE change_request_id = ? AND revision = ? AND url = ?", r.id, r.revision, input.url)) {
-      throw conflict("duplicate_evidence", "This link is already on this revision");
+      throw conflict("duplicate_evidence", `This link is already on revision ${r.revision}, so it isn't added twice.`);
     }
-    if (evidenceCount(r.id, r.revision) >= EVIDENCE_PER_REVISION) throw conflict("too_much_evidence", `A revision holds at most ${EVIDENCE_PER_REVISION} evidence links`);
+    if (evidenceCount(r.id, r.revision) >= EVIDENCE_PER_REVISION) throw conflict("too_much_evidence", `A revision holds at most ${EVIDENCE_PER_REVISION} evidence links; remove one to add another.`);
     const newEv = newId("ev");
     run(
       "INSERT INTO v2_change_request_evidence (id, ws_id, change_request_id, revision, kind, url, label, source, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -676,14 +698,18 @@ export async function addEvidence(pp: PolicyPrincipal, goalId: string | undefine
 /** Remove one of the caller's own links from the current revision of an open request (404 if it isn't there). */
 export async function removeEvidence(pp: PolicyPrincipal, goalId: string | undefined, id: string, evidenceId: string) {
   visibleRequest(pp, id, goalId);
-  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything");
+  if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
   const at = nowIso();
   await tx(() => {
     const r = crRow(pp.wsId, id)!;
     const e = get<{ revision: number; added_by: string }>("SELECT revision, added_by FROM v2_change_request_evidence WHERE id = ? AND change_request_id = ?", evidenceId, r.id);
     if (!e) throw notFound();
-    if (e.added_by !== pp.userId) throw forbidden("not_evidence_author", "Only the person who added this link can remove it");
-    if (!mayRemoveEvidence(pp, r, e)) throw conflict("evidence_frozen", "This link is kept as it was: its revision was superseded or the request was decided");
+    if (e.added_by !== pp.userId) throw forbidden("not_evidence_author", "Only the person who added this link can remove it.");
+    // Frozen: a request no longer open says what happened in the words every refusal of it gives (c9 W1, as adding a link
+    // does: C8-1); on an earlier revision, which one the request is at now.
+    if (!mayRemoveEvidence(pp, r, e)) {
+      throw conflict("evidence_frozen", isOpen(r) ? `This link is on revision ${e.revision}, and the request has moved on to revision ${r.revision}, so the link is kept as it was.` : crStateRefusal(r, pp.userId));
+    }
     run("DELETE FROM v2_change_request_evidence WHERE id = ?", evidenceId);
     run("UPDATE v2_change_requests SET updated_at = ? WHERE id = ?", at, r.id);
     audit(pp.wsId, pp.userId, "change_request.evidence_removed", r.id, at);
@@ -728,7 +754,7 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
   const launchable = unlaunched && launchers.includes(me) && r.base_version === g.version && pp.wsRole !== "viewer";
   const hiddenRefusal = approvable ? hiddenDependencyRefusal(pp, r, "approve") : launchable ? hiddenDependencyRefusal(pp, r, "launch") : null;
   // A request whose dependencies would close a loop against the goals as they stand: refused 409 cycle (C5-1).
-  const loop = dependencyLoop(r, g);
+  const loop = dependencyLoop(r, g, pp.userId);
   const can = {
     approve: approvable && !hiddenRefusal && !loop,
     approve_and_launch: approvable && !hiddenRefusal && !loop,
@@ -804,7 +830,7 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     /** What happened to the request, in the words a `wrong_state` refusal of an action it no longer allows gives
      *  ("This request was declined by <name>, so nothing changes.", never "rejected"), so a card that finds it changed
      *  before sending says what the server would (W2). */
-    state_note: crStateRefusal(r),
+    state_note: crStateRefusal(r, me),
     /** Why `can.approve` and `can.approve_and_launch` (pending) or `can.launch` (approved) are false although the reader
      *  decides on it: the refusal they would get (409 dependency_not_visible), naming no goal. null otherwise. */
     dependency_not_visible: hiddenRefusal,

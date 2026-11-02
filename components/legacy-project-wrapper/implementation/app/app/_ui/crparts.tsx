@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, Btn, Err, Field, Input, num, Pill, Select, TextArea, usd, useAction, useApi, when } from "./kit";
+import { api, ApiError, Btn, Err, Field, Input, num, Pill, Select, sentence, TextArea, usd, useAction, useApi, when } from "./kit";
 import { LimitEditor, MeasuresEditor, limitsDraft, limitsOut, measuresDraft, measuresOut, sameLimits, type LimitDraft, type MeasureDraft } from "./goalform";
 import { LIMIT_WORDS } from "./limits";
 import type { AlignSnapshot, ChangeFields, ChangeRequest, Evidence, EvidenceKind, Goal } from "./types";
@@ -322,6 +322,20 @@ export function EvidenceItem({ e, me, busy, onRemove }: { e: Evidence; me: strin
   );
 }
 
+/** Remove one of the reader's own links. A 409 (the request was decided, withdrawn or moved on meanwhile, in another tab)
+ *  is refused as adding one is (C8-1): the card's focused "Not recorded. <the server's message>", and the card reloads to
+ *  show the request as it is now (c9 W1). Other errors throw, for the card's own error line. */
+export async function removeEvidence(path: string, id: string, setNotice: (n: Notice | null) => void, onDone: () => void) {
+  setNotice(null);
+  try {
+    await api(`${path}/evidence/${id}`, { method: "DELETE" });
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.status !== 409) throw e;
+    setNotice({ kind: "refused", text: `Not recorded. ${sentence(e.message)}` });
+  }
+  onDone();
+}
+
 /** "Recorded by Align at revision N": the goal's spend over 30 days, bound sessions and last activity. */
 export function SnapshotBox({ s }: { s: AlignSnapshot }) {
   const models = s.spend?.by_model ?? [];
@@ -383,7 +397,7 @@ export function AddEvidence({ path, revision, onDone, setNotice }: { path: strin
             await api(`${path}/evidence`, { body: { kind, url: url.trim(), label: label.trim(), revision } });
           } catch (e) {
             if (!(e instanceof ApiError) || e.status !== 409) throw e;
-            setNotice({ kind: "refused", text: `Not recorded. ${e.message}` });
+            setNotice({ kind: "refused", text: `Not recorded. ${sentence(e.message)}` });
           }
           close();
         });
@@ -436,7 +450,7 @@ export function ConditionBox({ c, said, closed }: { c: NonNullable<ChangeRequest
 }
 
 /** Every revision with its author and note, under "Revisions" once there is more than one. */
-export function Revisions({ cr }: { cr: ChangeRequest }) {
+export function Revisions({ cr, me }: { cr: ChangeRequest; me: string }) {
   if (cr.revisions.length < 2) return null;
   return (
     <details className="mt-1 text-[14px] text-zinc-500">
@@ -444,7 +458,7 @@ export function Revisions({ cr }: { cr: ChangeRequest }) {
       {cr.revisions.map((r) => (
         <div key={r.revision}>
           <p>
-            Revision {r.revision} by {r.author.name} against version {r.base_version}, {when(r.created_at)}
+            Revision {r.revision} by {r.author.id === me ? "you" : r.author.name} against version {r.base_version}, {when(r.created_at)}
             {r.note ? `: ${r.note}` : ""}
           </p>
           {r.snapshot && r.revision !== cr.revision && <SnapshotBox s={r.snapshot} />}

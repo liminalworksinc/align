@@ -19,6 +19,14 @@ export class ApiError extends Error {
   }
 }
 
+/** A server message as a sentence for a "Not recorded. …" line: capitalized, ending in a full stop, so a short
+ *  validation message ("condition is required") never runs into the next sentence (c9 sweep). */
+export function sentence(message: string): string {
+  const t = message.trim();
+  const s = t.charAt(0).toUpperCase() + t.slice(1);
+  return /[.!?…]["”]?$/.test(s) ? s : `${s}.`;
+}
+
 export async function api<T = unknown>(path: string, init?: { method?: string; body?: unknown; headers?: Record<string, string> }): Promise<T> {
   const res = await fetch(path, {
     method: init?.method ?? (init?.body !== undefined ? "POST" : "GET"),
@@ -31,7 +39,7 @@ export async function api<T = unknown>(path: string, init?: { method?: string; b
   const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string; code?: string };
   if (!res.ok) {
     if (res.status === 401 && typeof window !== "undefined") go(`/app/sign-in?next=${encodeURIComponent(window.location.pathname)}`);
-    throw new ApiError(res.status, data.error ?? data.code ?? "error", data.message ?? `Something went wrong (${res.status})`);
+    throw new ApiError(res.status, data.error ?? data.code ?? "error", data.message ?? `Something went wrong (${res.status}).`);
   }
   return data as T;
 }

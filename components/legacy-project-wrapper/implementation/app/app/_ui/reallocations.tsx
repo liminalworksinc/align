@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { api, ApiError, Btn, Card, Err, Field, Input, Loading, Note, Pill, TextArea, useAction, useApi, when } from "./kit";
+import { api, ApiError, Btn, Card, Err, Field, Input, Loading, Note, Pill, sentence, TextArea, useAction, useApi, when } from "./kit";
 import { NoticeBox, useNotice, type Notice } from "./crparts";
 import type { Me } from "./server";
 import type { Goal, Reallocation, WsDetail } from "./types";
@@ -11,7 +11,11 @@ import type { Goal, Reallocation, WsDetail } from "./types";
 // hear the new targets.
 
 const pctOr = (v: number | null) => (v === null ? "no target" : `${v}%`);
-const names = (l: { name: string }[]) => l.map((p) => p.name).join(", ");
+/** A person as the reader hears them: "you" for themself, as change requests say it (c9 W3), never their own name. */
+const said = (p: { id: string; name: string } | null, me: string) => (!p ? "someone" : p.id === me ? "you" : p.name);
+const names = (l: { id: string; name: string }[], me: string) => l.map((p) => said(p, me)).join(", ");
+/** Closed: nothing more can happen to it, so a goal not approved in it needs nobody (c9 W7). */
+const closed = (r: Reallocation) => r.state === "rejected" || r.state === "withdrawn" || r.state === "superseded";
 
 const STATE_WORDS: Record<Reallocation["state"], string> = {
   pending: "waiting for approval",
@@ -22,11 +26,11 @@ const STATE_WORDS: Record<Reallocation["state"], string> = {
   superseded: "superseded",
 };
 
-function launchLine(r: Reallocation) {
+function launchLine(r: Reallocation, me: string) {
   if (r.state === "superseded") return "Superseded: one of its goals got a newer version first. It never reached agents; propose again if it still applies.";
   if (r.state !== "approved") return null;
-  if (r.launch === "launched") return `Launched by ${r.launch_decided_by?.name ?? "someone"}, ${when(r.launch_decided_at)}. Agents on these goals hear the new targets at their next turn.`;
-  if (r.launch === "not_yet") return `Approved, not launched yet: ${r.launch_decided_by?.name ?? "someone"} decided not yet. Agents still have the old targets.`;
+  if (r.launch === "launched") return `Launched by ${said(r.launch_decided_by, me)}, ${when(r.launch_decided_at)}. Agents on these goals hear the new targets at their next turn.`;
+  if (r.launch === "not_yet") return `Approved, not launched yet: ${said(r.launch_decided_by, me)} decided not yet. Agents still have the old targets.`;
   return "Approved, waiting for launch. Agents still have the old targets.";
 }
 
@@ -80,12 +84,12 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
       } catch (e) {
         if (!(e instanceof ApiError)) throw e;
         const conflict = e.status === 409;
-        setNotice({ kind: "refused", text: `Not recorded. ${e.message}${conflict ? "" : " Nothing changed."}` });
+        setNotice({ kind: "refused", text: `Not recorded. ${sentence(e.message)}${conflict ? "" : " Nothing changed."}` });
         if (conflict) onDone();
       }
     });
   const doIt = decide;
-  const line = launchLine(r);
+  const line = launchLine(r, me.id);
   const reason = r.history.find((h) => h.revision === 1)?.note ?? null;
   const counterNote = [...r.history].reverse().find((h) => h.revision > 1 && h.author.id !== r.requester.id && h.note) ?? null;
   return (
@@ -103,7 +107,12 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
         {r.targets.map((t, i) => (
           <li key={i} className="break-words">
             {t.goal ? t.goal.title : "A goal you can't see"}: {t.goal ? `${pctOr(t.from_share)} → ${pctOr(t.target_share)}` : "changes"}
-            {t.goal && (t.approved ? <span className="text-zinc-500"> (approved by {t.approved_by?.name ?? "someone"})</span> : <span className="text-zinc-500"> (needs one of: {names(t.approvers) || "nobody yet"})</span>)}
+            {t.goal &&
+              (t.approved ? (
+                <span className="text-zinc-500"> (approved by {said(t.approved_by, me.id)})</span>
+              ) : (
+                !closed(r) && <span className="text-zinc-500"> (needs one of: {names(t.approvers, me.id) || "nobody yet"})</span>
+              ))}
           </li>
         ))}
       </ul>
@@ -119,7 +128,12 @@ function ProposalItem({ ws, r, me, onDone }: { ws: string; r: Reallocation; me: 
           {counterNote.author.id === me.id ? "Your" : `${counterNote.author.name}'s`} note on revision {counterNote.revision}: “{counterNote.note}”
         </p>
       )}
-      {r.rejection_reason && <p className="text-[14px] text-zinc-600">Declined by {r.rejected_by?.name}: “{r.rejection_reason}”</p>}
+      {r.state === "rejected" && (
+        <p className="text-[14px] text-zinc-600" data-reallocation-declined>
+          Declined by {said(r.rejected_by, me.id)}
+          {r.rejection_reason ? <>: “{r.rejection_reason}”</> : "."}
+        </p>
+      )}
       {line && <p className="text-[14px] text-zinc-600">{line}</p>}
       <div className="mt-2 flex flex-wrap gap-2">
         {r.can.approve && (
