@@ -889,8 +889,8 @@ and a closed "Details" disclosure.
 
 #### Scenario: A refused update to the goal's version
 
-- **WHEN** the requester presses **Update to version <n>** and the server refuses it (409, for example `stale_version` because the goal moved on again, `dependency_not_visible` or `cycle`) (`scripts/test-v2.mjs` "C3-5 (ui): a refused Update to version n reads \"Not recorded. ...")
-- **THEN** the card shows a focused alert "Not recorded. <the server's message>" like every other refused decision and reloads, so it shows the request as it is now (for `stale_version`, **Update to version <the goal's new version>**)
+- **WHEN** the requester presses **Update to version <n>** and the server refuses it (409, for example `stale_version` because the goal moved on again, `dependency_not_visible` or `cycle`, or `wrong_state` because an approver countered it meanwhile) (`scripts/test-v2.mjs` "C3-5 (ui): a refused Update to version n reads \"Not recorded. ..." and "W6 (ui): ...")
+- **THEN** the card shows a focused alert "Not recorded. <the server's message>" like every other refused decision and reloads, so it shows the request as it is now (for `stale_version`, **Update to version <the goal's new version>**; for a counter, "Not recorded. This request was countered by <name>; review the counter." and the counter with **Accept the change** and **Withdraw**)
 
 #### Scenario: Viewer
 

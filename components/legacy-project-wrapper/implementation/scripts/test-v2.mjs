@@ -7899,6 +7899,18 @@ try {
           `${bumpR2.status} ${rNotice} ${rText.slice(0, 500)}`,
         );
 
+        // W6 (E2E-WEB cycle 7): an approver counters the behind request while its requester's card is open; Update to
+        // version 3 is then refused in Y5's words, naming who countered it, never the bare "This request is countered".
+        const ctrR = await xa(XO, "POST", `/goals/${GR?.id}/change-requests/${crR?.id}/counter`, { changes: { title: "Rebase here, retitled" }, note: "A shorter name" });
+        await press(pA, rSel, "Update to version 3");
+        await pA.waitForFunction((s) => /Not recorded\. This request was countered/.test(document.querySelector(s)?.innerText ?? ""), { timeout: 15000 }, rSel).catch(() => undefined);
+        const w6Text = await textOf(pA, rSel);
+        check(
+          "W6 (ui): Update to version n on a request countered meanwhile (another tab) reads \"Not recorded. This request was countered by <approver>; review the counter.\" (wrong_state in the app's words, naming who countered it), never \"This request is countered\"",
+          ctrR.status === 200 && w6Text.includes(`Not recorded. This request was countered by ${XO.name}; review the counter.`) && !w6Text.includes("This request is countered"),
+          `${ctrR.status} ${ctrR.text.slice(0, 200)} ${w6Text.slice(0, 600)}`,
+        );
+
         // C3-3 (ui): the propose form doesn't offer the goals that would make a loop, and says why.
         await open(pO, `/app/w/${XW}/goals/${GQ?.id}`);
         await press(pO, "#change-requests", "Propose a change");

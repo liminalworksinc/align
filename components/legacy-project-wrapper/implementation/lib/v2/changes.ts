@@ -133,6 +133,29 @@ function changesIn(pp: PolicyPrincipal, goalId: string, base: GoalContent, v: un
 
 const applied = (base: GoalContent, c: Changes): GoalContent => ({ ...base, ...c });
 
+/** Why an action on a request in another state is refused (409 wrong_state), in the app's words ("declined", never
+ *  "rejected") and naming who did it, as the alignments' refusals do (Y5): everyone who may act on a request sees its
+ *  requester and approvers. A counter names its author, so a requester whose open card offered **Update to version n**
+ *  hears to review it (W6). */
+function crStateRefusal(r: ChangeRequestRow): string {
+  switch (r.state) {
+    case "pending":
+      return "This request is waiting for approval; reload to see it.";
+    case "countered": {
+      const author = get<{ author_id: string }>("SELECT author_id FROM v2_change_request_revisions WHERE change_request_id = ? AND revision = ?", r.id, r.revision)?.author_id;
+      return `This request was countered${author ? ` by ${memberName(author)}` : ""}; review the counter.`;
+    }
+    case "approved":
+      return "This request is already approved; reload to see it.";
+    case "rejected":
+      return `This request was declined${r.rejected_by ? ` by ${memberName(r.rejected_by)}` : ""}, so nothing changes.`;
+    case "withdrawn":
+      return `This request was withdrawn by ${memberName(r.requester_id)}, so nothing changes.`;
+    case "superseded":
+      return "This request was superseded: its goal was closed or got a newer version first, so nothing changes.";
+  }
+}
+
 /** A counter that would change nothing (409 no_change): suggest a change, or decline instead (C7-2). */
 const COUNTER_NO_CHANGE = "This suggestion changes nothing on the goal, so there is nothing to suggest. Change a field to suggest something else, or decline the request.";
 
@@ -384,7 +407,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
       if (!isRequester) throw forbidden("not_requester", "Only the person who asked can do this");
     };
     const inState = (...s: ChangeRequestState[]) => {
-      if (!s.includes(r.state)) throw conflict("wrong_state", `This request is ${r.state}`);
+      if (!s.includes(r.state)) throw conflict("wrong_state", crStateRefusal(r));
     };
     const expectRevision = (required: boolean) => {
       if ((required || b.revision !== undefined) && b.revision !== r.revision) throw conflict("stale_revision", `This request is at revision ${r.revision}; reload and try again`);
@@ -435,7 +458,7 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
     const launchable = () => {
       if (r.state === "approved" && r.launch === "launched") throw conflict("wrong_state", `This change is already launched as version ${r.version}.`);
       if (r.state === "superseded" && r.launch === "superseded") throw conflict("wrong_state", `This change was superseded before launch. ${memberName(r.requester_id)} can propose it again.`);
-      if (r.state !== "approved") throw conflict("wrong_state", `This request is ${r.state}`);
+      if (r.state !== "approved") throw conflict("wrong_state", crStateRefusal(r));
       // A newer version supersedes it in the same transaction, so this is a guard, not a path.
       if (g.version !== r.base_version) throw conflict("stale_version", `This goal is at version ${g.version}; reload and try again`);
     };
