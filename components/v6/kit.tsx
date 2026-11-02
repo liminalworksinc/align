@@ -26,8 +26,11 @@ export function Pill({ tone, children, small }: { tone: PillTone; children: Reac
   );
 }
 
-export function Chip({ children, tone }: { children: ReactNode; tone?: "amber" | "violet" }) {
+export function Chip({ children, tone, wrap = false }: { children: ReactNode; tone?: "amber" | "violet"; wrap?: boolean }) {
   const color = tone === "amber" ? "text-amber-700" : tone === "violet" ? "text-violet-700" : "text-zinc-700";
+  // `wrap` (custom only: a sentence, such as a company goal's measure) wraps at any width instead of running past its
+  // column; on one line it looks the same.
+  if (wrap) return <span className={`max-w-full whitespace-normal rounded-[12px] bg-zinc-100 px-[9px] py-[3px] text-[12px] ${color}`}>{children}</span>;
   // A long chip wraps in a narrow container (a custom workspace on a phone); elsewhere it stays on one line.
   return <span className={`whitespace-nowrap rounded-full bg-zinc-100 px-[9px] py-[3px] text-[12px] @max-md:whitespace-normal ${color}`}>{children}</span>;
 }
