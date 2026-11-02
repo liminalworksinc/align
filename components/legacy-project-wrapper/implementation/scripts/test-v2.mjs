@@ -9431,6 +9431,59 @@ try {
   }
   // ==== end fix:c10-web ====
 
+  // ==== fix:c11-web ====
+  // Regression checks for the cycle-11 web walk (e2e-reports/cycle11/web.md) that the API shows: W1 (API-only refusals
+  // in a person's words), W2 (Not yet twice) and W3 (a revision from the future), on a workspace of their own. SO owns it
+  // and ST, a Growth goal; SC leads Growth, so SO and SC both decide on ST; SD, a Growth member, asks.
+  {
+    const sUsers = {};
+    for (const [who, name] of [
+      ["SO", "Sasha Owner"],
+      ["SC", "Sol Lead"],
+      ["SD", "Sami Asker"],
+    ])
+      sUsers[who] = await signUp(who, name, `${who.toLowerCase()}@c11web.example.test`);
+    const { SO, SC, SD } = sUsers;
+    const SW = (await call("SO", "POST", "/api/v2/workspaces", { cookie: SO.cookie, body: { name: "C11 web fix workspace" } })).json?.id;
+    const sa = (u, method, p, body) => call(u.who, method, `/api/v2/workspaces/${SW}${p}`, { cookie: u.cookie, ...(body !== undefined ? { body } : {}) });
+    for (const u of [SC, SD]) {
+      const i = await sa(SO, "POST", "/invites", { email: u.email, role: "member" });
+      await call(u.who, "POST", `/api/v2/invites/${i.json?.token}/accept`, { cookie: u.cookie, body: {} });
+    }
+    const STm = (await sa(SO, "POST", "/teams", { name: "Growth" })).json?.id;
+    await sa(SO, "POST", `/teams/${STm}/members`, { user_id: SC.id, role: "lead" });
+    for (const u of [SD, SO]) await sa(SO, "POST", `/teams/${STm}/members`, { user_id: u.id, role: "member" });
+    const sGoal = async (title, u = SO, team = STm) => (await sa(u, "POST", "/goals", { title, visibility: "workspace", ...(team ? { team_id: team } : {}) })).json;
+    const ST = await sGoal("Ship 2000 robot arms");
+    const sAl = async (n) => {
+      const src = await sGoal(`Sami's goal ${n}`, SD, null);
+      return (await sa(SD, "POST", "/alignments", { target_goal_id: ST?.id, source_goal_id: src?.id, choice: "contribution", session_keys: [] })).json;
+    };
+    const sAlAct = (u, al, action, body) => sa(u, "POST", `/alignments/${al?.id}/${action}`, body);
+    const sAlNow = (al) => withDb((d) => d.prepare("SELECT state, revision FROM v2_alignments WHERE id = ?").get(al?.id));
+
+    // -- W1: refusals only an API client can get say what to do, never a field name --
+    const NO_REV = "This decision doesn't say which revision you read, so nothing was recorded. Read it again and decide again.";
+    const w1Al = await sAl("w1");
+    const w1Revs = [];
+    for (const body of [{}, { revision: "1" }, { revision: null }, { revision: -1 }, { revision: 1.5 }]) w1Revs.push(await sAlAct(SO, w1Al, "approve", body));
+    const w1Codes = [];
+    for (const [route, body] of [
+      ["approve", { user_code: null, workspace_ids: [SW] }],
+      ["approve", { user_code: 12345678, workspace_ids: [SW] }],
+      ["deny", { user_code: null }],
+      ["deny", { user_code: ["BCDF-GHJK"] }],
+    ])
+      w1Codes.push(await call("SO", "POST", `/api/v2/device/${route}`, { cookie: SO.cookie, body }));
+    const w1Long = await call("SO", "POST", "/api/v2/device/deny", { cookie: SO.cookie, body: { user_code: "BCDF-GHJK-BCDF-GHJK-BCDF" } });
+    check(
+      "c11 W1 (E2E-WEB cycle 11): an alignment decision with no revision, or one that isn't a whole number (\"1\", null, -1, 1.5), is 400 \"This decision doesn't say which revision you read, so nothing was recorded. Read it again and decide again.\", never \"revision must be a non-negative integer\"; a device approval or denial whose code is null, a number or a list is 400 \"Enter the code shown by align login.\" and a code longer than any align login shows \"That code is too long. Enter the code shown by align login.\", never \"user_code …\"; the request stays pending at revision 1",
+      w1Revs.every((r) => r.status === 400 && r.json?.message === NO_REV) && w1Codes.every((r) => r.status === 400 && r.json?.message === "Enter the code shown by align login.") &&
+        w1Long.status === 400 && w1Long.json?.message === "That code is too long. Enter the code shown by align login." && JSON.stringify(sAlNow(w1Al)) === JSON.stringify({ state: "pending", revision: 1 }),
+      `${w1Revs.map((r) => `${r.status} ${r.json?.message}`).join(" | ")} || ${w1Codes.map((r) => `${r.status} ${r.json?.message}`).join(" | ")} || ${w1Long.text} ${JSON.stringify(sAlNow(w1Al))}`,
+    );
+  }
+  // ==== end fix:c11-web ====
 
   // -- the private-goal canary never reached anyone but its owner --
   const leaks = seen.filter((s) => s.who !== "U2" && s.text.includes(CANARY));

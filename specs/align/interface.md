@@ -356,8 +356,9 @@ another code SHALL close that panel and clear its ticks, as a new **Look up** do
 that the person did not look up (E2E-WEB cycle 10 C10-1). A **Look up** still on its way when the field changes SHALL
 be dropped when it answers unless the field still holds the code it looked up (case, spaces and dashes aside), and so
 SHALL any but the latest **Look up**, so the panel never opens for a device whose code the field no longer shows
-(E2E-WEB cycle 11 C11-1). An approval or denial with no code SHALL be 400 `Enter the code shown by align login.`, never a
-field name (E2E-WEB cycle 10 W4). A device name, on this page (its
+(E2E-WEB cycle 11 C11-1). An approval or denial with no code, or with a `user_code` that is not text (`null`, a number),
+SHALL be 400 `Enter the code shown by align login.`, and one longer than 20 characters 400 `That code is too long. Enter
+the code shown by align login.`, never a field name (E2E-WEB cycle 10 W4, cycle 11 W1). A device name, on this page (its
 panel and the note after **Approve**) as on the Devices page, the invite page ("Your paired devices") and the Sessions
 page (the line naming a session's machine), SHALL wrap anywhere and clip what can't wrap inside its own box, and every box
 that holds one SHALL be able to shrink below the name's width (a `fieldset` included, whose default minimum is its
@@ -379,8 +380,8 @@ E2E-WEB cycle 11 W4).
 
 #### Scenario: An empty code
 
-- **WHEN** an approval or denial is posted with an empty or blank `user_code` (`scripts/test-v2.mjs` "W4 (E2E-WEB cycle 10): ...")
-- **THEN** it is 400 `Enter the code shown by align login.`
+- **WHEN** an approval or denial is posted with an empty or blank `user_code` (`scripts/test-v2.mjs` "W4 (E2E-WEB cycle 10): ..."), or with `null`, a number or a list (`scripts/test-v2.mjs` "c11 W1 (E2E-WEB cycle 11): ...")
+- **THEN** it is 400 `Enter the code shown by align login.`, and a code of more than 20 characters is 400 `That code is too long. Enter the code shown by align login.`
 
 #### Scenario: A device name too wide for the page
 

@@ -8,7 +8,7 @@ import { writeDirective } from "./directives";
 import { holdNewlyBound } from "./requests";
 import { openEpoch, sessionRow, type SessionRow } from "./sessions";
 import { memberName, nameTo, need } from "./workspaces";
-import { nonNegInt, oneOf, optStr, strList, type Body } from "./validate";
+import { oneOf, optStr, revisionRead, strList, type Body } from "./validate";
 
 // Alignment = effect-scoped approval (plan rev 2, option D). Two choices in the UI:
 //   contribution -> contributes_to only (a relationship; nothing about usage or directives changes)
@@ -289,9 +289,9 @@ function revisionRefusal(a: AlignmentRow, reader: string): string {
 export async function actOnAlignment(pp: PolicyPrincipal, id: string, action: AlignmentAction, b: Body) {
   const a0 = visibleAlignment(pp, id);
   if (pp.wsRole === "viewer") throw forbidden("read_only", "Viewers can look but not change anything.");
-  // Every decision names the revision the person read (400 without one), so it is never recorded against a counter or a
-  // revision they never saw (c10 C10-2).
-  const seen = nonNegInt(b, "revision");
+  // Every decision names the revision the person read (400 without one, in words: c11 W1), so it is never recorded
+  // against a counter or a revision they never saw (c10 C10-2).
+  const seen = revisionRead(b);
   const me = pp.userId;
   const at = nowIso();
   await tx(() => {

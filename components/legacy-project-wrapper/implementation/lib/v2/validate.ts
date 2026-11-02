@@ -95,6 +95,21 @@ export function nonNegInt(b: Body, k: string): number {
   return v;
 }
 
+/** A decision sent without the revision its person read, or with one that is not a whole number: refused in a person's
+ *  words, never a field name, though only API clients can send it (E2E-WEB cycle 11 W1). */
+export const NO_REVISION = "This decision doesn't say which revision you read, so nothing was recorded. Read it again and decide again.";
+
+/** The `revision` a decision was taken on (a whole number from 0; 400 NO_REVISION otherwise). With `optional`, a
+ *  decision that leaves it out gives `undefined` (change requests and target changes); alignments always need it. */
+export function revisionRead(b: Body, optional: true): number | undefined;
+export function revisionRead(b: Body, optional?: false): number;
+export function revisionRead(b: Body, optional = false): number | undefined {
+  const v = b.revision;
+  if (v === undefined && optional) return undefined;
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) throw badRequest(NO_REVISION);
+  return v;
+}
+
 export function optInt(b: Body, k: string): number | null {
   if (b[k] === undefined || b[k] === null) return null;
   return nonNegInt(b, k);
