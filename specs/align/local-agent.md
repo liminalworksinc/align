@@ -1305,7 +1305,8 @@ and when signed in flush the outbox, poll directives, upload usage, refresh `/ap
 otherwise every 10 minutes, and at once when the directives answer's `workspaces` differ from the cached `me.json`) and every workspace's goal feed, fetch each workspace's asks feed with `If-None-Match`
 into `feeds/asks-<ws>.json` (a 304 only updates `fetched_at`; it keeps the asks of the person's teams and the asks
 they recorded, then the accepted asks of a team the person is not in whose goal one of this machine's sessions counts
-toward (an approved alignment; E2E acycle1 A1-cross-2), at most 200 with the person's own first, then open and
+toward (an approved alignment; the server marks such asks `via_alignment: {goal_id}`, which is kept, and an ask so
+marked is kept even when no cached goal names its team; E2E acycle1 A1-cross-2), at most 200 with the person's own first, then open and
 accepted, without the server's `can` flags; when those followed teams changed since the cached answer, the asks feed
 SHALL be read again without `If-None-Match`; any failure leaves the cached file as it was), detect git edits, upload activity, fetch team activity and report queued steering lines; and,
 signed in or not, recompute the local unshared-time digest at most every 6 hours. It SHALL record `{at, ms, pid}` in `~/.align/last-sync.json`,
@@ -1445,7 +1446,11 @@ longer is (`me.json` no longer lists it, so the feed no longer holds its asks; w
 `asks_seen`): that is told once as `[Align] Team "<team>": you are no longer
 in this team, so its accepted asks are no longer shown here; they were not closed. No added authority.` A session that
 follows a goal of a team the person was never in gets that team's accepted asks only while they are accepted, so for it
-an ask that is gone closed, and it is told so (E2E acycle1 A1-cross-3). A quoted text that already ends in `.`, `!` or
+an ask that is gone closed, and it is told so (E2E acycle1 A1-cross-3). When such a session stops following that goal
+(its alignment revoked, so its binding is suspended; moved to a goal of another team; or no longer counting) while
+that team's accepted asks are in its context, the `bound` or `unbound` delta SHALL be followed, once, by `[Align] This
+session no longer follows a goal of team "<team>", so that team's accepted asks given earlier no longer apply to it;
+they were not closed. No added authority.` A quoted text that already ends in `.`, `!` or
 `?` SHALL not be followed by a second full stop in any note or notice (`... "<limit>." No added authority.`, never
 `"<limit>.".`; E2E acycle1 A1-cross-10). Each delta SHALL be delivered once; unchanged prompts SHALL
 produce 0 bytes, and private sessions SHALL produce 0 bytes on `SessionStart`, `UserPromptSubmit` and `PreToolUse`
@@ -1459,7 +1464,7 @@ apart from the user-only hints and `::align` replies described in other requirem
 #### Scenario: A team followed through an approved alignment
 
 - **WHEN** the person is in team Retirement only, their session is shared toward "Ship the v2 onboarding flow" of team Cutover, Cutover accepts an ask, the server later drops it from the feed once withdrawn, and an ask the person recorded is accepted and then withdrawn (test `findings16` "its accepted asks reach the session; ...")
-- **THEN** the first ask arrives as `[Align] Accepted ask of team "Cutover": ...`, the envelope's heading says `this session follows a goal of that team`, each closing is told once as `1 earlier accepted ask closed (done, reopened or withdrawn)`, and nothing says `no longer in this team` or `you are`
+- **THEN** the first ask arrives as `[Align] Accepted ask of team "Cutover": ...` and the feed keeps its `via_alignment`, the envelope's heading says `this session follows a goal of that team`, each closing is told once as `1 earlier accepted ask closed (done, reopened or withdrawn)`, and nothing says `no longer in this team` or `you are`; when the alignment is then revoked (the binding suspended, the team's asks gone from the feed), the next prompt has the `unbound` delta and `This session no longer follows a goal of team "Cutover", ... they were not closed.` once
 
 #### Scenario: Fifty unchanged prompts
 

@@ -217,8 +217,14 @@ describe("A1-cross-3: a team the person is not in, followed through an approved 
 
   test("its accepted asks reach the session; the envelope says the session follows a goal of that team; a closing is told as a closing, never as leaving the team", async () => {
     const { fake, t, sid, cwd, prompt, sync } = await world();
-    fake.addAsk("ws_acme", accepted("ask_3", "Do the cutover outside month-end close. ASKCANARY-3", { from_label: "Retirement" }));
+    // As the fixed server marks it (A1-cross-2): read only through the alignment.
+    fake.addAsk("ws_acme", accepted("ask_3", "Do the cutover outside month-end close. ASKCANARY-3", { from_label: "Retirement", via_alignment: { goal_id: "g_ship" } }));
+    // The server's mark alone keeps an ask, even of a team no cached goal names.
+    fake.addAsk("ws_acme", accepted("ask_9", "Another followed team's ask", { team: { id: "pod_x", name: "X" }, via_alignment: { goal_id: "g_x" } }));
     await sync();
+    const kept = readJson<{ asks: Ask[] }>(layout.asksFeed(t.home, "ws_acme"))!.asks;
+    assert.deepEqual(kept.find((a) => a.id === "ask_3")?.via_alignment, { goal_id: "g_ship" });
+    assert.ok(kept.some((a) => a.id === "ask_9"));
     const note = ctxOf(prompt());
     assert.match(note, /^\[Align\] Accepted ask of team "Cutover": "Do the cutover outside month-end close\. ASKCANARY-3" \(asked by "Retirement"/);
     const env = ctxOf(runHook(t, "claude", "SessionStart", { session_id: sid, source: "compact", cwd }).stdout);
@@ -242,6 +248,22 @@ describe("A1-cross-3: a team the person is not in, followed through an approved 
     const again = ctxOf(prompt());
     assert.match(again, /1 earlier accepted ask closed/);
     assert.doesNotMatch(again, /no longer in this team|were not closed/);
+
+    // The alignment is revoked: the binding is suspended and the server stops serving the team's asks. Said honestly.
+    fake.addAsk("ws_acme", accepted("ask_4", "Freeze schema changes during the cutover. ASKCANARY-4", { via_alignment: { goal_id: "g_ship" } }));
+    await sync();
+    assert.match(ctxOf(prompt()), /ASKCANARY-4/);
+    const c = ctxFor(t);
+    const skey = sessionKey(c.secret, "ws_acme", "claude-code", sid);
+    c.db.close();
+    fake.asks.set("ws_acme", (fake.asks.get("ws_acme") || []).filter((a) => a.id !== "ask_4"));
+    fake.pushDirective({ ws: "ws_acme", kind: "binding_suspended", session_keys: [skey], goal: null, binding: null });
+    await sync();
+    const ended = ctxOf(prompt());
+    assert.match(ended, /no longer bound to an Align goal/);
+    assert.match(ended, /^\[Align\] This session no longer follows a goal of team "Cutover", so that team's accepted asks given earlier no longer apply to it; they were not closed\. No added authority\.$/m);
+    assert.doesNotMatch(ended, /closed \(done|no longer in this team/);
+    assert.equal(prompt(), "", "told once");
   });
 });
 
@@ -396,7 +418,6 @@ describe("works but confusing: the offline sync counts waiting activity", () => 
     fake.setOffline(true);
     const off = await runCli(t, ["sync"]);
     assert.match(off.stderr, /\d+ usage rows, 1 activity item and \d+ queued calls stay on this machine/, off.stderr);
-    void sessionKey;
   });
 });
 

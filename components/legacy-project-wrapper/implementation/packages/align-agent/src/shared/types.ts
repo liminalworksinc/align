@@ -203,7 +203,7 @@ export interface InjectedState {
   /** The bound goal's limits (id and text) last put into context, so a version's delta can name a changed limit. */
   limits_seen?: { id: string; text: string }[];
   /** The accepted asks of the bound goal's team last put into context (D3); a change is told once as a delta. */
-  asks_seen?: { team_id: string; ids: string[]; member?: boolean };
+  asks_seen?: { team_id: string; team_name?: string; ids: string[]; member?: boolean };
   /** Limit ids a local drift notice was already shown for (D5): once per limit per session. */
   drift_shown?: string[];
   /**
@@ -302,6 +302,9 @@ export interface Ask {
   created_at: string;
   updated_at: string;
   waiting_on_me: boolean;
+  /** Device feed only: an accepted ask read only because a session of this device follows `goal_id`, the asked team's
+   *  goal, through an approved "work toward" alignment (server A1-cross-2). */
+  via_alignment?: { goal_id: string } | null;
 }
 
 /** feeds/asks-<ws>.json: the asks of this person's teams and the asks they recorded, revalidated with an ETag. */

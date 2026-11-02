@@ -23,6 +23,7 @@ import {
   measureKey,
   renderAsksDelta,
   renderAsksGone,
+  renderFollowedAsksEnded,
   renderCard,
   renderContextDelta,
   renderDelta,
@@ -109,7 +110,21 @@ function markInjected(inj: InjectedState, goal: GoalSnapshot | null, shareState:
 
 /** The accepted asks put into context with an envelope; a fresh envelope replaces whatever context held before. */
 function markAsks(inj: InjectedState, ta: TeamAsks | null): void {
-  inj.asks_seen = ta ? { team_id: ta.team.id, ids: ta.asks.map((a) => a.id), member: ta.member !== false } : undefined;
+  inj.asks_seen = ta ? { team_id: ta.team.id, team_name: ta.team.name, ids: ta.asks.map((a) => a.id), member: ta.member !== false } : undefined;
+}
+
+/**
+ * The session no longer follows the goal of a team the person is not in (its approved alignment ended, or the session
+ * moved to another goal or stopped counting), while that team's accepted asks are in its context: told once that they no
+ * longer apply to it, honestly (not closed, and never "you are no longer in this team"; E2E acycle1 A1-cross-3).
+ */
+function followedAsksEnded(home: string, ws: string, inj: InjectedState, goal: GoalSnapshot | null): string | null {
+  const seen = inj.asks_seen;
+  if (!seen || seen.member !== false || !seen.ids.length) return null;
+  const team = goal ? readJson<FeedFile>(layout.feed(home, ws))?.goals?.find((g) => g.id === goal.id)?.team?.id : null;
+  if (team === seen.team_id) return null;
+  inj.asks_seen = undefined;
+  return renderFollowedAsksEnded(seen.team_name || "");
 }
 
 /**
@@ -126,7 +141,7 @@ function asksNote(home: string, ws: string, goalId: string, inj: InjectedState):
   // Gone from the accepted ones, not merely pushed past the first five by newer ones.
   const gone = prev.filter((id) => !ids.includes(id) && !(ta.accepted_ids || ids).includes(id));
   const member = ta.member !== false;
-  inj.asks_seen = { team_id: ta.team.id, ids, member };
+  inj.asks_seen = { team_id: ta.team.id, team_name: ta.team.name, ids, member };
   // Closed (done, reopened, withdrawn): the feed still holds it in another state. An ask the feed no longer holds is
   // closed too, unless the person was in the team and no longer is: then the feed dropped the team's asks, which is not
   // the same as closing them (C3-10). A session that follows a goal of a team the person was never in (an approved
@@ -857,6 +872,8 @@ export function userPromptSubmit(home: string, harness: Harness, input: HookInpu
         holdsTold(inj, kept.map((x) => x.goal_id), kept.map((x) => x.goal_title));
       }
     }
+    const ended = followedAsksEnded(home, hot.share.workspace_id, inj, kind === "unbound" ? null : goal);
+    if (ended) context = `${context}\n${ended}`;
     markInjected(inj, kind === "unbound" ? null : goal, hot.share.state);
   }
   if (hot.share.state === "shared" && goal) {

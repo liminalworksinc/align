@@ -242,6 +242,12 @@ export function renderAsksGone(ta: TeamAsks): string {
   return `[Align] Team ${quoted(ta.team.name, 40)}: you are no longer in this team, so its accepted asks are no longer shown here; they were not closed. No added authority.`.slice(0, DELTA_MAX);
 }
 
+/** A session that followed a goal of a team the person is not in no longer does (its alignment ended, or it moved or
+ *  stopped counting): that team's accepted asks it was given no longer apply to it. They were not closed. */
+export function renderFollowedAsksEnded(team: string): string {
+  return `[Align] This session no longer follows a goal of team ${quoted(team, 40)}, so that team's accepted asks given earlier no longer apply to it; they were not closed. No added authority.`.slice(0, DELTA_MAX);
+}
+
 /** The text a measure is compared by when telling an agent what changed. */
 export const measureKey = (m: Measure): string => `${clean(m.text, 200)}${m.target ? ` (target: ${clean(m.target, 60)})` : ""}`;
 

@@ -30,6 +30,7 @@ function keep(a: Ask): Ask {
     created_at: a.created_at,
     updated_at: a.updated_at,
     waiting_on_me: !!a.waiting_on_me,
+    ...(a.via_alignment && typeof a.via_alignment.goal_id === "string" ? { via_alignment: { goal_id: a.via_alignment.goal_id } } : {}),
   };
 }
 
@@ -64,11 +65,11 @@ export async function fetchAsks(ctx: Ctx, ws: string): Promise<boolean> {
   const teams = new Set(myTeams(me, ws).map((t) => t.id));
   const own = (a: Ask) => teams.has(a.team.id) || (!!me?.user?.id && a.requester?.id === me.user.id);
   // The accepted asks of a team this machine's sessions work toward through an approved alignment (the person not in
-  // it) reach their agents too, as they do sessions of the team's own members (E2E acycle1 A1-cross-2): kept after the
-  // person's own.
+  // it; the server marks them `via_alignment`) reach their agents too, as they do sessions of the team's own members
+  // (E2E acycle1 A1-cross-2): kept after the person's own.
   const asks = (r.json.asks as unknown[])
     .filter(wellFormed)
-    .filter((a) => own(a) || (a.state === "accepted" && followed.has(a.team.id)))
+    .filter((a) => own(a) || (a.state === "accepted" && (followed.has(a.team.id) || !!a.via_alignment)))
     .sort((a, b) => Number(!own(a)) - Number(!own(b)) || askOrder(a, b))
     .slice(0, KEEP)
     .map(keep);
