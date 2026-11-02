@@ -292,7 +292,10 @@ test(`share-state notices agree with the deny and the status views, whatever the
         if (/stays stopped|can't be shared (there )?again from here/.test(n.text)) assert.notEqual(dw, "share", nctx);
         if (dw === "share") assert.doesNotMatch(n.text, /until you run `align stop-sharing/, nctx);
         const hot = readJson<HotState>(layout.hot(t.home, s.lid));
-        if (hot?.share_now?.unread) assert.doesNotMatch(n.text, /signed (in to|out of) Align|`::align share`/, `told while the ended shares are unread\n${nctx}`);
+        // A share its person stopped on the web, already read, stays stopped whatever is unread: its notice names the
+        // earlier end only as what happened (`its share here had ended when this machine signed out of Align`).
+        const forGood = /stays stopped and is not shared again from here \(its share here had ended when [^;]*\); its usage stays on this machine\.$/.test(n.text.split(" It was ")[0]);
+        if (hot?.share_now?.unread && !forGood) assert.doesNotMatch(n.text, /signed (in to|out of) Align|`::align share`/, `told while the ended shares are unread\n${nctx}`);
         // A share its person stopped on the web is never asked for again, so it is never refused as stopped (C12-3).
         assert.doesNotMatch(n.text, /sharing failed \(sharing_stopped\)/, `a share path asked for a share stopped on the web\n${nctx}`);
       }
