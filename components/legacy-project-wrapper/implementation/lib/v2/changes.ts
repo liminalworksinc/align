@@ -1,5 +1,5 @@
 import { all, audit, get, run, tx } from "./db";
-import { badRequest, conflict, forbidden, notFound } from "./errors";
+import { V2Error, badRequest, conflict, forbidden, notFound } from "./errors";
 import { event } from "./events";
 import { newId, nowIso } from "./ids";
 import { effectiveSet, launchSet } from "./approval";
@@ -132,6 +132,9 @@ function changesIn(pp: PolicyPrincipal, goalId: string, base: GoalContent, v: un
 }
 
 const applied = (base: GoalContent, c: Changes): GoalContent => ({ ...base, ...c });
+
+/** A counter that would change nothing (409 no_change): suggest a change, or decline instead (C7-2). */
+const COUNTER_NO_CHANGE = "This suggestion changes nothing on the goal, so there is nothing to suggest. Change a field to suggest something else, or decline the request.";
 
 /** Who must be able to read a dependency a revision adds, and what the refusal says. A proposal (or a rebase) is
  *  decided by the goal's effective approval set; a counter goes back to the requester, who accepts it or not, and then
@@ -512,7 +515,14 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
           const hiddenBase = unreadableGoals(pp, base.depends_on);
           sent = { ...(sent as Body), depends_on: base.depends_on.filter((id) => !hiddenBase.includes(id)) };
         }
-        const countered = changesIn(pp, g.id, base, sent, current.depends_on);
+        // A suggestion that changes nothing on the version the request was made against says what to do instead (C7-2).
+        let countered: Changes;
+        try {
+          countered = changesIn(pp, g.id, base, sent, current.depends_on);
+        } catch (e) {
+          if (e instanceof V2Error && e.code === "no_change") throw conflict("no_change", COUNTER_NO_CHANGE);
+          throw e;
+        }
         // A dependency already on the request or its base was checked when it was added; one this counter adds must be
         // readable by the requester, who accepts it, and by the approval set, who then decide on it (C2 N1).
         const already = [...base.depends_on, ...current.depends_on];

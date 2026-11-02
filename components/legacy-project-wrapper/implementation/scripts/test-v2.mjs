@@ -7173,6 +7173,28 @@ try {
       `${lr5Done.status} ${lr6IfKeep.status} ${lr6IfKeep.text.slice(0, 200)} ${lr6Read?.state} ${lr6Read?.dependency_loop}`,
     );
 
+    // -- C7-1, C7-2: the looping dependency is explained once (never also counted as a goal a decider can't see), and a
+    // request whose only change was that dependency leaves its counter nothing to send --
+    const KL9 = await kGoal(KA, { title: "Solo nine", visibility: "workspace", team_id: KPT });
+    const KL10 = await kGoal(KA, { title: "Solo ten", visibility: "workspace", team_id: KPT });
+    const lr9 = await ka(KB, "POST", kcrs(KL9.id), { base_version: 1, changes: { depends_on: [KL10.id] }, reason: "Nine reads ten" });
+    const lr10 = await ka(KB, "POST", kcrs(KL10.id), { base_version: 1, changes: { depends_on: [KL9.id] }, reason: "Ten reads nine" });
+    const lr9Done = await kAct(KA, KL9.id, lr9.json?.id, "approve_and_launch", { revision: 1 });
+    const lr10Empty = await kAct(KA, KL10.id, lr10.json?.id, "counter", { revision: 1, changes: { depends_on: [] }, note: "Without the loop" });
+    check(
+      "C7-2: a counter that changes nothing (the request's only change was a dependency that now loops, dropped) is 409 no_change saying what to do: \"This suggestion changes nothing on the goal, so there is nothing to suggest. Change a field to suggest something else, or decline the request.\"",
+      lr9.status === 201 && lr10.status === 201 && lr9Done.status === 200 && lr10Empty.status === 409 && lr10Empty.json?.error === "no_change" &&
+        lr10Empty.json?.message === "This suggestion changes nothing on the goal, so there is nothing to suggest. Change a field to suggest something else, or decline the request.",
+      `${lr9.status} ${lr10.status} ${lr9Done.status} ${lr10Empty.status} ${lr10Empty.text.slice(0, 300)}`,
+    );
+    /** How many goals the counter form on `crId` should count as hidden from someone who decides: those KA can see that
+     *  are neither offered, nor would loop, nor already on the request (C7-1). */
+    const kHiddenFromDeciders = async (goalId, crId, startDeps) => {
+      const read = (await ka(KA, "GET", `/goals/${goalId}?counter=${crId}`)).json ?? {};
+      const listed = ((await ka(KA, "GET", "/goals")).json?.goals ?? []).filter((g) => g.id !== goalId && g.status === "active");
+      return listed.filter((g) => !(read.dependency_choices ?? []).includes(g.id) && !(read.dependency_loops ?? []).includes(g.id) && !startDeps.includes(g.id)).length;
+    };
+
     // -- C6-2: a pending request that would now loop, on a goal that then moved on: its requester can still update it,
     // and it then waits on its deciders like any request that would loop --
     const KL7 = await kGoal(KA, { title: "Loop seven", visibility: "workspace", team_id: KPT });
@@ -7342,6 +7364,46 @@ try {
             lr6Form.dropped === `The request's dependency on “${KL5.title}” is left out: it already depends on this goal, so keeping it would make a loop.` &&
             !lr6Form.boxes.some((b) => b.label === KL5.title),
           `${JSON.stringify(lr6Choices)} ${JSON.stringify(lr6Form).slice(0, 600)}`,
+        );
+
+        // C7-1 (ui): the looping dependency is said once, by name, and not also counted among goals a decider can't see.
+        const lr6Hidden = await kHiddenFromDeciders(KL6.id, lr6.json?.id, []);
+        const lr6NotOffered = await pL.evaluate((sel) => document.querySelector(sel)?.querySelector("[data-deps-not-offered]")?.textContent?.replace(/\s+/g, " ").trim() ?? "", lr6Card);
+        const lr6WantNotOffered = lr6Hidden === 0 ? "" : `${lr6Hidden === 1 ? "1 goal you can see isn't offered" : `${lr6Hidden} goals you can see aren't offered`}: ${KB.name} or someone who decides on this goal can't see ${lr6Hidden === 1 ? "it" : "them"}.`;
+        check(
+          "C7-1 (ui): the counter form of a request that would close a loop explains the dropped dependency once (\"The request's dependency on “Loop five” is left out …\") and never also counts it as \"N goals you can see aren't offered: … can't see it\" (only goals left out because someone who decides can't see them are counted there)",
+          !!lr6Form.dropped && lr6NotOffered === lr6WantNotOffered,
+          `hidden=${lr6Hidden} shown=${JSON.stringify(lr6NotOffered)} want=${JSON.stringify(lr6WantNotOffered)}`,
+        );
+
+        // C7-2 (ui): the request's only change was the looping dependency: the counter form says there is nothing left to
+        // suggest and points to Decline, and Review this decision stays disabled even with a note.
+        const lr10Card = `[data-cr="${lr10.json?.id}"]`;
+        await open(pL, `/app/w/${KW}/goals/${KL10.id}`);
+        await pL.waitForSelector(`${lr10Card} [data-dependency-loop]`, { timeout: 15000 }).catch(() => undefined);
+        await pL.click(`${lr10Card} [data-decision="Suggest a change"]`).catch(() => undefined);
+        await pL.waitForSelector(`${lr10Card} [data-deps-loop-dropped]`, { timeout: 15000 }).catch(() => undefined);
+        await pL.evaluate((sel) => {
+          const t = document.querySelector(`${sel} [data-decision-input] textarea`);
+          if (t) t.setAttribute("data-c72-note", "1");
+        }, lr10Card);
+        await pL.type(`${lr10Card} [data-c72-note]`, "Without the loop").catch(() => undefined);
+        const lr10Form = await pL.evaluate((sel) => {
+          const c = document.querySelector(sel);
+          const review = [...(c?.querySelectorAll("[data-decision-input] button") ?? [])].find((b) => b.textContent?.trim() === "Review this decision");
+          return {
+            left: c?.querySelector("[data-counter-nothing-left]")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+            notOffered: c?.querySelector("[data-deps-not-offered]")?.textContent ?? "",
+            review: review ? (review.disabled ? "disabled" : "enabled") : "none",
+            choices: [...(c?.querySelectorAll("[data-decision]") ?? [])].map((e) => e.getAttribute("data-decision")),
+          };
+        }, lr10Card);
+        const lr10Hidden = await kHiddenFromDeciders(KL10.id, lr10.json?.id, []);
+        check(
+          "C7-2 (ui): when the looping dependency was the request's only change, Suggest a change says \"Without its dependency on “Solo nine”, this request changes nothing, so there is nothing left to suggest. To close it, choose Decline above (or <requester> can withdraw it); …\", Review this decision stays disabled with a note written (no confirmation of an empty change), Decline is offered, and the dropped dependency is not counted as hidden",
+          lr10Form.left.startsWith(`Without its dependency on “${KL9.title}”, this request changes nothing, so there is nothing left to suggest. To close it, choose Decline above (or ${KB.name} can withdraw it)`) &&
+            lr10Form.review === "disabled" && lr10Form.choices.includes("Decline") && (lr10Hidden > 0 || lr10Form.notOffered === ""),
+          `${JSON.stringify(lr10Form)} hidden=${lr10Hidden}`,
         );
 
         // N3, N5 and F4: Not yet, then Launch, from the goal page. Every fetch and every "Loading…" in the change-request

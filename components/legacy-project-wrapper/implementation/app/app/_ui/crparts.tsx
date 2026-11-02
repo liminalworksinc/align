@@ -92,12 +92,29 @@ export function Diff({ cr, titles }: { cr: ChangeRequest; titles: Map<string, st
 const sameMeasures = (a: { id?: string; text: string; target: string | null }[], b: Goal["measures"]) =>
   JSON.stringify(a.map((m) => [m.id ?? null, m.text, m.target ?? null])) === JSON.stringify(b.map((m) => [m.id, m.text, m.target ?? null]));
 const sameIds = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
+/** Whether a field's value as the form would send it is the value it already has (so sending it changes nothing). */
+function sameField(k: keyof ChangeFields, a: ChangeFields[keyof ChangeFields], b: ChangeFields[keyof ChangeFields]): boolean {
+  if (k === "depends_on") return sameIds((a as string[] | undefined) ?? [], (b as string[] | undefined) ?? []);
+  if (k === "measures") {
+    const m = (v: unknown) => JSON.stringify(((v as Goal["measures"] | undefined) ?? []).map((x) => [x.id ?? null, x.text, x.target ?? null]));
+    return m(a) === m(b);
+  }
+  if (k === "limits") {
+    const l = (v: unknown) => JSON.stringify(((v as Goal["limits"] | undefined) ?? []).map((x) => [x.id ?? null, x.type, x.text, x.source ?? null]));
+    return l(a) === l(b);
+  }
+  return a === b;
+}
 
 /** Goal, measures, Status and Depends on, pre-filled from `start`. `onSend` gets only the fields that differ from
  *  `goal` (plus any in `keep`, for a counter that restates the request's fields). `hiddenDeps` counts the dependencies
  *  the person can't see, which the server keeps (the form says so); `choices`, when given, are the only goals offered
  *  as a new dependency (the ones everyone who decides can see), besides those already on the list; `notOfferedWho`
- *  names who can't see the others ("someone who decides on this goal", or for a counter the requester too). */
+ *  names who can't see the others ("someone who decides on this goal", or for a counter the requester too). Each goal
+ *  that isn't offered is left out for one reason, counted once (C7-1). Sending is offered only while what would be sent
+ *  changes something: compared with `before` (a counter: the request's base values of its fields) or else `goal`, plus
+ *  `hiddenChange` (the request changes dependencies the person can't see, which a counter keeps). A counter whose only
+ *  change was a dependency that would loop has nothing left to send, and says so, pointing to Decline (C7-2). */
 export function ChangesForm({
   ws,
   goal,
@@ -107,6 +124,9 @@ export function ChangesForm({
   choices = null,
   notOfferedWho = "someone who decides on this goal",
   loops = null,
+  before,
+  hiddenChange = false,
+  requesterName,
   noteLabel,
   noteRequired,
   withCondition = false,
@@ -123,6 +143,11 @@ export function ChangesForm({
   notOfferedWho?: string;
   /** Goals left out of `choices` because they already depend on this goal (a loop), counted on their own (C3-3). */
   loops?: string[] | null;
+  /** The values the sent fields are compared with to tell whether sending changes anything, when not `goal`'s. */
+  before?: ChangeFields;
+  hiddenChange?: boolean;
+  /** A counter's requester, named where the form says there is nothing left to suggest. */
+  requesterName?: string;
   noteLabel: string;
   noteRequired: boolean;
   /** Offer the "Accept if…" condition (an approver's counter). */
@@ -146,10 +171,13 @@ export function ChangesForm({
   const listed = feed.data?.goals.filter((g) => g.id !== goal.id && (g.status === "active" || deps.includes(g.id))) ?? [];
   // A goal someone who decides can't see would be refused as a new dependency, so it isn't offered (C2 F5).
   const offered = (id: string) => !choices || choices.includes(id) || startDeps.includes(id);
+  // Why a listed goal isn't offered, decided once so no goal is explained (or counted) twice (C7-1): the request's own
+  // dependency that would loop (named below), a goal that would loop if added, or one someone who decides can't see.
+  const leftOut = (id: string): "dropped" | "looping" | "hidden" | null => (offered(id) ? null : looped.includes(id) ? "dropped" : loops?.includes(id) ? "looping" : "hidden");
   const others = listed.filter((g) => offered(g.id));
-  const looping = listed.filter((g) => !offered(g.id) && loops?.includes(g.id) && !looped.includes(g.id)).length;
+  const looping = listed.filter((g) => leftOut(g.id) === "looping").length;
   const titleOf = (id: string) => `“${feed.data?.goals.find((g) => g.id === id)?.title ?? "a goal"}”`;
-  const notOffered = listed.length - others.length - looping;
+  const notOffered = listed.filter((g) => leftOut(g.id) === "hidden").length;
   const them = (n: number) => (n === 1 ? "it" : "them");
   const out = measuresOut(measures);
   const changes: ChangeFields = {};
@@ -159,7 +187,10 @@ export function ChangesForm({
   if (!sameIds(deps, goal.depends_on ?? []) || keep.includes("depends_on") || looped.length) changes.depends_on = deps;
   const limitsChanged = !sameLimits(limits, goal.limits ?? []);
   if (limitsChanged || keep.includes("limits")) changes.limits = limitsOut(limits) as Goal["limits"];
-  const differs = title.trim() !== goal.title || !sameMeasures(out, goal.measures) || status !== goal.status || !sameIds(deps, goal.depends_on ?? []) || limitsChanged || keep.length > 0;
+  // Would sending change anything? Each field sent against the value it would replace (the server answers 409
+  // no_change otherwise), so a counter that only restates nothing is never offered.
+  const differs = hiddenChange || (Object.keys(changes) as (keyof ChangeFields)[]).some((k) => !sameField(k, changes[k], before && k in before ? before[k] : (goal as ChangeFields)[k]));
+  const nothingLeft = !differs && looped.length > 0;
   return (
     <form
       onSubmit={(e) => {
@@ -220,6 +251,13 @@ export function ChangesForm({
         <Field label="Accept if… (optional condition the requester confirms)" hint="Never sent to agents, and never a gate on approval or launch. At most 2000 characters.">
           <TextArea rows={2} value={condition} maxLength={2000} onChange={(e) => setCondition(e.target.value)} />
         </Field>
+      )}
+      {nothingLeft && feed.data && (
+        <p className="mb-2 text-[15px] text-zinc-700" data-counter-nothing-left>
+          Without {looped.length === 1 ? `its dependency on ${titleOf(looped[0])}` : "the dependencies that would make a loop"}, this request changes nothing, so there is nothing left to
+          suggest. To close it, choose <strong>Decline</strong> above{requesterName ? ` (or ${requesterName} can withdraw it)` : ""}; to suggest something else, change a field
+          here.
+        </p>
       )}
       <Btn type="submit" disabled={busy || !differs || (noteRequired && !note.trim()) || !title.trim()}>
         {sendLabel}

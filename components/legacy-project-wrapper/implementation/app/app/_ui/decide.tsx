@@ -148,6 +148,9 @@ function CounterInput({ ws, cr, focus, onReview }: { ws: string; cr: ChangeReque
         keep={Object.keys(cr.changes) as (keyof ChangeFields)[]}
         choices={g.data.dependency_choices ?? null}
         loops={g.data.dependency_loops ?? null}
+        before={cr.diff.before}
+        hiddenChange={!!cr.diff.hidden_depends_on && cr.diff.hidden_depends_on.after !== cr.diff.hidden_depends_on.before}
+        requesterName={cr.requester.name}
         notOfferedWho={`${cr.requester.name} or someone who decides on this goal`}
         hiddenDeps={hidden}
         noteLabel="Note"
