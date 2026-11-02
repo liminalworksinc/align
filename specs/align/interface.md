@@ -403,11 +403,26 @@ person is a member of SHALL offer those workspaces in a list with **Give this de
 `POST /api/v2/devices/<id>/workspaces` (`workspaces` "Giving a device a workspace later", an extension of owner decision
 2026-11-01 in `docs/decisions/0003-owner-decisions-v2.md` section 6); a 403 `reauth_required` shows the server's message
 with **Sign in again** (back to `/app/devices`), and a note says the device picks the workspace up at its next sync.
+The devices SHALL be listed as the invite page lists them, by name (case-insensitive), the live ones first and then the
+revoked ones. The button SHALL give the workspace the list shows: once one is given it leaves the list, and the next
+press gives the one shown then. A refusal because the device is no longer the person's (revoked in another tab, say),
+or the workspace no longer theirs, SHALL show the server's message and read both lists again, so the row shows what is
+true now.
 
 #### Scenario: Give a device a workspace
 
 - **WHEN** a person with a recent sign-in opens the page with a device that lacks one of their workspaces and presses **Give this device the workspace** (`scripts/test-v2.mjs` "ui (Chrome, E2E-AGENT cycle 5): the Devices page names each device ...")
 - **THEN** the row showed the device's `dv_…` tag, now lists the workspace and offers it no more, the device has the grant on the server, and a device that has every workspace of theirs is offered none
+
+#### Scenario: Two workspaces given one after the other
+
+- **WHEN** a device lacks two of the person's workspaces, they choose the second in the list and press **Give this device the workspace**, then press it again without choosing (`scripts/test-v2.mjs` "C6-3 (ui): ...")
+- **THEN** the first press gives the chosen workspace, the list then shows only the other, and the second press gives that one (never the one just given, which the server would refuse 409 `already_granted`)
+
+#### Scenario: Order, and a device revoked in another tab
+
+- **WHEN** the person opens the page, then a device is revoked in another tab and they press **Give this device the workspace** on its row (`scripts/test-v2.mjs` "Z1, Z2 (ui): ...")
+- **THEN** the live devices were listed by name before the revoked ones, and after the press the page shows "This device is not one of your paired devices any more …", and the row reads "revoked" with nothing offered
 
 #### Scenario: Revoke a device
 

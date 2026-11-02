@@ -2399,6 +2399,51 @@ try {
         before.includes(`dv_…${desk2.id.slice(-6)}`) && after.includes(`Workspaces: ${wsName}`) && !after.includes("Give this device the workspace") && granted2 === A && !deskRow.includes("Give this device the workspace"),
         `${before} | ${after} | ${deskRow} | ${granted2}`,
       );
+
+      // C6-3, Z1 and Z2 (E2E-WEB cycle 6): U5 joins a second workspace and pairs a device that has neither.
+      const u5Side = (await call("U5", "POST", "/api/v2/workspaces", { cookie: U5.cookie, body: { name: "U5 side" } })).json?.id;
+      const cart = insertDevice(U5.id, "U5's zed cart");
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      const cartRow = `li[data-device="${cart.id}"]`;
+      await page.waitForSelector(`${cartRow} select`, { timeout: 15000 }).catch(() => undefined);
+      const u5Devs = (await call("U5", "GET", "/api/v2/devices", { cookie: U5.cookie })).json?.devices ?? [];
+      const nameOrder = (a, b) => (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : a.id < b.id ? -1 : 1);
+      const wantOrder = [...u5Devs.filter((d) => !d.revoked_at).sort(nameOrder), ...u5Devs.filter((d) => d.revoked_at).sort(nameOrder)].map((d) => d.id);
+      const pageOrder = await page.$$eval("li[data-device]", (lis) => lis.map((li) => li.getAttribute("data-device")));
+      check(
+        "Z1 (ui): the Devices page lists the live devices by name (case-insensitive), as the invite page does, then the revoked ones, not newest first",
+        u5Devs.length >= 4 && JSON.stringify(pageOrder) === JSON.stringify(wantOrder) && pageOrder.indexOf(cart.id) > pageOrder.indexOf(desk.id),
+        `${JSON.stringify(pageOrder)} want ${JSON.stringify(wantOrder)}`,
+      );
+      const cartOptions = await page.$$eval(`${cartRow} select option`, (os) => os.map((o) => o.value)).catch(() => []);
+      const giveOn = (sel) => page.$eval(sel, (li) => [...li.querySelectorAll("button")].find((b) => b.textContent === "Give this device the workspace")?.click());
+      await page.select(`${cartRow} select`, cartOptions[1] ?? "");
+      await giveOn(cartRow);
+      await page.waitForFunction((sel) => document.querySelectorAll(`${sel} select option`).length === 1, { timeout: 15000 }, cartRow).catch(() => undefined);
+      const cartShown = await page.$eval(`${cartRow} select`, (s) => s.value).catch(() => null);
+      await giveOn(cartRow).catch(() => undefined);
+      await page.waitForFunction((sel) => !document.querySelector(sel)?.textContent?.includes("Give this device the workspace") || document.body.innerText.includes("already has this workspace"), { timeout: 15000 }, cartRow).catch(() => undefined);
+      const cartGrants = withDb((d) => d.prepare("SELECT ws_id FROM v2_device_grants WHERE device_id = ? ORDER BY ws_id").all(cart.id).map((r) => r.ws_id).join());
+      const cartPage = await page.evaluate((sel) => ({ row: document.querySelector(sel)?.textContent ?? "", body: document.body.innerText }), cartRow);
+      check(
+        "C6-3 (ui): a device missing two workspaces: choosing the second and giving it, then pressing Give this device the workspace again without choosing, gives the one the list then shows (both granted, no 409 \"already has this workspace\"), and the row offers nothing more",
+        !!u5Side && cartOptions.length === 2 && cartShown === cartOptions[0] && cartGrants === [A, u5Side].sort().join() && !cartPage.body.includes("already has this workspace") && !cartPage.row.includes("Give this device the workspace"),
+        `${JSON.stringify(cartOptions)} shown=${cartShown} grants=${cartGrants} ${cartPage.row} | ${cartPage.body.slice(0, 300)}`,
+      );
+      // desk now lacks the new workspace; it is revoked in another tab, then Give is pressed on its row.
+      const deskRowSel = `li[data-device="${desk.id}"]`;
+      await page.goto(`${BASE}/app/devices`, { waitUntil: "networkidle0" });
+      await page.waitForFunction((sel) => document.querySelector(sel)?.textContent?.includes("Give this device the workspace"), { timeout: 15000 }, deskRowSel).catch(() => undefined);
+      const revokedElsewhere = await call("U5", "DELETE", `/api/v2/devices/${desk.id}`, { cookie: U5.cookie });
+      await giveOn(deskRowSel).catch(() => undefined);
+      await page.waitForFunction((sel) => /revoked/.test(document.querySelector(sel)?.textContent ?? ""), { timeout: 15000 }, deskRowSel).catch(() => undefined);
+      const z2 = await page.evaluate((sel) => ({ row: document.querySelector(sel)?.textContent ?? "", body: document.body.innerText }), deskRowSel);
+      check(
+        "Z2 (ui): Give this device the workspace on a device revoked in another tab says \"This device is not one of your paired devices any more …\" and reads the list again: the row reads revoked and offers nothing",
+        revokedElsewhere.status === 204 && z2.body.includes("This device is not one of your paired devices any more (it may have been signed out), so it was given nothing.") && /revoked/.test(z2.row) && !/active/.test(z2.row) && !z2.row.includes("Give this device the workspace"),
+        `${revokedElsewhere.status} ${z2.row} | ${z2.body.slice(0, 300)}`,
+      );
+
     } finally {
       await browser.close();
     }

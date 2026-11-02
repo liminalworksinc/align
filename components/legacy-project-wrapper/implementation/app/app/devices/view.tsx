@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { api, Btn, Card, Err, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "../_ui/kit";
+import { api, ApiError, Btn, Card, Err, Loading, Note, Pill, Select, Shell, SignInAgain, useAction, useApi, when, type WsSummary } from "../_ui/kit";
 import type { Me } from "../_ui/server";
 
 interface Device {
@@ -17,11 +17,30 @@ interface Device {
  *  apart (E2E cycle 5). */
 const tag = (id: string) => `dv_…${id.slice(-6)}`;
 
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+/** Live devices first, each group by name (case-insensitive, then id), as the invite page lists them (Y4, Z1): an order
+ *  by when they were paired or last seen would put the same devices in another order there. */
+const byName = (a: Device, b: Device) => Number(!!a.revoked_at) - Number(!!b.revoked_at) || cmp(a.name.toLowerCase(), b.name.toLowerCase()) || cmp(a.id, b.id);
+
 export default function Devices({ me }: { me: Me }) {
   const list = useApi<{ devices: Device[] }>("/api/v2/devices");
   const mine = useApi<{ workspaces: WsSummary[] }>("/api/v2/workspaces");
   const act = useAction();
   const [pick, setPick] = useState<Record<string, string>>({});
+  /** Give a device a workspace. A device that is no longer the person's (signed out in another tab, say), or a workspace
+   *  they left, reads both lists again, so its row shows it revoked and offers nothing (Z2), as the invite page does. */
+  const give = (deviceId: string, wsId: string) =>
+    act.run(async () => {
+      try {
+        await api(`/api/v2/devices/${deviceId}/workspaces`, { body: { workspace_id: wsId } });
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) {
+          list.reload();
+          mine.reload();
+        }
+        throw e;
+      }
+    }, list.reload);
   if (act.reauth) {
     return (
       <Shell me={me}>
@@ -39,11 +58,13 @@ export default function Devices({ me }: { me: Me }) {
         <Err>{list.error ?? act.error}</Err>
         {list.data?.devices.length === 0 && <Note>No devices yet. Run align login on your machine to connect one.</Note>}
         <ul className="divide-y divide-zinc-200">
-          {list.data?.devices.map((d) => {
+          {[...(list.data?.devices ?? [])].sort(byName).map((d) => {
             // Workspaces I am a member of that this device does not reach: one can be given to it here, as when
             // accepting an invite with the device ticked (ADR 0003 section 6).
             const missing = d.revoked_at ? [] : (mine.data?.workspaces ?? []).filter((w) => !d.workspaces.some((x) => x.id === w.id));
-            const chosen = pick[d.id] ?? missing[0]?.id ?? "";
+            // The workspace the list shows: the one picked while it is still missing, else the first (C6-3: once given,
+            // a picked workspace leaves the list, so the button never sends one the list doesn't show).
+            const chosen = missing.find((w) => w.id === pick[d.id])?.id ?? missing[0]?.id ?? "";
             return (
               <li key={d.id} data-device={d.id} className="flex flex-wrap items-center gap-3 py-3">
                 <div className="min-w-0 flex-1">
@@ -69,7 +90,7 @@ export default function Devices({ me }: { me: Me }) {
                       <Btn
                         kind="secondary"
                         disabled={act.busy || !chosen}
-                        onClick={() => void act.run(() => api(`/api/v2/devices/${d.id}/workspaces`, { body: { workspace_id: chosen } }), list.reload)}
+                        onClick={() => void give(d.id, chosen)}
                       >
                         Give this device the workspace
                       </Btn>
