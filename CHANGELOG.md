@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- End-to-end test cycles 1 to 13 (real browsers, the hosted edge, MCP clients, and the real `align` CLI and hooks under
+- End-to-end test cycles 1 to 14 (real browsers, the hosted edge, MCP clients, and the real `align` CLI and hooks under
   real Claude Code sessions). Every finding is fixed with a regression test, among them: directives fetched by cursor;
   the server's clock used for every timestamp an agent sends; device sign-out, member removal and re-pairing end or
   keep shares consistently, with pending revokes kept until the server confirms them; login, logout and sync passes
@@ -17,7 +17,6 @@
   invite page lists their devices, none ticked, behind a recent sign-in, each grant audited; `align` picks the
   workspace up at its next contact and says how to share again there.
   The same grant is available later from the Devices page, for a person's own live devices.
-
 - Ported main's #53, #55, #56 and the merged #44 onto v2 (PORT4): the requester's Home shows their declined request
   (who declined it, the reason) until they send a newer one on that goal (#53); Align records which goal versions it
   sent each connected app, and a launched change's value card names the apps it sent the new version, "Align sent it
