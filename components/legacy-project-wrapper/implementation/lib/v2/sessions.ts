@@ -435,7 +435,9 @@ export async function setAgentStop(pp: PolicyPrincipal, key: string, stop: boole
   if (s.ended_reason === "device_signed_out") {
     throw conflict(
       "device_signed_out",
-      "The machine that shared this session signed out of Align, so its sharing ended and a stop or resume can't reach it. If it was stopped, it stays stopped until its developer runs align stop-sharing there.",
+      // The machine offers `::align share` once it is signed in again, as the member_removed refusal says (E2E-AGENT
+      // cycle 14, section 5).
+      "The machine that shared this session signed out of Align, so its sharing ended and a stop or resume can't reach it. Once that machine is signed in again (align login), ::align share in the session shares it again, and then Stop and Resume here reach it; until then, a stopped session stays stopped unless its developer runs align stop-sharing there.",
     );
   }
   if (s.ended_reason === "member_removed") throw conflict("member_removed", memberRemovedRefusal(pp, s));

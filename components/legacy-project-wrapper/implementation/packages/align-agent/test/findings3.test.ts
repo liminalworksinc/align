@@ -88,7 +88,7 @@ describe("re-invite: a workspace given back to this device at an invite (owner d
     assert.equal(runHook(t, "claude", "UserPromptSubmit", { session_id: A.sid, prompt_id: "again", prompt: "again", cwd: A.cwd }).stdout, "", "once");
 
     // Shared again in the session: the same device, no new pairing; Side Co's share untouched.
-    assert.equal(prompt(t, A.sid, "::align share confirm", A.cwd).reason, 'Align: sharing requested toward "Ship the v2 onboarding flow". It takes effect within a few seconds; your next prompt carries the goal.');
+    assert.equal(prompt(t, A.sid, "::align share confirm", A.cwd).reason, 'Align: sharing requested toward "Ship the v2 onboarding flow". The next sync asks the Align server for it (within a few seconds); once it is shared, your next prompt carries the goal.');
     assert.equal((await runCli(t, ["sync"])).code, 0);
     const list = await sessionsJson(t);
     assert.equal(list.find((s) => s.native_id === A.sid)?.shared, "shared (Acme)");

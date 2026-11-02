@@ -412,17 +412,26 @@ export function requestNotice(r: HotRequest): string {
       ? `move this session from goal "${goalTitle(r)}" to goal "${targetTitle(r)}". Nothing changes unless you accept`
       : r.type === "checkpoint"
         ? `at the end of the current step, commit the work and summarize where things stand. ${DELIVERED}`
-        : `re-read goal "${goalTitle(r)}" (v${v}) and update the plan. The agent is asked to draft an updated plan for you and to keep its current course until you agree. ${DELIVERED}`;
+        : `re-read goal "${goalTitle(r)}" (v${v}) and update the plan. The agent is asked to draft an updated plan for you and to keep its current course until you agree. ${REPLAN_DELIVERED}`;
   const note = noteOf(r);
   const id = requestShortId(r.id);
   // A checkpoint has nothing to agree to: it is only declined. A replan's draft is accepted (agreed) or declined.
-  const answer = r.type === "checkpoint" ? `Run \`::align decline ${id}\` if you don't want it, or tell the agent.` : `Run \`::align accept ${id}\` or \`::align decline ${id}\`, or tell the agent.`;
+  const answer =
+    r.type === "checkpoint"
+      ? `Run \`::align decline ${id}\` if you don't want it, or tell the agent.`
+      : r.type === "replan"
+        ? `Run \`::align accept ${id}\` when you agree to its plan, or \`::align decline ${id}\`, or tell the agent.`
+        : `Run \`::align accept ${id}\` or \`::align decline ${id}\`, or tell the agent.`;
   return `Align: ${senderName(r)} (${role}) asks: ${ask}.${note ? ` Note: ${note}.` : ""} ${answer}`;
 }
 
 /** What a safe request's notice says Align reports: delivery, never that the agent did it (Align can't tell). A decline
  *  after the turn ended still counts (the receipt moves to declined), so the notice sets no deadline on it. */
 const DELIVERED = "It goes to the agent now as a safe step that needs no answer. Align reports it delivered to the agent and not declined (not that the agent did it) until you decline it, which you can do now or later";
+
+/** A replan's: the draft goes to the agent with no answer needed, and the answer the notice asks for is agreement to the
+ *  plan, never to the request (E2E-AGENT cycle 14, section 5: "needs no answer" next to "run accept or decline"). */
+const REPLAN_DELIVERED = "It goes to the agent now: drafting the plan needs no answer from you, and the plan changes only when you accept it. Align reports it delivered to the agent and not declined (not that the agent did it) until you decline it, which you can do now or later";
 
 /** The model context for a request: fixed wording per type. `boundGoalId` says whether the goal is already in context. */
 export function requestContext(r: HotRequest, boundGoalId: string | null): string {
@@ -494,6 +503,22 @@ export function outOfReachWords(ws: string, lid: string, latched: boolean): stri
 /** Why a session shared before in workspace `ws` is not shared into `other` (cycle 8). */
 export function otherWorkspaceWords(ws: string, other: string): string {
   return `this session was shared with ${clean(ws, 80)}, so it is shared again only there (its work is that workspace's), never into ${clean(other, 80)}.`;
+}
+
+/**
+ * Why a request expired here, from the reason kept with it (`expired_reason`, and for a refused answer which answer and
+ * the server's code): the same words in the session (`::align accept`, `::align status`) and in a terminal (`align
+ * requests`), so one expiry never reads two ways (E2E-AGENT cycle 14, section 5).
+ */
+export function expiredWhy(q: { expired_reason?: unknown; refused_answer?: unknown; refused_error?: unknown } | null | undefined): string {
+  const reason = q?.expired_reason;
+  if (reason === "device_signed_out") return "this session's share ended when this machine signed out of Align, and the Align server expired the request";
+  if (reason === "receipt_refused") {
+    return `the Align server did not take the answer ${q?.refused_answer === "declined" ? "declined" : "accepted"} here (${String(q?.refused_error || "not_found").slice(0, 40)}): this session's share there has ended`;
+  }
+  if (reason === "member_removed") return "this session's share ended when this machine lost access to its workspace, and the Align server expired the request";
+  if (reason === "sharing_stopped") return "this session's sharing was stopped (Stop sharing on the web, or `align stop-sharing`), and the Align server expired the request";
+  return "this session's share ended, and the Align server expired the request";
 }
 
 export function releaseNotice(by: string, title: string): string {

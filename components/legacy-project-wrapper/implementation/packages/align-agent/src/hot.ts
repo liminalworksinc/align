@@ -1,5 +1,7 @@
 // Hot files are a projection of the database, rewritten whole after every change, so the CLI, the sync job and the hooks can all
 // update state without racing on the files. Hooks read only these files.
+import fs from "node:fs";
+import path from "node:path";
 import type { Ctx } from "./context.ts";
 import { loadCredentials, signedIn } from "./api.ts";
 import { kvGet, kvSet, nowIso } from "./db.ts";
@@ -10,6 +12,8 @@ import { contextGoals, snapshot } from "./shared/goaltree.ts";
 import { clean } from "./shared/envelope.ts";
 import { readJson } from "./shared/fsx.ts";
 import { storedText, type ReleaseReaches, type ShareFacts, type ShareNow } from "./shared/ended.ts";
+import { isShareStateNotice, noticeKind } from "./shared/notices.ts";
+import { NEWEST_BUILD, selfBuild, WRITER_GEN, type BuildMark } from "./build.ts";
 import type { EndedWhy, GoalSnapshot, HoldLatch, HotRequest, HotState, Latch, MeFile, RequestState, ShareState } from "./shared/types.ts";
 
 export { snapshot };
@@ -111,6 +115,12 @@ function releasedHolds(ctx: Ctx, lid: string): NonNullable<HotState["released_ho
     .map((r) => ({ directive_id: r.directive_id, goal_id: r.goal_id, goal_title: r.goal_title, by: r.by }));
 }
 
+/** The releases still in force on this session, whatever its share's state: a later hold on the same goal withdraws a
+ *  release, so its notice is not told while the goal is held again (E2E-AGENT cycle 14 C14-2). */
+function releasesNow(ctx: Ctx, lid: string): string[] {
+  return (ctx.db.prepare("SELECT directive_id FROM holds WHERE local_id=? AND held=0").all(lid) as { directive_id: string }[]).map((r) => r.directive_id);
+}
+
 /** The resume that lifted this session's stop, while no later stop replaced it. */
 function resumedBy(ctx: Ctx, lid: string): string | null {
   const latch = ctx.db.prepare("SELECT stopped, directive_id FROM latches WHERE local_id=?").get(lid) as { stopped: number; directive_id: string } | undefined;
@@ -126,8 +136,16 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     | { id: string; goal_id: string | null; goal_json: string | null; cause: string; directive_id: string | null }
     | undefined;
   // Notices about the share's state go with what happened (`facts`): the hook words them from `share_now` (cycle 11).
-  const notices = (ctx.db.prepare("SELECT id, text, facts FROM notices WHERE local_id=? ORDER BY created_at, rowid").all(lid) as { id: string; text: string; facts: string | null }[]).map(
-    (n) => ({ id: n.id, text: n.text, ...(n.facts ? { facts: JSON.parse(n.facts) as ShareFacts } : {}) }),
+  // One an older build stored (no facts, or facts of an older generation stored after this one first wrote here) is
+  // only that its share's state changed: the hook tells it, worded from the state now, when the session's situation
+  // differs from what it was last told (E2E-AGENT cycle 14 C14-1).
+  const since = buildMark(ctx)?.since ?? null;
+  const notices = (ctx.db.prepare("SELECT id, text, facts, created_at FROM notices WHERE local_id=? ORDER BY created_at, rowid").all(lid) as { id: string; text: string; facts: string | null; created_at: string }[]).map(
+    (n) => {
+      const f = n.facts ? (JSON.parse(n.facts) as ShareFacts) : null;
+      if (isShareStateNotice(noticeKind(n.id)) && (!f || (olderGen(f) && !!since && n.created_at >= since))) return { id: n.id, text: n.text, facts: changedFacts(ctx, lid, f) };
+      return { id: n.id, text: n.text, ...(f ? { facts: f } : {}) };
+    },
   );
   const pendingDirs = (
     ctx.db
@@ -137,7 +155,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     .filter((r) => CONTEXT_KINDS.has(r.kind))
     .map((r) => r.id);
   const live = share && share.state !== "error" ? share : null;
-  const since = kvGet(ctx.db, `share_since:${lid}`);
+  const shareSince = kvGet(ctx.db, `share_since:${lid}`);
   // Why the share ended so nothing from the web can lift its latches, whether `::align share` shares it again now, and
   // whether a release still reaches its holds: one reading, for its latch files and its notices alike (C6-2, C10-4).
   const end = endedState(ctx, share);
@@ -154,7 +172,7 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
           workspace_name: live.workspace_name,
           session_key: live.session_key,
           state: live.state as ShareState,
-          ...(since ? { since } : {}),
+          ...(shareSince ? { since: shareSince } : {}),
           ...(live.state === "stopped" ? { ended: endedReason(live) ?? "sharing_ended" } : {}),
         }
       : null,
@@ -170,12 +188,17 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
     context_goals: live && live.goal_json ? contextGoals(ctx.home, live.workspace_id, (JSON.parse(live.goal_json) as GoalSnapshot).id) : [],
     requests: live ? hotRequests(ctx, lid) : [],
     released_holds: live ? releasedHolds(ctx, lid) : [],
+    releases_now: releasesNow(ctx, lid),
     resumed: resumedBy(ctx, lid),
     prior_share: sharedBefore(ctx, lid) ? { stopped: stoppedByPerson(ctx, lid) } : null,
     epochs_seen: (ctx.db.prepare("SELECT epoch_id FROM epochs WHERE local_id=? ORDER BY rowid DESC LIMIT 10").all(lid) as { epoch_id: string }[]).map((e) => e.epoch_id),
     updated_at: new Date().toISOString(),
+    by: { gen: WRITER_GEN, build: selfBuild().build },
   };
-  writeJsonAtomic(layout.hot(ctx.home, lid), hot);
+  // A newer build has written here: the hot file is its to write (cycle 14). Marked, so it rewrites it; a stop or hold
+  // is still enforced below, whatever build hears it.
+  if (ctx.superseded) kvSet(ctx.db, `${OLDER_RENDER}${lid}`, nowIso());
+  else writeJsonAtomic(layout.hot(ctx.home, lid), hot);
   // A latch whose share has ended (this machine signed out, or the server no longer has the share) can't be lifted from
   // the web any more: the latch says so, so the deny tells the user how to get out (`align stop-sharing`). When the
   // session can be shared there again now (signed in again, its workspace in reach again), the latch says that instead,
@@ -207,26 +230,46 @@ export function renderHot(ctx: Ctx, lid: string): HotState | null {
         ...(release ? { release } : {}),
       }
     : {};
+  const held: HoldLatch["holds"] = holds.map((r) => {
+    const j = JSON.parse(r.json) as { goal_title: string; by: string; reason: string | null };
+    return { goal_id: r.goal_id, goal_title: j.goal_title, by: j.by, reason: j.reason, directive_id: r.directive_id, seq: r.seq, at: r.at };
+  });
+  if (ctx.superseded) {
+    enforceOnly(ctx, lid, latch?.stopped ? { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...ended } : null, held, ended);
+    return hot;
+  }
   if (latch && latch.stopped) {
     const l: Latch = { v: 1, stopped: true, directive_id: latch.directive_id, seq: latch.seq, at: latch.at, ...ended };
     writeJsonAtomic(layout.latch(ctx.home, lid), l);
   } else {
     removeFile(layout.latch(ctx.home, lid));
   }
-  if (holds.length) {
-    const h: HoldLatch = {
-      v: 1,
-      ...ended,
-      holds: holds.map((r) => {
-        const j = JSON.parse(r.json) as { goal_title: string; by: string; reason: string | null };
-        return { goal_id: r.goal_id, goal_title: j.goal_title, by: j.by, reason: j.reason, directive_id: r.directive_id, seq: r.seq, at: r.at };
-      }),
-    };
+  if (held.length) {
+    const h: HoldLatch = { v: 1, ...ended, holds: held };
     writeJsonAtomic(layout.hold(ctx.home, lid), h);
   } else {
     removeFile(layout.hold(ctx.home, lid));
   }
   return hot;
+}
+
+/**
+ * A build that found a newer build's record writes no hot file, but a stop or hold it hears is enforced at once: stops
+ * and holds fail closed whatever build hears them, never waiting for the newest build (E2E-AGENT cycle 14). It only
+ * adds blocks: a stop latch when the session is stopped, and a hold file holding the goals held now together with those
+ * the file already holds (a goal held now replaces its own entry). A resume or release it hears removes nothing, since a
+ * file another build wrote may hold what this one does not know: the newest build lifts them when it re-renders the
+ * session, which this build marked (`OLDER_RENDER`).
+ */
+function enforceOnly(ctx: Ctx, lid: string, stop: Latch | null, held: HoldLatch["holds"], ended: Partial<HoldLatch>): void {
+  if (stop) writeJsonAtomic(layout.latch(ctx.home, lid), stop);
+  if (!held.length) return;
+  const file = layout.hold(ctx.home, lid);
+  const prev = readJson<HoldLatch>(file);
+  const kept = Array.isArray(prev?.holds) ? prev.holds.filter((h) => h && typeof h.goal_id === "string" && !held.some((x) => x.goal_id === h.goal_id)) : [];
+  // A hold file that can't be read blocks every tool already; it is left as it is.
+  if (fs.existsSync(file) && !prev) return;
+  writeJsonAtomic(file, { v: 1, ...ended, holds: [...kept, ...held] } satisfies HoldLatch);
 }
 
 /** The newest notice about a sign-out that ended the share of `lid` says a new `align login` ended it (cycle 12), and
@@ -236,6 +279,22 @@ export function endedByLogin(ctx: Ctx, lid: string): boolean {
   try {
     const f = r?.facts ? (JSON.parse(r.facts) as ShareFacts) : null;
     return f?.via === "login" && !f.out_since;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The share of `lid` that a sign-out (or a lost workspace) ended had not reached the server yet (it was still pending):
+ * it was never shared, so no view says it ended or is shared "again" (E2E-AGENT cycle 14 C14-4). From the newest notice
+ * about that end, as `endedByLogin` reads the new sign-in.
+ */
+export function endedUnsent(ctx: Ctx, lid: string, share = getShare(ctx, lid)): boolean {
+  const kind = share?.error === DEVICE_SIGNED_OUT ? "signed_out_" : share?.error === ACCESS_LOST ? "access_lost_" : null;
+  if (!kind || share?.state !== "stopped") return false;
+  const r = ctx.db.prepare("SELECT facts FROM notices WHERE local_id=? AND id LIKE ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(lid, `${lid}/${kind}%`) as { facts: string | null } | undefined;
+  try {
+    return !!(r?.facts && (JSON.parse(r.facts) as ShareFacts).unsent);
   } catch {
     return false;
   }
@@ -358,6 +417,11 @@ export const ACCESS_LOST = "workspace_access_lost";
 /** A user notice for one session, once per `id` and session: one directive that reaches several sessions (a release,
  *  a suspension) leaves each its own notice, so the stored id is scoped to the session. */
 export function addNotice(ctx: Ctx, lid: string, id: string, text: string, facts: ShareFacts | null = null): void {
+  // A newer build has written here: a notice about a share's state is left for it to store, worded its way (cycle 14).
+  if (ctx.superseded && (facts || isShareStateNotice(id))) {
+    kvSet(ctx.db, `${OLDER_NOTICE}${lid}/${id}`, JSON.stringify(facts));
+    return;
+  }
   ctx.db
     .prepare("INSERT OR IGNORE INTO notices(id, local_id, text, created_at, facts) VALUES(?,?,?,?,?)")
     .run(`${lid}/${id}`, lid, text, new Date().toISOString(), facts ? JSON.stringify(facts) : null);
@@ -366,5 +430,120 @@ export function addNotice(ctx: Ctx, lid: string, id: string, text: string, facts
 /** A notice about what happened to the share of `lid` (`facts`), worded when it is shown, from the state then (cycle
  *  11); its stored text, which only an older hook shows, is true whenever it is shown (`storedText`, C12-1). */
 export function addShareNotice(ctx: Ctx, lid: string, id: string, facts: ShareFacts): void {
-  addNotice(ctx, lid, id, storedText(facts), facts);
+  const f = { ...facts, g: WRITER_GEN };
+  addNotice(ctx, lid, id, storedText(f), f);
+}
+
+// ---------- another build writing to the same ALIGN_HOME (E2E-AGENT cycle 14) ----------
+
+/** kv prefix: a session whose hot and latch files a build that saw a newer one's mark did not write. */
+export const OLDER_RENDER = "older_render:";
+/** kv prefix (`<lid>/<notice id>`): a notice about a share's state such a build left for the newest one to store. */
+export const OLDER_NOTICE = "older_notice:";
+/** kv: when a pass last looked for hot files another build wrote. */
+const OLDER_SCAN_AT = "older_scan_at";
+
+/** The newest build that has written to this database (`markBuild`), or null before any did. */
+export function buildMark(ctx: Ctx): BuildMark | null {
+  try {
+    const m = JSON.parse(kvGet(ctx.db, NEWEST_BUILD) || "null") as BuildMark | null;
+    return m && typeof m.gen === "number" ? m : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Record this build as the newest that has written here, unless a newer one did: then return that one's mark, and this
+ * build leaves the sessions' notices about their share, hot files and latch files to it (`ctx.superseded`).
+ */
+export function markBuild(ctx: Ctx): BuildMark | null {
+  const mine = selfBuild();
+  const cur = buildMark(ctx);
+  if (cur && cur.gen > mine.gen) return cur;
+  if (!cur || cur.gen < mine.gen) kvSet(ctx.db, NEWEST_BUILD, JSON.stringify({ ...mine, since: nowIso() } satisfies BuildMark));
+  return null;
+}
+
+/** A notice's facts stored by a build of an older generation (one from before builds were recorded has none). */
+const olderGen = (f: ShareFacts): boolean => (f.g ?? 0) < WRITER_GEN;
+
+/**
+ * What an older build's notice about the share of `lid` still says: only that its state changed, with its workspace and
+ * goal, and how its end came as every view reads it (a replacing `align login`, a share that never reached the server),
+ * so the hook words it from the state now and never contradicts the deny (C14-1, C14-4).
+ */
+function changedFacts(ctx: Ctx, lid: string, own: ShareFacts | null): ShareFacts {
+  const s = getShare(ctx, lid);
+  const g = s?.goal_json ? (JSON.parse(s.goal_json) as GoalSnapshot) : null;
+  const login = own ? own.via === "login" && !own.out_since : endedByLogin(ctx, lid);
+  const unsent = own ? !!own.unsent : endedUnsent(ctx, lid, s);
+  return {
+    e: "changed",
+    ws: clean(s?.workspace_name ?? own?.ws ?? "its workspace", 80),
+    goal: g ? clean(g.title, 100) : (own?.goal ?? null),
+    ...(login ? { via: "login" as const } : {}),
+    ...(unsent ? { unsent: true as const } : {}),
+    g: WRITER_GEN,
+  };
+}
+
+/**
+ * The newest build catches up with what another build wrote here: it stores the notices a build that saw its mark left
+ * (`OLDER_NOTICE`, as "changed"), and when anything shows another build wrote (those, a session it did not render, a hot
+ * file not stamped with this generation), re-renders every session's hot and latch files, so each is told and denied
+ * from the state now and an older build's rows read as "changed" (E2E-AGENT cycle 14 C14-1, C14-3). Run by every pass
+ * (`full`: every hot file is looked at) and every command (only hot files changed since the last pass looked).
+ * Returns how many sessions it re-rendered.
+ */
+export function catchUpOtherBuilds(ctx: Ctx, full = false): number {
+  if (ctx.superseded) return 0;
+  let other = false;
+  const left = ctx.db.prepare("SELECT key, value FROM kv WHERE key LIKE ? ORDER BY key").all(`${OLDER_NOTICE}%`) as { key: string; value: string }[];
+  for (const r of left) {
+    const rest = r.key.slice(OLDER_NOTICE.length);
+    const lid = rest.slice(0, rest.indexOf("/"));
+    const id = rest.slice(rest.indexOf("/") + 1);
+    let own: ShareFacts | null = null;
+    try {
+      own = JSON.parse(r.value) as ShareFacts | null;
+    } catch {
+      /* worded from the state alone */
+    }
+    if (lid && id && getSession(ctx.db, lid)) {
+      const f = changedFacts(ctx, lid, own);
+      ctx.db.prepare("INSERT OR IGNORE INTO notices(id, local_id, text, created_at, facts) VALUES(?,?,?,?,?)").run(`${lid}/${id}`, lid, storedText(f), nowIso(), JSON.stringify(f));
+    }
+    ctx.db.prepare("DELETE FROM kv WHERE key=?").run(r.key);
+    other = true;
+  }
+  if (ctx.db.prepare("DELETE FROM kv WHERE key LIKE ?").run(`${OLDER_RENDER}%`).changes) other = true;
+  const dir = layout.hotDir(ctx.home);
+  const scanned = Number(kvGet(ctx.db, OLDER_SCAN_AT) || 0);
+  const scanStart = Date.now();
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+  } catch {
+    /* no hot files yet */
+  }
+  for (const f of files) {
+    if (other) break;
+    const file = path.join(dir, f);
+    try {
+      if (!full && fs.statSync(file).mtimeMs < scanned - 5_000) continue;
+    } catch {
+      continue;
+    }
+    const h = readJson<HotState>(file);
+    if (h && !(h.by && h.by.gen >= WRITER_GEN)) other = true;
+  }
+  if (full) kvSet(ctx.db, OLDER_SCAN_AT, String(scanStart));
+  if (!other) return 0;
+  const lids = new Set(files.map((f) => f.slice(0, -".json".length)));
+  for (const r of ctx.db.prepare("SELECT local_id FROM shares").all() as { local_id: string }[]) lids.add(r.local_id);
+  let n = 0;
+  for (const lid of lids) if (renderHot(ctx, lid)) n++;
+  ctx.log(`another Align build wrote to this machine's Align data: ${n} session(s) re-rendered from the state now`);
+  return n;
 }

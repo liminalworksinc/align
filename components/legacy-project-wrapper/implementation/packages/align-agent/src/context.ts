@@ -3,6 +3,8 @@ import path from "node:path";
 import { openDb, type Db } from "./db.ts";
 import { deviceSecret } from "./keys.ts";
 import { migrateLocal } from "./migrate.ts";
+import { catchUpOtherBuilds, markBuild } from "./hot.ts";
+import type { BuildMark } from "./build.ts";
 import { ensureHome, resolvePaths, type Paths } from "./paths.ts";
 import { layout } from "./shared/layout.ts";
 import { readJson, writeJsonAtomic } from "./shared/fsx.ts";
@@ -39,6 +41,9 @@ export interface Ctx {
   boundDevice?: string | null;
   /** When the sync pass running in this process started (ms), for what it tells sessions that started with it. */
   passStartedAt?: number;
+  /** A newer build has written to this database (its mark): this one leaves the sessions' notices about their share,
+   *  hot files and latch files to it (E2E-AGENT cycle 14). Null when this build is the newest. */
+  superseded?: BuildMark | null;
 }
 
 export function loadConfig(alignHome: string, env: NodeJS.ProcessEnv = process.env): Config {
@@ -72,7 +77,15 @@ export function openCtx(env: NodeJS.ProcessEnv = process.env, log?: (m: string) 
       }
     });
   const ctx: Ctx = { paths, home: paths.alignHome, db, secret: deviceSecret(paths.alignHome), config: loadConfig(paths.alignHome, env), env, log: writeLog };
+  // The newest build that has written here, before anything is written (E2E-AGENT cycle 14).
+  ctx.superseded = markBuild(ctx);
   // A newer agent's first command or pass brings the database up to date (src/migrate.ts).
   migrateLocal(ctx);
+  // What another build wrote since this one last looked: re-rendered from the state now.
+  try {
+    catchUpOtherBuilds(ctx);
+  } catch (e) {
+    ctx.log(`catching up with another build failed: ${(e as Error).message}`);
+  }
   return ctx;
 }
