@@ -558,6 +558,19 @@ async function phaseHosted(dir) {
     );
     await shots(page, "receipt-decision");
 
+    // A newer request (proposed, then declined) changes the workspace but not the approved plan: both lines show.
+    const p3 = await req("POST", "/api/proposals", { cookie: w.c.product, body: { proposed_measure_text: "Ship the integrations first", rationale: "UILOOP newer request", reciprocal_commitment: "Nothing extra" } });
+    const r3 = await req("POST", `/api/proposals/${p3.json?.id}/reject`, { cookie: w.c.security, body: {} });
+    const both = await untilApi(w, (j) => j?.apps?.[0]?.received_current_plan === true && j.apps[0].on_current_plan === false);
+    await page.reload({ waitUntil: "networkidle2" });
+    const sideBoth = await waitFor(page, async () => /Align sent it the approved plan \(v2\)/.test(await side()) && /Last seen before the latest change/.test(await side()));
+    const homeBoth = /Align sent it the approved plan \(v2\)/.test(await home()) && /Last seen before the latest change/.test(await home());
+    check(
+      "hosted: after a newer request the sidebar and Home show both 'Align sent it the approved plan (v2)' and 'Last seen before the latest change'",
+      p3.status === 200 && r3.status === 200 && both && sideBoth && homeBoth,
+      `${p3.status} ${r3.status} ${JSON.stringify(await app0())} || ${await side()} || ${await home()}`,
+    );
+
     // A newer approval: the old receipt doesn't count for it.
     const pid2 = await agree(w);
     const moved = await app0();

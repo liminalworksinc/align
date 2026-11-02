@@ -171,12 +171,14 @@ function AgentsSection({ agents: read, teamOf }: { agents: AgentsRead; teamOf: (
               </span>
               <span className="min-w-0 font-semibold text-zinc-900">{a.name}</span>
               <span className="text-[14px] text-zinc-500">as {teamOf(a.role)}</span>
-              {a.received_current_plan && a.plan_receipt ? (
+              {a.received_current_plan && a.plan_receipt && (
                 <span className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-zinc-700 @max-md:ml-6 @max-md:basis-full">
                   <Badge tone="violet">Align sent it the approved plan ({a.plan_receipt.accepted_version})</Badge>
                   <span>sent by Align {ago(a.plan_receipt.at)}</span>
                 </span>
-              ) : (
+              )}
+              {/* Both can be true: the approved plan is unchanged, but a newer request changed the workspace. */}
+              {!(a.received_current_plan && a.plan_receipt && a.on_current_plan) && (
                 <span className={`ml-auto text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"} @max-md:ml-6 @max-md:basis-full`}>
                   {a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"} · last seen by Align {ago(a.last_used_at!)}
                 </span>

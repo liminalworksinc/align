@@ -204,10 +204,12 @@ export default function ConnectAI({
               </span>
               <span className="min-w-0">
                 <span className="font-semibold text-zinc-900">{a.name}</span>{" "}
-                {a.received_current_plan && a.plan_receipt ? (
+                {a.received_current_plan && a.plan_receipt && (
                   <span className="text-zinc-700">Align sent it the approved plan ({a.plan_receipt.accepted_version})</span>
-                ) : (
-                  <span className={a.on_current_plan ? "text-zinc-700" : "text-amber-800"}>{a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"}</span>
+                )}
+                {/* Both can be true: the approved plan is unchanged, but a newer request changed the workspace. */}
+                {!(a.received_current_plan && a.plan_receipt && a.on_current_plan) && (
+                  <span className={`block ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"}`}>{a.on_current_plan ? "Seen since the latest change" : "Last seen before the latest change"}</span>
                 )}
               </span>
             </li>
@@ -289,11 +291,12 @@ export default function ConnectAI({
                       <div className="text-[14px] text-zinc-600">
                         As {teamOf(a.role)} · {a.last_used_at ? `last seen by Align ${when(a.last_used_at)}` : "Approved, not seen by Align yet"}
                       </div>
-                      {a.received_current_plan && a.plan_receipt ? (
+                      {a.received_current_plan && a.plan_receipt && (
                         <div className="mt-1 text-[14px] text-zinc-700">
                           ✓ Align sent it the approved plan ({a.plan_receipt.accepted_version}) at {when(a.plan_receipt.at)}. Align can’t see what the app does next.
                         </div>
-                      ) : a.last_used_at && (
+                      )}
+                      {a.last_used_at && !(a.received_current_plan && a.plan_receipt && a.on_current_plan) && (
                         <div className={`mt-1 text-[14px] ${a.on_current_plan ? "text-zinc-700" : "text-amber-800"}`}>
                           {a.on_current_plan
                             ? "✓ Seen since the latest change."

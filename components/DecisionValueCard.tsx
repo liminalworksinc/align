@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { launchState, recordFacts } from "@/components/launch";
+import { recordFacts } from "@/components/launch";
 import type { ViewProps } from "@/components/props";
 import { accepted, currentGoal } from "@/components/select";
 import { Badge, Button } from "@/components/ui";
@@ -70,7 +70,7 @@ function PlanReceipts({ read, acc, teamOf }: { read: AgentsRead; acc: Acceptance
               </Badge>
               <span className="text-zinc-600">
                 {when(a.plan_receipt!.at)}
-                {a.plan_receipt!.launch !== launchState(acc) && ", before the launch decision"}
+                {a.plan_receipt!.launch === "approved" ? ", after the launch was approved" : ", before the launch decision"}
               </span>
             </li>
           ))}
