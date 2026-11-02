@@ -530,6 +530,11 @@ export async function actOnChangeRequest(pp: PolicyPrincipal, goalId: string, id
         launcherOnly();
         launchable();
         expectRevision(false);
+        // Already not yet (in another tab, or by another launcher): recording it again would change nothing (c11 W2).
+        if (r.launch === "not_yet") {
+          const who = r.launch_by === me ? "You" : r.launch_by ? memberName(r.launch_by) : "Someone";
+          throw conflict("wrong_state", `${who} already decided not yet, so nothing changes: agents stay on version ${r.base_version} until someone launches version ${r.base_version + 1}.`);
+        }
         run("UPDATE v2_change_requests SET launch = 'not_yet', launch_by = ?, launch_at = ?, updated_at = ? WHERE id = ?", me, at, at, r.id);
         audit(pp.wsId, me, "change_request.not_yet", r.id, at);
         break;
@@ -766,7 +771,7 @@ function requestView(pp: PolicyPrincipal, r: ChangeRequestRow) {
     rebase: r.state === "pending" && isRequester,
     add_evidence: mayAddEvidence(pp, r, approvers),
     launch: launchable && !hiddenRefusal && !loop,
-    not_yet: launchable,
+    not_yet: launchable && r.launch !== "not_yet",
   };
   if (pp.wsRole === "viewer") for (const k of Object.keys(can) as (keyof typeof can)[]) can[k] = false;
   const evidence = evidenceRows(r.id);

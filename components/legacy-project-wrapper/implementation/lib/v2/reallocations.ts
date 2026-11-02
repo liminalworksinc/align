@@ -284,6 +284,11 @@ export async function actOnReallocation(pp: PolicyPrincipal, id: string, action:
         launcherOnly();
         launchable();
         expectRevision(false);
+        // Already not yet (in another tab, or by another launcher): recording it again would change nothing (c11 W2).
+        if (r.launch === "not_yet") {
+          const who = r.launch_by === me ? "You" : r.launch_by ? memberName(r.launch_by) : "Someone";
+          throw conflict("wrong_state", `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches these.`);
+        }
         run("UPDATE v2_reallocations SET launch = 'not_yet', launch_by = ?, launch_at = ?, updated_at = ? WHERE id = ?", me, at, at, r.id);
         audit(r.ws_id, me, "reallocation.not_yet", r.id, at);
         break;
@@ -384,7 +389,7 @@ function view(pp: PolicyPrincipal, r: Row) {
     // My approval completes it and I may launch: both in one step.
     approve_and_launch: r.state === "pending" && canApproveNow && launcher && targets.every((t) => t.approved || t.approvers.some((a) => a.id === me)),
     launch: unlaunched && launcher,
-    not_yet: unlaunched && launcher,
+    not_yet: unlaunched && launcher && r.launch !== "not_yet",
     counter: r.state === "pending" && isApprover && !isRequester,
     accept_counter: r.state === "countered" && isRequester,
     reject: open && isApprover && !isRequester,

@@ -1982,13 +1982,18 @@ try {
   const notYetViewer = await crAct(U4, GL.id, cr1.json.id, "not_yet", {});
   const notYet1 = await crAct(U2, GL.id, cr1.json.id, "not_yet", {});
   const notYet2 = await crAct(U3, GL.id, cr1.json.id, "not_yet", {});
+  const notYet2Own = await crAct(U2, GL.id, cr1.json.id, "not_yet", {});
+  const notYetRead = (await crGet(U3, GL.id, cr1.json.id)).json;
   const dirsAfterNotYet = await dirs(D3, cursor3);
   const feedAfterNotYet = await glFeed();
   check(
-    "launch (D1): not yet (a viewer -> 403 read_only) records the decision and publishes nothing; a later not yet replaces it (launch not_yet, launch_decided_by the owner); the feed's ETag is unchanged and no directive is written; audit change_request.not_yet",
-    notYetViewer.status === 403 && notYetViewer.json?.error === "read_only" && notYet1.json?.launch === "not_yet" && notYet1.json.launch_decided_by?.id === U2.id && notYet2.json?.launch === "not_yet" && notYet2.json.launch_decided_by?.id === U3.id && notYet2.json.version === null &&
-      (dirsAfterNotYet?.directives ?? []).length === 0 && feedAfterNotYet.headers.get("etag") === etagBefore && auditOf("change_request.not_yet", cr1.json.id).sort().join() === [U2.id, U3.id].sort().join(),
-    `${notYet1.text.slice(0, 200)} ${notYet2.text.slice(0, 200)} ${JSON.stringify(dirsAfterNotYet).slice(0, 200)}`,
+    "launch (D1): not yet (a viewer -> 403 read_only) records the decision and publishes nothing (launch not_yet, launch_decided_by the launcher); a second not yet, by another launcher or the same one (another tab), is 409 wrong_state \"Uli Two already decided not yet, so nothing changes: agents stay on version 1 until someone launches version 2.\" (\"You already decided not yet, …\" to them) and is not recorded again, while can.not_yet reads false and can.launch true (c11 W2); the feed's ETag is unchanged and no directive is written; audit change_request.not_yet once",
+    notYetViewer.status === 403 && notYetViewer.json?.error === "read_only" && notYet1.json?.launch === "not_yet" && notYet1.json.launch_decided_by?.id === U2.id && notYet1.json.version === null &&
+      notYet2.status === 409 && notYet2.json?.error === "wrong_state" && notYet2.json.message === `${U2.name} already decided not yet, so nothing changes: agents stay on version 1 until someone launches version 2.` &&
+      notYet2Own.status === 409 && notYet2Own.json?.message === "You already decided not yet, so nothing changes: agents stay on version 1 until someone launches version 2." &&
+      notYetRead?.launch_decided_by?.id === U2.id && notYetRead.can?.not_yet === false && notYetRead.can.launch === true &&
+      (dirsAfterNotYet?.directives ?? []).length === 0 && feedAfterNotYet.headers.get("etag") === etagBefore && auditOf("change_request.not_yet", cr1.json.id).join() === U2.id,
+    `${notYet1.text.slice(0, 200)} ${notYet2.text.slice(0, 200)} ${notYet2Own.text.slice(0, 200)} ${JSON.stringify(notYetRead?.can)} ${JSON.stringify(dirsAfterNotYet).slice(0, 200)}`,
   );
   // U1, the workspace owner, is the requester: not an approver, but in the launch set.
   const launchViewer = await crAct(U4, GL.id, cr1.json.id, "launch", {});
@@ -9482,6 +9487,79 @@ try {
         w1Long.status === 400 && w1Long.json?.message === "That code is too long. Enter the code shown by align login." && JSON.stringify(sAlNow(w1Al)) === JSON.stringify({ state: "pending", revision: 1 }),
       `${w1Revs.map((r) => `${r.status} ${r.json?.message}`).join(" | ")} || ${w1Codes.map((r) => `${r.status} ${r.json?.message}`).join(" | ")} || ${w1Long.text} ${JSON.stringify(sAlNow(w1Al))}`,
     );
+
+    // -- W2: Not yet on a target change someone already said not yet to is refused, not recorded again --
+    const sRl = async (share) => (await sa(SD, "POST", "/reallocations", { targets: [{ goal_id: ST?.id, target_share: share }], note: "More here" })).json;
+    const sRlAct = (u, t, action, body) => sa(u, "POST", `/reallocations/${t?.id}/${action}`, body);
+    const sRlNow = (t) => withDb((d) => d.prepare("SELECT state, revision, launch, launch_by FROM v2_reallocations WHERE id = ?").get(t?.id));
+    const sRlAudit = (t, action) => withDb((d) => d.prepare("SELECT actor_id FROM v2_audit WHERE action = ? AND object_id = ?").all(action, t?.id).map((r) => r.actor_id));
+    const NOT_YET_RL = (who) => `${who} already decided not yet, so nothing changes: agents keep the old targets until someone launches these.`;
+    const n1 = await sRl(10);
+    const n1Ok = await sRlAct(SO, n1, "approve", { revision: 1 });
+    const n1First = await sRlAct(SO, n1, "not_yet", { revision: 1 });
+    const n1Again = await sRlAct(SO, n1, "not_yet", { revision: 1 });
+    const n1Other = await sRlAct(SC, n1, "not_yet", { revision: 1 });
+    const n1Read = (await sa(SC, "GET", `/reallocations/${n1?.id}`)).json;
+    const n1Launch = await sRlAct(SC, n1, "launch", { revision: 1 });
+    check(
+      "c11 W2 (E2E-WEB cycle 11): Not yet on an approved target change already \"not yet\" is 409 wrong_state, \"You already decided not yet, so nothing changes: agents keep the old targets until someone launches these.\" to the person who said it and \"Sasha Owner already decided not yet, …\" to another launcher, and is not recorded again (one reallocation.not_yet, launch_by unchanged); can.not_yet then reads false and can.launch true, and Launch still launches",
+      n1Ok.json?.state === "approved" && n1First.status === 200 && n1First.json?.launch === "not_yet" &&
+        n1Again.status === 409 && n1Again.json?.error === "wrong_state" && n1Again.json.message === NOT_YET_RL("You") &&
+        n1Other.status === 409 && n1Other.json?.error === "wrong_state" && n1Other.json.message === NOT_YET_RL(SO.name) &&
+        sRlAudit(n1, "reallocation.not_yet").join() === SO.id && n1Read?.can?.not_yet === false && n1Read.can.launch === true && n1Launch.json?.launch === "launched",
+      `${n1Ok.status} ${n1First.status} ${n1Again.text} | ${n1Other.text} | ${JSON.stringify(n1Read?.can)} ${n1Launch.text.slice(0, 200)} ${JSON.stringify(sRlAudit(n1, "reallocation.not_yet"))}`,
+    );
+
+    // -- the browser: W2 (ui), Not yet on a target change card left open while another launcher said not yet --
+    const n2 = await sRl(11);
+    const n2Ok = await sRlAct(SO, n2, "approve", { revision: 1 });
+    if (existsSync(CHROME)) {
+      const { default: puppeteer } = await import("puppeteer-core");
+      const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--no-first-run", "--no-default-browser-check"] });
+      const errors = [];
+      const as = async (u) => {
+        const ctx = await browser.createBrowserContext();
+        const pg = await ctx.newPage();
+        pg.on("pageerror", (e) => errors.push(e.message));
+        await pg.setViewport({ width: 1100, height: 900 });
+        await pg.setCookie(...u.cookie.split("; ").map((c) => ({ name: c.slice(0, c.indexOf("=")), value: c.slice(c.indexOf("=") + 1), url: BASE })));
+        return pg;
+      };
+      const open = async (pg, p) => {
+        await pg.goto(`${BASE}${p}`, { waitUntil: "networkidle0" });
+        await pg.waitForFunction(() => !document.body.innerText.includes("Loading"), { timeout: 15000 }).catch(() => undefined);
+      };
+      const press = (pg, scope, label) => pg.evaluate((sc, t) => [...document.querySelectorAll(`${sc} button`)].find((b) => b.textContent?.trim() === t)?.click(), scope, label);
+      const hasButton = (pg, scope, label) => pg.waitForFunction((sc, t) => [...document.querySelectorAll(`${sc} button`)].some((b) => b.textContent?.trim() === t), { timeout: 15000 }, scope, label).catch(() => undefined);
+      const cardState = (pg, sel) =>
+        pg.evaluate((c) => {
+          const card = document.querySelector(c);
+          const n = card?.querySelector("[data-notice]");
+          return { notice: n?.getAttribute("data-notice") ?? null, noticeText: n?.textContent?.trim() ?? "", focused: !!n && document.activeElement === n, text: card?.innerText ?? "", buttons: [...(card?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()) };
+        }, sel);
+      try {
+        const pO = await as(SO);
+        await open(pO, `/app/w/${SW}/alignments`);
+        const card = `[data-reallocation="${n2?.id}"]`;
+        await hasButton(pO, card, "Not yet");
+        const n2Other = await sRlAct(SC, n2, "not_yet", { revision: 1 });
+        await press(pO, card, "Not yet");
+        await pO.waitForFunction((c) => !!document.querySelector(`${c} [data-notice]`), { timeout: 15000 }, card).catch(() => undefined);
+        await pO.waitForNetworkIdle({ idleTime: 300, timeout: 15000 }).catch(() => undefined);
+        const n2Ui = await cardState(pO, card);
+        check(
+          "c11 W2 (ui): Not yet on a target change card left open while another launcher said not yet reads, focused, \"Not recorded. Sol Lead already decided not yet, so nothing changes: …\"; the card reloads (\"Approved, not launched yet: Sol Lead decided not yet.\", no Not yet button) and only Sol Lead's not yet is recorded",
+          n2Ok.json?.state === "approved" && n2Other.status === 200 && n2Ui.notice === "refused" && n2Ui.focused && n2Ui.noticeText === `Not recorded. ${NOT_YET_RL(SC.name)}` &&
+            n2Ui.text.includes(`Approved, not launched yet: ${SC.name} decided not yet.`) && !n2Ui.buttons.includes("Not yet") && sRlAudit(n2, "reallocation.not_yet").join() === SC.id,
+          JSON.stringify(n2Ui).slice(0, 700),
+        );
+        check("c11 web fix (ui): no page error", errors.length === 0, errors.slice(0, 3).join(" | "));
+      } catch (e) {
+        check("c11 web fix (ui) run", false, e?.stack ?? e);
+      } finally {
+        await browser.close();
+      }
+    } else check("ui (Chrome) available for the c11 web fix checks", false, `no Chrome at ${CHROME}`);
   }
   // ==== end fix:c11-web ====
 
