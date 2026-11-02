@@ -6631,6 +6631,41 @@ try {
             yOtherPerson.status === 404 && yJoined.text.includes("You already joined Invite Y, in another tab or window.") && yJoined.link === `/app/w/${IWY}` && !/Not found/.test(yJoined.text),
           `${yOther.status} ${yAgain.status} ${yAgain.text} ${yOtherPerson.status} ${JSON.stringify(yJoined).slice(0, 400)}`,
         );
+        // Z6 (E2E-WEB cycle 6): joined in another tab with a device ticked here: the page says the device was not given
+        // the workspace and points to the Devices page.
+        const IWY3 = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite Y three" } })).json?.id;
+        const ivY3 = await call("FO", "POST", `/api/v2/workspaces/${IWY3}/invites`, { cookie: FO.cookie, body: { email: FY.email, role: "member" } });
+        await open(pY, `/app/invite/${ivY3.json?.token}`);
+        await pY.click('main input[type="checkbox"]');
+        await pY.waitForFunction(() => [...document.querySelectorAll("main button")].some((b) => b.textContent?.trim() === "Join workspace and give it to this device"), { timeout: 5000 }).catch(() => undefined);
+        const y3Other = await call("FY", "POST", `/api/v2/invites/${ivY3.json?.token}/accept`, { cookie: FY.cookie, body: {} });
+        await press(pY, "main", "Join workspace and give it to this device");
+        await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("You already joined"), { timeout: 15000 }).catch(() => undefined);
+        const y3 = await pY.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", links: [...document.querySelectorAll("main a")].map((a) => a.getAttribute("href")) }));
+        const y3Grant = withDb((d) => d.prepare("SELECT 1 AS x FROM v2_device_grants WHERE device_id = ? AND ws_id = ?").get(fyA.id, IWY3) ?? null);
+        check(
+          "Z6 (ui): Join with a device ticked on an invite already accepted in another tab says \"You already joined Invite Y three, in another tab or window.\" and \"The device you ticked was not given Invite Y three: give it to that device on your Devices page.\" (linked), and the device has no new workspace",
+          y3Other.status === 200 && y3.text.includes("You already joined Invite Y three, in another tab or window.") &&
+            /The device you ticked was not given Invite Y three: give it to that device on your Devices page\./.test(y3.text.replace(/\s+/g, " ")) &&
+            y3.links.includes("/app/devices") && y3.links.includes(`/app/w/${IWY3}`) && y3Grant === null,
+          `${y3Other.status} ${JSON.stringify(y3).slice(0, 600)} ${JSON.stringify(y3Grant)}`,
+        );
+        // C6-5 (E2E-WEB cycle 6): the invite is withdrawn while the page is open, then Join: only the refusal is shown.
+        const IWY4 = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite Y four" } })).json?.id;
+        const ivY4 = await call("FO", "POST", `/api/v2/workspaces/${IWY4}/invites`, { cookie: FO.cookie, body: { email: FY.email, role: "viewer" } });
+        await open(pY, `/app/invite/${ivY4.json?.token}`);
+        const y4Withdrawn = await call("FO", "DELETE", `/api/v2/workspaces/${IWY4}/invites/${ivY4.json?.id}`, { cookie: FO.cookie });
+        await press(pY, "main", "Join workspace");
+        await pY.waitForFunction(() => document.querySelector("main")?.innerText.includes("can't be used any more"), { timeout: 15000 }).catch(() => undefined);
+        await pY.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => undefined);
+        const y4 = await pY.evaluate(() => ({ text: document.querySelector("main")?.innerText ?? "", buttons: [...document.querySelectorAll("main button")].map((b) => b.textContent?.trim()) }));
+        check(
+          "C6-5 (ui): Join on an invite withdrawn while the page was open shows only \"This invite can't be used any more: … You have not joined. …\": no \"You are invited …\", no \"This invite link is not valid\" and no Join button",
+          y4Withdrawn.status === 204 &&
+            y4.text.includes("This invite can't be used any more: it was withdrawn, it expired, or it was already used. You have not joined.") &&
+            !y4.text.includes("You are invited") && !y4.text.includes("This invite link is not valid") && !y4.buttons.some((t) => /^Join workspace/.test(t ?? "")),
+          `${y4Withdrawn.status} ${JSON.stringify(y4).slice(0, 600)}`,
+        );
         // A 403 reauth_required on Join (the sign-in aged while the page was open) says so in place: the devices are
         // unticked and disabled, and Join (without them) stays; then Sign in again is one step to the sign-in page.
         const IWY2 = (await call("FO", "POST", "/api/v2/workspaces", { cookie: FO.cookie, body: { name: "Invite Y two" } })).json?.id;

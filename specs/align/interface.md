@@ -451,7 +451,15 @@ of the person's paired devices (signed out in another tab) gives the server's me
 again: choose again, or join without them.", with the list read again and nothing ticked; an invite the person already
 accepted in another tab gives "You already joined <workspace>, in another tab or window." with a link to it; an
 invite that is gone otherwise gives "This invite can't be used any more: it was withdrawn, it expired, or it was
-already used. You have not joined. …".
+already used. You have not joined. …", and then only that: no invite text and no **Join workspace**. When the person
+already joined in another tab with devices ticked here, it SHALL also say "The device you ticked was not given
+<workspace>: give it to that device on your Devices page." ("The <n> devices you ticked were … give it to them …"),
+with a link to `/app/devices`, since a refused Join grants nothing.
+
+#### Scenario: Refused Join, invite gone or joined elsewhere
+
+- **WHEN** the invitee presses Join after the invite was withdrawn, and, on another invite, presses Join with a device ticked after accepting it in another tab (`scripts/test-v2.mjs` "C6-5, Z6 (ui): ...")
+- **THEN** the first page shows "This invite can't be used any more: …" alone, with no "You are invited …", no "This invite link is not valid" and no Join button; the second says "You already joined <workspace>, in another tab or window." and "The device you ticked was not given <workspace>: give it to that device on your Devices page." with links to `/app/devices` and the workspace, and the device has no new workspace
 
 #### Scenario: Accept an invite
 
