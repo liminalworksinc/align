@@ -69,8 +69,10 @@ export interface HotState {
   harness: Harness;
   native_session_id: string;
   cwd: string | null;
-  /** `since`: the first epoch of this share, which a share made again after an earlier one ended changes (cycle 6). */
-  share: { workspace_id: string; workspace_name: string; session_key: string; state: ShareState; since?: string } | null;
+  /** `since`: the first epoch of this share, which a share made again after an earlier one ended changes (cycle 6).
+   *  `ended`: why a stopped share ended (a sign-out or a lost workspace, which the server lets this person share again;
+   *  else `sharing_ended`), cycle 7. */
+  share: { workspace_id: string; workspace_name: string; session_key: string; state: ShareState; since?: string; ended?: EndedWhy } | null;
   goal: GoalSnapshot | null;
   binding: { epoch_id: string; goal_id: string | null } | null;
   /** Opened by the next UserPromptSubmit hook (a root-turn boundary). */
@@ -201,8 +203,10 @@ export interface InjectedState {
   releases_told?: string[];
   /** The resume the model was last told about. */
   resume_told?: string;
-  /** The share (its `since`) the model was last told it counts in: a share made again later is told as `bound` even
-   *  toward the goal already in context, since it stopped counting in between (cycle 6). */
+  /** The share (its `since`, the share's first epoch) the model was last told it counts in, recorded whenever an envelope
+   *  or a delta about the share's goal is delivered (for a folder rule's share at session start, the epoch the hook chose
+   *  for it): a share made again later is told as `bound` even toward the goal already in context, since it stopped
+   *  counting in between (cycles 6 and 7). */
   share_since?: string;
   at: string;
 }
@@ -353,5 +357,8 @@ export type SpoolRecord =
       rule_dir?: string | null;
       /** `bind`: the id of the binding the hook already applies at the next prompt (InjectedState.local_binding). */
       pending_id?: string;
+      /** `share` from a folder rule at session start: the share's first epoch, chosen by the hook that gave the model the
+       *  goal's envelope, so the share the model was told about is known by its id (cycle 7). */
+      epoch_id?: string;
       ts: string;
     };

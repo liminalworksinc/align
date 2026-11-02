@@ -28,7 +28,7 @@ import {
 import { bumpGap, nowIso, tx } from "./db.ts";
 import { endEpochs, ensureSession, epochFor, getSession, recordRootTurn } from "./ledger.ts";
 import { addNotice, getShare, renderHot, snapshot } from "./hot.ts";
-import { applyShare, bind, endShareRemoved, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
+import { applyShare, bind, endShareRemoved, endShareSignedOutByServer, endSharesIfSignedOut, enqueue, forgetShare, markStopped, notePriorShare, planShare, sharedBefore, stopSharing, stoppedByPerson } from "./share.ts";
 import { hasWorkspace, loadFeed, loadMe, refreshFeed, refreshMe, resolveGoal, resolveWorkspace } from "./goals.ts";
 import { pollDirectives } from "./directives.ts";
 import { answerRequest } from "./requests.ts";
@@ -173,7 +173,7 @@ function applyCommand(ctx: Ctx, r: Extract<SpoolRecord, { type: "command" }>): s
       }
       // Shared before (its history deleted since, too): this share counts from now (C6-1).
       const before = sharedBefore(ctx, lid);
-      applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start"));
+      applyShare(ctx, planShare(ctx, lid, ws, goal, null, before ? "now" : "start", r.epoch_id));
       if (!r.rule_dir) addNotice(ctx, lid, `share_started_${r.ts}`, `Align: sharing this session with ${ws.name}${goal ? ` for "${goal.title}"` : ""}, counting from ${before ? "now" : "session start"}.`);
     }
   } catch (e) {
@@ -518,6 +518,9 @@ export async function uploadUsage(ctx: Ctx): Promise<{ uploaded: number; batches
             // Its person was removed (and is back: /me lists the workspace) while this device never saw it: not a stop
             // for good, so it ends as a lost workspace does and `::align share` shares it again (C6-3).
             endShareRemoved(ctx, s.local_id);
+          } else if (stopped && r.json?.ended_reason === "device_signed_out") {
+            // Ended at a sign-out this machine never saw end it: worded as a sign-out, not as leaving the workspace (C7-5).
+            endShareSignedOutByServer(ctx, s.local_id);
           } else if (stopped || r.json?.error === "not_shared" || r.status === 404) {
             markStopped(ctx, s.local_id);
             // A server that names why (`ended_reason`) says null when its person stopped it (on the web, or on another
@@ -699,7 +702,10 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
     return res;
   } finally {
     unbind();
-    res.serverError = serverTrouble();
+    // A call the pairing change cut short (held past its timeout while `align login` or `align logout` committed, say)
+    // says nothing about whether the server can be reached: no "could not reach", and last-sync keeps what it said
+    // (cycle 7).
+    res.serverError = res.aborted ? null : serverTrouble();
     try {
       const at = nowIso();
       const prev = readJson<LastSync>(layout.lastSync(ctx.home));
@@ -708,6 +714,9 @@ export async function syncOnce(ctx: Ctx, opts: { tailBudgetMs: number; refreshFe
         rec.error = res.serverError;
         rec.error_since = prev?.error ? prev.error_since || prev.at : at;
         ctx.log(`sync: ${res.serverError}; queued work stays on this machine until a pass gets through`);
+      } else if (res.aborted && prev?.error) {
+        rec.error = prev.error;
+        rec.error_since = prev.error_since || prev.at;
       } else if (prev?.error) ctx.log("sync: the server is reachable again");
       writeJsonAtomic(layout.lastSync(ctx.home), rec);
       fs.unlinkSync(lock);
