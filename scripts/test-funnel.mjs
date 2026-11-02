@@ -979,7 +979,7 @@ async function phaseLayout(dir) {
       });
       check(
         "(g) rail: 'Layout New App Seen since the latest change' (violet ✓), 'Layout Old App Last seen before the latest change' (the server's on_current_plan); no 'read', 'current plan', 'older plan' or 'still on'",
-        apps.filter((a) => a.on_current_plan).length === 1 && /Layout New App Seen since the latest change/.test(rail) && /Layout Old App Last seen before the latest change/.test(rail) && !/read|current plan|older plan|still on/i.test(rail) && railTone,
+        apps.filter((a) => a.on_current_plan).length === 1 && /Layout New App\s+Seen since the latest change/.test(rail) && /Layout Old App\s+Last seen before the latest change/.test(rail) && !/read|current plan|older plan|still on/i.test(rail) && railTone,
         `${JSON.stringify(apps.map((a) => [a.name, a.on_current_plan]))} :: ${rail}`,
       );
       await ctx.close();
