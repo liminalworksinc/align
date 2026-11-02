@@ -289,7 +289,8 @@ export async function revokeDevice(deviceId: string, reason: string, actor: stri
  * "X (3)" (the plain name held by another machine) passes "X (2)" on, and the machine keeps the name it had. Only for the
  * same person's live device named `<base> (<n>)` whose base is this one's name without its own " (<m>)" and m < n (the
  * plain name counting as 1), and only while no other live device of theirs has the name, so two real machines of one
- * name keep telling apart; a pairing that asked for another name keeps it.
+ * name keep telling apart; a pairing that asked for another name keeps it, and so does one whose " (<n>)" is part of the
+ * name it asked for (`align login --name "X (5)"`), which its approval page showed (cycle 9).
  */
 function passNameOn(revokedId: string, nextId: string) {
   const gone = get<{ user_id: string; name: string }>("SELECT user_id, name FROM v2_devices WHERE id = ?", revokedId);
@@ -297,6 +298,11 @@ function passNameOn(revokedId: string, nextId: string) {
   if (!gone || !next || next.user_id !== gone.user_id || next.revoked_at) return;
   const m = /^(.*) \((\d+)\)$/.exec(next.name);
   if (!m) return;
+  // The name the person asked for (`align login --name`, or the agent's default) is theirs: only a number added to tell
+  // it apart from a live device is passed back, never one they asked for (E2E-AGENT cycle 9 C9-4), so the device keeps
+  // the name its approval page showed.
+  const asked = get<{ device_name: string }>("SELECT device_name FROM v2_device_requests WHERE device_id = ?", nextId)?.device_name;
+  if (asked === next.name) return;
   const was = nameNumber(m[1], gone.name);
   if (was === null || was >= Number(m[2])) return;
   if (get("SELECT 1 AS x FROM v2_devices WHERE user_id = ? AND revoked_at IS NULL AND name = ? AND id <> ?", gone.user_id, gone.name, nextId)) return;

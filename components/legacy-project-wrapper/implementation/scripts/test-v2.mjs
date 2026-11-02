@@ -1222,8 +1222,30 @@ try {
       passRenamedRevoke.status === 204 && nameOf(passRenamed.id)?.name === "work mac (2)" && passBetterRevoke.status === 204 && nameOf(passBetter.id)?.name === "pass mac (4)",
     `${passRevoke.status} ${JSON.stringify([nameOf(passNew.id), nameOf(passOther.id), nameOf(passOld.id)])} ${passRenamedRevoke.status} ${nameOf(passRenamed.id)?.name} ${passBetterRevoke.status} ${nameOf(passBetter.id)?.name}`,
   );
+  // C9-4 (E2E-AGENT cycle 9): `align login --name "ask mac (5)"` replacing this machine's live "ask mac (2)" (another
+  // machine holds "ask mac") keeps the name it asked for, which its approval answered; a pairing whose number was only
+  // added to tell it apart ("auto mac" approved as "auto mac (3)") still gets the replaced device's "auto mac (2)".
+  const askOther = insertDevice(U1.id, "ask mac");
+  const askOld = insertDevice(U1.id, "ask mac (2)");
+  const askReq = insertPairing("ask mac (5)");
+  const askAp = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: askReq.userCode, workspace_ids: [A] } });
+  const askTok = await call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: askReq.deviceCode, replaces: askOld.id } });
+  const askRevoke = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${askTok.json?.device_id ?? ""}`, { bearer: askOld.access });
+  const autoOther = insertDevice(U1.id, "auto mac");
+  const autoOld = insertDevice(U1.id, "auto mac (2)");
+  const autoReq = insertPairing("auto mac");
+  const autoAp = await call("U1", "POST", "/api/v2/device/approve", { cookie: U1.cookie, body: { user_code: autoReq.userCode, workspace_ids: [A] } });
+  const autoTok = await call("D", "POST", "/api/v2/device/token", { body: { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: autoReq.deviceCode } });
+  const autoRevoke = await call("U1", "DELETE", `/api/v2/devices/self?replaced_by=${autoTok.json?.device_id ?? ""}`, { bearer: autoOld.access });
+  check(
+    "device (E2E-AGENT cycle 9 C9-4): `align login --name \"ask mac (5)\"` replacing the live \"ask mac (2)\" keeps \"ask mac (5)\", the name it asked for and its approval answered, when the replaced device's self-revoke names it; a pairing that asked for \"auto mac\" and got \"auto mac (3)\" only to tell it apart still takes the replaced \"auto mac (2)\"",
+    askAp.json?.device_name === "ask mac (5)" && askTok.status === 200 && askRevoke.status === 204 && nameOf(askTok.json.device_id)?.name === "ask mac (5)" && !!nameOf(askOld.id)?.revoked_at &&
+      autoAp.json?.device_name === "auto mac (3)" && autoTok.status === 200 && autoRevoke.status === 204 && nameOf(autoTok.json.device_id)?.name === "auto mac (2)",
+    `${askAp.text} ${askTok.status} ${askRevoke.status} ${JSON.stringify(nameOf(askTok.json?.device_id ?? ""))} ${autoAp.text} ${autoTok.status} ${autoRevoke.status} ${JSON.stringify(nameOf(autoTok.json?.device_id ?? ""))}`,
+  );
   withDb((d) => {
-    for (const x of [raceB, raceOther, raceKeep, passOther, passNew, passRenamed, passBetter]) d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
+    for (const x of [raceB, raceOther, raceKeep, passOther, passNew, passRenamed, passBetter, askOther, autoOther, { id: askTok.json?.device_id ?? "" }, { id: autoTok.json?.device_id ?? "" }])
+      d.prepare("UPDATE v2_devices SET revoked_at = ?, revoked_reason = 'revoked_on_web' WHERE id = ?").run(new Date().toISOString(), x.id);
   });
   const ts3 = new Date().toISOString();
   const rr1 = await call("D", "POST", "/api/v2/device/refresh", { body: { device_id: DR.id, refresh_token: DR.refresh, ts: ts3, sig: refreshSig(DR, DR.id, DR.refresh, ts3) } });

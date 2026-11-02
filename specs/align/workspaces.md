@@ -1143,12 +1143,19 @@ once it is revoked, the named device SHALL take that name in the same transactio
 machine (the second named while the first's device was live, then replacing it) so end with the name the machine had:
 the plain name, never `<name> (2)` next to no `<name>`, and `<name> (2)` (another machine holding `<name>`), never
 `<name> (3)` next to no `<name> (2)`. Another person's device, a name still taken, a replacement that asked for another
-name, or one already named better than the revoked device is left as it is.
+name, or one already named better than the revoked device is left as it is. Only a number added to tell the name apart
+from a live device is passed back: a replacement whose name is exactly the name its pairing asked for (`align login
+--name "<name> (5)"`, or the agent's default), which its approval page showed, SHALL keep it.
 
 #### Scenario: A suffixed machine keeps its name through two logins at once
 
 - **WHEN** a person's device `pass mac (2)` (their other machine is `pass mac`) revokes itself naming their live `pass mac (3)` as its replacement; `pass mac (5)` names their `work mac (2)`; and `pass mac (6)` names their `pass mac (4)` (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 8 C8-2): ...")
 - **THEN** each revoke is 204, `pass mac (3)` becomes `pass mac (2)` and `pass mac` stays, while `work mac (2)` and `pass mac (4)` keep their names
+
+#### Scenario: A name asked for is kept when it replaces a live pairing
+
+- **WHEN** a person's machine is `ask mac (2)` (their other machine is `ask mac`), a pairing asks for `ask mac (5)` and replaces it, and the old device revokes itself naming it; and a pairing that asked for `auto mac` is approved as `auto mac (3)` (`auto mac` and `auto mac (2)` live) and replaces `auto mac (2)` (`scripts/test-v2.mjs` "device (E2E-AGENT cycle 9 C9-4): ...")
+- **THEN** the approval answers `ask mac (5)` and the device keeps `ask mac (5)`, while the `auto mac (3)` device takes `auto mac (2)`
 
 #### Scenario: Emoji in a device name
 
